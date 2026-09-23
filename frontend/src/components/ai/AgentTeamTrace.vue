@@ -436,6 +436,10 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 .agent-team-message-trace { grid-column: 2; overflow-wrap: anywhere; color: var(--gray-500); font-size: 9px; }
 .agent-team-empty { margin: 8px 0 0; color: var(--gray-500); }
 @media (max-width: 420px) {
+  .agent-team-trace-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .agent-team-toggle { grid-column: 1 / -1; width: 100%; }
+  .agent-team-refresh { grid-column: 1; }
+  .agent-team-open-detail { grid-column: 2; }
   .agent-team-member { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .agent-team-member code { grid-column: 2 / -1; }
   .agent-team-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }

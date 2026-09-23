@@ -9,7 +9,6 @@ v2.4(2026-06-25): 数据隔离改为基于 project_member 关系
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
@@ -137,8 +136,10 @@ def list_issues(
     else:
         q = q.filter(ReviewIssue.status.in_(["unfixed", "pending_review"]))
     if keyword:
-        like = f"%{keyword}%"
-        q = q.filter(and_(ReviewIssue.title.like(like) | ReviewIssue.description.like(like)))
+        q = q.filter(
+            ReviewIssue.title.contains(keyword, autoescape=True)
+            | ReviewIssue.description.contains(keyword, autoescape=True)
+        )
 
     total = q.count()
     pagination = Pagination(page, page_size, total)

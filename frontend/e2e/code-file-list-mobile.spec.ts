@@ -6,6 +6,7 @@ const binaryName = 'workshop.db-shm'
 async function mockSession(page: Page, options: { empty?: boolean; failOnce?: boolean; shrinkOnPageTwo?: boolean; onFileRequest?: (page: number) => void } = {}) {
   await page.addInitScript(() => localStorage.setItem('review_token', 'mobile-file-layout'))
   let failed = false
+  let shrunk = false
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
     if (!pathname.startsWith('/api/')) return route.continue()
@@ -25,13 +26,14 @@ async function mockSession(page: Page, options: { empty?: boolean; failOnce?: bo
       const pageNumber = Number(new URL(route.request().url()).searchParams.get('page') || '1')
       options.onFileRequest?.(pageNumber)
       if (options.shrinkOnPageTwo && pageNumber === 2) {
+        shrunk = true
         return route.fulfill({ json: { code: 0, message: 'ok', data: { items: [], total: 1, page: 2 } } })
       }
       const items = options.empty ? [] : pageNumber === 1 ? [
         { id: 783, project_id: 15, file_name: longName, language: 'Java', size_bytes: 3834, line_count: 73, version_no: 4, is_binary: 0, update_time: '2026-09-23T10:00:00Z' },
         { id: 784, project_id: 15, file_name: binaryName, language: '', size_bytes: 32768, line_count: 0, version_no: 2, is_binary: 1, update_time: '2026-09-23T10:01:00Z' },
       ] : [{ id: 785, project_id: 15, file_name: 'README.md', language: 'Markdown', size_bytes: 80, line_count: 4, version_no: 1, is_binary: 0, update_time: '2026-09-23T10:02:00Z' }]
-      data = { items, total: options.empty ? 0 : 12, page: pageNumber }
+      data = { items: shrunk ? items.slice(0, 1) : items, total: options.empty ? 0 : shrunk ? 1 : 12, page: pageNumber }
     }
     await route.fulfill({ json: { code: 0, message: 'ok', data } })
   })

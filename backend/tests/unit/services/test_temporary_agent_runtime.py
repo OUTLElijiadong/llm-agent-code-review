@@ -1,12 +1,14 @@
 """临时分析执行器的权限、范围和输出真实性回归。"""
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
 
 from app.agents.base import AgentResult, BaseAgent
 from app.core.permission_codes import PermissionCode
+from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentVersion
 from app.models.project import Project
@@ -81,7 +83,7 @@ def model(monkeypatch):
     return calls, configure
 
 
-def run(db, actor, payload=None, definition=None):
+def run(db, actor, payload=None, definition=None, context=None):
     return runtime.run_temporary_agent(
         db,
         actor,
@@ -89,7 +91,7 @@ def run(db, actor, payload=None, definition=None):
             "user_id": actor.id,
             "send_to": "temporary:specialist",
             "trace_id": "trace-temporary",
-            "context": {"team_id": 88, "agent_team_task_id": 99},
+            "context": {"team_id": 88, "agent_team_task_id": 99, **(context or {})},
             "payload": {"instructions": "分析当前材料", **(payload or {})},
         },
         definition or {"purpose": "边界分析", "instructions": "识别边界错误并给出依据"},
@@ -368,6 +370,108 @@ def test_output_truncation_rechecks_account_before_second_request(db, actor, mod
     assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
     assert len(calls) == 1
     assert "eval(value)" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("change", ["content", "version_no", "file_name", "language"])
+def test_source_changed_during_model_call_discards_old_analysis(db, actor, model, monkeypatch, change):
+    def answer(*args, **kwargs):
+        replacement = {
+            "content": "safe_call(value)\n",
+            "version_no": 2,
+            "file_name": "renamed.py",
+            "language": "javascript",
+        }[change]
+        db.query(CodeFile).filter_by(id=811).update({change: replacement}, synchronize_session=False)
+        db.commit()
+        return AgentResult(
+            success=True,
+            data={"summary": "STALE_MODEL_CONCLUSION", "findings": [], "limitations": []},
+            usage_log_ids=[901], http_attempts=1,
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
+    assert "STALE_MODEL_CONCLUSION" not in json.dumps(result)
+    assert not result.get("findings") and not result.get("coverage")
+
+
+def test_source_changed_after_truncation_stops_paid_retry(db, actor, model, monkeypatch):
+    calls = []
+
+    def answer(*args, **kwargs):
+        calls.append(1)
+        db.query(CodeFile).filter_by(id=811).update(
+            {"content": "safe_call(value)\n"}, synchronize_session=False
+        )
+        db.commit()
+        return AgentResult(success=False, failure_kind="output_truncated", usage_log_ids=[901], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
+    assert len(calls) == 1
+
+
+def _active_team_lease(db, actor):
+    db.add(AgentTeam(
+        id=88, user_id=actor.id, surface="user", session_key="temporary-lease",
+        title="租约复核", objective="只分析当前源码", status="running", trace_id="temporary-lease",
+    ))
+    db.add(AgentTeamMember(
+        id=89, team_id=88, member_key="specialist", display_name="临时分析员",
+        address="temporary:specialist", kind="temporary", role="worker",
+    ))
+    db.add(AgentTeamTask(
+        id=99, team_id=88, member_id=89, task_key="analyze", title="分析",
+        instructions="只分析当前源码", status="running", lease_token="old-lease",
+        lease_expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    ))
+    db.commit()
+
+
+@pytest.mark.parametrize("change", ["cancelled", "replaced_lease"])
+def test_lost_team_lease_after_truncation_stops_paid_retry(db, actor, model, monkeypatch, change):
+    _active_team_lease(db, actor)
+    calls = []
+
+    def answer(*args, **kwargs):
+        calls.append(1)
+        if change == "cancelled":
+            db.query(AgentTeam).filter_by(id=88).update({"status": "cancelled"}, synchronize_session=False)
+        else:
+            db.query(AgentTeamTask).filter_by(id=99).update(
+                {"lease_token": "new-lease"}, synchronize_session=False
+            )
+        db.commit()
+        return AgentResult(success=False, failure_kind="output_truncated", usage_log_ids=[901], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811}, context={"member_id": 89, "lease_token": "old-lease"})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
+    assert len(calls) == 1
+
+
+def test_cancelled_team_discards_successful_model_result(db, actor, model, monkeypatch):
+    _active_team_lease(db, actor)
+
+    def answer(*args, **kwargs):
+        db.query(AgentTeam).filter_by(id=88).update({"status": "cancelled"}, synchronize_session=False)
+        db.commit()
+        return AgentResult(
+            success=True,
+            data={"summary": "STALE_MODEL_CONCLUSION", "findings": [], "limitations": []},
+            usage_log_ids=[901], http_attempts=1,
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811}, context={"member_id": 89, "lease_token": "old-lease"})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [901] and result["http_attempts"] == 1
+    assert "STALE_MODEL_CONCLUSION" not in json.dumps(result)
 
 
 def test_oversized_user_input_is_explicitly_blocked(db, actor, model):

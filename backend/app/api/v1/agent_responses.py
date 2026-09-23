@@ -6,7 +6,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, List, Literal, Mapping, Optional
+from typing import Any, AsyncIterator, List, Literal, Mapping, Optional, Sequence
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -302,7 +302,7 @@ def get_agent_response_session(
                 "cancel_reason": _public_text(checkpoint.get("cancel_reason")),
                 "updated_at": _public_utc_time(row.update_time),
             },
-            "messages": _public_session_messages(db, row, checkpoint),
+            "messages": _public_session_history_messages(db, row),
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
@@ -503,6 +503,112 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
                 current["image_assets"] = old["image_assets"]
                 current["content"] = old["content"]
     return messages
+
+
+def _public_session_history_messages(db: Session, selected: AgentResponseRun) -> list[dict[str, Any]]:
+    """从最近运行向前分页，恢复同账号会话最近 100 条可见消息。"""
+    from app.models.agent_multimodal import AgentMultimodalAsset
+
+    query = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.user_id == selected.user_id,
+            AgentResponseRun.surface == selected.surface,
+            AgentResponseRun.session_key == selected.session_key,
+        )
+    )
+    has_images = db.query(AgentMultimodalAsset.id).join(
+        AgentResponseRun, AgentMultimodalAsset.run_id == AgentResponseRun.run_id,
+    ).filter(
+        AgentResponseRun.user_id == selected.user_id,
+        AgentResponseRun.surface == selected.surface,
+        AgentResponseRun.session_key == selected.session_key,
+        AgentMultimodalAsset.user_id == selected.user_id,
+        AgentMultimodalAsset.surface == selected.surface,
+        AgentMultimodalAsset.role == "input",
+    ).first() is not None
+
+    runs: list[AgentResponseRun] = []
+    visible_by_run: dict[int, list[dict[str, Any]]] = {}
+    offset = 0
+    while True:
+        batch = query.order_by(
+            AgentResponseRun.create_time.desc(), AgentResponseRun.id.desc(),
+        ).offset(offset).limit(100).all()
+        if not batch:
+            return _merge_public_history_runs(runs, visible_by_run)
+        for run in batch:
+            try:
+                checkpoint = json.loads(run.checkpoint_json or "{}")
+            except (TypeError, ValueError):
+                checkpoint = {}
+            if not isinstance(checkpoint, Mapping):
+                checkpoint = {}
+            visible_by_run[int(run.id)] = (
+                _public_session_messages(db, run, checkpoint)
+                if has_images else _public_transcript_messages(checkpoint.get("transcript"))
+            )
+        runs[:0] = reversed(batch)
+        history = _merge_public_history_runs(runs, visible_by_run)
+        if len(history) >= 100 or len(batch) < 100:
+            return history
+        offset += len(batch)
+
+
+def _merge_public_history_runs(
+    runs: Sequence[AgentResponseRun], visible_by_run: Mapping[int, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """将全量前缀和异步回复折叠为按运行创建时间排序的可见消息。"""
+    history: list[dict[str, Any]] = []
+    previous_user_run: list[dict[str, Any]] = []
+    background_since_user_run: list[dict[str, Any]] = []
+    for run in runs:
+        messages = visible_by_run[int(run.id)]
+        if run.mesh_message_id:
+            # Agent Mesh 的投递提示是内部输入，历史只展示本次回复。
+            replies = [message for message in messages if message["role"] == "assistant"]
+            history.extend(replies)
+            history = history[-100:]
+            background_since_user_run = (background_since_user_run + replies)[-100:]
+            continue
+
+        # 浏览器发起的新运行可能携带完整的旧历史。只把确实新增的后缀
+        # 加入账本；相同的单条用户问题也可能是两次独立提问，不能据此去重。
+        prefix = history if len(history) >= 2 else previous_user_run
+        if len(prefix) >= 2 and messages[:len(prefix)] == prefix:
+            new_messages = messages[len(prefix):]
+            background_since_user_run = []
+        elif (
+            previous_user_run
+            and (len(previous_user_run) >= 2 or len(messages) > len(previous_user_run))
+            and messages[:len(previous_user_run)] == previous_user_run
+        ):
+            new_messages = messages[len(previous_user_run):]
+            # 新运行可能只吸收了部分异步回复，也可能在别的普通运行后
+            # 才吸收；在待回填回复中寻找最长的连续匹配片段。
+            for overlap in range(min(len(background_since_user_run), len(new_messages)), 0, -1):
+                matched = next((start for start in range(len(background_since_user_run) - overlap + 1)
+                                if background_since_user_run[start:start + overlap] == new_messages[:overlap]), None)
+                if matched is not None:
+                    new_messages = new_messages[overlap:]
+                    background_since_user_run = (
+                        background_since_user_run[:matched]
+                        + background_since_user_run[matched + overlap:]
+                    )
+                    break
+        else:
+            new_messages = messages
+            # 超过当前窗口时，下一轮可能只携带旧历史的尾部。
+            # 至少匹配两条且本轮确有新消息，避免误删独立重复提问。
+            for overlap in range(min(len(history), len(new_messages) - 1), 1, -1):
+                if history[-overlap:] == new_messages[:overlap]:
+                    new_messages = new_messages[overlap:]
+                    break
+            background_since_user_run = []
+        history.extend(new_messages)
+        history = history[-100:]
+        previous_user_run = messages
+    return history
 
 
 def _public_transcript_messages(

@@ -1884,6 +1884,7 @@ onBeforeUnmount(() => {
   .no-print { display: none !important; }
 
   .report-detail-page {
+    display: block;
     background: #fff;
     padding: 0;
   }
@@ -1892,6 +1893,8 @@ onBeforeUnmount(() => {
     border: none;
     border-radius: 0;
     box-shadow: none;
+    display: block;
+    overflow: visible;
   }
 
   .cover {
@@ -1899,6 +1902,28 @@ onBeforeUnmount(() => {
   }
 
   .paper-table-scroll { overflow: visible; }
+
+  .paper-table {
+    min-width: 0;
+    table-layout: fixed;
+    font-size: 10px;
+
+    th, td {
+      padding: 6px 4px;
+      overflow-wrap: anywhere;
+    }
+
+    .col-num { width: auto; }
+  }
+
+  .top10-table {
+    min-width: 0;
+
+    .col-rank { width: 24px; }
+
+    /* 打印页没有交互，释放这一列给漏洞标题。 */
+    th:last-child, td:last-child { display: none; }
+  }
 
   .no-break {
     page-break-inside: avoid;
@@ -1908,7 +1933,13 @@ onBeforeUnmount(() => {
     page-break-inside: avoid;
   }
 
-  body, html, #app { background: #fff !important; }
+  :global(html:has(.report-detail-page)),
+  :global(body:has(.report-detail-page)),
+  :global(#app:has(.report-detail-page)) {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
 
   /* Element Plus 按钮等不打印 */
   .el-button { display: none; }

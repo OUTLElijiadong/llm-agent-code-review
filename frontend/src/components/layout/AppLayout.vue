@@ -143,6 +143,36 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
   }
 }
 
+@media print {
+  /* 仅报告页展开滚动容器，避免浏览器只打印可视区域。 */
+  .app-layout:has(.report-detail-page) {
+    display: block;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    background: #fff;
+
+    > :not(.app-layout-right) { display: none !important; }
+
+    .app-layout-right {
+      display: block;
+      height: auto;
+      min-height: 0;
+      background: #fff;
+
+      > :not(.app-layout-main) { display: none !important; }
+    }
+
+    .app-layout-main {
+      display: block;
+      height: auto;
+      min-height: 0;
+      overflow: visible;
+      padding: 0;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .content-route-enter-active,
   .content-route-leave-active {

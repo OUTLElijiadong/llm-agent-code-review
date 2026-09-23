@@ -95,7 +95,7 @@ def _selected_file_ids(payload):
     return selected
 
 
-def _recheck_access(db, user_id, project_id, file_ids):
+def _recheck_access(db, user_id, project_id, file_ids, source_snapshots):
     # 本执行器仅做读取；结束旧只读事务，避免 MySQL repeatable-read 仍看到撤权前的快照。
     # HTTP 用量记录已经在独立会话提交，不受此 rollback 影响。
     db.rollback()
@@ -115,6 +115,37 @@ def _recheck_access(db, user_id, project_id, file_ids):
         row = code_file_service.get_file(db, user=current, file_id=file_id)
         if int(row.project_id) != project_id:
             raise _Blocked("目标文件项目归属已变化，临时分析结果不再回传")
+        snapshot = source_snapshots[file_id]
+        if (
+            row.file_name != snapshot["file_name"]
+            or row.file_path != snapshot["file_path"]
+            or row.language != snapshot["language"]
+            or row.status != snapshot["status"]
+            or row.is_reviewable != snapshot["is_reviewable"]
+            or int(row.version_no or 0) != snapshot["version_no"]
+            or hashlib.sha256((row.content or "").encode("utf-8")).hexdigest() != snapshot["sha256"]
+        ):
+            raise _Blocked("目标文件源码或版本已变化，临时分析结果不再回传")
+
+
+def _recheck_lease(db, user_id, context, address):
+    # 对外只由团队租约入口调用；无租约的直调保留给执行器隔离测试。
+    lease_token = str(context.get("lease_token") or "")
+    if not lease_token:
+        return
+    from app.services import agent_team_service
+
+    db.rollback()
+    db.expire_all()
+    _team, _task, member = agent_team_service.require_active_task_lease(
+        db,
+        team_id=int(context.get("team_id") or 0),
+        task_id=int(context.get("agent_team_task_id") or 0),
+        owner_user_id=user_id,
+        lease_token=lease_token,
+    )
+    if int(member.id) != int(context.get("member_id") or 0) or member.address != address:
+        raise _Blocked("临时成员与当前团队租约不匹配")
 
 
 def _prepare_context(db, user, message):
@@ -211,6 +242,7 @@ def _prepare_context(db, user, message):
             )
 
     visible_lines = {}
+    source_snapshots = {}
     for row in rows:
         if not row.is_reviewable:
             coverage["skipped_file_ids"].append(int(row.id))
@@ -243,6 +275,15 @@ def _prepare_context(db, user, message):
         coverage["included_file_ids"].append(int(row.id))
         coverage["source_chars_included"] += len(included)
         visible_lines[int(row.id)] = len(included.splitlines())
+        source_snapshots[int(row.id)] = {
+            "file_name": row.file_name,
+            "file_path": row.file_path,
+            "language": row.language,
+            "status": row.status,
+            "is_reviewable": row.is_reviewable,
+            "version_no": int(row.version_no or 0),
+            "sha256": source["sha256"],
+        }
     if coverage["omitted_files"] or coverage["skipped_file_ids"]:
         coverage["truncated"] = True
     coverage["complete"] = not coverage["truncated"]
@@ -254,7 +295,7 @@ def _prepare_context(db, user, message):
     prepared = _json({"sources": sources, "coverage": coverage})
     if len(prepared) > MAX_CONTEXT_CHARS:
         raise _Blocked("临时分析上下文超过 60000 字符，请拆分任务")
-    return prepared, sources, coverage, limitations, project_id, visible_lines
+    return prepared, sources, coverage, limitations, project_id, visible_lines, source_snapshots
 
 
 def run_temporary_agent(db: Session, user: User, message: dict, definition: dict, display_name: str) -> dict:
@@ -267,7 +308,9 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
             raise _Blocked("临时分析缺少有效的当前账号上下文")
         _require(db, user, PermissionCode.AGENT_CHAT)
         role = TemporaryAgentDefinition.model_validate(definition)
-        prepared, sources, coverage, limitations, project_id, visible_lines = _prepare_context(db, user, message)
+        prepared, sources, coverage, limitations, project_id, visible_lines, source_snapshots = _prepare_context(
+            db, user, message
+        )
     except _Blocked as exc:
         return {**_result("blocked", str(exc), errors=[{"code": "temporary_scope_blocked"}]), "retryable": False}
     except (ValidationError, TypeError, ValueError):
@@ -337,12 +380,13 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
         # 原样重放会让团队的每次外层重试继续触发 length。只在本次任务内
         # 压缩输出并增加一次预算；首次及二次请求均保留独立用量流水。
         try:
-            _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"])
+            _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"], source_snapshots)
+            _recheck_lease(db, ctx.user_id, context, address)
         except Exception:
             return {
                 **_result(
                     "blocked",
-                    "当前账号或目标资料权限已变化，临时分析结果不再回传",
+                    "当前账号、团队租约或目标资料已变化，临时分析结果不再回传",
                     errors=[{"code": "temporary_scope_revoked"}],
                 ),
                 "usage_log_ids": usage_log_ids,
@@ -385,12 +429,13 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
         response = retry_response
     usage = {"usage_log_ids": usage_log_ids, "model": response.model, "http_attempts": http_attempts}
     try:
-        _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"])
+        _recheck_access(db, ctx.user_id, project_id, coverage["included_file_ids"], source_snapshots)
+        _recheck_lease(db, ctx.user_id, context, address)
     except Exception:
         return {
             **_result(
                 "blocked",
-                "当前账号或目标资料权限已变化，临时分析结果不再回传",
+                "当前账号、团队租约或目标资料已变化，临时分析结果不再回传",
                 errors=[{"code": "temporary_scope_revoked"}],
             ),
             **usage,

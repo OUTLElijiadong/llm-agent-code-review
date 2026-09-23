@@ -569,6 +569,21 @@ def test_issue_service_covers_detail_status_filters_and_batch_update(db):
     assert primary.status == pending.status == "ignored"
 
 
+def test_issue_keyword_treats_like_wildcards_as_literal(db):
+    owner = _make_user(db, "issue-keyword-owner")
+    project = _make_project(db, owner, "Issue Keyword Project")
+    task = _make_task(db, owner, project, "Issue Keyword Task")
+    percent = _make_issue(db, task, title="rate%check")
+    underscore = _make_issue(db, task, title="snake_case")
+    _make_issue(db, task, title="plain")
+
+    percent_result = issue_service.list_issues(db, owner, keyword="%")
+    underscore_result = issue_service.list_issues(db, owner, keyword="_")
+
+    assert [item["id"] for item in percent_result["items"]] == [percent.id]
+    assert [item["id"] for item in underscore_result["items"]] == [underscore.id]
+
+
 def test_issue_service_rejects_missing_issue_or_deleted_task(db):
     """问题读取和更新应把缺失问题或已删除任务统一视为不存在。
 

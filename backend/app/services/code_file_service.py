@@ -77,7 +77,7 @@ def list_files(db: Session, user: User, project_id: int = None, language: str = 
     if language:
         q = q.filter(CodeFile.language == language)
     if keyword:
-        q = q.filter(CodeFile.file_name.contains(keyword))
+        q = q.filter(CodeFile.file_name.contains(keyword, autoescape=True))
 
     total = q.count()
     pagination = Pagination(page, page_size, total)
