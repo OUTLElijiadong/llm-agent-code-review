@@ -340,7 +340,7 @@ const meshBridge = createAgentMeshBridge({
   isBusy: isMeshSessionBusy,
   onMessage: handleMeshMessage,
   // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
-  onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
+  onSessionGone: (goneSessionId) => { void switcherRef.value?.removeGoneSession(goneSessionId) },
 })
 
 function messageId(): string {
@@ -2273,6 +2273,8 @@ onBeforeUnmount(() => {
 
 onMounted(() => {
   meshBridge.start()
+  // 登录后恢复“上次保持打开”时 visible 在首次挂载前已为 true，普通 watch 不会触发。
+  if (props.visible) void nextTick(restoreOrAnchor)
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
@@ -2346,6 +2348,7 @@ onMounted(() => {
                   :discover-remote="true"
                   @select="handleSessionSelect"
                   @sessions-changed="handleSwitcherReady"
+                  @session-restored="meshBridge.reviveSession"
                   @archive="handleSessionArchive"
                 />
               </div>

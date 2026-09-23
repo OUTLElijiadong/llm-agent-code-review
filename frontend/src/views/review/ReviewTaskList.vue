@@ -80,14 +80,16 @@
           role="listitem"
           @click="onRowClick(row)"
         >
-          <label v-if="canCancelReview" class="tc-check" @click.stop>
-            <input
-              type="checkbox"
-              :checked="selectedRows.some((t) => t.id === row.id)"
-              :aria-label="`选择 ${row.task_name || '任务'}`"
-              @change="toggleSelect(row)"
-            >
-          </label>
+          <div class="tc-check-slot">
+            <label v-if="canCancelReview" class="tc-check" @click.stop>
+              <input
+                type="checkbox"
+                :checked="selectedRows.some((t) => t.id === row.id)"
+                :aria-label="`选择 ${row.task_name || '任务'}`"
+                @change="toggleSelect(row)"
+              >
+            </label>
+          </div>
           <span class="tc-band" :data-status="row.status" aria-hidden="true"></span>
           <div class="tc-main">
             <div class="tc-line1">
@@ -110,7 +112,7 @@
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
                 cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
-                :stroke="row.score >= 80 ? '#40a35f' : row.score >= 60 ? '#d9a857' : '#dc4961'"
+                :stroke="row.score >= 80 ? 'var(--color-success)' : row.score >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'"
                 :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
                 stroke-dashoffset="25"
               />
@@ -448,7 +450,8 @@ onUnmounted(() => {
 .task-cards { display: grid; gap: 10px; min-height: 120px; }
 .task-card {
   position: relative; display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  grid-template-columns: 16px 4px minmax(0, 1fr) 64px 96px;
+  grid-template-areas: 'check band main score actions';
   gap: 14px; align-items: center;
   padding: 13px 16px 13px 12px; border-radius: 12px;
   background: #fff; border: 1px solid var(--gray-100, #eef0f4);
@@ -459,18 +462,19 @@ onUnmounted(() => {
   box-shadow: 0 10px 24px rgba(23, 34, 62, .07);
   border-color: var(--brand-300, #a8c4fa);
 }
+.tc-check-slot { grid-area: check; display: grid; place-items: center; }
 .tc-check { display: grid; place-items: center; cursor: pointer; }
 .tc-check input { width: 15px; height: 15px; accent-color: var(--brand-500, #4078f4); cursor: pointer; }
-.tc-band { width: 4px; height: 38px; border-radius: 999px; }
+.tc-band { grid-area: band; width: 4px; height: 38px; border-radius: 999px; }
 .tc-band[data-status='running'] { background: var(--brand-500, #4078f4); }
 .tc-band[data-status='pending'] { background: var(--gray-300, #cfd4dc); }
-.tc-band[data-status='success'] { background: #40a35f; }
+.tc-band[data-status='success'] { background: var(--color-success, #4fb87a); }
 .tc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
 .tc-band[data-status='cancelled'] { background: var(--gray-200, #e3e6eb); }
-.tc-main { display: grid; gap: 5px; min-width: 0; }
+.tc-main { grid-area: main; display: grid; gap: 5px; min-width: 0; }
 .tc-name:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 3px; }
-.tc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tc-name { background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; font-family: inherit; font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-line1 { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.tc-name { background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; font-family: inherit; font-size: 13.5px; font-weight: 600; line-height: 20px; max-width: 420px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
 .tc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-progress { position: relative; height: 5px; border-radius: 999px; background: var(--gray-100, #eef0f4); overflow: hidden; max-width: 360px; }
@@ -479,19 +483,33 @@ onUnmounted(() => {
   background: linear-gradient(90deg, var(--brand-400, #6f9df7), var(--brand-600, #2f5ce0));
   transition: width .5s ease;
 }
-.tc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
+.tc-score { grid-area: score; display: grid; place-items: center; gap: 2px; min-width: 56px; }
 .tc-ring { width: 38px; height: 38px; transform: rotate(0deg); }
 .tc-score span { font-size: 12.5px; font-weight: 700; }
 .no-score { font-size: 11px; color: var(--gray-400); font-weight: 400; }
-.tc-actions { display: flex; gap: 4px; }
+.tc-actions { grid-area: actions; display: flex; justify-content: flex-end; gap: 4px; width: 96px; }
 
 @media (prefers-reduced-motion: reduce) {
   .task-card, .tc-progress-fill { transition: none; }
 }
 @media (max-width: 760px) {
-  .task-card { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .task-card {
+    grid-template-columns: 16px minmax(0, 1fr) 64px;
+    grid-template-areas: 'check main score';
+  }
   .tc-band, .tc-actions { display: none; }
-  .tc-name { max-width: 46vw; }
+  .tc-line1 {
+    display: grid;
+    grid-template-columns: max-content max-content minmax(0, 1fr);
+    gap: 4px 8px;
+    justify-items: start;
+  }
+  .tc-name {
+    grid-column: 1 / -1;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 .review-task-list-page {
   .page-header {

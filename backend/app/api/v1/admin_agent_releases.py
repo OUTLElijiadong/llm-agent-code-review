@@ -161,7 +161,10 @@ def approve_release(
     db: Session = Depends(get_db),
     admin: User = Depends(require_permission(PermissionCode.AGENT_ASSET_PUBLISH)),
 ):
-    approval_service.decide_item(db, admin, approval_id, approve=True, note=payload.note)
+    approval_service.decide_item(
+        db, admin, approval_id, approve=True, note=payload.note,
+        expected_action="agent_package.publish",
+    )
     row = db.query(CustomAgentRelease).filter(CustomAgentRelease.approval_id == approval_id).first()
     return Resp(data=ReleaseOut.model_validate(row))
 
@@ -173,7 +176,10 @@ def reject_release(
     db: Session = Depends(get_db),
     admin: User = Depends(require_permission(PermissionCode.AGENT_ASSET_APPROVE)),
 ):
-    row = approval_service.decide_item(db, admin, approval_id, approve=False, note=payload.note)
+    row = approval_service.decide_item(
+        db, admin, approval_id, approve=False, note=payload.note,
+        expected_action="agent_package.publish",
+    )
     return Resp(data={"approval_id": row.id, "status": row.status})
 
 

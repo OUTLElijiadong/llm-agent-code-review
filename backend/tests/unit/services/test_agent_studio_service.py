@@ -1,5 +1,7 @@
 """Tests for declarative Agent Studio ownership and release state machine."""
 
+import json
+
 import pytest
 
 from app.core.exceptions import ConflictError, ForbiddenError, ValidationError
@@ -15,7 +17,8 @@ from app.models.custom_agent import (  # noqa: F401
 )
 from app.models.user import User
 from app.schemas.agent_studio import CatalogAgentOut
-from app.services import agent_studio_service, approval_service
+from app.schemas.agent_team import AgentTeamCreateIn
+from app.services import agent_studio_service, agent_team_service, approval_service
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 
 
@@ -92,6 +95,42 @@ def test_create_test_submit_and_atomic_publish(db, admin_user):
     assert agent_studio_service.list_catalog(db)[0]["code"] == agent.code
 
 
+@pytest.mark.parametrize("corruption", ["resource", "owner", "agent_code", "version", "missing", "invalid_json"])
+def test_admin_revise_pending_rejects_mismatched_or_missing_release_target(db, admin_user, corruption):
+    reviewer = _user(db, f"reviewer_revise_{corruption}", "reviewer")
+    agent, version, _, _ = _create_package(db, reviewer, f"revise_{corruption}")
+    approval = _test_and_submit(db, reviewer, version)
+    if corruption == "resource":
+        approval.resource = "custom_agent_version:999999"
+    elif corruption == "owner":
+        approval.request_json = json.dumps({"agent_version_id": version.id, "owner_id": 999999})
+    elif corruption == "agent_code":
+        approval.agent_code = "other_agent"
+    elif corruption == "version":
+        approval.request_json = json.dumps({"agent_version_id": 999999, "owner_id": reviewer.id})
+    elif corruption == "missing":
+        approval.request_json = "{}"
+    else:
+        approval.request_json = "invalid-json"
+    db.commit()
+
+    with pytest.raises(ConflictError, match="目标与申请内容不一致"):
+        agent_studio_service.admin_revise_pending(
+            db,
+            admin_user,
+            approval.id,
+            prompt="Inspect the supplied code and report only evidence-backed authorization issues.",
+            review_focus="Authorization",
+            model_config={},
+            note="修订职责",
+        )
+
+    db.refresh(approval)
+    assert approval.status == "pending"
+    assert db.get(CustomAgentVersion, version.id).status == "pending_approval"
+    assert db.query(CustomAgentVersion).filter(CustomAgentVersion.agent_id == agent.id).count() == 1
+
+
 def test_published_catalog_response_is_global_but_does_not_expose_owner_id(db, admin_user):
     reviewer = _user(db, "reviewer_catalog_visibility", "reviewer")
     agent, version, _, _ = _create_package(db, reviewer, "visibility")
@@ -104,6 +143,89 @@ def test_published_catalog_response_is_global_but_does_not_expose_owner_id(db, a
     serialized = response.model_dump()
     assert serialized["code"] == agent.code
     assert "owner_id" not in serialized
+
+
+def test_published_release_remains_callable_by_team_during_draft_and_pending_revision(db, admin_user):
+    reviewer = _user(db, "reviewer_live_revision", "reviewer")
+    agent, first, _, _ = _create_package(db, reviewer, "live_revision")
+    approval = _test_and_submit(db, reviewer, first)
+    approval_service.decide_item(db, admin_user, approval.id, approve=True)
+    release = db.query(CustomAgentRelease).one()
+
+    def create_team(session_id: str):
+        return agent_team_service.create_team(
+            db,
+            admin_user,
+            AgentTeamCreateIn.model_validate({
+                "surface": "admin",
+                "session_id": session_id,
+                "title": "代码审查",
+                "objective": "对真实发布版本进行代码审查",
+                "members": [{
+                    "member_key": "reviewer",
+                    "display_name": "专项审查员",
+                    "address": f"custom:{agent.code}",
+                    "role": "verifier",
+                }],
+                "tasks": [{
+                    "task_key": "review",
+                    "member_key": "reviewer",
+                    "title": "复核代码",
+                    "instructions": "复核代码并给出证据",
+                }],
+            }),
+        )
+
+    def resolve_first_release():
+        return DeclarativeReviewAgentFactory.resolve_release(
+            db,
+            agent.code,
+            release_id=release.id,
+            version_id=first.id,
+            package_checksum=release.package_checksum,
+            template_checksum=first.checksum,
+            user=reviewer,
+        )
+
+    assert resolve_first_release() is not None
+    first_team = create_team("release_v1")
+    assert first_team["members"][0]["capabilities"]["release_id"] == release.id
+    second = agent_studio_service.revise_agent(
+        db,
+        reviewer,
+        agent.id,
+        prompt="Review resource ownership and authorization against the supplied code only.",
+        review_focus="Authorization and account isolation",
+        model_config={},
+    )
+    assert db.query(CustomAgentSkillBinding).filter(CustomAgentSkillBinding.agent_version_id == second.id).count() == 1
+    assert db.get(CustomAgent, agent.id).status == "published"
+    assert resolve_first_release() is not None
+    assert create_team("release_draft")["members"][0]["capabilities"]["release_id"] == release.id
+
+    second_approval = _test_and_submit(db, reviewer, second)
+    assert db.get(CustomAgent, agent.id).status == "published"
+    assert resolve_first_release() is not None
+    assert create_team("release_pending")["members"][0]["capabilities"]["release_id"] == release.id
+
+    approval_service.decide_item(db, admin_user, second_approval.id, approve=True)
+    second_release = db.query(CustomAgentRelease).filter(CustomAgentRelease.status == "published").one()
+    assert second_release.agent_version_id == second.id
+    assert db.get(CustomAgentRelease, release.id).status == "superseded"
+    assert create_team("release_v2")["members"][0]["capabilities"]["release_id"] == second_release.id
+    assert resolve_first_release() is not None
+    assert DeclarativeReviewAgentFactory.resolve_release(
+        db,
+        agent.code,
+        release_id=release.id,
+        version_id=first.id,
+        package_checksum="wrong-checksum",
+        template_checksum=first.checksum,
+        user=reviewer,
+    ) is None
+
+    agent_studio_service.disable_agent(db, admin_user, agent.id)
+    assert resolve_first_release() is None
 
 
 def test_published_shared_skill_keeps_published_state(db, admin_user):

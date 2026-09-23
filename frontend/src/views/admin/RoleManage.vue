@@ -62,7 +62,7 @@
     <el-drawer
       v-model="permDrawerVisible"
       :title="`分配权限 - ${currentRole?.name || ''}`"
-      size="420px"
+      size="min(420px, calc(100vw - 16px))"
       direction="rtl"
     >
       <div v-loading="permLoading" class="perm-drawer-body">

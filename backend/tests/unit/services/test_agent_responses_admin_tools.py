@@ -175,6 +175,32 @@ def _submitted_agent(db, owner: User, suffix: str):
     return agent, version, approval
 
 
+def test_admin_release_tool_rejects_mismatched_approval_target(db, admin_user) -> None:
+    reviewer = User(username="release_target_reviewer", password="x", role="reviewer", status=1)
+    db.add(reviewer)
+    db.commit()
+    _, version, approval = _submitted_agent(db, reviewer, "wrong_target")
+    approval.resource = "custom_agent_version:999999"
+    db.commit()
+
+    preview = admin_agent_tools.preview_agent_release_decision(
+        db, admin_user, approval_id=approval.id, decision="approve"
+    )
+    result = admin_agent_tools.admin_decide_agent_release(
+        db,
+        admin_user,
+        approval_id=approval.id,
+        decision="approve",
+        expected_snapshot=admin_agent_tools._release_target_snapshot(db, approval),
+    )
+
+    assert preview.success is False
+    assert result.success is False
+    assert db.get(ApprovalItem, approval.id).status == "pending"
+    assert db.get(CustomAgentVersion, version.id).status == "pending_approval"
+    assert db.query(CustomAgentRelease).count() == 0
+
+
 @pytest.mark.asyncio
 async def test_release_detail_and_approve_reject_are_responses_approved(db, admin_user) -> None:
     reviewer = User(username="release_reviewer", password="x", role="reviewer", status=1)

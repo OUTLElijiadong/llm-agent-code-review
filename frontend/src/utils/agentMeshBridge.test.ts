@@ -186,6 +186,141 @@ describe('Agent Mesh session bridge', () => {
     expect(heartbeatIds).not.toContain('session-archived')
     expect(inboxIds).not.toContain('session-archived')
   })
+
+  it('归档会话的心跳返回 40921 时继续同步其他会话,后续不再心跳该会话', async () => {
+    const receive = vi.fn().mockResolvedValue(true)
+    const onSessionGone = vi.fn()
+    api.heartbeat.mockImplementation(({ session_id }: { session_id: string }) => (
+      session_id === 'session-archived'
+        ? Promise.reject({ code: 40921, message: '会话已归档，请先恢复后再继续' })
+        : Promise.resolve({})
+    ))
+    api.inbox.mockImplementation((_surface: string, sessionId: string) => Promise.resolve(
+      sessionId === 'session-current-01'
+        ? [{ message_id: 'msg_current', status: 'delivered', subject: '生产消息' }]
+        : [],
+    ))
+    const bridge = createAgentMeshBridge({
+      surface: 'user',
+      getSessionId: () => 'session-current-01',
+      getTitle: () => '当前会话',
+      getSessions: () => [
+        { id: 'session-archived', title: '已归档会话' },
+        { id: 'session-current-01', title: '当前会话' },
+      ],
+      isBusy: () => false,
+      onMessage: receive,
+      onSessionGone,
+    })
+
+    await bridge.syncNow()
+    expect(onSessionGone).toHaveBeenCalledExactlyOnceWith('session-archived')
+    expect(api.heartbeat.mock.calls.map((call) => call[0].session_id)).toEqual([
+      'session-archived', 'session-current-01',
+    ])
+    expect(receive).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'msg_current' }), 'session-current-01')
+
+    api.heartbeat.mockClear()
+    await bridge.syncNow()
+    expect(api.heartbeat.mock.calls.map((call) => call[0].session_id)).toEqual(['session-current-01'])
+    expect(onSessionGone).toHaveBeenCalledTimes(1)
+  })
+
+  it('非归档心跳错误不误判会话失效,且不阻塞其他会话', async () => {
+    const onSessionGone = vi.fn()
+    api.heartbeat.mockImplementation(({ session_id }: { session_id: string }) => (
+      session_id === 'session-retry'
+        ? Promise.reject({ code: 40921, message: '会话容量已满' })
+        : Promise.resolve({})
+    ))
+    const bridge = createAgentMeshBridge({
+      surface: 'user',
+      getSessionId: () => 'session-current-01',
+      getTitle: () => '当前会话',
+      getSessions: () => [
+        { id: 'session-retry', title: '待重试' },
+        { id: 'session-current-01', title: '当前会话' },
+      ],
+      isBusy: () => false,
+      onMessage: vi.fn().mockResolvedValue(true),
+      onSessionGone,
+    })
+
+    await bridge.syncNow()
+    expect(onSessionGone).not.toHaveBeenCalled()
+    expect(api.heartbeat.mock.calls.map((call) => call[0].session_id)).toEqual([
+      'session-retry', 'session-current-01',
+    ])
+    expect(api.inbox.mock.calls.map((call) => call[1])).toEqual(['session-current-01'])
+  })
+
+  it('同页显式恢复归档会话后重新心跳并认领该会话消息', async () => {
+    let archived = true
+    const receive = vi.fn().mockResolvedValue(true)
+    api.heartbeat.mockImplementation(() => archived
+      ? Promise.reject({ code: 40921, message: '会话已归档，请先恢复后再继续' })
+      : Promise.resolve({}))
+    api.inbox.mockResolvedValue([{ message_id: 'msg_restored', status: 'delivered', subject: '恢复后的消息' }])
+    const bridge = createAgentMeshBridge({
+      surface: 'user',
+      getSessionId: () => 'session-restored',
+      getTitle: () => '恢复的业务对话',
+      isBusy: () => false,
+      onMessage: receive,
+    })
+
+    await bridge.syncNow()
+    api.heartbeat.mockClear()
+    await bridge.syncNow()
+    expect(api.heartbeat).not.toHaveBeenCalled()
+    expect(api.inbox).not.toHaveBeenCalled()
+
+    archived = false
+    bridge.reviveSession('session-restored')
+    await bridge.syncNow()
+    expect(api.heartbeat).toHaveBeenCalledOnce()
+    expect(receive).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'msg_restored' }), 'session-restored')
+  })
+
+  it('停止桥接后清除旧账号的失效标记', async () => {
+    let archived = true
+    const receive = vi.fn().mockResolvedValue(true)
+    api.heartbeat.mockImplementation(() => archived
+      ? Promise.reject({ code: 40921, message: '会话已归档，请先恢复后再继续' })
+      : Promise.resolve({}))
+    api.inbox.mockResolvedValue([{ message_id: 'msg_same', status: 'delivered', subject: '新账号消息' }])
+    const bridge = createAgentMeshBridge({
+      surface: 'user', getSessionId: () => 'session-same-id', getTitle: () => '切换账号后的会话',
+      isBusy: () => false, onMessage: receive,
+    })
+    await bridge.syncNow()
+    bridge.stop()
+
+    archived = false
+    bridge.start()
+    try {
+      await vi.waitFor(() => {
+        expect(receive).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'msg_same' }), 'session-same-id')
+      })
+    } finally { bridge.stop() }
+  })
+
+  it('切换账号后不沿用旧账号的消息去重记录', async () => {
+    const receive = vi.fn().mockResolvedValue(true)
+    api.inbox.mockResolvedValue([{ message_id: 'msg_same', status: 'delivered', subject: '每个账号自己的消息' }])
+    const bridge = createAgentMeshBridge({
+      surface: 'user', getSessionId: () => 'session-current', getTitle: () => '当前账号',
+      isBusy: () => false, onMessage: receive,
+    })
+    await bridge.syncNow()
+    expect(receive).toHaveBeenCalledTimes(1)
+    bridge.stop()
+
+    bridge.start()
+    try {
+      await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(2))
+    } finally { bridge.stop() }
+  })
 })
 
 function deferred<T>() {

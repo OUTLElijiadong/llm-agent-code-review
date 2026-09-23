@@ -393,7 +393,7 @@ const meshBridge = createAgentMeshBridge({
     }
   },
   // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
-  onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
+  onSessionGone: (goneSessionId) => { void switcherRef.value?.removeGoneSession(goneSessionId) },
 })
 
 function welcomeEntry(): ChatEntry {
@@ -1859,6 +1859,7 @@ onMounted(() => {
               :discover-remote="true"
               @select="handleSessionSelect"
               @sessions-changed="handleSwitcherReady"
+              @session-restored="meshBridge.reviveSession"
               @archive="handleSessionArchive"
             />
           </div>

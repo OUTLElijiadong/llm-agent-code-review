@@ -102,7 +102,7 @@
                 type="textarea"
                 :rows="2"
                 placeholder='params JSON(可选,如 {"window_days": 90})'
-                style="flex: 1; min-width: 200px"
+                style="flex: 1; min-width: min(200px, 100%)"
               />
               <el-button
                 type="primary"
@@ -510,7 +510,7 @@ onMounted(reloadAll)
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 16px;
 }
@@ -561,7 +561,7 @@ onMounted(reloadAll)
 
 .skill-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
   gap: 16px;
 }
 
@@ -626,6 +626,16 @@ onMounted(reloadAll)
   flex-wrap: wrap;
   padding-top: 6px;
   border-top: 1px dashed var(--color-border-light, #EEF0F4);
+}
+
+@media (max-width: 900px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .stat-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .stat-foot { overflow-wrap: anywhere; }
+  .invoke-form :deep(.el-input) { width: 100% !important; }
 }
 
 .invoke-result {

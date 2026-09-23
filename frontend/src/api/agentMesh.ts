@@ -75,8 +75,11 @@ export function heartbeatAgentMesh(input: {
   title: string
   active_run_id?: string
   active_run_status?: string
-}): Promise<AgentMeshAddress> {
-  return post<AgentMeshAddress>('/agent-mesh/conversations/heartbeat', input)
+}, silentGone = false): Promise<AgentMeshAddress> {
+  return post<AgentMeshAddress>(
+    '/agent-mesh/conversations/heartbeat', input, undefined,
+    silentGone ? [40921] : undefined,
+  )
 }
 
 export function listAgentMeshAgents(surface?: AgentMeshSurface): Promise<AgentMeshDiscovery> {

@@ -11,8 +11,13 @@ const issues = ['重复的样式规则块(DRY)', '公开函数缺少文档注释
   severity: index ? '高' : '中', status: 'unfixed', issue_type: '安全漏洞',
   description: `第 ${index + 1} 条问题的完整描述`, create_time: '2026-09-16T10:35:00',
 }))
+const reviewTasks = [{
+  id: 21, task_name: '中文代码审查任务与英文 API_Review 混合标题', project_id: 1,
+  project_name: projects[0].project_name, review_type: 'security', status: 'success',
+  total_issues: 3, score: 86, duration_ms: 12000, create_time: '2026-09-16T10:35:00',
+}]
 
-async function mockSession(page: Page, canHandle = false) {
+async function mockSession(page: Page, canHandle = false, canCancelReview = false) {
   await page.addInitScript(() => localStorage.setItem('review_token', 'layout-fixture'))
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -20,11 +25,86 @@ async function mockSession(page: Page, canHandle = false) {
     let data: unknown = {}
     if (pathname === '/api/auth/me') data = { id: 7, username: '布局验收', role: 'user' }
     else if (pathname.endsWith('/roles')) data = [{ code: 'user' }]
-    else if (pathname.endsWith('/permissions')) data = ['project:view', 'file:view', 'issue:view', 'review:view', ...(canHandle ? ['issue:handle', 'issue:batch'] : [])]
+    else if (pathname.endsWith('/permissions')) data = [
+      'project:view', 'file:view', 'issue:view', 'review:view',
+      ...(canHandle ? ['issue:handle', 'issue:batch'] : []),
+      ...(canCancelReview ? ['review:cancel'] : []),
+    ]
     else if (pathname.endsWith('/menus')) data = []
     else if (pathname === '/api/projects') data = { items: projects, total: projects.length }
     else if (pathname === '/api/issues') data = { items: issues, total: issues.length }
+    else if (pathname === '/api/review/tasks') data = { items: reviewTasks, total: reviewTasks.length }
     await route.fulfill({ json: { code: 0, message: 'ok', data } })
+  })
+}
+
+for (const width of [1440, 768, 390, 320]) {
+  test(`问题卡片操作列相对色带固定，权限差异不改变锚点：${width}px`, async ({ page }, testInfo) => {
+    const readOnly = await page.context().newPage()
+    await readOnly.setViewportSize({ width, height: 1000 })
+    await mockSession(readOnly)
+    await readOnly.goto('/issues')
+    await expect(readOnly.locator('.issue-card')).toHaveCount(3)
+
+    const canHandle = await page.context().newPage()
+    await canHandle.setViewportSize({ width, height: 1000 })
+    await mockSession(canHandle, true)
+    await canHandle.goto('/issues')
+    await expect(canHandle.locator('.issue-card')).toHaveCount(3)
+
+    const offset = async (target: Page) => target.locator('.issue-card').first().evaluate((card) => {
+      const band = card.querySelector('.ic-band')!.getBoundingClientRect()
+      const details = card.querySelector('.ic-toggle')!.getBoundingClientRect()
+      const task = [...card.querySelectorAll('button')].find((button) => button.textContent?.includes('查看任务'))!.getBoundingClientRect()
+      return { detailOffset: details.x - band.x, taskOffset: task.x - band.x }
+    })
+    expect(await offset(canHandle)).toEqual(await offset(readOnly))
+    expect(await readOnly.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    expect(await canHandle.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    if (width === 1440 || width === 390) {
+      await readOnly.screenshot({ path: testInfo.outputPath(`issues-readonly-${width}.png`) })
+      await canHandle.screenshot({ path: testInfo.outputPath(`issues-handle-${width}.png`) })
+    }
+
+    await readOnly.close()
+    await canHandle.close()
+  })
+}
+
+for (const width of [1440, 768, 390, 320]) {
+  test(`审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：${width}px`, async ({ page }, testInfo) => {
+    const geometries: Array<{ checkX: number; bandX: number; mainX: number; scoreX: number; titleBottom: number; typeTop: number; typeBottom: number; statusBottom: number }> = []
+    for (const canCancel of [false, true]) {
+      const target = canCancel ? await page.context().newPage() : page
+      await target.setViewportSize({ width, height: 1000 })
+      await mockSession(target, false, canCancel)
+      await target.goto('/reviews')
+      await expect(target.locator('.task-card')).toHaveCount(1)
+      geometries.push(await target.locator('.task-card').first().evaluate((card) => {
+        const rect = (selector: string) => card.querySelector(selector)!.getBoundingClientRect()
+        return {
+          checkX: rect('.tc-check-slot').x,
+          bandX: rect('.tc-band').x,
+          mainX: rect('.tc-main').x,
+          scoreX: rect('.tc-score').x,
+          titleBottom: rect('.tc-name').bottom,
+          typeTop: rect('.tc-line1 .el-tag').top,
+          typeBottom: rect('.tc-line1 .el-tag').bottom,
+          statusBottom: rect('.tc-line1 .el-tag:last-child').bottom,
+        }
+      }))
+      if (canCancel) await target.close()
+    }
+    for (const key of ['checkX', 'bandX', 'mainX', 'scoreX'] as const) {
+      expect(geometries[1][key]).toBeCloseTo(geometries[0][key], 0)
+    }
+    for (const geometry of geometries) {
+      expect(Math.abs(geometry.typeBottom - geometry.statusBottom)).toBeLessThanOrEqual(1)
+      if (width > 760) expect(Math.abs(geometry.titleBottom - geometry.typeBottom)).toBeLessThanOrEqual(1)
+      else expect(geometry.titleBottom).toBeLessThan(geometry.typeTop)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    if (width === 1440 || width === 390) await page.screenshot({ path: testInfo.outputPath(`review-tasks-${width}.png`) })
   })
 }
 

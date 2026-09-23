@@ -92,7 +92,7 @@
           v-for="row in rows"
           :key="row.id"
           class="issue-card"
-          :class="{ 'is-expanded': expandedIds.has(row.id), 'has-selection': canBatchIssues }"
+          :class="{ 'is-expanded': expandedIds.has(row.id) }"
           role="listitem"
         >
           <label v-if="canBatchIssues" class="ic-check" @click.stop>
@@ -103,6 +103,7 @@
               @change="toggleSelect(row)"
             >
           </label>
+          <span v-else class="ic-check-placeholder" aria-hidden="true"></span>
           <span class="ic-band" :data-severity="String(severityClass(row.severity))" aria-hidden="true"></span>
           <div class="ic-main">
             <div class="ic-line1">
@@ -136,17 +137,19 @@
               {{ expandedIds.has(row.id) ? '收起' : '详情' }}
             </button>
             <el-button link type="primary" size="small" @click="onJump(row)">查看任务</el-button>
-            <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
-              <el-button link type="primary" size="small">改状态<el-icon><ArrowDown /></el-icon></el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="fixed">标记已修复</el-dropdown-item>
-                  <el-dropdown-item command="ignored">标记已忽略</el-dropdown-item>
-                  <el-dropdown-item command="pending_review">标记待复查</el-dropdown-item>
-                  <el-dropdown-item command="unfixed">恢复未修复</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <span class="ic-status-slot">
+              <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
+                <el-button link type="primary" size="small">改状态<el-icon><ArrowDown /></el-icon></el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="fixed">标记已修复</el-dropdown-item>
+                    <el-dropdown-item command="ignored">标记已忽略</el-dropdown-item>
+                    <el-dropdown-item command="pending_review">标记待复查</el-dropdown-item>
+                    <el-dropdown-item command="unfixed">恢复未修复</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </span>
           </div>
         </article>
       </div>
@@ -431,8 +434,8 @@ onMounted(async () => {
 
 .issue-card {
   display: grid;
-  grid-template-columns: 4px minmax(0, 1fr) auto;
-  grid-template-areas: 'band main actions';
+  grid-template-columns: 16px 4px minmax(0, 1fr) 192px;
+  grid-template-areas: 'check band main actions';
   gap: 14px;
   align-items: start;
   padding: 13px 16px 13px 12px;
@@ -440,12 +443,6 @@ onMounted(async () => {
   background: var(--el-bg-color, #fff);
   border: 1px solid var(--gray-100, #eef0f4);
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-}
-
-/* 勾选框按权限存在，显式命名列避免普通用户的正文被放入 auto 列。 */
-.issue-card.has-selection {
-  grid-template-columns: 16px 4px minmax(0, 1fr) auto;
-  grid-template-areas: 'check band main actions';
 }
 
 .issue-card:hover {
@@ -460,6 +457,11 @@ onMounted(async () => {
   place-items: center;
   padding-top: 3px;
   cursor: pointer;
+}
+
+.ic-check-placeholder {
+  grid-area: check;
+  width: 16px;
 }
 
 .ic-check input {
@@ -582,10 +584,11 @@ onMounted(async () => {
 
 .ic-actions {
   grid-area: actions;
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  min-width: 0;
+  display: grid;
+  grid-template-columns: 48px 64px 72px;
+  align-items: end;
+  gap: 4px;
+  width: 192px;
   white-space: nowrap;
 
   :deep(.el-button) {
@@ -593,6 +596,12 @@ onMounted(async () => {
     min-height: 24px;
     padding: 2px 0;
   }
+}
+
+.ic-status-slot {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -609,19 +618,16 @@ onMounted(async () => {
 /* 以卡片容器宽度响应，桌面收起/展开侧栏后也保持可用。 */
 @container (max-width: 680px) {
   .issue-card {
-    grid-template-columns: 4px minmax(0, 1fr);
-    grid-template-areas: 'band main' 'band actions';
+    grid-template-columns: 16px 4px minmax(0, 1fr);
+    grid-template-areas: 'check band main' '. band actions';
     gap: 10px;
   }
 
-  .issue-card.has-selection {
-    grid-template-columns: 16px 4px minmax(0, 1fr);
-    grid-template-areas: 'check band main' '. band actions';
-  }
-
   .ic-actions {
+    display: flex;
     flex-wrap: wrap;
     justify-content: flex-start;
+    width: auto;
     padding-top: 8px;
     border-top: 1px solid var(--gray-100, #eef0f4);
   }

@@ -101,7 +101,7 @@
       v-model="drawerVisible"
       :title="selectedAgent?.name || 'Agent 详情'"
       direction="rtl"
-      size="420px"
+      size="min(420px, calc(100vw - 16px))"
     >
       <div v-if="selectedAgent" class="agent-detail">
         <div class="detail-head">

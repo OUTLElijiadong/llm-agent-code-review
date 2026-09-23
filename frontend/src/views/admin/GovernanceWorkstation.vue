@@ -1413,6 +1413,21 @@ onMounted(loadData)
   gap: 10px;
 }
 
+.form-row.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.toolbar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: end;
+  gap: 10px;
+}
+
+.toolbar-grid > * {
+  min-width: 0;
+}
+
 .decision-line {
   margin-top: 10px;
   color: var(--gray-700);
@@ -1428,7 +1443,8 @@ pre {
 
 @media (max-width: 900px) {
   .content-grid,
-  .form-row {
+  .form-row,
+  .form-row.two {
     grid-template-columns: 1fr;
   }
 }

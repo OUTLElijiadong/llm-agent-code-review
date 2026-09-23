@@ -160,6 +160,19 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
 
+it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', async () => {
+  const wrapper = mountDrawer()
+  const panel = wrapper.get('.chat-drawer').element
+  Object.defineProperty(panel, 'offsetWidth', { configurable: true, value: 400 })
+  Object.defineProperty(panel, 'offsetHeight', { configurable: true, value: 620 })
+
+  await flushPromises()
+
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('left:')
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('top:')
+  wrapper.unmount()
+})
+
 describe('AgentChatDrawer Responses stream', () => {
   it('模型最终输出等于用户原话时仍补齐真正的助手结果', async () => {
     const wrapper = await mountReadyDrawer()
