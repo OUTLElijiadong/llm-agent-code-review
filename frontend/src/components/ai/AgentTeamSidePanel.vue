@@ -224,7 +224,7 @@ function askMember(member: AgentTeamMember): void {
                 <div class="overview-section">
                   <div class="section-label">成员 ({{ members.length }})</div>
                   <div class="overview-badges">
-                    <AgentTeamMemberBadge v-for="m in members" :key="m.member_id" :name="m.display_name" :role="m.role" :status="m.status" :address="m.address" :interactive="false" />
+                    <AgentTeamMemberBadge v-for="m in members" :key="m.member_id" :name="m.display_name" :kind="m.kind" :role="m.role" :status="m.status" :address="m.address" :interactive="false" />
                   </div>
                 </div>
                 <div class="overview-section">

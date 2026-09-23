@@ -5,21 +5,36 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class TemporaryAgentDefinition(_StrictModel):
+    """任务内的专项分析职责；不接受权限、代码或模型端点覆盖。"""
+
+    purpose: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("purpose", "instructions")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("临时 Agent 职责和指令不能为空")
+        return value.strip()
+
+
 class AgentTeamMemberIn(_StrictModel):
     member_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     display_name: str = Field(min_length=1, max_length=200)
-    address: str = Field(min_length=1, max_length=200)
+    address: str = Field(min_length=1, max_length=200, pattern=r"^(?:agent|custom|temporary):[A-Za-z0-9_-]+$")
     role: Literal["worker", "verifier", "summarizer"] = "worker"
     template_id: Optional[int] = Field(default=None, gt=0)
     template_version_id: Optional[int] = Field(default=None, gt=0)
     capabilities: Dict[str, Any] = Field(default_factory=dict)
+    definition: Optional[TemporaryAgentDefinition] = None
 
     @field_validator("address")
     @classmethod
@@ -28,11 +43,24 @@ class AgentTeamMemberIn(_StrictModel):
             code = value[6:]
         elif value.startswith("custom:"):
             code = value[7:]
+        elif value.startswith("temporary:"):
+            code = value[10:]
         else:
-            raise ValueError("成员目标只能是 agent:<code> 或 custom:<code>")
+            raise ValueError("成员目标只能是 agent:<code>、custom:<code> 或 temporary:<member_key>")
         if not code or not all(char.isalnum() or char in "_-" for char in code):
             raise ValueError("成员目标编码非法")
         return value
+
+    @model_validator(mode="after")
+    def validate_definition(self) -> "AgentTeamMemberIn":
+        if self.address.startswith("temporary:"):
+            if self.address != f"temporary:{self.member_key}" or self.definition is None:
+                raise ValueError("临时成员必须使用 temporary:<member_key> 并提供 definition")
+            if self.template_id is not None or self.template_version_id is not None:
+                raise ValueError("临时成员不能绑定永久模板或版本")
+        elif self.definition is not None:
+            raise ValueError("仅 temporary 成员可以提供 definition")
+        return self
 
 
 class AgentTeamTaskIn(_StrictModel):

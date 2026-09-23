@@ -78,7 +78,8 @@
             </div>
             <div class="ac-row">
               <span class="ac-label">说明</span>
-              <span class="ac-text" :title="row.detail || ''">{{ row.detail || '-' }}</span>
+              <span v-if="row.content_redacted" class="ac-text" role="status">原文按账号隔离</span>
+              <span v-else class="ac-text" :title="row.detail || ''">{{ row.detail || '-' }}</span>
             </div>
             <div class="ac-row">
               <span class="ac-label">来源</span>
@@ -108,7 +109,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
+import { useUserStore } from '@/stores/user'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -117,6 +120,8 @@ import { listAuditLogs } from '@/api/audit'
 import type { AuditLogOut } from '@/types/audit'
 
 const router = useRouter()
+const userStore = useUserStore()
+const auditScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => '')
 const loading = ref(false)
 const rows = ref<AuditLogOut[]>([])
 const total = ref(0)
@@ -161,6 +166,7 @@ function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info
 }
 
 async function loadLogs(): Promise<void> {
+  const scopeCurrent = auditScope.captureAccount()
   loading.value = true
   try {
     const data = await listAuditLogs({
@@ -171,10 +177,13 @@ async function loadLogs(): Promise<void> {
       page: page.value,
       page_size: pageSize.value,
     })
+    if (!scopeCurrent()) return
     rows.value = data.items
     total.value = data.total
+  } catch {
+    // 请求拦截器负责错误提示；不保留上一账号的结果。
   } finally {
-    loading.value = false
+    if (scopeCurrent()) loading.value = false
   }
 }
 
@@ -208,6 +217,17 @@ function goTrace(row: AuditLogOut): void {
 }
 
 
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  rows.value = []
+  total.value = 0
+  expandedId.value = null
+  page.value = 1
+  loading.value = false
+  filters.action = ''
+  filters.keyword = ''
+  dateRange.value = null
+  if (userStore.profile) void loadLogs()
+}, { flush: 'sync' })
 onMounted(loadLogs)
 </script>
 

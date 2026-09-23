@@ -301,10 +301,10 @@ def test_resolve_sse_user_rejects_missing_or_disabled_accounts(
 
 
 @pytest.mark.asyncio
-async def test_sse_filters_other_users_but_delivers_system_and_owner_events(
+async def test_sse_filters_other_and_unowned_events_but_delivers_owner_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """普通用户 SSE 应过滤他人事件，并保留系统级与本人事件。"""
+    """缺少账号归属的事件不能被解释为公共聊天事件。"""
     bus = FakeEventBus([_event("other", 8), _event("system", None), _event("owner", 7)])
     monkeypatch.setattr(module, "_resolve_sse_user", MagicMock(return_value=SimpleNamespace(id=7, role="member")))
     monkeypatch.setattr(module, "_is_sse_session_active", MagicMock(return_value=True))
@@ -316,16 +316,16 @@ async def test_sse_filters_other_users_but_delivers_system_and_owner_events(
 
     assert chunks[0] == ":connected\n\n"
     assert "other" not in payload
-    assert "system" in payload
+    assert "system" not in payload
     assert "owner" in payload
-    assert payload.count("event: agent") == 2
+    assert payload.count("event: agent") == 1
     assert bus.replays == [9]
 
 
 @pytest.mark.asyncio
-async def test_admin_sse_delivers_all_events(monkeypatch: pytest.MonkeyPatch) -> None:
-    """管理员 SSE 应接收任意 user_id 的事件。"""
-    bus = FakeEventBus([_event("foreign", 88)])
+async def test_admin_sse_only_delivers_owned_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    """管理员业务权限不包含订阅其他账号私人聊天的权限。"""
+    bus = FakeEventBus([_event("foreign", 88), _event("own", 1)])
     monkeypatch.setattr(module, "_resolve_sse_user", MagicMock(return_value=SimpleNamespace(id=1, role="admin")))
     monkeypatch.setattr(module.rbac_service, "is_admin_user", lambda _db, user_id: user_id == 1)
     monkeypatch.setattr(module.AgentEventBus, "instance", MagicMock(return_value=bus))
@@ -333,7 +333,8 @@ async def test_admin_sse_delivers_all_events(monkeypatch: pytest.MonkeyPatch) ->
     response = await module.stream_agent_events(replay=0, authorization=None, token="x", db=object())
     payload = "".join(await _collect_stream(response))
 
-    assert "foreign" in payload
+    assert "foreign" not in payload
+    assert "own" in payload
     assert payload.count("event: agent") == 1
 
 
@@ -448,12 +449,12 @@ def test_submit_clarification_merges_payload_and_returns_dict_result(
     assert ctx.extra == {}
 
 
-def test_submit_clarification_allows_admin_and_returns_scalar_result(
+def test_submit_clarification_allows_owner_admin_and_returns_scalar_result(
     monkeypatch: pytest.MonkeyPatch,
     clarify_store: ClarifyStore,
 ) -> None:
-    """管理员可代填他人追问，非字典结果应映射到 content 与 model。"""
-    clarify_store.put("clarify-3", {"user_id": 8, "intent": "summary", "payload": {}})
+    """管理员可回答自己的追问，非字典结果映射到 content 与 model。"""
+    clarify_store.put("clarify-3", {"user_id": 1, "intent": "summary", "payload": {}})
     chat_agent = FakeChatAgent(AgentResult(success=True, data="plain text", model="model-b"))
     monkeypatch.setattr(
         module,
@@ -476,7 +477,7 @@ def test_submit_clarification_maps_agent_failure_to_ai_error(
     clarify_store: ClarifyStore,
 ) -> None:
     """续跑 Agent 失败时应抛出带 50202 业务码的 AiServiceError。"""
-    clarify_store.put("clarify-4", {"user_id": None, "intent": "review", "payload": {}})
+    clarify_store.put("clarify-4", {"user_id": 7, "intent": "review", "payload": {}})
     chat_agent = FakeChatAgent(AgentResult(success=False, error="upstream failed"))
     monkeypatch.setattr(
         module,

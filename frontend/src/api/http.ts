@@ -218,7 +218,7 @@ export async function del<T>(url: string): Promise<T> {
  * @param params - 可选查询参数。
  * @returns 文件内容 Blob。
  */
-export async function download(url: string, params?: object): Promise<Blob> {
-  const response = await http.get<Blob>(url, { params: cleanParams(params), responseType: 'blob' })
+export async function download(url: string, params?: object, config?: AxiosRequestConfig): Promise<Blob> {
+  const response = await http.get<Blob>(url, { ...config, params: cleanParams(params), responseType: 'blob' })
   return response.data
 }

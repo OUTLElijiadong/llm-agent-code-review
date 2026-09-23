@@ -82,6 +82,7 @@ import {
   findAgentMeshTimeline,
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { actionableError } from '@/composables/withFeedback'
 import { CHAT_IMAGE_MIME, useChatImages } from '@/composables/useChatImages'
@@ -287,6 +288,8 @@ const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.pro
 const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
+const chatAccountEpoch = ref(0)
+const chatScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => sessionId.value)
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
 const meshSessions = ref<AgentChatSessionMeta[]>([])
 const backgroundBusySessions = new Set<string>()
@@ -333,18 +336,24 @@ const canRetryRun = computed(() => {
 })
 
 /** 吉祥物与标题栏共享的 agent 状态:运行中/等待用户/空闲 */
-const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
+const mascotStatus = computed<'idle' | 'thinking' | 'working' | 'waiting' | 'error'>(() => {
   const status = sessionRun.value?.status
-  if (loading.value || isAgentResponseSessionActive(status)) return 'running'
+  if (loading.value || isAgentResponseSessionActive(status)) {
+    const hasActiveTool = Boolean(lastActiveToolName.value) || messages.value.some((message) => (
+      message.toolCalls?.some((call) => ['running', 'processing', 'queued'].includes(call.status))
+    ))
+    return hasActiveTool ? 'working' : 'thinking'
+  }
   if (isAgentResponseSessionWaiting(status)) return 'waiting'
+  if (status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status)) return 'error'
   return 'idle'
 })
 const runStatusLabel = computed(() => (
-  mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
+  ({ idle: '空闲', thinking: '思考中', working: '运行中', waiting: '等待你操作', error: '遇到问题' })[mascotStatus.value]
 ))
 /** 页面操作类工具运行中时显示全屏彩框与虚拟鼠标。 */
 const pageActionActive = computed(() => (
-  mascotStatus.value === 'running' && isPageActionTool(lastActiveToolName.value)
+  ['thinking', 'working'].includes(mascotStatus.value) && isPageActionTool(lastActiveToolName.value)
 ))
 const canSend = computed(() => (
   (inputText.value.trim().length > 0 || pendingImages.value.length > 0)
@@ -366,6 +375,7 @@ const meshBridge = createAgentMeshBridge({
   // JARVIS 默认只作为告警证据留存;不能因为管理员打开页面就自动消耗模型额度。
   shouldAutoProcess: (message) => message.payload?.patrol_kind !== 'jarvis',
   onDeferredMessage: async (message, targetSessionId) => {
+    const scopeCurrent = chatScope.captureAccount()
     if (message.payload?.patrol_kind !== 'jarvis') return false
     try {
       await acknowledgeAgentMeshMessage(
@@ -375,6 +385,7 @@ const meshBridge = createAgentMeshBridge({
         'completed',
         'JARVIS 简报已记入运维告警;成本保护已阻止自动模型调用,请管理员明确发起核验。',
       )
+      if (!scopeCurrent()) return false
       unreadAlerts.value += 1
       return true
     } catch {
@@ -404,15 +415,15 @@ function persistSnapshot(): void {
     messages: messages.value.map((entry) => ({ role: entry.role, content: entry.payload.content ?? '' })),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
-  })
+  }, chatStorageKey.value)
 }
 
 function rememberCurrentDraft(): void {
   if (!sessionId.value) return
-  saveAgentChatDraft(sessionId.value, inputText.value)
+  saveAgentChatDraft(sessionId.value, inputText.value, chatStorageKey.value)
 }
 
-watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft), { flush: 'sync' })
+watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft, chatStorageKey.value), { flush: 'sync' })
 
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
@@ -443,8 +454,9 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollStopped = false
   sessionSnapshotSignature = ''
   sessionId.value = nextSessionId
+  const scopeCurrent = chatScope.capture()
   // 每个会话独立保留草稿；页面刷新或跨布局后切回仍可继续编辑。
-  inputText.value = loadAgentChatDraft(nextSessionId)
+  inputText.value = loadAgentChatDraft(nextSessionId, chatStorageKey.value)
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
@@ -457,6 +469,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionRestoring.value = true
   messages.value = [welcomeEntry()]
   await scrollToBottom()
+  if (!scopeCurrent()) return
   void restoreSession()
 }
 
@@ -479,7 +492,7 @@ function isMeshSessionBusy(targetSessionId: string): boolean {
     return loading.value || sessionRestoring.value || sessionBusy.value
   }
   if (backgroundBusySessions.has(targetSessionId)) return true
-  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)?.runStatus)
 }
 
 function now(): string {
@@ -541,9 +554,10 @@ function invalidateSessionPoll(): void {
 
 /** 团队账本是服务端事实源;会话恢复和每次轮询都重新读取当前会话的最新团队。 */
 async function refreshAgentTeam(generation?: number): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (!sessionId.value) return
   const requestedSessionId = sessionId.value
-  const isCurrent = (): boolean => requestedSessionId === sessionId.value
+  const isCurrent = (): boolean => scopeCurrent() && requestedSessionId === sessionId.value
     && (generation === undefined || generation === sessionPollGeneration)
   agentTeamLoading.value = true
   try {
@@ -555,6 +569,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       return
     }
     const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
+    if (!scopeCurrent()) return
     if (!isCurrent()) return
     const details = settled
       .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
@@ -564,6 +579,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     agentTeams.value = details
     agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
   } catch {
+    if (!scopeCurrent()) return
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
   } finally {
     if (isCurrent()) agentTeamLoading.value = false
@@ -703,6 +719,7 @@ function applySessionSnapshot(session: AgentResponseSession): void {
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (
     sessionPollStopped
     || generation !== sessionPollGeneration
@@ -710,50 +727,61 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   try {
     const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('admin', sessionId.value)
-    if (sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
+    if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0
     sessionLastPolledAt.value = now()
     // 活动流持有最新状态,轮询快照可能落后于 SSE,不能在 loading 期间覆盖。
     if (!loading.value) applySessionSnapshot(session)
     await refreshAgentTeam(generation)
+    if (!scopeCurrent()) return
   } catch {
+    if (!scopeCurrent()) return
     sessionPollFailures += 1
     sessionPollError.value = '同步暂时中断,正在重试'
   } finally {
-    syncBusy()
-    persistSnapshot()
-    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
+    if (scopeCurrent()) {
+      syncBusy()
+      persistSnapshot()
+      if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
+    }
   }
 }
 
 async function restoreSession(generation = restoreGeneration + 1): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   restoreGeneration = generation
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('admin', requestedSessionId)
+    if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
-    if (generation !== restoreGeneration || requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
+    if (!scopeCurrent() || generation !== restoreGeneration || requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
       scheduleSessionPoll()
       return
     }
     applySessionSnapshot(session)
     await refreshAgentTeam()
+    if (!scopeCurrent()) return
   } catch {
+    if (!scopeCurrent()) return
     // HTTP 层已给出错误提示；保留空对话仍允许用户重试。
   } finally {
-    if (generation === restoreGeneration) {
-      sessionRestoring.value = false
-      syncBusy()
-      persistSnapshot()
-      await scrollToBottom()
-      void meshBridge.syncNow()
+    if (scopeCurrent()) {
+      if (generation === restoreGeneration) {
+        sessionRestoring.value = false
+        syncBusy()
+        persistSnapshot()
+        await scrollToBottom()
+        if (scopeCurrent()) void meshBridge.syncNow()
+      }
     }
   }
 }
 
 async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  const scopeCurrent = chatScope.capture()
   if (targetSessionId !== sessionId.value) {
     return runBackgroundMeshMessage(message, targetSessionId)
   }
@@ -764,6 +792,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     })
   }
   await scrollToBottom()
+  if (!scopeCurrent()) return false
   const succeeded = await runResponse({
     action: 'start',
     surface: 'admin',
@@ -771,6 +800,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     messages: [],
     mesh_message_id: message.message_id,
   })
+  if (!scopeCurrent()) return false
   settleAgentMeshTimeline(
     messages.value,
     message.message_id,
@@ -785,6 +815,7 @@ async function runBackgroundMeshMessage(
   message: AgentMeshMessage,
   targetSessionId: string,
 ): Promise<boolean> {
+  const scopeCurrent = chatScope.captureAccount()
   backgroundBusySessions.add(targetSessionId)
   switcherRef.value?.setBusy(targetSessionId, true)
   let waiting = false
@@ -799,6 +830,7 @@ async function runBackgroundMeshMessage(
     mesh_message_id: message.message_id,
   }, {
     async onEvent(event) {
+      if (!scopeCurrent()) return
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
       }
@@ -816,13 +848,14 @@ async function runBackgroundMeshMessage(
       }
     },
   })
+  chatScope.track(handle)
   try {
     await handle.done
-    return succeeded
+    return scopeCurrent() && succeeded
   } catch {
     return false
   } finally {
-    if (!waiting) {
+    if (scopeCurrent() && !waiting) {
       backgroundBusySessions.delete(targetSessionId)
       switcherRef.value?.setBusy(targetSessionId, false)
     }
@@ -928,6 +961,7 @@ function onDragLeave(event: DragEvent): void {
 }
 
 async function onDrop(event: DragEvent): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   dragActive.value = false
   const files = Array.from(event.dataTransfer?.files ?? [])
   if (!files.length || uploading.value) return
@@ -940,6 +974,7 @@ async function onDrop(event: DragEvent): Promise<void> {
       // 多模态:纯图片作为聊天附件,发送时自动切换视觉模型
       resetUploadProgress()
       const added = await addPendingImageFiles(images)
+      if (!scopeCurrent()) return
       if (added) ElMessage.success(`已添加 ${added} 张图片，发送后将自动用视觉模型分析`)
       return
     }
@@ -947,16 +982,21 @@ async function onDrop(event: DragEvent): Promise<void> {
     const skipped = files.length - targets.length
     if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
     await uploadFilesAsProject(targets, images.length)
+    if (!scopeCurrent()) return
   } catch (err) {
+    if (!scopeCurrent()) return
     resetUploadProgress()
     ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
   } finally {
-    uploading.value = false
+    if (scopeCurrent()) {
+      uploading.value = false
+    }
   }
 }
 
 /** 把拖拽的文件建成一个新项目并导入,然后让贾维斯接手引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   setUploadProgress('正在验证文件…', 0, files.length)
   const readableFiles: File[] = []
   const preflightFailures: string[] = []
@@ -964,8 +1004,10 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     try {
       if (file.size <= 0) throw new Error('文件为空')
       await file.slice(0, 1).arrayBuffer()
+      if (!scopeCurrent()) return
       readableFiles.push(file)
     } catch (err) {
+    if (!scopeCurrent()) return
       preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
     }
     setUploadProgress('正在验证文件…', readableFiles.length + preflightFailures.length, files.length)
@@ -980,11 +1022,13 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const language = inferProjectLanguage(readableFiles)
   setUploadProgress(`正在创建项目「${projectName}」…`, 0, readableFiles.length)
   const created = await createProject({ project_name: projectName, description: `管理端贾维斯拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
+  if (!scopeCurrent()) return
   const projectId = created.id
   let okCount = 0
   const failures: string[] = [...preflightFailures]
   for (let i = 0; i < readableFiles.length; i++) {
     const file = readableFiles[i]
+    if (!scopeCurrent()) return
     setUploadProgress(file.name, i, readableFiles.length)
     try {
       const fd = new FormData()
@@ -992,12 +1036,16 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
       fd.append('file', file)
       fd.append('file_path', file.name)
       await uploadCodeFile(fd)
+      if (!scopeCurrent()) return
       okCount += 1
     } catch (err) {
+    if (!scopeCurrent()) return
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
     }
+    if (!scopeCurrent()) return
     setUploadProgress(file.name, i + 1, readableFiles.length)
   }
+  if (!scopeCurrent()) return
   resetUploadProgress()
   if (!okCount) {
     try { await deleteProject(projectId) } catch { /* 仍优先把真实上传失败反馈给用户 */ }
@@ -1007,10 +1055,12 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   if (uploadedLanguage !== language) {
     try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
   }
+  if (!scopeCurrent()) return
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
   const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。接下来你想让我帮你对这个项目做什么?比如发起代码审查、安全扫描或沙箱部署。`
   messages.value.push(assistantEntry({ type: 'text', content: summary }))
   await scrollToBottom()
+  if (!scopeCurrent()) return
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
   await runResponse({
@@ -1124,9 +1174,10 @@ async function retryRun(): Promise<void> {
 }
 
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
+  const scopeCurrent = chatScope.capture()
   const generation = submissionGeneration
   const requestedSessionId = sessionId.value
-  const isCurrentSubmission = () => generation === submissionGeneration && requestedSessionId === sessionId.value
+  const isCurrentSubmission = () => scopeCurrent() && generation === submissionGeneration && requestedSessionId === sessionId.value
   if (payload.action === 'start') {
     // JSON 请求对象只在内存暂存，不将图片写入 localStorage 或会话快照。
     unconfirmedStart.value = {
@@ -1326,6 +1377,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     },
   })
   activeResponse = handle
+  chatScope.track(handle)
 
   try {
     await handle.done
@@ -1451,6 +1503,7 @@ function onComposerPaste(event: ClipboardEvent): void {
 }
 
 async function sendMessage(): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const content = inputText.value.trim()
   const images = [...pendingImages.value]
   if ((!content && !images.length) || readingImages.value || retryChecking.value || loading.value || sessionRestoring.value || sessionBusy.value) return
@@ -1462,6 +1515,7 @@ async function sendMessage(): Promise<void> {
     switcherRef.value?.reload?.()
   }
   await scrollToBottom()
+  if (!scopeCurrent()) return
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
   // 仍复用同一权限守卫,并交给全局虚拟鼠标执行真实点击和路由跳转。
@@ -1476,6 +1530,7 @@ async function sendMessage(): Promise<void> {
     messages.value.push(assistantEntry({ type: 'text', content: message, status: 'completed' }))
     persistSnapshot()
     await scrollToBottom()
+    if (!scopeCurrent()) return
     if (localNavigation.kind === 'navigate' && directive) {
       requestXiaolingNavigation(
         directive.route,
@@ -1495,6 +1550,7 @@ async function sendMessage(): Promise<void> {
 }
 
 async function decideApproval(entry: ChatEntry, decision: ResponseApprovalDecision): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const approval = entry.approval
   if (!approval || approval.status !== 'pending' || loading.value) return
   const { action, confirmation = '' } = decision
@@ -1509,6 +1565,7 @@ async function decideApproval(entry: ChatEntry, decision: ResponseApprovalDecisi
     call_id: approval.call_id,
     confirmation,
   })
+  if (!scopeCurrent()) return
   approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
   if (!succeeded) setTimelineCallStatus(approval.call_id, 'failed', '审批续跑失败，可重试')
   else if (action === 'reject') setTimelineCallStatus(approval.call_id, 'rejected')
@@ -1545,6 +1602,7 @@ async function copyMessage(entry: ChatEntry): Promise<void> {
 }
 
 async function submitInput(entry: ChatEntry, selectedAnswer?: string): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const request = entry.inputRequest
   if (request && selectedAnswer !== undefined) request.answer = selectedAnswer
   const answer = request?.answer.trim() ?? ''
@@ -1564,6 +1622,7 @@ async function submitInput(entry: ChatEntry, selectedAnswer?: string): Promise<v
     call_id: request.call_id ?? '',
     answer,
   })
+  if (!scopeCurrent()) return
   request.status = succeeded ? 'answered' : 'pending'
   setTimelineCallStatus(
     request.call_id,
@@ -1607,10 +1666,13 @@ function handleSubmitKey(event: KeyboardEvent): void {
 
 /** 会话归档:服务端成功后才本地移除;失败保留会话并重新发现。 */
 async function handleSessionArchive(sessionId: string): Promise<void> {
+  const scopeCurrent = chatScope.captureAccount()
   try {
     await archiveAgentMeshSession('admin', sessionId)
+    if (!scopeCurrent()) return
     switcherRef.value?.removeSession(sessionId)
   } catch {
+    if (!scopeCurrent()) return
     ElMessage.warning('服务端归档失败,会话保留在列表中')
     switcherRef.value?.restoreSessionAfterArchiveFailure()
     switcherRef.value?.refreshFromAgentMesh()
@@ -1647,6 +1709,45 @@ function handleVisibilityChange(): void {
     scheduleSessionPoll(true)
   }
 }
+
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  chatAccountEpoch.value += 1
+  meshBridge.stop()
+  activeResponse = null
+  sessionPollStopped = true
+  invalidateSessionPoll()
+  sessionId.value = ''
+  inputText.value = ''
+  messages.value = []
+  meshSessions.value = []
+  backgroundBusySessions.clear()
+  sessionRun.value = null
+  sessionSnapshotSignature = ''
+  sessionPollFailures = 0
+  sessionPollError.value = ''
+  sessionLastPolledAt.value = ''
+  sessionRestoring.value = true
+  agentTeams.value = []
+  agentTeamLoading.value = false
+  agentTeamError.value = ''
+  loading.value = false
+  showTyping.value = false
+  uploading.value = false
+  resetUploadProgress()
+  dragActive.value = false
+  cancelPromptVisible.value = false
+  lastActiveToolName.value = ''
+  activityStore.clear()
+  restoreGeneration += 1
+  clearUnconfirmedStart()
+  unreadAlerts.value = 0
+  expandedTables.value = new Set()
+  selectedTeamId.value = null
+  runningSinceMs.value = null
+  sandboxProgress.value = ''
+  sessionPollStopped = false
+  if (userStore.profile) meshBridge.start()
+}, { flush: 'sync' })
 
 onBeforeUnmount(() => {
   clearUnconfirmedStart()
@@ -1700,7 +1801,7 @@ onMounted(() => {
       :title="ASSISTANT_NAME"
       @click="openPanel"
     >
-      <PrismMascot :size="44" :status="mascotStatus !== 'idle' ? 'running' : 'idle'" />
+      <PrismMascot :size="44" :status="mascotStatus" />
       <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
     </button>
 
@@ -1723,7 +1824,7 @@ onMounted(() => {
       <div v-if="dragActive" class="drop-mask">
         <div class="drop-mask-text">松开鼠标,把文件交给贾维斯建项目</div>
       </div>
-      <header class="copilot-header" :class="{ 'is-running': mascotStatus === 'running' }">
+      <header class="copilot-header" :class="{ 'is-running': ['thinking', 'working'].includes(mascotStatus) }">
         <button class="panel-drag-handle" type="button" aria-label="移动管理副驾驶窗口" title="拖拽移动窗口" @pointerdown="beginDrag">
           ⠿
         </button>
@@ -1748,6 +1849,7 @@ onMounted(() => {
             </div>
             <AgentSessionSwitcher
               ref="switcherRef"
+                  :key="`${chatStorageKey}:${chatAccountEpoch}`"
               class="copilot-session-switch"
               :storage-key="chatStorageKey"
               :account-key="userStore.profile?.id"
@@ -1766,7 +1868,7 @@ onMounted(() => {
         </button>
       </header>
 
-      <div v-if="mascotStatus === 'running' && lastActiveToolName" class="copilot-progress">
+      <div v-if="['thinking', 'working'].includes(mascotStatus) && lastActiveToolName" class="copilot-progress">
         {{ toolRunningPhrase(lastActiveToolName, MASCOT_NAME) }}
         <span v-if="runningElapsedLabel" class="progress-elapsed"> · 已运行 {{ runningElapsedLabel }}</span>
         <span v-if="sandboxProgress" class="progress-sandbox"> · {{ sandboxProgress }}</span>
@@ -2240,8 +2342,8 @@ input { font: inherit; }
 }
 .copilot-run-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .copilot-run-badge.run-idle { color: var(--agent-text-secondary); background: #f2f3f5; border-color: var(--agent-border); }
-.copilot-run-badge.run-running { color: #2f7a3d; background: rgba(43, 164, 113, 0.12); border-color: rgba(43, 164, 113, 0.35); }
-.copilot-run-badge.run-running i { animation: copilot-run-blink 1s ease-in-out infinite; }
+.copilot-run-badge.run-thinking, .copilot-run-badge.run-working { color: #2f7a3d; background: rgba(43, 164, 113, 0.12); border-color: rgba(43, 164, 113, 0.35); }
+.copilot-run-badge.run-thinking i, .copilot-run-badge.run-working i { animation: copilot-run-blink 1s ease-in-out infinite; }
 .copilot-run-badge.run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .copilot-run-badge.run-waiting i { animation: copilot-run-blink 1s ease-in-out infinite; }
 .copilot-sync-status { color: var(--agent-text-secondary); font-size: 9.5px; white-space: nowrap; }
@@ -2754,7 +2856,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   .typing-label { animation: none; }
   .typing-bubble i { animation: none; opacity: 1; transform: none; }
   .stop-button { animation: none; }
-  .copilot-run-badge.run-running i, .copilot-run-badge.run-waiting i { animation: none; opacity: 1; }
+  .copilot-run-badge.run-thinking i, .copilot-run-badge.run-working i, .copilot-run-badge.run-waiting i { animation: none; opacity: 1; }
   .message-row.is-assistant .message-stack:hover .message-bubble { transform: none; }
   .send-button { transition: none; }
   .send-button:hover:not(:disabled) { transform: none; }

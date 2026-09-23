@@ -21,6 +21,14 @@ let authExpiredListenerRegistered = false
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(getToken() || '')
   const profile = ref<UserOut | null>(null)
+  let authGeneration = 0
+
+  function captureAuth(): () => boolean {
+    const generation = authGeneration
+    const requestedToken = token.value
+    const requestedUserId = profile.value?.id
+    return () => generation === authGeneration && requestedToken === token.value && requestedUserId === profile.value?.id
+  }
 
   /** 用户权限点编码集合 */
   const permissions = ref<Set<string>>(new Set())
@@ -40,10 +48,13 @@ export const useUserStore = defineStore('user', () => {
    */
   async function fetchUserRoles(): Promise<void> {
     if (!profile.value) return
+    const isCurrent = captureAuth()
     try {
       const list = await apiFetchUserRoles(profile.value.id)
+      if (!isCurrent()) return
       roles.value = list.map((r) => r.code)
     } catch {
+      if (!isCurrent()) return
       roles.value = []
     }
   }
@@ -54,11 +65,14 @@ export const useUserStore = defineStore('user', () => {
    */
   async function fetchUserPermissions(): Promise<void> {
     if (!profile.value) return
+    const isCurrent = captureAuth()
     try {
       const list = await apiFetchUserPermissions(profile.value.id)
+      if (!isCurrent()) return
       // 后端返回权限编码字符串数组(List[str]),直接入 Set
       permissions.value = new Set(list)
     } catch {
+      if (!isCurrent()) return
       permissions.value = new Set()
     }
   }
@@ -69,9 +83,13 @@ export const useUserStore = defineStore('user', () => {
    */
   async function fetchUserMenus(): Promise<void> {
     if (!profile.value) return
+    const isCurrent = captureAuth()
     try {
-      menus.value = await apiFetchUserMenus(profile.value.id)
+      const list = await apiFetchUserMenus(profile.value.id)
+      if (!isCurrent()) return
+      menus.value = list
     } catch {
+      if (!isCurrent()) return
       menus.value = []
     }
   }
@@ -83,10 +101,13 @@ export const useUserStore = defineStore('user', () => {
    */
   async function fetchDataScope(): Promise<void> {
     if (!profile.value) return
+    const isCurrent = captureAuth()
     try {
       const scope = await apiFetchUserDataScope(profile.value.id)
+      if (!isCurrent()) return
       dataScope.value = scope ?? null
     } catch {
+      if (!isCurrent()) return
       dataScope.value = null
     }
   }
@@ -152,11 +173,15 @@ export const useUserStore = defineStore('user', () => {
    * @param data - 登录请求参数
    */
   async function login(data: LoginIn) {
+    const generation = ++authGeneration
     const res = await authLogin(data)
+    if (generation !== authGeneration) return
+    clearRbacState()
     token.value = res.access_token
     setToken(res.access_token)
     profile.value = res.user
     await loadRbacInfo()
+    if (generation !== authGeneration) return
     markAgentChatLoginFreshStart()
     invalidateAvatarCache()
     // 注册后首次登录 → 小菱新手引导(仅一次;老用户 first_login=false 不弹)
@@ -178,7 +203,10 @@ export const useUserStore = defineStore('user', () => {
    * 同时加载 RBAC 权限信息,保证刷新后权限校验生效
    */
   async function fetchProfile() {
-    profile.value = await authMe()
+    const isCurrent = captureAuth()
+    const restored = await authMe()
+    if (!isCurrent()) return
+    profile.value = restored
     await loadRbacInfo()
   }
 
@@ -195,6 +223,7 @@ export const useUserStore = defineStore('user', () => {
 
   /** 清空会话本地状态(登录失效/单设备被顶下线时调用) */
   function clearSession(): void {
+    authGeneration += 1
     token.value = ''
     profile.value = null
     clearRbacState()
@@ -214,6 +243,7 @@ export const useUserStore = defineStore('user', () => {
    * @returns void
    */
   function syncAuthExpiredState(): void {
+    authGeneration += 1
     token.value = ''
     profile.value = null
     clearRbacState()

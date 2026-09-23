@@ -139,23 +139,12 @@ def _can_access_session(user: User, owner_user_id: int, db: Session | None = Non
         owner_user_id: 讨论会话创建者 ID。
 
     Returns:
-        bool: owner 或管理员返回 True。
+        bool: 仅明确归属当前账号时返回 True，管理员无私人会话豁免。
     """
-    if owner_user_id <= 0:
-        return False
-    if user.id == owner_user_id:
-        return True
-    from app.services.rbac_service import is_admin_user
-
-    if db is not None:
-        return is_admin_user(db, int(user.id))
-    try:
-        with SessionLocal() as auth_db:
-            return is_admin_user(auth_db, int(user.id))
-    except Exception as exc:
-        # WebSocket 不得在 RBAC 存储不可用时回退信任 JWT 内的旧角色。
-        logger.warning("[WS] RBAC 会话授权校验失败 user={} error={}", user.id, exc)
-        return False
+    return (
+        isinstance(owner_user_id, int) and not isinstance(owner_user_id, bool)
+        and owner_user_id > 0 and user.id == owner_user_id
+    )
 
 
 def _load_ws_user(token: str) -> User | None:

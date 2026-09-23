@@ -59,6 +59,7 @@ import {
   findAgentMeshTimeline,
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { actionableError } from '@/composables/withFeedback'
 import { CHAT_IMAGE_MIME, useChatImages } from '@/composables/useChatImages'
@@ -180,6 +181,8 @@ const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveD
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const sessionId = ref('')
+const chatAccountEpoch = ref(0)
+const chatScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => sessionId.value)
 let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
 let sessionPollFailures = 0
@@ -274,14 +277,20 @@ function openTeamWindow(team: AgentTeamDetail | AgentTeamSummary): void {
 }
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
-const mascotStatus = computed<'idle' | 'running' | 'waiting'>(() => {
+const mascotStatus = computed<'idle' | 'thinking' | 'working' | 'waiting' | 'error'>(() => {
   const status = sessionRun.value?.status
-  if (loading.value || isAgentResponseSessionActive(status)) return 'running'
+  if (loading.value || isAgentResponseSessionActive(status)) {
+    const hasActiveTool = Boolean(lastActiveToolName.value) || messages.value.some((message) => (
+      message.toolCalls?.some((call) => ['running', 'processing', 'queued'].includes(call.status))
+    ))
+    return hasActiveTool ? 'working' : 'thinking'
+  }
   if (isAgentResponseSessionWaiting(status)) return 'waiting'
+  if (status && ['failed', 'incomplete', 'max_rounds_exceeded'].includes(status)) return 'error'
   return 'idle'
 })
 const runStatusLabel = computed(() => (
-  mascotStatus.value === 'running' ? '运行中' : mascotStatus.value === 'waiting' ? '等待你操作' : '空闲'
+  ({ idle: '空闲', thinking: '思考中', working: '运行中', waiting: '等待你操作', error: '遇到问题' })[mascotStatus.value]
 ))
 
 /** 小菱执行进度:统计当前会话中「最新一轮」工具调用的完成情况。 */
@@ -391,15 +400,15 @@ function persistSnapshot(): void {
     teams: visibleAgentTeams.value.map(snapshotTeam),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
-  })
+  }, chatStorageKey.value)
 }
 
 function rememberCurrentDraft(): void {
   if (!sessionId.value) return
-  saveAgentChatDraft(sessionId.value, inputText.value)
+  saveAgentChatDraft(sessionId.value, inputText.value, chatStorageKey.value)
 }
 
-watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft), { flush: 'sync' })
+watch(inputText, (draft) => saveAgentChatDraft(sessionId.value, draft, chatStorageKey.value), { flush: 'sync' })
 
 /** 会话切换:中止本地流视图与轮询,清空后展示欢迎语并恢复目标会话。 */
 async function handleSessionSelect(nextSessionId: string): Promise<void> {
@@ -429,8 +438,9 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionSnapshotSignature = ''
   sessionRestoreStarted = false
   sessionId.value = nextSessionId
+  const scopeCurrent = chatScope.capture()
   // 每个会话独立保留草稿；页面刷新后切回仍可继续编辑。
-  inputText.value = loadAgentChatDraft(nextSessionId)
+  inputText.value = loadAgentChatDraft(nextSessionId, chatStorageKey.value)
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
@@ -447,6 +457,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionRestoring.value = true
   messages.value = [welcomeMessage()]
   await nextTick()
+  if (!scopeCurrent()) return
   scrollToBottom()
   void restoreSession()
 }
@@ -469,14 +480,14 @@ function isMeshSessionBusy(targetSessionId: string): boolean {
     return loading.value || sessionRestoring.value || sessionBusy.value
   }
   if (backgroundBusySessions.has(targetSessionId)) return true
-  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId)?.runStatus)
+  return isAgentResponseSessionOccupied(loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)?.runStatus)
 }
 
 function restoredMessages(
   session: Awaited<ReturnType<typeof getAgentResponseSession>>,
   restoredTime: string,
 ): ChatMessage[] {
-  return restoredSessionMessages(session, restoredTime, loadAgentChatSnapshot(session.session_id)?.messages)
+  return restoredSessionMessages(session, restoredTime, loadAgentChatSnapshot(session.session_id, chatStorageKey.value)?.messages)
 }
 
 function persistedTeamBuckets(
@@ -599,15 +610,17 @@ function restoredSessionMessages(
 }
 
 async function restoreSession(): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (sessionRestoreStarted) return
   sessionRestoreStarted = true
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
-    restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId)?.teams)
+    restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId, chatStorageKey.value)?.teams)
     const session = await getAgentResponseSession('user', requestedSessionId)
+    if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
-    if (requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
+    if (!scopeCurrent() || requestedSessionId !== sessionId.value || requestedUserId !== userStore.profile?.id || loading.value || activeResponse) {
       scheduleSessionPoll()
       return
     }
@@ -629,6 +642,7 @@ async function restoreSession(): Promise<void> {
     if (!pending) {
       showTyping.value = isAgentResponseSessionActive(session.run?.status)
       await refreshAgentTeam()
+      if (!scopeCurrent()) return
       scheduleSessionPoll()
       return
     }
@@ -650,20 +664,27 @@ async function restoreSession(): Promise<void> {
     }
     messages.value.push(target)
     await refreshAgentTeam()
+    if (!scopeCurrent()) return
     scheduleSessionPoll()
   } catch {
+    if (!scopeCurrent()) return
     // HTTP 层已给出错误提示；保留本地会话不覆盖用户输入。
   } finally {
-    sessionRestoring.value = false
-    syncBusy()
-    persistSnapshot()
-    await nextTick()
-    scrollToBottom()
-    void meshBridge.syncNow()
+    if (scopeCurrent()) {
+      sessionRestoring.value = false
+      syncBusy()
+      persistSnapshot()
+      await nextTick()
+      if (scopeCurrent()) {
+        scrollToBottom()
+        void meshBridge.syncNow()
+      }
+    }
   }
 }
 
 async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
+  const scopeCurrent = chatScope.capture()
   if (targetSessionId !== sessionId.value) {
     return runBackgroundMeshMessage(message, targetSessionId)
   }
@@ -678,6 +699,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     })
   }
   await nextTick()
+  if (!scopeCurrent()) return false
   scrollToBottom()
   const succeeded = await runResponse({
     action: 'start',
@@ -686,6 +708,7 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     messages: [],
     mesh_message_id: message.message_id,
   })
+  if (!scopeCurrent()) return false
   settleAgentMeshTimeline(
     messages.value,
     message.message_id,
@@ -700,6 +723,7 @@ async function runBackgroundMeshMessage(
   message: AgentMeshMessage,
   targetSessionId: string,
 ): Promise<boolean> {
+  const scopeCurrent = chatScope.captureAccount()
   backgroundBusySessions.add(targetSessionId)
   switcherRef.value?.setBusy(targetSessionId, true)
   let waiting = false
@@ -714,6 +738,7 @@ async function runBackgroundMeshMessage(
     mesh_message_id: message.message_id,
   }, {
     onEvent(event) {
+      if (!scopeCurrent()) return
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
       }
@@ -731,13 +756,14 @@ async function runBackgroundMeshMessage(
       }
     },
   })
+  chatScope.track(handle)
   try {
     await handle.done
-    return succeeded
+    return scopeCurrent() && succeeded
   } catch {
     return false
   } finally {
-    if (!waiting) {
+    if (scopeCurrent() && !waiting) {
       backgroundBusySessions.delete(targetSessionId)
       switcherRef.value?.setBusy(targetSessionId, false)
     }
@@ -778,9 +804,10 @@ function invalidateSessionPoll(): void {
 
 /** 团队状态由服务端账本提供,会话切换和轮询均按当前 session 对齐。 */
 async function refreshAgentTeam(generation?: number): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (!sessionId.value) return
   const requestedSessionId = sessionId.value
-  const isCurrent = (): boolean => requestedSessionId === sessionId.value
+  const isCurrent = (): boolean => scopeCurrent() && requestedSessionId === sessionId.value
     && (generation === undefined || generation === sessionPollGeneration)
   agentTeamLoading.value = true
   try {
@@ -793,6 +820,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       return
     }
     const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
+    if (!scopeCurrent()) return
     if (!isCurrent()) return
     const details = settled
       .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
@@ -829,6 +857,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     }
     agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
   } catch {
+    if (!scopeCurrent()) return
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
   } finally {
     if (isCurrent()) agentTeamLoading.value = false
@@ -850,15 +879,17 @@ function scheduleSessionPoll(immediate = false): void {
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
-  if (sessionPollStopped || generation !== sessionPollGeneration) return
+  const scopeCurrent = chatScope.capture()
+  if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration) return
   try {
     const requestedUserId = userStore.profile?.id
     const session = await getAgentResponseSession('user', sessionId.value)
-    if (sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
+    if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0
     sessionLastPolledAt.value = dayjs().format('HH:mm:ss')
     await refreshAgentTeam(generation)
+    if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration) return
     // 活动流持有最新状态,轮询快照可能落后于 SSE,不能在 loading 期间覆盖。
     if (!loading.value) {
       sessionRun.value = session.run
@@ -899,12 +930,15 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       }
     }
   } catch {
+    if (!scopeCurrent()) return
     sessionPollFailures += 1
     sessionPollError.value = '同步暂时中断,正在重试'
   } finally {
-    syncBusy()
-    persistSnapshot()
-    if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
+    if (scopeCurrent()) {
+      syncBusy()
+      persistSnapshot()
+      if (!sessionPollStopped && generation === sessionPollGeneration) scheduleSessionPoll()
+    }
   }
 }
 
@@ -1042,10 +1076,13 @@ async function handleAskMember({ teamId, name, address }: { teamId: number; name
 }
 
 async function handleSessionArchive(sessionId: string): Promise<void> {
+  const scopeCurrent = chatScope.captureAccount()
   try {
     await archiveAgentMeshSession('user', sessionId)
+    if (!scopeCurrent()) return
     switcherRef.value?.removeSession(sessionId)
   } catch {
+    if (!scopeCurrent()) return
     ElMessage.warning('服务端归档失败,会话保留在列表中')
     switcherRef.value?.restoreSessionAfterArchiveFailure()
     switcherRef.value?.refreshFromAgentMesh()
@@ -1210,6 +1247,7 @@ async function retryRun(): Promise<void> {
 }
 
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
+  const scopeCurrent = chatScope.capture()
   invalidateSessionPoll()
   clearLiveTeamPoll()
   loading.value = true
@@ -1263,6 +1301,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
 
   const handle = streamResponses(payload, {
     onEvent(event) {
+      if (!scopeCurrent()) return
       if (event.type === 'response.created') {
         const model = event.response.model
         if (typeof model === 'string' && model) modelName.value = model
@@ -1398,9 +1437,11 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     },
   })
   activeResponse = handle
+  chatScope.track(handle)
 
   try {
     await handle.done
+    if (!scopeCurrent()) return false
     if (protocolError) {
       ElMessage.error(protocolError)
       appendErrorCard(protocolError, true)
@@ -1408,6 +1449,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     }
     return true
   } catch (error) {
+    if (!scopeCurrent()) return false
     activityStore.clear()
     if (error instanceof Error && error.name === 'AbortError') {
       // 停止请求可能晚于真实完成；仅服务端确认cancelled才显示取消卡片。
@@ -1425,13 +1467,17 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     if (isAgentResponseSessionActive(sessionRun.value?.status)) scheduleSessionPoll()
     return false
   } finally {
-    clearLiveTeamPoll()
-    if (activeResponse === handle) activeResponse = null
-    loading.value = false
-    showTyping.value = false
-    await nextTick()
-    scrollToBottom()
-    scheduleSessionPoll()
+    if (scopeCurrent()) {
+      clearLiveTeamPoll()
+      if (activeResponse === handle) activeResponse = null
+      loading.value = false
+      showTyping.value = false
+      await nextTick()
+      if (scopeCurrent()) {
+        scrollToBottom()
+        scheduleSessionPoll()
+      }
+    }
   }
 }
 
@@ -1452,6 +1498,7 @@ let projectSearchRequestId = 0
  * @returns 请求完成后更新项目候选，无直接返回值。
  */
 async function loadProjectOptions(keyword = ''): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const normalizedKeyword = keyword.trim()
   const requestId = ++projectSearchRequestId
   projectOptionsLoading.value = true
@@ -1461,7 +1508,7 @@ async function loadProjectOptions(keyword = ''): Promise<void> {
       page_size: 100,
       keyword: normalizedKeyword,
     })
-    if (requestId !== projectSearchRequestId) return
+    if (!scopeCurrent() || requestId !== projectSearchRequestId) return
     const options = (data.items ?? []).map((p) => ({
       value: p.id,
       label: `#${p.id} ${p.project_name}`,
@@ -1469,12 +1516,13 @@ async function loadProjectOptions(keyword = ''): Promise<void> {
     if (normalizedKeyword) projectSearchOptions.value = options
     else projectOptions.value = options
   } catch {
-    if (requestId === projectSearchRequestId) {
+    if (!scopeCurrent()) return
+    if (scopeCurrent() && requestId === projectSearchRequestId) {
       if (normalizedKeyword) projectSearchOptions.value = []
       else projectOptions.value = []
     }
   } finally {
-    if (requestId === projectSearchRequestId) projectOptionsLoading.value = false
+    if (scopeCurrent() && requestId === projectSearchRequestId) projectOptionsLoading.value = false
   }
 }
 
@@ -1485,9 +1533,10 @@ async function loadProjectOptions(keyword = ''): Promise<void> {
 async function ensureProjectOptions(): Promise<void> {
   if (projectOptions.value.length) return
   if (optionsPromise) return optionsPromise
+  const scopeCurrent = chatScope.capture()
   optionsPromise = (async () => {
     await loadProjectOptions()
-    optionsPromise = null
+    if (scopeCurrent()) optionsPromise = null
   })()
   return optionsPromise
 }
@@ -1507,14 +1556,17 @@ function searchProjectOptions(query: string): void {
 }
 
 async function ensureTaskOptions(): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (taskOptions.value.length) return
   try {
     const data = await getReviewTasks({ page: 1, page_size: 100 })
+    if (!scopeCurrent()) return
     taskOptions.value = (data.items ?? []).map((t) => ({
       value: t.id,
       label: `#${t.id} ${t.task_name ?? '审查任务'}`,
     }))
   } catch {
+    if (!scopeCurrent()) return
     taskOptions.value = []
   }
 }
@@ -1597,6 +1649,7 @@ function submitConfirmation(message: ChatMessage, answer: '确认' | '取消'): 
  * @returns 请求完成后更新对话消息，无直接返回值。
  */
 async function submitClarify(message: ChatMessage): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const clarify = message.clarify
   if (!clarify) return
   const prepared = prepareClarifyAnswers(
@@ -1615,6 +1668,7 @@ async function submitClarify(message: ChatMessage): Promise<void> {
       '/agents/clarify',
       { clarify_id: clarify.clarify_id, answers: prepared.answers },
     )
+    if (!scopeCurrent()) return
     message.clarify = undefined
     delete clarifyCustomProjectInputs.value[clarify.clarify_id]
     messages.value.push({
@@ -1628,6 +1682,7 @@ async function submitClarify(message: ChatMessage): Promise<void> {
       ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
     }
   } catch (error) {
+    if (!scopeCurrent()) return
     const info = actionableError(error, '提交追问失败,请重试')
     message.clarifyError = {
       message: info.message,
@@ -1636,9 +1691,11 @@ async function submitClarify(message: ChatMessage): Promise<void> {
       requestId: info.requestId,
     }
   } finally {
-    loading.value = false
-    await nextTick()
-    scrollToBottom()
+    if (scopeCurrent()) {
+      loading.value = false
+      await nextTick()
+      if (scopeCurrent()) scrollToBottom()
+    }
   }
 }
 
@@ -1704,6 +1761,7 @@ function onChatInputPaste(event: ClipboardEvent): void {
 }
 
 async function sendMessage(): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const text = inputText.value.trim()
   const images = [...pendingImages.value]
   if ((!text && !images.length) || readingImages.value || loading.value || sessionRestoring.value || sessionBusy.value) return
@@ -1722,6 +1780,7 @@ async function sendMessage(): Promise<void> {
   }
 
   await nextTick()
+  if (!scopeCurrent()) return
   scrollToBottom()
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
@@ -1741,6 +1800,7 @@ async function sendMessage(): Promise<void> {
     })
     persistSnapshot()
     await nextTick()
+    if (!scopeCurrent()) return
     scrollToBottom()
     if (localNavigation.kind === 'navigate' && directive) {
       requestXiaolingNavigation(
@@ -1771,6 +1831,7 @@ async function decideApproval(
   message: ChatMessage,
   decision: ResponseApprovalDecision,
 ): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const approval = message.approval
   if (!approval || approval.status !== 'pending' || loading.value) return
   const { action, confirmation = '' } = decision
@@ -1786,12 +1847,14 @@ async function decideApproval(
     call_id: approval.call_id,
     confirmation,
   })
+  if (!scopeCurrent()) return
   approval.status = succeeded ? (action === 'approve' ? 'approved' : 'rejected') : 'pending'
   if (!succeeded) setTimelineCallStatus(approval.call_id, 'failed', '审批续跑失败，可重试')
   else if (action === 'reject') setTimelineCallStatus(approval.call_id, 'rejected')
 }
 
 async function submitInput(message: ChatMessage, selectedAnswer?: string): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const request = message.inputRequest
   if (request && selectedAnswer !== undefined) request.answer = selectedAnswer
   const answer = request?.answer.trim() ?? ''
@@ -1817,6 +1880,7 @@ async function submitInput(message: ChatMessage, selectedAnswer?: string): Promi
     call_id: request.call_id ?? '',
     answer,
   })
+  if (!scopeCurrent()) return
   request.status = succeeded ? 'answered' : 'pending'
   setTimelineCallStatus(
     request.call_id,
@@ -1952,6 +2016,7 @@ function inferProjectLanguage(files: File[]): string {
 }
 
 async function processIncomingFiles(files: File[]): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   if (!files.length || uploading.value) return
   uploading.value = true
   setUploadProgress(`准备上传…`, 0, files.length)
@@ -1962,6 +2027,7 @@ async function processIncomingFiles(files: File[]): Promise<void> {
       // 多模态:纯图片作为聊天附件,发送时自动切换视觉模型
       resetUploadProgress()
       const added = await addPendingImageFiles(images)
+      if (!scopeCurrent()) return
       if (added) ElMessage.success(`已添加 ${added} 张图片，发送后将自动用视觉模型分析`)
       return
     }
@@ -1969,11 +2035,15 @@ async function processIncomingFiles(files: File[]): Promise<void> {
     const skipped = files.length - targets.length
     if (skipped > 0) ElMessage.warning(`单次最多上传 20 个文件,已跳过后面的 ${skipped} 个`)
     await uploadFilesAsProject(targets, images.length)
+    if (!scopeCurrent()) return
   } catch (err) {
+    if (!scopeCurrent()) return
     resetUploadProgress()
     ElMessage.error(`上传失败: ${err instanceof Error ? err.message : '请重试'}`)
   } finally {
-    uploading.value = false
+    if (scopeCurrent()) {
+      uploading.value = false
+    }
   }
 }
 
@@ -1983,17 +2053,20 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 
 async function onFileInput(event: Event): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files ?? [])
   input.value = ''
   const imageFiles = files.filter((f) => CHAT_IMAGE_MIME.test(f.type))
   const rest = files.filter((f) => !CHAT_IMAGE_MIME.test(f.type))
   if (imageFiles.length) await addPendingImageFiles(imageFiles)
+  if (!scopeCurrent()) return
   if (rest.length) await processIncomingFiles(rest)
 }
 
 /** 把拖拽的文件建成一个新项目并导入,然后让 Agent 接手引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
+  const scopeCurrent = chatScope.capture()
   setUploadProgress('正在验证文件…', 0, files.length)
   // 创建项目前先逐个读取,空文件/读取失败时不调用创建接口,避免留下空项目。
   const readableFiles: File[] = []
@@ -2002,8 +2075,10 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     try {
       if (file.size <= 0) throw new Error('文件为空')
       await file.slice(0, 1).arrayBuffer()
+      if (!scopeCurrent()) return
       readableFiles.push(file)
     } catch (err) {
+    if (!scopeCurrent()) return
       preflightFailures.push(`${file.name}: ${err instanceof Error ? err.message : '文件不可读取'}`)
     }
     setUploadProgress('正在验证文件…', readableFiles.length + preflightFailures.length, files.length)
@@ -2018,12 +2093,14 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const language = inferProjectLanguage(readableFiles)
   setUploadProgress(`正在创建项目「${projectName}」…`, 0, readableFiles.length)
   const created = await createProject({ project_name: projectName, description: `小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
+  if (!scopeCurrent()) return
   const projectId = created.id
   let okCount = 0
   const failures: string[] = [...preflightFailures]
   const targets = readableFiles
   for (let i = 0; i < targets.length; i++) {
     const file = targets[i]
+    if (!scopeCurrent()) return
     setUploadProgress(file.name, i, targets.length)
     try {
       const fd = new FormData()
@@ -2031,12 +2108,16 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
       fd.append('file', file)
       fd.append('file_path', file.name)
       await uploadCodeFile(fd)
+      if (!scopeCurrent()) return
       okCount += 1
     } catch (err) {
+    if (!scopeCurrent()) return
       failures.push(`${file.name}: ${err instanceof Error ? err.message : '上传失败'}`)
     }
+    if (!scopeCurrent()) return
     setUploadProgress(file.name, i + 1, targets.length)
   }
+  if (!scopeCurrent()) return
   resetUploadProgress()
   // 若所有上传请求都失败,立即软删除刚建的空项目,不把失败项目留给用户。
   if (!okCount) {
@@ -2048,10 +2129,12 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   if (uploadedLanguage !== language) {
     try { await updateProject(projectId, { language: uploadedLanguage }) } catch { /* 不影响已上传文件 */ }
   }
+  if (!scopeCurrent()) return
   const imageNote = imageCount ? `（含 ${imageCount} 张图片附件）` : ''
   const summary = `我已帮你把 ${okCount} 个文件${imageNote}上传到项目「${projectName}」(#${projectId},语言 ${uploadedLanguage})${failures.length ? `,${failures.length} 个失败(${failures[0]})` : ''}。小菱正在自动启动隔离沙箱全量验证，完成后会返回白盒、黑盒与多 Agent 审查报告。`
   messages.value.push({ id: messageId(), role: 'assistant', content: summary, time: dayjs().format('HH:mm') })
   await nextTick()
+  if (!scopeCurrent()) return
   scrollToBottom()
   if (failures.length) ElMessage.warning(`已上传 ${okCount} 个,${failures.length} 个失败`)
   else ElMessage.success(`已创建项目「${projectName}」并上传 ${okCount} 个文件`)
@@ -2122,6 +2205,51 @@ function handleVisibilityChange(): void {
   }
 }
 
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  chatAccountEpoch.value += 1
+  meshBridge.stop()
+  activeResponse = null
+  sessionPollStopped = true
+  invalidateSessionPoll()
+  sessionId.value = ''
+  inputText.value = ''
+  messages.value = []
+  meshSessions.value = []
+  backgroundBusySessions.clear()
+  sessionRun.value = null
+  sessionSnapshotSignature = ''
+  sessionPollFailures = 0
+  sessionPollError.value = ''
+  sessionLastPolledAt.value = ''
+  sessionRestoring.value = true
+  agentTeams.value = []
+  agentTeamLoading.value = false
+  agentTeamError.value = ''
+  loading.value = false
+  showTyping.value = false
+  uploading.value = false
+  resetUploadProgress()
+  dragActive.value = false
+  cancelPromptVisible.value = false
+  lastActiveToolName.value = ''
+  activityStore.clear()
+  clearLiveTeamPoll()
+  sessionRestoreStarted = false
+  cachedAgentTeams.value = []
+  teamWindowVisible.value = false
+  teamWindowTeamId.value = null
+  projectSearchRequestId += 1
+  window.clearTimeout(projectSearchTimer)
+  projectOptions.value = []
+  projectSearchOptions.value = []
+  taskOptions.value = []
+  optionsPromise = null
+  clarifyAnswers.value = {}
+  clarifyCustomProjectInputs.value = {}
+  sessionPollStopped = false
+  if (userStore.profile) meshBridge.start()
+}, { flush: 'sync' })
+
 onBeforeUnmount(() => {
   rememberCurrentDraft()
   meshBridge.stop()
@@ -2131,6 +2259,7 @@ onBeforeUnmount(() => {
   clearLiveTeamPoll()
   // 组件卸载（退出登录/离开布局）只断开本地订阅。服务端任务由持久检查点继续执行；
   // 只有用户点击“停止”才走 cancelResponse() 并取消服务端运行。
+  activeResponse?.abort()
   activeResponse = null
   activityStore.clear()
   window.clearTimeout(projectSearchTimer)
@@ -2162,7 +2291,7 @@ onMounted(() => {
       :title="`${MASCOT_NAME} · Prism 小助手`"
       @click="emit('update:visible', true)"
     >
-      <PrismMascot :size="44" :status="mascotStatus !== 'idle' ? 'running' : 'idle'" />
+      <PrismMascot :size="44" :status="mascotStatus" />
     </button>
     <Transition name="drawer">
       <div v-if="visible" class="chat-overlay">
@@ -2182,7 +2311,7 @@ onMounted(() => {
           <div v-if="dragActive" class="drop-mask">
             <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
           </div>
-          <div class="chat-header" :class="{ 'is-running': mascotStatus === 'running' }">
+          <div class="chat-header" :class="{ 'is-running': ['thinking', 'working'].includes(mascotStatus) }">
             <button class="panel-drag-handle" type="button" aria-label="移动 Agent 助手窗口" title="拖拽移动窗口" @pointerdown="beginDrag">⠿</button>
             <div class="chat-title">
               <span class="mascot-badge">
@@ -2207,6 +2336,7 @@ onMounted(() => {
                 </div>
                 <AgentSessionSwitcher
                   ref="switcherRef"
+                  :key="`${chatStorageKey}:${chatAccountEpoch}`"
                   class="chat-session-switch"
                   :storage-key="chatStorageKey"
                   :account-key="userStore.profile?.id"
@@ -2234,7 +2364,7 @@ onMounted(() => {
           <div class="chat-body-region">
             <Transition name="mascot-float">
               <div v-if="messages.length <= 1 && !showTyping && !sessionRestoring" class="mascot-hero" aria-hidden="true">
-                <PrismMascot :size="120" :status="mascotStatus" />
+                <PrismMascot :size="88" :status="mascotStatus" />
               </div>
             </Transition>
 
@@ -2253,14 +2383,14 @@ onMounted(() => {
             </Transition>
 
             <div
-              v-if="showToolProgress || (mascotStatus === 'running' && lastActiveToolName)"
+              v-if="showToolProgress || (['thinking', 'working'].includes(mascotStatus) && lastActiveToolName)"
               class="chat-progress"
-              :class="{ 'is-busy': mascotStatus === 'running' }"
+              :class="{ 'is-busy': ['thinking', 'working'].includes(mascotStatus) }"
               role="status"
               aria-label="小菱执行进度"
             >
               <span class="chat-progress-phrase">
-                <template v-if="mascotStatus === 'running' && lastActiveToolName">
+                <template v-if="['thinking', 'working'].includes(mascotStatus) && lastActiveToolName">
                   {{ toolRunningPhrase(lastActiveToolName) }}
                 </template>
                 <template v-else-if="toolStepProgress.current">
@@ -2884,8 +3014,8 @@ onMounted(() => {
   background: currentColor;
 }
 .run-idle { color: var(--gray-500); background: var(--gray-100); border-color: var(--gray-200, #e5e6eb); }
-.run-running { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
-.run-running i { animation: run-blink 1s ease-in-out infinite; }
+.run-thinking, .run-working { color: #2f7a3d; background: rgba(79, 184, 122, 0.12); border-color: rgba(79, 184, 122, 0.35); }
+.run-thinking i, .run-working i { animation: run-blink 1s ease-in-out infinite; }
 .run-waiting { color: #b68039; background: rgba(217, 168, 87, 0.16); border-color: rgba(217, 168, 87, 0.4); }
 .run-waiting i { animation: run-blink 1s ease-in-out infinite; }
 .sync-status { color: var(--color-text-secondary); font-size: 9.5px; white-space: nowrap; }
@@ -3010,10 +3140,9 @@ onMounted(() => {
 }
 
 .mascot-hero {
-  position: absolute;
-  top: 6px;
-  right: 4px;
-  z-index: 1;
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 8px;
   pointer-events: none;
   opacity: 0.95;
   /* 吉祥物周围的光谱环境光晕,营造「AI 在场」的氛围 */
@@ -3021,14 +3150,12 @@ onMounted(() => {
 }
 
 .quick-questions {
-  position: absolute;
-  top: 134px;
-  right: 8px;
-  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
 }
 
 .quick-question {
@@ -3073,7 +3200,7 @@ onMounted(() => {
   .msg-row.assistant .msg-bubble:hover { transform: none; }
   .chat-header.is-running::after { animation: none; opacity: 0.6; }
   .stop-btn { transition: none; }
-  .run-running i, .run-waiting i { animation: none; opacity: 1; }
+  .run-thinking i, .run-working i, .run-waiting i { animation: none; opacity: 1; }
   .send-btn { transition: none; }
   .send-btn:hover:not(:disabled) { transform: none; }
   .chat-input { transition: none; }

@@ -122,18 +122,38 @@ def _responses_owner_id(item: ApprovalItem) -> Optional[int]:
     if not (item.action or "").strip().lower().startswith("responses."):
         return None
     try:
-        return int(_request_payload(item)["owner_user_id"])
+        owner = _request_payload(item)["owner_user_id"]
+        if isinstance(owner, bool) or not isinstance(owner, (int, str)):
+            return -1
+        owner_id = int(owner)
+        return owner_id if owner_id > 0 else -1
     except (KeyError, TypeError, ValueError):
         return -1
 
 
-def _ordinary_admin_can_access(db: Session, actor: Optional[User], item: ApprovalItem) -> bool:
-    """Apply sensitive-action and Responses-owner boundaries for a normal admin."""
-
-    if actor is None or requires_super_admin(db, item):
+def _can_access(db: Session, actor: Optional[User], item: ApprovalItem) -> bool:
+    """私人会话归属独立于管理权限，超级管理员也必须是同一账号。"""
+    if actor is None:
         return False
     owner_id = _responses_owner_id(item)
-    return owner_id is None or owner_id == actor.id
+    if owner_id is not None and owner_id != actor.id:
+        return False
+    if item.action == "knowledge.activate":
+        from app.models.agent_governance import AgentKnowledgeDoc
+        from app.services.agent_knowledge_service import _document_access_clause
+
+        doc_id = _request_payload(item).get("doc_id")
+        if isinstance(doc_id, bool) or not isinstance(doc_id, (int, str)):
+            return False
+        try:
+            doc_id = int(doc_id)
+        except ValueError:
+            return False
+        if not db.query(AgentKnowledgeDoc.id).filter(
+            AgentKnowledgeDoc.id == doc_id, _document_access_clause(actor.id)
+        ).first():
+            return False
+    return is_unique_super_admin(db, actor) or not requires_super_admin(db, item)
 
 
 def create_or_auto_decide(
@@ -193,7 +213,7 @@ def create_or_auto_decide(
         "agent_approval",
         target_type="approval",
         target_id=item.id,
-        detail=f"{item.status}: {title}",
+        detail=f"审批状态: {item.status}",
     )
     return item
 
@@ -222,14 +242,11 @@ def list_items(
     limit = max(0, min(limit, 1000))
     if limit == 0:
         return []
-    if is_unique_super_admin(db, actor):
-        return q.order_by(ApprovalItem.id.desc()).limit(limit).all()
-
     # Applying SQL LIMIT before classification could hide older program-content
     # approvals when newer infrastructure approvals fill the page.
     rows: list[ApprovalItem] = []
     for item in q.order_by(ApprovalItem.id.desc()).yield_per(100):
-        if _ordinary_admin_can_access(db, actor, item):
+        if _can_access(db, actor, item):
             rows.append(item)
             if len(rows) >= limit:
                 break
@@ -256,8 +273,8 @@ def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str
     item = db.query(ApprovalItem).filter(ApprovalItem.id == item_id).with_for_update().first()
     if not item:
         raise NotFoundError("审批事项不存在", code=40400)
-    if not is_unique_super_admin(db, admin) and not _ordinary_admin_can_access(db, admin, item):
-        raise ForbiddenError("无权处理该审批；服务器与全局基础设施审批仅限超级管理员 admin", code=40322)
+    if not _can_access(db, admin, item):
+        raise ForbiddenError("无权处理该审批；私人会话仅限本人，服务器操作仅限超级管理员", code=40322)
     if item.status in ("approved", "rejected", "auto_approved"):
         if item.action == "agent_package.publish" and (
             (approve and item.status == "approved") or (not approve and item.status == "rejected")
@@ -292,7 +309,7 @@ def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str
         "agent_approval",
         target_type="approval",
         target_id=item.id,
-        detail=f"{item.status}: {item.title}",
+        detail=f"审批状态: {item.status}",
     )
     return item
 
@@ -324,7 +341,7 @@ def _apply_approval_side_effect(db: Session, item: ApprovalItem) -> None:
         if doc_id:
             from app.services import agent_knowledge_service
 
-            agent_knowledge_service.activate_document(db, int(doc_id), commit=False)
+            agent_knowledge_service.activate_document(db, int(doc_id), user_id=item.decided_by, commit=False)
         return
     if item.action == "user.set_role":
         from app.services import user_service

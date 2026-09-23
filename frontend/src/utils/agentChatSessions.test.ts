@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   createAgentChatSession,
+  agentChatStorageKey,
   migrateUnscopedAgentChatSessions,
   resolveAgentChatStorageKey,
   findPristineAgentChatSession,
@@ -284,5 +285,37 @@ describe('会话索引账号隔离', () => {
 
     expect(loadAgentChatSessions('user:123', 'no-legacy-key', 'user').map(m => m.id)).toEqual(['user-new'])
     expect(window.localStorage.getItem('prism-agent-sessions:user')).toBeNull()
+  })
+})
+
+
+describe('账号与入口绑定本地消息和草稿', () => {
+  it('相同 session_id 在账号和入口之间完全隔离，不能接管旧无归属快照', () => {
+    const a = agentChatStorageKey('user', 101)
+    const b = agentChatStorageKey('user', 202)
+    const admin = agentChatStorageKey('admin', 101)
+    const snapshot = { messages: [{ role: 'user' as const, content: 'A 的私密消息' }], runStatus: null, updatedAt: 1 }
+    saveAgentChatSnapshot('shared-session', snapshot)
+    saveAgentChatDraft('shared-session', '无归属历史草稿')
+    expect(loadAgentChatSnapshot('shared-session', b)).toBeNull()
+    expect(loadAgentChatDraft('shared-session', b)).toBe('')
+    saveAgentChatSnapshot('shared-session', snapshot, a)
+    saveAgentChatDraft('shared-session', 'A 的草稿', a)
+    expect(loadAgentChatSnapshot('shared-session', a)?.messages[0].content).toBe('A 的私密消息')
+    expect(loadAgentChatDraft('shared-session', a)).toBe('A 的草稿')
+    for (const key of [b, admin]) {
+      expect(loadAgentChatSnapshot('shared-session', key)).toBeNull()
+      expect(loadAgentChatDraft('shared-session', key)).toBe('')
+    }
+  })
+
+  it('宿主和切换器重复传入账号时命名空间幂等，迁移仅接管同账号旧双重键', () => {
+    const key = agentChatStorageKey('user', 101)
+    expect(agentChatStorageKey(key, 101)).toBe(key)
+    window.localStorage.setItem(`prism-agent-sessions:${key}:account:101`, JSON.stringify([{ id: 'a-history', title: 'A 历史', createdAt: 1 }]))
+    window.localStorage.setItem('prism-agent-sessions:user:account:202:account:202', JSON.stringify([{ id: 'b-history', title: 'B 历史', createdAt: 1 }]))
+    migrateUnscopedAgentChatSessions('user', key)
+    expect(loadAgentChatSessions(key, 'legacy:101', 'user').map(row => row.id)).toEqual(['a-history'])
+    expect(window.localStorage.getItem('prism-agent-sessions:user:account:202:account:202')).toContain('b-history')
   })
 })

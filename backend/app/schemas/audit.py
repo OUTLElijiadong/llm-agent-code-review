@@ -16,6 +16,7 @@ class AuditLogOut(BaseModel):
     target_type: Optional[str] = None
     target_id: Optional[str] = None
     detail: Optional[str] = None
+    content_redacted: bool = False
     status: str
     ip: Optional[str] = None
     create_time: datetime

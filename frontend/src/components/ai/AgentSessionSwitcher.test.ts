@@ -542,3 +542,23 @@ describe('AgentSessionSwitcher 会话管理(搜索/置顶/删除确认)', () => 
     expect(busyItem?.find('.session-delete').exists()).toBe(false)
   })
 })
+
+
+it('账号切换后旧目录请求不得写入新账号命名空间', async () => {
+  let resolveOld!: (value: unknown) => void
+  meshApi.list.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+  const wrapper = mount(AgentSessionSwitcher, { props: {
+    storageKey: 'user', accountKey: 101, legacyKey: 'legacy:101', idPrefix: 'user', discoverRemote: true,
+  } })
+  await flushPromises()
+  await wrapper.setProps({ accountKey: 202, legacyKey: 'legacy:202' })
+  await flushPromises()
+  const newId = lastSelect(wrapper)
+  resolveOld({ items: [{ session_id: 'user-private-a', title: '账号 A 私密标题', surface: 'user', status: 'active' }], total: 1 })
+  await flushPromises()
+  expect(lastSelect(wrapper)).toBe(newId)
+  expect(window.localStorage.getItem('prism-agent-sessions:user:account:202')).not.toContain('账号 A 私密标题')
+  await wrapper.find('.session-current').trigger('click')
+  expect(wrapper.text()).not.toContain('账号 A 私密标题')
+  wrapper.unmount()
+})

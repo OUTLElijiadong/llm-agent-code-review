@@ -210,6 +210,7 @@ class PolicyDecisionOut(BaseModel):
     reason: Optional[str] = None
     matched_rule_id: Optional[int] = None
     context_json: Optional[Union[dict, list]] = None
+    content_redacted: bool = False
     create_time: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -307,6 +308,7 @@ class ToolCallLogOut(BaseModel):
     input_summary: Optional[str] = None
     output_summary: Optional[str] = None
     error: Optional[str] = None
+    content_redacted: bool = False
     duration_ms: int = 0
     policy_decision_id: Optional[int] = None
     approval_id: Optional[int] = None

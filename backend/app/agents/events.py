@@ -47,7 +47,7 @@ class AgentEvent:
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )
     # v2.4: 事件归属用户 ID,用于 SSE 按用户隔离
-    # None 表示系统级事件(所有订阅者都能收到)
+    # None 表示未绑定账号的内部事件；不经用户 SSE 对外广播。
     user_id: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:

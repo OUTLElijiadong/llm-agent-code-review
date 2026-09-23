@@ -6,6 +6,7 @@ export interface AuditLogOut {
   target_type?: string | null
   target_id?: string | null
   detail?: string | null
+  content_redacted?: boolean
   status: string
   ip?: string | null
   create_time: string

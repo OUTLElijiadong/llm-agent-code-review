@@ -56,7 +56,7 @@ def list_logs(db: Session, task_id: int = None, user_id: int = None, status: str
     return pagination.to_dict(items)
 
 
-def get_log_detail(db: Session, log_id: int) -> dict:
+def get_log_detail(db: Session, log_id: int, *, actor: User | None = None) -> dict:
     """获取AI调用日志详情
 
     Args:
@@ -72,10 +72,12 @@ def get_log_detail(db: Session, log_id: int) -> dict:
     log = db.get(AiCallLog, log_id)
     if not log:
         raise NotFoundError("日志不存在", code=40400)
-    return _to_traceable_dict(db, log, include_detail=True)
+    return _to_traceable_dict(db, log, include_detail=True, actor_id=actor.id if actor else None)
 
 
-def _to_traceable_dict(db: Session, log: AiCallLog, include_detail: bool = False) -> dict:
+def _to_traceable_dict(
+    db: Session, log: AiCallLog, include_detail: bool = False, *, actor_id: int | None = None,
+) -> dict:
     """构造带任务/项目/文件/用户快照的 AI 调用日志响应。
 
     Args:
@@ -119,9 +121,15 @@ def _to_traceable_dict(db: Session, log: AiCallLog, include_detail: bool = False
         "create_time": log.create_time,
     }
     if include_detail:
+        # 管理员可以核对全局用量，但不能通过运行派生的模型账本读取他人对话。
+        # 历史记录可能没有 agent_label；没有正式审查任务归属时也不能默认公开原文。
+        private_call = (not log.task_id or log.agent_label in {"chat_assistant", "manager", "admin_copilot"}
+                        or any(getattr(log, field, None) is not None for field in ATTRIBUTION_FIELDS))
+        redact_content = bool(private_call and (actor_id is None or actor_id != log.user_id))
         data.update({
-            "prompt": log.prompt,
-            "response": log.response,
-            "error_message": log.error_message,
+            "prompt": None if redact_content else log.prompt,
+            "response": None if redact_content else log.response,
+            "error_message": None if redact_content else log.error_message,
+            "content_redacted": redact_content,
         })
     return data

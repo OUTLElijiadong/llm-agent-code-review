@@ -4,6 +4,7 @@ import { computed } from "vue";
 const props = withDefaults(defineProps<{
   name: string
   role?: string
+  kind?: string
   status: string
   address?: string
   /** 卡片内可追问/打开详情的徽章;详情概览只做状态展示。 */
@@ -52,7 +53,7 @@ function activate(): void {
     :class="[`status-${status}`, { 'is-interactive': props.interactive }]"
     :role="props.interactive ? 'button' : undefined"
     :tabindex="props.interactive ? 0 : undefined"
-    :aria-label="props.interactive ? `${name || agentCode || '子Agent'}${roleLabel ? `,${roleLabel}` : ''}` : undefined"
+    :aria-label="props.interactive ? `${name || agentCode || '子Agent'}${roleLabel ? `,${roleLabel}` : ''}${kind === 'temporary' ? ',本任务临时' : ''}` : undefined"
     @click.stop="activate"
     @keydown.enter.stop.prevent="activate"
     @keydown.space.stop.prevent="activate"
@@ -60,6 +61,7 @@ function activate(): void {
     <span class="badge-dot" :style="{ background: statusColor }" />
     <span class="badge-name">{{ name || agentCode }}</span>
     <span v-if="roleLabel" class="badge-role">{{ roleLabel }}</span>
+    <span v-if="kind === 'temporary'" class="badge-role" title="仅服务当前账号的本次任务；结束后保留审计记录">本任务临时</span>
   </span>
 </template>
 

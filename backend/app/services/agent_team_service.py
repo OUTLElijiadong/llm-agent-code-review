@@ -22,7 +22,7 @@ from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, Ag
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
-from app.schemas.agent_team import AgentTeamCreateIn
+from app.schemas.agent_team import AgentTeamCreateIn, TemporaryAgentDefinition
 from app.services.ai_usage_context import current_attribution, model_attribution
 
 
@@ -207,6 +207,41 @@ def _assert_surface(db: Session, user: User, surface: str) -> None:
         raise AgentTeamValidationError("surface 只能是 user 或 admin")
     if surface == "admin" and not _is_admin(db, user):
         raise AgentTeamAccessError("普通账户不能创建管理端团队")
+
+
+def temporary_definition_checksum(definition: dict[str, Any]) -> str:
+    canonical = json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def resolve_temporary_member(
+    db: Session, user: User, address: str, message: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """临时地址仅在当前账户有效租约内解析，永不信任消息里的定义副本。"""
+    context = message.get("context") if isinstance(message.get("context"), dict) else {}
+    if int(message.get("user_id") or 0) != int(user.id) or int(user.status or 0) != 1:
+        raise AgentTeamAccessError("临时成员账户不匹配或已停用")
+    from app.core.permission_codes import PermissionCode
+    from app.services.rbac_service import check_permission
+
+    if not check_permission(db, int(user.id), PermissionCode.AGENT_CHAT):
+        raise AgentTeamAccessError("当前账户没有 agent:chat 权限")
+    team, _task, member = require_active_task_lease(
+        db, team_id=int(context.get("team_id") or 0),
+        task_id=int(context.get("agent_team_task_id") or 0),
+        owner_user_id=int(user.id), lease_token=str(context.get("lease_token") or ""),
+    )
+    _assert_surface(db, user, team.surface)
+    if (member.kind != "temporary" or member.address != address
+            or int(member.id) != int(context.get("member_id") or 0)):
+        raise AgentTeamAccessError("临时成员与持久化任务不匹配")
+    snapshot = _unjson(member.capabilities_json, {})
+    definition = TemporaryAgentDefinition.model_validate(snapshot.get("temporary_definition")).model_dump()
+    if not secrets.compare_digest(
+        temporary_definition_checksum(definition), str(snapshot.get("definition_checksum") or ""),
+    ):
+        raise AgentTeamValidationError("临时成员定义校验失败")
+    return member.display_name, definition
 
 
 def _validate_target(db: Session, user: User, address: str) -> tuple[str, Optional[int], Optional[int], dict[str, Any]]:
@@ -565,6 +600,12 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     if not address.startswith("agent:"):
         return
     code = address.split(":", 1)[1]
+    if code == "security_sentinel":
+        from app.core.permission_codes import PermissionCode
+        from app.services.rbac_service import check_permission
+
+        if not check_permission(db, int(user.id), PermissionCode.SECURITY_SCAN):
+            raise AgentTeamAccessError("当前账户没有 security:scan 权限")
     if code == "review_orchestrator" and raw.get("operation") == "run_review":
         if project_id is None:
             raise AgentTeamValidationError(f"任务 {task_input.task_key} 必须提供 project_id")
@@ -1023,13 +1064,12 @@ def cleanup_terminal_team_resources(db: Session, *, limit: int = 100) -> int:
 
 
 def _team_or_raise(db: Session, user: User, team_id: int, *, lock: bool = False) -> AgentTeam:
-    query = db.query(AgentTeam).filter(AgentTeam.id == int(team_id))
-    if not _is_admin(db, user):
-        query = query.filter(AgentTeam.user_id == int(user.id))
+    query = db.query(AgentTeam).filter(AgentTeam.id == int(team_id), AgentTeam.user_id == int(user.id))
     row = query.populate_existing().with_for_update() if lock else query
     team = row.first()
     if team is None:
         raise AgentTeamNotFoundError("团队不存在或不属于当前账户")
+    _assert_surface(db, user, team.surface)
     return team
 
 
@@ -1051,6 +1091,9 @@ def _serialize_member(row: AgentTeamMember) -> dict[str, Any]:
 
 
 def _member_release_snapshot(row: Optional[AgentTeamMember]) -> dict[str, Any]:
+    if row is not None and row.kind == "temporary":
+        capabilities = _unjson(row.capabilities_json, {})
+        return {"kind": "temporary", "definition_checksum": capabilities.get("definition_checksum", "")}
     if row is None or row.kind != "custom":
         return {}
     capabilities = _unjson(row.capabilities_json, {})
@@ -1239,7 +1282,20 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
         if item.address == "agent:operations" and payload.surface != "admin":
             raise AgentTeamAccessError("运维子 Agent 只能在管理小菱会话中创建")
         _validate_safe_input(item.capabilities)
-        target = _validate_target(db, user, item.address)
+        if item.address.startswith("temporary:"):
+            from app.core.permission_codes import PermissionCode
+            from app.services.rbac_service import check_permission
+
+            if not check_permission(db, int(user.id), PermissionCode.AGENT_CHAT):
+                raise AgentTeamAccessError("当前账户没有 agent:chat 权限")
+            definition = TemporaryAgentDefinition.model_validate(item.definition).model_dump()
+            target = ("temporary", None, None, {
+                "dispatch_state": "team_only",
+                "temporary_definition": definition,
+                "definition_checksum": temporary_definition_checksum(definition),
+            })
+        else:
+            target = _validate_target(db, user, item.address)
         kind, template_id, version_id, _ = target
         if item.template_id is not None and item.template_id != template_id:
             raise AgentTeamValidationError(f"成员 {item.member_key} 的模板与已发布目标不匹配")
@@ -1352,12 +1408,11 @@ def list_teams(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    query = db.query(AgentTeam)
-    if not _is_admin(db, user) or session_id:
-        query = query.filter(AgentTeam.user_id == int(user.id))
+    query = db.query(AgentTeam).filter(AgentTeam.user_id == int(user.id))
+    if not _is_admin(db, user):
+        query = query.filter(AgentTeam.surface == "user")
     if surface:
-        if surface not in {"user", "admin"}:
-            raise AgentTeamValidationError("surface 只能是 user 或 admin")
+        _assert_surface(db, user, surface)
         query = query.filter(AgentTeam.surface == surface)
     if session_id:
         query = query.filter(AgentTeam.session_key == session_id)

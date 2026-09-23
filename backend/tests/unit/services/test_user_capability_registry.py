@@ -573,7 +573,7 @@ async def test_concluded_roundtable_continuation_rejects_non_owner(
 
 
 @pytest.mark.asyncio
-async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
+async def test_unique_super_admin_roundtable_is_owner_only(
     db,
     super_admin_user,
     monkeypatch,
@@ -598,8 +598,7 @@ async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
         mcp_provider=EmptyMcp(),
     )
 
-    # 控制面/体验面分离(2026-08-31): 圆桌是成员侧业务, 管理面(贾维斯)不再执行,
-    # 引导到成员端小菱; 唯一超管的治理旁路保留在成员面(user surface)。
+    # 圆桌仍只在成员面执行；超级管理员身份不能绕过私人会话 owner。
     status = await executor.execute(
         ToolCall("call-super-read", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
     )
@@ -624,9 +623,24 @@ async def test_unique_super_admin_can_read_and_control_other_users_roundtable(
     read_again = await member_executor.execute(
         ToolCall("call-super-read2", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
     )
-    assert read_again.status == "success"
+    assert read_again.status == "error"
+    assert "无权访问" in read_again.error
     assert (await member_executor.execute(control)).status == "approval_required"
-    assert (await member_executor.execute(control, approved=True)).status == "success"
+    assert (await member_executor.execute(control, approved=True)).status == "error"
+    assert controls == []
+
+    own = bus.create_session(
+        session_id="disc_super_admin_owned", task_id=0, file_name="own.py", owner_user_id=super_admin_user.id,
+    )
+    bus.set_controller(own.session_id, lambda action, _payload: controls.append(action))
+    assert (await member_executor.execute(ToolCall(
+        "call-own-read", "get_roundtable_discussion", {"session_id": own.session_id}, "{}",
+    ))).status == "success"
+    own_control = ToolCall(
+        "call-own-stop", "control_roundtable_discussion", {"session_id": own.session_id, "action": "stop"}, "{}",
+    )
+    assert (await member_executor.execute(own_control)).status == "approval_required"
+    assert (await member_executor.execute(own_control, approved=True)).status == "success"
     assert controls == ["stop"]
     DiscussionBus._instance = None
 

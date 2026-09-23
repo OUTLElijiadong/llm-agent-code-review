@@ -224,6 +224,7 @@ function statusClass(status: string): string {
     <div class="member-work-main">
       <div class="member-work-head">
         <strong class="member-work-name">{{ member.display_name }}</strong>
+        <span v-if="member.kind === 'temporary'" class="member-work-role" title="仅服务当前账号的本次任务；结束后保留审计记录">本任务临时</span>
         <span class="member-work-role" :class="`is-${theme}`">{{ roleLabel(member.role) }}</span>
         <button
           v-if="showAsk"

@@ -40,7 +40,10 @@ router = APIRouter()
 _BACKGROUND_RESPONSE_TASKS: set[asyncio.Task[Any]] = set()
 
 
-@router.get("/runs/{run_id}/assets")
+@router.get(
+    "/runs/{run_id}/assets",
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
 def list_run_assets(run_id: str, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
     """列出一次运行留档的多模态资产(输入/输出图片元数据;仅本人)。"""
@@ -51,6 +54,7 @@ def list_run_assets(run_id: str, db: Session = Depends(get_db),
         .filter(
             AgentMultimodalAsset.run_id == run_id,
             AgentMultimodalAsset.user_id == int(user.id),
+            AgentMultimodalAsset.surface.in_(("user", "admin") if _is_admin_actor(db, user) else ("user",)),
         )
         .order_by(AgentMultimodalAsset.id)
         .all()
@@ -65,7 +69,10 @@ def list_run_assets(run_id: str, db: Session = Depends(get_db),
     } for row in rows])
 
 
-@router.get("/assets/{asset_id}/image")
+@router.get(
+    "/assets/{asset_id}/image",
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
 def get_asset_image(asset_id: int, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
     """查看留档的多模态图片(内联,仅本人)。"""
@@ -78,6 +85,7 @@ def get_asset_image(asset_id: int, db: Session = Depends(get_db),
         .filter(
             AgentMultimodalAsset.id == asset_id,
             AgentMultimodalAsset.user_id == int(user.id),
+            AgentMultimodalAsset.surface.in_(("user", "admin") if _is_admin_actor(db, user) else ("user",)),
         )
         .first()
     )
@@ -88,7 +96,8 @@ def get_asset_image(asset_id: int, db: Session = Depends(get_db),
         media_type=row.mime,
         headers={
             "Content-Disposition": "inline",
-            "Cache-Control": "private, max-age=3600",
+            # 浏览器缓存按 URL 复用；退出后换账号也必须重新执行所属账号校验。
+            "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
         },
     )

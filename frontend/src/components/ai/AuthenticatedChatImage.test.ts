@@ -3,13 +3,13 @@ import { reactive } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import AuthenticatedChatImage from './AuthenticatedChatImage.vue'
 
-const api = vi.hoisted(() => ({ image: vi.fn(), store: { profile: { id: 5 } } }))
+const api = vi.hoisted(() => ({ image: vi.fn(), store: { profile: { id: 5 }, token: 'token-a' } }))
 vi.mock('@/api/agentResponses', () => ({ fetchAgentResponseImage: api.image }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => api.store }))
 const wrappers: ReturnType<typeof mount>[] = []
 
 beforeEach(() => {
-  api.store = reactive({ profile: { id: 5 } })
+  api.store = reactive({ profile: { id: 5 }, token: 'token-a' })
   api.image.mockReset().mockResolvedValue(new Blob(['image'], { type: 'image/png' }))
   vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:fixture'), revokeObjectURL: vi.fn() })
 })
@@ -54,4 +54,19 @@ it('换账号后丢弃旧未完成结果，不显示或重发旧账号图片', a
   expect(wrapper.find('img').exists()).toBe(false)
   expect(URL.createObjectURL).not.toHaveBeenCalled()
   expect(api.image).toHaveBeenCalledTimes(1)
+})
+
+
+it('同账号换 token 也立即撤销旧图片，并丢弃上次登录期间的图片请求', async () => {
+  let resolveOld!: (blob: Blob) => void
+  api.image.mockReturnValueOnce(new Promise<Blob>(done => { resolveOld = done }))
+  api.image.mockReturnValueOnce(new Promise<Blob>(() => undefined))
+  const wrapper = render()
+  api.store.token = 'token-b'
+  await flushPromises()
+  resolveOld(new Blob(['old private bytes'], { type: 'image/png' }))
+  await flushPromises()
+  expect(wrapper.find('img').exists()).toBe(false)
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
+  expect(api.image).toHaveBeenCalledTimes(2)
 })

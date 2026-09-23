@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useUserStore } from '@/stores/user'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 
 import { formatDate } from '@/utils/format'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -10,14 +12,16 @@ import {
 } from '@/api/knowledge'
 
 const SOURCE: Record<string, string> = {
-  preference: '小菱偏好（本地记录）', upload: '手动上传', code: '项目代码', issue: '审查问题',
+  manual: '小菱笔记', preference: '小菱偏好（本地记录）', upload: '手动上传', code: '项目代码', issue: '审查问题',
   forum: '论坛', feedback: '反馈', ticket: '工单',
 }
 const SOURCE_TAG: Record<string, string> = {
-  preference: 'info', upload: 'primary', code: 'success', issue: 'warning',
+  manual: 'primary', preference: 'info', upload: 'primary', code: 'success', issue: 'warning',
   forum: 'info', feedback: 'danger', ticket: '',
 }
 
+const userStore = useUserStore()
+const knowledgeScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => '')
 const stats = ref<KbStats | null>(null)
 const docs = ref<KnowledgeDoc[]>([])
 const total = ref(0)
@@ -34,25 +38,36 @@ const addForm = reactive({ title: '', content: '' })
 const query = ref('')
 const searching = ref(false)
 const hits = ref<SearchHit[]>([])
+let deleteConfirming = false
+
+function closeDeleteConfirmation(): void {
+  if (deleteConfirming) ElMessageBox.close()
+  deleteConfirming = false
+}
 
 async function loadStats() {
-  stats.value = await getKbStats()
+  const isCurrent = knowledgeScope.captureAccount()
+  const data = await getKbStats()
+  if (isCurrent()) stats.value = data
 }
 
 async function loadDocs() {
+  const isCurrent = knowledgeScope.captureAccount()
   loading.value = true
   try {
     const res = await getDocs({
       page: page.value, page_size: pageSize.value, source_type: sourceFilter.value,
     })
+    if (!isCurrent()) return
     docs.value = res.items
     total.value = res.total
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 
 async function submitAdd() {
+  const isCurrent = knowledgeScope.captureAccount()
   if (!addForm.title.trim() || !addForm.content.trim()) {
     ElMessage.warning('请填写标题和内容')
     return
@@ -61,53 +76,91 @@ async function submitAdd() {
   adding.value = true
   try {
     const res = await addDoc({ ...addForm })
+    if (!isCurrent()) return
     ElMessage.success(`已入库,切片 ${res.chunk_count} 段`)
     addVisible.value = false
     Object.assign(addForm, { title: '', content: '' })
     page.value = 1
     await Promise.all([loadDocs(), loadStats()])
   } finally {
-    adding.value = false
+    if (isCurrent()) adding.value = false
   }
 }
 
 async function remove(d: KnowledgeDoc) {
-  await ElMessageBox.confirm(`确认从知识库删除「${d.title}」?`, '提示', { type: 'warning' })
+  const isCurrent = knowledgeScope.captureAccount()
+  if (deleteConfirming) return
+  deleteConfirming = true
+  try {
+    await ElMessageBox.confirm(`确认从知识库删除「${d.title}」?`, '提示', { type: 'warning' })
+  } catch {
+    return
+  } finally {
+    if (isCurrent()) deleteConfirming = false
+  }
+  if (!isCurrent()) return
   await deleteDoc(d.id)
+  if (!isCurrent()) return
   ElMessage.success('已删除')
   await Promise.all([loadDocs(), loadStats()])
 }
 
 async function sync() {
+  const isCurrent = knowledgeScope.captureAccount()
   syncing.value = true
   try {
     const r = await syncKnowledge()
+    if (!isCurrent()) return
     ElMessage.success(`同步完成:代码${r.code} / 问题${r.issue} / 论坛${r.forum} / 反馈${r.feedback} / 工单${r.ticket}`)
     page.value = 1
     await Promise.all([loadDocs(), loadStats()])
   } finally {
-    syncing.value = false
+    if (isCurrent()) syncing.value = false
   }
 }
 
 async function doSearch() {
+  const isCurrent = knowledgeScope.captureAccount()
   if (!query.value.trim()) {
     ElMessage.warning('请输入检索内容')
     return
   }
   searching.value = true
   try {
-    hits.value = await searchKnowledge({ query: query.value, top_k: 5 })
+    const data = await searchKnowledge({ query: query.value, top_k: 5 })
+    if (!isCurrent()) return
+    hits.value = data
     if (hits.value.length === 0) ElMessage.info('没有命中,知识库可能还没有相关内容')
   } finally {
-    searching.value = false
+    if (isCurrent()) searching.value = false
   }
 }
 
-onMounted(() => {
-  loadStats()
-  loadDocs()
-})
+function refreshKnowledge(): void {
+  // 失败由 HTTP 拦截器统一提示，账号切换后的旧请求不能触发未处理拒绝。
+  void loadStats().catch(() => undefined)
+  void loadDocs().catch(() => undefined)
+}
+
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  closeDeleteConfirmation()
+  stats.value = null
+  docs.value = []
+  total.value = 0
+  page.value = 1
+  sourceFilter.value = ''
+  query.value = ''
+  hits.value = []
+  addVisible.value = false
+  Object.assign(addForm, { title: '', content: '' })
+  loading.value = false
+  searching.value = false
+  syncing.value = false
+  adding.value = false
+  if (userStore.profile) refreshKnowledge()
+}, { flush: 'sync' })
+onBeforeUnmount(closeDeleteConfirmation)
+onMounted(refreshKnowledge)
 </script>
 
 <template>

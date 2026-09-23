@@ -197,6 +197,7 @@ function openPanel(): void {
       <div v-for="member in members" :key="member.member_id" class="team-card-member">
         <AgentTeamMemberBadge
           :name="member.display_name"
+          :kind="member.kind"
           :role="member.role"
           :status="member.status"
           :address="member.address"

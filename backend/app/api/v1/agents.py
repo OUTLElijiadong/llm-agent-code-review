@@ -180,9 +180,8 @@ async def stream_agent_events(
 ):
     """SSE 实时事件流: Agent 调度 / 思考 / 完成 / 失败 / 追问
 
-    v2.4 隔离策略:
-        - admin: 接收全部事件
-        - 非 admin: 仅接收 user_id 匹配的事件,以及 user_id=None 的系统级事件
+    私人对话事件只发送给所属账号；管理员也不能订阅其他账号的对话。
+    未标明归属的内部事件不能当作公开广播。
 
     Args:
         replay: 订阅初期回放最近 N 条历史事件,默认 20
@@ -190,7 +189,6 @@ async def stream_agent_events(
     """
     raw_token = _resolve_sse_token(authorization, token)
     current_user = _resolve_sse_user(authorization, token, db)
-    is_admin = rbac_service.is_admin_user(db, current_user.id)
     current_user_id = current_user.id
 
     def _should_deliver(ev) -> bool:
@@ -202,14 +200,10 @@ async def stream_agent_events(
         Returns:
             bool: 当前用户是否应收到此事件
         """
-        # admin 接收全部
-        if is_admin:
-            return True
-        # 系统级事件(无 user_id)所有用户都能收到
-        if ev.user_id is None:
-            return True
-        # 仅接收自己的事件
-        return ev.user_id == current_user_id
+        return (
+            isinstance(ev.user_id, int) and not isinstance(ev.user_id, bool)
+            and ev.user_id > 0 and ev.user_id == current_user_id
+        )
 
     async def event_source():
         bus = AgentEventBus.instance()
@@ -291,7 +285,8 @@ def submit_clarification(
     if pending is None:
         return Resp(code=41001, message="追问已过期或不存在,请重新提问", data={})
     owner_user_id = pending.get("user_id")
-    if owner_user_id is not None and owner_user_id != user.id and not rbac_service.is_admin_user(db, user.id):
+    if (not isinstance(owner_user_id, int) or isinstance(owner_user_id, bool)
+            or owner_user_id <= 0 or owner_user_id != user.id):
         raise ForbiddenError("无权回填此追问", code=40300)
     reserved = store.reserve(payload.clarify_id, expected_data=pending)
     if reserved is None:

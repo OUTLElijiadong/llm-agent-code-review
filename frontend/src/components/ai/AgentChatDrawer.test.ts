@@ -37,6 +37,7 @@ vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages
 
 import AgentChatDrawer from './AgentChatDrawer.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
+import { useUserStore } from '@/stores/user'
 
 function mountDrawer(prefill?: string, extraPlugins: Plugin[] = []): VueWrapper {
   return mount(AgentChatDrawer, {
@@ -1269,4 +1270,46 @@ it('服务器历史恢复保留资产缩略图，不把整轮更新时间伪装�
   expect(wrapper.findAll('.msg-time')).toHaveLength(0)
   expect(wrapper.text()).not.toContain('[图片]')
   wrapper.unmount()
+})
+
+
+describe('小菱账号切换隔离', () => {
+  it('切换账号立即清空旧消息和草稿，迟到流不能写入新账号', async () => {
+    const user = useUserStore()
+    user.profile = { id: 101, username: 'alice', role: 'user', status: 1 }
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('账号 A 私密问题')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-private-a' } })
+    emit(0, { type: 'response.output_text.delta', delta: '账号 A 私密答复' })
+    await flushPromises()
+    user.profile = { id: 202, username: 'bob', role: 'user', status: 1 }
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('账号 A 私密')
+    expect(streams.records[0].aborted).toBe(true)
+    emit(0, { type: 'response.output_text.delta', delta: '迟到秘密' })
+    emit(0, { type: 'response.completed', response: { id: 'run-private-a' } })
+    await finish(0)
+    expect(wrapper.text()).not.toContain('迟到秘密')
+    expect(wrapper.text()).not.toContain('已停止本次回答')
+    wrapper.unmount()
+  })
+
+  it('旧恢复结束不能解除新会话恢复锁', async () => {
+    let resolveOld!: (value: unknown) => void
+    let resolveNew!: (value: unknown) => void
+    sessionApi.get.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mountDrawer()
+    await flushPromises()
+    sessionApi.get.mockImplementationOnce(() => new Promise(resolve => { resolveNew = resolve }))
+    await wrapper.find('.session-new').trigger('click')
+    await flushPromises()
+    resolveOld({ surface: 'user', session_id: 'old', run: null, messages: [], pending: null })
+    await flushPromises()
+    expect((wrapper.find('.chat-input').element as HTMLTextAreaElement).disabled).toBe(true)
+    resolveNew({ surface: 'user', session_id: 'new', run: null, messages: [], pending: null })
+    await flushPromises()
+    wrapper.unmount()
+  })
 })

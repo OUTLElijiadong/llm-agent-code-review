@@ -871,7 +871,9 @@ onMounted(loadData)
           </el-table-column>
           <el-table-column label="决策" width="110"><template #default="{ row }">{{ statusText(row.decision) }}</template></el-table-column>
           <el-table-column label="风险" width="100"><template #default="{ row }">{{ riskText(row.risk_level) }}</template></el-table-column>
-          <el-table-column prop="reason" label="原因" min-width="220" show-overflow-tooltip />
+          <el-table-column label="原因" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }"><span>{{ row.content_redacted ? '原文按账号隔离' : (row.reason || '-') }}</span></template>
+          </el-table-column>
         </el-table>
       </div>
     </section>
@@ -950,6 +952,9 @@ onMounted(loadData)
             <template #default="{ row }"><span :title="row.risk_level">{{ riskText(row.risk_level) }}</span></template>
           </el-table-column>
           <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
+          <el-table-column label="说明" min-width="160">
+            <template #default="{ row }"><span>{{ row.content_redacted ? '原文按账号隔离' : '-' }}</span></template>
+          </el-table-column>
         </el-table>
       </div>
     </section>

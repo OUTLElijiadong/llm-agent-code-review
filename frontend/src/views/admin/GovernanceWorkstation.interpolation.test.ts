@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   listApprovals: vi.fn(),
   listAlerts: vi.fn(),
   listToolCalls: vi.fn(),
+  listPolicies: vi.fn(),
+  listPolicyDecisions: vi.fn(),
   listToolPermissions: vi.fn(),
   listAgentMemory: vi.fn(),
   listAgentKnowledge: vi.fn(),
@@ -32,7 +34,7 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import AgentGovernance from './AgentGovernance.vue'
 import GovernanceWorkstation from './GovernanceWorkstation.vue'
 
-type TestedMode = 'overview' | 'agents' | 'approvals' | 'tools' | 'knowledge' | 'rewards' | 'rollback'
+type TestedMode = 'policies' | 'overview' | 'agents' | 'approvals' | 'tools' | 'knowledge' | 'rewards' | 'rollback'
 const wrappers: VueWrapper[] = []
 const renderErrors: unknown[] = []
 
@@ -94,6 +96,8 @@ beforeEach(() => {
     resource: 'fixture', risk_level: 'high', status: 'pending',
   }])
   api.listAlerts.mockResolvedValue([])
+  api.listPolicies.mockResolvedValue([])
+  api.listPolicyDecisions.mockResolvedValue([])
   api.listToolPermissions.mockResolvedValue([{
     id: 2, agent_code: 'manager', tool_code: 'shell', permission: 'escalate', risk_level: 'high', enabled: 1,
   }])
@@ -280,5 +284,17 @@ describe('AgentGovernance refresh feedback only', () => {
     expect(wrapper.text()).not.toContain('Agent 列表')
     request.resolve([])
     await settle()
+  })
+})
+
+
+describe('私人治理日志隔离提示', () => {
+  it.each(['policies', 'tools'] as const)('%s 中被隔离原文明示原因且不显示旧字段', async (mode) => {
+    api.listPolicyDecisions.mockResolvedValue([{ id: 91, subject: 'agent:manager', action: 'knowledge.read', resource: '[按账号隔离]', decision: 'allow', risk_level: 'low', risk_score: 1, reason: '不该出现的私人原文', content_redacted: true }])
+    api.listToolCalls.mockResolvedValue([{ id: 92, agent_code: 'manager', tool_code: 'knowledge_read', action: 'knowledge.read', resource: '[按账号隔离]', decision: 'allow', status: 'success', risk_level: 'low', duration_ms: 12, input_summary: '不该出现的私人原文', content_redacted: true }])
+    const wrapper = mountMode(mode)
+    await settle()
+    expect(wrapper.text()).toContain('原文按账号隔离')
+    expect(wrapper.text()).not.toContain('不该出现的私人原文')
   })
 })

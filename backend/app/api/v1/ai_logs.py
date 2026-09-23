@@ -40,7 +40,7 @@ def list_logs(
 
 
 @router.get("/{log_id}", response_model=Resp[AiLogDetailOut])
-def get_log(log_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def get_log(log_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """AI调用日志详情(管理员)"""
-    log = ai_log_service.get_log_detail(db, log_id)
+    log = ai_log_service.get_log_detail(db, log_id, actor=admin)
     return Resp(data=AiLogDetailOut.model_validate(log))

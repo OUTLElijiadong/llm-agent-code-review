@@ -39,7 +39,8 @@ def create_team(
         audit_service.log(
             db, user, "agent_team_create",
             target_type="agent_team", target_id=str(team.get("team_id", "")),
-            detail=f"创建多Agent团队: {str(payload.objective)[:80]}",
+            # 全局操作审计只记动作；私人任务目标保留在 owner 隔离的团队记录。
+            detail="创建多 Agent 团队",
         )
         return Resp(data=team)
     except agent_team_service.AgentTeamError as exc:
@@ -159,7 +160,7 @@ def cancel_team(
         audit_service.log(
             db, user, "agent_team_cancel",
             target_type="agent_team", target_id=str(team_id),
-            detail=f"取消团队: {payload.reason}",
+            detail="取消多 Agent 团队",
         )
         return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:
@@ -177,20 +178,19 @@ def retry_team(
     user: User = Depends(get_current_user),
 ) -> Resp[dict]:
     try:
-        return Resp(
-            data=agent_team_service.retry_team(
-                db,
-                user,
-                team_id,
-                task_keys=payload.task_keys,
-                strategy_changes=payload.strategy_changes,
-            )
+        data = agent_team_service.retry_team(
+            db,
+            user,
+            team_id,
+            task_keys=payload.task_keys,
+            strategy_changes=payload.strategy_changes,
         )
         audit_service.log(
             db, user, "agent_team_retry",
             target_type="agent_team", target_id=str(team_id),
-            detail=f"重试团队任务 {payload.task_keys}",
+            detail="重试多 Agent 团队",
         )
+        return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:
         _raise_team_error(exc)
         raise AssertionError("unreachable")
@@ -212,7 +212,7 @@ def archive_team(
         audit_service.log(
             db, user, "agent_team_archive",
             target_type="agent_team", target_id=str(team_id),
-            detail=f"归档团队: {payload.reason}",
+            detail="归档多 Agent 团队",
         )
         return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:

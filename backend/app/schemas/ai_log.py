@@ -76,6 +76,7 @@ class AiLogDetailOut(BaseModel):
     total_tokens: Optional[int] = None
     prompt: Optional[str] = None
     response: Optional[str] = None
+    content_redacted: bool = False
     status: str
     error_message: Optional[str] = None
     duration_ms: Optional[int] = None

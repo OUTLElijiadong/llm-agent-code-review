@@ -207,3 +207,24 @@ describe('streamResponses', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 })
+
+
+it('旧 token 的流不得派发新账号认证失效或完成事件', async () => {
+  setToken('account-a')
+  let resolve!: (response: Response) => void
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(done => { resolve = done })))
+  const onEvent = vi.fn()
+  const expired = vi.fn()
+  const completed = vi.fn()
+  window.addEventListener('prism:auth-expired', expired)
+  window.addEventListener('prism:agent-task-complete', completed)
+  const pending = streamResponses({}, { onEvent }).done.catch(error => error)
+  setToken('account-b')
+  resolve(streamResponse(['data: {"type":"auth_expired"}\n\n']))
+  await pending
+  expect(onEvent).not.toHaveBeenCalled()
+  expect(expired).not.toHaveBeenCalled()
+  expect(completed).not.toHaveBeenCalled()
+  window.removeEventListener('prism:auth-expired', expired)
+  window.removeEventListener('prism:agent-task-complete', completed)
+})

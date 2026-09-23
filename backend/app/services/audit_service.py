@@ -6,12 +6,27 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import and_
+from sqlalchemy import and_, false, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.pagination import Pagination
 from app.models.audit_log import AuditLog
 from app.models.user import User
+
+
+def _private_content_filter():
+    """覆盖旧日志；动作名和目标类型任一指向私人对话即不可跨账号读原文。"""
+    action = func.coalesce(AuditLog.action, "")
+    return or_(
+        func.coalesce(AuditLog.target_type, "").in_((
+            "agent_team", "agent_response_run", "agent_tool_execution", "agent_mesh_conversation",
+            "agent_mesh_message", "agent_chat", "chat_session", "discussion", "roundtable",
+            "approval", "agent_knowledge_doc",
+        )),
+        *(action.startswith(prefix, autoescape=True) for prefix in (
+            "agent_team_", "agent_chat", "agent_response", "agent_mesh", "roundtable", "discussion", "agent_tool.",
+        )),
+    )
 
 
 def log(
@@ -69,6 +84,8 @@ def list_logs(
     end: str = "",
     page: int = 1,
     page_size: int = 20,
+    *,
+    viewer: Optional[User] = None,
 ) -> dict:
     """分页查询审计日志
 
@@ -85,14 +102,18 @@ def list_logs(
     Returns:
         dict: 分页响应
     """
-    q = db.query(AuditLog)
+    private_content = _private_content_filter()
+    owned = AuditLog.actor_id == int(viewer.id) if viewer is not None else false()
+    detail_visible = or_(~private_content, owned)
+    q = db.query(AuditLog, private_content.label("private_content"))
     if action:
         q = q.filter(AuditLog.action == action)
     if actor_id is not None:
         q = q.filter(AuditLog.actor_id == actor_id)
     if keyword:
         like = f"%{keyword}%"
-        q = q.filter(and_(AuditLog.detail.like(like) | AuditLog.actor_name.like(like)))
+        # 过滤也只能匹配可见内容，否则 total/命中行会泄露他人私人关键词。
+        q = q.filter(or_(and_(detail_visible, AuditLog.detail.like(like)), AuditLog.actor_name.like(like)))
     if start:
         try:
             start_dt = datetime.fromisoformat(start)
@@ -114,4 +135,14 @@ def list_logs(
         .limit(pagination.page_size)
         .all()
     )
-    return pagination.to_dict(rows)
+    items = []
+    for row, is_private in rows:
+        redact_content = bool(is_private and (viewer is None or row.actor_id != viewer.id))
+        items.append({
+            "id": row.id, "actor_id": row.actor_id, "actor_name": row.actor_name,
+            "action": row.action, "target_type": row.target_type, "target_id": row.target_id,
+            "detail": None if redact_content else row.detail,
+            "content_redacted": redact_content,
+            "status": row.status, "ip": row.ip, "create_time": row.create_time,
+        })
+    return pagination.to_dict(items)

@@ -69,6 +69,14 @@ let discoveryTimer: number | undefined
 let archivedSearchTimer: number | undefined
 let archivedRequestSerial = 0
 let pendingHeartbeatId = ''
+let scopeGeneration = 0
+let disposed = false
+
+function captureScope(): () => boolean {
+  const generation = scopeGeneration
+  const namespace = storageNamespace.value
+  return () => !disposed && generation === scopeGeneration && namespace === storageNamespace.value
+}
 
 const currentTitle = computed(() => (
   sessions.value.find((item) => item.id === activeId.value)?.title ?? '对话'
@@ -208,11 +216,11 @@ function inferBusy(meta: AgentChatSessionMeta): boolean {
   // running/waiting,也不能继续显示为忙碌或阻止归档等显式操作。
   const remote = remoteRunState.value.get(meta.id)
   if (remote !== undefined) return isAgentResponseSessionOccupied(remote)
-  const snapshot = loadAgentChatSnapshot(meta.id)
+  const snapshot = loadAgentChatSnapshot(meta.id, storageNamespace.value)
   return isAgentResponseSessionOccupied(snapshot?.runStatus)
 }
 
-onMounted(() => {
+function initializeSessions(): void {
   migrateUnscopedAgentChatSessions(props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user'), storageNamespace.value)
   sessions.value = loadAgentChatSessions(storageNamespace.value, props.legacyKey, props.idPrefix)
   if (!sessions.value.length) {
@@ -238,6 +246,30 @@ onMounted(() => {
   emit('select', activeId.value)
   // 首次挂载同步服务端目录；当前会话只由登录标记或用户动作决定。
   void ensureFreshOnOpen()
+}
+
+watch(storageNamespace, () => {
+  scopeGeneration += 1
+  archivedRequestSerial += 1
+  sessions.value = []
+  archivedSessions.value = []
+  activeId.value = ''
+  busyIds.value = new Set()
+  remoteRunState.value = new Map()
+  discoveryLoading.value = false
+  discoveryLoadedOnce.value = false
+  archivedLoading.value = false
+  restoringId.value = ''
+  archivingId.value = ''
+  pendingHeartbeatId = ''
+  menuFor.value = ''
+  searchQuery.value = ''
+  historyStatus.value = 'active'
+  initializeSessions()
+}, { flush: 'sync' })
+
+onMounted(() => {
+  initializeSessions()
   if (props.discoverRemote) {
     void refreshFromAgentMesh()
     discoveryTimer = window.setInterval(() => void refreshFromAgentMesh(), 10_000)
@@ -246,6 +278,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  scopeGeneration += 1
   if (discoveryTimer !== undefined) window.clearInterval(discoveryTimer)
   if (archivedSearchTimer !== undefined) window.clearTimeout(archivedSearchTimer)
   document.removeEventListener('click', handleOutsideClick)
@@ -276,11 +310,13 @@ function reload(): void {
  */
 async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
   if (discoveryLoading.value) return
+  const isCurrent = captureScope()
   discoveryLoading.value = true
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   const previousActiveId = activeId.value
   try {
     const page = await listAgentMeshConversations({ surface, status: 'active', limit: 20, offset: 0 })
+    if (!isCurrent()) return
     const discovered = page.items
       .filter((item) => item.surface === surface && item.status !== 'archived' && item.session_id)
       .map((item) => ({
@@ -346,12 +382,13 @@ async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
   } catch {
     // 发现接口短暂不可用时保留本地列表，下一次打开或轮询继续收敛。
   } finally {
-    discoveryLoading.value = false
+    if (isCurrent()) discoveryLoading.value = false
   }
 }
 
 /** 已归档目录始终直接来自当前登录账号的服务端，不写入本地索引。 */
 async function refreshArchivedSessions(): Promise<void> {
+  const isCurrent = captureScope()
   const requestSerial = ++archivedRequestSerial
   archivedLoading.value = true
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
@@ -363,7 +400,7 @@ async function refreshArchivedSessions(): Promise<void> {
       limit: 50,
       offset: 0,
     })
-    if (requestSerial !== archivedRequestSerial) return
+    if (!isCurrent() || requestSerial !== archivedRequestSerial) return
     archivedSessions.value = page.items
       .filter((item) => item.surface === surface && item.status === 'archived' && item.session_id)
       .map((item) => ({
@@ -374,23 +411,26 @@ async function refreshArchivedSessions(): Promise<void> {
   } catch {
     // 归档目录读取失败时保留上次结果，用户可重新打开后重试。
   } finally {
-    if (requestSerial === archivedRequestSerial) archivedLoading.value = false
+    if (isCurrent() && requestSerial === archivedRequestSerial) archivedLoading.value = false
   }
 }
 
 async function restoreArchivedSession(sessionId: string): Promise<void> {
   if (restoringId.value) return
+  const isCurrent = captureScope()
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   restoringId.value = sessionId
   try {
     await restoreAgentMeshConversation(surface, sessionId)
+    if (!isCurrent()) return
     archivedSessions.value = archivedSessions.value.filter((item) => item.id !== sessionId)
     historyStatus.value = 'active'
     searchQuery.value = ''
     await refreshFromAgentMesh(sessionId)
+    if (!isCurrent()) return
     menuFor.value = ''
   } finally {
-    restoringId.value = ''
+    if (isCurrent()) restoringId.value = ''
   }
 }
 

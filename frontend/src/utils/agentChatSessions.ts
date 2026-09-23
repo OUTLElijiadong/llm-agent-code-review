@@ -68,7 +68,9 @@ export function agentChatStorageKey(surface: string, accountId?: string | number
   const normalized = accountId === undefined || accountId === null || String(accountId).trim() === ''
     ? ''
     : String(accountId).trim()
-  return normalized ? `${surface}:account:${normalized}` : surface
+  // 宿主和切换器都可能传入已绑定的键，归一化后只追加一次账号。
+  const base = surface.split(':account:')[0]
+  return normalized ? `${base}:account:${normalized}` : surface
 }
 
 /** 与历史测试/调用方兼容的账号命名空间解析。 */
@@ -89,6 +91,18 @@ export function migrateUnscopedAgentChatSessions(
   try {
     window.localStorage.removeItem(INDEX_PREFIX + surface)
     window.localStorage.removeItem(ACTIVE_PREFIX + surface)
+    // 旧版宿主和切换器各追加了一次账号；仅迁移相同账号的可证明归属目录。
+    const account = scopedKey.split(':account:')[1]
+    const doubled = `${scopedKey}:account:${account}`
+    if (account) {
+      for (const prefix of [INDEX_PREFIX, ACTIVE_PREFIX]) {
+        const value = window.localStorage.getItem(prefix + doubled)
+        if (value && !window.localStorage.getItem(prefix + scopedKey)) {
+          window.localStorage.setItem(prefix + scopedKey, value)
+        }
+        window.localStorage.removeItem(prefix + doubled)
+      }
+    }
   } catch {
     // 存储不可用时由服务端目录兜底。
   }
@@ -196,11 +210,16 @@ export function loadActiveAgentChatSession(storageKey: string): string {
   }
 }
 
+/** 新生产调用必须同时带账号命名空间；不自动接管无归属的历史快照/草稿。 */
+function scopedSessionKey(sessionId: string, storageKey: string): string {
+  return storageKey.includes(':account:') ? `${storageKey}:${sessionId}` : sessionId
+}
+
 /** 保存某一会话尚未发送的输入；空白草稿直接删除。 */
-export function saveAgentChatDraft(sessionId: string, draft: string): void {
+export function saveAgentChatDraft(sessionId: string, draft: string, storageKey = ''): void {
   if (!sessionId) return
   try {
-    const key = DRAFT_PREFIX + sessionId
+    const key = DRAFT_PREFIX + scopedSessionKey(sessionId, storageKey)
     if (draft.trim()) window.localStorage.setItem(key, draft)
     else window.localStorage.removeItem(key)
   } catch {
@@ -209,10 +228,10 @@ export function saveAgentChatDraft(sessionId: string, draft: string): void {
 }
 
 /** 恢复某一会话尚未发送的输入。 */
-export function loadAgentChatDraft(sessionId: string): string {
+export function loadAgentChatDraft(sessionId: string, storageKey = ''): string {
   if (!sessionId) return ''
   try {
-    return window.localStorage.getItem(DRAFT_PREFIX + sessionId) ?? ''
+    return window.localStorage.getItem(DRAFT_PREFIX + scopedSessionKey(sessionId, storageKey)) ?? ''
   } catch {
     return ''
   }
@@ -344,8 +363,8 @@ export function autoTitleAgentChatSession(
 export function removeAgentChatSession(storageKey: string, sessionId: string): void {
   writeIndex(storageKey, readIndex(storageKey).filter((item) => item.id !== sessionId))
   try {
-    window.localStorage.removeItem(SNAPSHOT_PREFIX + sessionId)
-    window.localStorage.removeItem(DRAFT_PREFIX + sessionId)
+    window.localStorage.removeItem(SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey))
+    window.localStorage.removeItem(DRAFT_PREFIX + scopedSessionKey(sessionId, storageKey))
     if (window.localStorage.getItem(ACTIVE_PREFIX + storageKey) === sessionId) {
       window.localStorage.removeItem(ACTIVE_PREFIX + storageKey)
     }
@@ -354,9 +373,9 @@ export function removeAgentChatSession(storageKey: string, sessionId: string): v
   }
 }
 
-export function loadAgentChatSnapshot(sessionId: string): AgentChatSnapshot | null {
+export function loadAgentChatSnapshot(sessionId: string, storageKey = ''): AgentChatSnapshot | null {
   try {
-    const raw = window.localStorage.getItem(SNAPSHOT_PREFIX + sessionId)
+    const raw = window.localStorage.getItem(SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey))
     if (!raw) return null
     const parsed = JSON.parse(raw) as AgentChatSnapshot
     if (!parsed || !Array.isArray(parsed.messages)) return null
@@ -394,12 +413,12 @@ export function findPristineAgentChatSession(
   ))
 }
 
-export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot): void {
+export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot, storageKey = ''): void {
   try {
     // 空的时间线消息也可能携带团队锚点,不能在快照压缩时丢掉。
     const trimmed = snapshot.messages.filter((item) => item.content.trim() || item.teamIds?.length).slice(-60)
     window.localStorage.setItem(
-      SNAPSHOT_PREFIX + sessionId,
+      SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey),
       JSON.stringify({ ...snapshot, messages: trimmed }),
     )
   } catch {

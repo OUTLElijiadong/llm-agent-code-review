@@ -70,6 +70,7 @@ export type PolicyRuleInput = Omit<PolicyRule, 'id'> & {
 }
 
 export interface PolicyDecision {
+  content_redacted?: boolean
   id?: number | null
   subject: string
   action: string
@@ -83,6 +84,7 @@ export interface PolicyDecision {
 }
 
 export interface ToolCallLog {
+  content_redacted?: boolean
   id: number
   agent_code: string
   tool_code: string

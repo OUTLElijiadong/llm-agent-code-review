@@ -235,7 +235,7 @@ def test_sensitive_approvals_are_super_admin_only_but_program_approvals_remain_a
         risk_level="critical",
         status="pending",
         decision="escalate",
-        request_json=json.dumps({"arguments": {"action": "restart_service"}}),
+        request_json=json.dumps({"owner_user_id": super_admin_user.id, "arguments": {"action": "restart_service"}}),
     )
     global_config_approval = ApprovalItem(
         title="更新全局 LLM 配置",
@@ -244,7 +244,10 @@ def test_sensitive_approvals_are_super_admin_only_but_program_approvals_remain_a
         risk_level="critical",
         status="pending",
         decision="escalate",
-        request_json=json.dumps({"arguments": {"capability": "llm.config.update", "params": {}}}),
+        request_json=json.dumps({
+            "owner_user_id": super_admin_user.id,
+            "arguments": {"capability": "llm.config.update", "params": {}},
+        }),
     )
     restricted_job_approval = ApprovalItem(
         title="手动抓取外部知识",
@@ -309,8 +312,6 @@ def test_sensitive_approvals_are_super_admin_only_but_program_approvals_remain_a
     assert {item.id for item in super_items} == {
         server_approval.id,
         global_config_approval.id,
-        restricted_job_approval.id,
-        owned_program_response.id,
         foreign_program_response.id,
         program_approval.id,
     }
@@ -321,6 +322,12 @@ def test_sensitive_approvals_are_super_admin_only_but_program_approvals_remain_a
     db.refresh(server_approval)
     assert server_approval.status == "pending"
     assert server_approval.decided_by is None
+
+    for item in (restricted_job_approval, owned_program_response):
+        for approve in (True, False):
+            with pytest.raises(ForbiddenError):
+                approval_service.decide_item(db, super_admin_user, item.id, approve=approve)
+        assert item.status == "pending"
 
     for item in (restricted_job_approval, foreign_program_response):
         for approve in (True, False):

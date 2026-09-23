@@ -197,7 +197,7 @@ def list_agent_knowledge(agent_code: str, db: Session = Depends(get_db), _: User
     Returns:
         Resp[list[AgentKnowledgeDocOut]]: 知识文档列表。
     """
-    rows = agent_knowledge_service.list_docs(db, agent_code=agent_code)
+    rows = agent_knowledge_service.list_docs(db, agent_code=agent_code, user_id=_.id)
     return Resp(data=[AgentKnowledgeDocOut.model_validate(row) for row in rows])
 
 
@@ -252,7 +252,7 @@ def activate_agent_knowledge_doc(
     Returns:
         Resp[AgentKnowledgeDocOut]: 激活后的知识文档。
     """
-    row = agent_knowledge_service.activate_document(db, doc_id)
+    row = agent_knowledge_service.activate_document(db, doc_id, user_id=_.id)
     audit_service.log(
         db, _, "governance.knowledge_doc_activate",
         target_type="agent_knowledge_doc", target_id=str(doc_id),
@@ -514,8 +514,10 @@ def list_policy_decisions(db: Session = Depends(get_db), _: User = Depends(requi
     Returns:
         Resp[list[PolicyDecisionOut]]: 决策日志列表。
     """
+    from app.services.governance_log_privacy_service import policy_log_view
+
     rows = db.query(PolicyDecisionLog).order_by(PolicyDecisionLog.id.desc()).limit(100).all()
-    return Resp(data=[PolicyDecisionOut.model_validate(row) for row in rows])
+    return Resp(data=[policy_log_view(db, _, row) for row in rows])
 
 
 @router.get("/tools/calls", response_model=Resp[list[ToolCallLogOut]])
@@ -529,8 +531,10 @@ def list_tool_calls(db: Session = Depends(get_db), _: User = Depends(require_adm
     Returns:
         Resp[list[ToolCallLogOut]]: 工具调用日志列表。
     """
+    from app.services.governance_log_privacy_service import tool_log_view
+
     rows = db.query(ToolCallLog).order_by(ToolCallLog.id.desc()).limit(100).all()
-    return Resp(data=[ToolCallLogOut.model_validate(row) for row in rows])
+    return Resp(data=[tool_log_view(db, _, row) for row in rows])
 
 
 @router.get("/tools/permissions", response_model=Resp[list[AgentToolPermissionOut]])

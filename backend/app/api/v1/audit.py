@@ -29,5 +29,5 @@ def list_audit_logs(
     _: User = Depends(require_admin),
 ):
     """审计日志列表(仅管理员)"""
-    result = audit_service.list_logs(db, action, keyword, actor_id, start, end, page, page_size)
+    result = audit_service.list_logs(db, action, keyword, actor_id, start, end, page, page_size, viewer=_)
     return Resp(data=PageOut(**result))

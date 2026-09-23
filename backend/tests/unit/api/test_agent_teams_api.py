@@ -115,7 +115,7 @@ def team_api():
             app.dependency_overrides[get_current_user] = lambda: user
         return TestClient(app).request(method, path, **kwargs)
 
-    yield {"owner": owner, "other": other, "admin": admin, "request": request}
+    yield {"owner": owner, "other": other, "admin": admin, "request": request, "db": db}
 
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_current_user, None)
@@ -259,14 +259,27 @@ def test_plain_user_cannot_create_admin_surface(team_api):
     assert response.json()["code"] == 40331
 
 
-def test_admin_can_read_and_operate_team_across_accounts(team_api):
+def test_admin_cannot_read_or_operate_other_accounts_private_team(team_api):
     request = team_api["request"]
     owner = team_api["owner"]
     admin = team_api["admin"]
     created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
     team_id = created["team_id"]
 
-    detail = _data(request(admin, "GET", f"/api/agent-teams/{team_id}"))
+    for method, suffix, body in (
+        ("GET", "", None), ("GET", "/messages", None), ("GET", "/events", None),
+        ("POST", "/cancel", {"reason": "越权取消"}),
+        ("POST", "/retry", {"task_keys": []}), ("POST", "/archive", {"reason": "越权归档"}),
+    ):
+        options = {"json": body} if body is not None else {}
+        rejected = request(admin, method, f"/api/agent-teams/{team_id}{suffix}", **options)
+        assert rejected.status_code == 404
+        assert rejected.json()["code"] == 40431
+    assert _data(request(admin, "GET", "/api/agent-teams")) == {"items": [], "total": 0}
+    detail = _data(request(owner, "GET", f"/api/agent-teams/{team_id}"))
+    assert detail["status"] == created["status"]
+    assert detail["events"] == created["events"]
+    assert detail["tasks"] == created["tasks"]
     assert detail["team_id"] == team_id
     assert detail["user_id"] == owner.id
     # 任务输出带 member_key:前端子Agent工作卡片按它把任务匹配回成员
@@ -276,10 +289,10 @@ def test_admin_can_read_and_operate_team_across_accounts(team_api):
 
     cancelled = _data(
         request(
-            admin,
+            owner,
             "POST",
             f"/api/agent-teams/{team_id}/cancel",
-            json={"reason": "管理员终止验收任务"},
+            json={"reason": "本人终止验收任务"},
         )
     )
     assert cancelled["status"] == "cancelled"
@@ -296,3 +309,42 @@ def test_admin_can_read_and_operate_team_across_accounts(team_api):
     )
     assert admin_team["surface"] == "admin"
     assert admin_team["user_id"] == admin.id
+
+
+def test_global_audit_does_not_store_private_team_objective_or_cancel_reason(team_api):
+    from app.models.audit_log import AuditLog
+    request, owner = team_api["request"], team_api["owner"]
+    payload = _team_payload()
+    payload["objective"] = "PRIVATE_TEAM_OBJECTIVE_SYNTHETIC"
+    created = _data(request(owner, "POST", "/api/agent-teams", json=payload))
+    _data(request(owner, "POST", f"/api/agent-teams/{created['team_id']}/cancel",
+                  json={"reason": "PRIVATE_CANCEL_REASON_SYNTHETIC"}))
+    _data(request(owner, "POST", f"/api/agent-teams/{created['team_id']}/archive",
+                  json={"reason": "PRIVATE_ARCHIVE_REASON_SYNTHETIC"}))
+    logs = team_api["db"].query(AuditLog).filter_by(target_type="agent_team", target_id=str(created["team_id"])).all()
+    assert len(logs) == 3
+    assert all("PRIVATE_" not in str(row.detail or "") for row in logs)
+    assert {row.action for row in logs} == {"agent_team_create", "agent_team_cancel", "agent_team_archive"}
+
+
+def test_owner_retry_retains_an_audit_entry_without_task_text(team_api):
+    from app.models.agent_team import AgentTeam, AgentTeamTask
+    from app.models.audit_log import AuditLog
+
+    request, owner, db = team_api["request"], team_api["owner"], team_api["db"]
+    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    team_id = created["team_id"]
+    db.get(AgentTeam, team_id).status = "failed"
+    for task in db.query(AgentTeamTask).filter_by(team_id=team_id):
+        task.status = "failed"
+    db.commit()
+    strategies = {
+        task.task_key: "仅重新读取合成输入，按新的范围复核并保留证据"
+        for task in db.query(AgentTeamTask).filter_by(team_id=team_id)
+    }
+    retried = _data(request(
+        owner, "POST", f"/api/agent-teams/{team_id}/retry", json={"task_keys": [], "strategy_changes": strategies}
+    ))
+    assert retried["status"] in {"queued", "running", "verifying"}
+    log = db.query(AuditLog).filter_by(action="agent_team_retry", target_id=str(team_id)).one()
+    assert log.actor_id == owner.id and log.detail == "重试多 Agent 团队"

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.services import agent_responses_service as service_module
+from app.services import knowledge_service
 from app.services.agent_responses_service import PrismToolExecutor, _instructions, _operations_tool_schema
 from app.services.deepseek_responses_runtime import ToolCall
 
@@ -76,12 +77,14 @@ async def test_save_knowledge_note_requires_approval_and_persists(db, super_admi
         captured.update(kwargs)
         return SimpleNamespace(id=1, title=str(kwargs["title"]), status="active")
 
-    monkeypatch.setattr(service_module.agent_knowledge_service, "add_document", fake_add)
+    monkeypatch.setattr(knowledge_service, "add_document", fake_add)
     result = await executor.execute(call)
     assert result.status == "success"
     assert result.output["doc_id"] == 1
-    assert captured["agent_code"] == "manager"
-    assert captured["risk_level"] == "medium"
+    assert captured["user_id"] == int(super_admin_user.id)
+    assert captured["source_ref"] == "response_run:run-save-note:call-note"
+    assert captured["replace_existing"] is True
+    assert result.output["owner_type"] == "user"
 
 
 def test_operations_schema_includes_firewall_description() -> None:

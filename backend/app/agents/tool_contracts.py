@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.schemas.agent_team import AgentTeamMemberIn
+
 
 class FixedToolArguments(BaseModel):
     """固定工具参数基类：严格类型并拒绝未声明字段。"""
@@ -457,21 +459,8 @@ class SendMessageArguments(FixedToolArguments):
     delivery: SendMessageDeliveryArguments = Field(default_factory=SendMessageDeliveryArguments)
 
 
-class CreateAgentTeamMemberArguments(FixedToolArguments):
-    """小菱创建团队成员的严格参数。"""
-
-    member_key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
-    display_name: str = Field(min_length=1, max_length=200)
-    address: str = Field(
-        min_length=1,
-        max_length=200,
-        pattern=r"^(?:agent|custom):[A-Za-z0-9_-]+$",
-        description="可执行的内置 Agent 或已发布自定义 Agent 地址",
-    )
-    role: Literal["worker", "verifier", "summarizer"] = "worker"
-    template_id: Optional[int] = Field(default=None, gt=0)
-    template_version_id: Optional[int] = Field(default=None, gt=0)
-    capabilities: Dict[str, Any] = Field(default_factory=dict)
+class CreateAgentTeamMemberArguments(AgentTeamMemberIn):
+    """工具与 API 复用同一成员契约，避免临时定义验证漂移。"""
 
 
 class CreateAgentTeamTaskArguments(FixedToolArguments):
@@ -577,13 +566,18 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     ),
     FixedToolContract(
         "create_agent_team",
-        "创建有依赖关系、可排队、可追踪的临时子 Agent 团队；成员只能引用 list_agents 返回的 executable Agent。"
+        "创建有依赖关系、可并行、可追踪的 Agent 团队；可复用 list_agents 返回的 executable Agent，"
+        "也可现场生成 temporary:<member_key> 成员，提供 definition={purpose,instructions}，两类可混合编组。"
+        "临时成员仅当前账号、当前团队有效，职责冻结并保留审计记录，不写永久 Agent 库。"
         "团队必须至少有一个 verifier 或 summarizer 任务；所有无下游依赖的叶任务必须被 verifier/summarizer 覆盖。"
         "若遗漏汇总节点或叶任务覆盖关系，系统会自动补 agent:reporter 汇总节点；"
         "项目正式审查使用 agent:review_orchestrator 的 input={operation:'run_review',project_id,review_type:'full'}；"
         "项目安全审计使用 agent:security_sentinel 的 input={project_id,scan_mode:'full'}。"
         "独立审查/审计节点不互相依赖，可同时执行，最终 reporter 依赖全部工作节点。"
-        "只编组既有 Agent，不创建新 Agent 定义；code_reviewer 只接受代码片段 code。"
+        "临时成员执行有界只读专项分析，input 可含 project_id、file_id 或 file_ids（两者互斥且文件必须同项目），"
+        "至多5文件/每文件12000字符，结构化用户上下文总上限60000字符；"
+        "一般任务可传 text，不能替代全项目正式审查或越权写入，写操作由主小菱已有工具完成。"
+        "code_reviewer 只接受代码片段 code。"
         "needs_configuration/session_only/approval_required"
         "等不可执行成员不会被轮询伪装成可用，需改用 executable Agent。",
         CreateAgentTeamArguments,

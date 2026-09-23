@@ -7,11 +7,13 @@ from typing import List, Optional
 from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import httpx
+from sqlalchemy import exists, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc, AgentKnowledgeSource
+from app.models.agent_response_run import AgentResponseRun
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.services import approval_service, embedding_service, knowledge_service
@@ -47,7 +49,22 @@ def chunk_text(content: str) -> List[str]:
     return chunks
 
 
-def list_docs(db: Session, agent_code: str = "", limit: int = 100) -> list[AgentKnowledgeDoc]:
+def _document_access_clause(user_id: Optional[int]):
+    """旧聊天笔记按运行归属限制；无法解析的私人引用默认不可见。"""
+    source = AgentKnowledgeDoc.source_ref
+    shared = or_(source.is_(None), ~source.startswith("response_run:", autoescape=True))
+    if user_id is None:
+        return shared
+    owned = exists(select(AgentResponseRun.id).where(
+        AgentResponseRun.user_id == int(user_id),
+        source == literal("response_run:") + AgentResponseRun.run_id,
+    ))
+    return or_(shared, owned)
+
+
+def list_docs(
+    db: Session, agent_code: str = "", limit: int = 100, *, user_id: Optional[int] = None,
+) -> list[AgentKnowledgeDoc]:
     """查询 Agent 知识文档。
 
     Args:
@@ -58,7 +75,9 @@ def list_docs(db: Session, agent_code: str = "", limit: int = 100) -> list[Agent
     Returns:
         list[AgentKnowledgeDoc]: 知识文档列表。
     """
-    q = db.query(AgentKnowledgeDoc).filter(AgentKnowledgeDoc.status != "deleted")
+    q = db.query(AgentKnowledgeDoc).filter(
+        AgentKnowledgeDoc.status != "deleted", _document_access_clause(user_id),
+    )
     if agent_code:
         q = q.filter(AgentKnowledgeDoc.agent_code == agent_code)
     return q.order_by(AgentKnowledgeDoc.id.desc()).limit(limit).all()
@@ -91,6 +110,13 @@ def add_document(
     Returns:
         AgentKnowledgeDoc: 新增文档。
     """
+    if (source_ref or "").startswith("response_run:"):
+        run = db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id == source_ref[len("response_run:"):],
+            AgentResponseRun.user_id == user_id,
+        ).first() if user_id is not None else None
+        if run is None:
+            raise ForbiddenError("私人知识来源不属于当前账号", code=40300)
     status = "active" if risk_level in ("low", "medium") and confidence >= 0.6 else "pending_approval"
     doc = AgentKnowledgeDoc(
         agent_code=agent_code,
@@ -143,6 +169,7 @@ def activate_document(
     doc_id: int,
     *,
     commit: bool = True,
+    user_id: Optional[int] = None,
 ) -> AgentKnowledgeDoc:
     """将待审批 Agent 知识文档激活。
 
@@ -156,7 +183,11 @@ def activate_document(
     Raises:
         NotFoundError: 知识文档不存在。
     """
-    doc = db.get(AgentKnowledgeDoc, doc_id)
+    doc = db.query(AgentKnowledgeDoc).filter(
+        AgentKnowledgeDoc.id == doc_id,
+        AgentKnowledgeDoc.status != "deleted",
+        _document_access_clause(user_id),
+    ).first()
     if not doc:
         raise NotFoundError("Agent 知识文档不存在", code=40400)
     doc.status = "active"
@@ -748,6 +779,7 @@ def unified_retrieve(db: Session, *, user_id: int, agent_code: str, query: str, 
         .filter(
             AgentKnowledgeChunk.agent_code == agent_code,
             AgentKnowledgeDoc.status == "active",
+            _document_access_clause(user_id),
         )
         .all()
     )

@@ -227,7 +227,7 @@ def test_discussion_preflight_rejects_empty_scan_before_registration(db, monkeyp
     assert not registered
 
 
-def test_discussion_session_access_requires_owner_or_admin(db):
+def test_discussion_session_access_requires_owner_including_admin(db):
     """WebSocket 订阅必须绑定讨论会话 owner。"""
     owner = _user(db, "ws-owner")
     other = _user(db, "ws-other")
@@ -235,6 +235,7 @@ def test_discussion_session_access_requires_owner_or_admin(db):
     session = DiscussionSession(session_id="disc_x", task_id=1, file_name="app.py", owner_user_id=owner.id)
 
     assert _can_access_session(owner, session.owner_user_id, db) is True
-    assert _can_access_session(admin, session.owner_user_id, db) is True
+    assert _can_access_session(admin, session.owner_user_id, db) is False
+    assert _can_access_session(admin, admin.id, db) is True
     assert _can_access_session(other, session.owner_user_id, db) is False
     assert _can_access_session(owner, 0, db) is False

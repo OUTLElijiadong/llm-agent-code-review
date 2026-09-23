@@ -162,12 +162,14 @@
                 <span v-if="!activeDetail.project_id && !activeDetail.task_id && !(activeDetail.project_id && activeDetail.file_id)" class="text-muted">仅日志</span>
               </div>
 
-              <div v-if="activeDetail.error_message" class="detail-section">
+              <p v-if="activeDetail.content_redacted" class="text-muted" role="status">原文按账号隔离，仅记录所有者可查看私人聊天内容；此处保留调用与用量信息。</p>
+
+              <div v-if="!activeDetail.content_redacted && activeDetail.error_message" class="detail-section">
                 <div class="detail-label">错误信息</div>
                 <div class="detail-content error-content">{{ activeDetail.error_message }}</div>
               </div>
 
-              <div v-if="activeDetail.prompt" class="detail-section">
+              <div v-if="!activeDetail.content_redacted && activeDetail.prompt" class="detail-section">
                 <div class="detail-label">
                   <span>请求Prompt</span>
                   <el-button link type="primary" size="small" @click="copyText(activeDetail.prompt || '')">复制</el-button>
@@ -177,7 +179,7 @@
                 </div>
               </div>
 
-              <div v-if="activeDetail.response" class="detail-section">
+              <div v-if="!activeDetail.content_redacted && activeDetail.response" class="detail-section">
                 <div class="detail-label">
                   <span>AI响应</span>
                   <el-button link type="primary" size="small" @click="copyText(activeDetail.response || '')">复制</el-button>
@@ -206,8 +208,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { ArrowDown } from '@element-plus/icons-vue'
 
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -217,6 +221,8 @@ import { formatDateTime } from '@/utils/format'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 const router = useRouter()
+const userStore = useUserStore()
+const logScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => '')
 const loading = ref(false)
 const logs = ref<AiLogOut[]>([])
 const total = ref(0)
@@ -256,6 +262,7 @@ const activeDetail = computed<AiLogDetailOut | null>(() =>
 )
 
 async function toggleExpand(row: AiLogOut) {
+  const isCurrent = logScope.captureAccount()
   if (expandedId.value === row.id) {
     expandedId.value = null
     return
@@ -266,14 +273,14 @@ async function toggleExpand(row: AiLogOut) {
   detailLoading.value = true
   try {
     const data = await getAiLogDetail(row.id)
-    if (request !== detailRequest) return
+    if (!isCurrent() || request !== detailRequest) return
     detailCache.value = { ...detailCache.value, [row.id]: data }
   } catch {
-    if (request !== detailRequest) return
+    if (!isCurrent() || request !== detailRequest) return
     ElMessage.error('获取日志详情失败')
     if (expandedId.value === row.id) expandedId.value = null
   } finally {
-    if (request === detailRequest) detailLoading.value = false
+    if (isCurrent() && request === detailRequest) detailLoading.value = false
   }
 }
 
@@ -285,6 +292,7 @@ function formatDuration(ms?: number): string {
 }
 
 async function loadData() {
+  const isCurrent = logScope.captureAccount()
   loading.value = true
   try {
     const params: Record<string, unknown> = {
@@ -298,6 +306,7 @@ async function loadData() {
     }
 
     const data = await getAiLogs(params)
+    if (!isCurrent()) return
     logs.value = data.items
     total.value = data.total
     // 翻页/筛选后当前展开的日志若已不在列表中,收起展开区
@@ -305,7 +314,7 @@ async function loadData() {
       expandedId.value = null
     }
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 
@@ -345,6 +354,18 @@ function goTask(taskId: number): void {
 function goFile(projectId: number, fileId: number): void {
   router.push(`/code/${projectId}/file/${fileId}`)
 }
+
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  detailRequest += 1
+  expandedId.value = null
+  detailCache.value = {}
+  detailLoading.value = false
+  logs.value = []
+  total.value = 0
+  loading.value = false
+  page.value = 1
+  if (userStore.profile) void loadData()
+}, { flush: 'sync' })
 
 onMounted(() => {
   loadData()

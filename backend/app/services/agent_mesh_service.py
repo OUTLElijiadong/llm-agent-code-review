@@ -656,6 +656,9 @@ def list_conversations(
     )
     if surface:
         rows_query = rows_query.filter(AgentMeshConversation.surface == surface)
+    elif not _is_admin_surface(db, user):
+        # 账号降权后，省略 surface 也不能列出曾经的管理员私有会话。
+        rows_query = rows_query.filter(AgentMeshConversation.surface == "user")
     normalized_query = str(query or "").strip()
     if normalized_query:
         pattern = f"%{normalized_query}%"

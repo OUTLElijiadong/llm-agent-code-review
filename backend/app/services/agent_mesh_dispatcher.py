@@ -776,15 +776,15 @@ def _runtime_handler(
         return _as_mesh_result(result, action="修复提示词生成")
     if code == "security_sentinel":
         if file_id := (data.get("file_id") or context.get("file_id")):
-            result = orch.security_sentinel.scan_file(
+            result = orch.audit_security_for_file(
                 int(file_id),
                 scan_depth=str(data.get("scan_depth") or "standard"),
                 ctx=ctx,
             )
         elif task_id := (data.get("task_id") or context.get("task_id")):
-            result = orch.security_sentinel.scan_task(int(task_id), ctx=ctx)
+            result = orch.audit_security_for_task(int(task_id), ctx=ctx)
         elif project_id := (data.get("project_id") or context.get("project_id")):
-            result = orch.security_sentinel.scan_project(
+            result = orch.audit_security_for_project(
                 int(project_id), top_n=int(data.get("top_n") or 50),
                 scan_mode=str(data.get("scan_mode") or "full"), ctx=ctx,
             )
@@ -933,6 +933,18 @@ def _handle(
     trusted_team_execution: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     code = target_address.split(":", 1)[1]
+    if target_address.startswith("temporary:"):
+        from app.services import agent_team_service, temporary_agent_runtime
+
+        if not trusted_team_execution:
+            return code, _result("blocked", "临时成员只能由当前团队有效任务调用")
+        try:
+            name, definition = agent_team_service.resolve_temporary_member(db, user, target_address, message)
+        except (ValueError, TypeError) as exc:
+            return code, _result("blocked", str(exc), errors=[{"code": "invalid_temporary_member"}])
+        return name, temporary_agent_runtime.run_temporary_agent(
+            db, user, message, definition=definition, display_name=name,
+        )
     if target_address.startswith("custom:"):
         asset = (
             db.query(CustomAgent)

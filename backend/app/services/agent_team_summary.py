@@ -49,6 +49,8 @@ def dependency_coverage_summary(result: dict[str, Any]) -> dict[str, Any]:
         "static_scanned_file_count", "semantic_file_count", "semantic_candidate_source_chars",
         "semantic_attempted_source_chars", "semantic_source_chars", "semantic_failed_batch_count",
         "semantic_char_coverage_ratio", "archive_text_source_chars",
+        "included_file_count", "source_chars_included", "omitted_files",
+        "max_files", "max_file_chars", "max_context_chars",
     )
     projected: dict[str, Any] = {}
     for block in _result_blocks(result):
@@ -60,9 +62,11 @@ def dependency_coverage_summary(result: dict[str, Any]) -> dict[str, Any]:
                 value = source.get(field)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     projected[field] = value
-            for field in ("semantic_complete", "static_complete", "truncated"):
+            for field in ("semantic_complete", "static_complete", "truncated", "complete", "formal_review"):
                 if isinstance(source.get(field), bool):
                     projected[field] = source[field]
+            if source.get("execution_mode") == "analysis_only":
+                projected["execution_mode"] = "analysis_only"
             if isinstance(source.get("scan_mode"), str) and source["scan_mode"] in {"full", "static_full", "triage"}:
                 projected["scan_mode"] = source["scan_mode"]
             if isinstance(source.get("stage"), str) and source["stage"] in {

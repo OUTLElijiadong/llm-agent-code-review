@@ -103,5 +103,8 @@ export function getAgentResponseSession(
 /** 图片只经当前登录态认证接口读取，不将资产地址或blob回传到模型。 */
 export function fetchAgentResponseImage(assetId: number): Promise<Blob> {
   if (!Number.isSafeInteger(assetId) || assetId < 1) throw new Error('图片资产编号无效')
-  return download(`/agent-responses/assets/${assetId}/image`)
+  return download(`/agent-responses/assets/${assetId}/image`, undefined, {
+    // 旧版本曾返回 max-age；升级后也必须回源重新鉴权，不直接复用旧私密缓存。
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  })
 }

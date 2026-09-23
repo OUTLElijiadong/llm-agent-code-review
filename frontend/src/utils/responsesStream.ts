@@ -131,9 +131,6 @@ class SseParser {
     if (!SUPPORTED_EVENTS.has(type as ResponseStreamEventType)) return
 
     const event = { ...parsed, type } as ResponseStreamEvent
-    if (event.type === 'auth_expired') {
-      window.dispatchEvent(new Event('prism:auth-expired'))
-    }
     if (
       (event.type === 'response.output_text.delta'
         || event.type === 'response.function_call_arguments.delta')
@@ -185,6 +182,13 @@ export function streamResponses(
   options: ResponsesStreamOptions,
 ): ResponsesStreamHandle {
   const controller = new AbortController()
+  const token = getToken()
+  const assertCurrent = (): void => {
+    if (controller.signal.aborted || token !== getToken()) {
+      controller.abort()
+      throw new DOMException('Agent 会话已切换', 'AbortError')
+    }
+  }
   const externalSignal = options.signal
 
   const abortFromExternal = () => controller.abort(externalSignal?.reason)
@@ -192,7 +196,6 @@ export function streamResponses(
   else externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
 
   const done = (async (): Promise<void> => {
-    const token = getToken()
     if (!token) throw new Error('登录状态已失效,无法发起 Agent 请求')
 
     const response = await fetch(options.endpoint ?? DEFAULT_ENDPOINT, {
@@ -207,6 +210,7 @@ export function streamResponses(
       signal: controller.signal,
     })
 
+    assertCurrent()
     if (!response.ok) throw await readHttpError(response)
     if (!response.body) throw new Error('Responses 流响应缺少可读内容')
 
@@ -214,6 +218,8 @@ export function streamResponses(
     const decoder = new TextDecoder()
     let hasCompletionBoundary = false
     const parser = new SseParser((event) => {
+      assertCurrent()
+      if (event.type === 'auth_expired') window.dispatchEvent(new Event('prism:auth-expired'))
       if (isCompletionBoundary(event)) {
         // 每个流只派发一次:小菱完成任务,让相关页面刷新数据
         if (!hasCompletionBoundary) {
@@ -228,6 +234,7 @@ export function streamResponses(
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
+      assertCurrent()
       if (streamDone) break
       parser.push(decoder.decode(value, { stream: true }))
     }

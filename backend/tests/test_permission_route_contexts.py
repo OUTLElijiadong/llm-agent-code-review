@@ -35,7 +35,15 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("POST", "/api/me/profile/preference-prompted"),
     } <= paths
     assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 318
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 249
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 251
+    private_assets = {
+        "/api/agent-responses/runs/{run_id}/assets",
+        "/api/agent-responses/assets/{asset_id}/image",
+    }
+    asset_routes = [row for row in plan["routes"] if row["path"] in private_assets]
+    assert {row["path"] for row in asset_routes} == private_assets
+    assert all(row["method"] == "GET" and row["anonymous"] == row["no_permission"] == "ready"
+               for row in asset_routes)
 
 
 @pytest.mark.parametrize(

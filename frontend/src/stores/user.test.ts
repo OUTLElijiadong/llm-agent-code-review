@@ -227,3 +227,41 @@ describe('user store authentication and RBAC', () => {
     expect(api.clearToken).toHaveBeenCalledOnce()
   })
 })
+
+
+describe('认证异步归属', () => {
+  it('退出后迟到的个人资料不能复活旧账号', async () => {
+    let resolve!: (value: unknown) => void
+    api.authMe.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    store.token = 'old-token'
+    const pending = store.fetchProfile()
+    store.logout()
+    resolve(member)
+    await pending
+    expect(store.profile).toBeNull()
+    expect(api.fetchRoles).not.toHaveBeenCalled()
+  })
+
+  it('旧账号 RBAC 不能覆盖新账号权限', async () => {
+    let resolve!: (value: unknown) => void
+    api.fetchRoles.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    store.profile = member
+    const pending = store.fetchUserRoles()
+    store.profile = { ...member, id: 8 }
+    store.roles = ['user']
+    resolve([{ code: 'super_admin' }])
+    await pending
+    expect(store.roles).toEqual(['user'])
+  })
+
+  it('登录请求晚于退出返回时不得恢复认证', async () => {
+    let resolve!: (value: unknown) => void
+    api.authLogin.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const pending = store.login({ username: 'alice', password: 'secret' })
+    store.logout()
+    resolve({ access_token: 'late-token', user: member })
+    await pending
+    expect(store.profile).toBeNull()
+    expect(api.setToken).not.toHaveBeenCalled()
+  })
+})

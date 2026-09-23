@@ -1,210 +1,102 @@
 <script setup lang="ts">
-/**
- * Prism 平台吉祥物「小菱」(Prismling)——一个小棱镜小人偶。
- * 运行中会旋转追光并眨眼,等待交互时显示提示点,空闲时安静呼吸。
- */
-interface Props {
-  size?: number
-  /** 运行状态:idle 空闲 / running 运行中 / waiting 等待用户操作 */
-  status?: 'idle' | 'running' | 'waiting'
-}
+import { computed, getCurrentInstance } from 'vue'
 
-withDefaults(defineProps<Props>(), {
-  size: 56,
-  status: 'idle',
-})
+/** 小菱：保留棱镜识别度的圆润小精灵。状态同时由表情和符号表达。 */
+const props = withDefaults(defineProps<{
+  size?: number
+  status?: 'idle' | 'thinking' | 'working' | 'running' | 'waiting' | 'error'
+  /** 嵌入已命名按钮时保持装饰性；独立展示可开启可读状态。 */
+  decorative?: boolean
+  label?: string
+}>(), { size: 56, status: 'idle', decorative: true, label: '小菱' })
+
+const state = computed(() => props.status === 'running' ? 'working' : props.status)
+const stateLabel = computed(() => ({
+  idle: '准备好了', thinking: '正在思考', working: '正在工作', waiting: '等待你操作', error: '遇到问题',
+})[state.value])
+// 同页消息头像与浮窗会重复使用组件，渐变引用必须属于当前实例。
+const bodyId = `prismling-body-${getCurrentInstance()!.uid}`
 </script>
 
 <template>
   <svg
     class="prismling"
-    :class="`is-${status}`"
+    :class="`is-${state}`"
+    :data-state="state"
     :width="size"
     :height="size"
     viewBox="0 0 64 64"
     fill="none"
-    aria-hidden="true"
+    focusable="false"
+    :role="decorative ? undefined : 'img'"
+    :aria-hidden="decorative ? 'true' : undefined"
+    :aria-label="decorative ? undefined : `${label} · ${stateLabel}`"
   >
     <defs>
-      <linearGradient id="prismling-body" x1="14" y1="14" x2="50" y2="52" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#8F8BFF" />
-        <stop offset="0.55" stop-color="#5B58E8" />
-        <stop offset="1" stop-color="#3DBCD9" />
-      </linearGradient>
-      <linearGradient id="prismling-beam" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#FFD66E" />
-        <stop offset="0.55" stop-color="#7EE3F0" />
-        <stop offset="1" stop-color="#8F8BFF" stop-opacity="0.4" />
+      <linearGradient :id="bodyId" x1="17" y1="13" x2="46" y2="54" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#B2A5FF" />
+        <stop offset="0.52" stop-color="#8174EF" />
+        <stop offset="1" stop-color="#58C9D5" />
       </linearGradient>
     </defs>
-
-    <!-- 折射光束 -->
-    <g class="prismling-beams" stroke-linecap="round">
-      <path d="M5 25 L16 28.5" stroke="url(#prismling-beam)" stroke-width="2.2" />
-      <path d="M48 21 L59 16.5" stroke="#FFD66E" stroke-width="2" />
-      <path d="M49.5 27 L61 27.5" stroke="#7EE3F0" stroke-width="2" />
-      <path d="M48 33 L58.5 38" stroke="#B9B4FF" stroke-width="2" />
-    </g>
-
-    <!-- 圆耳朵(可爱化:柔软的圆角小耳) -->
-    <path d="M20 14.5 Q17 8 23.5 9.5 Q28 10.5 26.5 16.5 Z" fill="#8F8BFF" stroke="#3E3AA6" stroke-opacity="0.3" stroke-width="1.2" stroke-linejoin="round" />
-    <path d="M44 14.5 Q47 8 40.5 9.5 Q36 10.5 37.5 16.5 Z" fill="#8F8BFF" stroke="#3E3AA6" stroke-opacity="0.3" stroke-width="1.2" stroke-linejoin="round" />
-    <path d="M21.6 13.6 Q20.6 10.8 23.4 11.4 Q25.2 11.9 24.4 14.6 Z" fill="#FFB3C7" fill-opacity="0.7" />
-    <path d="M42.4 13.6 Q43.4 10.8 40.6 11.4 Q38.8 11.9 39.6 14.6 Z" fill="#FFB3C7" fill-opacity="0.7" />
-
-    <!-- 头顶小星光(可爱化:随身小星星伙伴) -->
-    <g class="prismling-star">
-      <path d="M32 2.6 L33.1 5.4 L36 5.6 L33.8 7.5 L34.5 10.3 L32 8.8 L29.5 10.3 L30.2 7.5 L28 5.6 L30.9 5.4 Z" fill="#FFD66E" />
-    </g>
-
-    <!-- 小脚 -->
-    <rect x="20.5" y="52" width="7" height="5" rx="2.5" fill="#4540B8" />
-    <rect x="36.5" y="52" width="7" height="5" rx="2.5" fill="#4540B8" />
-
-    <!-- 棱镜身体 -->
-    <path
-      d="M32 9 L53 47.5 Q53.8 49.6 51.9 49.6 L12.1 49.6 Q10.2 49.6 11 47.5 Z"
-      fill="url(#prismling-body)"
-      stroke="#3E3AA6"
-      stroke-opacity="0.35"
-      stroke-width="1.5"
-      stroke-linejoin="round"
-    />
-    <!-- 身体高光 -->
-    <path d="M32 13 L40 29 L32 46 L24 29 Z" fill="#FFFFFF" fill-opacity="0.14" />
-    <path d="M32 13 L24 29 L14.5 46" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="1.2" />
-
-    <!-- 表情(可爱化:亮晶晶大眼 + 猫猫嘴 + 软腮红) -->
-    <g class="prismling-face">
-      <g class="prismling-eyes">
-        <ellipse cx="25.5" cy="33.2" rx="2.9" ry="3.2" fill="#FFFFFF" />
-        <ellipse cx="38.5" cy="33.2" rx="2.9" ry="3.2" fill="#FFFFFF" />
-        <circle cx="24.7" cy="32.1" r="1" fill="#B9F0FA" fill-opacity="0.95" />
-        <circle cx="37.7" cy="32.1" r="1" fill="#B9F0FA" fill-opacity="0.95" />
-        <circle cx="26.3" cy="34.4" r="0.5" fill="#FFFFFF" />
-        <circle cx="39.3" cy="34.4" r="0.5" fill="#FFFFFF" />
+    <ellipse class="prismling-shadow" cx="32" cy="58" rx="13" ry="2.6" fill="#7362CD" opacity=".15" />
+    <g class="prismling-float">
+      <!-- 小光翼与短手让轮廓柔软，中心仍是四角菱形。 -->
+      <path d="M15 27C5 19 3 30 12 36M49 27C59 19 61 30 52 36" fill="#CBF4F3" stroke="#94DCD9" stroke-width="1.3" stroke-linejoin="round" />
+      <path class="prismling-body" d="M27 10Q32 5 37 10L52 25Q58 31 52 38L38 52Q32 58 26 52L12 38Q6 31 12 25Z" :fill="`url(#${bodyId})`" stroke="#7165CC" stroke-width="1.4" />
+      <path d="M29 12Q32 9 35 12L43 20Q32 15 21 23Z" fill="white" opacity=".34" />
+      <path d="M33 46L41 43L35 51Q32 54 29 51Z" fill="#A9F1EC" opacity=".45" />
+      <ellipse cx="32" cy="32.5" rx="17.2" ry="14" fill="#F8F7FF" />
+      <ellipse cx="20.5" cy="37" rx="3.2" ry="2.1" fill="#F5B6CF" opacity=".8" />
+      <ellipse cx="43.5" cy="37" rx="3.2" ry="2.1" fill="#F5B6CF" opacity=".8" />
+      <g class="prismling-eyes" fill="#443867">
+        <template v-if="state === 'error'">
+          <path d="M22 28L28 30M36 30L42 28" stroke="#443867" stroke-width="1.8" stroke-linecap="round" />
+          <ellipse cx="25" cy="33" rx="2" ry="2.5" />
+          <ellipse cx="39" cy="33" rx="2" ry="2.5" />
+        </template>
+        <template v-else>
+          <ellipse :cx="state === 'thinking' ? 26 : 25" cy="30.5" rx="2.8" ry="3.6" />
+          <ellipse :cx="state === 'thinking' ? 40 : 39" cy="30.5" rx="2.8" ry="3.6" />
+          <circle :cx="state === 'thinking' ? 25.2 : 24.2" cy="29.3" r="1" fill="white" />
+          <circle :cx="state === 'thinking' ? 39.2 : 38.2" cy="29.3" r="1" fill="white" />
+        </template>
       </g>
-      <path
-        class="prismling-mouth"
-        d="M27.5 40.2 Q29.7 42.8 32 40.2 Q34.3 42.8 36.5 40.2"
-        stroke="#FFFFFF"
-        stroke-width="2"
-        stroke-linecap="round"
-        fill="none"
-      />
-      <ellipse cx="19.8" cy="38.6" rx="2.7" ry="2.1" fill="#FFB3C7" fill-opacity="0.8" />
-      <ellipse cx="44.2" cy="38.6" rx="2.7" ry="2.1" fill="#FFB3C7" fill-opacity="0.8" />
+      <path v-if="state === 'error'" d="M29 40Q32 37 35 40" stroke="#69538A" stroke-width="1.8" stroke-linecap="round" />
+      <ellipse v-else-if="state === 'thinking' || state === 'waiting'" cx="32" cy="38.5" rx="2" ry="2.4" fill="#8A6DAB" />
+      <path v-else d="M28 37Q32 42 36 37" stroke="#69538A" stroke-width="1.9" stroke-linecap="round" />
+      <path class="prismling-hand" d="M12 35Q6 38 10 41Q13 42 16 39M49 38Q53 42 56 38" stroke="#9385E8" stroke-width="3.6" stroke-linecap="round" />
+      <path class="prismling-crown" d="M29 6L32 1.8L35 6L32 9Z" fill="#F9CF72" stroke="#E9B95A" stroke-width=".7" stroke-linejoin="round" />
     </g>
-
-    <!-- 身旁闪烁小星(可爱化:陪伴星星) -->
-    <g class="prismling-sparkles">
-      <path d="M8.5 12 L9.3 14 L11.3 14.8 L9.3 15.6 L8.5 17.6 L7.7 15.6 L5.7 14.8 L7.7 14 Z" fill="#FFD66E" fill-opacity="0.9" />
-      <path d="M56 44 L56.6 45.5 L58.1 46.1 L56.6 46.7 L56 48.2 L55.4 46.7 L53.9 46.1 L55.4 45.5 Z" fill="#7EE3F0" fill-opacity="0.9" />
+    <g v-if="state === 'thinking'" class="prismling-thought" fill="#A28BDD">
+      <circle cx="51" cy="18" r="1.5" /><circle cx="55" cy="13" r="2" /><circle cx="58" cy="6.5" r="2.6" />
     </g>
-
-    <!-- 等待用户操作时的提示点 -->
-    <g v-if="status === 'waiting'" class="prismling-attention">
-      <circle cx="51" cy="13" r="6.5" fill="#D9A857" stroke="#FFFFFF" stroke-width="2" />
-      <text x="51" y="16.5" text-anchor="middle" font-size="9" font-weight="700" fill="#FFFFFF">!</text>
+    <g v-else-if="state === 'waiting' || state === 'error'" class="prismling-attention">
+      <circle cx="52" cy="12" r="8" :fill="state === 'error' ? '#C95E78' : '#CA9643'" stroke="white" stroke-width="2" />
+      <path d="M52 8V12" stroke="white" stroke-width="2" stroke-linecap="round" /><circle cx="52" cy="15.3" r="1" fill="white" />
+    </g>
+    <g v-else-if="state === 'working'" class="prismling-work-spark" fill="#F3C25E">
+      <path d="M53 5L55 10L60 12L55 14L53 19L51 14L46 12L51 10Z" />
+      <path d="M7 12L8 15L11 16L8 17L7 20L6 17L3 16L6 15Z" />
     </g>
   </svg>
 </template>
 
 <style scoped>
-.prismling {
-  display: block;
-  transform-origin: 50% 78%;
-}
-
-.is-idle {
-  animation: prismling-breathe 3.2s ease-in-out infinite;
-}
-
-.is-running {
-  animation: prismling-bob 0.9s ease-in-out infinite;
-}
-
-.is-running .prismling-beams {
-  animation: prismling-spin 1.5s linear infinite;
-  transform-origin: 32px 32px;
-}
-
-.is-running .prismling-face {
-  animation: prismling-focus 0.9s ease-in-out infinite;
-}
-
-.prismling-eyes {
-  transform-origin: 32px 33.5px;
-  animation: prismling-blink 4.6s ease-in-out infinite;
-}
-
-.is-waiting .prismling-attention {
-  animation: prismling-pop 1.1s ease-in-out infinite;
-  transform-origin: 51px 13px;
-}
-
-/* 可爱化:头顶小星随呼吸轻晃,身旁星星交替闪烁 */
-.prismling-star {
-  transform-origin: 32px 6px;
-  animation: prismling-star-sway 2.6s ease-in-out infinite;
-}
-
-.prismling-sparkles {
-  animation: prismling-twinkle 2.2s ease-in-out infinite;
-}
-
-.is-running .prismling-sparkles {
-  animation-duration: 1.2s;
-}
-
-@keyframes prismling-star-sway {
-  0%, 100% { transform: rotate(-8deg) translateY(0); }
-  50% { transform: rotate(8deg) translateY(-0.8px); }
-}
-
-@keyframes prismling-twinkle {
-  0%, 100% { opacity: 0.35; transform: scale(0.86); }
-  50% { opacity: 1; transform: scale(1.08); }
-}
-
-@keyframes prismling-breathe {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-1.5px) scale(1.015); }
-}
-
-@keyframes prismling-bob {
-  0%, 100% { transform: translateY(0) rotate(-2deg); }
-  50% { transform: translateY(-2.5px) rotate(2deg); }
-}
-
-@keyframes prismling-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes prismling-blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(0.12); }
-}
-
-@keyframes prismling-focus {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(1.2px); }
-}
-
-@keyframes prismling-pop {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.18); }
-}
-
+.prismling { display: block; flex-shrink: 0; overflow: visible; }
+.prismling-float { transform-origin: 32px 34px; animation: prismling-breathe 4s ease-in-out infinite; }
+.prismling-eyes { transform-origin: 32px 31px; animation: prismling-blink 5.4s ease-in-out infinite; }
+.is-thinking .prismling-float { animation-duration: 3s; }
+.is-thinking .prismling-thought { animation: prismling-thought 2s ease-in-out infinite; }
+.is-working .prismling-float { animation: prismling-work 1.8s ease-in-out infinite; }
+.is-working .prismling-work-spark { transform-origin: 53px 12px; animation: prismling-thought 1.8s ease-in-out infinite; }
+.is-waiting .prismling-float { animation-duration: 5s; }
+.is-error .prismling-float, .is-error .prismling-eyes { animation: none; }
+@keyframes prismling-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.3px); } }
+@keyframes prismling-blink { 0%, 91%, 97%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.15); } }
+@keyframes prismling-work { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-1.8px) rotate(2deg); } }
+@keyframes prismling-thought { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .prismling,
-  .prismling-beams,
-  .prismling-eyes,
-  .prismling-face,
-  .prismling-attention,
-  .prismling-star,
-  .prismling-sparkles {
-    animation: none !important;
-  }
+  .prismling *, .prismling { animation: none !important; transition: none !important; }
 }
 </style>

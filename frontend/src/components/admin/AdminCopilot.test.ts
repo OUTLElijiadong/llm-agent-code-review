@@ -37,6 +37,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import AdminCopilot from './AdminCopilot.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
+import { useUserStore } from '@/stores/user'
 
 function flushSessionRestore(): Promise<void> {
   return new Promise((resolve) => {
@@ -1282,4 +1283,26 @@ describe('AdminCopilot 图片入口布局', () => {
     expect(composer.find('.send-button').exists() || composer.find('.stop-button').exists()).toBe(true)
     wrapper.unmount()
   })
+})
+
+
+it('管理端切换账号立即清空私密消息及未发送草稿', async () => {
+  const wrapper = mountCopilot()
+  const user = useUserStore()
+  user.profile = { id: 101, username: 'admin-a', role: 'admin', status: 1 }
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  await wrapper.find('textarea').setValue('管理账号 A 私密问题')
+  await wrapper.find('.send-button').trigger('click')
+  await flushPromises()
+  emit(0, { type: 'response.output_text.delta', delta: '管理账号 A 私密答复' })
+  await flushPromises()
+  user.profile = { id: 202, username: 'admin-b', role: 'admin', status: 1 }
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('管理账号 A 私密')
+  expect(streams.records[0].aborted).toBe(true)
+  emit(0, { type: 'response.sensitive.result', values: ['旧账号密钥'], title: '迟到敏感结果' })
+  await finish(0)
+  expect(wrapper.text()).not.toContain('旧账号密钥')
+  wrapper.unmount()
 })

@@ -37,7 +37,7 @@ async function load(): Promise<void> {
   }
 }
 
-watch(() => [props.assetId, props.ownerId, userStore.profile?.id], () => { void load() }, { immediate: true })
+watch(() => [props.assetId, props.ownerId, userStore.profile?.id, userStore.token], () => { void load() }, { immediate: true, flush: 'sync' })
 onBeforeUnmount(() => {
   generation += 1
   clearSource()

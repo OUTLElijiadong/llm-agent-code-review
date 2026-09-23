@@ -1144,6 +1144,9 @@ class PrismToolExecutor:
                 async for ev in agent_event_bus.AgentEventBus.instance().subscribe():
                     if ev.type != AgentEventType.PROGRESS:
                         continue
+                    # 总线同时承载其他账号和会话；只转发当前账号当前运行的审计进度。
+                    if ev.user_id != int(self._user.id) or ev.trace_id != self._run_id:
+                        continue
                     phase = str((ev.payload or {}).get("phase") or "")
                     if phase not in self._AUDIT_PHASE_LABELS:
                         continue
@@ -1180,6 +1183,7 @@ class PrismToolExecutor:
             )
         finally:
             relay.cancel()
+            await asyncio.gather(relay, return_exceptions=True)
 
     async def _run_full_project_validation(self, call: ToolCall) -> ToolExecutionResult:
         """创建一次组合沙箱并在同一固定工具调用中等待其真实终态。"""
@@ -1321,32 +1325,37 @@ class PrismToolExecutor:
     def _save_knowledge_note(self, call: ToolCall) -> ToolExecutionResult:
         """把小菱的学习感悟/操作要点写入知识笔记本(写操作已先经审批)。"""
 
-        row = agent_knowledge_service.add_document(
+        from app.services import knowledge_service
+
+        source_ref = f"response_run:{self._run_id}:{call.call_id}"
+        if len(source_ref) > 64:
+            # 复用个人知识表的64字符引用列，长run/call仍稳定幂等。
+            source_ref = "response_run:" + hashlib.sha256(source_ref.encode()).hexdigest()[:48]
+        row = knowledge_service.add_document(
             self._db,
-            agent_code=self._knowledge_agent_code(),
             user_id=int(self._user.id),
             title=str(call.arguments["title"]),
             content=str(call.arguments["content"]),
             source_type="manual",
-            source_ref=f"response_run:{self._run_id}",
-            risk_level="medium",
-            confidence=float(call.arguments.get("confidence") or 0.8),
+            source_ref=source_ref,
+            replace_existing=True,
         )
         try:
             from app.services import audit_service
 
             audit_service.log(
                 self._db, self._user, "agent_tool.knowledge_note_save",
-                target_type="agent_knowledge_doc", target_id=str(getattr(row, "id", "")),
+                target_type="knowledge_doc", target_id=str(getattr(row, "id", "")),
                 detail="小菱侧写入知识笔记(经审批)",
             )
         except Exception:  # noqa: BLE001 - 审计失败不影响工具结果
             logger.debug("knowledge_note_save 审计落库失败")
         return ToolExecutionResult.success({
+            "owner_type": "user",
             "doc_id": row.id,
             "title": row.title,
             "status": row.status,
-            "message": "已写入知识笔记本" if row.status == "active" else "已提交知识笔记本,等待审批激活",
+            "message": "已写入当前账号的个人知识库",
         })
 
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
@@ -1529,7 +1538,7 @@ class PrismToolExecutor:
         session = DiscussionBus.instance().get_session(session_id)
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
-        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
+        if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权访问该圆桌讨论")
         return ToolExecutionResult.success({
             "session_id": session.session_id,
@@ -1554,7 +1563,7 @@ class PrismToolExecutor:
         session = bus.get_session(session_id)
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
-        if int(session.owner_user_id) != int(self._user.id) and not _is_admin_actor(self._db, self._user):
+        if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
         if session.status == "concluded":
             if action != "user_input":
@@ -3083,8 +3092,15 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "dashboard 只用于看板汇总且 input 必须带 operation（summary|risk_distribution|score_trend 之一）；"
         "不得把只读核验交给 run_project_tests 或 run_full_project_validation。"
         "只有用户明确要求实际运行测试时，才允许使用后两种执行操作。"
-        "你是代码审查和安全审计的总控。用户要求多 Agent 同步审查时，只复用已存在且可执行的 Agent，"
-        "create_agent_team 仅编组现有成员，不创建新的 Agent 定义。"
+        "你是代码审查和安全审计的总控。用户要求多 Agent 同步审查时，可复用既有可执行成员，"
+        "也可现场生成一个或多个 temporary:<member_key> 成员，提供 definition={purpose,instructions}，"
+        "并用 create_agent_team 混合编组；独立工作节点不互相依赖，才能实际并行。"
+        "临时定义仅当前账号、当前团队任务可执行，任务结束保留审计记录，不进入永久 Agent 库。"
+        "临时成员是独立提示词的专项分析 Agent，input 可含 text、project_id、file_id 或 file_ids，"
+        "file_id 与 file_ids 互斥且文件必须同项目；最多分析5文件、每文件12000字符、结构化用户上下文总60000字符，"
+        "结果必须披露范围，不能代替完整项目审查或正式报告。"
+        "临时成员不自行写数据；用户要求的业务操作由你调用当前账号已有权限的工具与审批链完成，"
+        "不得因为临时成员只读就拒绝本账号可执行的正常操作，也不得授予临时定义额外权限。"
         "项目级审查成员必须为 agent:review_orchestrator，input={operation:'run_review',project_id,"
         "review_type:'full'}，安全专项可用 review_type:'security'，需要指定文件时带 file_ids。"
         "该成员复用正式审查任务，由现有专业画像并行审查并聚合去重，返回真实终态、task_id 和覆盖证据。"
@@ -3094,7 +3110,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "不得把有界语义检查称为完整语义覆盖。max_active_children 至少为2。"
         "需要核验既有黑盒证据时用 agent:test_verifier(input={operation:'inspect_existing_results',project_id})，"
         "只有用户明确要求实际运行测试才使用 run_project_tests；查看历史不等于运行黑盒测试。"
-        "最终汇总成员使用 agent:reporter 且 role='summarizer'，depends_on 包含所有工作节点，"
+        "正式审查最终汇总成员使用 agent:reporter 且 role='summarizer'，depends_on 包含所有工作节点，"
+        "一般分析也可生成临时汇总成员，必须区分已有证据、推断和未覆盖范围。"
         "不能用平台 dashboard 风险分布替代本团队结果。汇总后由你复核覆盖、未完成项和任务/报告引用，"
         "只在真实终态成功时说已完成；排队、部分失败、取消与超时必须明确报告，保留部分发现。"
         "用户要求修改自己的密码时，先说明修改成功后需要重新登录，并用 ask_user 收集旧密码与新密码，"

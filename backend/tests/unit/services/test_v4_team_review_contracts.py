@@ -17,7 +17,7 @@ def _orch(monkeypatch, **agents):
 
 def test_project_security_member_preserves_explicit_scan_mode(monkeypatch):
     sentinel = SimpleNamespace(scan_project=Mock(return_value=AgentResult(success=True, data={})))
-    _orch(monkeypatch, security_sentinel=sentinel)
+    _orch(monkeypatch, audit_security_for_project=sentinel.scan_project)
     result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "security_sentinel", {
         "payload": {"project_id": 8, "scan_mode": "static_full"},
     })
@@ -31,7 +31,7 @@ def test_partial_security_result_keeps_coverage_and_findings(monkeypatch):
     sentinel = SimpleNamespace(scan_project=Mock(return_value=AgentResult(
         success=False, data=partial, error="语义审计未完成", failure_kind="output_truncated",
     )))
-    _orch(monkeypatch, security_sentinel=sentinel)
+    _orch(monkeypatch, audit_security_for_project=sentinel.scan_project)
     result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "security_sentinel", {
         "payload": {"project_id": 8, "scan_mode": "full"},
     })

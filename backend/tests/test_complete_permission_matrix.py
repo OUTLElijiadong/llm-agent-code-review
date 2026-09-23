@@ -85,7 +85,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert len({(row["method"], row["path"]) for row in ROUTES}) == 332
     assert len({row["source"] for row in ROUTES}) == 42
     assert len(AUTHENTICATED_ROUTES) == 318
-    assert len(GUARDED_ROUTES) == 249
+    assert len(GUARDED_ROUTES) == 251
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -102,6 +102,8 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert len(catalog) == 1
     assert catalog[0]["guards"] == ["security:view"]
     expected_new_routes = {
+        ("GET", "/api/agent-responses/runs/{run_id}/assets"): ["agent:chat"],
+        ("GET", "/api/agent-responses/assets/{asset_id}/image"): ["agent:chat"],
         ("GET", "/api/agent-mesh/conversations"): ["agent:chat"],
         ("POST", "/api/agent-mesh/conversations/restore"): ["agent:chat"],
         ("POST", "/api/agent-mesh/inbox/pull"): ["agent:chat"],

@@ -19,6 +19,7 @@ export interface AiLogOut {
 }
 
 export interface AiLogDetailOut {
+  content_redacted?: boolean
   id: number
   task_id?: number
   task_name?: string

@@ -55,7 +55,17 @@ def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
     assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 318
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 249
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 251
+    private_assets = {
+        "/api/agent-responses/runs/{run_id}/assets",
+        "/api/agent-responses/assets/{asset_id}/image",
+    }
+    asset_routes = [row for row in plan["routes"] if row["path"] in private_assets]
+    assert {row["path"] for row in asset_routes} == private_assets
+    assert all(row["method"] == "GET" and row["anonymous"] == row["no_permission"] == "ready"
+               for row in asset_routes)
+    assert all(row["guard"] == "app.core.rbac_dependency.require_permission.<locals>._dependency"
+               for row in asset_routes)
     plan["source_sha256"]["app/core/dependencies.py"] = "0" * 64
     with pytest.raises(ValueError, match="不匹配"):
         runner_module.validate_plan(plan, PATH.parents[1])
