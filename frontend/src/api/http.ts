@@ -29,6 +29,8 @@ declare global {
 declare module 'axios' {
   interface AxiosRequestConfig {
     silentCodes?: number[]
+    /** 后台轮询无 HTTP 响应时由宿主局部处理，避免每个请求各弹一次网络错误。 */
+    silentTransportError?: boolean
   }
 }
 
@@ -164,7 +166,8 @@ http.interceptors.response.use(
       }
       return Promise.reject(data || err)
     }
-    if (!loginRequest && !isSilent(err.config, data)) {
+    if (!loginRequest && !isSilent(err.config, data)
+      && !(err.config?.silentTransportError && !err.response)) {
       const message = data?.message || err.message || '网络错误'
       ElMessage.error(message)
     }
@@ -191,14 +194,20 @@ function cleanParams(params?: object): object | undefined {
   return out
 }
 
-export async function get<T>(url: string, params?: object, silentCodes?: number[]): Promise<T> {
-  const r = await http.get<Resp<T>>(url, { params: cleanParams(params), silentCodes })
+export async function get<T>(url: string, params?: object, silentCodes?: number[], silentTransportError = false): Promise<T> {
+  const r = await http.get<Resp<T>>(url, {
+    params: cleanParams(params), silentCodes,
+    ...(silentTransportError ? { silentTransportError: true } : {}),
+  })
   return r.data.data as T
 }
 
 
-export async function post<T>(url: string, body?: object, params?: object, silentCodes?: number[]): Promise<T> {
-  const r = await http.post<Resp<T>>(url, body, { params: cleanParams(params), silentCodes })
+export async function post<T>(url: string, body?: object, params?: object, silentCodes?: number[], silentTransportError = false): Promise<T> {
+  const r = await http.post<Resp<T>>(url, body, {
+    params: cleanParams(params), silentCodes,
+    ...(silentTransportError ? { silentTransportError: true } : {}),
+  })
   return r.data.data as T
 }
 

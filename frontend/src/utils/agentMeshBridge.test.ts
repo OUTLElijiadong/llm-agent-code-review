@@ -254,6 +254,52 @@ describe('Agent Mesh session bridge', () => {
     expect(api.inbox.mock.calls.map((call) => call[1])).toEqual(['session-current-01'])
   })
 
+  it('网络中断后停止本轮其余会话请求，恢复时仍同步全部会话', async () => {
+    api.heartbeat.mockRejectedValueOnce({ code: 'ERR_NETWORK', message: 'Network Error' })
+    const bridge = createAgentMeshBridge({
+      surface: 'user',
+      getSessionId: () => 'one', getTitle: () => '当前会话',
+      getSessions: () => [{ id: 'one', title: '一' }, { id: 'two', title: '二' }],
+      isBusy: () => false, onMessage: vi.fn().mockResolvedValue(true),
+    })
+    await bridge.syncNow()
+    expect(api.heartbeat).toHaveBeenCalledTimes(1)
+    expect(api.inbox).not.toHaveBeenCalled()
+
+    await bridge.syncNow()
+    expect(api.heartbeat.mock.calls.map((call) => call[0].session_id)).toEqual(['one', 'one', 'two'])
+    expect(api.inbox.mock.calls.map((call) => call[1])).toEqual(['one', 'two'])
+  })
+
+  it('网络中断后轮询退避，恢复成功后回到普通间隔', async () => {
+    vi.useFakeTimers()
+    try {
+      api.heartbeat
+        .mockRejectedValueOnce({ code: 'ERR_NETWORK', message: 'Network Error' })
+        .mockRejectedValueOnce({ code: 'ERR_NETWORK', message: 'Network Error' })
+      const bridge = createAgentMeshBridge({
+        surface: 'user', getSessionId: () => 'one', getTitle: () => '会话',
+        isBusy: () => false, onMessage: vi.fn().mockResolvedValue(true), intervalMs: 1000,
+      })
+      bridge.start()
+      await Promise.resolve()
+      expect(api.heartbeat).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(api.heartbeat).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.heartbeat).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(3999)
+      expect(api.heartbeat).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.heartbeat).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(api.heartbeat).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.heartbeat).toHaveBeenCalledTimes(4)
+      bridge.stop()
+    } finally { vi.useRealTimers() }
+  })
+
   it('同页显式恢复归档会话后重新心跳并认领该会话消息', async () => {
     let archived = true
     const receive = vi.fn().mockResolvedValue(true)

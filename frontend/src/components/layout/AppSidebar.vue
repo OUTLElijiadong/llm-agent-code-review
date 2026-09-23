@@ -20,6 +20,7 @@ import {
   Fold,
   Expand,
   ArrowDown,
+  Close,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
@@ -201,6 +202,9 @@ function go(item: MenuItem): void {
           <el-icon><component :is="isCollapsed ? Expand : Fold" /></el-icon>
         </button>
       </el-tooltip>
+      <button class="sidebar-mobile-close" type="button" aria-label="关闭侧边栏" @click="emit('close')">
+        <el-icon><Close /></el-icon>
+      </button>
     </div>
 
     <nav class="sidebar-nav" aria-label="主导航">
@@ -216,7 +220,7 @@ function go(item: MenuItem): void {
         </button>
         <div v-if="isCollapsed" class="nav-group-divider" aria-hidden="true"></div>
 
-        <div v-show="isCollapsed || isGroupExpanded(group.key)" class="nav-group-items">
+        <div v-show="(isCollapsed && !props.mobileOpen) || isGroupExpanded(group.key)" class="nav-group-items">
           <el-tooltip
             v-for="item in group.items"
             :key="item.path"
@@ -329,6 +333,10 @@ function go(item: MenuItem): void {
     border-color: rgba(255, 255, 255, 0.24);
     outline: none;
   }
+}
+
+.sidebar-mobile-close {
+  display: none;
 }
 
 .is-collapsed .sidebar-toggle {
@@ -495,7 +503,20 @@ function go(item: MenuItem): void {
   }
 
   .sidebar-logo {
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr) 40px;
+  }
+
+  .sidebar-mobile-close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--side-text);
+    cursor: pointer;
   }
 
   .nav-group-toggle {
@@ -526,7 +547,7 @@ function go(item: MenuItem): void {
   }
 
   .app-sidebar.is-collapsed .sidebar-logo {
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr) 40px;
     justify-items: start;
     gap: 12px;
     height: var(--header-height);

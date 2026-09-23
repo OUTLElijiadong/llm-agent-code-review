@@ -151,6 +151,22 @@ describe('http interceptors', () => {
     expect(harness.messageError).toHaveBeenLastCalledWith('Network Error')
   })
 
+  it('keeps background transport failures local while still reporting server failures', async () => {
+    harness.messageError.mockClear()
+    const config = { silentTransportError: true }
+    const disconnected = { config, code: 'ERR_NETWORK', message: 'Network Error' }
+    await expect(harness.state.responseRejected!(disconnected)).rejects.toBe(disconnected)
+    expect(harness.messageError).not.toHaveBeenCalled()
+
+    const forbidden = { code: 40300, message: '无权访问', data: null }
+    await expect(harness.state.responseRejected!({
+      config,
+      response: { status: 403, data: forbidden },
+      message: 'Forbidden',
+    })).rejects.toBe(forbidden)
+    expect(harness.messageError).toHaveBeenCalledWith('无权访问')
+  })
+
   it('解析 Blob 形式的领域导出错误并保留下一步操作', async () => {
     const data = { code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON', retryable: false }
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })

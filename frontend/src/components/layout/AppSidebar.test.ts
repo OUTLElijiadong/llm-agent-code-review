@@ -48,8 +48,9 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.role = 'user'
   })
 
-  function mountSidebar() {
+  function mountSidebar(mobileOpen = false) {
     return mount(AppSidebar, {
+      props: { mobileOpen },
       global: {
         stubs: {
           'el-icon': true,
@@ -111,5 +112,20 @@ describe('AppSidebar ordinary member navigation', () => {
     expect(wrapper.classes()).toContain('is-collapsed')
     expect(window.localStorage.getItem('prism.sidebar.collapsed')).toBe('1')
     expect(wrapper.findAll('.nav-group-toggle').length).toBeGreaterThan(0)
+  })
+
+  it('桌面收起状态不妨碍手机抽屉折叠分组与关闭', async () => {
+    window.localStorage.setItem('prism.sidebar.collapsed', '1')
+    const wrapper = mountSidebar(true)
+    const group = wrapper.get('.nav-group-toggle')
+    const items = wrapper.get('.nav-group-items')
+
+    expect(items.attributes('style') ?? '').not.toContain('display: none')
+    await group.trigger('click')
+    expect(group.attributes('aria-expanded')).toBe('false')
+    expect(items.attributes('style')).toContain('display: none')
+
+    await wrapper.get('button[aria-label="关闭侧边栏"]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 })

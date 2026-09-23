@@ -56,11 +56,22 @@ function isGoneHeartbeat(reason: unknown): boolean {
   return typeof message === 'string' && message.includes('会话已归档')
 }
 
+/** Axios 没有收到 HTTP 响应时的网络/超时错误；与服务端业务拒绝分开处理。 */
+function isTransportFailure(reason: unknown): boolean {
+  if (!reason || typeof reason !== 'object') return false
+  const error = reason as { code?: unknown; response?: unknown }
+  return !error.response && (
+    error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+  )
+}
+
 export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMeshBridge {
   const handled = new Set<string>()
   /** 本轮已判定归档/未注册的会话:跳过轮询,避免对死会话反复 heartbeat+403。 */
   const goneSessions = new Set<string>()
   let timer: number | undefined
+  let started = false
+  let transportFailures = 0
   let stopped = false
   let generation = 0
   let syncingGeneration: number | undefined
@@ -88,6 +99,7 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
         : []
     if (!sessions.length) return
     syncingGeneration = syncGeneration
+    let transportFailed = false
     try {
       const activeRun = options.getActiveRun?.()
       const failedHeartbeatSessions = new Set<string>()
@@ -107,9 +119,15 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           if (!isCurrentSync()) return
         } catch (reason) {
           if (!isCurrentSync()) return
+          // 断网时继续遍历会话只会制造一批相同失败；整轮停止并退避。
+          if (isTransportFailure(reason)) {
+            transportFailed = true
+            transportFailures = Math.min(transportFailures + 1, 3)
+            return
+          }
           if (isGoneHeartbeat(reason)) markGone(session.id)
           else failedHeartbeatSessions.add(session.id)
-          // 单个后台会话失效或网络失败，不阻断其余会话的消息回收。
+          // 单个后台会话的业务失败不阻断其余会话的消息回收。
           continue
         }
       }
@@ -129,6 +147,11 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
           if (!isCurrentSync()) return
         } catch (reason) {
           if (!isCurrentSync()) return
+          if (isTransportFailure(reason)) {
+            transportFailed = true
+            transportFailures = Math.min(transportFailures + 1, 3)
+            return
+          }
           // 会话已归档/未注册:正常生命周期,标记后跳过,并通知宿主收敛会话列表。
           if (errorCode(reason) === AGENT_MESH_SESSION_GONE_CODE) {
             markGone(session.id)
@@ -156,23 +179,35 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
     } catch {
       // 短暂网络故障由下一轮心跳重试，不干扰用户当前对话。
     } finally {
+      if (isCurrentSync() && !transportFailed) transportFailures = 0
       if (syncingGeneration === syncGeneration) syncingGeneration = undefined
     }
   }
 
+  function scheduleNext(): void {
+    if (!started || stopped || timer !== undefined) return
+    const delay = (options.intervalMs ?? 5_000) * (2 ** transportFailures)
+    timer = window.setTimeout(() => {
+      timer = undefined
+      void syncNow().then(scheduleNext, scheduleNext)
+    }, delay)
+  }
+
   function start(): void {
-    if (timer !== undefined) return
+    if (started) return
+    started = true
     stopped = false
-    void syncNow()
-    timer = window.setInterval(() => void syncNow(), options.intervalMs ?? 5_000)
+    void syncNow().then(scheduleNext, scheduleNext)
   }
 
   function stop(): void {
+    started = false
     stopped = true
     generation += 1
     syncingGeneration = undefined
-    if (timer !== undefined) window.clearInterval(timer)
+    if (timer !== undefined) window.clearTimeout(timer)
     timer = undefined
+    transportFailures = 0
     // 宿主在切换登录账号时复用 bridge 实例，绝不沿用旧账号的去重/失效标记。
     handled.clear()
     goneSessions.clear()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
@@ -22,6 +22,13 @@ function toggleSidebar(): void {
 function closeSidebar(): void {
   sidebarVisible.value = false
 }
+
+function closeSidebarOnEscape(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && sidebarVisible.value) closeSidebar()
+}
+
+onMounted(() => window.addEventListener('keydown', closeSidebarOnEscape))
+onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape))
 
 </script>
 

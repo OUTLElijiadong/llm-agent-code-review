@@ -1,5 +1,8 @@
+import { mount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import { describe, expect, it } from 'vitest'
 import source from './AppLayout.vue?raw'
+import AppLayout from './AppLayout.vue'
 
 const styles = source.split('<style scoped lang="scss">')[1].split('</style>')[0]
 
@@ -17,5 +20,34 @@ describe('用户布局底部操作区避让小菱入口', () => {
     const main = media.match(/\.app-layout-main\s*\{([^}]+)\}/)?.[1] ?? ''
     expect(main).toContain('padding-inline:')
     expect(main).not.toMatch(/(?:^|;)\s*padding(?:-bottom)?\s*:/)
+  })
+})
+
+describe('移动端导航抽屉', () => {
+  it('打开后按 Esc 关闭', async () => {
+    const wrapper = mount(AppLayout, {
+      global: {
+        stubs: {
+          AppSidebar: defineComponent({
+            props: ['mobileOpen'],
+            template: '<aside :data-open="mobileOpen" />',
+          }),
+          AppHeader: defineComponent({
+            emits: ['toggle-sidebar'],
+            template: '<button class="open-sidebar" @click="$emit(\'toggle-sidebar\')" />',
+          }),
+          RouterView: true,
+          ProactivePageGuide: true,
+          XiaolingGreeter: true,
+        },
+      },
+    })
+
+    await wrapper.get('.open-sidebar').trigger('click')
+    expect(wrapper.get('aside').attributes('data-open')).toBe('true')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('aside').attributes('data-open')).toBe('false')
+    wrapper.unmount()
   })
 })

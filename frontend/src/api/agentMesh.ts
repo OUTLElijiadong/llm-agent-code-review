@@ -79,6 +79,7 @@ export function heartbeatAgentMesh(input: {
   return post<AgentMeshAddress>(
     '/agent-mesh/conversations/heartbeat', input, undefined,
     silentGone ? [40921] : undefined,
+    true,
   )
 }
 
@@ -127,7 +128,7 @@ export function pullAgentMeshInbox(
     surface,
     session_id: sessionId,
     limit,
-  }, [AGENT_MESH_SESSION_GONE_CODE])
+  }, [AGENT_MESH_SESSION_GONE_CODE], true)
 }
 
 /**

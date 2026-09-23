@@ -883,7 +883,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration) return
   try {
     const requestedUserId = userStore.profile?.id
-    const session = await getAgentResponseSession('user', sessionId.value)
+    const session = await getAgentResponseSession('user', sessionId.value, true)
     if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0

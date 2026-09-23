@@ -1166,6 +1166,7 @@ onUnmounted(() => {
 
   .head-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
     margin-top: 4px;
@@ -1177,11 +1178,36 @@ onUnmounted(() => {
 
   .trace-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     margin-top: 4px;
+    min-width: 0;
     color: var(--gray-500);
     font-size: 12px;
+
+    :deep(.el-button) {
+      max-width: 100%;
+      height: auto;
+      margin-left: 0;
+      white-space: normal;
+      text-align: left;
+    }
+
+    :deep(.el-button > span),
+    :deep(.el-tag__content) {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+
+    :deep(.el-tag) {
+      max-width: 100%;
+      height: auto;
+      min-height: 24px;
+      padding-block: 3px;
+      white-space: normal;
+    }
   }
 }
 
@@ -1272,6 +1298,7 @@ onUnmounted(() => {
 
 .head-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -1325,7 +1352,7 @@ onUnmounted(() => {
   }
 
   .task-head {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 

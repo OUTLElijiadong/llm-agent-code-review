@@ -495,17 +495,22 @@ onUnmounted(() => {
 @media (max-width: 760px) {
   .task-card {
     grid-template-columns: 16px minmax(0, 1fr) 64px;
-    grid-template-areas: 'check main score';
+    grid-template-areas: 'check main score' '. actions actions';
   }
-  .tc-band, .tc-actions { display: none; }
+  .tc-band { display: none; }
+  .tc-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+    width: auto;
+  }
   .tc-line1 {
-    display: grid;
-    grid-template-columns: max-content max-content minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: 4px 8px;
-    justify-items: start;
+    align-items: flex-end;
   }
   .tc-name {
-    grid-column: 1 / -1;
+    flex: 0 0 100%;
     max-width: 100%;
     white-space: normal;
     overflow-wrap: anywhere;
@@ -542,6 +547,7 @@ onUnmounted(() => {
 .batch-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
   padding: 8px 12px;

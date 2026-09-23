@@ -2,17 +2,19 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deferred, pageOf, scanMountOptions } from './scanRegressionTestUtils'
 
-const api = vi.hoisted(() => ({ tasks: vi.fn(), projects: vi.fn() }))
+const api = vi.hoisted(() => ({ tasks: vi.fn(), projects: vi.fn(), push: vi.fn(), canCancel: false }))
 vi.mock('@/api/review', () => ({ getReviewTasks: api.tasks, deleteReviewTask: vi.fn(), cancelReviewTask: vi.fn() }))
 vi.mock('@/api/project', () => ({ getProjects: api.projects }))
-vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: () => false }) }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: (code: string) => code === 'review:cancel' && api.canCancel }) }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: api.push }) }))
+vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: vi.fn().mockResolvedValue(false) }))
 import ReviewTaskList from './ReviewTaskList.vue'
 
 let wrapper: VueWrapper
 const running = { id: 1, status: 'running' }
 beforeEach(() => {
   vi.resetAllMocks()
+  api.canCancel = false
   vi.useFakeTimers()
   api.projects.mockResolvedValue(pageOf([]))
   api.tasks.mockResolvedValue(pageOf([running]))
@@ -185,6 +187,18 @@ describe('任务列表轮询恢复', () => {
 
 
 describe('审查卡片进度与可操作权限', () => {
+  it('有取消权限时，单任务停止与删除按钮保留在卡片且点击不进入详情', async () => {
+    api.canCancel = true
+    api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '运行任务', status: 'running' }]))
+    await render()
+    const actions = wrapper.get('.tc-actions')
+    expect(actions.text()).toContain('停止')
+    expect(actions.text()).toContain('删除')
+    const stop = actions.findAll('button').find(button => button.text().includes('停止'))
+    expect(stop).toBeDefined()
+    await stop!.trigger('click')
+    expect(api.push).not.toHaveBeenCalled()
+  })
   it('展示后端真实处理进度，并给详情保留可聚焦的按钮', async () => {
     api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '真实进度', status: 'running', total_files: 5, processed_files: 2 }]))
     await render()

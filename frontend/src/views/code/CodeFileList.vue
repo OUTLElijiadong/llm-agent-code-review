@@ -26,6 +26,7 @@
     <el-alert v-if="downloadError" data-testid="file-download-error" :title="downloadError" type="error" :closable="false" show-icon />
     <el-table
       v-loading="loading"
+      class="desktop-file-table"
       :data="files"
       border
       stripe
@@ -93,16 +94,52 @@
       </el-table-column>
     </el-table>
 
+    <section v-loading="loading" class="mobile-file-list" aria-label="代码文件">
+      <article v-for="row in files" :key="row.id" class="mobile-file-card" :aria-label="row.file_name">
+        <header class="mobile-file-head">
+          <el-icon class="file-icon" :class="`file-icon-${fileCategory(row).key}`">
+            <component :is="fileCategory(row).icon" />
+          </el-icon>
+          <h3 class="mobile-file-name">{{ row.file_name }}</h3>
+        </header>
+        <dl class="mobile-file-meta">
+          <div><dt>语言</dt><dd><el-tag v-if="row.language" size="small" type="info">{{ row.language }}</el-tag><span v-else class="text-muted">-</span></dd></div>
+          <div><dt>类型</dt><dd><el-tag size="small" :type="fileCategory(row).tagType" effect="light">{{ fileCategory(row).label }}</el-tag></dd></div>
+          <div><dt>大小</dt><dd>{{ formatFileSize(row.size_bytes) }}</dd></div>
+          <div><dt>行数</dt><dd>{{ row.is_binary === 1 ? '-' : row.line_count }}</dd></div>
+          <div><dt>版本</dt><dd>v{{ row.version_no }}</dd></div>
+          <div><dt>更新时间</dt><dd>{{ formatDate(row.update_time) }}</dd></div>
+        </dl>
+        <div class="mobile-file-actions">
+          <template v-if="row.is_binary === 1">
+            <el-button v-if="canDownload" type="primary" plain :loading="downloadingId === row.id" @click="handleDownload(row)">
+              <el-icon><Download /></el-icon>下载
+            </el-button>
+            <el-button v-if="canView" plain @click="handleView(row)">查看元信息</el-button>
+          </template>
+          <template v-else>
+            <el-button v-if="canView" type="primary" plain @click="handleView(row)">查看代码</el-button>
+            <el-button v-if="canView" plain @click="handleHistory(row)">版本历史</el-button>
+          </template>
+        </div>
+      </article>
+      <p v-if="!files.length && !loading" class="mobile-file-empty" role="status">
+        {{ loadError ? '文件列表未读取成功' : '暂无代码文件' }}
+      </p>
+    </section>
+
     <div v-if="total > 0" class="pagination-wrap">
       <el-pagination
         v-model:current-page="page"
         v-model:page-size="pageSize"
         :total="total"
         :page-sizes="[10, 20, 50]"
-        layout="total, sizes, prev, pager, next"
+        :pager-count="isMobile ? 5 : 7"
+        :layout="isMobile ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
         @size-change="fetchFiles"
         @current-change="fetchFiles"
       />
+      <span v-if="isMobile" class="mobile-page-total">共 {{ total }} 个文件</span>
     </div>
   </div>
 </template>
@@ -121,6 +158,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useMediaQuery } from '@vueuse/core'
 
 import { Picture, Files, Document, Download } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -149,6 +187,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const canView = computed(() => userStore.hasPermission('file:view'))
 const canDownload = computed(() => userStore.hasPermission('file:download'))
+const isMobile = useMediaQuery('(max-width: 768px)')
 
 const loading = ref(false)
 const loadError = ref('')
@@ -324,6 +363,8 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
 
 <style scoped lang="scss">
 .code-file-list {
+  min-width: 0;
+
   .toolbar {
     display: flex;
     align-items: center;
@@ -339,6 +380,10 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
     display: flex;
     justify-content: flex-end;
     margin-top: 16px;
+  }
+
+  .mobile-file-list {
+    display: none;
   }
 
   .text-muted {
@@ -370,6 +415,34 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
 
   .file-name-text {
     vertical-align: middle;
+  }
+}
+
+@media (max-width: 768px) {
+  .code-file-list {
+    .toolbar { min-width: 0; }
+    .filter-select { width: min(100%, 280px); }
+    .desktop-file-table { display: none; }
+    .mobile-file-list { display: grid; gap: 12px; min-height: 80px; }
+    .mobile-file-card {
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 12px;
+      background: var(--el-bg-color);
+    }
+    .mobile-file-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+    .mobile-file-head .file-icon { flex: none; margin: 2px 0 0; }
+    .mobile-file-name { min-width: 0; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+    .mobile-file-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 14px; margin: 12px 0 0; }
+    .mobile-file-meta > div { min-width: 0; }
+    .mobile-file-meta dt { color: var(--el-text-color-secondary); font-size: 12px; }
+    .mobile-file-meta dd { min-width: 0; margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+    .mobile-file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .mobile-file-actions :deep(.el-button) { min-height: 40px; margin-left: 0; }
+    .mobile-file-empty { margin: 0; padding: 24px 12px; border: 1px dashed var(--el-border-color); border-radius: 12px; color: var(--el-text-color-secondary); text-align: center; }
+    .pagination-wrap { flex-direction: column; align-items: center; gap: 8px; }
+    .mobile-page-total { color: var(--el-text-color-secondary); font-size: 12px; }
   }
 }
 </style>

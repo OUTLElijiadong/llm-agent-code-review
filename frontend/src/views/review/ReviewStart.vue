@@ -15,7 +15,7 @@
         </el-form-item>
 
         <el-form-item label="审查范围">
-          <el-radio-group v-model="form.scope" @change="onScopeChange">
+          <el-radio-group v-model="form.scope" class="review-scope-options" @change="onScopeChange">
             <el-radio-button value="whole" :disabled="form.review_type === 'discuss'"><el-icon><Box /></el-icon> 整个项目</el-radio-button>
             <el-radio-button value="files"><el-icon><FolderOpened /></el-icon> 指定文件</el-radio-button>
             <el-radio-button value="all" :disabled="form.review_type === 'discuss'"><el-icon><Connection /></el-icon> 全部项目</el-radio-button>
@@ -133,7 +133,7 @@
         </el-form-item>
 
         <el-form-item label="审查类型">
-          <el-radio-group v-model="form.review_type" @change="onReviewTypeChange">
+          <el-radio-group v-model="form.review_type" class="review-type-options" @change="onReviewTypeChange">
             <el-radio value="quick"><el-icon><Lightning /></el-icon> 快速审查</el-radio>
             <el-radio value="standard"><el-icon><DocumentChecked /></el-icon> 标准审查</el-radio>
             <el-radio value="security"><el-icon><Aim /></el-icon> 安全代理（渗透/漏洞）</el-radio>
@@ -658,15 +658,38 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-.review-start-page { .page-header { margin-bottom: 20px; h2 { margin: 0; font-size: 20px; font-weight: 600; } } }
-.form-card { max-width: 800px; }
+.review-start-page { min-width: 0; .page-header { margin-bottom: 20px; h2 { margin: 0; font-size: 20px; font-weight: 600; } } }
+.form-card { max-width: 800px; min-width: 0; }
+.form-card :deep(.el-form-item__content) { min-width: 0; }
 .scope-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; line-height: 1.5; }
 .all-projects-summary, .whole-summary { font-size: 13px; color: var(--el-text-color-primary); b { color: var(--el-color-primary); font-weight: 600; } }
-.file-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 0 0 4px 4px; padding: 8px 12px; width: 100%; }
-.file-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-lighter); border-bottom: none; border-radius: 4px 4px 0 0; .select-all-checkbox { margin-right: 0; } .file-count-text { font-size: 12px; color: var(--el-text-color-secondary); } }
-.file-item { padding: 6px 0; .file-name { font-weight: 500; margin-right: 8px; } .file-lang { margin-right: 8px; } .file-size { font-size: 12px; color: var(--el-text-color-secondary); } }
+.file-list { box-sizing: border-box; max-height: 300px; overflow-y: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 0 0 4px 4px; padding: 8px 12px; width: 100%; min-width: 0; }
+.file-toolbar { box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; width: 100%; min-width: 0; padding: 10px 14px; background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-lighter); border-bottom: none; border-radius: 4px 4px 0 0; .select-all-checkbox { margin-right: 0; } .file-count-text { min-width: 0; font-size: 12px; color: var(--el-text-color-secondary); overflow-wrap: anywhere; } }
+.file-item { min-width: 0; padding: 6px 0; overflow-wrap: anywhere; .file-name { font-weight: 500; margin-right: 8px; } .file-lang { margin-right: 8px; } .file-size { font-size: 12px; color: var(--el-text-color-secondary); } }
+.file-item :deep(.el-checkbox), .file-item :deep(.el-radio) { display: flex; height: auto; min-width: 0; align-items: flex-start; white-space: normal; }
+.file-item :deep(.el-checkbox__label), .file-item :deep(.el-radio__label) { min-width: 0; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.form-card :deep(.el-checkbox-group) { width: 100%; min-width: 0; }
+.review-type-options { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.review-type-options :deep(.el-radio) { height: auto; margin-right: 0; white-space: normal; }
+.review-type-options :deep(.el-radio__label) { line-height: 1.5; white-space: normal; }
 .form-hint { color: var(--el-text-color-secondary); font-size: 13px; }
 .reviewing-header { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; .reviewing-icon { font-size: 18px; } }
 .reviewing-hint { text-align: center; font-size: 13px; color: var(--el-text-color-secondary); margin-top: 8px; }
 .batch-results { margin-top: 16px; ul { max-height: 360px; overflow-y: auto; padding-left: 20px; overflow-wrap: anywhere; } li { margin: 8px 0; } }
+
+@media (max-width: 768px) {
+  .form-card { max-width: 100%; }
+  .form-card :deep(.el-form-item) { flex-direction: column; align-items: stretch; }
+  .form-card :deep(.el-form-item__label) { width: auto !important; height: auto; margin-bottom: 6px; justify-content: flex-start; line-height: 1.5; }
+  .form-card :deep(.el-form-item__content) { width: 100%; margin-left: 0 !important; }
+  .review-scope-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .review-scope-options :deep(.el-radio-button) { min-width: 0; }
+  .review-scope-options :deep(.el-radio-button__inner) { box-sizing: border-box; width: 100%; padding: 8px 4px; font-size: 12px; }
+  .review-type-options { width: 100%; flex-direction: column; align-items: flex-start; }
+  .review-type-options :deep(.el-radio) { margin-right: 0; }
+}
+
+@media (max-width: 480px) {
+  .form-card :deep(.el-card__body) { padding: 16px; }
+}
 </style>

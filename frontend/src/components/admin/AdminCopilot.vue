@@ -726,7 +726,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
   ) return
   try {
     const requestedUserId = userStore.profile?.id
-    const session = await getAgentResponseSession('admin', sessionId.value)
+    const session = await getAgentResponseSession('admin', sessionId.value, true)
     if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
     sessionPollFailures = 0

@@ -319,6 +319,23 @@ describe('审查输入快照预览', () => {
 })
 
 describe('审查详情真实执行状态', () => {
+  it('长项目名和 Agent 名称保留完整信息，项目与报告入口仍可点击', async () => {
+    const projectName = '手工作坊管理系统的鉴权与权限审查项目'
+    const agentName = '鉴权与账号隔离审查员'
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      status: 'success', project_name: projectName,
+      agent_releases: [{ release_id: 7, agent_name: agentName, agent_version: 1 }],
+    }))
+    await renderDetail()
+    const trace = wrapper.get('.trace-meta')
+    expect(trace.text()).toContain(projectName)
+    expect(trace.text()).toContain(`${agentName} v1`)
+    await trace.findAll('button')[0].trigger('click')
+    await trace.findAll('button')[1].trigger('click')
+    expect(navigation.push).toHaveBeenCalledWith('/projects/7')
+    expect(navigation.push).toHaveBeenCalledWith('/reports/21')
+  })
+
   it('沙箱历史16字段行按报告4条展示，未分级不伪造零风险', async () => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({
       id: 161, review_type: 'sandbox_test', status: 'success', total_files: 1, processed_files: 1,

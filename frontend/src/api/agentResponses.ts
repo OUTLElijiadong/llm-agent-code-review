@@ -93,11 +93,12 @@ export async function cancelAgentResponseRun(
 export function getAgentResponseSession(
   surface: 'user' | 'admin',
   sessionId: string,
+  background = false,
 ): Promise<AgentResponseSession> {
   return get<AgentResponseSession>('/agent-responses/session', {
     surface,
     session_id: sessionId,
-  })
+  }, undefined, background)
 }
 
 /** 图片只经当前登录态认证接口读取，不将资产地址或blob回传到模型。 */
