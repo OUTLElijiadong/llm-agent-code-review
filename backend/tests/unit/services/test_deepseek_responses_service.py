@@ -279,6 +279,7 @@ async def test_single_oversized_latest_user_input_fails_locally_without_upstream
 @pytest.mark.parametrize(
     ("upstream_status", "expected_status", "expected_code", "expected_type"),
     [(401, 401, "invalid_api_key", "authentication_error"),
+     (402, 402, "upstream_payment_required", "billing_error"),
      (403, 403, "permission_denied", "permission_error"),
      (429, 429, "upstream_rate_limited", "rate_limit_error"),
      (503, 503, "upstream_unavailable", "server_error"),

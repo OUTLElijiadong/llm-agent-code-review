@@ -101,6 +101,27 @@ def _selected_file_ids(payload):
     return selected
 
 
+def _partial_dependency_coverage(result):
+    """上游明确报告部分覆盖时，不得把下游有限分析冒充完整来源覆盖。"""
+    from app.services.agent_team_summary import _result_blocks
+
+    for block in _result_blocks(result):
+        for source in (block, block.get("coverage"), block.get("compliance")):
+            if not isinstance(source, dict):
+                continue
+            if any(source.get(key) is False for key in (
+                "complete", "coverage_complete", "semantic_complete", "static_complete",
+            )):
+                return True
+            if any(source.get(key) is True for key in (
+                "truncated", "findings_truncated", "source_truncated",
+            )):
+                return True
+            if source.get("stage") in {"failed", "cancelled"}:
+                return True
+    return False
+
+
 def _recheck_access(db, user_id, project_id, file_ids, source_snapshots):
     # 本执行器仅做读取；结束旧只读事务，避免 MySQL repeatable-read 仍看到撤权前的快照。
     # HTTP 用量记录已经在独立会话提交，不受此 rollback 影响。
@@ -236,6 +257,8 @@ def _prepare_context(db, user, message):
         result = entry.get("result")
         if isinstance(result, dict) and result.get("status", "completed") != "completed":
             raise _Blocked("依赖执行结果未完成，不能生成已完成的临时分析")
+        if isinstance(result, dict) and _partial_dependency_coverage(result):
+            raise _Blocked("依赖结果明确标记覆盖不完整，不能生成已完成的临时分析")
     for key, entry in dependencies.items():
         encoded = _json(entry)
         sources.append(
@@ -296,8 +319,14 @@ def _compact_context(
     sources, coverage, usage,
 ):
     """只在完整原文超过单次容量时压缩来源；每片失败都阻止最终分析。"""
+    def within_budget(active_sources):
+        text = _json({"sources": active_sources, "coverage": coverage})
+        # 与 BaseAgent 实际请求使用同一个 UTF-8 上界校验，预留二次输出重试预算。
+        _, overflow = agent._project_input(text, output_tokens=RETRY_OUTPUT_TOKENS)
+        return len(text) <= MAX_CONTEXT_CHARS and not overflow
+
     prepared = _json({"sources": sources, "coverage": coverage})
-    if len(prepared) <= MAX_CONTEXT_CHARS:
+    if within_budget(sources):
         return prepared, sources
 
     compacted = list(sources)
@@ -307,7 +336,7 @@ def _compact_context(
     )
     part_count = 0
     for index in order:
-        if len(_json({"sources": compacted, "coverage": coverage})) <= MAX_CONTEXT_CHARS:
+        if within_budget(compacted):
             break
         source = compacted[index]
         content_key = next((key for key in ("content", "text", "data") if key in source), None)
@@ -403,7 +432,7 @@ def _compact_context(
     coverage["source_parts"] = part_count
     coverage["covered_source_parts"] = part_count
     prepared = _json({"sources": compacted, "coverage": coverage})
-    if len(prepared) > MAX_CONTEXT_CHARS:
+    if not within_budget(compacted):
         raise _CompressionFailed("上下文压缩后仍超过临时分析容量", failure_kind="context_capacity_exceeded")
     return prepared, compacted
 

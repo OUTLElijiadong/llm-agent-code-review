@@ -3130,6 +3130,11 @@ def redact_agent_event_value(value: Any) -> Any:
     return _redact_event_value(value)
 
 
+def redact_agent_model_context_value(value: Any) -> Any:
+    """给内部模型上下文完整脱敏，不套用公开事件的预览长度限制。"""
+    return _redact_persistent_tool_value(value)
+
+
 def redact_agent_output_text(value: str) -> str:
     """完整恢复用户可见模型文本，并继续清除敏感信息。"""
     return _redact_sensitive_text_unbounded(value)

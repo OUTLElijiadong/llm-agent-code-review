@@ -814,6 +814,11 @@ class DeepSeekResponsesService:
                             "The upstream context compaction credential was rejected.",
                             status_code=401, code="invalid_api_key", error_type="authentication_error",
                         )
+                    if response.status_code == 402:
+                        raise ResponsesGatewayError(
+                            "The upstream context compaction API requires payment or additional quota.",
+                            status_code=402, code="upstream_payment_required", error_type="billing_error",
+                        )
                     if response.status_code == 403:
                         raise ResponsesGatewayError(
                             "The upstream context compaction credential lacks permission.",

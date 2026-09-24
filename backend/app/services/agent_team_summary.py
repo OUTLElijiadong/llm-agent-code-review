@@ -105,11 +105,16 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         blocks = _result_blocks(result)
         finding_summary = entry.get("finding_summary")
         if isinstance(finding_summary, dict):
-            # 队列提供来自数据库的最小字段摘要；不再读取已被事件脱敏截断的嵌套条目。
-            blocks = [{key: value for key, value in block.items() if key not in {"findings", "issues"}}
-                      for block in blocks]
-            blocks.append({"findings": finding_summary.get("items") or []})
-            if finding_summary.get("omitted_count") or finding_summary.get("source_truncated"):
+            items = finding_summary.get("items") or []
+            raw_count = sum(len(block.get(field) or []) for block in blocks for field in ("findings", "issues"))
+            # 内部依赖现在携带完整脱敏结果。仅当原结果确实没有更多问题时才退回
+            # 有界字段摘要；公开事件的预览上限不得决定团队实际核对范围。
+            use_raw = raw_count > len(items) or (raw_count > 0 and not finding_summary.get("omitted_count"))
+            if not use_raw:
+                blocks = [{key: value for key, value in block.items() if key not in {"findings", "issues"}}
+                          for block in blocks]
+                blocks.append({"findings": items})
+            if finding_summary.get("source_truncated") or (finding_summary.get("omitted_count") and not use_raw):
                 bounded_tasks.append(task_key)
         for data in blocks:
             project_id = data.get("project_id")

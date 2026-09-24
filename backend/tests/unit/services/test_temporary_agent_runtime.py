@@ -172,6 +172,49 @@ def test_more_than_twenty_completed_dependencies_are_all_included(db, actor, mod
     assert result["coverage"]["complete"] is True and result["coverage"]["truncated"] is False
 
 
+def test_unicode_dependency_uses_actual_model_window_budget(db, actor, model, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    map_calls = []
+    final_calls = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            map_calls.append(part)
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": f"已覆盖 {part['part_id']}",
+            }, usage_log_ids=[1000 + len(map_calls)], http_attempts=1)
+        final_calls.append(message)
+        return AgentResult(success=True, data={"summary": "完成", "findings": [], "limitations": []},
+                           usage_log_ids=[2000], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"dependency_context": {
+        "earlier": {"status": "completed", "result": {"summary": "中文证据" * 7500}}
+    }})
+    assert result["status"] == "completed"
+    assert map_calls
+    assert len(final_calls) == 1
+    source = json.loads(final_calls[0])["sources"][1]
+    assert source["id"] == "dependency:earlier" and source["compressed"] is True
+    assert source["covered_parts"] == len(map_calls)
+    assert result["coverage"]["complete"] is True
+
+
+@pytest.mark.parametrize("upstream_coverage", [{"complete": False}, {"truncated": True}])
+def test_partial_dependency_does_not_claim_complete_coverage(db, actor, model, upstream_coverage):
+    result = run(db, actor, {"dependency_context": {
+        "earlier": {"status": "completed", "result": {
+            "status": "completed", "coverage": upstream_coverage,
+        }}
+    }})
+    assert result["status"] == "blocked"
+    assert not model[0]
+
+
 def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, actor, model, monkeypatch):
     import hashlib
 

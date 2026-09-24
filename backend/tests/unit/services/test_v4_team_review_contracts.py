@@ -101,6 +101,33 @@ def test_team_dependency_findings_survive_public_depth_bound(db):
     assert "unsafe-secret" not in json.dumps(summary)
 
 
+def test_dependency_handoff_keeps_private_full_source_but_public_preview_is_bounded(db):
+    import json
+
+    from app.models.agent_team import AgentTeamTask
+    from app.services.agent_team_service import _dependency_context, _public
+
+    findings = [{"title": f"真实结论 {index}", "detail": "依据" * 300} for index in range(25)]
+    findings[-1]["detail"] += "LAST_SOURCE_EVIDENCE"
+    db.add(AgentTeamTask(
+        team_id=183, member_id=1, task_key="audit", title="审计", instructions="读取全部依赖",
+        status="completed", result_json=json.dumps({
+        "status": "completed", "findings": findings, "summary": "原始结论已入账",
+        "api_key": "sk-example-secret-12345678",
+        }),
+    ))
+    db.flush()
+    context = _dependency_context(db, SimpleNamespace(id=183), SimpleNamespace(
+        dependency_keys_json='["audit"]',
+    ))
+    assert len(context["audit"]["result"]["findings"]) == 25
+    assert "LAST_SOURCE_EVIDENCE" in context["audit"]["result"]["findings"][-1]["detail"]
+    assert context["audit"]["result"]["api_key"] == "[REDACTED]"
+    public = _public(context)
+    assert "LAST_SOURCE_EVIDENCE" not in json.dumps(public)
+    assert "TRUNCATED" in json.dumps(public)
+
+
 def test_dependency_projection_keeps_audit_bound_and_masks_sensitive_title():
     from app.services.agent_team_service import _public
     from app.services.agent_team_summary import dependency_finding_summary
@@ -138,6 +165,25 @@ def test_summary_keeps_shallow_findings_in_public_team_final_result():
     assert public["findings"][0]["title"] == "SQL注入"
     assert public["findings"][0]["source_task_keys"] == "review"
     assert public["references"][0]["route"] == "/reviews/17"
+
+
+def test_team_summary_counts_last_finding_from_full_private_dependency():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    findings = [
+        {"title": f"问题 {index}", "file_name": "source.py", "line_number": index, "severity": "高"}
+        for index in range(201)
+    ]
+    result = summarize_dependencies({"audit": {
+        "status": "completed", "result": {"status": "completed", "findings": findings},
+        "finding_summary": {"items": findings[:200], "omitted_count": 1, "source_truncated": False},
+    }})
+    full = result["artifacts"][0]["data"]
+    assert result["status"] == "completed"
+    assert result["unique_finding_count"] == full["unique_finding_count"] == 201
+    assert any(item["title"] == "问题 200" for item in full["findings"])
+    assert result["findings_preview_truncated"] is True
+    assert result["bounded_finding_tasks"] == []
 
 
 def test_audit_coverage_survives_dependency_and_double_public_projection(db):

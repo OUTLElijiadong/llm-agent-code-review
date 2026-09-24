@@ -140,8 +140,9 @@ def _validate_safe_input(value: Any, *, key: str = "", depth: int = 0) -> None:
 
 
 def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> dict[str, Any]:
-    """只把前置节点的脱敏结果摘要传入下一节点。"""
+    """把同账户前置结果完整脱敏后交给内部执行器；公开预览另行裁剪。"""
 
+    from app.services.agent_responses_service import redact_agent_model_context_value
     from app.services.agent_team_summary import dependency_coverage_summary, dependency_finding_summary
 
     wanted = {str(item) for item in _unjson(task.dependency_keys_json, [])}
@@ -152,13 +153,13 @@ def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> di
     return {
         key: {
             "status": by_key[key].status,
-            "result": _public(_unjson(by_key[key].result_json, {})),
+            "result": redact_agent_model_context_value(_unjson(by_key[key].result_json, {})),
             "finding_summary": dependency_finding_summary(
                 _unjson(by_key[key].result_json, {}), redact=_public,
             ),
             "coverage_summary": dependency_coverage_summary(_unjson(by_key[key].result_json, {})),
-            "artifacts": _public(_unjson(by_key[key].artifacts_json, [])),
-            "errors": _public(_unjson(by_key[key].errors_json, [])),
+            "artifacts": redact_agent_model_context_value(_unjson(by_key[key].artifacts_json, [])),
+            "errors": redact_agent_model_context_value(_unjson(by_key[key].errors_json, [])),
         }
         for key in sorted(wanted)
         if key in by_key
