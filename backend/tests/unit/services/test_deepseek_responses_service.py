@@ -245,7 +245,11 @@ async def test_previous_response_compaction_rejects_unverified_summary_before_ma
         await service.create({"model": "m", "previous_response_id": "resp_before", "input": "继续",
                               "max_output_tokens": 512}, "Bearer key")
     assert exc.value.code == "context_compaction_failed"
-    assert len(calls) == (3 if bad_kind == "length" else 1)
+    if bad_kind == "length":
+        assert len(calls) >= 3  # 重试后允许按来源拆批，但仍必须失败而非发送半截摘要。
+    else:
+        assert len(calls) == 1
+    assert all(call["store"] is False for call in calls)
     assert await storage.load(_fingerprint("key"), "resp_bad") is None
 
 
@@ -417,6 +421,41 @@ async def test_compactor_retries_output_length_and_accounts_for_usage(
     assert budgets == [512, 1024]
     assert calls == [2]
     assert usage_logs[-1][1] == ("verified-digest", 2, 200, 552, "completed")
+
+
+@pytest.mark.asyncio
+async def test_compactor_splits_multi_source_length_without_losing_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实模型对一批来源反复输出截断时，按来源拆批再核对全部 ID。"""
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 100_000)
+    service = DeepSeekResponsesService(storage=MemoryTranscriptStore())
+    seen_batches: List[List[str]] = []
+
+    async def fake_compactor(**kwargs: Any) -> str:
+        ids = kwargs["expected_ids"]
+        seen_batches.append(ids)
+        if len(kwargs["source"]) > 1:
+            raise ContextBudgetError("压缩模型输出被截断或请求本身超出上下文窗口")
+        return "保留这条来源的目标与证据。"
+
+    monkeypatch.setattr(service, "_call_compactor", fake_compactor)
+    records = [
+        {"role": "assistant", "content": f"第{index}条真实历史约束：" + "证据" * 600}
+        for index in range(3)
+    ]
+    summary = await service._semantic_compact_input(
+        records, [0, 1, 2], source_digest="history-digest", summary_budget=3000,
+        model="m", authorization="Bearer key", calls=[0],
+    )
+
+    assert any(len(batch) == 3 for batch in seen_batches)
+    assert {source_id for batch in seen_batches for source_id in batch} == {
+        "来源#0:片段1/1", "来源#1:片段1/1", "来源#2:片段1/1",
+    }
+    assert all(source_id in summary for source_id in (
+        "来源#0:片段1/1", "来源#1:片段1/1", "来源#2:片段1/1",
+    ))
 
 
 @pytest.mark.asyncio

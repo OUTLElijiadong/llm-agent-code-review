@@ -678,6 +678,39 @@ class DeepSeekResponsesService:
             raise ContextBudgetError("需要压缩的历史来源为空")
         level: List[Dict[str, Any]] = segments
         for depth in range(4):
+            async def summarize_chunk(
+                chunk: List[Dict[str, Any]], label: str,
+            ) -> List[Dict[str, Any]]:
+                ids = [source_id for item in chunk for source_id in item["covered_source_ids"]]
+                try:
+                    summary = await self._call_compactor(
+                        model=model,
+                        authorization=authorization,
+                        source=chunk,
+                        expected_ids=ids,
+                        source_digest=source_digest,
+                        output_budget=output_budget,
+                        calls=calls,
+                    )
+                except ContextBudgetError as exc:
+                    # A multi-source response can exhaust output tokens even
+                    # though its input fits. Split it, preserving every ID.
+                    if len(chunk) <= 1 or "压缩模型输出被截断" not in str(exc):
+                        raise
+                    middle = len(chunk) // 2
+                    return (
+                        await summarize_chunk(chunk[:middle], f"{label}.1")
+                        + await summarize_chunk(chunk[middle:], f"{label}.2")
+                    )
+                return [{
+                    "source_id": f"第{depth + 1}层压缩块#{label}",
+                    "covered_source_ids": ids,
+                    "content": (
+                        f"已核验来源 {json.dumps(ids, ensure_ascii=False, separators=(',', ':'))}；"
+                        f"摘要：{summary}"
+                    ),
+                }]
+
             chunks: List[List[Dict[str, Any]]] = []
             current: List[Dict[str, Any]] = []
             for item in level:
@@ -693,24 +726,7 @@ class DeepSeekResponsesService:
                 chunks.append(current)
             next_level: List[Dict[str, Any]] = []
             for chunk_index, chunk in enumerate(chunks, 1):
-                ids = [source_id for item in chunk for source_id in item["covered_source_ids"]]
-                summary = await self._call_compactor(
-                    model=model,
-                    authorization=authorization,
-                    source=chunk,
-                    expected_ids=ids,
-                    source_digest=source_digest,
-                    output_budget=output_budget,
-                    calls=calls,
-                )
-                next_level.append({
-                    "source_id": f"第{depth + 1}层压缩块#{chunk_index}",
-                    "covered_source_ids": ids,
-                    "content": (
-                        f"已核验来源 {json.dumps(ids, ensure_ascii=False, separators=(',', ':'))}；"
-                        f"摘要：{summary}"
-                    ),
-                })
+                next_level.extend(await summarize_chunk(chunk, str(chunk_index)))
             rendered = "\n".join(
                 f"[{item['source_id']}] {item['content']}" for item in next_level
             )
@@ -746,8 +762,9 @@ class DeepSeekResponsesService:
         }
         window = int(settings.deepseek_context_window_tokens)
         trial_budgets = [output_budget]
-        while trial_budgets[-1] < min(4096, window // 4):
-            trial_budgets.append(min(4096, window // 4, trial_budgets[-1] * 2))
+        retry_ceiling = min(8192, window // 4)
+        while trial_budgets[-1] < retry_ceiling:
+            trial_budgets.append(min(retry_ceiling, trial_budgets[-1] * 2))
         attempts = 0
         input_tokens = 0
         output_tokens = 0
