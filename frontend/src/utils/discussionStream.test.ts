@@ -145,11 +145,24 @@ it('connects with token protocols and routes only business messages', function t
   expect(socket.closeCalls).toBe(1)
 })
 
-/** 验证业务终态主动关闭后不会再报网络错误或安排重连。 */
-it.each([
-  ['session_end', { type: 'session_end' }],
-  ['control done', { type: 'control', session_id: 'terminal-session', action: 'done', payload: {} }],
-])('stops permanently after %s', async (_label, terminalFrame): Promise<void> => {
+/** 报告 done 先于截止时间到达，必须等 session_end 才能决定是否结束连接。 */
+it('keeps the socket open for follow-up after done and a valid session_end', async (): Promise<void> => {
+  installFakeWebSocket()
+  const onMessage = vi.fn()
+  const stream = subscribeDiscussion('followup-session', onMessage)
+  const socket = FakeWebSocket.instances[0]
+  socket.open()
+  socket.receive(JSON.stringify({ type: 'control', session_id: 'followup-session', action: 'done', payload: { status: 'success' } }))
+  expect(socket.closeCalls).toBe(0)
+  socket.receive(JSON.stringify({ type: 'session_end', followup_until: Date.now() / 1000 + 300 }))
+  expect(socket.closeCalls).toBe(0)
+  expect(stream.send('user_input', { content: '请说明证据' })).toBe(true)
+  expect(JSON.parse(socket.sent.at(-1) || '')).toEqual({ action: 'user_input', content: '请说明证据' })
+  stream.close()
+})
+
+/** 无追问窗口的终态关闭后不再报网络错误或安排重连。 */
+it('stops permanently after session_end without follow-up', async (): Promise<void> => {
   vi.useFakeTimers()
   installFakeWebSocket()
   const onMessage = vi.fn()
@@ -159,6 +172,7 @@ it.each([
   const socket = FakeWebSocket.instances[0]
   socket.open()
 
+  const terminalFrame = { type: 'session_end' }
   socket.receive(JSON.stringify(terminalFrame))
   socket.fail()
   socket.serverClose(1006, 'closed after terminal frame')

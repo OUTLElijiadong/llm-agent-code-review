@@ -189,6 +189,25 @@ it('运行时收到结束帧后以服务端期限开启追问，失败终态不�
   failed.unmount()
 })
 
+it('漏掉终态 WS 帧后由 REST 对账恢复完成进度、报告和五分钟追问', async () => {
+  const deadline = Date.now() / 1000 + 300
+  discussionApi.detail.mockResolvedValueOnce({
+    status: 'concluded', report_task_id: 184, followup_until: deadline,
+    progress: { phase: 'completed', completed_units: 13, total_units: 13, current_round: 2, seq: 12 },
+    turns: [turn(1, 'security', 1)], has_earlier: false, next_before_seq: null,
+  })
+  const wrapper = mountPanel({
+    initialStatus: 'active',
+    initialProgress: { phase: 'reporting', completed_units: 13, total_units: 13, current_round: 2, seq: 11 },
+  })
+  connected('connected')
+  await flushPromises()
+  expect(wrapper.get('.room-progress').text()).toContain('圆桌讨论已完成')
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('.report-btn').text()).toContain('查看报告')
+  wrapper.unmount()
+})
+
 it('按真实服务端步骤显示圆桌进度，并区分汇总和报告阶段', async () => {
   const wrapper = mountPanel()
   connected('connected')

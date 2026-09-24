@@ -1165,6 +1165,15 @@ describe('AgentChatDrawer Responses stream', () => {
   })
 })
 
+it('管理员复用小菱聊天窗口时不显示与贾维斯重叠的悬浮按钮', async () => {
+  const wrapper = mountDrawer()
+  await wrapper.setProps({ visible: false, showLauncher: false })
+  expect(wrapper.find('.chat-fab').exists()).toBe(false)
+  await wrapper.setProps({ showLauncher: true })
+  expect(wrapper.find('.chat-fab').exists()).toBe(true)
+  wrapper.unmount()
+})
+
 it('恢复进行中会话时展示调用链、部分输出与运行状态', async () => {
   sessionApi.get.mockResolvedValue({
     surface: 'user',

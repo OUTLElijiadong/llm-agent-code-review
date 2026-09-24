@@ -1130,6 +1130,7 @@ function onMessageClick(event: MouseEvent): void {
 
 async function openPanel(): Promise<void> {
   visible.value = true
+  window.dispatchEvent(new Event('prism:admin-copilot-opened'))
   unreadAlerts.value = 0
   await nextTick()
   restorePanelPosition()
@@ -1141,6 +1142,10 @@ function closePanel(): void {
   // 关闭前持久化运行状态,确保重开后能识别未完成会话(运行中/等待审批/等待输入)并跳回
   persistSnapshot()
   visible.value = false
+}
+
+function handleExternalClose(): void {
+  if (visible.value) closePanel()
 }
 
 function setTimelineCallStatus(
@@ -1820,6 +1825,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('offline', handleOffline)
   window.removeEventListener('resize', handlePanelViewportResize)
   window.removeEventListener('prism:open-admin-copilot', handleExternalOpen)
+  window.removeEventListener('prism:close-admin-copilot', handleExternalClose)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -1840,6 +1846,7 @@ onMounted(() => {
   window.addEventListener('offline', handleOffline)
   window.addEventListener('resize', handlePanelViewportResize)
   window.addEventListener('prism:open-admin-copilot', handleExternalOpen)
+  window.addEventListener('prism:close-admin-copilot', handleExternalClose)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

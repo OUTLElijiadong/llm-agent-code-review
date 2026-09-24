@@ -40,8 +40,8 @@ function mountApp() {
         VirtualCursor: true,
         AdminCopilot: { template: '<aside class="admin-copilot-stub" />' },
         AgentChatDrawer: {
-          props: ['visible', 'prefill'],
-          template: '<aside class="user-agent-stub" :data-visible="String(visible)" :data-prefill="prefill" />',
+          props: ['visible', 'prefill', 'showLauncher'],
+          template: '<aside class="user-agent-stub" :data-visible="String(visible)" :data-prefill="prefill" :data-launcher="String(showLauncher)" />',
         },
       },
     },
@@ -58,21 +58,27 @@ describe('全局小菱宿主', () => {
     router.onError.mockClear()
   })
 
-  it('管理员只挂载管理小菱,跨布局导航不会替换为用户端小菱', async () => {
-    const forwarded = vi.fn()
-    window.addEventListener('prism:open-admin-copilot', forwarded)
+  it('管理员同时保留两种入口，顶栏小菱打开独立 user 会话', async () => {
+    const forwardedToJarvis = vi.fn()
+    window.addEventListener('prism:open-admin-copilot', forwardedToJarvis)
     const wrapper = mountApp()
 
     expect(wrapper.find('.admin-copilot-stub').exists()).toBe(true)
-    expect(wrapper.find('.user-agent-stub').exists()).toBe(false)
+    expect(wrapper.find('.user-agent-stub').exists()).toBe(true)
+    expect(wrapper.get('.user-agent-stub').attributes('data-launcher')).toBe('false')
 
     window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { prefill: '检查项目' } }))
     await nextTick()
-    expect(forwarded).toHaveBeenCalledOnce()
-    expect((forwarded.mock.calls[0][0] as CustomEvent).detail).toEqual({ prefill: '检查项目' })
+    expect(forwardedToJarvis).not.toHaveBeenCalled()
+    expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('true')
+    expect(wrapper.get('.user-agent-stub').attributes('data-prefill')).toBe('检查项目')
+
+    window.dispatchEvent(new Event('prism:admin-copilot-opened'))
+    await nextTick()
+    expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('false')
 
     wrapper.unmount()
-    window.removeEventListener('prism:open-admin-copilot', forwarded)
+    window.removeEventListener('prism:open-admin-copilot', forwardedToJarvis)
   })
 
   it('普通成员只挂载用户小菱并由全局事件打开', async () => {

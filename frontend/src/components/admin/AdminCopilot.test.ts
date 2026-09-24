@@ -1328,3 +1328,19 @@ it('管理端切换账号立即清空私密消息及未发送草稿', async () =
   expect(wrapper.text()).not.toContain('旧账号密钥')
   wrapper.unmount()
 })
+
+it('贾维斯打开时通知宿主收起小菱，小菱再打开时贾维斯收起', async () => {
+  const opened = vi.fn()
+  window.addEventListener('prism:admin-copilot-opened', opened)
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  expect(opened).toHaveBeenCalledOnce()
+  expect(wrapper.find('.copilot-panel').exists()).toBe(true)
+
+  window.dispatchEvent(new Event('prism:close-admin-copilot'))
+  await flushPromises()
+  expect(wrapper.find('.copilot-panel').exists()).toBe(false)
+  expect(wrapper.find('.copilot-trigger').exists()).toBe(true)
+  wrapper.unmount()
+  window.removeEventListener('prism:admin-copilot-opened', opened)
+})

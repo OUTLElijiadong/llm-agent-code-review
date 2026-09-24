@@ -562,7 +562,20 @@ function syncLatest(baselineSeq = latestSeq()): Promise<void> {
         let page = await getDiscussionSession(props.sessionId, 100)
         if (disposed) return
         for (const turn of page.turns || []) addTurn(turn)
-        if (Number(page.followup_until) > 0) followupUntil.value = Number(page.followup_until)
+        // WS done/progress/session_end 可能在断线或队列溢出时丢失。
+        // 账本对账必须同步会话元数据，不能只补聊天气泡和截止时间。
+        if (page.progress && Number(page.progress.seq) >= lastProgressSeq) {
+          handleControl({ action: 'progress', payload: page.progress as unknown as Record<string, unknown> })
+        }
+        if (page.status === 'concluded') {
+          const wasLive = phase.value === 'live'
+          phase.value = 'concluded'
+          const finalStage = String(page.progress?.phase || '')
+          terminalStatus.value = finalStage === 'completed' ? 'success' : finalStage
+          reportTaskId.value = Number(page.report_task_id) || reportTaskId.value
+          followupUntil.value = Number(page.followup_until) || 0
+          if (wasLive) emit('settled')
+        }
         let first = Number(page.turns?.[0]?.seq) || 0
         while (baseline > 0 && first > baseline + 1 && page.has_earlier) {
           page = await getDiscussionSession(props.sessionId, 100, first)

@@ -148,8 +148,7 @@ export function subscribeDiscussion(
     missedPongs = 0
   }
 
-  // 业务终态不是网络异常。终态帧交付给页面后立即停止心跳和自动重连，
-  // 否则会话已经结束却在下一次断线时再次显示“连接失败”。
+  // 无追问窗口的业务终态不是网络异常；有窗口时保留双向连接。
   function terminateForBusiness() {
     if (closed) return
     closed = true
@@ -187,7 +186,10 @@ export function subscribeDiscussion(
         // 服务端保活探测帧,仅用于刷新 NAT 会话,不进业务回调
         if (msg.type === 'server_ping') return
         onMessage(msg)
-        if (msg.type === 'session_end' || (msg.type === 'control' && msg.action === 'done')) {
+        // done 在 close_session 之前发送，此时还没有五分钟截止时间。
+        // 必须等待 session_end，且有效追问窗口内不能关闭双向连接。
+        if (msg.type === 'session_end'
+          && !(Number(msg.followup_until) > Date.now() / 1000)) {
           terminateForBusiness()
         }
       } catch {

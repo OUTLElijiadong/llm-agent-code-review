@@ -623,20 +623,24 @@ class DiscussionBus:
                 "action": "progress", "payload": snapshot,
             }, ensure_ascii=False))
 
-        # 终态重连只补 done；真实轮次已在 progress 快照里，不能伪造末轮。
+        # 终态重连补进度、done 和截止时间；真实轮次已在进度快照里。
         if session and session.status == "concluded":
             try:
+                deadline = self.followup_until(session)
                 q.put_nowait(json_lib.dumps({
                     "type": "control", "session_id": session_id,
                     "action": "done",
                     "payload": {
                         "task_id": session.report_task_id,
                         "status": session.progress.get("phase", "completed"),
-                        "followup_until": self.followup_until(session),
+                        "followup_until": deadline,
                     },
                 }, ensure_ascii=False))
+                q.put_nowait(json_lib.dumps({
+                    "type": "session_end", "followup_until": deadline,
+                }, ensure_ascii=False))
             except asyncio.QueueFull:
-                pass
+                q.needs_resync = True
 
         return q
 

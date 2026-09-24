@@ -91,6 +91,20 @@ def test_unsuccessful_roundtable_has_no_followup(status: str):
 
 
 @pytest.mark.asyncio
+async def test_reopen_concluded_roundtable_replays_terminal_deadline(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("app.agents.discussion_bus.time.time", lambda: 3_000.0)
+    bus = DiscussionBus()
+    session = _completed(bus, "disc_reopen_followup")
+
+    queue = await bus.subscribe(session.session_id)
+    frames = [json.loads(queue.get_nowait()) for _ in range(queue.qsize())]
+    assert frames[-2]["action"] == "done"
+    assert frames[-2]["payload"]["followup_until"] == 3_300.0
+    assert frames[-1] == {"type": "session_end", "followup_until": 3_300.0}
+    assert bus.accept_user_input(session.session_id, "后台重开后的追问")
+
+
+@pytest.mark.asyncio
 async def test_followup_answers_are_serial_and_owner_scoped(monkeypatch: pytest.MonkeyPatch):
     bus = DiscussionBus()
     session = _completed(bus)

@@ -154,7 +154,7 @@ interface ChatMessage {
   teamIds?: number[]
 }
 
-const props = defineProps<{ visible: boolean; prefill?: string }>()
+const props = defineProps<{ visible: boolean; prefill?: string; showLauncher?: boolean }>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
 
 const router = useRouter()
@@ -2343,7 +2343,7 @@ onMounted(() => {
 <template>
   <Teleport to="body">
     <button
-      v-if="!visible"
+      v-if="!visible && showLauncher !== false"
       class="chat-fab"
       :class="{ 'is-busy': mascotStatus !== 'idle' }"
       type="button"

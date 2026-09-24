@@ -42,26 +42,32 @@ watch(agentVisible, (val) => {
   }
 })
 
-watch(canUseAgent, (val) => {
-  if (!val || userStore.isAdmin()) return
+watch([canUseAgent, () => userStore.profile?.id], ([allowed, id]) => {
+  if (!allowed || !id) {
+    agentVisible.value = false
+    return
+  }
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
-    if (window.localStorage.getItem(key) === '1') agentVisible.value = true
+    agentVisible.value = window.localStorage.getItem(key) === '1'
   } catch {
     // 读取失败保持默认关闭
   }
-})
+}, { immediate: true })
 
-/** 全站唯一小菱入口；管理员始终唤起管理会话，普通成员唤起用户会话。 */
+/** 顶栏与全站小菱入口始终打开 user 会话；管理员的贾维斯保留独立入口。 */
 function openAgentChat(prefill = ''): void {
   if (!canUseAgent.value) return
   if (userStore.isAdmin()) {
-    window.dispatchEvent(new CustomEvent('prism:open-admin-copilot', { detail: { prefill } }))
-    return
+    window.dispatchEvent(new Event('prism:close-admin-copilot'))
   }
   if (prefill) agentPrefill.value = prefill
   agentVisible.value = true
+}
+
+function handleAdminCopilotOpened(): void {
+  agentVisible.value = false
 }
 
 function handleOpenAgentChat(event: Event): void {
@@ -108,6 +114,7 @@ const removeErrorGuard = router.onError(() => {
 
 onMounted(() => {
   window.addEventListener('prism:open-agent-chat', handleOpenAgentChat as EventListener)
+  window.addEventListener('prism:admin-copilot-opened', handleAdminCopilotOpened)
 })
 
 onBeforeUnmount(() => {
@@ -117,6 +124,7 @@ onBeforeUnmount(() => {
   removeAfterGuard()
   removeErrorGuard()
   window.removeEventListener('prism:open-agent-chat', handleOpenAgentChat as EventListener)
+  window.removeEventListener('prism:admin-copilot-opened', handleAdminCopilotOpened)
 })
 </script>
 
@@ -130,9 +138,10 @@ onBeforeUnmount(() => {
   <VirtualCursor />
   <AdminCopilot v-if="canUseAgent && userStore.isAdmin()" />
   <AgentChatDrawer
-    v-else-if="canUseAgent"
+    v-if="canUseAgent"
     v-model:visible="agentVisible"
     :prefill="agentPrefill"
+    :show-launcher="!userStore.isAdmin()"
     @consumed-prefill="agentPrefill = ''"
   />
   <GlobalDiscussionHost v-if="userStore.isLoggedIn && userStore.profile" :user-id="userStore.profile.id" />

@@ -39,7 +39,7 @@ from app.agents.tool_contracts import (
 )
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.observability import observe_event
+from app.core.observability import database_is_ready, observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_mesh import AgentMeshConversation
@@ -117,6 +117,40 @@ SessionValidator = Callable[[], bool]
 _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", "stopped", "expired"})
 _FULL_VALIDATION_POLL_SECONDS = 2.0
 _ROUNDTABLE_TOOL_OUTPUT_BYTES = 8000
+_RELEASE_HEALTH_TOOL = "admin_release_health"
+
+
+def _is_release_health_only_request(messages: Sequence[Mapping[str, Any]]) -> bool:
+    """Keep a narrow version/health question away from unrelated host and write tools."""
+    if len(messages) != 1 or str(messages[0].get("role") or "") != "user":
+        return False
+    content = messages[0].get("content")
+    if not isinstance(content, str):
+        return False
+    request = content.strip()
+    if "版本" not in request or not any(word in request for word in ("健康", "就绪", "运行状态")):
+        return False
+    # Negated safety instructions are not requests to perform those actions.
+    positive = re.sub(
+        r"(?:不要|无需|不必|禁止|不得)\s*(?:修改|更改|更新|调整|重启|删除|写入|部署|发布|回滚)[^，。；;]*",
+        "",
+        request,
+    )
+    # Other read-only entities make this a multi-intent query; keep the normal
+    # capability set rather than silently dropping the second request.
+    if any(term in positive.casefold() for term in (
+        "审计", "告警", "agent", "用户", "项目", "任务", "报告", "审批", "权限",
+        "配置", "日志", "证书", "备份", "公网", "https", "前端", "宿主机",
+        "容器", "磁盘", "流量", "性能", "最近", "列表", "明细", "操作记录",
+    )):
+        return False
+    return not any(
+        word in positive
+        for word in (
+            "修改", "更改", "更新", "调整", "重启", "删除", "写入", "部署", "发布", "回滚",
+            "修复", "执行", "巡检", "证书", "备份",
+        )
+    )
 
 
 class AgentSessionExpiredError(RuntimeError):
@@ -693,6 +727,7 @@ class PrismToolExecutor:
         session_key: str = "",
         event_sink: Optional[EventSink] = None,
         session_validator: Optional[SessionValidator] = None,
+        tool_scope: str = "",
     ) -> None:
         self._db = db
         self._user = user
@@ -704,11 +739,22 @@ class PrismToolExecutor:
         self._mcp = mcp_provider
         self._event_sink = event_sink
         self._session_validator = session_validator
+        self._tool_scope = tool_scope
         self._orch = get_request_orchestrator(db, user=user)
         self._skill_bindings: Dict[str, str] = {}
 
     async def tool_schemas(self) -> list[Dict[str, Any]]:
         self._assert_session_active()
+        if self._tool_scope == "release_health":
+            return [{
+                "type": "function",
+                "name": _RELEASE_HEALTH_TOOL,
+                "description": (
+                    "只读读取本次后端进程版本和发布标识，并执行与 /readyz 相同的数据库 SELECT 1 就绪检查。"
+                    "不会检查公网 HTTPS、前端或整个宿主机；得到结果后直接回答并说明检查边界。"
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+            }]
         tools: list[Dict[str, Any]] = []
         is_admin = self._surface == "admin" and self._is_admin
         is_admin_actor = _is_admin_actor(self._db, self._user)
@@ -855,6 +901,23 @@ class PrismToolExecutor:
 
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
         self._assert_session_active()
+        if self._tool_scope == "release_health" and call.name != _RELEASE_HEALTH_TOOL:
+            return await self._failed_attempt(call, "本轮仅允许版本与就绪状态只读检查")
+        if call.name == _RELEASE_HEALTH_TOOL:
+            if self._tool_scope != "release_health" or self._surface != "admin" or not self._is_admin or call.arguments:
+                return await self._failed_attempt(call, "管理员版本与就绪检查无权访问或参数无效")
+            return await self._execute_once(call, lambda: ToolExecutionResult.success({
+                "version": settings.app_version,
+                "release": settings.app_release,
+                "process_liveness": "ok",
+                "database_readiness": "ready" if database_is_ready() else "not_ready",
+                "checked_at_utc": datetime.now(timezone.utc).isoformat(),
+                "sources": {
+                    "version_and_liveness": "当前后端进程配置，与 /healthz 的值同源；未发起公网 HTTP 请求",
+                    "database_readiness": "数据库 SELECT 1，与 /readyz 使用同一检查函数",
+                },
+                "scope": "当前后端进程与数据库；未检查公网 HTTPS、前端或宿主机",
+            }))
         if call.name.startswith(_ADMIN_TOOL_PREFIX) and not self._is_admin:
             return await self._failed_attempt(call, "当前用户没有管理员工具权限")
         if self._surface == "admin" and call.name in _MEMBER_BUSINESS_TOOLS:
@@ -2653,9 +2716,20 @@ class AgentResponsesService:
             prepared_messages = [*history_items, *prepared_messages]
         executor, runtime = await self._runtime(
             run_id, event_sink, vision_model=vision_model, image_assets=image_assets_map,
+            tool_scope=(
+                "release_health"
+                if self._surface == "admin" and _is_release_health_only_request(messages)
+                else ""
+            ),
         )
         tools = await executor.tool_schemas()
         instructions = _instructions(self._surface, self._user, self._is_super_admin)
+        if getattr(executor, "_tool_scope", "") == "release_health":
+            instructions += (
+                "本轮只查询当前后端版本与就绪状态。仅调用一次 admin_release_health，"
+                "随后直接回答版本、release、进程和数据库检查结果及来源；"
+                "不得推断公网 HTTPS、前端或整个平台健康，不要寻找主机文件或执行写操作。"
+            )
         if image_urls:
             # 含图请求显式告知模型图片已经作为 input_image 附件传入。
             # 小菱的通用提示会强调“工具列表没有图像识别工具”，模型可能据此
@@ -2749,6 +2823,7 @@ class AgentResponsesService:
         *,
         vision_model: str = "",
         image_assets: Optional[Mapping[str, str]] = None,
+        tool_scope: str = "",
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
         from app.services import multimodal_service
@@ -2760,6 +2835,8 @@ class AgentResponsesService:
         if existing is not None:
             self._store._assert_owner(existing)
             checkpoint = await self._store.load(run_id)
+        if checkpoint and {str(item.get("name") or "") for item in checkpoint.tools} == {_RELEASE_HEALTH_TOOL}:
+            tool_scope = "release_health"
         if checkpoint and multimodal_service.transcript_has_images(checkpoint.transcript):
             vision_model = checkpoint.model
             image_assets = multimodal_service.load_run_image_assets(
@@ -2777,6 +2854,7 @@ class AgentResponsesService:
             mcp_provider=mcp,
             session_key=self._session_key,
             event_sink=event_sink,
+            tool_scope=tool_scope,
         )
         # 工具事件必须先于结论文本到达用户端。DeepSeek 可能在工具调用前
         # 产生 output_text.delta，因此所有 surface 都先缓冲文本，完成后统一发出。
@@ -2880,16 +2958,47 @@ class AgentResponsesService:
                 else None
             ),
             image_assets=image_assets,
-            max_rounds=settings.agent_responses_max_rounds,
+            max_rounds=4 if tool_scope == "release_health" else settings.agent_responses_max_rounds,
             stream=True,
             context_window_tokens=settings.deepseek_context_window_tokens,
             max_output_tokens=settings.deepseek_max_output_tokens,
             compaction_threshold_tokens=settings.deepseek_compaction_threshold_tokens,
             keep_recent_tokens=settings.deepseek_compaction_keep_recent_tokens,
-            completion_guard=self._validate_admin_completion if self._surface == "admin" else None,
+            completion_guard=(
+                self._validate_release_health_completion
+                if tool_scope == "release_health"
+                else self._validate_admin_completion if self._surface == "admin" else None
+            ),
             on_round=_write_ai_call_log,
         )
         return executor, runtime
+
+    @staticmethod
+    async def _validate_release_health_completion(
+        checkpoint: RunCheckpoint,
+        _output_text: str,
+    ) -> Optional[str]:
+        """A version claim needs a successful same-run read, not model memory."""
+        last_user_index = max(
+            (index for index, item in enumerate(checkpoint.transcript) if item.get("role") == "user"),
+            default=-1,
+        )
+        current_turn = checkpoint.transcript[last_user_index + 1:]
+        call_ids = {
+            str(item.get("call_id") or item.get("id") or "")
+            for item in current_turn
+            if item.get("type") == "function_call" and item.get("name") == _RELEASE_HEALTH_TOOL
+        }
+        for item in current_turn:
+            if item.get("type") != "function_call_output" or str(item.get("call_id") or "") not in call_ids:
+                continue
+            try:
+                payload = json.loads(str(item.get("output") or ""))
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict) and payload.get("status") == "success":
+                return None
+        return "尚无本轮 admin_release_health 成功读取证据"
 
     async def _validate_admin_completion(
         self,
@@ -3197,6 +3306,7 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
     role_label = {
         "super_admin": "超级管理员(唯一 admin,可执行服务器运维)",
         "admin": "管理员(可管理平台内容,不可执行服务器运维)",
+        "reviewer": "审查员(已合并原审计员角色)",
         "user": "普通用户",
     }.get(role, role)
     identity_line = (
@@ -3205,6 +3315,11 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "执行服务器运维、删除、改角色、批量删除、写知识等敏感操作前,"
         "先向用户复述当前身份并请用户确认。"
     )
+    if surface != "admin":
+        identity_line += (
+            "操作审计页面为 /audit，按 audit:view 权限开放；审查员具备该权限时可访问，"
+            "普通用户不可访问。/api/admin/audit 是接口路径，不能仅凭 admin 字样推断页面只对管理员开放。"
+        )
     if surface == "admin" and not is_super_admin:
         identity_line += (
             "注意:你不是唯一超级管理员,没有服务器运维权限(admin_execute_operation/admin_system_status/"

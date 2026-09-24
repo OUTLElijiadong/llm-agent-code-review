@@ -369,7 +369,7 @@ onMounted(() => {
     grid-column: 1 / -1; flex-wrap: wrap;
     padding-top: 8px; border-top: 1px dashed var(--gray-100, #eef0f4);
   }
-  .rc-name { max-width: 100%; }
+  .rc-name { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .rc-project { max-width: 60vw; }
 }
 
@@ -406,4 +406,16 @@ onMounted(() => {
 .score-low { color: var(--color-danger, #dc4961); font-weight: 600; }
 
 .danger-item { color: var(--el-color-danger); }
+@media (max-width: 760px) {
+  .report-list-page .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .report-list-page .page-header .page-sub {
+    margin: 0;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
+}
 </style>

@@ -37,7 +37,82 @@ from app.services.deepseek_responses_runtime import (
     RunCheckpoint,
     RuntimeResult,
     ToolCall,
+    ToolExecutionResult,
 )
+
+
+def test_admin_release_health_scope_matches_only_narrow_read_query() -> None:
+    match = service_module._is_release_health_only_request
+    assert match([{
+        "role": "user",
+        "content": "请读取当前平台运行版本和健康状态，并说明数据来自哪个检查；不要修改配置。",
+    }])
+    assert not match([{"role": "user", "content": "查看运行版本，然后修改配置 LOG_LEVEL"}])
+    assert not match([{"role": "user", "content": "执行生产巡检，查询版本和健康状态"}])
+    assert not match([{"role": "user", "content": "查看用户列表和版本"}])
+    assert not match([{"role": "user", "content": "请查看当前版本、健康状态和最近的操作审计记录"}])
+    assert not match([{"role": "user", "content": "检查版本、健康状态并列出已发布 Agent"}])
+
+
+@pytest.mark.asyncio
+async def test_admin_release_health_is_one_read_only_tool_with_explicit_scope(db, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(service_module, "database_is_ready", lambda: True)
+    monkeypatch.setattr(service_module.settings, "app_version", "4.0.7")
+    monkeypatch.setattr(service_module.settings, "app_release", "sha-test")
+    executor = PrismToolExecutor(
+        db, SimpleNamespace(id=7, role="admin"), surface="admin", run_id="run_release_health",
+        mcp_provider=EmptyMcp(), tool_scope="release_health",
+    )
+
+    async def execute_once(_call, operation):
+        return operation()
+
+    async def failed_attempt(_call, error):
+        return ToolExecutionResult.failure(error)
+
+    monkeypatch.setattr(executor, "_execute_once", execute_once)
+    monkeypatch.setattr(executor, "_failed_attempt", failed_attempt)
+    assert {item["name"] for item in await executor.tool_schemas()} == {"admin_release_health"}
+
+    answer = await executor.execute(ToolCall("health", "admin_release_health", {}, "{}"))
+    assert answer.status == "success"
+    assert answer.output["version"] == "4.0.7"
+    assert answer.output["release"] == "sha-test"
+    assert answer.output["database_readiness"] == "ready"
+    assert "/readyz" in answer.output["sources"]["database_readiness"]
+    assert "未检查公网 HTTPS" in answer.output["scope"]
+
+    forbidden = await executor.execute(ToolCall(
+        "write", "admin_execute_operation", {"action": "update_config", "params": {}}, "{}",
+    ))
+    assert forbidden.status == "error"
+    assert "仅允许版本与就绪状态只读检查" in forbidden.error
+
+
+@pytest.mark.asyncio
+async def test_admin_release_health_completion_needs_successful_tool_evidence() -> None:
+    guard = service_module.AgentResponsesService._validate_release_health_completion
+    checkpoint = RunCheckpoint(
+        run_id="run_release_guard", model="deepseek-v4-flash", tools=[], transcript=[
+            {"role": "user", "content": "查询版本和健康状态"},
+        ],
+    )
+    assert "尚无本轮" in (await guard(checkpoint, "版本是 4.0.7") or "")
+    checkpoint.transcript.extend([
+        {"type": "function_call", "name": "admin_release_health", "call_id": "health"},
+        {"type": "function_call_output", "call_id": "health", "output": '{"status":"error"}'},
+    ])
+    assert "尚无本轮" in (await guard(checkpoint, "版本是 4.0.7") or "")
+    checkpoint.transcript[-1]["output"] = '{"status":"success","output":{"version":"4.0.7"}}'
+    assert await guard(checkpoint, "版本是 4.0.7") is None
+    checkpoint.transcript.append({"role": "user", "content": "再次查询当前版本和健康状态"})
+    assert "尚无本轮" in (await guard(checkpoint, "版本是 4.0.7") or "")
+    checkpoint.transcript.extend([
+        {"type": "function_call", "name": "admin_release_health", "call_id": "health-next"},
+        {"type": "function_call_output", "call_id": "health-next", "output": '{"status":"success"}'},
+    ])
+    assert await guard(checkpoint, "版本是 4.0.8") is None
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +150,33 @@ async def test_agent_responses_runtime_uses_configured_long_task_round_budget(
     await service._runtime("run-long-task", None)
 
     assert captured["max_rounds"] == 64
+
+
+@pytest.mark.asyncio
+async def test_admin_release_health_runtime_has_small_round_budget(db, monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class CapturingRuntime:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        service_module, "resolve_api_config",
+        lambda *_args, **_kwargs: SimpleNamespace(model="deepseek-v4-flash", source="system"),
+    )
+    monkeypatch.setattr(service_module, "NativeResponsesTransport", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(service_module, "DeepSeekResponsesRuntime", CapturingRuntime)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    service = service_module.AgentResponsesService(
+        db, SimpleNamespace(id=7, role="admin", username="admin"),
+        surface="admin", session_key="session-release-health",
+    )
+
+    executor, _runtime = await service._runtime("run-release-health", None, tool_scope="release_health")
+
+    assert captured["max_rounds"] == 4
+    assert captured["completion_guard"] == service._validate_release_health_completion
+    assert {item["name"] for item in await executor.tool_schemas()} == {"admin_release_health"}
 
 
 def test_agent_response_request_accepts_only_one_start_input_source() -> None:

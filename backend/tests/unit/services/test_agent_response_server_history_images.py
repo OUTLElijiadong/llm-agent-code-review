@@ -80,7 +80,7 @@ async def test_service_continues_raw_tool_transcript_and_restores_own_image(db, 
             captured["runtime_args"] = kwargs
             return RuntimeResult(run_id="new-image-run", status="completed")
 
-    async def fake_runtime(_run_id, _sink, *, vision_model="", image_assets=None):
+    async def fake_runtime(_run_id, _sink, *, vision_model="", image_assets=None, tool_scope=""):
         captured["vision_model"] = vision_model
         captured["image_assets"] = image_assets
         return FakeExecutor(), FakeRuntime()
