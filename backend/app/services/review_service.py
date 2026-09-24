@@ -1428,8 +1428,6 @@ def _review_chunk_collaborative(
         chunk_id=f"task:{task.id}:file:{code_file.id}:chunk:{chunk_idx}",
     )
     final_issues = aggregated.issues
-    if failures:
-        raise ReviewCoverageError(failures, [_final_issue_to_finding(item) for item in final_issues])
     if aggregated.diagnostics:
         logger.warning(
             "[collab] %s chunk=%s isolated_invalid=%s diagnostics=%s",
@@ -1438,6 +1436,21 @@ def _review_chunk_collaborative(
             aggregated.coverage.get("invalid_input_count", 0),
             aggregated.diagnostics[:10],
         )
+    coverage = aggregated.coverage
+    invalid_count = int(coverage.get("invalid_input_count") or 0)
+    if invalid_count:
+        failures.append(f"确定性聚合有 {invalid_count} 条无效问题被隔离，需人工复核原始输出")
+    if aggregated.summary.get("fallback") or any(
+        diagnostic.get("code") == "aggregation_internal_error"
+        for diagnostic in aggregated.diagnostics
+    ):
+        failures.append("确定性聚合内部失败，已保留原始发现供人工复核")
+    if coverage.get("discarded_claim_ids") or sorted(coverage.get("input_claim_ids") or []) != sorted(
+        coverage.get("output_claim_ids") or []
+    ):
+        failures.append("确定性聚合未保留全部有效问题声明，需人工复核原始输出")
+    if failures:
+        raise ReviewCoverageError(failures, [_final_issue_to_finding(item) for item in final_issues])
 
     # 事件广播: 通知各 Agent 协同完成
     for profile in profiles:

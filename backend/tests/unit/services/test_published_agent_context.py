@@ -1,6 +1,7 @@
 """Published Agent input coverage and approved Skill context regression tests."""
 
 import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -87,6 +88,104 @@ def test_readonly_tool_result_is_not_silently_cut(db, admin_user, monkeypatch):
         db, "main_agent", "只读证据", {"tool_code": "review_context"}, user=admin_user,
     )
     assert "唯一末尾证据" in rendered
+
+
+def test_large_readonly_result_compacts_every_sourced_piece(db, admin_user, monkeypatch):
+    output = {"first": "A" * 70_000, "late": "B" * 70_000 + "唯一末尾证据"}
+    monkeypatch.setattr(declarative_agent_runtime.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(declarative_agent_runtime.settings, "deepseek_max_output_tokens", 16_384)
+    monkeypatch.setattr(
+        declarative_agent_runtime,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            call_tool=lambda *_args, **_kwargs: SimpleNamespace(success=True, data=output),
+        ),
+    )
+    monkeypatch.setattr(
+        declarative_agent_runtime.tool_gateway,
+        "execute",
+        lambda _db, **kwargs: SimpleNamespace(success=True, data=kwargs["handler"]()),
+    )
+    monkeypatch.setattr(declarative_agent_runtime, "resolve_api_config", lambda *_args: object(), raising=False)
+    monkeypatch.setattr(declarative_agent_runtime, "resolve_subagent_config", lambda *_args: object(), raising=False)
+    seen_sources = []
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **kwargs):
+            sources = json.loads(kwargs["user_prompt"])["sources"]
+            seen_sources.extend(sources)
+            ids = [source_id for source in sources for source_id in source["covered_source_ids"]]
+            quotes = [
+                {"source_id": source["source_id"], "quote": source["content"][-20:]}
+                for source in sources
+            ]
+            summary = "已提炼片段" + ("唯一末尾证据" if "唯一末尾证据" in kwargs["user_prompt"] else "")
+            return json.dumps({"covered_source_ids": ids, "source_quotes": quotes, "summary": summary}), {}
+
+    monkeypatch.setattr(declarative_agent_runtime, "DeepSeekAgent", Client, raising=False)
+    rendered = DeclarativeReviewAgentFactory._run_readonly_tool(
+        db, "main_agent", "只读证据", {"tool_code": "review_context"}, user=admin_user,
+    )
+    assert len(seen_sources) > 1
+    assert any(source["path"] == "$.late" for source in seen_sources)
+    assert "唯一末尾证据" in seen_sources[-1]["content"]
+    assert "唯一末尾证据" in rendered
+    assert len(rendered) < len(json.dumps(output, ensure_ascii=False))
+    assert hashlib.sha256(json.dumps(output, ensure_ascii=False).encode()).hexdigest() in rendered
+
+
+@pytest.mark.parametrize("failure", ["coverage", "quote", "missing_tail", "length"])
+def test_large_readonly_result_rejects_unverified_compaction(db, admin_user, monkeypatch, failure):
+    output = {"proof": "A" * 140_000 + "唯一末尾证据"}
+    monkeypatch.setattr(declarative_agent_runtime.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(declarative_agent_runtime.settings, "deepseek_max_output_tokens", 16_384)
+    monkeypatch.setattr(
+        declarative_agent_runtime,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            call_tool=lambda *_args, **_kwargs: SimpleNamespace(success=True, data=output),
+        ),
+    )
+    monkeypatch.setattr(
+        declarative_agent_runtime.tool_gateway,
+        "execute",
+        lambda _db, **kwargs: SimpleNamespace(success=True, data=kwargs["handler"]()),
+    )
+    monkeypatch.setattr(declarative_agent_runtime, "resolve_api_config", lambda *_args: object(), raising=False)
+    monkeypatch.setattr(declarative_agent_runtime, "resolve_subagent_config", lambda *_args: object(), raising=False)
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **kwargs):
+            if failure == "length":
+                raise declarative_agent_runtime.DeepSeekOutputTruncatedError("length")
+            sources = json.loads(kwargs["user_prompt"])["sources"]
+            ids = [source_id for source in sources for source_id in source["covered_source_ids"]]
+            if failure == "coverage":
+                ids.pop()
+            quotes = [
+                {
+                    "source_id": source["source_id"],
+                    "quote": (
+                        "伪造引文" if failure == "quote" else
+                        source["content"][-40:-20] if failure == "missing_tail" else
+                        source["content"][-20:]
+                    ),
+                }
+                for source in sources
+            ]
+            return json.dumps({"covered_source_ids": ids, "source_quotes": quotes, "summary": "摘要"}), {}
+
+    monkeypatch.setattr(declarative_agent_runtime, "DeepSeekAgent", Client, raising=False)
+    with pytest.raises(ValidationError, match="只读工具.*压缩|来源覆盖|引文|截断"):
+        DeclarativeReviewAgentFactory._run_readonly_tool(
+            db, "main_agent", "只读证据", {"tool_code": "review_context"}, user=admin_user,
+        )
 
 
 def test_missing_approved_skill_fails_instead_of_skipping(db):

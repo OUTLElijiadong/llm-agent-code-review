@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.agents.base import AgentResult
+from app.ai import finding_aggregator as aggregator_module
 from app.ai.multi_agent import get_agent_profiles
 from app.core.database import Base
 from app.core.exceptions import ValidationError
@@ -506,6 +507,75 @@ def test_one_collaborative_failure_keeps_other_agents_valid_evidence(isolated_ro
         assert persisted.status == "failed"
         assert persisted.total_issues == observer.query(ReviewIssue).filter_by(task_id=rows.task.id).count() == 1
         assert persisted.score != 100
+
+
+def test_invalid_aggregation_claim_marks_formal_review_incomplete(isolated_rows, monkeypatch):
+    """聚合时被隔离的无效声明不能从完成口径中无声消失。"""
+    rows = isolated_rows
+    rows.task.review_type = "full"
+    rows.database.commit()
+    raw = json.dumps({
+        "issues": [{
+            "title": "retained result", "severity": "高", "line_number": 1,
+            "issue_type": "安全漏洞", "description": "independent evidence",
+            "evidence": "value = 1",
+        }],
+    })
+    monkeypatch.setattr(review_service, "_call_single_agent", lambda *args, **kwargs: (raw, {}))
+    aggregate = review_service.aggregate_agent_findings_safely
+
+    def add_invalid_claim(findings, names, **kwargs):
+        with_invalid = {code: list(items) for code, items in findings.items()}
+        first_agent = next(iter(with_invalid))
+        with_invalid[first_agent].append({
+            "title": "discarded result", "severity": "invalid", "line_start": 1,
+            "issue_type": "安全漏洞", "description": "must not vanish silently",
+        })
+        result = aggregate(with_invalid, names, **kwargs)
+        assert result.coverage["invalid_input_count"] == 1
+        return result
+
+    monkeypatch.setattr(review_service, "aggregate_agent_findings_safely", add_invalid_claim)
+    review_service._execute_review(
+        rows.database, Mock(), None, rows.task, rows.user, [rows.code_file], [],
+        get_agent_profiles("full"), "", execution_token="initial-lease",
+    )
+
+    with rows.sessions() as observer:
+        persisted = observer.get(ReviewTask, rows.task.id)
+        assert persisted.status == "failed"
+        assert "聚合" in (persisted.error_message or "")
+        assert persisted.total_issues == observer.query(ReviewIssue).filter_by(task_id=rows.task.id).count() == 1
+
+
+def test_aggregation_fallback_marks_formal_review_incomplete(isolated_rows, monkeypatch):
+    """聚合内部异常的人工待复核兜底不能伪装为协同审查已完成。"""
+    rows = isolated_rows
+    rows.task.review_type = "full"
+    rows.database.commit()
+    raw = json.dumps({
+        "issues": [{
+            "title": "retained fallback evidence", "severity": "高", "line_number": 1,
+            "issue_type": "安全漏洞", "description": "independent evidence",
+            "evidence": "value = 1",
+        }],
+    })
+    monkeypatch.setattr(review_service, "_call_single_agent", lambda *args, **kwargs: (raw, {}))
+
+    def aggregation_error(*args, **kwargs):
+        raise RuntimeError("aggregation unavailable")
+
+    monkeypatch.setattr(aggregator_module, "aggregate_agent_findings", aggregation_error)
+    review_service._execute_review(
+        rows.database, Mock(), None, rows.task, rows.user, [rows.code_file], [],
+        get_agent_profiles("full"), "", execution_token="initial-lease",
+    )
+
+    with rows.sessions() as observer:
+        persisted = observer.get(ReviewTask, rows.task.id)
+        assert persisted.status == "failed"
+        assert "聚合" in (persisted.error_message or "")
+        assert persisted.total_issues == observer.query(ReviewIssue).filter_by(task_id=rows.task.id).count() == 1
 
 
 def test_single_custom_profile_uses_collaborative_execution(isolated_rows, monkeypatch):

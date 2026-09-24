@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.agents import test_review_reporter_agent as reporter_module
 from app.agents.base import AgentResult
 from app.agents.test_review_reporter_agent import TestReviewReporterAgent as ReporterAgent
 
@@ -227,3 +228,329 @@ def test_evidence_over_batch_budget_fails_before_any_model_call(monkeypatch) -> 
 
     assert result.success is False
     assert result.failure_kind == "input_exceeds_context"
+
+
+def test_knowledge_references_compact_each_source_and_keep_last_anchor(monkeypatch) -> None:
+    """三段知识都应有可追溯来源；尾段不能被合并后的 2000 字符上限抹掉。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    hits = [
+        {"doc_id": index, "title": f"方法 {index}", "owner_type": "user",
+         "content": "x" * 2_100 + f"KNOWLEDGE_TAIL_{index}"}
+        for index in range(1, 4)
+    ]
+    monkeypatch.setattr(reporter_module.agent_knowledge_service, "unified_retrieve", lambda *a, **k: hits)
+    calls = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        calls.append(user)
+        source = user.split("原始知识片段:\n", 1)[1]
+        head_anchor = source[:16]
+        middle_anchor = source[len(source) // 2 - 8:len(source) // 2 + 8]
+        tail_anchor = source[-16:]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        return AgentResult(
+            success=True,
+            data=json.dumps({
+                "summary": f"保留中段{middle_anchor}与尾部{tail_anchor}",
+                "head_quote": head_anchor,
+                "middle_quote": middle_anchor,
+                "tail_quote": tail_anchor,
+                "covered_source_ids": [source_id],
+                "source_sha256": digest,
+                "coverage_complete": True,
+            }),
+            finish_reason="stop",
+        )
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    refs = agent._knowledge_refs(None, 1, "whitebox")
+
+    assert len(calls) == 3
+    assert all(f"KNOWLEDGE_TAIL_{index}" in refs for index in range(1, 4))
+    assert all(f'"doc_id": {index}' in refs for index in range(1, 4))
+    assert refs.count('"sha256"') == 3
+    assert refs.count("sha256=") == 3
+
+
+def test_knowledge_24k_source_keeps_tail_rule_and_every_chunk_fingerprint(monkeypatch) -> None:
+    """24k 末尾规则必须进参考文本，每片都向压缩模型独立提供 ID 与哈希。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    middle_rule = "中段规则：失败须留证"
+    tail_rule = "最终规则：失败不得判通过"
+    middle_at = 10_000
+    content = (
+        "x" * middle_at + middle_rule
+        + "x" * (24_000 - middle_at - len(middle_rule) - len(tail_rule)) + tail_rule
+    )
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": content}],
+    )
+    inputs = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        inputs.append(user)
+        part = user.split("原始知识片段:\n", 1)[1]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        tail = part[-16:]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": f"已提炼中段{middle}与尾部{tail}",
+            "head_quote": part[:16], "middle_quote": middle, "tail_quote": tail,
+            "covered_source_ids": [source_id], "source_sha256": digest,
+            "coverage_complete": True,
+        }, ensure_ascii=False))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    refs = agent._knowledge_refs(None, 1, "whitebox")
+
+    assert len(inputs) == 6
+    assert all(f"片段 {index}/6" in refs for index in range(1, 7))
+    assert all("sha256=" in user for user in inputs)
+    assert middle_rule in refs
+    assert tail_rule in refs
+    assert len(refs.split("压缩摘要（非原文）：\n", 1)[1]) <= 2_000
+
+
+def test_knowledge_chunks_balance_4001_character_boundary(monkeypatch) -> None:
+    """4001 字不能切出单字尾片，使首中尾引文契约无法满足。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    tail_rule = "末尾规则不得丢失"
+    content = "x" * (4_001 - len(tail_rule)) + tail_rule
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": content}],
+    )
+    parts = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        part = user.split("原始知识片段:\n", 1)[1]
+        parts.append(part)
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        tail = part[-16:]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": f"已提炼中段{middle}与尾部{tail}",
+            "head_quote": part[:16], "middle_quote": middle, "tail_quote": tail,
+            "covered_source_ids": [source_id], "source_sha256": digest,
+            "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    refs = agent._knowledge_refs(None, 1, "whitebox")
+
+    assert len(parts) == 2
+    assert min(map(len, parts)) >= 2_000
+    assert tail_rule in refs
+
+
+def test_knowledge_rejects_fake_whole_source_coverage_without_tail_quote(monkeypatch) -> None:
+    """模型只引用长来源开头却声称整条覆盖时，不能接受为完整参考。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    content = "仅开头规则" + "x" * 12_000 + "末尾不能忽略"
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": content}],
+    )
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0] if "sha256=" in user else ""
+        return AgentResult(success=True, data=json.dumps({
+            "summary": "只看开头", "anchors": ["仅开头规则"],
+            "head_quote": "仅开头规则", "middle_quote": "仅开头规则",
+            "tail_quote": "仅开头规则",
+            "covered_source_ids": [source_id], "coverage_complete": True,
+            "source_sha256": digest,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+
+    with pytest.raises(reporter_module.KnowledgeReferenceError):
+        agent._knowledge_refs(None, 1, "whitebox")
+
+
+def test_knowledge_rejects_wrong_middle_chunk_fingerprint(monkeypatch) -> None:
+    """即使首片通过，第二片回传错误指纹也不得拼成完整摘要。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    content = "A" * 4_000 + "B" * 4_000 + "C" * 200
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": content}],
+    )
+    calls = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        calls.append(user)
+        part = user.split("原始知识片段:\n", 1)[1]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        tail = part[-16:]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": f"已提炼中段{middle}与尾部{tail}",
+            "head_quote": part[:16], "middle_quote": middle, "tail_quote": tail,
+            "covered_source_ids": [source_id],
+            "source_sha256": "wrong" if len(calls) == 2 else digest,
+            "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+
+    with pytest.raises(reporter_module.KnowledgeReferenceError):
+        agent._knowledge_refs(None, 1, "whitebox")
+    assert len(calls) == 2
+
+
+def test_knowledge_rejects_generic_summary_with_only_anchor_fields(monkeypatch) -> None:
+    """只回“已检查”并把引文放在字段中，不足以当成覆盖完整的摘要。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    content = "开头测试规则" + "x" * 4_000 + "尾部测试规则"
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": content}],
+    )
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        part = user.split("原始知识片段:\n", 1)[1]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": "已检查", "head_quote": part[:16],
+            "middle_quote": middle, "tail_quote": part[-16:],
+            "covered_source_ids": [source_id], "source_sha256": digest,
+            "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    with pytest.raises(reporter_module.KnowledgeReferenceError):
+        agent._knowledge_refs(None, 1, "whitebox")
+
+
+def test_review_limits_total_knowledge_compaction_calls(monkeypatch) -> None:
+    """四阶段各自检索长来源时，总压缩调用数必须受单次报告预算限制。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": "x" * 24_000}],
+    )
+    calls = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        calls.append(system)
+        assert "知识压缩 Agent" in system
+        part = user.split("原始知识片段:\n", 1)[1]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        tail = part[-16:]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": f"已提炼中段{middle}与尾部{tail}",
+            "head_quote": part[:16], "middle_quote": middle, "tail_quote": tail,
+            "covered_source_ids": [source_id], "source_sha256": digest,
+            "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    review = agent.review(None, environment=_environment(), conclusion={"passed": True})
+
+    assert review.success is False
+    assert review.failure_kind == "knowledge_compaction_budget_exhausted"
+    assert len(calls) == 12
+
+
+def test_three_normal_knowledge_hits_keep_all_sources_without_model_call(monkeypatch) -> None:
+    """现有 700 字切片无需额外模型调用，第三条仍保留完整原文。"""
+    agent = ReporterAgent()
+    hits = [{"doc_id": index, "content": "x" * 680 + f"TAIL_{index}"} for index in range(1, 4)]
+    monkeypatch.setattr(reporter_module.agent_knowledge_service, "unified_retrieve", lambda *a, **k: hits)
+    monkeypatch.setattr(agent, "_role_call", lambda *a, **k: pytest.fail("短切片不应再次调用模型"))
+
+    refs = agent._knowledge_refs(None, 1, "whitebox")
+
+    assert all(f"TAIL_{index}" in refs for index in range(1, 4))
+    assert refs.count("原文：") == 3
+
+
+@pytest.mark.parametrize("result", [
+    AgentResult(success=False, error="模型不可用", failure_kind="upstream_error"),
+    AgentResult(success=True, data=json.dumps({
+        "summary": "只概括了开头", "anchors": ["x"],
+        "covered_source_ids": [], "coverage_complete": True,
+    })),
+    AgentResult(success=True, data=json.dumps({
+        "summary": "只概括了开头", "anchors": ["x"],
+        "covered_source_ids": ["wrong"], "coverage_complete": False,
+    })),
+])
+def test_knowledge_reference_compaction_failure_prevents_partial_report(monkeypatch, result) -> None:
+    """任一来源未覆盖或模型失败时，不能只带成功来源继续生成完整 AI 报告。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 1, "content": "x" * 3000}],
+    )
+    calls = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        calls.append(system)
+        return result
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    review = agent.review(None, environment=_environment(), conclusion={"passed": True})
+
+    assert review.success is False
+    assert review.failure_kind in {"upstream_error", "coverage_incomplete"}
+    assert all("白盒测试审查" not in system for system in calls)
+
+
+def test_knowledge_reference_rejects_anchor_missing_from_source(monkeypatch) -> None:
+    """即使模型声称覆盖且 ID 正确，编造的原文锚点也必须被拒绝。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 1, "content": "x" * 3000}],
+    )
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": "伪造引用", "anchors": ["不存在的原文"],
+            "covered_source_ids": [source_id], "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    review = agent.review(None, environment=_environment(), conclusion={"passed": True})
+
+    assert review.success is False
+    assert review.failure_kind == "coverage_incomplete"
+
+
+def test_knowledge_retrieval_error_is_explicit_failure(monkeypatch) -> None:
+    """知识服务报错不能被当成无知识命中。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+
+    def retrieve(*args, **kwargs):
+        raise RuntimeError("数据库不可用")
+
+    monkeypatch.setattr(reporter_module.agent_knowledge_service, "unified_retrieve", retrieve)
+    monkeypatch.setattr(agent, "_role_call", lambda *a, **k: pytest.fail("不得进入报告角色"))
+
+    review = agent.review(None, environment=_environment(), conclusion={"passed": True})
+
+    assert review.success is False
+    assert review.failure_kind == "knowledge_retrieval_failed"

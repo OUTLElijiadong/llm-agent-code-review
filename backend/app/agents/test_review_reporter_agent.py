@@ -92,6 +92,21 @@ _EVIDENCE_COMPRESSION_PROMPT = (
 _EVIDENCE_DIRECT_CHARS = 60_000
 _EVIDENCE_CHUNK_CHARS = 24_000
 _MAX_EVIDENCE_CHUNKS = 32
+_KNOWLEDGE_SOURCE_CHARS = 2_000
+_KNOWLEDGE_MAX_SOURCE_CHARS = 24_000
+_KNOWLEDGE_CHUNK_CHARS = 4_000
+_KNOWLEDGE_EXCERPT_CHARS = 32
+_KNOWLEDGE_MAX_COMPRESSION_CALLS = 12
+_KNOWLEDGE_COMPRESSION_PROMPT = (
+    "你是审查方法论知识压缩 Agent。只处理当前编号的知识片段，不补写外部内容。"
+    "保留该片段全部关键规则和例外；预算不足或无法确认覆盖时 coverage_complete=false。"
+    '只输出 JSON: {"summary":"...","head_quote":"片首原文逐字短引",'
+    '"middle_quote":"片中原文逐字短引","tail_quote":"片尾原文逐字短引",'
+    '"covered_source_ids":["当前片段 source_id"],'
+    '"source_sha256":"当前片段 sha256","coverage_complete":true}。'
+    "首、中、尾引文须分别取自片段开头、正中、末尾，摘要必须包含中、尾引文。"
+    "摘要不能只写已检查，也不能当成测试证据。"
+)
 
 _QUERIES = {
     "whitebox": "白盒编译 静态检查 单元测试 跳过 警告 修复方向",
@@ -104,6 +119,14 @@ _QUERIES = {
     "dependency": "依赖审计 SCA 供应链 离线安装 缺失依赖",
     "penetration": "渗透测试 攻击链 利用验证 证据纪律",
 }
+
+
+class KnowledgeReferenceError(ValueError):
+    """知识参考无法在预算内完整压缩，报告应显式失败并走确定性兜底。"""
+
+    def __init__(self, message: str, failure_kind: str = "coverage_incomplete") -> None:
+        super().__init__(message)
+        self.failure_kind = failure_kind
 
 
 class TestReviewReporterAgent(BaseAgent):
@@ -148,18 +171,147 @@ class TestReviewReporterAgent(BaseAgent):
             return redact_agent_output_text(value)
         return value
 
-    def _knowledge_refs(self, db: Session, owner_id: int, stage: str) -> str:
+    def _compact_knowledge_source(
+        self, content: str, source_id: str, stage: str, index: int,
+        ctx: Optional[AgentContext], call_budget: dict[str, int],
+    ) -> str:
+        """逐片压缩知识；校验指纹、首中尾引文及单轮调用预算。"""
+        chunk_count = (len(content) + _KNOWLEDGE_CHUNK_CHARS - 1) // _KNOWLEDGE_CHUNK_CHARS
+        base_size, extra = divmod(len(content), chunk_count)
+        chunks: list[str] = []
+        start = 0
+        for chunk_index in range(chunk_count):
+            end = start + base_size + (1 if chunk_index < extra else 0)
+            chunks.append(content[start:end])
+            start = end
+        chunk_budget = (_KNOWLEDGE_SOURCE_CHARS - 2 * (len(chunks) - 1)) // len(chunks)
+        sections: list[str] = []
+        for part_index, chunk in enumerate(chunks, start=1):
+            digest = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+            chunk_id = f"{source_id}:part:{part_index}/{len(chunks)}:{digest[:12]}"
+            if call_budget["used"] >= _KNOWLEDGE_MAX_COMPRESSION_CALLS:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识压缩已达单次报告 {_KNOWLEDGE_MAX_COMPRESSION_CALLS} 次调用上限",
+                    "knowledge_compaction_budget_exhausted",
+                )
+            call_budget["used"] += 1
+            try:
+                result = self._role_call(
+                    _KNOWLEDGE_COMPRESSION_PROMPT,
+                    f"source_id={chunk_id}\nsha256={digest}\n"
+                    f"片段={part_index}/{len(chunks)}；本片输出预算={chunk_budget}字符\n"
+                    f"原始知识片段:\n{chunk}",
+                    ctx,
+                    max_tokens=2048,
+                )
+            except Exception as exc:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 压缩调用异常",
+                    "knowledge_compaction_failed",
+                ) from exc
+            if not result.success:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 压缩失败: {result.error or '空输出'}",
+                    result.failure_kind or "knowledge_compaction_failed",
+                )
+            try:
+                item = json.loads(result.data) if isinstance(result.data, str) else result.data
+            except (TypeError, ValueError) as exc:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 摘要不是有效 JSON",
+                ) from exc
+            if not isinstance(item, dict) or item.get("coverage_complete") is not True:
+                raise KnowledgeReferenceError(f"{stage} 知识来源 {index} 片段 {part_index} 未确认完整覆盖")
+            summary = item.get("summary")
+            head_quote = item.get("head_quote")
+            middle_quote = item.get("middle_quote")
+            tail_quote = item.get("tail_quote")
+            midpoint = len(chunk) // 2
+            middle_fingerprint = chunk[midpoint - 8:midpoint + 8]
+            if (
+                item.get("covered_source_ids") != [chunk_id]
+                or item.get("source_sha256") != digest
+                or not isinstance(summary, str) or len(summary.strip()) < 24
+                or not isinstance(head_quote, str) or not 8 <= len(head_quote) <= 64
+                or not chunk.startswith(head_quote)
+                or not isinstance(middle_quote, str) or not 8 <= len(middle_quote) <= 64
+                or middle_fingerprint not in middle_quote
+                or middle_quote not in chunk[max(0, midpoint - 64):midpoint + 64]
+                or not isinstance(tail_quote, str) or not 8 <= len(tail_quote) <= 64
+                or not chunk.endswith(tail_quote)
+                or middle_quote not in summary or tail_quote not in summary
+            ):
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 指纹或首中尾原文引文无效",
+                )
+            middle_excerpt = chunk[
+                midpoint - _KNOWLEDGE_EXCERPT_CHARS // 2:
+                midpoint + _KNOWLEDGE_EXCERPT_CHARS // 2
+            ]
+            section = (
+                f"片段 {part_index}/{len(chunks)} source_id={chunk_id} sha256={digest}\n"
+                f"摘要：{summary.strip()}\n首引：{head_quote}\n中引：{middle_quote}\n"
+                f"尾引：{tail_quote}\n原文中段：{middle_excerpt}\n"
+                f"原文尾部：{chunk[-_KNOWLEDGE_EXCERPT_CHARS:]}"
+            )
+            if len(section) > chunk_budget:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 压缩结果超过片段预算",
+                )
+            sections.append(section)
+        body = "\n\n".join(sections)
+        if len(body) > _KNOWLEDGE_SOURCE_CHARS:
+            raise KnowledgeReferenceError(f"{stage} 知识来源 {index} 压缩结果超过来源预算")
+        return body
+
+    def _knowledge_refs(
+        self, db: Session, owner_id: int, stage: str, ctx: Optional[AgentContext] = None,
+        call_budget: Optional[dict[str, int]] = None,
+    ) -> str:
+        if call_budget is None:
+            call_budget = {"used": 0}
         try:
             hits = agent_knowledge_service.unified_retrieve(
                 db, user_id=owner_id, agent_code="test_review",
                 query=_QUERIES.get(stage, _QUERIES["report"]), top_k=3,
             )
-        except Exception:
+        except Exception as exc:
+            raise KnowledgeReferenceError(
+                f"{stage} 知识参考检索失败，不能确认来源覆盖",
+                "knowledge_retrieval_failed",
+            ) from exc
+        sources = [(hit, str(hit.get("content") or "")) for hit in hits or []]
+        sources = [(hit, content) for hit, content in sources if content.strip()]
+        if not sources:
             return ""
-        lines = [str(h.get("content") or "").strip() for h in hits or [] if str(h.get("content") or "").strip()]
-        if not lines:
-            return ""
-        return "\n\n【审查方法论参考】\n" + "\n---\n".join(lines)[:2000]
+        if len(sources) > 3:
+            raise KnowledgeReferenceError(f"{stage} 知识参考超过检索来源上限")
+
+        sections: list[str] = []
+        for index, (hit, content) in enumerate(sources, start=1):
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            source_id = f"knowledge:{stage}:{index}:{digest[:12]}"
+            source = {
+                "source_id": source_id,
+                "owner_type": hit.get("owner_type"),
+                "doc_id": hit.get("doc_id"),
+                "title": hit.get("title"),
+                "sha256": digest,
+            }
+            if len(content) + len("原文：") <= _KNOWLEDGE_SOURCE_CHARS:
+                body = "原文：" + content
+            else:
+                if len(content) > _KNOWLEDGE_MAX_SOURCE_CHARS:
+                    raise KnowledgeReferenceError(f"{stage} 知识来源 {index} 超过单次压缩输入预算")
+                if not self._api_key:
+                    raise KnowledgeReferenceError(f"{stage} 知识来源 {index} 需要压缩但模型不可用", "no_api_key")
+                body = "压缩摘要（非原文）：\n" + self._compact_knowledge_source(
+                    content, source_id, stage, index, ctx, call_budget,
+                )
+                if len(body) > _KNOWLEDGE_SOURCE_CHARS:
+                    raise KnowledgeReferenceError(f"{stage} 知识来源 {index} 压缩结果超过来源预算")
+            sections.append(f"来源：{json.dumps(source, ensure_ascii=False)}\n{body}")
+        return "\n\n【审查方法论参考；压缩摘要不能代替测试证据】\n" + "\n---\n".join(sections)
 
     def _role_call(self, system: str, user: str, ctx: Optional[AgentContext],
                    max_tokens: Optional[int] = None) -> AgentResult:
@@ -312,11 +464,20 @@ class TestReviewReporterAgent(BaseAgent):
         source_rows = compressed.data["sources"]
         evidence = compressed.data["text"]
 
+        knowledge_budget = {"used": 0}
+        try:
+            knowledge_refs = {
+                stage: self._knowledge_refs(db, owner_id, stage, ctx, knowledge_budget)
+                for stage in ("whitebox", "blackbox", "verify", "report")
+            }
+        except KnowledgeReferenceError as exc:
+            return AgentResult(success=False, error=str(exc), failure_kind=exc.failure_kind)
+
         roles: dict[str, Any] = {}
         # 1) 白盒角色
         wb = self._role_call(
             _WHITEBOX_PROMPT,
-            "请审查白盒测试证据并输出 ## 白盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "whitebox"),
+            "请审查白盒测试证据并输出 ## 白盒结果 小节:\n" + evidence + knowledge_refs["whitebox"],
             ctx,
         )
         if not wb.success or not isinstance(wb.data, str) or not wb.data.strip():
@@ -325,7 +486,7 @@ class TestReviewReporterAgent(BaseAgent):
         # 2) 黑盒角色
         bb = self._role_call(
             _BLACKBOX_PROMPT,
-            "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "blackbox"),  # noqa: E501
+            "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + knowledge_refs["blackbox"],  # noqa: E501
             ctx,
         )
         if not bb.success or not isinstance(bb.data, str) or not bb.data.strip():
@@ -337,7 +498,7 @@ class TestReviewReporterAgent(BaseAgent):
             "白盒草稿:\n" + str(roles["whitebox"]["text"])
             + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])
             + "\n\n原始证据:\n" + evidence
-            + self._knowledge_refs(db, owner_id, "verify"),
+            + knowledge_refs["verify"],
             ctx,
         )
         if not vf.success or not isinstance(vf.data, (str, dict)) or not vf.data:
@@ -348,7 +509,7 @@ class TestReviewReporterAgent(BaseAgent):
         try:
             orch = self._role_call(
                 _ORCHESTRATOR_PROMPT,
-                "测试证据:\n" + evidence + self._knowledge_refs(db, owner_id, "report"),
+                "测试证据:\n" + evidence + knowledge_refs["report"],
                 ctx,
                 max_tokens=1024,
             )
@@ -374,10 +535,14 @@ class TestReviewReporterAgent(BaseAgent):
             return AgentResult(success=False, error="动态编排角色结果无法解析", failure_kind="invalid_schema")
         for role_name in extra_roles:
             prompt = _EXTRA_ROLE_PROMPTS[role_name]
+            try:
+                extra_knowledge = self._knowledge_refs(db, owner_id, role_name, ctx, knowledge_budget)
+            except KnowledgeReferenceError as exc:
+                return AgentResult(success=False, error=str(exc), failure_kind=exc.failure_kind)
             rr = self._role_call(
                 prompt,
                 "请审查对应证据并输出小节:\n" + evidence
-                + self._knowledge_refs(db, owner_id, role_name),
+                + extra_knowledge,
                 ctx,
             )
             if not rr.success or not isinstance(rr.data, str) or not rr.data.strip():
@@ -398,7 +563,7 @@ class TestReviewReporterAgent(BaseAgent):
             + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])
             + extra_conclusions
             + "\n\n原始证据:\n" + evidence
-            + self._knowledge_refs(db, owner_id, "report"),
+            + knowledge_refs["report"],
             ctx,
             max_tokens=self._max_tokens,
         )
