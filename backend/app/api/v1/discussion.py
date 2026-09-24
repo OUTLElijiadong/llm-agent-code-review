@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.agents.discussion_bus import DiscussionBus, utc_timestamp
+from app.agents.discussion_bus import DiscussionBus, utc_timestamp, visible_roundtable_progress
 from app.api.v1.ws_discussion import purge_stale_pending, register_pending
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -37,8 +37,9 @@ def _bus_for_db(db: Session) -> DiscussionBus:
     return bus
 
 
-def _session_data(row: RoundtableSession) -> dict:
+def _session_data(db: Session, row: RoundtableSession) -> dict:
     """只返回前端重开所需的会话元数据，不在列表泄露聊天正文。"""
+    progress = visible_roundtable_progress(db, row)
     return {
         "session_id": row.session_id,
         "ws_url": f"/api/ws/discuss/{row.session_id}",
@@ -47,7 +48,7 @@ def _session_data(row: RoundtableSession) -> dict:
         "max_rounds": row.max_rounds,
         "report_task_id": row.report_task_id,
         "agents": list(row.agents or []),
-        "progress": dict(row.progress or {}),
+        "progress": progress,
         "turn_count": row.last_turn_seq,
         "continued_from_session_id": row.continued_from_session_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -55,8 +56,8 @@ def _session_data(row: RoundtableSession) -> dict:
         "followup_until": (
             utc_timestamp(row.closed_at) + 300
             if row.status == "concluded" and row.closed_at and row.report_task_id
-            and "followup_start_seq" in (row.progress or {})
-            and (row.progress or {}).get("phase") == "completed" else 0
+            and "followup_start_seq" in progress
+            and progress.get("phase") == "completed" else 0
         ),
     }
 
@@ -82,7 +83,7 @@ def list_discussions(
             bus.get_session(row.session_id, owner_user_id=int(user.id))
             db.refresh(row)
     return Resp(data={
-        "items": [_session_data(row) for row in rows[:limit]],
+        "items": [_session_data(db, row) for row in rows[:limit]],
         "next_offset": offset + limit if len(rows) > limit else None,
     })
 
@@ -113,7 +114,7 @@ def get_discussion(
     if before_seq is not None:
         query = query.filter(RoundtableTurn.seq < before_seq)
     page = query.order_by(RoundtableTurn.seq.desc()).limit(limit + 1).all()
-    result = _session_data(row)
+    result = _session_data(db, row)
     result["turns"] = [dict(item.turn) for item in reversed(page[:limit])]
     result["has_earlier"] = len(page) > limit
     result["next_before_seq"] = page[limit - 1].seq if len(page) > limit else None

@@ -54,6 +54,21 @@ def interrupt_orphan_roundtable(db, row) -> None:
         task.coverage = {**(task.coverage or {}), "stage": "interrupted"}
 
 
+def visible_roundtable_progress(db, row) -> dict:
+    """兼容旧圆桌终态：仅凭同账号报告的覆盖账本展示部分完成。"""
+    progress = dict(row.progress or {})
+    if row.status != "concluded" or progress.get("phase") != "failed" or not row.report_task_id:
+        return progress
+    from app.models.review_task import ReviewTask
+
+    report = db.get(ReviewTask, int(row.report_task_id))
+    if (report is not None and report.user_id == row.owner_user_id
+            and report.review_type == "discuss" and report.status == "failed"
+            and (report.coverage or {}).get("stage") == "partial"):
+        progress["phase"] = "partial"
+    return progress
+
+
 @dataclass
 class DiscussionSession:
     """一次多 Agent 讨论会话"""
@@ -444,7 +459,7 @@ class DiscussionBus:
                 origin_session_key=row.origin_session_key,
                 continued_from_session_id=row.continued_from_session_id,
                 agents=list(row.agents or []),
-                progress=dict(row.progress or {}),
+                progress=visible_roundtable_progress(db, row),
                 last_turn_seq=int(row.last_turn_seq or 0),
             )
 

@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import DiscussionTurn
 from app.core.exceptions import NotFoundError
+from app.models.review_task import ReviewTask
 from app.models.roundtable import RoundtableSession, RoundtableTurn
 
 
@@ -59,6 +60,66 @@ def test_partial_report_progress_survives_restart_without_opening_followup() -> 
     frames = [json.loads(frame) for frame in after.recovery_frames(session.session_id, 7)]
     assert frames[0]["payload"]["phase"] == "partial"
     assert frames[1]["payload"]["status"] == "partial"
+    engine.dispose()
+
+
+def test_old_failed_session_uses_same_owner_report_coverage_for_partial_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧会话未写 partial 标志时，REST 与重连仍根据报告账本正确展示。"""
+    import app.core.database as database
+    from app.api.v1.discussion import get_discussion, list_discussions
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    ReviewTask.__table__.create(engine)
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    with factory.begin() as db:
+        report = ReviewTask(
+            user_id=7, project_id=14, review_type="discuss", status="failed",
+            coverage={"stage": "partial", "successful_turns": 9, "expected_turns": 10},
+        )
+        db.add(report)
+        db.flush()
+        report_id = report.id
+
+    before = DiscussionBus(persist=True)
+    session = before.create_session("disc_old_partial", 0, "agent_service.py", owner_user_id=7)
+    session.report_task_id = report_id
+    before.publish_control(session.session_id, "done", {"status": "failed", "task_id": report_id})
+    before.close_session(session.session_id)
+    assert session.progress["phase"] == "failed"
+
+    restored_bus = DiscussionBus(persist=True)
+    monkeypatch.setattr(DiscussionBus, "instance", classmethod(lambda cls: restored_bus))
+    restored = restored_bus.get_session(session.session_id, owner_user_id=7)
+    assert restored is not None and restored.progress["phase"] == "partial"
+    assert restored_bus.followup_until(restored) == 0
+    with factory() as db:
+        owner = SimpleNamespace(id=7)
+        other = SimpleNamespace(id=8)
+        listing = list_discussions(limit=20, offset=0, db=db, user=owner).data
+        assert listing["items"][0]["progress"]["phase"] == "partial"
+        detail = get_discussion(session.session_id, limit=100, before_seq=None, db=db, user=owner).data
+        assert detail["progress"]["phase"] == "partial"
+        assert detail["followup_until"] == 0
+        assert list_discussions(limit=20, offset=0, db=db, user=other).data["items"] == []
+        with pytest.raises(NotFoundError):
+            get_discussion(session.session_id, limit=100, before_seq=None, db=db, user=other)
+        assert db.get(RoundtableSession, session.session_id).progress["phase"] == "failed"
+
+    # 即使报告 ID 指向其它账号，也不能借其覆盖字段改写本账号圆桌的展示。
+    with factory.begin() as db:
+        db.get(ReviewTask, report_id).user_id = 8
+    other_bus = DiscussionBus(persist=True)
+    assert other_bus.get_session(session.session_id, owner_user_id=7).progress["phase"] == "failed"
+    with factory() as db:
+        listing = list_discussions(limit=20, offset=0, db=db, user=owner).data
+        assert listing["items"][0]["progress"]["phase"] == "failed"
     engine.dispose()
 
 
