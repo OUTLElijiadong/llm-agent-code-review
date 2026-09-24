@@ -15,13 +15,17 @@ const streams = vi.hoisted(() => ({
 }))
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
-const sessionApi = vi.hoisted(() => ({ get: vi.fn() }))
+const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 const responseApi = vi.hoisted(() => ({ cancel: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
-vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get, cancelAgentResponseRun: responseApi.cancel }))
+vi.mock('@/api/agentResponses', () => ({
+  getAgentResponseSession: sessionApi.get,
+  getAgentResponseSessionMessages: sessionApi.page,
+  cancelAgentResponseRun: responseApi.cancel,
+}))
 vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
@@ -107,6 +111,7 @@ beforeEach(() => {
     items: [], has_more: false, next_after_id: 0, page_size: 200, team_status: 'running',
   })
   sessionApi.get.mockReset()
+  sessionApi.page.mockReset()
   sessionApi.get.mockResolvedValue({
     surface: 'user', session_id: 'user-test', run: null, messages: [], pending: null,
   })
@@ -159,6 +164,30 @@ async function mountReadyDrawer(prefill?: string, extraPlugins: Plugin[] = []): 
 async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
+
+it('127 条服务端聊天记录可点击加载旧页，当前账号消息顺序保持完整', async () => {
+  const message = (index: number) => ({ role: 'user' as const, content: `本人记录-${index}` })
+  sessionApi.get.mockImplementation((_surface: string, id: string) => Promise.resolve({
+    surface: 'user', session_id: id, run: null, pending: null,
+    messages: Array.from({ length: 100 }, (_, offset) => message(offset + 27)),
+    history_page: { total: 127, oldest_message_index: 27, has_more: true },
+  }))
+  sessionApi.page.mockResolvedValue({
+    messages: Array.from({ length: 27 }, (_, index) => message(index)),
+    total: 127, oldest_message_index: 0, has_more: false,
+  })
+  const wrapper = await mountReadyDrawer()
+  expect(wrapper.find('.history-load-button').exists()).toBe(true)
+  await wrapper.find('.history-load-button').trigger('click')
+  await flushPromises()
+  expect(sessionApi.page).toHaveBeenCalledWith('user', expect.any(String), 27)
+  const rows = wrapper.findAll('.msg-row.user')
+  expect(rows).toHaveLength(127)
+  expect(rows[0].text()).toContain('本人记录-0')
+  expect(rows[126].text()).toContain('本人记录-126')
+  expect(wrapper.find('.history-load-button').exists()).toBe(false)
+  wrapper.unmount()
+})
 
 it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', async () => {
   const wrapper = mountDrawer()
@@ -657,11 +686,8 @@ describe('AgentChatDrawer Responses stream', () => {
     void wrapper.find('.send-btn').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
-      messages: [
-        { role: 'user', content: '审查当前项目' },
-        { role: 'assistant', content: expect.stringContaining('发现 1 个问题') },
-        { role: 'user', content: '继续检查' },
-      ],
+      messages: [{ role: 'user', content: '继续检查' }],
+      use_server_history: true,
     })
     expect(JSON.stringify(streams.records[1].body)).not.toContain('<wbr>')
     await finish(1)
@@ -763,7 +789,7 @@ describe('AgentChatDrawer Responses stream', () => {
       surface: 'user',
       run_id: 'run-user-approval',
       call_id: 'call-write',
-      messages: [{ role: 'user', content: '修改项目配置' }],
+      messages: [],
     })
     expect(wrapper.findAll('.msg-row.user')).toHaveLength(1)
 
@@ -971,17 +997,14 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.find('.send-btn').exists()).toBe(true)
     expect(messages.error).not.toHaveBeenCalled()
 
-    // 点「重试」重新续跑(上下文包含部分输出,让模型知道说到哪了)
+    // 点「重试」重新启动；上下文由同账号服务端账本恢复。
     await wrapper.find('.msg-error-btn.is-retry').trigger('click')
     await settleAll()
     expect(streams.records[1].body).toMatchObject({
       action: 'start',
       surface: 'user',
-      messages: [
-        { role: 'user', content: '帮我分析这个项目' },
-        { role: 'assistant', content: '我先看一下项目结构' },
-        { role: 'assistant', content: expect.stringContaining('已停止任务') },
-      ],
+      messages: [{ role: 'user', content: '帮我分析这个项目' }],
+      use_server_history: true,
     })
     emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
     emit(1, { type: 'response.completed', response: { id: 'run-stop-retry' } })
@@ -1107,10 +1130,8 @@ describe('AgentChatDrawer Responses stream', () => {
     void wrapper.find('.send-btn').trigger('click')
     await flushPromises()
     expect(streams.records[1].body).toMatchObject({
-      messages: [
-        { role: 'user', content: '开始审查' },
-        { role: 'user', content: '重新审查' },
-      ],
+      messages: [{ role: 'user', content: '重新审查' }],
+      use_server_history: true,
     })
     await finish(1)
     wrapper.unmount()

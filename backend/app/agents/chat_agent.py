@@ -1,5 +1,6 @@
 import difflib
 import json as json_lib
+import re
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from loguru import logger
@@ -62,6 +63,69 @@ _INTENT_SYSTEM = (
     "不要自己把名称换算成数字 ID。\n"
     "5. scope 按语义推断:针对单个文件→file;针对一次审查任务→task;针对整个项目→project。\n"
 )
+
+
+_CHAT_CONTEXT_CHAR_BUDGET = 240_000
+_CONTEXT_ANCHOR = re.compile(
+    r"必须|不要|不得|仅|只能|确保|约束|决定|确认|错误|失败|项目|任务|文件|"
+    r"agent|api|issue|task|project|file|[A-Za-z0-9_./-]{12,}",
+    re.IGNORECASE,
+)
+
+
+def _compact_prior_message(content: str, budget: int) -> str:
+    """有界保留旧消息的首尾与关键行，明确标记缺失范围。
+
+    这是可追溯的摘录，不假称语义无损；最新用户消息永不经过此函数。
+    """
+    if len(content) <= budget:
+        return content
+    marker = f"\n[历史消息摘录：原文 {len(content)} 字，部分内容未包含；若需精确细节请回查原文]\n"
+    available = max(0, budget - len(marker))
+    head_len = available // 4
+    tail_len = available // 2
+    middle_len = available - head_len - tail_len
+    middle = content[head_len:len(content) - tail_len]
+    anchors: list[str] = []
+    used = 0
+    for line_no, line in enumerate(middle.splitlines(), start=1):
+        if not _CONTEXT_ANCHOR.search(line):
+            continue
+        excerpt = f"[关键行 {line_no}] {line.strip()}\n"
+        if used + len(excerpt) > middle_len:
+            continue
+        anchors.append(excerpt)
+        used += len(excerpt)
+    if not anchors and middle_len > 0:
+        center = max(0, (len(middle) - middle_len) // 2)
+        anchors.append(middle[center:center + middle_len])
+    return content[:head_len] + marker + "".join(anchors) + content[-tail_len:]
+
+
+def _bounded_conversation(messages: List[dict]) -> tuple[List[dict], bool]:
+    """保留最新消息全文，按原顺序为每条旧消息分配可追溯摘要预算。"""
+    if not messages:
+        return [], False
+    if sum(len(str(msg["content"])) for msg in messages) <= _CHAT_CONTEXT_CHAR_BUDGET:
+        return [
+            {"role": msg["role"], "content": str(msg["content"])}
+            for msg in messages
+        ], False
+    latest = str(messages[-1]["content"])
+    older = messages[:-1]
+    minimum = len(older) * 256
+    if len(latest) + minimum > _CHAT_CONTEXT_CHAR_BUDGET:
+        raise ValueError("当前消息和历史轮次超过聊天上下文容量，请缩小当前消息或改用文件审查")
+    per_old = (_CHAT_CONTEXT_CHAR_BUDGET - len(latest)) // max(1, len(older))
+    compacted: List[dict] = []
+    changed = False
+    for msg in older:
+        content = str(msg["content"])
+        excerpt = _compact_prior_message(content, per_old)
+        changed |= len(excerpt) < len(content)
+        compacted.append({"role": msg["role"], "content": excerpt})
+    compacted.append({"role": messages[-1]["role"], "content": latest})
+    return compacted, changed
 
 
 class ChatAssistantAgent(BaseAgent):
@@ -163,6 +227,11 @@ class ChatAssistantAgent(BaseAgent):
         intent = self._classify_intent(last_msg, messages)
         intent_payload = dict(intent.get("payload") or {})
         intent_payload.pop(self.WRITE_CONFIRMATION_KEY, None)
+        if intent.get("intent") == "review_code":
+            # 分类模型只决定路由，不负责复制可能超过其输出预算的整段代码。
+            # 使用服务端收到的原文，避免 JSON 意图载荷仅含代码前缀。
+            fenced = re.search(r"```(?:[^\n]*)\n([\s\S]*?)```", last_msg)
+            intent_payload["code"] = fenced.group(1) if fenced else last_msg
         intent["payload"] = intent_payload
 
         handler_name = intent.get("intent", "chat")
@@ -1306,11 +1375,20 @@ class ChatAssistantAgent(BaseAgent):
     def _classify_intent(self, last_msg: str,
                          messages: List[dict]) -> dict:
         """使用 LLM 分析用户意图"""
+        try:
+            bounded, compressed = _bounded_conversation(messages)
+        except ValueError as exc:
+            logger.warning(f"[ChatAgent] 意图上下文无法完整承载: {exc}")
+            return {"intent": "chat", "reason": "context_over_budget", "payload": {}}
         context = "\n".join(
-            f"{m['role']}: {m['content'][:200]}"
-            for m in messages[-3:]
+            f"第 {index} 轮 {m['role']}: {m['content']}"
+            for index, m in enumerate(bounded, start=1)
         )
-        user_msg = f"对话上下文:\n{context}\n\n请判断用户意图:"
+        note = (
+            "历史消息有明确标记的摘录；若精确细节缺失，归类 chat 并请求澄清。\n"
+            if compressed else ""
+        )
+        user_msg = f"{note}对话上下文:\n{context}\n\n请判断用户意图:"
 
         self._system_prompt = _INTENT_SYSTEM
         self._temperature = 0.1
@@ -1715,9 +1793,15 @@ class ChatAssistantAgent(BaseAgent):
             logger.warning(f"[chat_agent] 个性化注入失败,降级: {e}")
         system_content = self._system_prompt + (persona_block or "")
 
-        history = []
-        for msg in messages[-10:]:
-            history.append({"role": msg["role"], "content": msg["content"]})
+        try:
+            history, compressed = _bounded_conversation(messages)
+        except ValueError as exc:
+            return AgentResult(success=False, error=str(exc), failure_kind="input_exceeds_context")
+        if compressed:
+            system_content += (
+                "\n部分历史轮次是带原文长度标记的摘录。不要推断未显示的细节；"
+                "若完成当前请求需要缺失原文，应明确请用户补充。"
+            )
 
         messages_for_api = [
             {"role": "system", "content": system_content},
@@ -1730,14 +1814,18 @@ class ChatAssistantAgent(BaseAgent):
         from app.services.ai_usage_context import record_usage_attempt, usage_tokens
 
         last_error = None
+        last_finish_reason = ""
         usage_log_ids = []
         http_attempts = 0
+        response_budget = self._max_tokens
         for attempt in range(self._max_retries + 1):
+            last_finish_reason = ""
             t0 = time.time()
             request_sent = False
             body = {}
             content = ""
             success = False
+            retry_planned = attempt < self._max_retries
             try:
                 target = pin_public_http_url(f"{self._base_url}/chat/completions")
                 with httpx.Client(timeout=self._timeout, trust_env=False) as client:
@@ -1754,7 +1842,7 @@ class ChatAssistantAgent(BaseAgent):
                             "model": self._model,
                             "messages": messages_for_api,
                             "temperature": self._temperature,
-                            "max_tokens": self._max_tokens,
+                            "max_tokens": response_budget,
                         },
                         extensions=target.request_extensions,
                     )
@@ -1765,18 +1853,43 @@ class ChatAssistantAgent(BaseAgent):
                 except (TypeError, ValueError):
                     body = {}
                 if resp.status_code == 200:
-                    content = body["choices"][0]["message"]["content"]
-                    success = True
-                    return AgentResult(
-                        success=True, data=content,
-                        model=body.get("model", self._model), duration_ms=duration_ms,
-                        tokens={
-                            "prompt": usage_tokens(body.get("usage"), "prompt_tokens"),
-                            "completion": usage_tokens(body.get("usage"), "completion_tokens"),
-                            "total": usage_tokens(body.get("usage"), "total_tokens"),
-                        },
-                        usage_log_ids=usage_log_ids, http_attempts=http_attempts,
-                    )
+                    choice = body["choices"][0]
+                    content = str((choice.get("message") or {}).get("content") or "")
+                    finish_reason = choice.get("finish_reason")
+                    last_finish_reason = str(finish_reason or "missing")
+                    if finish_reason == "stop" and content:
+                        success = True
+                        return AgentResult(
+                            success=True, data=content,
+                            model=body.get("model", self._model), duration_ms=duration_ms,
+                            tokens={
+                                "prompt": usage_tokens(body.get("usage"), "prompt_tokens"),
+                                "completion": usage_tokens(body.get("usage"), "completion_tokens"),
+                                "total": usage_tokens(body.get("usage"), "total_tokens"),
+                            },
+                            usage_log_ids=usage_log_ids, http_attempts=http_attempts,
+                            finish_reason="stop",
+                        )
+                    last_error = f"模型输出不完整(finish_reason={finish_reason or 'missing'})"
+                    if finish_reason == "length" and attempt < self._max_retries:
+                        from app.core.config import settings
+
+                        next_budget = min(
+                            int(settings.deepseek_max_output_tokens),
+                            max(response_budget * 2, 8192),
+                        )
+                        if next_budget > response_budget:
+                            response_budget = next_budget
+                            messages_for_api = [
+                                {**messages_for_api[0], "content": (
+                                    system_content + "\n上一次回答达到输出上限；本次请重新给出完整、精炼的答复，"
+                                    "保留关键结论，不要接续或引用不完整草稿。"
+                                )},
+                                *history,
+                            ]
+                            continue
+                    retry_planned = False
+                    break
                 if resp.status_code == 429:
                     last_error = "请求过于频繁"
                 elif resp.status_code >= 500:
@@ -1790,7 +1903,7 @@ class ChatAssistantAgent(BaseAgent):
                     log_id = record_usage_attempt(
                         model_name=str(body.get("model") or self._model), agent_label=self.name,
                         usage=body.get("usage"),
-                        status="success" if success else "retry" if attempt < self._max_retries else "failed",
+                        status="success" if success else "retry" if retry_planned else "failed",
                         error="" if success else str(last_error or ""), duration_ms=int((time.time() - t0) * 1000),
                         prompt=json_lib.dumps(history, ensure_ascii=False),
                         response=content if isinstance(content, str) else "",
@@ -1802,5 +1915,12 @@ class ChatAssistantAgent(BaseAgent):
             if attempt < self._max_retries:
                 time.sleep(2 ** (attempt + 1))
 
-        return AgentResult(success=False, error=f"聊天失败: {last_error}",
-                           usage_log_ids=usage_log_ids, http_attempts=http_attempts)
+        return AgentResult(
+            success=False,
+            error=f"聊天失败: {last_error}",
+            failure_kind=("output_truncated" if last_finish_reason == "length"
+                          else "incomplete_response" if last_finish_reason else "upstream_error"),
+            finish_reason=last_finish_reason,
+            usage_log_ids=usage_log_ids,
+            http_attempts=http_attempts,
+        )

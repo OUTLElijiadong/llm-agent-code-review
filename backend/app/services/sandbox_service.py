@@ -1021,64 +1021,155 @@ def _extract_prism_facts(log_text: str) -> dict[str, Any] | None:
 
 
 def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -> dict[str, Any]:
-    """从源码 zip 提取文件清单和有界关键源码片段。"""
+    """从源码 zip 提取可逐片压缩的完整文本证据与文件清单。"""
+    from app.agents.source_context import MAX_SOURCE_CHUNKS
+
+    def incomplete(reason: str) -> dict[str, Any]:
+        return {
+            "language": language, "files": [], "entries": [], "source_chunks": [],
+            "coverage_complete": False, "coverage_error": reason,
+        }
+
     try:
-        raw = base64.b64decode(source_archive_base64)
+        raw = base64.b64decode(source_archive_base64, validate=True)
     except (binascii.Error, ValueError):
-        return {"language": language, "files": [], "entries": []}
+        return incomplete("源码归档 Base64 无效")
     file_names: list[str] = []
+    manifest: list[dict[str, Any]] = []
+    chunks: list[dict[str, Any]] = []
+    snippets: dict[str, str] = {}
+    coverage_error = ""
+    source_text_file_count = 0
+    source_binary_file_count = 0
+    source_text_bytes = 0
+    binary_suffixes = (
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip",
+        ".jar", ".class", ".pyc", ".so", ".dylib", ".exe", ".woff",
+        ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".sqlite", ".db",
+    )
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
             for info in zf.infolist():
                 name = info.filename
                 if name.startswith("_prism") or name.startswith("__MACOSX") or name.endswith("/"):
                     continue
-                if info.file_size > 400_000:
-                    continue
                 file_names.append(name)
-    except (zipfile.BadZipFile, OSError):
-        return {"language": language, "files": [], "entries": []}
-    # 入口与关键文件优先展示,避免 agent 基于截断清单误判"文件缺失"
-    priority = (
-        "index.",
-        "main.",
-        "app.",
-        "server.",
-        "config.",
-        "classes/",
-        "src/",
-        "lib/",
-        "composer.json",
-        "package.json",
-        "requirements.txt",
-        "pom.xml",
-        "go.mod",
-    )
-    priority_hits = [n for n in file_names if any(n.endswith(p) or n.startswith(p) for p in priority)]
-    rest = [n for n in file_names if n not in set(priority_hits)]
-    entries = (priority_hits + rest)[:180]
-    snippets: dict[str, str] = {}
-    remaining_bytes = 48_000
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-            for name in entries[:12]:
-                if remaining_bytes <= 0:
+                manifest.append({"path": name, "size": info.file_size, "crc": info.CRC})
+            file_name_set = set(file_names)
+            if len(file_name_set) != len(file_names):
+                coverage_error = "源码 ZIP 存在重复路径，无法确定唯一文件内容"
+            # 清单也分片：后续压缩模型会看到每个路径，不再假设前 300 项代表全局。
+            manifest_parts: list[list[dict[str, Any]]] = []
+            current_part: list[dict[str, Any]] = []
+            for item in manifest:
+                candidate = [*current_part, item]
+                if current_part and len(json.dumps(candidate, ensure_ascii=False)) > 5_000:
+                    manifest_parts.append(current_part)
+                    current_part = [item]
+                else:
+                    current_part = candidate
+            if current_part:
+                manifest_parts.append(current_part)
+            for part_number, part in enumerate(manifest_parts, start=1):
+                text = json.dumps(part, ensure_ascii=False, separators=(",", ":"))
+                if len(text) > 5_000:
+                    coverage_error = "源码文件名过长，无法在清单分片中完整展示"
                     break
-                content = zf.read(name)[: min(8_000, remaining_bytes)]
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                source_id = f"manifest-{part_number:03d}-{digest[:12]}"
+                chunks.append({
+                    "source_id": source_id, "path": "<archive-manifest>",
+                    "text": text, "sha256": digest,
+                })
+            if len(chunks) > MAX_SOURCE_CHUNKS:
+                coverage_error = f"文件清单超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+            packed_files: list[dict[str, str]] = []
+
+            def flush_packed_files() -> None:
+                if not packed_files:
+                    return
+                text = json.dumps(packed_files, ensure_ascii=False, separators=(",", ":"))
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                chunks.append({
+                    "source_id": f"files-{len(chunks) + 1:03d}-{digest[:12]}",
+                    "path": "<multiple-files>", "text": text, "sha256": digest,
+                })
+                packed_files.clear()
+
+            for info in zf.infolist():
+                if coverage_error:
+                    break
+                name = info.filename
+                if name not in file_name_set:
+                    continue
+                if name.lower().endswith(binary_suffixes):
+                    source_binary_file_count += 1
+                    continue  # 非代码资产的路径/大小/CRC 已完整进入清单。
+                if info.file_size > 400_000:
+                    coverage_error = f"源码文件 {name} 超过单文件 400000 字节上限"
+                    break
+                content = zf.read(name)
                 if b"\x00" in content:
+                    source_binary_file_count += 1
+                    continue  # 二进制资产只参与完整清单，不作为代码输入。
+                try:
+                    decoded = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    coverage_error = f"源码文件 {name} 无法按 UTF-8 完整解码"
+                    break
+                if not decoded:
                     continue
-                text = content.decode("utf-8", errors="replace").strip()
-                if not text:
-                    continue
-                snippets[name] = text
-                remaining_bytes -= len(content)
-    except (KeyError, OSError, zipfile.BadZipFile):
-        snippets = {}
+                source_text_file_count += 1
+                source_text_bytes += len(content)
+                if len(snippets) < 12:
+                    snippets[name] = decoded[:8_000]
+                if len(decoded) <= 3_000:
+                    record = {"path": name, "text": decoded}
+                    if packed_files and len(json.dumps([*packed_files, record], ensure_ascii=False)) > 5_000:
+                        flush_packed_files()
+                    if len(json.dumps([record], ensure_ascii=False)) <= 5_000:
+                        packed_files.append(record)
+                        if len(chunks) > MAX_SOURCE_CHUNKS:
+                            coverage_error = f"源码超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+                            break
+                        continue
+                flush_packed_files()
+                for offset in range(0, len(decoded), 5_000):
+                    text = decoded[offset:offset + 5_000]
+                    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                    source_id = f"file-{len(chunks) + 1:03d}-{digest[:12]}"
+                    chunks.append({
+                        "source_id": source_id, "path": name, "offset": offset,
+                        "text": text, "sha256": digest,
+                    })
+                    if len(chunks) > MAX_SOURCE_CHUNKS:
+                        coverage_error = f"源码超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+                        break
+                if coverage_error:
+                    break
+            if not coverage_error:
+                flush_packed_files()
+    except (zipfile.BadZipFile, OSError):
+        return incomplete("源码 ZIP 归档损坏")
+    if not chunks:
+        coverage_error = coverage_error or "源码归档没有可压缩的清单或文本"
     return {
         "language": language,
-        "files": file_names[:300],
-        "entries": entries,
+        "files": file_names,
+        "entries": file_names,
         "snippets": snippets,
+        "source_archive_sha256": hashlib.sha256(raw).hexdigest(),
+        "source_manifest_sha256": hashlib.sha256(
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "source_file_count": len(file_names),
+        "source_text_file_count": source_text_file_count,
+        "source_binary_file_count": source_binary_file_count,
+        "source_text_bytes": source_text_bytes,
+        "source_chunk_count": len(chunks),
+        "source_chunks": chunks,
+        "coverage_complete": not coverage_error,
+        "coverage_error": coverage_error or None,
     }
 
 
@@ -1696,6 +1787,14 @@ def _generate_agent_test_cases(
             db.commit()
             return None
         summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        if not summary.get("coverage_complete"):
+            _append_event(
+                db, environment, "progress", "agent_tests",
+                f"动态测试未执行：源码上下文不完整 ({str(summary.get('coverage_error') or '未知原因')[:140]})",
+                {"source_file_count": summary.get("source_file_count")},
+            )
+            db.commit()
+            return None
         environment_config = _loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}
         environment_config = environment_config if isinstance(environment_config, dict) else {}
         db_type = str(environment_config.get("db_type") or "none")
@@ -1767,6 +1866,9 @@ def _generate_agent_test_cases(
                         "count": len(files),
                         "files": [f.get("path") for f in files],
                         "generation_round": generation_round,
+                        "source_archive_sha256": summary.get("source_archive_sha256"),
+                        "source_manifest_sha256": summary.get("source_manifest_sha256"),
+                        "source_chunk_count": len(summary.get("source_chunks") or []),
                     },
                 )
                 db.commit()
@@ -1832,6 +1934,13 @@ def _generate_deployment_patch(
             db_type=db_type,
             ctx=ctx,
         )
+        if not isinstance(result, dict) or result.get("error"):
+            _append_event(
+                db, environment, "progress", "deploy_verify",
+                f"部署核验未形成完整计划: {str(result.get('error') if isinstance(result, dict) else '结果格式无效')[:160]}",
+            )
+            db.commit()
+            return None
         launch_script = str(result.get("launch_script") or "").strip() if isinstance(result, dict) else ""
         notes = str(result.get("notes") or "").strip() if isinstance(result, dict) else ""
         if not launch_script:
@@ -1845,6 +1954,11 @@ def _generate_deployment_patch(
             "progress",
             "deploy_verify",
             "部署核验: 生成补全启动脚本 _prism_launch.sh" + (f"({notes[:100]})" if notes else ""),
+            {
+                "source_archive_sha256": summary.get("source_archive_sha256"),
+                "source_manifest_sha256": summary.get("source_manifest_sha256"),
+                "source_chunk_count": len(summary.get("source_chunks") or []),
+            },
         )
         db.commit()
         return {"launch_script": launch_script, "notes": notes}

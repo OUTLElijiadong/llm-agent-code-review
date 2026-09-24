@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 
 const AgentChatDrawer = defineAsyncComponent(() => import('@/components/ai/AgentChatDrawer.vue'))
 const AdminCopilot = defineAsyncComponent(() => import('@/components/admin/AdminCopilot.vue'))
+const GlobalDiscussionHost = defineAsyncComponent(() => import('@/components/agent/GlobalDiscussionHost.vue'))
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -134,6 +135,7 @@ onBeforeUnmount(() => {
     :prefill="agentPrefill"
     @consumed-prefill="agentPrefill = ''"
   />
+  <GlobalDiscussionHost v-if="userStore.isLoggedIn && userStore.profile" :user-id="userStore.profile.id" />
   <transition name="route-loading-fade">
     <div v-if="routeLoading" class="route-loading-mask">
       <PrismLoading

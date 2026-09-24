@@ -29,6 +29,22 @@ _EVIDENCE_RANK = {"unsupported": 0, "inferred": 1, "direct": 2, "verified": 3}
 _EVIDENCE_CAP = {"unsupported": 0.45, "inferred": 0.60, "direct": 0.80, "verified": 0.98}
 _SPACE_RE = re.compile(r"\s+")
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[\u4e00-\u9fff]")
+_MYSQL_TEXT_MAX_BYTES = 65_535
+_REVIEW_TEXT_FIELDS = ("description", "suggestion", "evidence", "exploit_scenario", "remediation")
+
+
+class ReviewFindingTooLarge(RuntimeError):
+    """A model claim cannot fit the current ReviewIssue TEXT schema without data loss."""
+
+
+def _check_review_text_capacity(raw: Mapping[str, Any]) -> None:
+    for field in _REVIEW_TEXT_FIELDS:
+        byte_count = len(str(raw.get(field) or "").encode("utf-8"))
+        if byte_count > _MYSQL_TEXT_MAX_BYTES:
+            raise ReviewFindingTooLarge(
+                f"审查结果字段 {field} 为 {byte_count} 字节，超过 ReviewIssue 的 "
+                f"MySQL TEXT 上限 {_MYSQL_TEXT_MAX_BYTES} 字节；该文件审查失败，证据未被截断"
+            )
 
 
 class AggregationResult(BaseModel):
@@ -170,6 +186,8 @@ def aggregate_agent_findings_safely(
             file_name=file_name,
             chunk_id=chunk_id,
         )
+    except ReviewFindingTooLarge:
+        raise
     except Exception as exc:
         return _fallback_agent_findings(
             findings_by_agent,
@@ -258,6 +276,7 @@ def _fallback_issue(
     file_name: str,
     chunk_id: str,
 ) -> dict[str, Any]:
+    _check_review_text_capacity(raw)
     try:
         severity, severity_score = normalize_severity_with_score(raw.get("severity") or "中")
     except (TypeError, ValueError):
@@ -266,13 +285,13 @@ def _fallback_issue(
         confidence_raw, confidence = _normalize_confidence(raw.get("confidence"))
     except (TypeError, ValueError, OverflowError):
         confidence_raw, confidence = raw.get("confidence"), 0.5
-    evidence = str(raw.get("evidence") or "")[:4000]
+    evidence = str(raw.get("evidence") or "")
     evidence_quality = "direct" if evidence else "unsupported"
     confidence = round(min(confidence, _EVIDENCE_CAP[evidence_quality]), 4)
     line_number = _as_non_negative_int(raw.get("line_number", raw.get("line_start")))
     end_line = _as_non_negative_int(raw.get("end_line", raw.get("line_end"))) or line_number or None
     title = str(raw.get("title") or "")[:200]
-    description = str(raw.get("description") or "")[:4000]
+    description = str(raw.get("description") or "")
     source = str(raw.get("source") or f"llm:{agent_code}")[:80]
     claim_id = hashlib.sha256(
         f"fallback|{file_name}|{chunk_id}|{agent_code}|{index}".encode("utf-8")
@@ -309,14 +328,14 @@ def _fallback_issue(
         "confidence": confidence,
         "title": title or None,
         "description": description or "聚合器异常，已保留原始主张供人工复核",
-        "suggestion": str(raw.get("suggestion") or "")[:4000] or None,
-        "fixed_code": str(raw.get("fixed_code") or "")[:8000] or None,
+        "suggestion": str(raw.get("suggestion") or "") or None,
+        "fixed_code": str(raw.get("fixed_code") or "") or None,
         "owasp": str(raw.get("owasp") or "")[:128],
         "cwe": _normalize_cwe(raw.get("cwe")),
         "evidence": evidence,
-        "exploit_scenario": str(raw.get("exploit_scenario") or "")[:4000],
+        "exploit_scenario": str(raw.get("exploit_scenario") or ""),
         "references": _string_list(raw.get("references")),
-        "remediation": str(raw.get("remediation") or "")[:4000],
+        "remediation": str(raw.get("remediation") or ""),
         "source": "llm",
         "source_details": [{
             "source": source,
@@ -360,9 +379,12 @@ def _normalize_claim(
     file_name: str,
     chunk_id: str,
 ) -> dict[str, Any]:
+    _check_review_text_capacity(raw)
     title = str(raw.get("title") or "").strip()[:200]
-    description = str(raw.get("description") or "").strip()[:4000]
-    evidence = str(raw.get("evidence") or "").strip()[:4000]
+    # These values become persisted review evidence, not UI previews. Cropping
+    # them here can remove the only statement proving a finding at the tail.
+    description = str(raw.get("description") or "").strip()
+    evidence = str(raw.get("evidence") or "").strip()
     if not any((title, description, evidence)):
         raise ValueError("finding has no title, description or evidence")
     severity, severity_score = normalize_severity_with_score(raw.get("severity") or "中")
@@ -408,14 +430,14 @@ def _normalize_claim(
         "line_number": line_number,
         "end_line": end_line,
         "description": description,
-        "suggestion": str(raw.get("suggestion") or "")[:4000],
-        "fixed_code": str(raw.get("fixed_code") or "")[:8000],
+        "suggestion": str(raw.get("suggestion") or ""),
+        "fixed_code": str(raw.get("fixed_code") or ""),
         "owasp": str(raw.get("owasp") or "")[:128],
         "cwe": _normalize_cwe(raw.get("cwe")),
         "evidence": evidence,
-        "exploit_scenario": str(raw.get("exploit_scenario") or "")[:4000],
+        "exploit_scenario": str(raw.get("exploit_scenario") or ""),
         "references": _string_list(raw.get("references")),
-        "remediation": str(raw.get("remediation") or "")[:4000],
+        "remediation": str(raw.get("remediation") or ""),
         "source_anchor": str(raw.get("source_anchor") or "")[:300],
         "stance": str(raw.get("stance") or "asserted")[:32],
     }

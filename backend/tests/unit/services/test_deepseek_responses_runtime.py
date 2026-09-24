@@ -3,22 +3,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, AsyncIterator, Dict, List, Mapping, Sequence
 
 import pytest
 
 from app.services.deepseek_responses_runtime import (
+    CANCELLED,
     COMPLETED,
     FAILED,
+    INCOMPLETE,
     MAX_ROUNDS_EXCEEDED,
     WAITING_APPROVAL,
     WAITING_INPUT,
+    ContextBudgetError,
     DeepSeekResponsesRuntime,
     InMemoryCheckpointStore,
     InvalidRunStateError,
     RunCheckpoint,
     ToolCall,
     ToolExecutionResult,
+    compact_transcript,
     estimate_tokens,
 )
 
@@ -65,6 +70,28 @@ class ScriptedTransport:
         self.payloads.append(payload)
         response = self.responses.pop(0)
         return response() if callable(response) else response
+
+
+class SummarizingTransport(ScriptedTransport):
+    """保留来源标记的可控摘要模型，用于验证运行时完整投喂和审计。"""
+
+    def __init__(self) -> None:
+        super().__init__([])
+
+    async def create_response(self, payload: Mapping[str, Any]) -> Any:
+        self.payloads.append(payload)
+        if payload["tools"]:
+            return _message_response("投影执行完成")
+        source = str(payload["input"][0]["content"])
+        anchors = sorted(set(re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)))
+        blocks = sorted(set(re.findall(r"\[压缩块#\d+\]", source)))
+        facts = [
+            fact for fact in ("约束 13", "不得跨账号读聊天", "owner_user_id 校验")
+            if fact in source
+        ]
+        return _message_response("摘要 " + " ".join(
+            [*anchors, *blocks, *facts]
+        ))
 
 
 class RecordingExecutor:
@@ -165,7 +192,7 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
         ]
     )
     store = InMemoryCheckpointStore()
-    transport = ScriptedTransport([_message_response("投影执行完成")])
+    transport = SummarizingTransport()
     runtime = DeepSeekResponsesRuntime(
         transport=transport,
         tool_executor=RecordingExecutor(),
@@ -179,7 +206,7 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
     result = await runtime.start(transcript, run_id="run_compaction")
 
     assert result.status == "completed"
-    payload = transport.payloads[0]
+    payload = transport.payloads[-1]
     assert payload["max_output_tokens"] == 400
     assert payload["input"][0]["role"] == "system"
     assert "平台上下文压缩" in payload["input"][0]["content"][0]["text"]
@@ -191,6 +218,241 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
     assert checkpoint.context_metadata["omitted_items"] > 0
     assert len(checkpoint.context_metadata["summary_sha256"]) == 64
     assert estimate_tokens(payload["input"]) <= checkpoint.context_metadata["transcript_budget_tokens"]
+    assert any(p["tools"] == [] for p in transport.payloads[:-1])
+
+
+def test_compaction_covers_late_user_constraint_message_tail_and_tool_fact() -> None:
+    transcript: List[Dict[str, Any]] = [{"role": "user", "content": "审查项目"}]
+    transcript.extend(
+        {"role": "user", "content": f"约束 {index}: 仅检查授权项目"}
+        for index in range(1, 14)
+    )
+    transcript.append({"role": "user", "content": "说明背景。" + "甲" * 220 + "末尾条件：不得跨账号读聊天"})
+    transcript.extend([
+        {"type": "function_call", "call_id": "old_lookup", "name": "lookup", "arguments": "{}"},
+        {
+            "type": "function_call_output", "call_id": "old_lookup",
+            "output": json.dumps(
+                {"status": "success", "finding": "鉴权中间件需 owner_user_id 校验"},
+                ensure_ascii=False,
+            ),
+        },
+    ])
+    transcript.extend({"role": "assistant", "content": "填充历史" + "乙" * 200} for _ in range(15))
+    projected, metadata = compact_transcript(
+        transcript, context_window_tokens=9000, max_output_tokens=500,
+        compaction_threshold_tokens=1000, keep_recent_tokens=300,
+    )
+    summary = json.dumps(projected, ensure_ascii=False)
+    assert metadata["compacted"] is True
+    assert "约束 13" in summary
+    assert "不得跨账号读聊天" in summary
+    assert "owner_user_id 校验" in summary
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints() -> None:
+    transcript = [{"role": "user", "content": "审查项目"}]
+    transcript.extend({"role": "user", "content": f"约束 {i}: 仅当前账号"} for i in range(1, 14))
+    transcript.append({"role": "user", "content": "背景 " + "甲" * 700 + " 不得跨账号读聊天"})
+    transcript.extend([
+        {"type": "function_call", "call_id": "old", "name": "lookup", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "old", "output": '{"finding":"owner_user_id 校验"}'},
+    ])
+    transcript.extend({"role": "assistant", "content": "旧讨论 " + "乙" * 200} for _ in range(8))
+    transport = SummarizingTransport()
+    logs: List[Mapping[str, Any]] = []
+    runtime = _runtime(
+        transport, RecordingExecutor(), context_window_tokens=5000,
+        max_output_tokens=500, compaction_threshold_tokens=1000,
+        keep_recent_tokens=300, on_round=logs.append,
+    )
+    result = await runtime.start(transcript, run_id="semantic_compact")
+    assert result.status == COMPLETED
+    compact_requests = [p for p in transport.payloads if p["tools"] == []]
+    assert compact_requests
+    full_source = "".join(str(p["input"][0]["content"]) for p in compact_requests)
+    full_model_input = full_source + json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert "约束 13" in full_model_input
+    assert "不得跨账号读聊天" in full_model_input
+    assert "owner_user_id 校验" in full_model_input
+    final_input = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert "约束 13" in final_input
+    assert "不得跨账号读聊天" in final_input
+    assert "owner_user_id 校验" in final_input
+    assert len(logs) == len(transport.payloads)
+    assert all(log["_request_payload"]["max_output_tokens"] > 0 for log in logs)
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_rejects_missing_source_fragment() -> None:
+    class OmittingSourceTransport(SummarizingTransport):
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            if payload["tools"] == []:
+                self.payloads.append(payload)
+                return _message_response("摘要 [来源#1:片段1/1]")
+            return await super().create_response(payload)
+
+    transport = OmittingSourceTransport()
+    transcript = [{"role": "user", "content": "初始目标"}]
+    transcript.extend({"role": "user", "content": f"独立约束 {i}"} for i in range(30))
+    result = await _runtime(
+        transport, RecordingExecutor(), context_window_tokens=4000,
+        max_output_tokens=400, compaction_threshold_tokens=200,
+        keep_recent_tokens=100,
+    ).start(transcript, run_id="missing_source")
+    assert result.status == FAILED
+    assert "未覆盖全部来源片段" in result.error
+    assert all(payload["tools"] == [] for payload in transport.payloads)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_between_compaction_chunks_stops_paid_requests() -> None:
+    store = InMemoryCheckpointStore()
+
+    class CancellingTransport(SummarizingTransport):
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            response = await super().create_response(payload)
+            if payload["tools"] == [] and len(self.payloads) == 1:
+                checkpoint = await store.load("cancel_compaction")
+                assert checkpoint is not None
+                checkpoint.status = CANCELLED
+                await store.save(checkpoint)
+            return response
+
+    transport = CancellingTransport()
+    transcript = [{"role": "user", "content": "初始目标"}]
+    transcript.extend({"role": "user", "content": f"第 {i} 条独立条件 " + "甲" * 150} for i in range(35))
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+        context_window_tokens=4000, max_output_tokens=400,
+        compaction_threshold_tokens=600, keep_recent_tokens=250,
+    )
+    result = await runtime.start(transcript, run_id="cancel_compaction")
+    assert result.status == CANCELLED
+    assert len(transport.payloads) == 1
+    assert transport.payloads[0]["tools"] == []
+
+
+@pytest.mark.asyncio
+async def test_secondary_compaction_rejects_missing_original_source_markers() -> None:
+    class LosingReducer(SummarizingTransport):
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            if "将多个压缩块继续归纳" in str(payload.get("instructions") or ""):
+                self.payloads.append(payload)
+                source = str(payload["input"][0]["content"])
+                blocks = sorted(set(re.findall(r"\[压缩块#\d+\]", source)))
+                return _message_response("已处理 " + " ".join(blocks))
+            return await super().create_response(payload)
+
+    store = InMemoryCheckpointStore()
+    transcript = [{"role": "user", "content": "初始"}]
+    transcript.extend(
+        {"role": "user", "content": f"事实 {i} " + "甲" * 80}
+        for i in range(30)
+    )
+    checkpoint = RunCheckpoint(
+        run_id="bad_reduction", model="deepseek-v4-flash",
+        transcript=transcript, tools=[],
+    )
+    await store.create(checkpoint)
+    transport = LosingReducer()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+        context_window_tokens=4000, max_output_tokens=400,
+        compaction_threshold_tokens=600, keep_recent_tokens=250,
+    )
+    with pytest.raises(ContextBudgetError, match="缺失原始来源片段"):
+        await runtime._semantic_compact(
+            checkpoint,
+            {"summary_sha256": "1" * 64, "omitted_indices": list(range(1, 31))},
+            summary_budget=100,
+        )
+    assert any("将多个压缩块继续归纳" in str(p.get("instructions")) for p in transport.payloads)
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_call_cap_rejects_without_provider_request() -> None:
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="summary_limit", model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "目标"}, {"role": "user", "content": "约束"}],
+        tools=[], context_metadata={"semantic_compaction_calls": 32},
+    )
+    await store.create(checkpoint)
+    transport = SummarizingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+        context_window_tokens=4000, max_output_tokens=400,
+        compaction_threshold_tokens=600, keep_recent_tokens=250,
+    )
+    with pytest.raises(ContextBudgetError, match="32 次模型请求上限"):
+        await runtime._semantic_compact(
+            checkpoint,
+            {"summary_sha256": "2" * 64, "omitted_indices": [1]},
+            summary_budget=500,
+        )
+    assert transport.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_length_incomplete_retries_with_larger_budget_without_executing_partial_tool() -> None:
+    incomplete = _function_response(("partial_call", "dangerous_write", {}))
+    incomplete["status"] = "incomplete"
+    incomplete["incomplete_details"] = {"reason": "max_output_tokens"}
+    transport = ScriptedTransport([incomplete, _message_response("已完成分析；没有执行写操作")])
+    executor = RecordingExecutor()
+    store = InMemoryCheckpointStore()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=executor, checkpoint_store=store,
+        context_window_tokens=4000, max_output_tokens=400,
+        compaction_threshold_tokens=1000, keep_recent_tokens=300,
+    )
+    result = await runtime.start("请分析", run_id="length_retry")
+    assert result.status == COMPLETED
+    assert executor.calls == []
+    assert [p["max_output_tokens"] for p in transport.payloads] == [400, 800]
+    assert "partial_call" not in json.dumps(transport.payloads[1]["input"])
+    checkpoint = await runtime.get_checkpoint("length_retry")
+    assert checkpoint.context_metadata["output_budget_retries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_after_length_incomplete_never_repeats_same_budget() -> None:
+    incomplete = {
+        "status": INCOMPLETE,
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "output": [{"type": "function_call", "call_id": "half", "name": "write", "arguments": "{"}],
+    }
+    transport = ScriptedTransport([
+        incomplete, incomplete, incomplete, _message_response("完整回答"),
+    ])
+    executor = RecordingExecutor()
+    runtime = _runtime(
+        transport, executor, context_window_tokens=5000,
+        max_output_tokens=400, compaction_threshold_tokens=1000,
+        keep_recent_tokens=300,
+    )
+    first = await runtime.start("只分析", run_id="manual_length_retry")
+    assert first.status == INCOMPLETE
+    second = await runtime.retry("manual_length_retry")
+    assert second.status == COMPLETED
+    assert second.output_text == "完整回答"
+    assert executor.calls == []
+    assert [p["max_output_tokens"] for p in transport.payloads] == [400, 800, 1600, 3200]
+
+
+def test_compaction_rejects_when_complete_source_ledger_cannot_fit() -> None:
+    transcript = [{"role": "user", "content": "首条目标"}]
+    transcript.extend(
+        {"role": "user", "content": f"不可丢约束{i}，必须核验所有账号及每次调用的来源"}
+        for i in range(200)
+    )
+    with pytest.raises(ContextBudgetError, match="超过可用输入预算"):
+        compact_transcript(
+            transcript, context_window_tokens=2000, max_output_tokens=400,
+            compaction_threshold_tokens=300, keep_recent_tokens=100,
+        )
 
 
 @pytest.mark.asyncio

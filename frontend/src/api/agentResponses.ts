@@ -37,10 +37,18 @@ export interface AgentResponseSession {
   session_id: string
   run: AgentResponseSessionRun | null
   messages: AgentResponseSessionMessage[]
+  history_page?: Omit<AgentResponseSessionPage, 'messages'>
   events?: ResponseStreamEvent[]
   last_sequence_number?: number
   pending: ResponseApprovalRequiredEvent | ResponseInputRequiredEvent | null
   mesh_messages?: AgentMeshMessage[]
+}
+
+export interface AgentResponseSessionPage {
+  messages: AgentResponseSessionMessage[]
+  oldest_message_index: number
+  has_more: boolean
+  total: number
 }
 
 /**
@@ -99,6 +107,15 @@ export function getAgentResponseSession(
     surface,
     session_id: sessionId,
   }, undefined, background)
+}
+
+export function getAgentResponseSessionMessages(
+  surface: 'user' | 'admin', sessionId: string, beforeMessage: number,
+  limit = 50,
+): Promise<AgentResponseSessionPage> {
+  return get<AgentResponseSessionPage>('/agent-responses/session/messages', {
+    surface, session_id: sessionId, before_message: beforeMessage, limit,
+  })
 }
 
 /** 图片只经当前登录态认证接口读取，不将资产地址或blob回传到模型。 */

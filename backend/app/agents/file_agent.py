@@ -1,12 +1,17 @@
 """
 代码文件管理 Agent — 负责文件的查询
 """
+import hashlib
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.agents.source_context import SourceContextError, compact_source_context
 from app.services import code_file_service
+
+_DIRECT_SOURCE_CHARS = 12_000
+_SOURCE_CHUNK_CHARS = 12_000
 
 
 class CodeFileManagerAgent(BaseAgent):
@@ -67,10 +72,51 @@ class CodeFileManagerAgent(BaseAgent):
             return AgentResult(success=False, error="DB 未注入")
         try:
             cf = code_file_service.get_file(self._db, user=self._user, file_id=file_id)
-            return AgentResult(success=True, data={
+            if getattr(cf, "is_binary", 0) == 1:
+                return AgentResult(
+                    success=False,
+                    error="二进制文件不能作为代码文本读取，请使用文件下载接口",
+                    failure_kind="binary_source",
+                )
+            content = cf.content or ""
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            data = {
                 "id": cf.id, "file_name": cf.file_name,
-                "language": cf.language, "content": cf.content[:3000],
-                "line_count": cf.line_count,
-            })
+                "language": cf.language, "line_count": cf.line_count,
+                "source_sha256": digest, "source_char_count": len(content),
+                "coverage_complete": True,
+            }
+            if len(content) <= _DIRECT_SOURCE_CHARS:
+                data.update(content=content, content_mode="full")
+                return AgentResult(success=True, data=data)
+
+            chunks = [content[start:start + _SOURCE_CHUNK_CHARS]
+                      for start in range(0, len(content), _SOURCE_CHUNK_CHARS)]
+            source_chunks = []
+            for index, text in enumerate(chunks, start=1):
+                chunk_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                source_chunks.append({
+                    "source_id": f"file:{cf.id}:{index}/{len(chunks)}:{chunk_digest[:12]}",
+                    "sha256": chunk_digest,
+                    "text": text,
+                })
+            compressed = compact_source_context(
+                self,
+                {
+                    "coverage_complete": True,
+                    "language": cf.language,
+                    "source_file_count": 1,
+                    "source_text_file_count": 1,
+                    "source_binary_file_count": 0,
+                    "source_text_bytes": len(content.encode("utf-8")),
+                    "source_chunk_count": len(source_chunks),
+                    "source_chunks": source_chunks,
+                },
+                ctx=ctx,
+            )
+            data.update(content=None, content_mode="compacted", content_context=compressed)
+            return AgentResult(success=True, data=data)
+        except SourceContextError as e:
+            return AgentResult(success=False, error=str(e), failure_kind="source_coverage_incomplete")
         except Exception as e:
             return AgentResult(success=False, error=str(e))

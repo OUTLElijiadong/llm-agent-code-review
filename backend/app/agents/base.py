@@ -100,22 +100,27 @@ class BaseAgent:
         except Exception as e:
             logger.warning(f"[{self.name}] emit 事件失败: {e}")
 
-    def _project_input(self, user_message: str, *, system_prompt: Optional[str] = None) -> tuple[str, bool]:
-        """按 1M 上下文窗口对输入做投影(超长时截断尾部并标记)。
+    def _project_input(
+        self,
+        user_message: str,
+        *,
+        system_prompt: Optional[str] = None,
+        output_tokens: Optional[int] = None,
+    ) -> tuple[str, bool]:
+        """估算输入是否超出模型窗口；始终返回原文，不在此截掉证据。
 
         BaseAgent 直连 chat/completions,不经过 responses runtime 的压缩管线;
-        这里按 settings.deepseek_context_window_tokens 做保守预算,防止单条
-        user_message(如沙箱大日志/全量证据)顶爆模型上下文导致 400/截断。
-        粗略按 1 token ≈ 2 个字符(中英混合)估算,留 8K token 头部余量。
+        基类不知道消息是源码、审计证据、JSON 还是聊天，不能安全地压缩。
+        超限由调用方根据业务语义分片后重试，避免只审到输入前半段。
+        粗略按 1 token ≈ 2 个字符(中英混合)估算，并为本次输出预算留空间。
         """
         window = int(getattr(settings, "deepseek_context_window_tokens", 1_000_000) or 1_000_000)
-        budget_chars = max(8_000, (window - 8_192) * 2)
+        reserved = max(8_192, int(output_tokens or self._max_tokens))
+        budget_chars = max(0, (window - reserved) * 2 - 2_048)
         system_len = len((self._system_prompt if system_prompt is None else system_prompt) or "")
         if system_len + len(user_message) <= budget_chars:
             return user_message, False
-        keep = max(0, budget_chars - system_len - 200)
-        truncated = user_message[:keep] + "\n\n…[输入按 1M 上下文窗口投影截断]"
-        return truncated, True
+        return user_message, True
 
     def bind_usage_source(self, db, user) -> None:
         """Bind only a trusted Engine-backed factory; never share the request Session with workers."""
@@ -179,22 +184,45 @@ class BaseAgent:
                    payload={"model": model, "json_mode": json_mode})
 
         effective_system_prompt = self._system_prompt if system_prompt is None else system_prompt
-        messages = [{"role": "system", "content": effective_system_prompt}]
-        projected_message, input_truncated = self._project_input(user_message, system_prompt=effective_system_prompt)
-        messages.append({"role": "user", "content": projected_message})
-
         output_budget = int(max_tokens or self._max_tokens)
         output_budget = max(1, min(output_budget, settings.deepseek_max_output_tokens))
+        projected_message, input_exceeded = self._project_input(
+            user_message,
+            system_prompt=effective_system_prompt,
+            output_tokens=output_budget,
+        )
+        if input_exceeded:
+            from app.agents.events import AgentEventType
+
+            error = "输入超过模型上下文容量，需分片或压缩后重试；本次未发送任何片段"
+            self._emit(
+                AgentEventType.PROGRESS if recover_truncation else AgentEventType.FAILED,
+                ctx,
+                message=f"{self.name} {error}",
+                payload={
+                    "failure_kind": "input_exceeds_context",
+                    "input_chars": len(user_message),
+                    "system_chars": len(effective_system_prompt),
+                    "recoverable_by_split": recover_truncation,
+                },
+            )
+            return AgentResult(
+                success=False,
+                error=f"[{self.name}] {error}",
+                failure_kind="input_exceeds_context",
+                http_attempts=0,
+            )
+        messages = [
+            {"role": "system", "content": effective_system_prompt},
+            {"role": "user", "content": projected_message},
+        ]
+
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": output_budget,
         }
-        if input_truncated:
-            self._emit(AgentEventType.PROGRESS, ctx,
-                       message=f"{self.name} 输入按 1M 上下文窗口投影截断",
-                       payload={"input_truncated": True})
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         if thinking is not None:
@@ -451,7 +479,8 @@ class BaseAgent:
                   recover_truncation: bool = False,
                   retry_reserver: Optional[Callable[[], bool]] = None,
                   deadline_monotonic: Optional[float] = None,
-                  thinking: Optional[bool] = None) -> AgentResult:
+                  thinking: Optional[bool] = None,
+                  system_prompt: Optional[str] = None) -> AgentResult:
         """调用并解析为 JSON"""
         result = self.call(
             user_message,
@@ -463,6 +492,7 @@ class BaseAgent:
             retry_reserver=retry_reserver,
             deadline_monotonic=deadline_monotonic,
             thinking=thinking,
+            system_prompt=system_prompt,
         )
         if not result.success:
             return result

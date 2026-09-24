@@ -1,12 +1,13 @@
 """单元测试 (v2.0): AiPromptAgent 模板渲染 + 脱敏"""
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.agents.ai_prompt_agent import (
-    MAX_CONTEXT_CHARS,
     AiPromptAgent,
     _format_lines,
     _redact,
 )
+from app.agents.base import AgentResult
 
 
 def test_format_lines_handles_none_and_range():
@@ -103,16 +104,92 @@ def test_build_aggregate_groups_orders_and_marks_kind():
     assert "修复要求:" in text
 
 
-def test_build_aggregate_omits_snippet_when_many_issues():
-    """问题数 > 15 时省略代码上下文,避免提示词过长"""
+def test_build_aggregate_keeps_every_snippet_when_many_issues(monkeypatch):
+    """问题数 > 15 时仍保留每条代码证据。"""
     agent = AiPromptAgent()
     issues = [
         _AggIssue(i, "低", "代码规范", i, f"问题{i}", "a.py")
         for i in range(1, 20)
     ]
+    monkeypatch.setattr(
+        agent,
+        "_extract_context",
+        lambda _file_id, line, **_kw: (f"代码证据_{line}", line, line, None),
+    )
     agg = agent._build_aggregate(issues, "generic", scope_label="任务A", agg_id=-1)
     assert "19 个问题" in agg["title"]
-    assert "上下文:" not in agg["prompt_text"]
+    assert agg["prompt_text"].count("上下文:") == 19
+    assert "代码证据_19" in agg["prompt_text"]
+
+
+def test_llm_polish_missing_source_falls_back_to_full_draft(monkeypatch):
+    agent = AiPromptAgent()
+    draft = "文件: a.py\n行号: L7\n严重度: 高\n问题类型: 潜在Bug\n上下文代码:\n```python\n完整源码末尾\n```\n"
+    monkeypatch.setattr(
+        agent,
+        "call",
+        lambda _message: AgentResult(success=True, data="文件: a.py\n行号: L7\n严重度: 高\n问题类型: 潜在Bug"),
+    )
+    polished, _result = agent._polish_with_llm(draft, "generic")
+    assert polished == draft
+
+
+def test_llm_polish_missing_problem_description_falls_back(monkeypatch):
+    agent = AiPromptAgent()
+    draft = "文件: a.py\n行号: L7\n严重度: 高\n问题类型: 潜在Bug\n问题描述:\n遗漏边界条件\n\n修复要求:\n补测试"
+    monkeypatch.setattr(
+        agent,
+        "call",
+        lambda _message: AgentResult(
+            success=True, data="文件: a.py\n行号: L7\n严重度: 高\n问题类型: 潜在Bug\n修复要求:\n补测试",
+        ),
+    )
+    polished, _result = agent._polish_with_llm(draft, "generic")
+    assert polished == draft
+
+
+def test_llm_polish_over_context_keeps_complete_template(monkeypatch):
+    agent = AiPromptAgent()
+    draft = "文件: a.py\n问题描述:\n" + "证据" * 3000 + "\n尾部关键事实"
+    monkeypatch.setattr(
+        agent,
+        "call",
+        lambda _message: AgentResult(
+            success=False,
+            error="input_exceeds_context",
+            failure_kind="input_exceeds_context",
+        ),
+    )
+
+    polished, result = agent._polish_with_llm(draft, "generic")
+
+    assert result.failure_kind == "input_exceeds_context"
+    assert polished == draft
+    assert polished.endswith("尾部关键事实")
+
+
+def test_task_prompt_generation_does_not_silently_limit_to_fifty(monkeypatch):
+    agent = AiPromptAgent()
+    issues = [
+        SimpleNamespace(id=index, task_id=9, severity="低", line_number=index)
+        for index in range(1, 62)
+    ]
+    query = MagicMock()
+    query.order_by.return_value.all.return_value = issues
+    db = MagicMock()
+    db.get.return_value = SimpleNamespace(project_id=3, task_name="完整任务")
+    db.query.return_value.filter.return_value = query
+    agent._db = db
+    monkeypatch.setattr(agent, "_authz_project", lambda *_args: None)
+    monkeypatch.setattr(agent, "_build_for_issue", lambda issue, *_args: {"issue_id": issue.id, "tokens": {}})
+    monkeypatch.setattr(agent, "_build_aggregate", lambda group, *_args, **_kwargs: {"issue_id": -9})
+
+    result = agent.execute_for_task(9, use_llm=False)
+
+    assert result.success
+    assert len(result.data["prompts"]) == 61
+    assert result.data["prompts"][-1]["issue_id"] == 61
+    query.order_by.return_value.limit.assert_not_called()
 
 
 class _FakeDb:
@@ -150,17 +227,18 @@ def test_extract_context_omits_binary_base64_payload():
     assert end == 0
 
 
-def test_extract_context_truncates_oversized_text_line():
-    """超长文本行只保留有限上下文，避免提示词体积失控。"""
+def test_extract_context_keeps_oversized_text_line():
+    """超长文本行进入完整提示词；模型无法润色时应回退模板而非丢代码。"""
     agent = AiPromptAgent()
+    full_line = "x" * 5000 + "END_OF_SOURCE_LINE"
     agent._db = _FakeDb(SimpleNamespace(
-        content="x" * (MAX_CONTEXT_CHARS + 100),
+        content=full_line,
         language="javascript",
     ))
 
     snippet, start, end, _file = agent._extract_context(1, 1)
 
-    assert snippet.endswith("... [context truncated]")
-    assert len(snippet) < MAX_CONTEXT_CHARS + 100
+    assert snippet.endswith("END_OF_SOURCE_LINE")
+    assert full_line in snippet
     assert start == 1
     assert end == 1

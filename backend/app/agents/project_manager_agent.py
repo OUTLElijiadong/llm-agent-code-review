@@ -60,8 +60,8 @@ class ProjectManagerAgent(BaseAgent):
             return AgentResult(success=False, error="DB 未注入")
         try:
             payload = ProjectIn(
-                project_name=project_name[:50],
-                description=description[:200] if description else None,
+                project_name=project_name,
+                description=description if description else None,
                 language=language if language else None,
             )
             project = project_service.create_project(

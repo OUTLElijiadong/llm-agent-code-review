@@ -27,6 +27,7 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
+from app.models.roundtable import RoundtableSession, RoundtableTurn  # noqa: F401 - 注册隔离 SQLite 会话表
 from app.models.user import User
 from app.services import project_source_service
 from app.services.review_input_service import load_task_inputs

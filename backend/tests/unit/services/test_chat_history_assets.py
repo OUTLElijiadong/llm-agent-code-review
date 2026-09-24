@@ -63,14 +63,15 @@ def test_naive_and_aware_database_times_both_serialize_as_explicit_utc():
     assert api._public_utc_time(datetime(2026, 9, 12, 16, 33, tzinfo=timezone.utc)) == "2026-09-12T16:33:00+00:00"
 
 
-def test_truncated_public_history_does_not_guess_old_image_position(db):
-    seed(db)
+def test_long_public_history_keeps_exact_prefix_and_original_image_position(db):
+    _, asset = seed(db)
     row, _ = seed(db, image=False, tail=True)
     checkpoint = json.loads(row.checkpoint_json)
     checkpoint["transcript"].extend({"role": "user", "content": "重复提问"} for _ in range(100))
     messages = api._public_session_messages(db, row, checkpoint)
-    assert len(messages) == 100
-    assert all("image_assets" not in item for item in messages)
+    assert len(messages) == 103
+    assert messages[0]["image_assets"][0]["id"] == asset.id
+    assert all("image_assets" not in item for item in messages[1:])
 
 
 def test_same_question_with_different_later_answer_does_not_attach_branch_image(db):

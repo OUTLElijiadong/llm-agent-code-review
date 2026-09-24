@@ -15,6 +15,7 @@ import { getToken } from '@/utils/token'
 
 export interface DiscussionTurn {
   turn_id: number
+  seq?: number
   agent_code: string
   agent_name: string
   role: 'agent' | 'user'
@@ -29,12 +30,12 @@ export interface DiscussionTurn {
 export type WsMessage =
   | { type: 'discuss'; session_id: string; turn: DiscussionTurn }
   | { type: 'control'; session_id: string; action: string; payload: Record<string, unknown> }
-  | { type: 'session_end' }
+  | { type: 'session_end'; followup_until?: number }
   | { type: 'pong' }
   | { type: 'server_ping'; ts: number }
 
 export interface DiscussionStream {
-  send: (action: string, payload?: Record<string, unknown>) => void
+  send: (action: string, payload?: Record<string, unknown>) => boolean
   close: () => void
 }
 
@@ -234,7 +235,9 @@ export function subscribeDiscussion(
   function send(action: string, payload?: Record<string, unknown>) {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action, ...(payload || {}) }))
+      return true
     }
+    return false
   }
 
   connect()

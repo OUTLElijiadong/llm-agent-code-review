@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -93,9 +94,9 @@ class FullChainAuditOrchestrator:
                     frameworks.add(fw)
 
         hot = surface.hot_sinks
-        board.attack_surface_facts = surface.to_blackboard_facts(limit=40)
+        board.attack_surface_facts = surface.to_blackboard_facts(limit=max(1, len(hot)))
         # 高风险 sink → 落成待验证假设, 写入黑板(共享给 Analysis/Verification)
-        for prof, sink in hot[:60]:
+        for prof, sink in hot:
             cn, sev, cwe, _owasp = category_meta(sink.category)
             board.add_hypothesis(
                 title=f"{cn}: {sink.func.strip()[:40]}",
@@ -104,7 +105,7 @@ class FullChainAuditOrchestrator:
                 category=sink.category, severity=sev, confidence=0.55,
                 evidence=sink.snippet[:200], source="recon",
             )
-        hot_files = [p.file_path for p in surface.ranked_files if p.risk_score > 0][:30]
+        hot_files = [p.file_path for p in surface.ranked_files if p.risk_score > 0]
         report = ReconReport(
             surface=surface,
             hot_files=hot_files,
@@ -129,18 +130,25 @@ class FullChainAuditOrchestrator:
         self._emit(AgentEventType.PROGRESS, ctx,
                    message="[Analysis] 启动白盒语义审计(知识库注入 + 对抗复检)",
                    payload={"phase": "analysis"})
-        # 复用安全哨兵的项目级白盒审计(内含知识库注入 + 对抗复检)
-        # 复用安全哨兵的项目级白盒审计(内含知识库注入 + 对抗复检)。
-        # 关键: scan_mode 必须用 "static_full"(整包静态 + 有界语义)而非默认 "full"
-        # —— "full" 会对全量源码做无界语义审计, 大项目触发语义预算门禁(预算耗尽即
-        # 整体失败)。"static_full" 兼顾覆盖与预算可控, 符合全链路「分析→验证」的分工。
+        # 全链审计必须逐源码分片完成语义覆盖；供应商预算不足时由哨兵显式失败，
+        # 不能以 static_full 的风险子集结果冒充完整审计。
         result = self._sentinel.scan_project(
             project_id, top_n=top_n, trace_dataflow=trace_dataflow, ctx=ctx,
-            scan_mode="static_full",
+            scan_mode="full",
         )
         if not result.success:
             return result
         data = result.data or {}
+        coverage = data.get("compliance") or {}
+        if any(coverage.get(key) for key in (
+            "findings_truncated", "result_payload_truncated", "response_graph_truncated", "graph_items_truncated"
+        )):
+            return AgentResult(
+                success=False,
+                data=data,
+                error="白盒分片虽执行完成，但发现或数据流结果被容量裁剪；全链审计不能宣称完整",
+                failure_kind="partial_coverage",
+            )
         # 把分析产出的高危结论回写黑板为「事实」
         for f in (data.get("findings") or []):
             if not isinstance(f, dict):
@@ -178,28 +186,30 @@ class FullChainAuditOrchestrator:
         high = [f for f in findings
                 if isinstance(f, dict) and f.get("severity") in {"严重", "高"}]
         high.sort(key=lambda x: -float(x.get("confidence", 0) or 0))
-        targets = high[:max_verify]
+        targets = high
 
         verified: List[dict] = []
         sandbox_used = False
-        sandbox_error = ""
+        sandbox_errors: List[str] = []
+        sandbox_attempted = 0
 
         # —— 沙箱实测(可选, 安全降级) ——
         if enable_sandbox and targets:
-            try:
-                verified_sandbox = self._sandbox_verify(
-                    project, actor, targets, ctx=ctx,
-                )
-                if verified_sandbox:
-                    sandbox_used = True
-                    for item in verified_sandbox:
-                        idx = item.get("_index")
-                        if idx is not None and 0 <= idx < len(targets):
-                            targets[idx]["sandbox_verdict"] = item.get("verdict", "")
-                            targets[idx]["sandbox_evidence"] = item.get("evidence", "")
-            except Exception as e:
-                sandbox_error = str(e)[:200]
-                logger.warning(f"[fullchain][verification] 沙箱验证降级: {e}")
+            for start in range(0, len(targets), max(1, max_verify)):
+                batch = targets[start : start + max(1, max_verify)]
+                try:
+                    sandbox_attempted += len(batch)
+                    verified_sandbox = self._sandbox_verify(project, actor, batch, ctx=ctx)
+                    if verified_sandbox:
+                        sandbox_used = True
+                        for item in verified_sandbox:
+                            idx = item.get("_index")
+                            if idx is not None and 0 <= idx < len(batch):
+                                batch[idx]["sandbox_verdict"] = item.get("verdict", "")
+                                batch[idx]["sandbox_evidence"] = item.get("evidence", "")
+                except Exception as e:
+                    sandbox_errors.append(f"第 {start + 1}-{start + len(batch)} 条: {e}")
+                    logger.warning(f"[fullchain][verification] 沙箱验证降级: {e}")
 
         # —— LLM 推理验证(始终执行, 给每条高危结论出 PoC 思路与判定) ——
         llm_verdicts = self._llm_verify(targets, ctx=ctx)
@@ -219,7 +229,8 @@ class FullChainAuditOrchestrator:
             "targets": len(targets),
             "verified": len(verified),
             "sandbox_used": sandbox_used,
-            "sandbox_error": sandbox_error,
+            "sandbox_attempted": sandbox_attempted,
+            "sandbox_error": "；".join(sandbox_errors),
             "verified_findings": verified,
         }
 
@@ -228,36 +239,24 @@ class FullChainAuditOrchestrator:
         """LLM 推理验证: 对每条高危产出 PoC 思路 + 可利用性判定."""
         if not targets:
             return {}
-        items = []
-        for i, f in enumerate(targets):
-            items.append(
-                f"[{i}] {f.get('severity')} {f.get('category','')} "
-                f"{f.get('file_path','')}:{f.get('lines','')}\n"
-                f"  证据: {str(f.get('evidence',''))[:140]}\n"
-                f"  场景: {str(f.get('exploit_scenario',''))[:140]}"
-            )
         from app.agents.security_sentinel_agent import _knowledge_context
-        prompt = (
-            "你是漏洞验证专家。对下面每条高危漏洞候选, 给出:\n"
-            "1) verdict: confirmed(可利用)/plausible(疑似)/refuted(误报)\n"
-            "2) poc: 一段可操作的验证思路(请求方法/参数/payload 要点, ≤120 字)\n"
-            "判定须基于证据链, 不确定给 plausible, 误报给 refuted。\n\n"
-            f"{_knowledge_context('verification')}"
-            "候选:\n" + "\n\n".join(items) + "\n\n"
-            '严格输出 JSON: {"reviews":[{"index":0,"verdict":"confirmed|plausible|refuted","poc":"..."}]}'
-        )
-        result = self._sentinel.call_json(prompt, ctx=ctx, thinking=False)
         out: Dict[int, dict] = {}
-        if result.success and isinstance(result.data, dict):
-            for r in (result.data.get("reviews") or []):
-                if isinstance(r, dict):
-                    try:
-                        out[int(r.get("index"))] = {
-                            "verdict": str(r.get("verdict") or ""),
-                            "poc": str(r.get("poc") or "")[:200],
-                        }
-                    except (TypeError, ValueError):
-                        continue
+        for i, finding in enumerate(targets):
+            prompt = (
+                "你是漏洞验证专家。对本条高危候选给出 verdict: "
+                "confirmed(可利用)/plausible(疑似)/refuted(误报)，及 ≤120 字 PoC 思路。"
+                "判定须基于完整证据链, 不确定给 plausible, 误报给 refuted。\n\n"
+                f"{_knowledge_context('verification')}"
+                "候选(JSON):\n" + json.dumps(finding, ensure_ascii=False, default=str)
+                + '\n\n严格输出 JSON: {"verdict":"confirmed|plausible|refuted","poc":"..."}'
+            )
+            result = self._sentinel.call_json(prompt, ctx=ctx, thinking=False)
+            if not result.success or not isinstance(result.data, dict):
+                raise RuntimeError(f"高危候选 {i + 1}/{len(targets)} 未完成模型验证: {result.error}")
+            verdict = str(result.data.get("verdict") or "")
+            if verdict not in {"confirmed", "plausible", "refuted"}:
+                raise RuntimeError(f"高危候选 {i + 1}/{len(targets)} 模型验证缺少合法结论")
+            out[i] = {"verdict": verdict, "poc": str(result.data.get("poc") or "")[:200]}
         return out
 
     def _sandbox_verify(self, project: Project, actor: User,
@@ -362,7 +361,7 @@ class FullChainAuditOrchestrator:
             cat = str(f.get("category") or f.get("title") or "")
             items.append(
                 f"[{i}] 类别={cat} 文件={f.get('file_path','')}:{f.get('lines','')} "
-                f"证据={str(f.get('evidence',''))[:120]}"
+                f"证据={str(f.get('evidence',''))}"
             )
         prompt = (
             "你要为一个 PHP 项目生成一个**在隔离沙箱内执行的 PoC 验证脚本** `_prism_poc.sh`。"
@@ -547,10 +546,13 @@ class FullChainAuditOrchestrator:
         if not analysis.success:
             return analysis
         # 3. Verification(真实沙箱可选)
-        verification = self._verification(
-            project, actor, (analysis.data or {}).get("findings") or [],
-            board, ctx, enable_sandbox=enable_sandbox,
-        )
+        try:
+            verification = self._verification(
+                project, actor, (analysis.data or {}).get("findings") or [],
+                board, ctx, enable_sandbox=enable_sandbox,
+            )
+        except Exception as exc:  # noqa: BLE001 - 不允许漏评高危后仍报告审计完成
+            return AgentResult(success=False, error=f"全链漏洞验证不完整: {exc}", failure_kind="partial_coverage")
         # 4. Report
         duration_ms = int((time.time() - t0) * 1000)
         report = self._report(project, recon, analysis, verification, board, duration_ms)
@@ -566,11 +568,11 @@ class FullChainAuditOrchestrator:
         data["fullchain"] = report
         data["audit_board"] = {
             "summary": board.summary(),
-            "attack_surface": board.attack_surface_facts[:40],
+            "attack_surface": board.attack_surface_facts,
             "confirmed": [
                 {"title": n.title, "file_path": n.file_path, "line": n.line,
                  "severity": n.severity, "confidence": round(n.confidence, 2)}
-                for n in board.confirmed[:30]
+                for n in board.confirmed
             ],
         }
         return AgentResult(success=True, data=data, model=self._sentinel._model,

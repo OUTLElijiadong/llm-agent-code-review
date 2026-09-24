@@ -405,7 +405,7 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
         ToolCall("call_discussion_denied", "get_roundtable_discussion", {"session_id": "disc_agent_owned"}, "{}")
     )
     assert denied.status == "error"
-    assert "无权访问" in denied.error
+    assert "不存在或已过期" in denied.error
     DiscussionBus._instance = None
 
 
@@ -477,13 +477,14 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
         session_key="chat-current",
         mcp_provider=EmptyMcp(),
     )
+    correction = "重新核对管理员越权路径，并修正结论。" + "逐条检查授权证据。" * 750 + "最终核对结束标记。"
     call = ToolCall(
         "call-roundtable-continuation",
         "control_roundtable_discussion",
         {
             "session_id": original.session_id,
             "action": "user_input",
-            "content": "重新核对管理员越权路径，并修正结论。",
+            "content": correction,
         },
         "{}",
     )
@@ -521,6 +522,8 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     assert pending.kwargs["origin_session_key"] == "chat-original"
     assert "上一轮认为权限边界安全" in pending.kwargs["continuation_context"]
     assert "重新核对管理员越权路径" in pending.kwargs["continuation_context"]
+    assert "最终核对结束标记。" in pending.kwargs["continuation_context"]
+    assert continuation.turns[-1].content == correction
 
     ws_discussion._session_owners.pop("disc_continued", None)
     ws_discussion._owner_registered_at.pop("disc_continued", None)
@@ -566,7 +569,7 @@ async def test_concluded_roundtable_continuation_rejects_non_owner(
     denied = await executor.execute(call, approved=True)
 
     assert denied.status == "error"
-    assert "无权控制" in denied.error
+    assert "不存在或已过期" in denied.error
     assert list(bus._sessions) == [original.session_id]
     assert original.status == "concluded"
     DiscussionBus._instance = None
@@ -624,7 +627,7 @@ async def test_unique_super_admin_roundtable_is_owner_only(
         ToolCall("call-super-read2", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
     )
     assert read_again.status == "error"
-    assert "无权访问" in read_again.error
+    assert "不存在或已过期" in read_again.error
     assert (await member_executor.execute(control)).status == "approval_required"
     assert (await member_executor.execute(control, approved=True)).status == "error"
     assert controls == []

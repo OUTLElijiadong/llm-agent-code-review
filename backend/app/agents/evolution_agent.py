@@ -13,13 +13,14 @@
 纯函数(generate_fp_proposals / downgrade_severity 等)便于单元测试,
 LLM 蒸馏通过可注入的 distiller 解耦,测试时离线运行。
 """
+import hashlib
 import json
 from typing import Callable, Optional
 
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
+from app.core.config import settings
 from app.models.evolution_proposal import EvolutionProposal
 from app.models.review_rule import ReviewRule
 from app.services import experience_service, feedback_service
@@ -29,6 +30,12 @@ SEVERITY_ORDER = ["严重", "高", "中", "低"]
 
 # 开放(未决)提案状态:用于去重,避免重复堆积同一提案
 _OPEN_STATUSES = ("pending", "eval_passed", "eval_failed")
+_MAX_EXPERIENCE_PARTS = 64
+_EXPERIENCE_SUMMARY_PROMPT = (
+    "你是审查经验压缩员。只总结给定的来源分片，不得添加新事实。"
+    "输出 JSON 对象，含 source_id（原样返回）、summary（最多 180 字，保留修复动作和条件）、"
+    "quote（从原文逐字复制的一段非空短引文）。"
+)
 
 
 def downgrade_severity(severity: str) -> Optional[str]:
@@ -232,13 +239,17 @@ class EvolutionAgent(BaseAgent):
         if not self._db:
             return AgentResult(success=False, error="DB 未注入")
         # 支持测试注入 distiller(临时替换 Skill 的 distiller)
-        if distiller is not None and self._self_improve_skill is not None:
+        original_distiller = self._self_improve_skill.distiller
+        if distiller is not None:
             self._self_improve_skill.distiller = distiller
-        # 委托给 SelfImprovementSkill.evolve()(七步闭环:聚合→反思→闸门→持久化)
-        skill_result = self._self_improve_skill.evolve(self._db, window_days, ctx)
+        try:
+            # 委托给 SelfImprovementSkill.evolve()(七步闭环:聚合→反思→闸门→持久化)
+            skill_result = self._self_improve_skill.evolve(self._db, window_days, ctx)
+        finally:
+            self._self_improve_skill.distiller = original_distiller
         return AgentResult(
             success=skill_result.success,
-            data=skill_result.data,
+            data=skill_result.data or {},
             error=skill_result.error,
             duration_ms=skill_result.duration_ms,
         )
@@ -278,11 +289,7 @@ class EvolutionAgent(BaseAgent):
 
         proposals: list[dict] = []
         for exp in experiences[: self.max_new_rules]:
-            try:
-                rule = distiller(exp)
-            except Exception as e:
-                logger.warning(f"[evolution] 规则蒸馏失败,跳过: {e}")
-                continue
+            rule = distiller(exp)
             if not rule or not rule.get("rule_code") or not rule.get("rule_content"):
                 continue
             if rule["rule_code"] in existing_codes:
@@ -306,6 +313,16 @@ class EvolutionAgent(BaseAgent):
     def _distill_rule(self, exp) -> Optional[dict]:
         """调用 LLM,把一条高频确认经验蒸馏为更精准的审查规则(JSON)"""
         rule_type = feedback_service.ISSUE_TYPE_TO_RULE_TYPE.get(exp.issue_type, "correctness")
+        suggestion = exp.canonical_suggestion or "(无)"
+        # 单条经验的优质建议可能包含完整补丁或长审查对话。先把全部原文按
+        # SHA 来源压缩，再蒸馏规则；压缩失败会由 evolve() 报告失败。
+        fixed_prefix = (
+            f"问题类型: {exp.issue_type}\n代表标题: {exp.title}\n"
+            f"历史确认次数: {exp.accepted_count}\n适用语言: {exp.language}\n"
+        )
+        _unchanged, over_window = self._project_input(fixed_prefix + suggestion, output_tokens=2_048)
+        if over_window:
+            suggestion = self._compress_suggestion(suggestion, fixed_prefix)
         prompt = (
             "你是代码审查规则工程师。下面是某团队代码审查中【反复出现且被开发者确认修复】的真实问题,"
             "请把它提炼成一条更精准、可执行的审查规则(供审查 Prompt 使用)。\n\n"
@@ -313,18 +330,82 @@ class EvolutionAgent(BaseAgent):
             f"代表标题: {exp.title}\n"
             f"历史确认次数: {exp.accepted_count}\n"
             f"适用语言: {exp.language}\n"
-            f"参考修复建议: {exp.canonical_suggestion or '(无)'}\n\n"
+            f"参考修复建议: {suggestion}\n\n"
             "只输出 JSON,字段:\n"
             '{"rule_code":"英文小写下划线唯一标识","rule_name":"中文规则名(<=20字)",'
             f'"rule_type":"{rule_type}","rule_content":"一句话可执行的检查指令(<=80字)",'
             f'"language":"{exp.language}","severity":"严重|高|中|低"}}'
         )
-        result = self.call_json(prompt)
-        if not result.success or not isinstance(result.data, dict):
-            return None
+        if self._project_input(prompt, output_tokens=2_048)[1]:
+            raise RuntimeError("规则蒸馏压缩后仍超过模型上下文预算")
+        result = self.call_json(prompt, max_tokens=2_048)
+        if not result.success and result.failure_kind == "output_truncated":
+            result = self.call_json(prompt, max_tokens=4_096)
+        if not result.success:
+            raise RuntimeError(f"规则蒸馏模型调用失败: {result.failure_kind or result.error or 'unknown'}")
+        if not isinstance(result.data, dict):
+            raise RuntimeError("规则蒸馏模型输出不是 JSON 对象")
         data = result.data
+        if not data.get("rule_code") or not data.get("rule_content"):
+            raise RuntimeError("规则蒸馏模型输出缺少规则编号或内容")
         # 兜底字段
         data.setdefault("rule_type", rule_type)
         data.setdefault("language", exp.language or "*")
         data.setdefault("severity", "中")
         return data
+
+    def _compress_suggestion(self, suggestion: str, fixed_prefix: str) -> str:
+        window = int(settings.deepseek_context_window_tokens or 0)
+        capacity = (window - max(8_192, 2_048)) * 2 - 2_048
+        part_chars = min(12_000, max(0, capacity - len(_EXPERIENCE_SUMMARY_PROMPT) - 1_024))
+        if part_chars < 256:
+            raise RuntimeError("审查经验没有足够的分片输入预算")
+        parts: list[str] = []
+        offset = 0
+        while offset < len(suggestion):
+            take = min(part_chars, len(suggestion) - offset)
+            while take:
+                probe = json.dumps({
+                    "source_id": "E000-000000000000", "sha256": "0" * 64,
+                    "part": 999, "total_parts": 999,
+                    "text": suggestion[offset:offset + take],
+                }, ensure_ascii=False)
+                if not self._project_input(
+                    probe, system_prompt=_EXPERIENCE_SUMMARY_PROMPT, output_tokens=2_048,
+                )[1]:
+                    break
+                take //= 2
+            if not take:
+                raise RuntimeError("审查经验单字符也超过压缩输入预算")
+            parts.append(suggestion[offset:offset + take])
+            offset += take
+        if len(parts) > _MAX_EXPERIENCE_PARTS:
+            raise RuntimeError("审查经验超过语义压缩分片调用预算")
+        entries: list[str] = []
+        for index, part in enumerate(parts, start=1):
+            digest = hashlib.sha256(part.encode("utf-8")).hexdigest()
+            source_id = f"E{index:03d}-{digest[:12]}"
+            payload = json.dumps({
+                "source_id": source_id, "sha256": digest,
+                "part": index, "total_parts": len(parts), "text": part,
+            }, ensure_ascii=False)
+            result = self.call_json(
+                payload, max_tokens=2_048, system_prompt=_EXPERIENCE_SUMMARY_PROMPT,
+            )
+            if not result.success:
+                raise RuntimeError(f"审查经验来源 {source_id} 压缩失败: {result.failure_kind or result.error}")
+            data = result.data
+            if (not isinstance(data, dict) or data.get("source_id") != source_id
+                    or not isinstance(data.get("summary"), str)
+                    or not data["summary"].strip() or len(data["summary"]) > 180
+                    or not isinstance(data.get("quote"), str)
+                    or not data["quote"].strip() or data["quote"] not in part):
+                raise RuntimeError(f"审查经验来源 {source_id} 摘要或原文引文无效")
+            entries.append(f"【来源 {source_id}】{data['summary']} 原文引文：「{data['quote']}」")
+        projection = (
+            f"原文 SHA256: {hashlib.sha256(suggestion.encode('utf-8')).hexdigest()}；"
+            f"来源 {len(parts)} 片，已逐片压缩：\n" + "\n".join(entries)
+        )
+        if self._project_input(fixed_prefix + projection, output_tokens=2_048)[1]:
+            raise RuntimeError("审查经验全来源摘要仍超过模型上下文预算")
+        return projection

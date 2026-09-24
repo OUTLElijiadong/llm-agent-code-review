@@ -25,13 +25,14 @@ v2.4 心跳机制:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json as json_lib
 import time
 from urllib.parse import parse_qs
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.discussion_bus import DiscussionBus
 from app.core.database import SessionLocal
@@ -61,13 +62,26 @@ _STALE_TTL = 3600.0
 _SESSION_CHECK_INTERVAL = 1.0
 
 
-def _purge_stale():
-    """机会性清理:每次 register_pending 时顺带扫一遍过期条目。"""
+def _expire_pending(session_id: str) -> None:
+    """使过期预检会话进入可解释终态，避免永久显示进行中。"""
+    pending = _pending.pop(session_id, None)
+    if pending is None:
+        return
+    owner = int(pending.kwargs.get("user_id") or 0)
+    bus = DiscussionBus.instance()
+    session = bus.get_session(session_id, owner_user_id=owner) if owner else None
+    if session is not None and session.status in {"active", "paused"}:
+        bus.publish_control(session_id, "done", {"status": "interrupted"})
+        bus.close_session(session_id)
+    _session_owners.pop(session_id, None)
+    _owner_registered_at.pop(session_id, None)
+
+
+def purge_stale_pending():
+    """机会性清理过期预检；列表读取也调用，使状态按时更新。"""
     now = time.time()
     for sid in [s for s, p in _pending.items() if now - p.created_at > _STALE_TTL]:
-        _pending.pop(sid, None)
-        _session_owners.pop(sid, None)
-        _owner_registered_at.pop(sid, None)
+        _expire_pending(sid)
     bus = DiscussionBus.instance()
     for sid in [
         s for s, ts in _owner_registered_at.items()
@@ -78,7 +92,7 @@ def _purge_stale():
 
 
 def register_pending(session_id: str, **kwargs):
-    _purge_stale()
+    purge_stale_pending()
     _pending[session_id] = PendingDiscussion(session_id, **kwargs)
     owner = kwargs.get("user_id")
     if owner is not None:
@@ -88,6 +102,10 @@ def register_pending(session_id: str, **kwargs):
 
 def take_pending(session_id: str) -> PendingDiscussion | None:
     """原子领取待启动上下文，供 WebSocket 或用户 Agent 二选一启动。"""
+    pending = _pending.get(session_id)
+    if pending is not None and time.time() - pending.created_at > _STALE_TTL:
+        _expire_pending(session_id)
+        return None
     return _pending.pop(session_id, None)
 
 
@@ -283,7 +301,12 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
 
     bus = DiscussionBus.instance()
     pending = _pending.get(session_id)
-    session = bus.get_session(session_id)
+    session = bus.get_session(session_id, owner_user_id=int(user.id))
+    if session is None and pending is None and isinstance(bus, DiscussionBus):
+        # 浏览器可直接按旧 WS 地址重连，不依赖先访问圆桌 REST 列表。
+        with SessionLocal() as db:
+            bus.enable_persistence(sessionmaker(bind=db.get_bind(), expire_on_commit=False))
+        session = bus.get_session(session_id, owner_user_id=int(user.id))
     owner_user_id = 0
     if pending:
         owner_user_id = int(pending.kwargs.get("user_id") or 0)
@@ -309,23 +332,93 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
     await websocket.accept(subprotocol="prism-auth" if use_auth_subprotocol else None)
     logger.info(f"[WS] 讨论连接已接受 session={session_id} pending={bool(pending)} client={client}")
     queue: asyncio.Queue = await bus.subscribe(session_id)
+    if session is not None and session.status == "concluded":
+        from app.services.roundtable_followup_service import ensure_followup_worker
+
+        ensure_followup_worker(bus, session_id, owner_user_id)
 
     # 启动讨论编排
     if pending:
         launch_pending_discussion(pending)
     else:
-        bus.publish_control(session_id, "info", {
-            "message": "已连接,等待讨论启动。可通过 API 触发讨论。",
-        })
+        current = bus.get_session(session_id, owner_user_id=owner_user_id)
+        if current is not None and current.status in {"active", "paused"}:
+            bus.publish_control(session_id, "info", {
+                "message": "已连接,等待讨论启动。可通过 API 触发讨论。",
+            })
 
     # 转发消息 (WS → 客户端, 客户端 → WS)
     async def pump_bus_to_ws():
+        last_sent_seq = int(getattr(queue, "replay_after_seq", 0))
+
+        async def send_missing_turns() -> None:
+            """以账本为准补发所有未送达发言，允许补发期间继续产生新发言。"""
+            nonlocal last_sent_seq
+            while True:
+                page = bus.get_turns_after(
+                    session_id, owner_user_id, after_seq=last_sent_seq, limit=100,
+                )
+                if not page:
+                    current = bus.get_session(session_id, owner_user_id=owner_user_id)
+                    if current is not None and current.last_turn_seq > last_sent_seq:
+                        raise RuntimeError("圆桌发言账本存在无法补齐的序号缺口")
+                    return
+                for turn in page:
+                    if turn.seq != last_sent_seq + 1:
+                        raise RuntimeError("圆桌发言账本序号不连续")
+                    await websocket.send_text(json_lib.dumps({
+                        "type": "discuss", "session_id": session_id,
+                        "turn": turn.to_dict(),
+                    }, ensure_ascii=False))
+                    last_sent_seq = turn.seq
+
         try:
             while True:
+                if getattr(queue, "needs_resync", False):
+                    queue.needs_resync = False
+                    # 队列里的旧帧与账本补页会重复；清空后从最后已发送 seq 修复。
+                    while not queue.empty():
+                        queue.get_nowait()
+                    await send_missing_turns()
+                    for frame in bus.recovery_frames(session_id, owner_user_id):
+                        await websocket.send_text(frame)
+                    continue
                 msg = await queue.get()
+                if getattr(queue, "needs_resync", False):
+                    continue
+                parsed = json_lib.loads(msg)
+                delivered_seq = 0
+                if parsed.get("type") == "discuss":
+                    seq = int(parsed.get("turn", {}).get("seq") or 0)
+                    if seq > 0:
+                        if seq > last_sent_seq + 1:
+                            await send_missing_turns()
+                        if seq <= last_sent_seq:
+                            continue
+                        if seq != last_sent_seq + 1:
+                            raise RuntimeError("圆桌实时发言序号不连续")
+                        delivered_seq = seq
+                elif parsed.get("type") == "session_end" or (
+                    parsed.get("type") == "control" and parsed.get("action") == "done"
+                ):
+                    await send_missing_turns()
                 await websocket.send_text(msg)
+                if delivered_seq:
+                    last_sent_seq = delivered_seq
         except asyncio.CancelledError:
             pass
+        except Exception as exc:
+            logger.error(
+                "[WS] 圆桌发言同步失败 session={} error_type={}",
+                session_id, type(exc).__name__,
+            )
+            with contextlib.suppress(Exception):
+                await websocket.send_text(json_lib.dumps({
+                    "type": "control", "session_id": session_id,
+                    "action": "resync_required",
+                    "payload": {"after_seq": last_sent_seq},
+                }, ensure_ascii=False))
+                await websocket.close(code=1013, reason="圆桌发言同步失败，请重新连接")
 
     pump_task = asyncio.create_task(pump_bus_to_ws())
 
@@ -375,19 +468,38 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
 
                 if action == "user_input":
                     content = data.get("content", "")
-                    if content.strip():
-                        # 先广播用户的发言到讨论面板
-                        from app.agents.events import DiscussionTurn
-                        user_turn = DiscussionTurn(
-                            turn_id=-1,
-                            agent_code="user",
-                            agent_name="你",
-                            role="user",
-                            content=content.strip(),
+                    if not isinstance(content, str) or not content.strip():
+                        await websocket.send_text(json_lib.dumps({
+                            "type": "control", "action": "input_rejected",
+                            "payload": {"reason": "消息不能为空"},
+                        }, ensure_ascii=False))
+                    elif len(content) > 50000:
+                        await websocket.send_text(json_lib.dumps({
+                            "type": "control", "action": "input_rejected",
+                            "payload": {"reason": "单条消息超过 50000 字符，请拆分后发送"},
+                        }, ensure_ascii=False))
+                    elif bus.accept_user_input(session_id, content):
+                        accepted_session = bus.get_session(session_id, owner_user_id=int(user.id))
+                        if accepted_session is not None and accepted_session.status == "concluded":
+                            from app.services.roundtable_followup_service import ensure_followup_worker
+
+                            ensure_followup_worker(bus, session_id, owner_user_id)
+                        await websocket.send_text(json_lib.dumps({
+                            "type": "control", "action": "input_accepted",
+                            "payload": {"seq": int(getattr(accepted_session, "last_turn_seq", 0) or 0)},
+                        }, ensure_ascii=False))
+                    else:
+                        current_session = bus.get_session(session_id, owner_user_id=int(user.id))
+                        phase = str(getattr(current_session, "progress", {}).get("phase") or "")
+                        reason = (
+                            "报告正在整理，当前消息未发送；结束后可发起续会"
+                            if phase in {"summarizing", "extracting", "reporting"}
+                            else "讨论尚未启动或追问窗口已结束，消息未发送"
                         )
-                        bus.publish_turn(session_id, user_turn)
-                        # 然后通知编排器
-                        bus.send_user_input(session_id, content.strip())
+                        await websocket.send_text(json_lib.dumps({
+                            "type": "control", "action": "input_rejected",
+                            "payload": {"reason": reason},
+                        }, ensure_ascii=False))
                 elif action in ("pause", "resume", "stop"):
                     if not bus.control_session(session_id, action):
                         bus.publish_control(session_id, "info", {

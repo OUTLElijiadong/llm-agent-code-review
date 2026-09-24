@@ -15,7 +15,7 @@ from typing import List, Optional
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, PayloadTooLargeError
 from app.core.pagination import Pagination
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_doc import KnowledgeDoc
@@ -23,7 +23,8 @@ from app.services import embedding_service
 
 _CHUNK_SIZE = 700      # 目标切片字符数
 _CHUNK_OVERLAP = 80    # 切片重叠,保留上下文
-_MAX_SYNC_CHARS = 20000  # 单条来源最大入库字符,防超大文件拖垮
+_MAX_DOCUMENT_CHARS = 2_000_000  # 与 DocAddIn 一致；超限明确拒绝，不静默丢尾
+_EMBED_BATCH_SIZE = 32
 
 
 # ──────────────────────────────────────────────────────────
@@ -77,7 +78,23 @@ def add_document(
     若 source_ref 已存在且 replace_existing,则先软删旧文档与其切片再重建,
     实现幂等同步。
     """
-    content = (content or "")[:_MAX_SYNC_CHARS]
+    content = content or ""
+    if len(content) > _MAX_DOCUMENT_CHARS:
+        raise PayloadTooLargeError(f"知识文档最多 {_MAX_DOCUMENT_CHARS} 字，请拆分后入库")
+
+    # 先完成全部切片的嵌入，确认数量和模型一致后才替换旧来源。
+    # 远端嵌入可能独立记录用量；此时不持有知识文档写事务。
+    pieces = _chunk_text(content)
+    embedded: list[tuple[str, list[float], str]] = []
+    model_tag = ""
+    for offset in range(0, len(pieces), _EMBED_BATCH_SIZE):
+        batch = pieces[offset:offset + _EMBED_BATCH_SIZE]
+        vectors, tag = embedding_service.embed_texts(db, batch, user_id=user_id)
+        if len(vectors) != len(batch) or not tag or (model_tag and tag != model_tag):
+            raise RuntimeError("知识文档嵌入结果不完整或模型批次不一致，原文档保持不变")
+        model_tag = tag
+        embedded.extend((piece, vec, tag) for piece, vec in zip(batch, vectors))
+
     if source_ref and replace_existing:
         olds = db.query(KnowledgeDoc).filter(
             KnowledgeDoc.user_id == user_id,
@@ -98,22 +115,17 @@ def add_document(
         status="active",
     )
     db.add(doc)
-    db.commit()
-    db.refresh(doc)
-
-    pieces = _chunk_text(content)
-    if pieces:
-        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
-        for seq, (piece, vec) in enumerate(zip(pieces, vectors)):
-            db.add(KnowledgeChunk(
-                doc_id=doc.id,
-                user_id=user_id,
-                seq=seq,
-                content=piece,
-                embedding=json.dumps(vec),
-                embed_model=tag,
-            ))
-        doc.chunk_count = len(pieces)
+    db.flush()
+    for seq, (piece, vec, tag) in enumerate(embedded):
+        db.add(KnowledgeChunk(
+            doc_id=doc.id,
+            user_id=user_id,
+            seq=seq,
+            content=piece,
+            embedding=json.dumps(vec),
+            embed_model=tag,
+        ))
+    doc.chunk_count = len(embedded)
     db.commit()
     db.refresh(doc)
     return doc

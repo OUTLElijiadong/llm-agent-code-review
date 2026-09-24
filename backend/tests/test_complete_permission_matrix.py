@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 332, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 335, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,11 +81,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 332
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 332
+    assert len(ROUTES) == 335
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 335
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 318
-    assert len(GUARDED_ROUTES) == 251
+    assert len(AUTHENTICATED_ROUTES) == 321
+    assert len(GUARDED_ROUTES) == 252
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -104,11 +104,14 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     expected_new_routes = {
         ("GET", "/api/agent-responses/runs/{run_id}/assets"): ["agent:chat"],
         ("GET", "/api/agent-responses/assets/{asset_id}/image"): ["agent:chat"],
+        ("GET", "/api/agent-responses/session/messages"): ["agent:chat"],
         ("GET", "/api/agent-mesh/conversations"): ["agent:chat"],
         ("POST", "/api/agent-mesh/conversations/restore"): ["agent:chat"],
         ("POST", "/api/agent-mesh/inbox/pull"): ["agent:chat"],
         ("POST", "/api/feedback/{feedback_id}/read"): ["require_admin"],
         ("POST", "/api/forum/posts/{post_id}/views"): [],
+        ("GET", "/api/discuss/sessions"): [],
+        ("GET", "/api/discuss/sessions/{session_id}"): [],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]

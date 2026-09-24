@@ -1,4 +1,6 @@
 """管理员副驾驶确认协议和真实写入闭环测试。"""
+import json
+
 import pytest
 
 from app.agents.admin_copilot_agent import AdminCopilotAgent
@@ -138,7 +140,91 @@ def test_manager_structured_failure_retries_with_distinct_compact_prompt(
     assert result.success is True
     assert len(prompts) == 2
     assert prompts[0] != prompts[1]
-    assert len(prompts[1]) < len(prompts[0])
+    assert json.loads(prompts[1])["管理员问题"] == "总结当前状态"
+    assert "历史上下文" in prompts[1]
+
+
+def test_manager_compacts_all_old_history_sources_without_dropping_recent_text(
+    db, admin_user, monkeypatch,
+):
+    import re
+
+    from app.utils.api_resolver import ApiConfig
+
+    agent = AdminCopilotAgent()
+    prompts = []
+
+    def fake_call_json(prompt, *_args, **_kwargs):
+        prompts.append(prompt)
+        data = json.loads(prompt)
+        if "来源" in data:
+            refs = re.findall(r"\[(来源#.+?:片段\d+/\d+)\]", data["来源"])
+            return AgentResult(success=True, data={"summary": "来源事实均已归纳", "covered_refs": refs})
+        return AgentResult(success=True, data={"mode": "answer", "answer": "完成", "agent_code": "", "task": ""})
+
+    monkeypatch.setattr(agent, "call_json", fake_call_json)
+    monkeypatch.setattr(agent, "_log_call", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.agents.admin_copilot_agent.resolve_api_config",
+        lambda *_args, **_kwargs: ApiConfig(api_key="test", base_url="https://example.invalid", model="test"),
+    )
+    history = [
+        {"source_id": str(index), "role": "user", "content": f"第{index}条约束:" + ("细节" * 1_000)}
+        for index in range(20)
+    ]
+    result = agent.plan(
+        db, admin_user, message="按全部历史处理", history=history,
+        snapshot={"users": 18}, agents=[], trace_id="trace-full-history",
+    )
+    assert result.success
+    final = json.loads(prompts[-1])
+    context = final["对话上下文"]
+    assert len(context["最近原文"]) == 4
+    assert "第19条约束" in str(context["最近原文"])
+    refs = [ref for group in context["压缩历史"] for ref in group["covered_refs"]]
+    assert {f"来源#{index}:片段1/1" for index in range(16)} == set(refs)
+
+
+def test_admin_history_context_reads_all_persisted_messages_for_own_session(db, admin_user):
+    session = admin_chat_history_service.get_or_create_session(db, admin_user, "long-admin-history")
+    for index in range(15):
+        admin_chat_history_service.append_user_text(
+            db, session, f"历史约束 {index} " + ("末尾" * 1_100),
+        )
+    history = admin_chat_history_service.recent_context(db, session)
+    assert len(history) == 15
+    assert "历史约束 0" in history[0]["content"]
+    assert history[0]["content"].endswith("末尾")
+    assert len(history[0]["content"]) > 2_000
+    assert "历史约束 14" in history[-1]["content"]
+
+
+def test_manager_rejects_compaction_with_missing_source(db, admin_user, monkeypatch):
+    from app.utils.api_resolver import ApiConfig
+
+    agent = AdminCopilotAgent()
+    called = []
+
+    def fake_call_json(prompt, *_args, **_kwargs):
+        called.append(json.loads(prompt))
+        return AgentResult(success=True, data={"summary": "只提取首段", "covered_refs": ["来源#0:片段1/1"]})
+
+    monkeypatch.setattr(agent, "call_json", fake_call_json)
+    monkeypatch.setattr(
+        "app.agents.admin_copilot_agent.resolve_api_config",
+        lambda *_args, **_kwargs: ApiConfig(api_key="test", base_url="https://example.invalid", model="test"),
+    )
+    history = [
+        {"source_id": str(index), "role": "user", "content": "重要约束" * 1_000}
+        for index in range(20)
+    ]
+    result = agent.plan(
+        db, admin_user, message="按照全部约束", history=history,
+        snapshot={}, agents=[], trace_id="trace-missing-source",
+    )
+    assert result.success is False
+    assert result.failure_kind == "context_compaction_incomplete"
+    assert all("来源" in prompt for prompt in called)
 
 
 def test_unconfirmed_write_only_returns_preview_and_writes_nothing(db, copilot_data):

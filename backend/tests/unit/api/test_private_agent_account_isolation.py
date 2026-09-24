@@ -158,6 +158,164 @@ async def test_roundtable_owner_can_read_and_control_own_chat(monkeypatch, role)
     controller.assert_called_once_with(session.session_id, "pause")
 
 
+@pytest.mark.asyncio
+async def test_roundtable_tool_rejects_unhandled_input_without_ghost_turn(monkeypatch):
+    bus = DiscussionBus()
+    session = bus.create_session("unhandled-roundtable", 1, "own.py", owner_user_id=7)
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    executor = object.__new__(agent_responses_service.PrismToolExecutor)
+    executor._user = SimpleNamespace(id=7, role="user")
+    executor._db = object()
+    executor._surface = "user"
+
+    result = await executor._control_roundtable_discussion(
+        ToolCall(
+            "send", "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "user_input", "content": "重新核对权限边界"}, "{}",
+        )
+    )
+
+    assert result.status == "error"
+    assert session.turns == []
+
+
+def test_roundtable_tool_pages_complete_ordered_history(monkeypatch):
+    bus = DiscussionBus()
+    session = bus.create_session("long-roundtable", 1, "own.py", owner_user_id=7)
+    for seq in range(1, 136):
+        turn = DiscussionTurn(seq, "reviewer", "审查员", "agent", f"第 {seq} 条")
+        bus.publish_turn(session.session_id, turn)
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    executor = object.__new__(agent_responses_service.PrismToolExecutor)
+    executor._user = SimpleNamespace(id=7, role="user")
+    executor._db = object()
+    executor._surface = "user"
+
+    pages = []
+    cursor = None
+    while True:
+        arguments = {"session_id": session.session_id}
+        if cursor is not None:
+            arguments["before_seq"] = cursor
+        result = executor._get_roundtable_discussion(
+            ToolCall(f"get-{len(pages)}", "get_roundtable_discussion", arguments, "{}")
+        )
+        assert result.status == "success"
+        assert len(json.dumps({"status": "success", "output": result.output}, ensure_ascii=False).encode()) <= 8000
+        pages.append(result.output)
+        if not result.output["has_more"]:
+            break
+        cursor = result.output["next_before_seq"]
+        assert cursor is not None
+        assert len(pages) < 30
+
+    assert len(pages) > 1
+    assert pages[0]["turn_count"] == 135
+    assert [turn["content"] for page in reversed(pages) for turn in page["turns"]] == [
+        f"第 {seq} 条" for seq in range(1, 136)
+    ]
+
+
+def test_roundtable_tool_chunks_long_chinese_turn_without_losing_content(monkeypatch):
+    bus = DiscussionBus()
+    session = bus.create_session("chunked-roundtable", 1, "own.py", owner_user_id=7)
+    content = "中英文混排🙂\n" * 2500
+    bus.publish_turn(session.session_id, DiscussionTurn(1, "reviewer", "审查员", "agent", content))
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    executor = object.__new__(agent_responses_service.PrismToolExecutor)
+    executor._user = SimpleNamespace(id=7, role="user")
+    executor._db = object()
+    executor._surface = "user"
+
+    chunks = []
+    arguments = {"session_id": session.session_id}
+    while True:
+        result = executor._get_roundtable_discussion(
+            ToolCall(f"chunk-{len(chunks)}", "get_roundtable_discussion", arguments, "{}")
+        )
+        assert result.status == "success"
+        output = result.output
+        assert len(json.dumps({"status": "success", "output": output}, ensure_ascii=False,
+                              separators=(",", ":")).encode()) <= 8000
+        assert len(output["turns"]) == 1
+        turn = output["turns"][0]
+        assert turn["seq"] == 1
+        assert turn["content_offset"] == len("".join(chunks))
+        assert turn["content_total_chars"] == len(content)
+        chunks.append(turn["content"])
+        if output["next_chunk_seq"] is None:
+            assert turn["content_complete"] is True
+            assert output["has_more"] is False
+            break
+        assert turn["content_complete"] is False
+        arguments = {
+            "session_id": session.session_id,
+            "chunk_seq": output["next_chunk_seq"],
+            "chunk_offset": output["next_chunk_offset"],
+        }
+        assert len(chunks) < 30
+    assert "".join(chunks) == content
+
+
+def test_roundtable_tool_resumes_older_history_after_large_middle_turn(monkeypatch):
+    bus = DiscussionBus()
+    session = bus.create_session("mixed-roundtable", 1, "own.py", owner_user_id=7)
+    expected = ["较早发言", "长" * 12000, "最新发言"]
+    for index, content in enumerate(expected, start=1):
+        bus.publish_turn(session.session_id, DiscussionTurn(
+            index, "reviewer", "审查员", "agent", content,
+        ))
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    executor = object.__new__(agent_responses_service.PrismToolExecutor)
+    executor._user = SimpleNamespace(id=7, role="user")
+    executor._db = object()
+    executor._surface = "user"
+
+    newest = executor._get_roundtable_discussion(ToolCall(
+        "mixed-1", "get_roundtable_discussion", {"session_id": session.session_id}, "{}",
+    ))
+    assert [turn["seq"] for turn in newest.output["turns"]] == [3]
+    assert newest.output["next_before_seq"] == 3
+
+    partial = executor._get_roundtable_discussion(ToolCall(
+        "mixed-2", "get_roundtable_discussion",
+        {"session_id": session.session_id, "before_seq": 3}, "{}",
+    ))
+    pieces = []
+    while True:
+        assert partial.status == "success"
+        assert len(json.dumps({"status": "success", "output": partial.output},
+                              ensure_ascii=False, separators=(",", ":")).encode()) <= 8000
+        pieces.append(partial.output["turns"][0]["content"])
+        if partial.output["next_chunk_seq"] is None:
+            break
+        partial = executor._get_roundtable_discussion(ToolCall(
+            "mixed-next", "get_roundtable_discussion",
+            {
+                "session_id": session.session_id,
+                "chunk_seq": partial.output["next_chunk_seq"],
+                "chunk_offset": partial.output["next_chunk_offset"],
+            }, "{}",
+        ))
+        assert len(pieces) < 12
+
+    assert "".join(pieces) == expected[1]
+    assert partial.output["has_more"] is True
+    assert partial.output["next_before_seq"] == 2
+    oldest = executor._get_roundtable_discussion(ToolCall(
+        "mixed-3", "get_roundtable_discussion",
+        {"session_id": session.session_id, "before_seq": 2}, "{}",
+    ))
+    assert [turn["content"] for turn in oldest.output["turns"]] == [expected[0]]
+    assert oldest.output["has_more"] is False
+
+    invalid = executor._get_roundtable_discussion(ToolCall(
+        "mixed-invalid", "get_roundtable_discussion",
+        {"session_id": session.session_id, "chunk_seq": 2, "chunk_offset": len(expected[1]) + 1}, "{}",
+    ))
+    assert invalid.status == "error"
+
+
 @pytest.mark.parametrize("role", ["user", "admin", "super_admin"])
 def test_team_detail_and_list_never_expose_other_accounts_chat(db, role):
     team = AgentTeam(

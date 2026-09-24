@@ -12,12 +12,14 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import { isKnowledgeTool, isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { notifyRoundtableToolCompleted } from '@/utils/roundtableNotifications'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 
 import {
   type AdminCopilotMessage,
 } from '@/api/adminCopilot'
-import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
+import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
+import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import {
   acknowledgeAgentMeshMessage,
   archiveAgentMeshSession,
@@ -245,6 +247,10 @@ function handlePanelViewportResize(): void {
 }
 
 const messages = ref<ChatEntry[]>([])
+const historyWindow = new AgentSessionHistoryWindow()
+const historyHasMore = ref(false)
+const historyLoading = ref(false)
+let latestHistorySession: AgentResponseSession | null = null
 const sessionRun = ref<AgentResponseSession['run']>(null)
 const sessionRestoring = ref(true)
 const sessionPollError = ref('')
@@ -453,6 +459,9 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   invalidateSessionPoll()
   sessionPollStopped = false
   sessionSnapshotSignature = ''
+  latestHistorySession = null
+  historyHasMore.value = false
+  historyLoading.value = false
   sessionId.value = nextSessionId
   const scopeCurrent = chatScope.capture()
   // 每个会话独立保留草稿；页面刷新或跨布局后切回仍可继续编辑。
@@ -680,6 +689,42 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
   return restored
 }
 
+function withLoadedHistory(session: AgentResponseSession): AgentResponseSession {
+  const page = session.history_page ?? {
+    oldest_message_index: 0, total: session.messages.length, has_more: false,
+  }
+  historyWindow.apply(`${chatStorageKey.value}:${session.session_id}`, { ...page, messages: session.messages })
+  historyHasMore.value = historyWindow.hasMore
+  latestHistorySession = session
+  return { ...session, messages: historyWindow.messages }
+}
+
+async function loadOlderHistory(): Promise<void> {
+  if (!historyHasMore.value || historyLoading.value || loading.value || sessionRestoring.value || sessionBusy.value) return
+  const scopeCurrent = chatScope.capture()
+  const requestedSessionId = sessionId.value
+  const before = historyWindow.oldestMessageIndex
+  const area = messageArea.value
+  const oldHeight = area?.scrollHeight ?? 0
+  const oldTop = area?.scrollTop ?? 0
+  historyLoading.value = true
+  try {
+    const page = await getAgentResponseSessionMessages('admin', requestedSessionId, before)
+    if (!scopeCurrent() || requestedSessionId !== sessionId.value) return
+    historyWindow.apply(`${chatStorageKey.value}:${requestedSessionId}`, page)
+    historyHasMore.value = historyWindow.hasMore
+    if (latestHistorySession) {
+      messages.value = [welcomeEntry(), ...restoredEntries({ ...latestHistorySession, messages: historyWindow.messages }, '')]
+      await nextTick()
+      if (area) area.scrollTop = oldTop + area.scrollHeight - oldHeight
+    }
+  } catch (error) {
+    if (scopeCurrent()) ElMessage.error(actionableError(error, '读取更早消息失败').message)
+  } finally {
+    if (scopeCurrent()) historyLoading.value = false
+  }
+}
+
 function applySessionSnapshot(session: AgentResponseSession): void {
   sessionRun.value = session.run
   if (!loading.value) showTyping.value = isAgentResponseSessionActive(session.run?.status)
@@ -696,10 +741,11 @@ function applySessionSnapshot(session: AgentResponseSession): void {
   // Streaming owns the live DOM. Apply a poll snapshot after it settles so a
   // stale database read cannot erase text that is still arriving over SSE.
   if (loading.value) return
+  const displaySession = withLoadedHistory(session)
   sessionSnapshotSignature = signature
   // 检查点没有逐条发送时间，不能把整轮同步时间冒充历史消息时间。
   const restoredTime = ''
-  const restored = restoredEntries(session, restoredTime)
+  const restored = restoredEntries(displaySession, restoredTime)
   // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
   if (restored.length) messages.value = [welcomeEntry(), ...restored]
   const pending = pendingEntry(session, restoredTime)
@@ -1067,7 +1113,8 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     action: 'start',
     surface: 'admin',
     session_id: sessionId.value,
-    messages: [...conversationHistory(), { role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+    messages: [{ role: 'user', content: `我刚通过拖拽上传了 ${okCount} 个文件,已建好项目「${projectName}」(id=${projectId},语言 ${language})。请告诉我下一步可以做什么。` }],
+    use_server_history: true,
   })
 }
 
@@ -1168,7 +1215,7 @@ async function retryRun(): Promise<void> {
     action: 'retry',
     surface: 'admin',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: runId,
   })
 }
@@ -1265,6 +1312,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
+        notifyRoundtableToolCompleted(event, userStore.profile?.id)
         if (event.type === 'response.sandbox.progress' && typeof event.message === 'string') {
           sandboxProgress.value = event.message
         }
@@ -1541,11 +1589,13 @@ async function sendMessage(): Promise<void> {
     return
   }
 
+  const currentUserMessage = [...conversationHistory()].reverse().find((item) => item.role === 'user')
   await runResponse({
     action: 'start',
     surface: 'admin',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: currentUserMessage ? [currentUserMessage] : [],
+    use_server_history: true,
   })
 }
 
@@ -1560,7 +1610,7 @@ async function decideApproval(entry: ChatEntry, decision: ResponseApprovalDecisi
     action,
     surface: 'admin',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: approval.run_id,
     call_id: approval.call_id,
     confirmation,
@@ -1617,7 +1667,7 @@ async function submitInput(entry: ChatEntry, selectedAnswer?: string): Promise<v
     action: 'answer',
     surface: 'admin',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: request.run_id,
     call_id: request.call_id ?? '',
     answer,
@@ -1717,6 +1767,10 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   sessionPollStopped = true
   invalidateSessionPoll()
   sessionId.value = ''
+  historyWindow.reset('')
+  latestHistorySession = null
+  historyHasMore.value = false
+  historyLoading.value = false
   inputText.value = ''
   messages.value = []
   meshSessions.value = []
@@ -1883,6 +1937,9 @@ onMounted(() => {
         </div>
       </Transition>
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
+        <button v-if="historyHasMore" class="history-load-button" type="button"
+          :disabled="historyLoading || loading || sessionRestoring || sessionBusy"
+          @click="loadOlderHistory">{{ historyLoading ? '正在读取…' : '加载更早消息' }}</button>
         <Transition name="copilot-hero">
           <div v-if="messages.length <= 1 && !showTyping" class="copilot-hero" aria-hidden="true">
             <div class="copilot-hero-orb">
@@ -2420,6 +2477,18 @@ input { font: inherit; }
   white-space: nowrap;
   animation: copilot-quick-in 0.4s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
 }
+.history-load-button {
+  display: block;
+  margin: 0 auto 12px;
+  min-height: 36px;
+  padding: 7px 16px;
+  border: 1px solid rgba(91, 88, 232, 0.22);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--agent-primary-strong);
+  cursor: pointer;
+}
+.history-load-button:disabled { cursor: wait; opacity: 0.6; }
 .quick-question:nth-child(2) { animation-delay: 60ms; }
 .quick-question:nth-child(3) { animation-delay: 120ms; }
 @keyframes copilot-quick-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }

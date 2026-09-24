@@ -684,7 +684,7 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
         raw_details = issue.source_details or [{
             "source": issue.source or "llm",
             "confidence": round(float(issue.confidence or 0.0), 4),
-            "evidence": (issue.evidence or "")[:2000],
+            "evidence": issue.evidence or "",
             "line_number": int(issue.line_number or 0),
             "title": (issue.title or "")[:200],
         }]
@@ -700,7 +700,7 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
             detail = {
                 "source": str(raw.get("source") or issue.source or "llm")[:80],
                 "confidence": max(0.0, min(1.0, confidence)),
-                "evidence": str(raw.get("evidence") or "")[:2000],
+                "evidence": str(raw.get("evidence") or ""),
                 "line_number": line_number,
                 "title": str(raw.get("title") or "")[:200],
             }

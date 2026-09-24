@@ -212,6 +212,18 @@ describe('mergeAgentChatSessions 服务端发现优先', () => {
 })
 
 describe('Agent Team 快照锚点', () => {
+  it('本地只缓存最近 60 条时明确标记为部分历史', () => {
+    saveAgentChatSnapshot('long-session', {
+      messages: Array.from({ length: 75 }, (_, index) => ({ role: 'user', content: `消息 ${index}` })),
+      runStatus: null,
+      updatedAt: Date.now(),
+    })
+    const restored = loadAgentChatSnapshot('long-session')
+    expect(restored?.messages).toHaveLength(60)
+    expect(restored?.messages[0].content).toBe('消息 15')
+    expect(restored?.cacheIsPartial).toBe(true)
+  })
+
   it('保留无正文但带团队 ID 的调用时间线消息', () => {
     saveAgentChatSnapshot('user-team', {
       messages: [

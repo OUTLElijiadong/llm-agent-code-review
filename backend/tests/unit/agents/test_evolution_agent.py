@@ -1,12 +1,18 @@
 """单元测试: EvolutionAgent(规则蒸馏 + 提案生成)"""
+import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+from app.agents.base import AgentResult
 from app.agents.evolution_agent import (
+    _EXPERIENCE_SUMMARY_PROMPT,
     EvolutionAgent,
     downgrade_severity,
     generate_fp_proposals,
     pick_representative_rule,
 )
+from app.core.config import settings
 from app.models.review_rule import ReviewRule
 from app.services import experience_service
 
@@ -92,3 +98,64 @@ def test_run_distills_new_rule_and_dedups(db, mk_issue):
     # 二次运行:同 rule_code 的未决提案应被去重
     r2 = agent.run(distiller=fake_distiller)
     assert r2.data["created"] == 0
+
+
+def test_model_distillation_failure_fails_whole_run_and_restores_distiller(db, mk_issue, monkeypatch):
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        mk_issue(db, issue_type="性能问题", status="fixed", task_id=i,
+                 title="循环内查询", handled_at=now)
+    experience_service.harvest(db, now=now)
+
+    agent = EvolutionAgent()
+    agent.inject(db)
+    default_distiller = agent._self_improve_skill.distiller
+    monkeypatch.setattr(agent, "call_json", lambda _prompt, **_kwargs: AgentResult(
+        success=False, error="输入超过上下文", failure_kind="input_exceeds_context",
+    ))
+    result = agent.run()
+    assert result.success is False
+    assert result.data == {}
+    assert "input_exceeds_context" in result.error
+    assert agent._self_improve_skill.distiller == default_distiller
+
+    def broken(_exp):
+        raise RuntimeError("蒸馏提供方不可用")
+
+    result = agent.run(distiller=broken)
+    assert result.success is False
+    assert "蒸馏提供方不可用" in result.error
+    assert agent._self_improve_skill.distiller == default_distiller
+
+
+def test_long_experience_suggestion_compacts_every_source_before_rule(monkeypatch):
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 12_000)
+    agent = EvolutionAgent()
+    segments: list[str] = []
+    final_prompts: list[str] = []
+
+    def model(prompt, **kwargs):
+        if kwargs.get("system_prompt") == _EXPERIENCE_SUMMARY_PROMPT:
+            source = json.loads(prompt)
+            segments.append(source["text"])
+            return AgentResult(success=True, data={
+                "source_id": source["source_id"], "summary": "修复建议来源片段",
+                "quote": source["text"][:15],
+            })
+        final_prompts.append(prompt)
+        return AgentResult(success=True, data={
+            "rule_code": "avoid_loop_query", "rule_content": "循环内禁止重复查询",
+        })
+
+    agent.call_json = Mock(side_effect=model)
+    original = "在循环内查询会增加开销。" * 1_000 + "结尾应改为批量查询。"
+    exp = SimpleNamespace(
+        issue_type="性能问题", title="循环内重复查询", accepted_count=3,
+        language="python", canonical_suggestion=original,
+    )
+    rule = agent._distill_rule(exp)
+    assert rule["rule_code"] == "avoid_loop_query"
+    assert len(segments) > 1
+    assert "".join(segments) == original
+    assert final_prompts and all(f"E{index:03d}-" in final_prompts[0]
+                                 for index in range(1, len(segments) + 1))

@@ -124,20 +124,20 @@ def list_history(
     }
 
 
-def recent_context(db: Session, session: AdminChatSession, limit: int = 12) -> list[dict[str, str]]:
+def recent_context(db: Session, session: AdminChatSession) -> list[dict[str, str]]:
+    """Return the complete account-scoped source history for semantic compaction."""
     rows = (
         db.query(AdminChatMessage)
         .filter(AdminChatMessage.session_id == session.id)
-        .order_by(AdminChatMessage.id.desc())
-        .limit(max(1, min(limit, 30)))
+        .order_by(AdminChatMessage.id.asc())
         .all()
     )
     result: list[dict[str, str]] = []
-    for row in reversed(rows):
+    for row in rows:
         payload = _payload(row)
         content = str(payload.get("content") or payload.get("summary") or payload.get("operation") or "")
         if content:
-            result.append({"role": row.role, "content": content[:2000]})
+            result.append({"source_id": str(row.id), "role": row.role, "content": content})
     return result
 
 

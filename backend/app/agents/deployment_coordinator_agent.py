@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Optional
 
 from app.agents.base import AgentContext, BaseAgent
+from app.agents.source_context import SourceContextError, compact_source_context
 
 MAX_LAUNCH_BYTES = 20_000
 
@@ -43,6 +45,13 @@ class DeploymentCoordinatorAgent(BaseAgent):
         db_type: str = "none",
         ctx: Optional[AgentContext] = None,
     ) -> dict[str, Any]:
+        try:
+            compacted = compact_source_context(
+                self, source_summary, ctx=ctx, deadline=time.monotonic() + 120,
+                max_chars=9_000,
+            )
+        except SourceContextError as exc:
+            return {"error": f"源码上下文未完整覆盖: {exc}"}
         db_instruction = ""
         if db_type == "mysql":
             db_instruction = (
@@ -55,8 +64,9 @@ class DeploymentCoordinatorAgent(BaseAgent):
         elif db_type == "sqlite":
             db_instruction = "\n数据库: 沙箱内置 sqlite(路径 /workspace/.prism-db/app.db,可自行创建)。\n"
         user_message = (
-            f"语言: {language}\n测试模式: {test_mode}\n数据库: {db_type}\n源码摘要(JSON):\n"
-            f"{json.dumps(source_summary, ensure_ascii=False, default=str)[:12000]}\n\n"
+            f"语言: {language}\n测试模式: {test_mode}\n数据库: {db_type}\n"
+            "逐片压缩且经过来源覆盖核验的源码摘要(JSON):\n"
+            f"{json.dumps(compacted, ensure_ascii=False, default=str)}\n\n"
             "要求:\n"
             "1. 判断是否有可启动入口(main/app/index/server 等);若没有,生成一个最小可启动补全脚本。\n"
             "2. 脚本为 POSIX sh,监听 127.0.0.1 的 ${PRISM_PREVIEW_PORT}(默认8080),禁止外联、禁止读环境密钥。\n"
@@ -81,4 +91,4 @@ class DeploymentCoordinatorAgent(BaseAgent):
         # 只允许普通文本 shell 脚本,禁止明显的外联/危险指令
         if re.search(r"(curl|wget|nc\s|/dev/tcp|ssh\s|scp\s)", launch_script, re.I):
             launch_script = ""
-        return {"launch_script": launch_script, "notes": notes[:2000]}
+        return {"launch_script": launch_script, "notes": notes[:2000], "source_coverage": compacted}

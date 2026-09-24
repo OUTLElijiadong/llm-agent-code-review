@@ -147,6 +147,7 @@ _INVALID_CONTRACT_FAILURE_KINDS = frozenset({
 _RECOVERABLE_BATCH_FAILURE_KINDS = frozenset({
     "output_truncated",
     "output_limited",
+    "input_exceeds_context",
     *_INVALID_CONTRACT_FAILURE_KINDS,
 })
 _PROJECT_RISK_RE = re.compile(

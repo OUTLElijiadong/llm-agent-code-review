@@ -8,7 +8,7 @@
             <span class="header-icon">🗣️</span>
             <div class="header-titles">
               <div class="header-title">
-                Agent 圆桌讨论
+                <span class="header-heading">Agent 圆桌讨论</span>
                 <span v-if="fileName" class="file-chip">{{ fileName }}</span>
               </div>
               <div class="header-sub">
@@ -23,6 +23,9 @@
                 </span>
                 <span v-else-if="phase === 'concluded'" class="speaker-info done">
                   · 讨论已结束
+                </span>
+                <span v-if="isFollowupOpen" class="speaker-info done">
+                  · 追问剩余 {{ followupCountdown }}
                 </span>
               </div>
             </div>
@@ -67,6 +70,25 @@
           </div>
         </header>
 
+        <div class="room-progress" role="status" aria-label="圆桌执行进度">
+          <div class="room-progress-meta">
+            <span>{{ progressLabel }}</span>
+            <span v-if="progressTotal > 0">{{ progressCompleted }} / {{ progressTotal }}</span>
+            <span v-else>等待服务端进度</span>
+          </div>
+          <div
+            class="room-progress-track"
+            :class="{ indeterminate: progressTotal <= 0 && phase !== 'concluded' }"
+            role="progressbar"
+            :aria-valuenow="progressTotal > 0 ? progressCompleted : undefined"
+            :aria-valuemax="progressTotal > 0 ? progressTotal : undefined"
+            aria-valuemin="0"
+            :aria-valuetext="`${progressLabel}，${progressTotal > 0 ? `${progressCompleted} / ${progressTotal}` : '尚无计数'}`"
+          >
+            <span :style="{ width: `${progressPercent}%` }" />
+          </div>
+        </div>
+
         <!-- 参会者 -->
         <div class="participants">
           <span class="part-label">参会:</span>
@@ -88,6 +110,13 @@
 
         <!-- 消息区 -->
         <div ref="msgContainer" class="room-body" @scroll="onScroll">
+          <div v-if="hasEarlier || historyLoading || historyError" class="history-controls">
+            <button v-if="hasEarlier" class="load-earlier" type="button" :disabled="historyLoading" @click="loadEarlier">
+              {{ historyLoading ? '正在加载…' : '加载更早发言' }}
+            </button>
+            <span v-if="historyError" role="status">{{ historyError }}</span>
+            <button v-if="historyError" class="load-earlier" type="button" @click="syncLatest()">重试同步</button>
+          </div>
           <div v-if="lastError" class="error-bar">
             <span>⚠️ {{ lastError }}</span>
             <el-button size="small" type="primary" plain @click="reconnect">重新连接</el-button>
@@ -175,14 +204,14 @@
             <textarea
               v-model="userMessage"
               class="room-input"
-              :placeholder="canSend ? '插话参与讨论,所有 Agent 都会看到你的发言…(Enter 发送 / Shift+Enter 换行)' : '讨论已结束,无法发言'"
+              :placeholder="inputPlaceholder"
               rows="2"
               :disabled="!canSend"
               @keydown="onKeydown"
             />
             <el-button
               type="primary"
-              :disabled="!canSend || !userMessage.trim()"
+              :disabled="!canSend || sendingMessage || !userMessage.trim()"
               @click="sendMessage"
             >发送</el-button>
           </div>
@@ -193,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { renderMarkdown } from '@/utils/markdown'
@@ -206,38 +235,65 @@ import {
   type WsMessage,
   type DiscussionTurn,
 } from '@/utils/discussionStream'
+import { getDiscussionSession, type DiscussionProgress } from '@/api/discussion'
 
 const props = defineProps<{
   sessionId: string
   wsUrl?: string
   agents: Array<{ code: string; name: string }>
   fileName?: string
+  initialProgress?: DiscussionProgress | null
+  initialStatus?: string
+  initialReportTaskId?: number
+  initialFollowupUntil?: number
+  initialTurns?: DiscussionTurn[]
+  initialHasEarlier?: boolean
+  initialNextBeforeSeq?: number | null
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; settled: [] }>()
 
 const router = useRouter()
-const reportTaskId = ref(0)
+const reportTaskId = ref(props.initialReportTaskId || 0)
 
 type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 type Phase = 'live' | 'concluded'
 
-const turns = ref<DiscussionTurn[]>([])
-// 已渲染发言的稳定 key 集合 —— 用于去重。WS 断线自动重连后,后端 subscribe() 会把
-// session.turns(含用户插话 turn_id=-1 那条)整段重放,若不去重就会重复 push 出现
-// 重复 Vue key,导致 TransitionGroup 渲染错乱、用户发言后续无法正确显示。
-const seenKeys = new Set<string>()
+const turns = ref<DiscussionTurn[]>([...(props.initialTurns || [])].sort((a, b) =>
+  Number(a.seq || 0) - Number(b.seq || 0)))
+// 已持久化发言以会话内 seq 去重；旧会话帧才回退到 turn_id + timestamp。
+const seenKeys = new Set<string>(turns.value.map(turnKey))
 function turnKey(t: DiscussionTurn): string {
-  return `${t.turn_id}_${t.timestamp}`
+  return Number(t.seq) > 0 ? `seq:${t.seq}` : `legacy:${t.turn_id}_${t.timestamp}`
 }
+const hasEarlier = ref(Boolean(props.initialHasEarlier))
+const historyLoading = ref(false)
+const historyError = ref('')
+let nextBeforeSeq = props.initialNextBeforeSeq || 0
+let syncPromise: Promise<void> | null = null
+let queuedSyncBaseline = Number.POSITIVE_INFINITY
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
+let disposed = false
 const status = ref<ConnStatus>('connecting')
-const phase = ref<Phase>('live')
+const phase = ref<Phase>(
+  ['concluded', 'completed', 'failed', 'cancelled', 'interrupted'].includes(props.initialStatus || '')
+    ? 'concluded' : 'live',
+)
 const lastError = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
 const currentSpeaker = ref('')
 const currentSpeakerCode = ref('')
+const serverProgress = ref<DiscussionProgress | null>(props.initialProgress ?? null)
+const observedSpeakers = ref(turns.value.filter((turn) => turn.role === 'agent' && turn.agent_code !== 'orchestrator').length)
+let lastProgressSeq = Number(props.initialProgress?.seq ?? -1)
+const terminalStatus = ref('')
+const followupUntil = ref(Number(props.initialFollowupUntil) || 0)
+const nowSeconds = ref(Date.now() / 1000)
 const userMessage = ref('')
+const sendingMessage = ref(false)
+let pendingMessage = ''
 const isPaused = ref(false)
 const showScrollBtn = ref(false)
 const msgContainer = ref<HTMLElement>()
@@ -349,7 +405,14 @@ const quickPrompts = [
 ]
 
 const statusTag = computed(() => {
-  if (phase.value === 'concluded') return { type: 'info' as const, text: '已结束' }
+  if (phase.value === 'concluded') {
+    const terminal = ['failed', 'cancelled', 'interrupted'].includes(terminalStatus.value)
+      ? terminalStatus.value : serverProgress.value?.phase || props.initialStatus
+    if (terminal === 'failed') return { type: 'danger' as const, text: '失败' }
+    if (terminal === 'interrupted') return { type: 'warning' as const, text: '已中断' }
+    if (terminal === 'cancelled') return { type: 'info' as const, text: '已取消' }
+    return { type: 'info' as const, text: '已结束' }
+  }
   if (status.value === 'connecting') return { type: 'warning' as const, text: '连接中' }
   if (status.value === 'connected') return { type: 'success' as const, text: isPaused.value ? '已暂停' : '进行中' }
   if (status.value === 'error') return { type: 'danger' as const, text: '连接错误' }
@@ -357,7 +420,66 @@ const statusTag = computed(() => {
 })
 
 const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
-const canSend = computed(() => status.value === 'connected' && phase.value === 'live')
+const isFollowupOpen = computed(() => {
+  const complete = terminalStatus.value === 'success' || terminalStatus.value === 'completed'
+    || serverProgress.value?.phase === 'completed'
+  return phase.value === 'concluded' && complete && followupUntil.value > nowSeconds.value
+})
+const canSend = computed(() => status.value === 'connected'
+  && (phase.value === 'live' || isFollowupOpen.value))
+const followupCountdown = computed(() => {
+  const remaining = Math.max(0, Math.ceil(followupUntil.value - nowSeconds.value))
+  return `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
+})
+const inputPlaceholder = computed(() => {
+  if (phase.value === 'live'
+    && ['summarizing', 'extracting', 'reporting'].includes(serverProgress.value?.phase || '')) {
+    return '报告正在整理；消息会保存，完成后由主持人按顺序回复…'
+  }
+  if (phase.value === 'live') return '插话参与讨论…（Enter 发送 / Shift+Enter 换行）'
+  if (isFollowupOpen.value) return '报告已完成，五分钟内可继续追问主持人…'
+  return '追问窗口已结束，当前圆桌已禁言'
+})
+
+const progressTotal = computed(() => {
+  const serverTotal = Number(serverProgress.value?.total_units)
+  if (Number.isFinite(serverTotal) && serverTotal > 0) return serverTotal
+  return totalRounds.value > 0 ? totalRounds.value * props.agents.length : 0
+})
+const progressCompleted = computed(() => {
+  const serverCompleted = Number(serverProgress.value?.completed_units)
+  const raw = serverProgress.value && Number.isFinite(serverCompleted)
+    ? serverCompleted : observedSpeakers.value
+  return Math.max(0, Math.min(progressTotal.value, raw))
+})
+const progressPercent = computed(() => {
+  if (progressTotal.value <= 0) return 0
+  const actual = Math.round(progressCompleted.value / progressTotal.value * 100)
+  // 完成所有发言并不等于主持汇总、结构化抽取和报告落库成功。
+  const completed = phase.value === 'concluded'
+    && (serverProgress.value?.phase === 'completed' || terminalStatus.value === 'success')
+  return completed ? actual : Math.min(actual, 95)
+})
+const progressLabel = computed(() => {
+  if (phase.value === 'concluded' && ['failed', 'cancelled', 'interrupted'].includes(terminalStatus.value)) {
+    return terminalStatus.value === 'failed' ? '圆桌讨论失败'
+      : terminalStatus.value === 'cancelled' ? '圆桌讨论已取消' : '圆桌讨论已中断'
+  }
+  const stage = serverProgress.value?.phase
+  if (stage === 'pending') return '准备圆桌讨论'
+  if (stage === 'speaking') return '正在发言'
+  if (stage === 'summarizing') return '主持人正在汇总'
+  if (stage === 'extracting') return '正在整理结构化问题'
+  if (stage === 'reporting') return '正在生成报告'
+  if (stage === 'completed') return '圆桌讨论已完成'
+  if (stage === 'failed') return '圆桌讨论失败'
+  if (stage === 'cancelled') return '圆桌讨论已取消'
+  if (stage === 'interrupted') return '圆桌讨论已中断'
+  if (terminalStatus.value && terminalStatus.value !== 'success') return '圆桌讨论未完成'
+  if (phase.value === 'concluded') return '圆桌讨论已结束'
+  if (currentSpeaker.value) return '发言进度'
+  return progressTotal.value > 0 ? '发言进度' : '准备圆桌讨论'
+})
 
 const typingColor = computed(() => themeOf(currentSpeakerCode.value).color)
 const typingIcon = computed(() => themeOf(currentSpeakerCode.value).icon)
@@ -399,6 +521,93 @@ function nameColor(t: DiscussionTurn) {
   return t.role === 'user' ? AGENT_THEME.user.color : themeOf(t.agent_code).color
 }
 
+function latestSeq(): number {
+  return turns.value.reduce((latest, turn) => Math.max(latest, Number(turn.seq) || 0), 0)
+}
+
+function earliestSeq(): number {
+  return turns.value.reduce((earliest, turn) => {
+    const seq = Number(turn.seq) || 0
+    return seq > 0 && (earliest === 0 || seq < earliest) ? seq : earliest
+  }, 0)
+}
+
+/** REST 和 WS 共用有序合并，避免重连重放、分页与实时帧产生重复气泡。 */
+function addTurn(turn: DiscussionTurn): boolean {
+  if (!turn || typeof turn.content !== 'string') return false
+  const key = turnKey(turn)
+  if (seenKeys.has(key)) return false
+  seenKeys.add(key)
+  const seq = Number(turn.seq) || 0
+  if (seq > 0) {
+    const index = turns.value.findIndex((item) => Number(item.seq) > seq)
+    if (index >= 0) turns.value.splice(index, 0, turn)
+    else turns.value.push(turn)
+  } else {
+    turns.value.push(turn)
+  }
+  if (turn.role === 'agent' && turn.agent_code !== 'orchestrator') observedSpeakers.value++
+  return true
+}
+
+/** 同步尾页，并在尾页与当前已见序号之间有断档时向前翻页补齐。 */
+function syncLatest(baselineSeq = latestSeq()): Promise<void> {
+  queuedSyncBaseline = Math.min(queuedSyncBaseline, baselineSeq)
+  if (syncPromise) return syncPromise
+  syncPromise = (async () => {
+    while (!disposed && Number.isFinite(queuedSyncBaseline)) {
+      const baseline = queuedSyncBaseline
+      queuedSyncBaseline = Number.POSITIVE_INFINITY
+      try {
+        let page = await getDiscussionSession(props.sessionId, 100)
+        if (disposed) return
+        for (const turn of page.turns || []) addTurn(turn)
+        if (Number(page.followup_until) > 0) followupUntil.value = Number(page.followup_until)
+        let first = Number(page.turns?.[0]?.seq) || 0
+        while (baseline > 0 && first > baseline + 1 && page.has_earlier) {
+          page = await getDiscussionSession(props.sessionId, 100, first)
+          if (disposed) return
+          const olderFirst = Number(page.turns?.[0]?.seq) || 0
+          if (!olderFirst || olderFirst >= first) break
+          for (const turn of page.turns || []) addTurn(turn)
+          first = olderFirst
+        }
+        if (earliestSeq() === 1) hasEarlier.value = false
+        else if (page.has_earlier || earliestSeq() > 1) hasEarlier.value = true
+        historyError.value = ''
+      } catch {
+        if (!disposed) historyError.value = '发言同步失败，请重试'
+        break
+      }
+    }
+  })().finally(() => { syncPromise = null })
+  return syncPromise
+}
+
+async function loadEarlier(): Promise<void> {
+  if (historyLoading.value || !hasEarlier.value) return
+  const before = earliestSeq() || nextBeforeSeq
+  if (!before) return
+  historyLoading.value = true
+  historyError.value = ''
+  const container = msgContainer.value
+  const oldHeight = container?.scrollHeight || 0
+  const oldTop = container?.scrollTop || 0
+  try {
+    const page = await getDiscussionSession(props.sessionId, 100, before)
+    if (disposed) return
+    for (const turn of page.turns || []) addTurn(turn)
+    nextBeforeSeq = Number(page.next_before_seq) || 0
+    hasEarlier.value = Boolean(page.has_earlier)
+    await nextTick()
+    if (container) container.scrollTop = oldTop + container.scrollHeight - oldHeight
+  } catch {
+    if (!disposed) historyError.value = '加载更早发言失败，请重试'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 function connectWs() {
   lastError.value = ''
   stream?.close()
@@ -406,10 +615,12 @@ function connectWs() {
     props.sessionId,
     (msg: WsMessage) => {
       if (msg.type === 'discuss') {
-        const key = turnKey(msg.turn)
-        if (seenKeys.has(key)) return   // 重连重放/重复帧: 跳过, 不重复追加
-        seenKeys.add(key)
-        turns.value.push(msg.turn)
+        if (msg.turn.role === 'user' && pendingMessage && msg.turn.content === pendingMessage) {
+          acknowledgeMessage()
+        }
+        const previousLatest = latestSeq()
+        if (!addTurn(msg.turn)) return
+        if (previousLatest > 0 && Number(msg.turn.seq) > previousLatest + 1) void syncLatest(previousLatest)
         if (msg.turn.agent_code === currentSpeakerCode.value) {
           currentSpeaker.value = ''
           currentSpeakerCode.value = ''
@@ -419,8 +630,11 @@ function connectWs() {
         handleControl(msg)
       } else if (msg.type === 'session_end') {
         phase.value = 'concluded'
+        followupUntil.value = Number(msg.followup_until) || followupUntil.value
         currentSpeaker.value = ''
         currentSpeakerCode.value = ''
+        emit('settled')
+        void syncLatest()
       }
     },
     {
@@ -428,6 +642,7 @@ function connectWs() {
       onStatus: (s) => {
         status.value = s
         if (s === 'connected') lastError.value = ''
+        if (s === 'connected' || s === 'disconnected') void syncLatest()
       },
       onError: (m) => { lastError.value = m },
     },
@@ -436,6 +651,24 @@ function connectWs() {
 
 function handleControl(msg: { action: string; payload: Record<string, unknown> }) {
   switch (msg.action) {
+    case 'progress': {
+      const seq = Number(msg.payload.seq)
+      if (Number.isFinite(seq) && seq < lastProgressSeq) break
+      if (Number.isFinite(seq)) lastProgressSeq = seq
+      const completed = Number(msg.payload.completed_units)
+      const total = Number(msg.payload.total_units)
+      serverProgress.value = {
+        phase: String(msg.payload.phase || 'pending'),
+        completed_units: Number.isFinite(completed) ? completed : 0,
+        total_units: Number.isFinite(total) ? total : 0,
+        current_round: Number(msg.payload.current_round) || 0,
+        speaker_code: String(msg.payload.speaker_code || ''),
+        seq: Number.isFinite(seq) ? seq : lastProgressSeq,
+      }
+      if (serverProgress.value.current_round > 0) currentRound.value = serverProgress.value.current_round
+      if (Number(msg.payload.turn_count) > latestSeq()) void syncLatest()
+      break
+    }
     case 'round_start':
       currentRound.value = (msg.payload.round as number) || 0
       totalRounds.value = (msg.payload.total_rounds as number) || 0
@@ -456,36 +689,53 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       break
     case 'done':
       phase.value = 'concluded'
+      terminalStatus.value = String(msg.payload?.status || '')
+      followupUntil.value = Number(msg.payload?.followup_until) || followupUntil.value
       currentSpeaker.value = ''
       currentSpeakerCode.value = ''
-      reportTaskId.value = (msg.payload?.task_id as number) || 0
+      reportTaskId.value = (msg.payload?.task_id as number) || reportTaskId.value
+      emit('settled')
+      void syncLatest()
+      break
+    case 'input_accepted':
+      acknowledgeMessage()
+      break
+    case 'input_rejected':
+      lastError.value = String(msg.payload?.reason || msg.payload?.message || '消息未被圆桌接受，请确认讨论状态后重试')
+      sendingMessage.value = false
+      pendingMessage = ''
       break
   }
 }
 
 function reconnect() {
-  turns.value = []
-  seenKeys.clear()
-  currentRound.value = 0
-  totalRounds.value = 0
   currentSpeaker.value = ''
   currentSpeakerCode.value = ''
-  phase.value = 'live'
-  isPaused.value = false
+  // 保留已确认发言和进度；服务端重放用 seenKeys 去重，避免重连期间内容闪空。
   connectWs()
 }
 
 function sendMessage() {
   const text = userMessage.value.trim()
-  if (!text || !canSend.value) return
-  stream?.send('user_input', { content: text })
-  userMessage.value = ''
+  if (!text || !canSend.value || sendingMessage.value) return
+  pendingMessage = text
+  sendingMessage.value = true
+  if (!stream?.send('user_input', { content: text })) {
+    sendingMessage.value = false
+    pendingMessage = ''
+    lastError.value = '连接暂时不可用，消息仍在输入框中，请重连后发送'
+  }
+}
+
+function acknowledgeMessage() {
+  if (pendingMessage && userMessage.value.trim() === pendingMessage) userMessage.value = ''
+  pendingMessage = ''
+  sendingMessage.value = false
 }
 
 function sendQuick(text: string) {
   if (!canSend.value) return
   stream?.send('user_input', { content: text })
-  ElMessage.success('已发送给讨论组')
 }
 
 function togglePause() {
@@ -569,7 +819,19 @@ function formatTime(ts: string) {
   } catch { return '' }
 }
 
-onBeforeUnmount(() => stream?.close())
+onMounted(() => {
+  // WS 队列满时后端可能只把新发言写入账本，周期性对账可补齐无后续帧的尾段。
+  clockTimer = setInterval(() => { nowSeconds.value = Date.now() / 1000 }, 1000)
+  pollTimer = setInterval(() => {
+    if (status.value === 'connected') void syncLatest()
+  }, 20_000)
+})
+onBeforeUnmount(() => {
+  disposed = true
+  if (pollTimer) clearInterval(pollTimer)
+  if (clockTimer) clearInterval(clockTimer)
+  stream?.close()
+})
 connectWs()
 </script>
 
@@ -589,7 +851,7 @@ connectWs()
 .discuss-room {
   width: 780px;
   max-width: 96vw;
-  height: 84vh;
+  height: 84dvh;
   max-height: 880px;
   background: #fff;
   border-radius: 16px;
@@ -614,11 +876,13 @@ connectWs()
 .header-icon { font-size: 24px; }
 .header-titles { min-width: 0; }
 .header-title {
-  font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; min-width: 0;
 }
+.header-heading { white-space: nowrap; flex: 0 0 auto; }
 .file-chip {
   font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 8px;
   background: rgba(255, 255, 255, 0.16); color: #dfe3ff;
+  min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .header-sub {
   display: flex; align-items: center; gap: 8px; margin-top: 4px;
@@ -629,6 +893,13 @@ connectWs()
 .speaker-info.done { color: #9aa0d8; }
 .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .btn-emoji { font-size: 13px; line-height: 1; }
+
+.room-progress { padding: 9px 20px 11px; background: #292e67; color: #e4e7ff; flex-shrink: 0; }
+.room-progress-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.4; }
+.room-progress-track { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, 0.2); }
+.room-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8fc8ff, #b8afff); transition: width 0.25s ease; }
+.room-progress-track.indeterminate > span { width: 36% !important; animation: discuss-progress 1.4s ease-in-out infinite alternate; }
+@keyframes discuss-progress { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
 
 /* 参会者 */
 .participants {
@@ -667,6 +938,14 @@ connectWs()
   background: #fff1f0; border: 1px solid #ffccc7; border-radius: 8px;
   padding: 10px 14px; font-size: 13px; color: #cf1322;
 }
+
+.history-controls { display: grid; justify-items: center; gap: 6px; color: #9a5415; font-size: 12px; }
+.load-earlier {
+  min-height: 36px; padding: 7px 14px; border: 1px solid #dce0f5; border-radius: 999px;
+  background: #fff; color: #4547ad; font: inherit; cursor: pointer;
+}
+.load-earlier:disabled { opacity: 0.65; cursor: wait; }
+.load-earlier:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 
 .empty-state { margin: auto; padding: 40px 0; }
 
@@ -759,10 +1038,38 @@ connectWs()
 .quick-label { font-size: 12px; color: var(--color-text-secondary, #888); }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }
 .room-input {
-  flex: 1; border: 1px solid var(--color-border-light, #d8d8e2); border-radius: 10px;
+  flex: 1; min-width: 0; border: 1px solid var(--color-border-light, #d8d8e2); border-radius: 10px;
   padding: 10px 12px; font-size: 13.5px; line-height: 1.5; resize: none; outline: none;
   font-family: inherit; transition: border-color 0.2s;
   &:focus { border-color: var(--brand-400, #6366f1); }
   &:disabled { background: #f5f5f7; cursor: not-allowed; }
+}
+
+@media (max-width: 520px) {
+  .discuss-overlay { padding: 8px; align-items: stretch; }
+  .discuss-room { width: 100%; max-width: none; height: calc(100dvh - 16px); max-height: none; border-radius: 12px; }
+  .room-header { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .header-main { min-width: 0; gap: 8px; }
+  .header-icon { flex: 0 0 auto; }
+  .header-titles { min-width: 0; flex: 1; }
+  .header-title { white-space: nowrap; }
+  .header-heading { font-size: 15px; }
+  .file-chip { max-width: min(42vw, 150px); }
+  .header-sub { flex-wrap: wrap; gap: 4px 8px; }
+  .round-info, .speaker-info { white-space: nowrap; }
+  .header-actions { grid-column: 1; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+  .header-actions .el-button { min-width: 40px; min-height: 40px; margin-left: 0; }
+  .header-actions .report-btn { margin-right: auto; }
+  .room-progress { padding: 9px 12px 11px; }
+  .participants { padding: 8px 12px; max-height: 160px; overflow-y: auto; }
+  .part-chip { white-space: nowrap; }
+  .room-body { min-height: 0; padding: 12px; }
+  .room-footer { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
+  .quick-row { max-height: 80px; overflow-y: auto; }
+  .scroll-btn { bottom: 165px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-progress-track > span { transition: none; animation: none !important; }
 }
 </style>

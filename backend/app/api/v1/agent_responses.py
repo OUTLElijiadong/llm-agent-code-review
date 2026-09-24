@@ -168,6 +168,8 @@ class AgentResponsesRequest(StrictInputModel):
     surface: Literal["user", "admin"] = "user"
     session_id: str = Field(min_length=8, max_length=128)
     messages: List[AgentResponseMessage] = Field(default_factory=list, max_length=100)
+    # 新客户端只提交本轮用户输入；旧对话由同账号服务端账本恢复并由 runtime 压缩。
+    use_server_history: bool = False
     run_id: str = Field(default="", max_length=80)
     call_id: str = Field(default="", max_length=160)
     answer: str = Field(default="", max_length=20_000)
@@ -207,6 +209,10 @@ class AgentResponsesRequest(StrictInputModel):
     @model_validator(mode="after")
     def validate_action_fields(self) -> "AgentResponsesRequest":
         if self.action == "start":
+            if self.use_server_history and not self.mesh_message_id and (
+                len(self.messages) != 1 or self.messages[0].role != "user"
+            ):
+                raise ValueError("服务端历史模式只能提交本轮一条用户消息")
             for index, item in enumerate(self.messages):
                 if item.images and (item.role != "user" or index != len(self.messages) - 1):
                     raise ValueError("图片只能附在最后一条用户消息中，请重新选择本次图片")
@@ -271,6 +277,7 @@ def get_agent_response_session(
                 "session_id": session_id,
                 "run": None,
                 "messages": [],
+                "history_page": {"has_more": False, "oldest_message_index": 0, "total": 0},
                 "pending": None,
                 "mesh_messages": agent_mesh_service.list_session_messages(
                     db,
@@ -287,6 +294,9 @@ def get_agent_response_session(
     if not isinstance(checkpoint, Mapping):
         checkpoint = {}
     replay_events = _public_completed_tool_events(db, row, checkpoint)
+    history_page = _session_history_page(
+        db, user_id=int(user.id), surface=surface, session_id=session_id, limit=100,
+    )
     return Resp(
         data={
             "surface": surface,
@@ -298,11 +308,16 @@ def get_agent_response_session(
                 "model": str(checkpoint.get("model") or ""),
                 "rounds": int(checkpoint.get("rounds") or 0),
                 "error": _public_text(checkpoint.get("error")),
-                "output_text": _public_text(checkpoint.get("output_text"), limit=4000),
+                "output_text": redact_agent_output_text(str(checkpoint.get("output_text") or "")),
                 "cancel_reason": _public_text(checkpoint.get("cancel_reason")),
                 "updated_at": _public_utc_time(row.update_time),
             },
-            "messages": _public_session_history_messages(db, row),
+            "messages": history_page["messages"],
+            "history_page": {
+                "has_more": history_page["has_more"],
+                "oldest_message_index": history_page["oldest_message_index"],
+                "total": history_page["total"],
+            },
             "events": replay_events,
             "last_sequence_number": len(replay_events),
             "pending": _public_pending_event(row.run_id, row.status, checkpoint.get("pending")),
@@ -314,6 +329,29 @@ def get_agent_response_session(
             ),
         }
     )
+
+
+@router.get(
+    "/session/messages",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def get_agent_response_session_messages(
+    surface: Literal["user", "admin"] = Query(default="user"),
+    session_id: str = Query(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
+    before_message: Optional[int] = Query(default=None, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    """按会话内稳定的零基序号取更早消息，不传回整段无界历史。"""
+
+    if surface == "admin" and not _is_admin_actor(db, user):
+        raise ForbiddenError("仅管理员可使用管理员 Agent", code=40300)
+    return Resp(data=_session_history_page(
+        db, user_id=int(user.id), surface=surface, session_id=session_id,
+        before_message=before_message, limit=limit,
+    ))
 
 
 def sweep_stale_active_runs(db: Session, *, max_age_seconds: int = 0) -> int:
@@ -453,7 +491,7 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
             AgentMultimodalAsset.user_id == row.user_id,
             AgentMultimodalAsset.surface == row.surface,
             AgentMultimodalAsset.role == "input",
-        ).distinct().order_by(AgentResponseRun.id.desc()).limit(100).all()
+        ).distinct().order_by(AgentResponseRun.id.desc()).all()
     )
     assets_by_run: dict[str, dict[str, dict[str, Any]]] = {}
     if runs:
@@ -473,9 +511,6 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
     messages = _public_transcript_messages(
         checkpoint.get("transcript"), image_assets=assets_by_run.get(row.run_id, {}),
     )
-    # 达到公开历史截断窗口时无法证明位置未平移，只恢复本轮显式资产引用。
-    if len(messages) >= 100:
-        return messages
     for previous in runs:
         if previous.id == row.id:
             continue
@@ -488,7 +523,7 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
         old_messages = _public_transcript_messages(
             old_checkpoint.get("transcript"), image_assets=assets_by_run.get(previous.run_id, {}),
         )
-        if len(old_messages) >= 100 or len(old_messages) > len(messages):
+        if len(old_messages) > len(messages):
             continue
         # 先验证完整旧历史是当前历史前缀，再整体回填；后续分支不同时不能先挂上首问图片。
         if not all(
@@ -506,7 +541,7 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
 
 
 def _public_session_history_messages(db: Session, selected: AgentResponseRun) -> list[dict[str, Any]]:
-    """从最近运行向前分页，恢复同账号会话最近 100 条可见消息。"""
+    """从完整运行账本重建同账号会话的可见消息，不截断模型上下文。"""
     from app.models.agent_multimodal import AgentMultimodalAsset
 
     query = (
@@ -536,12 +571,12 @@ def _public_session_history_messages(db: Session, selected: AgentResponseRun) ->
             AgentResponseRun.create_time.desc(), AgentResponseRun.id.desc(),
         ).offset(offset).limit(100).all()
         if not batch:
-            return _merge_public_history_runs(runs, visible_by_run)
+            break
         for run in batch:
             try:
                 checkpoint = json.loads(run.checkpoint_json or "{}")
             except (TypeError, ValueError):
-                checkpoint = {}
+                raise ConflictError("会话历史检查点损坏，请联系管理员修复后重试", code=40931) from None
             if not isinstance(checkpoint, Mapping):
                 checkpoint = {}
             visible_by_run[int(run.id)] = (
@@ -549,10 +584,91 @@ def _public_session_history_messages(db: Session, selected: AgentResponseRun) ->
                 if has_images else _public_transcript_messages(checkpoint.get("transcript"))
             )
         runs[:0] = reversed(batch)
-        history = _merge_public_history_runs(runs, visible_by_run)
-        if len(history) >= 100 or len(batch) < 100:
-            return history
         offset += len(batch)
+        if len(batch) < 100:
+            break
+    return _merge_public_history_runs(runs, visible_by_run)
+
+
+def _session_history_page(
+    db: Session, *, user_id: int, surface: str, session_id: str,
+    limit: int, before_message: Optional[int] = None,
+) -> dict[str, Any]:
+    """只传回一个有界页面；游标是完整历史中的零基起点。"""
+
+    selected = db.query(AgentResponseRun).filter(
+        AgentResponseRun.user_id == user_id,
+        AgentResponseRun.surface == surface,
+        AgentResponseRun.session_key == session_id,
+    ).order_by(AgentResponseRun.id.desc()).first()
+    history = _public_session_history_messages(db, selected) if selected is not None else []
+    total = len(history)
+    end = total if before_message is None else min(total, max(0, before_message))
+    start = max(0, end - limit)
+    return {
+        "messages": history[start:end],
+        "oldest_message_index": start,
+        "has_more": start > 0,
+        "total": total,
+    }
+
+
+def _server_history_transcript(
+    db: Session, *, user_id: int, surface: str, session_id: str,
+) -> list[dict[str, Any]]:
+    """按运行顺序接续同账号原始 transcript，保留工具调用、结果和图片资产引用。"""
+
+    rows = db.query(AgentResponseRun).filter(
+        AgentResponseRun.user_id == user_id,
+        AgentResponseRun.surface == surface,
+        AgentResponseRun.session_key == session_id,
+    ).order_by(AgentResponseRun.create_time.asc(), AgentResponseRun.id.asc()).all()
+    combined: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            checkpoint = json.loads(row.checkpoint_json or "{}")
+        except (TypeError, ValueError):
+            raise ConflictError("会话历史检查点损坏，请联系管理员修复后重试", code=40931) from None
+        transcript = checkpoint.get("transcript") if isinstance(checkpoint, Mapping) else None
+        if transcript is not None and not isinstance(transcript, list):
+            raise ConflictError("会话历史检查点格式错误，请联系管理员修复后重试", code=40931)
+        if not isinstance(transcript, list):
+            continue
+        source = [dict(item) for item in transcript if isinstance(item, Mapping)]
+        if not source:
+            continue
+        if source == combined and len(source) == 1 and source[0].get("role") == "user":
+            # 两次独立运行都只有相同的一句提问时，不可把后一次当成旧前缀吞掉。
+            combined.extend(source)
+            continue
+        if source[:len(combined)] == combined:
+            combined.extend(source[len(combined):])
+            continue
+        # 旧客户端只重传可见对话，下一轮 checkpoint 不含之前的工具证据；
+        # 找最长可见消息重叠后追加新后缀，保留已审计工具调用与结果。
+        old_visible = [_visible_transcript_key(item) for item in combined]
+        old_visible = [item for item in old_visible if item is not None]
+        source_visible = [
+            (index, key) for index, item in enumerate(source)
+            if (key := _visible_transcript_key(item)) is not None
+        ]
+        overlap = 0
+        for size in range(min(len(old_visible), len(source_visible)), 1, -1):
+            if old_visible[-size:] == [key for _, key in source_visible[:size]]:
+                overlap = size
+                break
+        start = source_visible[overlap - 1][0] + 1 if overlap else 0
+        combined.extend(source[start:])
+    return combined
+
+
+def _visible_transcript_key(item: Mapping[str, Any]) -> Optional[str]:
+    if str(item.get("role") or "") not in {"user", "assistant"}:
+        return None
+    if str(item.get("type") or "message") != "message":
+        return None
+    return json.dumps({"role": item.get("role"), "content": item.get("content")},
+                      ensure_ascii=False, sort_keys=True, default=str)
 
 
 def _merge_public_history_runs(
@@ -568,8 +684,7 @@ def _merge_public_history_runs(
             # Agent Mesh 的投递提示是内部输入，历史只展示本次回复。
             replies = [message for message in messages if message["role"] == "assistant"]
             history.extend(replies)
-            history = history[-100:]
-            background_since_user_run = (background_since_user_run + replies)[-100:]
+            background_since_user_run.extend(replies)
             continue
 
         # 浏览器发起的新运行可能携带完整的旧历史。只把确实新增的后缀
@@ -606,7 +721,6 @@ def _merge_public_history_runs(
                     break
             background_since_user_run = []
         history.extend(new_messages)
-        history = history[-100:]
         previous_user_run = messages
     return history
 
@@ -666,7 +780,7 @@ def _public_transcript_messages(
             if visible_assets:
                 message["image_assets"] = visible_assets
             messages.append(message)
-    return messages[-100:]
+    return messages
 
 
 def _public_text(value: Any, *, limit: int = 1000) -> str:
@@ -924,13 +1038,13 @@ def _public_response_envelope(value: Any) -> dict[str, Any]:
     output: list[dict[str, Any]] = []
     raw_output = value.get("output")
     if isinstance(raw_output, list):
-        for item in raw_output[:100]:
+        for item in raw_output:
             if not isinstance(item, Mapping) or str(item.get("type") or "") != "message":
                 continue
             content: list[dict[str, str]] = []
             raw_content = item.get("content")
             if isinstance(raw_content, list):
-                for part in raw_content[:100]:
+                for part in raw_content:
                     if not isinstance(part, Mapping):
                         continue
                     part_type = str(part.get("type") or "")
@@ -1215,6 +1329,7 @@ async def stream_agent_response(
                 )
                 mesh_message_id = ""
                 source_attribution = {}
+                server_history_transcript: Optional[list[dict[str, Any]]] = None
                 if payload.action == "start":
                     messages = [item.model_dump() for item in payload.messages if item.content.strip() or item.images]
                     first_user_text = next(
@@ -1251,6 +1366,11 @@ async def stream_agent_response(
                             AgentMeshMessage.user_id == run_user.id,
                         ).first()
                         source_attribution = model_attribution(source_message)
+                    elif payload.use_server_history and owns_run_db:
+                        server_history_transcript = _server_history_transcript(
+                            run_db, user_id=int(run_user.id), surface=payload.surface,
+                            session_id=payload.session_id,
+                        )
                 else:
                     active_row = (
                         run_db.query(AgentResponseRun)
@@ -1286,7 +1406,10 @@ async def stream_agent_response(
                             pass
                     if payload.action == "start":
                         with usage_context(int(run_user.id), source_attribution):
-                            result = await service.start(messages, run_id=run_id, event_sink=sink)
+                            start_kwargs: dict[str, Any] = {"run_id": run_id, "event_sink": sink}
+                            if server_history_transcript is not None:
+                                start_kwargs["server_history_transcript"] = server_history_transcript
+                            result = await service.start(messages, **start_kwargs)
                     elif payload.action == "cancel":
                         result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)
                     else:

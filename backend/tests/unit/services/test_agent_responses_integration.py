@@ -915,6 +915,170 @@ def test_session_recovery_preserves_long_visible_table_without_leaking_secrets()
     assert "api_key=[REDACTED]" in restored
 
 
+def test_long_session_start_restores_over_100_ordered_messages_without_other_accounts(db) -> None:
+    previous = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"本人消息-{index:03d}"}
+        for index in range(122)
+    ]
+    for run_id, owner, transcript in (
+        ("run_long_owner", 7, previous),
+        ("run_long_foreign", 8, [{"role": "user", "content": "其他账号私密内容"}]),
+    ):
+        db.add(AgentResponseRun(
+            run_id=run_id, user_id=owner, surface="user", session_key="session-long-owner",
+            status="completed", checkpoint_json=json.dumps({"transcript": transcript}, ensure_ascii=False),
+        ))
+    db.commit()
+
+    request = api_module.AgentResponsesRequest(
+        session_id="session-long-owner", use_server_history=True,
+        messages=[{"role": "user", "content": "第 123 条新问题"}],
+    )
+    history = api_module._server_history_transcript(
+        db, user_id=7, surface=request.surface, session_id=request.session_id,
+    )
+    assert len(history) == 122
+    assert history[0]["content"] == "本人消息-000"
+    assert history[-1]["content"] == "本人消息-121"
+    assert request.messages[0].content == "第 123 条新问题"
+    assert "其他账号私密内容" not in json.dumps(history, ensure_ascii=False)
+
+
+def test_server_history_keeps_tool_evidence_and_async_mesh_chronology(db) -> None:
+    first = [
+        {"role": "user", "content": "核验项目"},
+        {"type": "function_call", "call_id": "call_1", "name": "read_project", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call_1", "output": '{"ok":true}'},
+        {"role": "assistant", "content": "项目已核验"},
+    ]
+    mesh = [{"role": "user", "content": "后台团队结果"}, {"role": "assistant", "content": "团队已完成"}]
+    # 旧客户端只把可见气泡带入下轮，工具证据须由服务端原始账本保留。
+    last = [
+        {"role": "user", "content": "核验项目"},
+        {"role": "assistant", "content": "项目已核验"},
+        *mesh,
+        {"role": "user", "content": "请总结"},
+        {"role": "assistant", "content": "总结完毕"},
+    ]
+    for run_id, transcript, mesh_id in (
+        ("run_raw_first", first, None),
+        ("run_raw_mesh", mesh, "msg_123"),
+        ("run_raw_last", last, None),
+    ):
+        db.add(AgentResponseRun(
+            run_id=run_id, user_id=7, surface="user", session_key="session-raw-order",
+            mesh_message_id=mesh_id, status="completed",
+            checkpoint_json=json.dumps({"transcript": transcript}, ensure_ascii=False),
+        ))
+        db.flush()
+    db.commit()
+
+    restored = api_module._server_history_transcript(db, user_id=7, surface="user", session_id="session-raw-order")
+    assert restored == [*first, *mesh, *last[-2:]]
+    assert api_module._server_history_transcript(db, user_id=8, surface="user", session_id="session-raw-order") == []
+    assert api_module._server_history_transcript(db, user_id=7, surface="admin", session_id="session-raw-order") == []
+
+
+def test_server_history_preserves_two_identical_independent_user_turns(db) -> None:
+    for index in range(2):
+        db.add(AgentResponseRun(
+            run_id=f"run_repeat_{index}", user_id=7, surface="user", session_key="session-repeat-turn",
+            status="failed", checkpoint_json='{"transcript":[{"role":"user","content":"再检查一次"}]}',
+        ))
+        db.flush()
+    db.commit()
+    assert [item["content"] for item in api_module._server_history_transcript(
+        db, user_id=7, surface="user", session_id="session-repeat-turn",
+    )] == ["再检查一次", "再检查一次"]
+
+
+def test_server_history_fails_explicitly_on_corrupt_checkpoint(db) -> None:
+    db.add(AgentResponseRun(
+        run_id="run_corrupt_history", user_id=7, surface="user", session_key="session-corrupt-history",
+        status="failed", checkpoint_json="{invalid",
+    ))
+    db.commit()
+    with pytest.raises(Exception, match="历史检查点损坏"):
+        api_module._server_history_transcript(db, user_id=7, surface="user", session_id="session-corrupt-history")
+    with pytest.raises(Exception, match="历史检查点损坏"):
+        api_module._session_history_page(
+            db, user_id=7, surface="user", session_id="session-corrupt-history", limit=50,
+        )
+
+
+def test_long_session_history_pages_recover_oldest_and_newest_without_cross_account_leak(db) -> None:
+    transcript = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"本人消息-{index:03d}"}
+        for index in range(127)
+    ]
+    db.add_all([
+        AgentResponseRun(
+            run_id="run_history_owner", user_id=7, surface="user", session_key="session-history-pages",
+            status="completed", checkpoint_json=json.dumps({"transcript": transcript}, ensure_ascii=False),
+        ),
+        AgentResponseRun(
+            run_id="run_history_foreign", user_id=8, surface="user", session_key="session-history-pages",
+            status="completed", checkpoint_json='{"transcript":[{"role":"user","content":"其他账号私密内容"}]}',
+        ),
+    ])
+    db.commit()
+
+    latest = api_module._session_history_page(
+        db, user_id=7, surface="user", session_id="session-history-pages", limit=50,
+    )
+    older = api_module._session_history_page(
+        db, user_id=7, surface="user", session_id="session-history-pages",
+        limit=50, before_message=latest["oldest_message_index"],
+    )
+    oldest = api_module._session_history_page(
+        db, user_id=7, surface="user", session_id="session-history-pages",
+        limit=50, before_message=older["oldest_message_index"],
+    )
+    combined = oldest["messages"] + older["messages"] + latest["messages"]
+    assert len(combined) == 127
+    assert [item["content"] for item in combined] == [f"本人消息-{i:03d}" for i in range(127)]
+    assert latest["has_more"] and older["has_more"] and not oldest["has_more"]
+    assert "其他账号私密内容" not in json.dumps(combined, ensure_ascii=False)
+
+    outsider = api_module.get_agent_response_session_messages(
+        surface="user", session_id="session-history-pages", before_message=50, limit=50,
+        db=db, user=SimpleNamespace(id=9, role="user"),
+    )
+    assert outsider.data == {"messages": [], "oldest_message_index": 0, "has_more": False, "total": 0}
+    with pytest.raises(Exception, match="仅管理员"):
+        api_module.get_agent_response_session_messages(
+            surface="admin", session_id="session-history-pages", before_message=50, limit=50,
+            db=db, user=SimpleNamespace(id=7, role="user"),
+        )
+
+
+def test_long_visible_output_and_tool_ledger_are_not_silently_cut() -> None:
+    tail = "末尾关键结论-必须保留"
+    long_text = "分析证据" * 30_000 + tail
+    assert service_module.redact_agent_output_text(long_text).endswith(tail)
+
+    persisted = service_module._redact_persistent_tool_value({
+        "rows": [f"证据-{index}" for index in range(35)],
+        "analysis": "x" * 1_000 + tail,
+        "api_key": "sk-secret-value",
+    })
+    assert len(persisted["rows"]) == 35
+    assert persisted["analysis"].endswith(tail)
+    assert persisted["api_key"] == "[REDACTED]"
+    execution = AgentToolExecution(
+        status="success", result_json=json.dumps({"status": "success", "output": persisted}),
+    )
+    assert PrismToolExecutor._recorded_execution(execution).output["analysis"].endswith(tail)
+
+    messages = [
+        {"type": "message", "role": "assistant",
+         "content": [{"type": "output_text", "text": f"第 {index} 条"}]}
+        for index in range(101)
+    ]
+    assert len(service_module._public_response_output(messages)) == 101
+    assert len(api_module._public_response_envelope({"output": messages})["output"]) == 101
+
+
 def test_public_terminal_response_drops_non_message_output_items() -> None:
     event = api_module._public_stream_event(
         {
@@ -975,6 +1139,7 @@ def test_session_recovery_is_user_and_surface_isolated(db) -> None:
         "session_id": "session-isolated",
         "run": None,
         "messages": [],
+        "history_page": {"has_more": False, "oldest_message_index": 0, "total": 0},
         "pending": None,
         "mesh_messages": [],
     }

@@ -74,6 +74,7 @@ class DiscussionTurn:
     stance: str = "neutral"     # propose | agree | oppose | question | supplement | neutral
     reply_to: Optional[str] = None
     round_index: int = 0
+    seq: int = 0  # 会话内单调递增的持久顺序号；历史帧默认为 0
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )

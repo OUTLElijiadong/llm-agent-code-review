@@ -221,9 +221,9 @@ def _build_summary(profile: UserProfile, stats: dict) -> str:
     """从显式+隐式信息合成一段中文画像摘要(确定性,无需外呼模型)"""
     parts = []
     if profile.hobbies:
-        parts.append(f"自述兴趣: {profile.hobbies.strip()[:300]}")
+        parts.append(f"自述兴趣: {profile.hobbies.strip()}")
     if profile.tech_stack:
-        parts.append(f"自述技术栈: {profile.tech_stack.strip()[:300]}")
+        parts.append(f"自述技术栈: {profile.tech_stack.strip()}")
     if profile.preferred_language or stats.get("top_languages"):
         langs = profile.preferred_language or "、".join(stats.get("top_languages", []))
         if langs:
@@ -236,7 +236,7 @@ def _build_summary(profile: UserProfile, stats: dict) -> str:
     if stats.get("tolerated_types"):
         parts.append(f"历史忽略较多的类型「{'、'.join(stats['tolerated_types'])}」类（不推断兴趣或放宽安全要求）")
     if profile.goals:
-        parts.append(f"目标: {profile.goals.strip()[:60]}")
+        parts.append(f"目标: {profile.goals.strip()}")
     if profile.focus_areas:
         try:
             fa = json.loads(profile.focus_areas)

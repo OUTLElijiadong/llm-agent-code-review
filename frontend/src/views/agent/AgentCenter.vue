@@ -214,20 +214,12 @@
       </div>
     </el-drawer>
 
-    <AgentDiscussionPanel
-      v-if="discussVisible && discussSessionId"
-      :session-id="discussSessionId"
-      :ws-url="discussWsUrl"
-      :agents="discussAgents"
-      :file-name="discussFileName"
-      @close="closeDiscussPanel"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
@@ -235,7 +227,6 @@ import AgentDeskCard from '@/components/agent/AgentDeskCard.vue'
 import SituationPanel from '@/components/agent/SituationPanel.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PrismLoading from '@/components/common/PrismLoading.vue'
-import AgentDiscussionPanel from '@/components/agent/AgentDiscussionPanel.vue'
 import MetaGPTOrchestrationPanel from '@/components/agent/MetaGPTOrchestrationPanel.vue'
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent, AgentEventType } from '@/types/agentEvent'
@@ -260,7 +251,6 @@ import type {
 } from '@/types/agent'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
 
 const loading = ref(false)
@@ -605,63 +595,26 @@ onMounted(async () => {
   if (disposed) return
   ensureStream()
   heartbeatTimer = setInterval(refreshAgentStats, HEARTBEAT_REFRESH_MS)
-  // 从 ReviewStart 跳转过来时自动打开讨论面板
-  initDiscussionFromRoute()
 })
 
 onBeforeUnmount(teardownStream)
 
-// === v2.3 M7: 多 Agent 圆桌讨论 ===
-
-const discussVisible = ref(false)
-const discussSessionId = ref('')
-const discussWsUrl = ref('')
-const discussAgents = ref<Array<{ code: string; name: string }>>([])
-const discussFileName = ref('')
-
-function closeDiscussPanel() {
-  discussVisible.value = false
-  discussSessionId.value = ''
-  discussWsUrl.value = ''
-  discussFileName.value = ''
-}
-
-function onStartDiscussion(
+// 兼容既有从 Agent 中心唤起的调用；面板由 App 全局宿主跨页面维护。
+async function onStartDiscussion(
   sessionId: string,
   agents: Array<{ code: string; name: string }>,
   fileName = '',
   wsUrl = '',
 ) {
-  discussSessionId.value = sessionId
-  discussWsUrl.value = wsUrl
-  discussAgents.value = agents
-  discussFileName.value = fileName
-  discussVisible.value = true
+  void agents
+  void fileName
+  void wsUrl
+  // 路由参数是可刷新、可等待异步全局宿主加载的稳定入口；事件只作同页即时唤起。
+  await router.replace({ query: { ...router.currentRoute.value.query, discuss_session: sessionId } })
+  window.dispatchEvent(new CustomEvent('prism:open-roundtable', { detail: { sessionId } }))
 }
 
 defineExpose({ onStartDiscussion })
-
-function initDiscussionFromRoute() {
-  const session = route.query.discuss_session as string
-  const wsUrl = route.query.discuss_ws as string
-  const agentsJson = route.query.discuss_agents as string
-  if (session && agentsJson) {
-    try {
-      const agents = JSON.parse(agentsJson)
-      discussSessionId.value = session
-      discussWsUrl.value = wsUrl || ''
-      discussAgents.value = agents
-      discussFileName.value = (route.query.discuss_file as string) || ''
-      discussVisible.value = true
-      // 仅清理地址栏查询串,不能用 router.replace:布局的 <router-view> 以
-      // fullPath 为 key,任何 query 变化都会重挂载 AgentCenter,导致刚设置的
-      // 讨论状态被重置、面板无法弹出。history API 不触发路由导航,故无重挂载。
-      window.history.replaceState(window.history.state, '', route.path)
-    } catch {
-      // ignore
-    }
-  }
-}
 
 </script>
 

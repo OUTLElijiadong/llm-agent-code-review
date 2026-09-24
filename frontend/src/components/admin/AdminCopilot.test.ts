@@ -13,12 +13,16 @@ const streams = vi.hoisted(() => ({
 }))
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }))
-const sessionApi = vi.hoisted(() => ({ get: vi.fn(), cancel: vi.fn() }))
+const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn(), cancel: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
-vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionApi.get, cancelAgentResponseRun: sessionApi.cancel }))
+vi.mock('@/api/agentResponses', () => ({
+  getAgentResponseSession: sessionApi.get,
+  getAgentResponseSessionMessages: sessionApi.page,
+  cancelAgentResponseRun: sessionApi.cancel,
+}))
 vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
@@ -96,6 +100,7 @@ beforeEach(() => {
     items: [], has_more: false, next_after_id: 0, page_size: 200, team_status: 'running',
   })
   sessionApi.get.mockReset()
+  sessionApi.page.mockReset()
   sessionApi.cancel.mockReset().mockResolvedValue({ run_id: 'run-admin-active', status: 'cancelled', output_text: '', error: '' })
   sessionApi.get.mockResolvedValue({
     surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null,
@@ -126,6 +131,29 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+it('管理端按游标加载更早消息，不把当前页误当全部历史', async () => {
+  sessionApi.get.mockImplementation((_surface: string, id: string) => Promise.resolve({
+    surface: 'admin', session_id: id, run: null, pending: null,
+    messages: [{ role: 'user', content: '最近的问题' }],
+    history_page: { total: 2, oldest_message_index: 1, has_more: true },
+  }))
+  sessionApi.page.mockResolvedValue({
+    messages: [{ role: 'user', content: '更早的问题' }],
+    total: 2, oldest_message_index: 0, has_more: false,
+  })
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  expect(wrapper.find('.history-load-button').exists()).toBe(true)
+  await wrapper.find('.history-load-button').trigger('click')
+  await flushPromises()
+  expect(sessionApi.page).toHaveBeenCalledWith('admin', expect.any(String), 1)
+  expect(wrapper.findAll('.message-row.is-user')).toHaveLength(2)
+  expect(wrapper.find('.copilot-messages').text()).toContain('更早的问题')
+  expect(wrapper.find('.history-load-button').exists()).toBe(false)
+  wrapper.unmount()
 })
 
 describe('AdminCopilot Responses stream', () => {
@@ -566,7 +594,7 @@ describe('AdminCopilot Responses stream', () => {
       run_id: 'run-restored',
       call_id: 'call-restored',
       confirmation: '确认执行',
-      messages: [{ role: 'user', content: '删除两个测试用户' }],
+      messages: [],
     })
     await finish(0)
   })
@@ -612,11 +640,8 @@ describe('AdminCopilot Responses stream', () => {
     void wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     const history = streams.records[1].body.messages as Array<{ role: string; content: string }>
-    expect(history.slice(-3)).toEqual([
-      { role: 'user', content: '检查生产状态' },
-      { role: 'assistant', content: '第一段\n第二段' },
-      { role: 'user', content: '继续检查' },
-    ])
+    expect(history).toEqual([{ role: 'user', content: '继续检查' }])
+    expect(streams.records[1].body.use_server_history).toBe(true)
     await finish(1)
   })
 
@@ -692,7 +717,7 @@ describe('AdminCopilot Responses stream', () => {
       confirmation: '确认执行',
     })
     const approveMessages = streams.records[1].body.messages as Array<{ role: string; content: string }>
-    expect(approveMessages[approveMessages.length - 1]).toEqual({ role: 'user', content: '删除测试用户' })
+    expect(approveMessages).toEqual([])
     expect(wrapper.findAll('.is-user')).toHaveLength(1)
 
     emit(1, {
@@ -817,11 +842,8 @@ describe('AdminCopilot Responses stream', () => {
     const serialized = JSON.stringify(streams.records[1].body)
     expect(serialized).not.toContain('BETA-ONE-TIME-123')
     const nextMessages = streams.records[1].body.messages as Array<{ role: string; content: string }>
-    expect(nextMessages.slice(-3)).toEqual([
-      { role: 'user', content: '生成一个内测码' },
-      { role: 'assistant', content: '已生成 1 个内测码' },
-      { role: 'user', content: '查询内测码列表' },
-    ])
+    expect(nextMessages).toEqual([{ role: 'user', content: '查询内测码列表' }])
+    expect(streams.records[1].body.use_server_history).toBe(true)
     await finish(1)
   })
 

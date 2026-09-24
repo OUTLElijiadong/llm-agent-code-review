@@ -6,6 +6,8 @@ MetaGPT Environment、WebSocket 讨论总线和真实等待，不访问任何外
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -15,6 +17,7 @@ import pytest
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import AgentEvent, AgentEventType, DiscussionTurn
 from app.ai import discussion_orchestrator as module
+from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
 from app.ai.discussion_orchestrator import DiscussionOrchestrator
 from app.ai.multi_agent import GENERAL_AGENT, SECURITY_AGENT
 from app.ai.result_parser import Issue
@@ -23,6 +26,8 @@ from app.models.code_version import CodeVersion
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
+
+_REAL_CALL_FOR_TASK = module._call_raw_for_task
 
 
 class RecordingAgent:
@@ -56,6 +61,7 @@ class RecordingAgent:
         user_prompt: str,
         agent_label: str,
         json_mode: bool,
+        max_tokens: Optional[int] = None,
     ) -> tuple[str, Optional[dict[str, Any]]]:
         """记录调用并返回下一项预设结果。
 
@@ -77,6 +83,7 @@ class RecordingAgent:
             "user_prompt": user_prompt,
             "agent_label": agent_label,
             "json_mode": json_mode,
+            "max_tokens": max_tokens,
         })
         if self.error is not None:
             raise self.error
@@ -377,7 +384,7 @@ def test_discussion_turn_serializes_decision_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_speaker_turn_builds_context_and_returns_trimmed_content() -> None:
-    """Agent 发言应包含历史与最近三条用户指示并去除首尾空白。
+    """Agent 发言应包含完整历史与全部用户指示并去除首尾空白。
 
     Returns:
         None: 断言提示词、Agent 标签、文本与元数据。
@@ -408,8 +415,7 @@ async def test_speaker_turn_builds_context_and_returns_trimmed_content() -> None
     assert call["json_mode"] is True
     assert "安全审查代理" in call["system_prompt"]
     assert "第 3 行需要校验" in call["user_prompt"]
-    assert "忽略旧指示" not in call["user_prompt"]
-    assert all(text in call["user_prompt"] for text in ("检查输入", "关注权限", "给出行号"))
+    assert all(text in call["user_prompt"] for text in ("忽略旧指示", "检查输入", "关注权限", "给出行号"))
     assert "选择发言或静音" in call["user_prompt"]
 
 
@@ -525,9 +531,10 @@ def test_summarize_handles_empty_success_and_fallback() -> None:
         success_agent,
     )
     assert summary.startswith("📋 **讨论共识小结**")
-    assert summary.endswith("结" * 2000)
+    assert summary.endswith("结" * 2100)
     assert returned_meta == meta
     assert success_agent.calls[0]["agent_label"] == "general"
+    assert success_agent.calls[0]["max_tokens"] > 4096
 
     fallback_agent = RecordingAgent(responses=[("   ", {"ignored": True})])
     fallback, fallback_meta = orchestrator._summarize(
@@ -542,9 +549,72 @@ def test_summarize_handles_empty_success_and_fallback() -> None:
     )
     assert "共 2 条发言" in fallback
     assert fallback.count("**质量代理**:") == 1
-    assert "A" * 100 + "..." in fallback
+    assert "A" * 120 in fallback
     assert "  · 短结论" in fallback
     assert fallback_meta is None
+
+
+def test_summarize_retries_length_without_losing_full_result() -> None:
+    """主持总结不能把 length 终态或固定 2000 字切片当成完整结果。"""
+    class BudgetAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if (kwargs.get("max_tokens") or 4096) < 32_768:
+                raise DeepSeekOutputTruncatedError(
+                    "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+                )
+            return "结" * 2200, {"model_name": "summary-model"}
+
+    orchestrator = _make_orchestrator()
+    agent = BudgetAgent()
+    summary, meta = orchestrator._summarize(
+        [_turn(1, content="第 7 行有证据")], "x = 1", "python", "summary.py", agent,
+    )
+    assert summary.endswith("结" * 2200)
+    assert meta is not None
+    assert [call["max_tokens"] for call in agent.calls] == [16_384, 32_768]
+
+
+def test_host_projects_complete_oversized_source_before_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """专家分窗已完成时，主持不应因再次塞入完整大源码而只能回退。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+
+    class HostAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                entries = []
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                ):
+                    prior_quote = re.search(r"「([^」]+)」", body)
+                    entries.append({
+                        "source_id": source_id,
+                        "summary": "此处源码已覆盖",
+                        "quotes": [prior_quote.group(1) if prior_quote else body[:8]],
+                    })
+                return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+            assert "完整源码窗口的证据投影" in kwargs["user_prompt"]
+            return "第 3000 行的发现需要优先修复。", {"model_name": "host"}
+
+    code = "\n".join(f"line_{index:04d}()" for index in range(1, 3001))
+    agent = HostAgent()
+    summary, meta = _make_orchestrator()._summarize(
+        [_turn(1, content="第 3000 行有边界问题")], code, "python", "large.py", agent,
+    )
+    assert meta is not None and "第 3000 行" in summary
+    source_prompts = [call["user_prompt"] for call in agent.calls
+                      if "历史压缩器" in call["system_prompt"]]
+    assert source_prompts
+    assert "line_0001()" in "\n".join(source_prompts)
+    assert "line_3000()" in "\n".join(source_prompts)
+    host_prompt = agent.calls[-1]["user_prompt"]
+    source_ids = set(re.findall(r"【来源 (C\d{4})", host_prompt))
+    assert source_ids
+    assert source_ids == {f"C{index:04d}" for index in range(1, len(source_ids) + 1)}
 
 
 def test_summarize_falls_back_when_llm_raises() -> None:
@@ -937,6 +1007,378 @@ def test_extract_issues_propagates_llm_failure() -> None:
         )
 
 
+def test_extract_issues_recovers_from_default_4096_output_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真实模型默认 4096 截断时，抽取阶段须显式提高输出预算。"""
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_args, **_kwargs: None))
+
+    class BudgetAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if (kwargs.get("max_tokens") or 4096) <= 4096:
+                raise DeepSeekOutputTruncatedError(
+                    "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+                )
+            return '{"issues":[]}', {"model_name": "extract-model"}
+
+    agent = BudgetAgent()
+    assert module._extract_issues(
+        [_turn(1, content="第 7 行应校验输入")],
+        "value.strip()", "python", "extract.py", agent, object(), 11, 12, 13,
+    ) == []
+    assert agent.calls[0]["max_tokens"] > 4096
+
+
+def test_extract_issues_splits_many_findings_without_dropping_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """即使整段输出反复 length，每条不同专家发现也必须被覆盖。"""
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_args, **_kwargs: None))
+
+    class BoundedAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            prompt = kwargs["user_prompt"]
+            present = [
+                int(value) for value in re.findall(r"【本批目标[^】]*】发现(\d+)号", prompt)
+            ]
+            if len(present) > 2:
+                raise DeepSeekOutputTruncatedError(
+                    "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+                )
+            issues = [
+                {"issue_type": "潜在Bug", "severity": "中", "title": f"发现{index}号",
+                 "line_number": index, "description": f"第{index}行证据", "suggestion": "修复"}
+                for index in present
+            ]
+            return json.dumps({"issues": issues}, ensure_ascii=False), {"model_name": "extract-model"}
+
+    agent = BoundedAgent()
+    turns = [_turn(index, content=f"发现{index}号") for index in range(1, 7)]
+    issues = module._extract_issues(
+        turns, "\n".join(f"line {index}" for index in range(1, 7)),
+        "python", "many.py", agent, object(), 11, 12, 13,
+    )
+    assert {issue.title for issue in issues} == {f"发现{index}号" for index in range(1, 7)}
+    assert len(agent.calls) > 1
+
+
+def test_extract_issues_semantically_compresses_all_long_history_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """输入超预算时每段都有来源和原文引文，不能直接砍掉旧轮次。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_args, **_kwargs: None))
+
+    class CompressingAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                entries = []
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                ):
+                    prior_quote = re.search(r"「([^」]+)」", body)
+                    quote = prior_quote.group(1) if prior_quote else body[:8]
+                    entries.append({
+                        "source_id": source_id,
+                        "summary": "保留代码证据及异议",
+                        "quotes": [quote],
+                    })
+                return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+            return '{"issues":[]}', {"model_name": "extract"}
+
+    turns = [
+        _turn(index, content=f"发现{index}号：" + chr(64 + index) * 2400)
+        for index in range(1, 9)
+    ]
+    agent = CompressingAgent()
+    result = module._extract_issues(
+        turns, "value = 1", "python", "long.py", agent, object(), 11, 12, 13,
+    )
+    assert result == []
+    assert any("历史压缩器" in call["system_prompt"] for call in agent.calls)
+    final_prompt = [
+        call["user_prompt"] for call in agent.calls
+        if "代码审查记录员" in call["system_prompt"]
+    ][-1]
+    for index in range(1, 9):
+        assert f"S{index:04d}-T{index}" in final_prompt
+    assert all(turn.content.endswith(chr(64 + index) * 2400) for index, turn in enumerate(turns, 1))
+
+
+def test_history_compression_rejects_unverifiable_quote() -> None:
+    """摘要编造引文时必须显式失败，原始记录保持不变。"""
+    class InventingAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            return json.dumps({"entries": [{
+                "source_id": "S0001-T1", "summary": "虚构事实", "quotes": ["不在原文中的证据"],
+            }]}), {"model_name": "compress"}
+
+    records = [("S0001-T1", "【本批目标·审查员#1】真实证据是第 7 行")]
+    with pytest.raises(RuntimeError, match="引文无法从原发言核验"):
+        module._compress_roundtable_history(
+            records, agent=InventingAgent(), task_id=11, user_id=12,
+            file_id=13, target_tokens=2000,
+        )
+    assert records[0][1].endswith("第 7 行")
+
+
+def test_history_compression_uses_second_level_without_losing_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """首层摘要仍超预算时，再压缩并逐项校验原文引文。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+
+    class LayeredAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            second_level = "上一层摘要" in kwargs["system_prompt"]
+            entries = []
+            for source_id, body in re.findall(
+                r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                kwargs["user_prompt"], re.S,
+            ):
+                prior_quote = re.search(r"「([^」]+)」", body)
+                entries.append({
+                    "source_id": source_id,
+                    "summary": "证" if second_level else "长" * 50,
+                    "quotes": [prior_quote.group(1) if prior_quote else body[:8]],
+                })
+            return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+
+    records = [(f"S{index:04d}-T{index}", f"【x】证据{index} " + "A" * 1200)
+               for index in range(1, 9)]
+    agent = LayeredAgent()
+    projected = module._compress_roundtable_history(
+        records, agent=agent, task_id=11, user_id=12, file_id=13, target_tokens=400,
+    )
+    assert any("上一层摘要" in call["system_prompt"] for call in agent.calls)
+    for source_id, _content in records:
+        assert source_id in projected
+    assert "长" * 50 not in projected
+
+
+def test_code_windows_cover_single_oversized_line_without_dropping_text() -> None:
+    """单行超窗口时按同一绝对行号分片，所有源码字符都进入证据窗口。"""
+    long_line = "A" * (module._EXTRACTION_CODE_WINDOW_CHARS * 2)
+    windows = module._discussion_code_windows("first\n" + long_line + "\nlast")
+    assert len(windows) >= 3
+    fragments = re.findall(r"2: (A+) \[片段 \d+/\d+\]", "\n".join(windows))
+    assert "".join(fragments) == long_line
+    assert "1: first" in windows[0]
+    assert "3: last" in windows[-1]
+
+
+@pytest.mark.asyncio
+async def test_speaker_and_host_compress_long_history_without_losing_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """发言和主持两个阶段都能投影长历史，且保留每个来源 ID。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12000)
+
+    class CompressingAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                entries = []
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                ):
+                    prior_quote = re.search(r"「([^」]+)」", body)
+                    entries.append({
+                        "source_id": source_id,
+                        "summary": "核对该来源",
+                        "quotes": [prior_quote.group(1) if prior_quote else body[:8]],
+                    })
+                return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+            if "主持人" in kwargs["system_prompt"]:
+                return "共识包含全部来源", {"model_name": "host"}
+            return '{"action":"speak","stance":"neutral","content":"已核对"}', {"model_name": "speaker"}
+
+    turns = [_turn(index, content=f"发现{index}号：" + chr(64 + index) * 5000)
+             for index in range(1, 9)]
+    orchestrator = _make_orchestrator()
+    agent = CompressingAgent()
+    decision, _meta, ok = await orchestrator._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT, code="value = 1", language="python",
+        file_name="long.py", all_turns=turns, user_inputs=[], round_idx=1, speaker_idx=0,
+    )
+    assert ok and decision.content == "已核对"
+    summary, meta = orchestrator._summarize(turns, "value = 1", "python", "long.py", agent)
+    assert "共识包含全部来源" in summary and meta is not None
+    final_calls = [call for call in agent.calls if "历史压缩器" not in call["system_prompt"]]
+    assert len(final_calls) == 2
+    for call in final_calls:
+        assert "语义投影" in call["user_prompt"]
+        for index in range(1, 9):
+            assert f"S{index:04d}-T{index}" in call["user_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_speaker_reviews_full_oversized_source_in_numbered_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """源码超过单次输入预算时逐窗审查，原始每行都可核对。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    class WindowAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                entries = []
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                ):
+                    entries.append({
+                        "source_id": source_id,
+                        "summary": "已核对当前源码窗口",
+                        "quotes": [body[:8]],
+                    })
+                return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+            numbers = re.findall(r"(?m)^(\d+): ", kwargs["user_prompt"])
+            assert numbers and "源码窗口" in kwargs["user_prompt"]
+            return json.dumps({
+                "action": "speak", "stance": "propose",
+                "content": f"检查第 {numbers[0]}–{numbers[-1]} 行，有具体证据",
+            }, ensure_ascii=False), {"model_name": "speaker"}
+
+    source = "\n".join(f"line_{index:03d}()" for index in range(1, 301))
+    agent = WindowAgent()
+    decision, meta, ok = await _make_orchestrator()._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT, code=source,
+        language="python", file_name="oversized.py", all_turns=[],
+        user_inputs=[], round_idx=0, speaker_idx=0,
+    )
+    assert ok and decision.action == "speak"
+    assert isinstance(meta, list) and len(meta) > 1
+    window_calls = [call for call in agent.calls if "历史压缩器" not in call["system_prompt"]]
+    covered = [int(value) for call in window_calls
+               for value in re.findall(r"(?m)^(\d+): ", call["user_prompt"])]
+    assert covered == list(range(1, 301))
+    assert "W0001" in decision.content
+    assert f"W{len(window_calls):04d}" in decision.content
+
+
+@pytest.mark.asyncio
+async def test_speaker_rejects_more_than_bounded_windows_without_silent_cut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """超出可审查的窗口数量时明确失败，不能把未读源码计为完成。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    agent = RecordingAgent(responses=[('{"action":"silent"}', None)])
+    decision, meta, ok = await _make_orchestrator()._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT, code="A" * 50_000,
+        language="python", file_name="too-large.py", all_turns=[],
+        user_inputs=[], round_idx=0, speaker_idx=0,
+    )
+    assert not ok and meta is None
+    assert "超过 64 个上限" in decision.content
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speaker_does_not_claim_complete_when_middle_window_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """任一源码窗口未完成时，该 Agent 整轮不得被标记为成功。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+
+    class FailingWindowAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "源码窗口 2/" in kwargs["user_prompt"]:
+                raise RuntimeError("第二窗口模型故障")
+            return '{"action":"speak","content":"已核对当前窗口"}', {"model_name": "speaker"}
+
+    agent = FailingWindowAgent()
+    decision, meta, ok = await _make_orchestrator()._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT,
+        code="\n".join(f"line_{index:03d}()" for index in range(1, 301)),
+        language="python", file_name="incomplete.py", all_turns=[],
+        user_inputs=[], round_idx=0, speaker_idx=0,
+    )
+    assert not ok and meta is None
+    assert "第二窗口模型故障" in decision.content
+    assert len(agent.calls) == 2
+
+
+def test_roundtable_model_call_budget_is_shared_at_all_call_sites() -> None:
+    """统一模型入口的会话预算耗尽后，第三次请求不得发给提供商。"""
+    budget = module._RoundtableCallBudget(limit=2)
+    token = module._roundtable_call_budget.set(budget)
+    agent = RecordingAgent(responses=[("第一答", None), ("第二答", None)])
+    try:
+        for _index in range(2):
+            _REAL_CALL_FOR_TASK(
+                agent, 0, 0, system_prompt="规则", user_prompt="问题",
+                agent_label="general", json_mode=False,
+            )
+        with pytest.raises(RuntimeError, match="模型调用预算最多 2 次"):
+            _REAL_CALL_FOR_TASK(
+                agent, 0, 0, system_prompt="规则", user_prompt="问题",
+                agent_label="general", json_mode=False,
+            )
+    finally:
+        module._roundtable_call_budget.reset(token)
+    assert budget.used == 2
+    assert len(agent.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_speaker_checks_total_session_budget_before_window_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """多 Agent 尚未发言时，单个大文件不得占满全部会话调用预算。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    budget = module._RoundtableCallBudget(limit=12)
+    token = module._roundtable_call_budget.set(budget)
+    agent = RecordingAgent(responses=[('{"action":"speak","content":"伪成功"}', None)])
+    try:
+        decision, meta, ok = await _make_orchestrator()._speaker_turn(
+            agent=agent, profile=SECURITY_AGENT,
+            code="\n".join(f"line_{index:03d}()" for index in range(1, 301)),
+            language="python", file_name="budget.py", all_turns=[],
+            user_inputs=[], round_idx=0, speaker_idx=0, remaining_turns=4,
+        )
+    finally:
+        module._roundtable_call_budget.reset(token)
+    assert not ok and meta is None
+    assert "模型调用预算最多 12 次" in decision.content
+    assert budget.used == 0
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_default_sized_context_reviews_300_lines_in_one_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """即使按配置允许的最小 100K 上下文，常见 300 行源码仍只需一次发言调用。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(module, "_call_raw_for_task", _REAL_CALL_FOR_TASK)
+    budget = module._RoundtableCallBudget(limit=module._ROUNDTABLE_MAX_MODEL_CALLS)
+    token = module._roundtable_call_budget.set(budget)
+    agent = RecordingAgent(responses=[(
+        '{"action":"speak","content":"第 7 行有一处证据"}', {"model_name": "speaker"},
+    )])
+    try:
+        decision, _meta, ok = await _make_orchestrator()._speaker_turn(
+            agent=agent, profile=SECURITY_AGENT,
+            code="\n".join(f"line_{index:03d}()" for index in range(1, 301)),
+            language="python", file_name="typical.py", all_turns=[],
+            user_inputs=[], round_idx=0, speaker_idx=0, remaining_turns=9,
+        )
+    finally:
+        module._roundtable_call_budget.reset(token)
+    assert ok and decision.action == "speak"
+    assert budget.used == 1
+    assert len(agent.calls) == 1
+
+
 def test_extract_issues_propagates_invalid_json() -> None:
     """结构化输出无法解析时必须暴露可读根因。"""
     with pytest.raises(RuntimeError, match="结构化问题解析失败.*非合法 JSON"):
@@ -1014,6 +1456,7 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
         _task_id: int,
         _user_id: int,
         _file_id: int,
+        progress_callback: Any = None,
     ) -> list[Issue]:
         """返回两条不同严重度的结构化问题。
 
@@ -1306,6 +1749,7 @@ def test_finalize_review_marks_task_failed_when_issue_persistence_fails(
     assert saved_task is not None
     assert saved_task.status == "failed"
     assert "review issue insert failed" in saved_task.error_message
+    assert saved_task.coverage["extraction_status"] == "success"
     assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
 
 
@@ -1434,25 +1878,25 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
         continuation_context=(
             "【上一轮结论】输入校验问题已经处理。\n"
             "【本次纠正要求】重新核对权限边界，不要沿用上一轮判断。"
+            + "长" * 6100 + "【尾部追问】必须核对未授权路径。"
         ),
     )
 
     assert session.status == "concluded"
     assert session.report_task_id == 88
-    assert len(session.turns) == 5
+    assert len(session.turns) == 4
     assert [turn.agent_code for turn in session.turns] == [
         "orchestrator",
-        "user",
         "general",
         "security",
         "orchestrator",
     ]
-    assert session.turns[1].role == "user"
-    assert "重新核对权限边界" in session.turns[1].content
-    assert session.turns[2].content == "通用代理发现第 2 行问题"
+    assert all(turn.role != "user" for turn in session.turns)
+    assert session.turns[1].content == "通用代理发现第 2 行问题"
     assert session.turns[-1].content.startswith("📋 **讨论共识小结**")
     assert "输入校验问题已经处理" in agent.calls[0]["user_prompt"]
     assert "重新核对权限边界" in agent.calls[0]["user_prompt"]
+    assert "【尾部追问】必须核对未授权路径。" in agent.calls[0]["user_prompt"]
     assert built["trace_id"] == "trace-roundtable"
     assert built["user_id"] == 42
     assert built["agent_codes"] == ["code_reviewer", "security_sentinel"]
@@ -1471,8 +1915,125 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
     review_args = finalized["review"]
     assert review_args["task_id"] == 77
     assert len(review_args["all_turns"]) == 3
+    assert review_args["all_turns"][0].role == "user"
+    assert "【尾部追问】必须核对未授权路径。" in review_args["all_turns"][0].content
     assert len(review_args["deferred_logs"]) == 3
     assert review_args["consensus"].startswith("📋 **讨论共识小结**")
+
+
+@pytest.mark.asyncio
+async def test_late_user_input_after_last_speaker_gets_visible_agent_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """末位 Agent 生成中到达的消息不能在轮末清空；应触发可见补答。"""
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-late-input", task_id=0, file_name="late.py",
+        owner_user_id=42, max_rounds=1,
+    )
+    orchestrator = _make_orchestrator(bus)
+    agent = RecordingAgent()
+    seen_inputs: list[list[str]] = []
+    finalized: dict[str, Any] = {}
+
+    async def speaker(**kwargs: Any) -> tuple[module.SpeakerDecision, dict[str, Any], bool]:
+        seen_inputs.append(list(kwargs["user_inputs"]))
+        if len(seen_inputs) == 1:
+            assert bus.accept_user_input("roundtable-late-input", "最后一位专家请回答权限边界")
+            return module.SpeakerDecision("speak", "propose", None, "第一轮发现"), {}, True
+        return module.SpeakerDecision("speak", "supplement", None, "已回答权限边界"), {}, True
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (
+        agent, {"code_reviewer": agent},
+    ))
+    monkeypatch.setattr(module, "build_discussion_environment", lambda **_kwargs: RecordingEnvironment())
+    monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
+    monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "success" if finalized else "running", "error": "",
+    })
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
+    monkeypatch.setattr(orchestrator, "_summarize", lambda *_args: (
+        "主持已汇总最新消息", {"model_name": "host"},
+    ))
+    monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
+    EventBusProvider.current = RecordingEventBus()
+
+    await orchestrator.start_discussion(
+        session_id="roundtable-late-input", profiles=(GENERAL_AGENT,),
+        code="x = 1", language="python", file_name="late.py",
+        user_id=42, project_id=12, file_id=34, max_rounds=1,
+    )
+
+    assert session.status == "concluded"
+    assert seen_inputs == [[], ["最后一位专家请回答权限边界"]]
+    assert any(turn.role == "user" and "权限边界" in turn.content for turn in session.turns)
+    assert any(turn.agent_code == "general" and turn.content == "已回答权限边界"
+               for turn in session.turns)
+    assert finalized["coverage"]["expected_turns"] == 2
+    assert finalized["coverage"]["attempted_turns"] == 2
+    assert any(turn.role == "user" and "权限边界" in turn.content
+               for turn in finalized["all_turns"])
+
+
+@pytest.mark.asyncio
+async def test_continuous_late_inputs_get_explicit_partial_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两次补答中仍不断发言时，最后一条必须有明确可见状态且报告不算完整。"""
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-late-burst", task_id=0, file_name="burst.py",
+        owner_user_id=42, max_rounds=1,
+    )
+    orchestrator = _make_orchestrator(bus)
+    agent = RecordingAgent()
+    seen_inputs: list[list[str]] = []
+    finalized: dict[str, Any] = {}
+
+    async def speaker(**kwargs: Any) -> tuple[module.SpeakerDecision, dict[str, Any], bool]:
+        seen_inputs.append(list(kwargs["user_inputs"]))
+        assert bus.accept_user_input(
+            "roundtable-late-burst", f"连续补充 {len(seen_inputs)}",
+        )
+        return module.SpeakerDecision("speak", "supplement", None, "当前补答"), {}, True
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (
+        agent, {"code_reviewer": agent},
+    ))
+    monkeypatch.setattr(module, "build_discussion_environment", lambda **_kwargs: RecordingEnvironment())
+    monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
+    monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "failed" if finalized else "running", "error": "部分结果",
+    })
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
+    monkeypatch.setattr(orchestrator, "_summarize", lambda *_args: (
+        "主持已汇总", {"model_name": "host"},
+    ))
+    monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
+    EventBusProvider.current = RecordingEventBus()
+
+    await orchestrator.start_discussion(
+        session_id="roundtable-late-burst", profiles=(GENERAL_AGENT,),
+        code="x = 1", language="python", file_name="burst.py",
+        user_id=42, project_id=12, file_id=34, max_rounds=1,
+    )
+
+    assert len(seen_inputs) == 3
+    assert seen_inputs[-1] == ["连续补充 2"]
+    assert any(turn.agent_code == "orchestrator" and "1 条专家尚未处理" in turn.content
+               for turn in session.turns)
+    assert finalized["coverage"]["pending_user_inputs"] == 1
+    assert finalized["coverage"]["errors"]
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,21 @@ from app.services.issue_merger import (
     merge_findings_and_issues,
 )
 
+
+def test_source_details_preserve_distinct_evidence_after_2000_characters():
+    shared_prefix = "代码上下文:" + "x" * 2100
+    first = _make_issue(line_number=10, evidence=shared_prefix + "第一处尾部证据")
+    second = _make_issue(line_number=10, evidence=shared_prefix + "第二处尾部证据")
+    first.source_details = [{"source": "llm:a", "evidence": first.evidence}]
+    second.source_details = [{"source": "llm:b", "evidence": second.evidence}]
+
+    merged = merge_findings_and_issues([], [first, second], file_id=1)
+
+    assert len(merged) == 1
+    assert {detail["evidence"][-7:] for detail in merged[0].source_details} == {
+        "第一处尾部证据", "第二处尾部证据",
+    }
+
 # ============ 辅助函数 ============
 
 def _make_finding(

@@ -192,7 +192,7 @@ class ChatPlanner:
         return (
             "你是 PRISM 平台的调用链规划器。基于用户意图,从可用工具中规划调用链,"
             f"最多 {self.MAX_STEPS} 步,输出 JSON 数组。\n\n"
-            f"用户原始消息:\n{user_message[:500]}\n\n"
+            f"用户原始消息:\n{user_message}\n\n"
             f"已识别意图: {intent.get('intent', 'chat')}\n"
             f"意图理由: {intent.get('reason', '')}\n"
             f"意图载荷: {json.dumps(intent_payload, ensure_ascii=False)}\n\n"

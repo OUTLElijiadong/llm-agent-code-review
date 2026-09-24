@@ -50,6 +50,8 @@ export interface AgentChatSnapshotTeam {
 
 export interface AgentChatSnapshot {
   messages: AgentChatSnapshotMessage[]
+  /** 本地缓存只是最近窗口；完整记录以登录账号的服务端分页为准。 */
+  cacheIsPartial?: boolean
   /** 团队 API 暂时不可用时仍可恢复卡片标题、状态和进度。 */
   teams?: AgentChatSnapshotTeam[]
   runStatus: string | null
@@ -416,10 +418,11 @@ export function findPristineAgentChatSession(
 export function saveAgentChatSnapshot(sessionId: string, snapshot: AgentChatSnapshot, storageKey = ''): void {
   try {
     // 空的时间线消息也可能携带团队锚点,不能在快照压缩时丢掉。
-    const trimmed = snapshot.messages.filter((item) => item.content.trim() || item.teamIds?.length).slice(-60)
+    const retained = snapshot.messages.filter((item) => item.content.trim() || item.teamIds?.length)
+    const trimmed = retained.slice(-60)
     window.localStorage.setItem(
       SNAPSHOT_PREFIX + scopedSessionKey(sessionId, storageKey),
-      JSON.stringify({ ...snapshot, messages: trimmed }),
+      JSON.stringify({ ...snapshot, messages: trimmed, cacheIsPartial: retained.length > trimmed.length }),
     )
   } catch {
     // 存储写满时静默失败,刷新后由服务端检查点兜底。

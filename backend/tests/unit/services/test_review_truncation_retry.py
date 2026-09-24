@@ -64,3 +64,40 @@ def test_call_single_agent_truncation_raises_when_already_at_ceiling(monkeypatch
         review_service._call_single_agent(
             profile, "value = 1\n", "python", "a.py", [], 0,
         )
+
+
+def test_custom_profile_over_window_fails_before_model_call(monkeypatch):
+    calls = []
+
+    def fake_call_raw(*_args, **_kwargs):
+        calls.append(True)
+        return '{"issues": []}', {}
+
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr("app.services.review_service.DeepSeekAgent.call_raw", fake_call_raw)
+    profile = GENERAL_AGENT.__class__(
+        **{**GENERAL_AGENT.__dict__, "is_custom": True, "system_prompt": "规则" * 60_000},
+    )
+    with pytest.raises(ValueError, match="审查输入超出模型上下文容量"):
+        review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
+    assert calls == []
+
+
+def test_review_length_retry_preserves_full_input_budget(monkeypatch):
+    calls = []
+
+    def fake_call_raw(*_args, **_kwargs):
+        calls.append(True)
+        raise DeepSeekOutputTruncatedError("length", finish_reason="length")
+
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr("app.services.review_service.DeepSeekAgent.call_raw", fake_call_raw)
+    profile = GENERAL_AGENT.__class__(
+        **{
+            **GENERAL_AGENT.__dict__, "is_custom": True,
+            "system_prompt": "规则" * 21_000, "max_tokens": 8_192,
+        },
+    )
+    with pytest.raises(ValueError, match="重试预算会挤占完整输入上下文"):
+        review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
+    assert len(calls) == 1

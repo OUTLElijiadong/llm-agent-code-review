@@ -135,6 +135,26 @@ class TestBusPurge:
 
 
 class TestWsRegistryPurge:
+    def test_expired_preflight_closes_its_roundtable_instead_of_leaving_it_running(self):
+        from app.api.v1 import ws_discussion
+
+        bus = _fresh_bus()
+        bus.create_session("disc_preflight_expired", task_id=0, file_name="main.py", owner_user_id=7)
+        ws_discussion.register_pending("disc_preflight_expired", user_id=7)
+        ws_discussion._pending["disc_preflight_expired"].created_at = (
+            time.time() - ws_discussion._STALE_TTL - 1
+        )
+        try:
+            assert ws_discussion.take_pending("disc_preflight_expired") is None
+            session = bus.get_session("disc_preflight_expired", owner_user_id=7)
+            assert session.status == "concluded"
+            assert session.progress["phase"] == "interrupted"
+            assert "disc_preflight_expired" not in ws_discussion._session_owners
+        finally:
+            ws_discussion._pending.pop("disc_preflight_expired", None)
+            ws_discussion._session_owners.pop("disc_preflight_expired", None)
+            ws_discussion._owner_registered_at.pop("disc_preflight_expired", None)
+
     def test_stale_pending_purged_on_register(self):
         from app.api.v1 import ws_discussion
 

@@ -55,6 +55,7 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.review import ReviewStartIn
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
+from app.services.deepseek_responses_runtime import estimate_tokens
 from app.services.issue_merger import finding_to_issue, merge_findings_and_issues
 from app.services.review_input_service import (
     freeze_task_inputs,
@@ -1610,6 +1611,16 @@ def _call_single_agent(
             "不得执行命令、访问网络、写文件或修改数据。\n\n"
             f"{system_prompt}"
         )
+    # 自定义画像会把已发布 Skill 一并注入系统提示。即便源码已经分片，
+    # Skill、历史经验和规则仍可能把整次调用挤出窗口；不能让供应商隐式
+    # 截取尾部后把此分片标记为审查成功。
+    estimated_input = estimate_tokens({"system": system_prompt, "user": user_prompt})
+    output_budget = max(8192, int(profile.max_tokens))
+    if estimated_input + output_budget + 1024 >= settings.deepseek_context_window_tokens:
+        raise ValueError(
+            f"审查输入超出模型上下文容量: input≈{estimated_input} tokens，"
+            f"output={output_budget} tokens；需缩小源码分片或压缩画像上下文"
+        )
     # v2.2: agent_label 使用真实 Agent name,便于 AiCallLog 归因到具体 Agent
     agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
     try:
@@ -1629,6 +1640,10 @@ def _call_single_agent(
         retry_budget = min(max(profile.max_tokens * 2, 8192), ceiling)
         if retry_budget <= profile.max_tokens:
             raise
+        if estimated_input + retry_budget + 1024 >= settings.deepseek_context_window_tokens:
+            raise ValueError(
+                "审查输出重试预算会挤占完整输入上下文，已停止重复调用"
+            )
         logger.warning(
             f"[review] {profile.code} 输出被截断,按 {profile.max_tokens}→{retry_budget} 提高输出预算重试一次"
         )

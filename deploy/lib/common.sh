@@ -38,6 +38,62 @@ require_commands() {
   done
 }
 
+# 发布前检查备份、构建和应用所在文件系统的剩余容量。沿用 ops-check
+# 的临界百分比，但告警阈值本身不阻断发布；另留绝对空间给备份恢复验证和镜像构建。
+# 参数: $1 仓库目录；$2 备份目录（可尚未创建）。
+# 返回: 容量足够时 0；采集失败、配置错误或容量不足时终止脚本。
+assert_deploy_capacity() {
+  local repo_dir="$1" backup_dir="$2"
+  local warning="${OPS_DISK_MAX_PERCENT:-85}"
+  local critical="${OPS_DISK_CRITICAL_PERCENT:-}"
+  local min_free_gib="${DEPLOY_MIN_FREE_GIB:-12}"
+  local min_free_kib docker_root label path df_output metrics available_kib used_percent
+
+  [[ "$warning" =~ ^[0-9]+$ ]] && (( warning <= 100 )) \
+    || fatal "OPS_DISK_MAX_PERCENT 必须为 0-100 的整数"
+  if [[ -z "$critical" ]]; then
+    if (( warning > 95 )); then critical="$warning"; else critical=95; fi
+  fi
+  [[ "$critical" =~ ^[0-9]+$ ]] && (( critical <= 100 && critical >= warning )) \
+    || fatal "OPS_DISK_CRITICAL_PERCENT 必须为不低于告警阈值的 0-100 整数"
+  [[ "$min_free_gib" =~ ^[1-9][0-9]*$ ]] && (( min_free_gib <= 1024 )) \
+    || fatal "DEPLOY_MIN_FREE_GIB 必须为 1-1024 的整数"
+  min_free_kib=$(( min_free_gib * 1024 * 1024 ))
+
+  # 使用 Docker daemon 实际数据根目录，避免 Docker 独立挂载时只检查仓库磁盘。
+  docker_root="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)" \
+    || fatal "无法读取 Docker 数据目录，拒绝在容量未知时发布"
+  [[ "$docker_root" == /* && -d "$docker_root" ]] \
+    || fatal "Docker 数据目录不可访问，拒绝在容量未知时发布"
+
+  # backup.sh 会创建尚不存在的目录；本门禁查询最近的现存父目录所处文件系统。
+  while [[ ! -e "$backup_dir" ]]; do
+    path="$(dirname "$backup_dir")"
+    [[ "$path" != "$backup_dir" ]] || fatal "无法定位备份目录所在文件系统"
+    backup_dir="$path"
+  done
+  [[ -d "$backup_dir" ]] || fatal "备份目录不是目录"
+
+  for label in repository backup docker; do
+    case "$label" in
+      repository) path="$repo_dir" ;;
+      backup) path="$backup_dir" ;;
+      docker) path="$docker_root" ;;
+    esac
+    df_output="$(df -Pk "$path" 2>/dev/null)" \
+      || fatal "无法读取 $label 文件系统容量"
+    metrics="$(printf '%s\n' "$df_output" | awk 'NR == 2 {print $4, $5}')"
+    read -r available_kib used_percent <<< "$metrics"
+    used_percent="${used_percent%%%}"
+    [[ "$available_kib" =~ ^[0-9]+$ && "$used_percent" =~ ^[0-9]+$ ]] \
+      || fatal "无法解析 $label 文件系统容量，拒绝发布"
+    if (( used_percent >= critical || available_kib < min_free_kib )); then
+      fatal "$label 文件系统容量不足：已用 ${used_percent}%（临界 ${critical}%），可用 ${available_kib} KiB（最低 ${min_free_kib} KiB）；发布尚未开始备份或构建"
+    fi
+    log_info "发布容量检查通过($label: used=${used_percent}%, available_kib=$available_kib, min_free_gib=$min_free_gib)"
+  done
+}
+
 # 执行 Docker Compose，确保所有脚本使用同一入口。
 # 参数: 原样传递给 docker compose。
 # 返回: docker compose 的退出状态。

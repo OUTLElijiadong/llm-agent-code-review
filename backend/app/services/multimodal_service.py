@@ -185,6 +185,60 @@ def load_run_image_assets(db: Session, *, user_id: int, run_id: str, surface: st
     return assets
 
 
+def history_image_hashes(items: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Find archived image references in a trusted Responses transcript."""
+    hashes: set[str] = set()
+    for item in items:
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, Mapping) or part.get("type") != "input_image":
+                continue
+            url = str(part.get("image_url") or "")
+            if url.startswith(ASSET_URL_PREFIX):
+                hashes.add(url[len(ASSET_URL_PREFIX):])
+    return hashes
+
+
+def load_session_image_assets(
+    db: Session, *, user_id: int, surface: str, session_key: str, hashes: set[str],
+) -> dict[str, str]:
+    """Restore only images owned by this account, surface and conversation.
+
+    A hash alone is never an authorization credential. Every archived asset must
+    join to a run in the same conversation before it can enter a later model call.
+    """
+    import base64
+
+    from app.core.exceptions import ValidationError
+    from app.models.agent_response_run import AgentResponseRun
+
+    if not hashes:
+        return {}
+    rows = db.query(AgentMultimodalAsset).join(
+        AgentResponseRun, AgentResponseRun.run_id == AgentMultimodalAsset.run_id,
+    ).filter(
+        AgentResponseRun.user_id == user_id,
+        AgentResponseRun.surface == surface,
+        AgentResponseRun.session_key == session_key,
+        AgentMultimodalAsset.user_id == user_id,
+        AgentMultimodalAsset.surface == surface,
+        AgentMultimodalAsset.role == "input",
+        AgentMultimodalAsset.sha256.in_(hashes),
+    ).all()
+    assets: dict[str, str] = {}
+    for row in rows:
+        binary = bytes(row.data)
+        if hashlib.sha256(binary).hexdigest() != row.sha256:
+            raise ValidationError("历史图片留档校验失败，请重新上传图片后重试")
+        assets[row.sha256] = f"data:{row.mime};base64,{base64.b64encode(binary).decode()}"
+    missing = hashes - assets.keys()
+    if missing:
+        raise ValidationError("历史图片不属于当前对话或已失效，请重新上传后重试")
+    return assets
+
+
 def transcript_has_images(items: Sequence[Mapping[str, Any]]) -> bool:
     for item in items:
         for key in ("content", "output"):

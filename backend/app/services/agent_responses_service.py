@@ -18,9 +18,10 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mappi
 from urllib.parse import urlencode
 
 import httpx
+from pydantic import Field
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents import AgentContext
 from app.agents.orchestrator import get_request_orchestrator
@@ -115,6 +116,7 @@ EventSink = Callable[[Mapping[str, Any]], Optional[Awaitable[None]]]
 SessionValidator = Callable[[], bool]
 _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", "stopped", "expired"})
 _FULL_VALIDATION_POLL_SECONDS = 2.0
+_ROUNDTABLE_TOOL_OUTPUT_BYTES = 8000
 
 
 class AgentSessionExpiredError(RuntimeError):
@@ -156,7 +158,11 @@ class StartRoundtableDiscussionArguments(FixedToolArguments):
 class GetRoundtableDiscussionArguments(FixedToolArguments):
     """读取当前用户圆桌讨论状态的固定参数。"""
 
-    session_id: str
+    session_id: str = Field(description="当前账号的圆桌会话 ID")
+    before_seq: int | None = Field(default=None, ge=1, description="读取此序号之前的较早发言")
+    limit: int = Field(default=8, ge=1, le=20, description="本次最多读取的完整发言数；响应仍受 8000 字节预算约束")
+    chunk_seq: int | None = Field(default=None, ge=1, description="继续读取长发言时的发言序号")
+    chunk_offset: int = Field(default=0, ge=0, description="长发言的字符偏移；与 chunk_seq 同时使用")
 
 
 class ControlRoundtableDiscussionArguments(FixedToolArguments):
@@ -1530,37 +1536,140 @@ class PrismToolExecutor:
         )
 
     def _get_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
-        """按会话归属返回圆桌状态与已产生的发言。"""
+        """按归属读取有界发言；长正文以可恢复字符游标逐块返回。"""
 
         from app.agents.discussion_bus import DiscussionBus
 
         session_id = str(call.arguments["session_id"])
-        session = DiscussionBus.instance().get_session(session_id)
+        bus = DiscussionBus.instance()
+        session = bus.get_session(session_id, owner_user_id=int(self._user.id))
+        if session is None and isinstance(self._db, Session):
+            bus.enable_persistence(sessionmaker(bind=self._db.get_bind(), expire_on_commit=False))
+            session = bus.get_session(session_id, owner_user_id=int(self._user.id))
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
         if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权访问该圆桌讨论")
-        return ToolExecutionResult.success({
+        try:
+            raw_before = call.arguments.get("before_seq")
+            before_seq = int(raw_before) if raw_before is not None else None
+            limit = int(call.arguments.get("limit", 8))
+            raw_chunk_seq = call.arguments.get("chunk_seq")
+            chunk_seq = int(raw_chunk_seq) if raw_chunk_seq is not None else None
+            chunk_offset = int(call.arguments.get("chunk_offset", 0))
+        except (TypeError, ValueError):
+            return ToolExecutionResult.failure("before_seq、limit 和分块游标必须是整数")
+        if before_seq is not None and before_seq <= 0:
+            return ToolExecutionResult.failure("before_seq 必须大于 0")
+        if not 1 <= limit <= 20:
+            return ToolExecutionResult.failure("limit 必须在 1 到 20 之间")
+        if chunk_seq is not None and (chunk_seq <= 0 or before_seq is not None):
+            return ToolExecutionResult.failure("chunk_seq 必须大于 0，且不能同时设置 before_seq")
+        if chunk_offset < 0 or (chunk_seq is None and chunk_offset != 0):
+            return ToolExecutionResult.failure("chunk_offset 必须随 chunk_seq 提供，且不能小于 0")
+
+        output = {
             "session_id": session.session_id,
             "status": session.status,
             "file_name": session.file_name,
             "max_rounds": session.max_rounds,
             "report_task_id": session.report_task_id,
-            "turn_count": len(session.turns),
-            "turns": [turn.to_dict() for turn in session.turns[-100:]],
-        })
+            "turn_count": session.last_turn_seq,
+            "turns": [],
+            "next_before_seq": None,
+            "next_chunk_seq": None,
+            "next_chunk_offset": None,
+            "has_more": False,
+        }
+
+        def fits_budget(candidate: dict) -> bool:
+            # 与 Responses Runtime 的 function_call_output 序列化方式一致。
+            serialized = json.dumps(
+                {"status": "success", "output": candidate},
+                ensure_ascii=False, separators=(",", ":"), default=str,
+            )
+            return len(serialized.encode("utf-8")) <= _ROUNDTABLE_TOOL_OUTPUT_BYTES
+
+        def chunk_turn(turn: Any, offset: int, has_older: bool) -> ToolExecutionResult:
+            content = str(turn.content or "")
+            if offset > len(content) or (offset == len(content) and content):
+                return ToolExecutionResult.failure("chunk_offset 超出发言正文范围")
+            raw_turn = turn.to_dict()
+            best: dict | None = None
+            low, high = 0, len(content) - offset
+            while low <= high:
+                length = (low + high) // 2
+                end = offset + length
+                complete = end == len(content)
+                candidate = dict(output)
+                candidate["turns"] = [{
+                    **raw_turn,
+                    "content": content[offset:end],
+                    "content_offset": offset,
+                    "content_total_chars": len(content),
+                    "content_complete": complete,
+                }]
+                candidate["next_chunk_seq"] = None if complete else turn.seq
+                candidate["next_chunk_offset"] = None if complete else end
+                candidate["next_before_seq"] = turn.seq if complete and has_older else None
+                candidate["has_more"] = not complete or has_older
+                if fits_budget(candidate):
+                    best = candidate
+                    low = length + 1
+                else:
+                    high = length - 1
+            if best is None or (not best["turns"][0]["content"] and offset < len(content)):
+                return ToolExecutionResult.failure("圆桌发言元数据超过工具响应预算，无法安全分块")
+            return ToolExecutionResult.success(best)
+
+        if chunk_seq is not None:
+            page = bus.get_turns_page(
+                session_id, int(self._user.id), limit=1, before_seq=chunk_seq + 1,
+            )
+            if not page["turns"] or page["turns"][0].seq != chunk_seq:
+                return ToolExecutionResult.failure("分块发言游标不存在")
+            older = bus.get_turns_page(
+                session_id, int(self._user.id), limit=1, before_seq=chunk_seq,
+            )
+            return chunk_turn(page["turns"][0], chunk_offset, bool(older["turns"]))
+
+        page = bus.get_turns_page(session_id, int(self._user.id), limit=limit, before_seq=before_seq)
+        selected: list[dict] = []
+        for turn in reversed(page["turns"]):
+            full_turn = {**turn.to_dict(), "content_complete": True}
+            candidate = dict(output)
+            candidate["turns"] = list(reversed([*selected, full_turn]))
+            candidate["next_before_seq"] = turn.seq
+            candidate["has_more"] = True
+            if fits_budget(candidate):
+                selected.append(full_turn)
+                continue
+            if selected:
+                output["turns"] = list(reversed(selected))
+                output["next_before_seq"] = selected[-1]["seq"]
+                output["has_more"] = True
+                return ToolExecutionResult.success(output)
+            return chunk_turn(turn, 0, len(page["turns"]) > 1 or bool(page["has_more"]))
+
+        output["turns"] = list(reversed(selected))
+        output["next_before_seq"] = page["next_before_seq"]
+        output["has_more"] = bool(page["has_more"])
+        if not fits_budget(output):
+            return ToolExecutionResult.failure("圆桌元数据超过工具响应预算")
+        return ToolExecutionResult.success(output)
 
     async def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """按会话归属发送暂停、恢复、停止或用户发言。"""
 
         from app.agents.discussion_bus import DiscussionBus
-        from app.agents.events import DiscussionTurn
-
         session_id = str(call.arguments["session_id"])
         action = str(call.arguments["action"])
         content = str(call.arguments.get("content") or "").strip()
         bus = DiscussionBus.instance()
-        session = bus.get_session(session_id)
+        session = bus.get_session(session_id, owner_user_id=int(self._user.id))
+        if session is None and isinstance(self._db, Session):
+            bus.enable_persistence(sessionmaker(bind=self._db.get_bind(), expire_on_commit=False))
+            session = bus.get_session(session_id, owner_user_id=int(self._user.id))
         if session is None:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
         if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
@@ -1574,14 +1683,7 @@ class PrismToolExecutor:
         if action == "user_input":
             if not content:
                 return ToolExecutionResult.failure("user_input 必须提供非空 content")
-            bus.publish_turn(session_id, DiscussionTurn(
-                turn_id=-1,
-                agent_code="user",
-                agent_name="你",
-                role="user",
-                content=content,
-            ))
-            accepted = bus.send_user_input(session_id, content)
+            accepted = bus.accept_user_input(session_id, content)
         else:
             accepted = bus.control_session(session_id, action)
         if not accepted:
@@ -1600,6 +1702,8 @@ class PrismToolExecutor:
     ) -> ToolExecutionResult:
         """为已结束圆桌创建独立续会，保留原小菱回投上下文。"""
 
+        from app.agents.discussion_bus import DiscussionBus
+        from app.agents.events import DiscussionTurn
         from app.api.v1.discussion import start_discussion
         from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
 
@@ -1627,9 +1731,9 @@ class PrismToolExecutor:
             previous_summary = "上一轮未产生可读的主持人结论。"
         continuation_context = (
             "【上一轮结论】\n"
-            f"{previous_summary[:4000]}\n\n"
+            f"{previous_summary}\n\n"
             "【本次纠正要求】\n"
-            f"{correction[:2000]}\n\n"
+            f"{correction}\n\n"
             "请基于当前项目源码重新独立审查，不得将上一轮结论当作既定事实。"
         )
 
@@ -1649,6 +1753,14 @@ class PrismToolExecutor:
         pending = take_pending(new_session_id)
         if not new_session_id or pending is None:
             return ToolExecutionResult.failure("圆桌续会上下文创建失败")
+        # 完整用户纠正先进入新会话账本，模型提示词另由编排器按预算压缩。
+        DiscussionBus.instance().publish_turn(new_session_id, DiscussionTurn(
+            turn_id=-1,
+            agent_code="user",
+            agent_name="你",
+            role="user",
+            content=correction,
+        ))
         launch_pending_discussion(pending)
         return ToolExecutionResult.success({
             "session_id": new_session_id,
@@ -1918,7 +2030,9 @@ class PrismToolExecutor:
             )
 
         row.status = "success" if result.status == "success" else "failed"
-        persisted_output = _redact_event_value(result.output)
+        # 幂等账本必须能完整恢复真实工具结果。SSE 的有界预览不能用于
+        # 持久结果，否则崩溃后同一 call_id 会拿到被截断的“成功”输出。
+        persisted_output = _redact_persistent_tool_value(result.output)
         row.result_json = json.dumps(
             {
                 "status": result.status,
@@ -2476,6 +2590,7 @@ class AgentResponsesService:
         *,
         run_id: str,
         event_sink: Optional[EventSink] = None,
+        server_history_transcript: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> RuntimeResult:
         if self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first() is not None:
             raise InvalidRunStateError("运行标识已存在，请恢复原任务或使用新的运行标识")
@@ -2483,6 +2598,20 @@ class AgentResponsesService:
         # 含图运行切换视觉模型,仅本次运行生效。
         vision_model = ""
         image_assets_map: Optional[Mapping[str, str]] = None
+        history_items = [copy.deepcopy(dict(item)) for item in (server_history_transcript or [])]
+        if history_items:
+            from app.services import multimodal_service
+
+            archived_hashes = multimodal_service.history_image_hashes(history_items)
+            if archived_hashes:
+                image_assets_map = multimodal_service.load_session_image_assets(
+                    self._db,
+                    user_id=int(self._user.id),
+                    surface=self._surface,
+                    session_key=self._session_key,
+                    hashes=archived_hashes,
+                )
+                vision_model = multimodal_service.resolve_vision_model(self._db)
         # API schema 为兼容旧客户端会给每条消息补 images=[]；该字段不是
         # Responses message 合法字段，必须在纯文本路径也剥离，避免上游 400。
         prepared_messages: Sequence[Mapping[str, Any]] = [
@@ -2497,7 +2626,7 @@ class AgentResponsesService:
         if image_urls:
             from app.services import multimodal_service
 
-            vision_model = multimodal_service.resolve_vision_model(self._db)
+            vision_model = vision_model or multimodal_service.resolve_vision_model(self._db)
             assets = multimodal_service.store_message_images(
                 self._db,
                 user_id=int(self._user.id),
@@ -2513,7 +2642,15 @@ class AgentResponsesService:
                 if index == len(messages) - 1 and assets:
                     content = multimodal_service.multimodal_content_parts(content, assets)  # type: ignore[assignment]
                 prepared_messages.append({"role": message.get("role", "user"), "content": content})
-            image_assets_map = multimodal_service.image_asset_map(assets)
+            image_assets_map = {
+                **(image_assets_map or {}),
+                **multimodal_service.image_asset_map(assets),
+            }
+        if history_items:
+            # The account-scoped checkpoint contains paired tool calls/results and
+            # archived image references. Never rebuild model context from the
+            # short, user-visible chat history returned by the session API.
+            prepared_messages = [*history_items, *prepared_messages]
         executor, runtime = await self._runtime(
             run_id, event_sink, vision_model=vision_model, image_assets=image_assets_map,
         )
@@ -2861,14 +2998,32 @@ def _redact_event_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
     return str(value)[:500]
 
 
+def _redact_persistent_tool_value(value: Any, *, key: str = "") -> Any:
+    """对幂等账本完整脱敏，不沿用仅供事件预览的长度/数量裁剪。"""
+    if _SENSITIVE_EVENT_KEY.search(key):
+        return "[REDACTED]"
+    if isinstance(value, Mapping):
+        return {
+            str(item_key): _redact_persistent_tool_value(item_value, key=str(item_key))
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_redact_persistent_tool_value(item) for item in value]
+    if isinstance(value, str):
+        return _redact_sensitive_text_unbounded(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _redact_sensitive_text_unbounded(str(value))
+
+
 def redact_agent_event_value(value: Any) -> Any:
     """向 API 层提供统一的有界递归脱敏，避免恢复接口绕过 SSE 保护。"""
     return _redact_event_value(value)
 
 
-def redact_agent_output_text(value: str, *, limit: int = 100_000) -> str:
-    """恢复用户可见的模型文本，保留长输出并继续清除敏感信息。"""
-    return _redact_sensitive_text_unbounded(value)[:limit]
+def redact_agent_output_text(value: str) -> str:
+    """完整恢复用户可见模型文本，并继续清除敏感信息。"""
+    return _redact_sensitive_text_unbounded(value)
 
 
 def _public_response_output(value: Any) -> list[dict[str, Any]]:
@@ -2876,13 +3031,13 @@ def _public_response_output(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
     output: list[dict[str, Any]] = []
-    for raw_item in list(value)[:100]:
+    for raw_item in value:
         if not isinstance(raw_item, Mapping) or str(raw_item.get("type") or "") != "message":
             continue
         content: list[dict[str, Any]] = []
         raw_content = raw_item.get("content")
         if isinstance(raw_content, Sequence) and not isinstance(raw_content, (str, bytes, bytearray)):
-            for raw_part in list(raw_content)[:100]:
+            for raw_part in raw_content:
                 if not isinstance(raw_part, Mapping):
                     continue
                 part_type = str(raw_part.get("type") or "")
@@ -3541,7 +3696,13 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
         {
             "type": "function",
             "name": "get_roundtable_discussion",
-            "description": "查询当前用户圆桌讨论的状态、发言与沉淀报告任务",
+            "description": (
+                "查询当前账号圆桌状态和原始发言；每次响应最多 8000 字节。"
+                "普通页按最新到较早顺序读取，has_more=true 时以 next_before_seq 继续；"
+                "长发言的 content_complete=false 时必须按 next_chunk_seq/next_chunk_offset "
+                "逐块读取并拼接原文，读完该发言再用 next_before_seq 读较早发言。"
+                "只有 has_more=false 才表示所选历史范围已全部读完，不要把单页当作完整讨论。"
+            ),
             "parameters": GetRoundtableDiscussionArguments.model_json_schema(),
         },
         {
@@ -3579,6 +3740,13 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
         event_type = "response.incomplete"
     else:
         event_type = "response.failed"
+    # A length-limited response may contain a plausible-looking partial answer.
+    # Keep it in the private checkpoint for diagnosis, but never publish it as
+    # a completed assistant message or actionable tool output.
+    public_output = (
+        _public_response_output(result.response.get("output"))
+        if result.status == COMPLETED else []
+    )
     return {
         "type": event_type,
         "response": {
@@ -3586,7 +3754,7 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
             "object": "response",
             "status": result.status,
             "output_text": result.output_text,
-            "output": _public_response_output(result.response.get("output")),
+            "output": public_output,
             "error": redact_agent_event_value(result.error) if result.error else None,
             "rounds": result.rounds,
         },

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from itertools import permutations
 
+import pytest
+
 import app.ai.finding_aggregator as aggregator_module
 from app.ai.finding_aggregator import (
     AGGREGATION_VERSION,
+    ReviewFindingTooLarge,
     aggregate_agent_findings,
+    aggregate_agent_findings_safely,
     normalize_severity_with_score,
 )
 
@@ -201,3 +205,99 @@ def test_internal_aggregation_error_preserves_claim_for_human_review(monkeypatch
     assert result.issues[0]["human_review_status"] == "pending"
     assert result.issues[0]["confirmation_count"] == 1
     assert result.coverage["input_claim_ids"] == result.coverage["output_claim_ids"]
+
+
+def test_long_claim_keeps_late_evidence_and_description() -> None:
+    source, claims = _claim("security")
+    tail = "末尾关键证据: os.system(user_input)"
+    claims[0]["evidence"] = "前置代码\n" + "x" * 4500 + tail
+    claims[0]["description"] = "背景\n" + "y" * 4500 + "末尾说明: 未校验输入"
+
+    result = aggregate_agent_findings(
+        {source: claims}, {source: "安全审查代理"},
+        code=CODE, file_name="runner.py", chunk_id="chunk-0",
+    )
+
+    issue = result.issues[0]
+    assert issue["evidence"].endswith(tail)
+    assert issue["description"].endswith("末尾说明: 未校验输入")
+    assert issue["source_details"][0]["evidence"].endswith(tail)
+    assert issue["aggregation"]["claims"][0]["evidence"].endswith(tail)
+
+
+def test_fallback_keeps_long_claim_tail(monkeypatch) -> None:
+    source, claims = _claim("security")
+    claims[0]["evidence"] = "x" * 4500 + "末尾证据"
+    claims[0]["description"] = "y" * 4500 + "末尾描述"
+    monkeypatch.setattr(
+        aggregator_module, "aggregate_agent_findings",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("聚合异常")),
+    )
+
+    result = aggregator_module.aggregate_agent_findings_safely(
+        {source: claims}, {source: "安全审查代理"},
+        code=CODE, file_name="runner.py", chunk_id="chunk-0",
+    )
+
+    issue = result.issues[0]
+    assert issue["evidence"].endswith("末尾证据")
+    assert issue["description"].endswith("末尾描述")
+    assert issue["aggregation"]["claims"][0]["evidence"].endswith("末尾证据")
+
+
+def test_all_narrative_claim_fields_keep_their_tail() -> None:
+    source, claims = _claim("security")
+    for field in ("suggestion", "fixed_code", "exploit_scenario", "remediation"):
+        claims[0][field] = "前置内容" + "x" * 8500 + f"{field}:末尾"
+
+    result = aggregate_agent_findings(
+        {source: claims}, {source: "安全审查代理"},
+        code=CODE, file_name="runner.py", chunk_id="chunk-0",
+    )
+
+    issue = result.issues[0]
+    for field in ("suggestion", "fixed_code", "exploit_scenario", "remediation"):
+        assert issue[field].endswith(f"{field}:末尾")
+        assert issue["aggregation"]["claims"][0][field].endswith(f"{field}:末尾")
+
+
+def test_fallback_keeps_all_narrative_field_tails(monkeypatch) -> None:
+    source, claims = _claim("security")
+    for field in ("suggestion", "fixed_code", "exploit_scenario", "remediation"):
+        claims[0][field] = "x" * 8500 + f"{field}:末尾"
+    monkeypatch.setattr(
+        aggregator_module, "aggregate_agent_findings",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("聚合异常")),
+    )
+
+    result = aggregate_agent_findings_safely(
+        {source: claims}, {source: "安全审查代理"},
+        code=CODE, file_name="runner.py", chunk_id="chunk-0",
+    )
+
+    issue = result.issues[0]
+    for field in ("suggestion", "fixed_code", "exploit_scenario", "remediation"):
+        assert issue[field].endswith(f"{field}:末尾")
+
+
+def test_mysql_text_overflow_fails_review_instead_of_dropping_claim() -> None:
+    source, claims = _claim("security")
+    claims[0]["remediation"] = "中" * 21_846  # 65,538 UTF-8 bytes
+
+    with pytest.raises(ReviewFindingTooLarge, match="remediation.*65535"):
+        aggregate_agent_findings_safely(
+            {source: claims}, {source: "安全审查代理"},
+            code=CODE, file_name="runner.py", chunk_id="chunk-0",
+        )
+
+
+def test_mysql_text_byte_limit_not_character_limit() -> None:
+    source, claims = _claim("security")
+    claims[0]["suggestion"] = "中" * 21_845  # 65,535 UTF-8 bytes
+
+    result = aggregate_agent_findings_safely(
+        {source: claims}, {source: "安全审查代理"},
+        code=CODE, file_name="runner.py", chunk_id="chunk-0",
+    )
+
+    assert result.issues[0]["suggestion"] == claims[0]["suggestion"]

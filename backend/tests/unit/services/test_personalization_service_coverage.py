@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, PayloadTooLargeError
 from app.models.code_file import CodeFile
 from app.models.forum_post import ForumPost
 from app.models.knowledge_chunk import KnowledgeChunk
@@ -273,6 +273,18 @@ def test_profile_create_update_serialization_and_summary_helpers(db):
     assert "保持可维护" in invalid_focus_summary
 
 
+def test_profile_summary_preserves_allowed_field_tails():
+    """显式画像字段按公开 schema 允许的长度进入摘要，不二次丢尾。"""
+    profile = UserProfile(
+        user_id=1,
+        hobbies="兴趣" * 900 + "兴趣末尾",
+        tech_stack="技术" * 900 + "技术末尾",
+        goals="目标" * 900 + "目标末尾",
+    )
+    summary = profile_service._build_summary(profile, {})
+    assert all(marker in summary for marker in ("兴趣末尾", "技术末尾", "目标末尾"))
+
+
 def test_profile_refresh_implicit_respects_opt_out_and_force(db):
     """隐式画像应尊重关闭开关，并在强制刷新时聚合用户行为。
 
@@ -405,6 +417,38 @@ def test_add_document_persists_embeddings_and_replaces_existing_source(db, monke
     assert empty.title == "未命名文档"
     assert empty.chunk_count == 0
     assert len(embed_calls) == 2
+
+
+def test_large_knowledge_document_keeps_tail_and_rejects_incomplete_replacement(db, monkeypatch):
+    """超过旧 2 万字阈值仍完整入库；嵌入批次不完整不能毁掉旧来源。"""
+    batch_sizes = []
+
+    def embed(_db, texts, *, user_id):
+        assert user_id == 1
+        batch_sizes.append(len(texts))
+        return [[1.0, 0.0] for _ in texts], "fake:embedding"
+
+    monkeypatch.setattr(knowledge_service.embedding_service, "embed_texts", embed)
+    content = "正文" * 11_000 + "末尾证据-不可丢失"
+    doc = knowledge_service.add_document(db, 1, "长文", content, source_ref="file:long")
+    chunks = db.query(KnowledgeChunk).filter(KnowledgeChunk.doc_id == doc.id).order_by(KnowledgeChunk.seq).all()
+    assert doc.char_count == len(content)
+    assert doc.chunk_count == len(chunks) > 32
+    assert all(size <= 32 for size in batch_sizes)
+    assert "末尾证据-不可丢失" in chunks[-1].content
+
+    def incomplete(_db, texts, *, user_id):
+        return [[1.0, 0.0]] * (len(texts) - 1), "fake:embedding"
+
+    monkeypatch.setattr(knowledge_service.embedding_service, "embed_texts", incomplete)
+    with pytest.raises(RuntimeError, match="嵌入结果不完整"):
+        knowledge_service.add_document(db, 1, "新长文", "替换" * 11_000, source_ref="file:long")
+    db.refresh(doc)
+    assert doc.status == "active"
+    assert db.query(KnowledgeChunk).filter(KnowledgeChunk.doc_id == doc.id).count() == len(chunks)
+
+    with pytest.raises(PayloadTooLargeError):
+        knowledge_service.add_document(db, 1, "超限", "字" * 2_000_001)
 
 
 def test_retrieve_list_delete_and_stats_enforce_knowledge_isolation(db, monkeypatch):
@@ -780,6 +824,33 @@ def test_personalization_context_builders_cover_empty_and_profile_branches(db, m
     monkeypatch.setattr(personalization_service.profile_service, "get_summary_text", empty_summary)
     assert personalization_service._kb_block(db, user.id, "无命中") == ""
     assert personalization_service.build_chat_context(db, user.id, "无命中") == ""
+
+
+def test_selected_knowledge_chunk_keeps_full_content_in_chat_and_forum(db, monkeypatch):
+    """top_k 选中的 700 字片段尾部不能在个性化与论坛注入时再丢失。"""
+    from app.utils import api_resolver
+
+    content = "知识内容" * 85 + "片段末尾证据"
+    hit = {
+        "content": content,
+        "score": 0.9,
+        "doc_id": 42,
+        "title": "个人长标题" * 10,
+        "source_type": "upload",
+    }
+    monkeypatch.setattr(personalization_service.knowledge_service, "retrieve", lambda *_args, **_kwargs: [hit])
+    monkeypatch.setattr(personalization_service.profile_service, "get_summary_text", lambda *_args: "")
+    block = personalization_service._kb_block(db, 7, "问题")
+    assert "片段末尾证据" in block
+    assert hit["title"] in block
+    assert "文档#42" in block
+
+    def unavailable(*_args):
+        raise RuntimeError("模型暂不可用")
+
+    monkeypatch.setattr(api_resolver, "resolve_api_config", unavailable)
+    forum = personalization_service.assist_forum_draft(db, 7, "标题", "草稿")
+    assert "片段末尾证据" in forum["suggestion"]
 
 
 def test_forum_assist_and_chat_wrapper_use_llm_or_safe_fallback(db, monkeypatch):

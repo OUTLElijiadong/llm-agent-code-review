@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_commands docker git curl awk grep
+require_commands docker git curl awk grep df dirname
 validate_compose_environment
 repo_dir="$(cd .. && pwd)"
 git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || fatal "上级目录不是 Git 仓库"
@@ -144,6 +144,10 @@ on_deploy_error() {
   finish_deploy_failure "$rc" "未捕获命令失败"
 }
 trap on_deploy_error ERR
+
+deploy_stage="capacity_preflight"
+assert_deploy_capacity "$repo_dir" "${BACKUP_DIR:-../backups}"
+deploy_stage="preflight"
 
 if [[ -f "$current_state" ]]; then
   load_release_environment "$current_state"

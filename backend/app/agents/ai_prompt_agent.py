@@ -28,7 +28,6 @@ from app.utils.encoding_utils import BASE64_PREFIX
 SUPPORTED_TOOLS: Tuple[str, ...] = (
     "generic", "cursor", "copilot", "chatgpt", "claude_code",
 )
-MAX_CONTEXT_CHARS = 4000
 BINARY_LANGUAGES = {
     "binary", "unknown", "image", "jpeg", "jpg", "png", "gif", "svg",
 }
@@ -202,8 +201,6 @@ class AiPromptAgent(BaseAgent):
         for i in range(start - 1, end):
             snippet_lines.append(f"{i + 1:>4}| {lines[i]}")
         snippet = _redact("\n".join(snippet_lines))
-        if len(snippet) > MAX_CONTEXT_CHARS:
-            snippet = f"{snippet[:MAX_CONTEXT_CHARS]}\n... [context truncated]"
         return snippet, start, end, file
 
     def _render_template(self, target_tool: str, issue: ReviewIssue,
@@ -244,7 +241,28 @@ class AiPromptAgent(BaseAgent):
         )
         result = self.call(user_msg)
         if result.success and isinstance(result.data, str) and result.data.strip():
-            return result.data.strip(), result
+            polished = result.data.strip()
+            # 润色是可选增强；任何已有证据被省略时交付完整模板。
+            required_lines = [
+                line for line in draft.splitlines()
+                if line.startswith(("文件: ", "行号: ", "严重度: ", "问题类型: "))
+            ]
+            required_blocks = []
+            for marker in ("问题描述:\n", "棱镜给出的修复建议:\n", "上下文代码:\n"):
+                if marker in draft:
+                    remainder = draft.split(marker, 1)[1]
+                    if marker == "上下文代码:\n":
+                        block = remainder.split("\n\n修复要求:", 1)[0].strip()
+                    else:
+                        block = remainder.split("\n\n", 1)[0].strip()
+                    if block:
+                        required_blocks.append(block)
+            if all(line in polished for line in required_lines) and (
+                all(block in polished for block in required_blocks)
+            ):
+                return polished, result
+            logger.warning("[AiPromptAgent] 润色结果遗漏必需字段或源码，使用完整模板原文")
+            return draft, result
         logger.warning(
             f"[AiPromptAgent] LLM 润色失败,使用模板原文: {result.error}",
         )
@@ -311,9 +329,6 @@ class AiPromptAgent(BaseAgent):
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for iss in ordered:
             sev_count[iss.severity] = sev_count.get(iss.severity, 0) + 1
-        # 问题较多时省略代码上下文,避免提示词过长
-        include_snippet = total <= 15
-
         parts = [
             f"任务: 这是棱镜 Prism 平台 AI 审查在「{scope_label}」中检出的全部 "
             f"{total} 个问题,请你一次性、系统地修复它们。\n\n",
@@ -335,7 +350,7 @@ class AiPromptAgent(BaseAgent):
                 )
                 if iss.suggestion:
                     parts.append(f"   修复建议: {iss.suggestion}\n")
-                if include_snippet and snippet:
+                if snippet:
                     parts.append(f"   上下文:\n```{lang}\n{snippet}\n```\n")
         parts.append(
             "\n修复要求:\n"
@@ -415,7 +430,7 @@ class AiPromptAgent(BaseAgent):
         if severity_filter:
             q = q.filter(ReviewIssue.severity.in_(severity_filter))
         issues = q.order_by(
-            ReviewIssue.severity.asc(), ReviewIssue.line_number.asc()).limit(50).all()
+            ReviewIssue.severity.asc(), ReviewIssue.line_number.asc()).all()
         if not issues:
             return AgentResult(
                 success=False,

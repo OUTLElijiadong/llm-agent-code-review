@@ -13,6 +13,7 @@ import time
 from typing import Any, Optional
 
 from app.agents.base import AgentContext, BaseAgent
+from app.agents.source_context import SourceContextError, compact_source_context
 
 MAX_FILES = 5
 MAX_FILE_BYTES = 60_000
@@ -80,10 +81,14 @@ _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _source_text(source_summary: dict[str, Any]) -> str:
+    compacted = source_summary.get("_compacted_source_context")
+    if isinstance(compacted, dict):
+        summaries = compacted.get("source_summaries")
+        if isinstance(summaries, list):
+            return "\n".join(str(item.get("summary") or "") for item in summaries if isinstance(item, dict))
     snippets = source_summary.get("snippets")
     snippets = snippets if isinstance(snippets, dict) else {}
-    parts = [str(value) for value in snippets.values() if isinstance(value, str)]
-    return "\n".join(parts)
+    return "\n".join(str(value) for value in snippets.values() if isinstance(value, str))
 
 
 def _grounding_feedback(files: list[dict[str, str]], source_summary: dict[str, Any]) -> list[str]:
@@ -167,6 +172,21 @@ class TestCaseGeneratorAgent(BaseAgent):
         Returns:
             dict: {"files": [{"path": "test_ai_xxx", "content": "..."}]} 或 {"error": "..."}
         """
+        try:
+            compacted = source_summary.get("_compacted_source_context")
+            if not isinstance(compacted, dict):
+                compacted = compact_source_context(
+                    self, source_summary, ctx=ctx, deadline=deadline, max_chars=40_000,
+                )
+                source_summary = {**source_summary, "_compacted_source_context": compacted}
+        except SourceContextError as exc:
+            return {"error": f"源码上下文未完整覆盖: {exc}"}
+        model_summary = dict(compacted)
+        for feedback_key in ("previous_generation_feedback", "previous_execution_feedback"):
+            if feedback_key in source_summary:
+                model_summary[feedback_key] = source_summary[feedback_key]
+        if len(json.dumps(model_summary, ensure_ascii=False, default=str)) > 48_000:
+            return {"error": "源码摘要与反馈超过测试模型输入预算"}
         db_instruction = ""
         if db_type == "mysql":
             db_instruction = (
@@ -200,8 +220,8 @@ class TestCaseGeneratorAgent(BaseAgent):
             f"语言: {language}\n"
             f"测试模式: {test_mode}\n"
             f"数据库: {db_type or 'none'}{db_instruction}\n"
-            "源码摘要(JSON):\n"
-            f"{json.dumps(source_summary, ensure_ascii=False, default=str)[:60000]}\n\n"
+            "逐片压缩且经过来源覆盖核验的源码摘要(JSON):\n"
+            f"{json.dumps(model_summary, ensure_ascii=False, default=str)}\n\n"
             "要求:\n"
             "1. whitebox 模式生成 2-4 个白盒断言文件；blackbox 模式只生成 1 个 blackbox 文件；\n"
             "   combined 模式生成 2-4 个白盒断言文件并额外生成 1 个 blackbox 文件。\n"

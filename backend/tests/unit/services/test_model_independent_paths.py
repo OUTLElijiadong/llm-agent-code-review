@@ -31,7 +31,8 @@ def image_tool_transcript(image_text="x " * 100):
 def test_compaction_preserves_current_image_after_text_history_and_tool_loop():
     transcript = image_tool_transcript()
     projected, metadata = compact_transcript(transcript, context_window_tokens=3000,
-        max_output_tokens=500, compaction_threshold_tokens=1500, keep_recent_tokens=500)
+        max_output_tokens=500, compaction_threshold_tokens=1500, keep_recent_tokens=500,
+        semantic_summary="[来源#1] 历史文本已由语义摘要覆盖")
     assert metadata["compacted"]
     assert transcript_has_images(projected)
     assert projected != transcript

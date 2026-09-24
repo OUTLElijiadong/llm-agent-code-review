@@ -97,7 +97,7 @@ class FakeDiscussionBus:
         self.discussion_tasks: dict[str, asyncio.Task] = {}
         self.cancelled_sessions: list[str] = []
 
-    def get_session(self, session_id: str) -> Any:
+    def get_session(self, session_id: str, *, owner_user_id: int | None = None) -> Any:
         """返回为测试配置的既有会话。"""
         return self.session
 
@@ -121,6 +121,18 @@ class FakeDiscussionBus:
     def send_user_input(self, session_id: str, content: str) -> bool:
         """记录传给讨论编排器的用户输入。"""
         self.user_inputs.append((session_id, content))
+        return True
+
+    def accept_user_input(self, session_id: str, content: str) -> bool:
+        """模拟先确认编排器接收，再公开用户发言的原子入口。"""
+        if not self.send_user_input(session_id, content.strip()):
+            return False
+        from app.agents.events import DiscussionTurn
+
+        self.publish_turn(session_id, DiscussionTurn(
+            turn_id=-1, agent_code="user", agent_name="你",
+            role="user", content=content.strip(),
+        ))
         return True
 
     def control_session(self, session_id: str, action: str) -> bool:
@@ -257,7 +269,7 @@ def test_register_pending_purges_only_stale_unowned_sessions(
     class PurgeBus(FakeDiscussionBus):
         """仅把 active 会话报告为仍然存在。"""
 
-        def get_session(self, session_id: str) -> Any:
+        def get_session(self, session_id: str, *, owner_user_id: int | None = None) -> Any:
             """active 返回会话，其余返回不存在。"""
             return SimpleNamespace(owner_user_id=3) if session_id == "active" else None
 
@@ -327,7 +339,10 @@ async def test_ws_message_flow_uses_owner_registry_and_cleans_subscription(
     session_id = "registry-session"
     module._session_owners[session_id] = 11
     module._owner_registered_at[session_id] = time.time()
-    bus = FakeDiscussionBus(outbound=['{"type":"control","action":"ready"}'])
+    bus = FakeDiscussionBus(
+        session=SimpleNamespace(owner_user_id=11, status="active"),
+        outbound=['{"type":"control","action":"ready"}'],
+    )
     callback_calls: list[tuple[str, dict[str, Any]]] = []
 
     def callback(action: str, payload: dict[str, Any]) -> None:
@@ -365,6 +380,218 @@ async def test_ws_message_flow_uses_owner_registry_and_cleans_subscription(
     info_controls = [item for item in bus.controls if item[1] == "info"]
     assert len(info_controls) == 3
     assert bus.unsubscribed == [(session_id, bus.queue)]
+
+
+@pytest.mark.asyncio
+async def test_ws_rejects_late_input_without_broadcast(monkeypatch: pytest.MonkeyPatch) -> None:
+    """终态 WS 仍连着时，迟到消息只给发送者拒绝回执。"""
+    from app.agents.discussion_bus import DiscussionBus
+
+    bus = DiscussionBus()
+    bus.create_session("disc_late", 0, "main.py", owner_user_id=7)
+    bus.close_session("disc_late")
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_load_ws_user", lambda _token: _user(7))
+    websocket = FakeWebSocket(
+        query=b"token=ok",
+        incoming=[json.dumps({"action": "user_input", "content": "迟到的意见"})],
+    )
+
+    await module.ws_discuss(websocket, "disc_late")
+
+    assert websocket.accepted == [None]
+    assert bus.get_session("disc_late").turns == []
+    rejected = [json.loads(frame) for frame in websocket.sent if "input_rejected" in frame]
+    assert len(rejected) == 1
+
+
+@pytest.mark.asyncio
+async def test_ws_accepts_completed_roundtable_followup_and_starts_background_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """圆桌主流程结束后，当前账号可经同一 WS 追问并获得持久接收回执。"""
+    from app.agents.discussion_bus import DiscussionBus
+    from app.services import roundtable_followup_service
+
+    bus = DiscussionBus()
+    session = bus.create_session("disc_followup_ws", 42, "main.py", owner_user_id=7)
+    session.report_task_id = 42
+    bus.publish_control(session.session_id, "done", {"status": "success", "task_id": 42})
+    bus.close_session(session.session_id)
+    scheduled = []
+    monkeypatch.setattr(roundtable_followup_service, "ensure_followup_worker",
+                        lambda *_args: scheduled.append(True))
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_load_ws_user", lambda _token: _user(7))
+    websocket = FakeWebSocket(
+        query=b"token=ok",
+        incoming=[json.dumps({"action": "user_input", "content": "报告中的证据在哪？"})],
+    )
+    await module.ws_discuss(websocket, session.session_id)
+    assert websocket.accepted == [None]
+    assert [turn.content for turn in session.turns] == ["报告中的证据在哪？"]
+    assert scheduled == [True, True]  # 重连恢复待答问题，以及本次新问题。
+    accepted = [json.loads(frame) for frame in websocket.sent if "input_accepted" in frame]
+    assert len(accepted) == 1
+    assert accepted[0]["payload"]["seq"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ws_direct_reconnect_restores_persisted_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """服务重启后直接打开旧 WS 地址，无需先 GET 列表。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.agents.discussion_bus import DiscussionBus
+    from app.agents.events import DiscussionTurn
+    from app.models.roundtable import RoundtableSession, RoundtableTurn
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    original = DiscussionBus(persist=True, session_factory=factory)
+    original.create_session("disc_restore", 0, "main.py", owner_user_id=7)
+    original.publish_turn("disc_restore", DiscussionTurn(
+        turn_id=1, agent_code="general", agent_name="通用质量代理",
+        role="agent", content="已审查",
+    ))
+    original.close_session("disc_restore")
+
+    restored = DiscussionBus()
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: restored))
+    monkeypatch.setattr(module, "SessionLocal", factory)
+    monkeypatch.setattr(module, "_load_ws_user", lambda _token: _user(7))
+    websocket = FakeWebSocket(query=b"token=ok")
+
+    await module.ws_discuss(websocket, "disc_restore")
+
+    assert websocket.accepted == [None]
+    assert restored.get_session("disc_restore").owner_user_id == 7
+    assert restored.get_session("disc_restore").turns[0].seq == 1
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_foreign_ws_reconnect_cannot_interrupt_persisted_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未知账号即使知道旧 WS 地址，也不能触发有副作用的会话恢复。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.agents.discussion_bus import DiscussionBus
+    from app.models.roundtable import RoundtableSession, RoundtableTurn
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    original = DiscussionBus(persist=True, session_factory=factory)
+    original.create_session("disc_foreign", 0, "main.py", owner_user_id=7)
+
+    restored = DiscussionBus()
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: restored))
+    monkeypatch.setattr(module, "SessionLocal", factory)
+    monkeypatch.setattr(module, "_load_ws_user", lambda _token: _user(8))
+    websocket = FakeWebSocket(query=b"token=ok")
+    await module.ws_discuss(websocket, "disc_foreign")
+
+    assert websocket.accepted == []
+    assert websocket.closed[0][0] == 4004
+    with factory() as db:
+        assert db.get(RoundtableSession, "disc_foreign").status == "active"
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ws_queue_overflow_replays_every_turn_and_terminal_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史回放占满订阅队列时，慢客户端也能接到后续全部发言。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.agents.discussion_bus import DiscussionBus
+    from app.agents.events import DiscussionTurn
+    from app.models.roundtable import RoundtableSession, RoundtableTurn
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    bus = DiscussionBus(persist=True, session_factory=factory)
+    bus.create_session("disc_overflow", 0, "main.py", owner_user_id=7)
+    for index in range(1, 151):
+        bus.publish_turn("disc_overflow", DiscussionTurn(
+            turn_id=index, agent_code="general", agent_name="通用质量代理",
+            role="agent", content=f"发言 {index}",
+        ))
+
+    class SlowWebSocket(FakeWebSocket):
+        def __init__(self) -> None:
+            super().__init__(query=b"token=ok")
+            self.terminal_received = asyncio.Event()
+            self.published = False
+            self.published_during_replay = False
+            self.last_seq = 0
+
+        async def receive_text(self) -> str:
+            if not self.published:
+                self.published = True
+                for index in range(151, 191):
+                    bus.publish_turn("disc_overflow", DiscussionTurn(
+                        turn_id=index, agent_code="general", agent_name="通用质量代理",
+                        role="agent", content=f"发言 {index}",
+                    ))
+            await asyncio.wait_for(self.terminal_received.wait(), timeout=3)
+            raise WebSocketDisconnect(code=1000)
+
+        async def send_text(self, message: str) -> None:
+            await super().send_text(message)
+            parsed = json.loads(message)
+            if parsed.get("type") == "discuss":
+                self.last_seq = int(parsed["turn"].get("seq") or 0)
+                if self.last_seq == 75 and not self.published_during_replay:
+                    self.published_during_replay = True
+                    for index in range(191, 221):
+                        bus.publish_turn("disc_overflow", DiscussionTurn(
+                            turn_id=index, agent_code="general", agent_name="通用质量代理",
+                            role="agent", content=f"发言 {index}",
+                        ))
+                    bus.publish_control("disc_overflow", "done", {"status": "success"})
+                    bus.close_session("disc_overflow")
+            elif parsed.get("type") == "control" and parsed.get("action") == "done":
+                if self.last_seq == 220:
+                    self.terminal_received.set()
+
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_load_ws_user", lambda _token: _user(7))
+    websocket = SlowWebSocket()
+    await module.ws_discuss(websocket, "disc_overflow")
+
+    delivered = [json.loads(message)["turn"]["seq"] for message in websocket.sent
+                 if json.loads(message).get("type") == "discuss"]
+    assert delivered == list(range(51, 221))
+    assert websocket.published_during_replay is True
+    assert any(json.loads(message).get("action") == "done" for message in websocket.sent)
+    with factory() as db:
+        assert db.get(RoundtableSession, "disc_overflow").last_turn_seq == 220
+    engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -471,7 +698,7 @@ async def test_ws_existing_session_allows_admin_and_sends_server_heartbeat(
 ) -> None:
     """管理员可连接既有会话，连接状态正常时服务端应发送主动心跳。"""
     session_id = "existing-session"
-    session = SimpleNamespace(owner_user_id=99)
+    session = SimpleNamespace(owner_user_id=99, status="active")
     bus = FakeDiscussionBus(session=session)
     _install_bus(monkeypatch, bus)
     monkeypatch.setattr(module, "_load_ws_user", lambda token: _user(1, role="admin"))

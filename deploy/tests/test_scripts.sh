@@ -186,6 +186,8 @@ esac
 case "$*" in *prism-frontend*) image_digit=$((image_digit + 1)) ;; esac
 image_id="sha256:$(printf '%064d' 0 | tr 0 "$image_digit")"
 case "${1:-}" in
+  info)
+    printf '%s\n' "${FAKE_RELEASE_WORKSPACE:?}" ;;
   compose)
     shift
     env_file="${DEPLOY_ENV_FILE:-.env}"
@@ -687,10 +689,72 @@ write_fake_df() {
 #!/usr/bin/env bash
 set -eu
 percent="${FAKE_DF_PERCENT:-50}"
+[[ "${FAKE_DF_FAIL:-0}" != 1 ]] || exit 23
+available="${FAKE_DF_AVAILABLE_KIB:-50000000}"
 printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'
-printf '/dev/test 100 50 50 %s%% /\n' "$percent"
+printf '/dev/test 100000000 50000000 %s %s%% /\n' "$available" "$percent"
 SCRIPT
   chmod +x "$target"
+}
+
+# 用隔离的 df/Docker 替身验证发布容量门禁边界；不连接生产。
+run_deploy_capacity_validation() {
+  local workspace="$1/capacity-gate"
+  local fake_bin="$workspace/bin"
+  local output_file="$workspace/output.log"
+  mkdir -p "$fake_bin" "$workspace/repo" "$workspace/backups"
+  write_release_fake_docker "$fake_bin/docker"
+  write_fake_df "$fake_bin/df"
+  : > "$workspace/docker.log"
+
+  env PATH="$fake_bin:$PATH" FAKE_RELEASE_WORKSPACE="$workspace" \
+    FAKE_DOCKER_LOG="$workspace/docker.log" FAKE_DF_PERCENT=88 \
+    FAKE_DF_AVAILABLE_KIB=24000000 OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    bash -c 'source ./lib/common.sh; assert_deploy_capacity "$1" "$2"' _ \
+    "$workspace/repo" "$workspace/backups" > "$output_file" 2>&1
+  assert_contains "$output_file" '发布容量检查通过(docker:'
+
+  if env PATH="$fake_bin:$PATH" FAKE_RELEASE_WORKSPACE="$workspace" \
+    FAKE_DOCKER_LOG="$workspace/docker.log" FAKE_DF_PERCENT=95 \
+    FAKE_DF_AVAILABLE_KIB=24000000 OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    bash -c 'source ./lib/common.sh; assert_deploy_capacity "$1" "$2"' _ \
+    "$workspace/repo" "$workspace/backups" > "$output_file" 2>&1; then
+    printf '发布容量门禁未拒绝 95%% 临界使用率\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" '文件系统容量不足'
+
+  if env PATH="$fake_bin:$PATH" FAKE_RELEASE_WORKSPACE="$workspace" \
+    FAKE_DOCKER_LOG="$workspace/docker.log" FAKE_DF_PERCENT=88 \
+    FAKE_DF_AVAILABLE_KIB=8000000 OPS_DISK_MAX_PERCENT=85 \
+    OPS_DISK_CRITICAL_PERCENT=95 \
+    bash -c 'source ./lib/common.sh; assert_deploy_capacity "$1" "$2"' _ \
+    "$workspace/repo" "$workspace/backups" > "$output_file" 2>&1; then
+    printf '发布容量门禁未拒绝低于 12 GiB 的可用空间\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" '文件系统容量不足'
+
+  if env PATH="$fake_bin:$PATH" FAKE_RELEASE_WORKSPACE="$workspace" \
+    FAKE_DOCKER_LOG="$workspace/docker.log" FAKE_DF_FAIL=1 \
+    bash -c 'source ./lib/common.sh; assert_deploy_capacity "$1" "$2"' _ \
+    "$workspace/repo" "$workspace/backups" > "$output_file" 2>&1; then
+    printf '发布容量门禁未拒绝无法采集的容量\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" '无法读取 repository 文件系统容量'
+
+  if env PATH="$fake_bin:$PATH" FAKE_RELEASE_WORKSPACE="$workspace/missing" \
+    FAKE_DOCKER_LOG="$workspace/docker.log" \
+    bash -c 'source ./lib/common.sh; assert_deploy_capacity "$1" "$2"' _ \
+    "$workspace/repo" "$workspace/backups" > "$output_file" 2>&1; then
+    printf '发布容量门禁未拒绝不可访问的 Docker 数据目录\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" 'Docker 数据目录不可访问'
+  printf 'deploy capacity gate: PASS\n'
 }
 
 # 执行 ops-check 的全绿和参数错误模拟。
@@ -1555,6 +1619,12 @@ if [[ "${1:-}" == --failure-matrix-only ]]; then
   run_deploy_failure_matrix "$test_root"
   exit 0
 fi
+if [[ "${1:-}" == --capacity-only ]]; then
+  test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-capacity-tests.XXXXXX")"
+  trap cleanup_test_workspace EXIT
+  run_deploy_capacity_validation "$test_root"
+  exit 0
+fi
 if [[ "${1:-}" == --release-case ]]; then
   run_release_binding_case "$2" "$3"
   exit 0
@@ -1575,6 +1645,7 @@ write_fake_docker "$fake_bin/docker"
 write_fake_curl "$fake_bin/curl"
 write_fake_df "$fake_bin/df"
 printf 'test_artifacts=%s\n' "$test_root"
+run_deploy_capacity_validation "$test_root"
 if [[ "${PRISM_FAKE_DOCKER_ONLY:-0}" == 1 ]]; then
   export PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$test_root/docker.log"
   printf 'docker_mode=fake-only (Compose parser integration not exercised)\n'

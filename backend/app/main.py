@@ -2,6 +2,7 @@
 FastAPI应用主入口
 """
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +55,7 @@ def _ensure_schema() -> None:
 
 
 def _reconcile_orphan_reviews() -> list[tuple[int, int, str]]:
-    """启动时识别孤儿审查任务并返回恢复引用。
+    """启动时分流孤儿普通审查与圆桌，并返回普通审查恢复引用。
 
     审查在后台守护线程中执行,进程重启/崩溃会让线程随进程消失,但 DB 中任务仍停留在
     status='running',在前端表现为永远「运行中」。新进程刚启动尚未派生任何审查线程,
@@ -72,11 +73,28 @@ def _reconcile_orphan_reviews() -> list[tuple[int, int, str]]:
             return []
         db = SessionLocal()
         try:
+            from app.agents.discussion_bus import interrupt_orphan_roundtable
             from app.models.review_task import ReviewTask
+            from app.models.roundtable import RoundtableSession
 
-            orphans = db.query(ReviewTask).filter(ReviewTask.status == "running").all()
-            if not orphans:
-                return []
+            # 圆桌执行器无法交给普通审查流水线恢复。会话与其报告任务必须
+            # 在同一事务里落为 interrupted，保留已发表的原始发言和用量记录。
+            if "roundtable_session" in insp.get_table_names():
+                for row in db.query(RoundtableSession).filter(
+                    RoundtableSession.status.in_(("active", "paused")),
+                ).with_for_update().all():
+                    interrupt_orphan_roundtable(db, row)
+            for task in db.query(ReviewTask).filter(
+                ReviewTask.status == "running", ReviewTask.review_type == "discuss",
+            ).with_for_update().all():
+                task.status = "failed"
+                task.error_message = "圆桌执行进程重启，任务已中断；请重新发起"
+                task.end_time = datetime.now(timezone.utc)
+                task.coverage = {**(task.coverage or {}), "stage": "interrupted"}
+
+            orphans = db.query(ReviewTask).filter(
+                ReviewTask.status == "running", ReviewTask.review_type != "discuss",
+            ).all()
             task_refs = [
                 (int(t.id), int(t.user_id), str(t.execution_token or ""))
                 for t in orphans
@@ -85,9 +103,10 @@ def _reconcile_orphan_reviews() -> list[tuple[int, int, str]]:
                 t.error_message = "进程重启导致审查中断，服务端正在自动恢复"
                 t.end_time = None
             db.commit()
-            logger.warning(
-                f"[reconcile] 识别 {len(orphans)} 个孤儿审查任务，等待自动恢复"
-            )
+            if orphans:
+                logger.warning(
+                    f"[reconcile] 识别 {len(orphans)} 个孤儿普通审查任务，等待自动恢复"
+                )
             return task_refs
         finally:
             db.close()
@@ -188,6 +207,24 @@ async def lifespan(app: FastAPI):
     start_agent_run_recovery()
     resume_interrupted_tasks(orphan_reviews)
     resume_interrupted_environments()
+    # 五分钟内已经接受的追问即使重启后过了禁言时间，也必须继续回答；
+    # 原始问题与回答状态均以账号隔离的持久发言账本为准。
+    try:
+        from sqlalchemy.orm import sessionmaker
+
+        from app.agents.discussion_bus import DiscussionBus
+        from app.services.roundtable_followup_service import resume_pending_followups
+
+        roundtable_bus = DiscussionBus.instance()
+        with _SessionLocal() as _roundtable_db:
+            roundtable_bus.enable_persistence(sessionmaker(
+                bind=_roundtable_db.get_bind(), expire_on_commit=False,
+            ))
+        await resume_pending_followups(roundtable_bus)
+    except Exception:  # noqa: BLE001 - 启动后用户重连仍可恢复，不阻断其它业务
+        from loguru import logger as _logger
+
+        _logger.exception("[startup] 圆桌追问自动续答失败；用户重连时仍可恢复")
     try:
         yield
     finally:

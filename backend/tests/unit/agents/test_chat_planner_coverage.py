@@ -130,6 +130,21 @@ def test_collect_tools_filters_non_invocable_and_builds_prompt(monkeypatch: pyte
     assert "不要先调用 list_code_files" in prompt
 
 
+def test_planner_preserves_user_constraints_after_legacy_prefix() -> None:
+    """第二层规划必须看到第 500 字之后的账号和审批约束。"""
+    planner = ChatPlanner(_privileged_planning_agent())
+    message = "背景" * 300 + "\n必须先由管理员审批，且禁止读取其他账号的数据"
+
+    prompt = planner._build_plan_prompt(
+        {"intent": "start_review", "reason": "requested", "payload": {"project_id": 7}},
+        [],
+        message,
+    )
+
+    assert message in prompt
+    assert "必须先由管理员审批" in prompt
+
+
 def test_collect_tools_degrades_to_fixed_tools_when_registry_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """SkillRegistry 故障时仍应返回 Orchestrator 固定工具。"""
     monkeypatch.setattr(SkillRegistry, "instance", FailingSkillRegistry.instance)

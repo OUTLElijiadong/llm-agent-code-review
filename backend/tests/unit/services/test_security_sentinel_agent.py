@@ -938,7 +938,9 @@ def test_adaptive_split_counts_parent_and_children_without_duplicate_chars(monke
     assert "".join(part.text for leaf, _chunk in result.leaves for part in leaf) == file.content
 
 
-@pytest.mark.parametrize("failure_kind", ["invalid_schema", "invalid_json"])
+@pytest.mark.parametrize("failure_kind", [
+    "invalid_schema", "invalid_json", "input_exceeds_context",
+])
 def test_adaptive_split_recovers_contract_failure_without_duplicate_ledger(
     monkeypatch,
     failure_kind,

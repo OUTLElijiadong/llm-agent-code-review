@@ -162,11 +162,9 @@ class EvolutionSelfImprovementSkill(SelfImprovementSkill):
 
         proposals: List[Dict[str, Any]] = []
         for exp in experiences[: self.max_new_rules]:
-            try:
-                rule = distiller(exp)
-            except Exception as e:
-                logger.warning(f"[{self.name}] 规则蒸馏失败,跳过: {e}")
-                continue
+            # 模型或上下文失败不能伪装成「没有新规则」。交给 evolve() 的
+            # 统一失败路径，避免把未覆盖的高权重经验报告为成功处理。
+            rule = distiller(exp)
             if not rule or not rule.get("rule_code") or not rule.get("rule_content"):
                 continue
             if rule["rule_code"] in existing_codes:

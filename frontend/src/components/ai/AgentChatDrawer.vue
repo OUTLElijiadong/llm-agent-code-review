@@ -4,7 +4,7 @@ import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument,
 
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
-import { cancelAgentResponseRun, getAgentResponseSession, type AgentResponseImageAsset } from '@/api/agentResponses'
+import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseImageAsset, type AgentResponseSession } from '@/api/agentResponses'
 import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
@@ -25,6 +25,7 @@ import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
 import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
 import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { notifyRoundtableToolCompleted } from '@/utils/roundtableNotifications'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
   extractAgentNavigations,
@@ -53,6 +54,7 @@ import {
   isAgentResponseSessionWaiting,
 } from '@/utils/agentResponseSession'
 import { normalizeAgentText } from '@/utils/agentText'
+import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
 import {
   agentMeshToolCalls,
@@ -168,6 +170,10 @@ const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审
 const QUICK_QUESTIONS = ['帮我发起代码审查', '查看我的项目', '有什么安全问题']
 
 const messages = ref<ChatMessage[]>([])
+const historyWindow = new AgentSessionHistoryWindow()
+const historyHasMore = ref(false)
+const historyLoading = ref(false)
+let latestHistorySession: AgentResponseSession | null = null
 const inputText = ref('')
 const loading = ref(false)
 const showTyping = ref(false)
@@ -437,6 +443,9 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollStopped = false
   sessionSnapshotSignature = ''
   sessionRestoreStarted = false
+  latestHistorySession = null
+  historyHasMore.value = false
+  historyLoading.value = false
   sessionId.value = nextSessionId
   const scopeCurrent = chatScope.capture()
   // 每个会话独立保留草稿；页面刷新后切回仍可继续编辑。
@@ -488,6 +497,43 @@ function restoredMessages(
   restoredTime: string,
 ): ChatMessage[] {
   return restoredSessionMessages(session, restoredTime, loadAgentChatSnapshot(session.session_id, chatStorageKey.value)?.messages)
+}
+
+function withLoadedHistory(session: AgentResponseSession): AgentResponseSession {
+  const page = session.history_page ?? {
+    oldest_message_index: 0, total: session.messages.length, has_more: false,
+  }
+  historyWindow.apply(`${chatStorageKey.value}:${session.session_id}`, { ...page, messages: session.messages })
+  historyHasMore.value = historyWindow.hasMore
+  latestHistorySession = session
+  return { ...session, messages: historyWindow.messages }
+}
+
+async function loadOlderHistory(): Promise<void> {
+  if (!historyHasMore.value || historyLoading.value || loading.value || sessionRestoring.value || sessionBusy.value) return
+  const scopeCurrent = chatScope.capture()
+  const requestedSessionId = sessionId.value
+  const before = historyWindow.oldestMessageIndex
+  const area = chatBody.value
+  const oldHeight = area?.scrollHeight ?? 0
+  const oldTop = area?.scrollTop ?? 0
+  historyLoading.value = true
+  try {
+    const page = await getAgentResponseSessionMessages('user', requestedSessionId, before)
+    if (!scopeCurrent() || requestedSessionId !== sessionId.value) return
+    historyWindow.apply(`${chatStorageKey.value}:${requestedSessionId}`, page)
+    historyHasMore.value = historyWindow.hasMore
+    if (latestHistorySession) {
+      const restored = restoredMessages({ ...latestHistorySession, messages: historyWindow.messages }, '')
+      messages.value = [welcomeMessage(), ...restored]
+      await nextTick()
+      if (area) area.scrollTop = oldTop + area.scrollHeight - oldHeight
+    }
+  } catch (error) {
+    if (scopeCurrent()) ElMessage.error(actionableError(error, '读取更早消息失败').message)
+  } finally {
+    if (scopeCurrent()) historyLoading.value = false
+  }
 }
 
 function persistedTeamBuckets(
@@ -628,7 +674,7 @@ async function restoreSession(): Promise<void> {
     if (session.run?.model) modelName.value = session.run.model
     // 服务端检查点没有逐条消息时间，不能用整轮更新时间冒充发送时间。
     const restoredTime = ''
-    const restored = restoredMessages(session, restoredTime)
+    const restored = restoredMessages(withLoadedHistory(session), restoredTime)
     // 服务端恢复出历史时,按欢迎语+历史整体重建,避免与本地占位重复
     if (restored.length) messages.value = [welcomeMessage(), ...restored]
     sessionSnapshotSignature = JSON.stringify({
@@ -904,7 +950,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       if (signature !== sessionSnapshotSignature) {
         sessionSnapshotSignature = signature
         const restoredTime = ''
-        const restored = restoredMessages(session, restoredTime)
+        const restored = restoredMessages(withLoadedHistory(session), restoredTime)
         // 轮询恢复快照:欢迎语置顶 + 服务端历史,替换本地占位
         messages.value = restored.length ? [welcomeMessage(), ...restored] : restored
         const pending = session.pending
@@ -1025,7 +1071,11 @@ async function retryLastAction(): Promise<void> {
       action: 'start',
       surface: 'user',
       session_id: sessionId.value,
-      messages: conversationHistory(),
+      messages: [{
+        role: 'user', content: lastUserMessage.content,
+        ...(lastUserMessage.images?.length ? { images: lastUserMessage.images } : {}),
+      }],
+      use_server_history: true,
     })
     return
   }
@@ -1241,7 +1291,7 @@ async function retryRun(): Promise<void> {
     action: 'retry',
     surface: 'user',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: runId,
   })
 }
@@ -1330,6 +1380,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
+        notifyRoundtableToolCompleted(event, userStore.profile?.id)
         if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
           lastActiveToolName.value = event.tool_name
           // 页面操作类工具:点亮全屏彩框 + 虚拟鼠标;targetHint 携带目标路由,
@@ -1812,11 +1863,13 @@ async function sendMessage(): Promise<void> {
     return
   }
 
+  const currentUserMessage = [...conversationHistory()].reverse().find((item) => item.role === 'user')
   await runResponse({
     action: 'start',
     surface: 'user',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: currentUserMessage ? [currentUserMessage] : [],
+    use_server_history: true,
   })
 }
 
@@ -1842,7 +1895,7 @@ async function decideApproval(
     action,
     surface: 'user',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: approval.run_id,
     call_id: approval.call_id,
     confirmation,
@@ -1875,7 +1928,7 @@ async function submitInput(message: ChatMessage, selectedAnswer?: string): Promi
     action: 'answer',
     surface: 'user',
     session_id: sessionId.value,
-    messages: conversationHistory(),
+    messages: [],
     run_id: request.run_id,
     call_id: request.call_id ?? '',
     answer,
@@ -2143,7 +2196,8 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
     action: 'start',
     surface: 'user',
     session_id: sessionId.value,
-    messages: [...conversationHistory(), {
+    use_server_history: true,
+    messages: [{
       role: 'user',
       content: buildAutoValidationPrompt(projectId, uploadedLanguage, projectName),
     }],
@@ -2212,6 +2266,10 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   sessionPollStopped = true
   invalidateSessionPoll()
   sessionId.value = ''
+  historyWindow.reset('')
+  latestHistorySession = null
+  historyHasMore.value = false
+  historyLoading.value = false
   inputText.value = ''
   messages.value = []
   meshSessions.value = []
@@ -2421,6 +2479,9 @@ onMounted(() => {
             </Transition>
 
             <div ref="chatBody" class="chat-body" :class="{ 'is-restoring': sessionRestoring }" @click="onMessageClick">
+            <button v-if="historyHasMore" class="history-load-button" type="button"
+              :disabled="historyLoading || loading || sessionRestoring || sessionBusy"
+              @click="loadOlderHistory">{{ historyLoading ? '正在读取…' : '加载更早消息' }}</button>
             <div v-for="(msg, i) in messages" :key="msg.id ?? i" class="msg-row" :class="[msg.role, { 'has-timeline': msg.toolCalls?.length || msg.auditPhases?.length }]">
               <div class="msg-avatar">
                 <template v-if="msg.role === 'user'">U</template>
@@ -3257,6 +3318,18 @@ onMounted(() => {
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
 }
+
+.history-load-button {
+  align-self: center;
+  min-height: 36px;
+  padding: 7px 16px;
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--brand-600);
+  cursor: pointer;
+}
+.history-load-button:disabled { cursor: wait; opacity: 0.6; }
 
 /* 恢复历史时整片渲染,跳过入场动画避免整屏闪烁 */
 .chat-body.is-restoring .msg-bubble,

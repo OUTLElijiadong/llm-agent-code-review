@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Optional
@@ -77,8 +78,20 @@ _ORCHESTRATOR_PROMPT = (
     "基础角色 whitebox/blackbox/verify/report 始终保留;根据证据追加专项角色,可选:"
     "sast(有源码/静态审计证据), dast(有运行态注入/探测证据), injection(有注入探测证据), "
     "dependency(有依赖清单或补全记录), penetration(应用稳定运行且证据充分)。"
-    "输出 JSON: {'extra_roles':['...']} 最多追加 3 个;不确定时输出 {'extra_roles':[]}。"
+    '输出 JSON: {"extra_roles":["..."]} 最多追加 3 个;不确定时输出 {"extra_roles":[]}。'
 )
+_EVIDENCE_COMPRESSION_PROMPT = (
+    "你是测试证据压缩 Agent。只压缩当前编号的原始证据片段，不推断其它片段。"
+    "保留所有失败状态、数字、文件路径、行号、测试计数、实际请求与响应；"
+    "不确定写明。只返回 JSON 对象："
+    '{"summary":"不超过2000字的事实摘要","anchors":["原文逐字短引"],'
+    '"coverage_complete":true}。'
+    "anchors 至少一条且必须逐字来自输入片段；如果无法在预算内覆盖该片段全部关键事实，"
+    "将 coverage_complete 设为 false，不能隐瞒。"
+)
+_EVIDENCE_DIRECT_CHARS = 60_000
+_EVIDENCE_CHUNK_CHARS = 24_000
+_MAX_EVIDENCE_CHUNKS = 32
 
 _QUERIES = {
     "whitebox": "白盒编译 静态检查 单元测试 跳过 警告 修复方向",
@@ -96,8 +109,8 @@ _QUERIES = {
 class TestReviewReporterAgent(BaseAgent):
     """黑白盒测试结论 → 多 Agent 结构化中文审查报告。
 
-    四角色 Whitebox/Blackbox/Verify/Report 各自一次 LLM 调用(≤4 次),
-    由 sandbox_service 在测试终态后调用;任一角色失败静默降级,不阻断测试结论。
+    四角色 Whitebox/Blackbox/Verify/Report 由 sandbox_service 在测试终态后调用。
+    任一必需角色失败时不输出貌似完整的 AI 报告，由上层使用确定性报告兜底。
     """
 
     name = "test_reviewer"
@@ -108,7 +121,7 @@ class TestReviewReporterAgent(BaseAgent):
     skills = ("白盒结论审查", "黑盒冒烟审查", "对抗复检", "测试报告生成", "攻击面待验证清单")
 
     def __init__(self) -> None:
-        # 报告输出预算顶到 DeepSeek 输出上限(65536),输入由 BaseAgent 按 1M 窗口投影。
+        # 报告输出预算顶到 DeepSeek 输出上限；输入超窗由 BaseAgent 显式拒绝。
         from app.core.config import settings
         super().__init__(system_prompt="", temperature=0.2,
                          max_tokens=min(65536, int(settings.deepseek_max_output_tokens)))
@@ -118,7 +131,7 @@ class TestReviewReporterAgent(BaseAgent):
     def _redact(value: Any, depth: int = 0) -> Any:
         """防止把密钥/Token 写进报告或发给 LLM。"""
         if depth > 6:
-            return "..."
+            raise ValueError("测试证据嵌套超过脱敏深度，不能生成覆盖不完整的报告")
         if isinstance(value, dict):
             out = {}
             for key, item in value.items():
@@ -128,9 +141,11 @@ class TestReviewReporterAgent(BaseAgent):
                     out[key] = TestReviewReporterAgent._redact(item, depth + 1)
             return out
         if isinstance(value, list):
-            return [TestReviewReporterAgent._redact(v, depth + 1) for v in value[:50]]
+            return [TestReviewReporterAgent._redact(v, depth + 1) for v in value]
         if isinstance(value, str):
-            return value[:4000]
+            from app.services.agent_responses_service import redact_agent_output_text
+
+            return redact_agent_output_text(value)
         return value
 
     def _knowledge_refs(self, db: Session, owner_id: int, stage: str) -> str:
@@ -168,6 +183,81 @@ class TestReviewReporterAgent(BaseAgent):
                 merged.update(facts)
         return merged
 
+    @staticmethod
+    def _failed_role(name: str, result: AgentResult) -> AgentResult:
+        return AgentResult(
+            success=False,
+            error=f"{name}角色未完成，不能生成覆盖完整的 AI 报告: {result.error or '空输出'}",
+            failure_kind=result.failure_kind or "incomplete_response",
+            finish_reason=result.finish_reason,
+        )
+
+    def _compact_evidence(
+        self,
+        evidence: str,
+        ctx: Optional[AgentContext],
+    ) -> AgentResult:
+        """长证据逐片模型压缩，验证每片的来源、引文和覆盖声明。"""
+        if len(evidence) <= _EVIDENCE_DIRECT_CHARS:
+            return AgentResult(success=True, data={"text": evidence, "sources": []})
+        if len(evidence) > _EVIDENCE_CHUNK_CHARS * _MAX_EVIDENCE_CHUNKS:
+            return AgentResult(
+                success=False,
+                error="测试证据超过分段压缩请求预算；原文未被截断发送",
+                failure_kind="input_exceeds_context",
+            )
+        sections: list[str] = []
+        sources: list[str] = []
+        for index, start in enumerate(range(0, len(evidence), _EVIDENCE_CHUNK_CHARS), start=1):
+            end = min(len(evidence), start + _EVIDENCE_CHUNK_CHARS)
+            source = evidence[start:end]
+            digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            source_id = f"evidence:{index} chars={start}:{end} sha256={digest} scope=redacted"
+            result = self._role_call(
+                _EVIDENCE_COMPRESSION_PROMPT,
+                f"source={source_id}\n原始片段:\n{source}",
+                ctx,
+                max_tokens=4096,
+            )
+            if not result.success:
+                return self._failed_role(f"证据压缩片段 {index}", result)
+            try:
+                item = json.loads(result.data) if isinstance(result.data, str) else result.data
+            except (TypeError, ValueError):
+                item = None
+            if not isinstance(item, dict) or item.get("coverage_complete") is not True:
+                return AgentResult(
+                    success=False,
+                    error=f"证据压缩片段 {index} 未确认覆盖，不能生成完整 AI 报告",
+                    failure_kind="coverage_incomplete",
+                )
+            summary = item.get("summary")
+            anchors = item.get("anchors")
+            if (
+                not isinstance(summary, str) or not summary.strip() or len(summary) > 2_000
+                or not isinstance(anchors, list) or not 1 <= len(anchors) <= 10
+                or any(not isinstance(quote, str) or not quote or len(quote) > 160 or quote not in source
+                       for quote in anchors)
+            ):
+                return AgentResult(
+                    success=False,
+                    error=f"证据压缩片段 {index} 的摘要或原文锚点不符合契约",
+                    failure_kind="invalid_schema",
+                )
+            sources.append(source_id)
+            sections.append(
+                f"source={source_id}\n{summary.strip()}\n"
+                + "\n".join(f"原文锚点：{quote}" for quote in anchors)
+            )
+        return AgentResult(
+            success=True,
+            data={
+                "text": "【分段压缩证据；摘要非无损，精确结论须引用下列原文锚点】\n"
+                + "\n\n".join(sections),
+                "sources": sources,
+            },
+        )
+
     # ── 主入口 ────────────────────────────────────────────
     def review(
         self,
@@ -183,8 +273,11 @@ class TestReviewReporterAgent(BaseAgent):
 
         owner_id = int(getattr(environment, "owner_id", 0) or 0)
         mode = str(getattr(environment, "test_mode", "") or "combined")
-        safe_conclusion = self._redact(conclusion)
-        facts = self._collect_facts(conclusion)
+        try:
+            safe_conclusion = self._redact(conclusion)
+            facts = self._redact(self._collect_facts(conclusion))
+        except ValueError as exc:
+            return AgentResult(success=False, error=str(exc), failure_kind="evidence_unavailable")
         env_brief = {
             "public_id": getattr(environment, "public_id", ""),
             "purpose": getattr(environment, "purpose", ""),
@@ -197,7 +290,7 @@ class TestReviewReporterAgent(BaseAgent):
         blackbox_signals = []
         full_log = ""
         try:
-            wr = (conclusion.get("evidence") or {}).get("worker_result") or {}
+            wr = (safe_conclusion.get("evidence") or {}).get("worker_result") or {}
             full_log = str((wr.get("logs") or {}).get("text") or "")
         except Exception:
             pass
@@ -213,6 +306,11 @@ class TestReviewReporterAgent(BaseAgent):
             },
             ensure_ascii=False, default=str,
         )
+        compressed = self._compact_evidence(evidence, ctx)
+        if not compressed.success:
+            return compressed
+        source_rows = compressed.data["sources"]
+        evidence = compressed.data["text"]
 
         roles: dict[str, Any] = {}
         # 1) 白盒角色
@@ -221,68 +319,83 @@ class TestReviewReporterAgent(BaseAgent):
             "请审查白盒测试证据并输出 ## 白盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "whitebox"),
             ctx,
         )
-        roles["whitebox"] = {"ok": wb.success, "text": (wb.data or "")[:16000] if wb.success else f"未执行: {wb.error}"}
+        if not wb.success or not isinstance(wb.data, str) or not wb.data.strip():
+            return self._failed_role("白盒", wb)
+        roles["whitebox"] = {"ok": wb.success, "text": (wb.data or "") if wb.success else f"未执行: {wb.error}"}
         # 2) 黑盒角色
         bb = self._role_call(
             _BLACKBOX_PROMPT,
             "请审查黑盒/冒烟测试证据并输出 ## 黑盒结果 小节:\n" + evidence + self._knowledge_refs(db, owner_id, "blackbox"),  # noqa: E501
             ctx,
         )
-        roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "")[:16000] if bb.success else f"未执行: {bb.error}"}
+        if not bb.success or not isinstance(bb.data, str) or not bb.data.strip():
+            return self._failed_role("黑盒", bb)
+        roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "") if bb.success else f"未执行: {bb.error}"}
         # 3) 对抗复检角色(gate:无证据降级)
         vf = self._role_call(
             _VERIFY_PROMPT,
-            "白盒草稿:\n" + str(roles["whitebox"]["text"])[:16000]
-            + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])[:16000]
+            "白盒草稿:\n" + str(roles["whitebox"]["text"])
+            + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])
             + "\n\n原始证据:\n" + evidence
             + self._knowledge_refs(db, owner_id, "verify"),
             ctx,
         )
-        roles["verify"] = {"ok": vf.success, "text": (vf.data or "")[:16000] if vf.success else f"未执行: {vf.error}"}
+        if not vf.success or not isinstance(vf.data, (str, dict)) or not vf.data:
+            return self._failed_role("对抗复检", vf)
+        roles["verify"] = {"ok": vf.success, "text": (vf.data or "") if vf.success else f"未执行: {vf.error}"}
         # 4) 编排 Agent 按证据追加专项角色(SAST/DAST/注入/依赖/渗透),失败则保持基础四角色
         extra_roles: list[str] = []
         try:
             orch = self._role_call(
                 _ORCHESTRATOR_PROMPT,
-                "测试证据:\n" + evidence[:12000] + self._knowledge_refs(db, owner_id, "report"),
+                "测试证据:\n" + evidence + self._knowledge_refs(db, owner_id, "report"),
                 ctx,
                 max_tokens=1024,
             )
+            if not orch.success:
+                return self._failed_role("动态编排", orch)
             orch_data = orch.data if isinstance(orch.data, dict) else None
             if orch.success and orch_data is None and isinstance(orch.data, str) and orch.data.strip():
                 try:
                     orch_data = json.loads(orch.data)
                 except (ValueError, TypeError):
                     orch_data = None
-            if isinstance(orch_data, dict) and isinstance(orch_data.get("extra_roles"), list):
-                extra_roles = [
-                    str(r).strip() for r in orch_data["extra_roles"]
-                    if isinstance(r, str) and r.strip() in _EXTRA_ROLE_PROMPTS
-                ][:3]
+            if not isinstance(orch_data, dict) or not isinstance(orch_data.get("extra_roles"), list):
+                return AgentResult(success=False, error="动态编排角色输出无效", failure_kind="invalid_schema")
+            if len(orch_data["extra_roles"]) > 3:
+                return AgentResult(success=False, error="动态编排返回超过 3 个专项角色", failure_kind="output_limited")
+            extra_roles = [
+                str(r).strip() for r in orch_data["extra_roles"]
+                if isinstance(r, str) and r.strip() in _EXTRA_ROLE_PROMPTS
+            ]
+            if len(extra_roles) != len(orch_data["extra_roles"]):
+                return AgentResult(success=False, error="动态编排包含未知专项角色", failure_kind="invalid_schema")
         except (ValueError, TypeError):
-            extra_roles = []
+            return AgentResult(success=False, error="动态编排角色结果无法解析", failure_kind="invalid_schema")
         for role_name in extra_roles:
             prompt = _EXTRA_ROLE_PROMPTS[role_name]
             rr = self._role_call(
                 prompt,
-                "请审查对应证据并输出小节:\n" + evidence[:16000]
+                "请审查对应证据并输出小节:\n" + evidence
                 + self._knowledge_refs(db, owner_id, role_name),
                 ctx,
             )
+            if not rr.success or not isinstance(rr.data, str) or not rr.data.strip():
+                return self._failed_role(role_name, rr)
             roles[role_name] = {
                 "ok": rr.success,
-                "text": (rr.data or "")[:16000] if rr.success else f"未执行: {rr.error}",
+                "text": (rr.data or "") if rr.success else f"未执行: {rr.error}",
             }
         # 5) 报告角色(七段报告在大量语法错误时输出较长,用满输出预算防截断)
         extra_conclusions = "".join(
-            f"\n\n{role_name}专项结论:\n" + str(roles[role_name]["text"])[:16000]
+            f"\n\n{role_name}专项结论:\n" + str(roles[role_name]["text"])
             for role_name in extra_roles
         )
         rp = self._role_call(
             _REPORT_PROMPT,
-            "白盒结论:\n" + str(roles["whitebox"]["text"])[:16000]
-            + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:16000]
-            + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:16000]
+            "白盒结论:\n" + str(roles["whitebox"]["text"])
+            + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])
+            + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])
             + extra_conclusions
             + "\n\n原始证据:\n" + evidence
             + self._knowledge_refs(db, owner_id, "report"),
@@ -290,22 +403,6 @@ class TestReviewReporterAgent(BaseAgent):
             max_tokens=self._max_tokens,
         )
         roles["report"] = {"ok": rp.success, "text": ""}
-
-        # 截断兜底:8192 仍截断时降级为精简重试(只求核心三段),保证总能产出报告
-        if (not rp.success or not (isinstance(rp.data, str) and rp.data.strip())) and rp.finish_reason == "length":
-            extra_short = "".join(
-                f"\n\n{role_name}专项结论(精简):\n" + str(roles[role_name]["text"])[:1500]
-                for role_name in extra_roles
-            )
-            rp = self._role_call(
-                _REPORT_PROMPT + "\n(上次输出超长被截断。本次只输出 ## 总体结论 / ## 问题清单 / ## 下一步建议 三段,问题清单最多列15条。)",  # noqa: E501
-                "白盒结论:\n" + str(roles["whitebox"]["text"])[:2000]
-                + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])[:2000]
-                + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])[:2000]
-                + extra_short,
-                ctx,
-                max_tokens=8192,
-            )
 
         if not rp.success or not isinstance(rp.data, str) or not rp.data.strip():
             return AgentResult(
@@ -316,6 +413,13 @@ class TestReviewReporterAgent(BaseAgent):
         report_md = rp.data.strip()
         if "## 总体结论" not in report_md:
             report_md = "## 总体结论\n（模型输出缺少固定段首,以下为原始内容）\n\n" + report_md
+        if source_rows:
+            report_md += (
+                "\n\n### 证据压缩来源\n"
+                "模型摘要已逐片处理并校验引用锚点；摘要不能证明语义无损，"
+                "关键结论应回查沙箱原始证据。\n"
+                + "\n".join(f"- {source}" for source in source_rows)
+            )
         roles["report"]["text"] = "已生成"
         executed = sum(1 for r in roles.values() if r.get("ok"))
         return AgentResult(

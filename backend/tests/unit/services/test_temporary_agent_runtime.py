@@ -146,6 +146,122 @@ def test_multiple_files_infer_same_project_and_report_count(db, actor, model):
     assert "eval(value)" in model[0][0]["message"] and "print('second')" in model[0][0]["message"]
 
 
+def test_two_accessible_projects_cannot_be_combined_under_one_file_scope(db, actor, model):
+    db.add_all([
+        Project(id=813, user_id=actor.id, project_name="另一个自有项目", status="active"),
+        CodeFile(id=814, project_id=813, file_name="other.py", language="python",
+                 content="print('other')", status="active", is_binary=0),
+    ])
+    db.commit()
+    result = run(db, actor, {"file_ids": [811, 814]})
+    assert result["status"] == "blocked" and not model[0]
+
+
+def test_more_than_twenty_completed_dependencies_are_all_included(db, actor, model):
+    dependencies = {
+        f"prior_{index}": {"status": "completed", "result": {"summary": f"依赖结论 {index}"}}
+        for index in range(25)
+    }
+    dependencies["prior_24"]["result"]["detail"] = "d" * 13_000 + "LAST_DEPENDENCY_EVIDENCE"
+    result = run(db, actor, {"dependency_context": dependencies})
+    assert result["status"] == "completed"
+    sources = json.loads(model[0][0]["message"])["sources"]
+    assert len([source for source in sources if source["type"] == "dependency_result"]) == 25
+    assert "LAST_DEPENDENCY_EVIDENCE" in sources[-1]["text"]
+    assert result["coverage"]["dependency_count"] == result["coverage"]["included_dependency_count"] == 25
+    assert result["coverage"]["complete"] is True and result["coverage"]["truncated"] is False
+
+
+def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, actor, model, monkeypatch):
+    import hashlib
+
+    first = "first\n" + "x" * 70_000 + "FIRST_TAIL_RISK"
+    second = "second\n" + "y" * 70_000 + "SECOND_TAIL_RISK"
+    db.query(CodeFile).filter_by(id=811).update({"content": first})
+    db.add(CodeFile(id=813, project_id=811, file_name="second.py", language="python",
+                    content=second, status="active", is_binary=0))
+    db.commit()
+    map_calls = []
+    final_calls = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            map_calls.append(part)
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": f"已读取 {part['part_id']}；末尾 {part['text'][-32:]}",
+            }, usage_log_ids=[1000 + len(map_calls)], http_attempts=1)
+        final_calls.append(json.loads(message))
+        return AgentResult(success=True, data={"summary": "完成所选文件分析", "findings": [], "limitations": []},
+                           usage_log_ids=[2000], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_ids": [811, 813]})
+    assert result["status"] == "completed" and len(final_calls) == 1
+    assert result["coverage"]["included_file_ids"] == [811, 813]
+    assert result["coverage"]["source_chars_included"] == len(first) + len(second)
+    assert result["coverage"]["complete"] is True and result["coverage"]["truncated"] is False
+    assert result["coverage"]["compressed"] is True
+    assert result["coverage"]["source_parts"] == result["coverage"]["covered_source_parts"] == len(map_calls)
+    assert len(map_calls) == 18
+    assert any("FIRST_TAIL_RISK" in part["text"] for part in map_calls)
+    assert any("SECOND_TAIL_RISK" in part["text"] for part in map_calls)
+    files = [source for source in final_calls[0]["sources"] if source["type"] == "source_file"]
+    assert {source["id"]: source["sha256"] for source in files} == {
+        "file:811": hashlib.sha256(first.encode()).hexdigest(),
+        "file:813": hashlib.sha256(second.encode()).hexdigest(),
+    }
+    assert all(len(source["summary_parts"]) == 9 for source in files)
+    assert result["usage_log_ids"] == [*(1000 + index for index in range(1, 19)), 2000]
+    assert result["http_attempts"] == 19
+
+
+@pytest.mark.parametrize("failure", ["missing_part", "length"])
+def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, model, monkeypatch, failure):
+    db.query(CodeFile).filter_by(id=811).update({"content": "x" * 70_000})
+    db.commit()
+    calls = []
+
+    def answer(instance, message, **kwargs):
+        calls.append(message)
+        assert kwargs.get("system_prompt")
+        part = json.loads(message)
+        if failure == "length":
+            return AgentResult(success=False, failure_kind="output_truncated",
+                               usage_log_ids=[1901], http_attempts=1)
+        return AgentResult(success=True, data={"part_id": "wrong", "part_sha256": part["part_sha256"],
+                                               "summary": "不完整覆盖"}, usage_log_ids=[1901], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    monkeypatch.setattr(runtime, "enrich_recorded_usage", lambda *args, **kwargs: None)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "failed" and result["retryable"] is False
+    assert result["usage_log_ids"] == [1901] and result["http_attempts"] == 1
+    assert len(calls) == 1
+
+
+def test_source_change_after_first_compaction_call_blocks_remaining_calls(db, actor, model, monkeypatch):
+    db.query(CodeFile).filter_by(id=811).update({"content": "x" * 70_000})
+    db.commit()
+    calls = []
+
+    def answer(instance, message, **kwargs):
+        calls.append(message)
+        part = json.loads(message)
+        db.query(CodeFile).filter_by(id=811).update({"content": "changed"}, synchronize_session=False)
+        db.commit()
+        return AgentResult(success=True, data={
+            "part_id": part["part_id"], "part_sha256": part["part_sha256"], "summary": "首片已读",
+        }, usage_log_ids=[1901], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["usage_log_ids"] == [1901] and result["http_attempts"] == 1
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -235,7 +351,7 @@ def test_current_permission_revocation_blocks_source_read(db, actor, model):
     assert not model[0]
 
 
-def test_project_analysis_reports_bounded_file_and_character_coverage(db, actor, model):
+def test_project_without_selection_over_five_blocks_instead_of_claiming_partial_success(db, actor, model):
     db.query(CodeFile).filter_by(id=811).update({"content": "x" * 13000})
     for index in range(6):
         db.add(
@@ -250,13 +366,8 @@ def test_project_analysis_reports_bounded_file_and_character_coverage(db, actor,
         )
     db.commit()
     result = run(db, actor, {"project_id": 811})
-    assert result["status"] == "completed"
-    coverage = result["coverage"]
-    assert coverage["total_files"] == 7 and len(coverage["included_file_ids"]) <= 5
-    assert coverage["source_chars_included"] <= 60000
-    assert coverage["truncated"] is True and coverage["complete"] is False
-    assert result["limitations"]
-    assert len(model[0][0]["message"]) <= 60000
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert "显式选择" in result["summary"] and not model[0]
 
 
 def test_incomplete_dependency_never_claims_completed(db, actor, model):
@@ -474,9 +585,11 @@ def test_cancelled_team_discards_successful_model_result(db, actor, model, monke
     assert "STALE_MODEL_CONCLUSION" not in json.dumps(result)
 
 
-def test_oversized_user_input_is_explicitly_blocked(db, actor, model):
-    result = run(db, actor, {"question": "大" * 70000})
-    assert result["status"] == "blocked"
+def test_input_over_compaction_capacity_fails_before_any_model_call(db, actor, model):
+    result = run(db, actor, {"question": "大" * (runtime.SOURCE_PART_CHARS * 34)})
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "context_capacity_exceeded"
+    assert result["retryable"] is False
     assert not model[0]
 
 

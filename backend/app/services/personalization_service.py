@@ -26,8 +26,8 @@ def _kb_block(db: Session, user_id: int, query: str, top_k: int = 4,
         return ""
     lines = ["【该用户的个人知识库相关片段(RAG 检索)】"]
     for i, h in enumerate(hits, 1):
-        snippet = h["content"].strip().replace("\n", " ")[:300]
-        lines.append(f"{i}. (来源:{h['source_type']}/{h['title'][:30]}) {snippet}")
+        snippet = h["content"].strip().replace("\n", " ")
+        lines.append(f"{i}. (来源:{h['source_type']}/{h['title']},文档#{h['doc_id']}) {snippet}")
     return "\n".join(lines)
 
 
@@ -91,7 +91,9 @@ def assist_forum_draft(db: Session, user_id: int, title: str, draft: str) -> dic
     hits = knowledge_service.retrieve(db, user_id, query, top_k=4)
     references = [{"title": h["title"], "source_type": h["source_type"],
                   "score": h["score"]} for h in hits]
-    kb_text = "\n".join(f"- ({h['source_type']}) {h['content'][:200]}" for h in hits)
+    kb_text = "\n".join(
+        f"- ({h['source_type']}/{h['title']},文档#{h['doc_id']}) {h['content']}" for h in hits
+    )
     summary = profile_service.get_summary_text(db, user_id)
 
     try:

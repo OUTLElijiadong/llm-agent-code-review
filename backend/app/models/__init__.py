@@ -40,6 +40,7 @@ _MODEL_MODULES = (
     "review_rule",
     "review_task",
     "review_task_file",
+    "roundtable",
     "system_config",
     "user",
     "user_avatar",
