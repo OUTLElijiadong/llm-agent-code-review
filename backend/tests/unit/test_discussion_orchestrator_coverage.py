@@ -357,6 +357,79 @@ def test_parse_speaker_decision_supports_speech_silence_and_plain_text_fallback(
     assert fallback.content == "我补充第 12 行存在资源泄漏。"
 
 
+def test_parse_speaker_decision_recovers_only_complete_last_content_field() -> None:
+    """生产形态的未转义引号应保留完整正文，不把 JSON 外壳显示给用户。"""
+    raw = (
+        '{"action":"speak","stance":"supplement","reply_to":"security",'
+        '"content":"第 7 行变量 "a" 未校验，访问 ["data"] 会抛出异常；'
+        '请检查输入及回退路径。"}'
+    )
+
+    decision = module._parse_speaker_decision(raw)
+
+    assert decision.action == "speak"
+    assert decision.stance == "supplement"
+    assert decision.reply_to == "security"
+    assert decision.content == (
+        '第 7 行变量 "a" 未校验，访问 ["data"] 会抛出异常；'
+        '请检查输入及回退路径。'
+    )
+
+
+@pytest.mark.asyncio
+async def test_speaker_turn_publishes_recovered_body_not_raw_json() -> None:
+    """完整生产形态响应只发布专家正文，保留一次真实模型调用的元数据。"""
+    raw = (
+        '{"action":"speak","stance":"supplement","reply_to":"security",'
+        '"content":"第 7 行变量 "a" 未校验，访问 ["data"] 会抛出异常。"}'
+    )
+    metadata = {"model_name": "speaker-model"}
+    agent = RecordingAgent(responses=[(raw, metadata)])
+
+    decision, meta, ok = await _make_orchestrator()._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT, code="value = user_input",
+        language="python", file_name="test_auth.py", all_turns=[],
+        user_inputs=[], round_idx=1, speaker_idx=1,
+    )
+
+    assert ok and meta == metadata
+    assert decision.content == '第 7 行变量 "a" 未校验，访问 ["data"] 会抛出异常。'
+    assert decision.stance == "supplement"
+    assert decision.reply_to == "security"
+    assert len(agent.calls) == 1
+
+
+@pytest.mark.parametrize("raw", [
+    '{"action":"speak","content":"第 7 行变量 "a" 未校验',
+    '{"action":"speak","content":"第 7 行异常","extra":"更多证据 "x""}',
+    '{"action":"speak","content":"首段 "a"","extra":"第二段"}',
+    '{"action":"speak","content":"首段 "a"","更多":"第二段 "x""}',
+    '{"action":"speak","content":"首段 "a"","1extra":"第二段 "x""}',
+])
+def test_parse_speaker_decision_rejects_incomplete_or_ambiguous_structures(raw: str) -> None:
+    """不能把残缺对象或含后续字段的歧义对象当成有效发言。"""
+    with pytest.raises(ValueError, match="结构化发言格式无效"):
+        module._parse_speaker_decision(raw)
+
+
+@pytest.mark.asyncio
+async def test_speaker_turn_rejects_malformed_structured_response() -> None:
+    """无法可靠抽取正文时本轮失败，且不能向讨论发布原始 JSON。"""
+    raw = '{"action":"speak","content":"第 7 行变量 "a" 未校验'
+    agent = RecordingAgent(responses=[(raw, {"model_name": "speaker-model"})])
+
+    decision, meta, ok = await _make_orchestrator()._speaker_turn(
+        agent=agent, profile=SECURITY_AGENT, code="value = user_input",
+        language="python", file_name="test_auth.py", all_turns=[],
+        user_inputs=[], round_idx=1, speaker_idx=1,
+    )
+
+    assert not ok and meta is None
+    assert "结构化发言格式无效" in decision.content
+    assert raw not in decision.content
+    assert len(agent.calls) == 1
+
+
 def test_discussion_turn_serializes_decision_metadata() -> None:
     """讨论帧应携带自主决策、立场、回应对象和轮次。
 

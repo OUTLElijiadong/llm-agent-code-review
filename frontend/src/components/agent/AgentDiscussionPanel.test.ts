@@ -49,6 +49,21 @@ function turn(turnId: number, agentCode: string, seq = 0): DiscussionTurn {
   }
 }
 
+function followupQuestion(seq: number): DiscussionTurn {
+  return {
+    turn_id: -1, seq, agent_code: 'user', agent_name: '你', role: 'user',
+    content: `追问 ${seq}`, timestamp: `2026-09-24T09:01:${String(seq).padStart(2, '0')}Z`,
+  }
+}
+
+function followupAnswer(questionSeq: number, seq: number): DiscussionTurn {
+  return {
+    turn_id: questionSeq, seq, agent_code: 'orchestrator', agent_name: '主持人',
+    role: 'agent', round_index: -1, reply_to: 'user', content: `回复 ${questionSeq}`,
+    timestamp: `2026-09-24T09:02:${String(seq).padStart(2, '0')}Z`,
+  }
+}
+
 beforeEach(() => {
   discussionApi.detail.mockReset().mockResolvedValue({ turns: [], has_earlier: false, next_before_seq: null })
   streamMock.subscribe.mockReset()
@@ -172,6 +187,103 @@ it('报告完成后可在固定五分钟窗口追问，到期即禁言但历史�
   wrapper.unmount()
 })
 
+it('已落库追问逐条显示待答和不定进度，主持人按原问题 seq 回复后减少计数', async () => {
+  const progress = { phase: 'completed', completed_units: 13, total_units: 13,
+    current_round: 2, seq: 12, followup_start_seq: 13 }
+  const wrapper = mountPanel({
+    initialStatus: 'concluded', initialProgress: progress,
+    initialFollowupUntil: Date.now() / 1000 + 300,
+    initialTurns: [turn(13, 'orchestrator', 13), followupQuestion(14), followupQuestion(15)],
+  })
+  connected('connected')
+  await nextTick()
+  expect(wrapper.get('.followup-progress').text()).toContain('2 条待答')
+  expect(wrapper.get('.followup-progress [role="progressbar"]').attributes('aria-valuetext'))
+    .toBe('2 条追问等待主持人回复')
+  expect(wrapper.get('.typing-row').text()).toContain('主持人 · 正在处理 2 条追问')
+  expect(wrapper.get('.room-progress').text()).toContain('13 / 13')
+
+  receive({ type: 'discuss', session_id: 'disc-1', turn: followupAnswer(14, 16) })
+  await nextTick()
+  expect(wrapper.get('.followup-progress').text()).toContain('1 条待答')
+  expect(wrapper.get('.room-progress').text()).toContain('13 / 13')
+
+  ;(wrapper.vm as unknown as { nowSeconds: number }).nowSeconds = Date.now() / 1000 + 301
+  await nextTick()
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('.followup-progress').text()).toContain('1 条待答')
+  receive({ type: 'discuss', session_id: 'disc-1', turn: followupAnswer(15, 17) })
+  await nextTick()
+  expect(wrapper.find('.followup-progress').exists()).toBe(false)
+  expect(wrapper.find('.typing-row').exists()).toBe(false)
+  wrapper.unmount()
+})
+
+it('刷新与 WS 重连时由已存有序发言恢复追问等待状态，不把普通主持总结误认作追问回复', async () => {
+  const deadline = Date.now() / 1000 + 300
+  const progress = { phase: 'completed', completed_units: 13, total_units: 13,
+    current_round: 2, seq: 12, followup_start_seq: 13 }
+  const summary = turn(14, 'orchestrator', 14)
+  summary.turn_id = 15
+  summary.round_index = 2
+  const wrapper = mountPanel({
+    initialStatus: 'concluded', initialProgress: progress, initialFollowupUntil: deadline,
+    initialTurns: [summary, followupQuestion(15)],
+  })
+  expect(wrapper.get('.followup-progress').text()).toContain('1 条待答')
+  discussionApi.detail.mockResolvedValueOnce({
+    status: 'concluded', followup_until: deadline, progress,
+    turns: [summary, followupQuestion(15), followupAnswer(15, 16)],
+    has_earlier: false, next_before_seq: null,
+  })
+  connected('connected')
+  await flushPromises()
+  expect(wrapper.find('.followup-progress').exists()).toBe(false)
+  expect((wrapper.vm as unknown as { turns: DiscussionTurn[] }).turns.map((item) => item.seq))
+    .toEqual([14, 15, 16])
+  wrapper.unmount()
+})
+
+it('漏掉 session_end 后，REST 对账也能恢复报告后的待答追问', async () => {
+  const deadline = Date.now() / 1000 + 300
+  discussionApi.detail.mockResolvedValueOnce({
+    status: 'concluded', followup_until: deadline,
+    progress: { phase: 'completed', completed_units: 13, total_units: 13,
+      current_round: 2, seq: 13, followup_start_seq: 13 },
+    turns: [turn(13, 'orchestrator', 13), followupQuestion(14)],
+    has_earlier: false, next_before_seq: null,
+  })
+  const wrapper = mountPanel({ initialStatus: 'active' })
+  connected('connected')
+  await flushPromises()
+  expect(wrapper.get('.followup-progress').text()).toContain('1 条待答')
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeUndefined()
+  wrapper.unmount()
+})
+
+it('刷新时尾页超出追问起点，自动补较早页而不漏掉待答问题', async () => {
+  const deadline = Date.now() / 1000 + 300
+  const progress = { phase: 'completed', completed_units: 13, total_units: 13,
+    current_round: 2, seq: 13, followup_start_seq: 13 }
+  const later = Array.from({ length: 100 }, (_, index) => followupAnswer(index + 1000, index + 35))
+  const earlier = [followupQuestion(14), ...Array.from({ length: 20 }, (_, index) =>
+    followupAnswer(index + 2000, index + 15))]
+  discussionApi.detail
+    .mockResolvedValueOnce({ status: 'concluded', followup_until: deadline, progress,
+      turns: later, has_earlier: true, next_before_seq: 35 })
+    .mockResolvedValueOnce({ status: 'concluded', followup_until: deadline, progress,
+      turns: earlier, has_earlier: false, next_before_seq: null })
+  const wrapper = mountPanel({ initialStatus: 'concluded', initialProgress: progress,
+    initialFollowupUntil: deadline, initialTurns: later, initialHasEarlier: true })
+  expect(wrapper.get('.followup-progress').text()).toContain('正在核对较早的追问记录')
+  connected('connected')
+  await flushPromises()
+  expect(discussionApi.detail.mock.calls).toEqual([['disc-1', 100], ['disc-1', 100, 35]])
+  expect(wrapper.get('.followup-progress').text()).toContain('1 条待答')
+  expect(wrapper.get('.followup-progress').text()).not.toContain('至少')
+  wrapper.unmount()
+})
+
 it('运行时收到结束帧后以服务端期限开启追问，失败终态不可追问', async () => {
   const wrapper = mountPanel()
   connected('connected')
@@ -263,7 +375,9 @@ it('发言全完但报告未完成及失败终态都不把进度条画成 100%',
 it('已有报告但一轮发言截断时准确标为部分完成，保持禁言与覆盖门禁', async () => {
   const wrapper = mountPanel({
     initialStatus: 'concluded', initialReportTaskId: 185,
-    initialProgress: { phase: 'partial', completed_units: 13, total_units: 13, current_round: 2, seq: 12 },
+    initialProgress: { phase: 'partial', completed_units: 13, total_units: 13,
+      current_round: 2, seq: 12, followup_start_seq: 13 },
+    initialTurns: [followupQuestion(14)], initialHasEarlier: true,
   })
   connected('connected')
   await flushPromises()
@@ -271,6 +385,7 @@ it('已有报告但一轮发言截断时准确标为部分完成，保持禁言�
   expect(wrapper.get('.room-progress').text()).toContain('审查覆盖不完整')
   expect(wrapper.get('.room-progress-track > span').attributes('style')).not.toContain('100%')
   expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
+  expect(wrapper.find('.followup-progress').exists()).toBe(false)
   expect(wrapper.text()).toContain('查看报告')
   wrapper.unmount()
 })

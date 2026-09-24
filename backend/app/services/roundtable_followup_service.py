@@ -48,13 +48,14 @@ def _pending_questions(turns: list[DiscussionTurn], start_seq: int) -> list[Disc
 
 
 def _answer(session: DiscussionSession, turns: list[DiscussionTurn], question: DiscussionTurn) -> str:
-    """原始发言全量送入有来源校验的语义压缩，保留提问原文。"""
+    """每次按实际输出预算选择完整原文或有来源的压缩历史。"""
     from app.ai.discussion_orchestrator import (
         _build_discussion_agents,
         _call_raw_for_task,
         _compress_roundtable_history,
         _roundtable_history_records,
         _roundtable_input_budget_error,
+        estimate_tokens,
     )
 
     agent, _ = _build_discussion_agents(session.owner_user_id, ())
@@ -62,35 +63,58 @@ def _answer(session: DiscussionSession, turns: list[DiscussionTurn], question: D
     ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
     output_tokens = min(8192, ceiling)
     context_tokens = min(12000, max(1024, settings.deepseek_context_window_tokens // 4))
-    history = _compress_roundtable_history(
-        records, agent=agent, task_id=session.report_task_id,
-        user_id=session.owner_user_id, file_id=session.file_id,
-        target_tokens=context_tokens,
-    )
+    budgets = list(dict.fromkeys((output_tokens, min(16384, ceiling), min(32768, ceiling))))
+    if len(budgets) == 1:
+        budgets.append(budgets[0])  # 旧模型预算固定时，改用更简短的回答要求重试一次。
     system_prompt = (
-        "你是已完成代码审查圆桌的主持人。根据附有来源编号的完整历史投影"
+        "你是已完成代码审查圆桌的主持人。根据附有来源编号的完整历史记录或投影"
         "回答当前账号的追问。保留前文中的用户要求、反驳、代码位置和证据；"
         "不能凭空声称重新审查了代码、调用了工具或修改了已完成的报告。"
         "若证据不足，明确指出缺口。回答清晰、适度简洁，引用相关来源编号。"
     )
-    user_prompt = (
-        f"圆桌文件：{session.file_name}\n"
-        f"完整历史的来源压缩投影：\n{history}\n\n"
-        f"当前追问（发言序号 {question.seq}，原文）：\n{question.content}"
-    )
-    budgets = list(dict.fromkeys((output_tokens, min(16384, ceiling), min(32768, ceiling))))
-    if len(budgets) == 1:
-        budgets.append(budgets[0])  # 旧模型预算固定时，改用更简短的回答要求重试一次。
+
+    def build_user_prompt(history: str) -> str:
+        return (
+            f"圆桌文件：{session.file_name}\n"
+            f"完整历史的来源记录：\n{history}\n\n"
+            f"当前追问（发言序号 {question.seq}，原文）：\n{question.content}"
+        )
+
+    # 历史不超过专用预算且当前输出预算容得下时保留原文。生产 13 条发言
+    # 约 6.8k token，旧实现无条件压缩导致 12 次额外调用、追问等待约两分钟。
+    raw_history = "\n".join(f"【来源 {source_id}】\n{content}" for source_id, content in records)
+    raw_history_tokens = estimate_tokens(raw_history)
+    compressed_histories: dict[int, str] = {}
     for attempt, budget in enumerate(budgets):
         prompt = system_prompt + (
             "本次重试请压缩表述，优先保留结论、关键依据和来源编号，避免冗长逐字复述。"
             if attempt else ""
         )
+        user_prompt = build_user_prompt(raw_history)
         budget_error = _roundtable_input_budget_error(
             prompt, user_prompt, max_output_tokens=budget,
         )
-        if budget_error:
-            raise RuntimeError(budget_error)
+        if raw_history_tokens > context_tokens or budget_error:
+            available_history = (
+                settings.deepseek_context_window_tokens - budget - 1024
+                - estimate_tokens(prompt) - estimate_tokens(build_user_prompt(""))
+            )
+            if available_history <= 0:
+                raise RuntimeError(budget_error)
+            target_tokens = min(context_tokens, available_history)
+            if target_tokens not in compressed_histories:
+                compressed_histories[target_tokens] = _compress_roundtable_history(
+                    records, agent=agent, task_id=session.report_task_id,
+                    user_id=session.owner_user_id, file_id=session.file_id,
+                    target_tokens=target_tokens,
+                )
+            history = compressed_histories[target_tokens]
+            user_prompt = build_user_prompt(history)
+            budget_error = _roundtable_input_budget_error(
+                prompt, user_prompt, max_output_tokens=budget,
+            )
+            if budget_error:
+                raise RuntimeError(budget_error)
         try:
             reply, _ = _call_raw_for_task(
                 agent, session.report_task_id, session.owner_user_id,

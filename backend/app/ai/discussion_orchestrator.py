@@ -311,6 +311,41 @@ def _strip_json_fence(raw: str) -> str:
     return text
 
 
+def _recover_last_content_field(text: str) -> Optional[dict]:
+    """只恢复 `content` 为末字段且边界完整的非标准 JSON 发言。
+
+    模型偶尔在正文中直接写 `"a"` 或 `["data"]`，使整个对象无法被
+    ``json.loads`` 解析。仅解析正文之前的合法 JSON 对象前缀，并原样取出
+    `content` 起始引号与对象末尾闭合引号之间的正文；有后续字段或边界
+    不完整时拒绝恢复。
+    """
+    marker = re.search(r'"content"\s*:\s*"', text)
+    ending = re.search(r'"\s*}\s*$', text)
+    if not (text.startswith("{") and marker and ending):
+        return None
+    body = text[marker.end():ending.start()]
+    if not body or ending.start() <= marker.end():
+        return None
+    # 末尾的引号若被反斜杠转义，响应并没有完整的 content 闭合边界。
+    slash_count = len(body) - len(body.rstrip("\\"))
+    if slash_count % 2:
+        return None
+    # 此时无法区分额外字段与正文片段，保守失败而不是发布歧义文本。
+    if re.search(r'",\s*"[^"\r\n]+"\s*:', body):
+        return None
+    try:
+        prefix = json.loads(text[:marker.end()] + '"}')
+    except (TypeError, ValueError):
+        return None
+    if (
+        not isinstance(prefix, dict)
+        or prefix.get("content") != ""
+        or set(prefix) - {"action", "stance", "reply_to", "content"}
+    ):
+        return None
+    return {**prefix, "content": body}
+
+
 def _parse_speaker_decision(raw: str) -> SpeakerDecision:
     """把模型响应规范化为可执行的发言或静音决策。
 
@@ -318,15 +353,18 @@ def _parse_speaker_decision(raw: str) -> SpeakerDecision:
         raw: 模型返回的 JSON 或兼容旧版本的纯文本发言。
 
     Returns:
-        SpeakerDecision: 经过枚举校验和空值兜底的决策。JSON 解析失败时
-        将原始文本降级为中立发言，空文本降级为静音。
+        SpeakerDecision: 经过枚举校验和空值兜底的决策。旧版自然语言
+        响应仍可作为纯文本发言；不完整的结构化响应不能算作有效发言。
     """
     text = _strip_json_fence(raw)
     data: object
     try:
         data = json.loads(text)
     except (TypeError, ValueError, json.JSONDecodeError):
-        data = None
+        data = _recover_last_content_field(text)
+
+    if not isinstance(data, dict) and text.startswith(("{", "[")):
+        raise ValueError("模型返回结构化发言格式无效，未发布原始 JSON")
 
     if not isinstance(data, dict):
         if text:

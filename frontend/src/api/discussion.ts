@@ -33,6 +33,8 @@ export interface DiscussionProgress {
   current_round: number
   speaker_code?: string
   seq: number
+  /** 圆桌报告冻结后的最后一条已纳入输入的发言序号；之后的用户发言由主持人逐条回复。 */
+  followup_start_seq?: number
 }
 
 export interface DiscussionSessionSummary {

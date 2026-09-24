@@ -203,3 +203,78 @@ def test_followup_retries_length_with_more_output_budget(monkeypatch: pytest.Mon
     assert answer == "证据位于来源 1。"
     assert len(budgets) == 2
     assert budgets[1] >= budgets[0]
+
+
+@pytest.mark.parametrize(
+    "context_window,history_chars,expect_compression",
+    [(100_000, 6, False), (1_000_000, 10_000, True), (100_000, 50_000, True)],
+)
+def test_followup_keeps_complete_source_history_when_it_fits(
+    monkeypatch: pytest.MonkeyPatch, context_window: int, history_chars: int,
+    expect_compression: bool,
+):
+    from app.ai import discussion_orchestrator as orchestrator
+
+    bus = DiscussionBus()
+    session = _completed(bus, "disc_source_budget")
+    bus.accept_user_input(session.session_id, "未登录和越权的证据在哪里？")
+    session.turns[0].content = "检查鉴权" + "证" * history_chars
+    monkeypatch.setattr(orchestrator, "_build_discussion_agents", lambda *_args: (object(), {}))
+    monkeypatch.setattr(followup.settings, "deepseek_context_window_tokens", context_window)
+    compression_calls = []
+
+    def compress(*_args, **_kwargs):
+        compression_calls.append(True)
+        return "【来源 S0001-T1】安全审查指出未登录缺口"
+
+    prompts = []
+
+    def model(*_args, **kwargs):
+        prompts.append(kwargs["user_prompt"])
+        return "证据来自安全发言。", {}
+
+    monkeypatch.setattr(orchestrator, "_compress_roundtable_history", compress)
+    monkeypatch.setattr(orchestrator, "_call_raw_for_task", model)
+    assert followup._answer(session, session.turns, session.turns[-1]) == "证据来自安全发言。"
+    assert bool(compression_calls) is expect_compression
+    assert "未登录和越权的证据在哪里？" in prompts[0]
+    if expect_compression:
+        assert "安全审查指出未登录缺口" in prompts[0]
+    else:
+        assert "检查鉴权" in prompts[0]
+        assert "【来源 S0001-T1】" in prompts[0]
+
+
+def test_followup_compresses_only_when_higher_retry_budget_requires_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from app.ai import discussion_orchestrator as orchestrator
+
+    bus = DiscussionBus()
+    session = _completed(bus, "disc_retry_budget")
+    bus.accept_user_input(session.session_id, "请完整说明证据。")
+    # 约 8k token：首轮 8k 输出预算和第二轮 16k 可以容纳，第三轮 32k 必须压缩。
+    session.turns[0].content = "鉴权证据" + "证" * 4_000
+    monkeypatch.setattr(followup.settings, "deepseek_context_window_tokens", 40_000)
+    monkeypatch.setattr(orchestrator, "_build_discussion_agents", lambda *_args: (object(), {}))
+    compressed_targets = []
+
+    def compress(*_args, **kwargs):
+        compressed_targets.append(kwargs["target_tokens"])
+        return "【来源 S0001-T1】鉴权证据摘要"
+
+    prompts = []
+
+    def model(*_args, **kwargs):
+        prompts.append((kwargs["max_tokens"], kwargs["user_prompt"]))
+        if len(prompts) < 3:
+            raise DeepSeekOutputTruncatedError("finish_reason=length")
+        return "完整回答。", {}
+
+    monkeypatch.setattr(orchestrator, "_compress_roundtable_history", compress)
+    monkeypatch.setattr(orchestrator, "_call_raw_for_task", model)
+    assert followup._answer(session, session.turns, session.turns[-1]) == "完整回答。"
+    assert [budget for budget, _ in prompts] == [8192, 16384, 32768]
+    assert all("鉴权证据" in prompt for _, prompt in prompts[:2])
+    assert "鉴权证据摘要" in prompts[2][1]
+    assert compressed_targets and compressed_targets[0] <= 12_000

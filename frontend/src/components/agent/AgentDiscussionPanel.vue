@@ -89,6 +89,17 @@
           </div>
         </div>
 
+        <div v-if="pendingFollowupCount > 0 || followupCountIncomplete" class="followup-progress" role="status" aria-live="polite">
+          <span class="followup-progress-label">
+            <template v-if="pendingFollowupCount > 0">主持人处理追问 · {{ followupCountIncomplete ? '至少 ' : '' }}{{ pendingFollowupCount }} 条待答</template>
+            <template v-else>正在核对较早的追问记录</template>
+          </span>
+          <span class="followup-progress-note">{{ followupProgressNote }}</span>
+          <div class="followup-progress-track" role="progressbar" aria-label="追问回复进度" :aria-valuetext="pendingFollowupCount > 0 ? `${pendingFollowupCount} 条追问等待主持人回复` : '正在核对较早的追问记录'">
+            <span />
+          </div>
+        </div>
+
         <!-- 参会者 -->
         <div class="participants">
           <span class="part-label">参会:</span>
@@ -180,6 +191,13 @@
               <div class="msg-bubble typing">
                 <span class="dot" /><span class="dot" /><span class="dot" />
               </div>
+            </div>
+          </div>
+          <div v-else-if="pendingFollowupCount > 0" class="msg-row orchestrator typing-row" aria-label="主持人正在处理追问">
+            <div class="msg-avatar" :style="{ background: AGENT_THEME.orchestrator.color }">🎤</div>
+            <div class="msg-main">
+              <div class="msg-meta"><span class="msg-name" :style="{ color: AGENT_THEME.orchestrator.color }">主持人 · 正在处理 {{ pendingFollowupCount }} 条追问</span></div>
+              <div class="msg-bubble typing"><span class="dot" /><span class="dot" /><span class="dot" /></div>
             </div>
           </div>
         </div>
@@ -290,6 +308,10 @@ const observedSpeakers = ref(turns.value.filter((turn) => turn.role === 'agent' 
 let lastProgressSeq = Number(props.initialProgress?.seq ?? -1)
 const terminalStatus = ref('')
 const followupUntil = ref(Number(props.initialFollowupUntil) || 0)
+const followupStartSeq = ref<number | null>(
+  Number.isFinite(props.initialProgress?.followup_start_seq)
+    ? Number(props.initialProgress?.followup_start_seq) : null,
+)
 const nowSeconds = ref(Date.now() / 1000)
 const userMessage = ref('')
 const sendingMessage = ref(false)
@@ -421,17 +443,33 @@ const statusTag = computed(() => {
 })
 
 const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
-const isFollowupOpen = computed(() => {
-  const complete = terminalStatus.value === 'success' || terminalStatus.value === 'completed'
-    || serverProgress.value?.phase === 'completed'
-  return phase.value === 'concluded' && complete && followupUntil.value > nowSeconds.value
-})
+const hasCompletedReport = computed(() => !['failed', 'cancelled', 'interrupted', 'partial'].includes(terminalStatus.value)
+  && (terminalStatus.value === 'success' || terminalStatus.value === 'completed'
+    || serverProgress.value?.phase === 'completed'))
+const isFollowupOpen = computed(() => phase.value === 'concluded'
+  && hasCompletedReport.value && followupUntil.value > nowSeconds.value)
 const canSend = computed(() => status.value === 'connected'
   && (phase.value === 'live' || isFollowupOpen.value))
 const followupCountdown = computed(() => {
   const remaining = Math.max(0, Math.ceil(followupUntil.value - nowSeconds.value))
   return `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
 })
+/** 仅匹配报告冻结后的用户发言及引用其 seq 的主持人追问回复。 */
+const pendingFollowupCount = computed(() => {
+  if (phase.value !== 'concluded' || followupStartSeq.value === null
+    || !hasCompletedReport.value) return 0
+  const answered = new Set(turns.value.filter((turn) =>
+    turn.agent_code === 'orchestrator' && turn.round_index === -1,
+  ).map((turn) => Number(turn.turn_id)))
+  return turns.value.filter((turn) => turn.role === 'user'
+    && Number(turn.seq) > followupStartSeq.value!
+    && !answered.has(Number(turn.seq))).length
+})
+const followupCountIncomplete = computed(() => hasCompletedReport.value && followupStartSeq.value !== null
+  && earliestSeq() > followupStartSeq.value + 1)
+const followupProgressNote = computed(() => status.value === 'connected'
+  ? '已收到的问题会按顺序回复，可能需要数分钟'
+  : '连接恢复后将同步回复；已保存的问题仍在后台处理')
 const inputPlaceholder = computed(() => {
   if (phase.value === 'live'
     && ['summarizing', 'extracting', 'reporting'].includes(serverProgress.value?.phase || '')) {
@@ -579,10 +617,18 @@ function syncLatest(baselineSeq = latestSeq()): Promise<void> {
           terminalStatus.value = finalStage === 'completed' ? 'success' : finalStage
           reportTaskId.value = Number(page.report_task_id) || reportTaskId.value
           followupUntil.value = Number(page.followup_until) || 0
+          if (Number.isFinite(page.progress?.followup_start_seq)) {
+            followupStartSeq.value = Number(page.progress?.followup_start_seq)
+          }
           if (wasLive) emit('settled')
         }
         let first = Number(page.turns?.[0]?.seq) || 0
-        while (baseline > 0 && first > baseline + 1 && page.has_earlier) {
+        // 刷新时只装载尾页，待答问题可能在更早页；追到追问起点，不能把部分计数当完整计数。
+        while (page.has_earlier && (
+          (baseline > 0 && first > baseline + 1)
+          || (phase.value === 'concluded' && followupStartSeq.value !== null
+            && first > followupStartSeq.value + 1)
+        )) {
           page = await getDiscussionSession(props.sessionId, 100, first)
           if (disposed) return
           const olderFirst = Number(page.turns?.[0]?.seq) || 0
@@ -648,6 +694,7 @@ function connectWs() {
         handleControl(msg)
       } else if (msg.type === 'session_end') {
         phase.value = 'concluded'
+        if (followupStartSeq.value === null) followupStartSeq.value = latestSeq()
         followupUntil.value = Number(msg.followup_until) || followupUntil.value
         currentSpeaker.value = ''
         currentSpeakerCode.value = ''
@@ -682,6 +729,11 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
         current_round: Number(msg.payload.current_round) || 0,
         speaker_code: String(msg.payload.speaker_code || ''),
         seq: Number.isFinite(seq) ? seq : lastProgressSeq,
+        followup_start_seq: Number.isFinite(msg.payload.followup_start_seq)
+          ? Number(msg.payload.followup_start_seq) : followupStartSeq.value ?? undefined,
+      }
+      if (Number.isFinite(msg.payload.followup_start_seq)) {
+        followupStartSeq.value = Number(msg.payload.followup_start_seq)
       }
       if (serverProgress.value.current_round > 0) currentRound.value = serverProgress.value.current_round
       if (Number(msg.payload.turn_count) > latestSeq()) void syncLatest()
@@ -919,6 +971,22 @@ connectWs()
 .room-progress-track.indeterminate > span { width: 36% !important; animation: discuss-progress 1.4s ease-in-out infinite alternate; }
 @keyframes discuss-progress { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
 
+.followup-progress {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 12px;
+  padding: 8px 20px; background: #f3efff; color: #5b21b6; flex-shrink: 0;
+  border-bottom: 1px solid #e3d8ff; font-size: 12px;
+}
+.followup-progress-label { font-weight: 600; }
+.followup-progress-note { color: #6b5f8c; text-align: right; }
+.followup-progress-track {
+  grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 999px; background: #dfd5f8;
+}
+.followup-progress-track > span {
+  display: block; width: 35%; height: 100%; border-radius: inherit;
+  background: #8b5cf6; animation: discuss-followup-wait 1.8s ease-in-out infinite alternate;
+}
+@keyframes discuss-followup-wait { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
+
 /* 参会者 */
 .participants {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -1079,6 +1147,8 @@ connectWs()
   .header-actions .el-button { min-width: 40px; min-height: 40px; margin-left: 0; }
   .header-actions .report-btn { margin-right: auto; }
   .room-progress { padding: 9px 12px 11px; }
+  .followup-progress { grid-template-columns: 1fr; padding: 7px 12px; gap: 2px; }
+  .followup-progress-note { text-align: left; }
   .participants { padding: 8px 12px; max-height: 160px; overflow-y: auto; }
   .part-chip { white-space: nowrap; }
   .room-body { min-height: 0; padding: 12px; }
@@ -1089,5 +1159,6 @@ connectWs()
 
 @media (prefers-reduced-motion: reduce) {
   .room-progress-track > span { transition: none; animation: none !important; }
+  .followup-progress-track > span { animation: none !important; }
 }
 </style>
