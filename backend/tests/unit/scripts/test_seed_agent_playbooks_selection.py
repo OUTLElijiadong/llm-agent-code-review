@@ -29,7 +29,12 @@ def test_targeted_seed_does_not_delete_unrelated_knowledge(monkeypatch, tmp_path
     removed = []
     events = []
     added = []
-    monkeypatch.setattr(seed_agent_playbooks, "SessionLocal", lambda: session)
+    def open_session():
+        events.append(("session", None))
+        return session
+
+    monkeypatch.setattr(seed_agent_playbooks, "load_all_models", lambda: events.append(("models", None)))
+    monkeypatch.setattr(seed_agent_playbooks, "SessionLocal", open_session)
     monkeypatch.setattr(seed_agent_playbooks, "CONTENT_DIR", tmp_path)
     def remove_existing(_db, agent_code, title, *, keep_doc_id):
         removed.append((agent_code, title, keep_doc_id))
@@ -46,7 +51,10 @@ def test_targeted_seed_does_not_delete_unrelated_knowledge(monkeypatch, tmp_path
     seed_agent_playbooks.seed({"role_permission_guide.md"})
 
     assert len(removed) == len(added) == 2
-    assert events == [("add", 1), ("remove", 1), ("add", 2), ("remove", 2)]
+    assert events == [
+        ("models", None), ("session", None),
+        ("add", 1), ("remove", 1), ("add", 2), ("remove", 2),
+    ]
     assert {item["agent_code"] for item in added} == {"chat_assistant", "manager"}
     assert {item["source_ref"] for item in added} == {"role_permission_guide.md"}
     assert all("审查员可依 audit:view" in item["content"] for item in added)

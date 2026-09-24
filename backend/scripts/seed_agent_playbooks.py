@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.database import SessionLocal
+from app.models import load_all_models
 from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc
 from app.services import agent_knowledge_service
 
@@ -58,6 +59,8 @@ def selected_playbooks(only_files: set[str] | None = None) -> list[dict[str, str
 
 def seed(only_files: set[str] | None = None) -> None:
     entries = selected_playbooks(only_files)
+    # 独立脚本不会经过应用启动流程，先注册所有 ORM 映射供用量记账等关联表使用。
+    load_all_models()
     db = SessionLocal()
     try:
         for entry in entries:
