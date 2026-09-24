@@ -231,7 +231,7 @@ def test_execute_clarifies_missing_fields_before_planning(
     planner = FakePlanner(AssertionError("planner should not run"))
     agent._planner = planner  # type: ignore[assignment]
 
-    def classify(last_msg: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def classify(last_msg: str, messages: list[dict[str, Any]], ctx: AgentContext | None) -> dict[str, Any]:
         """固定返回缺少 project_id 的删除意图。"""
         return {"intent": "delete_project", "reason": "删除", "payload": {}}
 
@@ -295,7 +295,7 @@ def test_execute_double_layer_success_and_chat_bypasses_planner(
     planner = FakePlanner([ToolCall("detect_language", {"name": "demo"}, "识别语言")])
     agent._planner = planner  # type: ignore[assignment]
 
-    def classify_tool(last_msg: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def classify_tool(last_msg: str, messages: list[dict[str, Any]], ctx: AgentContext | None) -> dict[str, Any]:
         """返回无需澄清的语言检测意图。"""
         return {"intent": "detect_language", "reason": "检测", "payload": {}}
 
@@ -307,7 +307,7 @@ def test_execute_double_layer_success_and_chat_bypasses_planner(
     assert planner.calls[0][1] == "识别语言"
     assert agent._last_plan_steps[0]["tool_name"] == "detect_language"
 
-    def classify_chat(last_msg: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def classify_chat(last_msg: str, messages: list[dict[str, Any]], ctx: AgentContext | None) -> dict[str, Any]:
         """返回普通聊天意图。"""
         return {"intent": "chat", "reason": "闲聊", "payload": {}}
 
@@ -336,7 +336,7 @@ def test_execute_planner_errors_fall_back_to_single_dispatch(
     """规划超时、非法结果和未知异常均应降级到单层 handler。"""
     agent._planner = FakePlanner(planning_error)  # type: ignore[assignment]
 
-    def classify(last_msg: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def classify(last_msg: str, messages: list[dict[str, Any]], ctx: AgentContext | None) -> dict[str, Any]:
         """固定返回非聊天意图以触发第二层规划。"""
         return {"intent": "list_agents", "reason": "查看", "payload": {}}
 
@@ -496,7 +496,7 @@ def test_classify_intent_uses_recent_context_and_falls_back(
     """意图分类保留全部会话的可追溯上下文，并在异常时回退 chat。"""
     prompts: list[str] = []
 
-    def classify_success(prompt: str) -> AgentResult:
+    def classify_success(prompt: str, ctx: AgentContext | None) -> AgentResult:
         """记录分类 prompt 并返回结构化意图。"""
         prompts.append(prompt)
         return _ok({"intent": "dashboard", "reason": "统计", "payload": {}})
@@ -513,14 +513,14 @@ def test_classify_intent_uses_recent_context_and_falls_back(
     assert "first" in prompts[0]
     assert "second" in prompts[0] and "fourth" in prompts[0]
 
-    def classify_non_dict(prompt: str) -> AgentResult:
+    def classify_non_dict(prompt: str, ctx: AgentContext | None) -> AgentResult:
         """返回成功但非字典结果以验证 fallback。"""
         return _ok(["bad"])
 
     monkeypatch.setattr(agent, "call_json", classify_non_dict)
     assert agent._classify_intent("x", messages)["intent"] == "chat"
 
-    def classify_error(prompt: str) -> AgentResult:
+    def classify_error(prompt: str, ctx: AgentContext | None) -> AgentResult:
         """抛出分类异常以验证异常降级。"""
         raise RuntimeError("classifier unavailable")
 
@@ -696,6 +696,35 @@ def test_security_audit_all_scopes_and_rich_findings(
         {"payload": {"scope": "task", "task_id": 2}},
         None,
     ).error == "audit failed"
+
+
+def test_security_audit_summary_uses_total_counts_not_preview_length(
+    agent: ChatAssistantAgent,
+) -> None:
+    """审计摘要要显示后端完整计数，不能把预览列表误报为总量。"""
+    response = _ok({
+        "findings": [{"severity": "高", "title": "已展示风险"}],
+        "risk_score": 60,
+        "summary": "审计完成",
+        "threat_model": {"data_flows": [{"from": "a", "to": "b"}]},
+        "compliance": {
+            "finding_total_count": 7,
+            "finding_severity_counts": {"严重": 1, "高": 6, "中": 0, "低": 0},
+            "data_flow_total_count": 4,
+        },
+    })
+    agent.set_orchestrator(FakeOrchestrator({
+        "audit_security_for_project": response,
+    }))  # type: ignore[arg-type]
+
+    result = agent._handle_security_audit(
+        {"payload": {"scope": "project", "project_id": 3}}, None,
+    )
+
+    assert result.success is True
+    assert "严重 🔴 1 · 高 🟠 6" in result.data
+    assert "还有 6 处风险未在摘要展示" in result.data
+    assert "4 条可达攻击路径" in result.data
 
 
 def test_evolution_and_skill_handlers_cover_validation_and_rich_results(
@@ -1138,7 +1167,7 @@ def test_long_chat_history_preserves_all_turns_and_latest_message_tail(
     agent: ChatAssistantAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """超预算旧轮次标记摘录；不得丢整轮或裁掉最新用户约束。"""
+    """模型窗口足够时保留全部原文，不能再因固定字符门槛摘录。"""
     body = {"choices": [{"finish_reason": "stop", "message": {"content": "收到"}}]}
     requests = _install_http(monkeypatch, [FakeHttpResponse(200, body)])
     messages = [
@@ -1153,10 +1182,242 @@ def test_long_chat_history_preserves_all_turns_and_latest_message_tail(
     sent = requests[0]["json"]["messages"]
     assert len(sent) == 101
     assert "第0轮尾部约束" in sent[1]["content"]
-    assert "历史消息摘录" in sent[1]["content"]
+    assert sent[1]["content"] == messages[0]["content"]
     assert sent[-1]["content"] == messages[-1]["content"]
     assert "禁止跨账号读记录" in sent[-1]["content"]
-    assert "不要推断未显示的细节" in sent[0]["content"]
+
+
+def test_long_chat_semantically_compacts_every_source_and_keeps_latest(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """超出真实 token 窗口才按来源压缩，并核验原文引文和时间顺序。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    agent._max_retries = 0
+    batches: list[list[str]] = []
+
+    def compact(prompt: str, *_args: Any, **kwargs: Any) -> AgentResult:
+        assert kwargs["recover_truncation"] is True
+        assert _args[0].user_id == 5
+        assert "聊天历史压缩器" in kwargs["system_prompt"]
+        assert "官方 AI 助手" in agent._system_prompt
+        assert agent._max_tokens == 4096
+        payload = json.loads(prompt)
+        sources = payload["sources"]
+        batches.append([source["source_id"] for source in sources])
+        return _ok({"entries": [
+            {
+                "source_id": source["source_id"],
+                "summary": "保留这段讨论的事实、修正和约束",
+                "quotes": [source["content"][-12:]],
+            }
+            for source in sources
+        ]})
+
+    monkeypatch.setattr(agent, "call_json", compact)
+    body = {"choices": [{"finish_reason": "stop", "message": {"content": "已处理"}}]}
+    requests = _install_http(monkeypatch, [FakeHttpResponse(200, body)])
+    messages = [
+        {"role": "user", "content": "第一轮目标：审查账号隔离。" + "甲" * 5_000 + "最后确认管理员不能看私聊"},
+        {"role": "assistant", "content": "第二轮已验证报告来源。" + "乙" * 5_000 + "结论来自任务187"},
+        {"role": "user", "content": "现在继续检查审计；保留前面的全部事实。"},
+    ]
+
+    result = agent._handle_chat(messages, AgentContext(user_id=5))
+
+    assert result.success is True
+    assert batches
+    sent = requests[0]["json"]["messages"]
+    assert sent[-1]["content"] == messages[-1]["content"]
+    assert sent[1]["role"] == "user" and sent[2]["role"] == "assistant"
+    assert "最后确认管理员不能看私聊" in sent[1]["content"]
+    assert "结论来自任务187" in sent[2]["content"]
+    assert "来源#" in sent[1]["content"]
+    assert "历史消息摘录" not in json.dumps(sent, ensure_ascii=False)
+    assert "官方 AI 助手" in sent[0]["content"]
+    assert "聊天历史压缩器" not in sent[0]["content"]
+
+
+def test_chat_second_compaction_level_still_checks_original_quotes(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """摘要再压缩时来源不重排，第二层引文仍须来自最初原文。"""
+    import re
+
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 12_000)
+    agent._max_retries = 0
+    levels: list[int] = []
+
+    def compact(prompt: str, *_args: Any, **_kwargs: Any) -> AgentResult:
+        sources = json.loads(prompt)["sources"]
+        level = 2 if sources[0]["content"].startswith("[来源#") else 1
+        levels.append(level)
+        return _ok({"entries": [{
+            "source_id": source["source_id"],
+            "summary": "精简后的事实" if level == 2 else "审查证据" * 350,
+            "quotes": [
+                re.search(r"「([^」]+)」", source["content"]).group(1)
+                if level == 2 else source["content"][-8:]
+            ],
+        } for source in sources]})
+
+    monkeypatch.setattr(agent, "call_json", compact)
+    requests = _install_http(monkeypatch, [FakeHttpResponse(200, {
+        "choices": [{"finish_reason": "stop", "message": {"content": "完成"}}],
+    })])
+    messages = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": f"第{index}轮证据" + "甲" * 1_100}
+        for index in range(8)
+    ] + [{"role": "user", "content": "继续"}]
+
+    result = agent._handle_chat(messages, None)
+
+    assert result.success is True
+    assert 1 in levels and 2 in levels
+    sent = requests[0]["json"]["messages"]
+    assert [item["role"] for item in sent[1:]] == [item["role"] for item in messages]
+    for index in range(8):
+        assert f"来源#{index + 1}." in sent[index + 1]["content"]
+        assert "「甲甲甲甲甲甲甲甲」" in sent[index + 1]["content"]
+
+
+def test_long_chat_rejects_unverified_or_missing_compaction_sources(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """压缩器遗漏来源或伪造引文时不发送聊天请求。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    agent._max_retries = 0
+    requests = _install_http(monkeypatch, [])
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: _ok({
+        "entries": [{"source_id": "1.1/1", "summary": "编造事实", "quotes": ["不存在的原文"]}],
+    }))
+    messages = [
+        {"role": "user", "content": "甲" * 5_000},
+        {"role": "assistant", "content": "乙" * 5_000},
+        {"role": "user", "content": "继续"},
+    ]
+
+    result = agent._handle_chat(messages, None)
+
+    assert result.success is False
+    assert result.failure_kind == "context_compaction_incomplete"
+    assert requests == []
+
+
+def test_chat_compactor_increases_output_budget_after_length(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """压缩器自身被模型截断时提高输出预算，不能使用不完整 JSON。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    agent._max_retries = 0
+    budgets: list[int] = []
+
+    def compact(prompt: str, *_args: Any, **kwargs: Any) -> AgentResult:
+        budgets.append(kwargs["max_tokens"])
+        if len(budgets) == 1:
+            return AgentResult(success=False, failure_kind="output_truncated")
+        return _ok({"entries": [{
+            "source_id": source["source_id"],
+            "summary": "已按来源保留",
+            "quotes": [source["content"][-8:]],
+        } for source in json.loads(prompt)["sources"]]})
+
+    monkeypatch.setattr(agent, "call_json", compact)
+    requests = _install_http(monkeypatch, [FakeHttpResponse(200, {
+        "choices": [{"finish_reason": "stop", "message": {"content": "完成"}}],
+    })])
+    result = agent._handle_chat([
+        {"role": "user", "content": "甲" * 8_000 + "保留此结论"},
+        {"role": "user", "content": "继续"},
+    ], None)
+
+    assert result.success is True
+    assert budgets[:2] == [4096, 5000]
+    assert "保留此结论" in requests[0]["json"]["messages"][1]["content"]
+
+
+def test_intent_classification_fails_explicitly_if_context_cannot_be_compacted(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类器的历史压缩失败不得默默改判为普通聊天。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=False, failure_kind="output_truncated",
+    ))
+    result = agent.execute([
+        {"role": "user", "content": "甲" * 5_000},
+        {"role": "assistant", "content": "乙" * 5_000},
+        {"role": "user", "content": "继续审计"},
+    ])
+
+    assert result.success is False
+    assert result.failure_kind == "context_compaction_incomplete"
+
+
+def test_intent_classification_does_not_downgrade_truncated_output_to_chat(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分类模型输出被截断时显式失败，防止错误进入聊天路由。"""
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=False, failure_kind="output_truncated",
+    ))
+
+    result = agent.execute([{"role": "user", "content": "继续审查"}], AgentContext(user_id=5))
+
+    assert result.success is False
+    assert result.failure_kind == "output_truncated"
+
+
+def test_intent_classification_retries_length_with_larger_output_budget(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """400-token 分类输出不足时提高预算重做，不能沿用半截 JSON。"""
+    budgets: list[int | None] = []
+
+    def classify(_prompt: str, _ctx: AgentContext | None, **kwargs: Any) -> AgentResult:
+        budgets.append(kwargs.get("max_tokens"))
+        if len(budgets) == 1:
+            return AgentResult(success=False, failure_kind="output_truncated")
+        return _ok({"intent": "chat", "reason": "已完整识别", "payload": {}})
+
+    monkeypatch.setattr(agent, "call_json", classify)
+    result = agent._classify_intent("你好", [{"role": "user", "content": "你好"}], AgentContext(user_id=5))
+
+    assert result["reason"] == "已完整识别"
+    assert budgets == [None, 8192]
+
+
+def test_chat_rejects_current_message_that_cannot_fit_context(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """最新用户消息绝不截断；自身超预算时明确失败且不发请求。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    agent._max_retries = 0
+    requests = _install_http(monkeypatch, [])
+    result = agent._handle_chat([{"role": "user", "content": "需要逐字审查" + "甲" * 15_000}], None)
+
+    assert result.success is False
+    assert result.failure_kind == "input_exceeds_context"
+    assert requests == []
 
 
 def test_handle_chat_restarts_complete_answer_after_length(
@@ -1181,6 +1442,33 @@ def test_handle_chat_restarts_complete_answer_after_length(
     assert requests[0]["json"]["max_tokens"] == 4096
     assert requests[1]["json"]["max_tokens"] == 8192
     assert "重新给出完整" in requests[1]["json"]["messages"][0]["content"]
+
+
+def test_handle_chat_reserves_context_for_length_retry_instruction(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """第一次请求可入窗也必须预留重试系统提示，避免第二次越界发送。"""
+    from app.core.config import settings
+    from app.services.deepseek_responses_runtime import estimate_tokens
+
+    agent._max_retries = 1
+    monkeypatch.setattr(settings, "deepseek_max_output_tokens", 16_384)
+    prompt = [
+        {"role": "system", "content": agent.system_prompt},
+        {"role": "user", "content": "请分析"},
+    ]
+    initial_only_window = estimate_tokens(prompt) + 8192 + 1024 + 1
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", initial_only_window)
+    requests = _install_http(monkeypatch, [FakeHttpResponse(200, {
+        "choices": [{"finish_reason": "length", "message": {"content": "半句"}}],
+    })])
+
+    result = agent._handle_chat([{"role": "user", "content": "请分析"}], None)
+
+    assert result.success is False
+    assert result.failure_kind in {"input_exceeds_context", "context_compaction_limit"}
+    assert requests == []
 
 
 def test_handle_chat_never_returns_length_or_filtered_output(

@@ -1096,6 +1096,13 @@ connectWs()
   overflow-x: auto; font-size: 12px; margin: 8px 0;
   code { background: transparent; color: inherit; padding: 0; }
 }
+.msg-bubble :deep(table) {
+  display: block; max-width: 100%; overflow-x: auto; white-space: nowrap;
+  border-collapse: collapse; margin: 8px 0;
+}
+.msg-bubble :deep(th), .msg-bubble :deep(td) {
+  border: 1px solid #dedcf0; padding: 6px 8px; vertical-align: bottom;
+}
 
 .typing-row .msg-bubble.typing {
   display: inline-flex; gap: 5px; align-items: center; padding: 14px 16px;

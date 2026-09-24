@@ -131,8 +131,13 @@ class _BoundedGraphResult:
     """图谱分析的有界返回样本与完整有效总量。"""
 
     items: List[dict] = field(default_factory=list)
+    full_items: List[dict] = field(default_factory=list)
     total_count: int = 0
     unique_link_count: int = 0
+    input_total_units: int = 1
+    input_completed_units: int = 1
+    complete: bool = True
+    failure_kind: str = ""
 
 
 _PROJECT_PART_CHARS = 24_000
@@ -1049,6 +1054,8 @@ class SecuritySentinelAgent(BaseAgent):
         dataflow_request_count = 0
         data_flow_total_count = 0
         data_flow_link_total_count = 0
+        dataflow_input_total_units = 0
+        dataflow_input_completed_units = 0
         if trace_dataflow and semantic_execution_complete and all_entries and all_sinks:
             dataflow_attempted = True
             self._emit(
@@ -1065,6 +1072,9 @@ class SecuritySentinelAgent(BaseAgent):
             dataflow_request_count = (
                 semantic_budget.request_count - request_count_before_dataflow
             )
+            if dataflow_result is not None:
+                dataflow_input_total_units = dataflow_result.input_total_units
+                dataflow_input_completed_units = dataflow_result.input_completed_units
             if dataflow_result is None:
                 dataflow_complete = False
                 dataflow_failure_kind = (
@@ -1073,13 +1083,16 @@ class SecuritySentinelAgent(BaseAgent):
                     else "dataflow_analysis_failed"
                 )
             else:
+                dataflow_complete = dataflow_result.complete
+                dataflow_failure_kind = dataflow_result.failure_kind
                 data_flows = dataflow_result.items
+                full_data_flows = dataflow_result.full_items or data_flows
                 data_flow_total_count = dataflow_result.total_count
                 data_flow_link_total_count = dataflow_result.unique_link_count
                 threat_model["data_flows"] = data_flows
                 # 升级出现在数据流上的 finding 严重度
                 severities_before = [finding.get("severity") or "中" for finding in all_findings]
-                self._upgrade_findings_on_dataflow(all_findings, data_flows)
+                self._upgrade_findings_on_dataflow(all_findings, full_data_flows)
                 for previous, finding in zip(severities_before, all_findings):
                     current = finding.get("severity") or "中"
                     if previous != current:
@@ -1094,7 +1107,7 @@ class SecuritySentinelAgent(BaseAgent):
         code_link_result = self._build_code_links(
             all_endpoints,
             all_sinks,
-            threat_model["data_flows"],
+            full_data_flows if dataflow_attempted and dataflow_result is not None else threat_model["data_flows"],
             data_flow_link_total_count=data_flow_link_total_count,
         )
         threat_model["code_links"] = code_link_result.items
@@ -1115,10 +1128,19 @@ class SecuritySentinelAgent(BaseAgent):
         raw_capacity_truncated = raw_candidate_count > raw_retained_count
         all_findings = self._dedup_findings(all_findings)
         deduplicated_finding_count = len(all_findings)
-        verification: dict = {"confirmed": 0, "refuted": 0, "reviewed": 0}
+        high_finding_count = sum(
+            item.get("severity") in {"严重", "高"} for item in all_findings
+        )
+        verification: dict = {
+            "confirmed": 0, "refuted": 0, "reviewed": 0,
+            "total": high_finding_count, "pending": high_finding_count,
+            "complete": high_finding_count == 0, "model_calls": 0,
+            "enabled": self._verify_enabled,
+        }
         if self._verify_enabled:
             try:
                 verification = self._adversarial_verify(all_findings, ctx=ctx)
+                verification["enabled"] = True
                 self._emit(
                     AgentEventType.PROGRESS, ctx,
                     message=(
@@ -1128,7 +1150,8 @@ class SecuritySentinelAgent(BaseAgent):
                     payload={"phase": "adversarial_verify", **verification},
                 )
             except Exception:
-                logger.exception("[security_sentinel] 对抗复检异常,跳过")
+                logger.exception("[security_sentinel] 对抗复检异常,标记覆盖不完整")
+                verification["failure_kind"] = "verification_failed"
 
         effective_findings = [
             item for item in all_findings
@@ -1247,6 +1270,9 @@ class SecuritySentinelAgent(BaseAgent):
             "dataflow_requested": dataflow_requested,
             "dataflow_attempted": dataflow_attempted,
             "dataflow_complete": dataflow_complete,
+            "dataflow_input_total_units": dataflow_input_total_units,
+            "dataflow_input_completed_units": dataflow_input_completed_units,
+            "verification_complete": verification["complete"] if self._verify_enabled else False,
             "raw_candidate_count": raw_candidate_count,
             "raw_finding_severity_counts": raw_severity_counts,
             "deduplicated_finding_count": deduplicated_finding_count,
@@ -1318,13 +1344,45 @@ class SecuritySentinelAgent(BaseAgent):
             )
         if result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES:
             raise RuntimeError("白盒审计结果超过 16MiB 持久化上限")
-        compliance["result_json_bytes"] = result_json_bytes
-        result_json_bytes = len(
-            json_lib.dumps(result_data, ensure_ascii=False, default=str).encode("utf-8")
-        )
-        if result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES:
-            raise RuntimeError("白盒审计结果超过 16MiB 持久化上限")
-        compliance["result_json_bytes"] = result_json_bytes
+        # The retained lists feed deduplication, risk scoring and the dataflow
+        # pass. A preview flag alone cannot make a missing late finding/sink
+        # safe: refuse a complete audit whenever an input or persisted finding
+        # fell outside those buffers.
+        capacity_gaps = {
+            "findings": raw_capacity_truncated,
+            "entry_points": entry_total_count > len(all_entries),
+            "dangerous_sinks": sink_total_count > len(all_sinks),
+            "api_endpoints": endpoint_total_count > len(all_endpoints),
+            "result_findings": bool(compliance.get("result_payload_truncated")),
+        }
+        compliance["audit_inputs_complete"] = not any(capacity_gaps.values())
+        compliance["audit_capacity_gaps"] = capacity_gaps
+        # Include the capacity verdict itself in the persisted-size check.
+        # The size field changes JSON length when its decimal width changes.
+        for _ in range(4):
+            result_json_bytes = len(
+                json_lib.dumps(result_data, ensure_ascii=False, default=str).encode("utf-8")
+            )
+            if result_json_bytes > _MAX_AUDIT_RESULT_JSON_BYTES:
+                raise RuntimeError("白盒审计结果超过 16MiB 持久化上限")
+            if compliance.get("result_json_bytes") == result_json_bytes:
+                break
+            compliance["result_json_bytes"] = result_json_bytes
+        if not compliance["audit_inputs_complete"]:
+            error = "审计发现或数据流来源超过保留容量，未覆盖末尾来源，不能宣称完整审计"
+            self._emit(
+                AgentEventType.FAILED, ctx, message=error,
+                payload={"phase": "capacity", "failure_kind": "audit_capacity_exceeded",
+                         "gaps": capacity_gaps},
+            )
+            project_source_service.finish_source_archive_audit(
+                self._db, project_id, "failed", result_data, audit_run_id=audit_run_id,
+            )
+            return AgentResult(
+                success=False, data=result_data, error=error,
+                model=self._model, duration_ms=duration_ms,
+                failure_kind="audit_capacity_exceeded",
+            )
         if not semantic_execution_complete or (scan_mode == "full" and not semantic_complete):
             semantic_failure_kind = (
                 "output_truncated" if semantic_output_truncated_leaf_count else
@@ -1411,6 +1469,25 @@ class SecuritySentinelAgent(BaseAgent):
                 model=self._model,
                 duration_ms=duration_ms,
                 failure_kind=dataflow_failure_kind or "dataflow_analysis_failed",
+            )
+
+        if self._verify_enabled and not verification["complete"]:
+            error = (
+                "高危候选对抗复检未完成: "
+                f"已复检 {verification['reviewed']}/{verification['total']} 条，"
+                "不能宣称完整安全审计"
+            )
+            self._emit(
+                AgentEventType.FAILED, ctx, message=error,
+                payload={"phase": "adversarial_verify", **verification},
+            )
+            project_source_service.finish_source_archive_audit(
+                self._db, project_id, "failed", result_data, audit_run_id=audit_run_id,
+            )
+            return AgentResult(
+                success=False, data=result_data, error=error,
+                model=self._model, duration_ms=duration_ms,
+                failure_kind=verification.get("failure_kind") or "verification_incomplete",
             )
 
         if not audit_request_accounting_complete:
@@ -1726,7 +1803,16 @@ class SecuritySentinelAgent(BaseAgent):
             "project_errors": project_errors,
             "scan_mode": scan_mode,
         })
-        scan_success = not project_errors
+        aggregate_capacity_gaps = {
+            "findings": finding_total_count > len(all_findings),
+            "entry_points": entry_total_count > len(all_entries),
+            "api_endpoints": endpoint_total_count > len(all_endpoints),
+            "data_flows": flow_total_count > len(all_flows),
+            "code_links": code_link_total_count > len(all_code_links),
+        }
+        compliance["aggregate_inputs_complete"] = not any(aggregate_capacity_gaps.values())
+        compliance["aggregate_capacity_gaps"] = aggregate_capacity_gaps
+        scan_success = not project_errors and compliance["aggregate_inputs_complete"]
         summary = (
             f"全量项目扫描完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
             f"跳过 {skipped_projects} 个,累计扫描文件 {total_files} 个;"
@@ -1736,11 +1822,13 @@ class SecuritySentinelAgent(BaseAgent):
             f"综合风险评分 {risk_score}/100。"
         )
         compliance["scan_complete"] = scan_success
-        if not scan_success:
+        if project_errors:
             summary = (
                 f"全量项目扫描未完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
                 f"失败 {len(project_errors)} 个;已拒绝生成完整结论。"
             )
+        elif not compliance["aggregate_inputs_complete"]:
+            summary = "全量项目扫描的聚合数据超过保留容量，未覆盖末尾来源；已拒绝生成完整结论。"
         threat_model = {
             "entry_points": all_entries[:100],
             "data_flows": all_flows[:100],
@@ -1782,7 +1870,9 @@ class SecuritySentinelAgent(BaseAgent):
         self._emit(
             AgentEventType.COMPLETE if scan_success else AgentEventType.FAILED,
             ctx,
-            message="全量项目扫描完成" if scan_success else "全量项目扫描存在失败项目",
+            message=("全量项目扫描完成" if scan_success else
+                     "全量项目扫描存在失败项目" if project_errors else
+                     "全量项目扫描聚合容量不足"),
             payload={
                 "scope": "all_projects",
                 "project_count": len(projects),
@@ -1808,11 +1898,10 @@ class SecuritySentinelAgent(BaseAgent):
             },
             model=self._model,
             duration_ms=duration_ms,
-            error=(
-                f"全量项目扫描有 {len(project_errors)} 个项目失败"
-                if not scan_success else None
-            ),
-            failure_kind="project_scan_failed" if not scan_success else "",
+            error=(f"全量项目扫描有 {len(project_errors)} 个项目失败" if project_errors
+                   else "全量项目扫描聚合数据超过保留容量" if not scan_success else None),
+            failure_kind=("project_scan_failed" if project_errors else
+                          "audit_capacity_exceeded" if not scan_success else ""),
         )
 
     # ============ 内部辅助 ============
@@ -2995,72 +3084,129 @@ class SecuritySentinelAgent(BaseAgent):
                                ctx: Optional[AgentContext],
                                api_endpoints: Optional[List[dict]] = None,
                                budget: Optional[_SemanticAuditBudget] = None,
-                               ) -> Optional[_BoundedGraphResult]:
-        """第二轮 LLM:跨文件数据流推断"""
-        if budget is not None and not budget.reserve():
-            return None
-        def _short(items: List[dict], limit: int = 30) -> List[dict]:
-            return items[:limit]
+                               ) -> _BoundedGraphResult:
+        """逐批覆盖全部接口、入口与接收点的组合；超预算显式记未完成。"""
+        def batches(items: List[dict]) -> List[List[dict]]:
+            return [items[start:start + 30] for start in range(0, len(items), 30)] or [[]]
 
-        user_msg = (
-            f"项目「{project_name}」接口/入口/接收点清单(已截断到 30 条以内):\n\n"
-            f"## 接口 api_endpoints\n"
-            f"{json_lib.dumps(_short(api_endpoints or []), ensure_ascii=False, indent=2)}\n\n"
-            f"## 入口 entry_points\n"
-            f"{json_lib.dumps(_short(entries), ensure_ascii=False, indent=2)}\n\n"
-            f"## 危险接收点 dangerous_sinks\n"
-            f"{json_lib.dumps(_short(sinks), ensure_ascii=False, indent=2)}\n\n"
-            "请推断哪些接口或入口数据流可以通过 import / 函数调用 / 路由抵达哪些接收点。\n"
-            "对每条可达路径输出 JSON 对象,字段:\n"
-            "- from: 入口位置(file:function 或 file:line)\n"
-            "- via: 中间经过的函数/模块列表(string 数组)\n"
-            "- to: 抵达的危险接收点\n"
-            "- risk_type: 攻击类型(SQL 注入 / RCE / SSRF / XSS / 越权 等)\n"
-            "- severity: 严重/高/中/低\n\n"
-            '严格输出 JSON: {"data_flows": [...]} ,无可达路径时 data_flows 为 []。'
+        endpoint_batches = batches(api_endpoints or [])
+        entry_batches = batches(entries)
+        sink_batches = batches(sinks)
+        total_units = len(endpoint_batches) * len(entry_batches) * len(sink_batches)
+        output = _BoundedGraphResult(
+            input_total_units=total_units, input_completed_units=0,
         )
-        result = self.call_json(
-            user_msg,
-            ctx=ctx,
-            recover_truncation=budget is not None,
-            retry_reserver=budget.reserve if budget is not None else None,
-            deadline_monotonic=budget.deadline if budget is not None else None,
-            thinking=False,
-        )
-        if not result.success or not isinstance(result.data, dict):
-            return None
-        if "data_flows" not in result.data:
-            return None
-        raw_flows = result.data["data_flows"]
-        if not isinstance(raw_flows, list):
-            return None
-        flows: List[dict] = []
+        if budget is not None and total_units > budget.max_requests - budget.request_count:
+            budget.exhausted_reason = "数据流全来源组合超过剩余模型请求预算"
+            output.complete = False
+            output.failure_kind = "semantic_budget_exhausted"
+            return output
+
+        seen_flows: set[str] = set()
         flow_link_keys: set[tuple[str, str]] = set()
-        for f in raw_flows:
-            if not isinstance(f, dict):
-                return None
-            via = f.get("via", [])
-            if not isinstance(via, list):
-                return None
-            normalized = {
-                "from": str(f.get("from") or "")[:500],
-                "via": [str(v)[:500] for v in via[:20] if v],
-                "to": str(f.get("to") or "")[:500],
-                "risk_type": str(f.get("risk_type") or "")[:200],
-                "severity": (
-                    f.get("severity")
-                    if f.get("severity") in _ALLOWED_SEVERITY else "中"
-                ),
-            }
-            if normalized["from"] and normalized["to"]:
-                flow_link_keys.add((normalized["from"], normalized["to"]))
-            if len(flows) < 100:
-                flows.append(normalized)
-        return _BoundedGraphResult(
-            items=flows,
-            total_count=len(raw_flows),
-            unique_link_count=len(flow_link_keys),
-        )
+        for endpoint_batch in endpoint_batches:
+            for entry_batch in entry_batches:
+                for sink_batch in sink_batches:
+                    # 每次拆分只替换当前组合，另一侧原文不变；所有笛卡尔组合均被审查。
+                    pending = [(endpoint_batch, entry_batch, sink_batch)]
+                    while pending:
+                        endpoints, sources, receivers = pending.pop()
+                        user_msg = (
+                            f"项目「{project_name}」跨文件数据流分析；当前来源组合 "
+                            f"{output.input_completed_units + 1}/{output.input_total_units}。\n"
+                            "下列三组均为本次完整原文分片，不得推断未提供的项目事实。\n\n"
+                            f"## 接口 api_endpoints\n{json_lib.dumps(endpoints, ensure_ascii=False)}\n\n"
+                            f"## 入口 entry_points\n{json_lib.dumps(sources, ensure_ascii=False)}\n\n"
+                            f"## 危险接收点 dangerous_sinks\n{json_lib.dumps(receivers, ensure_ascii=False)}\n\n"
+                            "请逐项检查当前接口、入口与接收点的可达关系。"
+                            "对每条可达路径给出 from、via(列表)、to、risk_type、severity。"
+                            '严格输出 JSON: {"data_flows": [...]}；无可达路径时输出空数组。'
+                        )
+                        _, exceeds = self._project_input(user_msg, output_tokens=self._max_tokens)
+                        if exceeds:
+                            failure_kind = "input_exceeds_context"
+                            result = None
+                        elif budget is not None and not budget.reserve():
+                            output.complete = False
+                            output.failure_kind = "semantic_budget_exhausted"
+                            return output
+                        else:
+                            try:
+                                result = self.call_json(
+                                    user_msg, ctx=ctx, thinking=False,
+                                    recover_truncation=budget is not None,
+                                    retry_reserver=budget.reserve if budget is not None else None,
+                                    deadline_monotonic=budget.deadline if budget is not None else None,
+                                )
+                            except Exception:
+                                logger.exception("[security_sentinel] 数据流来源组合调用失败")
+                                result = None
+                            failure_kind = (
+                                result.failure_kind if result is not None and not result.success
+                                else "dataflow_analysis_failed"
+                            )
+                        raw_flows = (
+                            result.data.get("data_flows")
+                            if result is not None and result.success and isinstance(result.data, dict)
+                            else None
+                        )
+                        valid = isinstance(raw_flows, list) and all(
+                            isinstance(item, dict)
+                            and isinstance(item.get("from"), str) and bool(item["from"].strip())
+                            and isinstance(item.get("to"), str) and bool(item["to"].strip())
+                            and isinstance(item.get("via", []), list)
+                            and all(isinstance(value, str) and value.strip()
+                                    for value in item.get("via", []))
+                            for item in raw_flows
+                        )
+                        if not valid:
+                            if result is not None and result.success:
+                                failure_kind = "invalid_schema"
+                            choices = [endpoints, sources, receivers]
+                            splittable = [index for index, items in enumerate(choices) if len(items) > 1]
+                            if splittable and (
+                                exceeds or failure_kind in {
+                                    "output_truncated", "input_exceeds_context", "invalid_json",
+                                    "invalid_schema", "dataflow_analysis_failed",
+                                }
+                            ):
+                                dimension = max(
+                                    splittable,
+                                    key=lambda index: len(json_lib.dumps(choices[index], ensure_ascii=False)),
+                                )
+                                items = choices[dimension]
+                                midpoint = len(items) // 2
+                                first = list(choices)
+                                second = list(choices)
+                                first[dimension] = items[:midpoint]
+                                second[dimension] = items[midpoint:]
+                                pending.extend((tuple(second), tuple(first)))
+                                output.input_total_units += 1
+                                continue
+                            output.complete = False
+                            output.failure_kind = failure_kind or "invalid_schema"
+                            return output
+                        for flow in raw_flows:
+                            normalized = {
+                                "from": flow["from"],
+                                "via": list(flow.get("via", [])),
+                                "to": flow["to"],
+                                "risk_type": str(flow.get("risk_type") or ""),
+                                "severity": flow.get("severity") if flow.get("severity") in _ALLOWED_SEVERITY else "中",
+                            }
+                            key = json_lib.dumps(normalized, ensure_ascii=False, sort_keys=True)
+                            if key in seen_flows:
+                                continue
+                            seen_flows.add(key)
+                            output.total_count += 1
+                            output.full_items.append(normalized)
+                            if normalized["from"] and normalized["to"]:
+                                flow_link_keys.add((normalized["from"], normalized["to"]))
+                            if len(output.items) < 100:
+                                output.items.append(normalized)
+                        output.input_completed_units += 1
+        output.unique_link_count = len(flow_link_keys)
+        return output
 
     def _normalize_finding(self, raw: dict, file: CodeFile,
                            line_offset: int,
@@ -3428,84 +3574,108 @@ class SecuritySentinelAgent(BaseAgent):
     def _adversarial_verify(self, findings: List[dict],
                             ctx: Optional[AgentContext],
                             max_review: int = 12) -> dict:
-        """对抗式复检: 以质疑者视角 + 已知误报模式复核高危 finding,确认或证伪.
-
-        解决「漏洞真假难辨」: 初判(LLM 易幻觉)→ 对抗复检(试图证伪)→ 确证/证伪。
-        注入知识库的「已知误报模式」,让模型识别框架自动转义/参数绑定/类型约束等
-        常见误报,显著压掉误报。只复核 严重/高 危且数量受控,避免 token 爆炸。
-        """
-        confirmed = 0
-        refuted = 0
-        reviewed = 0
+        """分批复核全部高危；原始证据不裁剪，未复核项不能算完整。"""
         high = [f for f in findings
                 if isinstance(f, dict) and f.get("severity") in {"严重", "高"}]
         high.sort(key=lambda x: (
             -_SEVERITY_DEDUCT.get(x.get("severity", "中"), 3),
             -float(x.get("confidence", 0) or 0),
         ))
-        targets = high[:max_review]
-        if not targets:
-            return {"confirmed": 0, "refuted": 0, "reviewed": 0,
-                    "note": "无高危 finding 需复检"}
+        for finding in high:
+            finding["verification"] = "unreviewed"
+        progress = {
+            "confirmed": 0, "refuted": 0, "reviewed": 0,
+            "total": len(high), "pending": len(high),
+            "complete": not high, "model_calls": 0,
+        }
+        if not high:
+            progress["note"] = "无高危 finding 需复检"
+            return progress
 
-        items = []
-        for i, f in enumerate(targets, 1):
-            items.append(
-                f"[{i}] {f.get('severity')} {f.get('category','')} "
-                f"{f.get('file_path','')}:{f.get('lines','')}\n"
-                f"  证据: {str(f.get('evidence',''))[:160]}\n"
-                f"  描述: {str(f.get('exploit_scenario',''))[:160]}"
+        pending = [high[start:start + max(1, max_review)]
+                   for start in range(0, len(high), max(1, max_review))]
+        deadline = time.monotonic() + settings.security_semantic_timeout_seconds
+        while pending:
+            batch = pending.pop(0)
+            items = [
+                f"[{index}] {finding.get('severity')} {finding.get('category', '')} "
+                f"{finding.get('file_path', '')}:{finding.get('lines', '')}\n"
+                f"  证据: {str(finding.get('evidence') or '')}\n"
+                f"  描述: {str(finding.get('exploit_scenario') or '')}"
+                for index, finding in enumerate(batch, 1)
+            ]
+            prompt = (
+                "你是资深安全审计员。逐条复核下列高危候选的完整证据，"
+                "识别框架自动转义、ORM 参数绑定、路由约束、全局过滤器等误报。"
+                "只根据本批证据判断；证据不足选 plausible，不得编造。"
+                "必须为本批每个 index 各返回一次 verdict。\n\n"
+                f"{_knowledge_context('verification')}"
+                "候选漏洞:\n" + "\n\n".join(items) + "\n\n"
+                "严格输出 JSON: "
+                '{"reviews":[{"index":1,"verdict":"confirmed|plausible|refuted","reason":"..."}]}'
             )
-        prompt = (
-            "你是资深安全审计员,下面是某项目自动扫描出的高危漏洞候选。"
-            "请以**质疑者**视角逐条复核,结合 PHP 常见误报模式"
-            "(框架自动转义、ORM 参数绑定、路由类型约束、整数强转、该参数非用户可控、"
-            "全局过滤器已拦截、仅是日志/注释等),判断每条是否**真实可利用**。\n"
-            "对每条输出 verdict: confirmed(确认可利用)/plausible(疑似,需人工)/"
-            "refuted(误报,给出理由)。\n\n"
-            f"{_knowledge_context('verification')}"
-            "候选漏洞:\n" + "\n\n".join(items) + "\n\n"
-            "严格输出 JSON(不要 markdown): "
-            '{"reviews":[{"index":1,"verdict":"confirmed|plausible|refuted","reason":"..."}]}'
-        )
-        result = self.call_json(prompt, ctx=ctx, thinking=False)
-        if result.success and isinstance(result.data, dict):
-            reviews = result.data.get("reviews") or []
-            verdict_by_index = {}
-            for r in reviews:
-                if isinstance(r, dict):
-                    try:
-                        verdict_by_index[int(r.get("index"))] = str(r.get("verdict") or "")
-                    except (TypeError, ValueError):
-                        continue
-            for i, f in enumerate(targets, 1):
-                verdict = verdict_by_index.get(i, "")
-                f["verification"] = verdict or "unreviewed"
-                if verdict not in {"confirmed", "plausible", "refuted"}:
-                    # 只有模型明确给出可识别结论，才算完成复核；空数组、
-                    # 非法 index 和未知 verdict 均必须留在未复核状态。
-                    continue
-                reviewed += 1
-                if verdict == "confirmed":
-                    confirmed += 1
-                    f["confidence"] = min(1.0, float(f.get("confidence", 0.8) or 0) + 0.15)
-                elif verdict == "refuted":
-                    refuted += 1
-                    f["confidence"] = min(float(f.get("confidence", 0.8) or 0), 0.3)
-                reason = next(
-                    (
-                        str(item.get("reason") or "")[:1000]
-                        for item in reviews
-                        if isinstance(item, dict)
-                        and self._coerce_int(item.get("index"), -1) == i
-                    ),
-                    "",
+            _, exceeds = self._project_input(prompt, output_tokens=self._max_tokens)
+            if exceeds:
+                failure_kind = "input_exceeds_context"
+                result = None
+            elif (progress["model_calls"] >= settings.security_semantic_max_requests
+                  or time.monotonic() >= deadline):
+                progress["failure_kind"] = "semantic_budget_exhausted"
+                return progress
+            else:
+                progress["model_calls"] += 1
+                try:
+                    result = self.call_json(prompt, ctx=ctx, thinking=False)
+                except Exception:
+                    logger.exception("[security_sentinel] 对抗复检模型调用异常")
+                    result = None
+                failure_kind = (
+                    result.failure_kind if result is not None and not result.success
+                    else "verification_incomplete"
                 )
+            reviews = (
+                result.data.get("reviews")
+                if result is not None and result.success and isinstance(result.data, dict)
+                else None
+            )
+            verdicts: dict[int, dict] = {}
+            if isinstance(reviews, list):
+                for item in reviews:
+                    if not isinstance(item, dict):
+                        break
+                    index = self._coerce_int(item.get("index"), -1)
+                    if (index < 1 or index > len(batch) or index in verdicts
+                            or item.get("verdict") not in {"confirmed", "plausible", "refuted"}):
+                        break
+                    verdicts[index] = item
+            if not isinstance(reviews, list) or len(verdicts) != len(batch) or len(reviews) != len(batch):
+                if len(batch) > 1 and (
+                    exceeds or failure_kind in {
+                        "output_truncated", "input_exceeds_context", "invalid_json",
+                        "invalid_schema", "verification_incomplete",
+                    }
+                ):
+                    midpoint = len(batch) // 2
+                    pending[:0] = [batch[:midpoint], batch[midpoint:]]
+                    continue
+                progress["failure_kind"] = failure_kind or "verification_incomplete"
+                return progress
+            for index, finding in enumerate(batch, 1):
+                verdict = verdicts[index]["verdict"]
+                finding["verification"] = verdict
+                progress["reviewed"] += 1
+                if verdict == "confirmed":
+                    progress["confirmed"] += 1
+                    finding["confidence"] = min(1.0, float(finding.get("confidence", 0.8) or 0) + 0.15)
+                elif verdict == "refuted":
+                    progress["refuted"] += 1
+                    finding["confidence"] = min(float(finding.get("confidence", 0.8) or 0), 0.3)
+                reason = str(verdicts[index].get("reason") or "")[:1000]
                 if reason:
-                    f["verification_reason"] = reason
-        else:
-            logger.warning("[security_sentinel] 对抗复检 LLM 调用失败,跳过错杀")
-        return {"confirmed": confirmed, "refuted": refuted, "reviewed": reviewed}
+                    finding["verification_reason"] = reason
+            progress["pending"] = progress["total"] - progress["reviewed"]
+        progress["complete"] = True
+        return progress
 
     def _upgrade_findings_on_dataflow(self, findings: List[dict],
                                      data_flows: List[dict]) -> None:

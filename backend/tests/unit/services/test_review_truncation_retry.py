@@ -1,5 +1,8 @@
 """审查画像输出截断兜底:_call_single_agent 提高预算重试一次的回归测试。"""
 
+import json
+import re
+
 import pytest
 
 from app.ai.deepseek_agent import DeepSeekOutputTruncatedError, _clamp_max_tokens
@@ -66,11 +69,11 @@ def test_call_single_agent_truncation_raises_when_already_at_ceiling(monkeypatch
         )
 
 
-def test_custom_profile_over_window_fails_before_model_call(monkeypatch):
-    calls = []
+def test_custom_profile_over_window_fails_when_compaction_has_no_source_coverage(monkeypatch):
+    labels = []
 
-    def fake_call_raw(*_args, **_kwargs):
-        calls.append(True)
+    def fake_call_raw(*_args, **kwargs):
+        labels.append(kwargs.get("agent_label"))
         return '{"issues": []}', {}
 
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
@@ -78,17 +81,23 @@ def test_custom_profile_over_window_fails_before_model_call(monkeypatch):
     profile = GENERAL_AGENT.__class__(
         **{**GENERAL_AGENT.__dict__, "is_custom": True, "system_prompt": "规则" * 60_000},
     )
-    with pytest.raises(ValueError, match="审查输入超出模型上下文容量"):
+    with pytest.raises(ValueError, match="来源覆盖不完整"):
         review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
-    assert calls == []
+    assert labels == ["review_context_compaction"]
 
 
-def test_review_length_retry_preserves_full_input_budget(monkeypatch):
+def test_review_length_retry_compresses_extra_context_for_new_output_budget(monkeypatch):
     calls = []
 
-    def fake_call_raw(*_args, **_kwargs):
-        calls.append(True)
-        raise DeepSeekOutputTruncatedError("length", finish_reason="length")
+    def fake_call_raw(*_args, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("agent_label") == "review_context_compaction":
+            ids = re.findall(r'"source_id": "([^"]+)"', kwargs["user_prompt"])
+            return json.dumps({"covered_source_ids": ids, "summary": "保持代理画像的审查重点。"},
+                              ensure_ascii=False), {}
+        if kwargs["max_tokens"] == 8_192:
+            raise DeepSeekOutputTruncatedError("length", finish_reason="length")
+        return '{"issues": []}', {}
 
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
     monkeypatch.setattr("app.services.review_service.DeepSeekAgent.call_raw", fake_call_raw)
@@ -98,6 +107,9 @@ def test_review_length_retry_preserves_full_input_budget(monkeypatch):
             "system_prompt": "规则" * 21_000, "max_tokens": 8_192,
         },
     )
-    with pytest.raises(ValueError, match="重试预算会挤占完整输入上下文"):
-        review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
-    assert len(calls) == 1
+    text, _meta = review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
+    assert text == '{"issues": []}'
+    main = [call for call in calls if call.get("agent_label") != "review_context_compaction"]
+    assert [call["max_tokens"] for call in main] == [8_192, 16_384]
+    assert any(call.get("agent_label") == "review_context_compaction" for call in calls)
+    assert "tail = 1" in main[-1]["user_prompt"]

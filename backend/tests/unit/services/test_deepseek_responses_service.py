@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncIterator, Callable, Dict, List
 
 import httpx
 import pytest
 
+from app.services.deepseek_responses_runtime import ContextBudgetError, estimate_tokens
 from app.services.deepseek_responses_service import (
     BufferedGatewayResponse,
     DeepSeekResponsesService,
@@ -143,6 +145,278 @@ async def test_non_stream_replays_complete_transcript_and_isolates_bearer_creden
     }
     with pytest.raises(ResponseNotFoundError):
         await service.retrieve("resp_2", "Bearer tenant-a")
+
+
+@pytest.mark.asyncio
+async def test_previous_response_compacts_with_verified_sources_and_keeps_full_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    history = [
+        {"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "审查全部证据，保留认证约束"},
+        ]},
+    ]
+    for index in range(6):
+        history.extend([
+            {"type": "function_call", "call_id": f"call_{index}", "name": "read_file",
+             "arguments": f'{{"file":"{index}.py"}}'},
+            {"type": "function_call_output", "call_id": f"call_{index}",
+             "output": f"证据{index}:" + "important finding " * 450},
+        ])
+    storage = MemoryTranscriptStore()
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_before", response=_response("resp_before", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+    requests: List[Dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if payload.get("instructions", "").startswith("你是上下文压缩器"):
+            source = payload["input"][0]["content"]
+            source_ids = re.findall(r'"source_id":"([^"]+)"', source)
+            assert source_ids
+            return httpx.Response(200, json=_response("resp_compact", [{
+                "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
+                    "covered_source_ids": source_ids,
+                    "summary": "已核查来源中的用户认证约束和 read_file 工具证据；继续审查。",
+                }, ensure_ascii=False)}],
+            }]))
+        return httpx.Response(200, json=_response("resp_after", []))
+
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    latest = {"type": "message", "role": "user", "content": [
+        {"type": "input_text", "text": "继续，并核对最后一个文件"},
+    ]}
+    await service.create({"model": "m", "previous_response_id": "resp_before", "input": [latest],
+                          "max_output_tokens": 512}, "Bearer key")
+
+    assert len(requests) >= 2
+    final = requests[-1]
+    assert "previous_response_id" not in final
+    assert final["input"][0]["role"] == "user"
+    assert "来源 sha256=" in final["input"][0]["content"][0]["text"]
+    assert final["input"][-1] == latest
+    assert estimate_tokens(final["input"]) + 512 < 6_000
+    stored = await storage.load(_fingerprint("key"), "resp_after")
+    assert stored is not None
+    assert stored.transcript == history + [latest]
+
+
+@pytest.mark.parametrize("bad_kind", ["missing_coverage", "length"])
+@pytest.mark.asyncio
+async def test_previous_response_compaction_rejects_unverified_summary_before_main_request(
+    monkeypatch: pytest.MonkeyPatch,
+    bad_kind: str,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    history = [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "最初目标"}]},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "证据 " * 15_000}]},
+    ]
+    storage = MemoryTranscriptStore()
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_before", response=_response("resp_before", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append(payload)
+        source_ids = re.findall(r'"source_id":"([^"]+)"', payload["input"][0]["content"])
+        bad_response = _response("resp_bad", [{
+            "type": "message", "role": "assistant", "content": [{"type": "output_text", "text":
+                json.dumps({
+                    "covered_source_ids": source_ids if bad_kind == "length" else [],
+                    "summary": "来源摘要未能正常完成",
+                }, ensure_ascii=False)}],
+        }])
+        if bad_kind == "length":
+            bad_response["output"][0]["finish_reason"] = "length"
+        return httpx.Response(200, json=bad_response)
+
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    with pytest.raises(ResponsesGatewayError) as exc:
+        await service.create({"model": "m", "previous_response_id": "resp_before", "input": "继续",
+                              "max_output_tokens": 512}, "Bearer key")
+    assert exc.value.code == "context_compaction_failed"
+    assert len(calls) == (3 if bad_kind == "length" else 1)
+    assert await storage.load(_fingerprint("key"), "resp_bad") is None
+
+
+@pytest.mark.asyncio
+async def test_single_oversized_latest_user_input_fails_locally_without_upstream_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_response("unexpected", []))
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(), client_factory=_client_factory(handler),
+    )
+    with pytest.raises(ResponsesGatewayError) as exc:
+        await service.create({"model": "m", "input": "不能丢失的最新请求" * 3_000,
+                              "max_output_tokens": 512}, "Bearer key")
+    assert exc.value.status_code == 413
+    assert exc.value.param == "input"
+    assert requests == []
+
+
+@pytest.mark.parametrize(
+    ("upstream_status", "expected_status", "expected_code", "expected_type"),
+    [(401, 401, "invalid_api_key", "authentication_error"),
+     (403, 403, "permission_denied", "permission_error"),
+     (429, 429, "upstream_rate_limited", "rate_limit_error"),
+     (503, 503, "upstream_unavailable", "server_error"),
+     (500, 502, "upstream_unavailable", "server_error")],
+)
+@pytest.mark.asyncio
+async def test_compaction_upstream_status_is_not_misreported_as_input_capacity(
+    monkeypatch: pytest.MonkeyPatch, upstream_status: int, expected_status: int,
+    expected_code: str, expected_type: str,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    storage = MemoryTranscriptStore()
+    history = [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "目标"}]},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "证据" * 4_000}]},
+    ]
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_prior", response=_response("resp_prior", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(upstream_status, json={"error": {"message": "upstream"}})
+
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    with pytest.raises(ResponsesGatewayError) as exc:
+        await service.create({"model": "m", "previous_response_id": "resp_prior",
+                              "input": "继续", "max_output_tokens": 512}, "Bearer key")
+    assert (exc.value.status_code, exc.value.code, exc.value.error_type) == (
+        expected_status, expected_code, expected_type,
+    )
+    assert len(requests) == 1 and requests[0]["store"] is False
+
+
+@pytest.mark.asyncio
+async def test_compaction_timeout_is_504_not_context_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    storage = MemoryTranscriptStore()
+    history = [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "目标"}]},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "证据" * 4_000}]},
+    ]
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_prior", response=_response("resp_prior", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    with pytest.raises(ResponsesGatewayError) as exc:
+        await service.create({"model": "m", "previous_response_id": "resp_prior",
+                              "input": "继续", "max_output_tokens": 512}, "Bearer key")
+    assert (exc.value.status_code, exc.value.code) == (504, "upstream_timeout")
+
+
+@pytest.mark.asyncio
+async def test_second_layer_rejects_missing_original_source_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 20_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    second_layer_seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        items = json.loads(payload["input"][0]["content"])
+        original_ids = [source_id for item in items for source_id in item["covered_source_ids"]]
+        if items[0]["source_id"].startswith("第1层压缩块"):
+            second_layer_seen.append(True)
+            original_ids = original_ids[:-1]
+        return httpx.Response(200, json=_response("resp_compact", [{
+            "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
+                "covered_source_ids": original_ids,
+                "summary": "已确认历史来源约束。" * 100,
+            }, ensure_ascii=False)}],
+        }]))
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(), client_factory=_client_factory(handler),
+    )
+    records = [{"type": "message", "role": "assistant", "content": [{
+        "type": "output_text", "text": "证据" * 6_000,
+    }]}]
+    with pytest.raises(ContextBudgetError, match="来源摘要未完整覆盖"):
+        await service._semantic_compact_input(
+            records, [0], source_digest="source-digest", summary_budget=900,
+            model="m", authorization="Bearer key", calls=[0],
+        )
+    assert second_layer_seen
+
+
+@pytest.mark.asyncio
+async def test_compactor_retries_output_length_and_accounts_for_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 20_000)
+    budgets: List[int] = []
+    usage_logs: List[Any] = []
+    monkeypatch.setattr(
+        "app.services.deepseek_responses_service.logger.info",
+        lambda message, *values: usage_logs.append((message, values)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        budgets.append(payload["max_output_tokens"])
+        if len(budgets) == 1:
+            return httpx.Response(200, json={
+                **_response("resp_compact", []), "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {"input_tokens": 100, "output_tokens": 512},
+            })
+        return httpx.Response(200, json={
+            **_response("resp_compact", [{
+                "type": "message", "role": "assistant", "content": [{
+                    "type": "output_text", "text": json.dumps({
+                        "covered_source_ids": ["来源#0:片段1/1"], "summary": "已核验来源。",
+                    }, ensure_ascii=False),
+                }],
+            }]),
+            "usage": {"input_tokens": 100, "output_tokens": 40},
+        })
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(), client_factory=_client_factory(handler),
+    )
+    calls = [0]
+    summary = await service._call_compactor(
+        model="m", authorization="Bearer key",
+        source=[{"source_id": "来源#0:片段1/1", "covered_source_ids": ["来源#0:片段1/1"],
+                 "content": "完整事实"}],
+        expected_ids=["来源#0:片段1/1"], source_digest="verified-digest",
+        output_budget=512, calls=calls,
+    )
+    assert summary == "已核验来源。"
+    assert budgets == [512, 1024]
+    assert calls == [2]
+    assert usage_logs[-1][1] == ("verified-digest", 2, 200, 552, "completed")
 
 
 @pytest.mark.asyncio

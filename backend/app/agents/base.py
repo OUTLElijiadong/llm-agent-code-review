@@ -112,13 +112,20 @@ class BaseAgent:
         BaseAgent 直连 chat/completions,不经过 responses runtime 的压缩管线;
         基类不知道消息是源码、审计证据、JSON 还是聊天，不能安全地压缩。
         超限由调用方根据业务语义分片后重试，避免只审到输入前半段。
-        粗略按 1 token ≈ 2 个字符(中英混合)估算，并为本次输出预算留空间。
+        按完整消息 JSON 的 UTF-8 字节数估算输入 token 上界，避免中文、
+        标点密集 JSON 或转义字符被平均字符比例低估；再留出输出和协议开销。
         """
         window = int(getattr(settings, "deepseek_context_window_tokens", 1_000_000) or 1_000_000)
-        reserved = max(8_192, int(output_tokens or self._max_tokens))
-        budget_chars = max(0, (window - reserved) * 2 - 2_048)
-        system_len = len((self._system_prompt if system_prompt is None else system_prompt) or "")
-        if system_len + len(user_message) <= budget_chars:
+        # call() 会把 max_tokens 裁到供应商配置上限，重试也不会扩大该值；
+        # 预留实际输出上限即可，额外 1024 token 留给协议开销。
+        reserved = int(output_tokens or self._max_tokens)
+        system_content = (self._system_prompt if system_prompt is None else system_prompt) or ""
+        messages_json = json_lib.dumps({"messages": [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_message},
+        ]}, ensure_ascii=False, separators=(",", ":"))
+        projected_tokens = len(messages_json.encode("utf-8"))
+        if projected_tokens + reserved + 1_024 < window:
             return user_message, False
         return user_message, True
 

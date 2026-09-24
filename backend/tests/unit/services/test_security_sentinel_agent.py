@@ -398,7 +398,116 @@ def test_adversarial_verify_counts_only_explicit_verdicts(monkeypatch):
     assert result["reviewed"] == 0
     assert result["confirmed"] == 0
     assert result["refuted"] == 0
+    assert result["total"] == 1
+    assert result["pending"] == 1
+    assert result["complete"] is False
     assert findings[0]["verification"] == "unreviewed"
+
+
+def test_adversarial_verify_batches_every_high_finding_with_full_evidence(monkeypatch):
+    import re
+
+    agent = SecuritySentinelAgent()
+    findings = [
+        {
+            "severity": "高",
+            "category": "注入",
+            "file_path": f"file_{index}.php",
+            "lines": "L9",
+            "evidence": "源码" * 100 + f"证据尾部_{index}",
+            "exploit_scenario": "攻击链" * 80 + f"场景尾部_{index}",
+            "confidence": 0.9,
+        }
+        for index in range(13)
+    ]
+    prompts = []
+
+    def answer(prompt, **_kwargs):
+        prompts.append(prompt)
+        indexes = [int(index) for index in re.findall(r"^\[(\d+)\]", prompt, re.M)]
+        return AgentResult(success=True, data={
+            "reviews": [{"index": index, "verdict": "plausible", "reason": "需要验证"}
+                        for index in indexes],
+        })
+
+    monkeypatch.setattr(agent, "call_json", answer)
+    result = agent._adversarial_verify(findings, ctx=None)
+
+    assert result["total"] == result["reviewed"] == 13
+    assert result["pending"] == 0
+    assert result["complete"] is True
+    assert len(prompts) == 2
+    assert all(f"证据尾部_{index}" in "\n".join(prompts) for index in range(13))
+    assert all(f"场景尾部_{index}" in "\n".join(prompts) for index in range(13))
+    assert all(finding["verification"] == "plausible" for finding in findings)
+
+
+def test_adversarial_verify_rejects_unfit_single_full_evidence(monkeypatch):
+    agent = SecuritySentinelAgent()
+    finding = {"severity": "严重", "evidence": "证据" * 1000, "confidence": 0.9}
+    calls = []
+    monkeypatch.setattr(agent, "_project_input", lambda *_args, **_kwargs: ("", True))
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: calls.append(True))
+
+    result = agent._adversarial_verify([finding], ctx=None)
+
+    assert result["complete"] is False
+    assert result["pending"] == 1
+    assert finding["verification"] == "unreviewed"
+    assert calls == []
+
+
+def test_adversarial_verify_retries_in_smaller_batches_after_missing_verdict(monkeypatch):
+    agent = SecuritySentinelAgent()
+    findings = [
+        {"severity": "高", "evidence": f"proof_{index}", "confidence": 0.9}
+        for index in range(2)
+    ]
+    prompts = []
+
+    def answer(prompt, **_kwargs):
+        prompts.append(prompt)
+        if "proof_0" in prompt and "proof_1" in prompt:
+            return AgentResult(success=True, data={"reviews": []})
+        return AgentResult(success=True, data={"reviews": [
+            {"index": 1, "verdict": "plausible", "reason": "仍需人工证据"},
+        ]})
+
+    monkeypatch.setattr(agent, "call_json", answer)
+    result = agent._adversarial_verify(findings, ctx=None)
+
+    assert result["complete"] is True
+    assert result["reviewed"] == result["total"] == 2
+    assert len(prompts) == 3
+
+
+def test_scan_project_does_not_claim_complete_when_high_finding_unverified(monkeypatch):
+    agent = SecuritySentinelAgent()
+    db = MagicMock()
+    project = _make_project()
+    file = _make_file(content="query = user_input\n")
+    db.get.return_value = project
+    agent.inject(db, user=_make_user())
+    _patch_project_source(monkeypatch, [file])
+    monkeypatch.setattr(agent, "_regex_findings", lambda _file: [{
+        "title": "注入风险", "category": "注入", "severity": "高",
+        "file_path": file.file_path, "line_number": 1, "lines": "L1",
+        "evidence": "query = user_input", "exploit_scenario": "用户输入进入查询",
+        "confidence": 0.9, "source": "regex",
+    }])
+    monkeypatch.setattr(agent, "_static_findings", lambda _file: [])
+    monkeypatch.setattr(agent, "_extract_api_endpoints", lambda _file: [])
+    monkeypatch.setattr(agent, "_llm_project_audit_batch", lambda *_args, **_kwargs: _AuditChunkResult())
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=True, data={"reviews": []},
+    ))
+
+    result = agent.scan_project(project.id, trace_dataflow=False)
+
+    assert result.success is False
+    assert result.failure_kind == "verification_incomplete"
+    assert result.data["compliance"]["verification_complete"] is False
+    assert result.data["compliance"]["verification"]["pending"] == 1
 
 
 def test_scan_file_invalid_depth_returns_error():
@@ -1620,7 +1729,9 @@ def test_llm_dataflow_distinguishes_valid_empty_result_from_failure(monkeypatch)
         "call_json",
         lambda *_args, **_kwargs: AgentResult(success=True, data={"data_flows": "invalid"}),
     )
-    assert agent._llm_dataflow_analysis([], [], "demo", None) is None
+    invalid_result = agent._llm_dataflow_analysis([], [], "demo", None)
+    assert invalid_result.complete is False
+    assert invalid_result.input_completed_units == 0
 
 
 def test_llm_dataflow_preserves_total_when_return_sample_is_bounded(monkeypatch):
@@ -1648,8 +1759,158 @@ def test_llm_dataflow_preserves_total_when_return_sample_is_bounded(monkeypatch)
 
     assert result is not None
     assert len(result.items) == 100
+    assert len(result.full_items) == 150
     assert result.total_count == 150
     assert result.unique_link_count == 150
+
+
+def test_llm_dataflow_rejects_empty_source_or_sink_in_model_result(monkeypatch):
+    agent = SecuritySentinelAgent()
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=True, data={"data_flows": [{}]},
+    ))
+
+    result = agent._llm_dataflow_analysis(
+        [{"name": "entry"}], [{"name": "sink"}], "demo", None,
+    )
+
+    assert result.complete is False
+    assert result.failure_kind == "invalid_schema"
+    assert result.input_completed_units == 0
+    assert result.total_count == 0
+
+
+def test_llm_dataflow_keeps_complete_long_paths_and_via_chain(monkeypatch):
+    agent = SecuritySentinelAgent()
+    long_from = "src/" + "a" * 550 + ":entry"
+    long_to = "src/" + "b" * 550 + ":sink"
+    via = [f"module_{index}_" + "c" * 510 for index in range(21)]
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=True, data={"data_flows": [{
+            "from": long_from, "via": via, "to": long_to,
+            "risk_type": "SQL 注入", "severity": "高",
+        }]},
+    ))
+
+    result = agent._llm_dataflow_analysis(
+        [{"name": "entry"}], [{"name": "sink"}], "demo", None,
+    )
+
+    assert result.complete is True
+    assert result.items[0]["from"] == long_from
+    assert result.items[0]["to"] == long_to
+    assert result.items[0]["via"] == via
+
+
+def test_llm_dataflow_batches_all_sources_including_after_thirtieth(monkeypatch):
+    agent = SecuritySentinelAgent()
+    endpoints = [{"path": f"/endpoint_{index}"} for index in range(31)]
+    entries = [{"name": f"entry_{index}"} for index in range(31)]
+    sinks = [{"name": f"sink_{index}"} for index in range(31)]
+    prompts = []
+
+    def answer(prompt, **_kwargs):
+        prompts.append(prompt)
+        return AgentResult(success=True, data={"data_flows": []})
+
+    monkeypatch.setattr(agent, "call_json", answer)
+    result = agent._llm_dataflow_analysis(
+        entries, sinks, "demo", None, api_endpoints=endpoints,
+    )
+
+    assert result is not None
+    assert result.complete is True
+    assert result.input_total_units == result.input_completed_units == 8
+    assert len(prompts) == 8
+    combined = "\n".join(prompts)
+    assert "/endpoint_30" in combined
+    assert "entry_30" in combined
+    assert "sink_30" in combined
+    assert any("entry_30" in prompt and "sink_0" in prompt for prompt in prompts)
+    assert any("/endpoint_0" in prompt and "entry_30" in prompt and "sink_30" in prompt
+               for prompt in prompts)
+
+
+def test_llm_dataflow_budget_shortage_reports_incomplete_before_model_call(monkeypatch):
+    agent = SecuritySentinelAgent()
+    calls = []
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: calls.append(True))
+    budget = _SemanticAuditBudget(max_requests=1, deadline=time.monotonic() + 60)
+
+    result = agent._llm_dataflow_analysis(
+        [{"name": f"entry_{i}"} for i in range(31)],
+        [{"name": f"sink_{i}"} for i in range(31)],
+        "demo", None, budget=budget,
+    )
+
+    assert result is not None
+    assert result.complete is False
+    assert result.failure_kind == "semantic_budget_exhausted"
+    assert result.input_total_units == 4
+    assert result.input_completed_units == 0
+    assert calls == []
+
+
+def test_llm_dataflow_splits_failed_multi_item_batch_without_losing_sources(monkeypatch):
+    agent = SecuritySentinelAgent()
+    prompts = []
+
+    def answer(prompt, **_kwargs):
+        prompts.append(prompt)
+        if "entry_0" in prompt and "entry_1" in prompt:
+            return AgentResult(success=False, failure_kind="output_truncated", error="length")
+        return AgentResult(success=True, data={"data_flows": []})
+
+    monkeypatch.setattr(agent, "call_json", answer)
+    result = agent._llm_dataflow_analysis(
+        [{"name": "entry_0"}, {"name": "entry_1"}],
+        [{"name": "sink"}], "demo", None,
+    )
+
+    assert result.complete is True
+    assert result.input_total_units == result.input_completed_units == 2
+    assert len(prompts) == 3
+    assert any("entry_0" in prompt and "entry_1" not in prompt for prompt in prompts)
+    assert any("entry_1" in prompt and "entry_0" not in prompt for prompt in prompts)
+
+
+def test_llm_dataflow_rejects_single_oversize_source_without_model_call(monkeypatch):
+    agent = SecuritySentinelAgent()
+    calls = []
+    monkeypatch.setattr(agent, "_project_input", lambda *_args, **_kwargs: ("", True))
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: calls.append(True))
+
+    result = agent._llm_dataflow_analysis(
+        [{"name": "entry"}], [{"name": "sink"}], "demo", None,
+    )
+
+    assert result.complete is False
+    assert result.failure_kind == "input_exceeds_context"
+    assert result.input_completed_units == 0
+    assert calls == []
+
+
+def test_llm_dataflow_second_batch_failure_keeps_partial_coverage_explicit(monkeypatch):
+    agent = SecuritySentinelAgent()
+    calls = []
+
+    def answer(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            return AgentResult(success=False, failure_kind="upstream_error", error="模型不可用")
+        return AgentResult(success=True, data={"data_flows": []})
+
+    monkeypatch.setattr(agent, "call_json", answer)
+    result = agent._llm_dataflow_analysis(
+        [{"name": f"entry_{i}"} for i in range(31)],
+        [{"name": "sink"}], "demo", None,
+    )
+
+    assert result.complete is False
+    assert result.failure_kind == "upstream_error"
+    assert result.input_total_units == 2
+    assert result.input_completed_units == 1
+    assert len(calls) == 2
 
 
 def test_scan_project_full_does_not_truncate_above_legacy_top_n(monkeypatch):
@@ -1718,7 +1979,8 @@ def test_scan_project_bounds_raw_findings_then_scores_deduplicated_results(monke
 
     result = agent.scan_project(project.id, trace_dataflow=False, scan_mode="static_full")
 
-    assert result.success is True
+    assert result.success is False
+    assert result.failure_kind == "audit_capacity_exceeded"
     assert len(result.data["findings"]) == 1
     compliance = result.data["compliance"]
     assert compliance["raw_candidate_count"] == 3_000
@@ -1731,6 +1993,62 @@ def test_scan_project_bounds_raw_findings_then_scores_deduplicated_results(monke
     assert compliance["finding_severity_counts"]["高"] == 1
     assert compliance["owasp_coverage"] == ["A03"]
     assert result.data["risk_score"] == 92
+
+
+def test_scan_project_fails_when_a_late_high_finding_exceeds_retention(monkeypatch):
+    agent = SecuritySentinelAgent()
+    agent._verify_enabled = False
+    db = MagicMock()
+    project = _make_project()
+    file = _make_file(content="x = 1\n", file_name="src/main.py")
+    db.get.return_value = project
+    agent.inject(db, user=_make_user())
+    _patch_project_source(monkeypatch, [file])
+    findings = [
+        {"title": f"finding-{index}", "severity": "低", "file_path": file.file_path,
+         "evidence": f"line-{index}"}
+        for index in range(2_000)
+    ] + [{"title": "late-high", "severity": "高", "file_path": file.file_path,
+          "evidence": "late evidence"}]
+    monkeypatch.setattr(agent, "_regex_findings", lambda _file: findings)
+    monkeypatch.setattr(agent, "_static_findings", lambda _file: [])
+    monkeypatch.setattr(agent, "_extract_api_endpoints", lambda _file: [])
+    monkeypatch.setattr(agent, "_llm_project_audit_batch", lambda parts, ctx=None, budget=None: _AuditChunkResult())
+
+    result = agent.scan_project(project.id, trace_dataflow=False, scan_mode="static_full")
+
+    assert result.success is False
+    assert result.failure_kind == "audit_capacity_exceeded"
+    assert result.data["compliance"]["raw_candidate_count"] == 2_001
+    assert result.data["compliance"]["raw_finding_severity_counts"]["高"] == 1
+    assert result.data["compliance"]["findings_truncated"] is True
+
+
+def test_scan_project_fails_when_entry_or_endpoint_exceeds_retention(monkeypatch):
+    agent = SecuritySentinelAgent()
+    agent._verify_enabled = False
+    db = MagicMock()
+    project = _make_project()
+    file = _make_file(content="x = 1\n", file_name="src/main.py")
+    db.get.return_value = project
+    agent.inject(db, user=_make_user())
+    _patch_project_source(monkeypatch, [file])
+    endpoints = [
+        {"method": "GET", "path": f"/route-{index}", "file_path": file.file_path,
+         "line_number": index + 1, "handler": f"handler_{index}"}
+        for index in range(2_001)
+    ]
+    monkeypatch.setattr(agent, "_extract_api_endpoints", lambda _file: endpoints)
+    monkeypatch.setattr(agent, "_regex_findings", lambda _file: [])
+    monkeypatch.setattr(agent, "_static_findings", lambda _file: [])
+    monkeypatch.setattr(agent, "_llm_project_audit_batch", lambda parts, ctx=None, budget=None: _AuditChunkResult())
+
+    result = agent.scan_project(project.id, trace_dataflow=False, scan_mode="static_full")
+
+    assert result.success is False
+    assert result.failure_kind == "audit_capacity_exceeded"
+    assert result.data["compliance"]["api_endpoint_total_count"] == 2_001
+    assert result.data["compliance"]["retained_api_endpoint_count"] == 2_000
 
 
 def test_scan_project_marks_secondary_graph_response_truncation(monkeypatch):
@@ -1865,8 +2183,8 @@ def test_scan_project_preserves_raw_dataflow_link_total_after_bounding(monkeypat
     assert compliance["retained_data_flow_count"] == 100
     assert compliance["returned_data_flow_count"] == 100
     assert compliance["code_link_total_count"] == 150
-    assert compliance["retained_code_link_count"] == 100
-    assert compliance["returned_code_link_count"] == 100
+    assert compliance["retained_code_link_count"] == 150
+    assert compliance["returned_code_link_count"] == 150
     assert compliance["response_graph_truncated"] is True
 
 
@@ -2010,6 +2328,40 @@ def test_scan_all_projects_rejects_partial_project_failures(monkeypatch):
     assert result.failure_kind == "project_scan_failed"
     assert result.data["compliance"]["scan_complete"] is False
     assert result.data["compliance"]["project_errors"][0]["project_id"] == 1
+
+
+def test_scan_all_projects_rejects_aggregate_retention_gap(monkeypatch):
+    """跨项目汇总不能把未保留的后续发现标为完整审计。"""
+    agent = SecuritySentinelAgent()
+    db = MagicMock()
+    projects = [
+        _make_project(project_id=1, user_id=1, name="alpha"),
+        _make_project(project_id=2, user_id=1, name="beta"),
+    ]
+    chain = MagicMock()
+    chain.filter.return_value = chain
+    chain.order_by.return_value.all.return_value = projects
+    db.query.return_value = chain
+    agent.inject(db, user=_make_user())
+    monkeypatch.setattr("app.agents.security_sentinel_agent._MAX_RETAINED_FINDINGS", 1)
+
+    def fake_scan_project(project_id, **_kwargs):
+        return AgentResult(success=True, data={
+            "findings": [{"title": f"发现 {project_id}", "severity": "高"}],
+            "threat_model": {},
+            "compliance": {"finding_total_count": 1, "finding_severity_counts": {"高": 1}},
+            "file_count": 1,
+        })
+
+    monkeypatch.setattr(agent, "scan_project", fake_scan_project)
+    result = agent.scan_all_projects()
+
+    assert result.success is False
+    assert result.failure_kind == "audit_capacity_exceeded"
+    assert result.data["compliance"]["scan_complete"] is False
+    assert result.data["compliance"]["aggregate_capacity_gaps"]["findings"] is True
+    assert result.data["compliance"]["finding_total_count"] == 2
+    assert len(result.data["findings"]) == 1
 
 
 def test_extract_api_endpoints_detects_common_routes():

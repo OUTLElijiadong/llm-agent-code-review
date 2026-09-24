@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -32,19 +33,29 @@ def _read(name: str) -> str:
         return ""
 
 
-def _extract_rules(text: str, max_chars: int) -> str:
+def _extract_rules(
+    text: str, max_chars: int, *, coverage: list[dict] | None = None, source_name: str = "",
+) -> str:
     """从 markdown 知识文件中抽取规则条目(标题 + 首行), 压缩体积.
 
     反幻觉/误报模式这类文件, 规则的名字与一句话判定条件才是关键,
     大段示例对模型反而是噪音。这里按 `##`/`###` 标题切片, 每片只留标题和
     「**Check**/**Pattern**/条件」这类判定句, 控制总长度。
     """
+    parts = [part for part in re.split(r"(?m)^(?=#{2,3}\s)", text) if part.strip()]
+    total = len(parts)
+    included = 0
+    partial = 0
     if len(text) <= max_chars:
+        if coverage is not None:
+            coverage.append({
+                "source": source_name, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "included": total, "total": total, "partial": 0, "omitted": 0,
+            })
         return text
     out: list[str] = []
     budget = max_chars
     # 按二级/三级标题分片
-    parts = re.split(r"(?m)^(?=#{2,3}\s)", text)
     for part in parts:
         if budget <= 0:
             break
@@ -52,6 +63,7 @@ def _extract_rules(text: str, max_chars: int) -> str:
         header = lines[0] if lines else ""
         # 取标题 + 含判定关键词的行(Check/Pattern/Condition/规则/判定/FP Condition)
         keep = [header]
+        source_part_cut = False
         for ln in lines[1:]:
             s = ln.strip()
             if not s:
@@ -62,24 +74,42 @@ def _extract_rules(text: str, max_chars: int) -> str:
                 s,
             ):
                 keep.append(ln)
+            else:
+                source_part_cut = True
             if sum(len(k) for k in keep) > 600:  # 单条规则最多保留 600 字符
+                source_part_cut = True
                 break
         chunk = "\n".join(keep).strip()
         if not chunk:
             continue
         if len(chunk) > budget:
             chunk = chunk[:budget]
+            source_part_cut = True
         out.append(chunk)
+        included += 1
+        partial += int(source_part_cut)
         budget -= len(chunk)
+    if coverage is not None:
+        coverage.append({
+            "source": source_name, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "included": included, "total": total, "partial": partial,
+            "omitted": total - included,
+        })
     return "\n".join(out).strip()
 
 
 # ---- L1: 全 Agent 必注入(高度压缩的铁律) ----
 
-def l1_core_rules(max_chars: int = 3500) -> str:
+def l1_core_rules(max_chars: int = 3500, *, coverage: list[dict] | None = None) -> str:
     """反幻觉铁律 + 误报红线, 所有审计/验证 Agent 必注入."""
-    anti = _extract_rules(_read("anti_hallucination"), max_chars * 2 // 3)
-    fp = _extract_rules(_read("false_positive_patterns"), max_chars // 3)
+    anti = _extract_rules(
+        _read("anti_hallucination"), max_chars * 2 // 3,
+        coverage=coverage, source_name="anti_hallucination.md",
+    )
+    fp = _extract_rules(
+        _read("false_positive_patterns"), max_chars // 3,
+        coverage=coverage, source_name="false_positive_patterns.md",
+    )
     return (
         "## 反幻觉与证据铁律(违反即被 QC 驳回)\n" + anti
         + "\n\n## 已知误报模式(命中即降级/排除)\n" + fp
@@ -100,7 +130,7 @@ _L2_MAP: Dict[str, str] = {
 }
 
 
-def l2_for_role(role: str, max_chars: int = 6000) -> str:
+def l2_for_role(role: str, max_chars: int = 6000, *, coverage: list[dict] | None = None) -> str:
     """按 Agent 角色注入对应领域知识.
 
     role: recon / analysis / verification / report
@@ -118,7 +148,7 @@ def l2_for_role(role: str, max_chars: int = 6000) -> str:
         name = _L2_MAP.get(key)
         if not name:
             continue
-        body = _extract_rules(_read(name), per)
+        body = _extract_rules(_read(name), per, coverage=coverage, source_name=f"{name}.md")
         if body:
             sections.append(f"### 知识库·{name}\n{body}")
     return "\n\n".join(sections).strip()
@@ -136,6 +166,17 @@ def l3_index() -> str:
 
 
 def build_prompt_context(role: str, l1_chars: int = 3500, l2_chars: int = 6000) -> str:
-    """组装某角色 Agent 的完整知识上下文(L1 + L2 + L3 索引)."""
-    parts = [l1_core_rules(l1_chars), l2_for_role(role, l2_chars)]
+    """组装角色知识摘录，并明确记录哪些原始段落未注入。"""
+    coverage: list[dict] = []
+    parts = [l1_core_rules(l1_chars, coverage=coverage), l2_for_role(role, l2_chars, coverage=coverage)]
+    coverage_lines = [
+        f"- {item['source']} sha256={item['sha256']}；段落={item['included']}/{item['total']}；"
+        f"部分段={item['partial']}；省略段={item['omitted']}"
+        + ("；状态=空文件或读取失败" if item["total"] == 0 else "")
+        for item in coverage
+    ]
+    parts.append(
+        "## 知识来源覆盖\n" + "\n".join(coverage_lines)
+        + "\n部分段仅含摘录；未注入的段落不构成本次模型已读取的规则。"
+    )
     return "\n\n".join(p for p in parts if p)
