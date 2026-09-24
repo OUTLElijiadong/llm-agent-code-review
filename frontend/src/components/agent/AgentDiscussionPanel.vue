@@ -406,6 +406,7 @@ const quickPrompts = [
 
 const statusTag = computed(() => {
   if (phase.value === 'concluded') {
+    if (serverProgress.value?.phase === 'partial') return { type: 'warning' as const, text: '部分完成' }
     const terminal = ['failed', 'cancelled', 'interrupted'].includes(terminalStatus.value)
       ? terminalStatus.value : serverProgress.value?.phase || props.initialStatus
     if (terminal === 'failed') return { type: 'danger' as const, text: '失败' }
@@ -461,6 +462,9 @@ const progressPercent = computed(() => {
   return completed ? actual : Math.min(actual, 95)
 })
 const progressLabel = computed(() => {
+  if (phase.value === 'concluded' && serverProgress.value?.phase === 'partial') {
+    return '圆桌部分完成，审查覆盖不完整'
+  }
   if (phase.value === 'concluded' && ['failed', 'cancelled', 'interrupted'].includes(terminalStatus.value)) {
     return terminalStatus.value === 'failed' ? '圆桌讨论失败'
       : terminalStatus.value === 'cancelled' ? '圆桌讨论已取消' : '圆桌讨论已中断'
@@ -472,6 +476,7 @@ const progressLabel = computed(() => {
   if (stage === 'extracting') return '正在整理结构化问题'
   if (stage === 'reporting') return '正在生成报告'
   if (stage === 'completed') return '圆桌讨论已完成'
+  if (stage === 'partial') return '圆桌部分完成，审查覆盖不完整'
   if (stage === 'failed') return '圆桌讨论失败'
   if (stage === 'cancelled') return '圆桌讨论已取消'
   if (stage === 'interrupted') return '圆桌讨论已中断'

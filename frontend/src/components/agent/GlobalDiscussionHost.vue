@@ -151,6 +151,7 @@ function openFromDock(): void {
 }
 
 function statusLabel(status: string, progressPhase?: string): string {
+  if (progressPhase === 'partial') return '部分完成'
   if (progressPhase === 'failed') return '失败'
   if (progressPhase === 'cancelled') return '已取消'
   if (progressPhase === 'interrupted') return '已中断'

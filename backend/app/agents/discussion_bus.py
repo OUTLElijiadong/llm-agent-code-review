@@ -561,7 +561,8 @@ class DiscussionBus:
                 result = str(data.get("status") or "success")
                 progress["phase"] = {
                     "success": "completed", "cancelled": "cancelled",
-                    "failed": "failed", "interrupted": "interrupted",
+                    "failed": "partial" if data.get("partial") is True else "failed",
+                    "interrupted": "interrupted",
                 }.get(result, "failed")
                 if result == "success":
                     progress["completed"] = int(progress.get("total") or 0)

@@ -500,6 +500,84 @@ async def test_speaker_turn_handles_first_speaker_and_llm_failure() -> None:
     assert failed_ok is False
 
 
+@pytest.mark.asyncio
+async def test_speaker_retries_length_with_complete_context_and_counts_each_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """生产中 4096 截断的专家发言应逐级扩容，且每次沿用完整源码与历史。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(module, "_call_raw_for_task", _REAL_CALL_FOR_TASK)
+
+    class RetryingAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if len(self.calls) < 3:
+                raise DeepSeekOutputTruncatedError(
+                    "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+                )
+            return (
+                '{"action":"speak","stance":"supplement","content":"第 7 行缺少校验"}',
+                {"model_name": "speaker-model"},
+            )
+
+    budget = module._RoundtableCallBudget()
+    token = module._roundtable_call_budget.set(budget)
+    agent = RetryingAgent()
+    try:
+        decision, meta, ok = await _make_orchestrator()._speaker_turn(
+            agent=agent, profile=SECURITY_AGENT,
+            code="source_marker = untrusted_input", language="python", file_name="source.py",
+            all_turns=[_turn(1, content="历史证据标记")],
+            user_inputs=["请检查账号隔离"], round_idx=1, speaker_idx=1,
+        )
+    finally:
+        module._roundtable_call_budget.reset(token)
+
+    assert ok and decision.content == "第 7 行缺少校验"
+    assert meta == {"model_name": "speaker-model"}
+    assert budget.used == 3
+    assert [call["max_tokens"] for call in agent.calls] == [8192, 16_384, 32_768]
+    assert len({call["user_prompt"] for call in agent.calls}) == 1
+    assert all(
+        "source_marker = untrusted_input" in call["user_prompt"]
+        and "历史证据标记" in call["user_prompt"]
+        and "请检查账号隔离" in call["user_prompt"]
+        for call in agent.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_speaker_exhausted_length_retries_remains_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三个输出预算都截断时不能把半截 JSON 算成有效专家发言。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(module, "_call_raw_for_task", _REAL_CALL_FOR_TASK)
+
+    class TruncatedAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            raise DeepSeekOutputTruncatedError(
+                "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+            )
+
+    budget = module._RoundtableCallBudget()
+    token = module._roundtable_call_budget.set(budget)
+    agent = TruncatedAgent()
+    try:
+        decision, meta, ok = await _make_orchestrator()._speaker_turn(
+            agent=agent, profile=SECURITY_AGENT, code="x = 1", language="python",
+            file_name="partial.py", all_turns=[], user_inputs=[], round_idx=0, speaker_idx=0,
+        )
+    finally:
+        module._roundtable_call_budget.reset(token)
+
+    assert not ok and meta is None
+    assert "finish_reason=length" in decision.content
+    assert budget.used == 3
+    assert [call["max_tokens"] for call in agent.calls] == [8192, 16_384, 32_768]
+
+
 def test_summarize_handles_empty_success_and_fallback() -> None:
     """主持人汇总应覆盖无发言、成功输出和空输出统计回退。
 
@@ -1573,6 +1651,41 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert saved_task.duration_ms >= 0
 
 
+def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
+    db: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """一轮专家截断时，即使主持与问题整理成功也不能产出完整报告。"""
+    task = ReviewTask(
+        user_id=4, project_id=5, task_name="部分圆桌",
+        review_type="discuss", status="running", total_files=1, processed_files=0,
+    )
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module, "_extract_issues", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module, "_normalize_discussion_issues", lambda *_args, **_kwargs: [])
+
+    module._finalize_review(
+        task_id=task.id, user_id=4, file_id=6, file_name="partial.py",
+        all_turns=[_turn(1, content="第一位专家的有效发现")],
+        code="x = 1", language="python", deferred_logs=[],
+        agent=RecordingAgent(), stopped=False, consensus="主持已归纳有效部分",
+        coverage={
+            "expected_turns": 2, "attempted_turns": 2, "successful_turns": 1,
+            "failed_turns": 1, "valid_speeches": 1, "summary_status": "success",
+            "errors": ["可靠性代理第 2 轮输出被截断"],
+        },
+    )
+
+    saved = db.get(ReviewTask, task.id)
+    assert saved.status == "failed"
+    assert saved.coverage["stage"] == "partial"
+    assert saved.coverage["extraction_status"] == "success"
+    assert saved.summary == "主持已归纳有效部分"
+    assert saved.processed_files == 0
+    assert saved.score == 0
+
+
 def test_finalize_review_marks_task_failed_when_extraction_fails(
     db: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -2013,6 +2126,7 @@ async def test_continuous_late_inputs_get_explicit_partial_status(
     monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
         "status": "failed" if finalized else "running", "error": "部分结果",
+        "coverage": {"stage": "partial"} if finalized else {},
     })
     monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
@@ -2034,6 +2148,7 @@ async def test_continuous_late_inputs_get_explicit_partial_status(
                for turn in session.turns)
     assert finalized["coverage"]["pending_user_inputs"] == 1
     assert finalized["coverage"]["errors"]
+    assert session.progress["phase"] == "partial"
 
 
 @pytest.mark.asyncio

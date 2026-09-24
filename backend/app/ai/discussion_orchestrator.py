@@ -513,6 +513,7 @@ class DiscussionOrchestrator:
         session.task_id = task_id
         final_status = "failed"
         final_error = ""
+        final_partial = False
         summary_turns: tuple[DiscussionTurn, ...] | None = None
         call_budget = _RoundtableCallBudget()
         budget_token = _roundtable_call_budget.set(call_budget)
@@ -847,6 +848,7 @@ class DiscussionOrchestrator:
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
                     final_status = state["status"]
                     final_error = state.get("error") or ""
+                    final_partial = (state.get("coverage") or {}).get("stage") == "partial"
                 except asyncio.CancelledError:
                     cancelled_during_finalization = True
                     report_task_id = await loop.run_in_executor(
@@ -864,6 +866,7 @@ class DiscussionOrchestrator:
             self._publish_terminal(
                 session_id, report_task_id, final_status,
                 final_error or ("；".join(coverage["errors"]) if final_status != "success" else ""),
+                partial=final_partial,
             )
             # 对齐团队派发逻辑:结论回投发起会话,小菱自动续跑汇报,无需用户手动追问。
             if self._origin_surface and self._origin_session_key:
@@ -892,7 +895,10 @@ class DiscussionOrchestrator:
             None, copy_context().run, lambda: _ensure_running(self._task_id)
         )
 
-    def _publish_terminal(self, session_id: str, task_id: int, status: str, error: str = "") -> None:
+    def _publish_terminal(
+        self, session_id: str, task_id: int, status: str, error: str = "",
+        *, partial: bool = False,
+    ) -> None:
         """复用发言和 done 控制帧发布可见失败原因，再关闭会话。"""
         session = self._bus.get_session(session_id)
         if session:
@@ -904,7 +910,10 @@ class DiscussionOrchestrator:
                 agent_code="orchestrator", agent_name="主持人", role="agent", content=message,
             ))
             self._emit(AgentEventType.FAILED, "orchestrator", message)
-        payload = {"task_id": task_id, "status": status, "error": error}
+        payload = {
+            "task_id": task_id, "status": status, "error": error,
+            "partial": bool(partial and status == "failed"),
+        }
         if status == "cancelled":
             self._bus.publish_control(session_id, "cancelled", payload)
         self._bus.publish_control(session_id, "done", payload)
@@ -997,14 +1006,27 @@ class DiscussionOrchestrator:
 
         history_for_prompt = history_text
         user_prompt = speaker_prompt(history_for_prompt, code)
-        output_budget = _clamp_max_tokens(None)
+        # 推理模型的思考内容与 JSON 正文共享输出预算。生产中默认 4096 曾让
+        # 第二轮专家以 finish_reason=length 结束；按预算递增重试同一完整提示。
+        output_ceiling = min(
+            _clamp_max_tokens(settings.deepseek_max_output_tokens),
+            # 为源码与发言历史至少留出约三分之二上下文；小窗口兼容旧预算。
+            max(_clamp_max_tokens(None), settings.deepseek_context_window_tokens // 3),
+        )
+        output_budgets = tuple(sorted({
+            min(output_ceiling, _clamp_max_tokens(value))
+            for value in (8192, 16_384, 32_768)
+        }))
+        output_budget = output_budgets[-1]
         budget_error = _roundtable_input_budget_error(
             system, user_prompt, max_output_tokens=output_budget,
         )
         windows: list[str] = []
         try:
             if call_budget:
-                call_budget.ensure_capacity(1 + max(0, remaining_turns) + 2)
+                call_budget.ensure_capacity(
+                    len(output_budgets) + max(0, remaining_turns) + 2,
+                )
             if budget_error and all_turns:
                 available = settings.deepseek_context_window_tokens - output_budget - 1024
                 # 先为源码留下最低证据窗口容量，再压缩历史；不能让历史吃掉全部输入。
@@ -1084,11 +1106,23 @@ class DiscussionOrchestrator:
         def call_speaker(prompt: str, chunk_index: int):
             if self._task_id:
                 _ensure_running(self._task_id)
-            return _call_raw_for_task(agent, self._task_id, self._user_id,
-                usage_file_id=self._file_id, usage_chunk_index=chunk_index,
-                system_prompt=system, user_prompt=prompt,
-                agent_label=profile.code, json_mode=True,
-            )
+            for index, budget in enumerate(output_budgets):
+                budget_error = _roundtable_input_budget_error(
+                    system, prompt, max_output_tokens=budget,
+                )
+                if budget_error:
+                    raise RuntimeError(budget_error)
+                try:
+                    return _call_raw_for_task(agent, self._task_id, self._user_id,
+                        usage_file_id=self._file_id, usage_chunk_index=chunk_index,
+                        system_prompt=system, user_prompt=prompt,
+                        agent_label=profile.code, json_mode=True,
+                        max_tokens=budget,
+                    )
+                except DeepSeekOutputTruncatedError:
+                    if index == len(output_budgets) - 1:
+                        raise
+            raise RuntimeError("专家发言未获得完整模型响应")
 
         try:
             if not windows:

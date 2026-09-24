@@ -24,7 +24,7 @@ export function startDiscussion(params: StartDiscussionParams) {
 /** 服务端圆桌阶段。未知值由 UI 显示通用处理中状态。 */
 export type DiscussionPhase =
   | 'pending' | 'speaking' | 'summarizing' | 'extracting' | 'reporting'
-  | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted'
 
 export interface DiscussionProgress {
   phase: DiscussionPhase | string

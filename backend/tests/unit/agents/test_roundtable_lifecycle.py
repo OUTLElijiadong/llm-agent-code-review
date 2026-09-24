@@ -36,6 +36,32 @@ def test_concluded_session_rejects_user_input_without_ghost_turn() -> None:
     assert bus.get_session("disc_closed").turns == []
 
 
+def test_partial_report_progress_survives_restart_without_opening_followup() -> None:
+    """有效部分报告须可重开且准确标识覆盖缺口，不能误开五分钟追问。"""
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    before = DiscussionBus(persist=True, session_factory=factory)
+    session = before.create_session("disc_partial", 185, "agent_service.py", owner_user_id=7)
+    session.report_task_id = 185
+    before.publish_control(session.session_id, "done", {"status": "failed", "partial": True, "task_id": 185})
+    before.close_session(session.session_id)
+
+    after = DiscussionBus(persist=True, session_factory=factory)
+    restored = after.get_session(session.session_id, owner_user_id=7)
+    assert restored is not None
+    assert restored.progress["phase"] == "partial"
+    assert after.followup_until(restored) == 0
+    assert after.accept_user_input(session.session_id, "部分报告后追问") is False
+    frames = [json.loads(frame) for frame in after.recovery_frames(session.session_id, 7)]
+    assert frames[0]["payload"]["phase"] == "partial"
+    assert frames[1]["payload"]["status"] == "partial"
+    engine.dispose()
+
+
 @pytest.mark.parametrize("stage", ["summarizing", "extracting", "reporting"])
 def test_finalizing_session_saves_user_input_for_followup(stage: str) -> None:
     bus = DiscussionBus()

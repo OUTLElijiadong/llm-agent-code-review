@@ -260,6 +260,21 @@ it('发言全完但报告未完成及失败终态都不把进度条画成 100%',
   wrapper.unmount()
 })
 
+it('已有报告但一轮发言截断时准确标为部分完成，保持禁言与覆盖门禁', async () => {
+  const wrapper = mountPanel({
+    initialStatus: 'concluded', initialReportTaskId: 185,
+    initialProgress: { phase: 'partial', completed_units: 13, total_units: 13, current_round: 2, seq: 12 },
+  })
+  connected('connected')
+  await flushPromises()
+  expect(wrapper.get('.header-sub').text()).toContain('部分完成')
+  expect(wrapper.get('.room-progress').text()).toContain('审查覆盖不完整')
+  expect(wrapper.get('.room-progress-track > span').attributes('style')).not.toContain('100%')
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
+  expect(wrapper.text()).toContain('查看报告')
+  wrapper.unmount()
+})
+
 it('手机头部有独立状态和进度区，长文件名受限，操作按钮保留触控面积', async () => {
   const source = (await import('./AgentDiscussionPanel.vue?raw')).default as string
   expect(source).toContain('@media (max-width: 520px)')

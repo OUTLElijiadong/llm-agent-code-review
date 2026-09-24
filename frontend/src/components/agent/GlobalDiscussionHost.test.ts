@@ -108,6 +108,19 @@ it('圆桌超过首批列表时可逐页加载，单条首批也能打开选择�
   wrapper.unmount()
 })
 
+it('会话列表准确区分有有效部分报告的圆桌', async () => {
+  discussionApi.list.mockResolvedValue({
+    items: [current, {
+      ...current, session_id: 'disc-partial', status: 'concluded',
+      progress: { ...current.progress, phase: 'partial' },
+    }], next_offset: null,
+  })
+  const { wrapper } = await mountHost()
+  await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+  expect(wrapper.get('.roundtable-choices').text()).toContain('部分完成')
+  wrapper.unmount()
+})
+
 it('服务端详情的历史页与更早游标交给圆桌面板', async () => {
   discussionApi.detail.mockResolvedValue({
     ...current, turns: [{ seq: 51, turn_id: 51, role: 'agent', content: '历史发言' }],
