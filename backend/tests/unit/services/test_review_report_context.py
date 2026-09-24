@@ -470,6 +470,46 @@ def test_review_limits_total_knowledge_compaction_calls(monkeypatch) -> None:
     assert len(calls) == 12
 
 
+@pytest.mark.parametrize(
+    ("attempts", "expected_retry_caps"),
+    [(3, [2, 2, 2, 2]), (2, [2, 2, 2, 2, 2, 1])],
+)
+def test_review_limits_actual_knowledge_http_attempts_with_retries(
+    monkeypatch, attempts, expected_retry_caps,
+) -> None:
+    """底层自动重试也占用同一报告的真实模型请求预算。"""
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+    agent._max_retries = 2
+    monkeypatch.setattr(
+        reporter_module.agent_knowledge_service, "unified_retrieve",
+        lambda *a, **k: [{"doc_id": 9, "content": "x" * 24_000}],
+    )
+    retry_caps = []
+
+    def role_call(system, user, ctx=None, max_tokens=None):
+        retry_caps.append(agent._max_retries)
+        part = user.split("原始知识片段:\n", 1)[1]
+        source_id = user.split("source_id=", 1)[1].split("\n", 1)[0]
+        digest = user.split("sha256=", 1)[1].split("\n", 1)[0]
+        middle = part[len(part) // 2 - 8:len(part) // 2 + 8]
+        tail = part[-16:]
+        return AgentResult(success=True, http_attempts=attempts, data=json.dumps({
+            "summary": f"已提炼中段{middle}与尾部{tail}",
+            "head_quote": part[:16], "middle_quote": middle, "tail_quote": tail,
+            "covered_source_ids": [source_id], "source_sha256": digest,
+            "coverage_complete": True,
+        }))
+
+    monkeypatch.setattr(agent, "_role_call", role_call)
+    review = agent.review(None, environment=_environment(), conclusion={"passed": True})
+
+    assert review.success is False
+    assert review.failure_kind == "knowledge_compaction_budget_exhausted"
+    assert retry_caps == expected_retry_caps
+    assert agent._max_retries == 2
+
+
 def test_three_normal_knowledge_hits_keep_all_sources_without_model_call(monkeypatch) -> None:
     """现有 700 字切片无需额外模型调用，第三条仍保留完整原文。"""
     agent = ReporterAgent()

@@ -189,12 +189,15 @@ class TestReviewReporterAgent(BaseAgent):
         for part_index, chunk in enumerate(chunks, start=1):
             digest = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
             chunk_id = f"{source_id}:part:{part_index}/{len(chunks)}:{digest[:12]}"
-            if call_budget["used"] >= _KNOWLEDGE_MAX_COMPRESSION_CALLS:
+            remaining_attempts = _KNOWLEDGE_MAX_COMPRESSION_CALLS - call_budget["used"]
+            if remaining_attempts <= 0:
                 raise KnowledgeReferenceError(
-                    f"{stage} 知识压缩已达单次报告 {_KNOWLEDGE_MAX_COMPRESSION_CALLS} 次调用上限",
+                    f"{stage} 知识压缩已达单次报告 {_KNOWLEDGE_MAX_COMPRESSION_CALLS} 次模型请求上限",
                     "knowledge_compaction_budget_exhausted",
                 )
-            call_budget["used"] += 1
+            # BaseAgent.call 会自动重试；将本片的重试上限限制在全报告剩余请求预算内。
+            old_retries = self._max_retries
+            self._max_retries = min(max(0, int(old_retries)), remaining_attempts - 1)
             try:
                 result = self._role_call(
                     _KNOWLEDGE_COMPRESSION_PROMPT,
@@ -209,6 +212,15 @@ class TestReviewReporterAgent(BaseAgent):
                     f"{stage} 知识来源 {index} 片段 {part_index} 压缩调用异常",
                     "knowledge_compaction_failed",
                 ) from exc
+            finally:
+                self._max_retries = old_retries
+            attempts_used = max(1, int(result.http_attempts or 0))
+            if attempts_used > remaining_attempts:
+                raise KnowledgeReferenceError(
+                    f"{stage} 知识来源 {index} 片段 {part_index} 超过剩余模型请求预算",
+                    "knowledge_compaction_budget_exhausted",
+                )
+            call_budget["used"] += attempts_used
             if not result.success:
                 raise KnowledgeReferenceError(
                     f"{stage} 知识来源 {index} 片段 {part_index} 压缩失败: {result.error or '空输出'}",
