@@ -62,7 +62,7 @@
     </section>
     </section>
 
-    <!-- ============ 后台进行中(隐藏设计:无任务时整块不渲染) ============ -->
+    <!-- ============ 后台状态(隐藏设计:无任务时整块不渲染) ============ -->
     <section
       v-if="runningState !== 'success' || hasRunningTasks"
       class="running-panel prism-rise"
@@ -71,10 +71,10 @@
       <header class="running-head">
         <h3 class="font-display">
           <span class="running-pulse" aria-hidden="true"></span>
-          后台进行中
+          <span data-testid="running-title">{{ runningTitle }}</span>
           <span class="running-count font-mono">{{ (runningData?.reviews.length ?? 0) + (runningData?.agents.length ?? 0) }}</span>
         </h3>
-        <p class="running-sub">进行中每 5 秒更新</p>
+        <p class="running-sub" data-testid="running-subtitle">{{ runningSubtitle }}</p>
       </header>
       <p v-if="runningState === 'loading' && !runningData" class="load-feedback" role="status">正在读取后台进度</p>
       <p v-if="runningState === 'error'" class="load-feedback error" role="alert">
@@ -327,8 +327,24 @@ const AGENT_RUN_STATUS_LABELS: Record<string, string> = {
   running: '运行中', approving: '审批处理中', rejecting: '驳回处理中',
   answering: '回答处理中', waiting_approval: '等待审批', waiting_input: '等待输入',
 }
+const ACTIVE_AGENT_STATUSES = new Set(['running', 'approving', 'rejecting', 'answering'])
+const WAITING_AGENT_STATUSES = new Set(['waiting_approval', 'waiting_input'])
 let runningTimer: ReturnType<typeof setTimeout> | undefined
 let runningRequest: Promise<void> | null = null
+
+const activeAgentCount = computed(() => runningData.value?.agents.filter((item) => ACTIVE_AGENT_STATUSES.has(item.status)).length ?? 0)
+const waitingAgentCount = computed(() => runningData.value?.agents.filter((item) => WAITING_AGENT_STATUSES.has(item.status)).length ?? 0)
+const runningTitle = computed(() => {
+  if (activeAgentCount.value === 0 && waitingAgentCount.value > 0 && !(runningData.value?.reviews.length)) return '待你继续'
+  return '后台进行中'
+})
+const runningSubtitle = computed(() => {
+  if (activeAgentCount.value === 0 && waitingAgentCount.value > 0 && !(runningData.value?.reviews.length)) {
+    return '等待你的回复或审批 · 可在 Agent 工作台继续'
+  }
+  if (waitingAgentCount.value > 0) return '后台任务每 5 秒更新 · 含待你继续的会话'
+  return '进行中每 5 秒更新'
+})
 
 function stopRunningPolling(): void {
   if (runningTimer) clearTimeout(runningTimer)

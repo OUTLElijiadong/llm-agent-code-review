@@ -491,6 +491,24 @@ describe('后台进度读取与恢复', () => {
     expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('40%')
   })
 
+  it('仅有等待回复或审批的会话不误报为后台运行', async () => {
+    mocks.getRunning.mockResolvedValue({
+      reviews: [],
+      agents: [{
+        run_id: 'run-waiting',
+        surface: 'user',
+        session_key: 'user-session',
+        status: 'waiting_input',
+        update_time: '2026-09-24T14:51:33Z',
+      }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="running-title"]').text()).toBe('待你继续')
+    expect(wrapper.get('[data-testid="running-subtitle"]').text()).toContain('可在 Agent 工作台继续')
+    expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('等待输入')
+  })
+
   it('进度读取失败有独立重试且不伪装没有后台任务', async () => {
     mocks.getRunning.mockRejectedValueOnce(new Error('unavailable'))
     const wrapper = mountPage()
