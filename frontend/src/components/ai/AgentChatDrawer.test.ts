@@ -42,6 +42,12 @@ vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages
 import AgentChatDrawer from './AgentChatDrawer.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
+import {
+  agentChatStorageKey,
+  saveActiveAgentChatSession,
+  saveAgentChatSessions,
+  saveAgentChatSnapshot,
+} from '@/utils/agentChatSessions'
 
 function mountDrawer(prefill?: string, extraPlugins: Plugin[] = []): VueWrapper {
   return mount(AgentChatDrawer, {
@@ -1170,6 +1176,42 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.find('.msg-error-card').text()).toContain('Responses 上游 HTTP 402')
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('页面切换后从账号快照恢复带请求号的失败卡片', async () => {
+    const runId = 'run-persisted-402'
+    const storageKey = agentChatStorageKey('user')
+    saveAgentChatSessions(storageKey, [{ id: 'user-test', title: '测试会话', createdAt: Date.now() }])
+    saveActiveAgentChatSession(storageKey, 'user-test')
+    saveAgentChatSnapshot('user-test', {
+      messages: [
+        { role: 'user', content: '调用审查 Agent' },
+        {
+          role: 'error',
+          content: 'Responses 上游 HTTP 402: Insufficient Balance',
+          runId,
+          errorCard: { retryable: true, requestId: 'req-persisted' },
+        },
+      ],
+      teams: [],
+      runStatus: 'failed',
+      updatedAt: Date.now(),
+    }, storageKey)
+    sessionApi.get.mockResolvedValue({
+      surface: 'user', session_id: 'user-test',
+      run: {
+        run_id: runId, status: 'failed', model: 'deepseek-v4-pro',
+        rounds: 1, error: '', updated_at: '',
+      },
+      messages: [{ role: 'user', content: '调用审查 Agent' }], pending: null,
+    })
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(sessionApi.get).toHaveBeenCalledWith('user', 'user-test')
+    expect(wrapper.find('.msg-error-card').text()).toContain('Responses 上游 HTTP 402')
+    expect(wrapper.find('.msg-error-request').text()).toContain('req-persisted')
+    wrapper.unmount()
   })
 
   it('助手消息可复制:写入剪贴板并短暂显示对勾', async () => {

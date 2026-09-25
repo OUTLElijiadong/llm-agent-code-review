@@ -398,9 +398,11 @@ function persistSnapshot(): void {
   if (!sessionId.value) return
   saveAgentChatSnapshot(sessionId.value, {
     messages: messages.value.map((message) => ({
-      role: message.role === 'error' ? 'assistant' : message.role,
+      role: message.role,
       content: message.images?.length && !message.content.trim() ? '(图片)' : message.content,
       teamIds: message.teamIds?.length ? [...message.teamIds] : undefined,
+      runId: message.runId,
+      errorCard: message.errorCard,
       // 图片字节不落本地快照，历史缩略图从服务器的本人资产恢复。
     })),
     teams: visibleAgentTeams.value.map(snapshotTeam),
@@ -616,25 +618,26 @@ function restoredSessionMessages(
   const emptyTeamAnchors = (persistedMessages ?? [])
     .filter((message) => message.role === 'assistant' && !message.content.trim() && message.teamIds?.length)
     .flatMap((message) => message.teamIds ?? [])
-  if (!toolCalls.length && !emptyTeamAnchors.length) return restored
-  const timeline: ChatMessage = {
-    id: messageId(),
-    role: 'assistant',
-    content: '',
-    time: restoredTime,
-    runId: session.run?.run_id,
-    toolCalls,
-  }
-  // 本地快照中的空时间线消息就是团队卡片的稳定锚点。
-  if (emptyTeamAnchors.length) timeline.teamIds = [...new Set(emptyTeamAnchors)]
-  let conclusionIndex = -1
-  for (let index = restored.length - 1; index >= 0; index -= 1) {
-    if (restored[index].role === 'assistant' && restored[index].content.trim()) {
-      conclusionIndex = index
-      break
+  if (toolCalls.length || emptyTeamAnchors.length) {
+    const timeline: ChatMessage = {
+      id: messageId(),
+      role: 'assistant',
+      content: '',
+      time: restoredTime,
+      runId: session.run?.run_id,
+      toolCalls,
     }
+    // 本地快照中的空时间线消息就是团队卡片的稳定锚点。
+    if (emptyTeamAnchors.length) timeline.teamIds = [...new Set(emptyTeamAnchors)]
+    let conclusionIndex = -1
+    for (let index = restored.length - 1; index >= 0; index -= 1) {
+      if (restored[index].role === 'assistant' && restored[index].content.trim()) {
+        conclusionIndex = index
+        break
+      }
+    }
+    restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   }
-  restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   // 非终态运行:把模型已生成的部分输出(尚未作为完整消息落库)展示出来。
   const partialOutput = session.run?.output_text?.trim()
   if (
@@ -657,18 +660,31 @@ function restoredSessionMessages(
   // 消息而不知道上次没做完,误以为「已经完成」。
   const failedStatus = session.run?.status
   const failedError = (session.run?.error ?? '').trim()
+  const persistedErrors = (persistedMessages ?? [])
+    .filter((message) => message.role === 'error' && message.runId === session.run?.run_id)
   if (
     (failedStatus === 'failed' || failedStatus === 'incomplete' || failedStatus === 'max_rounds_exceeded')
-    && failedError
+    && (failedError || persistedErrors.length)
   ) {
-    restored.push({
-      id: messageId(),
-      role: 'error',
-      content: failedError,
-      time: restoredTime,
-      runId: session.run?.run_id,
-      errorCard: { retryable: true },
-    })
+    if (failedError) {
+      restored.push({
+        id: messageId(),
+        role: 'error',
+        content: failedError,
+        time: restoredTime,
+        runId: session.run?.run_id,
+        errorCard: { retryable: true },
+      })
+    } else {
+      restored.push(...persistedErrors.map((message) => ({
+        id: messageId(),
+        role: 'error' as const,
+        content: message.content,
+        time: restoredTime,
+        runId: message.runId,
+        errorCard: message.errorCard ?? { retryable: true },
+      })))
+    }
   }
   return restored
 }
