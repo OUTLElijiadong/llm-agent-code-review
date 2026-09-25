@@ -499,6 +499,23 @@ function restoredMessages(
   return restoredSessionMessages(session, restoredTime, loadAgentChatSnapshot(session.session_id, chatStorageKey.value)?.messages)
 }
 
+/**
+ * SSE 终态先于服务端历史落库;紧接着的轮询可能只拿到失败状态,没有 error 文本。
+ * 这种快照仍要保留刚刚展示的本地错误卡片,否则用户只能看到“遇到问题”而看不到
+ * 可操作的上游错误和 request id。错误卡片带 runId,只合并当前失败运行,避免串入旧会话。
+ */
+function mergeLocalErrorCards(
+  restored: ChatMessage[],
+  run: Awaited<ReturnType<typeof getAgentResponseSession>>['run'],
+): ChatMessage[] {
+  if (!run || !['failed', 'incomplete', 'max_rounds_exceeded'].includes(run.status)) return restored
+  if (restored.some((message) => message.role === 'error' && message.runId === run.run_id)) return restored
+  const local = messages.value.filter((message) => (
+    message.role === 'error' && message.runId === run.run_id
+  ))
+  return local.length ? [...restored, ...local] : restored
+}
+
 function withLoadedHistory(session: AgentResponseSession): AgentResponseSession {
   const page = session.history_page ?? {
     oldest_message_index: 0, total: session.messages.length, has_more: false,
@@ -649,6 +666,7 @@ function restoredSessionMessages(
       role: 'error',
       content: failedError,
       time: restoredTime,
+      runId: session.run?.run_id,
       errorCard: { retryable: true },
     })
   }
@@ -950,7 +968,10 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
       if (signature !== sessionSnapshotSignature) {
         sessionSnapshotSignature = signature
         const restoredTime = ''
-        const restored = restoredMessages(withLoadedHistory(session), restoredTime)
+        const restored = mergeLocalErrorCards(
+          restoredMessages(withLoadedHistory(session), restoredTime),
+          session.run,
+        )
         // 轮询恢复快照:欢迎语置顶 + 服务端历史,替换本地占位
         messages.value = restored.length ? [welcomeMessage(), ...restored] : restored
         const pending = session.pending
@@ -1048,6 +1069,7 @@ function appendErrorCard(
     role: 'error',
     content,
     time: dayjs().format('HH:mm'),
+    runId: sessionRun.value?.run_id,
     errorCard: { retryable, ...metadata },
   })
   void nextTick().then(scrollToBottom)

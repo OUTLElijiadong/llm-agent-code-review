@@ -1137,6 +1137,41 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
+  it('失败快照轮询不覆盖实时上游错误卡片', async () => {
+    vi.useFakeTimers()
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('调用审查 Agent')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    emit(0, { type: 'response.created', response: { id: 'run-upstream-402', model: 'deepseek-v4-pro' } })
+    emit(0, {
+      type: 'response.failed',
+      response: {
+        id: 'run-upstream-402',
+        error: { message: 'Responses 上游 HTTP 402: Insufficient Balance' },
+      },
+    })
+    await finish(0)
+    expect(wrapper.find('.msg-error-card').text()).toContain('Responses 上游 HTTP 402')
+
+    // 生产中 SSE 先收到失败,随后轮询可能暂时拿到没有 error 文本的失败快照。
+    sessionApi.get.mockResolvedValue({
+      surface: 'user', session_id: 'user-test',
+      run: {
+        run_id: 'run-upstream-402', status: 'failed', model: 'deepseek-v4-pro',
+        rounds: 1, error: '', updated_at: '',
+      },
+      messages: [{ role: 'user', content: '调用审查 Agent' }], pending: null,
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(wrapper.find('.msg-error-card').exists()).toBe(true)
+    expect(wrapper.find('.msg-error-card').text()).toContain('Responses 上游 HTTP 402')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('助手消息可复制:写入剪贴板并短暂显示对勾', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
