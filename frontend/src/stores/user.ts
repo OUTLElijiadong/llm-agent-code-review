@@ -14,6 +14,7 @@ import { invalidateAvatarCache } from '@/constants/avatars'
 import { markAgentChatLoginFreshStart } from '@/utils/agentChatSessions'
 
 let authExpiredListenerRegistered = false
+let authStorageListenerRegistered = false
 
 /**
  * 用户状态管理 Store,管理认证状态、用户信息、RBAC 权限与 Token 持久化
@@ -250,6 +251,25 @@ export const useUserStore = defineStore('user', () => {
   }
 
   /**
+   * 同源标签页登录了另一个账号时,旧标签页不能继续展示旧账号权限。
+   * token 存在 localStorage 中,storage 事件不会在发起变更的标签页触发,
+   * 因而当前页仍由 login/logout 主流程维护,其他标签页统一失效并回登录页。
+   */
+  function syncCrossTabToken(event: StorageEvent): void {
+    if (event.key !== 'review_token') return
+    const nextToken = event.newValue ?? ''
+    if (nextToken === token.value) return
+    syncAuthExpiredState()
+    window.dispatchEvent(new Event('prism:auth-expired'))
+  }
+
+  function registerAuthStorageListener(): void {
+    if (authStorageListenerRegistered) return
+    window.addEventListener('storage', syncCrossTabToken)
+    authStorageListenerRegistered = true
+  }
+
+  /**
    * 注册全局认证过期监听,保证拦截器清 token 后 Pinia 状态同步
    * @returns void
    */
@@ -260,6 +280,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   registerAuthExpiredListener()
+  registerAuthStorageListener()
 
   return {
     token,

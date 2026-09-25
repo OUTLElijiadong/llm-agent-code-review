@@ -226,6 +226,46 @@ describe('user store authentication and RBAC', () => {
     expect(store.roles).toEqual([])
     expect(api.clearToken).toHaveBeenCalledOnce()
   })
+
+  it('另一个标签页切换账号时立即清空旧账号权限状态', () => {
+    store.$patch({
+      token: 'admin-token',
+      profile: { id: 1, username: 'admin', role: 'super_admin', status: 1 },
+      roles: ['super_admin'],
+      permissions: new Set(['server_ops:read']),
+    })
+    const expired = vi.fn()
+    window.addEventListener('prism:auth-expired', expired)
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'review_token',
+      oldValue: 'admin-token',
+      newValue: 'user-token',
+      storageArea: window.localStorage,
+    }))
+
+    expect(store.token).toBe('')
+    expect(store.profile).toBeNull()
+    expect(store.roles).toEqual([])
+    expect([...store.permissions]).toEqual([])
+    expect(api.clearToken).not.toHaveBeenCalled()
+    expect(expired).toHaveBeenCalledOnce()
+    window.removeEventListener('prism:auth-expired', expired)
+  })
+
+  it('同一 token 的 storage 通知不打断当前会话', () => {
+    store.$patch({ token: 'same-token', profile: member, roles: ['user'] })
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'review_token',
+      oldValue: 'same-token',
+      newValue: 'same-token',
+      storageArea: window.localStorage,
+    }))
+
+    expect(store.token).toBe('same-token')
+    expect(store.profile).toEqual(member)
+    expect(store.roles).toEqual(['user'])
+  })
 })
 
 
