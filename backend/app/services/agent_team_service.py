@@ -2307,7 +2307,7 @@ def complete_task(
             )
             task.instructions = (
                 f"{task.instructions}\n\n[小菱自动改道第 {task.attempt_count + 1} 次] {strategy_change}"
-            )[:12000]
+            )
             task.status = "queued"
             task.completed_at = None
             raw_retry_after = normalized_result.get("retry_after_seconds")
@@ -2624,7 +2624,7 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
             )
             task.instructions = (
                 f"{task.instructions}\n\n[小菱租约恢复改道第 {task.attempt_count + 1} 次] " f"{strategy_instruction}"
-            )[:12000]
+            )
             task.status = "queued"
             task.completed_at = None
             task.next_attempt_at = now

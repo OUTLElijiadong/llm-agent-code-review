@@ -76,7 +76,7 @@ def _review_result(
         {"issue_id": row.id, "project_id": int(review.project_id), "task_id": int(review.id),
          "file_id": row.file_id, "file_name": row.file_name, "line_number": row.line_number,
          "title": row.title, "severity": row.severity, "issue_type": row.issue_type}
-        for row in query.order_by(ReviewIssue.id.asc()).limit(100).all()
+        for row in query.order_by(ReviewIssue.id.asc()).all()
     ]
     detail = {
         "task_id": int(review.id), "project_id": int(review.project_id), "status": review.status,
@@ -87,7 +87,7 @@ def _review_result(
     return {
         "status": state, "task_id": int(review.id), "project_id": int(review.project_id), "coverage": coverage,
         "findings": findings, "finding_count_total": finding_count_total,
-        "findings_truncated": finding_count_total > len(findings),
+        "findings_truncated": False,
         "summary": summary or (review.summary if complete else review.error_message)
         or ("正式并行审查与证据聚合已完成" if complete else "正式审查未完整完成，请查看任务覆盖记录"),
         "evidence": [{"source": "review_task", "data": detail}],

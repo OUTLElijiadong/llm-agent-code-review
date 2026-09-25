@@ -219,7 +219,7 @@ def test_team_creation_preserves_run_review_contract_and_enforces_readonly(db, r
 
 
 @pytest.mark.parametrize("status", ["success", "failed"])
-def test_formal_result_projects_bounded_findings_without_source_or_secret_fields(db, monkeypatch, review_team, status):
+def test_formal_result_keeps_all_findings_without_source_or_secret_fields(db, monkeypatch, review_team, status):
     def finish(_):
         review = db.query(ReviewTask).one()
         db.add_all([ReviewIssue(
@@ -234,8 +234,8 @@ def test_formal_result_projects_bounded_findings_without_source_or_secret_fields
     result = _run(db, review_team)
     assert result["status"] == ("completed" if status == "success" else "failed")
     assert result["finding_count_total"] == 101
-    assert result["findings_truncated"] is True
-    assert len(result["findings"]) == 100
+    assert result["findings_truncated"] is False
+    assert len(result["findings"]) == 101
     assert result["findings"][0]["project_id"] == review_team.project.id
     assert result["findings"][0]["file_id"] == review_team.source.id
     assert set(result["findings"][0]) == {

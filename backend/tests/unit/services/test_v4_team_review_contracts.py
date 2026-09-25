@@ -186,6 +186,19 @@ def test_team_summary_counts_last_finding_from_full_private_dependency():
     assert result["bounded_finding_tasks"] == []
 
 
+def test_team_summary_rejects_completed_status_when_dependency_findings_are_truncated():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    result = summarize_dependencies({"audit": {"status": "completed", "result": {
+        "status": "completed", "findings": [{"title": "问题", "file_name": "a.py"}],
+        "findings_truncated": True,
+    }}})
+
+    assert result["status"] == "failed"
+    assert result["bounded_finding_tasks"] == ["audit"]
+    assert result["errors"][0]["code"] == "finding_coverage_incomplete"
+
+
 def test_audit_coverage_survives_dependency_and_double_public_projection(db):
     import json
 

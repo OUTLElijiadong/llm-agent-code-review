@@ -116,6 +116,8 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
                 blocks.append({"findings": items})
             if finding_summary.get("source_truncated") or (finding_summary.get("omitted_count") and not use_raw):
                 bounded_tasks.append(task_key)
+        if any(bool(block.get("findings_truncated")) for block in blocks) and task_key not in bounded_tasks:
+            bounded_tasks.append(task_key)
         for data in blocks:
             project_id = data.get("project_id")
             task_id = data.get("task_id")
@@ -150,7 +152,8 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "coverage_summary": coverage_summary,
         "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。",
     }
-    complete = bool(outcomes) and not failed
+    # 依赖节点若明确只返回了预览，团队不能把“节点完成”冒充为完整覆盖。
+    complete = bool(outcomes) and not failed and not bounded_tasks
     bounded_note = (
         f" {len(bounded_tasks)} 个节点的问题明细有截断，请查看原任务/报告中的完整结果。" if bounded_tasks else ""
     )
@@ -169,11 +172,19 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "summary": (
             f"已核对 {len(outcomes)} 个子任务的终态与证据，汇总保留问题 {len(findings)} 条；"
             f"实测范围见各项证据。{bounded_note}"
-            if complete else f"团队结果未全部完成；待处理节点：{', '.join(failed) or '缺少依赖结果'}。已保留可用证据。"
+            if complete else (
+                f"团队结果未完整覆盖；待处理节点：{', '.join(failed) or '无'}。"
+                f"问题明细有截断的节点：{', '.join(bounded_tasks) or '无'}。已保留可用证据。"
+            )
         ),
         "evidence": evidence,
         "artifacts": [{"type": "agent_team_summary", "data": summary}],
-        "errors": [] if complete else [{"code": "incomplete_dependencies", "task_keys": failed}],
-        "next_action": None if complete else {"review_incomplete_tasks": failed},
+        "errors": [] if complete else [{
+            "code": "incomplete_dependencies" if failed else "finding_coverage_incomplete",
+            "task_keys": failed, "bounded_task_keys": bounded_tasks,
+        }],
+        "next_action": None if complete else {
+            "review_incomplete_tasks": failed, "review_bounded_tasks": bounded_tasks,
+        },
         "retryable": False,
     }

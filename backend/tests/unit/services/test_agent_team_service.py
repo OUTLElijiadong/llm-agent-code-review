@@ -1919,6 +1919,24 @@ def test_failure_with_remaining_budget_is_automatically_requeued_with_new_strate
     assert second["input"]["_execution_strategy"]["instruction"]
 
 
+def test_automatic_retry_preserves_full_long_instruction(db, team_user):
+    created = agent_team_service.create_team(db, team_user, _payload(
+        tasks=[{
+            "task_key": "read", "member_key": "reader", "title": "读取",
+            "instructions": "原始上下文：" + "中段证据" * 2995,
+            "depends_on": [], "max_attempts": 2,
+        }]
+    ))
+    claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    retried = agent_team_service.complete_task(
+        db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
+        result={"status": "failed", "summary": "读取超时"}, success=False, error="读取超时",
+    )
+    read_task = db.get(AgentTeamTask, claimed["task_id"])
+    assert len(read_task.instructions) > 12000
+    assert read_task.instructions.endswith("先复核前置依赖并缩小输入范围，再执行本任务")
+
+
 def test_team_detail_pages_all_messages_with_a_stable_ledger_cursor(db, team_user):
     created = agent_team_service.create_team(db, team_user, _payload())
     base_time = datetime(2026, 8, 12, tzinfo=timezone.utc)
