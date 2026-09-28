@@ -83,7 +83,7 @@ def _set_run_chinese_font(run, font_name: str) -> None:
         from docx.oxml import OxmlElement
         rfonts = OxmlElement("w:rFonts")
         rpr.append(rfonts)
-    rfonts.set(qn("w:eastAsia"), font_name)
+    rfonts.set(qn("w:eastAsia"), _CHINESE_FONT if font_name == _CODE_FONT else font_name)
 
 
 def _add_run(paragraph, text: str, *, bold: bool = False, color: Optional[RGBColor] = None,
@@ -568,6 +568,10 @@ def export_to_word(
 
     # 1. 报告头
     _build_header(doc, task_info, context.get("score", score))
+
+    doc.add_heading("审查范围与版本", level=1)
+    for line in context["scope_lines"]:
+        _add_run(doc.add_paragraph(), line, size=10)
 
     # 2. 总体评价
     if summary_text:

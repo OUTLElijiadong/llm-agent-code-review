@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import stat
 import tarfile
 import zipfile
 
@@ -15,6 +16,7 @@ from app.utils.archive_extractor import (
     MAX_EXTRACTED_FILES,
     extract_archive,
     is_archive,
+    read_archive_members,
 )
 
 # ============ is_archive ============
@@ -156,6 +158,19 @@ class TestExtractTar:
 
 class TestSecurityChecks:
     """安全校验测试(zip slip / 超限)"""
+
+    @pytest.mark.parametrize("file_type", [stat.S_IFLNK, stat.S_IFIFO])
+    def test_zip_unix_link_or_special_member_rejected(self, file_type):
+        """ZIP Unix 文件类型不能作为普通源码写入或保存在隔离证据中。"""
+        buf = io.BytesIO()
+        info = zipfile.ZipInfo("src/alias.py")
+        info.create_system = 3
+        info.external_attr = (file_type | 0o777) << 16
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr(info, b"../../other-account/secret.py")
+        for strict_paths in (False, True):
+            with pytest.raises(ValidationError, match="链接或特殊文件"):
+                read_archive_members(buf.getvalue(), "source.zip", strict_paths=strict_paths)
 
     def test_zip_slip_rejected(self):
         """含 ../ 的 zip 路径应被拒绝"""

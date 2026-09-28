@@ -18,3 +18,17 @@ it('继续移除无权限导航并保留代码示例，摘要剥离排版标记'
   expect(root.querySelector('code')?.textContent).toBe('[示例](/admin)')
   expect(stripMarkdown('## 标题\n**说明**')).toBe('标题\n说明')
 })
+
+it.each([
+  '[危险](javascript:alert%281%29)',
+  '[危险](data:text/html;base64,PHN2Zz4=)',
+  '[危险](JaVaScRiPt:alert%281%29)',
+  '<svg onload="alert(1)"></svg>',
+  '<img src=x onerror="alert(1)">',
+])('AI Markdown 的活动内容不能生成可执行节点或链接：%s', (payload) => {
+  const root = document.createElement('div')
+  root.innerHTML = renderMarkdown(`${payload}\n\n[安全引用](https://example.com/docs)`)
+  expect(root.querySelectorAll('a')).toHaveLength(1)
+  expect(root.querySelector('a')?.getAttribute('href')).toBe('https://example.com/docs')
+  expect(root.querySelector('script, svg, iframe, img, [onload], [onerror]')).toBeNull()
+})

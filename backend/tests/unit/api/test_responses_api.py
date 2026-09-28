@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import AsyncIterator
 from unittest.mock import AsyncMock
 
@@ -10,7 +11,12 @@ import pytest
 from fastapi import FastAPI
 
 from app.api import responses as module
-from app.services.deepseek_responses_service import BufferedGatewayResponse, StreamingGatewayResponse
+from app.services.deepseek_responses_service import (
+    BufferedGatewayResponse,
+    DeepSeekResponsesService,
+    MemoryTranscriptStore,
+    StreamingGatewayResponse,
+)
 
 
 async def _client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
@@ -27,6 +33,99 @@ def app() -> FastAPI:
 
 
 @pytest.mark.asyncio
+async def test_public_responses_scope_is_bearer_key_not_product_login_cookie(
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upstream: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        upstream.append({"authorization": request.headers["authorization"], "payload": payload})
+        if request.headers["authorization"] == "Bearer stale-prism-jwt":
+            return httpx.Response(401, json={"error": {"message": "invalid upstream key"}})
+        return httpx.Response(200, json={
+            "id": f"resp_{len(upstream)}", "object": "response", "status": "completed",
+            "output": [{"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": "ok"},
+            ]}],
+        })
+
+    transport = httpx.MockTransport(handler)
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(),
+        client_factory=lambda: httpx.AsyncClient(transport=transport),
+    )
+    monkeypatch.setattr(module, "_service", service)
+    key_a = {"Authorization": "Bearer upstream-a"}
+    key_b = {"Authorization": "Bearer upstream-b"}
+
+    async for client in _client(app):
+        # 产品登录 Cookie 不能代替上游密钥。
+        cookie_only = await client.post(
+            "/v1/responses", headers={"Cookie": "access_token=prism-user-a"},
+            json={"model": "m", "input": "private"},
+        )
+        assert cookie_only.status_code == 401
+        assert cookie_only.json()["error"]["code"] == "invalid_api_key"
+
+        # 模拟旧登录令牌的字符串不会被解析成产品账号；它原样转交上游。
+        stale_token = await client.post(
+            "/v1/responses", headers={"Authorization": "Bearer stale-prism-jwt"},
+            json={"model": "m", "input": "private"},
+        )
+        assert stale_token.status_code == 401
+        assert stale_token.json()["error"]["message"] == "invalid upstream key"
+        upstream.clear()
+
+        created = await client.post(
+            "/v1/responses", headers={**key_a, "Cookie": "access_token=prism-user-a"},
+            json={"model": "m", "input": "first"},
+        )
+        assert created.status_code == 200
+        assert created.json()["id"] == "resp_1"
+
+        # 换产品 Cookie 但复用同一上游密钥，公开 API 仍是同一身份。
+        same_key = await client.get(
+            "/v1/responses/resp_1", headers={**key_a, "Cookie": "access_token=prism-user-b"},
+        )
+        assert same_key.status_code == 200
+        assert same_key.json()["id"] == "resp_1"
+
+        independent = await client.post(
+            "/v1/responses", headers={**key_a, "Cookie": "access_token=prism-user-b"},
+            json={"model": "m", "input": "independent session"},
+        )
+        assert independent.status_code == 200
+        assert independent.json()["id"] == "resp_2"
+        assert (await client.get("/v1/responses/resp_2", headers=key_a)).status_code == 200
+
+        # 不同密钥的查询、历史回放、列表与删除都不能触及 A 的记录。
+        assert (await client.get("/v1/responses/resp_1", headers=key_b)).status_code == 404
+        assert (await client.get("/v1/responses/resp_1/input_items", headers=key_b)).status_code == 404
+        assert (await client.delete("/v1/responses/resp_1", headers=key_b)).status_code == 404
+        forbidden_replay = await client.post(
+            "/v1/responses", headers=key_b,
+            json={"model": "m", "previous_response_id": "resp_1", "input": "continue"},
+        )
+        assert forbidden_replay.status_code == 404
+        assert len(upstream) == 2  # 拒绝跨密钥历史，未发送上游请求。
+
+        continued = await client.post(
+            "/v1/responses", headers=key_a,
+            json={"model": "m", "previous_response_id": "resp_1", "input": "continue"},
+        )
+        assert continued.status_code == 200
+        assert len(upstream) == 3
+        assert upstream[2]["authorization"] == "Bearer upstream-a"
+        assert "previous_response_id" not in upstream[2]["payload"]
+        assert len(upstream[2]["payload"]["input"]) == 3
+        assert (await client.get("/v1/responses/resp_1/input_items", headers=key_a)).status_code == 200
+        assert (await client.delete("/v1/responses/resp_1", headers=key_a)).status_code == 200
+        assert (await client.get("/v1/responses/resp_1", headers=key_a)).status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_router_exposes_exact_top_level_responses_paths(app: FastAPI) -> None:
     # FastAPI 0.139 会延迟展开 include_router；OpenAPI 是实际对外路由的稳定表示。
     paths = app.openapi()["paths"]
@@ -39,6 +138,7 @@ async def test_router_exposes_exact_top_level_responses_paths(app: FastAPI) -> N
     assert ("/v1/responses/{response_id}", "GET") in operations
     assert ("/v1/responses/{response_id}", "DELETE") in operations
     assert ("/v1/responses/{response_id}/input_items", "GET") in operations
+    assert ("/v1/responses/{response_id}/cancel", "POST") not in operations
 
 
 @pytest.mark.asyncio

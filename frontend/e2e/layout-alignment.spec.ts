@@ -17,7 +17,7 @@ const reviewTasks = [{
   total_issues: 3, score: 86, duration_ms: 12000, create_time: '2026-09-16T10:35:00',
 }]
 
-async function mockSession(page: Page, canHandle = false, canCancelReview = false) {
+async function mockSession(page: Page, canHandle = false, canCancelReview = false, canUseAgent = false) {
   await page.addInitScript(() => localStorage.setItem('review_token', 'layout-fixture'))
   await page.route('**/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -29,6 +29,7 @@ async function mockSession(page: Page, canHandle = false, canCancelReview = fals
       'project:view', 'file:view', 'issue:view', 'review:view',
       ...(canHandle ? ['issue:handle', 'issue:batch'] : []),
       ...(canCancelReview ? ['review:cancel'] : []),
+      ...(canUseAgent ? ['agent:chat'] : []),
     ]
     else if (pathname.endsWith('/menus')) data = []
     else if (pathname === '/api/projects') data = { items: projects, total: projects.length }
@@ -38,7 +39,7 @@ async function mockSession(page: Page, canHandle = false, canCancelReview = fals
   })
 }
 
-for (const width of [1440, 768, 390, 320]) {
+for (const width of [1440, 768, 430, 390, 360, 320]) {
   test(`问题卡片操作列相对色带固定，权限差异不改变锚点：${width}px`, async ({ page }, testInfo) => {
     const readOnly = await page.context().newPage()
     await readOnly.setViewportSize({ width, height: 1000 })
@@ -71,7 +72,7 @@ for (const width of [1440, 768, 390, 320]) {
   })
 }
 
-for (const width of [1440, 768, 390, 320]) {
+for (const width of [1440, 768, 430, 390, 360, 320]) {
   test(`审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：${width}px`, async ({ page }, testInfo) => {
     const geometries: Array<{ checkX: number; bandX: number; mainX: number; scoreX: number; titleBottom: number; typeTop: number; typeBottom: number; statusBottom: number }> = []
     for (const canCancel of [false, true]) {
@@ -172,21 +173,25 @@ test('代码中心失败原因与重试按钮同时可见，重试后恢复项�
   await expect(page.locator('.code-hub-page .el-alert')).toHaveCount(0)
 })
 
-test('移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  await mockSession(page)
-  await page.addInitScript(() => localStorage.setItem('prism.sidebar.collapsed', '1'))
-  await page.goto('/code')
-  await expect(page.locator('.project-card')).toHaveCount(2)
-  await page.getByRole('button', { name: '打开导航菜单' }).click()
-  await expect(page.locator('.app-sidebar')).toHaveClass(/is-mobile-open/)
-  await expect(page.locator('.sidebar-logo .logo-text')).toBeVisible()
-  await expect(page.locator('.sidebar-toggle')).toBeHidden()
-  await page.locator('.app-sidebar').getByRole('button', { name: '问题追踪', exact: true }).click()
-  await expect(page).toHaveURL(/\/issues$/)
-  await expect(page.locator('.app-sidebar')).not.toHaveClass(/is-mobile-open/)
-  await expect(page.locator('.issue-card')).toHaveCount(3)
-})
+for (const width of [320, 360, 390, 430]) {
+  test(`移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mockSession(page)
+    await page.addInitScript(() => localStorage.setItem('prism.sidebar.collapsed', '1'))
+    await page.goto('/code')
+    await expect(page.locator('.project-card')).toHaveCount(2)
+    await page.getByRole('button', { name: '打开导航菜单' }).click()
+    await expect(page.locator('.app-sidebar')).toHaveClass(/is-mobile-open/)
+    await expect.poll(async () => (await page.locator('.app-sidebar').boundingBox())?.x).toBeCloseTo(0, 0)
+    await expect(page.locator('.sidebar-logo .logo-text')).toBeVisible()
+    await expect(page.locator('.sidebar-toggle')).toBeHidden()
+    await assertInside(page, '.app-sidebar', '.sidebar-mobile-close')
+    await page.locator('.app-sidebar').getByRole('button', { name: '问题追踪', exact: true }).click()
+    await expect(page).toHaveURL(/\/issues$/)
+    await expect(page.locator('.app-sidebar')).not.toHaveClass(/is-mobile-open/)
+    await expect(page.locator('.issue-card')).toHaveCount(3)
+  })
+}
 
 test('问题追踪请求失败有明确反馈，两类请求可独立点击重试', async ({ page }) => {
   await mockSession(page)
@@ -211,8 +216,50 @@ test('问题追踪请求失败有明确反馈，两类请求可独立点击重�
   await expect(page.getByTestId('issue-project-load-error')).toHaveCount(0)
 })
 
+test('全局圆桌入口放在顶栏且不覆盖不同视口的问题卡片内容', async ({ page }) => {
+  await mockSession(page, false, false, true)
+  await page.route(/\/api\/discuss\/sessions(?:\?.*)?$/, async (route) => {
+    await route.fulfill({ json: { code: 0, message: 'ok', data: {
+      items: [{
+        session_id: 'layout-roundtable', status: 'running', file_name: 'review.py',
+        agents: [], max_rounds: 2, progress: { phase: 'speaking', completed_units: 1, total_units: 2, current_round: 1, seq: 1 },
+      }],
+      next_offset: null,
+    } } })
+  })
+  for (const width of [390, 800, 1440]) {
+    await page.setViewportSize({ width, height: 700 })
+    await page.goto('/issues')
+    await expect(page.locator('.issue-card')).toHaveCount(3)
+    await expect(page.locator('.agent-trigger')).toBeVisible()
+    await expect(page.locator('.agent-trigger .prismling')).toBeVisible()
+    await expect(page.locator('.chat-fab')).toHaveCount(0)
+    const dock = page.locator('#roundtable-header-slot .roundtable-dock')
+    await expect(dock).toBeVisible()
+
+    const geometry = await page.evaluate(() => {
+      const dockRect = document.querySelector('.roundtable-dock')!.getBoundingClientRect()
+      const headerRect = document.querySelector('.app-header')!.getBoundingClientRect()
+      const intersectsIssueContent = [...document.querySelectorAll('.issue-card .ic-main')].some((content) => {
+        const rect = content.getBoundingClientRect()
+        return dockRect.left < rect.right && dockRect.right > rect.left
+          && dockRect.top < rect.bottom && dockRect.bottom > rect.top
+      })
+      return {
+        inHeader: dockRect.top >= headerRect.top && dockRect.bottom <= headerRect.bottom
+          && dockRect.left >= headerRect.left && dockRect.right <= headerRect.right,
+        intersectsIssueContent,
+        scrollWidth: document.documentElement.scrollWidth,
+      }
+    })
+    expect(geometry.inHeader, `圆桌入口应留在 ${width}px 视口的顶栏`).toBe(true)
+    expect(geometry.intersectsIssueContent, `圆桌入口不应盖住 ${width}px 视口的问题内容`).toBe(false)
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(width)
+  }
+})
+
 for (const canHandle of [false, true]) {
-  for (const width of [1440, 1024, 768, 390, 320]) {
+  for (const width of [1440, 1024, 768, 430, 390, 360, 320]) {
     test(`问题操作列保持对齐且窄屏无溢出：${width}px，${canHandle ? '可处理' : '只读'}权限`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
       await mockSession(page, canHandle)

@@ -26,8 +26,8 @@ from app.models.agent_governance import (
 _DEFAULT_GOVERNANCE_AGENTS = (
     (
         "manager",
-        "贾维斯(全局运维)",
-        "管理端全局运维助手:态势巡查、风险处置、审批运维、批量治理(与成员侧小菱分离)",
+        "小菱管理权限边界(兼容策略)",
+        "历史管理员能力策略标识；不是独立主 Agent。管理操作仍由唯一主控小菱按当前账号权限和审批链执行",
         "governance",
         ("admin_capabilities", "agent_management"),
     ),
@@ -50,6 +50,13 @@ _DEFAULT_GOVERNANCE_AGENTS = (
     ),
     ("approval", "审批Agent", "低风险自动审批，高风险升级", "governance", ("approval",)),
     ("policy", "安全策略Agent", "动作风险评分与策略决策", "security", ("policy",)),
+    (
+        "supervisor",
+        "小菱监督子 Agent",
+        "复核小菱及子 Agent 的动作计划、授权范围和结果证据；只读监督，不执行任务、不授予权限",
+        "governance",
+        ("supervision", "risk_review", "evidence_review"),
+    ),
     ("scheduler", "调度Agent", "每日抓取和周期任务", "operations", ("schedule",)),
     ("memory_manager", "记忆管理Agent", "独立记忆沉淀与检索", "knowledge", ("memory",)),
     ("knowledge_distiller", "知识蒸馏Agent", "抓取清洗蒸馏知识", "knowledge", ("knowledge",)),

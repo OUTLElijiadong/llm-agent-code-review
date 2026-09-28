@@ -15,16 +15,11 @@ from app.services.agent_model_service import resolve_subagent_config
 from app.utils.api_resolver import resolve_api_config
 
 _MAX_FACT_PARTS = 64
-_MAX_COMPRESSION_CALLS = 96
 _FACT_COMPACTION_PROMPT = (
-    "你是运维事实压缩员。只归纳给定来源片段，不要推断未提供的数据。"
-    "必须输出 JSON 对象，包含 source_id（与输入完全一致）、summary（不超过 350 字）、"
-    "quote（从输入内容逐字复制的一段非空短引文）。保留异常、影响范围、数值和时间。"
-)
-_GROUP_COMPACTION_PROMPT = (
-    "你是运维摘要压缩员。只合并给定的来源摘要，不要新增事实。"
-    "必须输出 JSON 对象，包含 covered_source_ids（按输入顺序列出每个原始来源 ID）"
-    "和 summary（不超过 600 字）；保留异常、影响范围、数值、时间及不确定性。"
+    "你是运维事实压缩员。只记录给定来源片段中可直接观察到的内容，不要推断、补全或写建议。"
+    "必须输出 JSON 对象，包含 source_id（与输入完全一致）、summary（不超过 180 字）、"
+    "quote（从输入内容逐字复制的一段非空引文，最多 160 字）。保留异常、影响范围、数值和时间；"
+    "证据不足时明确写未知，不要把相关性写成因果。"
 )
 
 
@@ -53,8 +48,11 @@ class OperationsAgent(BaseAgent):
     def __init__(self):
         super().__init__(
             system_prompt=(
-                "你是 Prism 的全服管理 Agent。只分析真实工具结果，宿主机变更只能调用结构化运维工具；"
-                "输出中文，按异常、影响、建议动作、验证方式四项说明。不得声称未执行的动作已完成。"
+                "你是 Prism 唯一主 Agent 小菱调用的管理员运维子 Agent。只分析本次管理员会话提供的真实结构化工具结果；"
+                "上下文压缩摘要必须连同可核验的原始引文和来源 ID 使用，摘要与引文冲突时以引文为准，证据不足就说明未知。"
+                "不得把建议写成已执行动作，不得声称工具没有返回的状态、变更或验证已经完成。"
+                "宿主机变更只能由小菱调用结构化运维工具并通过既有审批流程；子 Agent 团队中的运维任务只读。"
+                "输出中文，按异常、影响、证据来源、建议动作、验证方式说明。"
             ),
             temperature=0.1,
             max_tokens=1200,
@@ -158,7 +156,6 @@ class OperationsAgent(BaseAgent):
             )
         records: list[dict[str, Any]] = []
         expected: list[str] = []
-        calls = 0
         for index, part in enumerate(parts, start=1):
             digest = hashlib.sha256(part.encode("utf-8")).hexdigest()
             source_id = f"F{index:03d}-{digest[:12]}"
@@ -167,7 +164,6 @@ class OperationsAgent(BaseAgent):
                 "source_id": source_id, "sha256": digest, "part": index,
                 "total_parts": len(parts), "content": part,
             }, ensure_ascii=False)
-            calls += 1
             result = self.call_json(
                 user_prompt, ctx, api_config=config, max_tokens=2_048,
                 system_prompt=_FACT_COMPACTION_PROMPT,
@@ -177,9 +173,10 @@ class OperationsAgent(BaseAgent):
             data = result.data
             if (not isinstance(data, dict) or data.get("source_id") != source_id
                     or not isinstance(data.get("summary"), str)
-                    or not data["summary"].strip() or len(data["summary"]) > 350
+                    or not data["summary"].strip() or len(data["summary"]) > 180
                     or not isinstance(data.get("quote"), str)
-                    or not data["quote"].strip() or data["quote"] not in part):
+                    or not data["quote"].strip() or len(data["quote"]) > 160
+                    or data["quote"] not in part):
                 return AgentResult(
                     success=False, error=f"运维事实来源 {source_id} 摘要缺失或引文无法核验",
                     failure_kind="invalid_summary",
@@ -189,60 +186,16 @@ class OperationsAgent(BaseAgent):
                 "summary": data["summary"].strip(), "quote": data["quote"],
             })
         manifest = hashlib.sha256(original.encode("utf-8")).hexdigest()
-        for _level in range(6):
-            final = json.dumps({
-                "source_manifest_sha256": manifest,
-                "covered_source_ids": expected,
-                "source_summaries": records,
-            }, ensure_ascii=False)
-            _projected, exceeds = self._project_input(final)
-            if not exceeds:
-                return AgentResult(success=True, data=final)
-            next_records: list[dict[str, Any]] = []
-            group: list[dict[str, Any]] = []
-            size = 0
-            groups: list[list[dict[str, Any]]] = []
-            for record in records:
-                record_size = len(json.dumps(record, ensure_ascii=False)) + 2
-                if record_size > part_chars:
-                    return AgentResult(
-                        success=False, error="单条运维摘要超过压缩输入预算",
-                        failure_kind="input_exceeds_context",
-                    )
-                if group and size + record_size > part_chars:
-                    groups.append(group)
-                    group, size = [], 0
-                group.append(record)
-                size += record_size
-            if group:
-                groups.append(group)
-            if len(groups) >= len(records) or calls + len(groups) > _MAX_COMPRESSION_CALLS:
-                return AgentResult(
-                    success=False, error="运维事实无法在调用预算内完整压缩",
-                    failure_kind="semantic_budget_exhausted",
-                )
-            for group in groups:
-                source_ids = [sid for record in group for sid in record["covered_source_ids"]]
-                calls += 1
-                result = self.call_json(
-                    json.dumps(group, ensure_ascii=False), ctx, api_config=config,
-                    max_tokens=2_048, system_prompt=_GROUP_COMPACTION_PROMPT,
-                )
-                if not result.success:
-                    return result
-                data = result.data
-                if (not isinstance(data, dict) or data.get("covered_source_ids") != source_ids
-                        or not isinstance(data.get("summary"), str)
-                        or not data["summary"].strip() or len(data["summary"]) > 600):
-                    return AgentResult(success=False, error="运维事实层级压缩遗漏来源", failure_kind="invalid_summary")
-                next_records.append({
-                    "covered_source_ids": source_ids,
-                    "summary": data["summary"].strip(),
-                })
-            if [sid for record in next_records for sid in record["covered_source_ids"]] != expected:
-                return AgentResult(success=False, error="运维事实层级覆盖不完整", failure_kind="invalid_summary")
-            records = next_records
-        return AgentResult(
-            success=False, error="运维事实摘要仍超过模型输入预算",
-            failure_kind="semantic_budget_exhausted",
-        )
+        final = json.dumps({
+            "source_manifest_sha256": manifest,
+            "covered_source_ids": expected,
+            "source_summaries": records,
+        }, ensure_ascii=False)
+        _projected, exceeds = self._project_input(final)
+        if exceeds:
+            return AgentResult(
+                success=False,
+                error="运维事实单轮压缩后仍超出模型输入预算；为避免二次改写造成失真，已拒绝继续诊断",
+                failure_kind="semantic_budget_exhausted",
+            )
+        return AgentResult(success=True, data=final)

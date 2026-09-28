@@ -88,8 +88,8 @@ class AgentRegistry:
                 "status": "idle",     # M1 阶段统一返回 idle,运行时状态由 EventBus 推送(M2)
                 "model": getattr(a, "_model", ""),
             })
-        # 让 orchestrator/chat_assistant 排在最前,便于 UI 上做"主控/前台"分组
-        priority = {"orchestrator": 0, "chat_assistant": 1}
+        # 唯一会话主控排首位；orchestrator 是内部调度引擎，不代表第二个主 Agent。
+        priority = {"chat_assistant": 0, "orchestrator": 99}
         items.sort(key=lambda x: (priority.get(x["code"], 99), x["code"]))
         return items
 

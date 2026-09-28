@@ -127,9 +127,13 @@ def test_recent_event_expiry_does_not_rewrite_historical_log(count_scope):
 
 def test_admin_catalog_nineteen_and_metagpt_builtin_seventeen_are_distinct(count_scope):
     env = count_scope
-    assert len(agent_service.get_runtime_agents(env['db'], None)) == 19
-    assert agent_service.get_runtime_summary(env['db'], None)['total'] == 19
-    assert agent_service.get_situation(env['db'], None)['online'] == 19
+    admin_runtime = agent_service.get_runtime_agents(env['db'], None)
+    admin_codes = {row['code'] for row in admin_runtime}
+    assert len(admin_runtime) == 18  # 17 个内置项隐藏 orchestrator 根别名，再加 2 个自定义项
+    assert 'chat_assistant' in admin_codes
+    assert 'orchestrator' not in admin_codes
+    assert agent_service.get_runtime_summary(env['db'], None)['total'] == 18
+    assert agent_service.get_situation(env['db'], None)['online'] == 18
     info = get_metagpt_info(env['user']).data
     preview = preview_metagpt_environment('review', env['user']).data
     assert len(info['adaptable_agents']) == preview['registered_agent_count'] == 17

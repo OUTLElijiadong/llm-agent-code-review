@@ -9,6 +9,7 @@ vi.mock('@/api/agentMesh', () => ({
 
 import AgentSessionSwitcher from './AgentSessionSwitcher.vue'
 import {
+  agentChatStorageKey,
   loadAgentChatSessions,
   markAgentChatLoginFreshStart,
   saveActiveAgentChatSession,
@@ -58,6 +59,38 @@ function lastSelect(wrapper: VueWrapper): string | undefined {
 }
 
 describe('AgentSessionSwitcher 登录周期选择权', () => {
+  it('本人首轮完成后刷新仍选中原对话，服务端目录不会使空对话抢占', async () => {
+    const props = {
+      surface: 'user' as const,
+      storageKey: 'user',
+      accountKey: 7,
+      legacyKey: 'legacy-user-7',
+      idPrefix: 'user',
+      welcomeText: WELCOME,
+      discoverRemote: true,
+    }
+    markAgentChatLoginFreshStart()
+    const first = mount(AgentSessionSwitcher, { props })
+    await flushPromises()
+    const completedId = lastSelect(first)
+    expect(completedId).toBeTruthy()
+    meshApi.list.mockResolvedValue({
+      items: [{ kind: 'session', session_id: completedId, surface: 'user', status: 'active',
+        title: '真实项目查询', last_seen_at: new Date().toISOString(), active_run_status: 'completed' }],
+      total: 1,
+    })
+    await (first.vm as unknown as { refreshFromAgentMesh(): Promise<void> }).refreshFromAgentMesh()
+    first.unmount()
+
+    const refreshed = mount(AgentSessionSwitcher, { props })
+    await flushPromises()
+    expect(lastSelect(refreshed)).toBe(completedId)
+    expect(refreshed.find('.session-current').text()).toContain('真实项目查询')
+    expect(loadAgentChatSessions(agentChatStorageKey('user', 7), props.legacyKey, 'user')
+      .filter((item) => item.id === completedId)).toHaveLength(1)
+    refreshed.unmount()
+  })
+
   for (const surface of ['user', 'admin'] as const) {
     it(`${surface} 成功登录后首次挂载新建一次,同次登录重挂载继续当前会话`, async () => {
       window.localStorage.setItem(`prism-agent-sessions:${surface}`, JSON.stringify([

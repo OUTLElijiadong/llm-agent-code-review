@@ -11,7 +11,9 @@
 """
 import io
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Any, Dict, List
 
 import pytest
@@ -158,6 +160,129 @@ def _make_mixed_issues() -> List[Dict[str, Any]]:
             line_number=idx * 10 + 1,
         ))
     return issues
+
+
+class _LinkCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hrefs: List[str] = []
+        self.active_tags: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[tuple[str, str | None]]) -> None:
+        if tag in {"script", "svg", "iframe"}:
+            self.active_tags.append(tag)
+        for name, value in attrs:
+            if name == "href" and value is not None:
+                self.hrefs.append(value)
+            if name.startswith("on"):
+                self.active_tags.append(name)
+
+
+@pytest.mark.parametrize("template_type", ["detailed", "compliance", "historical"])
+def test_html_report_references_reject_active_schemes_including_historical_templates(template_type: str) -> None:
+    """报告中的模型引用只能生成可点击的 HTTP(S) 链接。"""
+    issue = _make_issue(
+        title='<svg onload="alert(1)">',
+        references_json=[
+            "https://example.com/safe",
+            "http://example.org/reference",
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "java\nscript:alert(1)",
+            "java\tscript:alert(1)",
+            " javascript:alert(1)",
+            "//evil.example/path",
+            "https://",
+            "<svg onload=alert(1)>",
+        ],
+    )
+    template = (
+        '{% for ref in issues[0].references_json %}<a href="{{ ref }}">{{ ref }}</a>{% endfor %}'
+        if template_type == "historical" else load_builtin_template(template_type)
+    )
+    html = export_to_html(_make_task(), [issue], "摘要", 80, template)
+    links = _LinkCollector()
+    links.feed(html)
+
+    assert links.hrefs == (["#issue-1"] if template_type == "detailed" else []) + [
+        "https://example.com/safe", "http://example.org/reference",
+    ]
+    assert links.active_tags == []
+    if template_type != "historical":
+        assert "&lt;svg" in html  # 审查标题保留为文本，不生成活动节点
+
+
+def test_html_reference_filter_does_not_mutate_json_audit_evidence() -> None:
+    issue = _make_issue(references_json=["javascript:alert(1)", "https://example.com/safe"])
+    export_to_html(_make_task(), [issue], "摘要", 80, load_builtin_template("detailed"))
+
+    assert issue["references_json"] == ["javascript:alert(1)", "https://example.com/safe"]
+    assert export_to_dict(_make_task(), [issue], "摘要", 80)["issues"][0]["references_json"] == issue["references_json"]
+
+
+def test_html_report_top_vulnerability_alias_and_ai_text_are_safe() -> None:
+    issue = _make_issue(
+        description='<img src=x onerror="alert(1)">',
+        references_json=["javascript:alert(1)", "https://example.com/safe"],
+    )
+    template = (
+        '<div>{{ summary }}</div><div>{{ issues[0].description }}</div>'
+        '{% for ref in statistics.top_vulnerabilities[0].references_json %}'
+        '<a href="{{ ref }}">{{ ref }}</a>{% endfor %}'
+    )
+    html = export_to_html(_make_task(), [issue], '<svg onload="alert(1)">', 80, template)
+    links = _LinkCollector()
+    links.feed(html)
+
+    assert links.hrefs == ["https://example.com/safe"]
+    assert links.active_tags == []
+    assert "&lt;svg" in html and "&lt;img" in html
+
+
+def test_concurrent_html_exports_keep_sanitizer_state_isolated() -> None:
+    template = '<div>{{ task_info.task_name }}</div><script>window.bad=1</script>'
+
+    def render(index: int) -> str:
+        return export_to_html(_make_task(task_name=f"report-{index}"), [], "", 100, template)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(render, range(32)))
+
+    for index, html in enumerate(results):
+        assert f"report-{index}" in html
+        assert "<script" not in html
+        assert "window.bad" in html  # 活动标签被剥离，证据文本仍可读
+
+
+def test_custom_template_safe_filter_cannot_reactivate_ai_html() -> None:
+    html = export_to_html(
+        _make_task(), [], '<svg onload="alert(1)"></svg>', 100,
+        '<div>{{ summary | safe }}</div><img src="data:text/html,attack" onerror="alert(1)">',
+    )
+    links = _LinkCollector()
+    links.feed(html)
+
+    assert links.active_tags == []
+    assert "<img" in html and "onerror=" not in html and "data:text/html" not in html
+
+
+def test_html_report_does_not_autoload_external_images_or_fonts() -> None:
+    """旧自定义模板的远程图片与 CSS 资源不应随报告打开而自动加载。"""
+    template = (
+        '<style>.report-proof{background-image:url(https://c08-probe.example/css)}'
+        '@font-face{font-family:probe;src:url(https://c08-probe.example/font)}</style>'
+        '<div class="report-proof" style="color:rgb(12,34,56)">静态样式</div>'
+        '<img src="https://c08-probe.example/image" alt="remote">'
+        '<img src="data:image/png;base64,iVBORw0KGgo=" alt="inline">'
+    )
+    html = export_to_html(_make_task(), [], "", 100, template)
+
+    assert "img-src data:; font-src data:" in html
+    assert 'src="https://c08-probe.example/image"' not in html
+    assert 'src="data:image/png;base64,iVBORw0KGgo="' in html
+    assert ".report-proof{background-image:" in html  # CSS 样式可编辑，由 CSP 阻止外部加载。
+    assert 'style="color:rgb(12,34,56)"' in html
 
 
 # ============ JSON / dict 导出结构 ============

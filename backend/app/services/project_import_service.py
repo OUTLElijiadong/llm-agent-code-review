@@ -24,6 +24,7 @@ from app.core.exceptions import (
     ExternalServiceError,
     NotFoundError,
 )
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
@@ -33,7 +34,7 @@ from app.models.project_source_archive import ProjectSourceArchive
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.project import ProjectIn
-from app.services import audit_service, code_file_service, project_service, project_source_service
+from app.services import audit_service, code_file_service, project_service, project_source_service, rbac_service
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -431,6 +432,11 @@ def _assert_import_lease(db: Session, task_db_id: int, *, lease_token: str) -> P
         )
         authority_status = authority_row.status if authority_row is not None else None
         authority_lease_token = authority_row.lease_token if authority_row is not None else None
+        authority_owner_id = authority_row.user_id if authority_row is not None else None
+        access_error = (
+            _owner_import_access_error(authority_db, int(authority_owner_id))
+            if authority_owner_id is not None else ""
+        )
     finally:
         # SELECT 会在独立 Session 中开启事务；显式回滚保证不留任何状态或写入。
         authority_db.rollback()
@@ -445,6 +451,9 @@ def _assert_import_lease(db: Session, task_db_id: int, *, lease_token: str) -> P
     if authority_status not in LEASED_STATUSES or authority_lease_token != lease_token:
         db.rollback()
         raise ConflictError("远程导入任务租约已失效", code=40902)
+    if access_error:
+        db.rollback()
+        raise ConflictError(access_error, code=40902)
 
     # no_autoflush 很关键：获取本会话 ORM 对象时不得因此次检查先刷新半成品。
     # 权威会话只用于判定，不把字段回写到当前事务。
@@ -453,6 +462,17 @@ def _assert_import_lease(db: Session, task_db_id: int, *, lease_token: str) -> P
     if row is None:
         raise ConflictError("远程导入任务不存在或已被清理", code=40902)
     return row
+
+
+def _owner_import_access_error(db: Session, owner_id: int) -> str:
+    """用新事务复核异步任务所属账号的当前状态和导入权限。"""
+
+    owner = db.get(User, int(owner_id))
+    if owner is None or int(owner.status or 0) != 1:
+        return "远程导入任务所属账号不存在或已停用"
+    if not rbac_service.check_permission(db, int(owner_id), PermissionCode.PROJECT_IMPORT):
+        return "远程导入权限已撤销"
+    return ""
 
 
 class _ImportLeaseHeartbeat:
@@ -743,6 +763,7 @@ def execute_claimed_import(
             now_monotonic = time.monotonic()
             if received != total and now_monotonic - last_progress < 10:
                 return
+            _assert_import_lease(db, row.id, lease_token=lease_token)
             if not touch_import_task(
                 db,
                 row.id,
@@ -876,6 +897,15 @@ def complete_import_task(
     if row is None:
         db.rollback()
         return False
+    authority_db = Session(bind=db.get_bind(mapper=ProjectImportTask), autoflush=False)
+    try:
+        access_error = _owner_import_access_error(authority_db, int(row.user_id))
+    finally:
+        authority_db.rollback()
+        authority_db.close()
+    if access_error:
+        db.rollback()
+        raise ConflictError(access_error, code=40902)
     now = _utcnow()
     if row.project_id is not None:
         db.query(Project).filter(

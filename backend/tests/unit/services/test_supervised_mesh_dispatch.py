@@ -46,7 +46,7 @@ def _message(
     *,
     idempotency_key,
     message_type="task.request",
-    send_to="agent:monitor",
+    send_to="agent:code_reviewer",
     sent_from="",
     subject="复核代码修改",
     context=None,
@@ -82,10 +82,21 @@ def _message(
         pytest.param(
             {
                 "run_id": "run_supervised",
+                "supervision_objective": "确认修复通过",
                 "supervision_round": 2,
                 "supervision_max_rounds": 3,
             },
             id="round-over-one-without-correlation",
+        ),
+        pytest.param(
+            {
+                "run_id": "run_supervised",
+                "supervision_objective": "确认修复通过",
+                "supervision_round": 2,
+                "supervision_max_rounds": 3,
+                "supervision_correlation_id": "unrelated-message",
+            },
+            id="round-with-orphan-correlation",
         ),
         pytest.param(
             {
@@ -107,6 +118,7 @@ def test_send_rejects_invalid_supervision_envelope(db, user, context):
             user,
             surface="user",
             session_key="session-a1",
+            trusted_source=True,
             message=_message(idempotency_key="invalid-supervision", context=context),
         )
 
@@ -140,19 +152,146 @@ def test_send_rejects_invalid_supervision_envelope(db, user, context):
 def test_send_accepts_valid_supervision_envelope(db, user, context):
     _register_session(db, user)
 
+    if context.get("supervision_round") == 2:
+        root_context = {
+            **context,
+            "supervision_round": 1,
+        }
+        root_context.pop("supervision_correlation_id", None)
+        root = agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-a1",
+            trusted_source=True,
+            message=_message(idempotency_key="valid-supervision-root", context=root_context),
+        )
+        claim = agent_mesh_service.claim_dispatch_message(
+            db, user, root["message_id"], target_address="agent:code_reviewer"
+        )
+        agent_mesh_service.complete_dispatch_message(
+            db,
+            user,
+            root["message_id"],
+            target_address="agent:code_reviewer",
+            target_name="监控服务 Agent",
+            lease_token=claim["lease_token"],
+            success=True,
+            summary={"status": "completed", "summary": "根轮完成"},
+        )
+        root_result = db.query(AgentMeshMessage).filter_by(
+            correlation_id=root["message_id"], message_type="task.result"
+        ).one()
+        context["supervision_correlation_id"] = root_result.message_id
+
     created = agent_mesh_service.send_message(
         db,
         user,
         surface="user",
         session_key="session-a1",
+        trusted_source=True,
         message=_message(idempotency_key="valid-supervision", context=context),
     )
 
     assert created["status"] == "queued"
-    stored = db.query(AgentMeshMessage).one()
+    stored = db.query(AgentMeshMessage).filter_by(idempotency_key="valid-supervision").one()
     stored_context = json.loads(stored.context_json)
     for key, value in context.items():
         assert stored_context[key] == value
+
+
+def test_supervision_round_cannot_be_reset_for_same_trace_objective(db, user):
+    _register_session(db, user)
+    root_context = {
+        "run_id": "run_supervised",
+        "supervision_objective": "确认修复通过",
+        "supervision_round": 1,
+        "supervision_max_rounds": 3,
+    }
+    accepted = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        trusted_source=True,
+        message=_message(idempotency_key="repeated-root-1", context=root_context),
+    )
+    assert accepted["status"] == "queued"
+
+    with pytest.raises(agent_mesh_service.AgentMeshSupervisionError, match="不能重置轮次"):
+        agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-a1",
+            trusted_source=True,
+            message=_message(idempotency_key="repeated-root-2", context=root_context),
+        )
+
+    assert db.query(AgentMeshMessage).filter_by(message_type="task.request").count() == 1
+
+
+def test_supervision_chain_accepts_linked_rounds_through_configured_limit(db, user):
+    _register_session(db, user)
+    objective = "确认修复通过"
+    previous_result_id = None
+
+    for round_number in (1, 2, 3):
+        context = {
+            "run_id": "run_supervised",
+            "supervision_objective": objective,
+            "supervision_round": round_number,
+            "supervision_max_rounds": 3,
+        }
+        if previous_result_id:
+            context["supervision_correlation_id"] = previous_result_id
+        request = agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-a1",
+            trusted_source=True,
+            message=_message(
+                idempotency_key=f"linked-round-{round_number}",
+                context=context,
+            ),
+        )
+        claim = agent_mesh_service.claim_dispatch_message(
+            db, user, request["message_id"], target_address="agent:code_reviewer"
+        )
+        agent_mesh_service.complete_dispatch_message(
+            db,
+            user,
+            request["message_id"],
+            target_address="agent:code_reviewer",
+            target_name="监控服务 Agent",
+            lease_token=claim["lease_token"],
+            success=True,
+            summary={"status": "completed", "summary": f"第 {round_number} 轮完成"},
+        )
+        result = db.query(AgentMeshMessage).filter_by(
+            correlation_id=request["message_id"], message_type="task.result"
+        ).one()
+        previous_result_id = result.message_id
+
+    with pytest.raises(agent_mesh_service.AgentMeshSupervisionError, match="1..3"):
+        agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-a1",
+            trusted_source=True,
+            message=_message(
+                idempotency_key="linked-round-4",
+                context={
+                    "run_id": "run_supervised",
+                    "supervision_objective": objective,
+                    "supervision_round": 4,
+                    "supervision_max_rounds": 3,
+                    "supervision_correlation_id": previous_result_id,
+                },
+            ),
+        )
 
 
 def test_complete_supervised_request_writes_supervision_metadata_to_result(db, user):
@@ -168,17 +307,18 @@ def test_complete_supervised_request_writes_supervision_metadata_to_result(db, u
         user,
         surface="user",
         session_key="session-a1",
+        trusted_source=True,
         message=_message(idempotency_key="dispatch-supervised", context=context),
     )
     claimed = agent_mesh_service.claim_dispatch_message(
-        db, user, created["message_id"], target_address="agent:monitor"
+        db, user, created["message_id"], target_address="agent:code_reviewer"
     )
 
     completed = agent_mesh_service.complete_dispatch_message(
         db,
         user,
         created["message_id"],
-        target_address="agent:monitor",
+        target_address="agent:code_reviewer",
         target_name="监控服务 Agent",
         lease_token=claimed["lease_token"],
         success=True,
@@ -205,17 +345,18 @@ def test_complete_unsupervised_request_keeps_result_context_without_supervision(
         user,
         surface="user",
         session_key="session-a1",
+        trusted_source=True,
         message=_message(idempotency_key="dispatch-unsupervised"),
     )
     claimed = agent_mesh_service.claim_dispatch_message(
-        db, user, created["message_id"], target_address="agent:monitor"
+        db, user, created["message_id"], target_address="agent:code_reviewer"
     )
 
     agent_mesh_service.complete_dispatch_message(
         db,
         user,
         created["message_id"],
-        target_address="agent:monitor",
+        target_address="agent:code_reviewer",
         target_name="监控服务 Agent",
         lease_token=claimed["lease_token"],
         success=True,
@@ -249,7 +390,7 @@ def test_prepare_message_run_appends_review_protocol_for_supervised_result(db, u
             idempotency_key="supervised-result-inbox",
             message_type="task.result",
             send_to="session:user:session-a1",
-            sent_from="agent:monitor",
+            sent_from="agent:code_reviewer",
             subject="监控服务 Agent回复：复核代码修改",
             context={
                 "run_id": "run_supervised",

@@ -23,6 +23,7 @@ from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgent
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn, TemporaryAgentDefinition
+from app.services import audit_service
 from app.services.ai_usage_context import current_attribution, model_attribution
 
 
@@ -142,6 +143,7 @@ def _validate_safe_input(value: Any, *, key: str = "", depth: int = 0) -> None:
 def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> dict[str, Any]:
     """把同账户前置结果完整脱敏后交给内部执行器；公开预览另行裁剪。"""
 
+    from app.models.review_task import ReviewTask
     from app.services.agent_responses_service import redact_agent_model_context_value
     from app.services.agent_team_summary import dependency_coverage_summary, dependency_finding_summary
 
@@ -149,21 +151,41 @@ def _dependency_context(db: Session, team: AgentTeam, task: AgentTeamTask) -> di
     if not wanted:
         return {}
     rows = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
-    by_key = {row.task_key: row for row in rows}
-    return {
-        key: {
-            "status": by_key[key].status,
-            "result": redact_agent_model_context_value(_unjson(by_key[key].result_json, {})),
-            "finding_summary": dependency_finding_summary(
-                _unjson(by_key[key].result_json, {}), redact=_public,
-            ),
-            "coverage_summary": dependency_coverage_summary(_unjson(by_key[key].result_json, {})),
-            "artifacts": redact_agent_model_context_value(_unjson(by_key[key].artifacts_json, [])),
-            "errors": redact_agent_model_context_value(_unjson(by_key[key].errors_json, [])),
+    by_key = {row.task_key: row for row in rows if row.task_key in wanted}
+    reviews = {}
+    if by_key and getattr(team, "user_id", None) is not None:
+        reviews = {
+            int(review.agent_team_task_id): review
+            for review in db.query(ReviewTask).filter(
+                ReviewTask.agent_team_id == team.id,
+                ReviewTask.agent_team_task_id.in_([row.id for row in by_key.values()]),
+                ReviewTask.user_id == team.user_id,
+            ).all()
         }
-        for key in sorted(wanted)
-        if key in by_key
-    }
+    context = {}
+    for key in sorted(by_key):
+        row = by_key[key]
+        raw_result = _unjson(row.result_json, {})
+        entry = {
+            "status": row.status,
+            "result": redact_agent_model_context_value(raw_result),
+            "finding_summary": dependency_finding_summary(raw_result, redact=_public),
+            "coverage_summary": dependency_coverage_summary(raw_result),
+            "artifacts": redact_agent_model_context_value(_unjson(row.artifacts_json, [])),
+            "errors": redact_agent_model_context_value(_unjson(row.errors_json, [])),
+        }
+        review = reviews.get(int(row.id))
+        artifacts = raw_result.get("artifacts") if isinstance(raw_result, dict) else None
+        if (review is not None and row.status == "completed" and isinstance(raw_result, dict)
+                and raw_result.get("task_id") == review.id
+                and raw_result.get("project_id") == review.project_id
+                and isinstance(artifacts, list)
+                and any(isinstance(item, dict) and item.get("type") == "review_task"
+                        and item.get("task_id") == review.id for item in artifacts)):
+            # 正式 ReviewTask 的库记录、归属和结果标记同时吻合才允许生成审查链接。
+            entry["verified_review_task_id"] = int(review.id)
+        context[key] = entry
+    return context
 
 
 def _ensure_session(db: Session, team_user: User, *, surface: str, session_key: str, title: str) -> None:
@@ -353,6 +375,30 @@ def _topological_order(task_inputs: Iterable[Any]) -> list[str]:
     if len(ordered) != len(keys):
         raise AgentTeamValidationError("任务依赖图存在环")
     return ordered
+
+
+def _has_parallel_worker_tasks(payload: AgentTeamCreateIn) -> bool:
+    """判断 DAG 中是否存在可同时就绪的两个 worker 任务。"""
+
+    member_roles = {item.member_key: item.role for item in payload.members}
+    tasks_by_key = {item.task_key: item for item in payload.tasks}
+    ancestors: dict[str, set[str]] = {}
+    for task_key in _topological_order(payload.tasks):
+        task = tasks_by_key[task_key]
+        task_ancestors: set[str] = set()
+        for dependency in task.depends_on:
+            task_ancestors.add(dependency)
+            task_ancestors.update(ancestors[dependency])
+        ancestors[task_key] = task_ancestors
+
+    worker_keys = [
+        item.task_key for item in payload.tasks if member_roles.get(item.member_key) == "worker"
+    ]
+    for index, task_key in enumerate(worker_keys):
+        for other_key in worker_keys[index + 1 :]:
+            if other_key not in ancestors[task_key] and task_key not in ancestors[other_key]:
+                return True
+    return False
 
 
 def _validate_verification_coverage(payload: AgentTeamCreateIn) -> None:
@@ -639,6 +685,19 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     if not address.startswith("agent:"):
         return
     code = address.split(":", 1)[1]
+    from app.services import rbac_service
+    from app.services.agent_mesh_dispatcher import required_runtime_permissions
+
+    permission_input = {**raw, "instructions": task_input.instructions}
+    if code == "reporter" and task_input.depends_on:
+        # 有依赖的 reporter 会只汇总本团队依赖结果，不直接查数据库报告。
+        permission_input["dependency_context"] = {"pending": True}
+    required_permissions = required_runtime_permissions(code, permission_input)
+    for permission in required_permissions:
+        if not rbac_service.check_permission(db, int(user.id), permission):
+            raise AgentTeamAccessError(
+                f"当前账户没有 {permission} 权限，不能创建该读取任务"
+            )
     if code == "security_sentinel":
         from app.core.permission_codes import PermissionCode
         from app.services.rbac_service import check_permission
@@ -1309,6 +1368,12 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
             raise AgentTeamValidationError(f"任务 {item.task_key} 引用不存在成员 {item.member_key}")
         _validate_safe_input(item.input)
     _topological_order(payload.tasks)
+    effective_max_active_children = min(
+        int(payload.max_active_children),
+        int(getattr(settings, "agent_team_max_active_children", 3)),
+    )
+    if _has_parallel_worker_tasks(payload) and effective_max_active_children < 2:
+        raise AgentTeamValidationError("工作图包含可并行的多个 worker 任务，但有效并发上限不足 2")
     if payload.deadline_at is not None:
         deadline = payload.deadline_at
         if deadline.tzinfo is None:
@@ -1318,8 +1383,12 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
 
     validated_members: dict[str, tuple[str, Optional[int], Optional[int], dict[str, Any]]] = {}
     for item in payload.members:
-        if item.address == "agent:operations" and payload.surface != "admin":
-            raise AgentTeamAccessError("运维子 Agent 只能在管理小菱会话中创建")
+        if item.address.startswith("agent:"):
+            from app.services.agent_mesh_service import agent_surface_target_error
+
+            scope_error = agent_surface_target_error(db, user, payload.surface, item.address)
+            if scope_error:
+                raise AgentTeamAccessError(scope_error)
         _validate_safe_input(item.capabilities)
         if item.address.startswith("temporary:"):
             from app.core.permission_codes import PermissionCode
@@ -1362,9 +1431,7 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
         title=payload.title.strip(),
         objective=payload.objective.strip(),
         status="queued",
-        max_active_children=min(
-            int(payload.max_active_children), int(getattr(settings, "agent_team_max_active_children", 3))
-        ),
+        max_active_children=effective_max_active_children,
         max_attempts=effective_max_attempts,
         priority=int(payload.priority),
         trace_id=trace_id,
@@ -1428,13 +1495,99 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
 
 
 def create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[str, Any]:
+    """拒绝由普通 HTTP 调用者直接创建团队；团队必须由小菱工具环节发起。"""
+    raise AgentTeamAccessError("Agent 团队必须由小菱通过当前账号会话创建")
+
+
+def create_team_from_xiaoling(
+    db: Session,
+    user: User,
+    payload: AgentTeamCreateIn,
+    *,
+    supervisor_plan_sha256: str = "",
+    supervisor_confirmed_by: Optional[int] = None,
+) -> dict[str, Any]:
+    """小菱唯一的团队创建入口；仍由 _create_team 执行完整账号与资源校验。"""
+    from app.services import agent_supervisor_service
+
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    if review["needs_confirmation"]:
+        if (
+            not supervisor_plan_sha256
+            or supervisor_plan_sha256 != review["plan_sha256"]
+            or supervisor_confirmed_by != int(user.id)
+        ):
+            raise AgentTeamAccessError("监督子 Agent 要求当前账号确认该高风险或未分类团队任务")
+    elif supervisor_plan_sha256 and supervisor_plan_sha256 != review["plan_sha256"]:
+        raise AgentTeamAccessError("监督子 Agent 计划摘要与团队任务不匹配")
     try:
         result = _create_team(db, user, payload)
     except Exception:
         db.rollback()
         raise
+    team = db.get(AgentTeam, int(result["team_id"]))
+    if team is None:
+        db.rollback()
+        raise AgentTeamError("团队创建后无法读取监督记录目标")
+    authorized_fingerprints = [
+        item["fingerprint"]
+        for item in review["tasks"]
+        if item["risk_level"] in {agent_supervisor_service.HIGH, agent_supervisor_service.CRITICAL}
+    ]
+    _event(
+        db,
+        team,
+        "supervisor.plan_reviewed",
+        actor_address="agent:supervisor",
+        detail={
+            "decision": review["decision"],
+            "risk_level": review["risk_level"],
+            "plan_sha256": review["plan_sha256"],
+            "tasks": review["tasks"],
+            "confirmed_by_user_id": int(user.id) if review["needs_confirmation"] else None,
+            "authorized_high_risk_fingerprints": authorized_fingerprints,
+        },
+    )
+    db.commit()
+    db.refresh(team)
+    result = _team_out(db, team, include_events=True)
+    audit_service.log(
+        db,
+        user,
+        "agent_team_create",
+        target_type="agent_team",
+        target_id=str(result.get("team_id", "")),
+        detail="小菱创建多 Agent 团队",
+    )
     observe_event("team_created", labels={"surface": str(payload.surface)})
     return result
+
+
+def record_supervisor_task_review(
+    db: Session,
+    *,
+    team_id: int,
+    task_id: Optional[int],
+    phase: str,
+    review: dict[str, Any],
+    detail: Optional[dict[str, Any]] = None,
+) -> None:
+    """把监督子 Agent 的任务前/后复核追加到团队审计时间线。"""
+    team = db.get(AgentTeam, int(team_id))
+    task = db.get(AgentTeamTask, int(task_id)) if task_id is not None else None
+    if team is None or (task_id is not None and (task is None or int(task.team_id) != int(team.id))):
+        raise AgentTeamNotFoundError("监督记录目标不存在或不属于当前团队")
+    member = db.get(AgentTeamMember, task.member_id) if task is not None else None
+    _event(
+        db,
+        team,
+        f"supervisor.{phase}",
+        task=task,
+        member=member,
+        actor_address="agent:supervisor",
+        detail={"review": review, **(detail or {})},
+    )
+    db.commit()
 
 
 def list_teams(
@@ -1526,6 +1679,12 @@ def _locked_team_tasks(db: Session, team: AgentTeam) -> list[AgentTeamTask]:
 def _promote_dependencies(db: Session, team: AgentTeam) -> None:
     tasks = _locked_team_tasks(db, team)
     by_key = {row.task_key: row for row in tasks}
+    members = {
+        int(item.id): item
+        for item in db.query(AgentTeamMember).filter(AgentTeamMember.team_id == team.id).all()
+    }
+    terminal_dependency_states = {"completed", "failed", "blocked", "dead_letter", "cancelled", "expired"}
+    failed_dependency_states = terminal_dependency_states - {"completed"}
     now = _now()
     changed = False
     while True:
@@ -1535,13 +1694,15 @@ def _promote_dependencies(db: Session, team: AgentTeam) -> None:
                 continue
             deps = _unjson(row.dependency_keys_json, [])
             dep_rows = [by_key.get(str(key)) for key in deps]
+            member = members.get(int(row.member_id))
+            is_summarizer = bool(member and member.role == "summarizer")
             if any(dep is None for dep in dep_rows):
                 row.status = "blocked"
                 row.completed_at = now
                 row.next_attempt_at = None
                 row.errors_json = _json([{"code": "missing_dependency", "message": "依赖任务不存在"}])
                 wave_changed = True
-            elif any(dep.status in {"failed", "blocked", "dead_letter", "cancelled", "expired"} for dep in dep_rows):
+            elif not is_summarizer and any(dep.status in failed_dependency_states for dep in dep_rows):
                 previous = row.status
                 row.status = "blocked"
                 row.completed_at = now
@@ -1557,7 +1718,9 @@ def _promote_dependencies(db: Session, team: AgentTeam) -> None:
                     detail={"depends_on": deps},
                 )
                 wave_changed = True
-            elif all(dep.status == "completed" for dep in dep_rows):
+            elif all(dep.status in terminal_dependency_states for dep in dep_rows) and (
+                all(dep.status == "completed" for dep in dep_rows) or is_summarizer
+            ):
                 previous = row.status
                 row.status = "queued"
                 row.next_attempt_at = now
@@ -1568,7 +1731,11 @@ def _promote_dependencies(db: Session, team: AgentTeam) -> None:
                     task=row,
                     from_status=previous,
                     to_status="queued",
-                    detail={"reason": "dependencies_completed"},
+                    detail={
+                        "reason": "dependencies_completed"
+                        if all(dep.status == "completed" for dep in dep_rows)
+                        else "dependencies_terminal_partial"
+                    },
                 )
                 wave_changed = True
         changed = changed or wave_changed
@@ -1627,6 +1794,13 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         for item in tasks
         if (members.get(int(item.member_id)) and members[int(item.member_id)].role in {"verifier", "summarizer"})
     ]
+    pending_summarizers = [
+        item
+        for item in tasks
+        if members.get(int(item.member_id))
+        and members[int(item.member_id)].role == "summarizer"
+        and item.status in {"waiting_dependency", "queued", "running"}
+    ]
     workers = [item for item in tasks if item not in verification]
 
     if failed or not verification:
@@ -1634,6 +1808,8 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         now = _now()
         for task in tasks:
             if task.status not in {"queued", "waiting_dependency"}:
+                continue
+            if task in pending_summarizers:
                 continue
             previous_status = task.status
             task.status = "blocked"
@@ -1645,7 +1821,7 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
             errors = errors if isinstance(errors, list) else []
             failure = {
                 "code": "team_failed",
-                "message": "团队失败，按 fail-fast 策略阻断后续调度",
+                "message": "团队存在不可恢复失败，按 fail-fast 策略阻断其他工作任务",
                 "failed_tasks": failed_keys,
             }
             if not verification:
@@ -1659,7 +1835,7 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
                 member=members.get(int(task.member_id)),
                 from_status=previous_status,
                 to_status="blocked",
-                detail={"reason": "team_failed", "failed_tasks": failed_keys},
+                detail={"reason": "team_failed_preserve_summarizer", "failed_tasks": failed_keys},
             )
             failed.append(task)
 
@@ -1680,9 +1856,41 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
                 "final_result": verification_results[-1]["result"] if verification_results else {},
             }
         )
+    elif failed and pending_summarizers and not running:
+        # A failed worker closes new work but leaves a declared summary endpoint
+        # schedulable. It receives terminal dependency results and must report the
+        # omissions instead of silently discarding completed sibling work.
+        team.status = "verifying"
+        team.started_at = team.started_at or _now()
     elif failed and not running:
         team.status = "failed"
         team.completed_at = team.completed_at or _now()
+        completed_summarizers = [
+            item for item in tasks
+            if members.get(int(item.member_id))
+            and members[int(item.member_id)].role == "summarizer"
+            and item.status == "completed"
+        ]
+        if completed_summarizers:
+            verification_results = [
+                {"task_key": item.task_key, "result": _public(_unjson(item.result_json, {}))}
+                for item in verification
+                if item.status == "completed"
+            ]
+            failed_task_keys = [
+                item.task_key for item in tasks if item.status in {"failed", "dead_letter", "expired"}
+            ]
+            blocked_task_keys = [item.task_key for item in tasks if item.status == "blocked"]
+            team.summary_json = _json(
+                {
+                    "partial": True,
+                    "completed_tasks": sum(item.status == "completed" for item in tasks),
+                    "failed_tasks": failed_task_keys,
+                    "blocked_tasks": blocked_task_keys,
+                    "verification_results": verification_results,
+                    "final_result": _public(_unjson(completed_summarizers[-1].result_json, {})),
+                }
+            )
         team.error_json = _json(
             {
                 "failed_tasks": [item.task_key for item in failed],
@@ -2722,29 +2930,28 @@ def retry_team(
     ]
     if not rows:
         raise AgentTeamStateError("没有可重试的失败任务")
-    # 只指定失败根节点时，自动带上由它阻断的后继节点；后继节点会在根节点
-    # 成功后重新等待依赖，不要求小菱重复枚举整张工作图。
-    if wanted:
-        selected_keys = {task.task_key for task in rows}
-        changed = True
-        while changed:
-            changed = False
-            for task in all_tasks:
-                if task.task_key in selected_keys or task.status != "blocked":
-                    continue
-                dependencies = set(_unjson(task.dependency_keys_json, []))
-                errors = _unjson(task.errors_json, [])
-                errors = errors if isinstance(errors, list) else []
-                failed_keys = {
-                    str(key)
-                    for failure in errors
-                    if isinstance(failure, dict) and failure.get("code") == "team_failed"
-                    for key in failure.get("failed_tasks", [])
-                }
-                if (dependencies | failed_keys) & selected_keys:
-                    rows.append(task)
-                    selected_keys.add(task.task_key)
-                    changed = True
+    # 自动带上由重试根节点阻断的后继，也使依赖该根节点的已完成后继失效。
+    # 否则旧 verifier/summarizer 结果会在上游重跑后被误当成新结论。
+    selected_keys = {task.task_key for task in rows}
+    changed = True
+    while changed:
+        changed = False
+        for task in all_tasks:
+            if task.task_key in selected_keys or task.status not in {"blocked", "completed"}:
+                continue
+            dependencies = set(_unjson(task.dependency_keys_json, []))
+            errors = _unjson(task.errors_json, [])
+            errors = errors if isinstance(errors, list) else []
+            failed_keys = {
+                str(key)
+                for failure in errors
+                if isinstance(failure, dict) and failure.get("code") == "team_failed"
+                for key in failure.get("failed_tasks", [])
+            }
+            if dependencies & selected_keys or (task.status == "blocked" and failed_keys & selected_keys):
+                rows.append(task)
+                selected_keys.add(task.task_key)
+                changed = True
     changes = {str(key): str(value).strip() for key, value in (strategy_changes or {}).items()}
     for task in rows:
         if task.status not in {"failed", "dead_letter"}:
@@ -2773,6 +2980,8 @@ def retry_team(
         task.result_json = "{}"
         task.artifacts_json = "[]"
         task.errors_json = "[]"
+        task.lease_token = None
+        task.lease_expires_at = None
         new_hash = _task_strategy_hash(task)
         _event(
             db,
@@ -2791,6 +3000,7 @@ def retry_team(
     team.status = "queued"
     team.completed_at = None
     team.error_json = "{}"
+    team.summary_json = "{}"
     _event(
         db,
         team,

@@ -817,9 +817,8 @@ _TEAM_GOVERNED_CODES = frozenset({"sandbox_deployer", "test_verifier", "operatio
 
 # 成员面隐藏的纯治理 Agent 契约(与 /api/agents/runtime 的 USER_HIDDEN_BUILTIN
 # 口径对齐, 另加 monitor: 其全平台指标仅管理员可读, 成员端可见只会诱导无效组队)。
-_USER_SURFACE_HIDDEN_CODES = frozenset({
-    "manager", "operations", "evolution", "orchestrator", "monitor",
-})
+_NON_DELEGABLE_ROOT_CODES = frozenset({"chat_assistant", "manager", "orchestrator"})
+_USER_SURFACE_HIDDEN_CODES = frozenset({"operations", "evolution", "monitor"})
 
 
 def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
@@ -832,8 +831,23 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     runtime_codes = _runtime_codes()
     items: list[dict[str, Any]] = []
     for code, contract in CONTRACTS.items():
+        # 小菱是唯一会话主控；manager 为旧权限策略兼容码，orchestrator 为
+        # 调度引擎，均不得进入子 Agent 候选目录或被团队递归调用。
+        if code in _NON_DELEGABLE_ROOT_CODES:
+            continue
         if surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
             continue
+        if code == "operations":
+            is_super_admin = (
+                str(getattr(user, "username", "")) == "admin"
+                and str(getattr(user, "role", "")) == "super_admin"
+            )
+            if is_super_admin and isinstance(user, User):
+                from app.services import rbac_service
+
+                is_super_admin = rbac_service.is_super_admin_user(db, int(user.id))
+            if surface != "admin" or not is_super_admin:
+                continue
         kind = "runtime" if code in runtime_codes or contract.execution_mode in {
             "runtime", "runtime_service", "protected_runtime",
         } else "service"
@@ -870,23 +884,14 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
         elif code == "reporter":
             item["team_input_contract"] = {"depends_on": "all_work_nodes", "role": "summarizer"}
         if code == "operations":
-            is_super_admin = (
-                str(getattr(user, "username", "")) == "admin"
-                and str(getattr(user, "role", "")) == "super_admin"
-            )
-            if is_super_admin and isinstance(user, User):
-                from app.services import rbac_service
+            from app.services.ops_service import READ_ONLY_ACTIONS
 
-                is_super_admin = rbac_service.is_super_admin_user(db, int(user.id))
-            if is_super_admin:
-                from app.services.ops_service import READ_ONLY_ACTIONS
-
-                item["team_dispatch_state"] = "read_only"
-                item["team_input_contract"] = {
-                    "action": sorted(READ_ONLY_ACTIONS),
-                    "params": "object",
-                    "write_actions": "main_xiaoling_approval_only",
-                }
+            item["team_dispatch_state"] = "read_only"
+            item["team_input_contract"] = {
+                "action": sorted(READ_ONLY_ACTIONS),
+                "params": "object",
+                "write_actions": "main_xiaoling_approval_only",
+            }
         items.append(item)
     items.extend(_custom_agents(db, user))
     conversation_query = db.query(AgentMeshConversation).filter(
@@ -938,6 +943,32 @@ def _validate_target(db: Session, user: User, address: str) -> str:
     raise AgentMeshTargetError("目标地址格式非法")
 
 
+def agent_surface_target_error(db: Session, user: User, surface: str, address: str) -> str:
+    """返回目标未出现在当前小菱权限面时的拒绝原因。"""
+    if not address.startswith("agent:"):
+        return ""
+    code = address.split(":", 1)[1]
+    if code in {"chat_assistant", "manager", "orchestrator"}:
+        return "主控与调度引擎不能作为子 Agent 目标"
+    if surface == "user" and code in {"operations", "evolution", "monitor"}:
+        return "该 Agent 不属于当前用户会话的可调用目录"
+    if code == "monitor":
+        if surface != "admin" or not _is_admin_surface(db, user):
+            return "全平台监控 Agent 仅允许管理员会话调用"
+    if code == "operations":
+        is_super_admin = (
+            str(getattr(user, "username", "")) == "admin"
+            and str(getattr(user, "role", "")) == "super_admin"
+        )
+        if is_super_admin and isinstance(user, User):
+            from app.services import rbac_service
+
+            is_super_admin = rbac_service.is_super_admin_user(db, int(user.id))
+        if surface != "admin" or not is_super_admin:
+            return "运维子 Agent 仅允许唯一超级管理员的管理会话调用"
+    return ""
+
+
 _SUPERVISION_CONTEXT_KEYS = (
     "supervision_objective",
     "supervision_round",
@@ -967,8 +998,14 @@ def _effective_supervision_max_rounds(context: Mapping[str, Any]) -> int:
     return min(requested_int, limit)
 
 
-def _validate_supervision_envelope(message: AgentMeshMessageIn) -> None:
-    """校验 agent:/custom: task.request 的监督信封。"""
+def _validate_supervision_envelope(
+    db: Session,
+    user: User,
+    message: AgentMeshMessageIn,
+    *,
+    source: str,
+) -> None:
+    """校验监督轮次范围，并将续轮绑定到同一会话中已完成的上一轮。"""
     context = message.context.model_dump()
     round_value = context.get("supervision_round")
     if round_value is None:
@@ -980,12 +1017,92 @@ def _validate_supervision_envelope(message: AgentMeshMessageIn) -> None:
         raise AgentMeshSupervisionError(
             f"supervision_round 必须在 1..{max_rounds} 之间，当前为 {round_value}"
         )
-    if round_value > 1:
-        correlation_id = context.get("supervision_correlation_id")
-        if not isinstance(correlation_id, str) or len(correlation_id) == 0:
-            raise AgentMeshSupervisionError(
-                "supervision_round 大于 1 时必须提供非空 supervision_correlation_id"
+    objective = context.get("supervision_objective")
+    if not isinstance(objective, str) or not objective.strip():
+        raise AgentMeshSupervisionError("监督轮次必须提供非空 supervision_objective")
+
+    correlation_id = context.get("supervision_correlation_id")
+    if round_value == 1:
+        if correlation_id:
+            raise AgentMeshSupervisionError("监督首轮不能引用上一轮结果")
+        existing_requests = (
+            db.query(AgentMeshMessage)
+            .filter(
+                AgentMeshMessage.user_id == int(user.id),
+                AgentMeshMessage.trace_id == message.trace_id,
+                AgentMeshMessage.sent_from == source,
+                AgentMeshMessage.send_to == message.send_to,
+                AgentMeshMessage.message_type == "task.request",
             )
+            .all()
+        )
+        for row in existing_requests:
+            previous_context = _load(row.context_json, {})
+            if (
+                isinstance(previous_context, dict)
+                and previous_context.get("run_id") == context.get("run_id")
+                and previous_context.get("supervision_objective") == objective
+                and previous_context.get("supervision_round") is not None
+            ):
+                raise AgentMeshSupervisionError(
+                    "同一运行与目标已有监督链，不能重置轮次"
+                )
+        return
+
+    if not isinstance(correlation_id, str) or not correlation_id:
+        raise AgentMeshSupervisionError(
+            "supervision_round 大于 1 时必须关联上一轮 task.result"
+        )
+    parent_result = (
+        db.query(AgentMeshMessage)
+        .filter(
+            AgentMeshMessage.user_id == int(user.id),
+            AgentMeshMessage.message_id == correlation_id,
+            AgentMeshMessage.message_type == "task.result",
+            AgentMeshMessage.trace_id == message.trace_id,
+        )
+        .first()
+    )
+    if parent_result is None:
+        raise AgentMeshSupervisionError("监督续轮引用的上一轮结果不存在或不属于当前运行")
+    parent_context = _load(parent_result.context_json, {})
+    previous_request = (
+        db.query(AgentMeshMessage)
+        .filter(
+            AgentMeshMessage.user_id == int(user.id),
+            AgentMeshMessage.message_id == parent_result.correlation_id,
+            AgentMeshMessage.message_type == "task.request",
+        )
+        .first()
+    )
+    if previous_request is None:
+        raise AgentMeshSupervisionError("监督上一轮请求记录不存在")
+    previous_context = _load(previous_request.context_json, {})
+    expected_max_rounds = (
+        _effective_supervision_max_rounds(parent_context)
+        if isinstance(parent_context, dict)
+        else max_rounds
+    )
+    if (
+        not isinstance(parent_context, dict)
+        or not isinstance(previous_context, dict)
+        or previous_request.status != "completed"
+        or parent_result.correlation_id != previous_request.message_id
+        or parent_context.get("supervision_correlation_id") != previous_request.message_id
+        or parent_result.sent_from != message.send_to
+        or parent_result.send_to != source
+        or previous_request.sent_from != source
+        or previous_request.send_to != message.send_to
+        or parent_result.trace_id != message.trace_id
+        or previous_context.get("run_id") != context.get("run_id")
+        or previous_context.get("supervision_objective") != objective
+        or previous_context.get("supervision_round") != round_value - 1
+        or parent_context.get("supervision_round") != round_value - 1
+        or parent_context.get("supervision_objective") != objective
+        or parent_context.get("run_id") != context.get("run_id")
+        or expected_max_rounds != max_rounds
+    ):
+        raise AgentMeshSupervisionError("监督续轮与上一轮结果的账号、会话、目标或轮次不匹配")
 
 
 def _context_for_storage(message: AgentMeshMessageIn) -> dict[str, Any]:
@@ -1080,8 +1197,17 @@ def send_message(
     if not trusted_source and source != derived_source:
         raise AgentMeshAccessError("sent_from 与当前认证会话不一致")
     target_kind = _validate_target(db, user, message.send_to)
-    if target_kind in {"agent", "custom"} and message.message_type == "task.request":
-        _validate_supervision_envelope(message)
+    scope_error = agent_surface_target_error(db, user, surface, message.send_to)
+    if scope_error:
+        raise AgentMeshAccessError(scope_error)
+    if (
+        target_kind in {"agent", "custom"}
+        and message.message_type == "task.request"
+    ):
+        if not trusted_source:
+            raise AgentMeshAccessError("子 Agent 任务必须由小菱调用")
+        if source != derived_source:
+            raise AgentMeshAccessError("子 Agent 任务必须由当前小菱会话发起")
     if trusted_source and source.startswith("agent:") and message.send_to.startswith("agent:"):
         source_code = source.split(":", 1)[1]
         target_code = message.send_to.split(":", 1)[1]
@@ -1100,6 +1226,9 @@ def send_message(
         if existing.sent_from != source or existing.send_to != message.send_to:
             raise AgentMeshStateError("幂等键已用于不同的发送方或目标")
         return _message_out(existing)
+
+    if target_kind in {"agent", "custom"} and message.message_type == "task.request":
+        _validate_supervision_envelope(db, user, message, source=source)
 
     now = _now()
     row = AgentMeshMessage(
@@ -1177,6 +1306,20 @@ def claim_dispatch_message(
     if not target_address.startswith(("agent:", "custom:")):
         raise AgentMeshTargetError("消费者只能认领 Agent 地址")
     _validate_target(db, user, target_address)
+    row = (
+        db.query(AgentMeshMessage)
+        .filter(AgentMeshMessage.message_id == message_id, AgentMeshMessage.user_id == int(user.id))
+        .first()
+    )
+    if row is None or row.sent_from.count(":") < 2 or not row.sent_from.startswith("session:"):
+        raise AgentMeshAccessError("子 Agent 任务缺少有效的小菱会话来源")
+    source_parts = row.sent_from.split(":", 2)
+    source_surface, source_session = source_parts[1], source_parts[2]
+    if _conversation(db, int(user.id), source_surface, source_session) is None:
+        raise AgentMeshAccessError("子 Agent 任务来源会话已失效")
+    scope_error = agent_surface_target_error(db, user, source_surface, target_address)
+    if scope_error:
+        raise AgentMeshAccessError(scope_error)
     now = _now()
     lease_token = f"lease_{uuid.uuid4().hex}"
     lease_expires_at = now + timedelta(seconds=max(30, min(int(lease_seconds), 1800)))

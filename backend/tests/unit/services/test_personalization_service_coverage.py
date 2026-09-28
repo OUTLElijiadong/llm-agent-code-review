@@ -451,6 +451,21 @@ def test_large_knowledge_document_keeps_tail_and_rejects_incomplete_replacement(
         knowledge_service.add_document(db, 1, "超限", "字" * 2_000_001)
 
 
+def test_retrieve_rejects_chunk_linked_to_another_users_document(db, monkeypatch):
+    """检索切片与文档归属不一致时不能带出他人文档信息。"""
+    foreign_doc = _make_knowledge_doc(db, 2, "他人私有文档标题")
+    _make_chunk(db, foreign_doc, "错挂到本人名下的切片", "[1.0, 0.0]", user_id=1)
+    monkeypatch.setattr(
+        knowledge_service.embedding_service,
+        "embed_one",
+        lambda _db, _text, *, user_id: ([1.0, 0.0], "fake"),
+    )
+
+    hits = knowledge_service.retrieve(db, 1, "查询", top_k=10)
+
+    assert hits == []
+
+
 def test_retrieve_list_delete_and_stats_enforce_knowledge_isolation(db, monkeypatch):
     """知识管理应按用户隔离检索、列表、删除和统计。
 

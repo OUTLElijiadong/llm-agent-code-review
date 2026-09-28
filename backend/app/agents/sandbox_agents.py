@@ -47,11 +47,14 @@ class _SandboxAgent(BaseAgent):
 
 class TestVerifierAgent(_SandboxAgent):
     name = "test_verifier"
-    description = "黑盒测试员:把项目在隔离沙箱里真实运行,从外部发起真实攻击探测"
+    description = (
+        "测试验证员:在隔离沙箱执行项目白盒检查与回环黑盒验证；"
+        "外部目标仅做获批只读探测，真实渗透走独立授权流程"
+    )
     icon = "test_verifier"
     color = "#16866F"
     category = "review"
-    skills = ("项目动态白盒测试", "授权远程黑盒测试", "原始证据归档")
+    skills = ("隔离环境白盒与黑盒验证", "授权远程只读探测", "原始证据归档")
 
     def run_project_tests(
         self,

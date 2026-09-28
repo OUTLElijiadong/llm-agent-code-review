@@ -91,11 +91,24 @@ class SandboxCreateIn(BaseModel):
     ttl_hours: int = Field(default=72, ge=1, le=168)
     remote_target_url: Optional[HttpUrl] = None
     remote_target_authorized: bool = False
+    remote_target_approval_token: Optional[str] = Field(default=None, max_length=120)
 
     @field_validator("remote_target_authorized")
     @classmethod
     def authorization_is_explicit(cls, value: bool) -> bool:
         return bool(value)
+
+
+class SandboxRemoteTargetAuthorizationIn(BaseModel):
+    project_id: int = Field(gt=0)
+    remote_target_url: HttpUrl
+    test_mode: Literal["blackbox", "combined"]
+    confirmed: bool
+
+
+class SandboxRemoteTargetAuthorizationOut(BaseModel):
+    approval_token: str
+    expires_at: datetime
 
 
 class SandboxExtendIn(BaseModel):
@@ -133,8 +146,15 @@ class SandboxEnvironmentOut(BaseModel):
     runtime: str
     source_sha256: str
     source_revision_id: Optional[int] = None
+    source_revision_no: Optional[int] = None
+    source_revision_sha256: Optional[str] = None
+    execution_source_sha256: Optional[str] = None
+    execution_round: int = 0
+    worker_request_id: Optional[str] = None
+    syntax_repair_revisions: list[dict[str, Any]] = Field(default_factory=list)
     preview_path: Optional[str] = None
     remote_target_url: Optional[str] = None
+    remote_target_approval_id: Optional[int] = None
     expires_at: datetime
     started_at: Optional[datetime] = None
     stopped_at: Optional[datetime] = None

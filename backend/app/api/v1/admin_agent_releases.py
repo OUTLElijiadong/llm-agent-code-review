@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.permission_codes import PermissionCode
-from app.core.rbac_dependency import require_permission
+from app.core.rbac_dependency import require_admin, require_permission
 from app.models.agent_governance import ApprovalItem
 from app.models.custom_agent import (
     CustomAgent,
@@ -21,7 +21,8 @@ from app.schemas.agent_studio import AdminReviseIn, AssetOut, DecisionIn, Releas
 from app.schemas.common import Resp
 from app.services import agent_studio_service, approval_service
 
-router = APIRouter()
+# 发布管理始终要求管理员身份；可配置权限码仍在各操作上细分校验。
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 
 def _authoring(version: Optional[CustomAgentVersion]) -> Optional[dict[str, Any]]:

@@ -11,10 +11,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.core.dependencies import authenticate_access_token
-from app.core.exceptions import AuthError
-from app.core.security import decode_token
+from app.core.exceptions import AuthError, ForbiddenError
+from app.core.security import create_access_token, decode_token
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
-from app.services import auth_service
+from app.services import auth_service, rbac_service, user_service
 
 
 def _user(db, *, token_version: int = 0) -> User:
@@ -62,6 +63,50 @@ def test_failed_login_does_not_revoke_current_session(db, monkeypatch) -> None:
 
     db.expire_all()
     assert db.get(User, user.id).token_version == 7
+
+
+def test_role_downgrade_and_disable_revoke_existing_token_and_permissions(db) -> None:
+    reviewer = User(
+        username="revoked-reviewer", password="hash", role="reviewer", status=1,
+        token_version=4,
+    )
+    reviewer_role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    user_role = Role(name="普通用户", code="user", status="active", is_builtin=1)
+    audit_permission = Permission(code="audit:view", name="查看审计", module="audit", type="api")
+    review_permission = Permission(code="review:start", name="启动审查", module="review", type="api")
+    db.add_all([reviewer, reviewer_role, user_role, audit_permission, review_permission])
+    db.flush()
+    db.add_all([
+        UserRole(user_id=reviewer.id, role_id=reviewer_role.id),
+        RolePermission(role_id=reviewer_role.id, permission_id=audit_permission.id),
+        RolePermission(role_id=reviewer_role.id, permission_id=review_permission.id),
+    ])
+    db.commit()
+
+    old_token = create_access_token(reviewer.id, reviewer.role, reviewer.token_version)
+    assert authenticate_access_token(old_token, db).id == reviewer.id
+    assert rbac_service.check_permission(db, reviewer.id, "audit:view") is True
+    assert rbac_service.check_permission(db, reviewer.id, "review:start") is True
+
+    user_service.set_role(db, reviewer.id, "user")
+    with pytest.raises(AuthError) as revoked:
+        authenticate_access_token(old_token, db)
+    assert revoked.value.code == 40102
+    assert rbac_service.check_permission(db, reviewer.id, "audit:view") is False
+    assert rbac_service.check_permission(db, reviewer.id, "review:start") is False
+
+    current = db.get(User, reviewer.id)
+    downgraded_token = create_access_token(current.id, current.role, current.token_version)
+    assert authenticate_access_token(downgraded_token, db).id == reviewer.id
+    user_service.toggle_status(db, reviewer.id, 0)
+    with pytest.raises(ForbiddenError) as disabled:
+        authenticate_access_token(downgraded_token, db)
+    assert disabled.value.code == 40301
+
+    user_service.toggle_status(db, reviewer.id, 1)
+    with pytest.raises(AuthError) as still_revoked:
+        authenticate_access_token(downgraded_token, db)
+    assert still_revoked.value.code == 40102
 
 
 def test_token_signing_failure_rolls_back_session_version(db, monkeypatch) -> None:

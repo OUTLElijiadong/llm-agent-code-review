@@ -106,22 +106,35 @@ const scopeDescription = computed(() => {
   return '请求全包静态与语义审计；实际完成范围及覆盖以返回结果为准。'
 })
 
-const severityCounts = computed(() => {
-  const counts: Record<string, number> = { 严重: 0, 高: 0, 中: 0, 低: 0 }
-  if (!result.value) return counts
-  for (const f of result.value.findings) {
-    if (f.severity in counts) counts[f.severity]++
-  }
-  return counts
-})
+const refutedFindings = computed(() =>
+  result.value?.findings.filter((finding) => finding.verification === 'refuted') ?? [],
+)
 
 const sortedFindings = computed<SecurityFindingOut[]>(() => {
   if (!result.value) return []
   const order: Record<string, number> = { 严重: 0, 高: 1, 中: 2, 低: 3 }
-  return [...result.value.findings].sort((a, b) => {
-    return (order[a.severity] ?? 9) - (order[b.severity] ?? 9)
-  })
+  return result.value.findings
+    .filter((finding) => finding.verification !== 'refuted')
+    .sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9))
 })
+
+const severityCounts = computed(() => {
+  const counts: Record<string, number> = { 严重: 0, 高: 0, 中: 0, 低: 0 }
+  for (const finding of sortedFindings.value) {
+    if (finding.severity in counts) counts[finding.severity]++
+  }
+  return counts
+})
+
+const pendingReviewCount = computed(() =>
+  sortedFindings.value.filter((finding) =>
+    finding.verification === 'plausible' || finding.verification === 'unreviewed',
+  ).length,
+)
+
+const unknownReviewCount = computed(() =>
+  sortedFindings.value.filter((finding) => !finding.verification).length,
+)
 
 const groupedByOwasp = computed(() => {
   const map = new Map<string, SecurityFindingOut[]>()
@@ -213,7 +226,7 @@ function downloadReport(): void {
   lines.push(`# 棱镜 Prism · 安全审计报告`)
   lines.push('')
   lines.push(`- 扫描范围: ${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
-  lines.push(`- 风险评分: **${result.value.risk_score}/100**`)
+  lines.push(`- 安全评分（越高越安全）: **${result.value.risk_score}/100**`)
   lines.push(`- 扫描文件数: ${result.value.file_count}`)
   if (result.value.source_archive_sha256) {
     lines.push(`- 源码归档 SHA-256: \`${result.value.source_archive_sha256}\``)
@@ -222,6 +235,12 @@ function downloadReport(): void {
   lines.push('')
   lines.push(`## 概要`)
   lines.push(result.value.summary)
+  lines.push('')
+  lines.push('## 复核概况')
+  lines.push(`未被证伪候选: ${sortedFindings.value.length}`)
+  lines.push(`已证伪候选 (不计入有效发现及风险评分): ${refutedFindings.value.length}`)
+  lines.push(`待人工确认或未复核: ${pendingReviewCount.value}`)
+  lines.push(`未提供复核状态: ${unknownReviewCount.value}`)
   lines.push('')
   const endpoints = result.value.threat_model?.api_endpoints ?? []
   if (endpoints.length) {
@@ -273,6 +292,8 @@ function downloadReport(): void {
     for (const f of group.items) {
       lines.push(`### [${f.severity}] ${f.title}`)
       lines.push(`- 位置: \`${f.file_path}\` · ${f.lines}`)
+      lines.push(`- 复核状态: ${verificationLabel(f)}`)
+      if (f.verification_reason) lines.push(`- 复核理由: ${f.verification_reason}`)
       if (f.cwe) lines.push(`- CWE: ${f.cwe}`)
       if (f.confidence < 1) lines.push(`- 置信度: ${(f.confidence * 100).toFixed(0)}%`)
       if (f.evidence) {
@@ -286,6 +307,22 @@ function downloadReport(): void {
       }
       if (f.fix_suggestion) {
         lines.push(`- 修复建议: ${f.fix_suggestion}`)
+      }
+      lines.push('')
+    }
+  }
+  if (refutedFindings.value.length) {
+    lines.push('## 已证伪候选 (不计入有效发现及风险评分)')
+    for (const f of refutedFindings.value) {
+      lines.push(`### [${f.severity}] ${f.title}`)
+      lines.push(`- 复核状态: ${verificationLabel(f)}`)
+      lines.push(`- 位置: \`${f.file_path}\` · ${f.lines}`)
+      if (f.verification_reason) lines.push(`- 复核理由: ${f.verification_reason}`)
+      if (f.evidence) {
+        lines.push('- 原始证据:')
+        lines.push('```')
+        lines.push(f.evidence)
+        lines.push('```')
       }
       lines.push('')
     }
@@ -312,6 +349,14 @@ function downloadReport(): void {
 
 function severityClass(sev: string): string {
   return `sev-${sev}`
+}
+
+function verificationLabel(finding: SecurityFindingOut): string {
+  if (finding.verification === 'confirmed') return '已确认'
+  if (finding.verification === 'plausible') return '待人工确认'
+  if (finding.verification === 'unreviewed') return '未复核'
+  if (finding.verification === 'refuted') return '已证伪'
+  return '未提供复核状态'
 }
 
 function dataflowPath(f: DataFlowOut): string {
@@ -499,6 +544,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="sec-summary" v-if="result.summary" v-html="renderMarkdown(result.summary)" />
+      <p v-if="refutedFindings.length || pendingReviewCount || unknownReviewCount" class="review-status-note">
+        未被证伪候选 {{ sortedFindings.length }} 条；
+        <span v-if="refutedFindings.length">已证伪并从风险统计排除 {{ refutedFindings.length }} 条；</span>
+        <span v-if="pendingReviewCount">待人工确认或未复核 {{ pendingReviewCount }} 条；</span>
+        <span v-if="unknownReviewCount">{{ unknownReviewCount }} 条未提供复核状态。</span>
+      </p>
 
       <dl v-if="result.source_archive_sha256" class="audit-evidence">
         <dt>归档 SHA-256</dt>
@@ -652,6 +703,7 @@ onBeforeUnmount(() => {
                   <div class="finding-sub font-mono">
                     {{ f.file_path }} · {{ f.lines }}
                   </div>
+                  <div class="finding-review">{{ verificationLabel(f) }}</div>
                 </div>
               </button>
             </template>
@@ -683,6 +735,12 @@ onBeforeUnmount(() => {
               </div>
             </header>
             <dl class="view-body">
+              <dt>复核状态</dt>
+              <dd>{{ verificationLabel(sortedFindings[activeFindingIdx]) }}</dd>
+              <dt v-if="sortedFindings[activeFindingIdx].verification_reason">复核理由</dt>
+              <dd v-if="sortedFindings[activeFindingIdx].verification_reason">
+                {{ sortedFindings[activeFindingIdx].verification_reason }}
+              </dd>
               <dt>位置</dt>
               <dd class="font-mono">
                 {{ sortedFindings[activeFindingIdx].file_path }} · {{ sortedFindings[activeFindingIdx].lines }}
@@ -720,6 +778,21 @@ onBeforeUnmount(() => {
           </main>
         </div>
       </div>
+
+      <details v-if="refutedFindings.length" class="refuted-findings">
+        <summary>已证伪候选 {{ refutedFindings.length }} 条（不计入有效发现及风险评分）</summary>
+        <ul>
+          <li v-for="(finding, index) in refutedFindings" :key="`${finding.file_path}-${finding.line_number}-${index}`">
+            <strong>[{{ finding.severity }}] {{ finding.title }}</strong>
+            <span class="font-mono">{{ finding.file_path }} · {{ finding.lines }}</span>
+            <p v-if="finding.verification_reason">复核理由：{{ finding.verification_reason }}</p>
+            <details v-if="finding.evidence">
+              <summary>查看原始证据</summary>
+              <pre class="evidence">{{ finding.evidence }}</pre>
+            </details>
+          </li>
+        </ul>
+      </details>
 
       <!-- 跨文件数据流 -->
       <div
@@ -809,6 +882,31 @@ onBeforeUnmount(() => {
 .scan-close-note { font-size: 12px; line-height: 1.7; color: var(--gray-600); margin: 12px 0; }
 .sec-result { animation: scanResultReveal 0.18s ease-out; }
 .sec-error p { margin: 8px 0 0; line-height: 1.7; overflow-wrap: anywhere; }
+.review-status-note {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--brand-600, #5B58E8);
+  border-radius: 4px;
+  background: rgba(91, 88, 232, 0.05);
+  color: var(--gray-700);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.refuted-findings {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  color: var(--gray-700);
+  font-size: 12px;
+  summary { cursor: pointer; font-weight: 600; }
+  ul { display: grid; gap: 10px; margin: 10px 0 0; padding-left: 20px; }
+  li { display: grid; gap: 4px; overflow-wrap: anywhere; }
+  li > span { color: var(--gray-500); }
+  p { margin: 0; line-height: 1.6; }
+  details { margin-top: 4px; }
+}
 
 @keyframes scanWaiting { to { transform: rotate(360deg); } }
 @keyframes scanResultReveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -1095,6 +1193,13 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.finding-review {
+  margin-top: 2px;
+  color: var(--gray-600);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .finding-view {

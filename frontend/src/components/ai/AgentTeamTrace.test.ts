@@ -31,19 +31,59 @@ const team = {
 }
 
 describe('AgentTeamTrace', () => {
+  it('折叠按钮名称包含各自团队标题且控制面板 ID 唯一', () => {
+    const first = mount(AgentTeamTrace, { props: { team } })
+    const second = mount(AgentTeamTrace, { props: { team: { ...team, team_id: 43, title: '安全复核' } } })
+    const sameTitle = mount(AgentTeamTrace, { props: { team: { ...team, team_id: 44 } } })
+    const firstToggle = first.get('.agent-team-toggle')
+    const secondToggle = second.get('.agent-team-toggle')
+    const sameTitleToggle = sameTitle.get('.agent-team-toggle')
+
+    expect(firstToggle.attributes('aria-label')).toContain('发布前验证')
+    expect(secondToggle.attributes('aria-label')).toContain('安全复核')
+    expect(firstToggle.attributes('aria-label')).toContain('团队编号 42')
+    expect(sameTitleToggle.attributes('aria-label')).toContain('团队编号 44')
+    expect(firstToggle.attributes('aria-label')).not.toBe(sameTitleToggle.attributes('aria-label'))
+    expect(firstToggle.attributes('aria-controls')).not.toBe(secondToggle.attributes('aria-controls'))
+  })
+
   it('默认折叠，展开后显示脱敏团队树、依赖和消息', async () => {
     const wrapper = mount(AgentTeamTrace, { props: { team } })
 
-    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    expect(wrapper.find('.agent-team-trace-body').attributes('hidden')).toBeDefined()
+    expect(wrapper.find('.agent-team-stats').exists()).toBe(false)
     expect(wrapper.text()).toContain('发布前验证')
+    const toggle = wrapper.get('.agent-team-toggle')
+    const traceId = toggle.attributes('aria-controls')
+    expect(traceId).toBeTruthy()
+    expect(wrapper.get(`#${traceId}`).attributes('hidden')).toBeDefined()
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('50')
+    expect(wrapper.get('.agent-team-progress-label').text()).toContain('50%')
+    expect(wrapper.get('.agent-team-progress-count').text()).toContain('1/2')
     await wrapper.find('.agent-team-toggle').trigger('click')
 
-    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(true)
+    expect(wrapper.find('.agent-team-trace-body').attributes('hidden')).toBeUndefined()
+    expect(wrapper.get(`#${traceId}`).attributes('hidden')).toBeUndefined()
     expect(wrapper.text()).toContain('读取 Agent')
     expect(wrapper.text()).toContain('依赖: read')
     expect(wrapper.text()).toContain('读取完成')
     expect(wrapper.text()).not.toContain('并行执行测试')
     expect(wrapper.find('.agent-team-toggle').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('折叠摘要保留失败与阻塞计数；总任务为零时不伪造百分比', () => {
+    const interruptedTeam = {
+      ...team,
+      counts: { total: 3, completed: 1, running: 0, queued: 0, failed: 1, blocked: 1 },
+    }
+    const wrapper = mount(AgentTeamTrace, { props: { team: interruptedTeam } })
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('33')
+    expect(wrapper.find('.agent-team-progress-problems').text()).toContain('失败/阻塞 2')
+
+    const emptyTeam = { ...team, counts: { total: 0, completed: 0, running: 0, queued: 0, failed: 0, blocked: 0 } }
+    const emptyWrapper = mount(AgentTeamTrace, { props: { team: emptyTeam } })
+    expect(emptyWrapper.find('[role="progressbar"]').exists()).toBe(false)
+    expect(emptyWrapper.text()).not.toContain('%')
   })
 
   it('在窄屏内容中保持可换行且显示错误状态', () => {

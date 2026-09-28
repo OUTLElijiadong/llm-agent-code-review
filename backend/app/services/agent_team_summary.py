@@ -62,7 +62,9 @@ def dependency_coverage_summary(result: dict[str, Any]) -> dict[str, Any]:
                 value = source.get(field)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     projected[field] = value
-            for field in ("semantic_complete", "static_complete", "truncated", "complete", "formal_review"):
+            for field in ("semantic_complete", "static_complete", "truncated", "complete",
+                          "formal_review", "scan_complete", "semantic_execution_complete",
+                          "audit_inputs_complete"):
                 if isinstance(source.get(field), bool):
                     projected[field] = source[field]
             if source.get("execution_mode") == "analysis_only":
@@ -118,14 +120,23 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
                 bounded_tasks.append(task_key)
         if any(bool(block.get("findings_truncated")) for block in blocks) and task_key not in bounded_tasks:
             bounded_tasks.append(task_key)
+        if any(
+            isinstance(source, dict) and any(source.get(flag) is False for flag in (
+                "scan_complete", "semantic_execution_complete", "audit_inputs_complete", "complete",
+            ))
+            for block in blocks
+            for source in (block, block.get("compliance"), block.get("coverage"))
+        ) and task_key not in bounded_tasks:
+            bounded_tasks.append(task_key)
+        verified_review_id = entry.get("verified_review_task_id")
+        if (isinstance(verified_review_id, int) and not isinstance(verified_review_id, bool)
+                and verified_review_id > 0 and complete):
+            references[("review_task", verified_review_id)] = {
+                "type": "review_task", "task_id": verified_review_id,
+                "route": f"/reviews/{verified_review_id}", "source_task": task_key,
+            }
         for data in blocks:
             project_id = data.get("project_id")
-            task_id = data.get("task_id")
-            if isinstance(task_id, int) and task_id > 0:
-                references[("review_task", task_id)] = {
-                    "type": "review_task", "task_id": task_id,
-                    "route": f"/reviews/{task_id}", "source_task": task_key,
-                }
             for item in data.get("findings") or data.get("issues") or []:
                 if not isinstance(item, dict) or not item.get("title"):
                     continue
@@ -139,6 +150,8 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
                 )
                 if key not in findings:
                     findings[key] = {**item, "source_tasks": []}
+                    if not findings[key].get("project_id") and isinstance(project_id, int):
+                        findings[key]["project_id"] = project_id
                 if task_key not in findings[key]["source_tasks"]:
                     findings[key]["source_tasks"].append(task_key)
     summary = {
@@ -155,7 +168,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
     # 依赖节点若明确只返回了预览，团队不能把“节点完成”冒充为完整覆盖。
     complete = bool(outcomes) and not failed and not bounded_tasks
     bounded_note = (
-        f" {len(bounded_tasks)} 个节点的问题明细有截断，请查看原任务/报告中的完整结果。" if bounded_tasks else ""
+        f" {len(bounded_tasks)} 个节点的明细或覆盖不完整，请查看原任务/报告中的覆盖状态。" if bounded_tasks else ""
     )
     return {
         "status": "completed" if complete else "failed",
@@ -174,7 +187,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
             f"实测范围见各项证据。{bounded_note}"
             if complete else (
                 f"团队结果未完整覆盖；待处理节点：{', '.join(failed) or '无'}。"
-                f"问题明细有截断的节点：{', '.join(bounded_tasks) or '无'}。已保留可用证据。"
+                f"明细或覆盖不完整的节点：{', '.join(bounded_tasks) or '无'}。已保留可用证据。"
             )
         ),
         "evidence": evidence,

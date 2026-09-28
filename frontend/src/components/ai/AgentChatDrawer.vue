@@ -16,6 +16,7 @@ import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import AuthenticatedChatImage from '@/components/ai/AuthenticatedChatImage.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
+import AgentActivityDisclosure from '@/components/ai/AgentActivityDisclosure.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
@@ -24,7 +25,7 @@ import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline
 import AgentTeamTrace from '@/components/ai/AgentTeamTrace.vue'
 import AgentTeamWindow from '@/components/ai/AgentTeamWindow.vue'
 import TaskCancelConfirm from '@/components/ai/TaskCancelConfirm.vue'
-import { isPageActionTool, toolRunningPhrase } from '@/utils/toolDisplay'
+import { isPageActionTool, toolDisplayInfo, toolRunningPhrase } from '@/utils/toolDisplay'
 import { notifyRoundtableToolCompleted } from '@/utils/roundtableNotifications'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import {
@@ -241,6 +242,73 @@ const visibleAgentTeams = computed<Array<AgentTeamDetail | AgentTeamSummary>>(()
 const teamById = (teamId: number): AgentTeamDetail | AgentTeamSummary | undefined => (
   visibleAgentTeams.value.find((team) => team.team_id === teamId)
 )
+
+function hasMessageActivity(message: ChatMessage): boolean {
+  return message.role === 'assistant' && Boolean(
+    message.steps?.length || message.planSteps?.length || message.toolCalls?.length
+    || message.auditPhases?.length || message.teamIds?.length,
+  )
+}
+
+function messageActivitySummary(message: ChatMessage): string {
+  const parts: string[] = []
+  const calls = message.toolCalls ?? []
+  const completedCalls = calls.filter((call) => call.status === 'completed').length
+  const activeCalls = calls.filter((call) => (
+    ['streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running'].includes(call.status)
+  )).length
+  const failedCalls = calls.filter((call) => call.status === 'failed')
+  const waitingCalls = calls.filter((call) => ['waiting_input', 'waiting_approval'].includes(call.status)).length
+
+  if (calls.length) {
+    parts.push(`${completedCalls}/${calls.length} 个步骤完成`)
+    if (activeCalls) parts.push(`${activeCalls} 个进行中`)
+    if (waitingCalls) parts.push(`${waitingCalls} 个待确认`)
+    if (failedCalls.length) {
+      const failedNames = failedCalls.slice(0, 2).map((call) => call.subject || toolDisplayInfo(call.name).label)
+      parts.push(`失败：${failedNames.join('、')}${failedCalls.length > 2 ? ` 等 ${failedCalls.length} 项` : ''}`)
+    }
+  }
+
+  const teams = (message.teamIds ?? []).map((teamId) => teamById(teamId)).filter(
+    (team): team is AgentTeamDetail | AgentTeamSummary => Boolean(team),
+  )
+  if (teams.length) {
+    const completed = teams.reduce((sum, team) => sum + (team.counts?.completed ?? 0), 0)
+    const total = teams.reduce((sum, team) => sum + (team.counts?.total ?? 0), 0)
+    const problems = teams.reduce((sum, team) => sum + (team.counts?.failed ?? 0) + (team.counts?.blocked ?? 0), 0)
+    parts.push(total ? `Agent 团队 ${completed}/${total} 项` : `Agent 团队 ${teams.length} 个`)
+    if (problems) parts.push(`失败/阻塞 ${problems}`)
+  } else if (message.teamIds?.length) {
+    parts.push('Agent 团队正在准备')
+  }
+
+  const latestPhase = message.auditPhases?.at(-1)
+  if (latestPhase && message.runId === sessionRun.value?.run_id && isAgentResponseSessionActive(sessionRun.value?.status)) {
+    parts.push(`当前阶段：${latestPhase.label}`)
+  }
+  if (!parts.length) {
+    const count = message.steps?.length ?? message.planSteps?.length ?? 0
+    parts.push(`${count} 个调度步骤`)
+  }
+  return parts.join(' · ')
+}
+
+function messageActivityState(message: ChatMessage): 'running' | 'completed' | 'attention' {
+  const calls = message.toolCalls ?? []
+  const teams = (message.teamIds ?? []).map((teamId) => teamById(teamId)).filter(Boolean)
+  const hasProblem = calls.some((call) => ['failed', 'waiting_input', 'waiting_approval', 'rejected'].includes(call.status))
+    || teams.some((team) => Boolean(team?.counts && team.counts.failed + team.counts.blocked > 0))
+  if (hasProblem) return 'attention'
+  const activeCalls = calls.some((call) => (
+    ['streaming', 'queued', 'delivered', 'acknowledged', 'processing', 'running'].includes(call.status)
+  ))
+  const activeTeams = teams.some((team) => Boolean(team && !TERMINAL_TEAM_STATUSES.has(team.status)))
+  if (activeCalls || activeTeams || (
+    message.runId === sessionRun.value?.run_id && isAgentResponseSessionActive(sessionRun.value?.status)
+  )) return 'running'
+  return 'completed'
+}
 const anchoredTeamIds = computed(() => new Set(
   messages.value.flatMap((message) => message.teamIds ?? []),
 ))
@@ -611,6 +679,24 @@ function restoredSessionMessages(
         teamIds: takePersistedTeamIds(teamBuckets, message.role, message.content),
       }
     })
+  // 建立 run 前网络中断时服务端尚无检查点；同账号同会话的本地快照
+  // 是这条未送达消息及错误反馈的唯一恢复来源。
+  if (!session.run && !session.messages.length) {
+    const pending = (persistedMessages ?? []).filter((message) => message.role === 'user' || message.role === 'error')
+    if (pending.some((message) => message.role === 'user')) {
+      restored.push(...pending.map((message) => ({
+        id: messageId(), role: message.role, content: message.content,
+        time: restoredTime, runId: message.runId, errorCard: message.errorCard,
+      })))
+      if (!pending.some((message) => message.role === 'error')) {
+        restored.push({
+          id: messageId(), role: 'error',
+          content: '这条提问未在服务器留痕，页面已恢复本地内容；请点击重试重新发送。',
+          time: restoredTime, errorCard: { retryable: true },
+        })
+      }
+    }
+  }
   const toolCalls = [
     ...agentMeshToolCalls(session.mesh_messages, `session:user:${session.session_id}`),
     ...responseToolCallsFromEvents(session.events),
@@ -1088,6 +1174,7 @@ function appendErrorCard(
     runId: sessionRun.value?.run_id,
     errorCard: { retryable, ...metadata },
   })
+  persistSnapshot()
   void nextTick().then(scrollToBottom)
 }
 
@@ -1860,6 +1947,7 @@ async function sendMessage(): Promise<void> {
     images: images.length ? images.map((item) => item.dataUrl) : undefined,
     time: dayjs().format('HH:mm'),
   })
+  persistSnapshot()
   pendingImages.value = []
   inputText.value = ''
   lastFailedRun.value = { kind: 'user-message' }
@@ -2526,84 +2614,78 @@ onMounted(() => {
                 <PrismMascot v-else :size="26" :status="'idle'" />
               </div>
               <div class="msg-bubble" :class="{ 'has-response-control': msg.toolCalls?.length || msg.approval || msg.inputRequest }">
-                <!-- 步骤气泡: 仅对 assistant + 有 steps 时展示;默认折叠降噪 -->
-                <details
-                  v-if="msg.role === 'assistant' && msg.steps && msg.steps.length"
-                  class="step-stream"
+                <AgentActivityDisclosure
+                  v-if="hasMessageActivity(msg)"
+                  :summary="messageActivitySummary(msg)"
+                  :state="messageActivityState(msg)"
                 >
-                  <summary class="step-summary">
-                    Agent 调度链 · 共 {{ msg.steps.length }} 步
-                  </summary>
-                  <ol class="step-list">
-                    <li
-                      v-for="(s, idx) in msg.steps"
-                      :key="idx"
-                      class="step-item"
-                      :class="`step-${s.type}`"
-                    >
-                      <AgentAvatar
-                        :code="s.agent"
-                        :status="stepStatus(s)"
-                        :size="24"
-                        :label="s.agent"
-                      />
-                      <div class="step-info">
-                        <div class="step-line">
-                          <span class="step-agent font-mono">{{ s.agent }}</span>
-                          <span class="step-type">{{ stepLabel(s) }}</span>
-                          <span class="step-time font-mono">{{ s.time }}</span>
+                  <section v-if="msg.steps?.length" class="step-stream">
+                    <h4 class="step-summary">Agent 调度链 · 共 {{ msg.steps.length }} 步</h4>
+                    <ol class="step-list">
+                      <li
+                        v-for="(s, idx) in msg.steps"
+                        :key="idx"
+                        class="step-item"
+                        :class="`step-${s.type}`"
+                      >
+                        <AgentAvatar :code="s.agent" :status="stepStatus(s)" :size="24" :label="s.agent" />
+                        <div class="step-info">
+                          <div class="step-line">
+                            <span class="step-agent font-mono">{{ s.agent }}</span>
+                            <span class="step-type">{{ stepLabel(s) }}</span>
+                            <span class="step-time font-mono">{{ s.time }}</span>
+                          </div>
+                          <div class="step-msg">{{ s.message }}</div>
                         </div>
-                        <div class="step-msg">{{ s.message }}</div>
-                      </div>
-                    </li>
-                  </ol>
-                </details>
+                      </li>
+                    </ol>
+                  </section>
 
-                <!-- v3.0 双层调度 step tree: 展示 LLM 规划的调用链 -->
-                <details
-                  v-if="msg.role === 'assistant' && msg.planSteps && msg.planSteps.length"
-                  class="plan-tree"
-                >
-                  <summary class="plan-summary">
-                    <el-icon class="plan-icon" aria-hidden="true"><Connection /></el-icon>
-                    双层调度调用链 · LLM 规划 {{ msg.planSteps.length }} 步
-                    <span class="plan-total-ms">
-                      总耗时 {{ planTotalMs(msg.planSteps) }}ms
-                    </span>
-                  </summary>
-                  <ol class="plan-list">
-                    <li
-                      v-for="step in msg.planSteps"
-                      :key="step.step_index"
-                      class="plan-step"
-                      :class="{ 'plan-failed': !step.success }"
-                    >
-                      <div class="plan-step-head">
-                        <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
-                        <code class="plan-tool">{{ step.tool_name }}</code>
-                        <span
-                          class="plan-step-status"
-                          :class="step.success ? 'plan-ok' : 'plan-bad'"
-                        >
-                          {{ step.success ? '✓' : '✗' }}
-                        </span>
-                        <span class="plan-step-ms">{{ step.duration_ms }}ms</span>
-                      </div>
-                      <p v-if="step.reason" class="plan-reason">{{ step.reason }}</p>
-                      <details v-if="step.arguments && Object.keys(step.arguments).length" class="plan-args">
-                        <summary>参数 ({{ Object.keys(step.arguments).length }})</summary>
-                        <pre class="plan-json">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
-                      </details>
-                      <details v-if="step.data_preview" class="plan-preview">
-                        <summary>输出预览</summary>
-                        <pre class="plan-json">{{ step.data_preview }}</pre>
-                      </details>
-                      <p v-if="!step.success && step.error" class="plan-error">
-                        {{ step.error }}
-                      </p>
-                    </li>
-                  </ol>
-                </details>
+                  <section v-if="msg.planSteps?.length" class="plan-tree">
+                    <h4 class="plan-summary">
+                      <el-icon class="plan-icon" aria-hidden="true"><Connection /></el-icon>
+                      双层调度调用链 · LLM 规划 {{ msg.planSteps.length }} 步
+                      <span class="plan-total-ms">总耗时 {{ planTotalMs(msg.planSteps) }}ms</span>
+                    </h4>
+                    <ol class="plan-list">
+                      <li v-for="step in msg.planSteps" :key="step.step_index" class="plan-step" :class="{ 'plan-failed': !step.success }">
+                        <div class="plan-step-head">
+                          <span class="plan-step-idx">#{{ step.step_index + 1 }}</span>
+                          <code class="plan-tool">{{ step.tool_name }}</code>
+                          <span class="plan-step-status" :class="step.success ? 'plan-ok' : 'plan-bad'">{{ step.success ? '✓' : '✗' }}</span>
+                          <span class="plan-step-ms">{{ step.duration_ms }}ms</span>
+                        </div>
+                        <p v-if="step.reason" class="plan-reason">{{ step.reason }}</p>
+                        <details v-if="step.arguments && Object.keys(step.arguments).length" class="plan-args">
+                          <summary>参数 ({{ Object.keys(step.arguments).length }})</summary>
+                          <pre class="plan-json">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
+                        </details>
+                        <details v-if="step.data_preview" class="plan-preview">
+                          <summary>输出预览</summary>
+                          <pre class="plan-json">{{ step.data_preview }}</pre>
+                        </details>
+                        <p v-if="!step.success && step.error" class="plan-error">{{ step.error }}</p>
+                      </li>
+                    </ol>
+                  </section>
+
+                  <ResponseToolTimeline
+                    v-if="msg.toolCalls?.length || msg.auditPhases?.length"
+                    :calls="msg.toolCalls ?? []"
+                    :audit-phases="msg.auditPhases"
+                    :active="Boolean(msg.runId && msg.runId === sessionRun?.run_id && isAgentResponseSessionActive(sessionRun?.status))"
+                  />
+
+                  <template v-for="(teamId, teamIndex) in msg.teamIds ?? []" :key="`team-${teamId}`">
+                    <AgentTeamTrace
+                      v-if="teamById(teamId)"
+                      :team="teamById(teamId) ?? null"
+                      :loading="agentTeamLoading"
+                      :error="teamIndex === 0 ? agentTeamError : ''"
+                      @open-detail="openTeamWindow"
+                    />
+                  </template>
+                </AgentActivityDisclosure>
 
                 <!-- 错误卡片:失败/取消留在消息流,带重试与新建对话 -->
                 <div v-if="msg.role === 'error'" class="msg-error-card">
@@ -2674,27 +2756,6 @@ onMounted(() => {
                     prominent
                   />
                 </div>
-
-                <ResponseToolTimeline
-                  v-if="msg.toolCalls?.length || msg.auditPhases?.length"
-                  :calls="msg.toolCalls ?? []"
-                  :audit-phases="msg.auditPhases"
-                  :active="Boolean(msg.runId && msg.runId === sessionRun?.run_id && isAgentResponseSessionActive(sessionRun?.status))"
-                />
-
-                <!-- 团队卡片属于调用时间线,随消息锚点出现,不会在最终结论后统一补充。 -->
-                <template
-                  v-for="(teamId, teamIndex) in msg.teamIds ?? []"
-                  :key="`team-${teamId}`"
-                >
-                  <AgentTeamTrace
-                    v-if="teamById(teamId)"
-                    :team="teamById(teamId) ?? null"
-                    :loading="agentTeamLoading"
-                    :error="teamIndex === 0 ? agentTeamError : ''"
-                    @open-detail="openTeamWindow"
-                  />
-                </template>
 
                 <ResponseApprovalCard
                   v-if="msg.approval"

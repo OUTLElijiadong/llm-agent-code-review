@@ -38,10 +38,10 @@ vi.mock('@/stores/user', () => ({
 
 import AppHeader from './AppHeader.vue'
 
-function mountHeader() {
+function mountHeader(openAgentChat = vi.fn()) {
   return mount(AppHeader, {
     global: {
-      provide: { openAgentChat: vi.fn() },
+      provide: { openAgentChat },
       stubs: {
         'el-icon': true,
         'el-dialog': { template: '<section><slot /></section>' },
@@ -88,6 +88,8 @@ describe('AppHeader navigation visibility', () => {
     expect(dashboard.classes()).toContain('is-active')
     expect(dashboard.attributes('aria-current')).toBe('page')
     expect(wrapper.get('.agent-trigger').attributes('aria-label')).toBe('打开小菱助手')
+    expect(wrapper.get('.agent-trigger .prismling')).toBeTruthy()
+    expect(wrapper.get('#roundtable-header-slot')).toBeTruthy()
   })
 
   it('缺少 agent:chat 时不显示小菱按钮和搜索入口', () => {
@@ -96,6 +98,15 @@ describe('AppHeader navigation visibility', () => {
 
     expect(wrapper.find('.agent-trigger').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Agent 助手')
+  })
+
+  it('顶栏小菱按钮可以打开助手面板', async () => {
+    const openAgentChat = vi.fn()
+    const wrapper = mountHeader(openAgentChat)
+
+    await wrapper.get('.agent-trigger').trigger('click')
+
+    expect(openAgentChat).toHaveBeenCalledOnce()
   })
 
   it('审查员拥有项目权限时不被静态角色规则误隐藏', () => {

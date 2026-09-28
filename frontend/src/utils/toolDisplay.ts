@@ -141,7 +141,7 @@ export function toolDisplayInfo(name: string | undefined | null): ToolDisplayInf
 /**
  * 取工具进行时的通俗短语(进度条/时间线高亮用)。
  * @param name 原始工具名
- * @param subject 助手称谓(成员端小菱/管理端贾维斯), 默认小菱
+ * @param subject 助手称谓；所有 surface 共用小菱主控身份
  */
 export function toolRunningPhrase(
   name: string | undefined | null,

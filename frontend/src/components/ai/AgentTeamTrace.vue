@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, getCurrentInstance, inject, ref, watch } from 'vue'
 
 import { listAgentTeamMessages } from '@/api/agentTeams'
 import type {
@@ -12,6 +12,7 @@ import type {
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
+import { messageActivityExpandedKey } from '@/components/ai/agentActivityDisclosure'
 
 const props = withDefaults(defineProps<{
   team: AgentTeamDetail | AgentTeamSummary | null
@@ -30,6 +31,10 @@ function openDetail(): void {
 }
 
 const expanded = ref(false)
+const parentExpanded = inject(messageActivityExpandedKey, null)
+const embedded = computed(() => parentExpanded !== null)
+const detailsExpanded = computed(() => parentExpanded?.value ?? expanded.value)
+const tracePanelId = `agent-team-trace-panel-${getCurrentInstance()?.uid ?? 'instance'}`
 const TRACE_PAGE_SIZE = 12
 const visibleTaskCount = ref(TRACE_PAGE_SIZE)
 const visibleEventCount = ref(TRACE_PAGE_SIZE)
@@ -65,6 +70,11 @@ const counts = computed(() => props.team?.counts ?? {
   failed: tasks.value.filter((task) => ['failed', 'dead_letter', 'expired'].includes(task.status)).length,
   blocked: tasks.value.filter((task) => task.status === 'blocked').length,
 })
+const progressPercent = computed(() => {
+  if (counts.value.total <= 0) return null
+  return Math.max(0, Math.min(100, Math.round((counts.value.completed / counts.value.total) * 100)))
+})
+const problemCount = computed(() => counts.value.failed + counts.value.blocked)
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '运行中', verifying: '验证中',
@@ -188,11 +198,17 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 <template>
   <section v-if="team" class="agent-team-trace" aria-label="小菱子 Agent 协作团队">
     <header class="agent-team-trace-header">
+      <div v-if="embedded" class="agent-team-embedded-title">
+        <span class="agent-team-title">{{ team.title }}</span>
+        <span class="agent-team-status" :class="statusClass(team.status)">{{ label(team.status) }}</span>
+      </div>
       <button
+        v-else
         class="agent-team-toggle"
         type="button"
         :aria-expanded="expanded"
-        :aria-label="expanded ? '收起子 Agent 协作过程' : '展开子 Agent 协作过程'"
+        :aria-controls="tracePanelId"
+        :aria-label="`${expanded ? '收起' : '展开'}${team.title}团队的子 Agent 协作过程，团队编号 ${team.team_id}`"
         @click="toggle"
       >
         <span class="agent-team-caret" :class="{ 'is-open': expanded }" aria-hidden="true">›</span>
@@ -211,9 +227,29 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
       >查看详情</button>
     </header>
 
+    <div v-if="progressPercent !== null || problemCount > 0" class="agent-team-progress" aria-label="团队审查进度">
+      <div v-if="progressPercent !== null" class="agent-team-progress-topline">
+        <span class="agent-team-progress-count">{{ counts.completed }}/{{ counts.total }} 完成</span>
+        <span class="agent-team-progress-label">{{ progressPercent }}%</span>
+      </div>
+      <div
+        v-if="progressPercent !== null"
+        class="agent-team-progress-track"
+        role="progressbar"
+        :aria-valuemin="0"
+        :aria-valuemax="100"
+        :aria-valuenow="progressPercent"
+        :aria-label="`团队任务完成 ${counts.completed}/${counts.total}`"
+      >
+        <span class="agent-team-progress-fill" :style="{ width: `${progressPercent}%` }"></span>
+      </div>
+      <span v-if="problemCount > 0" class="agent-team-progress-problems" role="status">失败/阻塞 {{ problemCount }}</span>
+    </div>
+
     <p v-if="error" class="agent-team-error" role="status">{{ error }}</p>
 
-    <div v-if="expanded" class="agent-team-trace-body">
+    <div :id="tracePanelId" class="agent-team-trace-body" :hidden="!detailsExpanded">
+      <template v-if="detailsExpanded">
       <div class="agent-team-stats" aria-label="团队任务统计">
         <span><b>{{ counts.completed }}</b>完成</span>
         <span><b>{{ counts.running }}</b>运行</span>
@@ -362,6 +398,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
       <p v-if="!members.length && !tasks.length && !events.length && !messages.length" class="agent-team-empty">
         团队详情正在同步
       </p>
+      </template>
     </div>
   </section>
 </template>
@@ -380,6 +417,12 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 .agent-team-status.is-failed, .agent-team-status.is-expired { color: var(--color-danger); border-color: var(--color-danger); }
 .agent-team-refresh { flex: none; color: var(--gray-500); font-size: 10px; white-space: nowrap; }
 .agent-team-refresh.is-loading { color: var(--brand-500); }
+.agent-team-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px 10px; padding: 0 10px 9px; }
+.agent-team-progress-topline { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; grid-column: 1 / -1; color: var(--gray-500); font-size: 10.5px; }
+.agent-team-progress-label { color: var(--brand-600); font-size: 12px; font-weight: 700; }
+.agent-team-progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--gray-100); }
+.agent-team-progress-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand-500), var(--accent-500)); transition: width 180ms ease-out; }
+.agent-team-progress-problems { color: var(--color-danger); font-size: 10.5px; white-space: nowrap; }
 .agent-team-open-detail {
   flex: none;
   min-height: 32px;
@@ -440,9 +483,14 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
   .agent-team-toggle { grid-column: 1 / -1; width: 100%; }
   .agent-team-refresh { grid-column: 1; }
   .agent-team-open-detail { grid-column: 2; }
+  .agent-team-progress { grid-template-columns: minmax(0, 1fr) auto; }
   .agent-team-member { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .agent-team-member code { grid-column: 2 / -1; }
   .agent-team-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 8px; }
   .agent-team-open-detail, .agent-team-page-action { min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-team-progress-fill { transition: none; }
+  .agent-team-caret { transition: none; }
 }
 </style>

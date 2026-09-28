@@ -215,6 +215,97 @@ describe('同步安全扫描真实交互', () => {
     expect(api.scanProject).toHaveBeenCalledOnce()
   })
 
+  it('证伪候选不混入有效发现统计，并在详情与下载报告保留复核理由', async () => {
+    const refutedFinding = Object.assign({
+      title: '已证伪候选', category: '认证', owasp: '', cwe: '', severity: '严重',
+      file_path: 'auth.py', file_id: null, lines: 'L30', line_number: 30, end_line: 30,
+      evidence: 'hash_equals($stored, $input)', exploit_scenario: '', fix_suggestion: '',
+      references: [], confidence: 0.3, source: 'llm',
+    }, { verification: 'refuted', verification_reason: '比较的是哈希值，证据无法支持明文密码比较。' }) as SecurityScanOut['findings'][number]
+    const findings: SecurityScanOut['findings'] = [
+      Object.assign({ ...refutedFinding, title: '已确认候选', severity: '高', confidence: 0.95 }, {
+        verification: 'confirmed', verification_reason: '可由当前证据确认。',
+      }),
+      Object.assign({ ...refutedFinding, title: '待复核候选', severity: '高', confidence: 0.6 }, {
+        verification: 'unreviewed', verification_reason: '',
+      }),
+      Object.assign({ ...refutedFinding, title: '旧版未标记候选', severity: '中', confidence: 0.8 }, {
+        verification: undefined, verification_reason: '',
+      }),
+      refutedFinding,
+    ]
+    api.scanProject.mockResolvedValueOnce(scanResult({
+      findings,
+      summary: '有效/待复核候选 3 条；已证伪 1 条。',
+      compliance: { verification: { confirmed: 1, refuted: 1, pending: 1, unknown: 1, total: 4 } },
+    }))
+    await renderModal({ autoStart: true })
+
+    expect(wrapper.findAll('.finding-row')).toHaveLength(3)
+    expect(wrapper.find('.sev-严重 .cell-num').text()).toBe('0')
+    expect(wrapper.find('.sev-高 .cell-num').text()).toBe('2')
+    expect(wrapper.find('.sev-中 .cell-num').text()).toBe('1')
+    expect(wrapper.find('.refuted-findings summary').text()).toContain('已证伪候选 1 条')
+    await wrapper.find('.refuted-findings summary').trigger('click')
+    expect(wrapper.find('.refuted-findings').text()).toContain('比较的是哈希值')
+
+    let downloaded = ''
+    const NativeURL = URL
+    vi.stubGlobal('URL', class extends NativeURL {
+      static createObjectURL = vi.fn((blob: Blob) => {
+        const reader = new FileReader()
+        reader.onload = () => { downloaded = String(reader.result ?? '') }
+        reader.readAsText(blob)
+        return 'blob:review-state'
+      })
+      static revokeObjectURL = vi.fn()
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    await button('下载报告').trigger('click')
+    await vi.waitFor(() => expect(downloaded).toContain('比较的是哈希值'))
+    expect(downloaded).toContain('已证伪候选 (不计入有效发现及风险评分)')
+    expect(downloaded).toContain('已证伪候选')
+    expect(downloaded).toContain('安全评分（越高越安全）: **92/100**')
+    expect(downloaded).not.toContain('- 风险评分:')
+    expect(api.scanProject).toHaveBeenCalledOnce()
+  })
+
+  it('40 条大样本复现生产报告的汇总比例，严重度只统计 20 条未被证伪候选', async () => {
+    const makeFinding = (index: number, severity: string, verification: 'confirmed' | 'refuted') => ({
+      title: `样本候选 ${index + 1}`, category: '认证', owasp: '', cwe: '', severity,
+      file_path: `auth-${index}.py`, file_id: null, lines: `L${index + 1}`,
+      line_number: index + 1, end_line: index + 1, evidence: `evidence-${index}`,
+      exploit_scenario: '', fix_suggestion: '', references: [], confidence: 0.6,
+      source: 'llm', verification,
+      verification_reason: verification === 'refuted' ? '证据显示受输入校验保护。' : '',
+    })
+    const activeSeverities = [
+      ...Array(7).fill('严重'), ...Array(6).fill('高'),
+      ...Array(6).fill('中'), '低',
+    ]
+    const rejectedSeverities = [...Array(13).fill('严重'), ...Array(7).fill('高')]
+    const findings = [
+      ...activeSeverities.map((severity, index) => makeFinding(index, severity, 'confirmed')),
+      ...rejectedSeverities.map((severity, index) => makeFinding(index + 20, severity, 'refuted')),
+    ]
+    api.scanProject.mockResolvedValueOnce(scanResult({
+      findings,
+      risk_score: 0,
+      summary: '未被证伪候选 7 处严重 / 6 处高危 / 6 处中危 / 1 处低危；安全评分 0/100（越高越安全）。',
+    }))
+    await renderModal({ autoStart: true })
+
+    expect(wrapper.findAll('.finding-row')).toHaveLength(20)
+    expect(wrapper.find('.sev-严重 .cell-num').text()).toBe('7')
+    expect(wrapper.find('.sev-高 .cell-num').text()).toBe('6')
+    expect(wrapper.find('.sev-中 .cell-num').text()).toBe('6')
+    expect(wrapper.find('.sev-低 .cell-num').text()).toBe('1')
+    expect(wrapper.find('.refuted-findings summary').text()).toContain('已证伪候选 20 条')
+    expect(wrapper.findAll('.refuted-findings > ul > li')).toHaveLength(20)
+    expect(wrapper.find('.sec-summary').text()).toContain('未被证伪候选 7 处严重 / 6 处高危 / 6 处中危 / 1 处低危')
+    expect(wrapper.find('.review-status-note').text()).toContain('已证伪并从风险统计排除 20 条')
+  })
+
   it('空响应进入失败态而不是发布完成事件', async () => {
     api.scanProject.mockResolvedValue(null)
     await renderModal({ autoStart: true })

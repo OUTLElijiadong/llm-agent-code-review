@@ -219,6 +219,11 @@ def test_system_prompt_lists_agents_and_empty_execute_fails(
 
     assert "reviewer: 代码审查" in prompt
     assert "security: 安全审计" in prompt
+    assert "由小菱决定是否调用子 Agent" in prompt
+    assert "不得声称未返回的 Agent、工具或操作结果" in prompt
+    assert "当前没有 CNVD/CNNVD 实时查询能力" in prompt
+    assert "禁止声称使用了最新漏洞库" in prompt
+    assert "系统会自动判断用户意图并路由" not in prompt
     assert result.success is False
     assert result.error == "消息列表为空"
 
@@ -1202,7 +1207,7 @@ def test_long_chat_semantically_compacts_every_source_and_keeps_latest(
         assert kwargs["recover_truncation"] is True
         assert _args[0].user_id == 5
         assert "聊天历史压缩器" in kwargs["system_prompt"]
-        assert "官方 AI 助手" in agent._system_prompt
+        assert "唯一的主 Agent" in agent._system_prompt
         assert agent._max_tokens == 4096
         payload = json.loads(prompt)
         sources = payload["sources"]
@@ -1236,7 +1241,7 @@ def test_long_chat_semantically_compacts_every_source_and_keeps_latest(
     assert "结论来自任务187" in sent[2]["content"]
     assert "来源#" in sent[1]["content"]
     assert "历史消息摘录" not in json.dumps(sent, ensure_ascii=False)
-    assert "官方 AI 助手" in sent[0]["content"]
+    assert "唯一的主 Agent" in sent[0]["content"]
     assert "聊天历史压缩器" not in sent[0]["content"]
 
 

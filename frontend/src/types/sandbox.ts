@@ -13,6 +13,19 @@ export interface SandboxCreateInput {
   ttl_hours: number
   remote_target_url?: string
   remote_target_authorized: boolean
+  remote_target_approval_token?: string
+}
+
+export interface SandboxRemoteTargetAuthorizationInput {
+  project_id: number
+  remote_target_url: string
+  test_mode: 'blackbox' | 'combined'
+  confirmed: true
+}
+
+export interface SandboxRemoteTargetAuthorization {
+  approval_token: string
+  expires_at: string
 }
 
 export interface SandboxEvent {

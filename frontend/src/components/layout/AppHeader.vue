@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, SwitchButton, Search, MagicStick, Menu } from '@element-plus/icons-vue'
+import { ArrowDown, SwitchButton, Search, Menu } from '@element-plus/icons-vue'
 
 import { useUserStore } from '@/stores/user'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 import UserAvatar from '@/components/common/UserAvatar.vue'
+import PrismMascot from '@/components/ai/PrismMascot.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -240,9 +241,11 @@ onBeforeUnmount(() => {
       </button>
 
       <button v-if="canUseAgent" class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
-        <el-icon class="agent-icon"><MagicStick /></el-icon>
+        <PrismMascot class="agent-mascot" :size="26" />
         <span>Agent</span>
       </button>
+
+      <div id="roundtable-header-slot" class="roundtable-header-slot"></div>
 
       <el-dropdown trigger="click">
         <div class="user-info">
@@ -436,6 +439,13 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.roundtable-header-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
 .search-trigger {
   display: flex;
   align-items: center;
@@ -498,11 +508,6 @@ onBeforeUnmount(() => {
     background: #fff;
     box-shadow: 0 6px 16px -10px rgba(91, 88, 232, 0.52);
   }
-}
-
-.agent-icon {
-  font-size: 14px;
-  color: var(--brand-500);
 }
 
 /* 用户区 ------------------------------ */

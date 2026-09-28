@@ -8,7 +8,24 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.core.permission_codes import PermissionCode
 from app.schemas.agent_team import AgentTeamMemberIn
+
+# 直接调用领域服务的工具不会经过 REST 权限依赖。Responses 的发现/执行
+# 与 Orchestrator 的直接方法共用此规则；资源归属仍由领域服务单独校验。
+FIXED_DOMAIN_TOOL_PERMISSIONS = {
+    "list_projects": PermissionCode.PROJECT_VIEW,
+    "get_project_detail": PermissionCode.PROJECT_VIEW,
+    "create_project": PermissionCode.PROJECT_CREATE,
+    "update_project": PermissionCode.PROJECT_UPDATE,
+    "delete_project": PermissionCode.PROJECT_DELETE,
+    "list_code_files": PermissionCode.FILE_VIEW,
+    "list_review_tasks": PermissionCode.REVIEW_VIEW,
+    "list_review_issues": PermissionCode.ISSUE_VIEW,
+    "list_reports": PermissionCode.REPORT_VIEW,
+    "list_rules": PermissionCode.RULE_VIEW,
+    "start_review": PermissionCode.REVIEW_START,
+}
 
 
 class FixedToolArguments(BaseModel):

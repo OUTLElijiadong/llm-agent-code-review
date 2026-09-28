@@ -2,8 +2,6 @@
 import json
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from app.core.exceptions import ForbiddenError, ValidationError
 from app.models.agent_governance import (
     AgentJob,
@@ -20,11 +18,13 @@ from app.services import (
     agent_governance_service,
     agent_knowledge_service,
     agent_scheduler_runtime,
+    agent_supervisor_service,
     approval_service,
     policy_engine,
     rollback_service,
     tool_gateway,
 )
+from sqlalchemy.exc import IntegrityError
 
 
 def test_policy_engine_allows_low_risk_action(db):
@@ -52,6 +52,200 @@ def test_policy_engine_escalates_high_risk_delete(db):
 
     assert decision.decision == "escalate"
     assert decision.risk_level == "high"
+
+
+def test_policy_engine_escalates_unclassified_action_instead_of_default_allow(db):
+    """未分类动作不能被低风险默认规则自动放行。"""
+    decision = policy_engine.evaluate(
+        db,
+        subject="agent:future_agent",
+        action="external_target.dispatch",
+        resource="target:example",
+    )
+
+    assert decision.decision == "escalate"
+    assert decision.risk_level in {"high", "critical"}
+
+
+@pytest.mark.parametrize("risk_level", ["high", "critical"])
+def test_policy_engine_escalates_allow_rules_marked_high_risk(db, risk_level):
+    """高风险策略即使配置为 allow，也必须经过人工确认。"""
+    db.add(PolicyRule(
+        rule_code=f"allow_but_{risk_level}",
+        name=f"高风险 {risk_level} allow",
+        subject="agent:*",
+        action="artifact.publish",
+        resource="*",
+        effect="allow",
+        risk_level=risk_level,
+        priority=1,
+        enabled=1,
+    ))
+    db.commit()
+
+    decision = policy_engine.evaluate(
+        db,
+        subject="agent:future_agent",
+        action="artifact.publish",
+        resource="project:42",
+    )
+
+    assert decision.decision == "escalate"
+    assert decision.risk_level == risk_level
+
+
+def test_policy_engine_allows_explicit_medium_registered_action(db):
+    db.add(PolicyRule(
+        rule_code="isolated_test_medium",
+        name="隔离测试自动执行",
+        subject="agent:test_verifier",
+        action="test.run",
+        resource="project:*",
+        effect="allow",
+        risk_level="medium",
+        priority=1,
+        enabled=1,
+    ))
+    db.commit()
+
+    decision = policy_engine.evaluate(
+        db, subject="agent:test_verifier", action="test.run", resource="project:42",
+    )
+
+    assert decision.decision == "allow"
+    assert decision.risk_level == "medium"
+
+
+def test_supervisor_classifies_team_members_by_capability_and_external_scope():
+    low = agent_supervisor_service.review_agent_team_plan({
+        "objective": "检查代码",
+        "members": [{"member_key": "reader", "address": "agent:code_reviewer", "role": "worker"}],
+        "tasks": [{"task_key": "read", "member_key": "reader", "title": "审查代码",
+                   "instructions": "只读审查", "input": {"code": "x=1"}}],
+    })
+    medium = agent_supervisor_service.review_agent_team_plan({
+        "objective": "隔离验证",
+        "members": [{"member_key": "tester", "address": "agent:test_verifier", "role": "verifier"}],
+        "tasks": [{"task_key": "test", "member_key": "tester", "title": "运行测试",
+                   "instructions": "在隔离沙箱运行项目测试", "input": {"project_id": 42}}],
+    })
+    high = agent_supervisor_service.review_agent_team_plan({
+        "objective": "外部探测",
+        "members": [{"member_key": "tester", "address": "agent:test_verifier", "role": "verifier"}],
+        "tasks": [{"task_key": "probe", "member_key": "tester", "title": "黑盒探测",
+                   "instructions": "只读探测", "input": {"remote_target_url": "https://example.test"}}],
+    })
+
+    assert low["decision"] == "allow" and low["risk_level"] == "low"
+    assert medium["decision"] == "allow" and medium["risk_level"] == "medium"
+    assert high["decision"] == "escalate" and high["risk_level"] == "high"
+    assert high["tasks"][0]["fingerprint"]
+    approved_payload = {
+        **{
+            "objective": "外部探测",
+            "members": [{"member_key": "tester", "address": "agent:test_verifier", "role": "verifier"}],
+            "tasks": [{"task_key": "probe", "member_key": "tester", "title": "黑盒探测",
+                       "instructions": "只读探测", "input": {
+                           "remote_target_url": "https://example.test", "remote_target_authorized": True,
+                       }}],
+        },
+    }
+    assert agent_supervisor_service.review_agent_team_plan(approved_payload)["plan_sha256"] == high["plan_sha256"]
+
+
+def test_supervisor_rejects_unverified_success_result():
+    review = agent_supervisor_service.review_task_result({"status": "completed", "summary": "done"})
+
+    assert review.decision == "escalate"
+    assert review.risk_level == "high"
+    assert review.classification == "missing_evidence"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "decision", "risk"),
+    [
+        ("list_projects", {}, "allow", "low"),
+        ("update_project", {"project_id": 7, "project_name": "new"}, "allow", "medium"),
+        ("run_project_tests", {"project_id": 7}, "allow", "medium"),
+        ("queue_remote_project_import", {"url": "https://example.test/repo.git"}, "escalate", "high"),
+        ("delete_project", {"project_id": 7}, "escalate", "high"),
+        ("admin_execute_operation", {"action": "host.restart", "params": {}}, "escalate", "high"),
+        ("mcp_outside_unknown", {}, "escalate", "high"),
+        ("future_unregistered_tool", {}, "escalate", "high"),
+    ],
+)
+def test_supervisor_classifies_each_responses_tool_before_dispatch(tool_name, arguments, decision, risk):
+    review = agent_supervisor_service.review_response_tool(tool_name, arguments)
+
+    assert review["decision"] == decision
+    assert review["risk_level"] == risk
+    assert review["needs_confirmation"] is (decision == "escalate")
+
+
+@pytest.mark.parametrize(
+    ("kind", "tool", "permission", "requires_approval", "declared", "decision", "risk"),
+    [
+        ("prism-code", "list_project_source", "allow", False, "low", "allow", "low"),
+        ("prism-code", "download_project_source", "allow", False, "low", "allow", "low"),
+        ("prism-sandbox", "create_test", "allow", False, "low", "allow", "medium"),
+        ("prism-sandbox", "create_deployment", "allow", False, "low", "allow", "medium"),
+        ("prism-sandbox", "close", "allow", False, "medium", "allow", "medium"),
+        ("prism-sandbox", "extend", "allow", False, "low", "allow", "medium"),
+        ("prism-sandbox", "create_deployment", "escalate", False, "low", "escalate", "high"),
+        ("prism-sandbox", "unknown_write", "allow", False, "low", "escalate", "high"),
+        ("playwright", "browser_blackbox", "allow", False, "low", "escalate", "high"),
+        ("", "remote_write", "allow", False, "low", "escalate", "high"),
+        ("prism-sandbox", "close", "allow", True, "low", "escalate", "high"),
+        ("prism-sandbox", "close", "allow", False, "critical", "escalate", "critical"),
+    ],
+)
+def test_supervisor_mcp_auto_pass_uses_exact_server_registered_capability(
+    kind, tool, permission, requires_approval, declared, decision, risk,
+):
+    review = agent_supervisor_service.review_mcp_tool(
+        tool_name=tool,
+        managed_kind=kind,
+        permission=permission,
+        requires_approval=requires_approval,
+        declared_risk=declared,
+    )
+
+    assert review["decision"] == decision
+    assert review["risk_level"] == risk
+    assert review["needs_confirmation"] is (decision == "escalate")
+
+
+def test_supervisor_fixed_tool_catalog_has_no_unclassified_known_tools():
+    from app.agents.tool_contracts import get_fixed_tool_names
+
+    special = {"create_agent_team", "run_project_tests", "send_message"}
+    catalog = (
+        agent_supervisor_service._LOW_RESPONSE_TOOLS
+        | agent_supervisor_service._MEDIUM_RESPONSE_TOOLS
+        | agent_supervisor_service._HIGH_RESPONSE_TOOLS
+        | special
+    )
+
+    assert not (set(get_fixed_tool_names()) - catalog)
+    assert not (agent_supervisor_service._LOW_RESPONSE_TOOLS & agent_supervisor_service._MEDIUM_RESPONSE_TOOLS)
+    assert not (agent_supervisor_service._LOW_RESPONSE_TOOLS & agent_supervisor_service._HIGH_RESPONSE_TOOLS)
+    assert not (agent_supervisor_service._MEDIUM_RESPONSE_TOOLS & agent_supervisor_service._HIGH_RESPONSE_TOOLS)
+
+
+def test_supervisor_message_to_privileged_agent_requires_current_user_confirmation():
+    privileged = agent_supervisor_service.review_response_tool("send_message", {
+        "send_to": "agent:operations",
+        "message": {"payload": {"instructions": "restart production host"}},
+    })
+    reviewer = agent_supervisor_service.review_response_tool("send_message", {
+        "send_to": "agent:code_reviewer",
+        "message": {"payload": {"instructions": "read and review this diff"}},
+    })
+
+    assert privileged["needs_confirmation"] is True
+    assert privileged["risk_level"] == "high"
+    assert reviewer["needs_confirmation"] is False
+    assert reviewer["risk_level"] == "low"
 
 
 def test_policy_engine_matches_explicit_deny_rule(db):
@@ -381,6 +575,25 @@ def test_tool_gateway_escalates_high_risk_action(db, admin_user):
     assert result.log_id is not None
 
 
+def test_tool_gateway_does_not_execute_unclassified_action(db, admin_user):
+    calls = []
+    result = tool_gateway.execute(
+        db,
+        agent_code="future_agent",
+        tool_code="new_external_tool",
+        action="external_target.dispatch",
+        resource="target:example.test",
+        handler=lambda: calls.append("called"),
+        actor=admin_user,
+    )
+
+    assert result.success is False
+    assert result.status == "escalated"
+    assert result.risk_level == "high"
+    assert result.approval_id is not None
+    assert calls == []
+
+
 def test_tool_gateway_applies_tool_permission_deny(db):
     """验证工具权限配置会真实阻断工具网关调用。"""
     db.add(AgentToolPermission(
@@ -545,7 +758,7 @@ def test_agent_governance_sync_profiles_creates_governance_agents(db):
     manager = next(row for row in rows if row.code == "manager")
     data = agent_governance_service.profile_to_dict(db, manager)
 
-    assert manager.name == "贾维斯(全局运维)"
+    assert manager.name == "小菱管理权限边界(兼容策略)"
     boundary = data["config_json"]["governance_boundary"]
     assert "admin_execute_capability" in boundary["allowed_tools"]
     assert "admin_execute_capability" not in boundary["approval_tools"]

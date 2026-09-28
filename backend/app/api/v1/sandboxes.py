@@ -17,6 +17,8 @@ from app.schemas.agent_capability import (
     SandboxCreateIn,
     SandboxEnvironmentOut,
     SandboxExtendIn,
+    SandboxRemoteTargetAuthorizationIn,
+    SandboxRemoteTargetAuthorizationOut,
     SandboxWorkerUpsertIn,
 )
 from app.schemas.common import Resp
@@ -92,6 +94,23 @@ def list_sandboxes(
     return Resp(data=[SandboxEnvironmentOut(**item) for item in sandbox_service.list_environments(db, user, limit)])
 
 
+@router.post("/remote-target-authorization", response_model=Resp[SandboxRemoteTargetAuthorizationOut])
+def authorize_sandbox_remote_target(
+    payload: SandboxRemoteTargetAuthorizationIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    authorization = sandbox_service.issue_remote_target_authorization(
+        db,
+        user,
+        project_id=payload.project_id,
+        remote_target_url=str(payload.remote_target_url),
+        test_mode=payload.test_mode,
+        confirmed=payload.confirmed,
+    )
+    return Resp(data=SandboxRemoteTargetAuthorizationOut(**authorization))
+
+
 @router.post("", response_model=Resp[SandboxEnvironmentOut])
 def create_sandbox(
     payload: SandboxCreateIn,
@@ -99,7 +118,7 @@ def create_sandbox(
     user: User = Depends(get_current_user),
 ):
     data = payload.model_dump(mode="json")
-    row = sandbox_service.create_environment(db, user, data)
+    row = sandbox_service.create_environment(db, user, data, require_remote_target_approval=True)
     return Resp(data=SandboxEnvironmentOut(**sandbox_service.environment_to_dict(db, row)))
 
 

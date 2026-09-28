@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import io
 import json
 import zipfile
@@ -16,7 +17,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.project_source_revision import ProjectSourceRevision
 from app.services.project_member_service import require_project_access
 
@@ -70,12 +71,32 @@ def get_revision_archive(
     revision_id: int,
     project_id: int,
 ) -> bytes:
-    """校验副本归属并返回 zip 字节。"""
+    """校验副本归属和内容哈希后返回 zip 字节。"""
+    return get_revision_archive_snapshot(db, actor, revision_id, project_id)["archive"]
+
+
+def get_revision_archive_snapshot(
+    db: Session,
+    actor: Any,
+    revision_id: int,
+    project_id: int,
+) -> dict[str, Any]:
+    """原子读取已验真的修订元数据和归档字节，避免哈希与版本号来自不同读取。"""
     row = db.get(ProjectSourceRevision, revision_id)
     if row is None or row.project_id != project_id:
         raise NotFoundError("源码副本不存在", code=40400)
     require_project_access(db, project_id, actor, need_write=False)
-    return bytes(row.archive_blob)
+    archive = bytes(row.archive_blob)
+    actual_sha256 = hashlib.sha256(archive).hexdigest()
+    if not row.source_sha256 or not hmac.compare_digest(actual_sha256, str(row.source_sha256)):
+        raise ConflictError("源码副本内容与登记 SHA-256 不一致，已阻止执行", code=40903)
+    return {
+        "archive": archive,
+        "revision_id": int(row.id),
+        "revision_no": int(row.revision_no),
+        "source_sha256": actual_sha256,
+        "parent_sha256": row.parent_sha256,
+    }
 
 
 def save_revision(
@@ -88,7 +109,7 @@ def save_revision(
     parent_sha256: Optional[str],
     repair_notes: str = "",
 ) -> Optional[ProjectSourceRevision]:
-    """保存修复后源码为项目副本;sha 与最近副本相同则跳过。"""
+    """保存修复后源码为项目副本;若最新副本内容相同则返回该副本。"""
     raw = base64.b64decode(repaired_source_base64)
     cleaned = _strip_internal_members(raw)
     sha = hashlib.sha256(cleaned).hexdigest()
@@ -99,7 +120,10 @@ def save_revision(
         .first()
     )
     if latest is not None and latest.source_sha256 == sha:
-        return None
+        latest_blob_sha = hashlib.sha256(bytes(latest.archive_blob)).hexdigest()
+        if not hmac.compare_digest(latest_blob_sha, str(latest.source_sha256 or "")):
+            raise ConflictError("已有源码副本内容与登记 SHA-256 不一致，已阻止复用", code=40903)
+        return latest
     revision_no = (latest.revision_no if latest else 0) + 1
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = ProjectSourceRevision(

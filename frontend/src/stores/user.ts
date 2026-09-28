@@ -181,9 +181,11 @@ export const useUserStore = defineStore('user', () => {
     token.value = res.access_token
     setToken(res.access_token)
     profile.value = res.user
+    // 权限请求可能先于其他 RBAC 项完成，使小菱在 loadRbacInfo 结束前挂载。
+    // 先设首开标记，避免首挂载漏消费后在下次刷新才误建空会话。
+    markAgentChatLoginFreshStart()
     await loadRbacInfo()
     if (generation !== authGeneration) return
-    markAgentChatLoginFreshStart()
     invalidateAvatarCache()
     // 注册后首次登录 → 小菱新手引导(仅一次;老用户 first_login=false 不弹)
     if (res.first_login && res.user?.id) {

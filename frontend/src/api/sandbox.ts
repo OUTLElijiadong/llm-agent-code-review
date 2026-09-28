@@ -3,6 +3,8 @@ import type {
   CapabilitySearchResult,
   SandboxCreateInput,
   SandboxEnvironment,
+  SandboxRemoteTargetAuthorization,
+  SandboxRemoteTargetAuthorizationInput,
 } from '@/types/sandbox'
 
 export function listSandboxes(limit = 50): Promise<SandboxEnvironment[]> {
@@ -11,6 +13,12 @@ export function listSandboxes(limit = 50): Promise<SandboxEnvironment[]> {
 
 export function createSandbox(data: SandboxCreateInput): Promise<SandboxEnvironment> {
   return post<SandboxEnvironment>('/sandboxes', data)
+}
+
+export function authorizeSandboxRemoteTarget(
+  data: SandboxRemoteTargetAuthorizationInput,
+): Promise<SandboxRemoteTargetAuthorization> {
+  return post<SandboxRemoteTargetAuthorization>('/sandboxes/remote-target-authorization', data)
 }
 
 export function getSandbox(publicId: string): Promise<SandboxEnvironment> {

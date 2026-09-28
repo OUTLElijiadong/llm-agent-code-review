@@ -105,12 +105,21 @@ def _agent_activity(db: Session) -> list[dict]:
         (logged_total >= component_total, logged_total),
         else_=component_total,
     )
+    unknown_usage = case(
+        (
+            AiCallLog.total_tokens.is_(None)
+            & or_(AiCallLog.prompt_tokens.is_(None), AiCallLog.completion_tokens.is_(None)),
+            1,
+        ),
+        else_=0,
+    )
     ai_label_rows = (
         db.query(
             AiCallLog.agent_label,
             AiCallLog.model_name,
             func.count(AiCallLog.id).label("cnt"),
             func.coalesce(func.sum(effective_total), 0).label("tokens"),
+            func.coalesce(func.sum(unknown_usage), 0).label("unknown_usage_calls"),
         )
         .filter(
             func.date(AiCallLog.create_time) == today,
@@ -122,16 +131,22 @@ def _agent_activity(db: Session) -> list[dict]:
     profiles_by_code = {profile.code: profile for profile in profiles}
     model_today_map: dict[str, int] = {}
     model_token_map: dict[str, int] = {}
+    model_unknown_usage_map: dict[str, int] = {}
     unattributed_model_calls = 0
     unattributed_model_tokens = 0
-    for label, model_name, count, tokens in ai_label_rows:
+    unattributed_model_unknown_usage = 0
+    for label, model_name, count, tokens, unknown_usage_calls in ai_label_rows:
         codes = _activity_agent_codes(label, model_name, set(profiles_by_code))
         if not codes:
             unattributed_model_calls += int(count or 0)
             unattributed_model_tokens += int(tokens or 0)
+            unattributed_model_unknown_usage += int(unknown_usage_calls or 0)
         for code in codes:
             model_today_map[code] = model_today_map.get(code, 0) + int(count or 0)
             model_token_map[code] = model_token_map.get(code, 0) + int(tokens or 0)
+            model_unknown_usage_map[code] = (
+                model_unknown_usage_map.get(code, 0) + int(unknown_usage_calls or 0)
+            )
     event_status_map = {
         "dispatch": "thinking",
         "thinking": "thinking",
@@ -176,6 +191,7 @@ def _agent_activity(db: Session) -> list[dict]:
         tool_calls = tool_today_map.get(p.code, 0)
         model_calls = model_today_map.get(p.code, 0)
         model_tokens = model_token_map.get(p.code, 0)
+        model_unknown_usage = model_unknown_usage_map.get(p.code, 0)
         calls = tool_calls + model_calls
         db_status = getattr(p, "status", "idle") or "idle"
         latest_event = latest_events.get(p.code)
@@ -223,6 +239,7 @@ def _agent_activity(db: Session) -> list[dict]:
             "calls_today": calls,
             "model_calls_today": model_calls,
             "model_tokens_today": model_tokens,
+            "model_unknown_usage_calls_today": model_unknown_usage,
             "tool_calls_today": tool_calls,
             "purpose": purpose,
             "is_enabled": getattr(p, "is_enabled", 1),
@@ -237,6 +254,7 @@ def _agent_activity(db: Session) -> list[dict]:
             "calls_today": unattributed_model_calls,
             "model_calls_today": unattributed_model_calls,
             "model_tokens_today": unattributed_model_tokens,
+            "model_unknown_usage_calls_today": unattributed_model_unknown_usage,
             "tool_calls_today": 0,
             "purpose": "历史日志未记录 Agent 标识",
             "is_enabled": 1,

@@ -151,3 +151,17 @@ it('同标签页的小菱后台创建圆桌后，当前账号入口无需点链�
   expect(wrapper.get('[aria-label="打开圆桌讨论"]')).toBeTruthy()
   wrapper.unmount()
 })
+
+it('全局顶栏存在时将圆桌入口挂在顶栏中，避免固定浮层盖住页面内容', async () => {
+  const target = document.createElement('div')
+  target.id = 'roundtable-header-slot'
+  document.body.appendChild(target)
+  const { wrapper } = await mountHost()
+  await flushPromises()
+
+  expect(target.querySelector('.roundtable-dock')).not.toBeNull()
+  expect(wrapper.find('.roundtable-dock').exists()).toBe(false)
+
+  wrapper.unmount()
+  target.remove()
+})

@@ -39,6 +39,7 @@ def execute(
     input_summary: str = "",
     actor: Optional[User] = None,
     context: Optional[dict] = None,
+    declared_risk: Optional[str] = None,
 ) -> ToolGatewayResult:
     """执行一次受治理的工具调用。
 
@@ -59,12 +60,15 @@ def execute(
     t0 = time.time()
     project_id = _extract_project_id(resource, context, input_summary)
     subject = f"agent:{agent_code}"
+    policy_context = dict(context or {})
+    if declared_risk is not None:
+        policy_context["_supervisor_declared_risk"] = declared_risk
     decision = policy_engine.evaluate(
         db,
         subject=subject,
         action=action,
         resource=resource or "*",
-        context=context or {},
+        context=policy_context,
     )
     decision = _apply_tool_permission(
         db,
@@ -74,7 +78,7 @@ def execute(
         resource=resource or "*",
         subject=subject,
         decision=decision,
-        context=context or {},
+        context=policy_context,
     )
 
     approval_id = None
@@ -232,16 +236,20 @@ def authorize(
     resource: str = "",
     actor: Optional[User] = None,
     context: Optional[dict] = None,
+    declared_risk: Optional[str] = None,
 ) -> policy_engine.PolicyDecision:
     """只执行统一策略与工具权限判断，供已有持久化审批运行时复用。"""
     del actor  # 身份由调用入口 RBAC 校验；此处只处理 Agent 策略与工具边界。
     subject = f"agent:{agent_code}"
+    policy_context = dict(context or {})
+    if declared_risk is not None:
+        policy_context["_supervisor_declared_risk"] = declared_risk
     decision = policy_engine.evaluate(
         db,
         subject=subject,
         action=action,
         resource=resource or "*",
-        context=context or {},
+        context=policy_context,
     )
     return _apply_tool_permission(
         db,
@@ -251,7 +259,7 @@ def authorize(
         resource=resource or "*",
         subject=subject,
         decision=decision,
-        context=context or {},
+        context=policy_context,
     )
 
 

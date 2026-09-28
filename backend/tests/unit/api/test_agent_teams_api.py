@@ -16,6 +16,8 @@ from app.core.permission_codes import PermissionCode
 from app.main import app
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
+from app.schemas.agent_team import AgentTeamCreateIn
+from app.services import agent_supervisor_service, agent_team_service
 
 
 def _team_payload(*, surface: str = "user", session_id: str = "session-owner-1") -> dict[str, Any]:
@@ -66,6 +68,17 @@ def _data(response, *, status_code: int = 200) -> Any:
     assert body["message"] == "ok"
     assert "data" in body
     return body["data"]
+
+
+def _create_team_from_xiaoling(team_api, user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    """为读取/变更 API 用例构造已由小菱创建的团队状态。"""
+    parsed = AgentTeamCreateIn.model_validate(payload)
+    review = agent_supervisor_service.review_agent_team_plan(parsed.model_dump(mode="json"))
+    return agent_team_service.create_team_from_xiaoling(
+        team_api["db"], user, parsed,
+        supervisor_plan_sha256=review["plan_sha256"] if review["needs_confirmation"] else "",
+        supervisor_confirmed_by=int(user.id) if review["needs_confirmation"] else None,
+    )
 
 
 @pytest.fixture()
@@ -130,12 +143,56 @@ def test_agent_teams_requires_authentication(team_api):
     assert response.json()["code"] == 40100
 
 
+def test_agent_teams_public_create_requires_xiaoling(team_api):
+    """认证用户不能绕开小菱直接创建并排队执行子 Agent 团队。"""
+    response = team_api["request"](
+        team_api["owner"], "POST", "/api/agent-teams", json=_team_payload(),
+    )
+
+    assert response.status_code == 403
+    assert "必须由小菱" in response.json()["message"]
+    from app.models.agent_team import AgentTeam
+
+    assert team_api["db"].query(AgentTeam).count() == 0
+
+
+def test_supervisor_requires_current_account_confirmation_for_high_risk_team_plan(team_api):
+    from app.services.agent_team_service import AgentTeamAccessError
+
+    owner = team_api["owner"]
+    payload = _team_payload()
+    payload["tasks"][1]["input"] = {"external_target_url": "https://target.example"}
+    parsed = AgentTeamCreateIn.model_validate(payload)
+    review = agent_supervisor_service.review_agent_team_plan(parsed.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+    assert review["risk_level"] == "high"
+
+    with pytest.raises(AgentTeamAccessError, match="要求当前账号确认"):
+        agent_team_service.create_team_from_xiaoling(team_api["db"], owner, parsed)
+    with pytest.raises(AgentTeamAccessError, match="要求当前账号确认"):
+        agent_team_service.create_team_from_xiaoling(
+            team_api["db"], owner, parsed,
+            supervisor_plan_sha256=review["plan_sha256"],
+            supervisor_confirmed_by=int(team_api["other"].id),
+        )
+    assert team_api["db"].query(agent_team_service.AgentTeam).count() == 0
+
+    created = agent_team_service.create_team_from_xiaoling(
+        team_api["db"], owner, parsed,
+        supervisor_plan_sha256=review["plan_sha256"],
+        supervisor_confirmed_by=int(owner.id),
+    )
+    assert created["status"] == "queued"
+    assert created["events"][-1]["actor_address"] == "agent:supervisor"
+    assert created["events"][-1]["detail"]["confirmed_by_user_id"] == owner.id
+
+
 def test_agent_teams_plain_user_is_limited_to_own_account(team_api):
     request = team_api["request"]
     owner = team_api["owner"]
     other = team_api["other"]
 
-    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    created = _create_team_from_xiaoling(team_api, owner, _team_payload())
     team_id = created["team_id"]
     assert created["user_id"] == owner.id
     assert created["surface"] == "user"
@@ -205,7 +262,7 @@ def test_agent_teams_events_incremental_feed(team_api):
     request = team_api["request"]
     owner = team_api["owner"]
 
-    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    created = _create_team_from_xiaoling(team_api, owner, _team_payload())
     team_id = created["team_id"]
 
     first = _data(request(owner, "GET", f"/api/agent-teams/{team_id}/events"))
@@ -263,7 +320,7 @@ def test_admin_cannot_read_or_operate_other_accounts_private_team(team_api):
     request = team_api["request"]
     owner = team_api["owner"]
     admin = team_api["admin"]
-    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    created = _create_team_from_xiaoling(team_api, owner, _team_payload())
     team_id = created["team_id"]
 
     for method, suffix, body in (
@@ -279,6 +336,8 @@ def test_admin_cannot_read_or_operate_other_accounts_private_team(team_api):
     detail = _data(request(owner, "GET", f"/api/agent-teams/{team_id}"))
     assert detail["status"] == created["status"]
     assert detail["events"] == created["events"]
+    assert detail["events"][-1]["event_type"] == "supervisor.plan_reviewed"
+    assert detail["events"][-1]["actor_address"] == "agent:supervisor"
     assert detail["tasks"] == created["tasks"]
     assert detail["team_id"] == team_id
     assert detail["user_id"] == owner.id
@@ -299,13 +358,10 @@ def test_admin_cannot_read_or_operate_other_accounts_private_team(team_api):
     assert {item["status"] for item in cancelled["tasks"]} == {"cancelled"}
     assert {item["status"] for item in cancelled["members"]} == {"reclaimed"}
 
-    admin_team = _data(
-        request(
-            admin,
-            "POST",
-            "/api/agent-teams",
-            json=_team_payload(surface="admin", session_id="session-admin-owned"),
-        )
+    admin_team = _create_team_from_xiaoling(
+        team_api,
+        admin,
+        _team_payload(surface="admin", session_id="session-admin-owned"),
     )
     assert admin_team["surface"] == "admin"
     assert admin_team["user_id"] == admin.id
@@ -316,7 +372,7 @@ def test_global_audit_does_not_store_private_team_objective_or_cancel_reason(tea
     request, owner = team_api["request"], team_api["owner"]
     payload = _team_payload()
     payload["objective"] = "PRIVATE_TEAM_OBJECTIVE_SYNTHETIC"
-    created = _data(request(owner, "POST", "/api/agent-teams", json=payload))
+    created = _create_team_from_xiaoling(team_api, owner, payload)
     _data(request(owner, "POST", f"/api/agent-teams/{created['team_id']}/cancel",
                   json={"reason": "PRIVATE_CANCEL_REASON_SYNTHETIC"}))
     _data(request(owner, "POST", f"/api/agent-teams/{created['team_id']}/archive",
@@ -332,7 +388,7 @@ def test_owner_retry_retains_an_audit_entry_without_task_text(team_api):
     from app.models.audit_log import AuditLog
 
     request, owner, db = team_api["request"], team_api["owner"], team_api["db"]
-    created = _data(request(owner, "POST", "/api/agent-teams", json=_team_payload()))
+    created = _create_team_from_xiaoling(team_api, owner, _team_payload())
     team_id = created["team_id"]
     db.get(AgentTeam, team_id).status = "failed"
     for task in db.query(AgentTeamTask).filter_by(team_id=team_id):

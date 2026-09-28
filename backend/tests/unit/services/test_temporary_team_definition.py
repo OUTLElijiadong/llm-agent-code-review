@@ -1,5 +1,6 @@
 """任务内生成定义必须冻结、归属可核验且不能独立复用。"""
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -64,7 +65,7 @@ def test_definition_cannot_override_address_or_authority(change):
 
 def test_generated_definition_is_frozen_without_permanent_agent(db, admin_user):
     before = db.query(CustomAgent).count()
-    created = agent_team_service.create_team(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
+    created = agent_team_service.create_team_from_xiaoling(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
     row = db.query(AgentTeamMember).filter_by(team_id=created["team_id"]).one()
     snapshot = json.loads(row.capabilities_json)
     assert row.kind == "temporary"
@@ -73,12 +74,34 @@ def test_generated_definition_is_frozen_without_permanent_agent(db, admin_user):
     assert db.query(CustomAgent).count() == before
 
 
+def test_cancelled_temporary_team_keeps_owner_audit_without_permanent_agent(db, admin_user):
+    before = db.query(CustomAgent).count()
+    created = agent_team_service.create_team_from_xiaoling(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
+    claimed = agent_team_service.claim_next_task(db, created["team_id"])
+    cancelled = agent_team_service.cancel_team(db, admin_user, created["team_id"])
+    agent_team_service.cleanup_terminal_team_resources(db)
+
+    detail = agent_team_service.get_team(db, admin_user, created["team_id"])
+    event_types = [event["event_type"] for event in detail["events"]]
+    assert cancelled["status"] == detail["status"] == "cancelled"
+    assert detail["members"][0]["kind"] == "temporary"
+    assert {"team.created", "task.claimed", "task.cancelled", "team.cancelled"} <= set(event_types)
+    assert db.query(CustomAgent).count() == before
+    with pytest.raises(agent_team_service.AgentTeamLeaseError):
+        agent_team_service.complete_task(
+            db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
+            result={"status": "completed", "summary": "迟到的旧结果"},
+        )
+    with pytest.raises(agent_team_service.AgentTeamNotFoundError):
+        agent_team_service.get_team(db, SimpleNamespace(id=admin_user.id + 1, role="admin"), created["team_id"])
+
+
 @pytest.mark.parametrize("invalid", ["untrusted", "owner", "member", "checksum", "cancelled"])
 def test_temporary_dispatch_rejects_invalid_lease_or_snapshot(db, admin_user, monkeypatch, invalid):
     from app.services import temporary_agent_runtime
     run = Mock(return_value={"status": "completed", "summary": "verified"})
     monkeypatch.setattr(temporary_agent_runtime, "run_temporary_agent", run)
-    created = agent_team_service.create_team(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
+    created = agent_team_service.create_team_from_xiaoling(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
     team = db.get(AgentTeam, created["team_id"])
     claimed = agent_team_service.claim_next_task(db, team.id)
     message = agent_team_dispatcher._task_message(team, claimed)
@@ -105,7 +128,7 @@ def test_dispatch_uses_database_definition_not_message_override(db, admin_user, 
     from app.services import temporary_agent_runtime
     run = Mock(return_value={"status": "completed", "summary": "verified"})
     monkeypatch.setattr(temporary_agent_runtime, "run_temporary_agent", run)
-    created = agent_team_service.create_team(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
+    created = agent_team_service.create_team_from_xiaoling(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
     team = db.get(AgentTeam, created["team_id"])
     claimed = agent_team_service.claim_next_task(db, team.id)
     message = agent_team_dispatcher._task_message(team, claimed)

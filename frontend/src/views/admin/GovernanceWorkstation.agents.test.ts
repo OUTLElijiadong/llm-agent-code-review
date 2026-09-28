@@ -7,7 +7,7 @@ vi.mock('@/stores/user', () => ({ useUserStore: () => ({ isSuperAdmin: () => tru
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import AgentGovernance from './AgentGovernance.vue'
 const wrappers: ReturnType<typeof mount>[] = []
-const sample = { code: 'review_orchestrator', name: '审查编排', description: '协调项目审查并汇总发现', category: 'orchestrator', status: 'idle', is_enabled: 1, priority: 52, auto_approval_threshold: 0.74, memory_count: 12, knowledge_count: 8, skills: ['fixture.internal.skill.'.repeat(12)] }
+  const sample = { code: 'review_orchestrator', name: '审查编排', description: '协调项目审查并汇总发现', category: 'orchestrator', status: 'idle', is_enabled: 1, priority: 52, auto_approval_threshold: 0.74, memory_count: 12, knowledge_count: 8, skills: ['fixture.internal.skill.'.repeat(12)] }
 function render() { const w = mount(AgentGovernance, { global: { plugins: [ElementPlus] } }); wrappers.push(w); return w }
 beforeEach(() => { api.listGovernanceAgents.mockReset().mockResolvedValue([sample]) })
 afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()) })

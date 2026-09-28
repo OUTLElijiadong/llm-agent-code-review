@@ -68,6 +68,10 @@ class SecurityFindingOut(BaseModel):
     references: List[str] = Field(default_factory=list, description="参考链接")
     confidence: float = Field(1.0, ge=0.0, le=1.0, description="置信度")
     source: str = Field("llm", description="发现来源: regex / llm")
+    verification: Optional[Literal["confirmed", "plausible", "refuted", "unreviewed"]] = Field(
+        None, description="对抗复核结论；缺省表示旧结果未提供复核状态",
+    )
+    verification_reason: str = Field("", description="对抗复核理由")
 
 
 class DataFlowOut(BaseModel):

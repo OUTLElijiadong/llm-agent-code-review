@@ -87,10 +87,19 @@ def list_reports(db: Session, user: User, project_id: int = None,
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(ReviewTask.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
     issue_stats = load_task_issue_stats(db, rows)
+    project_ids = {row.project_id for row in rows if row.project_id is not None}
+    projects_by_id = (
+        {
+            project.id: project
+            for project in db.query(Project).filter(Project.id.in_(project_ids)).all()
+        }
+        if project_ids
+        else {}
+    )
 
     items = []
     for row in rows:
-        project = db.get(Project, row.project_id)
+        project = projects_by_id.get(row.project_id)
         issue_count, score, _breakdown, _severity_count = _build_task_score_facts(
             row,
             issue_stats[row.id],
@@ -135,6 +144,8 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         "task": {"id": task.id, "name": task.task_name, "task_name": task.task_name,
                  "review_type": task.review_type,
                  "total_files": task.total_files,
+                 "processed_files": task.processed_files,
+                 "coverage": task.coverage,
                  "duration_ms": task.duration_ms,
                  "total_issues": issue_count,
                  "score": score,
@@ -500,6 +511,7 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
         summaries.append(_file_summary(
             code_file, counts.get(key), file_id=link.file_id,
             file_snapshot=link.file_snapshot,
+            version_no=link.version_no, content_sha256=link.content_sha256,
         ))
 
     fallback_ids = [key[1] for key in counts if key not in emitted_keys and key[0] == "id"]
@@ -516,6 +528,7 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
 def _file_summary(
     code_file: CodeFile | None, counts: dict | None, *,
     file_id: int | None = None, file_snapshot: dict | None = None,
+    version_no: int | None = None, content_sha256: str | None = None,
 ) -> dict:
     """构造单个报告文件摘要。
 
@@ -537,6 +550,9 @@ def _file_summary(
     return {
         "file_id": file_id if file_id is not None else (code_file.id if code_file else item["file_id"]),
         "file_name": snapshot.get("file_name") or (code_file.file_name if code_file else item["file_name"]),
+        "file_path": snapshot.get("file_path") or (code_file.file_path if code_file else None),
+        "version_no": version_no,
+        "content_sha256": content_sha256,
         "language": snapshot.get("language") or (code_file.language if code_file else ""),
         "issue_count": sum(severity.values()),
         "severe_count": severity.get("严重", 0),

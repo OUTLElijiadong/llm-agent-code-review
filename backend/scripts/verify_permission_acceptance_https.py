@@ -89,7 +89,7 @@ def write_private(path, value, *, exclusive=False):
 
 # 已独立复核的2026-09-19基线（含显式会话恢复、收件、浏览及已读动作）；
 # 合法删除路由时须复核并显式更新此门禁。
-MIN_ROUTE_METHODS = 332
+MIN_ROUTE_METHODS = 333
 MIN_ENDPOINT_SOURCES = 42
 REQUIRED_ROUTES = {
     ("POST", "/api/auth/login"), ("POST", "/v1/responses"),

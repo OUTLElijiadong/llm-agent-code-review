@@ -29,6 +29,12 @@ export interface ResponseToolCall {
   status: ResponseToolCallStatus
   resultPreview?: string
   error?: string
+  supervision?: {
+    decision: 'allow' | 'escalate' | 'deny'
+    riskLevel: 'low' | 'medium' | 'high' | 'critical'
+    classification: string
+    reason: string
+  }
 }
 
 export interface NormalizedResponseInputOption {
@@ -156,12 +162,29 @@ export function isResponseToolEvent(event: ResponseStreamEvent): boolean {
     || event.type === 'response.tool.started'
     || event.type === 'response.tool.completed'
     || event.type === 'response.tool.failed'
+    || event.type === 'response.supervisor.reviewed'
 }
 
 export function applyResponseToolEvent(
   calls: ResponseToolCall[],
   event: ResponseStreamEvent,
 ): void {
+  if (event.type === 'response.supervisor.reviewed') {
+    const call = ensureCall(calls, {
+      callId: event.call_id,
+      name: event.tool_name,
+    })
+    call.callId ||= event.call_id
+    call.name = event.tool_name || call.name
+    call.supervision = {
+      decision: event.decision,
+      riskLevel: event.risk_level,
+      classification: event.classification,
+      reason: event.reason,
+    }
+    return
+  }
+
   if (event.type === 'response.output_item.added' || event.type === 'response.output_item.done') {
     const incoming = toolCallFromItem(event.item, event.output_index)
     if (!incoming) return

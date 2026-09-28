@@ -1,36 +1,39 @@
 <template>
-  <div v-if="sessions.length || selected || listError" class="roundtable-dock">
-    <div v-if="listError" class="roundtable-dock-error" role="status">
-      {{ listError }}
-      <button type="button" @click="loadSessions">重试</button>
-    </div>
-    <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" class="roundtable-choices" aria-label="我的圆桌讨论">
+  <Teleport :to="headerSlotAvailable ? '#roundtable-header-slot' : 'body'" :disabled="!headerSlotAvailable">
+    <div v-if="sessions.length || selected || listError" class="roundtable-dock" :class="{ 'is-header': headerSlotAvailable }">
+      <div v-if="listError" class="roundtable-dock-error" role="status">
+        {{ listError }}
+        <button type="button" @click="loadSessions">重试</button>
+      </div>
+      <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" class="roundtable-choices" aria-label="我的圆桌讨论">
+        <button
+          v-for="session in sessions"
+          :key="session.session_id"
+          type="button"
+          class="roundtable-choice"
+          @click="openSession(session.session_id)"
+        >
+          <span>{{ session.file_name || '未命名文件' }}</span>
+          <small>{{ statusLabel(session.status, session.progress?.phase) }}</small>
+        </button>
+        <button v-if="nextOffset !== null" type="button" class="roundtable-load-more" :disabled="moreLoading" @click="loadMore">
+          {{ moreLoading ? '正在加载…' : '加载更多圆桌' }}
+        </button>
+      </div>
       <button
-        v-for="session in sessions"
-        :key="session.session_id"
+        v-if="!visible && (sessions.length || selected)"
+        class="roundtable-fab"
         type="button"
-        class="roundtable-choice"
-        @click="openSession(session.session_id)"
+        aria-label="打开圆桌讨论"
+        :title="`圆桌讨论（${sessions.length || 1} 个会话）`"
+        @click="openFromDock"
       >
-        <span>{{ session.file_name || '未命名文件' }}</span>
-        <small>{{ statusLabel(session.status, session.progress?.phase) }}</small>
-      </button>
-      <button v-if="nextOffset !== null" type="button" class="roundtable-load-more" :disabled="moreLoading" @click="loadMore">
-        {{ moreLoading ? '正在加载…' : '加载更多圆桌' }}
+        <span aria-hidden="true">🗣️</span>
+        <span class="roundtable-label">圆桌讨论</span>
+        <span class="roundtable-count">{{ sessions.length || 1 }}{{ nextOffset !== null ? '+' : '' }}</span>
       </button>
     </div>
-    <button
-      v-if="!visible && (sessions.length || selected)"
-      class="roundtable-fab"
-      type="button"
-      aria-label="打开圆桌讨论"
-      @click="openFromDock"
-    >
-      <span aria-hidden="true">🗣️</span>
-      <span>圆桌讨论</span>
-      <span class="roundtable-count">{{ sessions.length || 1 }}{{ nextOffset !== null ? '+' : '' }}</span>
-    </button>
-  </div>
+  </Teleport>
 
   <AgentDiscussionPanel
     v-if="visible && selected"
@@ -72,9 +75,11 @@ const showChoices = ref(false)
 const listError = ref('')
 const nextOffset = ref<number | null>(null)
 const moreLoading = ref(false)
+const headerSlotAvailable = ref(false)
 let authGeneration = 0
 let listGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let headerSlotObserver: MutationObserver | null = null
 
 const routeSessionId = computed(() => {
   const raw = route.query.discuss_session
@@ -177,6 +182,13 @@ function onRoundtableListChanged(event: Event): void {
   if (owner === props.userId) void loadSessions()
 }
 
+function syncHeaderSlot(): void {
+  if (!document.getElementById('roundtable-header-slot')) return
+  headerSlotAvailable.value = true
+  headerSlotObserver?.disconnect()
+  headerSlotObserver = null
+}
+
 watch(() => props.userId, () => {
   authGeneration++
   listGeneration++
@@ -194,6 +206,11 @@ watch(routeSessionId, (id) => {
 }, { immediate: true })
 
 onMounted(() => {
+  // GlobalDiscussionHost may mount before the lazy-loaded route layout renders its header.
+  // Keep the legacy fallback only until the persistent shell slot appears.
+  headerSlotObserver = new MutationObserver(syncHeaderSlot)
+  headerSlotObserver.observe(document.body, { childList: true, subtree: true })
+  syncHeaderSlot()
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('prism:open-roundtable', onOpenEvent)
   window.addEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
@@ -205,6 +222,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   authGeneration++
   listGeneration++
+  headerSlotObserver?.disconnect()
+  headerSlotObserver = null
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('prism:open-roundtable', onOpenEvent)
   window.removeEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
@@ -214,10 +233,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .roundtable-dock { position: fixed; right: 24px; bottom: 100px; z-index: 2990; display: grid; justify-items: end; gap: 8px; max-width: min(320px, calc(100vw - 24px)); }
+.roundtable-dock.is-header { position: relative; inset: auto; z-index: auto; display: flex; justify-items: initial; max-width: none; }
 .roundtable-fab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid #d9ddfa; border-radius: 999px; background: #fff; color: #292e67; box-shadow: 0 8px 28px #24295c33; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .roundtable-fab:focus-visible, .roundtable-choice:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 .roundtable-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px; background: #eef0ff; font-size: 11px; }
 .roundtable-choices { display: grid; gap: 4px; width: min(300px, calc(100vw - 24px)); max-height: min(320px, 45dvh); overflow-y: auto; padding: 6px; border: 1px solid #dfe2f5; border-radius: 12px; background: white; box-shadow: 0 12px 30px #24295c30; }
+.roundtable-dock.is-header .roundtable-choices,
+.roundtable-dock.is-header .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 3100; }
 .roundtable-choice { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 40px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: #292e67; text-align: left; cursor: pointer; }
 .roundtable-choice:hover { background: #f2f3ff; }
 .roundtable-choice span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -228,4 +250,9 @@ onBeforeUnmount(() => {
 .roundtable-dock-error { max-width: 260px; padding: 8px 10px; border-radius: 8px; background: #fff8ed; color: #915018; font-size: 12px; }
 .roundtable-dock-error button { margin-left: 7px; padding: 2px 4px; border: 0; background: transparent; color: #5b58e8; cursor: pointer; }
 @media (max-width: 520px) { .roundtable-dock { right: 12px; bottom: calc(82px + env(safe-area-inset-bottom)); } }
+@media (max-width: 920px) {
+  .roundtable-dock.is-header .roundtable-fab { position: relative; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; }
+  .roundtable-dock.is-header .roundtable-label { display: none; }
+  .roundtable-dock.is-header .roundtable-count { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 3px; border: 1px solid #fff; }
+}
 </style>

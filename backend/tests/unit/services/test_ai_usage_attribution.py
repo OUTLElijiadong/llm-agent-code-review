@@ -154,7 +154,11 @@ async def test_response_rounds_link_root_and_preserve_zero_invalid_unknown(db, m
     assert logs[2].total_tokens is None
 
 
-async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeypatch):
+async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.database import Base
     from app.models.agent_mesh import AgentMeshMessage
     from app.models.agent_response_run import AgentToolExecution
     from app.models.agent_team import AgentTeam, AgentTeamEvent
@@ -162,6 +166,19 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
     from app.services import agent_mesh_dispatcher, agent_responses_service, agent_team_dispatcher, agent_team_service
     from app.services.ai_usage_context import current_attribution
     from app.services.deepseek_responses_runtime import ToolCall
+
+    # The dispatcher intentionally owns and closes a separate Session. A
+    # shared in-memory SQLite connection makes that close roll back the
+    # caller's transaction, so exercise the production session boundary with
+    # a file-backed database and independent sessions.
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'usage-attribution.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    SessionFactory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    db = SessionFactory()
+    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", SessionFactory)
 
     root = _run(db)
     user = User(id=7, username="usage-owner", password="x", role="user", status=1)
@@ -174,7 +191,7 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
     monkeypatch.setattr(executor, "_assert_session_active", lambda: None)
     created = await executor._execute_once(
         ToolCall(call_id="usage-call", name="create_agent_team", arguments={}, raw_arguments="{}"),
-        lambda: agent_team_service.create_team(db, user, _team_payload()),
+        lambda: agent_team_service.create_team_from_xiaoling(db, user, _team_payload()),
     )
     assert created.status == "success"
     team = db.query(AgentTeam).one()
@@ -196,10 +213,15 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
     def handle(session, actor, *_args, **_kwargs):
         assert current_attribution(actor.id) == expected
         DeepSeekAgent.log_deferred(session, user_id=actor.id, meta={"model_tag": "unit", "total_tokens": 13})
-        return "unit", {"status": "completed", "summary": "已读取"}
+        return "unit", {
+            "status": "completed",
+            "summary": "已读取",
+            "evidence": [{"source": "fixture", "data": "读取范围由本用例提供"}],
+        }
 
     monkeypatch.setattr(agent_mesh_dispatcher, "_handle", handle)
-    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
+    # 本用例只验证用量归因；新执行前权限守卫由独立撤权用例覆盖。
+    monkeypatch.setattr(agent_team_dispatcher.rbac_service, "check_permission", lambda *_args: True)
     assert agent_team_dispatcher._execute_claimed(team.id, claimed) == {"success": True}
     log = db.query(AiCallLog).one()
     assert {key: getattr(log, key) for key in expected} == expected
@@ -212,6 +234,8 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
     assert result.root_agent_run_id == root.id
     assert result.agent_execution_event_id == event.id
     assert current_attribution(7) == {}
+    db.close()
+    engine.dispose()
 
 
 async def test_nested_run_persists_root_across_checkpoint_reconstruction(db):
@@ -304,7 +328,7 @@ def test_retry_claims_have_different_immutable_execution_foreign_keys(db, monkey
     from app.services import agent_team_service
 
     user = SimpleNamespace(id=7, role="user", username="owner")
-    created = agent_team_service.create_team(db, user, _team_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, user, _team_payload())
     first = agent_team_service.claim_next_task(db, created["team_id"])
     agent_team_service.complete_task(
         db,

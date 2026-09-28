@@ -527,6 +527,16 @@ async def test_tool_sse_lifecycle_redacts_sensitive_arguments(db, super_admin_us
         def has_tool(self, name: str) -> bool:
             return name == "mcp_secret_tool"
 
+        def supervisor_details(self, _name: str) -> dict[str, str]:
+            return {
+                "managed_kind": "",
+                "tool_name": "secret_tool",
+                "permission": "escalate",
+                "requires_approval": "true",
+                "risk_level": "high",
+                "binding_fingerprint": "external-secret-tool-v1",
+            }
+
         async def call(self, _name: str, _arguments: dict[str, Any]) -> dict[str, Any]:
             return {"ok": True, "authorization": "must-not-leak"}
 

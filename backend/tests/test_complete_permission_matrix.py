@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 335, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 336, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,10 +81,10 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 335
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 335
+    assert len(ROUTES) == 336
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 336
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 321
+    assert len(AUTHENTICATED_ROUTES) == 322
     assert len(GUARDED_ROUTES) == 252
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
@@ -112,12 +112,49 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/forum/posts/{post_id}/views"): [],
         ("GET", "/api/discuss/sessions"): [],
         ("GET", "/api/discuss/sessions/{session_id}"): [],
+        ("POST", "/api/sandboxes/remote-target-authorization"): [],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]
         assert len(matches) == 1
         assert matches[0]["authenticated"] is True
         assert matches[0]["guards"] == expected_guards
+
+
+def test_remote_target_authorization_requires_project_membership_and_persists_only_scoped_ticket(
+    matrix_env, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from app.models.agent_governance import ApprovalItem
+    from app.services import sandbox_service
+
+    monkeypatch.setattr(
+        sandbox_service,
+        "pin_public_http_url",
+        lambda value, **_kwargs: SimpleNamespace(original_url=value),
+    )
+    monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
+    payload = {
+        "project_id": matrix_env["resources"]["a"]["project"],
+        "remote_target_url": "https://target.example/path",
+        "test_mode": "blackbox",
+        "confirmed": True,
+    }
+    before = matrix_env["db"].query(ApprovalItem).count()
+    outsider = _request(
+        matrix_env, "no_permission", "POST", "/api/sandboxes/remote-target-authorization", json=payload
+    )
+    assert outsider.status_code == 404, outsider.text
+    assert matrix_env["db"].query(ApprovalItem).count() == before
+
+    owner = _request(matrix_env, "owner_a", "POST", "/api/sandboxes/remote-target-authorization", json=payload)
+    assert owner.status_code == 200, owner.text
+    token = owner.json()["data"]["approval_token"]
+    approval_id = int(token.split(".", 1)[0])
+    approval = matrix_env["db"].get(ApprovalItem, approval_id)
+    assert approval is not None
+    assert token.split(".", 1)[1] not in approval.request_json
 
 
 def _route_id(row):

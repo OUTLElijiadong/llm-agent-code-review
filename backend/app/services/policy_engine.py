@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.agent_governance import PolicyDecisionLog, PolicyRule
+from app.services import agent_supervisor_service
 
 ALLOW = "allow"
 DENY = "deny"
@@ -105,50 +106,21 @@ def infer_default_decision(action: str, resource: str = "", context: Optional[di
         PolicyDecision: 默认策略决策。
     """
     context = context or {}
-    action_l = (action or "").lower()
-    resource_l = (resource or "").lower()
-    command = str(context.get("command", "")).lower()
-
-    if any(token in action_l or token in resource_l for token in _HIGH_RISK_ACTION_TOKENS):
-        return PolicyDecision(
-            subject=str(context.get("subject", "agent:unknown")),
-            action=action,
-            resource=resource,
-            decision=ESCALATE,
-            risk_level=HIGH,
-            risk_score=_risk_score(HIGH),
-            reason="命中高风险系统操作边界",
-        )
-
-    if action_l.startswith("shell"):
-        if any(token in command for token in _WRITE_SHELL_TOKENS) or "write" in action_l:
-            return PolicyDecision(
-                subject=str(context.get("subject", "agent:unknown")),
-                action=action,
-                resource=resource,
-                decision=ESCALATE,
-                risk_level=HIGH,
-                risk_score=_risk_score(HIGH),
-                reason="shell 写命令或危险命令需升级",
-            )
-        return PolicyDecision(
-            subject=str(context.get("subject", "agent:unknown")),
-            action=action,
-            resource=resource,
-            decision=ALLOW,
-            risk_level=LOW,
-            risk_score=_risk_score(LOW),
-            reason="shell 只读命令自动放行",
-        )
-
+    declared_risk = context.get("_supervisor_declared_risk")
+    review = agent_supervisor_service.review_action(
+        action,
+        resource,
+        declared_risk=declared_risk if isinstance(declared_risk, str) else None,
+        context=context,
+    )
     return PolicyDecision(
         subject=str(context.get("subject", "agent:unknown")),
         action=action,
         resource=resource,
-        decision=ALLOW,
-        risk_level=LOW,
-        risk_score=_risk_score(LOW),
-        reason="默认低风险动作自动放行",
+        decision=review.decision,
+        risk_level=review.risk_level,
+        risk_score=_risk_score(review.risk_level),
+        reason=f"监督子 Agent: {review.reason}",
     )
 
 
@@ -209,14 +181,38 @@ def evaluate(
                     matched_rule_id=matched.id,
                 )
             else:
+                review = agent_supervisor_service.review_action(
+                    action,
+                    resource,
+                    declared_risk=matched.risk_level,
+                    context=context,
+                )
+                if matched.effect == DENY:
+                    effective_decision = DENY
+                    effective_risk = matched.risk_level
+                    reason = f"命中拒绝策略: {matched.name}"
+                elif matched.effect == ESCALATE or review.decision == ESCALATE:
+                    effective_decision = ESCALATE
+                    effective_risk = max(
+                        (matched.risk_level, review.risk_level),
+                        key=lambda level: {LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3}.get(level, 3),
+                    )
+                    reason = f"监督子 Agent: {review.reason}; 策略: {matched.name}"
+                else:
+                    effective_decision = ALLOW
+                    effective_risk = max(
+                        (matched.risk_level, review.risk_level),
+                        key=lambda level: {LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3}.get(level, 3),
+                    )
+                    reason = f"监督子 Agent 与策略复核通过: {matched.name}"
                 decision = PolicyDecision(
                     subject=subject,
                     action=action,
                     resource=resource,
-                    decision=matched.effect,
-                    risk_level=matched.risk_level,
-                    risk_score=_risk_score(matched.risk_level),
-                    reason=f"命中策略: {matched.name}",
+                    decision=effective_decision,
+                    risk_level=effective_risk,
+                    risk_score=_risk_score(effective_risk),
+                    reason=reason,
                     matched_rule_id=matched.id,
                 )
         else:

@@ -153,7 +153,7 @@ def test_published_release_remains_callable_by_team_during_draft_and_pending_rev
     release = db.query(CustomAgentRelease).one()
 
     def create_team(session_id: str):
-        return agent_team_service.create_team(
+        return agent_team_service.create_team_from_xiaoling(
             db,
             admin_user,
             AgentTeamCreateIn.model_validate({

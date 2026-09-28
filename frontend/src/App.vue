@@ -56,7 +56,7 @@ watch([canUseAgent, () => userStore.profile?.id], ([allowed, id]) => {
   }
 }, { immediate: true })
 
-/** 顶栏与全站小菱入口始终打开 user 会话；管理员的贾维斯保留独立入口。 */
+/** 两个权限隔离的会话 surface 共用小菱主控；管理员工具仍按当前角色授权。 */
 function openAgentChat(prefill = ''): void {
   if (!canUseAgent.value) return
   if (userStore.isAdmin()) {
@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
     v-if="canUseAgent"
     v-model:visible="agentVisible"
     :prefill="agentPrefill"
-    :show-launcher="!userStore.isAdmin()"
+    :show-launcher="false"
     @consumed-prefill="agentPrefill = ''"
   />
   <GlobalDiscussionHost v-if="userStore.isLoggedIn && userStore.profile" :user-id="userStore.profile.id" />

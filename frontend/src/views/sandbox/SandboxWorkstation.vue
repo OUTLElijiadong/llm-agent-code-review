@@ -14,6 +14,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
+  authorizeSandboxRemoteTarget,
   createSandbox,
   createSandboxPreviewSession,
   downloadSandboxArtifact,
@@ -82,7 +83,7 @@ const languageOptions: Array<{ value: SandboxLanguage; label: string }> = [
 ]
 const testModes: Array<{ value: Exclude<SandboxTestMode, 'deploy'>; label: string; hint: string }> = [
   { value: 'whitebox', label: '白盒', hint: '源码整体扫描与本地测试' },
-  { value: 'blackbox', label: '黑盒', hint: '运行态或授权远程目标探测' },
+  { value: 'blackbox', label: '黑盒', hint: '隔离环境运行态探测；真实渗透请走授权渗透委托' },
   { value: 'combined', label: '组合', hint: '先白盒再黑盒核验' },
 ]
 const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: string }> = [
@@ -224,6 +225,15 @@ async function submit(): Promise<void> {
   const language = deploymentLanguage || form.language
   submitting.value = true
   try {
+    const remoteTargetUrl = form.remote_target_url.trim()
+    const remoteTargetApproval = remoteAuthorizationRequired.value
+      ? await authorizeSandboxRemoteTarget({
+        project_id: form.project_id,
+        remote_target_url: remoteTargetUrl,
+        test_mode: form.test_mode as 'blackbox' | 'combined',
+        confirmed: true,
+      })
+      : null
     const created = await createSandbox({
       project_id: form.project_id,
       purpose: form.purpose,
@@ -233,8 +243,9 @@ async function submit(): Promise<void> {
       worker_code: form.worker_code || undefined,
       source_revision_id: form.source_revision_id || undefined,
       ttl_hours: form.ttl_hours,
-      remote_target_url: form.remote_target_url.trim() || undefined,
+      remote_target_url: remoteTargetUrl || undefined,
       remote_target_authorized: remoteAuthorizationRequired.value && form.remote_target_authorized,
+      remote_target_approval_token: remoteTargetApproval?.approval_token,
     })
     environments.value.unshift(created)
     selectedId.value = created.public_id

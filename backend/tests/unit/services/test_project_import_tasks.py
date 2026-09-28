@@ -19,7 +19,7 @@ from app.models.project_source_archive import ProjectSourceArchive
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.project import ProjectIn
-from app.services import project_import_service
+from app.services import project_import_service, rbac_service
 
 
 def _user(db, username: str) -> User:
@@ -376,6 +376,7 @@ def test_terminal_failure_preserves_actionable_reason_for_owner(db, monkeypatch)
 
 def test_invalid_download_is_rejected_before_project_creation(db, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(project_import_service, "validate_remote_project_url", lambda _url: None)
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: True)
     user = _user(db, "invalid-archive-owner")
     _create(db, user, key="invalid-archive")
     claimed = project_import_service.claim_next_task(db, lease_seconds=30)

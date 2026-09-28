@@ -293,7 +293,7 @@ function skillTypeLabel(t: SkillType): string {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  meta: '主控',
+  meta: '系统支撑',
   frontline: '前台',
   analyzer: '分析',
   reviewer: '审查',

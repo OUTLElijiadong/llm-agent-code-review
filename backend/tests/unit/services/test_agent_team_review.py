@@ -210,9 +210,9 @@ def test_team_creation_preserves_run_review_contract_and_enforces_readonly(db, r
     })
     if readonly:
         with pytest.raises(agent_team_service.AgentTeamValidationError, match="只读"):
-            agent_team_service.create_team(db, rows.user, payload)
+            agent_team_service.create_team_from_xiaoling(db, rows.user, payload)
     else:
-        created = agent_team_service.create_team(db, rows.user, payload)
+        created = agent_team_service.create_team_from_xiaoling(db, rows.user, payload)
         stored = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="formal-review").one()
         assert json.loads(stored.input_json)["operation"] == "run_review"
         assert {item["address"] for item in created["members"]} == {"agent:review_orchestrator", "agent:reporter"}

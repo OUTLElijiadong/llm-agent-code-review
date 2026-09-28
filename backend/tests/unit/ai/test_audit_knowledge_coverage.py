@@ -55,3 +55,17 @@ def test_rule_excerpt_marks_section_partial_when_examples_are_dropped():
     loader._extract_rules(source, 100, coverage=coverage, source_name="examples.md")
 
     assert coverage[0]["partial"] > 0
+
+
+def test_verification_prompt_keeps_complete_truthful_severity_policy():
+    coverage = []
+    context = loader.l2_for_role("verification", coverage=coverage)
+    severity = next(item for item in coverage if item["source"] == "severity_rating.md")
+
+    assert severity["included"] == severity["total"]
+    assert severity["partial"] == severity["omitted"] == 0
+    assert "GB/T 30279-2020" in context
+    assert "severity-deduction-v1" in context
+    assert "没有 CNVD/CNNVD 实时查询/同步客户端" in context
+    assert "R × 0.40" not in context
+    assert "CVSS  = (Score / 3.0)" not in context

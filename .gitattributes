@@ -1,0 +1,4 @@
+*.pdf -diff
+*.png -diff
+*.jpg -diff
+*.jpeg -diff

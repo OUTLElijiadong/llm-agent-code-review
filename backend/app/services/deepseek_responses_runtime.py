@@ -58,7 +58,8 @@ COMPACTION_STRATEGY_VERSION = "agent-transcript-v3-sourced"
 COMPLETION_GUARD_RETRY_LIMIT = 2
 OUTPUT_BUDGET_RETRY_LIMIT = 2
 MAX_RETRY_OUTPUT_TOKENS = 65_536
-MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN = 32
+# 1M+ 原始历史需以 32k 输入块多次压缩；64 次仍是显式的成本/循环上限。
+MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN = 64
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 
 
@@ -779,16 +780,22 @@ class DeepSeekResponsesRuntime:
                 segments.append(f"[来源#{index}:片段{part_index}/{len(pieces)}] {piece}")
         chunks: List[str] = []
         current: List[str] = []
+        current_cost = 0
         for segment in segments:
+            segment_cost = estimate_tokens(segment)
             if current and (
                 len(current) >= 64
-                or estimate_tokens("\n".join([*current, segment])) > chunk_budget
+                # 每段单独估算会包含 JSON 引号；求和比合并后的保守估算略大，
+                # 可避免百万级历史反复重扫当前块，且仍不会把压缩请求推过预算。
+                or current_cost + segment_cost > chunk_budget
             ):
                 chunks.append("\n".join(current))
                 current = []
-            if estimate_tokens(segment) > chunk_budget:
+                current_cost = 0
+            if segment_cost > chunk_budget:
                 raise ContextBudgetError("单个来源片段超出压缩输入预算")
             current.append(segment)
+            current_cost += segment_cost
         if current:
             chunks.append("\n".join(current))
         if not chunks:
@@ -1729,7 +1736,8 @@ def _build_compacted_projection(
     )
     summary_item = {
         "type": "message",
-        "role": "system",
+        # 历史与工具输出是低信任数据；即使经过压缩也不能升级为系统指令。
+        "role": "user",
         "content": [{"type": "input_text", "text": summary_text}],
     }
     projected = [summary_item] + [

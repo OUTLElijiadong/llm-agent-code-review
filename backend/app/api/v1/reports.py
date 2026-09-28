@@ -129,6 +129,18 @@ def _get_template_content(db: Session, template_type: str) -> str:
     return report_template_service.get_builtin_template_content(db, template_type)
 
 
+def _report_export_task(db: Session, user: User, task: ReviewTask) -> dict:
+    """导出与详情页共用项目、冻结文件清单及来源事实，不修改 ORM 对象。"""
+    detail = report_service.get_report_detail(db, user, task.id)
+    return {
+        **{column.name: getattr(task, column.name) for column in ReviewTask.__table__.columns},
+        "project_name": detail["project"].get("project_name", ""),
+        "files": detail["files"],
+        "source": detail["source"],
+        "agent_releases": detail["task"].get("agent_releases", []),
+    }
+
+
 def _get_report_evidence(db: Session, task_id: int) -> dict:
     """读取沙箱报告的结构化证据，普通审查任务没有证据时返回空字典。"""
     row = db.query(ReviewReport).filter(ReviewReport.task_id == task_id).first()
@@ -217,18 +229,19 @@ def generate_report(
     if domain_response is not None:
         return domain_response
     evidence = _get_report_evidence(db, payload.task_id)
+    export_task = _report_export_task(db, user, task)
 
     if fmt == "json":
-        json_str = export_to_json(task, issues, summary, score, evidence)
+        json_str = export_to_json(export_task, issues, summary, score, evidence)
         return Response(content=json_str, media_type="application/json")
 
     if fmt == "html":
         template_content = _get_template_content(db, payload.template_type)
-        html_str = export_to_html(task, issues, summary, score, template_content, evidence)
+        html_str = export_to_html(export_task, issues, summary, score, template_content, evidence)
         return HTMLResponse(content=html_str)
 
     if fmt == "pdf":
-        pdf_bytes = export_to_pdf(task, issues, summary, score, payload.template_type, evidence)
+        pdf_bytes = export_to_pdf(export_task, issues, summary, score, payload.template_type, evidence)
         return _build_download_response(
             pdf_bytes,
             "application/pdf",
@@ -236,7 +249,7 @@ def generate_report(
         )
 
     if fmt == "word":
-        word_bytes = export_to_word(task, issues, summary, score, payload.template_type, evidence)
+        word_bytes = export_to_word(export_task, issues, summary, score, payload.template_type, evidence)
         return _build_download_response(
             word_bytes,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -274,7 +287,7 @@ def preview_report(
         return domain_response
     evidence = _get_report_evidence(db, task_id)
     template_content = _get_template_content(db, template_type)
-    html_str = export_to_html(task, issues, summary, score, template_content, evidence)
+    html_str = export_to_html(_report_export_task(db, user, task), issues, summary, score, template_content, evidence)
     return HTMLResponse(content=html_str)
 
 
@@ -322,9 +335,10 @@ def export_report(
     if domain_response is not None:
         return domain_response
     evidence = _get_report_evidence(db, task_id)
+    export_task = _report_export_task(db, user, task)
 
     if format == "json":
-        json_str = export_to_json(task, issues, summary, score, evidence)
+        json_str = export_to_json(export_task, issues, summary, score, evidence)
         return _build_download_response(
             json_str.encode("utf-8"),
             "application/json",
@@ -333,7 +347,7 @@ def export_report(
 
     if format == "html":
         template_content = _get_template_content(db, template_type)
-        html_str = export_to_html(task, issues, summary, score, template_content, evidence)
+        html_str = export_to_html(export_task, issues, summary, score, template_content, evidence)
         return _build_download_response(
             html_str.encode("utf-8"),
             "text/html",
@@ -341,7 +355,7 @@ def export_report(
         )
 
     if format == "pdf":
-        pdf_bytes = export_to_pdf(task, issues, summary, score, template_type, evidence)
+        pdf_bytes = export_to_pdf(export_task, issues, summary, score, template_type, evidence)
         return _build_download_response(
             pdf_bytes,
             "application/pdf",
@@ -349,7 +363,7 @@ def export_report(
         )
 
     if format == "word":
-        word_bytes = export_to_word(task, issues, summary, score, template_type, evidence)
+        word_bytes = export_to_word(export_task, issues, summary, score, template_type, evidence)
         return _build_download_response(
             word_bytes,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -524,7 +538,7 @@ def export_word(task_id: int, db: Session = Depends(get_db),
     if domain_response is not None:
         return domain_response
     evidence = _get_report_evidence(db, task_id)
-    content = export_to_word(task, issues, summary, score, "detailed", evidence)
+    content = export_to_word(_report_export_task(db, user, task), issues, summary, score, "detailed", evidence)
     return _build_download_response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -542,7 +556,7 @@ def export_pdf(task_id: int, db: Session = Depends(get_db),
     if domain_response is not None:
         return domain_response
     evidence = _get_report_evidence(db, task_id)
-    content = export_to_pdf(task, issues, summary, score, "detailed", evidence)
+    content = export_to_pdf(_report_export_task(db, user, task), issues, summary, score, "detailed", evidence)
     return _build_download_response(
         content,
         media_type="application/pdf",

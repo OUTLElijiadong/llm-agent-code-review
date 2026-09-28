@@ -54,7 +54,7 @@ from app.models.agent_capability import (
     SandboxEvent,
     SandboxWorker,
 )
-from app.models.agent_governance import AgentAlert
+from app.models.agent_governance import AgentAlert, ApprovalItem
 from app.models.project import Project
 from app.models.user import User
 from app.services import (
@@ -182,6 +182,57 @@ def _worker_request_config_json(environment: SandboxEnvironment, request_id: str
     # 受控流程最多两轮修复加部署验证；上限防止异常状态无限增长。
     config["worker_request_ids"] = request_ids[-16:]
     config["active_worker_request_id"] = request_id
+    return _json(config)
+
+
+def _validate_worker_execution_receipt(
+    response: dict[str, Any],
+    *,
+    request_id: str,
+    source_sha256: str,
+) -> dict[str, str]:
+    """拒绝与提交请求不匹配或没有完整归档回执的 Worker 响应。"""
+    returned_request_id = str(response.get("request_id") or "")
+    returned_sha256 = str(response.get("source_sha256") or "").lower()
+    if returned_request_id != request_id:
+        raise RuntimeError("Sandbox Worker 回执 request_id 与当前执行轮次不一致")
+    if not returned_sha256 or not hmac.compare_digest(returned_sha256, source_sha256):
+        raise RuntimeError("Sandbox Worker 回执源码 SHA-256 与当前执行快照不一致")
+    return {"request_id": returned_request_id, "source_sha256": returned_sha256}
+
+
+def _source_provenance(environment: SandboxEnvironment, worker_receipt: dict[str, str] | None = None) -> dict[str, Any]:
+    config = _loads(environment.agent_config_json, {})
+    request = _loads(getattr(environment, "worker_request_json", None), {})
+    return {
+        "source_revision_id": config.get("source_revision_id"),
+        "source_revision_no": config.get("source_revision_no"),
+        "source_revision_sha256": config.get("source_revision_sha256"),
+        "source_revision_parent_sha256": config.get("source_revision_parent_sha256"),
+        "original_source_sha256": config.get("original_source_sha256"),
+        "execution_source_sha256": getattr(environment, "execution_source_sha256", None),
+        "execution_round": int(getattr(environment, "execution_round", 0) or 0),
+        "worker_request_id": request.get("request_id") if isinstance(request, dict) else None,
+        "worker_receipt": worker_receipt,
+        "syntax_repair_revisions": config.get("syntax_repair_revisions", []),
+    }
+
+
+def _append_repair_revision_to_config(
+    config_json: str | None,
+    *,
+    revision: dict[str, Any],
+    repair_round: int,
+    worker_request_id: str,
+) -> str:
+    config = _loads(config_json, {})
+    if not isinstance(config, dict):
+        config = {}
+    revisions = config.get("syntax_repair_revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    revisions.append({**revision, "repair_round": repair_round, "worker_request_id": worker_request_id})
+    config["syntax_repair_revisions"] = revisions[-8:]
     return _json(config)
 
 
@@ -576,14 +627,14 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
 
 # deploy 后自动白盒/黑盒所用的内嵌 runner:作为 `_prism_verify.sh` 随源码注入,
 # 用 deploy 镜像自带的解释器运行,不依赖项目镜像 runner.sh 的 test 分支(deploy 镜像通常不含)。
-# 白盒做编译/静态检查与单测发现,黑盒在隔离网内起服务并对多个路径探活+首页断言。
+# 白盒做编译/静态检查与单测发现；黑盒在隔离网内做 HTTP smoke 和 Agent 动态断言，不能替代授权渗透。
 _DEPLOY_VERIFY_RUNNER = r"""#!/bin/sh
 set -u
 # runner.sh 已把源码(含本脚本)拷到 /workspace 并 cd 进去,这里就地运行。
 MODE="${1:-combined}"
 LANG_="${PRISM_LANGUAGE:-python}"
 PORT="${PRISM_PREVIEW_PORT:-8080}"
-cd /workspace 2>/dev/null || true
+cd "${PRISM_WORKSPACE:-/workspace}" 2>/dev/null || true
 
 # ── v3.5 多Agent测试: Recon 事实采集(零LLM,结构化facts供沙箱外Agent推理) ──
 collect_facts() {
@@ -712,7 +763,8 @@ run_whitebox() {
       [ -s /tmp/javasrc ] && { mkdir -p .prism-classes; javac -d .prism-classes @/tmp/javasrc || return 1; }
       ;;
     go)
-      command -v go >/dev/null 2>&1 && { go vet ./... >/dev/null 2>&1 || true; }
+      command -v go >/dev/null 2>&1 || { echo "go vet: Go toolchain unavailable"; return 1; }
+      go vet ./... >/dev/null 2>&1 || { echo "go vet: static analysis failed"; return 1; }
       ;;
     php)
       # 逐文件起进程在大项目上必超时(3400+ 文件 × 进程开销 > profile 上限);
@@ -773,19 +825,24 @@ php_doc_root() {
 }
 
 start_app() {
+  : > /tmp/prism-app.log
+  APP_PID=""
   case "$LANG_" in
     python)
-      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then python -m flask --app app run --host 127.0.0.1 --port "$PORT" &
-      elif [ -f main.py ]; then python main.py &
-      elif [ -f app.py ]; then python app.py &
+      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then
+        python -m flask --app app run --host 127.0.0.1 --port "$PORT" >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f main.py ]; then
+        python main.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f app.py ]; then
+        python app.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
       else return 1; fi
       ;;
-    node)   [ -f package.json ] || return 1; npm start --if-present & ;;
-    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" & ;;
-    go)     go run . & ;;
-    php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" & ;;
+    node)   [ -f package.json ] || return 1; npm start --if-present >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    go)     go run . >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
   esac
-  echo $!
+  [ -n "$APP_PID" ]
 }
 
 http_probe() {
@@ -803,16 +860,17 @@ except Exception as e:
 }
 
 run_blackbox() {
-  APP_PID=$(start_app) || { echo "blackbox: 无法启动应用"; return 1; }
+  start_app || { echo "blackbox: 无法启动应用"; return 1; }
+  trap 'kill "$APP_PID" 2>/dev/null || true' EXIT INT TERM
   sleep 1
   i=0; READY=0
   while [ $i -lt 30 ]; do
     S=$(http_probe "/")
-    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 任何合法HTTP状态=服务已就绪(5xx多为应用缺DB等自身错误,属运行态证据)
+    case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 存活探测只证明端口有响应，不代表测试通过
     kill -0 "$APP_PID" 2>/dev/null || break
     i=$((i+1)); sleep 1
   done
-  if [ "$READY" != "1" ]; then kill "$APP_PID" 2>/dev/null; echo "blackbox: 应用未在回环端口就绪"; return 1; fi
+  if [ "$READY" != "1" ]; then echo "blackbox: 应用未在回环端口就绪"; return 1; fi
   # 首页内容断言:首页非空则判通过
   if command -v python >/dev/null 2>&1; then
     BYTES=$(python -c "import urllib.request,urllib.error
@@ -832,9 +890,19 @@ PHPB
   for p in / /index /health /api /login; do
     printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
   done
-  kill "$APP_PID" 2>/dev/null
+  ROOT_STATUS=$(http_probe "/")
+  kill "$APP_PID" 2>/dev/null || true
   wait "$APP_PID" 2>/dev/null
-  [ "${BYTES:-0}" -gt 0 ] || { echo "blackbox: 首页响应为空"; return 1; }
+  APP_PID=""
+  trap - EXIT INT TERM
+  case "$ROOT_STATUS" in
+    2*|3*) ;;
+    *) echo "blackbox: 首页返回 HTTP ${ROOT_STATUS:-0}"; return 1 ;;
+  esac
+  if [ "$ROOT_STATUS" != "204" ] && [ "${BYTES:-0}" -le 0 ]; then
+    echo "blackbox: 首页响应为空"
+    return 1
+  fi
   echo "blackbox: 首页 $BYTES 字节, 探活完成"
   return 0
 }
@@ -3190,6 +3258,23 @@ def run_browser_blackbox(
     if not isinstance(result, dict) or result.get("protocol_version") != "1.0":
         raise RuntimeError("Playwright worker 返回的证据协议无效")
 
+    # Worker 调用可能跨越一次关闭或到期；锁定最新环境状态后再写制品，
+    # 避免迟到的截图/结论归属到已经停止的沙箱。
+    environment = (
+        db.query(SandboxEnvironment)
+        .populate_existing()
+        .filter(
+            SandboxEnvironment.id == environment.id,
+            SandboxEnvironment.status.in_(("succeeded", "failed")),
+            SandboxEnvironment.expires_at > _utcnow(),
+        )
+        .with_for_update()
+        .first()
+    )
+    if environment is None:
+        db.rollback()
+        raise ConflictError("沙箱已关闭或状态已变化，浏览器结果已丢弃", code=40903)
+
     evidence = dict(result)
     screenshot_encoded = str(evidence.pop("screenshot_base64", "") or "")
     artifacts: list[SandboxArtifact] = []
@@ -3396,10 +3481,131 @@ def _probe_remote_target(url: str) -> dict[str, Any]:
     }
 
 
-def create_environment(db: Session, actor: User, payload: dict[str, Any]) -> SandboxEnvironment:
+def issue_remote_target_authorization(
+    db: Session,
+    actor: User,
+    *,
+    project_id: int,
+    remote_target_url: str,
+    test_mode: str,
+    confirmed: bool,
+) -> dict[str, Any]:
+    """记录用户对精确外部目标和模式的短时确认，返回只能消费一次的凭证。"""
+    if not confirmed:
+        raise ForbiddenError("必须明确确认本次远程目标测试授权", code=40340)
+    if test_mode not in {"blackbox", "combined"}:
+        raise ValidationError("远程目标授权只支持黑盒或组合测试", code=40001)
+    require_project_access(db, int(project_id), actor, need_write=False)
+    target = pin_public_http_url(str(remote_target_url).strip(), require_https=True)
+    target_url = str(target.original_url)
+    expires_at = _utcnow() + timedelta(minutes=5)
+    secret = uuid.uuid4().hex + uuid.uuid4().hex
+    request = {
+        "owner_user_id": int(actor.id),
+        "project_id": int(project_id),
+        "remote_target_url": target_url,
+        "test_mode": test_mode,
+        "token_sha256": hashlib.sha256(secret.encode("ascii")).hexdigest(),
+        "expires_at": expires_at.isoformat(),
+        "consumed_by": None,
+    }
+    approval = ApprovalItem(
+        title="确认远程黑盒测试目标",
+        agent_code="test_verifier",
+        action="sandbox.remote_target.test",
+        resource=f"project:{int(project_id)}",
+        risk_level="medium",
+        status="approved",
+        decision="allow",
+        decision_reason="用户在沙箱工作台逐目标确认本次测试",
+        request_json=_json(request),
+        decided_by=int(actor.id),
+        decided_at=_utcnow(),
+    )
+    db.add(approval)
+    db.flush()
+    audit_service.log(
+        db,
+        actor,
+        "sandbox_remote_target_authorized",
+        target_type="approval",
+        target_id=str(approval.id),
+        detail=f"project={int(project_id)}; mode={test_mode}; target={target_url}",
+        commit=False,
+    )
+    db.commit()
+    return {"approval_token": f"{approval.id}.{secret}", "expires_at": expires_at}
+
+
+def _consume_remote_target_authorization(
+    db: Session,
+    actor: User,
+    *,
+    approval_token: str,
+    project_id: int,
+    remote_target_url: str,
+    test_mode: str,
+    sandbox_public_id: str,
+) -> int:
+    try:
+        raw_id, secret = str(approval_token).split(".", 1)
+        approval_id = int(raw_id)
+    except (TypeError, ValueError):
+        raise ForbiddenError("远程目标授权凭证无效或已过期", code=40340) from None
+    approval = db.query(ApprovalItem).filter(ApprovalItem.id == approval_id).with_for_update().first()
+    if approval is None or approval.action != "sandbox.remote_target.test":
+        raise ForbiddenError("远程目标授权凭证无效或已过期", code=40340)
+    request = _loads(approval.request_json, {})
+    target = pin_public_http_url(remote_target_url, require_https=True)
+    supplied_digest = hashlib.sha256(secret.encode("ascii", errors="ignore")).hexdigest()
+    try:
+        expires_at = datetime.fromisoformat(str(request.get("expires_at") or ""))
+    except ValueError:
+        expires_at = datetime.min
+    valid = (
+        approval.status == "approved"
+        and approval.decision == "allow"
+        and approval.decided_by == int(actor.id)
+        and int(request.get("owner_user_id") or 0) == int(actor.id)
+        and int(request.get("project_id") or 0) == int(project_id)
+        and request.get("remote_target_url") == str(target.original_url)
+        and request.get("test_mode") == test_mode
+        and not request.get("consumed_by")
+        and expires_at >= _utcnow()
+        and hmac.compare_digest(str(request.get("token_sha256") or ""), supplied_digest)
+    )
+    if not valid:
+        raise ForbiddenError("远程目标授权与账号、项目、目标、模式不匹配，或已过期/使用", code=40340)
+    request["consumed_by"] = sandbox_public_id
+    request["consumed_at"] = _utcnow().isoformat()
+    approval.request_json = _json(request)
+    db.flush()
+    return int(approval.id)
+
+
+def _require_remote_target_authorization(payload: dict[str, Any], *, server_approval_required: bool) -> None:
+    if server_approval_required:
+        if not payload.get("remote_target_approval_token"):
+            raise ForbiddenError("远程目标必须先完成服务端逐目标确认", code=40340)
+    elif not payload.get("remote_target_authorized"):
+        raise ForbiddenError("必须显式确认已获得该远程目标本次测试授权", code=40340)
+
+
+def create_environment(
+    db: Session,
+    actor: User,
+    payload: dict[str, Any],
+    *,
+    require_remote_target_approval: bool = False,
+) -> SandboxEnvironment:
     """创建沙箱环境，并在所有失败路径释放项目行锁。"""
     try:
-        return _create_environment_locked(db, actor, payload)
+        return _create_environment_locked(
+            db,
+            actor,
+            payload,
+            require_remote_target_approval=require_remote_target_approval,
+        )
     except Exception:
         db.rollback()
         raise
@@ -3409,6 +3615,8 @@ def _create_environment_locked(
     db: Session,
     actor: User,
     payload: dict[str, Any],
+    *,
+    require_remote_target_approval: bool = False,
 ) -> SandboxEnvironment:
     project_id = int(payload["project_id"])
     purpose = payload["purpose"]
@@ -3474,8 +3682,7 @@ def _create_environment_locked(
     if remote_url:
         if purpose != "test" or mode not in {"blackbox", "combined"}:
             raise ValidationError("远程目标只能用于黑盒或组合测试", code=40001)
-        if not payload.get("remote_target_authorized"):
-            raise ForbiddenError("必须显式确认已获得该远程目标本次测试授权", code=40340)
+        _require_remote_target_authorization(payload, server_approval_required=require_remote_target_approval)
         pin_public_http_url(remote_url, require_https=True)
 
     remote_only = bool(remote_url and mode == "blackbox")
@@ -3485,13 +3692,15 @@ def _create_environment_locked(
     if db_type not in {"none", "sqlite", "mysql"}:
         raise ValidationError("沙箱数据库类型不受支持", code=40001)
     source_revision_id = payload.get("source_revision_id")
+    source_revision_snapshot: dict[str, Any] | None = None
     if source_revision_id:
-        archive = project_source_revision_service.get_revision_archive(
+        source_revision_snapshot = project_source_revision_service.get_revision_archive_snapshot(
             db,
             actor,
             int(source_revision_id),
             project_id,
         )
+        archive = source_revision_snapshot["archive"]
     else:
         archive, archive_filename = project_source_service.build_source_archive(db, actor, project_id)
     if source_revision_id:
@@ -3523,6 +3732,17 @@ def _create_environment_locked(
     requested_ttl = int(payload.get("ttl_hours") or settings.sandbox_default_ttl_hours)
     ttl_hours = max(1, min(requested_ttl, settings.sandbox_max_ttl_hours))
     public_id = f"sbx_{uuid.uuid4().hex[:24]}"
+    remote_target_approval_id = None
+    if remote_url and require_remote_target_approval:
+        remote_target_approval_id = _consume_remote_target_authorization(
+            db,
+            actor,
+            approval_token=str(payload.get("remote_target_approval_token") or ""),
+            project_id=project_id,
+            remote_target_url=remote_url,
+            test_mode=mode,
+            sandbox_public_id=public_id,
+        )
     agent_code = "sandbox_deployer" if purpose == "deploy" else "test_verifier"
     execution_token = uuid.uuid4().hex
     environment = SandboxEnvironment(
@@ -3560,6 +3780,11 @@ def _create_environment_locked(
                 "language_source": "project" if project_language else "request",
                 "db_type": db_type,
                 "source_revision_id": int(source_revision_id) if source_revision_id else None,
+                "remote_target_approval_id": remote_target_approval_id,
+                "source_revision_no": source_revision_snapshot["revision_no"] if source_revision_snapshot else None,
+                "source_revision_sha256": source_revision_snapshot["source_sha256"] if source_revision_snapshot else None,
+                "source_revision_parent_sha256": source_revision_snapshot["parent_sha256"] if source_revision_snapshot else None,
+                "syntax_repair_revisions": [],
                 "source_archive_filename": worker_archive_filename,
                 "original_source_sha256": original_source_sha256,
                 "decompilation": decompilation_plan,
@@ -3579,7 +3804,7 @@ def _create_environment_locked(
             }
         ),
         remote_target_url=remote_url or None,
-        remote_target_authorized_at=_utcnow() if remote_url else None,
+        remote_target_authorized_at=_utcnow() if remote_url and (remote_target_approval_id or payload.get("remote_target_authorized")) else None,
         expires_at=_utcnow() + timedelta(hours=ttl_hours),
     )
     db.add(environment)
@@ -3597,7 +3822,17 @@ def _create_environment_locked(
             resource_id=public_id,
             metadata={"attempt": agent_team_context["attempt"], "purpose": purpose},
         )
-    _append_event(db, environment, "dispatch", "authorization", f"{agent_code} 已校验项目权限和测试边界")
+    _append_event(
+        db,
+        environment,
+        "dispatch",
+        "authorization",
+        f"{agent_code} 已校验项目权限和测试边界",
+        {
+            "remote_target_approval_id": remote_target_approval_id,
+            "remote_target_authorized": bool(remote_url and remote_target_approval_id),
+        },
+    )
     if language != requested_language:
         _append_event(
             db,
@@ -3729,6 +3964,8 @@ def _syntax_repair_round(
     environment: Any,
     source_archive_base64: str,
     lint_errors: list[dict[str, Any]],
+    *,
+    parent_source_sha256: str | None = None,
 ) -> dict[str, Any] | None:
     """对白盒 php -l 报错文件调用修复 Agent,返回写回修复后的新 zip。
 
@@ -3792,7 +4029,7 @@ def _syntax_repair_round(
                     data = repaired[info.filename].encode("utf-8")
                 zout.writestr(info, data)
         new_source = base64.b64encode(buf.getvalue()).decode("ascii")
-        # 修复后的源码作为项目副本持久化,下次审计可选用
+        # 修复后的源码作为不可变项目副本持久化;执行快照须可回指到该副本。
         try:
             saved = project_source_revision_service.save_revision(
                 db,
@@ -3800,23 +4037,60 @@ def _syntax_repair_round(
                 owner_id=environment.owner_id,
                 repaired_source_base64=new_source,
                 repaired_files=sorted(repaired),
-                parent_sha256=environment.source_sha256,
+                parent_sha256=parent_source_sha256 or environment.source_sha256,
                 repair_notes=f"沙箱语法修复第{len(lint_errors)}处错误,修复{len(repaired)}文件",
             )
-            saved_note = f", 已保存为项目源码副本 rev#{saved.revision_no}" if saved else ""
-        except Exception as exc:  # noqa: BLE001 - 副本保存失败不影响修复流程
-            saved_note = f", 副本保存失败: {str(exc)[:80]}"
+            if saved is None:
+                raise RuntimeError("源码副本保存服务未返回可核验版本")
+            repaired_bytes = base64.b64decode(new_source, validate=True)
+            revision_archive = project_source_revision_service._strip_internal_members(repaired_bytes)
+            revision_sha256 = hashlib.sha256(revision_archive).hexdigest()
+            if (
+                not hmac.compare_digest(revision_sha256, str(saved.source_sha256 or ""))
+                or not hmac.compare_digest(hashlib.sha256(bytes(saved.archive_blob)).hexdigest(), revision_sha256)
+            ):
+                raise RuntimeError("修复副本与待重跑源码内容不一致")
+            execution_sha256 = hashlib.sha256(repaired_bytes).hexdigest()
+            revision_metadata = {
+                "revision_id": int(saved.id),
+                "revision_no": int(saved.revision_no),
+                "parent_source_sha256": parent_source_sha256 or environment.source_sha256,
+                "revision_source_sha256": revision_sha256,
+                "execution_source_sha256": execution_sha256,
+                "repaired_files": sorted(repaired),
+            }
+            saved_note = f", 已保存为项目源码副本 rev#{saved.revision_no} ({revision_sha256[:12]})"
+        except Exception as exc:  # noqa: BLE001 - 无法固化并校验的修复版本不得重跑
             db.rollback()
+            environment = db.get(SandboxEnvironment, environment.id) or environment
+            _append_event(
+                db,
+                environment,
+                "failed",
+                "syntax_repair",
+                f"修复副本未能通过完整性校验，已阻止重跑: {str(exc)[:100]}",
+                {"repaired_files": sorted(repaired), "round_errors": len(lint_errors)},
+            )
+            db.commit()
+            return None
         _append_event(
             db,
             environment,
             "progress",
             "syntax_repair",
             f"后端语法修复 Agent 已修复 {len(repaired)} 个文件({', '.join(sorted(repaired)[:8])}){saved_note}",
-            {"repaired_files": sorted(repaired), "round_errors": len(lint_errors)},
+            {
+                "repaired_files": sorted(repaired),
+                "round_errors": len(lint_errors),
+                "repair_revision": revision_metadata,
+            },
         )
         db.commit()
-        return {"source": new_source, "files": sorted(repaired)}
+        return {
+            "source": new_source,
+            "files": sorted(repaired),
+            "repair_revision": revision_metadata,
+        }
     except Exception as exc:  # noqa: BLE001 - 修复失败不阻断原测试链
         _append_event(db, environment, "progress", "syntax_repair", f"语法修复异常: {str(exc)[:120]}")
         db.commit()
@@ -3973,6 +4247,7 @@ def _execute_environment(
         effective_source = source_archive_base64
         effective_sha = environment.source_sha256
         repair_round = 0
+        worker_receipt: dict[str, str] | None = None
         expected_agent_tests: set[str] = set()
         if getattr(environment, "execution_archive_blob", None) is not None:
             execution_bytes = bytes(environment.execution_archive_blob)
@@ -4059,6 +4334,9 @@ def _execute_environment(
                     "test_mode": worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox",
                     "db_type": sandbox_db_type,
                     "source_sha256": effective_sha,
+                    "source_revision_id": config.get("source_revision_id"),
+                    "source_revision_sha256": config.get("source_revision_sha256"),
+                    "repair_round": repair_round,
                     "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
                     "image_digest": environment.image_digest or "",
                 }
@@ -4111,6 +4389,11 @@ def _execute_environment(
                     if isinstance(execute_response.get("result"), dict)
                     else execute_response
                 )
+                worker_receipt = _validate_worker_execution_receipt(
+                    result,
+                    request_id=worker_request_id,
+                    source_sha256=effective_sha,
+                )
                 last_sequence = 0
                 configured_policy = _loads(environment.resource_policy_json, {})
                 deadline = time.monotonic() + int(configured_policy.get("timeout_seconds") or 600) + 180
@@ -4142,6 +4425,11 @@ def _execute_environment(
                         if isinstance(status_response.get("result"), dict)
                         else status_response
                     )
+                    worker_receipt = _validate_worker_execution_receipt(
+                        result,
+                        request_id=worker_request_id,
+                        source_sha256=effective_sha,
+                    )
                     persist_worker_events(result)
                     _commit_execution(db, environment_id, execution_token)
                 environment = db.get(SandboxEnvironment, environment_id)
@@ -4163,13 +4451,30 @@ def _execute_environment(
                     log_text = str((wlogs or {}).get("text") or "")
                     lint_errors = collect_php_lint_errors(log_text)
                     if lint_errors:
-                        repaired = _syntax_repair_round(db, environment, effective_source, lint_errors)
+                        repaired = _syntax_repair_round(
+                            db,
+                            environment,
+                            effective_source,
+                            lint_errors,
+                            parent_source_sha256=effective_sha,
+                        )
                         if repaired:
                             effective_source = repaired["source"]
                             effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
+                            revision = repaired.get("repair_revision")
+                            if not isinstance(revision, dict) or not hmac.compare_digest(
+                                str(revision.get("execution_source_sha256") or ""),
+                                effective_sha,
+                            ):
+                                raise RuntimeError("修复副本执行哈希与下一轮 Worker 输入不一致")
                             repair_round += 1
                             next_request_id = f"{environment.public_id}-r{repair_round}"
-                            next_config_json = _worker_request_config_json(environment, next_request_id)
+                            next_config_json = _append_repair_revision_to_config(
+                                _worker_request_config_json(environment, next_request_id),
+                                revision=revision,
+                                repair_round=repair_round,
+                                worker_request_id=next_request_id,
+                            )
                             next_request = {
                                 "request_id": next_request_id,
                                 "purpose": environment.purpose,
@@ -4181,6 +4486,10 @@ def _execute_environment(
                                 ),
                                 "db_type": sandbox_db_type,
                                 "source_sha256": effective_sha,
+                                "source_revision_id": revision.get("revision_id"),
+                                "source_revision_sha256": revision.get("revision_source_sha256"),
+                                "repair_revision_id": revision.get("revision_id"),
+                                "repair_round": repair_round,
                                 "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
                                 "image_digest": environment.image_digest or "",
                             }
@@ -4374,6 +4683,7 @@ def _execute_environment(
             "summary": summary,
             "evidence": evidence,
             "agent_code": environment.agent_code,
+            "source_provenance": _source_provenance(environment, worker_receipt),
         }
         if agent_tests_result is not None:
             conclusion["agent_tests"] = agent_tests_result
@@ -4567,8 +4877,15 @@ def environment_to_dict(db: Session, row: SandboxEnvironment) -> dict[str, Any]:
         "runtime": row.runtime,
         "source_sha256": row.source_sha256,
         "source_revision_id": env_config.get("source_revision_id"),
+        "source_revision_no": env_config.get("source_revision_no"),
+        "source_revision_sha256": env_config.get("source_revision_sha256"),
+        "execution_source_sha256": row.execution_source_sha256,
+        "execution_round": row.execution_round,
+        "worker_request_id": _loads(row.worker_request_json, {}).get("request_id"),
+        "syntax_repair_revisions": env_config.get("syntax_repair_revisions", []),
         "preview_path": row.preview_path,
         "remote_target_url": row.remote_target_url,
+        "remote_target_approval_id": env_config.get("remote_target_approval_id"),
         "expires_at": row.expires_at,
         "started_at": row.started_at,
         "stopped_at": row.stopped_at,

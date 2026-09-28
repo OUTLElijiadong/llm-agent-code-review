@@ -154,7 +154,7 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     { mode: 'overview', cells: [[0, 1, '治理']] },
     { mode: 'approvals', cells: [[0, 1, '审查编排'], [0, 2, '读取知识']] },
     { mode: 'tools', cells: [
-      [0, 0, '贾维斯(全局运维)'], [0, 1, '命令执行'], [0, 2, '升级审批'], [0, 3, '高风险'],
+      [0, 0, '小菱管理权限策略(兼容)'], [0, 1, '命令执行'], [0, 2, '升级审批'], [0, 3, '高风险'],
       [1, 0, '审查编排'], [1, 1, '读取知识'], [1, 2, '读取知识'], [1, 3, '允许'], [1, 4, '成功'], [1, 5, '低风险'],
     ] },
     { mode: 'knowledge', cells: [[0, 0, '内联'], [1, 1, '长期记忆'], [2, 1, '手动录入'], [2, 3, '生效']] },
@@ -169,9 +169,9 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     for (const cell of wrapper.findAll('tbody td')) expect(cell.text()).not.toMatch(/\{\s*\w+\([^{}]*\)\s*\}/)
   })
 
-  it('renders all 35 agent cards using the existing eight category labels', async () => {
+  it('renders all 35 agent cards without presenting the meta category as a second main agent', async () => {
     const categories = [
-      ['meta', '主控'], ['frontline', '前台'], ['governance', '治理'], ['operations', '运维'],
+      ['meta', '系统支撑'], ['frontline', '前台'], ['governance', '治理'], ['operations', '运维'],
       ['security', '安全'], ['knowledge', '知识'], ['quality', '质量'], ['general', '通用'],
     ]
     api.listGovernanceAgents.mockResolvedValue(Array.from({ length: 35 }, (_, index) => ({

@@ -291,6 +291,9 @@ def decide_item(
         if not is_admin_user(db, admin.id):
             raise ForbiddenError("仅管理员可处理 Agent 发布审批", code=40300)
         agent_studio_service.assert_release_approval_target(db, item)
+        request = agent_studio_service._load(item.request_json, {})
+        if int(request.get("owner_id") or 0) == int(admin.id):
+            raise ForbiddenError("Agent 发布审批必须由非申请人管理员处理", code=40300)
     if not _can_access(db, admin, item):
         raise ForbiddenError("无权处理该审批；私人会话仅限本人，服务器操作仅限超级管理员", code=40322)
     if item.status in ("approved", "rejected", "auto_approved"):

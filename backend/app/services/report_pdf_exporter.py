@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
@@ -48,6 +49,15 @@ _SEVERITY_ORDER: Tuple[str, ...] = ("严重", "高", "中", "低")
 
 # 字体是否已注册的标志(避免重复注册)
 _font_registered: bool = False
+
+
+def _code_markup(text: str) -> str:
+    """代码中的中文显式使用 CID 字体，西文保留 Courier 等宽布局。"""
+    return re.sub(
+        r"[^\x00-\x7f]+",
+        lambda match: f'<font name="{_CHINESE_FONT_NAME}">{match.group(0)}</font>',
+        text,
+    )
 
 
 # ============ 内部辅助 ============
@@ -314,7 +324,7 @@ def _build_score_breakdown_elements(
         table_data.append([
             Paragraph(escape(str(label)), styles["normal"]),
             Paragraph(
-                escape(str(value)).replace("\n", "<br/>") or "-",
+                _code_markup(escape(str(value)).replace("\n", "<br/>")) or "-",
                 styles["code"] if code_value else styles["normal"],
             ),
         ])
@@ -375,7 +385,7 @@ def _build_decompilation_evidence_elements(
     for label, value in rows:
         table_data.append([
             Paragraph(escape(str(label)), styles["normal"]),
-            Paragraph(escape(str(value)), styles["code"]),
+            Paragraph(_code_markup(escape(str(value))), styles["code"]),
         ])
     table = Table(table_data, colWidths=[38 * mm, 132 * mm], repeatRows=1)
     table.setStyle(TableStyle([
@@ -445,13 +455,13 @@ def _build_issue_section(
         cvss_parts.append(f"source={issue.get('cvss_source')}")
     if cvss_parts:
         elements.append(Paragraph("<b>CVSS:</b>", styles["normal"]))
-        elements.append(Paragraph(escape(" | ".join(cvss_parts)), styles["code"]))
+        elements.append(Paragraph(_code_markup(escape(" | ".join(cvss_parts))), styles["code"]))
 
     source_parts = [f"source={issue.get('source') or '-'}"]
     source_parts.append(f"confirmation_count={issue.get('confirmation_count') or 0}")
     source_parts.append(f"fingerprint={issue.get('finding_fingerprint') or '-'}")
     elements.append(Paragraph("<b>来源与确认:</b>", styles["normal"]))
-    elements.append(Paragraph(escape(" | ".join(source_parts)), styles["code"]))
+    elements.append(Paragraph(_code_markup(escape(" | ".join(source_parts))), styles["code"]))
     source_details = issue.get("source_details")
     if source_details:
         details_text = json.dumps(source_details, ensure_ascii=False, default=str)
@@ -467,14 +477,14 @@ def _build_issue_section(
         trust_parts.append(f"conflict={issue.get('conflict_status') or '-'}")
         trust_parts.append(f"human_review={issue.get('human_review_status') or '-'}")
         elements.append(Paragraph("<b>可信聚合:</b>", styles["normal"]))
-        elements.append(Paragraph(escape(" | ".join(trust_parts)), styles["code"]))
+        elements.append(Paragraph(_code_markup(escape(" | ".join(trust_parts))), styles["code"]))
 
     status_parts = [f"status={issue.get('status') or '-'}"]
     status_parts.append(f"handled_by={issue.get('handled_by') or '-'}")
     status_parts.append(f"handled_at={issue.get('handled_at') or '-'}")
     status_parts.append(f"updated_at={issue.get('update_time') or '-'}")
     elements.append(Paragraph("<b>处理状态:</b>", styles["normal"]))
-    elements.append(Paragraph(escape(" | ".join(status_parts)), styles["code"]))
+    elements.append(Paragraph(_code_markup(escape(" | ".join(status_parts))), styles["code"]))
 
     # 问题描述
     description = escape(str(issue.get("description") or ""))
@@ -483,9 +493,9 @@ def _build_issue_section(
 
     evidence = issue.get("evidence") or ""
     if evidence:
-        evidence_text = escape(str(evidence)).replace("\n", "<br/>")
+        evidence_text = escape(str(evidence).expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
         elements.append(Paragraph("<b>证据:</b>", styles["normal"]))
-        elements.append(Paragraph(evidence_text, styles["code"]))
+        elements.append(Paragraph(_code_markup(evidence_text), styles["code"]))
 
     exploit_scenario = escape(str(issue.get("exploit_scenario") or ""))
     if exploit_scenario:
@@ -510,9 +520,9 @@ def _build_issue_section(
     fixed_code = issue.get("fixed_code") or ""
     if fixed_code:
         # 转义 HTML 特殊字符并保留换行
-        code_escaped = escape(str(fixed_code)).replace("\n", "<br/>")
+        code_escaped = escape(str(fixed_code).expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
         elements.append(Paragraph("<b>修复代码:</b>", styles["normal"]))
-        elements.append(Paragraph(code_escaped, styles["code"]))
+        elements.append(Paragraph(_code_markup(code_escaped), styles["code"]))
 
     references = issue.get("references_json") or []
     if not isinstance(references, (list, tuple)):
@@ -521,7 +531,7 @@ def _build_issue_section(
         elements.append(Paragraph("<b>参考:</b>", styles["normal"]))
         for reference in references:
             if reference:
-                elements.append(Paragraph(escape(str(reference)), styles["code"]))
+                elements.append(Paragraph(_code_markup(escape(str(reference))), styles["code"]))
 
     elements.append(Spacer(1, 4 * mm))
     return elements
@@ -620,6 +630,10 @@ def export_to_pdf(
 
     # 1. 报告头
     elements.extend(_build_header_elements(task_info, context.get("score", score), styles))
+
+    elements.append(Paragraph("审查范围与版本", styles["heading"]))
+    for line in context["scope_lines"]:
+        elements.append(Paragraph(escape(line), styles["normal"]))
 
     # 2. 总体评价
     summary_text = context.get("summary") or ""

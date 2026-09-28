@@ -23,6 +23,7 @@ from app.agents.rule_agent import RuleManagerAgent
 from app.agents.sandbox_agents import SandboxDeployerAgent, TestVerifierAgent
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
 from app.agents.tool_contracts import (
+    FIXED_DOMAIN_TOOL_PERMISSIONS,
     FixedToolArgumentError,
     fixed_tool_accepts_ctx,
     is_fixed_tool,
@@ -45,7 +46,7 @@ from app.utils.api_resolver import ApiConfig, resolve_api_config
 
 
 class Orchestrator(BaseAgent):
-    """主调度 Agent — 宏观调控层
+    """内部调度引擎 — 为唯一主控小菱执行请求级工具与任务图
 
     管理全部专业 Agent(含 v3.0 新增的自进化代理), 注入 DB 依赖,
     通过 ChatAgent 统一入口接收用户指令。
@@ -55,7 +56,7 @@ class Orchestrator(BaseAgent):
     """
 
     name = "orchestrator"
-    description = "主调度 Agent, 协调所有子 Agent 完成全平台功能"
+    description = "小菱的内部调度引擎，执行已授权工具与任务图；不是独立对话主控"
     icon = "orchestrator"
     color = "#5B58E8"
     category = "meta"
@@ -115,7 +116,7 @@ class Orchestrator(BaseAgent):
         self.operations_agent = OperationsAgent()
 
         self.chat_agent = ChatAssistantAgent()
-        # 小菱人格(chat_assistant)与总调度者共用 orchestrator pro;子 Agent 保持 flash 默认。
+        # 两个会话 surface 共用小菱主控身份；调度引擎与子 Agent 分别按角色配置模型。
         self.chat_agent._model = settings.deepseek_orchestrator_model
         self.chat_agent.set_orchestrator(self)
 
@@ -258,12 +259,27 @@ class Orchestrator(BaseAgent):
         kw.pop("ctx", None)
         return self.code_reviewer.execute(*args, **kw)
 
+    def _require_domain_tool_permission(self, tool_name: str) -> Optional[AgentResult]:
+        """在直接方法边界验权，覆盖 Planner、Clarify 和 Responses 调用。"""
+        permission = FIXED_DOMAIN_TOOL_PERMISSIONS[tool_name]
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if not check_permission(self._db, self._user.id, permission):
+            return AgentResult(
+                success=False, error=f"当前用户缺少 {permission} 权限", failure_kind="permission_denied",
+            )
+        return None
+
     def create_project(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("create_project"):
+            return denied
         if disabled := self._disabled_result("project_manager"):
             return disabled
         return self.project_mgr.create_project(*args, **kw)
 
     def list_projects(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_projects"):
+            return denied
         if disabled := self._disabled_result("project_manager"):
             return disabled
         return self.project_mgr.list_projects(*args, **kw)
@@ -271,10 +287,8 @@ class Orchestrator(BaseAgent):
     def get_project_detail(self, project_id: int,
                            ctx: Optional[AgentContext] = None) -> AgentResult:
         """返回项目完整详情(含源码修复副本 source_revisions,供选用副本跑沙箱)。"""
-        if self._db is None or self._user is None:
-            return AgentResult(success=False, error="DB 或用户上下文未注入")
-        if not check_permission(self._db, self._user.id, PermissionCode.PROJECT_VIEW):
-            return AgentResult(success=False, error="当前用户没有 project:view 权限")
+        if denied := self._require_domain_tool_permission("get_project_detail"):
+            return denied
         try:
             data = project_service.get_project(self._db, self._user, project_id)
             return AgentResult(success=True, data=data)
@@ -282,6 +296,8 @@ class Orchestrator(BaseAgent):
             return AgentResult(success=False, error=str(exc))
 
     def delete_project(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("delete_project"):
+            return denied
         if disabled := self._disabled_result("project_manager"):
             return disabled
         return self.project_mgr.delete_project(*args, **kw)
@@ -291,8 +307,8 @@ class Orchestrator(BaseAgent):
                        status: Optional[str] = None,
                        ctx: Optional[AgentContext] = None) -> AgentResult:
         """通过当前请求用户更新项目元数据。"""
-        if self._db is None or self._user is None:
-            return AgentResult(success=False, error="DB 或用户上下文未注入")
+        if denied := self._require_domain_tool_permission("update_project"):
+            return denied
         if rbac_service.is_admin_user(self._db, int(self._user.id)):
             from app.models.project import Project as _Project
             target = self._db.get(_Project, project_id)
@@ -444,6 +460,8 @@ class Orchestrator(BaseAgent):
             AgentResult: 成功时返回下游任务结果；无数据库、无 active 文件或
             查询异常时返回安全失败且不调用下游。
         """
+        if denied := self._require_domain_tool_permission("start_review"):
+            return denied
         if disabled := self._disabled_result("review_orchestrator"):
             return disabled
         resolved_file_ids = list(file_ids or [])
@@ -468,16 +486,22 @@ class Orchestrator(BaseAgent):
         )
 
     def list_review_tasks(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_review_tasks"):
+            return denied
         if disabled := self._disabled_result("review_orchestrator"):
             return disabled
         return self.review_orch.list_tasks(*args, **kw)
 
     def list_review_issues(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_review_issues"):
+            return denied
         if disabled := self._disabled_result("review_orchestrator"):
             return disabled
         return self.review_orch.list_issues(*args, **kw)
 
     def list_code_files(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_code_files"):
+            return denied
         if disabled := self._disabled_result("code_file_manager"):
             return disabled
         return self.file_mgr.list_files(*args, **kw)
@@ -488,11 +512,15 @@ class Orchestrator(BaseAgent):
         return self.dashboard_agent.summary(*args, **kw)
 
     def list_rules(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_rules"):
+            return denied
         if disabled := self._disabled_result("rule_manager"):
             return disabled
         return self.rule_mgr.list_rules(*args, **kw)
 
     def list_reports(self, *args, **kw) -> AgentResult:
+        if denied := self._require_domain_tool_permission("list_reports"):
+            return denied
         if disabled := self._disabled_result("reporter"):
             return disabled
         return self.reporter.list_reports(*args, **kw)
@@ -833,11 +861,14 @@ class Orchestrator(BaseAgent):
             from app.services import agent_mesh_service
 
             message_context = dict(context or {})
-            message_context["run_id"] = str(message_context.get("run_id") or extra.get("run_id") or "")
+            # 当前模型运行的身份字段由服务端 AgentContext 决定，不能由模型参数
+            # 改写；监督链的限额与结果关联依赖稳定的 run_id/trace_id。
+            message_context["run_id"] = str(extra.get("run_id") or message_context.get("run_id") or "")
+            effective_trace_id = str(extra.get("trace_id") or trace_id or "")
             message = AgentMeshMessageIn.model_validate({
                 "schema_version": schema_version,
                 "idempotency_key": idempotency_key,
-                "trace_id": trace_id or str(extra.get("trace_id") or ""),
+                "trace_id": effective_trace_id,
                 "correlation_id": correlation_id,
                 "causation_id": causation_id,
                 "sent_from": "",
@@ -857,6 +888,7 @@ class Orchestrator(BaseAgent):
                 surface=surface,
                 session_key=session_key,
                 message=message,
+                trusted_source=True,
             )
             return AgentResult(success=True, data=data)
         except Exception as exc:
@@ -899,7 +931,19 @@ class Orchestrator(BaseAgent):
                 "deadline_at": deadline_at,
                 "trace_id": str(extra.get("trace_id") or ""),
             })
-            return AgentResult(success=True, data=agent_team_service.create_team(self._db, self._user, payload))
+            return AgentResult(
+                success=True,
+                data=agent_team_service.create_team_from_xiaoling(
+                    self._db,
+                    self._user,
+                    payload,
+                    supervisor_plan_sha256=str(extra.get("supervisor_plan_sha256") or ""),
+                    supervisor_confirmed_by=(
+                        int(extra["supervisor_confirmed_by"])
+                        if extra.get("supervisor_confirmed_by") is not None else None
+                    ),
+                ),
+            )
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
 

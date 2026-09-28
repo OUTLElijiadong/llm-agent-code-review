@@ -34,7 +34,7 @@ def test_xiaoling_can_pass_json_rules_to_published_agent(db, admin_user, monkeyp
             pass
 
         def call_raw(self, **kwargs):
-            prompts.append(kwargs["user_prompt"])
+            prompts.append(f"{kwargs['system_prompt']}\n{kwargs['user_prompt']}")
             return '{"summary":"已检查鉴权边界","score":100,"issues":[]}', {}
 
         def log_deferred(self, *_args, **_kwargs):
@@ -61,6 +61,8 @@ def test_xiaoling_can_pass_json_rules_to_published_agent(db, admin_user, monkeyp
     assert result["summary"] == "已检查鉴权边界"
     assert "跨账号鉴权" in prompts[0]
     assert "验证对象所属账号再读取记录" in prompts[0]
+    assert "evidence 必须逐字来自当前源码分片" in prompts[0]
+    assert "证据不足、路径未闭合" in prompts[0]
 
 
 def test_published_agent_retries_truncated_response_with_review_budget(db, admin_user, monkeypatch):

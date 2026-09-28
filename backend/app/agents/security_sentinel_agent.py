@@ -61,7 +61,7 @@ SYSTEM_PROMPT = (
     "1. 严格 JSON 输出,字段见用户消息中的 schema\n"
     "2. 每条 finding 必须给出 owasp 和 cwe 编号(无法判断时填空字符串)\n"
     "3. severity 仅取 严重 / 高 / 中 / 低\n"
-    "4. 不臆造漏洞;不确定时 confidence < 0.6 并明确标注\n"
+    "4. 不臆造漏洞;证据或触发路径不充分时从 findings 中省略,并在范围说明中记录未验证边界\n"
     "5. 不输出风格、命名、注释类问题(那是 code_reviewer 的领域)\n"
 )
 
@@ -1314,9 +1314,9 @@ class SecuritySentinelAgent(BaseAgent):
         })
         summary = (
             f"项目「{project.project_name}」白盒审计静态覆盖 {len(static_files)}/{len(files)} 个文件,"
-            f"发现 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
+            f"未被证伪候选 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
             f"{sev_counts['中']} 处中危 / {sev_counts['低']} 处低危。"
-            f"风险评分 {risk_score}/100。"
+            f"安全评分 {risk_score}/100（越高越安全）。"
         )
 
         result_data = {
@@ -1817,9 +1817,9 @@ class SecuritySentinelAgent(BaseAgent):
             f"全量项目扫描完成:可见项目 {len(projects)} 个,成功扫描 {scanned_projects} 个,"
             f"跳过 {skipped_projects} 个,累计扫描文件 {total_files} 个;"
             f"识别接口 {endpoint_total_count} 个,代码联动关系 {code_link_total_count} 条;"
-            f"发现 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
+            f"未被证伪候选 {sev_counts['严重']} 处严重 / {sev_counts['高']} 处高危 / "
             f"{sev_counts['中']} 处中危 / {sev_counts['低']} 处低危。"
-            f"综合风险评分 {risk_score}/100。"
+            f"综合安全评分 {risk_score}/100（越高越安全）。"
         )
         compliance["scan_complete"] = scan_success
         if project_errors:
@@ -3035,8 +3035,8 @@ class SecuritySentinelAgent(BaseAgent):
                             file_path: str, line_offset: int,
                             context_section: str = "") -> str:
         return (
-            "请对以下代码做系统化网络安全审查,尽量把每一类真实存在的风险都找全,"
-            "宁可多给低置信度线索,也不要漏报。\n\n"
+            "请对以下代码做系统化网络安全审查。仅报告证据充分、触发路径可解释的真实风险；"
+            "证据不足时宁可不报，不以覆盖率为由猜测或补造发现。\n\n"
             + owasp_prompt_context()
             + "逐项排查：访问控制与 SSRF、配置、依赖与构建供应链、加密、注入、业务设计、"
             "认证与会话、反序列化与制品完整性、日志与告警、错误处理与失败放行。"
@@ -3066,7 +3066,8 @@ class SecuritySentinelAgent(BaseAgent):
             "- 每条 finding 必须给出 line_start 和 evidence:它们是「漏洞点」的定位依据,缺一不可;"
             "evidence 必须是下方代码里真实出现的原文,便于交叉校验行号。\n"
             "- 不报告代码风格/命名/注释类问题(那是 code_reviewer 的活)\n"
-            "- 不臆造漏洞;不确定的把 confidence 标到 0.6 以下,但仍要给出 line_start 与 evidence\n"
+            "- 不臆造漏洞;confidence 低于 0.6 或触发路径不能由当前代码支持时不要输出 finding\n"
+            "- evidence 必须逐字来自当前代码，行号须能对应 evidence；无法核对的 finding 必须省略\n"
             "- 行号是当前代码块的相对行号(后端会自动加偏移)\n"
             "- 输出纯 JSON,不要 markdown 围栏,不要解释\n\n"
             f"## 代码信息\n"
@@ -3225,7 +3226,9 @@ class SecuritySentinelAgent(BaseAgent):
         severity = raw.get("severity") or "中"
         if severity not in _ALLOWED_SEVERITY:
             severity = "中"
-        evidence = str(raw.get("evidence") or "")[:500]
+        # 这些字段还会送入对抗复核；标准化不能裁掉可能推翻结论的尾部。
+        # 复核阶段负责检查完整输入预算，超限显式失败而不是改写证据。
+        evidence = str(raw.get("evidence") or "")
         line_start = self._coerce_int(raw.get("line_start"), 0)
         line_end = self._coerce_int(raw.get("line_end"), 0)
         # 兜底:模型漏给行号时,用 evidence 在代码块里定位,relative → +offset
@@ -3268,7 +3271,7 @@ class SecuritySentinelAgent(BaseAgent):
             "column_end": column_end if column_end >= 0 else None,
             "source_anchor": source_anchor,
             "evidence": evidence,
-            "exploit_scenario": str(raw.get("exploit_scenario") or "")[:1_000],
+            "exploit_scenario": str(raw.get("exploit_scenario") or ""),
             "fix_suggestion": str(raw.get("fix_suggestion") or "")[:1_000],
             "references": [str(r)[:500] for r in (raw.get("references") or []) if r][:5],
             "confidence": confidence,
@@ -3700,7 +3703,7 @@ class SecuritySentinelAgent(BaseAgent):
             return f"文件 {file.file_name} 未发现明显安全风险。"
         counts = self._severity_counts(findings)
         return (
-            f"文件 {file.file_name} 共发现 {len(findings)} 处安全问题:"
+            f"文件 {file.file_name} 未被证伪候选 {len(findings)} 处:"
             f"严重 {counts['严重']} · 高 {counts['高']} · "
             f"中 {counts['中']} · 低 {counts['低']}。"
         )

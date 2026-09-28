@@ -609,16 +609,23 @@ def _budget_blocked_result(
     skill_name: str,
     snapshot: Any,
 ) -> Dict[str, Any]:
+    usage_unknown = snapshot.unknown_usage_calls > 0
     return {
         "success": False,
         "skipped": True,
         "budget_blocked": True,
-        "reason": "daily_token_budget_exhausted",
-        "error": f"Agent {agent_name} 当日自动任务 token 预算已用尽",
+        "reason": "daily_token_usage_unknown" if usage_unknown else "daily_token_budget_exhausted",
+        "error": (
+            f"Agent {agent_name} 今日有 {snapshot.unknown_usage_calls} 条模型调用缺少完整 token 用量，"
+            "自动任务已暂停，需先核对用量"
+            if usage_unknown
+            else f"Agent {agent_name} 当日自动任务 token 预算已用尽"
+        ),
         "agent_name": agent_name,
         "skill_name": skill_name,
         "used_tokens": snapshot.used_tokens,
         "budget_tokens": snapshot.budget_tokens,
+        "unknown_usage_calls": snapshot.unknown_usage_calls,
     }
 
 
@@ -1095,10 +1102,18 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         except agent_cost_budget_service.AutomaticTokenBudgetExceeded as exc:
             summary["diagnosis_skipped"] = True
             summary["diagnosis_budget_blocked"] = True
-            summary["diagnosis"] = "当日自动运维 token 预算已用尽，已跳过模型诊断。"
+            if exc.snapshot.unknown_usage_calls:
+                summary["diagnosis"] = (
+                    f"今日有 {exc.snapshot.unknown_usage_calls} 条模型调用缺少完整 token 用量，"
+                    "预算无法核实，已跳过自动模型诊断。"
+                )
+                summary["diagnosis_usage_unknown_calls"] = exc.snapshot.unknown_usage_calls
+            else:
+                summary["diagnosis"] = "当日自动运维 token 预算已用尽，已跳过模型诊断。"
             summary["diagnosis_budget"] = {
                 "used_tokens": exc.snapshot.used_tokens,
                 "budget_tokens": exc.snapshot.budget_tokens,
+                "unknown_usage_calls": exc.snapshot.unknown_usage_calls,
             }
         except agent_cost_budget_service.AutomaticBudgetLockUnavailable as exc:
             summary["diagnosis_skipped"] = True

@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import stat
 import tarfile
 import unicodedata
 import zipfile
@@ -77,10 +78,13 @@ class _ZipEntry:
     def __init__(self, info: zipfile.ZipInfo, archive: zipfile.ZipFile) -> None:
         self._info = info
         self._archive = archive
-        self.isdir = info.is_dir()
-        self.isfile = not info.is_dir()
+        # Unix ZIP 将文件类型放在 external_attr 高 16 位；不能把链接或
+        # FIFO/设备节点误当作普通源码成员。
+        unix_type = stat.S_IFMT(info.external_attr >> 16) if info.create_system == 3 else 0
+        self.isdir = unix_type == stat.S_IFDIR or (info.is_dir() and unix_type == 0)
+        self.isfile = not self.isdir and unix_type in (0, stat.S_IFREG)
         self.isreg = self.isfile
-        self.issym = False
+        self.issym = unix_type == stat.S_IFLNK
         self.islnk = False
         self.linkpath = None
         self.pathname = info.filename

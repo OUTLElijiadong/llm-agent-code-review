@@ -23,6 +23,7 @@ class DailyTokenBudgetSnapshot:
     agent_code: str
     budget_tokens: int
     used_tokens: int
+    unknown_usage_calls: int = 0
 
     @property
     def remaining_tokens(self) -> Optional[int]:
@@ -34,16 +35,27 @@ class DailyTokenBudgetSnapshot:
     def exceeded(self) -> bool:
         return self.budget_tokens > 0 and self.used_tokens >= self.budget_tokens
 
+    @property
+    def blocked(self) -> bool:
+        return self.budget_tokens > 0 and (self.exceeded or self.unknown_usage_calls > 0)
+
 
 class AutomaticTokenBudgetExceeded(RuntimeError):
     """Raised before unattended work when the Agent has spent its daily budget."""
 
     def __init__(self, snapshot: DailyTokenBudgetSnapshot) -> None:
         self.snapshot = snapshot
-        super().__init__(
-            f"Agent {snapshot.agent_code} 当日自动任务 token 预算已用尽"
-            f"({snapshot.used_tokens}/{snapshot.budget_tokens})"
-        )
+        if snapshot.unknown_usage_calls:
+            message = (
+                f"Agent {snapshot.agent_code} 今日有 {snapshot.unknown_usage_calls} 条调用缺少完整 token 用量，"
+                f"当前可核算 {snapshot.used_tokens}/{snapshot.budget_tokens}；已暂停后台自动任务，需先核对用量"
+            )
+        else:
+            message = (
+                f"Agent {snapshot.agent_code} 当日自动任务 token 预算已用尽"
+                f"({snapshot.used_tokens}/{snapshot.budget_tokens})"
+            )
+        super().__init__(message)
 
 
 class AutomaticBudgetLockUnavailable(RuntimeError):
@@ -87,6 +99,25 @@ def _usage_tokens(db: Session, agent_code: str, *, now: Optional[datetime]) -> i
     return int(value or 0)
 
 
+def _unknown_usage_calls(db: Session, agent_code: str, *, now: Optional[datetime]) -> int:
+    """Count attempts whose usage cannot be totaled from total or both components."""
+    start, end = _utc_day_bounds(now)
+    incomplete = AiCallLog.total_tokens.is_(None) & (
+        AiCallLog.prompt_tokens.is_(None) | AiCallLog.completion_tokens.is_(None)
+    )
+    value = (
+        db.query(func.count(AiCallLog.id))
+        .filter(
+            AiCallLog.agent_label == agent_code,
+            AiCallLog.create_time >= start,
+            AiCallLog.create_time < end,
+            incomplete,
+        )
+        .scalar()
+    )
+    return int(value or 0)
+
+
 def _snapshot(
     db: Session,
     agent_code: str,
@@ -104,6 +135,7 @@ def _snapshot(
         agent_code=agent_code,
         budget_tokens=max(0, int(profile.budget_tokens_daily or 0)) if profile else 0,
         used_tokens=_usage_tokens(db, agent_code, now=now),
+        unknown_usage_calls=_unknown_usage_calls(db, agent_code, now=now),
     )
 
 
@@ -192,6 +224,6 @@ def guard_automatic_model_call(
             profile=profile,
             now=now,
         )
-        if snapshot.exceeded:
+        if snapshot.blocked:
             raise AutomaticTokenBudgetExceeded(snapshot)
         yield snapshot

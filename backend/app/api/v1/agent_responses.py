@@ -882,7 +882,35 @@ def _public_completed_tool_events(
     )
     events: list[dict[str, Any]] = []
     sequence = 0
-    agent_code = "manager" if run.surface == "admin" else "chat_assistant"
+    from app.models.audit_log import AuditLog
+    from app.services.agent_responses_service import surface_agent_identity
+
+    supervision_by_call: dict[str, dict[str, Any]] = {}
+    try:
+        audit_rows = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.actor_id == int(run.user_id),
+                AuditLog.action == "agent_response_supervisor",
+                AuditLog.target_type == "agent_response_run",
+                AuditLog.target_id == run.run_id,
+            )
+            .order_by(AuditLog.id.asc())
+            .all()
+        )
+        for audit_row in audit_rows:
+            try:
+                detail = json.loads(audit_row.detail or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            call_id = str(detail.get("call_id") or "") if isinstance(detail, Mapping) else ""
+            if call_id:
+                supervision_by_call[call_id] = dict(detail)
+    except Exception:
+        # 恢复显示可以降级；执行时的监督审计已在副作用前强制落库。
+        db.rollback()
+
+    agent_code = surface_agent_identity(run.surface)[0]
     covered_call_ids: set[str] = set()
     for row in rows:
         try:
@@ -892,6 +920,20 @@ def _public_completed_tool_events(
         safe_arguments = redact_agent_event_value(arguments if isinstance(arguments, Mapping) else {})
         sequence += 1
         covered_call_ids.add(str(row.call_id))
+        supervision = supervision_by_call.get(str(row.call_id))
+        if supervision is not None:
+            events.append({
+                "type": "response.supervisor.reviewed",
+                "run_id": run.run_id,
+                "call_id": row.call_id,
+                "tool_name": str(supervision.get("tool_name") or row.tool_name),
+                "decision": str(supervision.get("decision") or "escalate"),
+                "risk_level": str(supervision.get("risk_level") or "high"),
+                "classification": str(supervision.get("classification") or "unclassified"),
+                "reason": str(supervision.get("reason") or "监督复核记录已恢复"),
+                "sequence_number": sequence,
+            })
+            sequence += 1
         events.append(
             {
                 "type": "response.tool.started",
@@ -943,6 +985,24 @@ def _public_completed_tool_events(
                     "sequence_number": sequence,
                 }
             )
+
+    # 监督结论在审批暂停时可能先于执行账本存在；仍要恢复并关联到
+    # transcript 中的待确认调用，不能因为尚未执行就丢失高风险提示。
+    for call_id, supervision in supervision_by_call.items():
+        if call_id in covered_call_ids:
+            continue
+        sequence += 1
+        events.append({
+            "type": "response.supervisor.reviewed",
+            "run_id": run.run_id,
+            "call_id": call_id,
+            "tool_name": str(supervision.get("tool_name") or "未知工具"),
+            "decision": str(supervision.get("decision") or "escalate"),
+            "risk_level": str(supervision.get("risk_level") or "high"),
+            "classification": str(supervision.get("classification") or "unclassified"),
+            "reason": str(supervision.get("reason") or "监督复核记录已恢复"),
+            "sequence_number": sequence,
+        })
 
     # 从模型 transcript 补齐账本尚未覆盖的调用：进行中/未执行完的
     # function_call 只发 started，让前端恢复时能看到“正在调用”的调用链；
@@ -1386,7 +1446,7 @@ async def stream_agent_response(
 
                 try:
                     # 运行级状态广播: Agent 中心工位卡实时显示助手「正在工作」。
-                    # 按 surface 归属身份(管理端=贾维斯/manager, 成员端=小菱)。
+                    # surface 只隔离会话和工具权限；事件都归唯一主控小菱。
                     # 事件走全局 AgentEventBus, 按 user_id 隔离; 广播失败不影响运行。
                     if payload.action in {"start", "resume", "approve"}:
                         try:

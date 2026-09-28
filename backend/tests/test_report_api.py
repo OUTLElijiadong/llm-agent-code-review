@@ -838,3 +838,70 @@ def test_update_builtin_template_content_allowed(admin_client):
     assert response.json()["data"]["description"] == "更新后的描述"
     # is_builtin 不变
     assert response.json()["data"]["is_builtin"] == 1
+
+
+def test_template_manager_html_cannot_run_in_report_viewer_preview_or_export(admin_client, monkeypatch):
+    """模板管理者保存的活动 HTML 不应传播到其他账号的预览与下载报告。"""
+    client, db, task_id = admin_client
+    template = db.query(ReportTemplate).filter(
+        ReportTemplate.type == "detailed", ReportTemplate.is_builtin == 1,
+    ).one()
+    unsafe_template = (
+        '<!DOCTYPE html><html><head><title>审查报告</title>'
+        '<style>.report-proof{color:rgb(12, 34, 56)}</style></head><body>'
+        '<style>.report-proof{background-image:url(https://c08-probe.example/css)}</style>'
+        '<div class="report-proof" style="margin-top:4px">报告内容：{{ task_info.task_name }}</div>'
+        '<img src="https://c08-probe.example/image" alt="remote">'
+        '<div style="background:url(javascript:alert(1))">危险样式</div>'
+        '<script>window.reportXssProbe=1</script>'
+        '<svg onload="window.reportXssProbe=2"></svg>'
+        '<iframe srcdoc="<script>window.reportXssProbe=4</script>"></iframe>'
+        '<a href="javascript:alert(1)" onclick="window.reportXssProbe=3">危险链接</a>'
+        '<a href="java&#x0a;script:alert(1)">编码危险链接</a>'
+        '<a href="data:text/html,probe">数据链接</a>'
+        '<meta http-equiv="refresh" content="0;url=javascript:alert(1)">'
+        '<a href="https://example.com/reference">安全链接</a>'
+        '</body></html>'
+    )
+    update = client.put(f"/api/reports/templates/{template.id}", json={"content": unsafe_template})
+    assert update.status_code == 200
+
+    viewer = _make_plain_user()
+    db.add(viewer)
+    db.get(ReviewTask, task_id).user_id = viewer.id
+    db.get(Project, 1).user_id = viewer.id
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: viewer
+    monkeypatch.setattr(
+        "app.core.rbac_dependency.check_permission",
+        lambda _db, user_id, code: user_id == viewer.id and code == PermissionCode.REPORT_VIEW,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.reports.check_permission",
+        lambda _db, user_id, code: user_id == viewer.id and code == PermissionCode.REPORT_EXPORT_HTML,
+    )
+
+    denied_update = client.put(f"/api/reports/templates/{template.id}", json={"description": "deny"})
+    assert denied_update.status_code == 403
+    preview = client.get(f"/api/reports/tasks/{task_id}", params={"template_type": "detailed"})
+    download = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": "html", "template_type": "detailed"},
+    )
+    for response in (preview, download):
+        assert response.status_code == 200
+        assert "报告内容：SQL注入审查" in response.text
+        assert ".report-proof{color:rgb(12, 34, 56)}" in response.text
+        assert 'style="margin-top:4px"' in response.text
+        assert "img-src data:; font-src data:" in response.text
+        assert 'src="https://c08-probe.example/image"' not in response.text
+        assert "<script" not in response.text
+        assert "<svg" not in response.text
+        assert "<iframe" not in response.text
+        assert "onload=" not in response.text
+        assert "onclick=" not in response.text
+        assert 'href="javascript:' not in response.text
+        assert 'href="data:text/html' not in response.text
+        assert 'style="background:url(' not in response.text
+        assert 'http-equiv="refresh"' not in response.text
+        assert 'href="https://example.com/reference"' in response.text

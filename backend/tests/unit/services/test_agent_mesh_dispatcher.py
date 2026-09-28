@@ -15,6 +15,10 @@ from app.schemas.agent_mesh import AgentMeshMessageIn
 from app.services import agent_mesh_dispatcher, agent_mesh_service
 
 
+def test_orchestrator_is_a_protected_session_only_target():
+    assert agent_mesh_dispatcher.dispatch_state("agent:orchestrator") == "session_only"
+
+
 def _factory(tmp_path):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'mesh-dispatch.db'}",
@@ -33,7 +37,7 @@ def _message(*, message_type="task.request", expires_at=None, max_attempts=3):
     return AgentMeshMessageIn.model_validate({
         "idempotency_key": f"agent-dispatch-{message_type}",
         "trace_id": "trc_agent_dispatch_001",
-        "send_to": "agent:monitor",
+        "send_to": "agent:code_reviewer",
         "message_type": message_type,
         "subject": "查询运行异常",
         "payload": {"task": "查询最近一小时是否有异常指标"},
@@ -47,7 +51,12 @@ def _seed(factory, message=None):
     user = SimpleNamespace(id=7, role="user", username="owner")
     agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-a1", title="来源会话")
     created = agent_mesh_service.send_message(
-        db, user, surface="user", session_key="session-a1", message=message or _message()
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        trusted_source=True,
+        message=message or _message(),
     )
     db.close()
     return user, created
@@ -60,7 +69,7 @@ def test_agent_message_claim_and_result_reply_are_traceable(tmp_path):
     try:
         assert created["status"] == "queued"
         claimed = agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         assert claimed["status"] == "processing"
         assert claimed["lease_token"].startswith("lease_")
@@ -69,7 +78,7 @@ def test_agent_message_claim_and_result_reply_are_traceable(tmp_path):
             db,
             user,
             created["message_id"],
-            target_address="agent:monitor",
+            target_address="agent:code_reviewer",
             target_name="监控服务 Agent",
             lease_token=claimed["lease_token"],
             success=True,
@@ -105,7 +114,7 @@ def test_agent_message_claim_is_single_winner_across_sessions(tmp_path):
         try:
             barrier.wait()
             outcomes.append(agent_mesh_service.claim_dispatch_message(
-                db, user, created["message_id"], target_address="agent:monitor"
+                db, user, created["message_id"], target_address="agent:code_reviewer"
             ))
         finally:
             db.close()
@@ -126,7 +135,7 @@ def test_old_worker_cannot_complete_after_lease_changes(tmp_path):
     db = factory()
     try:
         claimed = agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
         row.lease_token = "lease_new_worker"
@@ -136,7 +145,7 @@ def test_old_worker_cannot_complete_after_lease_changes(tmp_path):
                 db,
                 user,
                 created["message_id"],
-                target_address="agent:monitor",
+                target_address="agent:code_reviewer",
                 target_name="监控服务 Agent",
                 lease_token=claimed["lease_token"],
                 success=True,
@@ -153,7 +162,7 @@ def test_expired_lease_is_requeued_and_old_worker_is_rejected(tmp_path):
     db = factory()
     try:
         claimed = agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
         row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -168,7 +177,7 @@ def test_expired_lease_is_requeued_and_old_worker_is_rejected(tmp_path):
                 db,
                 user,
                 created["message_id"],
-                target_address="agent:monitor",
+                target_address="agent:code_reviewer",
                 target_name="监控服务 Agent",
                 lease_token=claimed["lease_token"],
                 success=True,
@@ -187,7 +196,7 @@ def test_expired_last_attempt_lease_becomes_dead_letter_with_error_reply(tmp_pat
         db.add(User(id=7, username="owner", password="unused", role="user", status=1))
         db.commit()
         agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
         row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -211,7 +220,7 @@ def test_non_request_and_expired_messages_are_not_claimed(tmp_path):
     db = factory()
     try:
         assert agent_mesh_service.claim_dispatch_message(
-            db, user, status_message["message_id"], target_address="agent:monitor"
+            db, user, status_message["message_id"], target_address="agent:code_reviewer"
         ) is None
     finally:
         db.close()
@@ -222,7 +231,7 @@ def test_non_request_and_expired_messages_are_not_claimed(tmp_path):
     db = factory()
     try:
         assert agent_mesh_service.claim_dispatch_message(
-            db, user, expired_message["message_id"], target_address="agent:monitor"
+            db, user, expired_message["message_id"], target_address="agent:code_reviewer"
         ) is None
         assert agent_mesh_service.expire_unclaimed_dispatch_messages(db) == 1
         row = db.query(AgentMeshMessage).filter_by(message_id=expired_message["message_id"]).one()
@@ -237,10 +246,24 @@ def test_missing_monitor_fields_returns_business_result_without_querying_metrics
     result = agent_mesh_dispatcher._monitor_handler(
         SimpleNamespace(),
         user,
-        {"payload": {"task": "最近一小时是否异常"}},
+        {"sent_from": "session:admin:session-a1", "payload": {"task": "最近一小时是否异常"}},
     )
     assert result["status"] == "needs_clarification"
     assert result["next_action"]["provide_fields"] == ["window_minutes", "metrics"]
+
+
+def test_monitor_handler_rejects_user_surface_even_for_admin_account():
+    user = SimpleNamespace(id=7, role="admin")
+    result = agent_mesh_dispatcher._monitor_handler(
+        SimpleNamespace(),
+        user,
+        {
+            "sent_from": "session:user:member-session",
+            "payload": {"window_minutes": 60, "metrics": ["latency_p95"]},
+        },
+    )
+    assert result["status"] == "blocked"
+    assert result["errors"][0]["code"] == "insufficient_scope"
 
 
 def test_terminal_failure_returns_one_task_error(tmp_path):
@@ -249,13 +272,13 @@ def test_terminal_failure_returns_one_task_error(tmp_path):
     db = factory()
     try:
         claimed = agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         failed = agent_mesh_service.complete_dispatch_message(
             db,
             user,
             created["message_id"],
-            target_address="agent:monitor",
+            target_address="agent:code_reviewer",
             target_name="监控服务 Agent",
             lease_token=claimed["lease_token"],
             success=False,
@@ -278,7 +301,7 @@ def test_result_with_archived_source_is_dead_lettered_without_retry(tmp_path):
     db = factory()
     try:
         claimed = agent_mesh_service.claim_dispatch_message(
-            db, user, created["message_id"], target_address="agent:monitor"
+            db, user, created["message_id"], target_address="agent:code_reviewer"
         )
         conversation = db.query(AgentMeshConversation).filter_by(session_key="session-a1").one()
         conversation.status = "archived"
@@ -288,7 +311,7 @@ def test_result_with_archived_source_is_dead_lettered_without_retry(tmp_path):
             db,
             user,
             created["message_id"],
-            target_address="agent:monitor",
+            target_address="agent:code_reviewer",
             target_name="监控服务 Agent",
             lease_token=claimed["lease_token"],
             success=True,
@@ -314,7 +337,7 @@ def test_dispatch_once_consumes_request_and_returns_result(tmp_path, monkeypatch
     request.idempotency_key = "dispatch-once-e2e"
     request.payload = {"window_minutes": 60, "metrics": ["latency_p95"]}
     created = agent_mesh_service.send_message(
-        db, user, surface="admin", session_key="session-a1", message=request
+        db, user, surface="admin", session_key="session-a1", trusted_source=True, message=request
     )
     db.close()
 
@@ -359,7 +382,12 @@ def test_dispatch_once_counts_undeliverable_result_as_failed(tmp_path, monkeypat
     db.commit()
     agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
     created = agent_mesh_service.send_message(
-        db, user, surface="admin", session_key="session-a1", message=_message()
+        db,
+        user,
+        surface="admin",
+        session_key="session-a1",
+        trusted_source=True,
+        message=_message(),
     )
     user.role = "user"
     user.status = -1

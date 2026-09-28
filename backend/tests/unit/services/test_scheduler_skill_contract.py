@@ -166,6 +166,60 @@ def test_daily_budget_blocks_scheduled_skill_before_orchestrator(
     assert calls["invoke"] == 0
 
 
+def test_unknown_usage_blocks_scheduled_skill_with_auditable_reason(
+    db: Any,
+    monkeypatch: Any,
+) -> None:
+    db.add_all([
+        AgentProfile(
+            code="code_reviewer",
+            name="代码审查",
+            category="quality",
+            status="idle",
+            is_enabled=1,
+            budget_tokens_daily=100,
+        ),
+        AiCallLog(
+            model_name="deepseek-v4-flash",
+            agent_label="code_reviewer",
+            status="failed",
+            total_tokens=None,
+            prompt_tokens=None,
+            completion_tokens=None,
+        ),
+    ])
+    db.commit()
+    calls = {"invoke": 0}
+
+    class FakeOrchestrator:
+        def __init__(self, register: bool = False) -> None:
+            self._db = None
+
+        def invoke_skill(self, **_kwargs: Any) -> Any:
+            calls["invoke"] += 1
+            return SimpleNamespace(success=True, data={"effect": "no_op"}, duration_ms=1)
+
+    monkeypatch.setattr("app.agents.orchestrator.Orchestrator", FakeOrchestrator)
+    monkeypatch.setattr(settings, "skill_scheduler_enabled", True)
+    job = SimpleNamespace(
+        id=18,
+        job_code="hourly_skill_proactive_code_reviewer",
+        agent_code="code_reviewer",
+        config_json='{"action": "check_proactive"}',
+        schedule="hourly@*:00",
+    )
+
+    result = scheduler_service._execute_skill_proactive(db, job)
+
+    assert result["success"] is False
+    assert result["skipped"] is True
+    assert result["budget_blocked"] is True
+    assert result["reason"] == "daily_token_usage_unknown"
+    assert result["unknown_usage_calls"] == 1
+    assert "缺少完整 token 用量" in result["error"]
+    assert calls["invoke"] == 0
+
+
 def test_disabled_direct_skill_executor_skips_orchestrator(
     db: Any,
     monkeypatch: Any,

@@ -234,3 +234,60 @@ def test_zero_budget_remains_unlimited(db: Any) -> None:
         assert snapshot.budget_tokens == 0
         assert snapshot.remaining_tokens is None
         assert snapshot.exceeded is False
+
+
+def test_unknown_usage_blocks_configured_automatic_budget(db: Any) -> None:
+    from app.services import agent_cost_budget_service
+
+    db.add_all([
+        AgentProfile(
+            code="code_reviewer",
+            name="代码审查",
+            category="quality",
+            status="idle",
+            is_enabled=1,
+            budget_tokens_daily=10,
+        ),
+        AiCallLog(
+            model_name="deepseek-v4-flash",
+            agent_label="code_reviewer",
+            status="failed",
+            create_time=datetime.now(timezone.utc),
+        ),
+    ])
+    db.commit()
+
+    snapshot = agent_cost_budget_service.daily_budget_snapshot(db, "code_reviewer")
+
+    assert snapshot.unknown_usage_calls == 1
+    assert snapshot.used_tokens == 0
+    assert snapshot.blocked is True
+    with pytest.raises(agent_cost_budget_service.AutomaticTokenBudgetExceeded, match="缺少完整 token 用量"):
+        with agent_cost_budget_service.guard_automatic_model_call(db, "code_reviewer"):
+            pytest.fail("known budget must not admit an automatic call while usage is unknown")
+
+
+def test_unknown_usage_does_not_block_unlimited_budget(db: Any) -> None:
+    from app.services import agent_cost_budget_service
+
+    db.add_all([
+        AgentProfile(
+            code="code_reviewer",
+            name="代码审查",
+            category="quality",
+            status="idle",
+            is_enabled=1,
+            budget_tokens_daily=0,
+        ),
+        AiCallLog(
+            model_name="deepseek-v4-flash",
+            agent_label="code_reviewer",
+            status="failed",
+            create_time=datetime.now(timezone.utc),
+        ),
+    ])
+    db.commit()
+
+    with agent_cost_budget_service.guard_automatic_model_call(db, "code_reviewer") as snapshot:
+        assert snapshot.unknown_usage_calls == 1
+        assert snapshot.blocked is False

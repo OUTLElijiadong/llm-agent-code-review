@@ -101,13 +101,13 @@ def test_ordinary_member_with_no_runs_sees_empty_workbench(db, monkeypatch) -> N
     assert rows == []
 
 
-def test_admin_runtime_keeps_all_agents(db, monkeypatch) -> None:
+def test_admin_runtime_keeps_children_but_hides_internal_root_aliases(db, monkeypatch) -> None:
     monkeypatch.setattr(agent_service, "get_runtime_catalog", _fake_catalog)
     rows = agent_service.get_runtime_agents(db, None)
     codes = {item["code"] for item in rows}
-    assert "manager" in codes
+    assert "manager" not in codes
     assert "operations" in codes
-    assert "orchestrator" in codes
+    assert "orchestrator" not in codes
     assert "chat_assistant" in codes
     assert "custom_reviewer" in codes
 
@@ -129,4 +129,3 @@ def test_member_call_count_attribute_to_agent_label(db, monkeypatch) -> None:
     assert by_code["test_verifier"]["call_count"] == 1
     # 无后缀 model_name 不应把调用误计入其他 agent
     assert "code_reviewer" not in by_code
-

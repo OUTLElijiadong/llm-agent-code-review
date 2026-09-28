@@ -4,6 +4,7 @@ import {
   extractAgentNavigations,
   isNavigationPathAllowed,
   resolveLocalNavigationRequest,
+  renderAuthorizedAgentMarkdown,
 } from './agentNavigation'
 
 function guard(permission: boolean) {
@@ -56,6 +57,25 @@ describe('shared navigation visibility', () => {
     reviewerGuard.hasRole = (role: string): boolean => role === 'reviewer'
 
     expect(isNavigationPathAllowed(router as never, '/reviewer-only', reviewerGuard)).toBe(true)
+  })
+
+  it('历史 AI 导航文本不把危险协议或 SVG 变成可点击入口', () => {
+    const router = {
+      resolve: ({ path }: { path: string }) => ({
+        matched: path === '/known' ? [{ path }] : [],
+        meta: { permissions: ['known:view'] },
+      }),
+    }
+    const html = renderAuthorizedAgentMarkdown(
+      '[安全](/known) [无权](/admin) [脚本](javascript:alert%281%29) '
+      + '[数据](data:text/html;base64,PHN2Zz4=) <svg onload="alert(1)"></svg>',
+      router as never,
+      guard(true),
+    )
+    const root = document.createElement('div')
+    root.innerHTML = html
+    expect([...root.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['/known'])
+    expect(root.querySelector('svg, script, [onload]')).toBeNull()
   })
 })
 

@@ -20,6 +20,8 @@ export interface SecurityFindingOut {
   references: string[]
   confidence: number
   source: string
+  verification?: 'confirmed' | 'plausible' | 'refuted' | 'unreviewed' | null
+  verification_reason?: string
 }
 
 export interface DataFlowOut {

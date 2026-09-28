@@ -420,10 +420,10 @@ describe('AdminCopilot Responses stream', () => {
 
     // 首条为吉祥物欢迎语,其后才是恢复的历史消息
     expect(rows).toHaveLength(4)
-    expect(rows[0].text()).toContain('我是贾维斯')
+    expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.xl-steps').text()).toContain('贾维斯的工作')
+    expect(rows[2].find('.xl-steps').text()).toContain('小菱的工作')
     expect(rows[2].find('.xl-steps').text()).toContain('查看管理数据')
     expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
@@ -606,7 +606,7 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.message-row')).toHaveLength(1)
-    expect(wrapper.text()).toContain('我是贾维斯')
+    expect(wrapper.text()).toContain('我是小菱')
     expect(wrapper.find('.quick-commands').exists()).toBe(false)
 
     await wrapper.find('textarea').setValue('检查生产状态')
@@ -1329,7 +1329,7 @@ it('管理端切换账号立即清空私密消息及未发送草稿', async () =
   wrapper.unmount()
 })
 
-it('贾维斯打开时通知宿主收起小菱，小菱再打开时贾维斯收起', async () => {
+it('管理员surface打开时收起成员surface的小菱会话，反向切换也能关闭', async () => {
   const opened = vi.fn()
   window.addEventListener('prism:admin-copilot-opened', opened)
   const wrapper = mountCopilot()

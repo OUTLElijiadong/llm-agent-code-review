@@ -185,7 +185,7 @@ def test_tool_schema_exposes_only_capability_code_and_params() -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_surface_exposes_registry_tools_but_admin_surface_does_not(db, monkeypatch) -> None:
+async def test_both_xiaoling_surfaces_expose_role_scoped_capability_registries(db, monkeypatch) -> None:
     user = _user(db)
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     user_tools = {item["name"] for item in await _executor(db, user).tool_schemas()}
@@ -199,8 +199,12 @@ async def test_user_surface_exposes_registry_tools_but_admin_surface_does_not(db
     admin_tools = {item["name"] for item in await admin_executor.tool_schemas()}
 
     assert {"user_describe_capabilities", "user_execute_capability"} <= user_tools
-    assert "user_describe_capabilities" not in admin_tools
-    assert "user_execute_capability" not in admin_tools
+    assert {"user_describe_capabilities", "user_execute_capability"} <= admin_tools
+    assert {"admin_describe_capabilities", "admin_execute_capability"} <= admin_tools
+    assert {"admin_describe_capabilities", "admin_execute_capability"}.isdisjoint(user_tools)
+    assert service_module.surface_agent_identity("user") == service_module.surface_agent_identity("admin") == (
+        "chat_assistant", "小菱",
+    )
 
 
 @pytest.mark.asyncio
@@ -372,12 +376,10 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
 
     assert status.status == "success"
     assert status.output["session_id"] == "disc_agent_owned"
-    assert paused.status == "approval_required"
-    assert controls == []
-
-    completed = await executor.execute(control_call, approved=True)
-    assert completed.status == "success"
-    assert completed.output["accepted"] is True
+    assert paused.status == "success"
+    assert paused.output["accepted"] is True
+    assert controls == [("pause", {"session_id": "disc_agent_owned"})]
+    assert (await executor.execute(control_call)).status == "success"
     assert controls == [("pause", {"session_id": "disc_agent_owned"})]
 
     user_input_call = ToolCall(
@@ -390,8 +392,7 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
         },
         "{}",
     )
-    assert (await executor.execute(user_input_call)).status == "approval_required"
-    user_input = await executor.execute(user_input_call, approved=True)
+    user_input = await executor.execute(user_input_call)
     assert user_input.status == "success"
     assert user_input.output["session_id"] == "disc_agent_owned"
     assert bus.get_session("disc_agent_owned").status == "active"
@@ -489,8 +490,7 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
         "{}",
     )
 
-    assert (await executor.execute(call)).status == "approval_required"
-    completed = await executor.execute(call, approved=True)
+    completed = await executor.execute(call)
 
     assert completed.status == "success"
     assert completed.output["session_id"] == "disc_continued"
@@ -565,8 +565,7 @@ async def test_concluded_roundtable_continuation_rejects_non_owner(
         },
         "{}",
     )
-    assert (await executor.execute(call)).status == "approval_required"
-    denied = await executor.execute(call, approved=True)
+    denied = await executor.execute(call)
 
     assert denied.status == "error"
     assert "不存在或已过期" in denied.error
@@ -601,7 +600,7 @@ async def test_unique_super_admin_roundtable_is_owner_only(
         mcp_provider=EmptyMcp(),
     )
 
-    # 圆桌仍只在成员面执行；超级管理员身份不能绕过私人会话 owner。
+    # 会话所有权按账号绑定，不允许管理员账号读取另一个账号的圆桌。
     status = await executor.execute(
         ToolCall("call-super-read", "get_roundtable_discussion", {"session_id": "disc_super_admin_control"}, "{}")
     )
@@ -612,8 +611,8 @@ async def test_unique_super_admin_roundtable_is_owner_only(
         "{}",
     )
     assert status.status == "error"
-    assert "成员侧" in (status.error or "")
-    assert (await executor.execute(control, approved=True)).status == "error"
+    control_denied = await executor.execute(control)
+    assert control_denied.status == "error"
     assert controls == []
 
     member_executor = PrismToolExecutor(
@@ -628,7 +627,8 @@ async def test_unique_super_admin_roundtable_is_owner_only(
     )
     assert read_again.status == "error"
     assert "不存在或已过期" in read_again.error
-    assert (await member_executor.execute(control)).status == "approval_required"
+    assert (await member_executor.execute(control)).status == "error"
+    assert controls == []
     assert (await member_executor.execute(control, approved=True)).status == "error"
     assert controls == []
 
@@ -636,20 +636,23 @@ async def test_unique_super_admin_roundtable_is_owner_only(
         session_id="disc_super_admin_owned", task_id=0, file_name="own.py", owner_user_id=super_admin_user.id,
     )
     bus.set_controller(own.session_id, lambda action, _payload: controls.append(action))
+    own_admin_read = await executor.execute(ToolCall(
+        "call-own-admin-read", "get_roundtable_discussion", {"session_id": own.session_id}, "{}",
+    ))
+    assert own_admin_read.status == "success"
     assert (await member_executor.execute(ToolCall(
         "call-own-read", "get_roundtable_discussion", {"session_id": own.session_id}, "{}",
     ))).status == "success"
     own_control = ToolCall(
         "call-own-stop", "control_roundtable_discussion", {"session_id": own.session_id, "action": "stop"}, "{}",
     )
-    assert (await member_executor.execute(own_control)).status == "approval_required"
-    assert (await member_executor.execute(own_control, approved=True)).status == "success"
+    assert (await member_executor.execute(own_control)).status == "success"
     assert controls == ["stop"]
     DiscussionBus._instance = None
 
 
 @pytest.mark.asyncio
-async def test_user_capability_reuses_current_identity_and_requires_write_approval(db, monkeypatch) -> None:
+async def test_user_capability_reuses_current_identity_and_auto_executes_medium_write(db, monkeypatch) -> None:
     user = _user(db)
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     monkeypatch.setattr(
@@ -672,19 +675,12 @@ async def test_user_capability_reuses_current_identity_and_requires_write_approv
         "{}",
     )
 
-    paused = await executor.execute(call)
-    assert paused.status == "approval_required"
-    assert paused.danger is False
-    assert calls == []
-    approval = db.get(ApprovalItem, paused.approval_id)
-    assert approval.action == "responses.user_execute_capability"
-
-    completed = await executor.execute(call, approved=True)
+    completed = await executor.execute(call)
     assert completed.status == "success"
     assert calls == [(user.id, "profile.update", {"goals": "全量白盒审计"})]
     ledger = db.query(AgentToolExecution).filter_by(run_id="run_profile_update").one()
     assert ledger.status == "success"
-    assert db.get(ApprovalItem, paused.approval_id).status == "approved"
+    assert db.query(ApprovalItem).filter_by(resource="response_run:run_profile_update").count() == 0
 
 
 @pytest.mark.asyncio

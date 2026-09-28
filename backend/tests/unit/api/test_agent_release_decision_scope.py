@@ -15,6 +15,7 @@ from app.core.dependencies import get_current_user
 from app.core.error_handlers import register_handlers
 from app.models.agent_governance import ApprovalItem
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.services import agent_studio_service, approval_service
 
@@ -121,6 +122,25 @@ def test_matching_agent_release_can_publish_and_repeat_approval(release_api):
 
 
 @pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_agent_author_cannot_decide_own_release(release_api, decision):
+    client, db, _ = release_api
+    admin = client.app.dependency_overrides[get_current_user]()
+    approval = _submitted_package(db, admin, f"self_decision_{decision}")
+    version_id = json.loads(approval.request_json)["agent_version_id"]
+
+    response = client.post(
+        f"/api/admin/agent-releases/{approval.id}/{decision}", json={"note": "自审尝试"}
+    )
+
+    assert response.status_code == 403
+    assert "非申请人" in response.json()["message"]
+    db.refresh(approval)
+    assert approval.status == "pending"
+    assert db.get(CustomAgentVersion, version_id).status == "pending_approval"
+    assert db.query(CustomAgentRelease).filter_by(approval_id=approval.id).count() == 0
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
 def test_generic_governance_decision_cannot_bypass_release_target_check(release_api, decision):
     client, db, reviewer = release_api
     approval = _submitted_package(db, reviewer, f"generic_bypass_{decision}")
@@ -181,5 +201,46 @@ def test_release_service_rejects_reviewer_even_without_route_guard(release_api):
 
     with pytest.raises(ForbiddenError):
         approval_service.decide_item(db, reviewer, approval.id, approve=True)
+    assert db.get(ApprovalItem, approval.id).status == "pending"
+    assert db.query(CustomAgentRelease).count() == 0
+
+
+def _misgrant_release_permissions(db, reviewer, *codes: str) -> None:
+    role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    permissions = [
+        Permission(code=code, name=code, module="agent", type="api") for code in codes
+    ]
+    db.add_all([role, *permissions])
+    db.flush()
+    db.add_all([
+        UserRole(user_id=reviewer.id, role_id=role.id),
+        *(RolePermission(role_id=role.id, permission_id=permission.id) for permission in permissions),
+    ])
+    db.commit()
+
+
+@pytest.mark.parametrize("path", ["", "/agents"])
+def test_reviewer_cannot_read_admin_release_pages_even_if_permission_was_misgranted(release_api, path):
+    client, db, reviewer = release_api
+    _misgrant_release_permissions(db, reviewer, "agent_asset:approve")
+    client.app.dependency_overrides[get_current_user] = lambda: reviewer
+
+    response = client.get(f"/api/admin/agent-releases{path}")
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_misgranted_reviewer_still_cannot_decide_agent_release(release_api, decision):
+    client, db, reviewer = release_api
+    approval = _submitted_package(db, reviewer, f"misgrant_{decision}")
+    _misgrant_release_permissions(db, reviewer, "agent_asset:approve", "agent_asset:publish")
+    client.app.dependency_overrides[get_current_user] = lambda: reviewer
+
+    response = client.post(
+        f"/api/admin/agent-releases/{approval.id}/{decision}", json={"note": "越权尝试"}
+    )
+
+    assert response.status_code == 403
     assert db.get(ApprovalItem, approval.id).status == "pending"
     assert db.query(CustomAgentRelease).count() == 0

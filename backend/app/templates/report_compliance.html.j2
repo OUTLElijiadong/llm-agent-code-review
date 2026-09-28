@@ -45,9 +45,17 @@
     .codes { margin-top: 8px; }
     code { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; background: #eef2ff; color: #4338ca; padding: 1px 6px; border-radius: 3px; font-size: 12px; margin: 2px 2px; display: inline-block; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    .table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
+    .table-scroll table { min-width: 460px; }
+    .table-scroll .top-table { min-width: 760px; }
     th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 600; color: #374151; }
     tr:nth-child(even) td { background: #fafbfc; }
+    @media (max-width: 700px) {
+      body { padding: 12px; }
+      .container { padding: 16px; }
+      .standards-grid { grid-template-columns: minmax(0, 1fr); }
+    }
     .sev { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
     .sev-严重 { background: #dc2626; }
     .sev-高 { background: #ea580c; }
@@ -74,6 +82,7 @@
     .compliance-codes { margin-top: 4px; }
     .empty { color: #9ca3af; font-style: italic; padding: 16px 0; }
     .footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; text-align: center; }
+    .scope-line { overflow-wrap: anywhere; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -96,8 +105,12 @@
       {% endif %}
     </div>
 
+    <h2>审查范围与版本</h2>
+    {% for line in scope_lines %}<div class="meta scope-line">{{ line }}</div>{% endfor %}
+
     {% set breakdown = statistics.score_breakdown %}
     <h2>评分明细</h2>
+    <div class="table-scroll" role="region" aria-label="评分明细表格" tabindex="0">
     <table>
       <tbody>
         <tr><th>评分版本</th><td><code>{{ breakdown.version }}</code></td></tr>
@@ -111,6 +124,7 @@
         {% if breakdown.compatibility_override %}<tr><th>兼容说明</th><td>空问题历史显式评分；标准零问题评分为 {{ breakdown.compatibility_override.canonical_score }}</td></tr>{% endif %}
       </tbody>
     </table>
+    </div>
 
     {% if summary %}
     <h2>审查摘要</h2>
@@ -216,7 +230,8 @@
 
     <h2>Top 10 高危漏洞</h2>
     {% if statistics.top_vulnerabilities %}
-    <table>
+    <div class="table-scroll" role="region" aria-label="高危漏洞表格" tabindex="0">
+    <table class="top-table">
       <thead>
         <tr>
           <th style="width:40px;">#</th>
@@ -250,6 +265,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
     <div class="empty">暂无高危漏洞。</div>
     {% endif %}

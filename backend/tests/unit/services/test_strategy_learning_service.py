@@ -158,6 +158,8 @@ def test_base_instructions_do_not_duplicate_execution_memory_in_notebook() -> No
 
     assert "自动按当前账户固化" in instructions
     assert "不得为这类执行结果重复调用 save_knowledge_note" in instructions
+    assert "当前没有 CNVD/CNNVD 实时查询能力" in instructions
+    assert "GB/T 30279-2020" in instructions
 
 
 def test_sandbox_only_solidifies_verified_terminal_outcome(db) -> None:

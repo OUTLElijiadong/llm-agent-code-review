@@ -1,4 +1,6 @@
 """报告服务回归测试。"""
+from sqlalchemy import event
+
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
@@ -210,3 +212,60 @@ def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, ad
     assert detail["stats"]["score_breakdown"]["score"] == 100
     assert detail["stats"]["score_breakdown"]["score_source"] == "task_explicit_empty_report"
     assert detail["stats"]["risk_level"] == "低风险"
+
+
+def test_report_list_fetches_projects_in_one_batch_query(db, admin_user, monkeypatch):
+    """不同项目的报告列表不应为每一行单独读取 Project。"""
+    projects = [
+        Project(
+            user_id=admin_user.id,
+            project_name=f"批量报告项目 {index}",
+            language="python",
+        )
+        for index in range(4)
+    ]
+    db.add_all(projects)
+    db.commit()
+    db.add_all([
+        ReviewTask(
+            user_id=admin_user.id,
+            project_id=project.id,
+            task_name=f"批量项目任务 {index}",
+            status="success",
+            score=100,
+        )
+        for index, project in enumerate(projects)
+    ])
+    db.commit()
+    project_ids = [project.id for project in projects]
+    monkeypatch.setattr(
+        "app.services.report_service.get_visible_project_ids",
+        lambda *_args: (project_ids, None),
+    )
+    monkeypatch.setattr(
+        "app.services.report_service.rbac_service.is_admin_user",
+        lambda *_args: True,
+    )
+    db.expunge_all()
+    project_selects = 0
+    engine = db.get_bind()
+
+    def count_project_queries(_conn, _cursor, statement, _params, _context, _many):
+        nonlocal project_selects
+        lowered = statement.lower()
+        if lowered.lstrip().startswith("select") and (
+            "\nfrom project\n" in lowered or "\nfrom project " in lowered
+        ):
+            project_selects += 1
+
+    event.listen(engine, "before_cursor_execute", count_project_queries)
+    try:
+        result = list_reports(db, admin_user, page_size=4)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_project_queries)
+
+    assert result["total"] == 4
+    assert {item["project_name"] for item in result["items"]} == {
+        project.project_name for project in projects
+    }
+    assert project_selects == 1

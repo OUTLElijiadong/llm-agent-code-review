@@ -679,11 +679,13 @@ function connectWs() {
     props.sessionId,
     (msg: WsMessage) => {
       if (msg.type === 'discuss') {
-        if (msg.turn.role === 'user' && pendingMessage && msg.turn.content === pendingMessage) {
-          acknowledgeMessage()
-        }
         const previousLatest = latestSeq()
         if (!addTurn(msg.turn)) return
+        // 重连可能重放一条内容完全相同的旧发言；只有新入账序号才能确认本次发送。
+        if (msg.turn.role === 'user' && pendingMessage && msg.turn.content === pendingMessage
+          && Number(msg.turn.seq) > previousLatest) {
+          acknowledgeMessage()
+        }
         if (previousLatest > 0 && Number(msg.turn.seq) > previousLatest + 1) void syncLatest(previousLatest)
         if (msg.turn.agent_code === currentSpeakerCode.value) {
           currentSpeaker.value = ''

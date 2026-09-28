@@ -186,6 +186,7 @@ def test_unicode_dependency_uses_actual_model_window_budget(db, actor, model, mo
             return AgentResult(success=True, data={
                 "part_id": part["part_id"], "part_sha256": part["part_sha256"],
                 "summary": f"已覆盖 {part['part_id']}",
+                "evidence_quotes": [part["text"][:4]],
             }, usage_log_ids=[1000 + len(map_calls)], http_attempts=1)
         final_calls.append(message)
         return AgentResult(success=True, data={"summary": "完成", "findings": [], "limitations": []},
@@ -218,7 +219,7 @@ def test_partial_dependency_does_not_claim_complete_coverage(db, actor, model, u
 def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, actor, model, monkeypatch):
     import hashlib
 
-    first = "first\n" + "x" * 70_000 + "FIRST_TAIL_RISK"
+    first = "first\r" + "x" * 70_000 + "FIRST_TAIL_RISK"
     second = "second\n" + "y" * 70_000 + "SECOND_TAIL_RISK"
     db.query(CodeFile).filter_by(id=811).update({"content": first})
     db.add(CodeFile(id=813, project_id=811, file_name="second.py", language="python",
@@ -234,10 +235,26 @@ def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, act
             return AgentResult(success=True, data={
                 "part_id": part["part_id"], "part_sha256": part["part_sha256"],
                 "summary": f"已读取 {part['part_id']}；末尾 {part['text'][-32:]}",
+                "evidence_quotes": [part["text"][-32:]],
             }, usage_log_ids=[1000 + len(map_calls)], http_attempts=1)
-        final_calls.append(json.loads(message))
-        return AgentResult(success=True, data={"summary": "完成所选文件分析", "findings": [], "limitations": []},
-                           usage_log_ids=[2000], http_attempts=1)
+        final_payload = json.loads(message)
+        final_calls.append(final_payload)
+        source = next(item for item in final_payload["sources"] if item["id"] == "file:811")
+        quote = source["summary_parts"][-1]["evidence_quotes"][0]
+        return AgentResult(success=True, data={
+            "summary": "完成所选文件分析",
+            "findings": [{
+                "title": "文件尾部可追溯风险",
+                "description": "压缩摘要保留了文件尾部原文证据",
+                "severity": "中",
+                "kind": "fact",
+                "evidence_refs": ["file:811"],
+                "evidence_quote": quote,
+                "file_id": 811,
+                "line_number": 2,
+            }],
+            "limitations": [],
+        }, usage_log_ids=[2000], http_attempts=1)
 
     monkeypatch.setattr(BaseAgent, "call_json", answer)
     result = run(db, actor, {"file_ids": [811, 813]})
@@ -256,11 +273,17 @@ def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, act
         "file:813": hashlib.sha256(second.encode()).hexdigest(),
     }
     assert all(len(source["summary_parts"]) == 9 for source in files)
+    assert all(part["evidence_quotes"] for source in files for part in source["summary_parts"])
+    assert files[0]["summary_parts"][0]["line_start"] == 1
+    assert files[0]["summary_parts"][1]["line_start"] == 2
+    assert files[0]["summary_parts"][-1]["line_end"] == 2
+    assert result["findings"][0]["evidence_quote"] in first
+    assert "FIRST_TAIL_RISK" in result["findings"][0]["evidence_quote"]
     assert result["usage_log_ids"] == [*(1000 + index for index in range(1, 19)), 2000]
     assert result["http_attempts"] == 19
 
 
-@pytest.mark.parametrize("failure", ["missing_part", "length"])
+@pytest.mark.parametrize("failure", ["missing_part", "length", "fabricated_quote"])
 def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, model, monkeypatch, failure):
     db.query(CodeFile).filter_by(id=811).update({"content": "x" * 70_000})
     db.commit()
@@ -273,8 +296,15 @@ def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, mo
         if failure == "length":
             return AgentResult(success=False, failure_kind="output_truncated",
                                usage_log_ids=[1901], http_attempts=1)
+        if failure == "fabricated_quote":
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "末片风险已经确认",
+                "evidence_quotes": ["DELETE FROM users"],
+            }, usage_log_ids=[1901], http_attempts=1)
         return AgentResult(success=True, data={"part_id": "wrong", "part_sha256": part["part_sha256"],
-                                               "summary": "不完整覆盖"}, usage_log_ids=[1901], http_attempts=1)
+                                               "summary": "不完整覆盖", "evidence_quotes": []},
+                           usage_log_ids=[1901], http_attempts=1)
 
     monkeypatch.setattr(BaseAgent, "call_json", answer)
     monkeypatch.setattr(runtime, "enrich_recorded_usage", lambda *args, **kwargs: None)
@@ -296,6 +326,7 @@ def test_source_change_after_first_compaction_call_blocks_remaining_calls(db, ac
         db.commit()
         return AgentResult(success=True, data={
             "part_id": part["part_id"], "part_sha256": part["part_sha256"], "summary": "首片已读",
+            "evidence_quotes": [part["text"][:10]],
         }, usage_log_ids=[1901], http_attempts=1)
 
     monkeypatch.setattr(BaseAgent, "call_json", answer)
@@ -346,6 +377,7 @@ def test_completed_dependencies_and_valid_source_finding_are_preserved(db, actor
                         "severity": "高",
                         "kind": "inference",
                         "evidence_refs": ["file:811", "dependency:earlier"],
+                        "evidence_quote": "eval(value)",
                         "file_id": 811,
                         "line_number": 1,
                     }
@@ -361,8 +393,8 @@ def test_completed_dependencies_and_valid_source_finding_are_preserved(db, actor
         {"file_id": 811, "dependency_context": {"earlier": {"status": "completed", "result": {"summary": "有界建议"}}}},
     )
     assert result["status"] == "completed" and result["findings"][0]["project_id"] == 811
+    assert result["findings"][0]["evidence_quote"] == "eval(value)"
     assert "未执行代码" in result["limitations"]
-    assert "eval(value)" not in json.dumps(result)
 
 
 def test_accounting_failure_never_retries_a_model_request(db, actor, model, monkeypatch):
@@ -699,6 +731,67 @@ def test_file_finding_requires_its_source_reference(db, actor, model, monkeypatc
     assert run(db, actor, {"file_id": 811})["status"] == "failed"
 
 
+def test_file_finding_with_fabricated_quote_is_rejected(db, actor, model, monkeypatch):
+    monkeypatch.setattr(
+        BaseAgent,
+        "call_json",
+        lambda *args, **kwargs: AgentResult(
+            success=True,
+            data={
+                "summary": "发现危险调用",
+                "findings": [
+                    {
+                        "title": "危险调用",
+                        "description": "源码执行任意表达式",
+                        "severity": "高",
+                        "kind": "fact",
+                        "evidence_refs": ["file:811"],
+                        "evidence_quote": "exec(user_input)",
+                        "file_id": 811,
+                        "line_number": 1,
+                    }
+                ],
+                "limitations": [],
+            },
+        ),
+    )
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "temporary_output_invalid"
+    assert not result.get("findings")
+
+
+def test_file_finding_quote_must_match_the_exact_cited_line(db, actor, model, monkeypatch):
+    db.query(CodeFile).filter_by(id=811).update({"content": "safe_call()\neval(value)\n"})
+    db.commit()
+    monkeypatch.setattr(
+        BaseAgent,
+        "call_json",
+        lambda *args, **kwargs: AgentResult(
+            success=True,
+            data={
+                "summary": "发现危险调用",
+                "findings": [
+                    {
+                        "title": "动态执行",
+                        "description": "第一行存在动态执行",
+                        "severity": "高",
+                        "kind": "fact",
+                        "evidence_refs": ["file:811"],
+                        "evidence_quote": "eval(value)",
+                        "file_id": 811,
+                        "line_number": 1,
+                    }
+                ],
+                "limitations": [],
+            },
+        ),
+    )
+    result = run(db, actor, {"file_id": 811})
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "temporary_output_invalid"
+
+
 def test_general_findings_are_counted_once_in_dependency_summary(db, actor, model, monkeypatch):
     from app.services.agent_team_summary import summarize_dependencies
 
@@ -716,14 +809,15 @@ def test_general_findings_are_counted_once_in_dependency_summary(db, actor, mode
                         "severity": "中",
                         "kind": "fact",
                         "evidence_refs": ["task_input"],
+                        "evidence_quote": "没有规定超时后的冲突处理",
                     }
-                    for title in ("时延未定义", "冲突处理未定义")
+                    for title in ("超时处理未定义", "冲突处理未定义")
                 ],
                 "limitations": [],
             },
         ),
     )
-    result = run(db, actor)
+    result = run(db, actor, {"requirements": "接口的响应时间小于100ms，但没有规定超时后的冲突处理"})
     summary = summarize_dependencies({"requirements": {"status": "completed", "result": result}})
     assert len(result["findings"]) == summary["unique_finding_count"] == len(summary["findings"]) == 2
 

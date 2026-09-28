@@ -55,11 +55,11 @@ def test_registry_metadata_complete():
 
 
 def test_registry_priority_ordering():
-    """orchestrator/chat_assistant 应排在最前(UI 主控/前台分组)"""
+    """唯一主 Agent 小菱排在最前;内部 orchestrator 保留在注册表末端。"""
     runtime = AgentRegistry.instance().list_runtime()
     codes = [r["code"] for r in runtime]
-    assert codes[0] == "orchestrator"
-    assert codes[1] == "chat_assistant"
+    assert codes[0] == "chat_assistant"
+    assert "orchestrator" in codes[1:]
 
 
 def test_registry_summary_buckets_by_category():
@@ -111,9 +111,12 @@ def test_get_runtime_agents_fills_call_stats():
 
 
 def test_get_runtime_agents_matches_registry_count():
-    """get_runtime_agents 返回的条数严格等于 AgentRegistry 注册数量"""
+    """用户可寻址运行目录隐藏内部 root alias,其余内置 Agent 仍完整列出。"""
     runtime = agent_service.get_runtime_agents(_FakeDb([]))
-    registry_size = len(AgentRegistry.instance().list_runtime())
+    registry_size = sum(
+        item["code"] not in agent_service.INTERNAL_ROOT_ALIASES
+        for item in AgentRegistry.instance().list_runtime()
+    )
     assert len(runtime) == registry_size
 
 

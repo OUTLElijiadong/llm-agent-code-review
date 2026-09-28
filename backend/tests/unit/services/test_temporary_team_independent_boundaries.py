@@ -93,4 +93,4 @@ def test_team_creation_cannot_delegate_ungranted_security_scan(db, isolated_acco
                    "input": {"project_id": 901, "scan_mode": "full"}}],
     })
     with pytest.raises(agent_team_service.AgentTeamAccessError):
-        agent_team_service.create_team(db, owner, payload)
+        agent_team_service.create_team_from_xiaoling(db, owner, payload)

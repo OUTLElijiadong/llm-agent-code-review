@@ -1047,7 +1047,7 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
         runtime="runsc",
         image_ref="prism-sandbox-python:test",
         image_digest=None,
-        source_sha256="a" * 64,
+        source_sha256=hashlib.sha256(b"source").hexdigest(),
         resource_policy_json=sandbox_service._json({"network": "none"}),
         agent_config_json=sandbox_service._json({"worker_mode": "whitebox", "remote_only": False}),
         remote_target_url=None,
@@ -1067,12 +1067,14 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     worker_calls: list[str] = []
     stored_events: list[tuple[str, str, str, dict[str, object]]] = []
 
-    def call_worker(_worker, _method: str, path: str, _payload):
+    def call_worker(_worker, _method: str, path: str, payload):
         worker_calls.append(path)
         assert path == "/execute"
+        assert payload["source_sha256"] == hashlib.sha256(b"source").hexdigest()
         return {
             "result": {
                 "request_id": environment.public_id,
+                "source_sha256": hashlib.sha256(b"source").hexdigest(),
                 "status": "succeeded",
                 "last_sequence": 2,
                 "events": [
@@ -1115,7 +1117,12 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     assert stages == ["executor", "running_whitebox", "succeeded", "conclusion"], environment.error
     assert stages.index("succeeded") < stages.index("conclusion")
     assert environment.status == "succeeded"
-    assert json.loads(environment.result_json)["passed"] is True
+    result = json.loads(environment.result_json)
+    assert result["passed"] is True
+    assert result["source_provenance"]["worker_receipt"] == {
+        "request_id": environment.public_id,
+        "source_sha256": hashlib.sha256(b"source").hexdigest(),
+    }
     assert db.rollback.call_count == 0
     assert db.close.call_count == 1
 
@@ -1464,6 +1471,88 @@ def test_sandbox_terminal_transition_requires_current_execution_token(db) -> Non
         result_json='{"passed":true}',
         execution_token="current-token",
     ) is True
+
+
+@pytest.mark.parametrize(
+    "late_status,expired",
+    [
+        ("stopping", False),
+        ("stopped", False),
+        ("expired", False),
+        ("succeeded", True),
+        ("succeeded", False),
+    ],
+)
+def test_late_browser_worker_result_respects_current_sandbox_state(
+    db, monkeypatch, late_status: str, expired: bool,
+) -> None:
+    owner = User(username="sandbox_late_browser_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="late-browser", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_late_browser_01",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.12",
+        source_sha256="a" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        remote_target_url="https://example.com/",
+        remote_target_authorized_at=datetime.utcnow(),
+        result_json='{"passed":true}',
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+
+    monkeypatch.setattr(
+        sandbox_service, "_normalize_browser_target",
+        lambda _url: ("https://example.com/", SimpleNamespace(ip_address="93.184.216.34")),
+    )
+    monkeypatch.setattr(
+        sandbox_service, "_select_browser_worker",
+        lambda _db: SimpleNamespace(code="isolated-browser"),
+    )
+
+    def return_after_status_change(*_args, **_kwargs):
+        values = {SandboxEnvironment.status: late_status}
+        if expired:
+            values[SandboxEnvironment.expires_at] = datetime.utcnow() - timedelta(seconds=1)
+        db.query(SandboxEnvironment).filter_by(id=environment.id).update(
+            values, synchronize_session=False,
+        )
+        db.commit()
+        return {"result": {"protocol_version": "1.0", "passed": True}}
+
+    monkeypatch.setattr(sandbox_service, "_call_worker", return_after_status_change)
+    if late_status == "succeeded" and not expired:
+        result = sandbox_service.run_browser_blackbox(
+            db, owner, environment.public_id, "https://example.com/",
+        )
+        assert result["passed"] is True
+        assert len(result["artifacts"]) == 1
+    else:
+        with pytest.raises(sandbox_service.ConflictError, match="已关闭|状态"):
+            sandbox_service.run_browser_blackbox(
+                db, owner, environment.public_id, "https://example.com/",
+            )
+    db.refresh(environment)
+    assert environment.status == late_status
+    if late_status == "succeeded" and not expired:
+        assert len(json.loads(environment.result_json)["browser_blackbox_runs"]) == 1
+        assert db.query(SandboxArtifact).filter_by(environment_id=environment.id).count() == 1
+    else:
+        assert json.loads(environment.result_json) == {"passed": True}
+        assert db.query(SandboxArtifact).filter_by(environment_id=environment.id).count() == 0
 
 
 def test_sandbox_snapshot_and_finalizing_require_current_execution_token(db) -> None:

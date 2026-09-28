@@ -158,7 +158,7 @@ def _clamp_max_tokens(max_tokens: Optional[int]) -> int:
     ceiling = max(8192, int(settings.deepseek_max_output_tokens))
     if max_tokens is None:
         return 4096
-    return max(128, min(ceiling, int(max_tokens)))
+    return max(1, min(ceiling, int(max_tokens)))
 
 
 class DeepSeekAgent:

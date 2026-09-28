@@ -19,7 +19,7 @@ from app.models.project_import_task import ProjectImportTask
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
 from app.models.user import User
-from app.services import project_import_service
+from app.services import project_import_service, rbac_service
 
 
 def _user(db, username: str) -> User:
@@ -31,6 +31,7 @@ def _user(db, username: str) -> User:
 
 def _create(db, user: User, monkeypatch, *, key: str, audit_mode: bool = False) -> dict:
     monkeypatch.setattr(project_import_service, "validate_remote_project_url", lambda _url: None)
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: True)
     return project_import_service.create_import_task(
         db,
         user,
@@ -39,6 +40,144 @@ def _create(db, user: User, monkeypatch, *, key: str, audit_mode: bool = False) 
         audit_mode=audit_mode,
         idempotency_key=key,
     )
+
+
+def test_queued_import_rechecks_permission_before_download(db, monkeypatch) -> None:
+    owner = _user(db, "revoked-before-download-owner")
+    created = _create(db, owner, monkeypatch, key="revoked-before-download")
+    claimed = project_import_service.claim_next_task(db, lease_seconds=60)
+    assert claimed is not None
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: False)
+    monkeypatch.setattr(
+        project_import_service.project_source_service,
+        "download_remote_project_archive_to_temp",
+        lambda *_args, **_kwargs: pytest.fail("撤权后不得连接远端"),
+    )
+
+    with pytest.raises(ConflictError, match="权限") as error:
+        project_import_service.execute_claimed_import(
+            db, claimed["id"], lease_token=claimed["lease_token"],
+        )
+    assert project_import_service.fail_import_task(
+        db, claimed["id"], lease_token=claimed["lease_token"],
+        error=error.value, retryable=False,
+    )
+    assert project_import_service.get_import_task(db, owner, created["task_id"])["status"] == "failed"
+    assert db.query(Project).count() == 0
+
+
+def test_running_import_rechecks_permission_before_project_write(db, monkeypatch, tmp_path) -> None:
+    owner = _user(db, "revoked-during-scan-owner")
+    created = _create(db, owner, monkeypatch, key="revoked-during-scan")
+    claimed = project_import_service.claim_next_task(db, lease_seconds=60)
+    assert claimed is not None
+    archive_path = tmp_path / "source.zip"
+    archive_path.write_bytes(b"placeholder")
+    allowed = True
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: allowed)
+
+    @contextmanager
+    def fake_download(*_args, **_kwargs):
+        yield project_import_service.project_source_service.DownloadedRemoteArchive(
+            path=archive_path, filename="source.zip", byte_size=archive_path.stat().st_size,
+            sha256="a" * 64,
+        )
+
+    def revoke_during_scan(*_args, **_kwargs):
+        nonlocal allowed
+        allowed = False
+        return []
+
+    monkeypatch.setattr(
+        project_import_service.project_source_service,
+        "download_remote_project_archive_to_temp", fake_download,
+    )
+    monkeypatch.setattr(
+        project_import_service.project_source_service,
+        "read_archive_members", revoke_during_scan,
+    )
+    monkeypatch.setattr(
+        project_import_service, "_ensure_import_project",
+        lambda *_args: pytest.fail("撤权后不得创建项目"),
+    )
+    with pytest.raises(ConflictError, match="权限") as error:
+        project_import_service.execute_claimed_import(
+            db, claimed["id"], lease_token=claimed["lease_token"],
+        )
+    assert project_import_service.fail_import_task(
+        db, claimed["id"], lease_token=claimed["lease_token"],
+        error=error.value, retryable=False,
+    )
+    assert project_import_service.get_import_task(db, owner, created["task_id"])["status"] == "failed"
+    assert db.query(Project).count() == 0
+
+
+def test_revocation_before_success_write_cannot_mark_import_succeeded(db, monkeypatch) -> None:
+    owner = _user(db, "revoked-before-complete-owner")
+    created = _create(db, owner, monkeypatch, key="revoked-before-complete")
+    claimed = project_import_service.claim_next_task(db, lease_seconds=60)
+    assert claimed is not None
+    row = db.get(ProjectImportTask, claimed["id"])
+    partial_project = project_import_service._ensure_import_project(
+        db, row, owner, project_import_service._load_json(row.request_json),
+    )
+    partial_project_id = partial_project.id
+    assert db.get(Project, partial_project_id).status == "importing"
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: False)
+    with pytest.raises(ConflictError, match="权限") as error:
+        project_import_service.complete_import_task(
+            db, claimed["id"], lease_token=claimed["lease_token"], result={"id": 99},
+        )
+    assert project_import_service.fail_import_task(
+        db, claimed["id"], lease_token=claimed["lease_token"],
+        error=error.value, retryable=False,
+    )
+    assert project_import_service.get_import_task(db, owner, created["task_id"])["status"] == "failed"
+    assert db.get(Project, partial_project_id) is None
+
+
+def test_revocation_during_download_stops_on_progress_callback(db, monkeypatch) -> None:
+    owner = _user(db, "revoked-during-download-owner")
+    _create(db, owner, monkeypatch, key="revoked-during-download")
+    claimed = project_import_service.claim_next_task(db, lease_seconds=60)
+    assert claimed is not None
+    allowed = True
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: allowed)
+
+    @contextmanager
+    def fake_download(*_args, progress_callback=None, **_kwargs):
+        nonlocal allowed
+        allowed = False
+        progress_callback(1, 2)
+        pytest.fail("撤权后不得完成下载")
+        yield
+
+    monkeypatch.setattr(
+        project_import_service.project_source_service,
+        "download_remote_project_archive_to_temp", fake_download,
+    )
+    with pytest.raises(ConflictError, match="权限"):
+        project_import_service.execute_claimed_import(
+            db, claimed["id"], lease_token=claimed["lease_token"],
+        )
+
+
+def test_cancelled_import_remains_cancelled_after_owner_loses_permission(db, monkeypatch) -> None:
+    owner = _user(db, "cancelled-then-revoked-owner")
+    created = _create(db, owner, monkeypatch, key="cancelled-then-revoked")
+    claimed = project_import_service.claim_next_task(db, lease_seconds=60)
+    assert claimed is not None
+    cancelled = project_import_service.cancel_import_task(db, owner, created["task_id"])
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: False)
+    assert not project_import_service.complete_import_task(
+        db, claimed["id"], lease_token=claimed["lease_token"], result={"id": 99},
+    )
+    assert not project_import_service.fail_import_task(
+        db, claimed["id"], lease_token=claimed["lease_token"],
+        error=ConflictError("权限已撤销"), retryable=False,
+    )
+    assert cancelled["status"] == "cancelled"
+    assert project_import_service.get_import_task(db, owner, created["task_id"])["status"] == "cancelled"
 
 
 @pytest.mark.parametrize("phase", ["queued", "downloading", "scanning", "ingesting"])

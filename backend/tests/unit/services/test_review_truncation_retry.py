@@ -15,7 +15,7 @@ def test_clamp_max_tokens_ceiling_follows_settings():
     assert _clamp_max_tokens(None) == 4096
     assert _clamp_max_tokens(16384) == 16384
     assert _clamp_max_tokens(10**9) == 65536
-    assert _clamp_max_tokens(1) == 128
+    assert _clamp_max_tokens(1) == 1
 
 
 def test_profile_default_max_tokens_covers_reasoning_budget():

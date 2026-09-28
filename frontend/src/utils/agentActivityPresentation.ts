@@ -2,6 +2,7 @@ export interface AgentActivityUsageInput {
   calls_today: number
   model_calls_today?: number
   model_tokens_today?: number
+  model_unknown_usage_calls_today?: number
   tool_calls_today?: number
 }
 
@@ -37,16 +38,26 @@ export function formatAgentActivityUsage(activity: AgentActivityUsageInput): Age
 
   const modelCalls = safeCount(activity.model_calls_today)
   const modelTokens = safeCount(activity.model_tokens_today)
+  const unknownUsageCalls = safeCount(activity.model_unknown_usage_calls_today)
   const toolCalls = safeCount(activity.tool_calls_today)
   const label = [`模型 ${integerFormatter.format(modelCalls)}`]
-  if (modelTokens > 0) label.push(`${compactTokens(modelTokens)} Token`)
+  if (modelTokens > 0 || unknownUsageCalls > 0) label.push(`${compactTokens(modelTokens)} Token`)
+  if (unknownUsageCalls > 0) label.push(`用量未知 ${integerFormatter.format(unknownUsageCalls)}`)
   if (toolCalls > 0) label.push(`工具 ${integerFormatter.format(toolCalls)}`)
+
+  const title = unknownUsageCalls > 0
+    ? (
+      `今日模型调用 ${integerFormatter.format(modelCalls)} 次，可核算 ${integerFormatter.format(modelTokens)} Token；` +
+      `${integerFormatter.format(unknownUsageCalls)} 次调用缺少完整用量，实际总量可能更高；` +
+      `本地工具调用 ${integerFormatter.format(toolCalls)} 次，不调用模型、不产生模型 Token 费用`
+    )
+    : (
+      `今日模型调用 ${integerFormatter.format(modelCalls)} 次，共 ${integerFormatter.format(modelTokens)} Token；` +
+      `本地工具调用 ${integerFormatter.format(toolCalls)} 次，不调用模型、不产生模型 Token 费用`
+    )
 
   return {
     label: label.join(' · '),
-    title: (
-      `今日模型调用 ${integerFormatter.format(modelCalls)} 次，共 ${integerFormatter.format(modelTokens)} Token；` +
-      `本地工具调用 ${integerFormatter.format(toolCalls)} 次，不调用模型、不产生模型 Token 费用`
-    ),
+    title,
   }
 }

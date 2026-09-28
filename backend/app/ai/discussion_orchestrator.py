@@ -1895,13 +1895,21 @@ def _compress_roundtable_history(
     input_limit = min(8000, max(512, (context_window - budgets[-1]) // 3))
     part_chars = max(128, input_limit // 3)
     pieces: list[tuple[str, str]] = []
+    source_labels: dict[str, str] = {}
     for source_id, content in records:
+        # 来源标签只从完整记录的元数据读取；后续正文分片没有标签前缀，
+        # 不能把整片正文重新放入摘要标题，否则每轮压缩都会恢复原文。
+        label_match = re.match(r"^【([^】\r\n]{1,160})】", content)
+        source_label = label_match.group(1) if label_match else source_id
         if estimate_tokens(content) <= input_limit:
             pieces.append((source_id, content))
+            source_labels[source_id] = source_label
             continue
         # 单条发言也按连续片段覆盖；每段保留相同来源及 part 序号。
         for part_index, offset in enumerate(range(0, len(content), part_chars), start=1):
-            pieces.append((f"{source_id}.{part_index}", content[offset:offset + part_chars]))
+            part_id = f"{source_id}.{part_index}"
+            pieces.append((part_id, content[offset:offset + part_chars]))
+            source_labels[part_id] = source_label
 
     groups: list[list[tuple[str, str]]] = []
     current: list[tuple[str, str]] = []
@@ -1979,7 +1987,7 @@ def _compress_roundtable_history(
                     ):
                         raise ValueError("压缩摘要证据引文无法从原发言核验")
                     seen.add(source_id)
-                    source_label = original_pieces[source_id].split("】", 1)[0].lstrip("【")
+                    source_label = source_labels[source_id]
                     result.append((source_id, f"【来源 {source_id} · {source_label}】{summary} 原文引文："
                                    + "；".join(f"「{quote}」" for quote in quotes)))
                 if seen != set(expected):

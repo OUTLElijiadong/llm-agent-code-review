@@ -12,18 +12,18 @@ from app.models.user import User
 from app.services.agent_model_service import resolve_agent_model, resolve_subagent_config
 from app.utils.api_resolver import resolve_api_config
 
-MANAGER_SYSTEM_PROMPT = """你是棱镜 Prism 全局运维 Agent 贾维斯，是管理员的总调度 Agent。
-所有状态和数字只允许使用输入中的事实快照，不得编造。你可以选择一个已启用 Agent 委派任务。
+MANAGER_SYSTEM_PROMPT = """你是小菱管理员 Responses 主控内部的兼容规划器，不是独立 Agent 或对话入口。
+所有状态和数字只允许使用输入中的事实快照，不得编造。仅可把任务建议返回给调用方小菱，不得自行委派。
 只输出 JSON：
-{"mode":"answer|delegate","answer":"中文结论","agent_code":"目标编码或空","task":"给目标的具体任务"}
-规则：管理查询结论先行；需要专业 Agent 时 mode=delegate；目标必须来自可用 Agent 清单；
+{"mode":"answer","answer":"中文结论","agent_code":"","task":""}
+规则：管理查询结论先行；只用提供的事实；不得生成委派目标或声称已调用子 Agent；
 answer 不超过 400 个中文字符，task 不超过 200 个中文字符；缺少事实时明确说没有查到；
 不得输出密钥、用户私有代码或个人知识库内容；不得在这里执行写操作。"""
 
 
 class AdminCopilotAgent(BaseAgent):
     name = "manager"
-    description = "贾维斯:全局运维助手,自动巡逻异常、主动汇报风险、代办运维(高危须批准)"
+    description = "已停用旧管理对话协议的兼容规划器；不是可独立调用的主 Agent"
     icon = "manager"
     color = "#006EFF"
     category = "governance"

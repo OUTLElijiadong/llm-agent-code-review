@@ -67,10 +67,40 @@ def _build_review_call(
     return (
         f"{profile.system_prompt.strip()}\n\n"
         "平台强制契约：只审查用户提供的代码，严格输出现有 Issue JSON 结构；"
+        "每条 issue 的 evidence 必须逐字来自当前源码分片，"
+        "line_number 必须能定位到该 evidence；不得编造文件、函数、依赖、调用路径、漏洞利用结果或覆盖范围。"
+        "证据不足、路径未闭合或行号/evidence 无法核实时省略该 issue，并在 summary 中说明实际未覆盖范围；"
         "不得执行命令、访问网络、写文件或修改数据。\n\n"
         f"{system_prompt}",
         user_prompt,
     )
+
+
+def _validate_issue_source_evidence(issue, chunk: CodeChunk) -> None:
+    """Reject published-agent findings whose quote and chunk-local start line do not match."""
+    evidence = str(getattr(issue, "evidence", "") or "")
+    source = chunk.text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized_evidence = evidence.replace("\r\n", "\n").replace("\r", "\n")
+    if not evidence.strip() or normalized_evidence not in source:
+        raise DeepSeekResponseError("已发布 Agent 的问题证据不在当前源码分片中")
+    try:
+        line_number = int(getattr(issue, "line_number", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise DeepSeekResponseError("已发布 Agent 的问题行号非法") from exc
+    if line_number <= 0:
+        raise DeepSeekResponseError("已发布 Agent 的问题行号非法")
+    # Check the complete quote's actual start line. Checking only its first line
+    # lets repeated prefixes attach a multi-line quote to the wrong location.
+    start = 0
+    while True:
+        start = source.find(normalized_evidence, start)
+        if start < 0:
+            break
+        actual_line = source.count("\n", 0, start) + 1
+        if actual_line == line_number:
+            return
+        start += 1
+    raise DeepSeekResponseError("已发布 Agent 的问题行号与逐字证据不匹配")
 
 
 def _plan_complete_review(
@@ -283,6 +313,8 @@ def invoke_published_agent(
                     f"已发布 Agent 分片 {index + 1}/{len(calls)} 有 "
                     f"{result.invalid_issue_count} 条问题未通过解析，无法声明完整审查"
                 )
+            for issue in result.issues:
+                _validate_issue_source_evidence(issue, chunk)
             summaries.append(result.summary)
             scores.append((int(result.score), max(1, len(chunk.text))))
             for issue in result.issues:

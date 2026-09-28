@@ -3,17 +3,80 @@
 import threading
 import time
 from concurrent.futures import Future
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-
 from app.agents.base import AgentResult
-from app.models.agent_team import AgentTeam, AgentTeamTask
+from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_mesh_dispatcher, agent_team_dispatcher, agent_team_service, published_agent_tools
+
+
+@pytest.mark.parametrize("change", [
+    "permission_before", "permission_during", "disabled_before", "disabled_during",
+])
+def test_team_worker_discards_task_after_owner_loses_access(
+    monkeypatch, db, change,
+):
+    user = User(username=f"revoke-{change}", password="x", role="user", status=1)
+    db.add(user)
+    db.flush()
+    team = AgentTeam(
+        user_id=user.id, surface="user", session_key="revoke-session", title="撤权边界",
+        objective="只在当前权限内审查", status="running", trace_id="revoke-trace",
+    )
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(
+        team_id=team.id, member_key="reviewer", display_name="审查 Agent",
+        address="agent:code_reviewer", kind="builtin", role="verifier", status="running",
+    )
+    db.add(member)
+    db.flush()
+    task = AgentTeamTask(
+        team_id=team.id, member_id=member.id, task_key="review", title="审查代码",
+        instructions="审查给定片段", status="running", attempt_count=1, max_attempts=2,
+        lease_token="active-lease", lease_expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+        input_json='{"code":"print(1)"}',
+    )
+    db.add(task)
+    db.commit()
+    claimed = {
+        "task_id": task.id, "member_id": member.id, "address": member.address,
+        "lease_token": "active-lease", "attempt_count": 1, "input": {"code": "print(1)"},
+    }
+    permission = {"allowed": change != "permission_before"}
+    if change == "disabled_before":
+        user.status = 0
+        db.commit()
+    calls = []
+    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
+    monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *_args: permission["allowed"])
+
+    def handler(*_args, **_kwargs):
+        calls.append("model invoked")
+        if change == "permission_during":
+            permission["allowed"] = False
+        elif change == "disabled_during":
+            db.query(User).filter(User.id == user.id).update({User.status: 0})
+            db.commit()
+        return "审查 Agent", {"status": "completed", "summary": "旧权限下的结果"}
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", handler)
+    outcome = agent_team_dispatcher._execute_claimed(team.id, claimed)
+
+    assert outcome == {"success": False}
+    assert calls == (["model invoked"] if change.endswith("during") else [])
+    db.expire_all()
+    saved = db.get(AgentTeamTask, task.id)
+    assert saved.status == "failed"
+    assert "旧权限下的结果" not in saved.result_json
+    assert db.query(AgentTeamEvent).filter_by(team_id=team.id, event_type="task.failed").count() == 1
 
 
 def test_task_message_preserves_input_and_adds_team_handoff_context():
@@ -133,6 +196,7 @@ def test_operations_team_rejects_write_action_without_executing(monkeypatch):
 
 
 def test_project_analyzer_can_inspect_project_without_source_paths(monkeypatch):
+    monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *_args: True)
     detail = AgentResult(success=True, data={"id": 153, "source_mode": "audit_archive"})
     files = AgentResult(success=True, data={"total": 0, "items": []})
     orch = SimpleNamespace(
@@ -156,7 +220,216 @@ def test_project_analyzer_can_inspect_project_without_source_paths(monkeypatch):
     assert [item["source"] for item in result["evidence"]] == ["project_detail", "project_files"]
 
 
+_TEAM_READ_PERMISSION_CASES = [
+    pytest.param(
+        "project_manager", {"operation": "list"},
+        ("project:view",), "list_projects", id="project-list",
+    ),
+    pytest.param(
+        "project_manager", {"operation": "get", "project_id": 153},
+        ("project:view",), "get_project_detail", id="project-detail",
+    ),
+    pytest.param(
+        "code_file_manager", {"operation": "list", "project_id": 153},
+        ("file:view",), "list_files", id="file-list",
+    ),
+    pytest.param(
+        "code_file_manager", {"operation": "get", "file_id": 91},
+        ("file:view",), "get_file", id="file-content",
+    ),
+    pytest.param(
+        "project_analyzer", {"operation": "inspect_project", "project_id": 153},
+        ("project:view", "file:view"), "list_files", id="project-inspection",
+    ),
+    pytest.param(
+        "review_orchestrator", {"operation": "list", "project_id": 153},
+        ("review:view",), "list_tasks", id="review-list",
+    ),
+    pytest.param(
+        "review_orchestrator", {"operation": "get", "task_id": 29},
+        ("review:view",), "get_task_detail", id="review-detail",
+    ),
+    pytest.param(
+        "review_orchestrator", {"operation": "issues", "task_id": 29},
+        ("issue:view",), "list_issues", id="review-issues",
+    ),
+    pytest.param(
+        "test_verifier", {"operation": "inspect_existing_results", "project_id": 153},
+        ("review:view",), "list_tasks", id="existing-review-results",
+    ),
+    pytest.param(
+        "reporter", {"operation": "list", "project_id": 153},
+        ("report:view",), "list_reports", id="report-list",
+    ),
+    pytest.param(
+        "reporter", {"operation": "get", "task_id": 29},
+        ("report:view",), "get_report_detail", id="report-detail",
+    ),
+    pytest.param(
+        "rule_manager", {"operation": "list"},
+        ("rule:view",), "list_rules", id="rule-list",
+    ),
+]
+
+
+def _mesh_permission_user(db, permission_codes):
+    user = User(username="mesh-reader", password="x", role="reviewer", status=1)
+    role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    db.add_all([user, role])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
+    for code in permission_codes:
+        permission = Permission(code=code, name=code, module=code.split(":", 1)[0], type="api")
+        db.add(permission)
+        db.flush()
+        db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    db.commit()
+    return user
+
+
+def _mesh_read_orchestrator():
+    from unittest.mock import Mock
+
+    completed = AgentResult(success=True, data={"total": 0, "items": []})
+    return SimpleNamespace(
+        get_project_detail=Mock(return_value=completed),
+        list_projects=Mock(return_value=completed),
+        file_mgr=SimpleNamespace(
+            list_files=Mock(return_value=completed),
+            get_file=Mock(return_value=completed),
+        ),
+        review_orch=SimpleNamespace(
+            list_tasks=Mock(return_value=completed),
+            get_task_detail=Mock(return_value=completed),
+            list_issues=Mock(return_value=completed),
+        ),
+        reporter=SimpleNamespace(
+            list_reports=Mock(return_value=completed),
+            get_report_detail=Mock(return_value=completed),
+        ),
+        rule_mgr=SimpleNamespace(list_rules=Mock(return_value=completed)),
+    )
+
+
+@pytest.mark.parametrize("code,payload,required,expected_call", _TEAM_READ_PERMISSION_CASES)
+def test_team_read_agents_block_when_global_read_permission_is_revoked(
+    monkeypatch, db, code, payload, required, expected_call,
+):
+    granted = set(required) - {required[-1]}
+    user = _mesh_permission_user(db, granted)
+    orchestrator = _mesh_read_orchestrator()
+    monkeypatch.setattr(
+        "app.agents.orchestrator.get_request_orchestrator",
+        lambda *_args, **_kwargs: orchestrator,
+    )
+
+    result = agent_mesh_dispatcher._runtime_handler(
+        db,
+        user,
+        code,
+        {"user_id": user.id, "payload": payload, "context": {"team_id": 8}},
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["errors"][0]["code"] == "insufficient_permission"
+    assert required[-1] in result["errors"][0]["permissions"]
+    for target in (orchestrator, orchestrator.file_mgr, orchestrator.review_orch,
+                   orchestrator.reporter, orchestrator.rule_mgr):
+        call = getattr(target, expected_call, None)
+        if call is not None:
+            assert not call.called
+    if code == "project_analyzer":
+        assert not orchestrator.get_project_detail.called
+
+
+@pytest.mark.parametrize("code,payload,required,expected_call", _TEAM_READ_PERMISSION_CASES)
+def test_team_read_agents_keep_authorized_path_when_permissions_exist(
+    monkeypatch, db, code, payload, required, expected_call,
+):
+    user = _mesh_permission_user(db, required)
+    orchestrator = _mesh_read_orchestrator()
+    monkeypatch.setattr(
+        "app.agents.orchestrator.get_request_orchestrator",
+        lambda *_args, **_kwargs: orchestrator,
+    )
+
+    result = agent_mesh_dispatcher._runtime_handler(
+        db,
+        user,
+        code,
+        {"user_id": user.id, "payload": payload, "context": {"team_id": 8}},
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "completed"
+    if expected_call in {"list_files", "get_file"}:
+        assert getattr(orchestrator.file_mgr, expected_call).called
+    elif expected_call in {"list_tasks", "get_task_detail", "list_issues"}:
+        assert getattr(orchestrator.review_orch, expected_call).called
+    elif expected_call in {"list_reports", "get_report_detail"}:
+        assert getattr(orchestrator.reporter, expected_call).called
+    elif expected_call == "list_rules":
+        assert orchestrator.rule_mgr.list_rules.called
+    else:
+        assert getattr(orchestrator, expected_call).called
+    if code == "project_analyzer":
+        assert orchestrator.get_project_detail.called
+        assert orchestrator.file_mgr.list_files.called
+
+
+@pytest.mark.parametrize("code,payload,required,_expected_call", _TEAM_READ_PERMISSION_CASES)
+def test_team_creation_rejects_member_without_the_read_permission(
+    db, code, payload, required, _expected_call,
+):
+    from app.schemas.agent_team import AgentTeamTaskIn
+
+    granted = set(required) - {required[-1]}
+    user = _mesh_permission_user(db, granted)
+    task_input_data = dict(payload)
+    if task_input_data.get("project_id"):
+        project = Project(user_id=user.id, project_name="Mesh permission scope", status="active")
+        db.add(project)
+        db.flush()
+        task_input_data["project_id"] = project.id
+    task_input = AgentTeamTaskIn.model_validate({
+        "task_key": "read-check",
+        "member_key": "reader",
+        "title": "读取权限复核",
+        "instructions": "按请求读取当前任务所需内容",
+        "input": task_input_data,
+    })
+
+    with pytest.raises(agent_team_service.AgentTeamAccessError, match=required[-1]):
+        agent_team_service._validate_task_scope(db, user, task_input, f"agent:{code}")
+
+
+def test_team_run_review_rechecks_review_start_permission_at_dispatch(monkeypatch, db):
+    from unittest.mock import Mock
+
+    user = _mesh_permission_user(db, {"review:view"})
+    run_review = Mock()
+    monkeypatch.setattr("app.services.agent_team_review.run_team_review", run_review)
+
+    result = agent_mesh_dispatcher._runtime_handler(
+        db,
+        user,
+        "review_orchestrator",
+        {
+            "user_id": user.id,
+            "payload": {"operation": "run_review", "project_id": 153, "review_type": "full"},
+            "context": {"team_id": 8, "agent_team_task_id": 12, "lease_token": "valid-lease"},
+        },
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["errors"][0]["permissions"] == ["review:start"]
+    run_review.assert_not_called()
+
+
 def test_test_verifier_can_inspect_existing_results_without_running_tests(monkeypatch):
+    monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *_args: True)
     list_tasks = AgentResult(success=True, data={"total": 2, "items": [{"id": 137, "status": "failed"}]})
     orch = SimpleNamespace(review_orch=SimpleNamespace(list_tasks=lambda *args, **kwargs: list_tasks))
     monkeypatch.setattr("app.agents.orchestrator.get_request_orchestrator", lambda *args, **kwargs: orch)
@@ -177,6 +450,7 @@ def test_test_verifier_can_inspect_existing_results_without_running_tests(monkey
 
 
 def test_readonly_instructions_fail_closed_when_model_omits_operation(monkeypatch):
+    monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *_args: True)
     list_tasks = AgentResult(success=True, data={"total": 5, "items": []})
     orch = SimpleNamespace(review_orch=SimpleNamespace(list_tasks=lambda *args, **kwargs: list_tasks))
     monkeypatch.setattr("app.agents.orchestrator.get_request_orchestrator", lambda *args, **kwargs: orch)
@@ -263,9 +537,10 @@ def test_dispatch_once_consumes_persistent_queue_and_records_completion(monkeypa
             ],
         }
     )
-    created = agent_team_service.create_team(db, user, payload)
+    created = agent_team_service.create_team_from_xiaoling(db, user, payload)
     monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
     monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_enabled", True)
+    monkeypatch.setattr(agent_team_dispatcher.rbac_service, "check_permission", lambda *_args: True)
 
     class ImmediateExecutor:
         def __init__(self, *_args, **_kwargs):
@@ -351,7 +626,7 @@ def test_dispatch_once_runs_three_independent_children_concurrently(monkeypatch,
             ],
         }
     )
-    agent_team_service.create_team(db, user, payload)
+    agent_team_service.create_team_from_xiaoling(db, user, payload)
     monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
     monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_enabled", True)
     monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_max_active_children", 3)
@@ -1215,6 +1490,71 @@ def test_test_verifier_waits_for_terminal_failure_and_returns_reroute_strategy(m
     assert result["evidence"][0]["data"]["events"][0]["message"] == "1 failed"
     assert result["artifacts"][0]["data"]["artifacts"][0]["file_name"] == "report.json"
     assert "全新沙箱" in result["strategy_change"]
+
+
+def test_test_verifier_team_runs_combined_whitebox_blackbox_on_requested_revision(monkeypatch):
+    """小菱团队中的 test_verifier 将组合验证和修复副本交给隔离沙箱执行。"""
+    calls = []
+
+    class FakeOrchestrator:
+        def run_project_tests(self, **kwargs):
+            calls.append(kwargs)
+            return AgentResult(
+                success=True,
+                data={
+                    "public_id": "sbx_combined",
+                    "status": "succeeded",
+                    "source_revision_id": 41,
+                    "source_sha256": "a" * 64,
+                    "test_mode": "combined",
+                },
+            )
+
+    class FakeDb:
+        pass
+
+    monkeypatch.setattr(
+        "app.agents.orchestrator.get_request_orchestrator",
+        lambda *_args, **_kwargs: FakeOrchestrator(),
+    )
+    monkeypatch.setattr(
+        "app.services.agent_team_service.handoff_dependency_runtime_resources",
+        lambda *_args, **_kwargs: [],
+    )
+
+    result = agent_mesh_dispatcher._runtime_handler(
+        FakeDb(),
+        SimpleNamespace(id=7, role="super_admin"),
+        "test_verifier",
+        {
+            "user_id": 7,
+            "trace_id": "team-combined-trace",
+            "message_id": "team-combined-1",
+            "payload": {
+                "operation": "run_project_tests",
+                "project_id": 31,
+                "language": "python",
+                "test_mode": "combined",
+                "source_revision_id": 41,
+            },
+            "context": {"team_id": 9, "task_id": 3, "lease_token": "lease-combined"},
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert calls == [{
+        "project_id": 31,
+        "language": "python",
+        "test_mode": "combined",
+        "worker_code": "",
+        "source_revision_id": 41,
+        "remote_target_url": "",
+        "remote_target_authorized": False,
+        "ctx": calls[0]["ctx"],
+    }]
+    environment_evidence = result["evidence"][0]["data"]
+    assert environment_evidence["source_revision_id"] == 41
+    assert environment_evidence["source_sha256"] == "a" * 64
 
 
 def test_team_cancellation_stops_waiting_sandbox(monkeypatch):

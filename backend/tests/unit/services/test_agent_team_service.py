@@ -5,9 +5,6 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy.orm import Session
-from sqlalchemy.sql.dml import Update
-
 from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentMemory
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
@@ -20,6 +17,8 @@ from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_responses_service, agent_team_service, sandbox_service
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Update
 
 
 @pytest.fixture()
@@ -116,7 +115,7 @@ def _claimed_deploy_and_verifier(db, team_user):
     )
     db.add_all([project, revision])
     db.commit()
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -220,15 +219,111 @@ def _claimed_deploy_and_verifier(db, team_user):
 
 
 def test_create_team_persists_graph_and_dependency_state(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     assert created["status"] == "queued"
     assert created["tasks"][0]["status"] == "queued"
     assert created["tasks"][1]["status"] == "waiting_dependency"
 
 
+@pytest.mark.parametrize(
+    ("requested_limit", "configured_limit"),
+    [(3, 1), (1, 3)],
+    ids=["server-config-clamps-to-one", "request-limit-is-one"],
+)
+def test_parallel_ready_workers_reject_effective_single_worker_limit(
+    db, team_user, monkeypatch, requested_limit, configured_limit
+):
+    monkeypatch.setattr(
+        agent_team_service.settings, "agent_team_max_active_children", configured_limit
+    )
+    payload = _branching_payload()
+    payload.max_active_children = requested_limit
+
+    with pytest.raises(agent_team_service.AgentTeamValidationError, match="并行.*2"):
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert db.query(AgentTeam).count() == 0
+    assert db.query(AgentMeshConversation).count() == 0
+
+
+def test_parallel_ready_workers_keep_default_concurrency(db, team_user, monkeypatch):
+    monkeypatch.setattr(agent_team_service.settings, "agent_team_max_active_children", 3)
+    payload = _branching_payload()
+
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert created["max_active_children"] == 3
+    assert sum(task["status"] == "queued" for task in created["tasks"]) >= 2
+
+
+def test_later_parallel_worker_wave_rejects_single_worker_limit(db, team_user, monkeypatch):
+    monkeypatch.setattr(agent_team_service.settings, "agent_team_max_active_children", 3)
+    payload = _payload(
+        max_active_children=1,
+        tasks=[
+            {"task_key": "prepare", "member_key": "reader", "title": "准备", "instructions": "准备"},
+            {
+                "task_key": "left",
+                "member_key": "reader",
+                "title": "左分支",
+                "instructions": "处理左分支",
+                "depends_on": ["prepare"],
+            },
+            {
+                "task_key": "right",
+                "member_key": "reader",
+                "title": "右分支",
+                "instructions": "处理右分支",
+                "depends_on": ["prepare"],
+            },
+            {
+                "task_key": "verify",
+                "member_key": "reviewer",
+                "title": "验证",
+                "instructions": "验证两个分支",
+                "depends_on": ["left", "right"],
+            },
+        ],
+    )
+
+    with pytest.raises(agent_team_service.AgentTeamValidationError, match="并行.*2"):
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert db.query(AgentTeam).count() == 0
+
+
+def test_dependency_sequence_can_use_single_worker_limit(db, team_user, monkeypatch):
+    monkeypatch.setattr(agent_team_service.settings, "agent_team_max_active_children", 1)
+    payload = _payload(
+        max_active_children=1,
+        tasks=[
+            {"task_key": "read", "member_key": "reader", "title": "读取", "instructions": "读取"},
+            {
+                "task_key": "analyze",
+                "member_key": "reader",
+                "title": "分析",
+                "instructions": "分析读取结果",
+                "depends_on": ["read"],
+            },
+            {
+                "task_key": "verify",
+                "member_key": "reviewer",
+                "title": "验证",
+                "instructions": "验证分析结果",
+                "depends_on": ["analyze"],
+            },
+        ],
+    )
+
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert created["max_active_children"] == 1
+    assert created["status"] == "queued"
+
+
 def test_claim_and_complete_events_carry_task_key(db, team_user):
     """事件 detail 统一带 task_key:前端子Agent工作卡片日志「开始工作 <task_key>」依赖它。"""
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     assert claim["task_key"]
     agent_team_service.complete_task(
@@ -264,7 +359,7 @@ def test_claim_and_complete_events_carry_task_key(db, team_user):
 
 
 def test_team_retry_budget_caps_each_task(db, team_user):
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -332,7 +427,7 @@ def test_create_team_auto_adds_verifier_task_when_member_exists(db, team_user):
             }
         ],
     )
-    created = agent_team_service.create_team(db, team_user, payload)
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
     assert any(item["task_key"] == "auto_summary" for item in created["tasks"])
 
 
@@ -375,7 +470,7 @@ def test_published_custom_member_uses_server_release_snapshot(db):
     db.add(release)
     db.commit()
 
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         admin,
         _payload(
@@ -543,11 +638,11 @@ def test_create_team_rejects_dependency_cycle(db, team_user):
         ]
     )
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="环"):
-        agent_team_service.create_team(db, team_user, payload)
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
 
 
 def test_team_isolation_and_cancel_are_idempotent(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     other = SimpleNamespace(id=8, role="user", username="other")
     with pytest.raises(agent_team_service.AgentTeamNotFoundError):
         agent_team_service.get_team(db, other, created["team_id"])
@@ -556,7 +651,7 @@ def test_team_isolation_and_cancel_are_idempotent(db, team_user):
     assert agent_team_service.cancel_team(db, team_user, created["team_id"], reason="重复取消")["status"] == "cancelled"
 
 
-def test_monitor_team_rejects_server_fact_object_before_queueing(db, team_user):
+def test_monitor_team_is_hidden_on_user_surface_and_rejects_server_fact_objects(db, team_user):
     payload = _payload(
         members=[
             {
@@ -590,8 +685,10 @@ def test_monitor_team_rejects_server_fact_object_before_queueing(db, team_user):
         ],
     )
 
+    with pytest.raises(agent_team_service.AgentTeamAccessError, match="不属于当前用户会话"):
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="metrics 必须是非空指标名字符串列表"):
-        agent_team_service.create_team(db, team_user, payload)
+        agent_team_service._validate_task_scope(db, team_user, payload.tasks[0], "agent:monitor")
 
 
 def test_operations_team_requires_unique_super_admin_and_readonly_action(db, monkeypatch):
@@ -630,16 +727,32 @@ def test_operations_team_requires_unique_super_admin_and_readonly_action(db, mon
     )
     admin = SimpleNamespace(id=1, role="super_admin", username="admin")
     monkeypatch.setattr("app.services.rbac_service.is_super_admin_user", lambda *_args: True)
-    created = agent_team_service.create_team(db, admin, payload)
+    from app.services import agent_supervisor_service
+
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        admin,
+        payload,
+        supervisor_plan_sha256=review["plan_sha256"],
+        supervisor_confirmed_by=admin.id,
+    )
     assert created["members"][0]["capabilities"]["dispatch_state"] == "team_governed"
 
     payload.tasks[0].input = {"action": "restart_service", "params": {"service": "backend"}}
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="只能执行运维只读动作"):
-        agent_team_service.create_team(db, admin, payload)
+        review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+        agent_team_service.create_team_from_xiaoling(
+            db,
+            admin,
+            payload,
+            supervisor_plan_sha256=review["plan_sha256"],
+            supervisor_confirmed_by=admin.id,
+        )
 
 
 def test_dependency_failure_recursively_blocks_all_descendants(db, team_user):
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -690,7 +803,7 @@ def test_dependency_failure_recursively_blocks_all_descendants(db, team_user):
 @pytest.mark.parametrize(("retryable", "root_status"), [(False, "failed"), (True, "dead_letter")])
 def test_terminal_failure_closes_independent_queued_and_waiting_tasks(db, team_user, retryable, root_status):
     """失败根节点、独立排队分支及其等待后继必须在同一提交中闭合。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     result = _fail_claim(db, created["team_id"], claim, retryable=retryable)
     tasks = {item["task_key"]: item for item in result["tasks"]}
@@ -714,7 +827,7 @@ def test_terminal_failure_closes_independent_queued_and_waiting_tasks(db, team_u
 
 def test_terminal_failure_and_block_events_are_atomic(db, team_user, monkeypatch):
     """阻断事件写入失败时，失败父、失败子和兄弟阻断必须一起回滚。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     before = {task.task_key: task.status for task in db.query(AgentTeamTask).all()}
     event_count = db.query(AgentTeamEvent).count()
@@ -737,7 +850,7 @@ def test_terminal_failure_and_block_events_are_atomic(db, team_user, monkeypatch
 
 def test_retryable_failure_keeps_independent_branches_schedulable(db, team_user):
     """尚有自动重试预算不构成团队终态失败，也不阻断其他分支。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload(root_attempts=2))
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload(root_attempts=2))
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     result = _fail_claim(db, created["team_id"], claim, retryable=True)
     assert result["status"] == "queued"
@@ -755,7 +868,7 @@ def test_retryable_failure_keeps_independent_branches_schedulable(db, team_user)
 @pytest.mark.parametrize("sibling_success", [True, False])
 def test_fail_fast_drains_running_sibling_without_starting_more_work(db, team_user, sibling_success):
     """在途兄弟保留租约；禁止新领取，真实返回后才归约失败父。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     root = agent_team_service.claim_next_task(db, created["team_id"])
     sibling = agent_team_service.claim_next_task(db, created["team_id"])
     running = _fail_claim(db, created["team_id"], root)
@@ -777,10 +890,254 @@ def test_fail_fast_drains_running_sibling_without_starting_more_work(db, team_us
     assert agent_team_service.claim_next_task(db, created["team_id"]) is None
 
 
+@pytest.mark.parametrize(("retryable", "failure_status"), [(False, "failed"), (True, "dead_letter")])
+def test_failed_worker_preserves_running_sibling_and_runs_partial_summarizer(db, team_user, retryable, failure_status):
+    """一个并行工作节点失败时停止新工作，等在途节点结束后仍汇总可用结果。"""
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        _payload(
+            max_active_children=2,
+            members=[
+                {
+                    "member_key": "quality",
+                    "display_name": "代码质量",
+                    "address": "agent:project_analyzer",
+                    "role": "worker",
+                },
+                {
+                    "member_key": "security",
+                    "display_name": "安全审查",
+                    "address": "agent:project_analyzer",
+                    "role": "worker",
+                },
+                {
+                    "member_key": "summary",
+                    "display_name": "部分结果汇总",
+                    "address": "agent:reporter",
+                    "role": "summarizer",
+                },
+            ],
+            tasks=[
+                {
+                    "task_key": "quality",
+                    "member_key": "quality",
+                    "title": "代码质量检查",
+                    "instructions": "检查代码质量",
+                    "priority": 100,
+                    "max_attempts": 1,
+                },
+                {
+                    "task_key": "security",
+                    "member_key": "security",
+                    "title": "安全检查",
+                    "instructions": "检查安全问题",
+                    "priority": 90,
+                },
+                {
+                    "task_key": "summary",
+                    "member_key": "summary",
+                    "title": "汇总已完成结果",
+                    "instructions": "汇总成功节点并注明失败节点",
+                    "depends_on": ["quality", "security"],
+                },
+            ],
+        ),
+    )
+
+    quality = agent_team_service.claim_next_task(db, created["team_id"])
+    security = agent_team_service.claim_next_task(db, created["team_id"])
+    assert quality["task_key"] == "quality"
+    assert security["task_key"] == "security"
+
+    after_quality_failure = agent_team_service.complete_task(
+        db,
+        created["team_id"],
+        quality["task_id"],
+        lease_token=quality["lease_token"],
+        result={"status": "failed", "summary": "代码质量节点输出被截断", "retryable": retryable},
+        success=False,
+        error="finish_reason=length",
+    )
+    after_failure = {item["task_key"]: item for item in after_quality_failure["tasks"]}
+    assert after_quality_failure["status"] == "running"
+    assert after_failure["quality"]["status"] == failure_status
+    assert after_failure["security"]["status"] == "running"
+    assert after_failure["summary"]["status"] == "waiting_dependency"
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+
+    after_security_success = agent_team_service.complete_task(
+        db,
+        created["team_id"],
+        security["task_id"],
+        lease_token=security["lease_token"],
+        result={
+            "status": "completed",
+            "findings": [{"id": "SEC-1", "severity": "high"}],
+            "summary": "发现一项高危风险",
+        },
+        success=True,
+    )
+    after_sibling = {item["task_key"]: item for item in after_security_success["tasks"]}
+    assert after_security_success["status"] == "verifying"
+    assert after_sibling["summary"]["status"] == "queued"
+
+    summary = agent_team_service.claim_next_task(db, created["team_id"])
+    assert summary["task_key"] == "summary"
+    assert summary["dependency_context"]["quality"]["status"] == failure_status
+    assert summary["dependency_context"]["quality"]["errors"]
+    assert summary["dependency_context"]["security"]["status"] == "completed"
+    assert summary["dependency_context"]["security"]["result"]["findings"][0]["id"] == "SEC-1"
+
+    final = agent_team_service.complete_task(
+        db,
+        created["team_id"],
+        summary["task_id"],
+        lease_token=summary["lease_token"],
+        result={"status": "partial", "summary": "安全审查发现 SEC-1；代码质量检查因输出截断未完成"},
+        success=True,
+    )
+    assert final["status"] == "failed"
+    assert final["summary"]["partial"] is True
+    assert final["summary"]["failed_tasks"] == ["quality"]
+    assert final["summary"]["final_result"]["summary"].startswith("安全审查发现 SEC-1")
+    assert {item["task_key"] for item in final["tasks"] if item["status"] == "completed"} == {"security", "summary"}
+
+
+def test_retrying_partial_summary_dependency_invalidates_stale_summary(db, team_user):
+    """重试部分结果的失败上游时，旧汇总必须失效并在新上游结果后重跑。"""
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        _payload(
+            max_active_children=2,
+            members=[
+                {
+                    "member_key": "quality",
+                    "display_name": "代码质量",
+                    "address": "agent:project_analyzer",
+                    "role": "worker",
+                },
+                {
+                    "member_key": "security",
+                    "display_name": "安全审查",
+                    "address": "agent:project_analyzer",
+                    "role": "worker",
+                },
+                {
+                    "member_key": "segment",
+                    "display_name": "依赖后继",
+                    "address": "agent:project_analyzer",
+                    "role": "worker",
+                },
+                {
+                    "member_key": "summary",
+                    "display_name": "汇总",
+                    "address": "agent:reporter",
+                    "role": "summarizer",
+                },
+            ],
+            tasks=[
+                {
+                    "task_key": "quality",
+                    "member_key": "quality",
+                    "title": "代码质量",
+                    "instructions": "检查质量",
+                    "priority": 100,
+                },
+                {
+                    "task_key": "security",
+                    "member_key": "security",
+                    "title": "安全审查",
+                    "instructions": "检查安全",
+                    "priority": 90,
+                },
+                {
+                    "task_key": "segment",
+                    "member_key": "segment",
+                    "title": "处理中间结果",
+                    "instructions": "基于质量检查结果处理",
+                    "depends_on": ["quality"],
+                },
+                {
+                    "task_key": "summary",
+                    "member_key": "summary",
+                    "title": "汇总",
+                    "instructions": "汇总结果",
+                    "depends_on": ["segment", "security"],
+                },
+            ],
+        ),
+    )
+    quality = agent_team_service.claim_next_task(db, created["team_id"])
+    security = agent_team_service.claim_next_task(db, created["team_id"])
+    agent_team_service.complete_task(
+        db, created["team_id"], quality["task_id"], lease_token=quality["lease_token"],
+        result={"status": "failed", "summary": "首轮截断", "retryable": False}, success=False, error="length",
+    )
+    agent_team_service.complete_task(
+        db, created["team_id"], security["task_id"], lease_token=security["lease_token"],
+        result={"status": "completed", "summary": "首轮安全结果"}, success=True,
+    )
+    summary = agent_team_service.claim_next_task(db, created["team_id"])
+    agent_team_service.complete_task(
+        db, created["team_id"], summary["task_id"], lease_token=summary["lease_token"],
+        result={"status": "partial", "summary": "旧的部分汇总"}, success=True,
+    )
+
+    retried = agent_team_service.retry_team(
+        db,
+        team_user,
+        created["team_id"],
+        task_keys=["quality"],
+        strategy_changes={"quality": "按函数和调用链分片后重新审查"},
+    )
+    retried_tasks = {item["task_key"]: item for item in retried["tasks"]}
+    assert retried_tasks["quality"]["status"] == "queued"
+    assert retried_tasks["security"]["status"] == "completed"
+    assert retried_tasks["segment"]["status"] == "waiting_dependency"
+    assert retried_tasks["summary"]["status"] == "waiting_dependency"
+    assert retried_tasks["segment"]["result"] == {}
+    assert retried_tasks["summary"]["result"] == {}
+    assert retried["summary"] == {}
+
+    new_quality = agent_team_service.claim_next_task(db, created["team_id"])
+    assert new_quality["task_key"] == "quality"
+    agent_team_service.complete_task(
+        db, created["team_id"], new_quality["task_id"], lease_token=new_quality["lease_token"],
+        result={"status": "completed", "summary": "重试后的质量结果"}, success=True,
+    )
+    refreshed_team = agent_team_service.get_team(db, team_user, created["team_id"])
+    refreshed = {item["task_key"]: item for item in refreshed_team["tasks"]}
+    assert refreshed["segment"]["status"] == "queued"
+    assert refreshed["summary"]["status"] == "waiting_dependency"
+    new_segment = agent_team_service.claim_next_task(db, created["team_id"])
+    assert new_segment["task_key"] == "segment"
+    assert new_segment["dependency_context"]["quality"]["result"]["summary"] == "重试后的质量结果"
+    agent_team_service.complete_task(
+        db, created["team_id"], new_segment["task_id"], lease_token=new_segment["lease_token"],
+        result={"status": "completed", "summary": "重试后的中间结果"}, success=True,
+    )
+    refreshed = {item["task_key"]: item for item in agent_team_service.get_team(
+        db, team_user, created["team_id"]
+    )["tasks"]}
+    assert refreshed["summary"]["status"] == "queued"
+    current_summary = agent_team_service.claim_next_task(db, created["team_id"])
+    assert current_summary["task_key"] == "summary"
+    assert current_summary["dependency_context"]["segment"]["result"]["summary"] == "重试后的中间结果"
+    agent_team_service.complete_task(
+        db, created["team_id"], current_summary["task_id"], lease_token=current_summary["lease_token"],
+        result={"status": "completed", "summary": "重新汇总后的完整结果"}, success=True,
+    )
+    final = agent_team_service.get_team(db, team_user, created["team_id"])
+    assert final["status"] == "completed"
+    assert final["summary"]["final_result"]["summary"] == "重新汇总后的完整结果"
+
+
 @pytest.mark.parametrize("terminal", ["failed", "completed", "cancelled", "expired"])
 def test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped(db, team_user, terminal):
     """防御已有异常组合：拒绝晚到结果，不改写运行任务或假称资源已停止。"""
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     team = db.get(AgentTeam, created["team_id"])
     team.status = terminal
@@ -802,7 +1159,7 @@ def test_terminal_parent_rejects_late_complete_without_claiming_resource_stopped
 
 def test_stale_session_cannot_claim_after_another_session_fails_team(db, team_user):
     """两个会话交错：旧 identity map 不得领取或复活另一个会话已失败的团队。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     with Session(bind=db.get_bind(), autoflush=False, expire_on_commit=False) as stale_db:
         stale_team = stale_db.get(AgentTeam, created["team_id"])
@@ -819,7 +1176,7 @@ def test_stale_session_cannot_claim_after_another_session_fails_team(db, team_us
 
 def test_stale_session_cannot_complete_an_old_attempt_after_retry_claim(db, team_user):
     """两个会话交错：旧缓存中的 token 不能覆盖新的领取与尝试。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload(root_attempts=2))
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload(root_attempts=2))
     old_claim = agent_team_service.claim_next_task(db, created["team_id"])
     with Session(bind=db.get_bind(), autoflush=False, expire_on_commit=False) as stale_db:
         stale_team = stale_db.get(AgentTeam, created["team_id"])
@@ -842,7 +1199,7 @@ def test_stale_session_cannot_complete_an_old_attempt_after_retry_claim(db, team
 
 def test_claim_lost_cas_has_no_running_transition_or_event(db, team_user, monkeypatch):
     """可控模拟 CAS 竞争失败，失败领取必须回滚且不得生成执行事件。"""
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     event_count = db.query(AgentTeamEvent).count()
     original_execute = db.execute
     attempted = []
@@ -862,7 +1219,7 @@ def test_claim_lost_cas_has_no_running_transition_or_event(db, team_user, monkey
 
 def test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate(db, team_user):
     """重复回调或状态归约不得复活终态，也不重复写失败/阻断事件。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     _fail_claim(db, created["team_id"], claim)
     team = db.get(AgentTeam, created["team_id"])
@@ -885,7 +1242,7 @@ def test_failed_team_refresh_and_repeated_completion_do_not_reopen_or_duplicate(
 
 def test_expired_last_attempt_closes_independent_pending_tasks(db, team_user):
     """租约恢复耗尽预算时也必须闭合独立分支，而非只闭合依赖后继。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     db.get(AgentTeamTask, claim["task_id"]).lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     db.commit()
@@ -898,7 +1255,7 @@ def test_expired_last_attempt_closes_independent_pending_tasks(db, team_user):
 
 def test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction(db, team_user, monkeypatch):
     """清理未确认时兄弟仍运行；确认后停止调度重试并归约失败父。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     root = agent_team_service.claim_next_task(db, created["team_id"])
     sibling = agent_team_service.claim_next_task(db, created["team_id"])
     _fail_claim(db, created["team_id"], root)
@@ -920,7 +1277,7 @@ def test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction(db, t
 
 def test_explicit_root_retry_restores_its_fail_fast_blocked_branches(db, team_user):
     """显式改变根节点方案后，可恢复由它全局阻断的节点，不改变原始 DAG。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     claim = agent_team_service.claim_next_task(db, created["team_id"])
     failed = _fail_claim(db, created["team_id"], claim)
     assert {item["status"] for item in failed["tasks"] if item["task_key"] != "read"} == {"blocked"}
@@ -941,7 +1298,7 @@ def test_explicit_root_retry_restores_its_fail_fast_blocked_branches(db, team_us
 
 def test_independent_branching_team_still_completes_normally(db, team_user):
     """没有不可恢复失败时，所有独立分支与验证节点保持原有正常完成语义。"""
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     for _attempt in range(5):
         claim = agent_team_service.claim_next_task(db, created["team_id"])
         assert claim is not None
@@ -955,7 +1312,7 @@ def test_independent_branching_team_still_completes_normally(db, team_user):
 
 @pytest.mark.parametrize("last_success", [True, False])
 def test_missing_verifier_drains_running_tasks_before_failing(db, team_user, last_success):
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     first = agent_team_service.claim_next_task(db, created["team_id"])
     second = agent_team_service.claim_next_task(db, created["team_id"])
     verifier = db.query(AgentTeamMember).filter_by(team_id=created["team_id"], role="verifier").one()
@@ -988,7 +1345,7 @@ def test_missing_verifier_drains_running_tasks_before_failing(db, team_user, las
 
 
 def test_missing_verifier_without_running_tasks_still_fails_immediately(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _branching_payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
     verifier = db.query(AgentTeamMember).filter_by(team_id=created["team_id"], role="verifier").one()
     verifier.role = "worker"
     db.commit()
@@ -1035,7 +1392,7 @@ def test_claim_respects_team_concurrency_and_lease_cas(db, team_user):
             },
         ],
     )
-    created = agent_team_service.create_team(db, team_user, payload)
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
     claimed = [agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60) for _ in range(4)]
     assert sum(item is not None for item in claimed) == 3
     assert db.query(AgentTeamTask).filter(AgentTeamTask.status == "queued").count() == 1
@@ -1071,7 +1428,7 @@ def test_create_team_auto_covers_worker_leaf_with_final_verifier(db, team_user):
         ],
     )
 
-    created = agent_team_service.create_team(db, team_user, payload)
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
     verify = next(item for item in created["tasks"] if item["task_key"] == "verify")
     assert "read-b" in verify["depends_on"]
 
@@ -1144,7 +1501,7 @@ def test_sandbox_team_validates_source_revision_scope_and_allows_governed_agents
         ],
     )
 
-    created = agent_team_service.create_team(db, team_user, payload)
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, payload)
     assert [item["address"] for item in created["members"]] == [
         "agent:sandbox_deployer",
         "agent:test_verifier",
@@ -1153,10 +1510,22 @@ def test_sandbox_team_validates_source_revision_scope_and_allows_governed_agents
     revision.project_id = 999
     db.commit()
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="源码修订"):
-        agent_team_service.create_team(db, team_user, payload)
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
 
 
 def test_create_team_rolls_back_partial_rows_and_rejects_host_paths(db, team_user):
+    from app.services import agent_supervisor_service
+
+    def create_after_supervisor_confirmation(payload):
+        review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+        return agent_team_service.create_team_from_xiaoling(
+            db,
+            team_user,
+            payload,
+            supervisor_plan_sha256=review["plan_sha256"],
+            supervisor_confirmed_by=team_user.id,
+        )
+
     payload = _payload(
         members=[
             {"member_key": "reader", "display_name": "读取 Agent", "address": "agent:project_analyzer"},
@@ -1179,14 +1548,12 @@ def test_create_team_rolls_back_partial_rows_and_rejects_host_paths(db, team_use
         ],
     )
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="不存在"):
-        agent_team_service.create_team(db, team_user, payload)
+        create_after_supervisor_confirmation(payload)
     assert db.query(AgentTeam).count() == 0
     assert db.query(AgentTeamMember).count() == 0
 
     with pytest.raises(agent_team_service.AgentTeamValidationError, match="宿主机路径"):
-        agent_team_service.create_team(
-            db,
-            team_user,
+        create_after_supervisor_confirmation(
             _payload(
                 tasks=[
                     {
@@ -1204,8 +1571,10 @@ def test_create_team_rolls_back_partial_rows_and_rejects_host_paths(db, team_use
 
 
 def test_list_teams_filters_current_surface_and_session_with_real_total(db, team_user):
-    first = agent_team_service.create_team(db, team_user, _payload(session_id="session-a1", title="会话 A"))
-    agent_team_service.create_team(db, team_user, _payload(session_id="session-b1", title="会话 B"))
+    first = agent_team_service.create_team_from_xiaoling(
+        db, team_user, _payload(session_id="session-a1", title="会话 A"),
+    )
+    agent_team_service.create_team_from_xiaoling(db, team_user, _payload(session_id="session-b1", title="会话 B"))
 
     listed = agent_team_service.list_teams(
         db,
@@ -1220,7 +1589,7 @@ def test_list_teams_filters_current_surface_and_session_with_real_total(db, team
 
 
 def test_dependency_handoff_mesh_ledger_and_verifier_status(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     first = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     assert first is not None
     assert first["dependency_context"] == {}
@@ -1276,7 +1645,7 @@ def test_dependency_handoff_mesh_ledger_and_verifier_status(db, team_user):
 
 
 def test_cancel_reclaims_running_tasks_and_invalidates_lease(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     cancelled = agent_team_service.cancel_team(db, team_user, created["team_id"], reason="停止")
 
@@ -1301,7 +1670,7 @@ def test_expired_lease_stops_persisted_runtime_resource_before_requeue(db, team_
     project = Project(user_id=team_user.id, project_name="lease-cleanup", language="python", status="active")
     db.add(project)
     db.commit()
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -1702,7 +2071,7 @@ def test_handoff_retry_is_idempotent_after_stop_event_write_crash(db, team_user,
 
 
 def test_failure_is_learned_and_retry_requires_changed_strategy(db, team_user):
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -1762,7 +2131,7 @@ def test_failure_is_learned_and_retry_requires_changed_strategy(db, team_user):
 
 
 def test_automatic_retry_honors_bounded_resource_backoff(db, team_user, monkeypatch):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
     completed_at = datetime(2026, 8, 12, 1, 2, 3, tzinfo=timezone.utc)
     monkeypatch.setattr(agent_team_service, "_now", lambda: completed_at)
@@ -1820,7 +2189,7 @@ def test_automatic_retry_honors_bounded_resource_backoff(db, team_user, monkeypa
 
 
 def test_retry_failed_root_releases_blocked_descendants_without_reusing_attempt_ids(db, team_user):
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -1875,7 +2244,7 @@ def test_retry_failed_root_releases_blocked_descendants_without_reusing_attempt_
 
 
 def test_failure_with_remaining_budget_is_automatically_requeued_with_new_strategy(db, team_user):
-    created = agent_team_service.create_team(
+    created = agent_team_service.create_team_from_xiaoling(
         db,
         team_user,
         _payload(
@@ -1920,7 +2289,7 @@ def test_failure_with_remaining_budget_is_automatically_requeued_with_new_strate
 
 
 def test_automatic_retry_preserves_full_long_instruction(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload(
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload(
         tasks=[{
             "task_key": "read", "member_key": "reader", "title": "读取",
             "instructions": "原始上下文：" + "中段证据" * 2995,
@@ -1928,7 +2297,7 @@ def test_automatic_retry_preserves_full_long_instruction(db, team_user):
         }]
     ))
     claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
-    retried = agent_team_service.complete_task(
+    agent_team_service.complete_task(
         db, created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
         result={"status": "failed", "summary": "读取超时"}, success=False, error="读取超时",
     )
@@ -1938,7 +2307,7 @@ def test_automatic_retry_preserves_full_long_instruction(db, team_user):
 
 
 def test_team_detail_pages_all_messages_with_a_stable_ledger_cursor(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     base_time = datetime(2026, 8, 12, tzinfo=timezone.utc)
     for index in range(505):
         db.add(
@@ -1983,7 +2352,7 @@ def test_team_detail_pages_all_messages_with_a_stable_ledger_cursor(db, team_use
 
 
 def test_team_detail_uses_id_to_break_equal_message_timestamps(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     same_time = datetime(2026, 8, 12, tzinfo=timezone.utc)
     for index in range(501):
         db.add(
@@ -2014,7 +2383,7 @@ def test_team_detail_uses_id_to_break_equal_message_timestamps(db, team_user):
 
 
 def test_team_message_pages_remain_scoped_to_the_team_owner(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
 
     with pytest.raises(agent_team_service.AgentTeamNotFoundError):
         agent_team_service.list_team_messages(
@@ -2027,7 +2396,7 @@ def test_team_message_pages_remain_scoped_to_the_team_owner(db, team_user):
 
 
 def test_non_retryable_business_failure_stays_failed_without_automatic_requeue(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     claimed = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
 
     after_failure = agent_team_service.complete_task(
@@ -2101,7 +2470,7 @@ def test_non_readonly_team_keeps_original_task_inputs() -> None:
 
 def test_list_team_events_incremental_pagination(db, team_user):
     """增量事件流:首次全量,之后只拿 after_id 之后的新事件,支撑前端思考城市实时渲染。"""
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     team_id = created["team_id"]
 
     first = agent_team_service.list_team_events(db, team_user, team_id, after_id=0, limit=500)
@@ -2133,7 +2502,7 @@ def test_list_team_events_incremental_pagination(db, team_user):
 
 
 def test_list_team_events_limit_and_has_more(db, team_user):
-    created = agent_team_service.create_team(db, team_user, _payload())
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     team_id = created["team_id"]
     page = agent_team_service.list_team_events(db, team_user, team_id, after_id=0, limit=1)
     assert len(page["items"]) == 1

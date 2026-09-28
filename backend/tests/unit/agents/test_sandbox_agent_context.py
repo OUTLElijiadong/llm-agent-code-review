@@ -5,9 +5,18 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+from app.agents.sandbox_agents import TestVerifierAgent
 from app.agents.source_context import SourceContextError, compact_source_context
 from app.agents.syntax_repair_agent import SyntaxRepairAgent
 from app.agents.test_case_generator_agent import TestCaseGeneratorAgent as CaseGeneratorAgent
+
+
+def test_test_verifier_description_does_not_overclaim_real_penetration() -> None:
+    agent = TestVerifierAgent()
+
+    assert "白盒检查与回环黑盒验证" in agent.description
+    assert "真实渗透走独立授权流程" in agent.description
+    assert "真实攻击探测" not in agent.description
 
 
 def test_syntax_repair_reconstructs_large_file_from_unique_patch(monkeypatch) -> None:

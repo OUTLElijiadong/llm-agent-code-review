@@ -47,6 +47,26 @@ def test_agent_activity_today_calls_merge_tool_and_ai_logs(db) -> None:
     assert by_code["manager"]["tool_calls_today"] == 0
 
 
+def test_agent_activity_counts_model_calls_with_unknown_token_usage(db) -> None:
+    db.add(AgentProfile(code="security_sentinel", name="安全哨兵", is_enabled=1))
+    db.add(AiCallLog(
+        agent_label="security_sentinel",
+        model_name="deepseek-v4-flash",
+        status="failed",
+        total_tokens=None,
+        prompt_tokens=None,
+        completion_tokens=None,
+    ))
+    db.commit()
+
+    rows = _agent_activity(db)
+    by_code = {row["agent_code"]: row for row in rows}
+
+    assert by_code["security_sentinel"]["model_calls_today"] == 1
+    assert by_code["security_sentinel"]["model_tokens_today"] == 0
+    assert by_code["security_sentinel"]["model_unknown_usage_calls_today"] == 1
+
+
 def test_agent_activity_excludes_old_ai_logs(db) -> None:
     now = datetime.now(timezone.utc)
     db.add(AgentProfile(code="manager", name="管理副驾驶", is_enabled=1))

@@ -418,7 +418,7 @@ def update_llm_config(
 
 # ── 模型注册表与按角色模型分配 ────────────────────────────────────────────────
 # 管理员从 provider 拉取或手工登记可用模型(含视觉能力标记),再把语义角色
-# (小菱对话/小菱视觉/总调度/子Agent)指到注册表中的具体模型;留空表示沿用
+# (小菱主控/小菱视觉/内部调度引擎/子Agent)指到注册表中的具体模型;留空表示沿用
 # 全局默认。注册表与分配都不含 Key,仅存模型标识与能力元数据。
 
 MODEL_REGISTRY_KEY = "model_registry"
@@ -428,7 +428,7 @@ MODEL_ASSIGNMENTS_KEY = "model_assignments"
 MODEL_ASSIGNMENT_ROLES: dict[str, str] = {
     "chat": "小菱对话(用户端默认)",
     "chat_vision": "小菱视觉(消息含图片时临时使用)",
-    "orchestrator": "总调度/管理端助手",
+    "orchestrator": "小菱内部调度引擎(非独立主控)",
     "subagent": "子Agent默认",
 }
 

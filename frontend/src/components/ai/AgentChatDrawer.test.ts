@@ -19,6 +19,7 @@ const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 const responseApi = vi.hoisted(() => ({ cancel: vi.fn() }))
+const connectedDisclosureRoots = new Set<Element>()
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({
@@ -44,6 +45,7 @@ import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
 import {
   agentChatStorageKey,
+  loadAgentChatSnapshot,
   saveActiveAgentChatSession,
   saveAgentChatSessions,
   saveAgentChatSnapshot,
@@ -156,6 +158,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  const leakedRoots = [...connectedDisclosureRoots].filter((root) => root.isConnected)
+  for (const root of connectedDisclosureRoots) root.remove()
+  connectedDisclosureRoots.clear()
+  expect(leakedRoots).toEqual([])
   vi.useRealTimers()
 })
 
@@ -165,11 +171,43 @@ async function mountReadyDrawer(prefill?: string, extraPlugins: Plugin[] = []): 
   return wrapper
 }
 
-/** 整块调用链默认折叠,断言前先展开。 */
-/** 调用链默认折叠;需要断言展开详情的用例自行点击 .xl-step-line。 */
-async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
-  // no-op:保留给历史用例的兼容入口
+/** 过程摘要默认折叠；集成断言先通过可见控件真实展开。 */
+async function expandTimeline(wrapper: VueWrapper): Promise<void> {
+  // HTML details 的原生 open/toggle 行为需要挂载到真实文档树中。
+  if (!wrapper.element.isConnected) {
+    document.body.appendChild(wrapper.element)
+    connectedDisclosureRoots.add(wrapper.element)
+  }
+  const disclosures = wrapper.findAll('.agent-message-activity')
+  expect(disclosures.length).toBeGreaterThan(0)
+  for (const disclosure of disclosures) {
+    if (disclosure.attributes('open') === undefined) {
+      await disclosure.get(':scope > summary').trigger('click')
+      // HTML details 的 toggle 事件在用户代理任务队列中派发；让父组件的同步状态先落地。
+      await settleAll()
+    }
+    expect(disclosure.attributes('open')).toBeDefined()
+    expect(disclosure.get('.agent-message-activity-body').isVisible()).toBe(true)
+  }
 }
+
+it('恢复历史 AI 消息时阻断脚本链接、事件属性与 SVG 活动节点', async () => {
+  sessionApi.get.mockResolvedValueOnce({
+    surface: 'user', session_id: 'user-test', run: null, pending: null,
+    messages: [{
+      role: 'assistant',
+      content: '[安全引用](https://example.com/docs) [危险](javascript:alert%281%29) '
+        + '[数据](data:text/html;base64,PHN2Zz4=) <img src=x onerror="alert(1)"> '
+        + '<svg onload="alert(1)"></svg>',
+    }],
+  })
+  const wrapper = await mountReadyDrawer()
+  const bubble = wrapper.findAll('.msg-row.assistant .markdown-body').at(-1)
+
+  expect(bubble?.findAll('a').map((link) => link.attributes('href'))).toEqual(['https://example.com/docs'])
+  expect(bubble?.find('svg, script, img, iframe, [onerror], [onload]').exists()).toBe(false)
+  wrapper.unmount()
+})
 
 it('127 条服务端聊天记录可点击加载旧页，当前账号消息顺序保持完整', async () => {
   const message = (index: number) => ({ role: 'user' as const, content: `本人记录-${index}` })
@@ -209,6 +247,49 @@ it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', asyn
 })
 
 describe('AgentChatDrawer Responses stream', () => {
+  it('建 run 前网络失败时立即保存消息和错误，刷新后可恢复并重试', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('核查账号边界')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    await failStream(0, new Error('网络连接中断'))
+
+    const sessionId = streams.records[0].body.session_id as string
+    const storageKey = agentChatStorageKey('user')
+    const saved = loadAgentChatSnapshot(sessionId, storageKey)
+    expect(saved?.messages.slice(-2).map((message) => message.role)).toEqual(['user', 'error'])
+    expect(saved?.messages.at(-1)?.content).toContain('网络连接中断')
+
+    saveAgentChatSessions(storageKey, [{ id: sessionId, title: '核查账号边界', createdAt: Date.now() }])
+    saveActiveAgentChatSession(storageKey, sessionId)
+    sessionApi.get.mockResolvedValue({ surface: 'user', session_id: sessionId, run: null, messages: [], pending: null })
+    wrapper.unmount()
+    const restored = await mountReadyDrawer()
+    await settleAll()
+    expect(sessionApi.get.mock.calls.at(-1)).toEqual(['user', sessionId])
+    expect(restored.find('.msg-row.user').text()).toContain('核查账号边界')
+    expect(restored.find('.msg-error-card').text()).toContain('网络连接中断')
+    expect(restored.find('.msg-error-btn.is-retry').exists()).toBe(true)
+    restored.unmount()
+  })
+
+  it('建 run 前异常退出仅留本地提问时明确显示未送达并允许重试', async () => {
+    const storageKey = agentChatStorageKey('user')
+    saveAgentChatSessions(storageKey, [{ id: 'user-test', title: '中断提问', createdAt: Date.now() }])
+    saveActiveAgentChatSession(storageKey, 'user-test')
+    saveAgentChatSnapshot('user-test', {
+      messages: [{ role: 'user', content: '只核查当前账号项目' }],
+      teams: [], runStatus: null, updatedAt: Date.now(),
+    }, storageKey)
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(wrapper.find('.msg-row.user').text()).toContain('只核查当前账号项目')
+    expect(wrapper.find('.msg-error-card').text()).toContain('未在服务器留痕')
+    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('模型最终输出等于用户原话时仍补齐真正的助手结果', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('重复这句话')
@@ -419,7 +500,20 @@ describe('AgentChatDrawer Responses stream', () => {
 
     expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'user', limit: 20 }))
     expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
-    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    const activity = wrapper.get('.agent-message-activity')
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
+    const tracePanel = wrapper.find('.agent-team-trace-body')
+    expect(tracePanel.exists()).toBe(true)
+    expect(tracePanel.attributes('hidden')).toBeDefined()
+    expect(tracePanel.find('.agent-team-stats').exists()).toBe(false)
+
+    // 团队嵌入聊天过程卡后共用外层原生 disclosure；打开后团队内容应随之显示。
+    await expandTimeline(wrapper)
+    expect(activity.attributes('open')).toBeDefined()
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
+    expect(tracePanel.attributes('hidden')).toBeUndefined()
+    expect(tracePanel.get('.agent-team-stats').isVisible()).toBe(true)
     wrapper.unmount()
   })
 
@@ -456,7 +550,14 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(rows).toHaveLength(4)
     expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('user')
+    const activity = rows[2].get('.agent-message-activity')
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
+    expect(activity.get('.agent-message-activity-summary').text()).toContain('已完成')
     await expandTimeline(wrapper)
+    expect(activity.attributes('open')).toBeDefined()
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
+    expect(rows[2].get('.xl-steps-detail').isVisible()).toBe(true)
     expect(rows[2].find('.xl-steps').text()).toContain('查看项目列表')
     expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 2 个项目')
@@ -780,10 +881,17 @@ describe('AgentChatDrawer Responses stream', () => {
 
     expect(wrapper.find('.approval-card').exists()).toBe(true)
     await expandTimeline(wrapper)
+    expect(wrapper.get('.agent-message-activity').attributes('open')).toBeDefined()
+    expect(wrapper.get('.xl-steps-detail').isVisible()).toBe(true)
     expect(wrapper.find('.xl-steps').text()).toContain('更新项目')
     // 调用参数默认折叠为技术细节,点击后展示
-    await wrapper.find('.response-approval-detail-toggle').trigger('click')
+    const approvalDetailToggle = wrapper.get('.response-approval-detail-toggle')
+    expect(approvalDetailToggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.response-approval-arguments').exists()).toBe(false)
+    await approvalDetailToggle.trigger('click')
     await flushPromises()
+    expect(approvalDetailToggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('.response-approval-arguments').isVisible()).toBe(true)
     expect(wrapper.find('.response-approval-arguments').text()).toContain('"project_id": 3')
     expect(wrapper.find('.response-approval-preview').text()).toContain('更新默认分支')
     expect(wrapper.findAll('.msg-row.user')).toHaveLength(1)
@@ -813,6 +921,7 @@ describe('AgentChatDrawer Responses stream', () => {
     await expandTimeline(wrapper)
     const timelineText = wrapper.findAll('.xl-steps').map((node) => node.text()).join('\n')
     expect(timelineText).toContain('做好了')
+    wrapper.unmount()
   })
 
   it('marks a resumed approval as failed when the terminal response has no tool result', async () => {
@@ -845,11 +954,14 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(1)
 
     await expandTimeline(wrapper)
-    // 新设计:失败步骤默认展开原因,无需点击
+    expect(wrapper.get('.agent-message-activity').get('.agent-message-activity-body').isVisible()).toBe(true)
+    expect(wrapper.get('.xl-step-error').isVisible()).toBe(true)
+    // 父级展开后失败步骤的完整原因应真实可见。
     const timelineText = wrapper.find('.xl-steps').text()
     expect(timelineText).toContain('没做成')
     expect(timelineText).toMatch(/响应已结束|更新项目/)
     expect(timelineText).not.toContain('做好了')
+    wrapper.unmount()
   })
 
   it('submits the model generated question as an answer continuation', async () => {
@@ -956,14 +1068,26 @@ describe('AgentChatDrawer Responses stream', () => {
     emit(0, { type: 'response.completed', response: { id: 'run-tool-failed' } })
     await finish(0)
 
+    const activity = wrapper.get('.agent-message-activity')
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(activity.get('.agent-message-activity-state').text()).toBe('需留意')
+    expect(activity.get('.agent-message-activity-summary').text()).toContain('失败：')
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
+    expect(wrapper.get('.xl-step-error').isVisible()).toBe(false)
+
     await expandTimeline(wrapper)
     const timeline = wrapper.find('.xl-steps')
+    expect(activity.attributes('open')).toBeDefined()
+    expect(wrapper.get('.agent-message-activity-body').isVisible()).toBe(true)
+    expect(timeline.get('.xl-steps-detail').isVisible()).toBe(true)
+    expect(timeline.get('.xl-step-error').isVisible()).toBe(true)
     expect(timeline.text()).toContain('read file')
     expect(timeline.text()).not.toContain('read_file')
     expect(timeline.text()).not.toContain('project_agent')
     expect(timeline.text()).toContain('没做成')
-    // 新设计:失败步骤默认展开,直接可见错误详情
-    expect(wrapper.find('.xl-steps').text()).toContain('文件不存在')
+    // 父级展开后失败步骤的完整原因应真实可见。
+    expect(timeline.get('.xl-step-error').text()).toContain('文件不存在')
+    wrapper.unmount()
   })
 
   it('运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片', async () => {

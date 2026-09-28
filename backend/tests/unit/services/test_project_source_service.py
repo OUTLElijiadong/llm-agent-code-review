@@ -83,6 +83,18 @@ def test_public_url_rejects_unsafe_schemes_credentials_and_ports(url):
         project_source_service._assert_public_url(url)
 
 
+@pytest.mark.parametrize("query", [
+    "X-Amz-Signature=secret",
+    "X-Goog-Credential=secret",
+    "sig=secret",
+    "X%2DAmz%2DSignature=secret",
+    "x-AMZ-signature=secret",
+])
+def test_remote_url_rejects_signed_link_credentials_before_queue(query):
+    with pytest.raises(ValidationError, match="凭据"):
+        project_source_service.validate_remote_project_url(f"https://example.com/source.zip?{query}")
+
+
 def test_public_url_rejects_private_dns_result(monkeypatch):
     monkeypatch.setattr(
         "app.utils.public_http.socket.getaddrinfo",
@@ -167,6 +179,46 @@ def test_remote_download_revalidates_redirect_and_size(monkeypatch):
     ]
     assert visited[0][1]["extensions"] == {"sni_hostname": "example.com"}
     assert client_kwargs["trust_env"] is False
+
+
+def test_remote_redirect_to_metadata_address_is_rejected_before_second_request(monkeypatch, tmp_path):
+    response = MagicMock(
+        status_code=302,
+        headers=httpx.Headers({"location": "https://169.254.169.254/latest/meta-data/"}),
+    )
+    requests = []
+
+    class ResponseContext:
+        def __enter__(self):
+            return response
+
+        def __exit__(self, *_args):
+            return None
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream(self, method, url, **_kwargs):
+            requests.append((method, url))
+            return ResponseContext()
+
+    def resolve(host, port, **_kwargs):
+        address = "93.184.216.34" if host == "example.com" else host
+        return [(2, 1, 6, "", (address, port))]
+
+    monkeypatch.setattr("app.utils.public_http.socket.getaddrinfo", resolve)
+    monkeypatch.setattr(project_source_service.httpx, "Client", lambda **_kwargs: FakeClient())
+    with pytest.raises(ValidationError, match="内网或保留地址"):
+        with project_source_service.download_remote_archive_to_temp(
+            "https://example.com/source.zip", temp_dir=tmp_path,
+        ):
+            pass
+    assert requests == [("GET", "https://93.184.216.34/source.zip")]
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_remote_download_rejects_invalid_content_length(monkeypatch):

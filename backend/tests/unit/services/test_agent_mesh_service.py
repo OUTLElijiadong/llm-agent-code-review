@@ -68,7 +68,7 @@ def test_message_schema_rejects_free_form_and_unknown_fields() -> None:
         _message(message_type="unregistered.type")
 
 
-def test_heartbeat_and_list_agents_include_all_contracts_and_same_user_sessions(db, user) -> None:
+def test_child_catalog_excludes_root_engines_and_preserves_same_user_sessions(db, user) -> None:
     agent_mesh_service.heartbeat(
         db,
         user,
@@ -96,7 +96,14 @@ def test_heartbeat_and_list_agents_include_all_contracts_and_same_user_sessions(
     builtins = [item for item in result["items"] if item["kind"] in {"runtime", "service"}]
     sessions = [item for item in result["items"] if item["kind"] == "session"]
 
-    assert {item["address"] for item in builtins} == {f"agent:{code}" for code in CONTRACTS}
+    assert {item["address"] for item in builtins} == {
+        f"agent:{code}"
+        for code in CONTRACTS
+        if code not in {"chat_assistant", "manager", "orchestrator", "operations"}
+    }
+    assert not {"agent:chat_assistant", "agent:manager", "agent:orchestrator"} & {
+        item["address"] for item in result["items"]
+    }
     assert {item["address"] for item in sessions} == {
         "session:user:session-a1",
         "session:admin:session-admin1",
@@ -110,9 +117,25 @@ def test_list_agents_marks_governed_runtime_agents_as_team_members(db, user) -> 
     by_address = {item["address"]: item for item in result["items"]}
     for code in ("test_verifier", "sandbox_deployer", "operations"):
         item = by_address.get(f"agent:{code}")
+        if code == "operations":
+            assert item is None  # 仅 admin 超级管理员的 admin surface 可发现运维子 Agent
+            continue
         assert item is not None
         if item["dispatch_state"] == "approval_required":
             assert item.get("team_dispatch_state") == "team_governed"
+
+
+def test_admin_catalog_exposes_read_only_operations_child_only_to_superadmin(db) -> None:
+    admin = SimpleNamespace(id=1, username="admin", role="admin")
+    superadmin = SimpleNamespace(id=2, username="admin", role="super_admin")
+
+    regular_admin = agent_mesh_service.list_agents(db, admin, surface="admin")
+    super_admin = agent_mesh_service.list_agents(db, superadmin, surface="admin")
+
+    assert "agent:operations" not in {item["address"] for item in regular_admin["items"]}
+    operations = next(item for item in super_admin["items"] if item["address"] == "agent:operations")
+    assert operations["team_dispatch_state"] == "read_only"
+    assert operations["team_input_contract"]["write_actions"] == "main_xiaoling_approval_only"
 
 
 def test_send_message_is_owner_scoped_idempotent_and_traceable(db, user) -> None:
@@ -161,6 +184,121 @@ def test_non_task_message_to_agent_is_recorded_without_entering_dispatch_queue(d
     assert created["status"] == "completed"
     trace = agent_mesh_service.get_trace(db, user, created["trace_id"])
     assert [event["status"] for event in trace["messages"][0]["events"]] == ["queued", "completed"]
+
+
+def test_public_session_cannot_dispatch_child_agent_task(db, user) -> None:
+    """普通认证会话只能发会话消息，子 Agent 任务必须由小菱工具循环发起。"""
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-root1", title="小菱对话")
+
+    with pytest.raises(agent_mesh_service.AgentMeshAccessError, match="必须由小菱调用"):
+        agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-root1",
+            message=_message(
+                idempotency_key="public-child-dispatch-001",
+                sent_from="session:user:session-root1",
+                send_to="agent:code_reviewer",
+                message_type="task.request",
+                subject="直接派发子 Agent",
+                payload={"task": "审查一段代码"},
+                context={"run_id": "run-public-child-dispatch"},
+            ),
+        )
+
+
+def test_trusted_xiaoling_can_dispatch_child_agent_task(db, user) -> None:
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-root1", title="小菱对话")
+
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-root1",
+        trusted_source=True,
+        message=_message(
+            idempotency_key="trusted-child-dispatch-001",
+            sent_from="",
+            send_to="agent:code_reviewer",
+            message_type="task.request",
+            subject="小菱派发代码审查子任务",
+            payload={"task": "审查一段代码"},
+            context={"run_id": "run-trusted-child-dispatch"},
+        ),
+    )
+
+    assert created["status"] == "queued"
+
+
+def test_xiaoling_user_surface_cannot_dispatch_hidden_monitor_target(db, user) -> None:
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-root1", title="小菱对话")
+
+    with pytest.raises(agent_mesh_service.AgentMeshAccessError, match="不属于当前用户会话"):
+        agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-root1",
+            trusted_source=True,
+            message=_message(
+                idempotency_key="user-surface-monitor-blocked",
+                sent_from="",
+                send_to="agent:monitor",
+                message_type="task.request",
+                context={"run_id": "run-user-monitor-blocked"},
+            ),
+        )
+    assert db.query(AgentMeshMessage).count() == 0
+
+
+def test_admin_surface_can_dispatch_monitor_from_admin_session(db, user) -> None:
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-admin1", title="管理员小菱")
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-admin1",
+        trusted_source=True,
+        message=_message(
+            idempotency_key="admin-surface-monitor-allowed",
+            sent_from="",
+            send_to="agent:monitor",
+            message_type="task.request",
+            payload={"window_minutes": 60, "metrics": ["latency_p95"]},
+            context={"run_id": "run-admin-monitor-allowed"},
+        ),
+    )
+    assert created["status"] == "queued"
+
+
+def test_monitor_dispatch_rechecks_source_surface_before_claim(db, user) -> None:
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-admin1", title="管理员小菱")
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-user1", title="用户小菱")
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-admin1",
+        trusted_source=True,
+        message=_message(
+            idempotency_key="monitor-source-recheck",
+            sent_from="",
+            send_to="agent:monitor",
+            message_type="task.request",
+            payload={"window_minutes": 60, "metrics": ["latency_p95"]},
+            context={"run_id": "run-monitor-source-recheck"},
+        ),
+    )
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    row.sent_from = "session:user:session-user1"
+    db.commit()
+
+    with pytest.raises(agent_mesh_service.AgentMeshAccessError, match="不属于当前用户会话"):
+        agent_mesh_service.claim_dispatch_message(
+            db, user, created["message_id"], target_address="agent:monitor",
+        )
+    assert row.status == "queued"
 
 
 def test_send_message_rejects_spoofed_source_and_cross_user_target(db, user) -> None:

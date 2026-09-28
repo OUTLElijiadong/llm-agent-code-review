@@ -65,6 +65,97 @@ def _bare_orchestrator() -> Orchestrator:
     return orch
 
 
+def test_agent_mesh_message_uses_server_run_and_trace_context(monkeypatch: Any) -> None:
+    orch = _bare_orchestrator()
+    orch._db = object()
+    orch._user = SimpleNamespace(id=7)
+    captured: dict[str, Any] = {}
+
+    def capture_message(_db: Any, _user: Any, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"message_id": "msg_1", "status": "queued"}
+
+    monkeypatch.setattr("app.services.agent_mesh_service.send_message", capture_message)
+    result = orch.send_message(
+        send_to="agent:code_reviewer",
+        message_type="task.request",
+        subject="监督修复",
+        payload={"task": "检查"},
+        idempotency_key="server-context-wins",
+        trace_id="model-chosen-trace",
+        context={
+            "run_id": "model-chosen-run",
+            "supervision_objective": "确认修复通过",
+            "supervision_round": 1,
+        },
+        ctx=AgentContext(
+            user_id=7,
+            extra={
+                "run_id": "server-run",
+                "trace_id": "server-trace",
+                "surface": "user",
+                "session_key": "session-12345678",
+            },
+        ),
+    )
+
+    assert result.success is True
+    assert captured["message"].context.run_id == "server-run"
+    assert captured["message"].trace_id == "server-trace"
+
+
+def test_xiaoling_team_tool_routes_through_trusted_internal_entry(monkeypatch: Any) -> None:
+    """只有小菱工具路径能创建团队，并沿用认证会话的 surface、session 和 trace。"""
+    orch = _bare_orchestrator()
+    orch._db = object()
+    orch._user = SimpleNamespace(id=7)
+    captured: dict[str, Any] = {}
+
+    def create_from_xiaoling(db, user, payload, **supervision):
+        captured.update(db=db, user=user, payload=payload, supervision=supervision)
+        return {"team_id": 91, "status": "queued"}
+
+    monkeypatch.setattr(
+        "app.services.agent_team_service.create_team_from_xiaoling",
+        create_from_xiaoling,
+    )
+    result = orch.create_agent_team(
+        title="并行审查",
+        objective="由独立子 Agent 检查代码并由汇总节点核验发现",
+        members=[
+            {"member_key": "review", "display_name": "代码审查", "address": "agent:code_reviewer"},
+            {"member_key": "verify", "display_name": "结果汇总", "address": "agent:reporter", "role": "summarizer"},
+        ],
+        tasks=[
+            {
+                "task_key": "review_code",
+                "member_key": "review",
+                "title": "审查代码",
+                "instructions": "只依据当前源码寻找有证据的问题",
+                "input": {"code": "value = 1\n"},
+            },
+            {
+                "task_key": "verify_summary",
+                "member_key": "verify",
+                "title": "复核并汇总",
+                "instructions": "引用工作节点证据并说明未覆盖范围",
+                "depends_on": ["review_code"],
+            },
+        ],
+        ctx=AgentContext(
+            user_id=7,
+            extra={"surface": "user", "session_key": "session-12345678", "trace_id": "trace-root"},
+        ),
+    )
+
+    assert result.success is True
+    assert result.data == {"team_id": 91, "status": "queued"}
+    assert captured["user"] is orch._user
+    assert captured["payload"].surface == "user"
+    assert captured["payload"].session_id == "session-12345678"
+    assert captured["payload"].trace_id == "trace-root"
+
+
 def _result(label: str = "ok") -> AgentResult:
     """构造带标签的成功 AgentResult。"""
     return AgentResult(success=True, data=label)
@@ -358,7 +449,7 @@ def test_disabled_agent_blocks_fixed_runtime_before_delegate(db: Any) -> None:
     execute.assert_not_called()
 
 
-def test_start_review_auto_selects_only_active_project_files(db: Any) -> None:
+def test_start_review_auto_selects_only_active_project_files(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """统一入口应在 file_ids 为空时按 ID 选择同项目 active 文件。
 
     Args:
@@ -373,6 +464,8 @@ def test_start_review_auto_selects_only_active_project_files(db: Any) -> None:
     _add_code_file(db, project_id=8, file_name="other.py")
     orch = _bare_orchestrator()
     orch._db = db
+    orch._user = SimpleNamespace(id=3)
+    monkeypatch.setattr(orchestrator_module, "check_permission", lambda _db, _uid, code: code == "review:start")
     orch.review_orch = SimpleNamespace(start_review=MagicMock(return_value=_result("started")))
     ctx = AgentContext(user_id=3)
 
@@ -384,7 +477,7 @@ def test_start_review_auto_selects_only_active_project_files(db: Any) -> None:
     )
 
 
-def test_start_review_without_active_files_or_database_fails_safely(db: Any) -> None:
+def test_start_review_without_active_files_or_database_fails_safely(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """统一入口无法解析 active 文件时不得调用下游审查。
 
     Args:
@@ -395,6 +488,8 @@ def test_start_review_without_active_files_or_database_fails_safely(db: Any) -> 
     """
     _add_code_file(db, project_id=9, file_name="deleted.py", status="deleted")
     orch = _bare_orchestrator()
+    orch._user = SimpleNamespace(id=3)
+    monkeypatch.setattr(orchestrator_module, "check_permission", lambda _db, _uid, code: code == "review:start")
     downstream = MagicMock(return_value=_result("unexpected"))
     orch.review_orch = SimpleNamespace(start_review=downstream)
 
@@ -406,7 +501,8 @@ def test_start_review_without_active_files_or_database_fails_safely(db: Any) -> 
     query_error = orch.start_review(project_id=9, file_ids=[])
 
     assert all(result.success is False for result in (no_files, no_db, query_error))
-    assert all("没有可审查的代码文件" in (result.error or "") for result in (no_files, no_db, query_error))
+    assert all("没有可审查的代码文件" in (result.error or "") for result in (no_files, query_error))
+    assert "DB 或用户上下文未注入" in no_db.error
     downstream.assert_not_called()
 
 

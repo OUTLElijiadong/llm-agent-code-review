@@ -7,9 +7,9 @@
 
 /** Agent 编码 → 中文名(注册中心 BaseAgent + 治理默认 Agent 全量) */
 export const AGENT_CODE_LABELS: Record<string, string> = {
-  orchestrator: '总编排',
-  chat_assistant: '小菱(对话助手)',
-  manager: '贾维斯(全局运维)',
+  orchestrator: '内部调度引擎',
+  chat_assistant: '小菱(唯一主控)',
+  manager: '小菱管理权限策略(兼容)',
   review_orchestrator: '审查编排',
   code_reviewer: '代码审查员',
   security_sentinel: '安全哨兵',
@@ -179,7 +179,7 @@ export function memoryTypeText(value: string | null | undefined): string {
 
 /** Agent 分类 → 中文 */
 export const CATEGORY_LABELS: Record<string, string> = {
-  meta: '主控', frontline: '前台', governance: '治理', operations: '运维',
+  meta: '系统支撑', frontline: '前台', governance: '治理', operations: '运维',
   security: '安全', knowledge: '知识', quality: '质量', general: '通用',
   analytics: '数据分析', analyzer: '分析检测', custom_review: '自定义审查',
   manager: '协调管理', orchestrator: '任务编排', output: '报告输出', reviewer: '代码审查',

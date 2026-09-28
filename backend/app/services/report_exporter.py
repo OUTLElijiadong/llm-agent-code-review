@@ -27,10 +27,13 @@ HTML 模板(simple/detailed/compliance),分别面向快速浏览、开发排查�
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
+from bleach.sanitizer import Cleaner
 from jinja2 import select_autoescape
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -70,11 +73,11 @@ _ISSUE_FIELDS: tuple = (
 )
 # Task 已知字段列表(用于 ORM → dict 转换,与 ReviewTask ORM 对齐)
 _TASK_FIELDS: tuple = (
-    "id", "task_name", "name", "project_id", "review_type", "status",
+    "id", "task_name", "name", "project_id", "project_name", "review_type", "status",
     "total_files", "processed_files", "total_issues",
     "severe_issues", "high_issues", "medium_issues", "low_issues",
     "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
-    "start_time", "end_time", "create_time",
+    "start_time", "end_time", "create_time", "coverage", "agent_releases",
 )
 
 # 模板目录路径(app/templates/)
@@ -87,6 +90,98 @@ _JINJA_ENV: SandboxedEnvironment = SandboxedEnvironment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+
+def _has_ambiguous_url_chars(value: str) -> bool:
+    # 浏览器和 URL 解析器会折叠部分控制字符，先拒绝原始输入中的歧义。
+    return any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7f or char == "\\" for char in value)
+
+
+def _safe_html_reference_url(value: Any) -> bool:
+    """仅允许报告 HTML 中的引用以绝对 HTTP(S) URL 作为链接。"""
+    if not isinstance(value, str) or not value or _has_ambiguous_url_chars(value):
+        return False
+    try:
+        parts = urlsplit(value)
+        return parts.scheme in {"http", "https"} and bool(parts.hostname)
+    except ValueError:
+        return False
+
+
+class _ReportCssSanitizer:
+    """保留现有报表的静态内联样式，移除外部加载与旧浏览器脚本表达式。"""
+
+    def sanitize_css(self, style: str) -> str:
+        return "" if re.search(r"(?i)@import|url\s*\(|expression\s*\(|behavior\s*:|javascript\s*:", style) else style
+
+
+def _allowed_report_html_attribute(tag: str, name: str, value: str) -> bool:
+    if name in {"class", "id", "lang", "title", "role", "aria-label", "style"}:
+        return True
+    if tag == "div" and name == "tabindex":
+        return value == "0"  # 报告的局部横滚区必须能用键盘聚焦。
+    if tag == "meta":
+        return name in {"charset", "name", "content"}
+    if tag == "a":
+        if name == "href":
+            if _has_ambiguous_url_chars(value):
+                return False
+            return (
+                value.startswith("#")
+                or (value.startswith("/") and not value.startswith("//"))
+                or _safe_html_reference_url(value)
+                or value.startswith("mailto:")
+            )
+        return name in {"target", "rel"}
+    if tag == "img":
+        if name == "src":
+            return bool(re.fullmatch(
+                r"data:image/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+", value,
+            ))
+        return name in {"alt", "width", "height"}
+    if tag in {"td", "th"}:
+        return name in {"colspan", "rowspan", "scope"}
+    return False
+
+
+def _new_report_html_cleaner() -> Cleaner:
+    # Bleach Cleaner 的解析器带状态，API 可并发导出，必须每次新建实例。
+    return Cleaner(
+        tags={
+            "html", "head", "body", "meta", "title", "style", "main", "header", "footer",
+            "article", "section", "div", "span", "p", "br", "hr", "h1", "h2", "h3",
+            "h4", "h5", "h6", "strong", "em", "b", "i", "u", "small", "code", "pre",
+            "blockquote", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr",
+            "th", "td", "a", "img", "figure", "figcaption",
+        },
+        attributes=_allowed_report_html_attribute,
+        protocols={"http", "https", "mailto", "data"},
+        strip=True,
+        strip_comments=True,
+        css_sanitizer=_ReportCssSanitizer(),
+    )
+_REPORT_CSP = (
+    "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "
+    "img-src data:; font-src data:; "
+    "object-src 'none'; base-uri 'none'; form-action 'none'"
+)
+
+
+def _sanitize_report_html(html: str) -> str:
+    """清洗可编辑模板的最终 HTML；独立文件与 Blob 预览均内置 CSP。"""
+    # 旧版纯文本/Markdown 模板没有任何 HTML 活动节点，保持既有字节级输出契约。
+    if "<" not in html:
+        return html
+    body = _new_report_html_cleaner().clean(html)
+    return (
+        '<!DOCTYPE html><html><head>'
+        f'<meta http-equiv="Content-Security-Policy" content="{_REPORT_CSP}">'
+        '<meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '</head><body>'
+        f'{body}'
+        '</body></html>'
+    )
 
 
 # ============ 内部归一化辅助 ============
@@ -451,14 +546,46 @@ def _build_report_context(
         "aggregation_summary": aggregation_summary,
     }
 
-    return {
+    files = task.get("files", []) if isinstance(task, dict) else getattr(task, "files", [])
+    source = task.get("source", {}) if isinstance(task, dict) else getattr(task, "source", {})
+    context = {
         "task_info": task_info,
         "summary": summary or "",
         "score": effective_score,
         "issues": sorted_issues,
         "statistics": statistics,
         "evidence": _to_serializable(evidence or {}),
+        "files": _to_serializable(files if isinstance(files, list) else []),
+        "source": _to_serializable(source if isinstance(source, dict) else {}),
     }
+    context["scope_lines"] = _build_scope_lines(context)
+    return context
+
+
+def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
+    """各格式共用范围说明；历史缺失保持未知，处理数量不冒充语义覆盖率。"""
+    task = context["task_info"]
+    lines = [
+        f"任务状态：{task.get('status') or '未记录'}；文件处理进度："
+        f"{task.get('processed_files') or 0}/{task.get('total_files') or 0}（不等同于语义覆盖率）",
+        "统计来源：" + json.dumps(context["source"], ensure_ascii=False, default=str),
+        "覆盖记录：" + (
+            json.dumps(task["coverage"], ensure_ascii=False, default=str)
+            if isinstance(task.get("coverage"), dict) and task["coverage"]
+            else "未记录，不能据此判定完整覆盖"
+        ),
+    ]
+    if task.get("agent_releases"):
+        lines.append("审查 Agent 版本：" + json.dumps(task["agent_releases"], ensure_ascii=False, default=str))
+    for file in context["files"]:
+        lines.append(
+            f"文件：{file.get('file_path') or file.get('file_name') or '未命名'}；"
+            f"版本：{file.get('version_no') if file.get('version_no') is not None else '未记录'}；"
+            f"问题数：{file.get('issue_count', 0)}；SHA-256：{file.get('content_sha256') or '未记录'}"
+        )
+    if not context["files"]:
+        lines.append("文件清单未记录，不能由问题列表推断全部送审文件。")
+    return lines
 
 
 # ============ 对外导出接口 ============
@@ -529,6 +656,14 @@ def export_to_html(
         str: 渲染后的 HTML 字符串;模板渲染异常时抛出 jinja2 异常。
     """
     context = _build_report_context(task, issues, summary, score, evidence)
+    # 仅收紧 HTML 中的可点击引用。JSON/PDF/Word 保留原始审计事实；对旧版
+    # 数据库模板也生效，避免只改当前文件模板而让历史模板继续生成危险链接。
+    for issue_list in (context["issues"], context["statistics"]["top_vulnerabilities"]):
+        for issue in issue_list:
+            references = issue.get("references_json")
+            issue["references_json"] = [
+                ref for ref in references if _safe_html_reference_url(ref)
+            ] if isinstance(references, list) else []
     # 008 迁移预置的模板使用 task / metrics / compliance_summary，后续内置
     # HTML 模板改为 task_info / statistics。保留旧变量别名，确保历史数据库中
     # 已保存的模板和用户基于旧契约创建的模板仍可导出。
@@ -557,7 +692,7 @@ def export_to_html(
         "compliance_summary": context["statistics"]["compliance_summary"],
     })
     template = _JINJA_ENV.from_string(template_content)
-    return template.render(**context)
+    return _sanitize_report_html(template.render(**context))
 
 
 def load_builtin_template(template_type: str) -> str:

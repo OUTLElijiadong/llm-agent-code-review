@@ -66,8 +66,8 @@ def _team_call(call_id: str, title: str) -> ToolCall:
         "title": title,
         "objective": "并行验证两个独立子任务并汇总",
         "members": [
-            {"member_key": "researcher", "display_name": "调研员", "address": "agent:chat_assistant"},
-            {"member_key": "verifier", "display_name": "核验员", "address": "agent:chat_assistant"},
+            {"member_key": "researcher", "display_name": "调研员", "address": "agent:project_analyzer"},
+            {"member_key": "verifier", "display_name": "核验员", "address": "agent:code_reviewer"},
         ],
         "tasks": [
             {"task_key": "t1", "member_key": "researcher", "title": "调研资料",
@@ -174,8 +174,8 @@ async def test_user_surface_cannot_execute_admin_beta_capability(db, user, monke
 
 
 @pytest.mark.asyncio
-async def test_member_business_tools_blocked_and_unlisted_on_admin_surface(db, user, monkeypatch):
-    """审计/沙箱/下载/圆桌/审查等成员业务工具: 管理面 schema 不广告 + 网关硬拒。"""
+async def test_xiaoling_admin_surface_keeps_project_tools_and_validates_real_arguments(db, user, monkeypatch):
+    """同一个小菱可在管理员面处理项目任务；参数校验、权限与审批仍生效。"""
     from app.models.user import User as _U
 
     admin = _U(username="biz-admin", password="x", role="super_admin", status=1)
@@ -184,21 +184,27 @@ async def test_member_business_tools_blocked_and_unlisted_on_admin_surface(db, u
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_a, **_k: _bare_orchestrator())
     executor = _executor(db, admin, "admin", "run-biz-block")
 
-    # 网关: 逐个成员业务工具在管理面直接拒绝
-    for tool in ("audit_security_for_project", "deploy_project_sandbox", "download_project_source",
-                 "start_roundtable_discussion", "start_review"):
-        call = ToolCall(call_id=f"call-{tool}", name=tool, arguments={}, raw_arguments="{}")
-        result = await executor.execute(call, approved=True)
-        assert result.status == "error", tool
-        assert "成员侧" in (result.error or ""), tool
+    tool_arguments = {
+        "audit_security_for_project": {"project_id": 999999, "scan_mode": "full"},
+        "deploy_project_sandbox": {"project_id": 999999, "language": "python"},
+        "download_project_source": {"project_id": 999999},
+        "start_roundtable_discussion": {"project_id": 999999, "file_id": 999999},
+        "start_review": {"project_id": 999999},
+    }
+    # 使用不存在的对象，确认进入真实参数/对象/审批路径且不会创建生产式副作用。
+    for tool, arguments in tool_arguments.items():
+        call = ToolCall(call_id=f"call-{tool}", name=tool, arguments=arguments, raw_arguments="{}")
+        result = await executor.execute(call)
+        assert result.status in {"error", "approval_required"}, (tool, result)
+        assert "参数校验失败" not in (result.error or ""), tool
+        assert "成员侧" not in (result.error or ""), tool
 
-    # schema: 成员业务工具不出现在管理面工具清单
+    # 单一主控不改变管理端可调用工具的账号、项目权限和确认门。
     schemas = await executor.tool_schemas()
     names = {item["name"] for item in schemas}
     for tool in ("audit_security_for_project", "deploy_project_sandbox", "download_project_source",
                  "start_roundtable_discussion", "start_review", "create_pentest_engagement"):
-        assert tool not in names, f"{tool} 不应出现在管理面工具清单"
-    # 管理面应有工具与团队工具仍在
+        assert tool in names, f"小菱管理面应能发现已授权工具 {tool}"
     assert "admin_execute_capability" in names
     assert "create_agent_team" in names
 
@@ -209,8 +215,8 @@ async def test_member_business_tools_blocked_and_unlisted_on_admin_surface(db, u
     assert "start_roundtable_discussion" in user_names
 
 
-def test_list_agents_hides_governance_contracts_for_user_surface(db, user):
-    """成员面 list_agents 隐藏治理契约(manager/operations/monitor 等), 管理面全量。"""
+def test_list_agents_hides_root_aliases_and_scopes_operations_to_super_admin(db, user, super_admin_user):
+    """根别名不可作为子 Agent；运维子 Agent 仅在唯一超级管理员管理面可见。"""
     from app.services import agent_mesh_service
 
     user_items = agent_mesh_service.list_agents(db, user, surface="user")["agents"] \
@@ -223,7 +229,8 @@ def test_list_agents_hides_governance_contracts_for_user_surface(db, user):
     for hidden in ("manager", "operations", "monitor", "orchestrator", "evolution"):
         assert hidden not in codes, f"成员面不应看到 {hidden}"
 
-    admin_payload = agent_mesh_service.list_agents(db, user, surface="admin")
+    admin_payload = agent_mesh_service.list_agents(db, super_admin_user, surface="admin")
     admin_items = admin_payload.get("items") or admin_payload.get("agents") or []
     admin_codes = {str(item.get("address", "")).split(":")[-1] for item in admin_items}
-    assert {"manager", "operations", "monitor"} <= admin_codes
+    assert {"manager", "orchestrator", "chat_assistant"}.isdisjoint(admin_codes)
+    assert {"operations", "monitor"} <= admin_codes

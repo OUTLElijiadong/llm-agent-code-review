@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -10,9 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.agent_team import AgentTeam
+from app.core.permission_codes import PermissionCode
+from app.models.agent_team import AgentTeam, AgentTeamEvent
 from app.models.user import User
-from app.services import agent_team_service
+from app.services import agent_team_service, rbac_service
 from app.services.ai_usage_context import model_attribution, usage_context
 
 _scheduler = None
@@ -68,6 +70,20 @@ def _task_message(team: AgentTeam, claimed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _owner_access_error(db: Session, owner_id: int) -> str:
+    """用新事务观察撤权或停用；旧 Worker 的只读快照不能授权执行或回传。"""
+
+    with Session(bind=db.get_bind(), autoflush=False) as access_db:
+        owner = access_db.get(User, int(owner_id))
+        if owner is None:
+            return "团队所属账户不存在"
+        if int(owner.status or 0) != 1:
+            return "账户已停用或删除，团队任务已阻断"
+        if not rbac_service.check_permission(access_db, int(owner.id), PermissionCode.AGENT_CHAT):
+            return "账户的 agent:chat 权限已撤销，团队任务已阻断"
+    return ""
+
+
 def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
     """在独立 DB Session 中执行单个已获租约的任务。"""
 
@@ -83,23 +99,98 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
             db.rollback()
             logger.info("[agent-team-dispatcher] skip inactive team={} task={}: {}", team_id, claimed["task_id"], exc)
             return {"success": False}
-        user = db.get(User, int(team.user_id)) if team else None
-        if user is None or int(user.status or 0) != 1:
-            error = "团队所属账户不存在" if user is None else "账户已停用或删除，团队任务未执行"
+        access_error = _owner_access_error(db, int(team.user_id))
+        if access_error:
             try:
                 agent_team_service.complete_task(
                     db,
                     team_id,
                     claimed["task_id"],
                     lease_token=claimed["lease_token"],
-                    result={"status": "blocked", "summary": error, "retryable": False},
+                    result={"status": "blocked", "summary": access_error, "retryable": False},
                     success=False,
-                    error=error,
+                    error=access_error,
                 )
             except agent_team_service.AgentTeamError:
                 db.rollback()
             return {"success": False}
+        user = db.get(User, int(team.user_id))
         try:
+            from app.services import agent_supervisor_service
+
+            task_input = claimed.get("input") if isinstance(claimed.get("input"), dict) else None
+            if task_input is None:
+                try:
+                    task_input = json.loads(_task.input_json or "{}")
+                except (TypeError, ValueError):
+                    task_input = {}
+            task_key = str(claimed.get("task_key") or _task.task_key)
+            task_title = str(claimed.get("title") or _task.title)
+            task_instructions = str(claimed.get("instructions") or _task.instructions)
+            supervisor_review = agent_supervisor_service.review_team_task(
+                address=str(claimed["address"]),
+                task_key=task_key,
+                title=task_title,
+                instructions=task_instructions,
+                task_input=task_input,
+            )
+            plan_event = (
+                db.query(AgentTeamEvent)
+                .filter(
+                    AgentTeamEvent.team_id == int(team.id),
+                    AgentTeamEvent.event_type == "supervisor.plan_reviewed",
+                )
+                .order_by(AgentTeamEvent.id.desc())
+                .first()
+            )
+            plan_detail = {}
+            if plan_event is not None:
+                try:
+                    plan_detail = json.loads(plan_event.detail_json or "{}")
+                except (TypeError, ValueError):
+                    plan_detail = {}
+            fingerprint = agent_supervisor_service.task_fingerprint(
+                {
+                    "task_key": task_key,
+                    "member_key": str(member.member_key),
+                    "title": task_title,
+                    "instructions": task_instructions,
+                    "input": task_input,
+                },
+                str(claimed["address"]),
+            )
+            authorized_fingerprints = set(plan_detail.get("authorized_high_risk_fingerprints") or [])
+            confirmed_by = plan_detail.get("confirmed_by_user_id")
+            high_risk_authorized = (
+                confirmed_by == int(team.user_id)
+                and fingerprint in authorized_fingerprints
+            )
+            review_data = agent_supervisor_service.public_review(supervisor_review)
+            agent_team_service.record_supervisor_task_review(
+                db,
+                team_id=int(team.id),
+                task_id=int(claimed["task_id"]),
+                phase="before",
+                review=review_data,
+                detail={"attempt": int(claimed.get("attempt_count") or 0)},
+            )
+            if supervisor_review.needs_confirmation and not high_risk_authorized:
+                blocked = {
+                    "status": "blocked",
+                    "summary": "监督子 Agent 要求当前账号确认该高风险任务；任务未执行",
+                    "errors": [{
+                        "code": "supervisor_confirmation_required",
+                        "risk_level": supervisor_review.risk_level,
+                    }],
+                    "next_action": {"confirm_with_current_user": True},
+                    "retryable": False,
+                }
+                agent_team_service.complete_task(
+                    db, team_id, claimed["task_id"], lease_token=claimed["lease_token"],
+                    result=blocked, success=False, error=blocked["summary"],
+                )
+                return {"success": False}
+
             # 只有持有团队租约的内部调度链可执行受治理沙箱 Agent。
             from app.services.agent_mesh_dispatcher import _handle
 
@@ -117,6 +208,35 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     _task_message(team, claimed),
                     trusted_team_execution=True,
                 )
+            access_error = _owner_access_error(db, int(team.user_id))
+            if access_error:
+                result = {"status": "blocked", "summary": access_error, "retryable": False}
+            result_review = agent_supervisor_service.review_task_result(result)
+            agent_team_service.record_supervisor_task_review(
+                db,
+                team_id=int(team.id),
+                task_id=int(claimed["task_id"]),
+                phase="after",
+                review=agent_supervisor_service.public_review(result_review),
+                detail={
+                    "reported_status": str(result.get("status") or ""),
+                    "evidence_count": len(result.get("evidence") or [])
+                    if isinstance(result.get("evidence"), list) else None,
+                    "error_count": len(result.get("errors") or [])
+                    if isinstance(result.get("errors"), list) else None,
+                },
+            )
+            if result_review.needs_confirmation and str(result.get("status") or "") == "completed":
+                result = {
+                    **result,
+                    "status": "blocked",
+                    "summary": "监督子 Agent 未能验证完成结果的证据结构；请复核后再继续",
+                    "errors": [*(result.get("errors") or []), {
+                        "code": "supervisor_result_review_required",
+                        "reason": result_review.reason,
+                    }],
+                    "retryable": False,
+                }
             success = str(result.get("status") or "") == "completed"
             agent_team_service.complete_task(
                 db,

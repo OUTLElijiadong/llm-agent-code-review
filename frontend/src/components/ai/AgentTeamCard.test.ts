@@ -33,9 +33,9 @@ function makeTeam(): AgentTeamDetail {
   }
 }
 
-function mountCard() {
+function mountCard(team = makeTeam()) {
   return mount(AgentTeamCard, {
-    props: { team: makeTeam() },
+    props: { team },
     global: {
       stubs: {
         'el-icon': { template: '<span><slot /></span>' },
@@ -73,6 +73,19 @@ describe('AgentTeamCard keyboard interaction', () => {
     await badge.trigger('keydown.enter')
 
     expect(wrapper.emitted('open-panel')).toEqual([[7]])
+    wrapper.unmount()
+  })
+
+  it('恢复的团队标题和成员名称按文本展示，不生成活动 HTML', () => {
+    const team = makeTeam()
+    team.title = '<svg onload="alert(1)">团队</svg>'
+    team.objective = '<img src=x onerror="alert(1)">'
+    team.members[0].display_name = '<script>alert(1)</script>审查员'
+    const wrapper = mountCard(team)
+
+    expect(wrapper.text()).toContain('<svg onload="alert(1)">团队</svg>')
+    expect(wrapper.text()).toContain('<script>alert(1)</script>审查员')
+    expect(wrapper.find('svg, img, script, [onload], [onerror]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

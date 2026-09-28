@@ -151,7 +151,8 @@ def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict
         db.query(KnowledgeChunk, KnowledgeDoc.title, KnowledgeDoc.source_type)
         .join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
         .filter(
-            KnowledgeChunk.user_id == user_id,   # 隔离红线
+            KnowledgeChunk.user_id == user_id,   # 切片与文档两侧均校验租户归属
+            KnowledgeDoc.user_id == user_id,
             KnowledgeDoc.status == "active",
         )
         .all()

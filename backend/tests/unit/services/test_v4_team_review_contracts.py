@@ -1,5 +1,7 @@
 """小菱团队业务合同：真实执行参数、部分证据及可信汇总。"""
 
+import hashlib
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -16,7 +18,9 @@ def _orch(monkeypatch, **agents):
 
 
 def test_project_security_member_preserves_explicit_scan_mode(monkeypatch):
-    sentinel = SimpleNamespace(scan_project=Mock(return_value=AgentResult(success=True, data={})))
+    sentinel = SimpleNamespace(scan_project=Mock(return_value=AgentResult(success=True, data={
+        "findings": [], "summary": "已扫描指定项目", "compliance": {"scan_mode": "static_full"},
+    })))
     _orch(monkeypatch, audit_security_for_project=sentinel.scan_project)
     result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "security_sentinel", {
         "payload": {"project_id": 8, "scan_mode": "static_full"},
@@ -38,6 +42,112 @@ def test_partial_security_result_keeps_coverage_and_findings(monkeypatch):
     assert result["status"] != "completed"
     assert result["evidence"][0]["data"] == {**partial, "project_id": 8}
     assert result["errors"][0]["code"] == "output_truncated"
+
+
+def test_code_review_empty_model_object_is_not_completed_zero_findings(monkeypatch):
+    reviewer = SimpleNamespace(review_code=Mock(return_value=AgentResult(success=True, data={})))
+    _orch(monkeypatch, review_code=reviewer.review_code)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", {
+        "payload": {"code": "dangerous_call(user_input)", "file_name": "review.py"},
+    })
+    assert result["status"] != "completed"
+    assert result["errors"][0]["code"] == "invalid_review_result"
+
+
+def test_code_review_valid_zero_and_invalid_issue_are_distinguished(monkeypatch):
+    response = {"data": {"issues": [], "summary": "已核对所给片段，未发现问题"}}
+    reviewer = SimpleNamespace(review_code=Mock(side_effect=lambda *_args, **_kwargs: AgentResult(
+        success=True, data=response["data"],
+    )))
+    _orch(monkeypatch, review_code=reviewer.review_code)
+    message = {"payload": {"code": "print('ok')", "file_name": "sample.py"}}
+    valid = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", message)
+    assert valid["status"] == "completed"
+    assert valid["evidence"][0]["data"]["issues"] == []
+
+    response["data"] = {"issues": [{"unexpected": "missing finding identity"}]}
+    invalid = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", message)
+    assert invalid["status"] != "completed"
+    assert invalid["errors"][0]["code"] == "invalid_review_result"
+
+
+def test_code_review_mixed_valid_and_invalid_issues_is_not_complete(monkeypatch):
+    reviewer = Mock(return_value=AgentResult(success=True, data={
+        "issues": [{"title": "已定位问题", "description": "真实问题"}, {"unexpected": "missing identity"}],
+        "summary": "模型输出含一条无效问题",
+    }))
+    _orch(monkeypatch, review_code=reviewer)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", {
+        "payload": {"code": "dangerous_call(user_input)", "file_name": "review.py"},
+    })
+    assert result["status"] != "completed"
+    assert result["errors"][0]["code"] == "invalid_review_result"
+    assert result["evidence"][0]["data"]["issues"][0]["title"] == "已定位问题"
+
+
+def test_code_review_upstream_invalid_issue_count_is_not_hidden(monkeypatch):
+    reviewer = Mock(return_value=AgentResult(success=True, data={
+        "issues": [], "summary": "保留了有效条目", "invalid_issue_count": 1,
+        "diagnostics": ["issue_missing_identity"],
+    }))
+    _orch(monkeypatch, review_code=reviewer)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", {
+        "payload": {"code": "dangerous_call(user_input)", "file_name": "review.py"},
+    })
+    assert result["status"] != "completed"
+    assert result["errors"][0]["code"] == "invalid_review_result"
+
+
+def test_review_retry_preserves_original_snippet_even_with_unrelated_project_dependency(monkeypatch):
+    from app.services.agent_team_service import _apply_execution_strategy
+
+    original_code = "report = db.get(Report, report_id)\n"
+    original_sha = hashlib.sha256(original_code.encode()).hexdigest()
+    row = SimpleNamespace(
+        input_json=json.dumps({"code": original_code, "file_name": "user-snippet.py",
+                               "source_revision_id": 81, "project_id": 7}),
+        attempt_count=1,
+    )
+    member = SimpleNamespace(address="agent:code_reviewer")
+    _apply_execution_strategy(row, member, instruction="补充鉴权证据", error="上一轮证据不足", automatic=False)
+    retried = json.loads(row.input_json)
+    assert hashlib.sha256(retried["code"].encode()).hexdigest() == original_sha
+    assert retried["source_revision_id"] == 81
+    assert retried["file_name"] == "user-snippet.py"
+
+    reviewer = Mock(return_value=AgentResult(success=True, data={"issues": [], "summary": "仅此片段未发现问题"}))
+    _orch(monkeypatch, review_code=reviewer)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", {
+        "payload": {**retried, "dependency_context": {"foreign": {
+            "project_id": 999, "file_name": "other-project.py", "code": "different_source()",
+        }}},
+    })
+    assert result["status"] == "completed"
+    assert reviewer.call_args.args[0] == original_code
+    assert reviewer.call_args.kwargs["file_name"] == "user-snippet.py"
+
+
+def test_security_success_without_structured_evidence_cannot_report_zero_findings(monkeypatch):
+    sentinel = Mock(return_value=AgentResult(success=True, data={}))
+    _orch(monkeypatch, audit_security_for_task=sentinel)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "security_sentinel", {
+        "payload": {"task_id": 18},
+    })
+    assert result["status"] != "completed"
+    assert result["errors"][0]["code"] == "invalid_audit_result"
+
+
+def test_security_explicit_incomplete_coverage_is_not_completed(monkeypatch):
+    audit = {"findings": [], "summary": "仅保留部分扫描结果", "file_count": 1,
+             "compliance": {"scan_complete": False, "findings_truncated": True}}
+    sentinel = Mock(return_value=AgentResult(success=True, data=audit))
+    _orch(monkeypatch, audit_security_for_file=sentinel)
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "security_sentinel", {
+        "payload": {"file_id": 18},
+    })
+    assert result["status"] != "completed"
+    assert result["errors"][0]["code"] == "invalid_audit_result"
+    assert result["evidence"][0]["data"] == audit
 
 
 def test_summary_does_not_promote_nested_partial_to_success():
@@ -156,8 +266,10 @@ def test_summary_keeps_shallow_findings_in_public_team_final_result():
     from app.services.agent_team_service import _public
     from app.services.agent_team_summary import summarize_dependencies
 
-    result = summarize_dependencies({"review": {"status": "completed", "result": {
+    result = summarize_dependencies({"review": {"status": "completed", "verified_review_task_id": 17,
+        "result": {
         "status": "completed", "task_id": 17, "project_id": 2,
+        "artifacts": [{"type": "review_task", "task_id": 17}],
         "findings": [{"title": "SQL注入", "file_name": "app.py", "line_number": 3}],
     }}})
     public = _public({"completed_tasks": 3, "final_result": _public(result)})["final_result"]
@@ -165,6 +277,61 @@ def test_summary_keeps_shallow_findings_in_public_team_final_result():
     assert public["findings"][0]["title"] == "SQL注入"
     assert public["findings"][0]["source_task_keys"] == "review"
     assert public["references"][0]["route"] == "/reviews/17"
+
+
+def test_summary_does_not_turn_team_task_id_into_formal_review_link():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    result = summarize_dependencies({
+        "ordinary": {"status": "completed", "result": {
+            "status": "completed", "task_id": 216,
+            "findings": [{"title": "代码建议", "file_name": "a.py"}],
+        }},
+        "formal": {"status": "completed", "verified_review_task_id": 180, "result": {
+            "status": "completed", "task_id": 180, "project_id": 167,
+            "artifacts": [{"type": "review_task", "task_id": 180}],
+        }},
+    })
+    assert result["references"] == [{
+        "type": "review_task", "task_id": 180,
+        "route": "/reviews/180", "source_task": "formal",
+    }]
+
+
+def test_dependency_context_verifies_formal_review_record_before_linking(db):
+    import json
+
+    from app.models.agent_team import AgentTeamTask
+    from app.models.review_task import ReviewTask
+    from app.services.agent_team_service import _dependency_context
+
+    row = AgentTeamTask(id=216, team_id=81, member_id=1, task_key="review", title="审查",
+                        instructions="正式审查", status="completed", result_json="{}")
+    db.add(row)
+    db.flush()
+    review = ReviewTask(id=180, user_id=3, project_id=5, review_type="full", status="success",
+                        agent_team_id=81, agent_team_task_id=row.id)
+    db.add(review)
+    db.flush()
+    row.result_json = json.dumps({"status": "completed", "task_id": review.id,
+                                  "project_id": 5, "artifacts": [{"type": "review_task", "task_id": review.id}]})
+    db.flush()
+    team = SimpleNamespace(id=81, user_id=3)
+    task = SimpleNamespace(dependency_keys_json='["review"]')
+    assert _dependency_context(db, team, task)["review"]["verified_review_task_id"] == review.id
+
+    team.user_id = 4
+    assert "verified_review_task_id" not in _dependency_context(db, team, task)["review"]
+    team.user_id = 3
+    row.result_json = json.dumps({"status": "completed", "task_id": review.id, "project_id": 5})
+    db.flush()
+    assert "verified_review_task_id" not in _dependency_context(db, team, task)["review"]
+
+    unrelated_id = row.id
+    row.result_json = json.dumps({"status": "completed", "task_id": unrelated_id,
+                                  "project_id": 5, "artifacts": [{"type": "review_task", "task_id": unrelated_id}]})
+    db.flush()
+    assert "verified_review_task_id" not in _dependency_context(db, team, task)["review"]
 
 
 def test_team_summary_counts_last_finding_from_full_private_dependency():
@@ -197,6 +364,36 @@ def test_team_summary_rejects_completed_status_when_dependency_findings_are_trun
     assert result["status"] == "failed"
     assert result["bounded_finding_tasks"] == ["audit"]
     assert result["errors"][0]["code"] == "finding_coverage_incomplete"
+
+
+def test_team_summary_rejects_explicit_incomplete_audit_coverage():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    result = summarize_dependencies({"audit": {"status": "completed", "result": {
+        "status": "completed", "evidence": [{"data": {
+            "project_id": 9, "findings": [], "compliance": {
+                "scan_complete": False, "semantic_execution_complete": False,
+            },
+        }}],
+    }}})
+    assert result["status"] == "failed"
+    assert result["bounded_finding_tasks"] == ["audit"]
+    assert result["coverage_summary"][0]["scan_complete"] is False
+
+
+def test_team_summary_keeps_same_path_findings_from_different_projects_separate():
+    from app.services.agent_team_summary import summarize_dependencies
+
+    finding = {"title": "SQL 注入", "file_path": "app.py", "line_number": 3, "severity": "高"}
+    result = summarize_dependencies({
+        str(project_id): {"status": "completed", "result": {
+            "status": "completed", "evidence": [{"data": {
+                "project_id": project_id, "findings": [finding],
+            }}],
+        }} for project_id in (8, 9)
+    })
+    assert result["unique_finding_count"] == 2
+    assert {item["project_id"] for item in result["artifacts"][0]["data"]["findings"]} == {8, 9}
 
 
 def test_audit_coverage_survives_dependency_and_double_public_projection(db):

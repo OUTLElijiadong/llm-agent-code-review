@@ -1,5 +1,6 @@
 """全局异常处理器注册模块。"""
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from loguru import logger
@@ -58,7 +59,10 @@ def register_handlers(app: FastAPI) -> None:
         """处理 FastAPI 请求参数校验异常。"""
         request_id = get_request_id(req)
         # 生产环境不再回显 exc.errors() 的 loc(字段路径)等调试细节
-        detail = exc.errors() if not _is_prod() else None
+        # Pydantic v2 can place a ValueError instance in ctx.error. Encode it
+        # before JSONResponse, otherwise a malformed request raises TypeError
+        # while reporting the original validation error.
+        detail = jsonable_encoder(exc.errors(), custom_encoder={Exception: str}) if not _is_prod() else None
         content: dict = {
             "code": 40002,
             "message": "参数校验失败",

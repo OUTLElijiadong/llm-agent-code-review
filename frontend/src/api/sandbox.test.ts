@@ -4,6 +4,7 @@ const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('./http', () => http)
 
 import {
+  authorizeSandboxRemoteTarget,
   createSandbox,
   createSandboxPreviewSession,
   extendSandbox,
@@ -23,6 +24,13 @@ describe('sandbox api', () => {
     http.get.mockResolvedValue([])
     http.post.mockResolvedValue({ public_id: 'sbx_1' })
 
+    await authorizeSandboxRemoteTarget({
+      project_id: 7,
+      remote_target_url: 'https://target.example',
+      test_mode: 'combined',
+      confirmed: true,
+    })
+
     await listSandboxes(20)
     await getSandbox('sbx/a')
     await createSandbox({
@@ -33,19 +41,27 @@ describe('sandbox api', () => {
       ttl_hours: 72,
       remote_target_url: 'https://target.example',
       remote_target_authorized: true,
+      remote_target_approval_token: '41.secret',
     })
     await extendSandbox('sbx/a', 24)
     await stopSandbox('sbx/a')
 
     expect(http.get).toHaveBeenNthCalledWith(1, '/sandboxes', { limit: 20 })
     expect(http.get).toHaveBeenNthCalledWith(2, '/sandboxes/sbx%2Fa')
-    expect(http.post).toHaveBeenNthCalledWith(1, '/sandboxes', expect.objectContaining({
+    expect(http.post).toHaveBeenNthCalledWith(1, '/sandboxes/remote-target-authorization', {
+      project_id: 7,
+      remote_target_url: 'https://target.example',
+      test_mode: 'combined',
+      confirmed: true,
+    })
+    expect(http.post).toHaveBeenNthCalledWith(2, '/sandboxes', expect.objectContaining({
       project_id: 7,
       test_mode: 'combined',
       remote_target_authorized: true,
+      remote_target_approval_token: '41.secret',
     }))
-    expect(http.post).toHaveBeenNthCalledWith(2, '/sandboxes/sbx%2Fa/extend', { hours: 24 })
-    expect(http.post).toHaveBeenNthCalledWith(3, '/sandboxes/sbx%2Fa/stop')
+    expect(http.post).toHaveBeenNthCalledWith(3, '/sandboxes/sbx%2Fa/extend', { hours: 24 })
+    expect(http.post).toHaveBeenNthCalledWith(4, '/sandboxes/sbx%2Fa/stop')
   })
 
   it('creates a preview session before opening the deployment path and searches capabilities', async () => {

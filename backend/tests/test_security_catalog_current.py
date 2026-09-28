@@ -70,6 +70,12 @@ def test_scan_prompt_contains_actual_current_categories():
     assert "A10:2025-Mishandling of Exceptional Conditions" in prompt
     assert "A03:2025-Software Supply Chain Failures" in prompt
     assert not re.search(r"A\d{2}:2021|Top10 2021", prompt)
+    assert "宁可多给低置信度线索" not in prompt
+    assert "证据不足时宁可不报" in prompt
+    assert "evidence 必须逐字来自当前代码" in prompt
+    review_prompt = (Path(__file__).resolve().parents[1] / "app/ai/prompts/review.zh.md").read_text()
+    assert "不得作为已确认问题输出" in review_prompt
+    assert "confidence 设为 0.6 以下" not in review_prompt
 
 
 def test_verified_cve_reference_set_and_prompt_loading():

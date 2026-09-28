@@ -10,11 +10,6 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
-from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.dialects import mysql, sqlite
-from sqlalchemy.orm import sessionmaker
-
 from app.api.v1 import agent_responses as api_module
 from app.models.admin_chat import AdminChatMessage, OpsExecution
 from app.models.agent_governance import (
@@ -28,6 +23,7 @@ from app.models.agent_governance import (
 from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_multimodal import AgentMultimodalAsset
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
+from app.models.audit_log import AuditLog
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
 from app.services.deepseek_responses_runtime import (
@@ -39,6 +35,10 @@ from app.services.deepseek_responses_runtime import (
     ToolCall,
     ToolExecutionResult,
 )
+from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy.orm import sessionmaker
 
 
 def test_admin_release_health_scope_matches_only_narrow_read_query() -> None:
@@ -206,9 +206,12 @@ def test_agent_response_request_accepts_only_one_start_input_source() -> None:
 @pytest.fixture()
 def db():
     engine = create_engine("sqlite:///:memory:")
+    from app.models.api_config import UserApiConfig
     from app.models.system_config import SystemConfig
 
     SystemConfig.__table__.create(engine)
+    AuditLog.__table__.create(engine)
+    UserApiConfig.__table__.create(engine)
     AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
     AgentMultimodalAsset.__table__.create(engine)
@@ -1506,6 +1509,8 @@ async def test_write_tool_requires_click_approval_then_executes_exact_call(db, m
         run_id="run_approval",
         mcp_provider=EmptyMcp(),
     )
+    # 本用例只验证审批状态机；真实 RBAC 路由/工具对照见 C07 定向测试。
+    monkeypatch.setattr(executor, "_has_permission", lambda code: code == "project:delete")
     call = ToolCall(
         call_id="call_delete",
         name="delete_project",
@@ -1533,6 +1538,344 @@ async def test_write_tool_requires_click_approval_then_executes_exact_call(db, m
 
 
 @pytest.mark.asyncio
+async def test_supervisor_auto_executes_registered_medium_tool_and_audits_classification(db, monkeypatch) -> None:
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Mapping[str, Any]]] = []
+
+        def invoke_tool(self, name: str, arguments: Mapping[str, Any], _ctx: Any) -> Any:
+            self.calls.append((name, arguments))
+            return SimpleNamespace(success=True, data={"created": arguments["project_name"]}, error="")
+
+    events: list[dict[str, Any]] = []
+    orchestrator = FakeOrchestrator()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: orchestrator)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, username="member", role="user"),
+        surface="user",
+        run_id="run_supervisor_medium_auto",
+        mcp_provider=EmptyMcp(),
+        event_sink=lambda event: events.append(dict(event)),
+    )
+    monkeypatch.setattr(executor, "_has_permission", lambda _code: True)
+    call = ToolCall(
+        "call_create_project_medium",
+        "create_project",
+        {"project_name": "受控项目", "description": "仅测试元数据", "language": "python"},
+        '{"project_name":"受控项目","description":"仅测试元数据","language":"python"}',
+    )
+
+    result = await executor.execute(call)
+
+    assert result.status == "success"
+    assert orchestrator.calls == [("create_project", call.arguments)]
+    assert db.query(ApprovalItem).filter(ApprovalItem.action == "responses.create_project").count() == 0
+    review = next(event for event in events if event["type"] == "response.supervisor.reviewed")
+    assert (review["decision"], review["risk_level"]) == ("allow", "medium")
+    audit = db.query(AuditLog).filter_by(
+        action="agent_response_supervisor", target_id="run_supervisor_medium_auto",
+    ).one()
+    assert audit.actor_id == 7
+    assert audit.target_type == "agent_response_run"
+    assert '"risk_level":"medium"' in audit.detail
+    assert "受控项目" not in audit.detail
+
+
+@pytest.mark.asyncio
+async def test_managed_mcp_writes_are_classified_by_exact_registry_not_approval_flag(db) -> None:
+    class ManagedMcp:
+        def __init__(self, tool_name: str) -> None:
+            self.tool_name = tool_name
+            self.calls: list[str] = []
+            self.fingerprint = f"snapshot:{tool_name}:v1"
+
+        async def discover(self):
+            return []
+
+        def has_tool(self, name: str) -> bool:
+            return name == "mcp_managed_action"
+
+        def is_managed_tool(self, _name: str) -> bool:
+            return True
+
+        def supervisor_details(self, _name: str):
+            return {
+                "managed_kind": "prism-sandbox",
+                "tool_name": self.tool_name,
+                "permission": "allow",
+                "requires_approval": "false",
+                "risk_level": "low",
+                "binding_fingerprint": self.fingerprint,
+            }
+
+        def requires_approval(self, _name: str) -> bool:
+            return False
+
+        async def call(self, _name: str, _arguments: Mapping[str, Any]):
+            self.calls.append(self.tool_name)
+            return {"executed": self.tool_name}
+
+    safe_provider = ManagedMcp("create_deployment")
+    safe_executor = PrismToolExecutor(
+        db, SimpleNamespace(id=7, username="member", role="user"), surface="user",
+        run_id="run_managed_mcp_medium", mcp_provider=safe_provider,
+    )
+    safe = await safe_executor.execute(ToolCall("call_safe_mcp", "mcp_managed_action", {"project_id": 12}, "{}"))
+    assert safe.status == "success"
+    assert safe_provider.calls == ["create_deployment"]
+    assert db.query(ApprovalItem).filter(ApprovalItem.copilot_request_id.like("run_managed_mcp_medium:%")).count() == 0
+
+    unknown_provider = ManagedMcp("unregistered_write")
+    unknown_executor = PrismToolExecutor(
+        db, SimpleNamespace(id=7, username="member", role="user"), surface="user",
+        run_id="run_managed_mcp_unknown", mcp_provider=unknown_provider,
+    )
+    call = ToolCall("call_unknown_mcp", "mcp_managed_action", {"project_id": 12}, "{}")
+    waiting = await unknown_executor.execute(call)
+    assert waiting.status == "approval_required"
+    assert unknown_provider.calls == []
+    completed = await unknown_executor.execute(call, approved=True)
+    assert completed.status == "success"
+    assert unknown_provider.calls == ["unregistered_write"]
+
+    changed_provider = ManagedMcp("unregistered_remote_write")
+    changed_executor = PrismToolExecutor(
+        db, SimpleNamespace(id=7, username="member", role="user"), surface="user",
+        run_id="run_managed_mcp_snapshot_changed", mcp_provider=changed_provider,
+    )
+    changed_call = ToolCall("call_changed_mcp", "mcp_managed_action", {"project_id": 12}, "{}")
+    confirmation = await changed_executor.execute(changed_call)
+    assert confirmation.status == "approval_required"
+    changed_provider.fingerprint = "snapshot:unregistered_remote_write:v2"
+    rejected = await changed_executor.execute(changed_call, approved=True)
+    assert rejected.status == "error"
+    assert "旧确认已失效" in rejected.error
+    assert changed_provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_disable_after_confirmation_invalidates_pending_approval(db) -> None:
+    class MutableMcp:
+        enabled = True
+        calls: list[str] = []
+
+        async def discover(self):
+            return []
+
+        def has_tool(self, name: str) -> bool:
+            return self.enabled and name == "mcp_managed_action"
+
+        def is_managed_tool(self, _name: str) -> bool:
+            return True
+
+        def supervisor_details(self, _name: str):
+            if not self.enabled:
+                return None
+            return {
+                "managed_kind": "prism-sandbox",
+                "tool_name": "unregistered_write",
+                "permission": "allow",
+                "requires_approval": "false",
+                "risk_level": "low",
+                "binding_fingerprint": "binding-version-1",
+            }
+
+        def requires_approval(self, _name: str) -> bool:
+            return True
+
+        async def call(self, name: str, _arguments: Mapping[str, Any]):
+            self.calls.append(name)
+            return {"executed": True}
+
+    provider = MutableMcp()
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, username="member", role="user"),
+        surface="user",
+        run_id="run_mcp_disabled_after_approval",
+        mcp_provider=provider,
+    )
+    call = ToolCall("call_mcp_disabled", "mcp_managed_action", {"project_id": 12}, "{}")
+    waiting = await executor.execute(call)
+    assert waiting.status == "approval_required"
+
+    provider.enabled = False
+    rejected = await executor.execute(call, approved=True)
+
+    assert rejected.status == "error"
+    assert "MCP 工具已不可用" in rejected.error
+    assert provider.calls == []
+    audit = db.query(AuditLog).filter_by(
+        action="agent_response_supervisor", target_id="run_mcp_disabled_after_approval",
+    ).order_by(AuditLog.id.desc()).first()
+    assert audit is not None
+    assert '"classification":"mcp_binding_unavailable"' in audit.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["details_exception", "missing_fingerprint"])
+async def test_mcp_supervisor_binding_failure_is_audited_and_blocked(db, failure) -> None:
+    class BrokenBindingMcp:
+        calls = 0
+
+        async def discover(self):
+            return []
+
+        def has_tool(self, _name: str) -> bool:
+            return True
+
+        def is_managed_tool(self, _name: str) -> bool:
+            return True
+
+        def supervisor_details(self, _name: str):
+            if failure == "details_exception":
+                raise RuntimeError("binding registry unavailable")
+            return {
+                "managed_kind": "prism-sandbox",
+                "tool_name": "create_test",
+                "permission": "allow",
+                "requires_approval": "false",
+                "risk_level": "low",
+            }
+
+        def requires_approval(self, _name: str) -> bool:
+            return False
+
+        async def call(self, _name: str, _arguments: Mapping[str, Any]):
+            self.calls += 1
+            return {"unexpected": True}
+
+    provider = BrokenBindingMcp()
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, username="member", role="user"),
+        surface="user",
+        run_id=f"run_mcp_binding_failure_{failure}",
+        mcp_provider=provider,
+    )
+    result = await executor.execute(ToolCall(
+        f"call_mcp_binding_failure_{failure}", "mcp_managed_action", {"project_id": 12}, "{}",
+    ))
+
+    assert result.status == "error"
+    assert "监督复核不可用" in result.error
+    assert provider.calls == 0
+    assert db.query(ApprovalItem).filter(
+        ApprovalItem.copilot_request_id.like(f"run_mcp_binding_failure_{failure}:%")
+    ).count() == 0
+    audit = db.query(AuditLog).filter_by(
+        action="agent_response_supervisor", target_id=f"run_mcp_binding_failure_{failure}",
+    ).one()
+    assert '"decision":"deny"' in audit.detail
+    assert '"classification":"supervisor_unavailable"' in audit.detail
+
+
+@pytest.mark.asyncio
+async def test_supervisor_classification_failure_is_audited_and_never_approved(db, monkeypatch) -> None:
+    class Orchestrator:
+        calls = 0
+
+        def invoke_tool(self, *_args, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(success=True, data={"unexpected": True}, error="")
+
+    orchestrator = Orchestrator()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: orchestrator)
+
+    def fail_review(*_args, **_kwargs):
+        raise RuntimeError("review unavailable")
+
+    monkeypatch.setattr(service_module.agent_supervisor_service, "review_response_tool", fail_review)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, username="member", role="user"),
+        surface="user",
+        run_id="run_supervisor_unavailable",
+        mcp_provider=EmptyMcp(),
+    )
+    monkeypatch.setattr(executor, "_has_permission", lambda _permission: True)
+
+    result = await executor.execute(ToolCall(
+        "call_supervisor_unavailable", "create_project", {"project_name": "must-not-run"}, "{}",
+    ))
+
+    assert result.status == "error"
+    assert "监督复核不可用" in result.error
+    assert orchestrator.calls == 0
+    audit = db.query(AuditLog).filter_by(
+        action="agent_response_supervisor", target_id="run_supervisor_unavailable",
+    ).one()
+    assert '"decision":"deny"' in audit.detail
+    assert '"classification":"supervisor_unavailable"' in audit.detail
+
+
+@pytest.mark.asyncio
+async def test_supervisor_audit_persistence_failure_stops_before_tool_side_effect(db, monkeypatch) -> None:
+    class Orchestrator:
+        calls = 0
+
+        def invoke_tool(self, *_args, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(success=True, data={"unexpected": True}, error="")
+
+    orchestrator = Orchestrator()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: orchestrator)
+    AuditLog.__table__.drop(db.get_bind())
+    executor = PrismToolExecutor(
+        db, SimpleNamespace(id=7, username="member", role="user"), surface="user",
+        run_id="run_supervisor_audit_failure", mcp_provider=EmptyMcp(),
+    )
+    monkeypatch.setattr(executor, "_has_permission", lambda _permission: True)
+
+    result = await executor.execute(ToolCall("call_audit_failure", "create_project", {
+        "project_name": "must-not-run", "description": "", "language": "python",
+    }, "{}"))
+
+    assert result.status == "error"
+    assert "监督审计不可用" in result.error
+    assert orchestrator.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_supervisor_pauses_unknown_tool_and_binds_confirmation_to_current_user(db, monkeypatch) -> None:
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def invoke_tool(self, name: str, _arguments: Mapping[str, Any], _ctx: Any) -> Any:
+            self.calls.append(name)
+            return SimpleNamespace(success=True, data={"ran": name}, error="")
+
+    orchestrator = FakeOrchestrator()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: orchestrator)
+    executor = PrismToolExecutor(
+        db, SimpleNamespace(id=19, username="tester", role="user"), surface="user",
+        run_id="run_supervisor_unknown", mcp_provider=EmptyMcp(),
+    )
+    call = ToolCall("call_unknown", "future_unregistered_tool", {"target": "production"}, '{"target":"production"}')
+
+    waiting = await executor.execute(call)
+    assert waiting.status == "approval_required"
+    assert waiting.danger is True
+    assert orchestrator.calls == []
+
+    completed = await executor.execute(call, approved=True)
+    assert completed.status == "success"
+    assert orchestrator.calls == ["future_unregistered_tool"]
+    approval = db.get(ApprovalItem, waiting.approval_id)
+    assert approval.status == "approved"
+    assert approval.decided_by == 19
+
+    other_user = PrismToolExecutor(
+        db, SimpleNamespace(id=20, username="other", role="user"), surface="user",
+        run_id="run_supervisor_unknown", mcp_provider=EmptyMcp(),
+    )
+    with pytest.raises(InvalidRunStateError, match="用户不匹配"):
+        await other_user.execute(call, approved=True)
+
+
+@pytest.mark.asyncio
 async def test_uncertain_tool_execution_is_never_retried(db, monkeypatch) -> None:
     class FakeOrchestrator:
         def __init__(self) -> None:
@@ -1552,6 +1895,8 @@ async def test_uncertain_tool_execution_is_never_retried(db, monkeypatch) -> Non
         run_id="run_uncertain",
         mcp_provider=EmptyMcp(),
     )
+    # 保持授权前提，验证执行结果不确定时不得自动重试。
+    monkeypatch.setattr(executor, "_has_permission", lambda code: code == "project:view")
     call = ToolCall("call_once", "list_projects", {}, "{}")
     db.add(
         AgentToolExecution(
@@ -1733,7 +2078,7 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
 
 
 @pytest.mark.asyncio
-async def test_admin_capability_read_executes_and_write_is_approved_once(db, monkeypatch) -> None:
+async def test_admin_capability_read_and_medium_write_execute_without_confirmation(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     monkeypatch.setattr(
         service_module.tool_gateway,
@@ -1772,17 +2117,58 @@ async def test_admin_capability_read_executes_and_write_is_approved_once(db, mon
         {"capability": "report_templates.create", "params": write_params},
         json.dumps({"capability": "report_templates.create", "params": write_params}, ensure_ascii=False),
     )
-    paused = await executor.execute(write_call)
-    assert paused.status == "approval_required"
-    assert paused.danger is False
-    assert calls == [("overview.security", {})]
-
-    completed = await executor.execute(write_call, approved=True)
+    completed = await executor.execute(write_call)
     assert completed.status == "success"
     assert calls == [("overview.security", {}), ("report_templates.create", write_params)]
-    repeated = await executor.execute(write_call, approved=True)
+    repeated = await executor.execute(write_call)
     assert repeated.output == completed.output
     assert calls == [("overview.security", {}), ("report_templates.create", write_params)]
+
+
+@pytest.mark.asyncio
+async def test_super_admin_high_capability_cannot_bypass_supervisor_confirmation(
+    db, monkeypatch,
+) -> None:
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(service_module.rbac_service, "is_super_admin_user", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service_module.tool_gateway,
+        "authorize",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            decision=service_module.policy_engine.ALLOW,
+            risk_level=service_module.policy_engine.LOW,
+            reason="test policy allow",
+        ),
+    )
+    calls = []
+
+    async def fake_execute(_user, spec, params, *, request_id):
+        calls.append((spec.code, dict(params)))
+        return {"deleted_count": 1, "request_id": request_id}
+
+    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    executor = PrismToolExecutor(
+        db,
+        SimpleNamespace(id=7, username="admin", role="super_admin", token_version=0),
+        surface="admin",
+        run_id="run_supervisor_high_admin_capability",
+        mcp_provider=EmptyMcp(),
+    )
+    call = ToolCall(
+        "call_high_delete_template",
+        "admin_execute_capability",
+        {"capability": "report_templates.delete", "params": {"template_id": 55}},
+        '{"capability":"report_templates.delete","params":{"template_id":55}}',
+    )
+
+    paused = await executor.execute(call)
+    assert paused.status == "approval_required"
+    assert paused.danger is True
+    assert calls == []
+
+    approved = await executor.execute(call, approved=True)
+    assert approved.status == "success"
+    assert calls == [("report_templates.delete", {"template_id": 55})]
 
 
 @pytest.mark.asyncio
@@ -2941,6 +3327,50 @@ def test_public_completed_tool_events_includes_inflight_calls(db) -> None:
             result_json='{"status":"success","output":{"total":2}}',
         )
     )
+    db.add_all([
+        AuditLog(
+            actor_id=7,
+            actor_name="member",
+            action="agent_response_supervisor",
+            target_type="agent_response_run",
+            target_id="run_inflight",
+            detail=json.dumps({
+                "run_id": "run_inflight", "call_id": "call_a", "tool_name": "list_projects",
+                "decision": "allow", "risk_level": "low", "classification": "registered_read_tool",
+                "reason": "已登记的只读操作", "owner_user_id": 7,
+            }),
+            status="success",
+            create_time=datetime.utcnow(),
+        ),
+        AuditLog(
+            actor_id=7,
+            actor_name="member",
+            action="agent_response_supervisor",
+            target_type="agent_response_run",
+            target_id="run_inflight",
+            detail=json.dumps({
+                "run_id": "run_inflight", "call_id": "call_b", "tool_name": "delete_template",
+                "decision": "escalate", "risk_level": "high", "classification": "unregistered_tool",
+                "reason": "等待当前账号确认", "owner_user_id": 7,
+            }),
+            status="success",
+            create_time=datetime.utcnow(),
+        ),
+        AuditLog(
+            actor_id=8,
+            actor_name="other",
+            action="agent_response_supervisor",
+            target_type="agent_response_run",
+            target_id="run_inflight",
+            detail=json.dumps({
+                "run_id": "run_inflight", "call_id": "call_b", "tool_name": "delete_project",
+                "decision": "escalate", "risk_level": "high", "classification": "registered_high_risk_tool",
+                "reason": "越权日志", "owner_user_id": 8,
+            }),
+            status="success",
+            create_time=datetime.utcnow(),
+        ),
+    ])
     db.commit()
 
     checkpoint = {
@@ -2971,12 +3401,19 @@ def test_public_completed_tool_events_includes_inflight_calls(db) -> None:
     call_a = [event for event in events if event.get("call_id") == "call_a"]
     call_b = [event for event in events if event.get("call_id") == "call_b"]
     # 已落账本:started + completed
-    assert [event["type"] for event in call_a] == ["response.tool.started", "response.tool.completed"]
+    assert [event["type"] for event in call_a] == [
+        "response.supervisor.reviewed", "response.tool.started", "response.tool.completed",
+    ]
+    assert call_a[0]["risk_level"] == "low"
+    assert "越权日志" not in json.dumps(call_a, ensure_ascii=False)
     # 进行中:只有 started,状态 running
-    assert len(call_b) == 1
-    assert call_b[0]["type"] == "response.tool.started"
-    assert call_b[0]["status"] == "running"
-    assert call_b[0]["tool_name"] == "delete_template"
+    assert [event["type"] for event in call_b] == [
+        "response.supervisor.reviewed", "response.tool.started",
+    ]
+    assert call_b[0]["risk_level"] == "high"
+    assert call_b[1]["status"] == "running"
+    assert call_b[1]["tool_name"] == "delete_template"
+    assert "越权日志" not in json.dumps(call_b, ensure_ascii=False)
 
 
 def test_transcript_function_calls_parses_terminal_output(db) -> None:

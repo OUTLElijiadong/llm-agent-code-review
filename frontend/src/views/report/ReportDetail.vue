@@ -179,7 +179,7 @@
               v-for="r in severityRows"
               :key="r.key"
               class="sev-row"
-              :title="`${r.label} ${r.value} 个 · 占比 ${r.percent}%`"
+              :title="`${r.label} ${r.value} 个 · 占比 ${displayPercent(r.percent)}%`"
             >
               <span class="sr-label">
                 <span class="sr-dot" :style="{ background: r.color }"></span>{{ r.label }}
@@ -187,7 +187,7 @@
               <div class="sr-bar">
                 <div class="sr-fill" :style="{ width: `${r.percent}%`, background: r.color }"></div>
               </div>
-              <span class="sr-val font-mono">{{ r.value }}<span class="sr-pct"> · {{ r.percent }}%</span></span>
+              <span class="sr-val font-mono">{{ r.value }}<span class="sr-pct"> · {{ displayPercent(r.percent) }}%</span></span>
             </div>
           </div>
         </div>
@@ -624,6 +624,7 @@ const mediumCount  = computed(() => Number(stats.value.medium ?? 0))
 const lowCount     = computed(() => Number(stats.value.low ?? 0))
 const fixedCount   = computed(() => Number(stats.value.fixed ?? 0))
 const fixedPercent = computed(() => totalIssues.value > 0 ? Math.round((fixedCount.value / totalIssues.value) * 100) : 0)
+const displayPercent = (percent: number) => Number.isFinite(percent) ? String(Math.round(percent * 10) / 10) : '0'
 
 const severityRows = computed(() => {
   const total = Math.max(1, totalIssues.value)

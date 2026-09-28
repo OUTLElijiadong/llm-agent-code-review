@@ -24,7 +24,9 @@ from app.ai.multi_agent import (
 )
 from app.models.ai_call_log import AiCallLog
 
-# 普通成员 Agent 工作台不展示的管理/内部调度 Agent
+# 兼容旧存储与权限策略的内部主控别名，不作为独立子 Agent 展示。
+INTERNAL_ROOT_ALIASES = frozenset({"manager", "orchestrator"})
+# 普通成员 Agent 工作台不展示的管理/内部运维 Agent
 USER_HIDDEN_BUILTIN = frozenset({"manager", "operations", "evolution", "orchestrator"})
 
 # 注册顺序即前端展示顺序;通用代理在最前
@@ -363,7 +365,10 @@ def get_runtime_agents(db: Session, user_id: Optional[int] = None) -> list[dict]
     Returns:
         list[dict]: 符合 AgentRuntimeOut Schema 的字段
     """
-    runtime = get_runtime_catalog(db)
+    runtime = [
+        item for item in get_runtime_catalog(db)
+        if item.get("code") not in INTERNAL_ROOT_ALIASES
+    ]
     codes = {r["code"] for r in runtime}
     stats = _aggregate_log_stats(db, user_id, codes)
     statuses = _derive_runtime_statuses(codes, user_id=user_id)

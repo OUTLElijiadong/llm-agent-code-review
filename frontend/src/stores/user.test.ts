@@ -118,6 +118,23 @@ describe('user store authentication and RBAC', () => {
     expect(consumeAgentChatLoginFreshStart('admin')).toBe(true)
   })
 
+  it('登录权限先加载时首开标记已就绪，刷新不会再误建空对话', async () => {
+    let finishMenus!: (value: unknown) => void
+    api.authLogin.mockResolvedValue({ access_token: 'token-7', user: member })
+    api.fetchPermissions.mockResolvedValue(['agent:chat'])
+    api.fetchMenus.mockImplementationOnce(() => new Promise(done => { finishMenus = done }))
+
+    const pendingLogin = store.login({ username: 'alice', password: 'secret' })
+    await vi.waitFor(() => expect(store.hasPermission('agent:chat')).toBe(true))
+    // App 在权限先返回时即可挂载小菱；标记必须此时可消费，而非留到下一次刷新。
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(true)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(true)
+    finishMenus([])
+    await pendingLogin
+    expect(consumeAgentChatLoginFreshStart('user')).toBe(false)
+    expect(consumeAgentChatLoginFreshStart('admin')).toBe(false)
+  })
+
   it('keeps successful RBAC slices while failed slices degrade to empty state', async () => {
     /** 验证四项 RBAC 并发加载互不连坐。 */
     store.profile = member

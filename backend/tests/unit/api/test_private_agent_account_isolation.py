@@ -420,6 +420,39 @@ def test_identical_session_keys_do_not_join_other_accounts_history(db, role):
     assert "foreign-private" not in json.dumps(response.data)
 
 
+@pytest.mark.parametrize("role", ["user", "admin"])
+def test_same_session_key_paginated_history_keeps_account_and_order(db, role):
+    session_key = "shared-session-key"
+    for owner, label in ((7, "own"), (8, "foreign")):
+        transcript = [
+            {"role": "user", "content": f"{label}-message-{index:03d}"}
+            for index in range(120)
+        ]
+        db.add(AgentResponseRun(
+            run_id=f"run-page-{owner}",
+            user_id=owner,
+            surface="user",
+            session_key=session_key,
+            status="completed",
+            checkpoint_json=json.dumps({"transcript": transcript}),
+        ))
+    db.commit()
+
+    actor = SimpleNamespace(id=7, role=role)
+    first = agent_responses.get_agent_response_session_messages(
+        "user", session_key, None, 100, db, actor,
+    ).data
+    older = agent_responses.get_agent_response_session_messages(
+        "user", session_key, first["oldest_message_index"], 100, db, actor,
+    ).data
+    contents = [item["content"] for page in (older, first) for item in page["messages"]]
+    assert first["total"] == older["total"] == 120
+    assert first["has_more"] is True
+    assert older["has_more"] is False
+    assert contents == [f"own-message-{index:03d}" for index in range(120)]
+    assert "foreign" not in json.dumps((first, older))
+
+
 @pytest.mark.asyncio
 async def test_audit_progress_is_bound_to_both_account_and_current_run(monkeypatch):
     cases = [

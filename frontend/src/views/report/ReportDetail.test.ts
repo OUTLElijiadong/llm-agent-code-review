@@ -98,6 +98,49 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it.each([
+    { count: 2, total: 6, displayed: '33.3%' },
+    { count: 1, total: 3, displayed: '33.3%' },
+    { count: 1, total: 1, displayed: '100%' },
+    { count: 0, total: 0, displayed: '0%' },
+  ])('严重度占比 $count/$total 只在文字显示时四舍五入为 $displayed', async ({ count, total, displayed }) => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: {}, stats: { total_issues: total, high: count }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const high = wrapper.findAll('.sev-row').find(row => row.text().includes('高'))
+    expect(high?.attributes('title')).toContain(`占比 ${displayed}`)
+    expect(high?.text()).toContain(displayed)
+    if (total) expect(setupState(wrapper).severityRows[1].percent).toBeCloseTo(count / total * 100)
+    wrapper.unmount()
+  })
+
+  it('沙箱未分级与大数量报告仍用原值绘图，只缩短可见占比', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: {}, source: { type: 'sandbox_test' },
+      stats: { total_issues: 7, severity: { 未分级: 2 } }, files: [], rules_snapshot: [],
+    })
+    const sandbox = mountPage()
+    await flushPromises()
+    const unclassified = sandbox.findAll('.sev-row').find(row => row.text().includes('未分级'))
+    expect(unclassified?.attributes('title')).toContain('占比 28.6%')
+    expect(unclassified?.text()).toContain('28.6%')
+    expect(setupState(sandbox).severityRows[0].percent).toBeCloseTo(2 / 7 * 100)
+    sandbox.unmount()
+
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: {}, stats: { total_issues: 1_000_000, high: 333_333 },
+      files: [], rules_snapshot: [],
+    })
+    const large = mountPage()
+    await flushPromises()
+    const high = large.findAll('.sev-row').find(row => row.text().includes('高'))
+    expect(high?.text()).toContain('33.3%')
+    expect(setupState(large).severityRows[1].percent).toBeCloseTo(33.3333)
+    large.unmount()
+  })
+
   it.each(['2026-09-20T12:50:47', '2026-09-20T12:50:47Z', '2026-09-20T20:50:47+08:00'])('报告任务时间 %s 按 UTC 解释并保留本地生成时刻', async (createdAt) => {
     vi.stubEnv('TZ', 'Asia/Shanghai')
     vi.useFakeTimers()

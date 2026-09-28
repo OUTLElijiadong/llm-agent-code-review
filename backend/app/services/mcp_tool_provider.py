@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -41,6 +42,43 @@ class McpToolBinding:
     input_schema: Dict[str, Any]
     requires_approval: bool = True
     managed_kind: str = ""
+    permission: str = ""
+    risk_level: str = "high"
+    server_id: int = 0
+    tool_id: int = 0
+    transport: str = "streamable_http"
+    schema_sha256: str = ""
+
+    def configuration_fingerprint(self) -> str:
+        """绑定实际端点、原始工具、Schema 和授权配置，不泄露服务 URL/凭据。"""
+
+        endpoint_sha256 = hashlib.sha256(self.server.url.encode("utf-8")).hexdigest()
+        headers_sha256 = hashlib.sha256(
+            json.dumps(self.server.headers, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            .encode("utf-8")
+        ).hexdigest()
+        schema_sha256 = self.schema_sha256 or hashlib.sha256(
+            json.dumps(self.input_schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            .encode("utf-8")
+        ).hexdigest()
+        payload = {
+            "model_name": self.model_name,
+            "server_id": self.server_id,
+            "tool_id": self.tool_id,
+            "server_code": self.server.name,
+            "transport": self.transport,
+            "endpoint_sha256": endpoint_sha256,
+            "headers_sha256": headers_sha256,
+            "managed_kind": self.managed_kind,
+            "tool_name": self.tool_name,
+            "schema_sha256": schema_sha256,
+            "description_sha256": hashlib.sha256(self.description.encode("utf-8")).hexdigest(),
+            "permission": self.permission,
+            "requires_approval": self.requires_approval,
+            "risk_level": self.risk_level,
+        }
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def as_responses_tool(self) -> Dict[str, Any]:
         return {
@@ -145,6 +183,10 @@ class McpToolProvider:
                     description=str(item.get("description") or f"MCP {server.name} 工具 {tool_name}"),
                     input_schema=dict(schema),
                     requires_approval=True,
+                    schema_sha256=hashlib.sha256(
+                        json.dumps(dict(schema), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                        .encode("utf-8")
+                    ).hexdigest(),
                 )
         self._bindings = bindings
         return [binding.as_responses_tool() for binding in bindings.values()]
@@ -265,6 +307,12 @@ class McpToolProvider:
                     binding.requires_approval or binding.permission == "escalate"
                 ),
                 managed_kind=managed_kind if server.transport == "managed" else "",
+                permission=str(binding.permission or ""),
+                risk_level=str(tool.risk_level or "high").casefold(),
+                server_id=int(server.id),
+                tool_id=int(tool.id),
+                transport=str(server.transport or ""),
+                schema_sha256=str(tool.schema_sha256 or ""),
             )
         self._bindings = bindings
         return [item.as_responses_tool() for item in bindings.values()]
@@ -277,6 +325,21 @@ class McpToolProvider:
         if binding is None:
             return True
         return binding.managed_kind == "playwright" or binding.requires_approval
+
+    def supervisor_details(self, model_name: str) -> Optional[Dict[str, str]]:
+        """返回服务端 MCP 注册信息供监督器分类；不采信模型或工具描述中的风险声明。"""
+
+        binding = self._bindings.get(model_name)
+        if binding is None:
+            return None
+        return {
+            "managed_kind": binding.managed_kind,
+            "tool_name": binding.tool_name,
+            "permission": binding.permission,
+            "requires_approval": "true" if binding.requires_approval else "false",
+            "risk_level": binding.risk_level,
+            "binding_fingerprint": binding.configuration_fingerprint(),
+        }
 
     def is_managed_tool(self, model_name: str) -> bool:
         """返回当前已发现工具是否由本地受管执行器提供。"""

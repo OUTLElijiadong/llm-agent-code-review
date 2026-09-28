@@ -9,6 +9,7 @@ export type ResponseStreamEventType =
   | 'response.tool.completed'
   | 'response.tool.failed'
   | 'response.tool.rejected'
+  | 'response.supervisor.reviewed'
   | 'response.sandbox.progress'
   | 'response.audit.progress'
   | 'response.approval.required'
@@ -59,6 +60,17 @@ export interface ResponseToolLifecycleEvent extends ResponseStreamEventBase {
   preview?: unknown
   error?: string | Record<string, unknown>
   cached?: boolean
+}
+
+export interface ResponseSupervisorReviewEvent extends ResponseStreamEventBase {
+  type: 'response.supervisor.reviewed'
+  run_id: string
+  call_id: string
+  tool_name: string
+  decision: 'allow' | 'escalate' | 'deny'
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  classification: string
+  reason: string
 }
 
 export interface ResponseInputOption {
@@ -174,6 +186,7 @@ export type ResponseStreamEvent =
   | ResponseFunctionCallArgumentsDeltaEvent
   | ResponseFunctionCallArgumentsDoneEvent
   | ResponseToolLifecycleEvent
+  | ResponseSupervisorReviewEvent
   | ResponseApprovalRequiredEvent
   | ResponseInputRequiredEvent
   | ResponseSensitiveResultEvent

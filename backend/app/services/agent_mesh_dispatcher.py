@@ -38,6 +38,7 @@ _READONLY_RUNTIME_CODES = frozenset(
         "rule_manager",
         "ai_prompt",
         "security_sentinel",
+        "supervisor",
     }
 )
 _APPROVAL_REQUIRED_CODES = frozenset(
@@ -53,7 +54,7 @@ _APPROVAL_REQUIRED_CODES = frozenset(
         "alert",
     }
 )
-_PROTECTED_CODES = frozenset({"chat_assistant", "manager"})
+_PROTECTED_CODES = frozenset({"chat_assistant", "manager", "orchestrator"})
 _SANDBOX_FAILURE_STATES = frozenset({"failed", "blocked", "stopped", "expired"})
 _SANDBOX_POLL_SECONDS = 2.0
 
@@ -159,6 +160,55 @@ def _as_mesh_result(result: AgentResult, *, action: str) -> dict[str, Any]:
         "blocked",
         result.error or f"{action}未完成",
         errors=[{"code": "agent_rejected", "message": result.error or "执行未完成"}],
+    )
+
+
+def required_runtime_permissions(code: str, data: dict[str, Any]) -> tuple[str, ...]:
+    """声明消息分发器读取操作的 RBAC 权限，与对应 REST 路由保持一致。"""
+
+    from app.core.permission_codes import PermissionCode
+
+    operation = str(data.get("operation") or "list")
+    if code == "project_manager" and operation in {"list", "get"}:
+        return (PermissionCode.PROJECT_VIEW,)
+    if code == "code_file_manager" and operation in {"list", "get"}:
+        return (PermissionCode.FILE_VIEW,)
+    if code == "project_analyzer" and (
+        (operation == "inspect_project" or _readonly_team_task(data))
+        and (data.get("project_id") or data.get("context_project_id"))
+    ):
+        return (PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW)
+    if code == "review_orchestrator":
+        if operation in {"list", "get"}:
+            return (PermissionCode.REVIEW_VIEW,)
+        if operation == "issues":
+            return (PermissionCode.ISSUE_VIEW,)
+    if code == "test_verifier" and (
+        operation == "inspect_existing_results"
+        or (_readonly_team_task(data) and (data.get("project_id") or data.get("context_project_id")))
+    ):
+        return (PermissionCode.REVIEW_VIEW,)
+    if code == "reporter" and not (isinstance(data.get("dependency_context"), dict) and data["dependency_context"]):
+        return (PermissionCode.REPORT_VIEW,)
+    if code == "rule_manager" and operation == "list":
+        return (PermissionCode.RULE_VIEW,)
+    return ()
+
+
+def _require_runtime_permissions(db: Session, user: User, *permission_codes: str) -> Optional[dict[str, Any]]:
+    """在 Mesh 直接服务调用边界重新验权，避免绕过 HTTP/Orchestrator 包装器。"""
+
+    missing = [
+        permission
+        for permission in permission_codes
+        if not rbac_service.check_permission(db, int(user.id), permission)
+    ]
+    if not missing:
+        return None
+    return _result(
+        "blocked",
+        f"当前账户缺少读取权限：{', '.join(missing)}",
+        errors=[{"code": "insufficient_permission", "permissions": missing}],
     )
 
 
@@ -414,6 +464,17 @@ def _runtime_handler(
     data = _payload(message)
     context = message.get("context") if isinstance(message.get("context"), dict) else {}
     team_task_id = context.get("agent_team_task_id") or context.get("task_id")
+
+    # Agent Mesh 的服务内分发直接调 Agent/service，不经过 HTTP 路由，也不一定经过
+    # Orchestrator 包装器。因此在加载代码、审查结果或问题前按真实操作重查 RBAC。
+    operation = str(data.get("operation") or "list")
+    permission_data = {**data, "context_project_id": context.get("project_id")}
+    required_permissions = required_runtime_permissions(code, permission_data)
+    if required_permissions:
+        denied = _require_runtime_permissions(db, user, *required_permissions)
+        if denied is not None:
+            return denied
+
     if code == "operations":
         from app.services import ops_service
 
@@ -538,6 +599,24 @@ def _runtime_handler(
             line_offset=int(data.get("line_offset") or 0),
             ctx=ctx,
         )
+        if result.success:
+            from app.ai.exceptions import ResultParseError
+            from app.ai.result_parser import parse as parse_review_result
+
+            try:
+                parsed = parse_review_result(json.dumps(result.data, ensure_ascii=False, default=str))
+                if parsed.invalid_issue_count or (
+                    isinstance(result.data, dict)
+                    and isinstance(result.data.get("invalid_issue_count"), int)
+                    and result.data["invalid_issue_count"] > 0
+                ):
+                    raise ResultParseError("代码审查包含无效问题条目")
+            except (ResultParseError, TypeError, ValueError):
+                return _result(
+                    "failed", "代码审查结果结构不完整，不能按零问题完成",
+                    evidence=[{"source": "request_scoped_agent", "data": result.data}],
+                    errors=[{"code": "invalid_review_result"}],
+                )
         return _as_mesh_result(result, action="代码质量审查")
     if code == "test_verifier":
         project_id = data.get("project_id") or context.get("project_id")
@@ -708,6 +787,11 @@ def _runtime_handler(
         if operation == "run_review":
             if not trusted_team_execution or _readonly_team_task(data):
                 return _result("approval_required", "正式团队审查必须由小菱通过有效团队租约发起")
+            from app.core.permission_codes import PermissionCode
+
+            denied = _require_runtime_permissions(db, user, PermissionCode.REVIEW_START)
+            if denied is not None:
+                return denied
             from app.services.agent_team_review import run_team_review
 
             return run_team_review(
@@ -778,14 +862,17 @@ def _runtime_handler(
         return _as_mesh_result(result, action="修复提示词生成")
     if code == "security_sentinel":
         if file_id := (data.get("file_id") or context.get("file_id")):
+            audit_scope = "file"
             result = orch.audit_security_for_file(
                 int(file_id),
                 scan_depth=str(data.get("scan_depth") or "standard"),
                 ctx=ctx,
             )
         elif task_id := (data.get("task_id") or context.get("task_id")):
+            audit_scope = "task"
             result = orch.audit_security_for_task(int(task_id), ctx=ctx)
         elif project_id := (data.get("project_id") or context.get("project_id")):
+            audit_scope = "project"
             result = orch.audit_security_for_project(
                 int(project_id), top_n=int(data.get("top_n") or 50),
                 scan_mode=str(data.get("scan_mode") or "full"), ctx=ctx,
@@ -795,6 +882,33 @@ def _runtime_handler(
                 result.data = {**result.data, "project_id": int(project_id)}
         else:
             return _missing("file_id|task_id|project_id")
+        if result.success:
+            audit_data = result.data if isinstance(result.data, dict) else {}
+            compliance = audit_data.get("compliance")
+            compliance = compliance if isinstance(compliance, dict) else {}
+            invalid_structure = (
+                not isinstance(audit_data.get("findings"), list)
+                or not isinstance(audit_data.get("compliance"), dict)
+                or not str(audit_data.get("summary") or "").strip()
+            )
+            incomplete = bool(
+                compliance.get("findings_truncated")
+                or compliance.get("result_payload_truncated")
+                or compliance.get("audit_inputs_complete") is False
+                or compliance.get("semantic_execution_complete") is False
+                or compliance.get("audit_request_accounting_complete") is False
+                or (compliance.get("dataflow_attempted") and compliance.get("dataflow_complete") is False)
+                or (audit_scope == "file" and compliance.get("scan_complete") is False)
+                or (audit_scope == "project" and compliance.get("scan_mode") == "full"
+                    and compliance.get("semantic_complete") is False)
+            )
+            if invalid_structure or incomplete:
+                return _result(
+                    "failed", "安全审查结果缺少有效结构或覆盖未完成",
+                    evidence=[{"source": "request_scoped_agent", "data": result.data}],
+                    errors=[{"code": "invalid_audit_result"}],
+                    next_action={"inspect_coverage": True},
+                )
         if not result.success and isinstance(result.data, dict) and result.data:
             partial = _result(
                 "failed", result.error or "安全审查未完整完成，已保留部分结果",
@@ -809,6 +923,13 @@ def _runtime_handler(
 
 
 def _monitor_handler(db: Session, user: User, message: dict[str, Any]) -> dict[str, Any]:
+    sent_from = str(message.get("sent_from") or "")
+    if not sent_from.startswith("session:admin:"):
+        return _result(
+            "blocked",
+            "全平台监控 Agent 仅接受管理员小菱会话任务",
+            errors=[{"code": "insufficient_scope", "message": "需要 admin surface 来源"}],
+        )
     data = _payload(message)
     window = data.get("window_minutes")
     metrics = data.get("metrics")
@@ -877,6 +998,25 @@ def _monitor_handler(db: Session, user: User, message: dict[str, Any]) -> dict[s
         "completed",
         f"已读取最近 {minutes} 分钟的 {len(snapshots)} 条指标快照和 {len(alerts)} 条未关闭告警",
         evidence=evidence,
+    )
+
+
+def _supervisor_handler(db: Session, user: User, message: dict[str, Any]) -> dict[str, Any]:
+    """提供可寻址的只读监督子 Agent；真实强制决策由服务端网关复用同一规则。"""
+    del db, user
+    data = _payload(message)
+    action = str(data.get("action") or "").strip()
+    resource = str(data.get("resource") or "").strip()
+    if not action:
+        return _missing("action")
+    from app.services import agent_supervisor_service
+
+    review = agent_supervisor_service.review_action(action, resource, context=data.get("context"))
+    return _result(
+        "approval_required" if review.needs_confirmation else "completed",
+        review.reason,
+        evidence=[{"source": "server_supervision_policy", "data": agent_supervisor_service.public_review(review)}],
+        next_action={"confirm_with_current_user": True} if review.needs_confirmation else None,
     )
 
 
@@ -1092,6 +1232,8 @@ def _handle(
         )
     if code == "monitor":
         return contract.name, _monitor_handler(db, user, message)
+    if code == "supervisor":
+        return contract.name, _supervisor_handler(db, user, message)
     return contract.name, _runtime_handler(db, user, code, message, trusted_team_execution=trusted_team_execution)
 
 

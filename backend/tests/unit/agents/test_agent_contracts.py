@@ -45,11 +45,12 @@ EXPECTED_SERVICES = {
     "report_verifier",
     "data_integrity",
     "incident_responder",
+    "supervisor",
 }
 
 
 def test_contract_catalog_covers_all_agents_and_has_unique_skill_owners() -> None:
-    """32 个现有 Agent/服务画像必须全部覆盖且每个 Skill 只有一个所有者。"""
+    """33 个现有 Agent/服务画像必须全部覆盖且每个 Skill 只有一个所有者。"""
     assert set(CONTRACTS) == EXPECTED_RUNTIME | EXPECTED_SERVICES
     assert PROTECTED_AGENT_CODES == {"chat_assistant", "manager"}
     skill_codes = [skill.code for item in CONTRACTS.values() for skill in item.skills]
@@ -85,6 +86,8 @@ def test_each_contract_is_complete_and_renders_full_prompt() -> None:
         assert "target_agent" not in prompt
         assert "跨 Agent 协作消息必须" in prompt
         assert "用户或系统直接调用沿用" in prompt
+        assert "只根据当前输入和已验证工具结果断言事实" in prompt
+        assert "没有证据就说明未知或阻断" in prompt
 
 
 def test_protected_interaction_agents_are_not_prompt_injected() -> None:
@@ -95,13 +98,25 @@ def test_protected_interaction_agents_are_not_prompt_injected() -> None:
     assert compose_system_prompt("code_reviewer", baseline) != baseline
 
 
-def test_manager_contract_declares_full_admin_page_capabilities() -> None:
-    """受保护的管理 Agent 仍须声明其完整后台能力边界。"""
+def test_manager_contract_is_only_a_legacy_policy_alias() -> None:
+    """manager 只能兼容权限策略，不能成为对话根或子 Agent 目标。"""
     manager = CONTRACTS["manager"]
-    assert "管理全部管理员页面" in manager.mission
+    assert "不代表第二个主 Agent" in manager.mission
+    assert manager.delegates_to == ()
     assert {skill.code for skill in manager.skills} == {"manager.admin_capabilities"}
-    assert "真实业务 API" in manager.skills[0].purpose
-    assert "禁止自行拼接 HTTP 方法或路径" in manager.skills[0].usage_rule
+    assert "策略编码" in manager.skills[0].purpose
+    assert "不是执行主体" in manager.skills[0].usage_rule
+    assert collaboration_allowed("manager", "operations") is False
+    assert collaboration_allowed("operations", "manager") is False
+    assert collaboration_allowed("chat_assistant", "operations") is True
+
+
+def test_xiaoling_is_the_only_interaction_root_and_orchestrator_is_internal() -> None:
+    """身份契约把小菱设为唯一主控，并把 orchestrator 限定为内部引擎。"""
+    assert CONTRACTS["chat_assistant"].name == "小菱唯一主控"
+    assert "唯一对用户负责" in CONTRACTS["chat_assistant"].mission
+    assert CONTRACTS["orchestrator"].name == "内部调度引擎"
+    assert "不是独立对话身份" in CONTRACTS["orchestrator"].mission
 
 
 def test_collaboration_requires_reciprocal_allowlist() -> None:

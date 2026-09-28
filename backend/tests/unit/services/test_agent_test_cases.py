@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import zipfile
 
@@ -111,9 +112,13 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
     from app.services import sandbox_service
 
     source = "<?php\n" + "// keep\n" * 6_000 + "echo broken;\n"
-    archive = _zip_with({"main.php": source, "untouched.php": "<?php echo 'keep';\n"})
+    archive = _zip_with({
+        "main.php": source,
+        "untouched.php": "<?php echo 'keep';\n",
+        "_agent_tests/test_generated.php": "<?php echo 'runner-only';\n",
+    })
     environment = SimpleNamespace(
-        public_id="sbx_repair", owner_id=7, project_id=9, language="php", source_sha256="sha",
+        public_id="sbx_repair", owner_id=7, project_id=9, language="php", source_sha256="parent-sha",
     )
 
     class FakeRepair:
@@ -125,19 +130,66 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
     monkeypatch.setattr(sandbox_service, "SyntaxRepairAgent", FakeRepair)
     monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, _user_id: agent)
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        sandbox_service.project_source_revision_service, "save_revision",
-        lambda *_args, **_kwargs: SimpleNamespace(revision_no=1),
-    )
     result = sandbox_service._syntax_repair_round(
         db, environment, archive,
         [{"file": "main.php", "line": 6002, "message": "unexpected identifier"}],
     )
     assert result is not None
+    revision = result["repair_revision"]
+    assert revision["revision_id"] > 0
+    assert revision["revision_no"] == 1
+    assert revision["parent_source_sha256"] == "parent-sha"
+    assert revision["revision_source_sha256"] != revision["execution_source_sha256"]
+    assert hashlib.sha256(base64.b64decode(result["source"])).hexdigest() == revision["execution_source_sha256"]
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(result["source"]))) as zf:
         assert zf.read("main.php").decode() == source.replace("echo broken;", "echo 'fixed';")
         assert zf.read("untouched.php").decode() == "<?php echo 'keep';\n"
+        assert "_agent_tests/test_generated.php" in zf.namelist()
         assert zf.namelist().count("main.php") == 1
+
+
+def test_syntax_repair_revision_config_binds_repair_to_next_worker_request() -> None:
+    import json
+
+    from app.services.sandbox_service import _append_repair_revision_to_config
+
+    revision = {
+        "revision_id": 31,
+        "revision_no": 4,
+        "parent_source_sha256": "parent",
+        "revision_source_sha256": "saved-revision",
+        "execution_source_sha256": "worker-archive",
+        "repaired_files": ["main.php"],
+    }
+    config = json.loads(
+        _append_repair_revision_to_config(
+            '{"source_revision_id": 12,"syntax_repair_revisions":[]}',
+            revision=revision,
+            repair_round=1,
+            worker_request_id="sbx_repair-r1",
+        )
+    )
+    assert config["source_revision_id"] == 12
+    assert config["syntax_repair_revisions"] == [
+        {**revision, "repair_round": 1, "worker_request_id": "sbx_repair-r1"}
+    ]
+
+
+def test_worker_receipt_requires_exact_request_and_archive_digest() -> None:
+    import pytest
+
+    from app.services.sandbox_service import _validate_worker_execution_receipt
+
+    valid = {"request_id": "sbx_1-r1", "source_sha256": "a" * 64}
+    assert _validate_worker_execution_receipt(valid, request_id="sbx_1-r1", source_sha256="a" * 64) == valid
+    with pytest.raises(RuntimeError, match="request_id"):
+        _validate_worker_execution_receipt(valid, request_id="sbx_1-r2", source_sha256="a" * 64)
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        _validate_worker_execution_receipt(
+            {"request_id": "sbx_1-r1", "source_sha256": "b" * 64},
+            request_id="sbx_1-r1",
+            source_sha256="a" * 64,
+        )
 
 
 def test_large_source_does_not_call_dynamic_test_agent_with_partial_context(db, monkeypatch) -> None:

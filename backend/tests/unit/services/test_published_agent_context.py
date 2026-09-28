@@ -236,6 +236,61 @@ def test_direct_published_agent_covers_all_code_chunks(db, admin_user, monkeypat
     assert result["coverage"]["source_sha256"] == hashlib.sha256(code.encode()).hexdigest()
 
 
+@pytest.mark.parametrize(
+    "code,evidence",
+    [
+        ("result = eval(user_input)\n", "eval(user_input)"),
+        ("    result = eval(user_input)\n", "    result = eval(user_input)"),
+    ],
+    ids=["plain", "exact-indentation"],
+)
+def test_published_agent_accepts_exact_evidence_from_reported_line(
+    db, admin_user, monkeypatch, code, evidence,
+):
+    profile = GENERAL_AGENT.__class__(
+        **{**GENERAL_AGENT.__dict__, "code": "approved_agent", "max_tokens": 4096},
+    )
+    monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_args: None)
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_published",
+        lambda *_args, **_kwargs: SimpleNamespace(to_profile=lambda: profile),
+    )
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **_kwargs):
+            return json.dumps({
+                "summary": "发现动态执行",
+                "score": 60,
+                "issues": [{
+                    "title": "动态执行",
+                    "description": "输入未经约束即被执行",
+                    "severity": "高",
+                    "issue_type": "安全漏洞",
+                    "suggestion": "避免动态执行",
+                    "evidence": evidence,
+                    "line_number": 1,
+                }],
+            }, ensure_ascii=False), {}
+
+        def log_deferred(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", Client)
+    result = published_agent_tools.invoke_published_agent(
+        db,
+        admin_user,
+        agent_code="approved_agent",
+        code=code,
+        language="python",
+    )
+    assert result["issues"][0]["evidence"] == evidence
+    assert result["issues"][0]["line_number"] == 1
+
+
 def test_invalid_issue_in_one_chunk_cannot_be_reported_complete(db, admin_user, monkeypatch):
     profile = GENERAL_AGENT.__class__(
         **{**GENERAL_AGENT.__dict__, "code": "approved_agent", "max_tokens": 4096},
@@ -277,6 +332,64 @@ def test_invalid_issue_in_one_chunk_cannot_be_reported_complete(db, admin_user, 
             language="python",
         )
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "evidence,line_number,code",
+    [
+        ("missing_source_line()", 1, "line_0 = 0\nline_1 = 1\n"),
+        ("line_0 = 0", 2, "line_0 = 0\nline_1 = 1\n"),
+        ("problem()", 0, "safe()\nproblem()\n"),
+        ("danger(\nexecute())", 1, "danger(\nsafe)\ndanger(\nexecute())\n"),
+        ("  exact_call()  ", 1, "exact_call()\n"),
+    ],
+    ids=["fabricated", "wrong-line", "missing-line", "multiline-duplicate-prefix", "padded-quote"],
+)
+def test_published_agent_rejects_fabricated_or_mislocated_evidence(
+    db, admin_user, monkeypatch, evidence, line_number, code,
+):
+    profile = GENERAL_AGENT.__class__(
+        **{**GENERAL_AGENT.__dict__, "code": "approved_agent", "max_tokens": 4096},
+    )
+    monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_args: None)
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_published",
+        lambda *_args, **_kwargs: SimpleNamespace(to_profile=lambda: profile),
+    )
+    monkeypatch.setattr(published_agent_tools.settings, "deepseek_chunk_threshold", 500)
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **_kwargs):
+            return json.dumps({
+                "summary": "已发现问题",
+                "score": 50,
+                "issues": [{
+                    "title": "未验证问题",
+                    "description": "证据未能对应",
+                    "severity": "高",
+                    "issue_type": "潜在Bug",
+                    "suggestion": "复核",
+                    "evidence": evidence,
+                    "line_number": line_number,
+                }],
+            }, ensure_ascii=False), {}
+
+        def log_deferred(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", Client)
+    with pytest.raises(published_agent_tools.DeepSeekResponseError, match="证据|行号"):
+        published_agent_tools.invoke_published_agent(
+        db,
+        admin_user,
+        agent_code="approved_agent",
+        code=code,
+        language="python",
+    )
 
 
 def test_oversized_approved_skill_fails_before_model_call(db, admin_user, monkeypatch):

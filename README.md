@@ -18,7 +18,7 @@
 - 报告保留发起人/管理员私有范围，同时要求项目当前可见；成员移除或项目删除、隔离后不能继续读取或导出。历史报告文件信息使用当次审查快照。
 - 仪表盘可视化：风险分布、问题类型、评分趋势
 - **Agent 自进化（v3.0）**：从审查反馈（采纳/忽略）聚合信号、沉淀经验并蒸馏规则，经黄金集评估闸门 + 管理员审批后自动流回审查，全程可解释、可审计、可一键回滚
-- 角色权限：管理员 / 普通用户
+- 角色权限：唯一超级管理员 / 管理员 / 审查员（合并审计员职责）/ 普通用户
 
 ## 技术栈
 
@@ -60,14 +60,14 @@
 │   └── Agent自进化/                # v3.0 Agent自进化设计 (6A工作流)
 ├── backend/                        # FastAPI 后端
 │   ├── app/
-│   │   ├── agents/                # Agent 注册中心与编排 (14个Agent)
+│   │   ├── agents/                # Agent 注册中心与编排
 │   │   ├── ai/                    # AI 智能体 (Prompt/解析/分片/评分)
-│   │   ├── api/v1/                # RESTful API 路由 (87条 HTTP + 1条 WebSocket)
+│   │   ├── api/v1/                # RESTful API 路由与 WebSocket
 │   │   ├── core/                  # 配置、安全、数据库、异常、依赖
 │   │   ├── exporters/             # Word/PDF 导出
-│   │   ├── models/                # SQLAlchemy ORM (14张业务表 + base)
-│   │   ├── schemas/               # Pydantic Schema (16个模块)
-│   │   ├── services/              # 业务服务层 (17个服务)
+│   │   ├── models/                # SQLAlchemy ORM
+│   │   ├── schemas/               # Pydantic Schema
+│   │   ├── services/              # 业务服务层
 │   │   ├── utils/                 # 工具函数
 │   │   └── main.py
 │   ├── alembic/                   # 数据库迁移
@@ -76,14 +76,14 @@
 │   └── Dockerfile
 ├── frontend/                       # Vue3 前端
 │   ├── src/
-│   │   ├── api/                   # 接口封装 (17个模块)
-│   │   ├── components/            # 通用组件 (23个)
+│   │   ├── api/                   # 接口封装
+│   │   ├── components/            # 通用组件
 │   │   ├── constants/             # 常量定义
 │   │   ├── router/                # 路由 + 守卫
 │   │   ├── stores/                # Pinia 状态管理
-│   │   ├── types/                 # TypeScript 类型定义 (15个)
+│   │   ├── types/                 # TypeScript 类型定义
 │   │   ├── utils/                 # 工具函数
-│   │   ├── views/                 # 页面 (27个)
+│   │   ├── views/                 # 页面
 │   │   ├── assets/styles/         # 全局样式
 │   │   ├── App.vue
 │   │   └── main.ts

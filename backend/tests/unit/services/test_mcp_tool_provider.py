@@ -10,7 +10,43 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ValidationError
 from app.services import mcp_tool_provider as module
-from app.services.mcp_tool_provider import McpServerConfig, McpToolProvider, load_mcp_server_configs
+from app.services.mcp_tool_provider import (
+    McpServerConfig,
+    McpToolBinding,
+    McpToolProvider,
+    load_mcp_server_configs,
+)
+
+
+def test_mcp_approval_fingerprint_binds_endpoint_secret_schema_and_policy() -> None:
+    def binding(
+        *,
+        url: str = "https://mcp.example.test/rpc",
+        token: str = "secret-one",
+        schema: Mapping[str, Any] | None = None,
+        permission: str = "escalate",
+    ) -> McpToolBinding:
+        return McpToolBinding(
+            model_name="mcp_remote_read_file",
+            server=McpServerConfig("remote", url, {"Authorization": f"Bearer {token}"}),
+            tool_name="read_file",
+            description="读取文件",
+            input_schema=dict(schema or {"type": "object", "properties": {"path": {"type": "string"}}}),
+            requires_approval=True,
+            permission=permission,
+            risk_level="high",
+            server_id=4,
+            tool_id=8,
+            transport="streamable_http",
+        )
+
+    original = binding().configuration_fingerprint()
+    assert len(original) == 64
+    assert "secret-one" not in original
+    assert binding(url="https://changed.example.test/rpc").configuration_fingerprint() != original
+    assert binding(token="secret-two").configuration_fingerprint() != original
+    assert binding(schema={"type": "object", "properties": {"cmd": {"type": "string"}}}).configuration_fingerprint() != original
+    assert binding(permission="allow").configuration_fingerprint() != original
 
 
 def test_load_mcp_configs_validates_names_urls_and_headers(monkeypatch) -> None:

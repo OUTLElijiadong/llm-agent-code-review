@@ -559,10 +559,7 @@ run_blackbox() {
   stable=0
   http_ready=""
   http_status=""
-  # 完整部署核验:先离线补全依赖,再启动应用;服务"稳定运行"= 连续 3 次探活
-  # 返回任何合法 HTTP 状态行(含 5xx)。5xx 说明服务已起来,只是应用自身(如缺DB/
-  # 配置)报错——这是运行态证据,不该判黑盒失败;真正的失败是"一直没监听/
-  # 进程死了/完全无响应"。
+  # 服务就绪探测只确认端口有响应；黑盒通过状态另行判定，不能把错误页当成功。
   prepare_deps
   while [ "$attempts" -lt 45 ]; do
     if status="$(bash -c '
@@ -614,7 +611,8 @@ run_blackbox() {
   # agent 动态黑盒:应用仍在运行,执行 agent 生成的回环测试脚本(必须放在 kill 之前)
   blackbox_failed=0
   case "$http_status" in
-    5*) printf '%s\n' 'blackbox: application returned a 5xx response' >&2; blackbox_failed=1 ;;
+    2*|3*) ;;
+    *) printf 'blackbox: application returned HTTP %s for /\n' "$http_status" >&2; blackbox_failed=1 ;;
   esac
   if ! run_agent_blackbox; then
     blackbox_failed=1

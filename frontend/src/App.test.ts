@@ -58,9 +58,9 @@ describe('全局小菱宿主', () => {
     router.onError.mockClear()
   })
 
-  it('管理员同时保留两种入口，顶栏小菱打开独立 user 会话', async () => {
-    const forwardedToJarvis = vi.fn()
-    window.addEventListener('prism:open-admin-copilot', forwardedToJarvis)
+  it('管理员两个会话surface使用同一小菱身份并按入口切换', async () => {
+    const forwardedToAdmin = vi.fn()
+    window.addEventListener('prism:open-admin-copilot', forwardedToAdmin)
     const wrapper = mountApp()
 
     expect(wrapper.find('.admin-copilot-stub').exists()).toBe(true)
@@ -69,7 +69,7 @@ describe('全局小菱宿主', () => {
 
     window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { prefill: '检查项目' } }))
     await nextTick()
-    expect(forwardedToJarvis).not.toHaveBeenCalled()
+    expect(forwardedToAdmin).not.toHaveBeenCalled()
     expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('true')
     expect(wrapper.get('.user-agent-stub').attributes('data-prefill')).toBe('检查项目')
 
@@ -78,7 +78,7 @@ describe('全局小菱宿主', () => {
     expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('false')
 
     wrapper.unmount()
-    window.removeEventListener('prism:open-admin-copilot', forwardedToJarvis)
+    window.removeEventListener('prism:open-admin-copilot', forwardedToAdmin)
   })
 
   it('普通成员只挂载用户小菱并由全局事件打开', async () => {
@@ -86,6 +86,7 @@ describe('全局小菱宿主', () => {
     const wrapper = mountApp()
     expect(wrapper.find('.admin-copilot-stub').exists()).toBe(false)
     expect(wrapper.get('.user-agent-stub').attributes('data-visible')).toBe('false')
+    expect(wrapper.get('.user-agent-stub').attributes('data-launcher')).toBe('false')
 
     window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { prefill: '分析代码' } }))
     await nextTick()

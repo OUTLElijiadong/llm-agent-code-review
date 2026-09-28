@@ -14,6 +14,7 @@ from app.services.deepseek_responses_runtime import (
     FAILED,
     INCOMPLETE,
     MAX_ROUNDS_EXCEEDED,
+    MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN,
     WAITING_APPROVAL,
     WAITING_INPUT,
     ContextBudgetError,
@@ -208,7 +209,7 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
     assert result.status == "completed"
     payload = transport.payloads[-1]
     assert payload["max_output_tokens"] == 400
-    assert payload["input"][0]["role"] == "system"
+    assert payload["input"][0]["role"] == "user"
     assert "平台上下文压缩" in payload["input"][0]["content"][0]["text"]
     recent_items = [item for item in payload["input"] if item.get("call_id") == "call_recent"]
     assert [item["type"] for item in recent_items] == ["function_call", "function_call_output"]
@@ -282,6 +283,103 @@ async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints
     assert "owner_user_id 校验" in final_input
     assert len(logs) == len(transport.payloads)
     assert all(log["_request_payload"]["max_output_tokens"] > 0 for log in logs)
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_handles_more_than_one_million_estimated_tokens() -> None:
+    """以真实量级历史验证分块、来源覆盖和预算；模拟模型不证明语义理解。"""
+    anchor_facts = {
+        "EARLY_FACT=only_current_account",
+        "MIDDLE_FACT=review_must_be_read_only",
+        "LATE_FACT=latest_correction_overrides_earlier_scope",
+    }
+
+    class MillionTokenTransport(ScriptedTransport):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            self.payloads.append(payload)
+            if payload["tools"]:
+                return _message_response("百万级合成上下文压力回归完成")
+            source = str(payload["input"][0]["content"])
+            source_ids = sorted(set(re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)))
+            facts = sorted(fact for fact in anchor_facts if fact in source)
+            return _message_response(" ".join([*source_ids, *facts]))
+
+    transcript = []
+    for index in range(1100):
+        facts = ""
+        if index == 1:
+            facts = " EARLY_FACT=only_current_account"
+        elif index == 550:
+            facts = " MIDDLE_FACT=review_must_be_read_only"
+        elif index == 950:
+            facts = " LATE_FACT=latest_correction_overrides_earlier_scope"
+        transcript.append({
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"history_item_{index:04d}{facts} " + ("x" * 3990),
+        })
+
+    original_token_estimate = estimate_tokens(transcript)
+    assert original_token_estimate > 1_000_000
+    assert original_token_estimate < 1_200_000
+
+    transport = MillionTokenTransport()
+    runtime = _runtime(
+        transport,
+        RecordingExecutor(),
+        context_window_tokens=1_000_000,
+        max_output_tokens=16_000,
+        compaction_threshold_tokens=850_000,
+        keep_recent_tokens=150_000,
+    )
+    projected, metadata = compact_transcript(
+        transcript,
+        context_window_tokens=1_000_000,
+        max_output_tokens=16_000,
+        compaction_threshold_tokens=850_000,
+        keep_recent_tokens=150_000,
+        semantic_summary="[平台上下文压缩] 正在生成带来源锚点的语义摘要。",
+    )
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="million_token_compaction",
+        model="deepseek-v4-flash",
+        transcript=transcript,
+        tools=[],
+    )
+    runtime._store = store
+    await store.create(checkpoint)
+    selected_tokens = estimate_tokens(projected) - estimate_tokens(projected[0])
+    summary_budget = metadata["transcript_budget_tokens"] - selected_tokens - 96
+    semantic_summary = await runtime._semantic_compact(
+        checkpoint, metadata, summary_budget=summary_budget,
+    )
+    final_projection, final_metadata = compact_transcript(
+        transcript,
+        context_window_tokens=1_000_000,
+        max_output_tokens=16_000,
+        compaction_threshold_tokens=850_000,
+        keep_recent_tokens=150_000,
+        semantic_summary=semantic_summary,
+    )
+
+    assert checkpoint.transcript == transcript
+    assert metadata["compacted"] is True
+    assert metadata["original_tokens"] == original_token_estimate
+    assert 0 < checkpoint.context_metadata["semantic_compaction_calls"] <= MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN
+
+    projected_text = json.dumps(final_projection, ensure_ascii=False)
+    for fact in anchor_facts:
+        assert fact in projected_text
+    assert final_metadata["projected_tokens"] <= final_metadata["transcript_budget_tokens"]
+    for payload in transport.payloads:
+        estimated_request = estimate_tokens({
+            "instructions": payload["instructions"],
+            "input": payload["input"],
+        })
+        assert estimated_request + int(payload["max_output_tokens"]) < 1_000_000
 
 
 @pytest.mark.asyncio
@@ -377,7 +475,9 @@ async def test_semantic_compaction_call_cap_rejects_without_provider_request() -
     checkpoint = RunCheckpoint(
         run_id="summary_limit", model="deepseek-v4-flash",
         transcript=[{"role": "user", "content": "目标"}, {"role": "user", "content": "约束"}],
-        tools=[], context_metadata={"semantic_compaction_calls": 32},
+        tools=[], context_metadata={
+            "semantic_compaction_calls": MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN,
+        },
     )
     await store.create(checkpoint)
     transport = SummarizingTransport()
@@ -386,7 +486,10 @@ async def test_semantic_compaction_call_cap_rejects_without_provider_request() -
         context_window_tokens=4000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
-    with pytest.raises(ContextBudgetError, match="32 次模型请求上限"):
+    with pytest.raises(
+        ContextBudgetError,
+        match=f"{MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN} 次模型请求上限",
+    ):
         await runtime._semantic_compact(
             checkpoint,
             {"summary_sha256": "2" * 64, "omitted_indices": [1]},

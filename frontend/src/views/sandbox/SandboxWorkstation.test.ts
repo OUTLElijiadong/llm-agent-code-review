@@ -3,7 +3,7 @@ import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  listSandboxes: vi.fn(), getSandbox: vi.fn(), createSandbox: vi.fn(), stopSandbox: vi.fn(),
+  listSandboxes: vi.fn(), getSandbox: vi.fn(), createSandbox: vi.fn(), authorizeSandboxRemoteTarget: vi.fn(), stopSandbox: vi.fn(),
   extendSandbox: vi.fn(), createSandboxPreviewSession: vi.fn(), searchSandboxCapabilities: vi.fn(),
 }))
 const projectApi = vi.hoisted(() => ({ getProjects: vi.fn() }))
@@ -57,6 +57,7 @@ beforeEach(() => {
   api.listSandboxes.mockResolvedValue([environment])
   api.getSandbox.mockResolvedValue(environment)
   api.searchSandboxCapabilities.mockResolvedValue([])
+  api.authorizeSandboxRemoteTarget.mockResolvedValue({ approval_token: '31.secret', expires_at: '2026-09-28T12:05:00' })
 })
 
 describe('SandboxWorkstation Agent output ordering', () => {
@@ -160,6 +161,46 @@ describe('SandboxWorkstation Agent output ordering', () => {
     expect(vm.submitDisabled).toBe(true)
     await vm.submit()
     expect(api.createSandbox).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('issues a target and mode bound authorization before creating a remote blackbox run', async () => {
+    api.createSandbox.mockResolvedValue({ ...environment, public_id: 'sbx_remote_1' })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      form: {
+        project_id: number | null
+        purpose: string
+        language: string
+        test_mode: string
+        remote_target_url: string
+        remote_target_authorized: boolean
+      }
+      submit: () => Promise<void>
+    }
+    vm.form.project_id = 7
+    vm.form.purpose = 'test'
+    vm.form.language = 'python'
+    vm.form.test_mode = 'blackbox'
+    vm.form.remote_target_url = 'https://authorized.example/path'
+    vm.form.remote_target_authorized = true
+
+    await vm.submit()
+
+    expect(api.authorizeSandboxRemoteTarget).toHaveBeenCalledOnce()
+    expect(api.authorizeSandboxRemoteTarget).toHaveBeenCalledWith({
+      project_id: 7,
+      remote_target_url: 'https://authorized.example/path',
+      test_mode: 'blackbox',
+      confirmed: true,
+    })
+    expect(api.createSandbox).toHaveBeenCalledWith(expect.objectContaining({
+      remote_target_url: 'https://authorized.example/path',
+      remote_target_approval_token: '31.secret',
+    }))
+    expect(api.authorizeSandboxRemoteTarget.mock.invocationCallOrder[0])
+      .toBeLessThan(api.createSandbox.mock.invocationCallOrder[0])
     wrapper.unmount()
   })
 

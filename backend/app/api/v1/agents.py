@@ -31,7 +31,7 @@ from app.agents.event_bus import AgentEventBus
 from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import SessionLocal, get_db
 from app.core.dependencies import authenticate_access_token, get_current_user, require_admin
-from app.core.exceptions import AuthError, ForbiddenError
+from app.core.exceptions import AuthError, ForbiddenError, PermissionError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -304,6 +304,8 @@ def submit_clarification(
         ctx = AgentContext(user_id=user.id, extra={})
         result = orch.chat_agent.dispatch_with_payload(intent_name, merged, ctx)
         if not result.success:
+            if result.failure_kind == "permission_denied":
+                raise PermissionError(result.error or "当前用户无操作权限")
             from app.ai.exceptions import AiServiceError
             raise AiServiceError(result.error or "执行失败", code=50202)
     except Exception:

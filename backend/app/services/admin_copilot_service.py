@@ -27,9 +27,9 @@ from app.services import (
     ops_service,
 )
 
-ASSISTANT_NAME = "Prism 管理副驾驶"
+ASSISTANT_NAME = "小菱管理员工作台（旧协议已停用）"
 OPENING = (
-    "我是管理副驾驶。你可以问我：进度怎么样、还有什么没做；"
+    "我是小菱管理员工作台。你可以问我：进度怎么样、还有什么没做；"
     "也可以直接让我：查询用户、调整角色、启停 Agent、生成汇报。需要我做什么？"
 )
 TOKEN_TTL_MINUTES = 15

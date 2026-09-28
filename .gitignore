@@ -38,6 +38,8 @@ deploy/certbot/
 /*.docx
 
 frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
 
 # 质量门禁与本地发布运行态
 backend/.coverage*

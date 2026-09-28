@@ -311,6 +311,16 @@ async def test_external_mcp_is_available_to_unique_super_admin(db, super_admin_u
         def has_tool(self, name: str) -> bool:
             return name == "mcp_ops_status"
 
+        def supervisor_details(self, _name: str) -> dict[str, str]:
+            return {
+                "managed_kind": "",
+                "tool_name": "status",
+                "permission": "escalate",
+                "requires_approval": "true",
+                "risk_level": "low",
+                "binding_fingerprint": "external-status-v1",
+            }
+
         async def call(self, _name, _arguments):
             return {"ok": True}
 

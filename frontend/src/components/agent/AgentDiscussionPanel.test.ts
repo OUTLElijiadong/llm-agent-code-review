@@ -419,3 +419,34 @@ it('服务端拒绝消息时保留输入，重连也不清空已确认发言', a
   expect(wrapper.text()).toContain('已完成本轮检查')
   wrapper.unmount()
 })
+
+it('发送相同追问时旧发言重放不能误确认新消息', async () => {
+  const previous: DiscussionTurn = {
+    turn_id: -1, seq: 2, agent_code: 'user', agent_name: '你', role: 'user',
+    content: '请核对相同问题', timestamp: '2026-09-24T09:00:02Z',
+  }
+  const wrapper = mountPanel({
+    initialStatus: 'concluded', initialFollowupUntil: Date.now() / 1000 + 300,
+    initialProgress: { phase: 'completed', completed_units: 12, total_units: 12,
+      current_round: 2, followup_start_seq: 1, seq: 2 },
+    initialTurns: [turn(1, 'security', 1), previous],
+  })
+  connected('connected')
+  await nextTick()
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeUndefined()
+  await wrapper.get('.room-input').setValue('请核对相同问题')
+  await wrapper.get('.room-input').trigger('keydown', { key: 'Enter' })
+  expect(send).toHaveBeenCalledWith('user_input', { content: '请核对相同问题' })
+
+  receive({ type: 'discuss', session_id: 'disc-1', turn: previous })
+  await nextTick()
+  expect((wrapper.get('.room-input').element as HTMLTextAreaElement).value).toBe('请核对相同问题')
+  expect((wrapper.vm as unknown as { sendingMessage: boolean }).sendingMessage).toBe(true)
+
+  receive({ type: 'discuss', session_id: 'disc-1', turn: { ...previous, seq: 3,
+    timestamp: '2026-09-24T09:00:03Z' } })
+  await nextTick()
+  expect((wrapper.get('.room-input').element as HTMLTextAreaElement).value).toBe('')
+  expect((wrapper.vm as unknown as { sendingMessage: boolean }).sendingMessage).toBe(false)
+  wrapper.unmount()
+})

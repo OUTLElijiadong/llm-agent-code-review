@@ -111,7 +111,7 @@
         >
           <span class="agent-dot" aria-hidden="true"></span>
           <span class="ri-main">
-            <b>{{ item.surface === 'admin' ? '贾维斯' : '小菱' }}会话</b>
+            <b>小菱会话</b>
             <span class="ri-meta font-mono">{{ AGENT_RUN_STATUS_LABELS[item.status] || item.status }}</span>
           </span>
           <span class="ri-tag">Agent</span>
