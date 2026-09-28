@@ -174,7 +174,18 @@ const COMPACT_DESKTOP_MAX_WIDTH = 1366
 const COMPACT_DESKTOP_MIN_HEIGHT = 520
 const COMPACT_DESKTOP_ACTION_GUTTER = 360
 
+const router = useRouter()
 const visible = ref(false)
+const mobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 520)
+const adminHeaderTriggerSlotPresent = ref(false)
+let adminHeaderTriggerObserver: MutationObserver | undefined
+const isAdminRoute = computed(() => (
+  (router?.currentRoute?.value?.path || window.location.pathname).startsWith('/admin')
+))
+const useAdminHeaderTrigger = computed(() => (
+  mobileViewport.value && isAdminRoute.value && adminHeaderTriggerSlotPresent.value
+))
+const triggerTeleportTarget = computed(() => useAdminHeaderTrigger.value ? '#admin-copilot-trigger-slot' : 'body')
 const loading = ref(false)
 const showTyping = ref(false)
 /** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
@@ -242,9 +253,32 @@ function restorePanelPosition(): void {
 }
 
 function handlePanelViewportResize(): void {
+  mobileViewport.value = window.innerWidth <= 520
+  syncAdminHeaderTriggerSlotPresence()
   if (!visible.value) return
   restorePanelPosition()
 }
+
+/**
+ * 管理页使用移动端页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
+ * MutationObserver 在 AdminLayout 挂载后再迁移 Teleport,避免 Vue 对缺失目标只告警一次后不重试。
+ */
+function syncAdminHeaderTriggerSlotPresence(): void {
+  const shouldUseHeader = mobileViewport.value && isAdminRoute.value
+  const targetExists = shouldUseHeader && Boolean(document.getElementById('admin-copilot-trigger-slot'))
+  adminHeaderTriggerSlotPresent.value = targetExists
+  if (!shouldUseHeader || targetExists) {
+    adminHeaderTriggerObserver?.disconnect()
+    adminHeaderTriggerObserver = undefined
+    return
+  }
+  if (!adminHeaderTriggerObserver && document.body) {
+    adminHeaderTriggerObserver = new MutationObserver(syncAdminHeaderTriggerSlotPresence)
+    adminHeaderTriggerObserver.observe(document.body, { childList: true, subtree: true })
+  }
+}
+
+watch([mobileViewport, isAdminRoute], syncAdminHeaderTriggerSlotPresence, { flush: 'post' })
 
 const messages = ref<ChatEntry[]>([])
 const historyWindow = new AgentSessionHistoryWindow()
@@ -287,7 +321,6 @@ async function handleAskMember({ teamId, name, address }: { teamId: number; name
     },
   )
 }
-const router = useRouter()
 const userStore = useUserStore()
 const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.profile?.id))
 /** 管理端同样点亮全局彩框/虚拟鼠标:小菱替管理员操作页面时的实况反馈。 */
@@ -1809,6 +1842,8 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
 }, { flush: 'sync' })
 
 onBeforeUnmount(() => {
+  adminHeaderTriggerObserver?.disconnect()
+  adminHeaderTriggerObserver = undefined
   clearUnconfirmedStart()
   rememberCurrentDraft()
   if (elapsedTimer !== undefined) window.clearInterval(elapsedTimer)
@@ -1839,6 +1874,7 @@ function handleExternalOpen(event: Event): void {
 
 let elapsedTimer: number | undefined
 onMounted(() => {
+  syncAdminHeaderTriggerSlotPresence()
   meshBridge.start()
   elapsedTimer = window.setInterval(() => { nowTickMs.value = Date.now() }, 1000)
   window.addEventListener('keydown', handleKeydown)
@@ -1853,21 +1889,23 @@ onMounted(() => {
 
 <template>
   <div class="admin-copilot" :class="{ 'is-open': visible }">
-    <button
-      v-if="!visible"
-      class="copilot-trigger"
-      :class="{ 'is-busy': mascotStatus !== 'idle' }"
-      type="button"
-      :aria-label="`打开${ASSISTANT_NAME}`"
-      :title="ASSISTANT_NAME"
-      @click="openPanel"
-    >
-      <PrismMascot :size="44" :status="mascotStatus" />
-      <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
-    </button>
+    <Teleport :to="triggerTeleportTarget">
+      <button
+        v-if="!visible"
+        class="copilot-trigger"
+        :class="{ 'is-busy': mascotStatus !== 'idle', 'is-header-trigger': useAdminHeaderTrigger, 'is-floating-trigger': !useAdminHeaderTrigger }"
+        type="button"
+        :aria-label="`打开${ASSISTANT_NAME}`"
+        :title="ASSISTANT_NAME"
+        @click="openPanel"
+      >
+        <PrismMascot :size="useAdminHeaderTrigger ? 32 : 44" :status="mascotStatus" />
+        <span v-if="unreadAlerts" class="unread-dot" aria-label="有未读异常"></span>
+      </button>
+    </Teleport>
 
     <section
-      v-else
+      v-if="visible"
       ref="panelRef"
       class="copilot-panel"
       :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
@@ -2289,6 +2327,20 @@ input { font: inherit; }
   box-shadow: 0 8px 24px rgba(91, 88, 232, 0.24), 0 2px 6px rgba(15, 18, 34, 0.1);
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.copilot-trigger.is-floating-trigger {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1900;
+}
+
+.copilot-trigger.is-header-trigger {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  box-shadow: 0 4px 12px rgba(91, 88, 232, 0.2);
 }
 
 .copilot-trigger:hover { transform: scale(1.06) translateY(-2px); box-shadow: 0 12px 30px rgba(91, 88, 232, 0.32), 0 3px 8px rgba(15, 18, 34, 0.12); }
@@ -2942,7 +2994,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 @media (max-width: 520px) {
   .admin-copilot { right: 12px; bottom: 12px; left: 12px; }
-  .copilot-trigger { margin-left: auto; }
+  .copilot-trigger.is-floating-trigger { right: 12px; bottom: 12px; }
   .copilot-panel {
     inset: auto 12px 12px 12px !important;
     width: auto;

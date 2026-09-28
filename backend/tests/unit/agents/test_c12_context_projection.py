@@ -18,7 +18,7 @@ def test_roundtable_split_history_compresses_body_instead_of_repeating_it_as_lab
     monkeypatch, body, label,
 ):
     monkeypatch.setattr(discussion.settings, "deepseek_context_window_tokens", 6000)
-    source = label + body + "最后约束必须保留"
+    source = label + body + "。最后约束必须保留"
     source_parts = []
 
     def compact(_agent, *_args, **kwargs):
@@ -31,7 +31,7 @@ def test_roundtable_split_history_compresses_body_instead_of_repeating_it_as_lab
             if first_level:
                 source_parts.append(text)
             prior = re.search(r"「([^」]+)」", text)
-            quote = prior.group(1) if prior else text[-8:]
+            quote = prior.group(1) if prior else text.strip()[-16:]
             entries.append({"source_id": source_id, "summary": "保留本段证据", "quotes": [quote]})
         return json.dumps({"entries": entries}, ensure_ascii=False), {"finish_reason": "stop"}
 
@@ -45,6 +45,38 @@ def test_roundtable_split_history_compresses_body_instead_of_repeating_it_as_lab
     assert "最后约束必须保留" in projected
     assert len(projected) < len(source) // 2
     assert discussion.estimate_tokens(projected) <= 1800
+
+
+@pytest.mark.parametrize("valid_quote", [True, False], ids=["trimmed-source-match", "trimmed-source-mismatch"])
+def test_roundtable_normalizes_quote_whitespace_but_requires_source_match(
+    monkeypatch, valid_quote,
+):
+    monkeypatch.setattr(discussion.settings, "deepseek_context_window_tokens", 6000)
+    source = "review evidence " * 500
+
+    def compact(_agent, *_args, **kwargs):
+        entries = []
+        for source_id, text in re.findall(
+            r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+            kwargs["user_prompt"], re.S,
+        ):
+            quote = text.strip()[-16:] if valid_quote else "NO_MATCH_IN_SOURCE"
+            entries.append({"source_id": source_id, "summary": "保留本段证据", "quotes": [f"  {quote} \r\n"]})
+        return json.dumps({"entries": entries}, ensure_ascii=False), {"finish_reason": "stop"}
+
+    monkeypatch.setattr(discussion, "_call_raw_for_task", compact)
+    records = [("S0001-T1", source)]
+    if valid_quote:
+        projected = discussion._compress_roundtable_history(
+            records, agent=object(), task_id=1, user_id=1, file_id=1, target_tokens=1800,
+        )
+        assert "原文引文：" in projected
+        assert "  " not in projected
+    else:
+        with pytest.raises(RuntimeError, match="引文无法从原发言核验"):
+            discussion._compress_roundtable_history(
+                records, agent=object(), task_id=1, user_id=1, file_id=1, target_tokens=1800,
+            )
 
 
 @pytest.mark.parametrize("evidence_size,scenario_size", [(501, 1001), (1800, 3600)])

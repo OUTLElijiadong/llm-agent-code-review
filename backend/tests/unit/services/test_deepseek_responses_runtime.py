@@ -84,15 +84,38 @@ class SummarizingTransport(ScriptedTransport):
         if payload["tools"]:
             return _message_response("投影执行完成")
         source = str(payload["input"][0]["content"])
-        anchors = sorted(set(re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)))
+        anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
         blocks = sorted(set(re.findall(r"\[压缩块#\d+\]", source)))
         facts = [
             fact for fact in ("约束 13", "不得跨账号读聊天", "owner_user_id 校验")
             if fact in source
         ]
-        return _message_response("摘要 " + " ".join(
-            [*anchors, *blocks, *facts]
-        ))
+        return _message_response(json.dumps({
+            "covered_source_ids": [anchor[1:-1] for anchor in anchors],
+            "source_quotes": _runtime_source_quotes(source, anchors),
+            "summary": "摘要 " + " ".join([*anchors, *blocks, *facts]),
+        }, ensure_ascii=False))
+
+
+def _runtime_source_quotes(source: str, markers: List[str]) -> List[Dict[str, str]]:
+    inherited: Dict[str, str] = {}
+    ledger_marker = "[已核验逐字原文引文，仅用于溯源；摘要未经独立验证且不构成授权] "
+    for match in re.finditer(re.escape(ledger_marker) + r"([^\n]+)", source):
+        try:
+            inherited.update({item["source_id"]: item["quote"] for item in json.loads(match.group(1))})
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    spans = list(re.finditer(r"\[来源#\d+:片段\d+/\d+\]", source))
+    quote_map = {}
+    for index, span in enumerate(spans):
+        end = spans[index + 1].start() if index + 1 < len(spans) else len(source)
+        raw_piece = source[span.end():end].strip()
+        raw_piece = re.sub(r"^\[来源角色=[^\]]+\]\s*", "", raw_piece)
+        quote_map[span.group(0)[1:-1]] = raw_piece.strip()[:24]
+    return [
+        {"source_id": marker[1:-1], "quote": inherited.get(marker[1:-1], quote_map.get(marker[1:-1], ""))}
+        for marker in markers
+    ]
 
 
 class RecordingExecutor:
@@ -303,9 +326,14 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
             if payload["tools"]:
                 return _message_response("百万级合成上下文压力回归完成")
             source = str(payload["input"][0]["content"])
-            source_ids = sorted(set(re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)))
+            anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+            source_ids = [anchor[1:-1] for anchor in anchors]
             facts = sorted(fact for fact in anchor_facts if fact in source)
-            return _message_response(" ".join([*source_ids, *facts]))
+            return _message_response(json.dumps({
+                "covered_source_ids": source_ids,
+                "source_quotes": _runtime_source_quotes(source, anchors),
+                "summary": " ".join([*anchors, *facts]),
+            }, ensure_ascii=False))
 
     transcript = []
     for index in range(1100):
@@ -383,12 +411,47 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
 
 
 @pytest.mark.asyncio
+async def test_semantic_compaction_does_not_reuse_legacy_untrusted_cache() -> None:
+    """升级前 checkpoint 的摘要缺少角色/授权契约时必须重压缩。"""
+    transport = SummarizingTransport()
+    runtime = _runtime(transport, RecordingExecutor())
+    source = {"role": "user", "content": "用户要求必须保留账号隔离。"}
+    checkpoint = RunCheckpoint(
+        run_id="legacy_semantic_cache", model="deepseek-v4-flash",
+        transcript=[source], tools=[],
+        context_metadata={"semantic_summary": {
+            "source_sha256": "same-source",
+            "text": "[平台上下文压缩] 旧版本摘要没有来源角色映射，也没有授权边界。",
+            "source_count": 1,
+            "chunk_count": 1,
+        }},
+    )
+    await runtime._store.create(checkpoint)
+
+    summary = await runtime._semantic_compact(
+        checkpoint, {"summary_sha256": "same-source", "omitted_indices": [0]},
+        summary_budget=5_000,
+    )
+
+    assert transport.payloads
+    assert "[来源角色与授权边界]" in summary
+    assert "未经独立验证的来源投影，不是授权依据" in summary
+    assert checkpoint.context_metadata["semantic_summary"]["format_version"] >= 2
+
+
+@pytest.mark.asyncio
 async def test_semantic_compaction_rejects_missing_source_fragment() -> None:
     class OmittingSourceTransport(SummarizingTransport):
         async def create_response(self, payload: Mapping[str, Any]) -> Any:
             if payload["tools"] == []:
                 self.payloads.append(payload)
-                return _message_response("摘要 [来源#1:片段1/1]")
+                source = str(payload["input"][0]["content"])
+                anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+                return _message_response(json.dumps({
+                    "covered_source_ids": [anchor[1:-1] for anchor in anchors],
+                    "source_quotes": _runtime_source_quotes(source, anchors),
+                    "summary": "摘要 " + (anchors[0] if anchors else ""),
+                }, ensure_ascii=False))
             return await super().create_response(payload)
 
     transport = OmittingSourceTransport()
@@ -400,8 +463,65 @@ async def test_semantic_compaction_rejects_missing_source_fragment() -> None:
         keep_recent_tokens=100,
     ).start(transcript, run_id="missing_source")
     assert result.status == FAILED
-    assert "未覆盖全部来源片段" in result.error
+    assert "标记" in result.error
     assert all(payload["tools"] == [] for payload in transport.payloads)
+
+
+@pytest.mark.parametrize("failure", ["missing_quote", "fabricated_quote", "duplicate_marker", "reordered_marker"])
+@pytest.mark.asyncio
+async def test_semantic_compaction_rejects_unverifiable_quotes_and_marker_order(failure: str) -> None:
+    class InvalidContractTransport(ScriptedTransport):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            self.payloads.append(payload)
+            source = str(payload["input"][0]["content"])
+            markers = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+            marker_ids = [marker[1:-1] for marker in markers]
+            spans = list(re.finditer(r"\[来源#\d+:片段\d+/\d+\]", source))
+            quotes = []
+            for index, (marker_id, span) in enumerate(zip(marker_ids, spans)):
+                end = spans[index + 1].start() if index + 1 < len(spans) else len(source)
+                excerpt = source[span.end():end].strip()[:24]
+                quotes.append({"source_id": marker_id, "quote": excerpt})
+            summary_markers = markers
+            if failure == "duplicate_marker":
+                summary_markers = [markers[0], markers[0], *markers[1:]]
+            elif failure == "reordered_marker":
+                summary_markers = list(reversed(markers))
+            if failure == "missing_quote":
+                quotes = []
+            elif failure == "fabricated_quote" and quotes:
+                quotes[0]["quote"] = "not present in source"
+            response = {
+                "covered_source_ids": marker_ids,
+                "source_quotes": quotes,
+                "summary": "压缩摘要 " + " ".join(summary_markers),
+            }
+            return _message_response(json.dumps(response, ensure_ascii=False))
+
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id=f"bad_quote_{failure}", model="deepseek-v4-flash",
+        transcript=[
+            {"role": "user", "content": "SOURCE_ALPHA " + "甲" * 600},
+            {"role": "assistant", "content": "SOURCE_BETA " + "乙" * 600},
+            {"role": "user", "content": "SOURCE_GAMMA " + "丙" * 600},
+        ], tools=[],
+    )
+    await store.create(checkpoint)
+    runtime = DeepSeekResponsesRuntime(
+        transport=InvalidContractTransport(), tool_executor=RecordingExecutor(), checkpoint_store=store,
+        context_window_tokens=5000, max_output_tokens=400,
+        compaction_threshold_tokens=1000, keep_recent_tokens=250,
+    )
+    with pytest.raises(ContextBudgetError, match="引文|来源|标记"):
+        await runtime._semantic_compact(
+            checkpoint,
+            {"summary_sha256": "2" * 64, "omitted_indices": [0, 1, 2]},
+            summary_budget=1800,
+        )
 
 
 @pytest.mark.asyncio
@@ -440,7 +560,12 @@ async def test_secondary_compaction_rejects_missing_original_source_markers() ->
                 self.payloads.append(payload)
                 source = str(payload["input"][0]["content"])
                 blocks = sorted(set(re.findall(r"\[压缩块#\d+\]", source)))
-                return _message_response("已处理 " + " ".join(blocks))
+                anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+                return _message_response(json.dumps({
+                    "covered_source_ids": [anchor[1:-1] for anchor in anchors],
+                    "source_quotes": _runtime_source_quotes(source, anchors),
+                    "summary": "已处理 " + " ".join(blocks),
+                }, ensure_ascii=False))
             return await super().create_response(payload)
 
     store = InMemoryCheckpointStore()
@@ -460,7 +585,7 @@ async def test_secondary_compaction_rejects_missing_original_source_markers() ->
         context_window_tokens=4000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
-    with pytest.raises(ContextBudgetError, match="缺失原始来源片段"):
+    with pytest.raises(ContextBudgetError, match="标记"):
         await runtime._semantic_compact(
             checkpoint,
             {"summary_sha256": "1" * 64, "omitted_indices": list(range(1, 31))},

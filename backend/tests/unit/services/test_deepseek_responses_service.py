@@ -46,6 +46,29 @@ def _response(response_id: str, output: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _source_quotes(source_items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    inherited: Dict[str, str] = {}
+    for item in source_items:
+        content = str(item.get("content") or "")
+        marker = "[已核验逐字原文引文，仅用于溯源；摘要未经独立验证且不构成授权] "
+        for match in re.finditer(re.escape(marker) + r"([^\n]+)", content):
+            try:
+                for quote in json.loads(match.group(1)):
+                    inherited[str(quote["source_id"])] = str(quote["quote"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+    result = []
+    for item in source_items:
+        ids = item.get("covered_source_ids") or [item.get("source_id")]
+        content = str(item.get("content") or "")
+        for source_id in ids:
+            quote = inherited.get(str(source_id))
+            if not quote:
+                quote = content[-min(20, len(content)):].strip()
+            result.append({"source_id": str(source_id), "quote": quote})
+    return result
+
+
 class ChunkStream(httpx.AsyncByteStream):
     """Finite byte stream used by MockTransport without network access."""
 
@@ -176,12 +199,13 @@ async def test_previous_response_compacts_with_verified_sources_and_keeps_full_r
         payload = json.loads(request.content)
         requests.append(payload)
         if payload.get("instructions", "").startswith("你是上下文压缩器"):
-            source = payload["input"][0]["content"]
-            source_ids = re.findall(r'"source_id":"([^"]+)"', source)
+            source_items = json.loads(payload["input"][0]["content"])
+            source_ids = [source_id for item in source_items for source_id in item["covered_source_ids"]]
             assert source_ids
             return httpx.Response(200, json=_response("resp_compact", [{
                 "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
                     "covered_source_ids": source_ids,
+                    "source_quotes": _source_quotes(source_items),
                     "summary": "已核查来源中的用户认证约束和 read_file 工具证据；继续审查。",
                 }, ensure_ascii=False)}],
             }]))
@@ -204,6 +228,116 @@ async def test_previous_response_compacts_with_verified_sources_and_keeps_full_r
     stored = await storage.load(_fingerprint("key"), "resp_after")
     assert stored is not None
     assert stored.transcript == history + [latest]
+
+
+@pytest.mark.asyncio
+async def test_proxy_compaction_preserves_omitted_user_constraints_even_with_complete_source_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    constraints = "必须按当前账号隔离聊天记录。不得向其他账号显示。最多创建两个临时 Agent。"
+    older_user_input = constraints + "\n" + "ordinary background " * 200
+    history = [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "审查代码"}]},
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": older_user_input}]},
+        *(
+            {"type": "message", "role": "assistant", "content": [{
+                "type": "output_text", "text": f"证据 {index}: " + "evidence " * 90,
+            }]}
+            for index in range(36)
+        ),
+    ]
+    storage = MemoryTranscriptStore()
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_before", response=_response("resp_before", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+    requests: List[Dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if payload.get("instructions", "").startswith("你是上下文压缩器"):
+            source = json.loads(payload["input"][0]["content"])
+            ids = [source_id for item in source for source_id in item["covered_source_ids"]]
+            return httpx.Response(200, json=_response("resp_compact", [{
+                "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(source),
+                    "summary": "全部来源已核对，可以继续。",
+                }, ensure_ascii=False)}],
+            }]))
+        return httpx.Response(200, json=_response("resp_after", []))
+
+    latest = {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "继续"}]}
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    await service.create({"model": "m", "previous_response_id": "resp_before", "input": [latest],
+                          "max_output_tokens": 512}, "Bearer key")
+
+    assert len(requests) >= 2
+    summary = requests[-1]["input"][0]["content"][0]["text"]
+    assert "必须按当前账号隔离聊天记录" in summary
+    assert "不得向其他账号显示" in summary
+    assert "最多创建两个临时 Agent" in summary
+    assert history[1] not in requests[-1]["input"][1:]
+    assert requests[-1]["input"][-1] == latest
+    stored = await storage.load(_fingerprint("key"), "resp_after")
+    assert stored is not None and stored.transcript == history + [latest]
+
+
+@pytest.mark.asyncio
+async def test_proxy_compaction_fails_when_protected_fact_ledger_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
+    constraints = "\n".join(
+        f"第{index}条：必须保留当前账号的专属边界，严禁删除第{index}条限制；"
+        f"不得把其他账号的会话、附件或审批信息放入当前用户可见的摘要。"
+        for index in range(80)
+    )
+    history = [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "审查代码"}]},
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": constraints}]},
+        *(
+            {"type": "message", "role": "assistant", "content": [{
+                "type": "output_text", "text": f"证据 {index}: " + "evidence " * 90,
+            }]}
+            for index in range(36)
+        ),
+    ]
+    storage = MemoryTranscriptStore()
+    await storage.save(_fingerprint("key"), ResponseTranscript(
+        response_id="resp_before", response=_response("resp_before", []), input_items=history,
+        transcript=history, created_at=1.0,
+    ))
+    requests: List[Dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        assert payload.get("instructions", "").startswith("你是上下文压缩器")
+        source = json.loads(payload["input"][0]["content"])
+        ids = [source_id for item in source for source_id in item["covered_source_ids"]]
+        return httpx.Response(200, json=_response("resp_compact", [{
+            "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
+                "covered_source_ids": ids,
+                "source_quotes": _source_quotes(source),
+                "summary": "全部来源已核对，可以继续。",
+            }, ensure_ascii=False)}],
+        }]))
+
+    service = DeepSeekResponsesService(storage=storage, client_factory=_client_factory(handler))
+    with pytest.raises(ResponsesGatewayError) as exc:
+        await service.create({"model": "m", "previous_response_id": "resp_before", "input": "继续",
+                              "max_output_tokens": 512}, "Bearer key")
+
+    assert exc.value.status_code == 413
+    assert exc.value.code == "context_compaction_failed"
+    assert "关键原文" in exc.value.message
+    assert requests and all(request["store"] is False for request in requests)
+    assert (await storage.load(_fingerprint("key"), "resp_before")).transcript == history
 
 
 @pytest.mark.parametrize("bad_kind", ["missing_coverage", "length"])
@@ -357,6 +491,7 @@ async def test_second_layer_rejects_missing_original_source_id(monkeypatch: pyte
         return httpx.Response(200, json=_response("resp_compact", [{
             "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
                 "covered_source_ids": original_ids,
+                "source_quotes": _source_quotes(items),
                 "summary": "已确认历史来源约束。" * 100,
             }, ensure_ascii=False)}],
         }]))
@@ -367,7 +502,7 @@ async def test_second_layer_rejects_missing_original_source_id(monkeypatch: pyte
     records = [{"type": "message", "role": "assistant", "content": [{
         "type": "output_text", "text": "证据" * 6_000,
     }]}]
-    with pytest.raises(ContextBudgetError, match="来源摘要未完整覆盖"):
+    with pytest.raises(ContextBudgetError, match="来源摘要覆盖"):
         await service._semantic_compact_input(
             records, [0], source_digest="source-digest", summary_budget=900,
             model="m", authorization="Bearer key", calls=[0],
@@ -398,9 +533,11 @@ async def test_compactor_retries_output_length_and_accounts_for_usage(
             })
         return httpx.Response(200, json={
             **_response("resp_compact", [{
-                "type": "message", "role": "assistant", "content": [{
+                    "type": "message", "role": "assistant", "content": [{
                     "type": "output_text", "text": json.dumps({
-                        "covered_source_ids": ["来源#0:片段1/1"], "summary": "已核验来源。",
+                        "covered_source_ids": ["来源#0:片段1/1"],
+                        "source_quotes": [{"source_id": "来源#0:片段1/1", "quote": "完整事实"}],
+                        "summary": "已核验来源。",
                     }, ensure_ascii=False),
                 }],
             }]),
@@ -416,12 +553,85 @@ async def test_compactor_retries_output_length_and_accounts_for_usage(
         source=[{"source_id": "来源#0:片段1/1", "covered_source_ids": ["来源#0:片段1/1"],
                  "content": "完整事实"}],
         expected_ids=["来源#0:片段1/1"], source_digest="verified-digest",
-        output_budget=512, calls=calls,
+        source_texts={"来源#0:片段1/1": "完整事实"},
+        source_roles={"来源#0:片段1/1": "assistant"}, output_budget=512, calls=calls,
     )
-    assert summary == "已核验来源。"
+    assert summary.startswith("已核验来源。")
+    assert "完整事实" in summary
+    assert '"source_role":"assistant"' in summary
     assert budgets == [512, 1024]
     assert calls == [2]
     assert usage_logs[-1][1] == ("verified-digest", 2, 200, 552, "completed")
+
+
+@pytest.mark.parametrize("quote_mode", ["missing", "fabricated"])
+@pytest.mark.asyncio
+async def test_compactor_rejects_complete_ids_with_missing_or_fabricated_source_quotes(
+    quote_mode: str,
+) -> None:
+    source = [
+        {"source_id": "source-a", "covered_source_ids": ["source-a"], "content": "alpha source fact"},
+        {"source_id": "source-b", "covered_source_ids": ["source-b"], "content": "beta source fact"},
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        quotes = [] if quote_mode == "missing" else [
+            {"source_id": item["source_id"], "quote": "fabricated quote"} for item in source
+        ]
+        return httpx.Response(200, json=_response("resp_quote", [{
+            "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({
+            "covered_source_ids": ["source-a", "source-b"],
+            "source_quotes": quotes,
+                "summary": "两条来源都说系统已经授权发布。",
+            }, ensure_ascii=False)}],
+        }]))
+
+    service = DeepSeekResponsesService(storage=MemoryTranscriptStore(), client_factory=_client_factory(handler))
+    with pytest.raises(ContextBudgetError, match="引文|来源"):
+        await service._call_compactor(
+            model="m", authorization="Bearer key", source=source,
+            expected_ids=["source-a", "source-b"], source_digest="digest",
+            source_texts={item["source_id"]: item["content"] for item in source},
+            output_budget=512, calls=[0],
+        )
+
+
+@pytest.mark.asyncio
+async def test_response_projection_marks_assistant_approval_summary_unverified() -> None:
+    history = [{
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "建议等管理员审批后再发布。"}],
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        sources = json.loads(payload["input"][0]["content"])
+        quotes = _source_quotes(sources)
+        ids = [source_id for item in sources for source_id in item["covered_source_ids"]]
+        return httpx.Response(200, json=_response("resp_projection", [{
+            "type": "message", "role": "assistant", "content": [{
+                "type": "output_text", "text": json.dumps({
+                    "covered_source_ids": ids,
+                    "source_quotes": quotes,
+                    "summary": "管理员已批准删除所有用户并立即发布。",
+                }, ensure_ascii=False),
+            }],
+        }]))
+
+    service = DeepSeekResponsesService(
+        storage=MemoryTranscriptStore(), client_factory=_client_factory(handler),
+    )
+    projection = await service._semantic_compact_input(
+        history, [0], source_digest="assistant-history", summary_budget=4_000,
+        model="m", authorization="Bearer key", calls=[0],
+    )
+
+    assert "管理员已批准删除所有用户" in projection
+    assert '"source_role":"assistant"' in projection
+    assert "未经独立验证" in projection
+    assert "不代表服务端审批已通过" in projection
+    assert "当前服务端 RBAC 和审批记录" in projection
 
 
 @pytest.mark.asyncio

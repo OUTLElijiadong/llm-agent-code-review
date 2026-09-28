@@ -13,7 +13,6 @@ import pytest
 from app.agents.source_context import SourceContextError, compact_source_context
 from app.services.deepseek_responses_runtime import (
     COMPLETED,
-    FAILED,
     DeepSeekResponsesRuntime,
     InMemoryCheckpointStore,
     compact_transcript,
@@ -50,6 +49,15 @@ def _batch_ids(message: str) -> list[str]:
     return json.loads(match.group(1))
 
 
+def _source_quotes(message: str) -> list[dict[str, object]]:
+    payload = json.loads(message.split("原始材料:\n", 1)[1])
+    entries = payload if isinstance(payload, list) else [payload]
+    return [
+        {"source_id": item["source_id"], "quotes": [(item.get("text") or item.get("summary"))[:16]]}
+        for item in entries
+    ]
+
+
 def test_compacted_history_remains_user_priority_data() -> None:
     transcript = [{"role": "user", "content": "核查本项目"}]
     transcript.extend({"role": "user", "content": "历史消息" + "甲" * 100} for _ in range(10))
@@ -79,9 +87,15 @@ def test_two_layer_source_compaction_preserves_head_middle_correction_and_tail()
                 summary = "；".join(_FACTS[0:1] if index == 0 else _FACTS[1:3] if index == 1 else _FACTS[3:])
             else:
                 summary = "；".join(_FACTS)
-            return SimpleNamespace(success=True, data={"covered_source_ids": covered, "summary": summary})
+            return SimpleNamespace(success=True, data={
+                "covered_source_ids": covered, "source_quotes": _source_quotes(message),
+                "summary": summary,
+            })
 
-    result = compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=450)
+    with pytest.raises(SourceContextError, match="超过模型预算"):
+        compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=500)
+    calls.clear()
+    result = compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=700)
     assert calls == [[source_id] for source_id in ids] + [ids]
     assert result["covered_source_ids"] == ids
     assert len(result["source_summaries"]) == 1
@@ -91,24 +105,24 @@ def test_two_layer_source_compaction_preserves_head_middle_correction_and_tail()
     assert all(chunk["sha256"][:12] in rendered for chunk in source["source_chunks"])
 
 
-@pytest.mark.xfail(strict=True, reason="正确来源 ID 和非空摘要不能检测模型遗漏的关键事实")
-def test_source_compaction_rejects_model_summary_that_omits_middle_permission_fact() -> None:
+def test_source_compaction_preserves_middle_permission_fact_when_model_summary_omits_it() -> None:
     source = _source_summary()
 
     class OmittingAgent:
         def call_json(self, message, **_kwargs):
             return SimpleNamespace(success=True, data={
                 "covered_source_ids": _batch_ids(message),
+                "source_quotes": _source_quotes(message),
                 "summary": "已阅读源码并了解项目。",
             })
 
-    with pytest.raises(SourceContextError, match="关键事实|语义|遗漏"):
-        compact_source_context(OmittingAgent(), source, ctx=None)
+    result = compact_source_context(OmittingAgent(), source, ctx=None)
+    rendered = json.dumps(result, ensure_ascii=False)
+    assert all(fact in rendered for fact in _FACTS)
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="来源标记齐全的模型摘要仍可能遗漏中段约束")
-async def test_runtime_rejects_complete_anchors_but_missing_middle_restriction() -> None:
+async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_anchors() -> None:
     middle_fact = "中段权限：不得跨账号读取聊天"
     transcript = [{"role": "user", "content": "审查目标：仅核查当前项目"}]
     transcript.extend({"role": "assistant", "content": f"历史讨论 {i}：" + "甲" * 80} for i in range(9))
@@ -124,8 +138,21 @@ async def test_runtime_rejects_complete_anchors_but_missing_middle_restriction()
             self.payloads.append(payload)
             if not payload["tools"]:
                 source = str(payload["input"][0]["content"])
-                anchors = sorted(set(re.findall(r"\[来源#\d+:片段\d+/\d+\]|\[压缩块#\d+\]", source)))
-                return _message_response("已阅读全部历史 " + " ".join(anchors))
+                anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+                spans = list(re.finditer(r"\[来源#\d+:片段\d+/\d+\]", source))
+                quotes = []
+                for index, (anchor, span) in enumerate(zip(anchors, spans)):
+                    end = spans[index + 1].start() if index + 1 < len(spans) else len(source)
+                    raw_piece = source[span.end():end].strip()
+                    raw_piece = re.sub(r"^\[来源角色=[^\]]+\]\s*", "", raw_piece)
+                    quote = raw_piece[:24]
+                    quotes.append({"source_id": anchor[1:-1], "quote": quote})
+                response = {
+                    "covered_source_ids": [anchor[1:-1] for anchor in anchors],
+                    "source_quotes": quotes,
+                    "summary": "已阅读全部历史 " + " ".join(anchors),
+                }
+                return _message_response(json.dumps(response, ensure_ascii=False))
             return _message_response("已完成审查")
 
     transport = OmittingTransport()
@@ -144,7 +171,13 @@ async def test_runtime_rejects_complete_anchors_but_missing_middle_restriction()
     assert any(middle_fact in json.dumps(payload, ensure_ascii=False) for payload in compact_payloads)
     model_payload = transport.payloads[-1]
     final_input = json.dumps(model_payload["input"], ensure_ascii=False)
-    assert result.status == FAILED or (result.status == COMPLETED and middle_fact in final_input)
+    projected_summary = model_payload["input"][0]["content"][0]["text"]
+    assert result.status == COMPLETED
+    assert middle_fact in final_input
+    assert '"source_role":"user"' in projected_summary
+    assert '"source_role":"assistant"' in projected_summary
+    assert "来源角色与授权边界" in final_input
+    assert "唯一授权依据" in final_input
 
 
 def _message_response(text: str) -> dict:

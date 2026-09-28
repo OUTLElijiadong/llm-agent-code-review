@@ -99,10 +99,12 @@ def test_migration_036_upgrade_and_downgrade_on_sqlite() -> None:
         _run_with_operations(module, conn, module.upgrade)
         for table, expected in _INDEXES.items():
             assert expected <= table_indexes(conn, table)
-        count = sum(
-            row[1] == "ix_sandbox_env_status_update"
-            for row in conn.execute(sa.text('PRAGMA index_list("sandbox_environment")'))
+        index_result = conn.execute(
+            sa.text('PRAGMA index_list("sandbox_environment")')
         )
+        index_rows = index_result.fetchall()
+        index_result.close()
+        count = sum(row[1] == "ix_sandbox_env_status_update" for row in index_rows)
         assert count == 1
 
         _run_with_operations(module, conn, module.downgrade)

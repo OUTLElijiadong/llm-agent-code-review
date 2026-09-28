@@ -185,14 +185,22 @@ def test_large_evidence_is_summarized_by_complete_source_chunks(monkeypatch) -> 
     compressed = [user for system, user in calls if "证据压缩 Agent" in system]
     assert len(compressed) >= 3
     report_input = [user for system, user in calls if "报告 Agent" in system][0]
+    report_system = [system for system, user in calls if "报告 Agent" in system][0]
     assert "LATE_SOURCE" in report_input
     assert "source=evidence:" in report_input
     assert "sha256=" in report_input
+    assert "未独立验证" in report_system
+    assert "不得把压缩摘要单独作为已确认" in report_system
+    assert "不得编造未保留的代码行" in report_system
+    assert "每项候选必须附对应来源 ID 和直接相关的原文锚点" in report_system
+    assert "均为待复核候选，不能视为已确认" in result.data["report_md"]
+    assert "不得为了格式伪造代码或 POC" in report_system
 
 
 @pytest.mark.parametrize("summary", [
     {"summary": "摘要", "anchors": ["not-in-source"], "coverage_complete": True},
     {"summary": "摘要", "anchors": ["x"], "coverage_complete": False},
+    {"summary": "与来源无关的任意断言", "anchors": ["x"], "coverage_complete": True},
 ])
 def test_evidence_compaction_rejects_unverified_or_incomplete_chunks(monkeypatch, summary) -> None:
     """压缩模型的无源引文或缺失声明应阻止报告成功。"""
@@ -209,6 +217,27 @@ def test_evidence_compaction_rejects_unverified_or_incomplete_chunks(monkeypatch
 
     assert result.success is False
     assert result.failure_kind in {"invalid_schema", "coverage_incomplete"}
+
+
+def test_compressed_evidence_is_labeled_as_unverified_projection(monkeypatch) -> None:
+    """原文锚点只证明字串存在；压缩摘要不能被后续 Agent 当作确认事实。"""
+    agent = _agent(monkeypatch)
+
+    def compact(system, user, ctx=None, max_tokens=None):
+        source = user.split("原始片段:\n", 1)[1]
+        quote = source[-40:]
+        return AgentResult(success=True, data=json.dumps({
+            "summary": "已确认存在可利用的 SQL 注入漏洞。",
+            "anchors": [quote], "coverage_complete": True,
+        }, ensure_ascii=False), finish_reason="stop")
+
+    monkeypatch.setattr(agent, "_role_call", compact)
+    result = agent._compact_evidence("x" * 61_000, None)
+
+    assert result.success is True
+    assert "未独立验证" in result.data["text"]
+    assert "锚点只证明原文中存在该字串" in result.data["text"]
+    assert "已确认存在可利用的 SQL 注入漏洞" in result.data["text"]
 
 
 def test_evidence_over_batch_budget_fails_before_any_model_call(monkeypatch) -> None:

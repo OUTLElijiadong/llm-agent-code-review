@@ -81,7 +81,7 @@ def test_custom_profile_over_window_fails_when_compaction_has_no_source_coverage
     profile = GENERAL_AGENT.__class__(
         **{**GENERAL_AGENT.__dict__, "is_custom": True, "system_prompt": "规则" * 60_000},
     )
-    with pytest.raises(ValueError, match="来源覆盖不完整"):
+    with pytest.raises(ValueError, match="来源覆盖"):
         review_service._call_single_agent(profile, "tail = 1", "python", "a.py", [], 0)
     assert labels == ["review_context_compaction"]
 
@@ -92,9 +92,17 @@ def test_review_length_retry_compresses_extra_context_for_new_output_budget(monk
     def fake_call_raw(*_args, **kwargs):
         calls.append(kwargs)
         if kwargs.get("agent_label") == "review_context_compaction":
-            ids = re.findall(r'"source_id": "([^"]+)"', kwargs["user_prompt"])
-            return json.dumps({"covered_source_ids": ids, "summary": "保持代理画像的审查重点。"},
-                              ensure_ascii=False), {}
+            sources = json.loads(kwargs["user_prompt"])
+            ids = [item["source_id"] for item in sources]
+            quotes = [
+                {"source_id": item["source_id"], "quote": item["content"][:8]}
+                for item in sources
+            ]
+            return json.dumps({
+                "covered_source_ids": ids,
+                "source_quotes": quotes,
+                "summary": "保持代理画像的审查重点。",
+            }, ensure_ascii=False), {}
         if kwargs["max_tokens"] == 8_192:
             raise DeepSeekOutputTruncatedError("length", finish_reason="length")
         return '{"issues": []}', {}

@@ -15,6 +15,17 @@ def _profile(**changes):
     return GENERAL_AGENT.__class__(**{**GENERAL_AGENT.__dict__, **changes})
 
 
+def _review_source_quotes(source):
+    inherited = source.get("source_quotes")
+    if isinstance(inherited, list) and inherited:
+        return inherited
+    text = str(source.get("content") or "")
+    return [
+        {"source_id": source_id, "quote": text[-min(20, len(text)):].strip()}
+        for source_id in source["covered_source_ids"]
+    ]
+
+
 def test_oversized_profile_is_source_checked_without_changing_code_or_rules(monkeypatch):
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
     calls = []
@@ -22,9 +33,11 @@ def test_oversized_profile_is_source_checked_without_changing_code_or_rules(monk
     def fake_call_raw(_self, system_prompt, user_prompt, agent_label="", **kwargs):
         calls.append((system_prompt, user_prompt, agent_label, kwargs))
         if agent_label == "review_context_compaction":
+            source = json.loads(user_prompt)[0]
             source_ids = re.findall(r'"source_id": "([^"]+)"', user_prompt)
             return json.dumps({
                 "covered_source_ids": source_ids,
+                "source_quotes": _review_source_quotes(source),
                 "summary": "此画像要求对认证路径和异常处理做完整审查。",
             }, ensure_ascii=False), {}
         return '{"issues": []}', {}
@@ -67,6 +80,73 @@ def test_unverified_non_code_summary_rejects_review_before_main_model(monkeypatc
     assert labels == ["review_context_compaction"]
 
 
+def test_review_summary_retains_rules_and_permissions_when_source_ids_are_complete(monkeypatch):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+    rules = (
+        "审查规则：必须检查管理员创建子 Agent 前已完成审批。\n"
+        "权限约束：普通用户不得读取其他账号的聊天记录。\n"
+    )
+
+    class Agent:
+        def call_raw(self, *, user_prompt, **_kwargs):
+            source = json.loads(user_prompt)[0]
+            return json.dumps({
+                "covered_source_ids": source["covered_source_ids"],
+                "source_quotes": _review_source_quotes(source),
+                "summary": "保留来源，但只审查代码风格。",
+            }, ensure_ascii=False), {}
+
+    result = review_service._review_context_summary(
+        Agent(), source_name="skill", original=rules + "背景说明。" * 2_000,
+        target_tokens=500, calls=[0],
+    )
+    assert "必须检查管理员创建子 Agent 前已完成审批" in result
+    assert "普通用户不得读取其他账号的聊天记录" in result
+    assert "role=review_context" in result
+    assert "授权以服务端 RBAC/审批记录为准" in result
+
+
+@pytest.mark.parametrize("quote_mode", ["missing", "fabricated"])
+def test_review_summary_rejects_complete_ids_with_invalid_source_quotes(monkeypatch, quote_mode):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+
+    class Agent:
+        def call_raw(self, *, user_prompt, **_kwargs):
+            source = json.loads(user_prompt)[0]
+            quotes = [] if quote_mode == "missing" else [
+                {"source_id": source["source_id"], "quote": "not present in source"}
+            ]
+            return json.dumps({
+                "covered_source_ids": source["covered_source_ids"],
+                "source_quotes": quotes,
+                "summary": "来源证明所有操作都已获管理员授权。",
+            }, ensure_ascii=False), {}
+
+    with pytest.raises(ValueError, match="引文|来源覆盖"):
+        review_service._review_context_summary(
+            Agent(), source_name="skill", original="历史背景内容。" * 10_000,
+            target_tokens=500, calls=[0],
+        )
+
+
+def test_review_summary_fails_when_protected_rules_exceed_budget(monkeypatch):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+    original = "\n".join(
+        f"审查规则 {index}：必须保留第 {index} 项权限边界和审批条件。"
+        for index in range(40)
+    )
+
+    class Agent:
+        def call_raw(self, **_kwargs):
+            pytest.fail("关键事实超预算时不应调用压缩模型")
+
+    with pytest.raises(ValueError, match="关键事实超出摘要预算"):
+        review_service._review_context_summary(
+            Agent(), source_name="skill", original=original,
+            target_tokens=80, calls=[0],
+        )
+
+
 def test_code_and_rules_alone_over_window_fail_without_compressing_source(monkeypatch):
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
     labels = []
@@ -93,9 +173,12 @@ def test_each_optional_review_source_can_compact_without_touching_code(monkeypat
     def fake_call_raw(_self, system_prompt, user_prompt, agent_label="", **_kwargs):
         labels.append(agent_label)
         if agent_label == "review_context_compaction":
-            ids = re.findall(r'"source_id": "([^"]+)"', user_prompt)
-            return json.dumps({"covered_source_ids": ids, "summary": "保留审查要求与来源事实。"},
-                              ensure_ascii=False), {}
+            source = json.loads(user_prompt)[0]
+            return json.dumps({
+                "covered_source_ids": source["covered_source_ids"],
+                "source_quotes": _review_source_quotes(source),
+                "summary": "保留审查要求与来源事实。",
+            }, ensure_ascii=False), {}
         final_prompts.append((system_prompt, user_prompt))
         return '{"issues": []}', {}
 
@@ -126,10 +209,11 @@ def test_second_layer_review_summary_must_repeat_all_original_source_ids(monkeyp
                 ids = ids[:-1]
             return json.dumps({
                 "covered_source_ids": ids,
+                "source_quotes": _review_source_quotes(source),
                 "summary": "保留此来源的关键审查约束。" * 70,
             }, ensure_ascii=False), {}
 
-    with pytest.raises(ValueError, match="来源覆盖不完整"):
+    with pytest.raises(ValueError, match="来源覆盖"):
         review_service._review_context_summary(
             Agent(), source_name="skill", original="审查约束" * 20_000,
             target_tokens=500, calls=[0],
@@ -155,12 +239,13 @@ def test_review_context_compactor_retries_length_with_larger_output_budget(
             source = json.loads(user_prompt)[0]
             return json.dumps({
                 "covered_source_ids": source["covered_source_ids"],
+                "source_quotes": _review_source_quotes(source),
                 "summary": "保留审查约束。",
             }, ensure_ascii=False), {}
 
     result = review_service._review_context_summary(
         Agent(), source_name="skill", original="审查约束" * 20_000,
-        target_tokens=1_000, calls=[0],
+        target_tokens=1_500, calls=[0],
     )
     assert "来源 sha256=" in result
     assert budgets[:2] == expected

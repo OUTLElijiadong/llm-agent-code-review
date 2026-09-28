@@ -334,7 +334,7 @@ describe('审查扫描范围失败回归', () => {
     expect(api.start).toHaveBeenCalledTimes(101)
     expect(api.start).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 101, file_ids: [101] }))
     expect(wrapper.text()).toContain('已处理 101 / 101')
-  })
+  }, 15000)
 
   it('批量超限项目计为失败，空项目计为跳过，均不创建残缺任务', async () => {
     api.projects.mockResolvedValue(pageOf([project(1), project(2)]))

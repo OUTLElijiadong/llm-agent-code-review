@@ -37,9 +37,15 @@ def _index_exists(conn, table: str, index_name: str) -> bool:
             sa.text(f"SHOW INDEX FROM `{table}` WHERE `Key_name` = :index_name"),
             {"index_name": index_name},
         )
-        return rows.first() is not None
+        try:
+            return rows.first() is not None
+        finally:
+            rows.close()
     rows = conn.execute(sa.text(f'PRAGMA index_list("{table}")'))
-    return any(row[1] == index_name for row in rows)
+    try:
+        return any(row[1] == index_name for row in rows)
+    finally:
+        rows.close()
 
 
 def upgrade() -> None:

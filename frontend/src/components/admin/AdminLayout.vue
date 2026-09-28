@@ -125,6 +125,7 @@ async function logout(): Promise<void> {
             {{ userStore.isSuperAdmin() ? '超级管理员' : '管理员' }}
           </el-tag>
           <el-button :icon="SwitchButton" @click="logout">退出</el-button>
+          <div id="admin-copilot-trigger-slot" class="admin-copilot-trigger-slot" aria-label="小菱入口"></div>
         </div>
       </header>
 
@@ -292,6 +293,8 @@ async function logout(): Promise<void> {
   color: var(--gray-600);
 }
 
+.admin-copilot-trigger-slot { display: none; }
+
 .admin-content {
   // 60px 副驾入口 + 24px 底距 + 16px 间隔，让页尾操作可滚动至入口上方。
   --assistant-action-clearance: calc(100px + env(safe-area-inset-bottom, 0px));
@@ -376,6 +379,16 @@ async function logout(): Promise<void> {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-copilot-trigger-slot {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 

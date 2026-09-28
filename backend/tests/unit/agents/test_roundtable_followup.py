@@ -1,6 +1,7 @@
 """圆桌正式结束后的五分钟追问、账号隔离与后台有序恢复。"""
 import asyncio
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -243,6 +244,40 @@ def test_followup_keeps_complete_source_history_when_it_fits(
     else:
         assert "检查鉴权" in prompts[0]
         assert "【来源 S0001-T1】" in prompts[0]
+
+
+def test_followup_compression_retains_earlier_user_constraints(monkeypatch: pytest.MonkeyPatch):
+    from app.ai import discussion_orchestrator as orchestrator
+
+    bus = DiscussionBus()
+    session = _completed(bus, "disc_followup_constraints")
+    bus.accept_user_input(
+        session.session_id,
+        "背景证据。" * 4_000 + "用户要求：必须先经管理员审批。普通用户不得读取其他账号聊天记录。",
+    )
+    bus.accept_user_input(session.session_id, "请按刚才的约束回答。")
+    monkeypatch.setattr(followup.settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(orchestrator, "_build_discussion_agents", lambda *_args: (object(), {}))
+    final_prompts = []
+
+    def model(*_args, **kwargs):
+        if kwargs.get("json_mode"):
+            entries = [
+                {"source_id": source_id, "summary": "讨论了代码风格", "quotes": [body[:8]]}
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                )
+            ]
+            return json.dumps({"entries": entries}, ensure_ascii=False), {}
+        final_prompts.append(kwargs["user_prompt"])
+        return "回答完成。", {}
+
+    monkeypatch.setattr(orchestrator, "_call_raw_for_task", model)
+    assert followup._answer(session, session.turns, session.turns[-1]) == "回答完成。"
+    assert len(final_prompts) == 1
+    assert "必须先经管理员审批" in final_prompts[0]
+    assert "普通用户不得读取其他账号聊天记录" in final_prompts[0]
 
 
 def test_followup_compresses_only_when_higher_retry_budget_requires_it(

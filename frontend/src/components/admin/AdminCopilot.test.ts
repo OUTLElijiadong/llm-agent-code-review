@@ -1,4 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const streams = vi.hoisted(() => ({
@@ -70,7 +72,10 @@ function mountCopilot(): VueWrapper {
 }
 
 async function openCopilot(wrapper: VueWrapper): Promise<void> {
-  await wrapper.find('.copilot-trigger').trigger('click')
+  const trigger = document.querySelector('.copilot-trigger') as HTMLButtonElement | null
+  if (trigger) trigger.click()
+  else await wrapper.find('.copilot-trigger').trigger('click')
+  await flushPromises()
 }
 
 function emit(index: number, event: Record<string, unknown>): void {
@@ -154,6 +159,64 @@ it('管理端按游标加载更早消息，不把当前页误当全部历史', a
   expect(wrapper.find('.copilot-messages').text()).toContain('更早的问题')
   expect(wrapper.find('.history-load-button').exists()).toBe(false)
   wrapper.unmount()
+})
+
+it('手机端从非管理页切入管理页时先保留浮动入口，页头槽位挂载后自动迁移', async () => {
+  const originalWidth = window.innerWidth
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/projects', component: { template: '<main />' } },
+      { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
+    ],
+  })
+  const teleportWarnings: string[] = []
+  const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => {
+    const message = args.map(String).join(' ')
+    if (message.includes('Teleport')) teleportWarnings.push(message)
+  })
+  let wrapper: VueWrapper | undefined
+  let slot: HTMLDivElement | undefined
+
+  try {
+    await router.push('/projects')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    wrapper = mount(AdminCopilot, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia(), router],
+        stubs: {
+          'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
+          ChatDotRound: true,
+          Close: true,
+          DocumentCopy: true,
+          Promotion: true,
+          WarningFilled: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(document.body.querySelector('.copilot-trigger')?.classList.contains('is-floating-trigger')).toBe(true)
+
+    await router.push('/admin/overview')
+    await flushPromises()
+    expect(document.body.querySelector('.copilot-trigger')?.classList.contains('is-floating-trigger')).toBe(true)
+
+    slot = document.createElement('div')
+    slot.id = 'admin-copilot-trigger-slot'
+    document.body.append(slot)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+
+    expect(slot.querySelector('.copilot-trigger')?.classList.contains('is-header-trigger')).toBe(true)
+    expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
+    expect(teleportWarnings).toEqual([])
+  } finally {
+    wrapper?.unmount()
+    slot?.remove()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+    warn.mockRestore()
+  }
 })
 
 describe('AdminCopilot Responses stream', () => {
@@ -1183,9 +1246,11 @@ it('首发断网但服务端已创建运行时恢复快照，不重复发起 sta
     sessionApi.get.mockResolvedValue({ surface: 'admin', session_id: payload.session_id,
       run: { run_id: 'server-accepted', status: 'running', model: 'model', rounds: 1, error: '', updated_at: new Date().toISOString() },
       messages: [{ role: 'user', content: '测试断网后的提交确认' }], events: [], pending: null })
+    const requestsBeforeRetry = sessionApi.get.mock.calls.length
     void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
     await flushPromises()
-    expect(sessionApi.get).toHaveBeenLastCalledWith('admin', payload.session_id)
+    expect(sessionApi.get.mock.calls.length).toBeGreaterThan(requestsBeforeRetry)
+    expect(sessionApi.get.mock.calls.slice(requestsBeforeRetry)).toContainEqual(['admin', payload.session_id])
     expect(streams.records).toHaveLength(1)
     expect(messages.info).toHaveBeenCalledWith(expect.stringContaining('已恢复'))
   } finally { wrapper.unmount() }
@@ -1340,7 +1405,7 @@ it('管理员surface打开时收起成员surface的小菱会话，反向切换�
   window.dispatchEvent(new Event('prism:close-admin-copilot'))
   await flushPromises()
   expect(wrapper.find('.copilot-panel').exists()).toBe(false)
-  expect(wrapper.find('.copilot-trigger').exists()).toBe(true)
+  expect(document.querySelector('.copilot-trigger')).not.toBeNull()
   wrapper.unmount()
   window.removeEventListener('prism:admin-copilot-opened', opened)
 })

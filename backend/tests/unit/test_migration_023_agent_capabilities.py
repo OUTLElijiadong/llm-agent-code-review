@@ -66,4 +66,7 @@ def test_migration_023_mysql_mcp_ddl_compiles_with_longtext() -> None:
     assert "BIGINT NOT NULL AUTO_INCREMENT" in ddl
     assert "INPUT_SCHEMA_JSON LONGTEXT NOT NULL" in " ".join(ddl.split())
     normalized = " ".join(ddl.split())
-    assert "DEFAULT NOW()" in normalized or "DEFAULT CURRENT_TIMESTAMP" in normalized
+    assert any(
+        default in normalized
+        for default in ("DEFAULT NOW()", "DEFAULT (NOW())", "DEFAULT CURRENT_TIMESTAMP")
+    )

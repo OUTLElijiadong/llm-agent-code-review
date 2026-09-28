@@ -129,7 +129,7 @@ def test_autogenerate_does_not_propose_dropping_existing_orm_tables():
                 import_module(f'app.models.{source.stem}')
         from app.core.database import Base
         def memory_only_connect(engine, *args, **kwargs):
-            assert str(engine.url) == 'sqlite:///:memory:'
+            assert engine.dialect.name == 'sqlite' and engine.url.database == ':memory:'
             return original_connect(engine, *args, **kwargs)
         Engine.connect = memory_only_connect
         engine = create_engine('sqlite:///:memory:')

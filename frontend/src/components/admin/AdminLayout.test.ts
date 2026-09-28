@@ -32,3 +32,11 @@ describe('管理员底部操作区避让副驾入口', () => {
     expect(content).not.toMatch(/(?:^|;)\s*padding(?:-bottom)?\s*:/)
   })
 })
+
+describe('管理员手机端小菱入口', () => {
+  it('入口有独立头部槽位，避免固定浮窗盖住运行卡片', () => {
+    expect(source).toContain('id="admin-copilot-trigger-slot"')
+    expect(styles).toContain('@media (max-width: 520px)')
+    expect(styles).toMatch(/\.admin-copilot-trigger-slot\s*\{[^}]*display:\s*grid;[^}]*min-height:\s*44px;/s)
+  })
+})

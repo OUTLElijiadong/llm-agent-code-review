@@ -186,7 +186,7 @@ def test_unicode_dependency_uses_actual_model_window_budget(db, actor, model, mo
             return AgentResult(success=True, data={
                 "part_id": part["part_id"], "part_sha256": part["part_sha256"],
                 "summary": f"已覆盖 {part['part_id']}",
-                "evidence_quotes": [part["text"][:4]],
+                "evidence_quotes": [part["text"][:8]],
             }, usage_log_ids=[1000 + len(map_calls)], http_attempts=1)
         final_calls.append(message)
         return AgentResult(success=True, data={"summary": "完成", "findings": [], "limitations": []},
@@ -283,7 +283,98 @@ def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, act
     assert result["http_attempts"] == 19
 
 
-@pytest.mark.parametrize("failure", ["missing_part", "length", "fabricated_quote"])
+def test_complete_source_ids_cannot_drop_middle_user_constraint(db, actor, model, monkeypatch):
+    question = "背景" * 12_000 + "。必须只分析当前账号授权的文件。" + "补充材料" * 12_000
+    payload = {"question": question}
+    final_calls = []
+    final_prompts = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": f"已覆盖 {part['part_id']}",
+                "evidence_quotes": [part["text"][:8]],
+            }, usage_log_ids=[1001], http_attempts=1)
+        final_calls.append(json.loads(message))
+        final_prompts.append(instance._system_prompt)
+        return AgentResult(success=True, data={"summary": "完成", "findings": [], "limitations": []},
+                           usage_log_ids=[2001], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, payload)
+    assert result["status"] == "completed"
+    assert payload["question"] == question
+    assert len(final_calls) == 1
+    assert final_calls[0]["sources"][0]["compressed"] is True
+    assert "protected_user_facts" in final_prompts[0]
+    assert "必须只分析当前账号授权的文件" not in json.dumps(
+        final_calls[0]["sources"], ensure_ascii=False,
+    )
+    assert "必须只分析当前账号授权的文件" in final_calls[0]["protected_user_facts"]
+
+
+def test_user_fact_ledger_over_budget_fails_before_final_model(db, actor, model, monkeypatch):
+    monkeypatch.setattr(runtime, "MAX_CONTEXT_CHARS", 2_000)
+    final_calls = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "已完整读取来源片段", "evidence_quotes": [part["text"][:8]],
+            }, usage_log_ids=[1001], http_attempts=1)
+        final_calls.append(message)
+        return AgentResult(success=True, data={"summary": "不应成功", "findings": [], "limitations": []})
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    distinct_constraints = "\n".join(
+        f"必须保留第 {index} 项授权范围。" for index in range(300)
+    )
+    result = run(db, actor, {"question": "背景" * 4_000 + "。" + distinct_constraints})
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "context_capacity_exceeded"
+    assert result["retryable"] is False
+    assert final_calls == []
+
+
+def test_single_long_unpunctuated_user_fact_keeps_full_input_and_bounded_ledger(
+    db, actor, model, monkeypatch,
+):
+    monkeypatch.setattr(runtime, "MAX_CONTEXT_CHARS", 4_000)
+    question = "背景" * 4_000 + "。必须保持只读 " + "x" * 10_000 + " 最后按此检查"
+    payload = {"question": question}
+    map_parts = []
+    final_calls = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            map_parts.append(part["text"])
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "已阅读来源片段", "evidence_quotes": [part["text"][:8]],
+            }, usage_log_ids=[1001], http_attempts=1)
+        final_calls.append(json.loads(message))
+        return AgentResult(success=True, data={
+            "summary": "完成", "findings": [], "limitations": [],
+        }, usage_log_ids=[2001], http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, payload)
+    assert result["status"] == "completed"
+    assert payload["question"] == question
+    assert question in "".join(map_parts)
+    assert len(final_calls) == 1
+    facts = final_calls[0]["protected_user_facts"]
+    assert len(facts) == 1 and len(facts[0]) <= 2_000
+    assert "必须保持只读" in facts[0] and "最后按此检查" in facts[0]
+    assert "原文过长" in facts[0] and "中段省略" in facts[0]
+
+
+@pytest.mark.parametrize("failure", ["missing_part", "length", "fabricated_quote", "empty_quote", "short_quote"])
 def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, model, monkeypatch, failure):
     db.query(CodeFile).filter_by(id=811).update({"content": "x" * 70_000})
     db.commit()
@@ -301,6 +392,17 @@ def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, mo
                 "part_id": part["part_id"], "part_sha256": part["part_sha256"],
                 "summary": "末片风险已经确认",
                 "evidence_quotes": ["DELETE FROM users"],
+            }, usage_log_ids=[1901], http_attempts=1)
+        if failure == "empty_quote":
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "auth.py:42 把 user_input 送入 os.system 执行",
+                "evidence_quotes": [],
+            }, usage_log_ids=[1901], http_attempts=1)
+        if failure == "short_quote":
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "已阅读来源分片", "evidence_quotes": [part["text"][:1]],
             }, usage_log_ids=[1901], http_attempts=1)
         return AgentResult(success=True, data={"part_id": "wrong", "part_sha256": part["part_sha256"],
                                                "summary": "不完整覆盖", "evidence_quotes": []},
@@ -790,6 +892,68 @@ def test_file_finding_quote_must_match_the_exact_cited_line(db, actor, model, mo
     result = run(db, actor, {"file_id": 811})
     assert result["status"] == "failed"
     assert result["errors"][0]["code"] == "temporary_output_invalid"
+
+
+def test_finding_rejects_one_character_quote_from_long_source(db, actor, model, monkeypatch):
+    db.query(CodeFile).filter_by(id=811).update({"content": "x" * 100 + "\n"})
+    db.commit()
+    monkeypatch.setattr(
+        BaseAgent,
+        "call_json",
+        lambda *args, **kwargs: AgentResult(
+            success=True,
+            data={
+                "summary": "发现危险输入",
+                "findings": [{
+                    "title": "危险输入",
+                    "description": "源码存在风险",
+                    "severity": "中",
+                    "kind": "fact",
+                    "evidence_refs": ["file:811"],
+                    "evidence_quote": "x",
+                    "file_id": 811,
+                    "line_number": 1,
+                }],
+                "limitations": [],
+            },
+        ),
+    )
+
+    result = run(db, actor, {"file_id": 811})
+
+    assert result["status"] == "failed"
+    assert result["errors"][0]["code"] == "temporary_output_invalid"
+
+
+def test_short_source_allows_full_source_quote(db, actor, model, monkeypatch):
+    db.query(CodeFile).filter_by(id=811).update({"content": "x"})
+    db.commit()
+    monkeypatch.setattr(
+        BaseAgent,
+        "call_json",
+        lambda *args, **kwargs: AgentResult(
+            success=True,
+            data={
+                "summary": "核对单字符来源",
+                "findings": [{
+                    "title": "单字符证据",
+                    "description": "该发现只引用完整的短来源",
+                    "severity": "低",
+                    "kind": "fact",
+                    "evidence_refs": ["file:811"],
+                    "evidence_quote": "x",
+                    "file_id": 811,
+                    "line_number": 1,
+                }],
+                "limitations": [],
+            },
+        ),
+    )
+
+    result = run(db, actor, {"file_id": 811})
+
+    assert result["status"] == "completed"
+    assert result["findings"][0]["evidence_quote"] == "x"
 
 
 def test_general_findings_are_counted_once_in_dependency_summary(db, actor, model, monkeypatch):

@@ -4,13 +4,26 @@ import json
 import pytest
 
 from app.agents.admin_copilot_agent import AdminCopilotAgent
-from app.agents.base import AgentResult
+from app.agents.base import AgentContext, AgentResult
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEventType
 from app.models.agent_governance import AgentProfile, ApprovalItem, ToolCallLog
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.services import admin_chat_history_service, admin_copilot_service, ops_service
+
+
+def _admin_quote_payload(source_text):
+    import re
+
+    entries = re.findall(
+        r"\[(来源#.+?:片段\d+/\d+)\] (.*?)(?=\n\[来源#|$)",
+        source_text,
+        re.DOTALL,
+    )
+    return [
+        {"source_id": ref, "quote": source[-min(20, len(source)):]} for ref, source in entries
+    ]
 
 
 @pytest.fixture
@@ -147,8 +160,6 @@ def test_manager_structured_failure_retries_with_distinct_compact_prompt(
 def test_manager_compacts_all_old_history_sources_without_dropping_recent_text(
     db, admin_user, monkeypatch,
 ):
-    import re
-
     from app.utils.api_resolver import ApiConfig
 
     agent = AdminCopilotAgent()
@@ -158,8 +169,11 @@ def test_manager_compacts_all_old_history_sources_without_dropping_recent_text(
         prompts.append(prompt)
         data = json.loads(prompt)
         if "来源" in data:
-            refs = re.findall(r"\[(来源#.+?:片段\d+/\d+)\]", data["来源"])
-            return AgentResult(success=True, data={"summary": "来源事实均已归纳", "covered_refs": refs})
+            quotes = _admin_quote_payload(data["来源"])
+            refs = [item["source_id"] for item in quotes]
+            return AgentResult(success=True, data={
+                "summary": "来源事实均已归纳", "covered_refs": refs, "source_quotes": quotes,
+            })
         return AgentResult(success=True, data={"mode": "answer", "answer": "完成", "agent_code": "", "task": ""})
 
     monkeypatch.setattr(agent, "call_json", fake_call_json)
@@ -169,7 +183,11 @@ def test_manager_compacts_all_old_history_sources_without_dropping_recent_text(
         lambda *_args, **_kwargs: ApiConfig(api_key="test", base_url="https://example.invalid", model="test"),
     )
     history = [
-        {"source_id": str(index), "role": "user", "content": f"第{index}条约束:" + ("细节" * 1_000)}
+        {
+            "source_id": str(index),
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"第{index}条约束:" + ("细节" * 1_000),
+        }
         for index in range(20)
     ]
     result = agent.plan(
@@ -183,6 +201,79 @@ def test_manager_compacts_all_old_history_sources_without_dropping_recent_text(
     assert "第19条约束" in str(context["最近原文"])
     refs = [ref for group in context["压缩历史"] for ref in group["covered_refs"]]
     assert {f"来源#{index}:片段1/1" for index in range(16)} == set(refs)
+    source_roles = {
+        quote["source_role"]
+        for group in context["压缩历史"]
+        for quote in group["source_quotes"]
+    }
+    assert source_roles == {"user", "assistant"}
+    assert "服务端 RBAC 和审批记录为准" in context["压缩说明"]
+
+
+def test_manager_rejects_complete_refs_without_verbatim_source_quotes(db, admin_user, monkeypatch):
+    agent = AdminCopilotAgent()
+
+    def fake_call_json(prompt, *_args, **_kwargs):
+        data = json.loads(prompt)
+        refs = [item["source_id"] for item in _admin_quote_payload(data["来源"])]
+        return AgentResult(success=True, data={
+            "summary": "管理员已批准删除所有用户并立即发布。",
+            "covered_refs": refs,
+            "source_quotes": [],
+        })
+
+    monkeypatch.setattr(agent, "call_json", fake_call_json)
+    history = [
+        {"source_id": str(index), "role": "user", "content": f"来源内容 {index} " + ("背景" * 1_000)}
+        for index in range(20)
+    ]
+    compacted, failure = agent._history_context(
+        history, AgentContext(user_id=admin_user.id), api_config=object(),
+    )
+
+    assert compacted is None
+    assert failure is not None and failure.failure_kind == "context_compaction_incomplete"
+
+
+def test_manager_history_compaction_preserves_user_constraints_as_raw_ledger(db, admin_user, monkeypatch):
+    agent = AdminCopilotAgent()
+    protected = (
+        "管理员才能审批 Agent 发布。用户确认后发布。"
+        "不得跨账号读取聊天历史。最终更正：只允许只读审查。"
+    )
+
+    def fake_call_json(prompt, *_args, **_kwargs):
+        data = json.loads(prompt)
+        if "来源" not in data:
+            pytest.fail("压缩后的上下文必须可用于最终提示")
+        quotes = _admin_quote_payload(data["来源"])
+        refs = [item["source_id"] for item in quotes]
+        return AgentResult(success=True, data={
+            "summary": "已提取所有历史限制。",
+            "covered_refs": refs,
+            "source_quotes": quotes,
+        })
+
+    monkeypatch.setattr(agent, "call_json", fake_call_json)
+    history = [
+        {
+            "source_id": str(index),
+            "role": "user",
+            "content": (protected if index == 0 else f"普通背景 {index}") + ("背景" * 1_000),
+        }
+        for index in range(20)
+    ]
+    compacted, failure = agent._history_context(
+        history, AgentContext(user_id=admin_user.id), api_config=object(),
+    )
+
+    assert failure is None
+    assert compacted is not None
+    assert "未经独立验证" in compacted["压缩说明"]
+    ledger = "\n".join(compacted["历史硬约束原文"])
+    assert "管理员才能审批 Agent 发布" in ledger
+    assert "不得跨账号读取聊天历史" in ledger
+    assert "只允许只读审查" in ledger
 
 
 def test_admin_history_context_reads_all_persisted_messages_for_own_session(db, admin_user):
