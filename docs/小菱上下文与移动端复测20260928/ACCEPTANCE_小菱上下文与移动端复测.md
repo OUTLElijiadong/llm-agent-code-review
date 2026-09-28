@@ -78,3 +78,29 @@
 - 生产 Safari 只重载并检查管理员工作台单一移动视口；本次不是全站设计规范逐屏验收。
 - v4.0.26 上第一轮压力脚本曾把成功回答追加到 checkpoint transcript 误当成输入被改写；修正为只比较原始输入前缀后，同一场景和混合角色场景均通过。首轮不用于负面产品结论或正式验收统计。
 - v4.0.27 首次部署因 Frontend Dockerfile 中 Node `--max-old-space-size=1536` 堆上限耗尽而自动回滚至 v4.0.26。随后候选将构建堆上限提高为可配置默认 `2048` MiB；生产主机单独构建约 103 秒、`vue-tsc` 与 Vite 均通过。再次运行正式 `deploy.sh all` 成功发布 v4.0.27。新备份 `/opt/code-review/backups/code_review_20260928T220502Z_e001ecc4e17f.sql.gz`，420 MiB，SHA-256 `42b9e4a855edb4e1da9856dbc3e2eb5bb1c27d616ef4b002d8a1f034b1807073`；隔离恢复通过（103 表、`058_roundtable_sessions`）。
+
+### v4.0.28 生产发布与真实模型重复复测（2026-09-29）
+
+- 发布提交 `6d7b44bac5dc404ca41dd82f3df2f471df8227d0`，版本 `4.0.28`。正式 `deploy.sh all` 于 2026-09-28 22:53:41 UTC 完成；Backend、Frontend 镜像同 SHA，Alembic `058_roundtable_sessions`。前端 `vue-tsc` 与 Vite 构建通过。
+- 发布前备份 `/opt/code-review/backups/code_review_20260928T224736Z_6d7b44bac5dc.sql.gz`，440,423,576 字节，SHA-256 `168c1a6ce2ce40ac39913af379cd90d0c04f3e73398c3b16b860586e6dea50a8`。正式发布门禁恢复验证 103 张表成功；部署后两次 `ops-check` 返回 `ok`，镜像/账本一致、服务 healthy、备份 gzip/hash 有效、HTTP→HTTPS 308、health 正常。最后巡检时间 2026-09-28 23:09:43 UTC，磁盘 82%、内存 45%。公网 `/`、`/login`、`/admin/operations?section=overview`、`/healthz`、`/readyz` 均为 HTTP 200。
+- 后端全量测试：`5371 passed, 5 skipped, 5 warnings`，496.73 秒；修改文件 Ruff、`compileall`、`git diff --check` 通过。定向 Responses Runtime 测试 `53 passed`。
+- 生产真实模型复测均在生产 Backend 容器内，经生产配置解析到 `deepseek-flash`，走原生 Responses SSE；检查点为 `InMemoryCheckpointStore`，工具执行器阻断一切调用，合成数据未写入聊天、任务或项目业务表。输入规模是平台保守估算值（非供应商 tokenizer 计数）；provider usage 为所有压缩请求与末轮应答累计值，不代表单次请求输入规模超过百万。
+
+| 复测样本 | 平台估算输入 | 最终运行 | Provider Responses | 累计 usage（输入/输出） | 覆盖与召回 |
+|---|---:|---|---:|---:|---|
+| 原失败场景，320 条 × 3,000 字符 user 历史 + 最终问题 | 1,920,095 tokens | completed；压缩请求 46 次 | 47，全部 completed | 1,118,307 / 25,357 tokens | 原始输入前缀不变；286 个来源标记、286 个唯一标记；早/中/晚锚点都在最终模型请求和回答中 |
+| 扩展样本，256 条 × 3,000 字符 user/assistant 交替历史 + 最终问题 | 1,536,234 tokens | completed；压缩请求 35 次 | 36，其中 33 completed、3 个 chunk 尝试 incomplete 后由拆块路径收敛 | 872,538 / 27,050 tokens | 原始输入前缀不变；222 个来源标记、222 个唯一标记；早/中/晚锚点都在最终模型请求和回答中 |
+
+每条早/中/晚锚点中，晚期消息仍在保留的近期原文里，不一定属于语义摘要；复核检查实际最终请求输入和答复均包含该锚点。第一次重复运行后，验收脚本曾错误地要求所有晚期锚点都必须落进摘要，因晚期内容正确保留在近期原文而触发脚本断言；运行本身已 completed，锚点也在最终回答中。修正为核对最终模型请求（摘要或保留的近期原文）后，原失败场景和混合角色场景再各跑一遍，以上重复结果全部满足验收。
+
+两组重复运行间曾收到 provider `incomplete / max_output_tokens` 响应；runtime 按完整来源集合递归拆块重试，最终任务均 `completed`，未把截断响应当成回答，也未裁掉历史前缀。部署版本不会证明 DeepSeek 的内部推理在语义层绝对无损；此次可核验结论限于：完整原始前缀仍保留、运行时所有来源标记唯一、预置的早/中/晚锚点进入最终实际模型请求并被正确召回。
+
+### v4.0.28 发布后真实移动端抽查
+
+- Safari 实际刷新生产站点，视口 `390×844`、2 倍像素比，登录态为超级管理员 `outle`；`/admin/operations?section=overview` 加载，运行总览、安全态势和 Agent 活跃数据返回。真实点击小菱入口后，管理员工作台抽屉正常展开，历史消息与输入区可见。当前轮未观察到 404。
+- 本轮只是管理员运行总览和小菱抽屉的一个移动视口抽查。审查员、普通账号以及全站逐页/逐控件布局、账号隔离、异常退出矩阵未在 v4.0.28 本轮重放，不作全站通过声明。
+
+## 最终状态与待办
+
+- 本次焦点项“Responses Runtime 超长输入截断后仍保全来源并完成压缩”已完成候选修复、全量后端回归、正式 v4.0.28 发布及生产模型重复复测。
+- 更大范围的用户目标仍未全部验收：其他 AI/Agent 独立压缩入口需逐入口映射并针对真实模型分别取证；admin/reviewer/user 生产账号矩阵、账号隔离、圆桌后台运行及结束后 5 分钟追问、黑白盒操作监督与高风险询问、异常退出和全站 404/移动布局仍按下方最终报告列为待办。
