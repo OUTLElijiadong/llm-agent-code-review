@@ -61,13 +61,20 @@
 - 独立本地隔离回归：`test_private_agent_account_isolation.py` 与 `test_private_audit_log_isolation.py` 共 `68 passed`，覆盖私人 SSE、澄清、WebSocket、圆桌会话和私密操作审计详情，不因管理员身份读取他人私人内容。该回归证明受测服务契约，不替代每个生产账号的全部页面/API矩阵。
 - 390×844 截图中的管理员页面与小菱对话未见横向溢出；长消息在气泡内换行并可滚动。此版本仅修后端，移动截图是单一页面的发布后抽查，不代表全站逐控件/全页面移动端验收。
 
-### v4.0.27 候选修复（测试中）
+### v4.0.27 生产发布与真实管理员复测
 
-针对上述实测的无证据架构推断，在主控通用指令中增加“用户限定只看当前会话且禁止工具时，不得从账号、surface、工具说明或一般权限规则推断后端架构/账号隔离；无本轮证据只说明未知”的边界，并新增 admin/user 两个 surface 的指令回归。定向套件 `14 passed`、Ruff、编译与 diff 检查通过。v4.0.27 全量后端结果、生产部署、同一 Safari 反向问题重放和百万级压缩复测尚未完成，当前不可宣称该项已修复或 v4.0.27 已发布。
+针对上述实测的无证据架构推断，在主控通用指令中增加“用户限定只看当前会话且禁止工具时，不得从账号、surface、工具说明或一般权限规则推断后端架构/账号隔离；无本轮证据只说明未知”的边界，并新增 admin/user 两个 surface 的指令回归。v4.0.27 于 2026-09-28 22:11 UTC 发布，正式发布门禁、健康及 HTTPS 冒烟通过。Safari 真实管理员会话重放后，小菱回答“当前会话无法证明”，明确撤回此前未经证实的寻址范围推断；这只验证回答约束，不构成账号隔离通过证据。
+
+### v4.0.27 生产长上下文失败复现
+
+- 生产模型 `deepseek-flash`、平台保守估算 `1,920,699` tokens、321 条消息（320×3,000 字符历史 + 最终查询）。第一次运行在 35 次 provider response 后失败；第二次同场景补充了逐次终态记录，在 11 次 provider response 后失败（completed 6、incomplete 5），供应商给出的不完整原因均为 `max_output_tokens`，逐次输出预算最高扩至 16,384 tokens。结束时 runtime error 为“语义压缩未完整结束”；没有输出半截最终答案。
+- 两次运行的原始输入前缀均完整保留，摘要未提交检查点的业务持久层，合成消息和 InMemoryCheckpointStore 仅在进程内。第二次真实 usage 累计 input `238,717`、output `45,033` tokens；这不是单次输入量。8 条×3,000 字符的单块定向供应商请求独立 completed，output `909` tokens，说明截断由完整长历史多块运行触发，不能从单块成功外推。
+- 根因范围已确认是长历史压缩响应达到供应商 `max_output_tokens` 上限，运行按 fail-closed 结束；长引文/摘要膨胀是实现层防护对象。修复候选增加短引文提示与服务端 64 字符校验，并在预算扩展重试仍截断后按完整来源集合递归拆块、按原序合并。
+- 本地 runtime 定向套件 `53 passed`，Ruff、compileall、diff check 通过；新测试覆盖 overlong quote 被拒绝和多层输出截断拆块后来源标记完整。该结果仍是本地结构测试，v4.0.28 生产模型复测待发布后执行。
 
 ### 仍未覆盖
 
 - 结束后五分钟可追问、后台圆桌消息进入上下文/最终结果，以及完整 reviewer/user/admin 页面、按钮、权限拒绝和异常退出 404 矩阵，本轮未重新逐项重测；沿用早前验收记录时需明确其版本和日期。
 - 生产 Safari 只重载并检查管理员工作台单一移动视口；本次不是全站设计规范逐屏验收。
 - v4.0.26 上第一轮压力脚本曾把成功回答追加到 checkpoint transcript 误当成输入被改写；修正为只比较原始输入前缀后，同一场景和混合角色场景均通过。首轮不用于负面产品结论或正式验收统计。
-- v4.0.27 首次部署因 Frontend Dockerfile 中 Node `--max-old-space-size=1536` 堆上限耗尽而失败。正式部署脚本自动回滚应用至 v4.0.26；Backend、Frontend 恢复健康，数据库仍为 `058_roundtable_sessions`，没有 downgrade/restore。发布备份为 `/opt/code-review/backups/code_review_20260928T215121Z_359d3b902260.sql.gz`，gzip/hash 和隔离恢复（103 表）均通过。后续候选把构建堆上限提高至可配置默认 `2048` MiB；发布前须在生产构建主机单独重建验证，再重试全量发布。
+- v4.0.27 首次部署因 Frontend Dockerfile 中 Node `--max-old-space-size=1536` 堆上限耗尽而自动回滚至 v4.0.26。随后候选将构建堆上限提高为可配置默认 `2048` MiB；生产主机单独构建约 103 秒、`vue-tsc` 与 Vite 均通过。再次运行正式 `deploy.sh all` 成功发布 v4.0.27。新备份 `/opt/code-review/backups/code_review_20260928T220502Z_e001ecc4e17f.sql.gz`，420 MiB，SHA-256 `42b9e4a855edb4e1da9856dbc3e2eb5bb1c27d616ef4b002d8a1f034b1807073`；隔离恢复通过（103 表、`058_roundtable_sessions`）。

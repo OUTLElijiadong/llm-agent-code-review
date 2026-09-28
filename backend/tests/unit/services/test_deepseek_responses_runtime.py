@@ -412,6 +412,7 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
         schema = output_format["schema"]
         assert schema["required"] == ["covered_source_ids", "source_quotes", "summary"]
         assert schema["additionalProperties"] is False
+        assert "不得复制整条来源消息" in payload["instructions"]
         estimated_request = estimate_tokens({
             "instructions": payload["instructions"],
             "input": payload["input"],
@@ -571,7 +572,7 @@ async def test_semantic_compaction_canonicalizes_missing_source_markers() -> Non
 
 
 @pytest.mark.parametrize(
-    "failure", ["missing_quote", "fabricated_quote", "duplicate_source_id", "missing_source_id"],
+    "failure", ["missing_quote", "fabricated_quote", "overlong_quote", "duplicate_source_id", "missing_source_id"],
 )
 @pytest.mark.asyncio
 async def test_semantic_compaction_rejects_unverifiable_quotes_and_source_coverage(failure: str) -> None:
@@ -599,6 +600,8 @@ async def test_semantic_compaction_rejects_unverifiable_quotes_and_source_covera
                 quotes = []
             elif failure == "fabricated_quote" and quotes:
                 quotes[0]["quote"] = "not present in source"
+            elif failure == "overlong_quote" and quotes:
+                quotes[0]["quote"] = "x" * 65
             response = {
                 "covered_source_ids": covered_ids,
                 "source_quotes": quotes,
@@ -627,6 +630,65 @@ async def test_semantic_compaction_rejects_unverifiable_quotes_and_source_covera
             {"summary_sha256": "2" * 64, "omitted_indices": [0, 1, 2]},
             summary_budget=1800,
         )
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_splits_batches_after_repeated_output_truncation() -> None:
+    class TruncatingLargeBatchTransport(SummarizingTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempted_source_counts: List[int] = []
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            source = str(payload["input"][0]["content"])
+            anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+            self.attempted_source_counts.append(len(anchors))
+            if len(anchors) > 1:
+                self.payloads.append(payload)
+                return {
+                    "id": "resp_incomplete",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 10, "output_tokens": int(payload["max_output_tokens"])},
+                    "output": [],
+                }
+            return await super().create_response(payload)
+
+    transcript = [
+        {"role": "user", "content": f"完整来源 {index}：" + "甲" * 200}
+        for index in range(4)
+    ]
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="split_after_incomplete_compaction",
+        model="deepseek-v4-flash",
+        transcript=transcript,
+        tools=[],
+    )
+    await store.create(checkpoint)
+    transport = TruncatingLargeBatchTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+        context_window_tokens=30_000,
+        max_output_tokens=400,
+        compaction_threshold_tokens=600,
+        keep_recent_tokens=250,
+    )
+    summary = await runtime._semantic_compact(
+        checkpoint,
+        {"summary_sha256": "3" * 64, "omitted_indices": [0, 1, 2, 3]},
+        summary_budget=5_000,
+    )
+
+    assert checkpoint.transcript == transcript
+    assert all(f"来源#{index}:片段1/1" in summary for index in range(4))
+    assert 4 in transport.attempted_source_counts
+    assert 2 in transport.attempted_source_counts
+    assert 1 in transport.attempted_source_counts
+    assert checkpoint.context_metadata["semantic_compaction_calls"] == len(transport.attempted_source_counts)
+    assert checkpoint.context_metadata["semantic_compaction_calls"] <= MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN
 
 
 @pytest.mark.asyncio
