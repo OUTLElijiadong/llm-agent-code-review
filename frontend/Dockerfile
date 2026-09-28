@@ -12,8 +12,9 @@ ENV VITE_APP_RELEASE_SHA=${VITE_APP_RELEASE_SHA}
 RUN npm ci --registry=${NPM_CONFIG_REGISTRY}
 COPY . .
 # npm run build 先完成类型检查，再顺序运行 Vite；任一步失败均阻止镜像发布。
-# 保留堆上限，两个进程不会同时常驻，不以服务器内存为由跳过类型门禁。
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# vue-tsc 与 Vite 顺序运行；2 GiB 为默认堆上限，镜像构建时可按宿主资源覆盖。
+ARG NODE_MAX_OLD_SPACE_SIZE=2048
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 RUN npm run build
 
 FROM nginx:1.27-alpine

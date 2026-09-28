@@ -70,3 +70,4 @@
 - 结束后五分钟可追问、后台圆桌消息进入上下文/最终结果，以及完整 reviewer/user/admin 页面、按钮、权限拒绝和异常退出 404 矩阵，本轮未重新逐项重测；沿用早前验收记录时需明确其版本和日期。
 - 生产 Safari 只重载并检查管理员工作台单一移动视口；本次不是全站设计规范逐屏验收。
 - v4.0.26 上第一轮压力脚本曾把成功回答追加到 checkpoint transcript 误当成输入被改写；修正为只比较原始输入前缀后，同一场景和混合角色场景均通过。首轮不用于负面产品结论或正式验收统计。
+- v4.0.27 首次部署因 Frontend Dockerfile 中 Node `--max-old-space-size=1536` 堆上限耗尽而失败。正式部署脚本自动回滚应用至 v4.0.26；Backend、Frontend 恢复健康，数据库仍为 `058_roundtable_sessions`，没有 downgrade/restore。发布备份为 `/opt/code-review/backups/code_review_20260928T215121Z_359d3b902260.sql.gz`，gzip/hash 和隔离恢复（103 表）均通过。后续候选把构建堆上限提高至可配置默认 `2048` MiB；发布前须在生产构建主机单独重建验证，再重试全量发布。
