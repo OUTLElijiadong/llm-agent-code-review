@@ -295,6 +295,7 @@ async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints
     assert result.status == COMPLETED
     compact_requests = [p for p in transport.payloads if p["tools"] == []]
     assert compact_requests
+    assert all(p["stream"] is True for p in compact_requests)
     full_source = "".join(str(p["input"][0]["content"]) for p in compact_requests)
     full_model_input = full_source + json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
     assert "约束 13" in full_model_input
@@ -403,6 +404,7 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
         assert fact in projected_text
     assert final_metadata["projected_tokens"] <= final_metadata["transcript_budget_tokens"]
     for payload in transport.payloads:
+        assert payload["stream"] is True
         estimated_request = estimate_tokens({
             "instructions": payload["instructions"],
             "input": payload["input"],

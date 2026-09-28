@@ -957,7 +957,10 @@ class DeepSeekResponsesRuntime:
                 "instructions": instruction,
                 "input": [{"role": "user", "content": source}],
                 "tools": [],
-                "stream": False,
+                # NativeResponsesTransport consumes Responses as SSE regardless of
+                # the caller. A non-streaming JSON response is parsed as an empty
+                # event stream and fails closed before a semantic summary exists.
+                "stream": True,
                 "max_output_tokens": max_output_tokens,
             }
             request_tokens = estimate_tokens(
