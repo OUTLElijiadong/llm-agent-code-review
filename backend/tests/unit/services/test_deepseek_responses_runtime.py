@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from typing import Any, AsyncIterator, Dict, List, Mapping, Sequence
@@ -333,7 +334,7 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
             return _message_response(json.dumps({
                 "covered_source_ids": source_ids,
                 "source_quotes": _runtime_source_quotes(source, anchors),
-                "summary": " ".join([*anchors, *facts]),
+                "summary": "已提炼来源内容。 " + " ".join(facts),
             }, ensure_ascii=False))
 
     transcript = []
@@ -440,7 +441,7 @@ async def test_semantic_compaction_retries_invalid_structured_output_without_dro
             return await super().create_response(payload)
 
     transcript = [{"role": "user", "content": "用户不得跨账号读聊天。" + "证据" * 40}]
-    source_hash = __import__("hashlib").sha256(
+    source_hash = hashlib.sha256(
         json.dumps(transcript, ensure_ascii=False, separators=(",", ":")).encode()
     ).hexdigest()
     store = InMemoryCheckpointStore()
@@ -462,6 +463,49 @@ async def test_semantic_compaction_retries_invalid_structured_output_without_dro
     assert transport.summary_calls == 2
     assert checkpoint.context_metadata["semantic_compaction_calls"] == 2
     assert "上一次响应未通过本地完整性校验" in transport.payloads[1]["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_canonicalizes_model_source_marker_order() -> None:
+    class DisorderedSummaryTransport(SummarizingTransport):
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            self.payloads.append(payload)
+            source = str(payload["input"][0]["content"])
+            anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+            quotes = _runtime_source_quotes(source, anchors)
+            return _message_response(json.dumps({
+                "covered_source_ids": [anchor[1:-1] for anchor in reversed(anchors)],
+                "source_quotes": list(reversed(quotes)),
+                "summary": "已提炼内容 " + " ".join([*reversed(anchors), *anchors]),
+            }, ensure_ascii=False))
+
+    transcript = [
+        {"role": "user", "content": "第一条来源内容必须可追溯。"},
+        {"role": "assistant", "content": "第二条来源内容保留其角色。"},
+    ]
+    source_hash = hashlib.sha256(
+        json.dumps(transcript, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="canonicalize_semantic_source_markers", model="deepseek-v4-flash",
+        transcript=transcript, tools=[],
+    )
+    await store.create(checkpoint)
+    transport = DisorderedSummaryTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+    )
+
+    summary = await runtime._semantic_compact(
+        checkpoint, {"summary_sha256": source_hash, "omitted_indices": [0, 1]}, summary_budget=5_000,
+    )
+
+    expected = ["[来源#0:片段1/1]", "[来源#1:片段1/1]"]
+    actual = re.findall(r"\[来源#\d+:片段\d+/\d+\]", summary)
+    assert actual == expected
+    assert all(summary.count(marker) == 1 for marker in expected)
+    assert checkpoint.context_metadata["semantic_compaction_calls"] == 1
 
 
 @pytest.mark.asyncio
@@ -494,7 +538,7 @@ async def test_semantic_compaction_does_not_reuse_legacy_untrusted_cache() -> No
 
 
 @pytest.mark.asyncio
-async def test_semantic_compaction_rejects_missing_source_fragment() -> None:
+async def test_semantic_compaction_canonicalizes_missing_source_markers() -> None:
     class OmittingSourceTransport(SummarizingTransport):
         async def create_response(self, payload: Mapping[str, Any]) -> Any:
             if payload["tools"] == []:
@@ -511,19 +555,26 @@ async def test_semantic_compaction_rejects_missing_source_fragment() -> None:
     transport = OmittingSourceTransport()
     transcript = [{"role": "user", "content": "初始目标"}]
     transcript.extend({"role": "user", "content": f"独立约束 {i}"} for i in range(30))
-    result = await _runtime(
+    runtime = _runtime(
         transport, RecordingExecutor(), context_window_tokens=4000,
         max_output_tokens=400, compaction_threshold_tokens=200,
         keep_recent_tokens=100,
-    ).start(transcript, run_id="missing_source")
-    assert result.status == FAILED
-    assert "标记" in result.error
-    assert all(payload["tools"] == [] for payload in transport.payloads)
+    )
+    result = await runtime.start(transcript, run_id="missing_source")
+    checkpoint = await runtime._store.load("missing_source")
+    assert result.status == COMPLETED
+    assert checkpoint is not None
+    source_ids = re.findall(r"\[来源#\d+:片段\d+/\d+\]", checkpoint.context_metadata["semantic_summary"]["text"])
+    assert len(source_ids) == len(set(source_ids))
+    assert len(source_ids) == checkpoint.context_metadata["semantic_summary"]["source_count"]
+    assert transport.payloads[0]["tools"] == []
 
 
-@pytest.mark.parametrize("failure", ["missing_quote", "fabricated_quote", "duplicate_marker", "reordered_marker"])
+@pytest.mark.parametrize(
+    "failure", ["missing_quote", "fabricated_quote", "duplicate_source_id", "missing_source_id"],
+)
 @pytest.mark.asyncio
-async def test_semantic_compaction_rejects_unverifiable_quotes_and_marker_order(failure: str) -> None:
+async def test_semantic_compaction_rejects_unverifiable_quotes_and_source_coverage(failure: str) -> None:
     class InvalidContractTransport(ScriptedTransport):
         def __init__(self) -> None:
             super().__init__([])
@@ -539,19 +590,19 @@ async def test_semantic_compaction_rejects_unverifiable_quotes_and_marker_order(
                 end = spans[index + 1].start() if index + 1 < len(spans) else len(source)
                 excerpt = source[span.end():end].strip()[:24]
                 quotes.append({"source_id": marker_id, "quote": excerpt})
-            summary_markers = markers
-            if failure == "duplicate_marker":
-                summary_markers = [markers[0], markers[0], *markers[1:]]
-            elif failure == "reordered_marker":
-                summary_markers = list(reversed(markers))
+            covered_ids = marker_ids
+            if failure == "duplicate_source_id":
+                covered_ids = [marker_ids[0], marker_ids[0], *marker_ids[2:]]
+            elif failure == "missing_source_id":
+                covered_ids = marker_ids[:-1]
             if failure == "missing_quote":
                 quotes = []
             elif failure == "fabricated_quote" and quotes:
                 quotes[0]["quote"] = "not present in source"
             response = {
-                "covered_source_ids": marker_ids,
+                "covered_source_ids": covered_ids,
                 "source_quotes": quotes,
-                "summary": "压缩摘要 " + " ".join(summary_markers),
+                "summary": "压缩摘要。",
             }
             return _message_response(json.dumps(response, ensure_ascii=False))
 
@@ -607,18 +658,17 @@ async def test_cancellation_between_compaction_chunks_stops_paid_requests() -> N
 
 
 @pytest.mark.asyncio
-async def test_secondary_compaction_rejects_missing_original_source_markers() -> None:
+async def test_secondary_compaction_rejects_missing_compressed_block_markers() -> None:
     class LosingReducer(SummarizingTransport):
         async def create_response(self, payload: Mapping[str, Any]) -> Any:
             if "将多个压缩块继续归纳" in str(payload.get("instructions") or ""):
                 self.payloads.append(payload)
                 source = str(payload["input"][0]["content"])
-                blocks = sorted(set(re.findall(r"\[压缩块#\d+\]", source)))
                 anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
                 return _message_response(json.dumps({
                     "covered_source_ids": [anchor[1:-1] for anchor in anchors],
                     "source_quotes": _runtime_source_quotes(source, anchors),
-                    "summary": "已处理 " + " ".join(blocks),
+                    "summary": "已处理来源，但忽略了压缩块锚点。",
                 }, ensure_ascii=False))
             return await super().create_response(payload)
 
@@ -639,7 +689,7 @@ async def test_secondary_compaction_rejects_missing_original_source_markers() ->
         context_window_tokens=4000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
-    with pytest.raises(ContextBudgetError, match="标记"):
+    with pytest.raises(ContextBudgetError, match="缺失压缩块"):
         await runtime._semantic_compact(
             checkpoint,
             {"summary_sha256": "1" * 64, "omitted_indices": list(range(1, 31))},
