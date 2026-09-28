@@ -69,6 +69,40 @@ MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN = 64
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
 
 
+def _semantic_compaction_json_schema(source_ids: Sequence[str]) -> Dict[str, Any]:
+    """Constrain model output shape; runtime still verifies order and source quotes."""
+    allowed_ids = list(source_ids)
+    exact_count = len(allowed_ids)
+    return {
+        "type": "object",
+        "properties": {
+            "covered_source_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": allowed_ids},
+                "minItems": exact_count,
+                "maxItems": exact_count,
+            },
+            "source_quotes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_id": {"type": "string", "enum": allowed_ids},
+                        "quote": {"type": "string"},
+                    },
+                    "required": ["source_id", "quote"],
+                    "additionalProperties": False,
+                },
+                "minItems": exact_count,
+                "maxItems": exact_count,
+            },
+            "summary": {"type": "string"},
+        },
+        "required": ["covered_source_ids", "source_quotes", "summary"],
+        "additionalProperties": False,
+    }
+
+
 class ObservedResponseError(RuntimeError):
     """Transport failure carrying provider metadata already observed before the failure."""
 
@@ -778,7 +812,7 @@ class DeepSeekResponsesRuntime:
             4096, max(512, summary_budget), max(512, self._context_window_tokens // 4),
         )
         chunk_budget = min(
-            32_000,
+            48_000,
             self._context_window_tokens - source_output_budget - 1200,
         )
         if chunk_budget < 300:
@@ -944,6 +978,7 @@ class DeepSeekResponsesRuntime:
         source_texts: Mapping[str, str],
         source_roles: Optional[Mapping[str, str]] = None,
     ) -> str:
+        validation_retry = False
         for attempt in range(OUTPUT_BUDGET_RETRY_LIMIT + 1):
             if await self._refresh_cancelled_checkpoint(checkpoint) is not None:
                 raise ContextBudgetError("语义压缩期间运行已取消")
@@ -954,13 +989,31 @@ class DeepSeekResponsesRuntime:
                 )
             payload: Dict[str, Any] = {
                 "model": checkpoint.model,
-                "instructions": instruction,
+                "instructions": (
+                    instruction
+                    + (
+                        "\n上一次响应未通过本地完整性校验。请严格按结构化 JSON 格式重试，"
+                        "逐字覆盖全部来源 ID 与可在来源中验证的原文引文。"
+                        if validation_retry else ""
+                    )
+                ),
                 "input": [{"role": "user", "content": source}],
                 "tools": [],
                 # NativeResponsesTransport consumes Responses as SSE regardless of
                 # the caller. A non-streaming JSON response is parsed as an empty
                 # event stream and fails closed before a semantic summary exists.
                 "stream": True,
+                # Compaction needs compact machine-readable output, not hidden
+                # reasoning tokens. The provider's default thinking mode can
+                # otherwise consume the entire output budget before JSON starts.
+                "reasoning": {"effort": "none"},
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "semantic_compaction",
+                        "schema": _semantic_compaction_json_schema(expected_source_ids),
+                    },
+                },
                 "max_output_tokens": max_output_tokens,
             }
             request_tokens = estimate_tokens(
@@ -1001,6 +1054,9 @@ class DeepSeekResponsesRuntime:
                     raise ContextBudgetError("语义压缩响应包含工具调用，拒绝执行")
                 text = _extract_output_text(response.get("output") or []).strip()
                 if not text:
+                    if attempt < OUTPUT_BUDGET_RETRY_LIMIT:
+                        validation_retry = True
+                        continue
                     raise ContextBudgetError("语义压缩响应为空")
                 try:
                     parsed = json.loads(text)
@@ -1046,6 +1102,9 @@ class DeepSeekResponsesRuntime:
                         f"{quote_ledger}"
                     )
                 except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    if attempt < OUTPUT_BUDGET_RETRY_LIMIT:
+                        validation_retry = True
+                        continue
                     raise ContextBudgetError("语义摘要来源标记或逐字引文校验失败") from exc
             reason = str((response.get("incomplete_details") or {}).get("reason") or "")
             next_budget = min(max_output_tokens * 2, MAX_RETRY_OUTPUT_TOKENS)

@@ -405,11 +405,63 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
     assert final_metadata["projected_tokens"] <= final_metadata["transcript_budget_tokens"]
     for payload in transport.payloads:
         assert payload["stream"] is True
+        assert payload["reasoning"] == {"effort": "none"}
+        output_format = payload["text"]["format"]
+        assert output_format["type"] == "json_schema"
+        schema = output_format["schema"]
+        assert schema["required"] == ["covered_source_ids", "source_quotes", "summary"]
+        assert schema["additionalProperties"] is False
         estimated_request = estimate_tokens({
             "instructions": payload["instructions"],
             "input": payload["input"],
         })
         assert estimated_request + int(payload["max_output_tokens"]) < 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_retries_invalid_structured_output_without_dropping_sources() -> None:
+    class InvalidFirstSummaryTransport(SummarizingTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.summary_calls = 0
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            if payload["tools"]:
+                return await super().create_response(payload)
+            self.payloads.append(payload)
+            self.summary_calls += 1
+            if self.summary_calls == 1:
+                source = str(payload["input"][0]["content"])
+                anchors = re.findall(r"\[来源#\d+:片段\d+/\d+\]", source)
+                return _message_response(json.dumps({
+                    "covered_source_ids": [anchor[1:-1] for anchor in anchors],
+                    "summary": "不完整摘要 " + " ".join(anchors),
+                }, ensure_ascii=False))
+            return await super().create_response(payload)
+
+    transcript = [{"role": "user", "content": "用户不得跨账号读聊天。" + "证据" * 40}]
+    source_hash = __import__("hashlib").sha256(
+        json.dumps(transcript, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    store = InMemoryCheckpointStore()
+    checkpoint = RunCheckpoint(
+        run_id="retry_invalid_semantic_summary", model="deepseek-v4-flash",
+        transcript=transcript, tools=[],
+    )
+    await store.create(checkpoint)
+    transport = InvalidFirstSummaryTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
+    )
+
+    summary = await runtime._semantic_compact(
+        checkpoint, {"summary_sha256": source_hash, "omitted_indices": [0]}, summary_budget=5_000,
+    )
+
+    assert "不得跨账号读聊天" in summary
+    assert transport.summary_calls == 2
+    assert checkpoint.context_metadata["semantic_compaction_calls"] == 2
+    assert "上一次响应未通过本地完整性校验" in transport.payloads[1]["instructions"]
 
 
 @pytest.mark.asyncio
