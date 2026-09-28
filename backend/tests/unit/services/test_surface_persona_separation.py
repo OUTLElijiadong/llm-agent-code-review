@@ -74,6 +74,17 @@ def test_user_instructions_stay_xiaoling(db):
     assert "audit_security_for_project" in instructions
 
 
+@pytest.mark.parametrize("surface", ["admin", "user"])
+def test_source_only_answers_do_not_infer_backend_isolation_from_surface_or_tools(db, admin, surface):
+    """仅凭会话可见文本回答且禁用工具时，不推测后端账号隔离或寻址能力。"""
+    instructions = _instructions(surface, admin, is_super_admin=(surface == "admin"))
+
+    assert "只依据当前会话/可见内容作答并禁止工具时" in instructions
+    assert "不得从账号身份、界面 surface、工具名称或工具清单" in instructions
+    assert "跨账号数据隔离、消息寻址范围等架构事实" in instructions
+    assert "没有本轮实际证据时只说明未知或未核实" in instructions
+
+
 @pytest.mark.asyncio
 async def test_admin_surface_uses_one_root_with_business_and_admin_tools(db, admin, monkeypatch):
     """管理端小菱能看到权限过滤后的项目审计、团队与管理能力工具。"""
