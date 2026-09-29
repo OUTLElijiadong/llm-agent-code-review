@@ -44,6 +44,7 @@ export interface SandboxArtifact {
   mime_type: string
   byte_size: number
   sha256: string
+  download_allowed?: boolean
 }
 
 export interface SandboxEnvironment {

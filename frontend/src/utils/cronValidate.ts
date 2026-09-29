@@ -5,10 +5,48 @@
  * 导致任务停摆。最终裁决仍在后端,这里做格式层防错(尼尔森·防错原则)。
  */
 
-/** 单段:数字/星号,支持 范围(-)、步进(/)、列表(,) 组合。 */
-const FIELD_SOURCE = String.raw`(\*|[0-9]|[1-5][0-9])(?:-[0-9]+)?(?:\/(?:[0-9]|[1-5][0-9]))?(?:,(?:[0-9]|[1-5][0-9])(?:-[0-9]+)?(?:\/(?:[0-9]|[1-5][0-9]))?)*`
+const CRON_FIELD_LIMITS = [
+  { min: 0, max: 59 }, // 分
+  { min: 0, max: 23 }, // 时
+  { min: 1, max: 31 }, // 日
+  { min: 1, max: 12 }, // 月
+  { min: 0, max: 6 }, // 星期 (APScheduler: 周一=0)
+] as const
 
-const FIVE_FIELD_RE = new RegExp(`^${FIELD_SOURCE}(?: ${FIELD_SOURCE}){4}$`)
+const MONTH_ALIASES = Object.fromEntries(
+  ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    .map((name, index) => [name, index + 1]),
+)
+const WEEKDAY_ALIASES = Object.fromEntries(
+  ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+    .map((name, index) => [name, index]),
+)
+
+function validCronField(
+  field: string,
+  min: number,
+  max: number,
+  aliases: Record<string, number> = {},
+): boolean {
+  if (!field) return false
+  return field.split(',').every((part) => {
+    if (!part) return false
+    const [rangePart, stepPart, extra] = part.split('/')
+    if (extra !== undefined) return false
+    if (stepPart !== undefined && (!/^\d+$/.test(stepPart) || Number(stepPart) < 1)) return false
+    if (rangePart === '*') return true
+
+    const range = /^([a-z]+|\d+)(?:-([a-z]+|\d+))?$/i.exec(rangePart)
+    if (!range) return false
+    const parseValue = (value: string): number => {
+      if (/^\d+$/.test(value)) return Number(value)
+      return aliases[value.toLowerCase()] ?? Number.NaN
+    }
+    const start = parseValue(range[1]!)
+    const end = range[2] === undefined ? start : parseValue(range[2])
+    return start >= min && start <= max && end >= min && end <= max && start <= end
+  })
+}
 
 /**
  * 校验 cron 表达式是否为合法五段格式。
@@ -18,16 +56,17 @@ const FIVE_FIELD_RE = new RegExp(`^${FIELD_SOURCE}(?: ${FIELD_SOURCE}){4}$`)
 export function isCronValid(expr: string): boolean {
   const value = expr.trim()
   if (!value) return false
-  if (!FIVE_FIELD_RE.test(value)) return false
   const parts = value.split(/\s+/)
-  const hour = parts[1]
-  // 纯数字小时必须 ≤23(其余字段范围校验留给后端)
-  if (/^[0-9]+$/.test(hour) && Number(hour) > 23) return false
-  return true
+  if (parts.length !== CRON_FIELD_LIMITS.length) return false
+  return parts.every((part, index) => {
+    const limits = CRON_FIELD_LIMITS[index]
+    const aliases = index === 3 ? MONTH_ALIASES : index === 4 ? WEEKDAY_ALIASES : undefined
+    return Boolean(limits && validCronField(part, limits.min, limits.max, aliases))
+  })
 }
 
 export function isScheduleValid(expr: string): boolean {
-  const value = expr.trim().toLowerCase()
+  const value = expr.trim()
   if (!value || value === 'manual') return value === 'manual'
 
   const daily = /^daily@(\d{1,2}):(\d{2})$/.exec(value)
@@ -36,10 +75,10 @@ export function isScheduleValid(expr: string): boolean {
   const hourly = /^hourly@(?:\*:)?(\d{1,2})$/.exec(value)
   if (hourly) return Number(hourly[1]) <= 59
 
-  const minutes = /^interval@(\d+)m$/.exec(value)
+  const minutes = /^interval@(\d+)[mM]$/.exec(value)
   if (minutes) return Number(minutes[1]) >= 1 && Number(minutes[1]) <= 1440
 
-  const seconds = /^interval@(\d+)s$/.exec(value)
+  const seconds = /^interval@(\d+)[sS]$/.exec(value)
   if (seconds) return Number(seconds[1]) >= 1 && Number(seconds[1]) <= 86400
 
   return isCronValid(value)

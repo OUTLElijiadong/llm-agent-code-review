@@ -38,6 +38,12 @@ async function mountHost(userId = 5) {
   return { wrapper, router }
 }
 
+function deferred<Value>() {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   discussionApi.list.mockReset().mockResolvedValue({ items: [current], next_offset: null })
   discussionApi.detail.mockReset().mockResolvedValue(current)
@@ -106,6 +112,76 @@ it('圆桌超过首批列表时可逐页加载，单条首批也能打开选择�
   expect(discussionApi.list).toHaveBeenCalledWith(30, 1)
   expect(wrapper.get('.roundtable-choices').text()).toContain('older.py')
   wrapper.unmount()
+})
+
+it('切换账号后旧分页请求不能锁住新账号或清除新请求状态', async () => {
+  const oldPage = deferred<{ items: Array<typeof current>; next_offset: number | null }>()
+  const newPage = deferred<{ items: Array<typeof current>; next_offset: number | null }>()
+  discussionApi.list
+    .mockResolvedValueOnce({ items: [current], next_offset: 1 })
+    .mockReturnValueOnce(oldPage.promise)
+    .mockResolvedValueOnce({ items: [{ ...current, session_id: 'new-account-session', file_name: 'new-account-session.py' }], next_offset: 2 })
+    .mockReturnValueOnce(newPage.promise)
+  const { wrapper } = await mountHost(5)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.get('.roundtable-load-more').trigger('click')
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({ userId: 73 })
+    await flushPromises()
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.roundtable-choices').text()).toContain('new-account-session.py')
+    await wrapper.get('.roundtable-load-more').trigger('click')
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeDefined()
+
+    oldPage.resolve({ items: [{ ...current, session_id: 'old-account-only', file_name: 'old-account-only.py' }], next_offset: null })
+    await flushPromises()
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('old-account-only.py')
+
+    newPage.resolve({ items: [{ ...current, session_id: 'new-account-older', file_name: 'new-account-older.py' }], next_offset: null })
+    await flushPromises()
+    expect(wrapper.find('.roundtable-load-more').exists()).toBe(false)
+    expect(wrapper.get('.roundtable-choices').text()).toContain('new-account-session.py')
+    expect(wrapper.get('.roundtable-choices').text()).toContain('new-account-older.py')
+    expect(wrapper.get('.roundtable-choices').text()).not.toContain('old-account-only.py')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('同账号列表刷新使分页响应过期后，会解除加载状态并允许重试', async () => {
+  const oldPage = deferred<{ items: Array<typeof current>; next_offset: number | null }>()
+  const pageOffsets: number[] = []
+  discussionApi.list.mockImplementation((_limit?: number, offset?: number) => {
+    if (offset === undefined) return Promise.resolve({ items: [current], next_offset: 1 })
+    pageOffsets.push(offset)
+    return pageOffsets.length === 1
+      ? oldPage.promise
+      : Promise.resolve({ items: [{ ...current, session_id: 'refreshed-older', file_name: 'refreshed-older.py' }], next_offset: null })
+  })
+  const { wrapper } = await mountHost(5)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.get('.roundtable-load-more').trigger('click')
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeDefined()
+
+    window.dispatchEvent(new CustomEvent('prism:roundtable-list-changed', { detail: { ownerUserId: 5 } }))
+    await flushPromises()
+    oldPage.resolve({ items: [{ ...current, session_id: 'stale-older', file_name: 'stale-older.py' }], next_offset: null })
+    await flushPromises()
+
+    expect(wrapper.get('.roundtable-load-more').attributes('disabled')).toBeUndefined()
+    await wrapper.get('.roundtable-load-more').trigger('click')
+    await flushPromises()
+    expect(pageOffsets).toEqual([1, 1])
+    expect(wrapper.text()).toContain('refreshed-older.py')
+    expect(wrapper.text()).not.toContain('stale-older.py')
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it('会话列表准确区分有有效部分报告的圆桌', async () => {
@@ -181,4 +257,37 @@ it('全局顶栏存在时将圆桌入口挂在顶栏中，避免固定浮层盖�
 
   wrapper.unmount()
   target.remove()
+})
+
+it('结束后的五分钟追问窗口显示为可追问并计入入口角标，超时后显示已结束', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-09-30T10:00:00Z'))
+  const now = Math.floor(Date.now() / 1000)
+  discussionApi.list.mockResolvedValue({
+    items: [
+      { ...current, session_id: 'disc-followup', status: 'concluded', followup_until: now + 300 },
+      { ...current, session_id: 'disc-expired', status: 'concluded', followup_until: now - 1 },
+    ],
+    next_offset: null,
+  })
+  let wrapper: Awaited<ReturnType<typeof mountHost>>['wrapper'] | null = null
+  try {
+    ({ wrapper } = await mountHost())
+    expect(wrapper.get('.roundtable-count').text()).toBe('1')
+    expect(wrapper.get('[aria-label="打开圆桌讨论"]').attributes('title')).toContain('已结束 1 个')
+
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    expect(wrapper.findAll('.roundtable-choice').map((choice) => choice.text()).join(' ')).toContain('追问中')
+    expect(wrapper.findAll('.roundtable-choice').map((choice) => choice.text()).join(' ')).toContain('已结束')
+
+    await vi.advanceTimersByTimeAsync(299_000)
+    expect(wrapper.get('.roundtable-count').text()).toBe('1')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('.roundtable-count').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="打开圆桌讨论"]').attributes('title')).toContain('已结束 2 个')
+    expect(wrapper.findAll('.roundtable-choice').map((choice) => choice.text()).join(' ')).not.toContain('追问中')
+  } finally {
+    wrapper?.unmount()
+    vi.useRealTimers()
+  }
 })

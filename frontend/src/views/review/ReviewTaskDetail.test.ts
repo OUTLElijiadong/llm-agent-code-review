@@ -318,12 +318,60 @@ describe('审查输入快照预览', () => {
   })
 })
 
+describe('报告入口权限与可用状态', () => {
+  it('同项目任务成员无报告访问权时不显示会产生 404 的报告入口', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({ status: 'success', can_view_report: false }))
+    await renderDetail()
+    expect(wrapper.text()).not.toContain('报告 #21')
+  })
+
+  it('创建人或管理员可见成功报告入口', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({ status: 'success', can_view_report: true }))
+    await renderDetail()
+    expect(wrapper.text()).toContain('报告 #21')
+  })
+
+  it('可读的失败沙箱报告仍显示报告入口', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: 'sandbox_test', status: 'failed', can_view_report: true,
+    }))
+    await renderDetail()
+    expect(wrapper.text()).toContain('报告 #21')
+  })
+})
+
 describe('审查详情真实执行状态', () => {
+  it.each(['sandbox_test', 'pentest'])('%s 无报告权限时隐藏计数、评分和问题工作台，不把受限统计显示为零', async (reviewType) => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: reviewType, status: 'success', can_view_report: false,
+      total_issues: null, severe_issues: null, high_issues: null,
+      medium_issues: null, low_issues: null, score: null,
+      score_breakdown: null, report_issue_summary: null,
+    }))
+    await renderDetail()
+    expect(wrapper.get('.head-tally').text()).toContain('报告问题统计受权限保护')
+    expect(wrapper.get('.score-unavailable').text()).toContain('报告评分受权限保护')
+    expect(wrapper.text()).not.toContain('0报告条目')
+    expect(wrapper.find('.workbench').exists()).toBe(false)
+  })
+
+  it('可读渗透任务的计数为空时显示未知，不伪装成零', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      review_type: 'pentest', status: 'success', can_view_report: true,
+      total_issues: null, severe_issues: null, high_issues: null,
+      medium_issues: null, low_issues: null,
+    }))
+    await renderDetail()
+    expect(wrapper.findAll('.head-tally .t-val').map((value) => value.text()))
+      .toEqual(['—', '—', '—', '—', '—'])
+  })
+
   it('长项目名和 Agent 名称保留完整信息，项目与报告入口仍可点击', async () => {
     const projectName = '手工作坊管理系统的鉴权与权限审查项目'
     const agentName = '鉴权与账号隔离审查员'
     review.getReviewTaskDetail.mockResolvedValue(taskResult({
       status: 'success', project_name: projectName,
+      can_view_report: true,
       agent_releases: [{ release_id: 7, agent_name: agentName, agent_version: 1 }],
     }))
     await renderDetail()

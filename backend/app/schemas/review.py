@@ -25,15 +25,16 @@ class TaskOut(BaseModel):
     project_name: str = ""
     review_type: str
     status: str
+    can_view_report: bool = False
     total_files: int
     processed_files: int
-    total_issues: int
+    total_issues: Optional[int] = None
     report_issue_summary: Optional[dict] = None
-    severe_issues: int
-    high_issues: int
-    medium_issues: int
-    low_issues: int
-    score: int
+    severe_issues: Optional[int] = None
+    high_issues: Optional[int] = None
+    medium_issues: Optional[int] = None
+    low_issues: Optional[int] = None
+    score: Optional[int] = None
     score_version: Optional[str] = None
     score_breakdown: Optional[dict] = None
     duration_ms: int
@@ -77,14 +78,15 @@ class TaskDetailOut(BaseModel):
     project_name: str = ""
     review_type: str
     status: str
+    can_view_report: bool = False
     total_files: int
     processed_files: int
-    total_issues: int
-    severe_issues: int
-    high_issues: int
-    medium_issues: int
-    low_issues: int
-    score: int
+    total_issues: Optional[int] = None
+    severe_issues: Optional[int] = None
+    high_issues: Optional[int] = None
+    medium_issues: Optional[int] = None
+    low_issues: Optional[int] = None
+    score: Optional[int] = None
     score_version: Optional[str] = None
     score_breakdown: Optional[dict] = None
     summary: Optional[str] = None

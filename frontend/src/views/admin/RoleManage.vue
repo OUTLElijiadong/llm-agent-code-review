@@ -2,13 +2,15 @@
   <div class="role-manage-page">
     <div class="page-header">
       <h2>角色管理</h2>
-      <el-tag type="info" effect="plain">固定角色模型：普通用户 / 评审员 / 管理员 / 唯一超级管理员</el-tag>
+      <el-tag type="info" effect="plain">固定角色模型：普通用户 / 审查员 / 管理员 / 唯一超级管理员</el-tag>
     </div>
 
     <el-card shadow="hover">
       <el-table :data="roles" v-loading="loading" style="width: 100%">
         <el-table-column prop="code" label="角色编码" width="160" show-overflow-tooltip />
-        <el-table-column prop="name" label="角色名称" width="160" show-overflow-tooltip />
+        <el-table-column label="角色名称" width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ roleNameText(row) }}</template>
+        </el-table-column>
         <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ row.description || '-' }}</template>
         </el-table-column>
@@ -61,7 +63,7 @@
     <!-- 分配权限抽屉 -->
     <el-drawer
       v-model="permDrawerVisible"
-      :title="`分配权限 - ${currentRole?.name || ''}`"
+      :title="`分配权限 - ${roleNameText(currentRole)}`"
       size="min(420px, calc(100vw - 16px))"
       direction="rtl"
     >
@@ -100,7 +102,7 @@
     <!-- 数据范围设置对话框 -->
     <el-dialog v-model="scopeDialogVisible" title="设置数据范围" width="480px">
       <el-form label-width="100px" v-loading="scopeLoading">
-        <el-form-item label="角色">{{ currentRole?.name }}</el-form-item>
+        <el-form-item label="角色">{{ roleNameText(currentRole) }}</el-form-item>
         <el-form-item label="范围类型">
           <el-radio-group v-model="scopeForm.scope_type">
             <el-radio value="all">全部数据</el-radio>
@@ -185,6 +187,17 @@ const MODULE_LABELS: Record<string, string> = {
 const loading = ref(false)
 const submitting = ref(false)
 const roles = ref<Role[]>([])
+
+/** 将固定 reviewer 角色统一显示为产品术语“审查员”，兼容历史角色名称。 */
+function roleNameText(value: Role | null | undefined): string {
+  if (!value) return ''
+  return value.code === 'reviewer' ? '审查员' : value.name
+}
+
+/** 未改动展示名时保留服务端原值，避免只编辑说明就顺带改写角色名称。 */
+function roleNameForSave(value: Role, editedName: string): string {
+  return value.code === 'reviewer' && editedName === roleNameText(value) ? value.name : editedName
+}
 
 const formDialogVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -286,7 +299,7 @@ function buildPermTree(list: Permission[]): PermTreeNode[] {
 function onEdit(row: Role): void {
   editingRole.value = row
   formData.code = row.code
-  formData.name = row.name
+  formData.name = roleNameText(row)
   formData.description = row.description || ''
   formDialogVisible.value = true
 }
@@ -302,7 +315,7 @@ async function onConfirmForm(): Promise<void> {
   submitting.value = true
   try {
     await updateRole(editingRole.value.id, {
-      name: formData.name,
+      name: roleNameForSave(editingRole.value, formData.name),
       description: formData.description,
     })
     ElMessage.success('角色更新成功')

@@ -72,7 +72,7 @@
           <el-button v-if="task?.project_id" link type="primary" @click="goProject(task.project_id)">
             {{ task.project_name || `项目 #${task.project_id}` }}
           </el-button>
-          <el-button v-if="task?.status === 'success'" link type="primary" @click="goReport(taskId)">报告 #{{ taskId }}</el-button>
+          <el-button v-if="task?.can_view_report" link type="primary" @click="goReport(taskId)">报告 #{{ taskId }}</el-button>
           <el-tag v-for="agent in task?.agent_releases || []" :key="agent.release_id" size="small" type="success" effect="plain">
             {{ agent.agent_name }} v{{ agent.agent_version }}
           </el-tag>
@@ -89,9 +89,12 @@
           <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
-      <div v-else class="score-unavailable">{{ task?.status === 'success' ? '评分未知（接口未提供有效评分）' : '尚无最终评分' }}</div>
+      <div v-else class="score-unavailable">{{ reportMetricsRestricted ? '报告评分受权限保护' : (task?.status === 'success' ? '评分未知（接口未提供有效评分）' : '尚无最终评分') }}</div>
 
-      <div class="head-tally">
+      <div v-if="reportMetricsRestricted" class="head-tally tally-access-note" role="note">
+        报告问题统计受权限保护
+      </div>
+      <div v-else class="head-tally">
         <div class="tally-item">
           <span class="t-val font-display" :style="{ color: 'var(--sev-severe)' }">{{ tallyCount('严重', task?.severe_issues) }}</span>
           <span class="t-label">危急</span>
@@ -113,7 +116,7 @@
         </div>
         <div class="tally-divider"></div>
         <div class="tally-item">
-          <span class="t-val font-display">{{ isSandboxReport ? (task?.report_issue_summary?.total ?? '—') : (task?.total_issues ?? 0) }}</span>
+          <span class="t-val font-display">{{ isSandboxReport ? (task?.report_issue_summary?.total ?? '—') : (task?.total_issues ?? (isTestScore ? '—' : 0)) }}</span>
           <span class="t-label">{{ isSandboxReport ? '报告条目' : '总计' }}</span>
         </div>
       </div>
@@ -145,7 +148,10 @@
       </div>
     </header>
 
-    <section v-if="isSandboxReport" class="coverage-note" role="note">
+    <section v-if="isSandboxReport && reportMetricsRestricted" class="coverage-note" role="note">
+      <p>当前账号无权查看此报告；报告条目数与严重度统计已隐藏。</p>
+    </section>
+    <section v-else-if="isSandboxReport" class="coverage-note" role="note">
       <p v-if="task?.report_issue_summary?.total != null">按报告“问题清单”的独立条目统计，严重度仅采用报告明示标签；条目数不代表已确认漏洞数。</p>
       <p v-else>报告未保存可识别的问题清单，条目数与严重度未确定。</p>
       <p v-if="!task?.report_issue_summary?.structured_issues">该报告没有结构化问题明细，请在报告中查看发现、证据和修复建议。</p>
@@ -185,7 +191,7 @@
     />
 
     <!-- ============ 三栏工作台 ============ -->
-    <section v-if="!isSandboxReport || task?.report_issue_summary?.structured_issues" class="workbench">
+    <section v-if="!reportMetricsRestricted && (!isSandboxReport || task?.report_issue_summary?.structured_issues)" class="workbench">
       <!-- 左：文件树 -->
       <aside class="pane pane-files">
         <header class="pane-head">
@@ -414,14 +420,20 @@ let detailRequest: { generation: number; promise: Promise<void> } | null = null
 let issueRequest: { key: string; promise: Promise<void> } | null = null
 const task = ref<TaskDetailOut | null>(null)
 const isSandboxReport = computed(() => task.value?.review_type === 'sandbox_test')
+const reportMetricsRestricted = computed(() => (
+  ['sandbox_test', 'pentest'].includes(task.value?.review_type || '')
+  && task.value?.can_view_report === false
+))
 const isTestScore = computed(() => ['sandbox_test', 'pentest'].includes(task.value?.review_type || ''))
-function tallyCount(level: string, fallback: number | undefined): number | string {
-  if (!isSandboxReport.value) return fallback ?? 0
+function tallyCount(level: string, fallback: number | null | undefined): number | string {
+  if (reportMetricsRestricted.value) return '—'
+  if (!isSandboxReport.value) return fallback ?? (isTestScore.value ? '—' : 0)
   const summary = task.value?.report_issue_summary
   if (summary?.total == null || summary.total === summary.unclassified && summary.total > 0) return '—'
   return summary.severity_counts[level] ?? 0
 }
 const displayScore = computed(() => {
+  if (reportMetricsRestricted.value) return null
   const value = task.value?.score
   return task.value?.status === 'success' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
 })

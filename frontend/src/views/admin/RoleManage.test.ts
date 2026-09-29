@@ -77,6 +77,21 @@ beforeEach(() => {
 })
 
 describe('RoleManage data scope', () => {
+  it('统一 reviewer 固定角色的展示名称，同时保留其他角色的服务端名称', async () => {
+    const wrapper = mountRoleManage()
+    await flushPromises()
+
+    const state = setupState(wrapper)
+    expect(state.roleNameText(role)).toBe('审查员')
+    expect(state.roleNameText({ ...role, code: 'user', name: '普通用户' })).toBe('普通用户')
+    state.onEdit(role)
+    expect(state.formData.name).toBe('审查员')
+    expect(state.roleNameForSave(role, state.formData.name)).toBe('评审员')
+    expect(state.roleNameForSave(role, '安全审查员')).toBe('安全审查员')
+
+    wrapper.unmount()
+  })
+
   it('loads the saved scope before allowing edits instead of overwriting defaults', async () => {
     const wrapper = mountRoleManage()
     await flushPromises()

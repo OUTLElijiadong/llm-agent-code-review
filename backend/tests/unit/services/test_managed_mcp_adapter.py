@@ -213,8 +213,9 @@ async def test_managed_sandbox_adapter_forwards_only_current_user_and_bounded_ar
         seen.append(("create", actor, dict(payload)))
         return environment
 
-    def fake_dict(_db, row):
+    def fake_dict(_db, row, actor):
         assert row is environment
+        assert actor is member
         return {"public_id": row.public_id, "status": "queued"}
 
     def fake_stop(_db, actor, public_id):

@@ -182,6 +182,21 @@ def _ensure_report_export_permission(db: Session, user: User, format: str) -> No
         )
 
 
+def _ensure_report_view_permission(db: Session, user: User) -> None:
+    """导出前也必须具备报告查看权限，格式权限不能代替内容读取权限。"""
+    if not check_permission(db, user.id, PermissionCode.REPORT_VIEW):
+        raise PermissionError(
+            f"无操作权限: 需要 {PermissionCode.REPORT_VIEW}",
+            detail={"required_permission": PermissionCode.REPORT_VIEW},
+        )
+
+
+def _ensure_report_export_permissions(db: Session, user: User, format: str) -> None:
+    """报告导出同时要求查看权限和具体格式权限。"""
+    _ensure_report_view_permission(db, user)
+    _ensure_report_export_permission(db, user, format)
+
+
 def _domain_export_response(db: Session, user: User, task: ReviewTask, format: str, *, download: bool = False):
     """所有报告出口共用来源分流；不支持等价导出的格式由服务抛出业务错误。"""
     payload = report_service.get_domain_report_export(db, user, task, format)
@@ -296,8 +311,8 @@ def _require_report_export_permission(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> User:
-    """按实际导出格式校验权限，避免使用不存在的 report:export。"""
-    _ensure_report_export_permission(db, user, format)
+    """校验查看权和实际格式权限，避免导出权限绕过报告查看授权。"""
+    _ensure_report_export_permissions(db, user, format)
     return user
 
 
@@ -532,7 +547,7 @@ def get_report(task_id: int, db: Session = Depends(get_db),
 def export_word(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """兼容旧 Word 地址，委托统一报告导出器。"""
-    _ensure_report_export_permission(db, user, "word")
+    _ensure_report_export_permissions(db, user, "word")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
     domain_response = _domain_export_response(db, user, task, "word", download=True)
     if domain_response is not None:
@@ -550,7 +565,7 @@ def export_word(task_id: int, db: Session = Depends(get_db),
 def export_pdf(task_id: int, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     """兼容旧 PDF 地址，委托统一报告导出器。"""
-    _ensure_report_export_permission(db, user, "pdf")
+    _ensure_report_export_permissions(db, user, "pdf")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
     domain_response = _domain_export_response(db, user, task, "pdf", download=True)
     if domain_response is not None:

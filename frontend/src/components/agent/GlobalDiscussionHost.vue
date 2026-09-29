@@ -14,7 +14,7 @@
           @click="openSession(session.session_id)"
         >
           <span>{{ session.file_name || '未命名文件' }}</span>
-          <small>{{ statusLabel(session.status, session.progress?.phase) }}</small>
+          <small>{{ statusLabel(session.status, session.progress?.phase, session.followup_until) }}</small>
         </button>
         <button v-if="nextOffset !== null" type="button" class="roundtable-load-more" :disabled="moreLoading" @click="loadMore">
           {{ moreLoading ? '正在加载…' : '加载更多圆桌' }}
@@ -76,16 +76,42 @@ const listError = ref('')
 const nextOffset = ref<number | null>(null)
 const moreLoading = ref(false)
 const headerSlotAvailable = ref(false)
+const followupClock = ref(Date.now())
 let authGeneration = 0
 let listGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+let followupTimer: ReturnType<typeof setInterval> | null = null
 let headerSlotObserver: MutationObserver | null = null
 
 const routeSessionId = computed(() => {
   const raw = route.query.discuss_session
   return typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0] || '' : ''
 })
-const activeCount = computed(() => sessions.value.filter((session) => ['active', 'running', 'paused'].includes(session.status)).length)
+const activeCount = computed(() => sessions.value.filter((session) => canContinue(session)).length)
+
+function followupOpen(session: Pick<DiscussionSessionSummary, 'status' | 'followup_until'>, now = followupClock.value / 1000): boolean {
+  return session.status === 'concluded' && Number(session.followup_until) > now
+}
+
+function canContinue(session: DiscussionSessionSummary): boolean {
+  return ['active', 'running', 'paused'].includes(session.status) || followupOpen(session)
+}
+
+function syncFollowupTimer(): void {
+  const hasOpenWindow = sessions.value.some((session) => followupOpen(session))
+  if (hasOpenWindow && !followupTimer) {
+    followupTimer = setInterval(() => {
+      followupClock.value = Date.now()
+      if (!sessions.value.some((session) => followupOpen(session))) {
+        if (followupTimer) clearInterval(followupTimer)
+        followupTimer = null
+      }
+    }, 1000)
+  } else if (!hasOpenWindow && followupTimer) {
+    clearInterval(followupTimer)
+    followupTimer = null
+  }
+}
 
 /** 列表与详情均由服务端按登录身份过滤；迟到响应不得覆盖切换后的账号。 */
 async function loadSessions(): Promise<void> {
@@ -96,6 +122,8 @@ async function loadSessions(): Promise<void> {
     const page = await listDiscussionSessions()
     if (generation !== listGeneration || auth !== authGeneration || owner !== props.userId) return
     sessions.value = Array.isArray(page?.items) ? page.items : []
+    followupClock.value = Date.now()
+    syncFollowupTimer()
     nextOffset.value = typeof page?.next_offset === 'number' ? page.next_offset : null
     listError.value = ''
   } catch {
@@ -116,6 +144,8 @@ async function loadMore(): Promise<void> {
     if (generation !== listGeneration || auth !== authGeneration || owner !== props.userId) return
     const known = new Set(sessions.value.map((session) => session.session_id))
     sessions.value = [...sessions.value, ...(page.items || []).filter((session) => !known.has(session.session_id))]
+    followupClock.value = Date.now()
+    syncFollowupTimer()
     nextOffset.value = typeof page.next_offset === 'number' ? page.next_offset : null
     listError.value = ''
   } catch {
@@ -123,7 +153,12 @@ async function loadMore(): Promise<void> {
       listError.value = '更多圆桌暂时无法读取'
     }
   } finally {
-    moreLoading.value = false
+    // 旧账号的迟到请求不能清除新账号分页请求的加载状态。
+    // 同账号列表刷新会使分页结果过期，但仍必须解除该分页请求占用的 loading；
+    // 账号切换时则由新账号请求持有状态，旧账号 finally 不得清理它。
+    if (auth === authGeneration && owner === props.userId) {
+      moreLoading.value = false
+    }
   }
 }
 
@@ -156,7 +191,8 @@ function openFromDock(): void {
   showChoices.value = !showChoices.value
 }
 
-function statusLabel(status: string, progressPhase?: string): string {
+function statusLabel(status: string, progressPhase?: string, followupUntil?: number): string {
+  if (status === 'concluded' && Number(followupUntil) > followupClock.value / 1000) return '追问中'
   if (progressPhase === 'partial') return '部分完成'
   if (progressPhase === 'failed') return '失败'
   if (progressPhase === 'cancelled') return '已取消'
@@ -193,6 +229,7 @@ function syncHeaderSlot(): void {
 watch(() => props.userId, () => {
   authGeneration++
   listGeneration++
+  moreLoading.value = false
   sessions.value = []
   nextOffset.value = null
   selected.value = null
@@ -229,6 +266,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('prism:open-roundtable', onOpenEvent)
   window.removeEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
   if (refreshTimer) clearInterval(refreshTimer)
+  if (followupTimer) clearInterval(followupTimer)
 })
 </script>
 

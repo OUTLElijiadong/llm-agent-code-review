@@ -29,6 +29,7 @@ import { getProjectDetail, getProjects } from '@/api/project'
 import { useUserStore } from '@/stores/user'
 import type { ProjectDetailOut, ProjectOut } from '@/types/project'
 import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
+import { canDownloadSandboxArtifact, visibleSandboxArtifacts } from '@/utils/sandboxArtifactAccess'
 import type { SandboxWorker } from '@/types/mcpGovernance'
 import {
   canExtendSandbox,
@@ -300,13 +301,16 @@ async function openPreview(): Promise<void> {
 }
 
 function reviewReportArtifact(env: SandboxEnvironment | null): SandboxArtifact | null {
-  return env?.artifacts?.find((artifact) => artifact.artifact_type === 'review_report') ?? null
+  return env?.artifacts?.find((artifact) => artifact.artifact_type === 'review_report'
+    && canDownloadSandboxArtifact(artifact)) ?? null
 }
 
 const reviewReport = computed(() => reviewReportArtifact(selected.value))
+const evidenceArtifacts = computed(() => visibleSandboxArtifacts(selected.value?.artifacts)
+  .filter((artifact) => artifact.artifact_type !== 'review_report'))
 
 async function downloadArtifact(artifact: SandboxArtifact): Promise<void> {
-  if (!selected.value) return
+  if (!selected.value || !canDownloadSandboxArtifact(artifact)) return
   mutating.value = true
   try {
     const blob = await downloadSandboxArtifact(selected.value.public_id, artifact.id)
@@ -588,10 +592,10 @@ onBeforeUnmount(() => {
             </button>
           </section>
 
-          <section v-if="selected.artifacts?.length" class="artifact-panel" data-testid="sandbox-artifacts">
-            <div class="section-title"><span>证据制品</span><span class="task-count font-mono">{{ selected.artifacts.length }}</span></div>
+          <section v-if="evidenceArtifacts.length" class="artifact-panel" data-testid="sandbox-artifacts">
+            <div class="section-title"><span>证据制品</span><span class="task-count font-mono">{{ evidenceArtifacts.length }}</span></div>
             <div class="artifact-list">
-              <button v-for="artifact in selected.artifacts" :key="artifact.id" type="button" class="artifact-row" @click="downloadArtifact(artifact)">
+              <button v-for="artifact in evidenceArtifacts" :key="artifact.id" type="button" class="artifact-row" @click="downloadArtifact(artifact)">
                 <span><b>{{ artifact.file_name }}</b><small class="font-mono">{{ artifact.artifact_type }} · {{ formatBytes(artifact.byte_size) }} · {{ artifact.sha256.slice(0, 12) }}</small></span>
                 <el-icon><Download /></el-icon>
               </button>

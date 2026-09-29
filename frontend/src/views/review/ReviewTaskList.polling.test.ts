@@ -213,6 +213,21 @@ describe('任务列表轮询恢复', () => {
     expect(renderedRows[6].get('.tc-score').text()).toBe('100')
     expect(renderedRows[6].find('.score-high').exists()).toBe(true)
   })
+
+  it.each(['sandbox_test', 'pentest'])('%s 无报告权限时列表不暴露报告数量和评分', async (reviewType) => {
+    api.tasks.mockResolvedValue(pageOf([{
+      id: 91, task_name: '受限测试报告', project_name: '测试项目', review_type: reviewType,
+      status: 'success', can_view_report: false, total_issues: null,
+      report_issue_summary: null, score: null, duration_ms: 0,
+      create_time: '2026-09-05T00:00:00Z',
+    }]))
+    await render()
+    const row = wrapper.get('.task-card')
+    expect(row.get('.tc-line2').text()).toContain('问题 报告受限')
+    expect(row.get('.tc-score').text()).toBe('报告受限')
+    expect(row.text()).not.toContain('41')
+    expect(row.text()).not.toContain('73')
+  })
 })
 
 

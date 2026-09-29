@@ -44,10 +44,12 @@ from app.core.exceptions import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    PermissionError,
     ServiceUnavailableError,
     ValidationError,
 )
 from app.core.observability import observe_event
+from app.core.permission_codes import PermissionCode
 from app.models.agent_capability import (
     SandboxArtifact,
     SandboxEnvironment,
@@ -2714,7 +2716,7 @@ def _publish_sandbox_report(
         return {}
 
 
-def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
+def artifact_to_dict(row: SandboxArtifact, *, download_allowed: bool = True) -> dict[str, Any]:
     return {
         "id": row.id,
         "artifact_type": row.artifact_type,
@@ -2722,6 +2724,7 @@ def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
         "mime_type": row.mime_type,
         "byte_size": row.byte_size,
         "sha256": row.sha256,
+        "download_allowed": download_allowed,
     }
 
 
@@ -4857,7 +4860,18 @@ def _get_visible(db: Session, actor: User, public_id: str) -> SandboxEnvironment
     return row
 
 
-def environment_to_dict(db: Session, row: SandboxEnvironment) -> dict[str, Any]:
+def _can_access_report_artifact(db: Session, actor: User | None, environment: SandboxEnvironment) -> bool:
+    if actor is None:
+        return False
+    in_report_scope = environment.owner_id == actor.id or rbac_service.is_admin_user(db, actor.id)
+    return in_report_scope and rbac_service.check_permission(db, actor.id, PermissionCode.REPORT_VIEW)
+
+
+def environment_to_dict(
+    db: Session,
+    row: SandboxEnvironment,
+    actor: User | None = None,
+) -> dict[str, Any]:
     worker = db.get(SandboxWorker, row.worker_id) if row.worker_id else None
     events = db.query(SandboxEvent).filter(SandboxEvent.environment_id == row.id).order_by(SandboxEvent.id).all()
     artifacts = (
@@ -4902,7 +4916,13 @@ def environment_to_dict(db: Session, row: SandboxEnvironment) -> dict[str, Any]:
             }
             for item in events
         ],
-        "artifacts": [artifact_to_dict(item) for item in artifacts],
+        # 不向项目成员暴露报告制品的名称、摘要或下载入口；普通测试证据仍按
+        # 项目可见范围返回，并由下载路由继续校验项目成员权限。
+        "artifacts": [
+            artifact_to_dict(item)
+            for item in artifacts
+            if item.artifact_type != "review_report" or _can_access_report_artifact(db, actor, row)
+        ],
     }
 
 
@@ -4914,11 +4934,11 @@ def list_environments(db: Session, actor: User, limit: int = 50) -> list[dict[st
             return []
         query = query.filter(SandboxEnvironment.project_id.in_(project_ids))
     rows = query.order_by(SandboxEnvironment.id.desc()).limit(max(1, min(limit, 100))).all()
-    return [environment_to_dict(db, row) for row in rows]
+    return [environment_to_dict(db, row, actor) for row in rows]
 
 
 def get_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]:
-    return environment_to_dict(db, _get_visible(db, actor, public_id))
+    return environment_to_dict(db, _get_visible(db, actor, public_id), actor)
 
 
 def get_artifact_download(
@@ -4938,6 +4958,14 @@ def get_artifact_download(
     )
     if not row:
         raise NotFoundError("沙箱制品不存在", code=40400)
+    if row.artifact_type == "review_report":
+        if environment.owner_id != actor.id and not rbac_service.is_admin_user(db, actor.id):
+            raise NotFoundError("沙箱制品不存在", code=40400)
+        if not rbac_service.check_permission(db, actor.id, PermissionCode.REPORT_VIEW):
+            raise PermissionError(
+                f"无操作权限: 需要 {PermissionCode.REPORT_VIEW}",
+                detail={"required_permission": PermissionCode.REPORT_VIEW},
+            )
     try:
         content = base64.b64decode(row.content_base64, validate=True)
     except (binascii.Error, ValueError, TypeError) as exc:
@@ -4952,7 +4980,7 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
-        return environment_to_dict(db, row)
+        return environment_to_dict(db, row, actor)
     worker = db.get(SandboxWorker, row.worker_id) if row.worker_id is not None else None
     row.status = "stopping"
     _append_event(db, row, "dispatch", "stop", f"{row.agent_code} 已调用关闭工具")
@@ -4989,7 +5017,7 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
         commit=False,
     )
     db.commit()
-    return environment_to_dict(db, row)
+    return environment_to_dict(db, row, actor)
 
 
 def extend_environment(db: Session, actor: User, public_id: str, hours: int) -> dict[str, Any]:
@@ -5027,7 +5055,7 @@ def extend_environment(db: Session, actor: User, public_id: str, hours: int) -> 
         commit=False,
     )
     db.commit()
-    return environment_to_dict(db, row)
+    return environment_to_dict(db, row, actor)
 
 
 def expire_due_environments() -> int:

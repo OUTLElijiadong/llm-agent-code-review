@@ -297,7 +297,37 @@ async def test_fixed_download_tools_return_only_authorized_same_origin_urls(db, 
     assert code_file.output["file_name"] == "evidence.bin"
     assert report_checks == [(user.id, 23)]
     assert file_checks == [(user.id, 41)]
-    assert checked_permissions[-2:] == ["report:export:html", "file:download"]
+    assert checked_permissions[-3:] == ["report:view", "report:export:html", "file:download"]
+
+
+@pytest.mark.asyncio
+async def test_download_report_requires_view_scope_before_resolving_report(db, monkeypatch) -> None:
+    user = _user(db)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    checked_permissions: list[str] = []
+
+    def allow_only_export(_db, user_id, permission):
+        assert user_id == user.id
+        checked_permissions.append(permission)
+        return permission == "report:export:html"
+
+    monkeypatch.setattr(service_module.rbac_service, "check_permission", allow_only_export)
+    report_checks: list[int] = []
+    monkeypatch.setattr(
+        service_module.report_service,
+        "get_report_detail",
+        lambda _db, actor, task_id: report_checks.append(task_id),
+    )
+    executor = _executor(db, user, "run_report_view_required")
+
+    result = await executor.execute(
+        ToolCall("call_report_without_view", "download_report", {"task_id": 23, "format": "html"}, "{}")
+    )
+
+    assert result.status == "error"
+    assert "report:view" in result.error
+    assert checked_permissions == ["report:view"]
+    assert report_checks == []
 
 
 @pytest.mark.asyncio

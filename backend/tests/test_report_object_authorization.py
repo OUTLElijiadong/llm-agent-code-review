@@ -232,11 +232,30 @@ def test_domain_reports_check_ownership_before_domain_data_or_renderer(scope, ac
 def test_read_and_generate_routes_require_view_permission(scope):
     scope["db"].delete(scope["permissions"]["report:view"])
     scope["db"].commit()
-    for endpoint in READ_ENDPOINTS[:6]:
+    for endpoint in READ_ENDPOINTS:
         response = _read(scope, endpoint)
         assert response.status_code == 403
         assert response.json()["detail"]["required_permission"] == "report:view"
     assert scope["client"].get("/reports").status_code == 403
+    assert scope["rendered"] == []
+
+
+def test_export_permission_without_report_view_cannot_read_report_content(scope):
+    """格式导出权限不能绕过独立的报告查看权限。"""
+    scope["db"].delete(scope["permissions"]["report:view"])
+    scope["db"].commit()
+
+    endpoints = [
+        ("GET", f"/tasks/{{id}}/export?format={fmt}", None)
+        for fmt in FORMATS
+    ] + [
+        ("GET", "/{id}/export/word", None),
+        ("GET", "/{id}/export/pdf", None),
+    ]
+    for endpoint in endpoints:
+        response = _read(scope, endpoint)
+        assert response.status_code == 403, endpoint
+        assert response.json()["detail"]["required_permission"] == "report:view", endpoint
     assert scope["rendered"] == []
 
 

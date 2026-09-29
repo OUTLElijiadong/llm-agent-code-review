@@ -1514,6 +1514,8 @@ class PrismToolExecutor:
             "pdf": PermissionCode.REPORT_EXPORT_PDF,
             "word": PermissionCode.REPORT_EXPORT_WORD,
         }[export_format]
+        if not rbac_service.check_permission(self._db, self._user.id, PermissionCode.REPORT_VIEW):
+            return ToolExecutionResult.failure(f"当前用户缺少权限: {PermissionCode.REPORT_VIEW}")
         if not rbac_service.check_permission(self._db, self._user.id, permission):
             return ToolExecutionResult.failure(f"当前用户缺少权限: {permission}")
         try:
@@ -1697,7 +1699,7 @@ class PrismToolExecutor:
                 "rules_version": pentest_service.PENTEST_RULES_VERSION,
                 "message": (
                     "委托草稿已创建。请在『渗透测试』页面确认规则、设定时间窗并提交授权申请;"
-                    "须由其他评审员或管理员独立批准，批准前不会执行任何主动测试动作。"
+                    "须由其他审查员或管理员独立批准，批准前不会执行任何主动测试动作。"
                 ),
             }
         )

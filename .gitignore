@@ -44,6 +44,7 @@ frontend/playwright-report/
 # 质量门禁与本地发布运行态
 backend/.coverage*
 backend/coverage*.json
+backend/.venv311/
 deploy/.releases/
 deploy/.state/
 deploy/ops.env

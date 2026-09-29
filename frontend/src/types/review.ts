@@ -101,15 +101,18 @@ export interface TaskOut {
   project_name: string
   review_type: string
   status: string
+  can_view_report?: boolean
   total_files: number
   processed_files: number
-  total_issues: number
+  total_issues: number | null
   report_issue_summary?: TaskDetailOut['report_issue_summary']
-  severe_issues: number
-  high_issues: number
-  medium_issues: number
-  low_issues: number
-  score: number
+  severe_issues: number | null
+  high_issues: number | null
+  medium_issues: number | null
+  low_issues: number | null
+  score: number | null
+  score_version?: string | null
+  score_breakdown?: Record<string, unknown> | null
   duration_ms: number
   create_time: string
 }
@@ -143,14 +146,17 @@ export interface TaskDetailOut {
   project_name: string
   review_type: string
   status: string
+  can_view_report?: boolean
   total_files: number
   processed_files: number
-  total_issues: number
-  severe_issues: number
-  high_issues: number
-  medium_issues: number
-  low_issues: number
-  score: number
+  total_issues: number | null
+  severe_issues: number | null
+  high_issues: number | null
+  medium_issues: number | null
+  low_issues: number | null
+  score: number | null
+  score_version?: string | null
+  score_breakdown?: Record<string, unknown> | null
   summary?: string
   model_name?: string
   coverage?: TaskCoverageOut | null

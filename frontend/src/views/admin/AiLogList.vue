@@ -35,8 +35,14 @@
       </div>
 
       <div class="log-cards" v-loading="loading" role="list" data-testid="log-cards">
+        <div v-if="loadError" class="log-load-error" role="alert" data-testid="logs-error">
+          <span>{{ loadError }}</span>
+          <button type="button" data-testid="retry-logs" :disabled="loading" @click="loadData">
+            {{ loading ? '正在重试…' : '重试' }}
+          </button>
+        </div>
         <EmptyState
-          v-if="!logs.length"
+          v-else-if="!loading && !logs.length"
           compact
           description="当前过滤条件下没有调用记录,试试放宽条件"
         />
@@ -225,6 +231,7 @@ const userStore = useUserStore()
 const logScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => '')
 const loading = ref(false)
 const logs = ref<AiLogOut[]>([])
+const loadError = ref('')
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -256,6 +263,7 @@ const expandedId = ref<number | null>(null)
 const detailCache = ref<Record<number, AiLogDetailOut>>({})
 const detailLoading = ref(false)
 let detailRequest = 0
+let listRequest = 0
 
 const activeDetail = computed<AiLogDetailOut | null>(() =>
   expandedId.value != null ? detailCache.value[expandedId.value] ?? null : null
@@ -293,7 +301,9 @@ function formatDuration(ms?: number): string {
 
 async function loadData() {
   const isCurrent = logScope.captureAccount()
+  const request = ++listRequest
   loading.value = true
+  loadError.value = ''
   try {
     const params: Record<string, unknown> = {
       page: page.value,
@@ -306,15 +316,21 @@ async function loadData() {
     }
 
     const data = await getAiLogs(params)
-    if (!isCurrent()) return
+    if (!isCurrent() || request !== listRequest) return
     logs.value = data.items
     total.value = data.total
     // 翻页/筛选后当前展开的日志若已不在列表中,收起展开区
     if (expandedId.value != null && !data.items.some((item) => item.id === expandedId.value)) {
       expandedId.value = null
     }
+  } catch {
+    if (!isCurrent() || request !== listRequest) return
+    logs.value = []
+    total.value = 0
+    expandedId.value = null
+    loadError.value = 'AI 调用日志加载失败，请检查网络后重试。'
   } finally {
-    if (isCurrent()) loading.value = false
+    if (isCurrent() && request === listRequest) loading.value = false
   }
 }
 
@@ -357,10 +373,12 @@ function goFile(projectId: number, fileId: number): void {
 
 watch([() => userStore.profile?.id, () => userStore.token], () => {
   detailRequest += 1
+  listRequest += 1
   expandedId.value = null
   detailCache.value = {}
   detailLoading.value = false
   logs.value = []
+  loadError.value = ''
   total.value = 0
   loading.value = false
   page.value = 1
@@ -412,6 +430,35 @@ onMounted(() => {
   gap: 10px;
   min-height: 120px;
 }
+
+.log-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #f4c7c7;
+  border-radius: 10px;
+  background: #fff7f7;
+  color: #9b2c2c;
+  font-size: 13px;
+}
+
+.log-load-error button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: #fff;
+  color: #6a63e9;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.log-load-error button:disabled { opacity: 0.6; cursor: wait; }
+.log-load-error button:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 
 .log-card {
   position: relative;

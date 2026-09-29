@@ -29,7 +29,13 @@
 
       <!-- 用户卡片列表:替代表格,头像+名称/徽章为主行,邮箱/登录/注册等元信息降级为次行 -->
       <div class="user-cards" v-loading="loading" role="list" data-testid="user-cards">
-        <EmptyState v-if="!users.length" description="暂无用户" />
+        <div v-if="loadError" class="user-load-error" role="alert" data-testid="users-error">
+          <span>{{ loadError }}</span>
+          <button type="button" data-testid="retry-users" :disabled="loading" @click="loadData">
+            {{ loading ? '正在重试…' : '重试' }}
+          </button>
+        </div>
+        <EmptyState v-else-if="!loading && !users.length" description="暂无用户" />
         <article
           v-for="row in users"
           :key="row.id"
@@ -172,6 +178,7 @@ type UserRow = UserListItem
 const loading = ref(false)
 const submitting = ref(false)
 const users = ref<UserRow[]>([])
+const loadError = ref('')
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -186,6 +193,8 @@ const allRoles = ref<Role[]>([])
 const passwordDialogVisible = ref(false)
 const resetPasswordUsername = ref('')
 const temporaryPassword = ref('')
+let listRequest = 0
+let rolesRequest: Promise<Role[]> | null = null
 
 /** 基础角色(RBAC 内置编码,与 user.role 旧列一一对应) */
 const BASE_ROLE_CODES = ['user', 'reviewer', 'admin'] as const
@@ -200,6 +209,22 @@ function roleLabel(role: string) {
   return roleLabels[role] ?? role
 }
 
+/** 角色目录只共享进行中的请求；它失败时用户列表仍可独立加载和展示。 */
+function loadRoles(): Promise<Role[]> {
+  if (allRoles.value.length) return Promise.resolve(allRoles.value)
+  if (!rolesRequest) {
+    rolesRequest = listRoles()
+      .then((roles) => {
+        allRoles.value = roles
+        return roles
+      })
+      .finally(() => {
+        rolesRequest = null
+      })
+  }
+  return rolesRequest
+}
+
 function roleType(role: string) {
   const map: Record<string, string> = { super_admin: 'danger', admin: 'warning', reviewer: 'warning', user: 'info' }
   return map[role] ?? 'info'
@@ -212,7 +237,9 @@ function avatarInitial(row: UserListItem): string {
 }
 
 async function loadData() {
+  const request = ++listRequest
   loading.value = true
+  loadError.value = ''
   try {
     const params: Record<string, unknown> = {
       page: page.value,
@@ -223,14 +250,27 @@ async function loadData() {
     if (filterStatus.value !== null) params.status = filterStatus.value
 
     const data = await getUsers(params)
+    if (request !== listRequest) return
     users.value = data.items
     total.value = data.total
+  } catch {
+    if (request !== listRequest) return
+    users.value = []
+    total.value = 0
+    loadError.value = '用户列表加载失败，请检查网络后重试。'
   } finally {
-    loading.value = false
+    if (request === listRequest) loading.value = false
   }
 }
 
 async function onSetRole(row: UserRow) {
+  try {
+    const roles = await loadRoles()
+    if (!roles.length) throw new Error('角色目录为空')
+  } catch {
+    ElMessage.error('角色目录加载失败，请稍后重试。')
+    return
+  }
   selectedUser.value = row
   selectedRole.value = BASE_ROLE_CODES.includes(row.role as never) ? row.role : 'user'
   roleDialogVisible.value = true
@@ -315,13 +355,11 @@ async function onDelete(row: UserListItem) {
   }
 }
 
-onMounted(async () => {
-  try {
-    allRoles.value = await listRoles()
-  } catch {
-    /* 角色列表失败时仅隐藏附加角色区,基础功能可用 */
-  }
-  loadData()
+onMounted(() => {
+  void loadRoles().catch(() => {
+    /* 用户列表与角色目录并行；目录失败时只影响角色编辑入口。 */
+  })
+  void loadData()
 })
 </script>
 
@@ -350,6 +388,32 @@ onMounted(async () => {
 
 /* ── 用户卡片列表(替代表格:头像+名称/徽章为主行,元信息降级为次行) ── */
 .user-cards { display: grid; gap: 10px; min-height: 120px; }
+.user-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #f4c7c7;
+  border-radius: 10px;
+  background: #fff7f7;
+  color: #9b2c2c;
+  font-size: 13px;
+}
+.user-load-error button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: #fff;
+  color: #6a63e9;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.user-load-error button:disabled { opacity: 0.6; cursor: wait; }
+.user-load-error button:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 .user-card {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;

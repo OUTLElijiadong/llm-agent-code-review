@@ -216,6 +216,27 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('顶部快捷导出和下方格式菜单共享并发锁，不会重复发送同格式导出', async () => {
+    let resolveExport!: (value: Blob) => void
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    reportApi.exportReport.mockReturnValueOnce(new Promise((resolve) => { resolveExport = resolve }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = setupState(wrapper)
+
+    const topAction = vm.downloadWord()
+    const menuAction = vm.handleExport('word')
+    await flushPromises()
+
+    expect(reportApi.exportReport).toHaveBeenCalledExactlyOnceWith(42, 'word', 'detailed')
+    expect(vm.exportingFormat).toBe('word')
+    resolveExport(new Blob(['report']))
+    await Promise.all([topAction, menuAction])
+    expect(click).toHaveBeenCalledTimes(1)
+    click.mockRestore()
+    wrapper.unmount()
+  })
+
   it('导出错误展示后端message和next_action并提供重试操作', async () => {
     reportApi.exportReport.mockRejectedValueOnce({ code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON' })
     const wrapper = mountPage()

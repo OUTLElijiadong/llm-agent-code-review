@@ -12,7 +12,8 @@
         </el-button>
         <el-button
           v-if="canExport('word')"
-          :loading="exportingWord"
+          :loading="exportingFormat === 'word'"
+          :disabled="exportingFormat !== null"
           data-testid="report-export-word"
           @click="downloadWord"
         >
@@ -21,7 +22,8 @@
         <el-button
           v-if="canExport('pdf')"
           type="primary"
-          :loading="exportingPdf"
+          :loading="exportingFormat === 'pdf'"
+          :disabled="exportingFormat !== null"
           data-testid="report-export-pdf"
           @click="downloadPdf"
         >
@@ -84,7 +86,7 @@
           <el-icon><View /></el-icon>预览 HTML
         </el-button>
         <el-dropdown v-if="hasExportFormat" trigger="click" @command="handleExport">
-          <el-button size="small" :loading="exportingFormat !== null">
+          <el-button size="small" :loading="exportingFormat !== null" :disabled="exportingFormat !== null">
             <el-icon><Download /></el-icon>导出报告
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
@@ -521,8 +523,6 @@ const loadError = ref('')
 let reportRequestVersion = 0
 let disposed = false
 const report = ref<ReportDetailOut | null>(null)
-const exportingWord = ref(false)
-const exportingPdf = ref(false)
 
 // ===== T15 新增:报告生成 / 预览 / 导出状态 =====
 /** 当前选择的模板类型(simple/detailed/compliance),影响生成/预览/导出 */
@@ -754,34 +754,12 @@ function downloadBlob(response: Blob, filename: string) {
   }
 }
 
-async function downloadWord() {
-  if (!canExport('word') || exportingWord.value) return
-  exportingWord.value = true
-  try {
-    const response = await apiExportReport(taskId, 'word', templateType.value)
-    if (disposed || !canExport('word')) return
-    downloadBlob(response as unknown as Blob, `review_report_${taskId}.docx`)
-    ElMessage.success('Word 报告导出成功')
-  } catch (error) {
-    if (!disposed) showExportError(error, 'word', '导出')
-  } finally {
-    exportingWord.value = false
-  }
+async function downloadWord(): Promise<void> {
+  await handleExport('word')
 }
 
-async function downloadPdf() {
-  if (!canExport('pdf') || exportingPdf.value) return
-  exportingPdf.value = true
-  try {
-    const response = await apiExportReport(taskId, 'pdf', templateType.value)
-    if (disposed || !canExport('pdf')) return
-    downloadBlob(response as unknown as Blob, `review_report_${taskId}.pdf`)
-    ElMessage.success('PDF 报告导出成功')
-  } catch (error) {
-    if (!disposed) showExportError(error, 'pdf', '导出')
-  } finally {
-    exportingPdf.value = false
-  }
+async function downloadPdf(): Promise<void> {
+  await handleExport('pdf')
 }
 
 function onPrint() {

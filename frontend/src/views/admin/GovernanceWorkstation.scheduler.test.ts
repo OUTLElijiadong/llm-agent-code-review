@@ -73,7 +73,7 @@ beforeEach(() => {
 })
 
 describe('GovernanceWorkstation scheduler compatibility', () => {
-  it.each(['daily@03:00', 'hourly@*:23', 'hourly@23', 'interval@5m', 'interval@30s'])('accepts backend schedule %s', (schedule) => {
+  it.each(['daily@03:00', 'hourly@*:23', 'hourly@23', 'interval@5m', 'interval@5M', 'interval@30s'])('accepts backend schedule %s', (schedule) => {
     expect(isScheduleValid(schedule)).toBe(true)
   })
 
@@ -85,6 +85,35 @@ describe('GovernanceWorkstation scheduler compatibility', () => {
     expect(isScheduleValid('interval@0m')).toBe(false)
     expect(isScheduleValid('interval@86401s')).toBe(false)
     expect(isScheduleValid('interval@5')).toBe(false)
+    expect(isScheduleValid('MANUAL')).toBe(false)
+    expect(isScheduleValid('DAILY@02:30')).toBe(false)
+    expect(isScheduleValid('60 * * * *')).toBe(false)
+    expect(isScheduleValid('0 24 * * *')).toBe(false)
+    expect(isScheduleValid('* * 0 * *')).toBe(false)
+    expect(isScheduleValid('* * * 13 *')).toBe(false)
+    expect(isScheduleValid('* * * * 7')).toBe(false)
+    expect(isScheduleValid('0-100 * * * *')).toBe(false)
+    expect(isScheduleValid('*/0 * * * *')).toBe(false)
+  })
+
+  it.each([
+    '0 9 * * mon',
+    '0 9 * * MON',
+    '0 9 * jan mon',
+    '0 9 * JAN MON',
+    '0 9 * jan-mar mon-fri',
+    '0 9 * * mon,wed,fri',
+  ])('accepts APScheduler named cron fields %s', (schedule) => {
+    expect(isScheduleValid(schedule)).toBe(true)
+  })
+
+  it.each([
+    '0 9 * monday mon',
+    '0 9 * jany mon',
+    '0 9 * jan monday',
+    '0 9 * jan-febx mon-fri',
+  ])('rejects unknown APScheduler cron names %s', (schedule) => {
+    expect(isScheduleValid(schedule)).toBe(false)
   })
 
   it.each(['daily@02:00', 'hourly@*:17', 'hourly@17', 'interval@7m', 'interval@45s'])('submits existing %s without cron false positive', async (schedule) => {

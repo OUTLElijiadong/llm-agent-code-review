@@ -20,6 +20,7 @@ const api = vi.hoisted(() => ({
   listAgentMemory: vi.fn(),
   listAgentKnowledge: vi.fn(),
   listAgentKnowledgeSources: vi.fn(),
+  listJobs: vi.fn(),
   getObservabilityOverview: vi.fn(),
   listRewardEvents: vi.fn(),
   listArtifactVersions: vi.fn(),
@@ -34,7 +35,7 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 import AgentGovernance from './AgentGovernance.vue'
 import GovernanceWorkstation from './GovernanceWorkstation.vue'
 
-type TestedMode = 'policies' | 'overview' | 'agents' | 'approvals' | 'tools' | 'knowledge' | 'rewards' | 'rollback'
+type TestedMode = 'policies' | 'overview' | 'agents' | 'approvals' | 'tools' | 'knowledge' | 'jobs' | 'observability' | 'rewards' | 'rollback'
 const wrappers: VueWrapper[] = []
 const renderErrors: unknown[] = []
 
@@ -118,6 +119,7 @@ beforeEach(() => {
     whitelist: 1, enabled: 1,
   }])
   api.getObservabilityOverview.mockResolvedValue({})
+  api.listJobs.mockResolvedValue([])
   api.listRewardEvents.mockResolvedValue([{
     id: 7, agent_code: 'review_orchestrator', event_type: 'reward', score: 2, reason: '隔离回归样例',
   }])
@@ -180,6 +182,69 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     await settle()
     for (const [table, column, text] of cells) expect(tableCells(wrapper, table)[column]).toBe(text)
     for (const cell of wrapper.findAll('tbody td')) expect(cell.text()).not.toMatch(/\{\s*\w+\([^{}]*\)\s*\}/)
+  })
+
+  it('translates known operations job names, types, and schedules while preserving unknown expressions', async () => {
+    api.listJobs.mockResolvedValue([
+      { id: 31, job_code: 'ops health check', job_type: 'ops_health_check', agent_code: 'operations', schedule: 'interval@5m', status: 'enabled' },
+      { id: 32, job_code: 'new_future_job', job_type: 'future_type', agent_code: null, schedule: '0 3 * * *', status: 'enabled' },
+      { id: 33, job_code: 'sandbox heartbeat', job_type: 'sandbox_heartbeat', agent_code: null, schedule: 'daily@02:30', status: 'enabled' },
+      { id: 34, job_code: 'security monitor', job_type: 'security_monitor', agent_code: null, schedule: 'hourly@*:00', status: 'enabled' },
+      { id: 35, job_code: 'hourly_skill_proactive_code_reviewer', job_type: 'skill_proactive', agent_code: 'code_reviewer', schedule: 'hourly@*:00', status: 'enabled' },
+      { id: 36, job_code: 'quarter_hour_check', job_type: 'manual', agent_code: null, schedule: 'hourly@*:15', status: 'enabled' },
+      { id: 37, job_code: 'invalid_interval', job_type: 'manual', agent_code: null, schedule: 'interval@0m', status: 'enabled' },
+    ])
+    const wrapper = mountMode('jobs')
+    await settle()
+
+    const firstRow = wrapper.findAll('tbody tr.el-table__row')[0]!
+    const firstCells = firstRow.findAll('td')
+    expect(firstCells[0]!.text()).toBe('运维健康检查')
+    expect(firstCells[1]!.text()).toBe('运维健康检查')
+    expect(firstCells[2]!.text()).toBe('全服管理')
+    expect(firstCells[3]!.text()).toBe('每 5 分钟')
+    expect((firstCells[3]!.find('input').element as HTMLInputElement).value).toBe('interval@5m')
+    expect(tableCells(wrapper, 0, 1)[0]).toBe('new future job')
+    expect(tableCells(wrapper, 0, 1)[1]).toBe('future_type')
+    const unknownScheduleCell = wrapper.findAll('tbody tr.el-table__row')[1]!.findAll('td')[3]!
+    expect((unknownScheduleCell.find('input').element as HTMLInputElement).value).toBe('0 3 * * *')
+    expect(unknownScheduleCell.find('.job-schedule-human').exists()).toBe(false)
+    expect(tableCells(wrapper, 0, 2)[0]).toBe('沙箱心跳检查')
+    expect(tableCells(wrapper, 0, 2)[3]).toBe('每天 02:30')
+    expect(tableCells(wrapper, 0, 3)[0]).toBe('安全监控')
+    expect(tableCells(wrapper, 0, 3)[3]).toBe('每小时整点')
+    expect(tableCells(wrapper, 0, 4)[0]).toBe('每小时·主动技能·代码审查员')
+    expect(tableCells(wrapper, 0, 4)[1]).toBe('主动技能检查')
+    expect(tableCells(wrapper, 0, 5)[3]).toBe('每小时的第 15 分钟')
+    expect(tableCells(wrapper, 0, 6)[3]).toBe('')
+    const invalidScheduleCell = wrapper.findAll('tbody tr.el-table__row')[6]!.findAll('td')[3]!
+    const invalidScheduleInput = invalidScheduleCell.find('.el-input')
+    expect((invalidScheduleInput.find('input').element as HTMLInputElement).value).toBe('interval@0m')
+    expect(invalidScheduleInput.classes()).toContain('is-cron-invalid')
+    expect(wrapper.findAll('tbody tr.el-table__row')[6]!.find('.job-schedule-human').exists()).toBe(false)
+  })
+
+  it('explains that execution totals are cumulative while alerts are current open items', async () => {
+    api.getObservabilityOverview.mockResolvedValue({
+      open_alerts: 99,
+      job_runs: 130788,
+      tool_status: [{ status: 'failed', count: 43188 }],
+      approval_status: [],
+    })
+    api.listAlerts.mockResolvedValue([])
+    const wrapper = mountMode('observability')
+    await settle()
+
+    expect(wrapper.text()).toContain('工具调用、调度执行和奖惩均为累计记录；审批按事项当前状态分组；开放告警只统计当前未关闭项。')
+    expect(wrapper.text()).toContain('当前开放告警')
+    expect(wrapper.text()).toContain('调度执行次数（累计）')
+    expect(wrapper.text()).toContain('工具执行结果（累计）')
+    expect(wrapper.text()).toContain('审批事项当前状态分布')
+    expect(wrapper.text()).toContain('事项数')
+    expect(wrapper.text()).toContain('暂无审批事项状态记录')
+    expect(wrapper.text()).toContain('状态')
+    expect(wrapper.text()).not.toContain('审批渠道状态为空')
+    expect(wrapper.text()).toContain('当前没有未关闭告警。历史失败记录请查看工具执行统计。')
   })
 
   it('renders all 35 agent cards without presenting the meta category as a second main agent', async () => {
@@ -304,16 +369,18 @@ describe('AgentGovernance refresh feedback only', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
-  it('does not add Agent-specific refresh behavior to approvals', async () => {
+  it('shows a busy refresh state while approvals load without Agent-specific copy', async () => {
     const request = deferred<unknown[]>()
     api.listApprovals.mockReturnValueOnce(request.promise)
     const wrapper = mountMode('approvals')
     await settle()
-    expect(wrapper.get('.page-head button').text()).toBe('刷新')
-    expect(wrapper.get('.page-head button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.page-head button').text()).toBe('正在加载')
+    expect(wrapper.get('.page-head button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.page-head button').attributes('aria-busy')).toBe('true')
     expect(wrapper.text()).not.toContain('Agent 列表')
     request.resolve([])
     await settle()
+    expect(wrapper.get('.page-head button').text()).toBe('刷新')
   })
 })
 

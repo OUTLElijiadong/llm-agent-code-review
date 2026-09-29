@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import EmptyState from '@/components/common/EmptyState.vue'
+import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 import { isScheduleValid } from '@/utils/cronValidate'
 import { useRouter } from 'vue-router'
@@ -65,6 +66,7 @@ const props = defineProps<{
   mode: Mode
 }>()
 const userStore = useUserStore()
+const approvalScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => '')
 
 const loading = ref(false)
 const overview = ref<GovernanceOverview | null>(null)
@@ -84,6 +86,9 @@ function toggleAgentDetails(code: string): void {
   else expandedAgentCodes.value.add(code)
 }
 const approvals = ref<ApprovalItem[]>([])
+const approvalLoadError = ref('')
+let approvalRequestVersion = 0
+let dataRequestVersion = 0
 const policies = ref<PolicyRule[]>([])
 const decisions = ref<PolicyDecision[]>([])
 const tools = ref<ToolCallLog[]>([])
@@ -201,6 +206,7 @@ import {
   categoryText,
   decisionText,
   jobCodeText,
+  jobScheduleText,
   jobTypeText,
   memoryTypeText,
   policyActionText,
@@ -260,10 +266,10 @@ function agentDisplayName(agent: GovernanceAgent): string {
 }
 
 const observabilityCards = computed(() => [
-  { label: '开放告警', value: Number(observability.value.open_alerts || 0) },
-  { label: '调度执行', value: Number(observability.value.job_runs || 0) },
+  { label: '当前开放告警', value: Number(observability.value.open_alerts || 0) },
+  { label: '调度执行次数（累计）', value: Number(observability.value.job_runs || 0) },
   { label: '累计奖惩分', value: Number(observability.value.reward_score_total || 0) },
-  { label: '工具状态类型', value: Array.isArray(observability.value.tool_status) ? observability.value.tool_status.length : 0 },
+  { label: '工具结果分类数', value: Array.isArray(observability.value.tool_status) ? observability.value.tool_status.length : 0 },
 ])
 
 /**
@@ -271,57 +277,104 @@ const observabilityCards = computed(() => [
  * @returns Promise<void>
  */
 async function loadData(): Promise<void> {
-  const isAgentsRequest = props.mode === 'agents'
+  const requestMode = props.mode
+  const isAgentsRequest = requestMode === 'agents'
+  const isApprovalsRequest = requestMode === 'approvals'
   if (isAgentsRequest && loading.value) return
+  const dataVersion = ++dataRequestVersion
+  const accountIsCurrent = isApprovalsRequest ? approvalScope.captureAccount() : () => true
+  const requestVersion = isApprovalsRequest ? ++approvalRequestVersion : 0
+  const requestIsCurrent = () => (
+    dataVersion === dataRequestVersion &&
+    props.mode === requestMode &&
+    accountIsCurrent() &&
+    (!isApprovalsRequest || requestVersion === approvalRequestVersion)
+  )
   loading.value = true
   if (isAgentsRequest) agentLoadError.value = ''
+  if (isApprovalsRequest) approvalLoadError.value = ''
   try {
-    if (props.mode === 'overview') {
-      overview.value = await getGovernanceOverview()
-      agents.value = await listGovernanceAgents()
-      approvals.value = await listApprovals('pending', 'agent_package.publish')
-      alerts.value = await listAlerts()
-    } else if (props.mode === 'agents') {
-      agents.value = await listGovernanceAgents()
+    if (requestMode === 'overview') {
+      const nextOverview = await getGovernanceOverview()
+      if (!requestIsCurrent()) return
+      overview.value = nextOverview
+      const nextAgents = await listGovernanceAgents()
+      if (!requestIsCurrent()) return
+      agents.value = nextAgents
+      const nextApprovals = await listApprovals('pending', 'agent_package.publish')
+      if (!requestIsCurrent()) return
+      approvals.value = nextApprovals
+      const nextAlerts = await listAlerts()
+      if (!requestIsCurrent()) return
+      alerts.value = nextAlerts
+    } else if (requestMode === 'agents') {
+      const nextAgents = await listGovernanceAgents()
+      if (!requestIsCurrent()) return
+      agents.value = nextAgents
       agentsLoaded.value = true
-    } else if (props.mode === 'approvals') {
-      approvals.value = await listApprovals('pending', 'agent_package.publish')
-    } else if (props.mode === 'policies') {
-      policies.value = await listPolicies()
-      decisions.value = await listPolicyDecisions()
-    } else if (props.mode === 'tools') {
+    } else if (isApprovalsRequest) {
+      const items = await listApprovals('pending', 'agent_package.publish')
+      if (requestIsCurrent()) approvals.value = items
+    } else if (requestMode === 'policies') {
+      const nextPolicies = await listPolicies()
+      if (!requestIsCurrent()) return
+      policies.value = nextPolicies
+      const nextDecisions = await listPolicyDecisions()
+      if (!requestIsCurrent()) return
+      decisions.value = nextDecisions
+    } else if (requestMode === 'tools') {
       const [calls, permissions] = await Promise.all([listToolCalls(), listToolPermissions()])
+      if (!requestIsCurrent()) return
       tools.value = calls
       toolPermissions.value = permissions
-    } else if (props.mode === 'knowledge') {
-      agents.value = await listGovernanceAgents()
+    } else if (requestMode === 'knowledge') {
+      const nextAgents = await listGovernanceAgents()
+      if (!requestIsCurrent()) return
+      agents.value = nextAgents
       selectedAgent.value = selectedAgent.value || agents.value[0]?.code || ''
-      await loadAgentKnowledge()
-    } else if (props.mode === 'jobs') {
-      jobs.value = await listJobs()
+      await loadAgentKnowledge(requestIsCurrent)
+    } else if (requestMode === 'jobs') {
+      const nextJobs = await listJobs()
+      if (!requestIsCurrent()) return
+      jobs.value = nextJobs
       // 只初始化缺失行:用户正在编辑的 schedule 不被后台刷新静默覆盖
       for (const job of jobs.value) {
         if (!jobEdit.value[job.id]) {
           jobEdit.value[job.id] = { schedule: job.schedule, status: job.status }
         }
       }
-    } else if (props.mode === 'observability') {
-      observability.value = await getObservabilityOverview()
-      alerts.value = await listAlerts()
-    } else if (props.mode === 'rewards') {
-      observability.value = await getObservabilityOverview()
-      rewardEvents.value = await listRewardEvents()
-    } else if (props.mode === 'rollback') {
-      artifactVersions.value = await listArtifactVersions()
+    } else if (requestMode === 'observability') {
+      const nextObservability = await getObservabilityOverview()
+      if (!requestIsCurrent()) return
+      observability.value = nextObservability
+      const nextAlerts = await listAlerts()
+      if (!requestIsCurrent()) return
+      alerts.value = nextAlerts
+    } else if (requestMode === 'rewards') {
+      const nextObservability = await getObservabilityOverview()
+      if (!requestIsCurrent()) return
+      observability.value = nextObservability
+      const nextRewardEvents = await listRewardEvents()
+      if (!requestIsCurrent()) return
+      rewardEvents.value = nextRewardEvents
+    } else if (requestMode === 'rollback') {
+      const nextVersions = await listArtifactVersions()
+      if (!requestIsCurrent()) return
+      artifactVersions.value = nextVersions
     }
   } catch (error) {
-    if (!isAgentsRequest) throw error
+    if (!requestIsCurrent()) return
     const message = error instanceof Error
       ? error.message
       : error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined
-    agentLoadError.value = (typeof message === 'string' && message.trim()) || 'Agent 列表加载失败，请刷新重试'
+    const readable = typeof message === 'string' && message.trim() ? message.trim() : ''
+    if (isAgentsRequest) agentLoadError.value = readable || 'Agent 列表加载失败，请刷新重试'
+    else if (isApprovalsRequest) {
+      approvals.value = []
+      approvalLoadError.value = readable || '审批列表加载失败，请刷新重试'
+    } else throw error
   } finally {
-    loading.value = false
+    if (requestIsCurrent()) loading.value = false
   }
 }
 
@@ -329,21 +382,26 @@ async function loadData(): Promise<void> {
  * 加载选中 Agent 的知识和记忆。
  * @returns Promise<void>
  */
-async function loadAgentKnowledge(): Promise<void> {
-  if (!selectedAgent.value) {
+async function loadAgentKnowledge(isCurrent: () => boolean = () => true): Promise<void> {
+  const agentCode = selectedAgent.value
+  const requestIsCurrent = () => isCurrent() && selectedAgent.value === agentCode
+  if (!agentCode) {
     agentMemory.value = []
     agentKnowledge.value = []
     return
   }
   const [memory, knowledge] = await Promise.all([
-    listAgentMemory(selectedAgent.value),
-    listAgentKnowledge(selectedAgent.value),
+    listAgentMemory(agentCode),
+    listAgentKnowledge(agentCode),
   ])
+  if (!requestIsCurrent()) return
   agentMemory.value = memory
   agentKnowledge.value = knowledge
-  knowledgeSources.value = await listAgentKnowledgeSources(selectedAgent.value)
-  toolPermissionForm.value.agent_code = selectedAgent.value
-  rewardForm.value.agent_code = selectedAgent.value
+  const sources = await listAgentKnowledgeSources(agentCode)
+  if (!requestIsCurrent()) return
+  knowledgeSources.value = sources
+  toolPermissionForm.value.agent_code = agentCode
+  rewardForm.value.agent_code = agentCode
 }
 
 /**
@@ -655,8 +713,27 @@ async function onRollbackArtifact(row: AgentArtifactVersion): Promise<void> {
   await loadData()
 }
 
-watch(() => props.mode, loadData)
-watch(selectedAgent, loadAgentKnowledge)
+watch(() => props.mode, () => {
+  dataRequestVersion += 1
+  approvalRequestVersion += 1
+  loading.value = false
+  if (props.mode !== 'approvals') {
+    approvals.value = []
+    approvalLoadError.value = ''
+  }
+  void loadData()
+}, { flush: 'sync' })
+watch([() => userStore.profile?.id, () => userStore.token], () => {
+  if (props.mode !== 'approvals') return
+  approvalRequestVersion += 1
+  approvals.value = []
+  approvalLoadError.value = ''
+  loading.value = false
+  if (userStore.profile && userStore.token) void loadData()
+}, { flush: 'sync' })
+watch(selectedAgent, () => {
+  if (props.mode === 'knowledge') void loadAgentKnowledge(() => props.mode === 'knowledge')
+})
 
 onMounted(loadData)
 </script>
@@ -669,11 +746,11 @@ onMounted(loadData)
         <p>{{ pageSubtitle }}</p>
       </div>
       <el-button
-        :loading="mode === 'agents' && loading"
-        :disabled="mode === 'agents' && loading"
-        :aria-busy="mode === 'agents' ? loading : undefined"
+        :loading="(mode === 'agents' || mode === 'approvals') && loading"
+        :disabled="(mode === 'agents' || mode === 'approvals') && loading"
+        :aria-busy="mode === 'agents' || mode === 'approvals' ? loading : undefined"
         @click="loadData"
-      >{{ mode === 'agents' && loading ? (agentsLoaded ? '正在刷新' : '正在加载') : '刷新' }}</el-button>
+      >{{ (mode === 'agents' || mode === 'approvals') && loading ? (mode === 'agents' && agentsLoaded ? '正在刷新' : '正在加载') : '刷新' }}</el-button>
     </div>
 
     <template v-if="mode === 'overview'">
@@ -783,10 +860,17 @@ onMounted(loadData)
       <EmptyState v-else compact :description="agentsLoaded ? '暂无 Agent 记录' : loading ? '正在加载 Agent 列表' : '尚未获取 Agent 列表'" />
     </section>
 
-    <section v-else-if="mode === 'approvals'" class="panel">
-      <el-table :data="approvals" stripe>
+    <section v-else-if="mode === 'approvals'" class="panel approval-panel">
+      <div v-if="approvalLoadError" class="approval-load-error" role="alert">
+        <span>{{ approvalLoadError }}</span>
+        <el-button :disabled="loading" @click="loadData">重试加载审批</el-button>
+      </div>
+      <div v-else class="approval-table-scroll" role="region" aria-label="待办审批列表，可横向滚动查看全部列" :aria-busy="loading" tabindex="0" data-testid="approval-table-scroll">
+        <p class="approval-scroll-hint">左右滑动可查看状态和操作列</p>
+        <el-table class="approval-table-content" :data="approvals" stripe>
           <template #empty>
-            <EmptyState compact description="无待审批事项" />
+            <p v-if="loading" class="approval-loading-state" role="status">正在加载待审批事项</p>
+            <EmptyState v-else compact description="无待审批事项" />
           </template>
         <el-table-column prop="title" label="审批事项" min-width="220" />
         <el-table-column label="Agent(智能体)" width="120">
@@ -803,7 +887,8 @@ onMounted(loadData)
             <el-button v-if="row.status === 'pending'" link type="danger" @click="onReject(row)">驳回</el-button>
           </template>
         </el-table-column>
-      </el-table>
+        </el-table>
+      </div>
     </section>
 
     <section v-else-if="mode === 'policies'" class="stack">
@@ -1124,8 +1209,13 @@ onMounted(loadData)
         </el-table-column>
         <el-table-column label="计划" width="190">
           <template #default="{ row }">
-            <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" placeholder="未设置；例如 0 3 * * *（每天 3 点）" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />
-            <span v-else>{{ row.schedule || '未设置' }}</span>
+            <div v-if="jobEdit[row.id]" class="job-schedule-editor">
+              <el-input v-model="jobEdit[row.id].schedule" size="small" placeholder="未设置；例如 0 3 * * *（每天 3 点）" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />
+              <small v-if="jobScheduleText(jobEdit[row.id].schedule) !== jobEdit[row.id].schedule" class="job-schedule-human">
+                {{ jobScheduleText(jobEdit[row.id].schedule) }}
+              </small>
+            </div>
+            <span v-else :title="row.schedule || '未设置'">{{ jobScheduleText(row.schedule) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
@@ -1156,12 +1246,13 @@ onMounted(loadData)
     <section v-else-if="mode === 'observability'" class="content-grid">
       <div class="panel">
         <h3>运行指标</h3>
+        <p class="observability-scope-note">工具调用、调度执行和奖惩均为累计记录；审批按事项当前状态分组；开放告警只统计当前未关闭项。</p>
         <div class="metric-grid compact-metrics">
           <div v-for="item in observabilityCards" :key="item.label" class="metric">
             <span>{{ item.label }}</span><strong>{{ item.value }}</strong>
           </div>
         </div>
-        <h4>工具执行结果</h4>
+        <h4>工具执行结果（累计）</h4>
         <el-table :data="Array.isArray(observability.tool_status) ? observability.tool_status : []" size="small">
           <template #empty>
             <EmptyState compact description="工具状态为空" />
@@ -1169,13 +1260,13 @@ onMounted(loadData)
           <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column prop="count" label="次数" width="100" />
         </el-table>
-        <h4>审批处理结果</h4>
+        <h4>审批事项当前状态分布</h4>
         <el-table :data="Array.isArray(observability.approval_status) ? observability.approval_status : []" size="small">
           <template #empty>
-            <EmptyState compact description="审批渠道状态为空" />
+            <EmptyState compact description="暂无审批事项状态记录" />
           </template>
-          <el-table-column prop="status" label="结果"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
-          <el-table-column prop="count" label="次数" width="100" />
+          <el-table-column prop="status" label="状态"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
+          <el-table-column prop="count" label="事项数" width="100" />
         </el-table>
       </div>
       <div class="panel">
@@ -1313,6 +1404,42 @@ onMounted(loadData)
   box-shadow: var(--shadow-1);
 }
 
+.approval-panel { overflow: visible; }
+.approval-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.approval-table-scroll :deep(.approval-table-content) {
+  /* 列最小宽度之和为 860px；留出单元格边距后让外层成为真实滚动容器。 */
+  min-width: 900px;
+}
+.approval-table-scroll:focus-visible {
+  outline: 2px solid var(--brand-500, #5b58e8);
+  outline-offset: 2px;
+}
+.approval-scroll-hint { display: none; }
+.approval-loading-state {
+  margin: 0;
+  color: var(--color-text-secondary, #737b8d);
+}
+.approval-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-danger, #d9304f);
+}
+@media (max-width: 860px) {
+  .approval-scroll-hint {
+    display: block;
+    margin: 0 0 8px;
+    color: var(--color-text-secondary, #737b8d);
+    font-size: 12px;
+  }
+}
+
 .metric {
   padding: 14px 16px;
 }
@@ -1337,6 +1464,20 @@ onMounted(loadData)
   margin: 18px 0 8px;
   font-size: 13px;
   color: var(--gray-700);
+}
+
+.observability-scope-note {
+  margin: -2px 0 12px;
+  color: var(--gray-500);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.job-schedule-editor { display: grid; gap: 4px; }
+.job-schedule-human {
+  color: var(--gray-500);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .form-control {

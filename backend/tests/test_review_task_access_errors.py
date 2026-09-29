@@ -1,4 +1,6 @@
 """真实 JWT/SQLite 验证审查读取的统一防枚举错误与合法成员回归。"""
+from datetime import datetime, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +16,7 @@ from app.core.security import create_access_token
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.rbac import Permission, Role, RolePermission, UserRole
+from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import project_member_service
@@ -56,7 +59,7 @@ def review_http():
             writes.append(statement.split(' ', 1)[0])
 
     event.listen(engine, 'before_cursor_execute', track_write)
-    yield client, users, writes
+    yield client, users, writes, db
     client.close()
     db.close()
     engine.dispose()
@@ -68,7 +71,7 @@ def headers(user):
 
 @pytest.mark.parametrize('suffix', ['', '/issues'])
 def test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error(review_http, suffix):
-    client, users, writes = review_http
+    client, users, writes, _db = review_http
     bodies = []
     cases = [('owner', 162), ('outsider', 11), ('owner', 12), ('owner', 13), ('owner', 14), ('owner', 15)]
     for actor, task_id in cases:
@@ -90,7 +93,7 @@ def test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_
 @pytest.mark.parametrize('actor', ['owner', 'member'])
 @pytest.mark.parametrize('suffix', ['', '/issues'])
 def test_visible_owner_and_reviewer_keep_success(review_http, actor, suffix):
-    client, users, writes = review_http
+    client, users, writes, _db = review_http
     response = client.get(f'/api/review/tasks/11{suffix}', headers=headers(users[actor]))
     assert response.status_code == 200
     assert response.json()['code'] == 0
@@ -102,7 +105,7 @@ def test_visible_owner_and_reviewer_keep_success(review_http, actor, suffix):
     (None, 401, 40100), ('no_permission', 403, 40303), ('disabled', 403, 40301),
 ])
 def test_authentication_and_permission_errors_are_not_masked_as_not_found(review_http, suffix, actor, status, code):
-    client, users, writes = review_http
+    client, users, writes, _db = review_http
     response = client.get(f'/api/review/tasks/162{suffix}', headers=headers(users[actor]) if actor else {})
     assert response.status_code == status
     assert response.json()['code'] == code
@@ -111,7 +114,7 @@ def test_authentication_and_permission_errors_are_not_masked_as_not_found(review
 
 @pytest.mark.parametrize('suffix', ['', '/issues'])
 def test_project_read_infrastructure_failure_is_not_masked_as_not_found(review_http, monkeypatch, suffix):
-    client, users, writes = review_http
+    client, users, writes, _db = review_http
 
     def unavailable(*_args, **_kwargs):
         raise ServiceUnavailableError('隔离测试：连接暂不可用')
@@ -121,4 +124,177 @@ def test_project_read_infrastructure_failure_is_not_masked_as_not_found(review_h
     assert response.status_code == 503
     assert response.json()['message'] == '隔离测试：连接暂不可用'
     assert response.json()['retryable'] is True
+    assert writes == []
+
+
+@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest"])
+def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(review_http, review_type):
+    client, users, writes, db = review_http
+    task = db.get(ReviewTask, 11)
+    task.review_type = review_type
+    task.summary = "UNIQUE_SECRET_DOMAIN_REPORT_BODY"
+    task.total_issues = 17
+    task.severe_issues = 3
+    task.high_issues = 4
+    task.medium_issues = 5
+    task.low_issues = 5
+    task.score = 72
+    task.score_breakdown = {"private_metric": "UNIQUE_SECRET_DOMAIN_REPORT_BODY"}
+    if review_type == "sandbox_test":
+        db.add(ReviewReport(
+            task_id=task.id,
+            user_id=task.user_id,
+            content_json={"source": "sandbox_test", "report_md": task.summary},
+            summary=task.summary,
+            score=0,
+            create_time=datetime.now(timezone.utc),
+        ))
+    db.commit()
+    writes.clear()
+
+    owner_response = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
+    member_response = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+
+    for response in (owner_response, member_response):
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["can_view_report"] is False
+        assert data["summary"] is None
+        assert data["total_issues"] is None
+        assert data["severe_issues"] is None
+        assert data["high_issues"] is None
+        assert data["medium_issues"] is None
+        assert data["low_issues"] is None
+        assert data["score"] is None
+        assert data["score_breakdown"] is None
+        assert "UNIQUE_SECRET_DOMAIN_REPORT_BODY" not in response.text
+    assert writes == []
+
+
+@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest"])
+def test_domain_report_body_requires_both_report_permission_and_owner_scope(review_http, review_type):
+    client, users, writes, db = review_http
+    task = db.get(ReviewTask, 11)
+    task.review_type = review_type
+    task.summary = "AUTHORIZED_DOMAIN_REPORT_BODY"
+    if review_type == "sandbox_test":
+        db.add(ReviewReport(
+            task_id=task.id,
+            user_id=task.user_id,
+            content_json={"source": "sandbox_test", "report_md": task.summary},
+            summary=task.summary,
+            score=0,
+            create_time=datetime.now(timezone.utc),
+        ))
+    report_permission = Permission(id=3, code="report:view", name="查看报告", module="report", type="api")
+    db.add(report_permission)
+    db.add(RolePermission(role_id=1, permission_id=report_permission.id))
+    db.commit()
+    writes.clear()
+
+    owner_response = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
+    member_response = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+
+    assert owner_response.status_code == member_response.status_code == 200
+    owner_data = owner_response.json()["data"]
+    member_data = member_response.json()["data"]
+    assert owner_data["can_view_report"] is True
+    assert owner_data["summary"] == "AUTHORIZED_DOMAIN_REPORT_BODY"
+    assert member_data["can_view_report"] is False
+    assert member_data["summary"] is None
+    assert "AUTHORIZED_DOMAIN_REPORT_BODY" not in member_response.text
+    assert writes == []
+
+
+@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest"])
+def test_domain_report_metrics_require_report_permission_and_owner_scope(review_http, review_type):
+    client, users, writes, db = review_http
+    task = db.get(ReviewTask, 11)
+    task.review_type = review_type
+    task.total_issues = 41
+    task.severe_issues = 11
+    task.high_issues = 12
+    task.medium_issues = 13
+    task.low_issues = 14
+    task.score = 73
+    task.score_breakdown = {"private_metric": "REPORT_METRIC_SECRET"}
+    task.status = "success"
+    if review_type == "sandbox_test":
+        db.add(ReviewReport(
+            task_id=task.id,
+            user_id=task.user_id,
+            content_json={
+                "source": "sandbox_test",
+                "report_md": "## 问题清单\n### [严重] REPORT_METRIC_SECRET\n证据：仅供报告授权用户查看",
+            },
+            summary="REPORT_METRIC_SECRET",
+            score=73,
+            create_time=datetime.now(timezone.utc),
+        ))
+
+    report_role = Role(id=2, name="审查员", code="reviewer", status="active", is_builtin=0)
+    report_permission = Permission(id=3, code="report:view", name="查看报告", module="report", type="api")
+    db.add_all([report_role, report_permission])
+    db.flush()
+    db.query(UserRole).filter(UserRole.user_id == users["owner"].id).delete()
+    users["owner"].role = report_role.code
+    db.add_all([
+        RolePermission(role_id=report_role.id, permission_id=permission_id)
+        for permission_id in (1, 2, report_permission.id)
+    ])
+    db.add(UserRole(user_id=users["owner"].id, role_id=report_role.id))
+    db.commit()
+    writes.clear()
+
+    member_list = client.get("/api/review/tasks", headers=headers(users["member"]))
+    owner_list = client.get("/api/review/tasks", headers=headers(users["owner"]))
+    member_detail = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+    owner_detail = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
+
+    assert all(response.status_code == 200 for response in (member_list, owner_list, member_detail, owner_detail))
+    member_row = next(item for item in member_list.json()["data"]["items"] if item["id"] == task.id)
+    owner_row = next(item for item in owner_list.json()["data"]["items"] if item["id"] == task.id)
+    member_data = member_detail.json()["data"]
+    owner_data = owner_detail.json()["data"]
+
+    for hidden in (member_row, member_data):
+        assert hidden["total_issues"] is None
+        assert hidden["severe_issues"] is None
+        assert hidden["high_issues"] is None
+        assert hidden["medium_issues"] is None
+        assert hidden["low_issues"] is None
+        assert hidden["score"] is None
+        assert hidden["score_breakdown"] is None
+        assert hidden.get("report_issue_summary") is None
+        assert hidden["can_view_report"] is False
+        assert "REPORT_METRIC_SECRET" not in str(hidden)
+
+    for visible in (owner_row, owner_data):
+        assert visible["can_view_report"] is True
+        assert visible["total_issues"] == (1 if review_type == "sandbox_test" else 41)
+        assert visible["severe_issues"] == 11
+        assert visible["high_issues"] == 12
+        assert visible["medium_issues"] == 13
+        assert visible["low_issues"] == 14
+        assert visible["score"] == 73
+        assert visible["score_breakdown"] == {"private_metric": "REPORT_METRIC_SECRET"}
+
+    # report:view alone must not broaden the report endpoint's owner/admin object scope.
+    db.add(RolePermission(role_id=1, permission_id=report_permission.id))
+    db.commit()
+    writes.clear()
+    member_with_report_permission = client.get("/api/review/tasks", headers=headers(users["member"]))
+    member_detail_with_report_permission = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+    for response, key in (
+        (member_with_report_permission, "items"),
+        (member_detail_with_report_permission, None),
+    ):
+        assert response.status_code == 200
+        payload = response.json()["data"]
+        hidden = next(item for item in payload[key] if item["id"] == task.id) if key else payload
+        assert hidden["can_view_report"] is False
+        assert hidden["total_issues"] is None
+        assert hidden["severe_issues"] is None
+        assert hidden["score"] is None
+        assert hidden.get("report_issue_summary") is None
     assert writes == []

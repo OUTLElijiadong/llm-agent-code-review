@@ -131,6 +131,7 @@ class SandboxArtifactOut(BaseModel):
     mime_type: str
     byte_size: int
     sha256: str
+    download_allowed: bool = False
 
 
 class SandboxEnvironmentOut(BaseModel):

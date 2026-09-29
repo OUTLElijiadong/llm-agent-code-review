@@ -17,6 +17,7 @@ from app.models.api_config import UserApiConfig as UserApiConfig
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
@@ -262,6 +263,63 @@ def test_api_does_not_claim_verified_for_corrupted_input(isolated_rows):
         detail = TaskDetailOut.model_validate(review_service.get_task_detail(observer, user, rows.task.id))
         actual = detail.files[0].model_dump()
         assert detail.files[0].snapshot_verified is False, actual
+
+
+def test_task_detail_report_link_capability_matches_owner_admin_and_report_availability(isolated_rows):
+    rows = isolated_rows
+    task = rows.task
+    task.status = "success"
+    task.review_type = "standard"
+    member = User(username="project-reviewer", password="isolated", role="user", status=1)
+    rows.database.add(member)
+    rows.database.flush()
+    rows.database.add(ProjectMember(
+        project_id=rows.project.id,
+        user_id=member.id,
+        role_in_project="reviewer",
+    ))
+    rows.database.commit()
+
+    owner_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
+    member_detail = review_service.get_task_detail(rows.database, member, task.id)
+    assert owner_detail.get("can_view_report") is True
+    assert member_detail.get("can_view_report") is False
+
+    task.review_type = "sandbox_test"
+    task.status = "failed"
+    rows.database.commit()
+    owner_sandbox_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
+    member_sandbox_detail = review_service.get_task_detail(rows.database, member, task.id)
+    assert owner_sandbox_detail.get("can_view_report") is True
+    assert member_sandbox_detail.get("can_view_report") is False
+
+    task.review_type = "standard"
+    task.status = "failed"
+    rows.database.commit()
+    unavailable_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
+    assert unavailable_detail.get("can_view_report") is False
+
+    creator_without_report_permission = User(
+        username="report-owner-without-view", password="isolated", role="user", status=1,
+    )
+    rows.database.add(creator_without_report_permission)
+    rows.database.flush()
+    rows.database.add(ProjectMember(
+        project_id=rows.project.id,
+        user_id=creator_without_report_permission.id,
+        role_in_project="reviewer",
+    ))
+    task.user_id = creator_without_report_permission.id
+    task.status = "success"
+    task.review_type = "standard"
+    rows.database.commit()
+
+    creator_detail = review_service.get_task_detail(
+        rows.database, creator_without_report_permission, task.id,
+    )
+    administrator_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
+    assert TaskDetailOut.model_validate(creator_detail).can_view_report is False
+    assert TaskDetailOut.model_validate(administrator_detail).can_view_report is True
 
 
 def test_real_session_snapshot_commit_failure_is_atomic(isolated_rows):

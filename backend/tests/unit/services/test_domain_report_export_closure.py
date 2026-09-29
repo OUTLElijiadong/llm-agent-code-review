@@ -193,6 +193,85 @@ def test_sandbox_export_links_to_integrity_checked_native_artifact(export_contex
     assert hashlib.sha256(downloaded.content).hexdigest() == native["sha256"]
 
 
+@pytest.mark.parametrize("task_status", ["success", "failed"])
+def test_sandbox_report_artifact_requires_report_scope_and_view_permission(export_context, task_status):
+    client, db, owner, other, project, current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test", status=task_status)
+    environment, artifact = _sandbox_artifact(db, owner, project, task)
+    db.add(ProjectMember(project_id=project.id, user_id=other.id, role_in_project="reviewer"))
+    normal_content = b'{"kind":"ordinary-result"}'
+    normal_artifact = SandboxArtifact(
+        environment_id=environment.id, artifact_type="result", file_name="result.json",
+        mime_type="application/json", byte_size=len(normal_content),
+        sha256=hashlib.sha256(normal_content).hexdigest(), storage_ref="inline",
+        content_base64=base64.b64encode(normal_content).decode("ascii"),
+    )
+    db.add(normal_artifact)
+    db.commit()
+
+    current["user"] = other
+    peer_environment = client.get(f"/api/sandboxes/{environment.public_id}")
+    assert peer_environment.status_code == 200
+    peer_artifacts = peer_environment.json()["data"]["artifacts"]
+    assert [item["artifact_type"] for item in peer_artifacts] == ["result"]
+    assert peer_artifacts[0]["download_allowed"] is True
+    ordinary_download = client.get(
+        f"/api/sandboxes/{environment.public_id}/artifacts/{normal_artifact.id}"
+    )
+    assert ordinary_download.status_code == 200
+    assert ordinary_download.content == normal_content
+
+    peer_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
+    assert peer_download.status_code == 404
+
+    view_role = Role(name="报告查看普通用户", code="user", status="active", is_builtin=0)
+    view_permission = Permission(code="report:view", name="查看审查报告", module="report", type="api")
+    db.add_all([view_role, view_permission])
+    db.flush()
+    db.add_all([
+        RolePermission(role_id=view_role.id, permission_id=view_permission.id),
+        UserRole(user_id=other.id, role_id=view_role.id),
+    ])
+    db.commit()
+    still_peer_environment = client.get(f"/api/sandboxes/{environment.public_id}")
+    assert still_peer_environment.status_code == 200
+    assert all(item["artifact_type"] != "review_report" for item in still_peer_environment.json()["data"]["artifacts"])
+    peer_with_view_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
+    assert peer_with_view_download.status_code == 404
+
+    task.user_id = other.id
+    environment.owner_id = other.id
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+    report.user_id = other.id
+    db.query(UserRole).filter_by(user_id=other.id, role_id=view_role.id).delete()
+    db.commit()
+    owner_environment = client.get(f"/api/sandboxes/{environment.public_id}")
+    assert all(item["artifact_type"] != "review_report" for item in owner_environment.json()["data"]["artifacts"])
+    owner_without_view_download = client.get(
+        f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}"
+    )
+    assert owner_without_view_download.status_code == 403
+
+    db.add(UserRole(user_id=other.id, role_id=view_role.id))
+    db.commit()
+    owner_with_view_environment = client.get(f"/api/sandboxes/{environment.public_id}")
+    report_item = next(item for item in owner_with_view_environment.json()["data"]["artifacts"]
+                       if item["artifact_type"] == "review_report")
+    assert report_item["download_allowed"] is True
+    owner_with_view_download = client.get(
+        f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}"
+    )
+    assert owner_with_view_download.status_code == 200
+    assert owner_with_view_download.content.decode("utf-8") == REPORT_MD
+
+    current["user"] = owner
+    admin_environment = client.get(f"/api/sandboxes/{environment.public_id}")
+    assert any(item["artifact_type"] == "review_report" for item in admin_environment.json()["data"]["artifacts"])
+    admin_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
+    assert admin_download.status_code == 200
+    assert admin_download.content.decode("utf-8") == REPORT_MD
+
+
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
 def test_missing_domain_evidence_is_not_an_empty_successful_export(export_context, source):
     client, db, owner, other, project, current = export_context

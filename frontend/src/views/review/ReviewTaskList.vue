@@ -99,7 +99,7 @@
             </div>
             <div class="tc-line2 font-mono">
               <span class="tc-project">{{ row.project_name }}</span>
-              <span>问题 {{ row.review_type === 'sandbox_test' ? (row.report_issue_summary?.total ?? '—') : row.total_issues }}</span>
+              <span>问题 {{ reportMetricsRestricted(row) ? '报告受限' : (row.review_type === 'sandbox_test' ? (row.report_issue_summary?.total ?? '—') : (row.total_issues ?? '—')) }}</span>
               <span>{{ formatDuration(row.duration_ms) }}</span>
               <span>{{ formatDateTime(parseUtcTimestamp(row.create_time), 'YYYY-MM-DD HH:mm') }}</span>
             </div>
@@ -108,7 +108,7 @@
             </div>
           </div>
           <div class="tc-score">
-            <svg v-if="row.status === 'success'" viewBox="0 0 36 36" class="tc-ring" aria-hidden="true">
+            <svg v-if="row.status === 'success' && !reportMetricsRestricted(row) && row.score != null" viewBox="0 0 36 36" class="tc-ring" aria-hidden="true">
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
                 cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
@@ -117,7 +117,8 @@
                 stroke-dashoffset="25"
               />
             </svg>
-            <span v-if="row.status === 'success'" :class="scoreClass(row.score)">{{ row.score }}</span>
+            <span v-if="reportMetricsRestricted(row)" class="no-score">报告受限</span>
+            <span v-else-if="row.status === 'success' && row.score != null" :class="scoreClass(row.score)">{{ row.score }}</span>
             <span v-else class="no-score">未形成评分</span>
           </div>
           <div class="tc-actions" @click.stop>
@@ -208,6 +209,10 @@ const canCancelReview = computed(() => userStore.hasPermission('review:cancel'))
 function startReview(): void {
   if (!canStartReview.value) return
   router.push('/reviews/start')
+}
+
+function reportMetricsRestricted(row: TaskOut): boolean {
+  return ['sandbox_test', 'pentest'].includes(row.review_type) && row.can_view_report === false
 }
 
 const statusLabels: Record<string, string> = {

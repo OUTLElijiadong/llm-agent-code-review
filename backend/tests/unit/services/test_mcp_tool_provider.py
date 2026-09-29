@@ -45,7 +45,9 @@ def test_mcp_approval_fingerprint_binds_endpoint_secret_schema_and_policy() -> N
     assert "secret-one" not in original
     assert binding(url="https://changed.example.test/rpc").configuration_fingerprint() != original
     assert binding(token="secret-two").configuration_fingerprint() != original
-    assert binding(schema={"type": "object", "properties": {"cmd": {"type": "string"}}}).configuration_fingerprint() != original
+    assert binding(
+        schema={"type": "object", "properties": {"cmd": {"type": "string"}}}
+    ).configuration_fingerprint() != original
     assert binding(permission="allow").configuration_fingerprint() != original
 
 

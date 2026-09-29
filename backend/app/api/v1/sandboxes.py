@@ -119,7 +119,7 @@ def create_sandbox(
 ):
     data = payload.model_dump(mode="json")
     row = sandbox_service.create_environment(db, user, data, require_remote_target_approval=True)
-    return Resp(data=SandboxEnvironmentOut(**sandbox_service.environment_to_dict(db, row)))
+    return Resp(data=SandboxEnvironmentOut(**sandbox_service.environment_to_dict(db, row, user)))
 
 
 @router.get("/{public_id}", response_model=Resp[SandboxEnvironmentOut])

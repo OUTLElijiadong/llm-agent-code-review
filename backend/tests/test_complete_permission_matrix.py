@@ -187,6 +187,13 @@ def matrix_env():
         db.add(permission)
         db.flush()
         db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    view_only_role = Role(name="报告只读矩阵角色", code="user", status="active", is_builtin=0)
+    db.add(view_only_role)
+    db.flush()
+    db.add(RolePermission(
+        role_id=view_only_role.id,
+        permission_id=db.query(Permission).filter_by(code="report:view").one().id,
+    ))
     for name in ("owner_a", "member_a", "owner_b"):
         db.add(UserRole(user_id=users[name].id, role_id=role.id))
     resources = {}
@@ -228,7 +235,10 @@ def matrix_env():
     tokens = {name: create_access_token(user.id, user.role) for name, user in users.items()}
     client = TestClient(app)
     try:
-        yield {"db": db, "client": client, "users": users, "tokens": tokens, "resources": resources}
+        yield {
+            "db": db, "client": client, "users": users, "tokens": tokens,
+            "resources": resources, "view_only_role": view_only_role,
+        }
     finally:
         client.close()
         app.dependency_overrides.clear()
@@ -267,9 +277,24 @@ def test_ordinary_admin_cannot_bypass_unique_super_admin_routes(matrix_env, rout
 @pytest.mark.parametrize("format", ["json", "html", "word", "pdf"])
 def test_report_export_format_permissions_are_independent(matrix_env, format):
     ids = matrix_env["resources"]["none"]
-    response = _request(matrix_env, "no_permission", "GET", f"/api/reports/tasks/{ids['task']}/export?format={format}")
-    assert response.status_code == 403, response.text
-    assert response.json()["detail"]["required_permission"] == f"report:export:{format}"
+    db, user, role = matrix_env["db"], matrix_env["users"]["no_permission"], matrix_env["view_only_role"]
+    assignment = UserRole(user_id=user.id, role_id=role.id)
+    db.add(assignment)
+    db.commit()
+    try:
+        endpoints = [
+            ("GET", f"/api/reports/tasks/{ids['task']}/export?format={format}", None),
+            ("POST", "/api/reports/generate", {"task_id": ids["task"], "format": format}),
+        ]
+        if format in {"word", "pdf"}:
+            endpoints.append(("GET", f"/api/reports/{ids['task']}/export/{format}", None))
+        for method, path, payload in endpoints:
+            response = _request(matrix_env, "no_permission", method, path, json=payload)
+            assert response.status_code == 403, response.text
+            assert response.json()["detail"]["required_permission"] == f"report:export:{format}"
+    finally:
+        db.delete(assignment)
+        db.commit()
 
 
 @pytest.mark.parametrize("format", ["word", "pdf"])

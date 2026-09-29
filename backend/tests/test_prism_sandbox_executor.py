@@ -671,6 +671,7 @@ def test_evidence_artifacts_are_structured_escaped_and_integrity_checked(monkeyp
     row = SimpleNamespace(
         id=7,
         environment_id=environment.id,
+        artifact_type="result",
         content_base64=base64.b64encode(content).decode("ascii"),
         byte_size=len(content),
         sha256=hashlib.sha256(content).hexdigest(),

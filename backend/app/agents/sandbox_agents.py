@@ -85,7 +85,7 @@ class TestVerifierAgent(_SandboxAgent):
                     "agent_team": self._agent_team_context(ctx),
                 },
             )
-            return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row))
+            return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row, user))
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
 
@@ -123,7 +123,7 @@ class SandboxDeployerAgent(_SandboxAgent):
                     "agent_team": self._agent_team_context(ctx),
                 },
             )
-            return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row))
+            return AgentResult(success=True, data=sandbox_service.environment_to_dict(db, row, user))
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
 

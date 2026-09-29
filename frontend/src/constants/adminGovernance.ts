@@ -1,3 +1,5 @@
+import { isScheduleValid } from '@/utils/cronValidate'
+
 /**
  * 管理端治理域中文标签(红线: 界面枚举必须中文, 集中在此)。
  *
@@ -44,6 +46,12 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   evolution: '自进化',
   skill_evolution: '技能进化',
   manual: '手动触发',
+  skill_proactive: '主动技能检查',
+  ops_health_check: '运维健康检查',
+  security_monitor: '安全监控',
+  db_backup: '数据库备份',
+  sandbox_heartbeat: '沙箱心跳检查',
+  archive_empty_sessions: '清理空会话归档',
 }
 
 /** 常见调度任务编码 → 中文名(未命中走规则化推导) */
@@ -51,6 +59,16 @@ const JOB_CODE_LABELS: Record<string, string> = {
   daily_agent_knowledge_crawl: '每日·Agent 知识爬取',
   daily_agent_reflection: '每日·Agent 自我反思',
   daily_agent_evolution: '每日·Agent 自进化',
+  'ops health check': '运维健康检查',
+  'security monitor': '安全监控',
+  'db backup': '数据库备份',
+  'sandbox heartbeat': '沙箱心跳检查',
+  'archive empty sessions': '清理空会话归档',
+  ops_health_check: '运维健康检查',
+  security_monitor: '安全监控',
+  db_backup: '数据库备份',
+  sandbox_heartbeat: '沙箱心跳检查',
+  archive_empty_sessions: '清理空会话归档',
 }
 
 export function jobCodeText(code: string | null | undefined): string {
@@ -71,6 +89,28 @@ export function jobCodeText(code: string | null | undefined): string {
 export function jobTypeText(value: string | null | undefined): string {
   const raw = String(value || '').trim()
   return JOB_TYPE_LABELS[raw] || raw || '—'
+}
+
+/** 将已知调度器计划转换为易读中文；未知表达式保留原值便于核对和编辑。 */
+export function jobScheduleText(value: string | null | undefined): string {
+  const raw = String(value || '').trim()
+  if (!raw) return '未设置'
+  const normalized = raw.toLowerCase()
+  if (!isScheduleValid(normalized)) return raw
+  if (normalized === 'manual') return '手动触发'
+  const daily = normalized.match(/^daily@(\d{1,2}):(\d{2})$/)
+  if (daily) return `每天 ${daily[1]!.padStart(2, '0')}:${daily[2]}`
+  const hourly = normalized.match(/^hourly@(?:\*:)?(\d{1,2})$/)
+  if (hourly) {
+    const minute = Number(hourly[1])
+    return minute === 0 ? '每小时整点' : `每小时的第 ${minute} 分钟`
+  }
+  const interval = normalized.match(/^interval@(\d+)(s|m)$/)
+  if (interval) {
+    const unit = interval[2] === 's' ? '秒' : '分钟'
+    return `每 ${interval[1]} ${unit}`
+  }
+  return raw
 }
 
 export function agentCodeText(code: string | null | undefined): string {

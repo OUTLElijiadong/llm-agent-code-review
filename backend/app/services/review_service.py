@@ -1934,6 +1934,34 @@ def _build_summary(profiles: tuple[ReviewAgentProfile, ...], file_count: int,
     return f"本次采用{agent_summary}完成 {file_count} 个文件审查,发现 {issue_count} 个问题,综合评分 {score}。"
 
 
+_REPORT_BACKED_REVIEW_TYPES = frozenset({"sandbox_test", "pentest"})
+
+
+def _can_view_task_report(
+    db: Session,
+    user: User,
+    task: ReviewTask,
+    *,
+    report_permission: Optional[bool] = None,
+    administrator: Optional[bool] = None,
+) -> bool:
+    """报告内容、摘要和聚合结果统一沿用报告查看权限及对象范围。"""
+    from app.core.permission_codes import PermissionCode
+    from app.services import rbac_service, report_service
+
+    if report_permission is None:
+        report_permission = rbac_service.check_permission(
+            db, int(user.id), PermissionCode.REPORT_VIEW,
+        )
+    if administrator is None:
+        administrator = rbac_service.is_admin_user(db, int(user.id))
+    return bool(
+        report_service.is_report_available(task)
+        and report_permission
+        and (task.user_id == user.id or administrator)
+    )
+
+
 def list_tasks(db: Session, user: User, project_id: int = None, status: str = "",
                start_date: str = "", end_date: str = "", page: int = 1, page_size: int = 20) -> dict:
     """查询审查任务列表(基于 project_member 关系)
@@ -1980,7 +2008,28 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
         p.id: p
         for p in db.query(Project).filter(Project.id.in_(project_ids)).all()
     } if project_ids else {}
-    sandbox_tasks = [row for row in rows if row.review_type == "sandbox_test"]
+    from app.core.permission_codes import PermissionCode
+    from app.services import rbac_service
+
+    report_permission = rbac_service.check_permission(
+        db, int(user.id), PermissionCode.REPORT_VIEW,
+    )
+    administrator = rbac_service.is_admin_user(db, int(user.id))
+    report_access = {
+        row.id: _can_view_task_report(
+            db,
+            user,
+            row,
+            report_permission=report_permission,
+            administrator=administrator,
+        )
+        for row in rows
+    }
+    # 不读取无权查看的报告内容，避免列表为渲染计数而加载受限 Markdown。
+    sandbox_tasks = [
+        row for row in rows
+        if row.review_type == "sandbox_test" and report_access[row.id]
+    ]
     from app.services.report_service import load_task_issue_stats
 
     sandbox_stats = load_task_issue_stats(db, sandbox_tasks)
@@ -1988,6 +2037,10 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
     items = []
     for row in rows:
         project = projects.get(row.project_id)
+        can_view_report = report_access[row.id]
+        hide_report_metrics = (
+            row.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
+        )
         summary = sandbox_stats.get(row.id, {}).get("source", {}).get("report_issue_summary")
         report_total = summary.get("total") if summary else None
         items.append({
@@ -1995,14 +2048,21 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "project_id": row.project_id,
             "project_name": project.project_name if project else "",
             "review_type": row.review_type, "status": row.status,
+            "can_view_report": can_view_report,
             "total_files": row.total_files,
             "processed_files": row.processed_files,
-            "total_issues": report_total if report_total is not None else row.total_issues,
-            "report_issue_summary": summary,
-            "severe_issues": row.severe_issues, "high_issues": row.high_issues,
-            "medium_issues": row.medium_issues, "low_issues": row.low_issues,
-            "score": row.score, "duration_ms": row.duration_ms,
-            "score_version": row.score_version, "score_breakdown": row.score_breakdown,
+            "total_issues": None if hide_report_metrics else (
+                report_total if report_total is not None else row.total_issues
+            ),
+            "report_issue_summary": None if hide_report_metrics else summary,
+            "severe_issues": None if hide_report_metrics else row.severe_issues,
+            "high_issues": None if hide_report_metrics else row.high_issues,
+            "medium_issues": None if hide_report_metrics else row.medium_issues,
+            "low_issues": None if hide_report_metrics else row.low_issues,
+            "score": None if hide_report_metrics else row.score,
+            "duration_ms": row.duration_ms,
+            "score_version": None if hide_report_metrics else row.score_version,
+            "score_breakdown": None if hide_report_metrics else row.score_breakdown,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -2046,8 +2106,12 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     """
     task = _require_readable_task(db, user, task_id)
     project = db.get(Project, task.project_id)
+    can_view_report = _can_view_task_report(db, user, task)
+    hide_report_metrics = (
+        task.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
+    )
     report_issue_summary = None
-    if task.review_type == "sandbox_test":
+    if task.review_type == "sandbox_test" and can_view_report:
         from app.models.review_report import ReviewReport
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
@@ -2060,18 +2124,30 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         report_issue_summary = summarize_sandbox_report(content.get("report_md"))
         report_issue_summary["structured_issues"] = db.query(ReviewIssue).filter(ReviewIssue.task_id == task.id).count()
     report_total = report_issue_summary.get("total") if report_issue_summary else None
+    # 沙箱/渗透测试任务把完整 Markdown 报告写入 summary；任务可见范围比报告
+    # 查看范围更宽，因此不能随任务元数据一起返回报告正文。
+    summary = task.summary
+    if task.review_type in {"sandbox_test", "pentest"} and not can_view_report:
+        summary = None
     return {
         "id": task.id, "task_name": task.task_name,
         "project_id": task.project_id,
         "project_name": project.project_name if project else "",
         "review_type": task.review_type, "status": task.status,
+        "can_view_report": can_view_report,
         "total_files": task.total_files, "processed_files": task.processed_files,
-        "total_issues": report_total if report_total is not None else task.total_issues,
-        "report_issue_summary": report_issue_summary,
-        "severe_issues": task.severe_issues, "high_issues": task.high_issues,
-        "medium_issues": task.medium_issues, "low_issues": task.low_issues,
-        "score": task.score, "summary": task.summary,
-        "score_version": task.score_version, "score_breakdown": task.score_breakdown,
+        "total_issues": None if hide_report_metrics else (
+            report_total if report_total is not None else task.total_issues
+        ),
+        "report_issue_summary": None if hide_report_metrics else report_issue_summary,
+        "severe_issues": None if hide_report_metrics else task.severe_issues,
+        "high_issues": None if hide_report_metrics else task.high_issues,
+        "medium_issues": None if hide_report_metrics else task.medium_issues,
+        "low_issues": None if hide_report_metrics else task.low_issues,
+        "score": None if hide_report_metrics else task.score,
+        "summary": summary,
+        "score_version": None if hide_report_metrics else task.score_version,
+        "score_breakdown": None if hide_report_metrics else task.score_breakdown,
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,

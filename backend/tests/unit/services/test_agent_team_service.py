@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.dml import Update
+
 from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentMemory
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
@@ -17,8 +20,6 @@ from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_responses_service, agent_team_service, sandbox_service
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
-from sqlalchemy.orm import Session
-from sqlalchemy.sql.dml import Update
 
 
 @pytest.fixture()

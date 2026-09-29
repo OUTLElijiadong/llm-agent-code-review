@@ -71,7 +71,7 @@ def _require_configurable_role(db: Session, role_id: int) -> Role:
     if role is None:
         raise NotFoundError("角色不存在", code=40400)
     if role.code not in ASSIGNABLE_ROLE_CODES:
-        raise ForbiddenError("仅允许管理普通用户、评审员和管理员三个固定角色", code=40324)
+        raise ForbiddenError("仅允许管理普通用户、审查员和管理员三个固定角色", code=40324)
     return role
 
 
@@ -181,7 +181,7 @@ def assign_roles_to_user(
     if any(role.code == SUPER_ADMIN_ROLE for role in roles):
         raise ForbiddenError("超级管理员只能是 admin", code=40322)
     if any(role.code not in ASSIGNABLE_ROLE_CODES for role in roles):
-        raise BadRequestError("仅允许分配普通用户、评审员或管理员", code=40000)
+        raise BadRequestError("仅允许分配普通用户、审查员或管理员", code=40000)
     if actor is not None and not is_admin_user(db, actor.id):
         raise ForbiddenError("需要管理员权限", code=40300)
 
@@ -376,7 +376,7 @@ def create_role(db: Session, role_in: RoleCreateIn, *, actor: User | None = None
     Raises:
         ForbiddenError: 角色模型已固定
     """
-    raise ForbiddenError("角色模型已固定为普通用户、评审员、管理员和唯一超级管理员", code=40324)
+    raise ForbiddenError("角色模型已固定为普通用户、审查员、管理员和唯一超级管理员", code=40324)
 
 
 def update_role(db: Session, role_id: int, role_in: RoleUpdateIn, *, actor: User | None = None) -> Role:

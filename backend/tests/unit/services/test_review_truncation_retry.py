@@ -1,7 +1,6 @@
 """审查画像输出截断兜底:_call_single_agent 提高预算重试一次的回归测试。"""
 
 import json
-import re
 
 import pytest
 

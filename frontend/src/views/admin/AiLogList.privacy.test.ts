@@ -20,6 +20,11 @@ function render() {
     'el-icon': true, 'el-pagination': true,
   } } })
 }
+function deferred<Value>() {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>((done) => { resolve = done })
+  return { promise, resolve }
+}
 it('被隔离原文明示原因，同时保留成本元数据', async () => {
   api.detail.mockResolvedValue({ ...entry, content_redacted: true, prompt: null, response: null, error_message: null })
   const wrapper = render()
@@ -43,5 +48,33 @@ it('切换账号后旧日志详情不能重新写入缓存', async () => {
   resolve({ ...entry, prompt: '上一个管理员私密请求' })
   await flushPromises()
   expect(wrapper.text()).not.toContain('上一个管理员私密请求')
+  wrapper.unmount()
+})
+
+it('日志列表请求失败显示重试错误，而不是误报空列表', async () => {
+  api.list.mockRejectedValueOnce(new Error('temporary network failure'))
+  const wrapper = render()
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="logs-error"]').exists()).toBe(true)
+  expect(wrapper.text()).not.toContain('当前过滤条件下没有调用记录')
+
+  api.list.mockResolvedValueOnce({ items: [], total: 0 })
+  await wrapper.get('[data-testid="retry-logs"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('当前过滤条件下没有调用记录')
+  wrapper.unmount()
+})
+
+it('日志列表加载中不短暂显示“没有调用记录”空态', async () => {
+  const pending = deferred<{ items: typeof entry[]; total: number }>()
+  api.list.mockReturnValueOnce(pending.promise)
+  const wrapper = render()
+  await flushPromises()
+
+  expect(wrapper.text()).not.toContain('当前过滤条件下没有调用记录')
+  pending.resolve({ items: [], total: 0 })
+  await flushPromises()
+  expect(wrapper.text()).toContain('当前过滤条件下没有调用记录')
   wrapper.unmount()
 })

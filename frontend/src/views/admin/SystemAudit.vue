@@ -38,7 +38,7 @@
       </div>
 
       <div v-loading="loading" class="audit-cards" role="list" data-testid="audit-cards">
-        <EmptyState v-if="!rows.length" description="暂无审计记录" />
+        <EmptyState v-if="!loading && !loadError && !rows.length" description="暂无审计记录" />
         <article
           v-for="row in rows"
           :key="row.id"
@@ -49,8 +49,8 @@
           tabindex="0"
           :aria-expanded="expandedId === row.id ? 'true' : 'false'"
           @click="toggleExpand(row.id)"
-          @keydown.enter.prevent="toggleExpand(row.id)"
-          @keydown.space.prevent="toggleExpand(row.id)"
+          @keydown.enter.self.prevent="toggleExpand(row.id)"
+          @keydown.space.self.prevent="toggleExpand(row.id)"
         >
           <span class="ac-band" :data-status="row.status" aria-hidden="true"></span>
           <div class="ac-main">
@@ -94,6 +94,11 @@
         </article>
       </div>
 
+      <div v-if="loadError" class="audit-load-error" role="alert">
+        <span>{{ loadError }}</span>
+        <el-button :disabled="loading" @click="loadLogs">重试加载</el-button>
+      </div>
+
       <div class="pagination-wrapper">
         <el-pagination
           v-model:current-page="page"
@@ -125,8 +130,10 @@ const auditScope = useAgentChatScope(() => userStore.profile?.id, () => userStor
 const loading = ref(false)
 const rows = ref<AuditLogOut[]>([])
 const total = ref(0)
+const loadError = ref('')
 const page = ref(1)
 const pageSize = ref(20)
+let auditRequestVersion = 0
 
 const filters = reactive({
   action: '',
@@ -167,7 +174,9 @@ function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info
 
 async function loadLogs(): Promise<void> {
   const scopeCurrent = auditScope.captureAccount()
+  const requestVersion = ++auditRequestVersion
   loading.value = true
+  loadError.value = ''
   try {
     const data = await listAuditLogs({
       action: filters.action || undefined,
@@ -177,13 +186,18 @@ async function loadLogs(): Promise<void> {
       page: page.value,
       page_size: pageSize.value,
     })
-    if (!scopeCurrent()) return
+    if (!scopeCurrent() || requestVersion !== auditRequestVersion) return
     rows.value = data.items
     total.value = data.total
-  } catch {
-    // 请求拦截器负责错误提示；不保留上一账号的结果。
+  } catch (error) {
+    if (!scopeCurrent() || requestVersion !== auditRequestVersion) return
+    rows.value = []
+    total.value = 0
+    const message = error instanceof Error ? error.message
+      : error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined
+    loadError.value = (typeof message === 'string' && message.trim()) || '审计记录加载失败，请重试。'
   } finally {
-    if (scopeCurrent()) loading.value = false
+    if (scopeCurrent() && requestVersion === auditRequestVersion) loading.value = false
   }
 }
 
@@ -220,6 +234,7 @@ function goTrace(row: AuditLogOut): void {
 watch([() => userStore.profile?.id, () => userStore.token], () => {
   rows.value = []
   total.value = 0
+  loadError.value = ''
   expandedId.value = null
   page.value = 1
   loading.value = false
@@ -264,6 +279,16 @@ onMounted(loadLogs)
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.audit-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  color: var(--color-danger, #d9304f);
 }
 
 .text-muted {

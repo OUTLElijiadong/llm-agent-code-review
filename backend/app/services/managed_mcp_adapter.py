@@ -250,7 +250,7 @@ def call_managed_tool(
                 "test_mode": parsed.test_mode,
             },
         )
-        return sandbox_service.environment_to_dict(db, row)
+        return sandbox_service.environment_to_dict(db, row, user)
     if tool_name == "create_deployment":
         parsed = _CreateDeploymentArguments.model_validate(dict(arguments))
         row = sandbox_service.create_environment(
@@ -264,7 +264,7 @@ def call_managed_tool(
                 "ttl_hours": parsed.ttl_hours,
             },
         )
-        return sandbox_service.environment_to_dict(db, row)
+        return sandbox_service.environment_to_dict(db, row, user)
     if tool_name == "close":
         parsed = _SandboxArguments.model_validate(dict(arguments))
         return sandbox_service.stop_environment(db, user, parsed.public_id)

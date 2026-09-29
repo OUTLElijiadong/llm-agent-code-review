@@ -40,6 +40,7 @@ const ROLES = [
 function mountUserManage(): VueWrapper {
   return mount(UserManage, {
     global: {
+      directives: { loading: () => undefined },
       stubs: {
         'el-card': { template: '<div><slot /></div>' },
         'el-tag': { template: '<span class="el-tag-stub"><slot /></span>' },
@@ -57,10 +58,16 @@ function mountUserManage(): VueWrapper {
         'el-checkbox': { template: '<label class="el-checkbox-stub"><slot /></label>' },
         'el-alert': { template: '<div class="el-alert-stub" :data-title="title"></div>', props: ['title'] },
         'el-tooltip': { template: '<span><slot /></span>' },
-        EmptyState: true,
+        EmptyState: { props: ['description'], template: '<div data-testid="empty-state">{{ description }}</div>' },
       },
     },
   })
+}
+
+function deferred<Value>() {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>((done) => { resolve = done })
+  return { promise, resolve }
 }
 
 beforeEach(() => {
@@ -73,6 +80,49 @@ beforeEach(() => {
 })
 
 describe('UserManage 统一角色编辑(合并原用户角色分配页)', () => {
+  it('进入页面自动加载用户列表', async () => {
+    const wrapper = mountUserManage()
+    await flushPromises()
+    await flushPromises()
+
+    expect(userApi.getUsers).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+    expect(wrapper.text()).toContain('someone')
+    wrapper.unmount()
+  })
+
+  it('角色目录请求挂起时仍并行加载用户列表', async () => {
+    const pendingRoles = deferred<typeof ROLES>()
+    rbacApi.listRoles.mockReturnValueOnce(pendingRoles.promise)
+    const wrapper = mountUserManage()
+    await flushPromises()
+
+    expect(userApi.getUsers).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+    expect(wrapper.text()).toContain('someone')
+    expect(wrapper.text()).not.toContain('暂无用户')
+
+    pendingRoles.resolve(ROLES)
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('用户列表请求失败显示错误重试，不显示误导性的暂无用户', async () => {
+    userApi.getUsers.mockRejectedValueOnce(new Error('temporary network failure'))
+    const wrapper = mountUserManage()
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="users-error"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('暂无用户')
+
+    userApi.getUsers.mockResolvedValueOnce({ items: [], total: 0 })
+    await wrapper.get('[data-testid="retry-users"]').trigger('click')
+    await flushPromises()
+    expect(userApi.getUsers).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('暂无用户')
+    expect(wrapper.find('[data-testid="users-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('卡片只展示唯一基础角色，不再查询或展示附加角色', async () => {
     const wrapper = mountUserManage()
     await flushPromises()
