@@ -172,7 +172,7 @@ watch(mode, () => {
     <section class="info-section">
       <header class="section-head">
         <div>
-          <h3 class="section-title">MetaGPT 编排层</h3>
+          <h3 class="section-title">Agent 协作能力</h3>
           <p v-if="info" class="section-sub">
             <el-tag size="small" type="success">{{ info.version }}</el-tag>
             <span class="section-desc">{{ info.description }}</span>
@@ -187,8 +187,8 @@ watch(mode, () => {
 
       <PrismLoading
         v-if="infoLoading && !info"
-        label="加载 MetaGPT 模块信息"
-        sublabel="从后端拉取编排层元数据"
+        label="正在读取协作能力"
+        sublabel="获取可用于审查和讨论的团队配置"
       />
 
       <template v-else-if="info">
@@ -221,18 +221,18 @@ watch(mode, () => {
 
       <EmptyState
         v-else
-        description="MetaGPT 模块信息加载失败"
+        description="协作能力读取失败，请刷新重试"
         compact
       />
     </section>
 
-    <!-- 中部:Environment 预览 -->
+    <!-- 中部:协作方案预览 -->
     <section class="preview-section">
       <header class="section-head">
         <div>
-          <h3 class="section-title">Environment 编排拓扑</h3>
+          <h3 class="section-title">团队执行结构</h3>
           <p class="section-sub">
-            预览模式不触发 LLM 调用,仅展示角色配置与订阅关系
+            预览不会调用模型，只展示参与角色、职责和消息接收关系。
           </p>
         </div>
         <div class="mode-switch">
@@ -245,27 +245,27 @@ watch(mode, () => {
 
       <PrismLoading
         v-if="previewLoading && !preview"
-        label="构建 Environment 预览"
-        sublabel="实例化 RoleAdapter 并组装拓扑"
+        label="正在生成团队预览"
+        sublabel="根据当前模式整理角色和协作关系"
       />
 
       <template v-else-if="preview">
-        <!-- Environment 元信息 -->
+        <!-- 团队方案信息 -->
         <div class="env-meta">
           <el-descriptions :column="3" border size="small">
-            <el-descriptions-item label="环境名称">
+            <el-descriptions-item label="方案名称">
               <code>{{ preview.env_name }}</code>
             </el-descriptions-item>
             <el-descriptions-item label="追踪 ID">
               <code class="trace-id">{{ preview.trace_id }}</code>
             </el-descriptions-item>
-            <el-descriptions-item label="最大深度">
+            <el-descriptions-item label="最大协作层级">
               {{ preview.max_depth }}
             </el-descriptions-item>
-            <el-descriptions-item label="角色数">
+            <el-descriptions-item label="参与角色">
               {{ preview.roles.length }}
             </el-descriptions-item>
-            <el-descriptions-item label="内置可适配 Agent">
+            <el-descriptions-item label="可用内置 Agent">
               {{ preview.registered_agent_count }}
             </el-descriptions-item>
             <el-descriptions-item label="默认参与">
@@ -316,11 +316,11 @@ watch(mode, () => {
                 <span class="field-value">{{ role.constraints || '—' }}</span>
               </div>
               <div class="role-field">
-                <span class="field-label">反应动作</span>
+              <span class="field-label">响应规则</span>
                 <code class="field-code">{{ role.react_action }}</code>
               </div>
               <div class="role-field">
-                <span class="field-label">订阅动作</span>
+              <span class="field-label">接收消息</span>
                 <div v-if="role.watch_actions.length" class="watch-tags">
                   <el-tag
                     v-for="act in role.watch_actions"
@@ -349,14 +349,14 @@ watch(mode, () => {
 
         <EmptyState
           v-else
-          description="当前环境无角色,请检查 AgentRegistry 注册状态"
+          description="当前方案中没有可用 Agent，请刷新；如持续出现，请联系管理员检查目录配置。"
           compact
         />
       </template>
 
       <EmptyState
         v-else
-        description="Environment 预览加载失败"
+        description="团队方案加载失败，请刷新重试"
         compact
       />
     </section>
@@ -364,9 +364,9 @@ watch(mode, () => {
     <!-- 底部:可适配 Agent 列表 -->
     <section v-if="adaptableAgents.length" class="adaptable-section">
       <header class="section-head">
-        <h3 class="section-title">内置可适配 Agent 池</h3>
+        <h3 class="section-title">可加入团队的内置 Agent</h3>
         <p class="section-sub">
-          共 {{ adaptableAgents.length }} 个内置 Agent 可通过 RoleAdapter 加入 Environment；不含已发布自定义 Agent 和历史审查画像
+          共 {{ adaptableAgents.length }} 个内置 Agent 可加入团队；不包含已发布的自定义 Agent 和历史审查画像。
         </p>
       </header>
       <div class="adaptable-grid">

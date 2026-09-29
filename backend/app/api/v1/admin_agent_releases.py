@@ -67,7 +67,7 @@ def list_release_approvals(
         db.query(ApprovalItem)
         .filter(ApprovalItem.action == "agent_package.publish")
         .order_by(ApprovalItem.id.desc())
-        .limit(100)
+        .limit(1000)
         .all()
     )
     data = []

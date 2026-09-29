@@ -2,6 +2,8 @@
 import json
 
 import pytest
+from sqlalchemy.exc import IntegrityError
+
 from app.core.exceptions import ForbiddenError, ValidationError
 from app.models.agent_governance import (
     AgentJob,
@@ -24,7 +26,6 @@ from app.services import (
     rollback_service,
     tool_gateway,
 )
-from sqlalchemy.exc import IntegrityError
 
 
 def test_policy_engine_allows_low_risk_action(db):
@@ -316,6 +317,63 @@ def test_approval_service_auto_approves_low_risk(db, admin_user):
 
     assert item.status == "auto_approved"
     assert item.decision == "allow"
+
+
+def test_generic_approval_list_excludes_agent_release_workflow(db, admin_user):
+    """发布审批只进入专用发布页，不与通用审批重复显示。"""
+    generic = ApprovalItem(
+        title="规则提案",
+        action="project.update",
+        resource="project:1",
+        risk_level="high",
+        status="pending",
+        decision="escalate",
+    )
+    release = ApprovalItem(
+        title="Agent 发布申请",
+        action="agent_package.publish",
+        resource="custom_agent_version:1",
+        risk_level="high",
+        status="pending",
+        decision="escalate",
+    )
+    db.add_all([generic, release])
+    db.commit()
+
+    assert {item.id for item in approval_service.list_items(db, actor=admin_user)} == {generic.id, release.id}
+    assert [item.id for item in approval_service.list_items(
+        db, actor=admin_user, exclude_actions=("agent_package.publish",),
+    )] == [generic.id]
+
+
+def test_approval_counts_follow_actor_visibility_and_exclude_requested_actions(db, admin_user):
+    rows = [
+        ApprovalItem(
+            title=f"待办 {index}", action="project.update", resource="project:1",
+            risk_level="high", status="pending", decision="escalate",
+        )
+        for index in range(105)
+    ]
+    release = ApprovalItem(
+        title="发布待办", action="agent_package.publish", resource="custom_agent_version:1",
+        risk_level="high", status="pending", decision="escalate",
+    )
+    completed = ApprovalItem(
+        title="已完成", action="project.update", resource="project:1",
+        risk_level="high", status="approved", decision="allow",
+    )
+    db.add_all([*rows, release, completed])
+    db.commit()
+
+    visible_pending = approval_service.list_items(
+        db, status="pending", actor=admin_user, exclude_actions=("agent_package.publish",),
+    )
+    pending_count = approval_service.count_items(
+        db, status="pending", actor=admin_user, exclude_actions=("agent_package.publish",),
+    )
+
+    assert len(visible_pending) == 105
+    assert pending_count == len(visible_pending)
 
 
 def test_sensitive_approval_never_uses_low_risk_auto_approval(db, super_admin_user):

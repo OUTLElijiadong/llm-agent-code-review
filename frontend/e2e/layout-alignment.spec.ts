@@ -158,6 +158,17 @@ test('代码中心顶部仅保留主布局间距，搜索框与标题说明区�
   await expect(page.locator('.project-card')).toHaveCount(1)
 })
 
+test('代码中心项目卡明确提示可浏览代码文件且键盘可达', async ({ page }) => {
+  await mockSession(page)
+  await page.goto('/code')
+  const card = page.locator('.project-card').first()
+  await expect(card).toHaveAttribute('aria-label', `查看 ${projects[0].project_name} 的代码文件`)
+  await expect(card.locator('.card-action')).toContainText('浏览代码文件')
+  await card.focus()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/\/code\/1$/)
+})
+
 test('代码中心失败原因与重试按钮同时可见，重试后恢复项目卡片', async ({ page }) => {
   await mockSession(page)
   let failed = false
@@ -173,15 +184,21 @@ test('代码中心失败原因与重试按钮同时可见，重试后恢复项�
   await expect(page.locator('.code-hub-page .el-alert')).toHaveCount(0)
 })
 
-for (const width of [320, 360, 390, 430]) {
+for (const width of [320, 360, 375, 390, 430]) {
   test(`移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await mockSession(page)
     await page.addInitScript(() => localStorage.setItem('prism.sidebar.collapsed', '1'))
     await page.goto('/code')
     await expect(page.locator('.project-card')).toHaveCount(2)
+    await expect(page.locator('.app-sidebar')).not.toHaveClass(/is-mobile-open/)
+    await expect(page.locator('.sidebar-mask')).toHaveCount(0)
     await page.getByRole('button', { name: '打开导航菜单' }).click()
     await expect(page.locator('.app-sidebar')).toHaveClass(/is-mobile-open/)
+    const mask = page.getByRole('button', { name: '关闭导航菜单' })
+    await expect(mask).toBeVisible()
+    const maskBounds = await mask.boundingBox()
+    expect(maskBounds?.width).toBeGreaterThanOrEqual(width - 1)
     await expect.poll(async () => (await page.locator('.app-sidebar').boundingBox())?.x).toBeCloseTo(0, 0)
     await expect(page.locator('.sidebar-logo .logo-text')).toBeVisible()
     await expect(page.locator('.sidebar-toggle')).toBeHidden()

@@ -1,7 +1,7 @@
 <template>
   <div class="review-start-page">
     <div class="page-header">
-      <h2>启动代码审查</h2>
+      <h2>发起审查</h2>
     </div>
 
     <el-card shadow="hover" class="form-card">
@@ -134,13 +134,20 @@
 
         <el-form-item label="审查类型">
           <el-radio-group v-model="form.review_type" class="review-type-options" @change="onReviewTypeChange">
-            <el-radio value="quick"><el-icon><Lightning /></el-icon> 快速审查</el-radio>
-            <el-radio value="standard"><el-icon><DocumentChecked /></el-icon> 标准审查</el-radio>
-            <el-radio value="security"><el-icon><Aim /></el-icon> 安全代理（渗透/漏洞）</el-radio>
-            <el-radio value="performance"><el-icon><Odometer /></el-icon> 性能代理</el-radio>
-            <el-radio value="full"><el-icon><Lightning /></el-icon> 多Agent全面审查(并行)</el-radio>
+            <el-radio value="standard">
+              <span class="review-mode"><span class="review-mode-title"><el-icon><DocumentChecked /></el-icon> 代码质量审查</span><span class="review-mode-desc">单 Agent 通用审查，覆盖可读性、规范、异常处理和常见缺陷。</span></span>
+            </el-radio>
+            <el-radio value="security">
+              <span class="review-mode"><span class="review-mode-title"><el-icon><Aim /></el-icon> 安全审查</span><span class="review-mode-desc">聚焦漏洞与安全风险，调用安全审查链路。</span></span>
+            </el-radio>
+            <el-radio value="performance">
+              <span class="review-mode"><span class="review-mode-title"><el-icon><Odometer /></el-icon> 性能审查</span><span class="review-mode-desc">聚焦性能瓶颈、资源使用和可扩展性。</span></span>
+            </el-radio>
+            <el-radio value="full">
+              <span class="review-mode"><span class="review-mode-title"><el-icon><Lightning /></el-icon> 多 Agent 全面审查</span><span class="review-mode-desc">多个审查 Agent 并行覆盖代码质量、安全与性能，再汇总结论。</span></span>
+            </el-radio>
             <el-radio v-if="form.scope !== 'all'" value="discuss">
-              <el-icon><ChatDotRound /></el-icon> 多Agent圆桌讨论(实时可见每个Agent的思考)
+              <span class="review-mode"><span class="review-mode-title"><el-icon><ChatDotRound /></el-icon> 多 Agent 圆桌讨论</span><span class="review-mode-desc">围绕选定的单个文件实时交流，可查看发言与讨论进度。</span></span>
             </el-radio>
           </el-radio-group>
           <div v-if="form.scope === 'all'" class="scope-hint">
@@ -669,9 +676,14 @@ onBeforeUnmount(() => {
 .file-item :deep(.el-checkbox), .file-item :deep(.el-radio) { display: flex; height: auto; min-width: 0; align-items: flex-start; white-space: normal; }
 .file-item :deep(.el-checkbox__label), .file-item :deep(.el-radio__label) { min-width: 0; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 .form-card :deep(.el-checkbox-group) { width: 100%; min-width: 0; }
-.review-type-options { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
-.review-type-options :deep(.el-radio) { height: auto; margin-right: 0; white-space: normal; }
-.review-type-options :deep(.el-radio__label) { line-height: 1.5; white-space: normal; }
+.review-type-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; min-width: 0; }
+.review-type-options :deep(.el-radio) { box-sizing: border-box; display: flex; align-items: flex-start; width: 100%; height: auto; min-height: 76px; margin: 0; padding: 10px 12px; border: 1px solid var(--el-border-color-light); border-radius: 9px; white-space: normal; }
+.review-type-options :deep(.el-radio.is-checked) { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.review-type-options :deep(.el-radio__input) { margin-top: 3px; }
+.review-type-options :deep(.el-radio__label) { display: block; min-width: 0; padding-left: 8px; line-height: 1.45; white-space: normal; }
+.review-mode { display: grid; gap: 4px; min-width: 0; }
+.review-mode-title { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-primary); font-weight: 600; }
+.review-mode-desc { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .form-hint { color: var(--el-text-color-secondary); font-size: 13px; }
 .reviewing-header { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; .reviewing-icon { font-size: 18px; } }
 .reviewing-hint { text-align: center; font-size: 13px; color: var(--el-text-color-secondary); margin-top: 8px; }
@@ -685,8 +697,7 @@ onBeforeUnmount(() => {
   .review-scope-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .review-scope-options :deep(.el-radio-button) { min-width: 0; }
   .review-scope-options :deep(.el-radio-button__inner) { box-sizing: border-box; width: 100%; padding: 8px 4px; font-size: 12px; }
-  .review-type-options { width: 100%; flex-direction: column; align-items: flex-start; }
-  .review-type-options :deep(.el-radio) { margin-right: 0; }
+  .review-type-options { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {

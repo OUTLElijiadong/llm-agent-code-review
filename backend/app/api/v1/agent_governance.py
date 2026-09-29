@@ -67,18 +67,18 @@ router = APIRouter()
 
 
 @router.get("/governance/overview", response_model=Resp[GovernanceOverviewOut])
-def governance_overview(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def governance_overview(db: Session = Depends(get_db), actor: User = Depends(require_admin)):
     """返回 Agent 治理大屏总览。
 
     Args:
         db: 数据库会话。
-        _: 管理员用户。
+        actor: 当前管理员;待办指标遵循当前账号可见性。
 
     Returns:
         Resp[GovernanceOverviewOut]: 治理大屏指标。
     """
     agent_governance_service.sync_profiles(db)
-    return Resp(data=GovernanceOverviewOut(**agent_governance_service.governance_overview(db)))
+    return Resp(data=GovernanceOverviewOut(**agent_governance_service.governance_overview(db, actor)))
 
 
 @router.get("/governance/agents", response_model=Resp[list[AgentProfileOut]])
@@ -334,6 +334,8 @@ def crawl_agent_knowledge_sources(
 @router.get("/approvals", response_model=Resp[list[ApprovalItemOut]])
 def list_approvals(
     status: str = Query(""),
+    exclude_action: str = Query(""),
+    limit: int = Query(1000, ge=1, le=1000),
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ):
@@ -341,13 +343,15 @@ def list_approvals(
 
     Args:
         status: 可选状态过滤。
+        exclude_action: 逗号分隔的动作过滤，供分类审批页排除其它类型事项。
         db: 数据库会话。
         actor: 当前管理员。
 
     Returns:
         Resp[list[ApprovalItemOut]]: 审批事项列表。
     """
-    rows = approval_service.list_items(db, status=status, actor=actor)
+    excluded = tuple(action.strip() for action in exclude_action.split(",") if action.strip())
+    rows = approval_service.list_items(db, status=status, limit=limit, actor=actor, exclude_actions=excluded)
     return Resp(data=[ApprovalItemOut.model_validate(row) for row in rows])
 
 

@@ -62,7 +62,7 @@ const assetStatusLabels: Record<string, string> = {
   pending_approval: '待审批',
   published: '已发布',
   disabled: '已停用',
-  rolled_back: '已回滚',
+  rolled_back: '已回退',
   rejected: '已驳回',
 }
 
@@ -203,12 +203,12 @@ async function rollback(item: AdminAgentReleases, releaseId: number): Promise<vo
   if (actionBusy.value) return
   actionKey.value = `rollback-${releaseId}`
   try {
-    await ElMessageBox.confirm(`确认回滚到发布 #${releaseId}？`, '版本回滚', { type: 'warning' })
+    await ElMessageBox.confirm(`确认回退到发布 #${releaseId}？`, '版本回退', { type: 'warning' })
     await rollbackCustomAgent(item.agent.id, releaseId)
-    ElMessage.success('已创建回滚发布')
+    ElMessage.success('已创建回退版本')
     await load()
   } catch (error) {
-    if (!isCancelled(error)) ElMessage.error(errorMessage(error, '创建回滚发布失败'))
+    if (!isCancelled(error)) ElMessage.error(errorMessage(error, '创建回退版本失败'))
   } finally {
     actionKey.value = ''
   }
@@ -254,7 +254,7 @@ onMounted(load)
       <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </header>
 
-    <el-segmented v-model="activeTab" :options="[{ label: '发布审批', value: 'approvals' }, { label: '发布与回滚', value: 'releases' }]" />
+    <el-segmented v-model="activeTab" :options="[{ label: '发布审批', value: 'approvals' }, { label: '已发布版本与回退', value: 'releases' }]" />
 
     <section v-if="activeTab === 'approvals'" class="data-section">
       <div v-loading="loading" class="approval-cards" role="list" data-testid="approval-cards">

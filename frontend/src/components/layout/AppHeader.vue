@@ -60,15 +60,15 @@ const searchItems = computed<SearchItem[]>(() => {
     { title: '项目管理', description: '管理项目、上传代码文件和编辑项目信息', path: '/projects', roles: ['user'], topNav: true },
     { title: '代码中心', description: '按项目浏览、编辑和管理代码文件', path: '/code', roles: ['user'] },
     { title: '发起审查', description: '选择项目文件并启动 Agent 代码审查', path: '/reviews/start', roles: ['user', 'reviewer'] },
-    { title: '审查记录', description: '查看历史审查任务和审查状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
+    { title: '审查任务', description: '查看历史审查任务和处理状态', path: '/reviews', roles: ['user', 'reviewer'], topNav: true },
     { title: '安全与审查规则', description: '统一查看安全态势并配置审查维度', path: '/security', roles: ['user', 'reviewer'] },
     { title: '审查报告', description: '查看和导出审查报告', path: '/reports', roles: ['user', 'reviewer'], topNav: true },
     { title: 'Agent 工作台', description: '查看 Agent 并创建和测试个人草稿', path: '/agents', roles: ['user', 'reviewer'] },
     { title: '开发者论坛', description: '提问、分享经验和交流审查实践', path: '/forum', roles: ['admin', 'user', 'reviewer'] },
     { title: '个人知识库', description: '管理个人 RAG 文档、同步与检索', path: '/knowledge', roles: ['user', 'reviewer'] },
-    { title: '支持中心', description: '统一提交维修工单和意见反馈并跟踪处理进度', path: '/support', roles: ['admin', 'user', 'reviewer'] },
+    { title: '支持中心', description: '提交支持工单和意见反馈并跟踪处理进度', path: '/support', roles: ['admin', 'user', 'reviewer'] },
     { title: '修改密码', description: '更新当前账号登录密码', path: '/profile/password', roles: ['admin', 'user', 'reviewer'] },
-    { title: 'Agent 助手', description: '打开智能助手咨询代码审查问题', action: 'agent' },
+    { title: '小菱助手', description: '打开小菱，咨询代码审查问题或安排 Agent 任务', action: 'agent' },
     { title: '用户与权限', description: '统一管理用户、角色和权限点', path: '/admin/access', admin: true },
     { title: '运行与审计', description: '查看运行总览、调用日志和系统审计', path: '/admin/operations', admin: true },
     { title: 'Agent 治理', description: '管理 Agent、知识、技能和发布审批', path: '/admin/governance', admin: true },
@@ -182,6 +182,10 @@ function openPreferenceDialog(): void {
   window.dispatchEvent(new Event('prism:open-preference-dialog'))
 }
 
+function restorePageGuide(): void {
+  window.dispatchEvent(new Event('prism:restore-page-guide'))
+}
+
 function goChangePassword(): void {
   router.push('/profile/password')
 }
@@ -242,7 +246,7 @@ onBeforeUnmount(() => {
 
       <button v-if="canUseAgent" class="agent-trigger" type="button" aria-label="打开小菱助手" title="打开小菱助手" @click="openAgent">
         <PrismMascot class="agent-mascot" :size="26" />
-        <span>Agent</span>
+        <span>小菱助手</span>
       </button>
 
       <div id="roundtable-header-slot" class="roundtable-header-slot"></div>
@@ -261,6 +265,7 @@ onBeforeUnmount(() => {
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="openPreferenceDialog">偏好设置(小菱)</el-dropdown-item>
+            <el-dropdown-item @click="restorePageGuide">重新显示页面引导</el-dropdown-item>
             <el-dropdown-item @click="goChangePassword">修改密码</el-dropdown-item>
             <el-dropdown-item divided @click="handleLogout">
               <span class="logout-item">
@@ -284,7 +289,7 @@ onBeforeUnmount(() => {
     <div class="command-panel">
       <el-input
         v-model="searchKeyword"
-        placeholder="查找功能页面或 Agent 助手"
+        placeholder="查找功能页面或小菱助手"
         aria-label="功能导航"
         clearable
         autofocus

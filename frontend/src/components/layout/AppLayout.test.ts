@@ -24,6 +24,36 @@ describe('用户布局底部操作区避让小菱入口', () => {
 })
 
 describe('移动端导航抽屉', () => {
+  it('默认收起，打开时提供可访问遮罩并可点击关闭', async () => {
+    const wrapper = mount(AppLayout, {
+      global: {
+        stubs: {
+          AppSidebar: defineComponent({
+            props: ['mobileOpen'],
+            template: '<aside :data-open="mobileOpen" />',
+          }),
+          AppHeader: defineComponent({
+            emits: ['toggle-sidebar'],
+            template: '<button class="open-sidebar" @click="$emit(\'toggle-sidebar\')" />',
+          }),
+          RouterView: true,
+          ProactivePageGuide: true,
+          XiaolingGreeter: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('aside').attributes('data-open')).toBe('false')
+    expect(wrapper.find('.sidebar-mask').exists()).toBe(false)
+    await wrapper.get('.open-sidebar').trigger('click')
+    const mask = wrapper.get('.sidebar-mask')
+    expect(mask.element.tagName).toBe('BUTTON')
+    expect(mask.attributes('aria-label')).toBe('关闭导航菜单')
+    await mask.trigger('click')
+    expect(wrapper.get('aside').attributes('data-open')).toBe('false')
+    wrapper.unmount()
+  })
+
   it('打开后按 Esc 关闭', async () => {
     const wrapper = mount(AppLayout, {
       global: {

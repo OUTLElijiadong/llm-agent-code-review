@@ -264,6 +264,14 @@ def test_external_knowledge_source_api_requires_unique_super_admin(monkeypatch):
             "/api/admin/approvals",
             headers={"Authorization": f"Bearer {super_token}"},
         )
+        ordinary_overview = client.get(
+            "/api/admin/governance/overview",
+            headers={"Authorization": f"Bearer {ordinary_token}"},
+        )
+        super_overview = client.get(
+            "/api/admin/governance/overview",
+            headers={"Authorization": f"Bearer {super_token}"},
+        )
         denied_sensitive_approval = client.post(
             f"/api/admin/approvals/{sensitive_approval.id}/approve",
             json={"note": "越权尝试"},
@@ -299,6 +307,10 @@ def test_external_knowledge_source_api_requires_unique_super_admin(monkeypatch):
         assert any(item["job_id"] == crawl_job["id"] for item in super_job_runs.json()["data"])
         assert ordinary_approvals.status_code == 200
         assert super_approvals.status_code == 200
+        assert ordinary_overview.status_code == 200
+        assert super_overview.status_code == 200
+        assert ordinary_overview.json()["data"]["approvals_pending"] == 1
+        assert super_overview.json()["data"]["approvals_pending"] == 2
         assert sensitive_approval.id not in {item["id"] for item in ordinary_approvals.json()["data"]}
         assert program_approval.id in {item["id"] for item in ordinary_approvals.json()["data"]}
         assert sensitive_approval.id in {item["id"] for item in super_approvals.json()["data"]}
@@ -331,6 +343,7 @@ def test_admin_governance_api_business_loop(admin_api_client):
         json={"priority": 77, "auto_approval_threshold": 0.8},
     )
     assert manager["priority"] == 77
+
 
     memory = _ok(
         client,
@@ -461,3 +474,32 @@ def test_admin_governance_api_business_loop(admin_api_client):
     )
     rolled = _ok(client, "post", f"/api/admin/rollback/versions/{version['id']}/rollback")
     assert rolled["status"] == "rolled_back"
+
+
+def test_generic_approval_api_can_filter_agent_release_items(admin_api_client):
+    """审批中心的通用页签可按动作过滤专用 Agent 发布单。"""
+    client, db = admin_api_client
+    generic = ApprovalItem(
+        title="通用知识审批",
+        action="project.update",
+        resource="project:1",
+        risk_level="high",
+        status="pending",
+        decision="escalate",
+    )
+    release = ApprovalItem(
+        title="专用发布审批",
+        action="agent_package.publish",
+        resource="custom_agent_version:1",
+        risk_level="high",
+        status="pending",
+        decision="escalate",
+        request_json="{}",
+    )
+    db.add_all([generic, release])
+    db.commit()
+
+    listed = _ok(
+        client, "get", "/api/admin/approvals", params={"exclude_action": "agent_package.publish"},
+    )
+    assert [item["id"] for item in listed] == [generic.id]

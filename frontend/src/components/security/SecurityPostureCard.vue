@@ -220,7 +220,7 @@ onMounted(loadDashboard)
         <div class="sev-row">
           <div class="sev-pill sev-severe">
             <span class="sev-num font-mono">{{ data.severe_issues_total }}</span>
-            <span class="sev-label">严重</span>
+            <span class="sev-label">危急</span>
           </div>
           <div class="sev-pill sev-high">
             <span class="sev-num font-mono">{{ data.high_issues_total }}</span>
@@ -259,7 +259,7 @@ onMounted(loadDashboard)
             />
           </svg>
           <div class="sparkline-label font-mono">
-            严重 + 高危趋势 ({{ days }}d)
+            危急 + 高危趋势 ({{ days }} 天)
           </div>
         </div>
 
@@ -304,7 +304,7 @@ onMounted(loadDashboard)
               <div class="risky-name">{{ p.project_name }}</div>
               <div class="risky-sub">
                 <span v-if="p.severe_issues > 0" class="r-sev">
-                  <i class="risk-dot severe"></i>{{ p.severe_issues }} 严重
+                  <i class="risk-dot severe"></i>{{ p.severe_issues }} 危急
                 </span>
                 <span v-if="p.high_issues > 0" class="r-high">
                   <i class="risk-dot high"></i>{{ p.high_issues }} 高

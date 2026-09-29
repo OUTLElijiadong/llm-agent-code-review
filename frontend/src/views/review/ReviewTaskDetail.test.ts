@@ -444,7 +444,7 @@ describe('审查详情真实执行状态', () => {
     route.params.id = '162'
     review.getReviewTaskDetail.mockRejectedValue({
       code: 40400, message: '审查任务不存在或当前账号无权访问', request_id: 'review-unavailable-162',
-      next_action: '请返回审查记录列表重新选择；如需访问，请联系项目负责人确认权限', retryable: false,
+      next_action: '请返回审查任务列表重新选择；如需访问，请联系项目负责人确认权限', retryable: false,
     })
     await renderDetail()
     const alert = wrapper.get('.page-error[role="alert"]')
@@ -453,7 +453,7 @@ describe('审查详情真实执行状态', () => {
     expect(alert.text()).toContain('请联系项目负责人确认权限')
     expect(alert.text()).not.toContain('项目不存在')
     expect(review.getTaskIssues).not.toHaveBeenCalled()
-    await button('返回审查记录').trigger('click')
+    await button('返回审查任务').trigger('click')
     expect(navigation.push).toHaveBeenCalledWith('/reviews')
   })
 
@@ -466,7 +466,7 @@ describe('审查详情真实执行状态', () => {
     expect(wrapper.get('.page-error').text()).toContain('读取暂不可用')
     expect(wrapper.get('.page-error').text()).toContain('failed-read-21')
     expect(button('重新加载').attributes('disabled')).toBeDefined()
-    expect(button('返回审查记录').attributes('disabled')).toBeUndefined()
+    expect(button('返回审查任务').attributes('disabled')).toBeUndefined()
     await button('重新加载').trigger('click')
     expect(review.getReviewTaskDetail).toHaveBeenCalledTimes(2)
     pending.resolve(taskResult({ status: 'success' }))
@@ -476,7 +476,7 @@ describe('审查详情真实执行状态', () => {
     expect(review.getTaskIssues).toHaveBeenCalledTimes(1)
   })
 
-  it('重复失败更新请求编号，可返回审查记录而不重发任务', async () => {
+  it('重复失败更新请求编号，可返回审查任务而不重发任务', async () => {
     review.getReviewTaskDetail.mockRejectedValueOnce({ message: '读取失败一', request_id: 'first-id' })
     await renderDetail()
     review.getReviewTaskDetail.mockRejectedValueOnce({ message: '读取失败二', request_id: 'second-id' })
@@ -484,7 +484,7 @@ describe('审查详情真实执行状态', () => {
     await flushPromises()
     expect(wrapper.get('.page-error').text()).toContain('second-id')
     expect(wrapper.text()).not.toContain('first-id')
-    await button('返回审查记录').trigger('click')
+    await button('返回审查任务').trigger('click')
     expect(navigation.push).toHaveBeenCalledWith('/reviews')
     expect(review.getReviewTaskDetail).toHaveBeenCalledTimes(2)
     expect(review.getTaskIssues).not.toHaveBeenCalled()
@@ -520,7 +520,7 @@ describe('审查详情真实执行状态', () => {
     const pending = deferred<TaskDetailOut>()
     review.getReviewTaskDetail.mockReturnValueOnce(pending.promise)
     await button('重新加载').trigger('click')
-    await button('返回审查记录').trigger('click')
+    await button('返回审查任务').trigger('click')
     wrapper.unmount()
     pending.resolve(taskResult())
     await flushPromises()

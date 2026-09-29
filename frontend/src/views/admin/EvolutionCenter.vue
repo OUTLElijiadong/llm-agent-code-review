@@ -1,6 +1,6 @@
 <template>
-  <div class="evolution-page">
-    <div class="page-header">
+  <div class="evolution-page" :class="{ 'proposal-only': props.approvalOnly }">
+    <div v-if="!props.approvalOnly" class="page-header">
       <div>
         <h2>Agent 自进化中心</h2>
         <p class="page-sub">
@@ -21,7 +21,7 @@
     </div>
 
     <!-- 反馈指标看板 -->
-    <div class="stat-grid">
+    <div v-if="!props.approvalOnly" class="stat-grid">
       <el-card shadow="hover" class="stat-card">
         <div class="stat-label">意见采纳率</div>
         <div class="stat-value ok"><span v-if="statsLoading" class="stat-skeleton" aria-label="加载中"></span><template v-else>{{ pct(feedback?.overall_acceptance_rate) }}</template></div>
@@ -48,7 +48,7 @@
     </div>
 
     <!-- v3.0 AgentSkill 升级:per-Agent 自进化控制台 -->
-    <el-card shadow="never" class="per-agent-card">
+    <el-card v-if="!props.approvalOnly" shadow="never" class="per-agent-card">
       <template #header>
         <div class="per-agent-head">
           <div>
@@ -192,7 +192,7 @@
         </el-tab-pane>
 
         <!-- 经验记忆 -->
-        <el-tab-pane name="experiences" label="经验记忆">
+        <el-tab-pane v-if="!props.approvalOnly" name="experiences" label="经验记忆">
           <el-table v-loading="loading" :data="experiences" stripe empty-text="暂无经验，运行进化后从已修复问题沉淀">
             <el-table-column prop="issue_type" label="类型" width="110" />
             <el-table-column prop="title" label="代表问题" min-width="200" show-overflow-tooltip />
@@ -214,7 +214,7 @@
         </el-tab-pane>
 
         <!-- 黄金集 -->
-        <el-tab-pane name="eval" label="黄金回归集">
+        <el-tab-pane v-if="!props.approvalOnly" name="eval" label="黄金回归集">
           <p class="hint pad">评估闸门基准：进化提案 promote 前须在这些人工锚点上召回不退化、噪声不上升。</p>
           <el-table v-loading="loading" :data="evalCases" stripe empty-text="暂无黄金集">
             <el-table-column prop="name" label="用例" min-width="180" />
@@ -239,7 +239,7 @@
         </el-tab-pane>
 
         <!-- 反馈明细 -->
-        <el-tab-pane name="feedback" label="反馈明细">
+        <el-tab-pane v-if="!props.approvalOnly" name="feedback" label="反馈明细">
           <el-table :data="feedback?.by_issue_type ?? []" stripe empty-text="暂无已决反馈">
             <el-table-column prop="issue_type" label="问题类型" width="120" />
             <el-table-column prop="rule_type" label="规则类型" width="120" />
@@ -320,6 +320,10 @@ import type {
   AgentRuntimeOut,
   AgentSkillRecordOut,
 } from '@/types/agent'
+
+const props = withDefaults(defineProps<{ approvalOnly?: boolean }>(), {
+  approvalOnly: false,
+})
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待评估',
@@ -693,7 +697,13 @@ function openDetail(row: EvolutionProposal): void {
   detailVisible.value = true
 }
 
-onMounted(reloadAll)
+onMounted(() => {
+  if (props.approvalOnly) {
+    void loadProposals()
+    return
+  }
+  void reloadAll()
+})
 </script>
 
 <style scoped lang="scss">
@@ -805,6 +815,19 @@ onMounted(reloadAll)
 .main-card {
   :deep(.el-tabs__header) {
     margin-bottom: 12px;
+  }
+}
+
+.proposal-only {
+  padding: 0;
+
+  .main-card {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .main-card :deep(.el-tabs__header) {
+    display: none;
   }
 }
 

@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  ArrowDown,
   Cpu,
   DataAnalysis,
   Histogram,
@@ -14,6 +15,7 @@ import { useUserStore } from '@/stores/user'
 import ProactivePageGuide from '@/components/ai/ProactivePageGuide.vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
+import UserAvatar from '@/components/common/UserAvatar.vue'
 
 interface AdminMenuItem {
   path: string
@@ -57,6 +59,10 @@ function go(path: string): void {
     return
   }
   router.push(path)
+}
+
+function restorePageGuide(): void {
+  window.dispatchEvent(new Event('prism:restore-page-guide'))
 }
 
 watch(
@@ -120,11 +126,25 @@ async function logout(): Promise<void> {
           <h1>{{ route.meta.title || '管理后台' }}</h1>
         </div>
         <div class="admin-user">
-          <span>{{ userStore.displayName || '管理员' }}</span>
-          <el-tag size="small" :type="userStore.isSuperAdmin() ? 'danger' : 'warning'">
-            {{ userStore.isSuperAdmin() ? '超级管理员' : '管理员' }}
-          </el-tag>
-          <el-button :icon="SwitchButton" @click="logout">退出</el-button>
+          <el-dropdown trigger="click">
+            <button type="button" class="admin-user-trigger" aria-label="打开账号菜单">
+              <UserAvatar :avatar="userStore.profile?.avatar" :name="userStore.displayName" :user-id="userStore.profile?.id || 0" :size="34" />
+              <span class="admin-user-meta">
+                <span class="admin-user-name">{{ userStore.displayName || '管理员' }}</span>
+                <span class="admin-user-role">{{ userStore.isSuperAdmin() ? '超级管理员' : '管理员' }}</span>
+              </span>
+              <el-icon><ArrowDown /></el-icon>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="restorePageGuide">重新显示页面引导</el-dropdown-item>
+                <el-dropdown-item @click="router.push('/profile/password')">修改密码</el-dropdown-item>
+                <el-dropdown-item divided @click="logout">
+                  <span class="admin-logout"><el-icon><SwitchButton /></el-icon>退出登录</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <div id="admin-copilot-trigger-slot" class="admin-copilot-trigger-slot" aria-label="小菱入口"></div>
         </div>
       </header>
@@ -292,6 +312,32 @@ async function logout(): Promise<void> {
   gap: 12px;
   color: var(--gray-600);
 }
+
+.admin-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.admin-user-trigger:hover,
+.admin-user-trigger:focus-visible {
+  border-color: var(--brand-200);
+  background: var(--brand-50);
+  outline: none;
+}
+
+.admin-user-meta { display: grid; gap: 2px; }
+.admin-user-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.admin-user-role { color: var(--gray-500); font-size: 11px; }
+.admin-logout { display: inline-flex; align-items: center; gap: 7px; }
 
 .admin-copilot-trigger-slot { display: none; }
 

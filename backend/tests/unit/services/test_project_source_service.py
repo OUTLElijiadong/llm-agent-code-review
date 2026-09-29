@@ -51,6 +51,7 @@ def test_build_source_archive_preserves_current_text_and_binary(monkeypatch):
         _file(3, "src/main.py", "print('new')\n"),
         _file(2, "src/main.py", "print('old')\n"),
         _file(1, "assets/logo.bin", binary=b"\x00\x01logo"),
+        _file(5, "..../..../x.py", "print('ordinary dotted directories')\n"),
         _file(4, "../escape.py", "bad\n"),
     ]
     db.get.return_value = project
@@ -64,9 +65,10 @@ def test_build_source_archive_preserves_current_text_and_binary(monkeypatch):
 
     assert filename == "demo_source_name.zip"
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
-        assert sorted(archive.namelist()) == ["assets/logo.bin", "src/main.py"]
+        assert sorted(archive.namelist()) == ["..../..../x.py", "assets/logo.bin", "src/main.py"]
         assert archive.read("src/main.py") == b"print('new')\n"
         assert archive.read("assets/logo.bin") == b"\x00\x01logo"
+        assert archive.read("..../..../x.py") == b"print('ordinary dotted directories')\n"
 
 
 @pytest.mark.parametrize(

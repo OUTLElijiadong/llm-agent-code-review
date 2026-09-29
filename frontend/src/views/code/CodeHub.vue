@@ -50,6 +50,7 @@
           <span class="meta">{{ projectFileSummary(proj) }}</span>
           <span class="meta">最近审查 {{ formatDate(proj.last_review_at) }}</span>
         </footer>
+        <span class="card-action" aria-hidden="true">浏览代码文件 <span>→</span></span>
       </article>
     </div>
   </div>
@@ -210,5 +211,17 @@ onMounted(loadProjects)
   font-size: 12px;
   color: var(--color-text-secondary, #909399);
   margin-top: auto;
+}
+
+.card-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-light, #ebeef5);
+  color: var(--brand-600, #5b58e8);
+  font-size: 12px;
+  font-weight: 600;
 }
 </style>

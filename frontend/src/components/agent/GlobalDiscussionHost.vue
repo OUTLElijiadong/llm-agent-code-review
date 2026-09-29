@@ -25,12 +25,12 @@
         class="roundtable-fab"
         type="button"
         aria-label="打开圆桌讨论"
-        :title="`圆桌讨论（${sessions.length || 1} 个会话）`"
+        :title="`圆桌讨论：可继续 ${activeCount} 个，已结束 ${sessions.length - activeCount} 个`"
         @click="openFromDock"
       >
         <span aria-hidden="true">🗣️</span>
         <span class="roundtable-label">圆桌讨论</span>
-        <span class="roundtable-count">{{ sessions.length || 1 }}{{ nextOffset !== null ? '+' : '' }}</span>
+        <span v-if="activeCount > 0" class="roundtable-count" aria-label="可继续的圆桌数量">{{ activeCount }}{{ nextOffset !== null ? '+' : '' }}</span>
       </button>
     </div>
   </Teleport>
@@ -85,6 +85,7 @@ const routeSessionId = computed(() => {
   const raw = route.query.discuss_session
   return typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0] || '' : ''
 })
+const activeCount = computed(() => sessions.value.filter((session) => ['active', 'running', 'paused'].includes(session.status)).length)
 
 /** 列表与详情均由服务端按登录身份过滤；迟到响应不得覆盖切换后的账号。 */
 async function loadSessions(): Promise<void> {

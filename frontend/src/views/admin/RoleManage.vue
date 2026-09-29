@@ -66,7 +66,17 @@
       direction="rtl"
     >
       <div v-loading="permLoading" class="perm-drawer-body">
+        <el-alert
+          v-if="permissionLoadError"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="permissionLoadError"
+        >
+          <el-button link type="primary" @click="retryPermissionLoad">重试加载</el-button>
+        </el-alert>
         <el-tree
+          v-else-if="permissionDataReady"
           ref="permTreeRef"
           :data="permTreeData"
           :props="{ label: 'label', children: 'children' }"
@@ -78,7 +88,12 @@
       </div>
       <template #footer>
         <el-button @click="permDrawerVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="onConfirmPermissions">保存</el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          :disabled="!permissionDataReady || permLoading"
+          @click="onConfirmPermissions"
+        >保存</el-button>
       </template>
     </el-drawer>
 
@@ -119,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -190,6 +205,15 @@ const permTreeRef = ref<ElTreeInstance>()
 const currentRole = ref<Role | null>(null)
 const permTreeData = ref<PermTreeNode[]>([])
 const allPermissions = ref<Permission[]>([])
+const permissionCatalogReady = ref(false)
+const rolePermissionsReady = ref(false)
+const permissionLoadError = ref('')
+const permissionDataReady = computed(() => (
+  permissionCatalogReady.value
+  && rolePermissionsReady.value
+  && allPermissions.value.length > 0
+  && !permissionLoadError.value
+))
 
 const scopeDialogVisible = ref(false)
 const scopeLoading = ref(false)
@@ -219,11 +243,16 @@ async function loadRoles(): Promise<void> {
 async function loadPermissions(): Promise<void> {
   if (allPermissions.value.length > 0) {
     permTreeData.value = buildPermTree(allPermissions.value)
+    permissionCatalogReady.value = true
     return
   }
   const list = await listPermissions()
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error('权限目录为空')
+  }
   allPermissions.value = list
   permTreeData.value = buildPermTree(list)
+  permissionCatalogReady.value = true
 }
 
 /**
@@ -293,15 +322,31 @@ async function onAssignPermissions(row: Role): Promise<void> {
   currentRole.value = row
   permDrawerVisible.value = true
   permLoading.value = true
+  permissionLoadError.value = ''
+  permissionCatalogReady.value = false
+  rolePermissionsReady.value = false
+  permTreeData.value = []
   try {
     await loadPermissions()
     const owned = await fetchRolePermissions(row.id)
     const ownedIds = owned.map((p) => p.id)
+    rolePermissionsReady.value = true
     // 等待树渲染后设置勾选
     await nextFrame()
     permTreeRef.value?.setCheckedKeys(ownedIds, false)
+  } catch {
+    permissionCatalogReady.value = false
+    rolePermissionsReady.value = false
+    permissionLoadError.value = '权限信息加载失败，角色权限未修改。请重试后再保存。'
+    ElMessage.error('权限信息加载失败，角色权限未修改')
   } finally {
     permLoading.value = false
+  }
+}
+
+function retryPermissionLoad(): void {
+  if (currentRole.value && !permLoading.value) {
+    void onAssignPermissions(currentRole.value)
   }
 }
 
@@ -318,7 +363,11 @@ function nextFrame(): Promise<void> {
  * @returns void
  */
 async function onConfirmPermissions(): Promise<void> {
-  if (!currentRole.value || !permTreeRef.value) return
+  if (!currentRole.value) return
+  if (!permissionDataReady.value || !permTreeRef.value) {
+    ElMessage.warning('权限信息未完整加载，无法保存')
+    return
+  }
   submitting.value = true
   try {
     const checked = permTreeRef.value.getCheckedKeys(false) as (string | number)[]

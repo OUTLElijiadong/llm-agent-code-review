@@ -48,6 +48,7 @@ async function mountGuide(path: string, surface: 'user' | 'admin'): Promise<{ wr
 describe('ProactivePageGuide', () => {
   beforeEach(() => {
     sessionStorage.clear()
+    localStorage.clear()
     auth.token = 'token'
     auth.profile = { id: 7, role: 'user' }
     auth.permission = true
@@ -55,7 +56,7 @@ describe('ProactivePageGuide', () => {
     auth.admin = false
     auth.superAdmin = false
   })
-  afterEach(() => { sessionStorage.clear(); vi.restoreAllMocks() })
+  afterEach(() => { sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks() })
 
   it('进入有建议的页面时弹出引导', async () => {
     const { wrapper } = await mountGuide('/projects', 'user')
@@ -129,5 +130,20 @@ describe('ProactivePageGuide', () => {
     auth.profile = { id: 8, role: 'user' }
     const second = await mountGuide('/projects', 'user')
     expect(second.wrapper.find('.proactive-guide').exists()).toBe(true)
+  })
+
+  it('关闭后按账号和界面持久隐藏，可从账号菜单恢复', async () => {
+    const first = await mountGuide('/projects', 'user')
+    await first.wrapper.get('.guide-close').trigger('click')
+    expect(localStorage.getItem('prism-page-guide-dismissed:user:user-7')).toBe('1')
+    first.wrapper.unmount()
+
+    const second = await mountGuide('/projects', 'user')
+    expect(second.wrapper.find('.proactive-guide').exists()).toBe(false)
+    window.dispatchEvent(new Event('prism:restore-page-guide'))
+    await flushPromises()
+    expect(localStorage.getItem('prism-page-guide-dismissed:user:user-7')).toBeNull()
+    expect(second.wrapper.find('.proactive-guide').exists()).toBe(true)
+    second.wrapper.unmount()
   })
 })

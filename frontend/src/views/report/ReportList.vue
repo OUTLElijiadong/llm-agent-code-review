@@ -42,8 +42,12 @@
       </div>
 
       <div class="report-cards" v-loading="loading" role="list" data-testid="report-cards">
+        <section v-if="loadErrorMessage" class="report-list-error" role="alert">
+          <strong>{{ loadErrorMessage }}</strong>
+          <el-button size="small" @click="loadData">重试加载</el-button>
+        </section>
         <EmptyState
-          v-if="!reports.length"
+          v-else-if="!loading && !reports.length"
           :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
           :action-text="hasFilter || !canStartReview ? '' : '去启动审查'"
           :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
@@ -118,7 +122,7 @@
         </article>
       </div>
 
-      <div class="pagination-wrapper">
+      <div v-if="!loading && !loadErrorMessage" class="pagination-wrapper">
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="pageSize"
@@ -152,6 +156,8 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const loading = ref(false)
+const loadErrorMessage = ref('')
+let loadRequestGeneration = 0
 const reports = ref<ReportListItem[]>([])
 const projects = ref<ProjectOut[]>([])
 const total = ref(0)
@@ -186,7 +192,9 @@ function scoreClass(score: number) {
 }
 
 async function loadData() {
+  const requestGeneration = ++loadRequestGeneration
   loading.value = true
+  loadErrorMessage.value = ''
   try {
     const params: Record<string, unknown> = {
       page: page.value,
@@ -199,10 +207,16 @@ async function loadData() {
     }
 
     const data = await getReports(params)
+    if (requestGeneration !== loadRequestGeneration) return
     reports.value = data.items
     total.value = data.total
+  } catch {
+    if (requestGeneration !== loadRequestGeneration) return
+    reports.value = []
+    total.value = 0
+    loadErrorMessage.value = '报告列表加载失败，请重试。'
   } finally {
-    loading.value = false
+    if (requestGeneration === loadRequestGeneration) loading.value = false
   }
 }
 
@@ -331,6 +345,10 @@ onMounted(() => {
 
 /* ── 报告卡片列表(替代表格:评分色环+任务名+类型徽章为主,项目/问题数/时间降级为次行) ── */
 .report-cards { display: grid; gap: 10px; min-height: 120px; }
+.report-list-error {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  min-height: 120px; color: var(--el-color-danger); text-align: center;
+}
 .report-card {
   position: relative; display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;

@@ -47,7 +47,7 @@ const TOOL_META: Record<string, ToolMeta> = {
 
   // 审查任务
   start_review: { label: '发起代码审查', running: '小菱正在发起代码审查…', group: 'review', isPageAction: true },
-  list_review_tasks: { label: '查看审查记录', running: '小菱正在查看审查记录…', group: 'review' },
+  list_review_tasks: { label: '查看审查任务', running: '小菱正在查看审查任务…', group: 'review' },
   list_review_issues: { label: '查看审查问题', running: '小菱正在查看审查问题…', group: 'review' },
   list_reports: { label: '查看审查报告', running: '小菱正在查看审查报告…', group: 'review' },
 

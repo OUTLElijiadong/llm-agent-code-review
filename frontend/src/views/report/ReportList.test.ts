@@ -34,7 +34,8 @@ function mountPage(): VueWrapper {
         'el-button': { inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' },
         'el-icon': { template: '<i><slot /></i>' }, 'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
         'el-dropdown-menu': { template: '<div><slot /></div>' }, 'el-dropdown-item': { template: '<div><slot /></div>' },
-        'el-tag': { template: '<span><slot /></span>' }, EmptyState: true,
+        'el-tag': { template: '<span><slot /></span>' },
+        EmptyState: { props: ['description'], template: '<div class="empty-state">{{ description }}</div>' },
       }, directives: { loading: {} },
     },
   })
@@ -74,6 +75,64 @@ describe('报告卡片列表', () => {
     expect(text).toContain('问题 3')
     expect(text).toContain('72')
     expect(text).toContain('2026-09-05')
+  })
+
+  it('请求未完成时不把空数组渲染成“暂无报告”或 0 条', async () => {
+    let resolveReports!: (value: { items: never[]; total: number }) => void
+    api.reports.mockReturnValueOnce(new Promise(resolve => { resolveReports = resolve }))
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.empty-state').exists()).toBe(false)
+    expect(wrapper.find('.pagination-wrapper').exists()).toBe(false)
+
+    resolveReports({ items: [], total: 0 })
+    await flushPromises()
+    expect(wrapper.find('.empty-state').text()).toBe('暂无审查报告')
+    expect(wrapper.find('.pagination-wrapper').exists()).toBe(true)
+  })
+
+  it('列表请求失败时显示失败状态，不伪装成空报告列表', async () => {
+    api.reports.mockRejectedValueOnce(new Error('network unavailable'))
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('报告列表加载失败，请重试。')
+    expect(wrapper.find('.empty-state').exists()).toBe(false)
+    expect(wrapper.find('.pagination-wrapper').exists()).toBe(false)
+  })
+
+  it('点击失败态重试后恢复报告列表', async () => {
+    api.reports.mockRejectedValueOnce(new Error('network unavailable'))
+    wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === '重试加载')?.trigger('click')
+    await flushPromises()
+
+    expect(api.reports).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.report-card').text()).toContain('渗透报告')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('较早筛选请求晚返回时不能覆盖新结果', async () => {
+    let resolveOlder!: (value: { items: typeof report[]; total: number }) => void
+    let resolveNewer!: (value: { items: typeof report[]; total: number }) => void
+    api.reports
+      .mockReturnValueOnce(new Promise(resolve => { resolveOlder = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveNewer = resolve }))
+    wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const newerRequest = vm.loadData()
+
+    resolveNewer({ items: [{ ...report, task_name: '新筛选结果' }], total: 1 })
+    await newerRequest
+    resolveOlder({ items: [{ ...report, task_name: '旧筛选结果' }], total: 1 })
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').text()).toContain('新筛选结果')
+    expect(wrapper.find('.report-card').text()).not.toContain('旧筛选结果')
   })
 })
 

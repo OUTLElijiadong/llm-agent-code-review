@@ -7,9 +7,10 @@
 
 /** Agent 编码 → 中文名(注册中心 BaseAgent + 治理默认 Agent 全量) */
 export const AGENT_CODE_LABELS: Record<string, string> = {
-  orchestrator: '内部调度引擎',
-  chat_assistant: '小菱(唯一主控)',
-  manager: '小菱管理权限策略(兼容)',
+  orchestrator: '小菱·内部调度模块（系统）',
+  chat_assistant: '小菱·主控 Agent',
+  manager: '小菱·管理权限兼容模块（系统）',
+  supervisor: '小菱监督子 Agent',
   review_orchestrator: '审查编排',
   code_reviewer: '代码审查员',
   security_sentinel: '安全哨兵',
@@ -59,6 +60,10 @@ export function jobCodeText(code: string | null | undefined): string {
   if (raw.startsWith('daily_skill_evolution_')) {
     const agent = raw.slice('daily_skill_evolution_'.length)
     return `每日·技能进化·${agentCodeText(agent)}`
+  }
+  if (raw.startsWith('hourly_skill_proactive_')) {
+    const agent = raw.slice('hourly_skill_proactive_'.length)
+    return `每小时·主动技能·${agentCodeText(agent)}`
   }
   return raw.replace(/^daily_/, '每日·').replace(/_/g, ' ')
 }

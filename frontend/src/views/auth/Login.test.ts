@@ -69,7 +69,7 @@ describe('登录真实反馈', () => {
     await flushPromises()
     expect(user.login).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(wrapper.findAll('.el-form-item__error').map((item) => item.text())).toEqual([
-      '请输入用户名', '请输入密码',
+      '请输入账号', '请输入密码',
     ]))
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
   })

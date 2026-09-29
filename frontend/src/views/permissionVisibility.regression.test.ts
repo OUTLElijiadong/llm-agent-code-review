@@ -241,11 +241,11 @@ describe('细粒度权限的页内操作可见性', () => {
     writable.unmount()
   })
 
-  it('仪表盘不向缺少 review:start 的账号显示新建审查', async () => {
+  it('仪表盘不向缺少 review:start 的账号显示发起审查', async () => {
     const wrapper = mountView(Dashboard)
     await flushPromises()
 
-    expect(wrapper.text()).not.toContain('新建审查')
+    expect(wrapper.text()).not.toContain('发起审查')
     expect(wrapper.text()).not.toContain('导出周报')
     expect((wrapper.vm as any).canStartReview).toBe(false)
     expect((wrapper.vm as any).canExportWeeklyReport).toBe(false)
@@ -271,7 +271,7 @@ describe('细粒度权限的页内操作可见性', () => {
     expect(button).toBeDefined()
     await button!.trigger('click')
     expect(state.routerPush).toHaveBeenCalledExactlyOnceWith('/reviews')
-    expect(wrapper.text()).not.toContain('新建审查')
+    expect(wrapper.text()).not.toContain('发起审查')
     wrapper.unmount()
   })
 })

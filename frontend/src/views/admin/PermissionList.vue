@@ -2,8 +2,19 @@
   <div class="permission-list-page">
     <div class="page-header">
       <h2>权限点列表</h2>
-      <div class="header-tip">系统内置权限点(只读),共 {{ totalCount }} 个</div>
+      <div class="header-tip">系统内置权限点（只读），共 {{ permissionsLoaded ? totalCount : '—' }} 个</div>
     </div>
+
+    <el-alert
+      v-if="loadError"
+      class="permission-load-error"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="loadError"
+    >
+      <el-button link type="primary" @click="loadPermissions">重试加载</el-button>
+    </el-alert>
 
     <el-card shadow="hover">
       <div class="filter-bar">
@@ -16,7 +27,10 @@
         />
       </div>
 
-      <div v-loading="loading" class="perm-groups">
+      <div v-if="permissionsLoaded && !loadError && totalCount === 0" class="perm-groups">
+        <el-empty description="权限接口返回 0 个权限点" />
+      </div>
+      <div v-else v-loading="loading" class="perm-groups">
         <div v-for="group in filteredGroups" :key="group.module" class="perm-group">
           <div class="group-header">
             <el-icon class="group-icon"><Files /></el-icon>
@@ -31,7 +45,7 @@
             </div>
           </div>
         </div>
-        <el-empty v-if="filteredGroups.length === 0" description="未找到匹配的权限点" />
+        <el-empty v-if="permissionsLoaded && !loadError && totalCount > 0 && filteredGroups.length === 0" description="未找到匹配的权限点" />
       </div>
     </el-card>
   </div>
@@ -73,6 +87,8 @@ const MODULE_ORDER = ['project', 'file', 'review', 'issue', 'agent', 'report', '
 const loading = ref(false)
 const keyword = ref('')
 const permissions = ref<Permission[]>([])
+const permissionsLoaded = ref(false)
+const loadError = ref('')
 
 const totalCount = computed(() => permissions.value.length)
 
@@ -121,8 +137,16 @@ const filteredGroups = computed<PermGroup[]>(() => {
  */
 async function loadPermissions(): Promise<void> {
   loading.value = true
+  permissionsLoaded.value = false
+  loadError.value = ''
   try {
-    permissions.value = await listPermissions()
+    const result = await listPermissions()
+    if (!Array.isArray(result)) throw new Error('权限接口返回格式错误')
+    permissions.value = result
+    permissionsLoaded.value = true
+  } catch {
+    permissions.value = []
+    loadError.value = '权限点加载失败，当前不能确认权限目录数量。请重试。'
   } finally {
     loading.value = false
   }

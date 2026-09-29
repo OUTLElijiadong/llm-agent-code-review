@@ -36,7 +36,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
   <div class="app-layout">
     <AppSidebar :mobile-open="sidebarVisible" @close="closeSidebar" />
     <transition name="sidebar-mask-fade">
-      <div v-if="sidebarVisible" class="sidebar-mask" @click="closeSidebar"></div>
+      <button v-if="sidebarVisible" type="button" class="sidebar-mask" aria-label="关闭导航菜单" @click="closeSidebar"></button>
     </transition>
     <div class="app-layout-right">
       <AppHeader @toggle-sidebar="toggleSidebar" />
@@ -91,6 +91,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
 
 .sidebar-mask {
   display: none;
+  border: 0;
+  appearance: none;
+  cursor: pointer;
 }
 
 .content-route-enter-active,

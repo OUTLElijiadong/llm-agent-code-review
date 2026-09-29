@@ -128,8 +128,8 @@ onMounted(load)
   <div class="maintenance-page">
     <div class="page-header">
       <div>
-        <h2>申请维修</h2>
-        <p class="page-sub">遇到平台故障、账号异常或功能报错,提交工单由管理员受理处理</p>
+        <h2>支持工单</h2>
+        <p class="page-sub">遇到平台故障、账号异常或功能报错，提交工单由管理员跟进处理。</p>
       </div>
       <el-button type="primary" @click="submitVisible = true">提交工单</el-button>
     </div>
@@ -166,7 +166,7 @@ onMounted(load)
     </el-card>
 
     <!-- 提交工单 -->
-    <el-dialog v-model="submitVisible" title="提交维修工单" width="560px">
+    <el-dialog v-model="submitVisible" title="提交支持工单" width="560px">
       <el-alert v-if="actionError" type="error" :closable="false" :title="actionError" />
       <el-form label-width="80px">
         <el-form-item label="标题" required>

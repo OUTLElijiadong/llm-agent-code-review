@@ -63,6 +63,29 @@ def _client_key(request: Request) -> str:
     return client_ip(request)
 
 
+def authenticated_actor_key(request: Request) -> str:
+    """按已签名 JWT 的账号限流；无效/缺失令牌退回可信客户端 IP。
+
+    不把原始 Bearer 令牌放进 Redis 限流键，也不以会话版本分桶，避免
+    同一账号重新登录后重置审查频率额度。
+    """
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() == "bearer" and token.strip():
+        try:
+            from app.core.security import decode_token
+
+            payload = decode_token(token.strip())
+            actor_id = int(payload["sub"])
+            if actor_id > 0:
+                return f"user:{actor_id}"
+        except Exception:
+            # Invalid, expired, or unverifiable credentials must never choose
+            # another actor's bucket. The endpoint's auth dependency rejects them.
+            pass
+    return f"ip:{_client_key(request)}"
+
+
 def build_limiter(storage_uri: Optional[str] = None) -> Limiter:
     """构造 SlowAPI 限流器；生产 Redis、多 worker 共享同一计数。"""
 

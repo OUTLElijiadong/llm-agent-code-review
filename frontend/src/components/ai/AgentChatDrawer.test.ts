@@ -808,7 +808,7 @@ describe('AgentChatDrawer Responses stream', () => {
 
     emit(0, {
       type: 'response.output_text.delta',
-      delta: '审查结果在这里,你可以点下面按钮去查看。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查记录"}-->',
+      delta: '审查结果在这里,你可以点下面按钮去查看。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查任务"}-->',
     })
     await flushPromises()
     emit(0, { type: 'response.completed', response: { id: 'run-nav' } })
@@ -819,7 +819,7 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.emitted('update:visible')).toBeFalsy()
     expect(wrapper.find('.nav-directives').exists()).toBe(true)
     const navText = wrapper.find('.nav-directives').text()
-    expect(navText).toContain('查看审查记录')
+    expect(navText).toContain('查看审查任务')
     // 正文里不残留 PRISM_NAVIGATE 指令
     expect(wrapper.find('.msg-row.assistant .markdown-body').text()).not.toContain('PRISM_NAVIGATE')
     wrapper.unmount()
@@ -847,7 +847,7 @@ describe('AgentChatDrawer Responses stream', () => {
 
     emit(0, {
       type: 'response.output_text.delta',
-      delta: '好的,正在为你打开审查记录。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查记录"}-->',
+      delta: '好的,正在为你打开审查任务。\n\n<!--PRISM_NAVIGATE {"action":"navigate","route":"/reviews","label":"查看审查任务"}-->',
     })
     await flushPromises()
     emit(0, { type: 'response.completed', response: { id: 'run-auto-nav' } })

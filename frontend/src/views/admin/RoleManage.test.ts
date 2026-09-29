@@ -35,6 +35,7 @@ function mountRoleManage(): VueWrapper {
       stubs: {
         'el-button': true,
         'el-card': true,
+        'el-alert': { props: ['title'], template: '<div role="alert">{{ title }}<slot /></div>' },
         'el-dialog': true,
         'el-drawer': true,
         'el-form': true,
@@ -105,6 +106,36 @@ describe('RoleManage data scope', () => {
     expect(state.scopeDialogVisible).toBe(false)
     expect(messages.error).toHaveBeenCalledWith('数据范围加载失败')
 
+    wrapper.unmount()
+  })
+})
+
+describe('RoleManage 权限分配失败保护', () => {
+  it.each([
+    ['权限目录返回空列表', () => rbacApi.listPermissions.mockResolvedValueOnce([])],
+    ['权限目录读取失败', () => rbacApi.listPermissions.mockRejectedValueOnce(new Error('network'))],
+    ['角色权限读取失败', () => {
+      rbacApi.listPermissions.mockResolvedValueOnce([{ id: 1, module: 'project', code: 'project:view', name: '查看项目' }])
+      rbacApi.fetchRolePermissions.mockRejectedValueOnce(new Error('network'))
+    }],
+  ])('当%s时不得把空权限提交成覆盖更新', async (_label, prepareFailure) => {
+    rbacApi.fetchRolePermissions.mockReset()
+    prepareFailure()
+    const wrapper = mountRoleManage()
+    await flushPromises()
+
+    const state = setupState(wrapper)
+    await state.onAssignPermissions(role).catch(() => undefined)
+    expect(state.permissionDataReady).toBe(false)
+    state.permTreeRef = {
+      getCheckedKeys: vi.fn(() => []),
+      getHalfCheckedKeys: vi.fn(() => []),
+      setCheckedKeys: vi.fn(),
+    }
+    await state.onConfirmPermissions()
+
+    expect(rbacApi.assignRolePermissions).not.toHaveBeenCalled()
+    expect(messages.error).toHaveBeenCalled()
     wrapper.unmount()
   })
 })

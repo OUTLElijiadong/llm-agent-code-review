@@ -69,8 +69,8 @@ const form = reactive({
 
 const rules: FormRules = {
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 32, message: '用户名长度在 3 到 32 个字符', trigger: 'blur' },
+    { required: true, message: '请输入账号', trigger: 'blur' },
+    { min: 3, max: 32, message: '账号长度在 3 到 32 个字符', trigger: 'blur' },
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
@@ -181,10 +181,10 @@ async function handleLogin(): Promise<void> {
           class="prism-form"
           @submit.prevent="handleLogin"
         >
-          <el-form-item prop="username" label="账号 / 学号">
+          <el-form-item prop="username" label="账号">
             <el-input
               v-model="form.username"
-              placeholder="请输入用户名"
+              placeholder="请输入账号或学号"
               :prefix-icon="User"
               size="large"
               autocomplete="username"

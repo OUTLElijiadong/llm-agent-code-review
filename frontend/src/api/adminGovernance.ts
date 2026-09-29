@@ -78,8 +78,8 @@ export function crawlAgentKnowledgeSources(agentCode = ''): Promise<Record<strin
   return post<Record<string, unknown>>('/admin/governance/knowledge/crawl', {}, { agent_code: agentCode })
 }
 
-export function listApprovals(status = ''): Promise<ApprovalItem[]> {
-  return get<ApprovalItem[]>('/admin/approvals', { status })
+export function listApprovals(status = '', excludeAction = '', limit = 1000): Promise<ApprovalItem[]> {
+  return get<ApprovalItem[]>('/admin/approvals', { status, exclude_action: excludeAction, limit })
 }
 
 export function approveItem(id: number, note = ''): Promise<ApprovalItem> {

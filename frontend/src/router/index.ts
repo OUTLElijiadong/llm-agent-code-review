@@ -40,7 +40,7 @@ const routes: RouteRecordRaw[] = [
         path: 'reviews',
         name: 'ReviewTaskList',
         component: () => import('@/views/review/ReviewTaskList.vue'),
-        meta: { title: '审查记录', permissions: ['review:view'] },
+        meta: { title: '审查任务', permissions: ['review:view'] },
       },
       {
         path: 'reviews/:id',
@@ -197,7 +197,7 @@ const routes: RouteRecordRaw[] = [
         path: 'support/maintenance',
         name: 'MaintenanceCenter',
         redirect: { path: '/support', query: { section: 'maintenance' } },
-        meta: { title: '申请维修' },
+        meta: { title: '支持工单' },
       },
       {
         path: 'support/feedback',
@@ -376,7 +376,7 @@ const routes: RouteRecordRaw[] = [
         path: 'audit',
         name: 'SystemAudit',
         redirect: { path: '/admin/operations', query: { section: 'audit' } },
-        meta: { title: '系统操作审计', role: 'admin', permissions: ['audit:view'] },
+        meta: { title: '操作审计', role: 'admin', permissions: ['audit:view'] },
       },
       {
         path: 'evolution',

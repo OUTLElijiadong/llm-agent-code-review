@@ -15,6 +15,9 @@ let hideTimer: number | undefined
 const seenKey = computed(() => (
   `prism-page-guide:${props.surface}:user-${userStore.profile?.id ?? 'anonymous'}`
 ))
+const dismissedKey = computed(() => (
+  `prism-page-guide-dismissed:${props.surface}:user-${userStore.profile?.id ?? 'anonymous'}`
+))
 
 function openCopilot(): void {
   if (!tip.value) return
@@ -28,6 +31,19 @@ function dismiss(): void {
   if (hideTimer !== undefined) window.clearTimeout(hideTimer)
 }
 
+function dismissForAccount(): void {
+  dismiss()
+  try { window.localStorage.setItem(dismissedKey.value, '1') } catch { /* 存储不可用时仅关闭本次提示。 */ }
+}
+
+function restoreForAccount(): void {
+  try {
+    window.localStorage.removeItem(dismissedKey.value)
+    window.sessionStorage.removeItem(seenKey.value)
+  } catch { /* 存储不可用时仍重新评估当前页面。 */ }
+  evaluate()
+}
+
 function evaluate(): void {
   if (hideTimer !== undefined) {
     window.clearTimeout(hideTimer)
@@ -36,6 +52,8 @@ function evaluate(): void {
   const path = route.fullPath.split('?')[0]
   const matched = findPageGuideTip(props.surface, path)
   const seen = (window.sessionStorage.getItem(seenKey.value) ?? '').split(',')
+  let dismissed = false
+  try { dismissed = window.localStorage.getItem(dismissedKey.value) === '1' } catch { /* 引导状态存储不可用时按会话级提示运行。 */ }
   // 已看过或无建议都必须清掉旧 tip,否则上一个页面的引导会残留在当前页且不再自动消失。
   // 这里必须与菜单、搜索和 Agent 导航共用同一条权限判定,否则入口虽然隐藏,
   // 主动提示仍可能泄露一个用户无法打开的页面。
@@ -44,7 +62,7 @@ function evaluate(): void {
     && userStore.hasPermission('agent:chat')
     && isNavigationPathAllowed(router, matched.route, userStore),
   )
-  if (!matched || !allowed || seen.includes(path)) {
+  if (!matched || !allowed || dismissed || seen.includes(path)) {
     tip.value = null
     return
   }
@@ -54,7 +72,11 @@ function evaluate(): void {
 }
 
 watch(() => [route.fullPath, seenKey.value], evaluate, { immediate: true })
-onBeforeUnmount(() => { if (hideTimer !== undefined) window.clearTimeout(hideTimer) })
+window.addEventListener('prism:restore-page-guide', restoreForAccount)
+onBeforeUnmount(() => {
+  if (hideTimer !== undefined) window.clearTimeout(hideTimer)
+  window.removeEventListener('prism:restore-page-guide', restoreForAccount)
+})
 </script>
 
 <template>
@@ -66,7 +88,7 @@ onBeforeUnmount(() => { if (hideTimer !== undefined) window.clearTimeout(hideTim
         <span class="guide-hint">{{ tip.hint }}</span>
       </div>
       <button class="guide-act" type="button" aria-label="让小菱继续引导" @click="openCopilot">让小菱引导</button>
-      <button class="guide-close" type="button" aria-label="关闭引导" @click="dismiss">×</button>
+      <button class="guide-close" type="button" aria-label="关闭后不再显示页面引导" title="关闭后不再显示页面引导" @click="dismissForAccount">×</button>
     </div>
   </Transition>
 </template>

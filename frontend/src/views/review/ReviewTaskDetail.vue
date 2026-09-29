@@ -11,13 +11,13 @@
     <!-- ============ 加载失败 ============ -->
     <div v-else-if="pageError" class="page-error" role="alert">
       <EmptyState :description="pageError" />
-      <p class="recovery-hint">{{ detailNextAction || '可重新读取原任务状态，或返回审查记录列表；重新加载不会再次发起审查。' }}</p>
+      <p class="recovery-hint">{{ detailNextAction || '可重新读取原任务状态，或返回审查任务列表；重新加载不会再次发起审查。' }}</p>
       <p v-if="detailRequestId" class="request-id">请求编号：{{ detailRequestId }}</p>
       <div class="recovery-actions">
         <el-button type="primary" :icon="RefreshRight" :loading="refreshing" :disabled="refreshing" @click="loadAllData">
           重新加载
         </el-button>
-        <el-button @click="router.push('/reviews')">返回审查记录</el-button>
+        <el-button @click="router.push('/reviews')">返回审查任务</el-button>
       </div>
     </div>
 

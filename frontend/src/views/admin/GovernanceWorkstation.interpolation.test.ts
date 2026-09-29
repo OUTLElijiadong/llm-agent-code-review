@@ -133,6 +133,19 @@ afterEach(() => {
 })
 
 describe('admin governance interpolation in real cells and agent cards', () => {
+  it('总览与执行审批页使用相同的可见待办口径，排除专用发布审批', async () => {
+    const overview = mountMode('overview')
+    await settle()
+    expect(api.listApprovals).toHaveBeenLastCalledWith('pending', 'agent_package.publish')
+    expect(overview.text()).toContain('执行审批待办')
+    overview.unmount()
+
+    const approvals = mountMode('approvals')
+    await settle()
+    expect(api.listApprovals).toHaveBeenLastCalledWith('pending', 'agent_package.publish')
+    approvals.unmount()
+  })
+
   it('has no single-brace function-call text in any admin Vue template', () => {
     const directory = path.resolve('src/views/admin')
     const candidates: string[] = []
@@ -154,7 +167,7 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     { mode: 'overview', cells: [[0, 1, '治理']] },
     { mode: 'approvals', cells: [[0, 1, '审查编排'], [0, 2, '读取知识']] },
     { mode: 'tools', cells: [
-      [0, 0, '小菱管理权限策略(兼容)'], [0, 1, '命令执行'], [0, 2, '升级审批'], [0, 3, '高风险'],
+      [0, 0, '小菱·管理权限兼容模块（系统）'], [0, 1, '命令执行'], [0, 2, '升级审批'], [0, 3, '高风险'],
       [1, 0, '审查编排'], [1, 1, '读取知识'], [1, 2, '读取知识'], [1, 3, '允许'], [1, 4, '成功'], [1, 5, '低风险'],
     ] },
     { mode: 'knowledge', cells: [[0, 0, '内联'], [1, 1, '长期记忆'], [2, 1, '手动录入'], [2, 3, '生效']] },
@@ -182,6 +195,23 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     const cards = wrapper.findAll('.agent-card')
     expect(cards).toHaveLength(35)
     for (let index = 0; index < 35; index++) expect(cards[index]!.get('.agent-category').text()).toBe(categories[index % categories.length]![1])
+  })
+
+  it('默认收起小菱的内部调度与兼容条目，保留监督子 Agent 并可展开查看系统项', async () => {
+    api.listGovernanceAgents.mockResolvedValue(['chat_assistant', 'code_reviewer', 'manager', 'orchestrator', 'supervisor'].map((code) => ({
+      ...makeAgent('meta'), code, name: code,
+    })))
+    const wrapper = mountMode('agents')
+    await settle()
+    expect(wrapper.findAll('.agent-card')).toHaveLength(3)
+    expect(wrapper.text()).toContain('小菱是唯一主控')
+    expect(wrapper.text()).not.toContain('小菱·管理权限兼容模块（系统）')
+    expect(wrapper.text()).toContain('小菱监督子 Agent')
+
+    await wrapper.get('.agent-system-disclosure button').trigger('click')
+    expect(wrapper.findAll('.agent-card')).toHaveLength(5)
+    expect(wrapper.text()).toContain('小菱·内部调度模块（系统）')
+    expect(wrapper.text()).toContain('小菱·管理权限兼容模块（系统）')
   })
 
   it.each([
@@ -239,16 +269,16 @@ describe('AgentGovernance refresh feedback only', () => {
     await refresh.trigger('click')
     expect(refresh.attributes('disabled')).toBeDefined()
     expect(wrapper.get('[role="status"]').text()).toContain('正在刷新 Agent 列表')
-    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排测试')
+    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排')
     await refresh.trigger('click')
     expect(api.listGovernanceAgents).toHaveBeenCalledTimes(2)
     request.reject({ message: '读取超时，请稍后重试' })
     await settle()
     expect(wrapper.get('[role="alert"]').text()).toContain('读取超时，请稍后重试')
     expect(wrapper.get('[role="alert"]').text()).toContain('上次成功')
-    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排测试')
+    expect(wrapper.get('.agent-card h3').text()).toBe('审查编排')
     expect(refresh.attributes('disabled')).toBeUndefined()
-    api.listGovernanceAgents.mockResolvedValueOnce([{ ...makeAgent(), name: '更新后的隔离样例' }])
+    api.listGovernanceAgents.mockResolvedValueOnce([{ ...makeAgent(), code: 'custom_test_agent', name: '更新后的隔离样例' }])
     await refresh.trigger('click')
     await settle()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)

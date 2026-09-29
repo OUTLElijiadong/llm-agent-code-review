@@ -20,7 +20,7 @@
         </el-select>
         <el-button :loading="loading" @click="loadDashboard">刷新数据</el-button>
         <el-button v-if="canExportWeeklyReport" data-testid="export-dashboard" :disabled="!canExportCurrentData" @click="onWeeklyReport">导出统计报告</el-button>
-        <el-button v-if="canStartReview" type="primary" @click="onNewReview">+ 新建审查</el-button>
+        <el-button v-if="canStartReview" type="primary" @click="onNewReview">+ 发起审查</el-button>
       </div>
     </header>
 
@@ -29,7 +29,9 @@
       <span v-if="failedReads"> · {{ failedReads }} 项读取失败，请在对应分区重试</span>
     </p>
     <section data-section="summary" :data-state="summaryState" :aria-busy="summaryState === 'loading'">
-      <PrismLoading v-if="summaryState === 'loading'" label="正在读取摘要" sublabel="正在查询当前账号可见的项目与已完成审查" />
+      <div v-if="summaryState === 'loading'" class="summary-skeleton" role="status" aria-label="正在加载仪表盘摘要">
+        <span v-for="slot in 6" :key="slot" class="summary-skeleton-card"><i></i><b></b><em></em></span>
+      </div>
       <p v-else-if="summaryState === 'error'" class="load-feedback error" role="alert">
         摘要读取失败，无法确认统计数值。
         <button class="link" type="button" @click="loadSummary">重试摘要</button>
@@ -122,6 +124,7 @@
     <!-- ============ v2.1.1 安全态势卡 ============ -->
     <section v-if="canViewSecurity" class="security-row prism-rise" style="--rise-delay: 180ms">
       <SecurityPostureCard :days="securityDays" />
+      <p class="security-scope-note">{{ securityScopeNote }}</p>
     </section>
 
     <!-- ============ 8 维度极坐标 + Agent 活动流 ============ -->
@@ -198,8 +201,8 @@
       <article class="chart-card" data-section="risk" :data-state="chartStates.risk" :aria-busy="chartStates.risk === 'loading'">
         <header class="chart-head">
           <div>
-            <h3 class="font-display">严重度分布</h3>
-            <p class="chart-desc">{{ rangeLabel }}的问题分布<span v-if="chartStates.risk === 'success' && riskTotal > 0"> · {{ riskTotal }} 个</span></p>
+            <h3 class="font-display">全部问题严重度分布</h3>
+            <p class="chart-desc">{{ riskRangeLabel }}的问题分布 · 全部问题类型<span v-if="chartStates.risk === 'success' && riskTotal > 0"> · {{ riskTotal }} 个</span></p>
           </div>
         </header>
         <p v-if="chartStates.risk === 'loading'" role="status">正在读取严重度数据</p>
@@ -261,7 +264,6 @@ import dayjs from 'dayjs'
 import type { EChartsCoreOption as EChartsOption } from 'echarts/core'
 import BaseChart from '@/components/chart/BaseChart.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import PrismLoading from '@/components/common/PrismLoading.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import { useCountUp } from '@/composables/useCountUp'
 import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
@@ -340,7 +342,7 @@ const runningTitle = computed(() => {
 })
 const runningSubtitle = computed(() => {
   if (activeAgentCount.value === 0 && waitingAgentCount.value > 0 && !(runningData.value?.reviews.length)) {
-    return '等待你的回复或审批 · 可在 Agent 工作台继续'
+    return '等待你的回复或审批 · 可在小菱助手继续'
   }
   if (waitingAgentCount.value > 0) return '后台任务每 5 秒更新 · 含待你继续的会话'
   return '进行中每 5 秒更新'
@@ -413,6 +415,13 @@ const frequencyData = ref<{ name: string; value: number }[]>([])
 /* 时间窗口:0 表示累计;图表副标题统一口径,防"统计卡累计 vs 图表窗口"认知错位 */
 const rangeLabel = computed(() => (timeRange.value === 0 ? '累计' : `近 ${timeRange.value} 天`))
 const securityDays = computed(() => (timeRange.value === 0 ? 365 : timeRange.value))
+const riskRangeLabel = computed(() => (timeRange.value === 0 ? '全历史' : rangeLabel.value))
+const securityScopeNote = computed(() => {
+  const securityWindow = timeRange.value === 0 ? '近 365 天' : rangeLabel.value
+  const issueWindow = timeRange.value === 0 ? '全历史' : rangeLabel.value
+  const issueTimeLabel = issueWindow === '全历史' ? issueWindow : `${issueWindow}内`
+  return `安全态势统计${securityWindow}内全部状态的安全漏洞，不含沙箱/渗透任务；问题总数包含已排除发现，但严重度分布不把它们计入等级，分布统计${issueTimeLabel}全来源、全类型问题；问题追踪默认仅展示未修复/待复查，因此时间范围、数据来源和状态口径不同。`
+})
 const riskTotal = computed(() => riskData.value.reduce((total, item) => total + item.value, 0))
 const cumulativeIssueCount = computed(() => summary.value?.total_issues ?? 0)
 
@@ -450,12 +459,12 @@ const statCards = computed(() => {
     {
       label: '累计发现问题', value: Math.round(totalIssuesAnim.value), unit: '个', icon: 'Warning',
       iconStyle: { background: 'rgba(226,92,115,.10)', color: 'var(--dim-bug)' },
-      delta: hasIssue ? `共 ${Math.round(severeIssuesAnim.value)} 个严重` : '— 暂无',
+      delta: hasIssue ? `共 ${Math.round(severeIssuesAnim.value)} 个危急` : '— 暂无',
       deltaDir: 'flat',
       feature: false,
     },
     {
-      label: '严重问题', value: Math.round(severeIssuesAnim.value), unit: '个', icon: 'CircleClose',
+      label: '危急问题', value: Math.round(severeIssuesAnim.value), unit: '个', icon: 'CircleClose',
       iconStyle: { background: 'rgba(220,73,97,.10)', color: 'var(--sev-severe)' },
       delta: hasSevere ? '需优先处理' : '— 暂无',
       deltaDir: hasSevere ? 'down' : 'flat',
@@ -810,7 +819,7 @@ function onWeeklyReport() {
   <div class="cards">
     <div class="card"><div class="n">${esc(s.review_count)}</div><div class="l">累计成功任务（含测试）</div></div>
     <div class="card"><div class="n">${esc(s.total_issues)}</div><div class="l">累计发现问题</div></div>
-    <div class="card"><div class="n">${esc(s.severe_issues)}</div><div class="l">严重问题</div></div>
+    <div class="card"><div class="n">${esc(s.severe_issues)}</div><div class="l">危急问题</div></div>
     <div class="card"><div class="n">${hasAverageScore.value ? esc(s.avg_score) : '暂无代码评分样本'}</div><div class="l">平均代码评分（${esc(s.code_review_count ?? 0)} 份有效代码审查，不含测试）</div></div>
     <div class="card"><div class="n">${esc(s.project_count)}</div><div class="l">可见项目</div></div>
     <div class="card"><div class="n">${esc(s.file_count)}</div><div class="l">代码库文件</div></div>
@@ -954,6 +963,17 @@ button.link {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
+
+.summary-skeleton { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; padding: 8px 0 16px; }
+.summary-skeleton-card { display: grid; gap: 12px; min-height: 104px; padding: 16px; border: 1px solid var(--color-border-light, #ebeef5); border-radius: 12px; background: var(--surface-1, #fff); }
+.summary-skeleton-card i, .summary-skeleton-card b, .summary-skeleton-card em { display: block; border-radius: 6px; background: linear-gradient(90deg, #f0f1f5 25%, #f7f8fb 45%, #f0f1f5 65%); background-size: 240% 100%; animation: summary-shimmer 1.4s ease infinite; }
+.summary-skeleton-card i { width: 55%; height: 12px; }
+.summary-skeleton-card b { width: 38%; height: 26px; }
+.summary-skeleton-card em { width: 70%; height: 10px; }
+.security-scope-note { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+@keyframes summary-shimmer { to { background-position-x: -240%; } }
+@media (max-width: 1100px) { .summary-skeleton { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .summary-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } }
 
 @media (min-width: 1680px) {
   .stat-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }

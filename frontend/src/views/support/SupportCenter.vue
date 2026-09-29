@@ -15,7 +15,7 @@ function sectionFromQuery(value: unknown): SupportSection {
 }
 
 const activeSection = ref<SupportSection>(sectionFromQuery(route.query.section))
-const activeTitle = computed(() => activeSection.value === 'maintenance' ? '维修工单' : '意见反馈')
+const activeTitle = computed(() => activeSection.value === 'maintenance' ? '支持工单' : '意见反馈')
 
 watch(() => route.query.section, (value) => {
   const next = sectionFromQuery(value)
@@ -35,13 +35,13 @@ function changeSection(value: string | number): void {
       <div>
         <div class="eyebrow">PRISM / 支持中心</div>
         <h1>支持中心</h1>
-        <p>统一提交平台问题、维修申请和产品反馈，并在同一处查看处理进度。</p>
+        <p>统一提交平台问题和产品反馈，并在同一处查看处理进度。</p>
       </div>
       <el-tag effect="plain" type="info">当前：{{ activeTitle }}</el-tag>
     </div>
 
     <el-tabs :model-value="activeSection" class="support-tabs" @update:model-value="changeSection">
-      <el-tab-pane name="maintenance" label="申请维修">
+      <el-tab-pane name="maintenance" label="支持工单">
         <MaintenanceCenter />
       </el-tab-pane>
       <el-tab-pane name="feedback" label="意见反馈">

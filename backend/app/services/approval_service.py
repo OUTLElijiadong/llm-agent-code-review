@@ -221,9 +221,10 @@ def create_or_auto_decide(
 def list_items(
     db: Session,
     status: str = "",
-    limit: int = 100,
+    limit: int = 1000,
     *,
     actor: Optional[User] = None,
+    exclude_actions: tuple[str, ...] = (),
 ) -> list[ApprovalItem]:
     """查询审批事项列表。
 
@@ -232,6 +233,7 @@ def list_items(
         status: 可选状态过滤。
         limit: 最大返回条数。
         actor: 当前管理员；缺失或非唯一超级管理员时隐藏敏感审批。
+        exclude_actions: 由专用审批工作流处理、应从通用审批列表中排除的动作。
 
     Returns:
         list[ApprovalItem]: 审批事项列表。
@@ -239,6 +241,8 @@ def list_items(
     q = db.query(ApprovalItem)
     if status:
         q = q.filter(ApprovalItem.status == status)
+    if exclude_actions:
+        q = q.filter(~ApprovalItem.action.in_(exclude_actions))
     limit = max(0, min(limit, 1000))
     if limit == 0:
         return []
@@ -251,6 +255,22 @@ def list_items(
             if len(rows) >= limit:
                 break
     return rows
+
+
+def count_items(
+    db: Session,
+    status: str = "",
+    *,
+    actor: Optional[User] = None,
+    exclude_actions: tuple[str, ...] = (),
+) -> int:
+    """Count items visible to the same actor and filters as ``list_items``."""
+    q = db.query(ApprovalItem)
+    if status:
+        q = q.filter(ApprovalItem.status == status)
+    if exclude_actions:
+        q = q.filter(~ApprovalItem.action.in_(exclude_actions))
+    return sum(1 for item in q.yield_per(100) if _can_access(db, actor, item))
 
 
 def decide_item(

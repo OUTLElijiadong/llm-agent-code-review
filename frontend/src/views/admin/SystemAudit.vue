@@ -2,9 +2,9 @@
   <div class="system-audit-page">
     <div class="page-header">
       <div>
-        <h2>系统操作审计</h2>
+        <h2>操作审计</h2>
         <p class="page-sub">
-          关键操作流水：登录、用户管理、规则变更、Agent 调用、项目变更
+          展示当前账号有权查看的登录、用户管理、规则变更、Agent 调用和项目变更记录；模型请求日志在管理员「运行与审计」中查看。
         </p>
       </div>
     </div>

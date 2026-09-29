@@ -92,7 +92,7 @@
         </template>
       </el-tab-pane>
 
-      <el-tab-pane label="MetaGPT 编排" name="metagpt">
+      <el-tab-pane label="Agent 协作方案" name="metagpt">
         <MetaGPTOrchestrationPanel />
       </el-tab-pane>
     </el-tabs>

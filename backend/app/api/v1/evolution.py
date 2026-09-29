@@ -72,7 +72,7 @@ def run_evolution(payload: RunIn, request: Request, db: Session = Depends(get_db
 
 
 @router.get("/proposals", response_model=Resp[list[ProposalOut]])
-def list_proposals(status: str = "", limit: int = 100, db: Session = Depends(get_db),
+def list_proposals(status: str = "", limit: int = Query(default=1000, ge=1, le=1000), db: Session = Depends(get_db),
                    _: User = Depends(require_admin)):
     """进化提案列表(可按状态过滤)"""
     rows = evolution_service.list_proposals(db, status, limit)

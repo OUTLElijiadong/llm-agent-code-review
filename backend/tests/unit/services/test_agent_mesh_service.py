@@ -728,6 +728,60 @@ def test_archived_history_is_owner_scoped_searchable_and_restorable(db, user) ->
     assert other.status == "archived"
 
 
+def test_duplicate_session_keys_keep_directory_and_messages_owner_scoped(db, user) -> None:
+    """历史客户端可能复用 ID；同 ID 不能让会话目录或消息跨 owner 合并。"""
+    other = SimpleNamespace(id=8, role="user", username="other")
+    shared_key = "same-session-key-across-accounts"
+    shared_title = "相同历史标题"
+
+    for owner in (user, other):
+        agent_mesh_service.heartbeat(
+            db,
+            owner,
+            surface="user",
+            session_key=shared_key,
+            title=shared_title,
+        )
+
+    first_message = _message(
+        idempotency_key="same-session-owner-7",
+        sent_from=f"session:user:{shared_key}",
+        send_to=f"session:user:{shared_key}",
+        subject="owner-7-private",
+    )
+    other_message = _message(
+        idempotency_key="same-session-owner-8",
+        sent_from=f"session:user:{shared_key}",
+        send_to=f"session:user:{shared_key}",
+        subject="owner-8-private",
+    )
+    agent_mesh_service.send_message(
+        db, user, surface="user", session_key=shared_key, message=first_message,
+    )
+    agent_mesh_service.send_message(
+        db, other, surface="user", session_key=shared_key, message=other_message,
+    )
+
+    first_directory = agent_mesh_service.list_conversations(
+        db, user, surface="user", status="active",
+    )
+    other_directory = agent_mesh_service.list_conversations(
+        db, other, surface="user", status="active",
+    )
+    assert first_directory["total"] == other_directory["total"] == 1
+    assert first_directory["items"][0]["session_id"] == other_directory["items"][0]["session_id"] == shared_key
+    assert first_directory["items"][0]["title"] == other_directory["items"][0]["title"] == shared_title
+
+    first_messages = agent_mesh_service.list_session_messages(
+        db, user, surface="user", session_key=shared_key,
+    )
+    other_messages = agent_mesh_service.list_session_messages(
+        db, other, surface="user", session_key=shared_key,
+    )
+    assert [item["subject"] for item in first_messages] == ["owner-7-private"]
+    assert [item["subject"] for item in other_messages] == ["owner-8-private"]
+
+
 def test_peek_inbox_is_read_only(db, user) -> None:
     for key in ("session-a1", "session-b1"):
         agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)

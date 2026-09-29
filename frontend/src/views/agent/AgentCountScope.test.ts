@@ -41,7 +41,7 @@ it('列表5、全局快照19、内置编排17分别明确范围，列表/分类/
   const metrics = wrapper.findComponent(SituationPanel).findAll('.metric-num')
   expect(metrics[0].text()).toBe('5')
   expect(wrapper.findComponent(SituationPanel).text()).toContain('可见目录')
-  expect(wrapper.text()).toContain('内置可适配 Agent')
+  expect(wrapper.text()).toContain('可加入团队的内置 Agent')
   expect(wrapper.text()).toContain('17')
 })
 

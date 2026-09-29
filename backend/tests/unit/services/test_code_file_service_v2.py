@@ -113,6 +113,18 @@ class TestBinaryFileUpload:
         assert code_file.original_blob is None
 
 
+def test_folder_upload_keeps_four_dot_directories_as_normal_path_components():
+    """Four dots are ordinary POSIX path text, not parent-directory traversal."""
+    paths = code_file_service.normalize_folder_upload_paths(["root/..../..../x.py"])
+
+    assert paths == ["..../..../x.py"]
+
+
+def test_folder_upload_rejects_parent_directory_traversal():
+    with pytest.raises(ValidationError, match="文件相对路径不合法"):
+        code_file_service.normalize_folder_upload_paths(["root/../escape.py"])
+
+
 # ============ get_file 二进制处理 ============
 
 class TestGetFileBinary:

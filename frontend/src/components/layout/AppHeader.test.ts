@@ -97,7 +97,11 @@ describe('AppHeader navigation visibility', () => {
     const wrapper = mountHeader()
 
     expect(wrapper.find('.agent-trigger').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Agent 助手')
+    expect(wrapper.text()).not.toContain('小菱助手')
+  })
+
+  it('使用小菱作为顶栏 Agent 助手的主入口名称', () => {
+    expect(mountHeader().get('.agent-trigger').text()).toContain('小菱助手')
   })
 
   it('顶栏小菱按钮可以打开助手面板', async () => {

@@ -22,6 +22,7 @@ from app.models.agent_governance import (
     PolicyDecisionLog,
     ToolCallLog,
 )
+from app.models.user import User
 
 _DEFAULT_GOVERNANCE_AGENTS = (
     (
@@ -420,7 +421,7 @@ def _ensure_protected_capability_contract(
         )
 
 
-def governance_overview(db: Session) -> dict:
+def governance_overview(db: Session, actor: User) -> dict:
     """聚合 Agent 治理总览指标。
 
     Args:
@@ -440,10 +441,17 @@ def governance_overview(db: Session) -> dict:
     recent_alerts = (
         db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(5).all()
     )
+    from app.services.approval_service import count_items
+
     return {
         "agents_total": agents_total,
         "agents_enabled": agents_enabled,
-        "approvals_pending": db.query(ApprovalItem).filter(ApprovalItem.status == "pending").count(),
+        "approvals_pending": count_items(
+            db,
+            status="pending",
+            actor=actor,
+            exclude_actions=("agent_package.publish",),
+        ),
         "approvals_auto_today": db.query(ApprovalItem).filter(ApprovalItem.status == "auto_approved").count(),
         "policy_decisions_today": (
             db.query(PolicyDecisionLog).filter(func.date(PolicyDecisionLog.create_time) == today).count()

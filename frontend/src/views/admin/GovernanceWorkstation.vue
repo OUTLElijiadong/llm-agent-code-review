@@ -69,6 +69,12 @@ const userStore = useUserStore()
 const loading = ref(false)
 const overview = ref<GovernanceOverview | null>(null)
 const agents = ref<GovernanceAgent[]>([])
+const showInternalAgents = ref(false)
+const INTERNAL_AGENT_CODES = new Set(['manager', 'orchestrator'])
+const visibleAgents = computed(() => showInternalAgents.value
+  ? agents.value
+  : agents.value.filter((agent) => !INTERNAL_AGENT_CODES.has(agent.code)))
+const hiddenInternalAgentCount = computed(() => agents.value.filter((agent) => INTERNAL_AGENT_CODES.has(agent.code)).length)
 const agentsLoaded = ref(false)
 const agentLoadError = ref('')
 const expandedAgentCodes = ref(new Set<string>())
@@ -225,11 +231,11 @@ function statusText(value: string | number | null | undefined): string {
 }
 
 function riskText(value: string | null | undefined): string {
-  return ({ low: '低风险', medium: '中风险', high: '高风险', critical: '严重风险' } as Record<string, string>)[value || ''] || (value || '-')
+  return ({ low: '低风险', medium: '中风险', high: '高风险', critical: '危急风险' } as Record<string, string>)[value || ''] || (value || '-')
 }
 
 function alertSeverityText(value: string | null | undefined): string {
-  return ({ info: '提示', warning: '警告', high: '高等级', critical: '严重' } as Record<string, string>)[value || ''] || (value || '-')
+  return ({ info: '提示', warning: '警告', high: '高等级', critical: '危急' } as Record<string, string>)[value || ''] || (value || '-')
 }
 
 function agentBoundaryText(agent: GovernanceAgent): string {
@@ -246,6 +252,11 @@ function agentBoundaryText(agent: GovernanceAgent): string {
     ? ((boundary as Record<string, unknown>).approval_tools as unknown[]).length
     : 0
   return `${scope} · 允许 ${allowed} 项 · 审批 ${approval} 项 · 其余拒绝`
+}
+
+function agentDisplayName(agent: GovernanceAgent): string {
+  const label = agentCodeText(agent.code)
+  return label === agent.code ? agent.name : label
 }
 
 const observabilityCards = computed(() => [
@@ -268,13 +279,13 @@ async function loadData(): Promise<void> {
     if (props.mode === 'overview') {
       overview.value = await getGovernanceOverview()
       agents.value = await listGovernanceAgents()
-      approvals.value = await listApprovals()
+      approvals.value = await listApprovals('pending', 'agent_package.publish')
       alerts.value = await listAlerts()
     } else if (props.mode === 'agents') {
       agents.value = await listGovernanceAgents()
       agentsLoaded.value = true
     } else if (props.mode === 'approvals') {
-      approvals.value = await listApprovals()
+      approvals.value = await listApprovals('pending', 'agent_package.publish')
     } else if (props.mode === 'policies') {
       policies.value = await listPolicies()
       decisions.value = await listPolicyDecisions()
@@ -634,13 +645,13 @@ async function onCreateArtifactVersion(): Promise<void> {
  */
 async function onRollbackArtifact(row: AgentArtifactVersion): Promise<void> {
   const ok = await confirmDanger({
-    target: `回滚版本「${row.version}」`,
+    target: `回退版本「${row.version}」`,
     consequence: '此操作将恢复到该版本的快照,覆盖当前内容。',
-    confirmText: '确认回滚',
+    confirmText: '确认回退',
   })
   if (!ok) return
   await rollbackArtifactVersion(row.id)
-  ElMessage.success('已回滚版本')
+  ElMessage.success('版本已回退')
   await loadData()
 }
 
@@ -670,8 +681,8 @@ onMounted(loadData)
         <div class="metric"><span>Agent 总数</span><strong>{{ overview?.agents_total ?? 0 }}</strong></div>
         <div class="metric"><span>启用 Agent</span><strong>{{ overview?.agents_enabled ?? 0 }}</strong></div>
         <!-- 统计卡即入口:待审批/开放告警点击直达,数值>0 标警示色 -->
-        <button type="button" class="metric is-link" title="去审批中心" @click="goMetric('/admin/governance?section=approvals')">
-          <span>待审批</span><strong :class="{ 'is-warn': (overview?.approvals_pending ?? 0) > 0 }">{{ overview?.approvals_pending ?? 0 }}</strong>
+        <button type="button" class="metric is-link" title="去执行审批" @click="goMetric('/admin/governance?section=approvals&approvalType=execution')">
+          <span>执行审批待办</span><strong :class="{ 'is-warn': (overview?.approvals_pending ?? 0) > 0 }">{{ overview?.approvals_pending ?? 0 }}</strong>
         </button>
         <div class="metric"><span>工具调用</span><strong>{{ overview?.tool_calls_today ?? 0 }}</strong></div>
         <button type="button" class="metric is-link" title="去可观测中心" @click="goMetric('/admin/operations?section=observability')">
@@ -723,12 +734,21 @@ onMounted(loadData)
         <p>{{ agentsLoaded ? '当前保留上次成功加载的列表，请重新加载。' : '尚未获取 Agent 列表，请重新加载。' }}</p>
         <el-button :loading="loading" :disabled="loading" @click="loadData">重新加载</el-button>
       </el-alert>
-      <div v-if="agents.length" class="agent-card-grid">
-        <article v-for="(agent, index) in agents" :key="agent.code" class="agent-card" :aria-labelledby="`agent-name-${index}`">
+      <div v-if="hiddenInternalAgentCount" class="agent-system-disclosure">
+        <span>小菱是唯一主控；{{ hiddenInternalAgentCount }} 个内部调度或兼容条目默认收起，监督子 Agent 仍单独显示。</span>
+        <el-button
+          link
+          :aria-expanded="showInternalAgents"
+          aria-controls="agent-internal-cards"
+          @click="showInternalAgents = !showInternalAgents"
+        >{{ showInternalAgents ? '收起系统内部 Agent' : '查看系统内部 Agent' }}</el-button>
+      </div>
+      <div v-if="visibleAgents.length" id="agent-internal-cards" class="agent-card-grid">
+        <article v-for="(agent, index) in visibleAgents" :key="agent.code" class="agent-card" :aria-labelledby="`agent-name-${index}`">
           <header class="agent-card-head">
             <div>
               <span class="agent-category" :title="typeof agent.category === 'string' ? agent.category : undefined">{{ agentCategoryText(agent.category) }}</span>
-              <h3 :id="`agent-name-${index}`">{{ agent.name }}</h3>
+              <h3 :id="`agent-name-${index}`">{{ agentDisplayName(agent) }}</h3>
             </div>
             <span class="agent-enabled" :class="{ 'is-disabled': agent.is_enabled === 0 }">{{ agent.is_enabled === 1 ? '已启用' : agent.is_enabled === 0 ? '已停用' : '状态未提供' }}</span>
           </header>
@@ -816,7 +836,7 @@ onMounted(loadData)
             <el-option label="低(low)" value="low" />
             <el-option label="中(medium)" value="medium" />
             <el-option label="高(high)" value="high" />
-            <el-option label="严重(critical)" value="critical" />
+            <el-option label="危急（critical）" value="critical" />
           </el-select>
           <el-input-number v-model="policyEditor.priority" :min="0" :max="10000" controls-position="right" />
           <el-select v-model="policyEditor.enabled">
@@ -895,7 +915,7 @@ onMounted(loadData)
             <el-option label="低(low)" value="low" />
             <el-option label="中(medium)" value="medium" />
             <el-option label="高(high)" value="high" />
-            <el-option label="严重(critical)" value="critical" />
+            <el-option label="危急（critical）" value="critical" />
           </el-select>
           <el-select v-model="toolPermissionForm.enabled">
             <el-option label="启用" :value="1" />
@@ -996,7 +1016,7 @@ onMounted(loadData)
                 <el-option label="低(low)" value="low" />
                 <el-option label="中(medium)" value="medium" />
                 <el-option label="高(high)" value="high" />
-                <el-option label="严重(critical)" value="critical" />
+                <el-option label="危急（critical）" value="critical" />
               </el-select>
               <el-input-number v-model="knowledgeDocForm.confidence" :min="0" :max="1" :step="0.1" />
               <el-button type="primary" @click="onCreateKnowledgeDoc">提交知识</el-button>
@@ -1104,7 +1124,8 @@ onMounted(loadData)
         </el-table-column>
         <el-table-column label="计划" width="190">
           <template #default="{ row }">
-            <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" placeholder="如 0 3 * * * (每天 3 点)" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />
+            <el-input v-if="jobEdit[row.id]" v-model="jobEdit[row.id].schedule" size="small" placeholder="未设置；例如 0 3 * * *（每天 3 点）" :class="{ 'is-cron-invalid': scheduleInvalid(row.id) }" />
+            <span v-else>{{ row.schedule || '未设置' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
@@ -1161,7 +1182,7 @@ onMounted(loadData)
         <h3>开放告警</h3>
         <el-table :data="alerts" height="360">
               <template #empty>
-                <EmptyState compact description="无开放告警,一切正常" />
+                <EmptyState compact description="当前没有未关闭告警。历史失败记录请查看工具执行统计。" />
               </template>
           <el-table-column prop="title" label="告警" min-width="180" />
           <el-table-column label="级别" width="110"><template #default="{ row }">{{ alertSeverityText(row.severity) }}</template></el-table-column>
@@ -1242,7 +1263,7 @@ onMounted(loadData)
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="90">
             <template #default="{ row }">
-              <el-button link type="primary" @click="onRollbackArtifact(row)">回滚</el-button>
+              <el-button link type="primary" @click="onRollbackArtifact(row)">回退</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -1361,6 +1382,19 @@ onMounted(loadData)
 }
 
 .agent-directory { overflow-x: visible; }
+.agent-system-disclosure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  color: var(--color-text-secondary, #646b7a);
+  font-size: 13px;
+}
 .agent-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));

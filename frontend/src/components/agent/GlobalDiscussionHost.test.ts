@@ -121,6 +121,23 @@ it('会话列表准确区分有有效部分报告的圆桌', async () => {
   wrapper.unmount()
 })
 
+it('入口角标统计可继续的圆桌，已结束会话仍可从入口打开', async () => {
+  discussionApi.list.mockResolvedValue({
+    items: [current, { ...current, session_id: 'disc-paused', status: 'paused' }, { ...current, session_id: 'disc-ended', status: 'concluded' }],
+    next_offset: null,
+  })
+  const { wrapper } = await mountHost()
+  expect(wrapper.get('.roundtable-count').text()).toBe('2')
+  expect(wrapper.get('[aria-label="打开圆桌讨论"]').attributes('title')).toContain('已结束 1 个')
+
+  discussionApi.list.mockResolvedValue({ items: [{ ...current, session_id: 'disc-ended', status: 'concluded' }], next_offset: null })
+  await wrapper.setProps({ userId: 6 })
+  await flushPromises()
+  expect(wrapper.find('.roundtable-count').exists()).toBe(false)
+  expect(wrapper.find('[aria-label="打开圆桌讨论"]').exists()).toBe(true)
+  wrapper.unmount()
+})
+
 it('服务端详情的历史页与更早游标交给圆桌面板', async () => {
   discussionApi.detail.mockResolvedValue({
     ...current, turns: [{ seq: 51, turn_id: 51, role: 'agent', content: '历史发言' }],

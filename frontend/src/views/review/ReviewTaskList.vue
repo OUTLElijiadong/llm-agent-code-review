@@ -1,9 +1,9 @@
 <template>
   <div class="review-task-list-page">
     <div class="page-header">
-      <h2>审查任务列表</h2>
+      <h2>审查任务</h2>
       <el-button v-if="canStartReview" type="primary" @click="startReview">
-        <el-icon><Plus /></el-icon>启动审查
+        <el-icon><Plus /></el-icon>发起审查
       </el-button>
     </div>
 

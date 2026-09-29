@@ -13,12 +13,12 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   message: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
-const permissions = vi.hoisted(() => ({ canExport: true, exportFormat: 'html' }))
+const permissions = vi.hoisted(() => ({ canExport: true, exportFormat: 'html', canViewSecurity: false }))
 
 vi.mock('@/api/dashboard', () => mocks)
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 vi.mock('@/stores/user', () => ({
-  useUserStore: () => ({ hasPermission: (code: string) => code !== 'security:view' && (!code.startsWith('report:export:') || (permissions.canExport && code === `report:export:${permissions.exportFormat}`)) }),
+  useUserStore: () => ({ hasPermission: (code: string) => code === 'security:view' ? permissions.canViewSecurity : (!code.startsWith('report:export:') || (permissions.canExport && code === `report:export:${permissions.exportFormat}`)) }),
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: mocks.message }))
 vi.mock('@/composables/useCountUp', () => ({ useCountUp: (source: { value: number }) => computed(() => source.value) }))
@@ -88,6 +88,7 @@ async function changeRange(wrapper: VueWrapper, days: number) {
 beforeEach(() => {
   permissions.canExport = true
   permissions.exportFormat = 'html'
+  permissions.canViewSecurity = false
   Object.values(mocks).forEach((mock) => { if (vi.isMockFunction(mock)) mock.mockReset() })
   mocks.getSummary.mockResolvedValue(summary())
   mocks.getRiskDistribution.mockResolvedValue([])
@@ -340,6 +341,7 @@ describe('成员仪表盘真实读取状态', () => {
   })
 
   it('窗口全零但累计有数据时提示口径并可一键切换累计', async () => {
+    permissions.canViewSecurity = true
     mocks.getRiskDistribution.mockResolvedValue(['严重', '高', '中', '低'].map((severity) => ({ severity, count: 0 })))
     const wrapper = mountPage()
     await flushPromises()
@@ -347,6 +349,8 @@ describe('成员仪表盘真实读取状态', () => {
     expect(risk.text()).toContain('近 30 天暂无严重度数据')
     expect(risk.get('[data-testid="risk-cumulative-hint"]').text()).toContain('9')
     expect(mocks.getRiskDistribution).toHaveBeenCalledWith(30)
+    expect(wrapper.get('.security-scope-note').text()).toContain('安全态势统计近 30 天内全部状态的安全漏洞')
+    expect(wrapper.get('.security-scope-note').text()).toContain('不含沙箱/渗透任务')
 
     mocks.getRiskDistribution.mockResolvedValue([
       { severity: '严重', count: 5 }, { severity: '高', count: 3 },
@@ -356,7 +360,11 @@ describe('成员仪表盘真实读取状态', () => {
     await flushPromises()
     expect(mocks.getRiskDistribution).toHaveBeenLastCalledWith(0)
     expect(section(wrapper, 'risk').find('.chart-output').exists()).toBe(true)
-    expect(section(wrapper, 'risk').text()).toContain('累计的问题分布')
+    expect(section(wrapper, 'risk').text()).toContain('全历史的问题分布')
+    expect(wrapper.get('.security-scope-note').text()).toContain('安全态势统计近 365 天内全部状态的安全漏洞')
+    expect(wrapper.get('.security-scope-note').text()).toContain('分布统计全历史全来源、全类型问题')
+    expect(wrapper.get('.security-scope-note').text()).toContain('问题总数包含已排除发现，但严重度分布不把它们计入等级')
+    expect(wrapper.get('.security-scope-note').text()).toContain('问题追踪默认仅展示未修复/待复查')
   })
 
   it.each([
@@ -505,7 +513,7 @@ describe('后台进度读取与恢复', () => {
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.get('[data-testid="running-title"]').text()).toBe('待你继续')
-    expect(wrapper.get('[data-testid="running-subtitle"]').text()).toContain('可在 Agent 工作台继续')
+    expect(wrapper.get('[data-testid="running-subtitle"]').text()).toContain('可在小菱助手继续')
     expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('等待输入')
   })
 
