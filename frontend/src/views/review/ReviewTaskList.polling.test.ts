@@ -28,7 +28,7 @@ async function render() {
 }
 
 describe('任务列表轮询恢复', () => {
-  it('首次读取期间不显示无数据提示或0条分页，成功后显示真实结果', async () => {
+  it('首次读取期间不显示空态，成功后显示首屏记录和接口总量', async () => {
     const pending = deferred<ReturnType<typeof pageOf>>()
     api.tasks.mockReturnValue(pending.promise)
     wrapper = mount(ReviewTaskList, scanMountOptions)
@@ -39,9 +39,15 @@ describe('任务列表轮询恢复', () => {
     expect(wrapper.text()).not.toContain('共 0 条')
     expect(wrapper.find('[data-testid="task-pagination"]').exists()).toBe(false)
 
-    pending.resolve(pageOf([running]))
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      ...running,
+      id: index + 1,
+      task_name: `审查任务${index + 1}`,
+    }))
+    pending.resolve(pageOf(firstPage, 50, 1, 20))
     await flushPromises()
-    expect(wrapper.findAll('.task-card')).toHaveLength(1)
+    expect((wrapper.vm as any).total).toBe(50)
+    expect(wrapper.findAll('.task-card')).toHaveLength(20)
     expect(wrapper.find('[data-testid="task-pagination"]').exists()).toBe(true)
   })
 
