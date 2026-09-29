@@ -28,6 +28,30 @@ async function render() {
 }
 
 describe('任务列表轮询恢复', () => {
+  it('首次读取期间不显示无数据提示或0条分页，成功后显示真实结果', async () => {
+    const pending = deferred<ReturnType<typeof pageOf>>()
+    api.tasks.mockReturnValue(pending.promise)
+    wrapper = mount(ReviewTaskList, scanMountOptions)
+
+    expect((wrapper.vm as any).loading).toBe(true)
+    expect((wrapper.vm as any).hasLoaded).toBe(false)
+    expect(wrapper.text()).not.toContain('还没有审查任务')
+    expect(wrapper.text()).not.toContain('共 0 条')
+    expect(wrapper.find('[data-testid="task-pagination"]').exists()).toBe(false)
+
+    pending.resolve(pageOf([running]))
+    await flushPromises()
+    expect(wrapper.findAll('.task-card')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="task-pagination"]').exists()).toBe(true)
+  })
+
+  it('确认首次读取成功且列表为空后才展示空态与零条计数', async () => {
+    api.tasks.mockResolvedValue(pageOf([]))
+    await render()
+    expect(wrapper.text()).toContain('还没有审查任务')
+    expect(wrapper.find('[data-testid="task-pagination"]').exists()).toBe(true)
+  })
+
   it.each(['2026-09-20T12:50:47', '2026-09-20T12:50:47Z', '2026-09-20T20:50:47+08:00'])('服务端时间 %s 转为本地时间，刷新时刻和日期筛选保持原义', async (createdAt) => {
     vi.stubEnv('TZ', 'Asia/Shanghai')
     try {

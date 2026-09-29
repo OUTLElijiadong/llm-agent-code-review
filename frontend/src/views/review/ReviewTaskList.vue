@@ -67,7 +67,7 @@
 
       <div class="task-cards" v-loading="loading" role="list" data-testid="task-cards">
         <EmptyState
-          v-if="!tasks.length"
+          v-if="hasLoaded && !refreshing && !tasks.length"
           :description="loadError ? '任务列表读取失败，请重试' : (hasFilter ? '当前筛选条件下没有审查任务,试试放宽条件' : '还没有审查任务')"
           :action-text="loadError || hasFilter || !canStartReview ? '' : '启动第一个审查'"
           :action-to="loadError || hasFilter || !canStartReview ? '' : '/reviews/start'"
@@ -151,7 +151,7 @@
         <el-button size="small" link @click="clearSelection">取消选择</el-button>
       </div>
 
-      <div class="pagination-wrapper">
+      <div v-if="hasLoaded && (tasks.length > 0 || (!refreshing && !loadError))" class="pagination-wrapper" data-testid="task-pagination">
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="pageSize"
@@ -186,6 +186,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const refreshing = ref(false)
+const hasLoaded = ref(false)
 const loadError = ref('')
 const projectsError = ref('')
 const lastUpdatedAt = ref('')
@@ -311,6 +312,7 @@ async function loadData(silent = false) {
     if (!disposed && request === loadRequest) {
       loading.value = false
       refreshing.value = false
+      hasLoaded.value = true
       maybeSchedulePoll()
     }
   }
