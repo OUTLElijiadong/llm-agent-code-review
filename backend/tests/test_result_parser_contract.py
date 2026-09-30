@@ -59,3 +59,11 @@ def test_missing_confidence_remains_unknown() -> None:
     result = parse(json.dumps({"summary": "one", "score": 60, "issues": [issue]}))
 
     assert result.issues[0].confidence is None
+
+
+@pytest.mark.parametrize("line_field", ["line_number", "end_line"])
+def test_boolean_source_line_is_rejected(line_field: str) -> None:
+    payload = _valid_issue(**{line_field: True})
+
+    with pytest.raises(ResultParseError, match="全部.*无效"):
+        parse(json.dumps({"summary": "bad line", "score": 60, "issues": [payload]}))

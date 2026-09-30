@@ -726,6 +726,110 @@ def test_summarize_retries_length_without_losing_full_result() -> None:
     assert [call["max_tokens"] for call in agent.calls] == [16_384, 32_768]
 
 
+def test_summarize_marks_truncated_consensus_as_incomplete() -> None:
+    """主持摘要两次遇到 finish_reason=length 时不得将发言摘录伪装成共识。"""
+    class AlwaysTruncatedAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            raise DeepSeekOutputTruncatedError(
+                "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+            )
+
+    orchestrator = _make_orchestrator()
+    summary, meta = orchestrator._summarize(
+        [_turn(1, agent_name="安全代理", content="第 7 行有待确认问题")],
+        "x = 1", "python", "summary.py", AlwaysTruncatedAgent(),
+    )
+
+    assert meta is None
+    assert "未完成" in summary
+    assert "不能作为完整共识" in summary
+    assert "安全代理" in summary  # 允许保留摘录，但必须明确是未完成部分结果。
+    assert orchestrator._summary_coverage["status"] == "failed"
+    assert orchestrator._summary_coverage["failure_kind"] == "output_truncated"
+    assert orchestrator._summary_coverage["host_summary_output_truncations"] == 2
+
+
+def test_summarize_preserves_window_coverage_when_projected_consensus_truncates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """源码已投影分窗但共识输出截断时，保留逐窗覆盖账并标记不完整。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+
+    class ProjectThenTruncateAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                entries = []
+                for source_id, body in re.findall(
+                    r"【来源 ([^】]+)】\n(.*?)(?=\n\n【来源 |\Z)",
+                    kwargs["user_prompt"], re.S,
+                ):
+                    quoted = body[:24]
+                    entries.append({
+                        "source_id": source_id,
+                        "summary": "该窗口已投影",
+                        "quotes": [quoted],
+                    })
+                return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
+            raise DeepSeekOutputTruncatedError(
+                "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+            )
+
+    code = "\n".join(f"line_{index:04d}()" for index in range(1, 3001))
+    orchestrator = _make_orchestrator()
+    summary, meta = orchestrator._summarize(
+        [_turn(1, content="第 3000 行需要关注")], code, "python", "large.py",
+        ProjectThenTruncateAgent(),
+    )
+
+    assert meta is None
+    assert "未完成" in summary
+    coverage = orchestrator._summary_coverage
+    assert coverage["status"] == "failed"
+    assert coverage["source_mode"] == "windowed_projection"
+    assert coverage["source_windows_total"] > 1
+    assert coverage["source_windows_completed"] == coverage["source_windows_total"]
+    assert len(coverage["source_window_ids"]) == coverage["source_windows_total"]
+    assert coverage["projection_status"] == "success"
+    assert coverage["host_summary_output_truncations"] == 2
+    assert coverage["code_projection_model_calls"] > 0
+
+
+def test_summarize_marks_invalid_window_projection_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分窗源码压缩结构不完整时必须失败，并保留未完成的窗口账。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+
+    class InvalidProjectionAgent(RecordingAgent):
+        def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+            self.calls.append(kwargs)
+            if "历史压缩器" in kwargs["system_prompt"]:
+                return '{"entries":[]}', {"model_name": "compress"}
+            return "不应调用共识总结", {"model_name": "host"}
+
+    code = "\n".join(f"line_{index:04d}()" for index in range(1, 3001))
+    orchestrator = _make_orchestrator()
+    agent = InvalidProjectionAgent()
+    summary, meta = orchestrator._summarize(
+        [_turn(1, content="第 3000 行需要关注")], code, "python", "large.py",
+        agent,
+    )
+
+    assert meta is None
+    assert "未完成" in summary
+    coverage = orchestrator._summary_coverage
+    assert coverage["status"] == "failed"
+    assert coverage["source_mode"] == "windowed_projection"
+    assert coverage["source_windows_total"] > 1
+    assert coverage["source_windows_completed"] == 0
+    assert len(coverage["source_window_ids"]) == coverage["source_windows_total"]
+    assert coverage["projection_status"] == "failed"
+    assert coverage["failure_kind"] == "source_projection_failed"
+    assert not any("历史压缩器" not in call["system_prompt"] for call in agent.calls)
+
+
 def test_host_projects_complete_oversized_source_before_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1482,12 +1586,45 @@ async def test_speaker_and_host_compress_long_history_without_losing_sources(
     assert ok and decision.content == "已核对"
     summary, meta = orchestrator._summarize(turns, "value = 1", "python", "long.py", agent)
     assert "共识包含全部来源" in summary and meta is not None
+    history_projection = orchestrator._summary_coverage["history_projection"]
+    assert history_projection["status"] == "success"
+    assert history_projection["source_count"] == 8
+    assert len(history_projection["source_ids"]) == 8
+    assert history_projection["model_calls"] > 0
     final_calls = [call for call in agent.calls if "历史压缩器" not in call["system_prompt"]]
     assert len(final_calls) == 2
     for call in final_calls:
         assert "语义投影" in call["user_prompt"]
         for index in range(1, 9):
             assert f"S{index:04d}-T{index}" in call["user_prompt"]
+
+
+def test_summarize_records_history_projection_failure_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史压缩失败单独标记，不误记为主持人总结失败。"""
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+
+    def fail_projection(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("历史来源投影失败")
+
+    monkeypatch.setattr(module, "_compress_roundtable_history", fail_projection)
+    turns = [
+        _turn(index, content=f"来源 {index}: " + chr(64 + index) * 5_000)
+        for index in range(1, 9)
+    ]
+    orchestrator = _make_orchestrator()
+    summary, meta = orchestrator._summarize(
+        turns, "value = 1", "python", "history.py", RecordingAgent(),
+    )
+
+    coverage = orchestrator._summary_coverage
+    assert meta is None
+    assert "共识小结未完成" in summary
+    assert coverage["status"] == "failed"
+    assert coverage["history_projection"]["status"] == "failed"
+    assert coverage["history_projection"]["failure_reason"] == "历史来源投影失败"
+    assert coverage["failure_kind"] == "history_projection_failed"
 
 
 @pytest.mark.asyncio
@@ -1866,6 +2003,17 @@ def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
         coverage={
             "expected_turns": 2, "attempted_turns": 2, "successful_turns": 1,
             "failed_turns": 1, "valid_speeches": 1, "summary_status": "success",
+            "summary_coverage": {
+                "status": "success", "source_mode": "windowed_projection",
+                "source_windows_total": 2, "source_windows_completed": 2,
+                "source_window_ids": ["C0001", "C0002"],
+                "projection_status": "success",
+                "history_projection": {
+                    "status": "success", "source_count": 2,
+                    "source_ids": ["S0001-T1", "S0002-T1"],
+                    "model_calls": 3, "output_truncations": 1,
+                },
+            },
             "errors": ["可靠性代理第 2 轮输出被截断"],
         },
     )
@@ -1877,6 +2025,92 @@ def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
     assert saved.summary == "主持已归纳有效部分"
     assert saved.processed_files == 0
     assert saved.score == 0
+    assert saved.coverage["summary_coverage"]["source_window_ids"] == ["C0001", "C0002"]
+    assert saved.coverage["summary_coverage"]["history_projection"]["status"] == "success"
+    assert saved.coverage["summary_coverage"]["history_projection"]["model_calls"] == 3
+
+
+def test_finalize_review_persists_failed_host_compression_as_partial(
+    db: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = ReviewTask(
+        user_id=7, project_id=8, task_name="摘要压缩失败", review_type="discuss",
+        status="running", total_files=1, processed_files=0,
+    )
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module, "_extract_issues", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module, "_normalize_discussion_issues", lambda *_args, **_kwargs: [])
+
+    module._finalize_review(
+        task_id=task.id, user_id=7, file_id=9, file_name="long.py",
+        all_turns=[_turn(1, content="有效专家发言")], code="x = 1", language="python",
+        deferred_logs=[], agent=RecordingAgent(), stopped=False,
+        consensus="⚠️ 主持人共识小结未完成；仅保留发言摘录。",
+        coverage={
+            "expected_turns": 1, "attempted_turns": 1, "successful_turns": 1,
+            "failed_turns": 0, "valid_speeches": 1, "summary_status": "failed",
+            "summary_coverage": {
+                "status": "failed", "failure_kind": "source_projection_failed",
+                "history_projection": {
+                    "status": "failed", "source_count": 1, "source_ids": ["S0001-T1"],
+                    "model_calls": 4, "output_truncations": 2,
+                    "failure_reason": "原始来源未完整投影",
+                },
+            },
+            "errors": ["主持人共识小结未完成"],
+        },
+    )
+
+    saved = db.get(ReviewTask, task.id)
+    assert saved.status == "failed"
+    assert saved.summary.startswith("⚠️")
+    assert saved.coverage["summary_coverage"]["failure_kind"] == "source_projection_failed"
+    history = saved.coverage["summary_coverage"]["history_projection"]
+    assert history["status"] == "failed"
+    assert history["model_calls"] == 4
+    assert history["output_truncations"] == 2
+
+
+def test_finalize_review_persists_history_projection_failure_kind(
+    db: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = ReviewTask(
+        user_id=7, project_id=8, task_name="圆桌历史压缩失败", review_type="discuss",
+        status="running", total_files=1, processed_files=0,
+    )
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module, "_extract_issues", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module, "_normalize_discussion_issues", lambda *_args, **_kwargs: [])
+
+    module._finalize_review(
+        task_id=task.id, user_id=7, file_id=9, file_name="history.py",
+        all_turns=[_turn(1, content="有效专家发言")], code="x = 1", language="python",
+        deferred_logs=[], agent=RecordingAgent(), stopped=False,
+        consensus="⚠️ 主持人共识小结未完成；仅保留发言摘录。",
+        coverage={
+            "expected_turns": 1, "attempted_turns": 1, "successful_turns": 1,
+            "failed_turns": 0, "valid_speeches": 1, "summary_status": "failed",
+            "summary_coverage": {
+                "status": "failed", "failure_kind": "history_projection_failed",
+                "history_projection": {
+                    "status": "failed", "source_count": 2,
+                    "source_ids": ["S0001-T1", "S0002-T1"],
+                    "model_calls": 1, "output_truncations": 1,
+                    "failure_reason": "历史来源投影失败",
+                },
+            },
+            "errors": ["圆桌历史语义压缩未完成"],
+        },
+    )
+
+    saved = db.get(ReviewTask, task.id)
+    assert saved.status == "failed"
+    assert saved.coverage["summary_coverage"]["failure_kind"] == "history_projection_failed"
+    assert saved.coverage["summary_coverage"]["history_projection"]["failure_reason"] == "历史来源投影失败"
 
 
 def test_finalize_review_marks_task_failed_when_extraction_fails(

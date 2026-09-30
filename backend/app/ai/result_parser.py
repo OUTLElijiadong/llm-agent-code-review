@@ -343,6 +343,10 @@ def _normalize_issue(raw: dict) -> Issue:
     Returns:
         Issue: 规范化后的问题对象
     """
+    for field_name in ("line_number", "end_line"):
+        if isinstance(raw.get(field_name), bool):
+            raise ValueError(f"{field_name} 不能是布尔值")
+
     issue_type = raw.get("issue_type") or "其他"
     if issue_type not in ALLOWED_TYPES:
         issue_type = "其他"
@@ -451,6 +455,18 @@ def parse(text: str) -> ReviewResult:
             diagnostics.append(ParseDiagnostic(
                 code="issue_missing_identity",
                 message="问题条目缺少 title、description 或 evidence",
+                index=index,
+            ))
+            continue
+        boolean_line_field = next(
+            (field_name for field_name in ("line_number", "end_line")
+             if isinstance(raw.get(field_name), bool)),
+            None,
+        )
+        if boolean_line_field:
+            diagnostics.append(ParseDiagnostic(
+                code="issue_invalid_line_number",
+                message=f"{boolean_line_field} 不能是布尔值",
                 index=index,
             ))
             continue

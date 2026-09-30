@@ -51,7 +51,7 @@ FRONTEND_API_CAPABILITY = {
     "adminGovernance:runJob": "jobs.run",
     "adminGovernance:updateJob": "jobs.update",
     "adminGovernance:getObservabilityOverview": "observability.overview",
-    "adminGovernance:listAlerts": "observability.alerts.list",
+    "adminGovernance:listAlertsPage": "observability.alerts.list",
     "adminGovernance:resolveAlert": "observability.alerts.resolve",
     "adminGovernance:listRewardEvents": "rewards.events.list",
     "adminGovernance:createRewardEvent": "rewards.events.create",

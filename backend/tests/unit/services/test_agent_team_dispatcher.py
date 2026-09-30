@@ -701,6 +701,27 @@ def test_custom_handler_forwards_frozen_release_snapshot(monkeypatch):
     assert captured["template_checksum"] == "v" * 64
 
 
+def test_custom_handler_stops_team_retry_after_irreducible_output_truncation(monkeypatch):
+    from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
+
+    def truncated(*_args, **_kwargs):
+        raise DeepSeekOutputTruncatedError("finish_reason=length", finish_reason="length")
+
+    monkeypatch.setattr(published_agent_tools, "invoke_published_agent", truncated)
+
+    result = agent_mesh_dispatcher._custom_handler(
+        object(),
+        SimpleNamespace(id=7),
+        "published_reviewer",
+        {"payload": {"code": "pass", "file_name": "sample.py"}},
+        trusted_team_execution=True,
+    )
+
+    assert result["status"] == "failed"
+    assert result["retryable"] is False
+    assert result["errors"][0]["code"] == "coverage_incomplete"
+
+
 def test_custom_team_reads_authorized_file_at_execution(db, super_admin_user, monkeypatch):
     project = Project(user_id=super_admin_user.id, project_name="团队源码", language="python", status="active")
     db.add(project)

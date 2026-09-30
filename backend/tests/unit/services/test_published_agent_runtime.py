@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
+from app.ai.deepseek_agent import DeepSeekOutputTruncatedError, DeepSeekResponseError
 from app.ai.multi_agent import GENERAL_AGENT
+from app.core.exceptions import ValidationError
 from app.services import published_agent_tools
 
 
@@ -115,3 +116,90 @@ def test_published_agent_does_not_repeat_at_output_ceiling(db, admin_user, monke
             db, admin_user, agent_code="auth_boundary_reviewer", code="pass",
         )
     assert budgets == [65_536]
+
+
+def test_published_agent_splits_source_after_output_budget_retry_is_truncated(
+    db, admin_user, monkeypatch,
+):
+    """A still-truncated response must shrink source coverage instead of replaying one chunk."""
+    _prepare_invocation(monkeypatch, _published_profile())
+    monkeypatch.setattr(published_agent_tools.settings, "deepseek_chunk_threshold", 100_000)
+    code = "line1 = first()\nline2 = second()\nline3 = third()\nline4 = fourth()\n"
+    calls = []
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) <= 2:
+                raise DeepSeekOutputTruncatedError(
+                    "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+                )
+            source_line = "line1 = first()" if "line1 = first()" in kwargs["user_prompt"] else "line3 = third()"
+            return (
+                '{"summary":"已检查焦点分片","score":100,"issues":[{'
+                f'"line_number":1,"issue_type":"潜在Bug","severity":"高","title":"边界问题",'
+                f'"description":"此处分支没有处理无效状态。","suggestion":"增加状态校验。",'
+                f'"evidence":"{source_line}"' + "}]}",
+                {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            )
+
+        def log_deferred(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", Client)
+    result = published_agent_tools.invoke_published_agent(
+        db,
+        admin_user,
+        agent_code="auth_boundary_reviewer",
+        code=code,
+        language="python",
+        file_name="sample.py",
+    )
+
+    assert [call["max_tokens"] for call in calls] == [4096, 16_384, 4096, 4096]
+    assert [item["line_number"] for item in result["issues"]] == [1, 3]
+    assert result["coverage"]["status"] == "complete"
+    assert result["coverage"]["completed_chunks"] == result["coverage"]["total_chunks"] == 2
+    assert "source_sha256" in result["coverage"]
+    assert all("审查分片:" not in call["user_prompt"] for call in calls)
+    assert all("审查焦点: 原文件行" in call["user_prompt"] for call in calls)
+
+
+def test_published_agent_rejects_end_line_outside_focused_chunk():
+    chunk = SimpleNamespace(text="one()\ntwo()", start_line=0, end_line=2)
+    issue = SimpleNamespace(line_number=1, end_line=3, evidence="one()")
+
+    with pytest.raises(DeepSeekResponseError, match="结束行"):
+        published_agent_tools._validate_issue_source_evidence(issue, chunk)
+
+
+@pytest.mark.parametrize("field", ["line_number", "end_line"])
+def test_published_agent_rejects_boolean_source_lines(field):
+    chunk = SimpleNamespace(text="one()\ntwo()", start_line=0, end_line=2)
+    issue = SimpleNamespace(line_number=1, end_line=1, evidence="one()")
+    setattr(issue, field, True)
+
+    with pytest.raises(DeepSeekResponseError, match="行号|结束行"):
+        published_agent_tools._validate_issue_source_evidence(issue, chunk)
+
+
+@pytest.mark.parametrize("line_offset", [-1, 10_000_001, True])
+def test_published_agent_rejects_invalid_line_offset(db, admin_user, monkeypatch, line_offset):
+    _prepare_invocation(monkeypatch, _published_profile())
+
+    class UnexpectedClient:
+        def __init__(self, api_config):
+            pytest.fail("invalid line_offset must be rejected before model invocation")
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", UnexpectedClient)
+    with pytest.raises(ValidationError, match="line_offset"):
+        published_agent_tools.invoke_published_agent(
+            db,
+            admin_user,
+            agent_code="auth_boundary_reviewer",
+            code="pass",
+            line_offset=line_offset,
+        )

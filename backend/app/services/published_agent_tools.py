@@ -31,6 +31,8 @@ from app.utils.api_resolver import resolve_api_config
 
 _MODEL_INPUT_RESERVE_BYTES = 1024
 _MAX_PUBLISHED_REVIEW_CHUNKS = 128
+_MAX_TRUNCATION_SPLIT_DEPTH = 8
+_MAX_LINE_OFFSET = 10_000_000
 
 
 def _build_review_call(
@@ -43,13 +45,11 @@ def _build_review_call(
     line_offset: int,
     experience: str,
     source_sha256: str,
-    chunk_index: int,
-    total_chunks: int,
 ) -> tuple[str, str]:
     """Render an exact source window with a stable origin and symbol context."""
     context = (
         f"源文件 SHA-256: {source_sha256}\n"
-        f"审查分片: {chunk_index + 1}/{total_chunks}; "
+        "审查焦点: "
         f"原文件行: {chunk.start_line + line_offset + 1}-{chunk.end_line + line_offset}\n"
         f"分片 SHA-256: {hashlib.sha256(chunk.text.encode('utf-8')).hexdigest()}\n"
         f"{chunk.context}"
@@ -83,8 +83,11 @@ def _validate_issue_source_evidence(issue, chunk: CodeChunk) -> None:
     normalized_evidence = evidence.replace("\r\n", "\n").replace("\r", "\n")
     if not evidence.strip() or normalized_evidence not in source:
         raise DeepSeekResponseError("已发布 Agent 的问题证据不在当前源码分片中")
+    raw_line_number = getattr(issue, "line_number", 0)
+    if isinstance(raw_line_number, bool):
+        raise DeepSeekResponseError("已发布 Agent 的问题行号不能是布尔值")
     try:
-        line_number = int(getattr(issue, "line_number", 0) or 0)
+        line_number = int(raw_line_number or 0)
     except (TypeError, ValueError) as exc:
         raise DeepSeekResponseError("已发布 Agent 的问题行号非法") from exc
     if line_number <= 0:
@@ -98,6 +101,16 @@ def _validate_issue_source_evidence(issue, chunk: CodeChunk) -> None:
             break
         actual_line = source.count("\n", 0, start) + 1
         if actual_line == line_number:
+            end_line = getattr(issue, "end_line", None)
+            if end_line is not None:
+                if isinstance(end_line, bool):
+                    raise DeepSeekResponseError("已发布 Agent 的问题结束行不能是布尔值")
+                try:
+                    end_line = int(end_line)
+                except (TypeError, ValueError) as exc:
+                    raise DeepSeekResponseError("已发布 Agent 的问题结束行非法") from exc
+                if end_line < line_number or end_line > len(source.splitlines()):
+                    raise DeepSeekResponseError("已发布 Agent 的问题结束行超出当前焦点范围")
             return
         start += 1
     raise DeepSeekResponseError("已发布 Agent 的问题行号与逐字证据不匹配")
@@ -147,11 +160,9 @@ def _plan_complete_review(
                     line_offset=line_offset,
                     experience=experience,
                     source_sha256=source_sha256,
-                    chunk_index=index,
-                    total_chunks=len(chunks),
                 ),
             )
-            for index, chunk in enumerate(chunks)
+            for chunk in chunks
         ]
         if all(
             len(system.encode("utf-8")) + len(user.encode("utf-8")) <= input_bytes
@@ -173,6 +184,38 @@ def _sum_usage(values: list[dict], key: str) -> int | None:
         if isinstance(value.get(key), int) and not isinstance(value[key], bool)
     ]
     return sum(available) if available else None
+
+
+def _split_truncated_chunk(chunk: CodeChunk) -> list[CodeChunk]:
+    """Split only at source-line boundaries and preserve the parent symbol context."""
+    source_lines = chunk.text.splitlines(keepends=True)
+    if len(source_lines) <= 1:
+        return []
+    midpoint = len(source_lines) // 2
+    left_text = "".join(source_lines[:midpoint])
+    right_text = "".join(source_lines[midpoint:])
+    if not left_text or not right_text or left_text + right_text != chunk.text:
+        return []
+    shared = {
+        "context": chunk.context,
+        "context_fingerprint": chunk.context_fingerprint,
+        "symbol_names": chunk.symbol_names,
+        "diagnostics": chunk.diagnostics,
+    }
+    return [
+        CodeChunk(
+            text=left_text,
+            start_line=chunk.start_line,
+            end_line=chunk.start_line + midpoint,
+            **shared,
+        ),
+        CodeChunk(
+            text=right_text,
+            start_line=chunk.start_line + midpoint,
+            end_line=chunk.end_line,
+            **shared,
+        ),
+    ]
 
 
 def _require_invoke_permission(db: Session, user: User) -> None:
@@ -252,6 +295,12 @@ def invoke_published_agent(
 ) -> dict[str, Any]:
     """通过与目录 API 相同的实现调用精确发布版本。"""
     _require_invoke_permission(db, user)
+    if (
+        isinstance(line_offset, bool)
+        or not isinstance(line_offset, int)
+        or not 0 <= line_offset <= _MAX_LINE_OFFSET
+    ):
+        raise ValidationError(f"line_offset 必须是 0 至 {_MAX_LINE_OFFSET} 的整数")
     if release_id is not None or version_id is not None:
         if release_id is None or version_id is None:
             raise NotFoundError("已发布 Agent 快照不完整", code=40400)
@@ -279,13 +328,32 @@ def invoke_published_agent(
         experience=experience,
     )
     client = DeepSeekAgent(api_config=resolve_subagent_config(db, resolve_api_config(db, user.id)))
+
+    def persist_failed_attempts(error_message: str) -> None:
+        for failed_meta in failed_attempt_metas:
+            client.log_deferred(
+                db,
+                user_id=user.id,
+                meta=failed_meta,
+                status="failed",
+                error=error_message[:500],
+            )
+        db.commit()
+
     summaries: list[str] = []
     scores: list[tuple[int, int]] = []
     issues: list[dict[str, Any]] = []
     metas: list[dict] = []
+    failed_attempt_metas: list[dict] = []
     completed: list[dict[str, Any]] = []
+    pending = [
+        (chunk, system_prompt, user_prompt, 0)
+        for chunk, system_prompt, user_prompt in calls
+    ]
+    planned_chunks = len(pending)
     with usage_context(int(user.id), current_attribution(int(user.id)), db=db):
-        for index, (chunk, system_prompt, user_prompt) in enumerate(calls):
+        while pending:
+            chunk, system_prompt, user_prompt, split_depth = pending.pop(0)
             call_args = {
                 "system_prompt": system_prompt,
                 "user_prompt": user_prompt,
@@ -294,27 +362,78 @@ def invoke_published_agent(
             }
             try:
                 raw, meta = client.call_raw(**call_args, max_tokens=profile.max_tokens)
-            except DeepSeekOutputTruncatedError:
+            except DeepSeekOutputTruncatedError as first_error:
+                if isinstance(getattr(first_error, "meta", None), dict):
+                    failed_attempt_metas.append(first_error.meta)
                 # Reasoning and JSON share the provider output allowance. A
                 # partial JSON cannot be counted as reviewed source coverage.
                 ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
                 initial_budget = _clamp_max_tokens(profile.max_tokens)
                 retry_budget = min(max(initial_budget * 4, 8192), ceiling)
-                if retry_budget <= initial_budget:
-                    raise
-                logger.warning(
-                    f"[published_agent] {profile.code} 分片 {index + 1}/{len(calls)} "
-                    f"输出被截断，按 {initial_budget}→{retry_budget} 提高输出预算重试"
-                )
-                raw, meta = client.call_raw(**call_args, max_tokens=retry_budget)
-            result = parse(raw)
-            if result.invalid_issue_count:
-                raise DeepSeekResponseError(
-                    f"已发布 Agent 分片 {index + 1}/{len(calls)} 有 "
-                    f"{result.invalid_issue_count} 条问题未通过解析，无法声明完整审查"
-                )
-            for issue in result.issues:
-                _validate_issue_source_evidence(issue, chunk)
+                retry_error = None
+                if retry_budget > initial_budget:
+                    logger.warning(
+                        f"[published_agent] {profile.code} 焦点范围 "
+                        f"{line_offset + chunk.start_line + 1}-{line_offset + chunk.end_line} "
+                        f"输出被截断，按 {initial_budget}→{retry_budget} 提高输出预算重试"
+                    )
+                    try:
+                        raw, meta = client.call_raw(**call_args, max_tokens=retry_budget)
+                    except DeepSeekOutputTruncatedError as exc:
+                        if isinstance(getattr(exc, "meta", None), dict):
+                            failed_attempt_metas.append(exc.meta)
+                        retry_error = exc
+                else:
+                    retry_error = DeepSeekOutputTruncatedError(
+                        "输出预算已达上限，需缩小源码分片",
+                        finish_reason="length",
+                    )
+                if retry_error is not None:
+                    children = _split_truncated_chunk(chunk)
+                    if (
+                        not children
+                        or split_depth >= _MAX_TRUNCATION_SPLIT_DEPTH
+                        or planned_chunks + len(children) - 1 > _MAX_PUBLISHED_REVIEW_CHUNKS
+                    ):
+                        error = DeepSeekOutputTruncatedError(
+                            f"已发布 Agent 原文件第 {line_offset + chunk.start_line + 1}-"
+                            f"{line_offset + chunk.end_line} 行输出仍被截断，审查覆盖不完整",
+                            finish_reason="length",
+                        )
+                        error.attempt_metas = list(failed_attempt_metas)
+                        persist_failed_attempts(str(error))
+                        raise error from retry_error
+                    new_calls = []
+                    for child in children:
+                        child_system, child_user = _build_review_call(
+                            profile,
+                            language=language,
+                            file_name=file_name,
+                            chunk=child,
+                            rules=rules or [],
+                            line_offset=line_offset,
+                            experience=experience,
+                            source_sha256=source_sha256,
+                        )
+                        new_calls.append((child, child_system, child_user, split_depth + 1))
+                    planned_chunks += len(children) - 1
+                    pending[0:0] = new_calls
+                    continue
+            try:
+                result = parse(raw)
+                if result.invalid_issue_count:
+                    raise DeepSeekResponseError(
+                        f"已发布 Agent 原文件第 {line_offset + chunk.start_line + 1}-"
+                        f"{line_offset + chunk.end_line} 行有 "
+                        f"{result.invalid_issue_count} 条问题未通过解析，无法声明完整审查"
+                    )
+                for issue in result.issues:
+                    _validate_issue_source_evidence(issue, chunk)
+            except DeepSeekResponseError as exc:
+                failed_attempt_metas.append(meta)
+                exc.attempt_metas = list(failed_attempt_metas)
+                persist_failed_attempts(str(exc))
+                raise
             summaries.append(result.summary)
             scores.append((int(result.score), max(1, len(chunk.text))))
             for issue in result.issues:
@@ -326,19 +445,19 @@ def invoke_published_agent(
                 issues.append(item)
             metas.append(meta)
             completed.append({
-                "index": index + 1,
+                "index": len(completed) + 1,
                 "start_line": line_offset + chunk.start_line + 1,
                 "end_line": line_offset + chunk.end_line,
                 "source_chars": len(chunk.text),
                 "source_sha256": hashlib.sha256(chunk.text.encode("utf-8")).hexdigest(),
             })
             client.log_deferred(db, user_id=user.id, meta=meta)
-    db.commit()
-    if len(calls) == 1:
+    persist_failed_attempts("模型输出被截断，后续通过源码范围恢复完成")
+    if len(completed) == 1:
         summary = summaries[0]
     else:
         summary = "\n".join(
-            f"分片 {index + 1}/{len(calls)}：{value}"
+            f"分片 {index + 1}/{len(completed)}：{value}"
             for index, value in enumerate(summaries)
         )
     weight = sum(chars for _, chars in scores)
@@ -350,15 +469,15 @@ def invoke_published_agent(
         "score": round(sum(score * chars for score, chars in scores) / weight),
         "issues": issues,
         "usage": {
-            "prompt_tokens": _sum_usage(metas, "prompt_tokens"),
-            "completion_tokens": _sum_usage(metas, "completion_tokens"),
-            "total_tokens": _sum_usage(metas, "total_tokens"),
-            "duration_ms": sum(int(meta.get("duration_ms") or 0) for meta in metas),
+            "prompt_tokens": _sum_usage(metas + failed_attempt_metas, "prompt_tokens"),
+            "completion_tokens": _sum_usage(metas + failed_attempt_metas, "completion_tokens"),
+            "total_tokens": _sum_usage(metas + failed_attempt_metas, "total_tokens"),
+            "duration_ms": sum(int(meta.get("duration_ms") or 0) for meta in metas + failed_attempt_metas),
         },
         "coverage": {
             "status": "complete",
             "source_sha256": source_sha256,
-            "total_chunks": len(calls),
+            "total_chunks": planned_chunks,
             "completed_chunks": len(completed),
             "chunks": completed,
         },

@@ -57,6 +57,13 @@ _APPROVAL_REQUIRED_CODES = frozenset(
 _PROTECTED_CODES = frozenset({"chat_assistant", "manager", "orchestrator"})
 _SANDBOX_FAILURE_STATES = frozenset({"failed", "blocked", "stopped", "expired"})
 _SANDBOX_POLL_SECONDS = 2.0
+_MAX_LINE_OFFSET = 10_000_000
+
+
+def _validated_line_offset(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= _MAX_LINE_OFFSET:
+        raise ValueError(f"line_offset 必须是 0 至 {_MAX_LINE_OFFSET} 的整数")
+    return value
 
 
 def dispatch_state(address: str) -> str:
@@ -154,6 +161,18 @@ def _as_mesh_result(result: AgentResult, *, action: str) -> dict[str, Any]:
             evidence=[{"source": "request_scoped_agent", "data": result.data}],
             next_action=None,
         )
+    if result.failure_kind in {"output_truncated", "coverage_incomplete"}:
+        # This result has already exhausted its domain-specific semantic split
+        # path. Requeueing the whole task would send the same source unchanged.
+        failed = _result(
+            "failed",
+            result.error or f"{action}覆盖不完整，不能作为成功结果",
+            evidence=([{"source": "request_scoped_agent", "data": result.data}]
+                      if result.data is not None else []),
+            errors=[{"code": result.failure_kind, "finish_reason": result.finish_reason or None}],
+        )
+        failed["retryable"] = False
+        return failed
     if result.failure_kind:
         raise RuntimeError(result.error or f"{action}调用失败")
     return _result(
@@ -585,6 +604,10 @@ def _runtime_handler(
         raw_code = data.get("code")
         if not isinstance(raw_code, str) or not raw_code.strip():
             return _missing("code")
+        try:
+            line_offset = _validated_line_offset(data.get("line_offset", 0))
+        except ValueError as exc:
+            return _result("needs_clarification", str(exc))
         language = str(data.get("language") or "plaintext")
         rules = data.get("rules")
         rules_text = json.dumps(rules, ensure_ascii=False) if isinstance(rules, list) else str(rules or "通用质量审查")
@@ -596,7 +619,7 @@ def _runtime_handler(
             rules_text,
             language,
             file_name=str(data.get("file_name") or "snippet.txt"),
-            line_offset=int(data.get("line_offset") or 0),
+            line_offset=line_offset,
             ctx=ctx,
         )
         if result.success:
@@ -1102,24 +1125,53 @@ def _custom_handler(
     strategy = data.get("_execution_strategy")
     strategy = strategy if isinstance(strategy, dict) else {}
     experience = str(data.get("experience") or "").strip()
+    try:
+        line_offset = _validated_line_offset(data.get("line_offset", 0))
+    except ValueError as exc:
+        return _result("needs_clarification", str(exc))
     strategy_instruction = str(strategy.get("instruction") or data.get("instructions") or "").strip()
     if strategy_instruction and strategy_instruction not in experience:
         experience = f"{experience}\n本次改道策略：{strategy_instruction}".strip()
-    result = published_agent_tools.invoke_published_agent(
-        db,
-        effective_user,
-        agent_code=code,
-        code=raw_code,
-        language=language,
-        file_name=file_name,
-        rules=data.get("rules") if isinstance(data.get("rules"), list) else [],
-        line_offset=int(data.get("line_offset") or 0),
-        experience=experience,
-        release_id=int(snapshot["release_id"]) if snapshot.get("release_id") else None,
-        version_id=int(snapshot["version_id"]) if snapshot.get("version_id") else None,
-        package_checksum=str(snapshot.get("package_checksum") or ""),
-        template_checksum=str(snapshot.get("template_checksum") or ""),
-    )
+    try:
+        result = published_agent_tools.invoke_published_agent(
+            db,
+            effective_user,
+            agent_code=code,
+            code=raw_code,
+            language=language,
+            file_name=file_name,
+            rules=data.get("rules") if isinstance(data.get("rules"), list) else [],
+            line_offset=line_offset,
+            experience=experience,
+            release_id=int(snapshot["release_id"]) if snapshot.get("release_id") else None,
+            version_id=int(snapshot["version_id"]) if snapshot.get("version_id") else None,
+            package_checksum=str(snapshot.get("package_checksum") or ""),
+            template_checksum=str(snapshot.get("template_checksum") or ""),
+        )
+    except Exception as exc:
+        from app.ai.deepseek_agent import DeepSeekOutputTruncatedError, DeepSeekResponseError
+
+        if not isinstance(exc, (DeepSeekOutputTruncatedError, DeepSeekResponseError)):
+            raise
+        incomplete = isinstance(exc, DeepSeekOutputTruncatedError)
+        failure_code = "coverage_incomplete" if incomplete else "invalid_review_output"
+        failed_message = (
+            "已发布 Agent 在缩小源码焦点后仍被模型输出上限截断，审查覆盖不完整"
+            if incomplete
+            else f"已发布 Agent 的审查结果未通过结构或行号证据校验：{exc}"
+        )
+        failed = _result(
+            "failed",
+            failed_message,
+            evidence=[source_evidence] if source_evidence is not None else [],
+            errors=[{
+                "code": failure_code,
+                "finish_reason": "length" if incomplete else None,
+                "attempts": len(getattr(exc, "attempt_metas", []) or []),
+            }],
+        )
+        failed["retryable"] = False
+        return failed
     if source_evidence is not None:
         # 模型调用会提交用量；用新事务确认期间未撤权、取消团队或替换源码。
         try:

@@ -82,6 +82,10 @@ def test_call_raw_rejects_nonempty_parseable_length_without_retry(monkeypatch):
 
     assert exc_info.value.finish_reason == "length"
     assert "finish_reason=length" in str(exc_info.value)
+    assert exc_info.value.meta["prompt_tokens"] == 2
+    assert exc_info.value.meta["completion_tokens"] == 3
+    assert exc_info.value.meta["total_tokens"] == 5
+    assert exc_info.value.meta["_http_attempts"] == 1
     assert len(calls) == 1
 
 

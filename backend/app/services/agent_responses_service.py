@@ -1176,7 +1176,7 @@ class PrismToolExecutor:
                     language=str(call.arguments.get("language") or "plaintext"),
                     file_name=str(call.arguments.get("file_name") or "snippet.txt"),
                     rules=list(call.arguments.get("rules") or []),
-                    line_offset=int(call.arguments.get("line_offset") or 0),
+                    line_offset=call.arguments.get("line_offset", 0),
                     experience=str(call.arguments.get("experience") or ""),
                 ),
             )

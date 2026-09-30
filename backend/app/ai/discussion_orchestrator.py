@@ -34,7 +34,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import Lock
 from types import SimpleNamespace
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from loguru import logger
 
@@ -420,6 +420,7 @@ class DiscussionOrchestrator:
 
     def __init__(self):
         self._bus = DiscussionBus.instance()
+        self._summary_coverage: dict[str, Any] = {}
 
     async def start_discussion(
         self,
@@ -469,6 +470,12 @@ class DiscussionOrchestrator:
             "successful_turns": 0, "failed_turns": 0, "valid_speeches": 0,
             "silent_turns": 0, "summary_status": "pending", "extraction_status": "pending",
             "model_calls_limit": _ROUNDTABLE_MAX_MODEL_CALLS, "model_calls_used": 0,
+            "summary_coverage": {
+                "history_projection": {
+                    "status": "not_required", "source_count": 0, "source_ids": [],
+                    "model_calls": 0, "output_truncations": 0, "failure_reason": None,
+                },
+            },
             "errors": [],
         }
         progress_total = coverage["expected_turns"] + 3  # 汇总、至少一批抽取、报告落库
@@ -822,10 +829,11 @@ class DiscussionOrchestrator:
                 ),
             )
             await self._check_active()
+            coverage["summary_coverage"] = dict(self._summary_coverage)
             coverage["summary_status"] = "success" if summary_meta is not None else "failed"
             publish_progress("summarizing", coverage["attempted_turns"] + 1, progress_total)
             if summary_meta is None:
-                coverage["errors"].append("主持人模型汇总失败，仅保留发言摘录")
+                coverage["errors"].append("主持人共识小结未完成，仅保留未核验为共识的发言摘录")
             if summary_meta:
                 deferred_logs.append({
                     "meta": summary_meta,
@@ -1276,12 +1284,31 @@ class DiscussionOrchestrator:
                    language: str, file_name: str, agent: DeepSeekAgent,
                    stopped: bool = False) -> tuple[str, Optional[dict]]:
         """生成主持人共识小结。Returns (文本, AiCallLog meta)。"""
+        self._summary_coverage = {
+            "status": "pending",
+            "source_mode": "full",
+            "source_windows_total": 0,
+            "source_windows_completed": 0,
+            "source_window_ids": [],
+            "source_windows": [],
+            "projection_status": "not_required",
+            "host_summary_output_truncations": 0,
+            "code_projection_model_calls": 0,
+            "code_projection_output_truncations": 0,
+            "history_projection": {
+                "status": "not_required", "source_count": 0, "source_ids": [],
+                "model_calls": 0, "output_truncations": 0, "failure_reason": None,
+            },
+            "failure_kind": None,
+            "failure_reason": None,
+        }
         prefix = "🛑 讨论已被用户终止。\n\n" if stopped else ""
         agent_turns = [
             t for t in turns
             if t.role == "agent" and getattr(t, "action", "speak") == "speak"
         ]
         if not agent_turns:
+            self._summary_coverage.update(status="skipped", failure_kind="no_agent_speeches")
             return prefix + "本次讨论没有产生有效发言。", None
 
         history = self._build_history(turns)
@@ -1331,11 +1358,32 @@ class DiscussionOrchestrator:
                     - reserved_code_tokens
                 )
                 if history_budget > 0 and estimate_tokens(history) > history_budget:
-                    projected = _compress_roundtable_history(
-                        _roundtable_history_records(turns),
-                        agent=agent, task_id=self._task_id, user_id=self._user_id,
-                        file_id=self._file_id, target_tokens=history_budget,
+                    history_records = _roundtable_history_records(turns)
+                    history_projection = self._summary_coverage["history_projection"]
+                    history_projection.update(
+                        status="pending", source_count=len(history_records),
+                        source_ids=[source_id for source_id, _content in history_records],
                     )
+
+                    def record_history_projection(event: str) -> None:
+                        if event == "request":
+                            history_projection["model_calls"] += 1
+                        elif event == "output_truncated":
+                            history_projection["output_truncations"] += 1
+
+                    try:
+                        projected = _compress_roundtable_history(
+                            history_records,
+                            agent=agent, task_id=self._task_id, user_id=self._user_id,
+                            file_id=self._file_id, target_tokens=history_budget,
+                            attempt_callback=record_history_projection,
+                        )
+                    except Exception as exc:
+                        history_projection.update(
+                            status="failed", failure_reason=str(exc).strip()[:300] or exc.__class__.__name__,
+                        )
+                        raise
+                    history_projection.update(status="success", failure_reason=None)
                     history_for_prompt = (
                         "语义投影（完整原始发言保存在圆桌会话中）：\n" + projected
                     )
@@ -1357,14 +1405,39 @@ class DiscussionOrchestrator:
                 records = []
                 for index, window in enumerate(windows, start=1):
                     line_numbers = [int(value) for value in re.findall(r"(?m)^(\d+): ", window)]
+                    window_id = f"C{index:04d}"
+                    line_scope = (
+                        f"第 {line_numbers[0]}–{line_numbers[-1]} 行"
+                        if line_numbers else "行号未知"
+                    )
+                    self._summary_coverage["source_mode"] = "windowed_projection"
+                    self._summary_coverage["projection_status"] = "pending"
+                    self._summary_coverage["source_windows_total"] = len(windows)
+                    self._summary_coverage["source_window_ids"].append(window_id)
+                    self._summary_coverage["source_windows"].append({
+                        "window_id": window_id,
+                        "line_start": line_numbers[0] if line_numbers else None,
+                        "line_end": line_numbers[-1] if line_numbers else None,
+                    })
                     records.append((
-                        f"C{index:04d}",
-                        f"【源码窗口 {index}/{len(windows)}·第 {line_numbers[0]}–{line_numbers[-1]} 行】"
+                        window_id,
+                        f"【源码窗口 {index}/{len(windows)}·{line_scope}】"
                         f"{window}",
                     ))
+                def record_code_projection(event: str) -> None:
+                    if event == "request":
+                        self._summary_coverage["code_projection_model_calls"] += 1
+                    elif event == "output_truncated":
+                        self._summary_coverage["code_projection_output_truncations"] += 1
+
                 code_projection = _compress_roundtable_history(
                     records, agent=agent, task_id=self._task_id, user_id=self._user_id,
                     file_id=self._file_id, target_tokens=code_budget,
+                    attempt_callback=record_code_projection,
+                )
+                # _compress_roundtable_history 返回前已校验所有来源 ID 及原文引文。
+                self._summary_coverage.update(
+                    source_windows_completed=len(windows), projection_status="success",
                 )
                 user_prompt = summary_prompt(
                     history_for_prompt, code_projection, projected_code=True,
@@ -1383,17 +1456,48 @@ class DiscussionOrchestrator:
                         agent_label="general", json_mode=False, max_tokens=budget,
                     )
                 except DeepSeekOutputTruncatedError:
+                    self._summary_coverage["host_summary_output_truncations"] += 1
                     continue
                 body = raw.strip()
                 if body:
+                    self._summary_coverage.update(status="success", failure_kind=None)
                     return f"{prefix}📋 **讨论共识小结**\n\n{body}", meta
         except _DiscussionInactive:
             raise
         except Exception as exc:
+            history_projection = self._summary_coverage.get("history_projection") or {}
+            if history_projection.get("status") == "failed":
+                self._summary_coverage["failure_kind"] = "history_projection_failed"
+            elif self._summary_coverage["projection_status"] == "pending":
+                self._summary_coverage.update(
+                    projection_status="failed", failure_kind="source_projection_failed",
+                )
+            else:
+                self._summary_coverage["failure_kind"] = (
+                    "output_truncated" if self._summary_coverage["host_summary_output_truncations"]
+                    else "summary_generation_failed"
+                )
+            self._summary_coverage["failure_reason"] = str(exc).strip()[:300] or exc.__class__.__name__
             logger.warning(f"[Discussion] 共识失败: {exc}")
 
-        # 回退: 简单统计
-        lines = [f"{prefix}📋 讨论结束 (共 {len(agent_turns)} 条发言):", ""]
+        if self._summary_coverage["failure_kind"] is None:
+            self._summary_coverage["failure_kind"] = (
+                "output_truncated" if self._summary_coverage["host_summary_output_truncations"]
+                else "empty_summary"
+            )
+            self._summary_coverage["failure_reason"] = (
+                "主持模型输出达到长度上限"
+                if self._summary_coverage["host_summary_output_truncations"]
+                else "主持模型未返回有效共识文本"
+            )
+        self._summary_coverage["status"] = "failed"
+        # 保留原始发言便于追溯，但清楚标记为未完成摘录，禁止 UI/下游将其误读成共识。
+        lines = [
+            f"{prefix}⚠️ **主持人共识小结未完成**",
+            "以下仅为 Agent 原始发言摘录，尚未形成共识，不能作为完整共识或审查结论。",
+            f"📋 发言摘录（共 {len(agent_turns)} 条发言）:",
+            "",
+        ]
         agent_issues: dict[str, list[str]] = {}
         for t in agent_turns:
             agent_issues.setdefault(t.agent_name, []).append(t.content)
@@ -1881,6 +1985,7 @@ def _compress_roundtable_history(
     user_id: int,
     file_id: int,
     target_tokens: int,
+    attempt_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
     """按来源分块做有引文校验的语义摘要；原始发言保持在会话记录中。"""
     if target_tokens <= 0:
@@ -1990,15 +2095,17 @@ def _compress_roundtable_history(
         )
         last_error: Exception | None = None
         for budget in budgets:
-            request_count += 1
-            if request_count > _EXTRACTION_MAX_REQUESTS:
-                raise RuntimeError("圆桌历史语义压缩达到请求上限，未生成完整投影")
             budget_error = _roundtable_input_budget_error(
                 level_prompt, payload, max_output_tokens=budget,
             )
             if budget_error:
                 last_error = RuntimeError(budget_error)
                 break
+            request_count += 1
+            if request_count > _EXTRACTION_MAX_REQUESTS:
+                raise RuntimeError("圆桌历史语义压缩达到请求上限，未生成完整投影")
+            if attempt_callback is not None:
+                attempt_callback("request")
             try:
                 raw, _meta = _call_raw_for_task(
                     agent, task_id, user_id,
@@ -2039,7 +2146,11 @@ def _compress_roundtable_history(
                 if seen != set(expected):
                     raise ValueError("压缩摘要遗漏来源")
                 return result
-            except (DeepSeekOutputTruncatedError, ValueError, TypeError) as exc:
+            except DeepSeekOutputTruncatedError as exc:
+                if attempt_callback is not None:
+                    attempt_callback("output_truncated")
+                last_error = exc
+            except (ValueError, TypeError) as exc:
                 last_error = exc
         if len(group) > 1:
             midpoint = len(group) // 2

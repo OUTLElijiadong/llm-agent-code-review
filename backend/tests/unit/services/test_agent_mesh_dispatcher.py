@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.agents.base import AgentResult
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
 from app.models.rbac import Role, UserRole
 from app.models.user import User
@@ -17,6 +18,31 @@ from app.services import agent_mesh_dispatcher, agent_mesh_service
 
 def test_orchestrator_is_a_protected_session_only_target():
     assert agent_mesh_dispatcher.dispatch_state("agent:orchestrator") == "session_only"
+
+
+@pytest.mark.parametrize("value", [-1, 10_000_001, True, "1", None])
+def test_mesh_line_offset_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="line_offset"):
+        agent_mesh_dispatcher._validated_line_offset(value)
+
+
+@pytest.mark.parametrize("value", [0, 1, 10_000_000])
+def test_mesh_line_offset_accepts_supported_values(value):
+    assert agent_mesh_dispatcher._validated_line_offset(value) == value
+
+
+@pytest.mark.parametrize("failure_kind", ["output_truncated", "coverage_incomplete"])
+def test_builtin_review_mesh_result_is_not_retryable_after_recovery_exhausted(failure_kind):
+    result = AgentResult(
+        success=False,
+        error="审查覆盖不完整",
+        failure_kind=failure_kind,
+    )
+
+    mesh_result = agent_mesh_dispatcher._as_mesh_result(result, action="代码审查")
+
+    assert mesh_result["status"] == "failed"
+    assert mesh_result["retryable"] is False
 
 
 def _factory(tmp_path):

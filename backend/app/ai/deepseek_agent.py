@@ -71,10 +71,13 @@ def _parse_completion_response(resp: httpx.Response) -> tuple[str, dict, str]:
     choice = choices[0]
     finish_reason = choice.get("finish_reason")
     if finish_reason == "length":
-        raise DeepSeekOutputTruncatedError(
+        error = DeepSeekOutputTruncatedError(
             "DeepSeek 输出被截断 (finish_reason=length)",
             finish_reason=finish_reason,
         )
+        error.usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        error.model_name = str(body.get("model") or "")
+        raise error
     if not isinstance(finish_reason, str) or not finish_reason.strip():
         raise DeepSeekResponseError("DeepSeek 响应缺少有效 finish_reason")
     if finish_reason != "stop":
@@ -354,6 +357,22 @@ class DeepSeekAgent:
                     content, usage, finish_reason = _parse_completion_response(resp)
                 except DeepSeekResponseError as exc:
                     exc.usage_log_ids = list(usage_log_ids)
+                    exc.meta = {
+                        "_usage_attribution": attribution_snapshot(),
+                        "_usage_log_ids": list(usage_log_ids),
+                        "_http_attempts": http_attempts,
+                        "model_tag": model_tag,
+                        "model_name": getattr(exc, "model_name", "") or self.model,
+                        "agent_label": agent_label,
+                        "prompt_tokens": usage_tokens(getattr(exc, "usage", {}), "prompt_tokens"),
+                        "completion_tokens": usage_tokens(getattr(exc, "usage", {}), "completion_tokens"),
+                        "total_tokens": usage_tokens(getattr(exc, "usage", {}), "total_tokens"),
+                        "duration_ms": duration_ms,
+                        "finish_reason": exc.finish_reason,
+                        "user_prompt": user_prompt,
+                        "response": "",
+                        "create_time": datetime.now(timezone.utc),
+                    }
                     raise
                 return content, {
                     "_usage_attribution": attribution_snapshot(),

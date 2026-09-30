@@ -275,7 +275,7 @@ class CatalogInvokeIn(StrictInputModel):
     language: str = Field(default="plaintext", max_length=40)
     file_name: str = Field(default="snippet.txt", max_length=255)
     rules: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
-    line_offset: int = Field(default=0, ge=0, le=10_000_000)
+    line_offset: int = Field(default=0, strict=True, ge=0, le=10_000_000)
     experience: str = Field(default="", max_length=12_000)
 
     @field_validator("code")

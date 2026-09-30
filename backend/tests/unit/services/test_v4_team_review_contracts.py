@@ -71,6 +71,24 @@ def test_code_review_valid_zero_and_invalid_issue_are_distinguished(monkeypatch)
     assert invalid["errors"][0]["code"] == "invalid_review_result"
 
 
+def test_irrecoverable_code_review_truncation_is_explicitly_non_retryable(monkeypatch):
+    reviewer = SimpleNamespace(review_code=Mock(return_value=AgentResult(
+        success=False,
+        error="代码审查覆盖不完整：原文件第 1 行仍被截断",
+        failure_kind="coverage_incomplete",
+        finish_reason="length",
+    )))
+    _orch(monkeypatch, review_code=reviewer.review_code)
+
+    result = dispatcher._runtime_handler(None, SimpleNamespace(id=3), "code_reviewer", {
+        "payload": {"code": "unusually_long_single_line()", "file_name": "review.py"},
+    })
+
+    assert result["status"] == "failed"
+    assert result["retryable"] is False
+    assert result["errors"][0]["code"] == "coverage_incomplete"
+
+
 def test_code_review_mixed_valid_and_invalid_issues_is_not_complete(monkeypatch):
     reviewer = Mock(return_value=AgentResult(success=True, data={
         "issues": [{"title": "已定位问题", "description": "真实问题"}, {"unexpected": "missing identity"}],

@@ -196,6 +196,11 @@ def test_catalog_source_preserves_whitespace_and_rejects_nested_control_characte
         CatalogInvokeIn(code="print(1)", rules=[{"name": "bad\x00rule"}])
 
 
+def test_catalog_invoke_rejects_boolean_line_offset_before_type_coercion() -> None:
+    with pytest.raises(ValidationError, match="line_offset"):
+        CatalogInvokeIn(code="print(1)", line_offset=True)
+
+
 def test_pentest_request_rejects_controls_and_undeclared_authorization_fields() -> None:
     with pytest.raises(ValidationError):
         PentestCreateIn(project_id=1, target_type="web", notes="scope\x00escape")

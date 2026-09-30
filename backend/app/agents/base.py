@@ -38,6 +38,7 @@ class AgentResult:
     finish_reason: str = ""
     usage_log_ids: list[int] = field(default_factory=list)
     http_attempts: Optional[int] = None
+    failed_usage_log_ids: list[int] = field(default_factory=list)
 
 
 class BaseAgent:

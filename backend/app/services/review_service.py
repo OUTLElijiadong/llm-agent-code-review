@@ -8,6 +8,7 @@ v2.2(2026-06-25): Agent 集成 + 双引擎漏洞识别
     - 多 Agent 独立感知后执行版本化、可审计的确定性证据聚合
 """
 import concurrent.futures
+import copy
 import hashlib
 import json
 import threading
@@ -1191,6 +1192,60 @@ def _log_sequential_call(
         None
     """
     # 优先路径:通过 BaseAgent._log_call() 写入,agent_label 自动填充为 self.name
+    failed_ids = list(getattr(result, "failed_usage_log_ids", []) or []) if result is not None else []
+    if failed_ids:
+        all_ids = list(getattr(result, "usage_log_ids", []) or [])
+        failed_set = set(failed_ids)
+        successful_ids = [item for item in all_ids if item not in failed_set]
+        meta = {
+            "_usage_log_ids": failed_ids,
+            "_http_attempts": getattr(result, "http_attempts", None),
+            "agent_label": agent_label,
+            "model_name": (getattr(result, "model", None) if result else None) or "",
+            "model_tag": (getattr(result, "model", None) if result else None) or "",
+            "user_prompt": "",
+            "response": "",
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+            "duration_ms": 0,
+            "create_time": datetime.now(timezone.utc),
+        }
+        if successful_ids and agent is not None and hasattr(agent, "_log_call"):
+            success_result = copy.copy(result)
+            success_result.usage_log_ids = successful_ids
+            success_result.failed_usage_log_ids = []
+            agent._log_call(
+                db,
+                task_id=task.id,
+                user_id=user.id,
+                file_id=code_file.id,
+                chunk_index=chunk_idx * 100 + agent_idx,
+                result=success_result,
+                status="success",
+            )
+        elif successful_ids:
+            DeepSeekAgent.log_deferred(
+                db,
+                task_id=task.id,
+                user_id=user.id,
+                file_id=code_file.id,
+                chunk_index=chunk_idx * 100 + agent_idx,
+                meta=dict(meta, _usage_log_ids=successful_ids),
+                status="success",
+            )
+        DeepSeekAgent.log_deferred(
+            db,
+            task_id=task.id,
+            user_id=user.id,
+            file_id=code_file.id,
+            chunk_index=chunk_idx * 100 + agent_idx,
+            meta=meta,
+            status="failed",
+            error=(error or getattr(result, "error", None) or "源码分片输出截断，覆盖不完整")[:500],
+        )
+        return
+
     if agent is not None and hasattr(agent, "_log_call"):
         try:
             agent._log_call(
@@ -1357,6 +1412,13 @@ def _review_chunk_collaborative(
                                    f"[{profile.name}] 发现 {len(parsed.issues)} 个问题",
                                    agent_code=target)
                 if agent_meta:
+                    for failed_meta in agent_meta.get("_failed_attempts", []):
+                        deferred_logs.append({
+                            "meta": failed_meta,
+                            "status": "failed",
+                            "error": "模型输出被截断，后续通过源码范围恢复完成",
+                            "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
+                        })
                     deferred_logs.append({
                         "meta": agent_meta,
                         "status": "success",
@@ -1372,6 +1434,13 @@ def _review_chunk_collaborative(
                 if agent_meta:
                     deferred_logs.append({
                         "meta": agent_meta,
+                        "status": "failed",
+                        "error": str(e)[:500],
+                        "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
+                    })
+                for failed_meta in getattr(e, "attempt_metas", []) or []:
+                    deferred_logs.append({
+                        "meta": failed_meta,
                         "status": "failed",
                         "error": str(e)[:500],
                         "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
@@ -1858,48 +1927,202 @@ def _call_single_agent(
         tuple: (raw_response_text, meta_dict)
     """
     agent = DeepSeekAgent(api_config=api_config)
-    # 自定义画像会把已发布 Skill 一并注入系统提示。即便源码已经分片，
-    # Skill、历史经验和规则仍可能把整次调用挤出窗口；不能让供应商隐式
-    # 截取尾部后把此分片标记为审查成功。
     output_budget = max(8192, int(profile.max_tokens))
     context_cache: dict[tuple[str, str, int], str] = {}
-    system_prompt, user_prompt, _estimated_input = _bounded_single_agent_prompts(
-        agent, profile, code, language, file_name, rules, line_offset,
-        experience_section, context_section, output_budget, context_cache,
-    )
-    # v2.2: agent_label 使用真实 Agent name,便于 AiCallLog 归因到具体 Agent
     agent_label = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
-    try:
-        return agent.call_raw(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            agent_label=agent_label,
-            temperature=profile.temperature,
-            max_tokens=profile.max_tokens,
-        )
-    except DeepSeekOutputTruncatedError:
-        # 输出预算兜底:推理型模型的 reasoning 与正文共享 completion 预算,
-        # 画像预算仍可能不足;截断时按翻倍预算重试一次,再失败才按覆盖不完整上报。
-        from app.ai.deepseek_agent import _clamp_max_tokens
+    original_lines = code.splitlines(keepends=True)
+    if not original_lines:
+        original_lines = [code]
+    pending = [(0, len(original_lines), 0)]
+    findings: list[dict] = []
+    summaries: list[str] = []
+    successful_meta: list[dict] = []
+    failed_attempt_meta: list[dict] = []
+    recovered = False
+    processed_ranges: list[tuple[int, int]] = []
+    call_count = 0
 
-        ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
-        retry_budget = min(max(profile.max_tokens * 2, 8192), ceiling)
-        if retry_budget <= profile.max_tokens:
+    def raise_incomplete(message: str, cause: Optional[Exception] = None) -> None:
+        error = DeepSeekOutputTruncatedError(message, finish_reason="length")
+        error.attempt_metas = list(failed_attempt_meta)
+        if cause is not None:
+            raise error from cause
+        raise error
+
+    def combined_meta(successful: list[dict]) -> dict:
+        meta = dict(successful[-1]) if successful else {}
+        all_attempts = successful + failed_attempt_meta
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens", "duration_ms"):
+            values = [item.get(field) for item in all_attempts if isinstance(item.get(field), int)]
+            meta[field] = sum(values) if values else None
+        meta["_usage_log_ids"] = [
+            int(log_id)
+            for item in successful
+            for log_id in item.get("_usage_log_ids", [])
+            if isinstance(log_id, int)
+        ]
+        meta["_failed_attempts"] = list(failed_attempt_meta)
+        meta["_http_attempts"] = sum(int(item.get("_http_attempts") or 0) for item in all_attempts)
+        return meta
+
+    while pending:
+        start, end, depth = pending.pop(0)
+        source = "".join(original_lines[start:end])
+        source_context = context_section
+        if recovered or start != 0 or end != len(original_lines):
+            source_context = (
+                f"完整源码上下文摘要（符号、继承和调用关系）：\n{context_section or '当前没有可用的符号索引'}\n\n"
+                f"本次负责原始分片内第 {start + 1}-{end} 行；源码行偏移为 {line_offset + start}。"
+                "只输出该行范围内的问题，行号使用当前源码分片相对位置。"
+            )
+        budget = int(profile.max_tokens)
+
+        def invoke(source_code: str, source_offset: int, context: str, max_tokens: int):
+            system_prompt, user_prompt, _estimated_input = _bounded_single_agent_prompts(
+                agent, profile, source_code, language, file_name, rules, source_offset,
+                experience_section, context, max(output_budget, max_tokens), context_cache,
+            )
+            return agent.call_raw(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                agent_label=agent_label,
+                temperature=profile.temperature,
+                max_tokens=max_tokens,
+            )
+
+        call_count += 1
+        if call_count > 32:
+            raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整")
+        try:
+            raw, meta = invoke(source, line_offset + start, source_context, budget)
+        except DeepSeekOutputTruncatedError as first_error:
+            if isinstance(getattr(first_error, "meta", None), dict):
+                failed_attempt_meta.append(first_error.meta)
+            from app.ai.deepseek_agent import _clamp_max_tokens
+
+            ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
+            retry_budget = min(max(profile.max_tokens * 2, 8192), ceiling)
+            retry_error: Optional[DeepSeekOutputTruncatedError] = first_error
+            if retry_budget > budget:
+                logger.warning(
+                    f"[review] {profile.code} 第 {line_offset + start + 1}-{line_offset + end} 行输出截断，"
+                    f"按 {budget}→{retry_budget} 提高预算后重试"
+                )
+                try:
+                    call_count += 1
+                    if call_count > 32:
+                        raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整")
+                    raw, meta = invoke(source, line_offset + start, source_context, retry_budget)
+                    retry_error = None
+                except DeepSeekOutputTruncatedError as exc:
+                    if isinstance(getattr(exc, "meta", None), dict):
+                        failed_attempt_meta.append(exc.meta)
+                    retry_error = exc
+            if retry_error is not None:
+                if end - start <= 1 or depth >= 8:
+                    raise_incomplete(
+                        f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行仍被截断，覆盖不完整",
+                        retry_error,
+                    )
+                midpoint = start + (end - start) // 2
+                recovered = True
+                pending[0:0] = [(start, midpoint, depth + 1), (midpoint, end, depth + 1)]
+                continue
+
+        if not recovered and not pending:
+            return raw, combined_meta([meta]) if failed_attempt_meta else meta
+
+        try:
+            parsed = parse(raw)
+            if parsed.invalid_issue_count:
+                raise ValueError(
+                    f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行含无效问题，覆盖不完整"
+                )
+            segment_line_count = len(source.splitlines())
+            for issue in parsed.issues:
+                if issue.line_number == 0 and start > 0:
+                    continue
+                if issue.line_number < 0 or issue.line_number > segment_line_count:
+                    raise ValueError(
+                        f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行结果行号超出焦点范围"
+                    )
+                if issue.line_number == 0:
+                    if issue.end_line not in (None, 0):
+                        raise ValueError("代码审查文件级问题的结束行必须为空或 0")
+                elif issue.end_line is not None and not issue.line_number <= issue.end_line <= segment_line_count:
+                    raise ValueError(
+                        f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行结果结束行超出焦点范围"
+                    )
+                item = {
+                    "line_number": issue.line_number + (start if issue.line_number else 0),
+                    "end_line": issue.end_line + start if issue.end_line else None,
+                    "issue_type": issue.issue_type,
+                    "severity": issue.severity,
+                    "title": issue.title,
+                    "description": issue.description,
+                    "suggestion": issue.suggestion,
+                    "fixed_code": issue.fixed_code,
+                    "owasp": issue.owasp,
+                    "cwe": issue.cwe,
+                    "evidence": issue.evidence,
+                    "exploit_scenario": issue.exploit_scenario,
+                    "references": issue.references,
+                    "confidence": issue.confidence,
+                    "cvss_score": issue.cvss_score,
+                    "cvss_vector": issue.cvss_vector,
+                    "cvss_version": issue.cvss_version,
+                    "cvss_source": issue.cvss_source,
+                    "compliance_mapping": issue.compliance_mapping,
+                    "remediation": issue.remediation,
+                }
+                findings.append(item)
+        except Exception as exc:
+            failed_attempt_meta.append(meta)
+            exc.attempt_metas = list(failed_attempt_meta)
             raise
-        system_prompt, user_prompt, _estimated_input = _bounded_single_agent_prompts(
-            agent, profile, code, language, file_name, rules, line_offset,
-            experience_section, context_section, retry_budget, context_cache,
+        summaries.append(parsed.summary)
+        successful_meta.append(meta)
+        processed_ranges.append((start + 1, end))
+
+    from app.ai.scoring import compute_score
+
+    cursor = 1
+    for range_start, range_end in sorted(processed_ranges):
+        if range_start != cursor:
+            raise DeepSeekOutputTruncatedError(
+                "代码审查恢复结果存在未覆盖源码范围，审查覆盖不完整",
+                finish_reason="length",
+            )
+        cursor = range_end + 1
+    if cursor != len(original_lines) + 1:
+        raise DeepSeekOutputTruncatedError(
+            "代码审查恢复结果未覆盖完整源码，审查覆盖不完整",
+            finish_reason="length",
         )
-        logger.warning(
-            f"[review] {profile.code} 输出被截断,按 {profile.max_tokens}→{retry_budget} 提高输出预算重试一次"
-        )
-        return agent.call_raw(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            agent_label=agent_label,
-            temperature=profile.temperature,
-            max_tokens=retry_budget,
-        )
+
+    severity_counts = {severity: 0 for severity in ("严重", "高", "中", "低")}
+    for finding in findings:
+        severity = finding.get("severity")
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+    context_scope = (
+        "跨片段关系仅参考可用的符号/调用上下文摘要"
+        if context_section.strip()
+        else "没有可用的符号/调用上下文摘要，跨片段关系未验证"
+    )
+    combined = {
+        "summary": (
+            f"源码行范围完整覆盖；因模型输出上限将 {len(original_lines)} 行拆为 "
+            f"{len(processed_ranges)} 个焦点范围；{context_scope}，"
+            f"合并发现 {len(findings)} 项。"
+        ),
+        "score": compute_score(severity_counts),
+        "issues": findings,
+    }
+    metadata = combined_meta(successful_meta)
+    metadata["user_prompt"] = "[审查源码按范围分片；上下文仅保留可用符号/调用摘要]"
+    metadata["response"] = "[完整 JSON 分片结果已合并]"
+    return json.dumps(combined, ensure_ascii=False), metadata
 
 
 def _absolute_line(line_number: Optional[int], chunk_start_line: int) -> int:

@@ -184,7 +184,7 @@ class ReviewCodeArguments(FixedToolArguments):
     rules: str = Field(description="审查规则文本")
     language: str = Field(description="编程语言")
     file_name: str = Field(default="", description="文件名")
-    line_offset: int = Field(default=0, description="行号偏移")
+    line_offset: int = Field(default=0, ge=0, le=10_000_000, description="行号偏移")
 
 
 class GenerateIssuePromptArguments(FixedToolArguments):
