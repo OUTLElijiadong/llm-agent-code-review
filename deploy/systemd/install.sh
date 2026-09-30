@@ -11,7 +11,7 @@ usage() {
   cat <<'USAGE'
 用法: ./install.sh [--apply] [--deploy-dir DIR] [--unit-dir DIR]
 
-默认 dry-run；--apply 时需要 root，并会 daemon-reload、enable --now Prism 运维 timer。
+默认 dry-run；--apply 时需要 root，并会安装单元、重启运维执行器、启用 Prism 运维 timer。
 USAGE
 }
 
@@ -78,7 +78,7 @@ if [[ "$apply" != "1" ]]; then
 fi
 
 [[ "$EUID" -eq 0 ]] || { printf '%s\n' '--apply 必须以 root 执行' >&2; exit 1; }
-for command_name in cut getent groupadd install mktemp sed systemctl; do
+for command_name in cp cut getent groupadd install mktemp readlink rm sed systemctl; do
   command -v "$command_name" >/dev/null 2>&1 || { printf '缺少命令: %s\n' "$command_name" >&2; exit 1; }
 done
 if ! getent group prism-ops >/dev/null 2>&1; then
@@ -90,22 +90,91 @@ fi
 }
 mkdir -p "$unit_dir"
 temp_dir="$(mktemp -d)"
-# 清理临时渲染目录。
+unit_files=("${services[@]}" "${timers[@]}")
+backup_dir="$temp_dir/previous-units"
+mkdir -p "$backup_dir"
+units_changed=0
+executor_was_active=0
+if systemctl is-active --quiet prism-ops-executor.service; then
+  executor_was_active=1
+fi
+for unit in "${unit_files[@]}"; do
+  if [[ -f "$unit_dir/$unit" ]]; then
+    cp -a "$unit_dir/$unit" "$backup_dir/$unit"
+  else
+    : > "$backup_dir/missing-$unit"
+  fi
+done
+
+# 安装失败时恢复旧 unit，并将执行器恢复到变更前的运行状态。
 # 参数: 无。
-# 返回: 始终返回 0。
+# 返回: 恢复旧状态；保留触发失败的原始退出码。
 cleanup() {
+  local rc=$?
+  if [[ "$rc" != 0 && "$units_changed" == 1 ]]; then
+    trap - EXIT
+    set +e
+    for unit in "${unit_files[@]}"; do
+      if [[ -f "$backup_dir/$unit" ]]; then
+        install -m 0644 "$backup_dir/$unit" "$unit_dir/$unit"
+      elif [[ -f "$backup_dir/missing-$unit" ]]; then
+        rm -f "$unit_dir/$unit"
+      fi
+    done
+    systemctl daemon-reload
+    if [[ "$executor_was_active" == 1 ]]; then
+      systemctl restart prism-ops-executor.service
+    else
+      systemctl stop prism-ops-executor.service
+    fi
+    printf '%s\n' 'systemd 单元安装失败，已恢复变更前的 unit 和执行器状态。' >&2
+    set -e
+  fi
   rm -rf "$temp_dir"
+  return "$rc"
 }
 trap cleanup EXIT
 
 for service in "${services[@]}"; do
   render_service "$service.in" "$temp_dir/$service"
+  units_changed=1
   install -m 0644 "$temp_dir/$service" "$unit_dir/$service"
 done
 for timer in "${timers[@]}"; do
+  units_changed=1
   install -m 0644 "$timer" "$unit_dir/$timer"
 done
 systemctl daemon-reload
-systemctl enable --now prism-ops-executor.service
+systemctl enable prism-ops-executor.service
+systemctl restart prism-ops-executor.service
+systemctl is-active --quiet prism-ops-executor.service || {
+  printf '%s\n' 'prism-ops-executor.service 重启后未处于 active 状态。' >&2
+  exit 1
+}
+working_directory="$(systemctl show prism-ops-executor.service --property=WorkingDirectory --value)"
+environment_files="$(systemctl show prism-ops-executor.service --property=EnvironmentFiles --value)"
+exec_start="$(systemctl show prism-ops-executor.service --property=ExecStart --value)"
+main_pid="$(systemctl show prism-ops-executor.service --property=MainPID --value)"
+[[ "$working_directory" == "$deploy_dir" ]] || {
+  printf '执行器 WorkingDirectory 不匹配：%s\n' "$working_directory" >&2
+  exit 1
+}
+[[ "$environment_files" == *"$deploy_dir/.env"* ]] || {
+  printf '执行器 EnvironmentFile 未指向当前发布目录：%s\n' "$environment_files" >&2
+  exit 1
+}
+[[ "$exec_start" == *"$deploy_dir/prism_ops_executor.py"* ]] || {
+  printf '执行器 ExecStart 未指向当前发布目录：%s\n' "$exec_start" >&2
+  exit 1
+}
+[[ "$main_pid" =~ ^[1-9][0-9]*$ ]] || {
+  printf '执行器 MainPID 无效：%s\n' "$main_pid" >&2
+  exit 1
+}
+process_directory="$(readlink -f "/proc/$main_pid/cwd")"
+[[ "$process_directory" == "$deploy_dir" ]] || {
+  printf '执行器进程 cwd 不匹配：%s\n' "$process_directory" >&2
+  exit 1
+}
 systemctl enable --now "${timers[@]}"
 systemctl list-timers --all 'prism-*'

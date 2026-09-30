@@ -299,6 +299,30 @@ if calibrate_default_env_file "$target_sha" "$desired_backend" "$desired_fronten
 else
   log_warn "默认 Compose 环境(.env)校准失败;手工校准前 ops-check 将持续报告发布环境漂移"
 fi
+# 正式发布树是 systemd 运维任务的唯一状态上下文。发布成功后同步全部
+# unit 到本树并显式重启执行器，避免它继续读取旧 checkout 的发布账本。
+if [[ "$EUID" == 0 && "$(uname -s)" == "Linux" && -d /run/systemd/system ]]; then
+  deploy_stage="systemd_release_binding"
+  ./systemd/install.sh --apply --deploy-dir "$(pwd -P)" \
+    || deploy_fatal "systemd 运维单元未能绑定到当前发布树"
+  deploy_stage="post_release_ops_check"
+  if ! ops_check_output="$(./ops-check.sh)"; then
+    deploy_fatal "systemd 重绑后的生产巡检仍有阻断项"
+  fi
+  if ! printf '%s' "$ops_check_output" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+checks = payload.get("checks", {})
+release = checks.get("release", {})
+if not release.get("ok") or payload.get("status") == "error":
+    raise SystemExit(1)
+'; then
+    deploy_fatal "systemd 重绑后的发布账本检查未通过"
+  fi
+  log_info "运维执行器已绑定当前发布树，巡检发布账本通过"
+else
+  log_info "当前环境未以 systemd root 部署；跳过 systemd 发布树重绑"
+fi
 # 提交发布账本后仅剩信息展示，不能因 compose ps 失败撤销已验收版本。
 failure_handled=1
 trap - ERR
