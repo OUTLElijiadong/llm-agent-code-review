@@ -13,11 +13,12 @@ AutoSurface 的公网无认证暴露已通过主机 systemd drop-in 修复为 lo
 - systemd 运维执行器的 `WorkingDirectory`、`ExecStart`、`EnvironmentFile`、`/proc/<pid>/cwd` 均指向新发布目录。部署即时巡检和发布后连续两次周期巡检通过发布账本检查；两次周期服务退出码均为 0。
 - 强制 CSP 已生效，Report-Only 头消失；公网 `Server` 只显示 `nginx`，未暴露版本。TLS 证书有效至 2026-12-29，Certbot timer enabled/active。
 - AutoSurface `127.0.0.1:8621` 仍能本机健康访问；外网连接连续 3 次拒绝。未调用其破坏性端点。
+- 按用户批准的 dry-run 清单执行生产 `cleanup.sh --apply` 后，Docker builder prune 回收 543.7 MB、镜像 prune 回收 0B；没有删除业务数据、数据库卷、证书或备份。随后 `/healthz`、`/readyz` 和首页各 3 次均为 200，版本/SHA 不变，前后端仍 healthy，AutoSurface 公网端口仍拒绝连接。
 - 前端 Vitest 129 文件/1483 项、ESLint、Vue 类型检查、Vite 构建、部署 Shell/运维测试均通过；桌面与移动审批表 Playwright 4/4 通过。后端全量此前复测为 5496 passed、5 skipped、5 warnings。
 - 普通 Safari 管理员会话真实打开自进化中心并点击到审批中心。全局 LLM 危急审批与历史高风险审批没有被改动。
 
 ## 未完成范围
 
-生产根盘使用率仍为 87%，ops-check 因超过 85% 告警线保持 `degraded`，但未到 95% 临界线；发布账本、服务、备份、Alembic 和 HTTPS 检查均通过。已生成 cleanup dry-run 候选清单，没有执行 `--apply` 或删除镜像/缓存。
+生产根盘清理后仍为 87%（156G/180G，约 25G 可用），ops-check 因超过 85% 告警线保持 `degraded`，但未到 95% 临界线；发布账本、服务、备份、Alembic 和 HTTPS 检查均通过。下一步需只读确定主要空间来源，再另行决定是否清理日志、上传或备份；这些内容不包含在本次批准范围内。
 
 生产真实浏览器本轮只验收管理员自进化与审批中心。R2–R10 的所有页面和审查员/普通账号逐项点击矩阵没有全部重跑；本地模拟 API 的 Playwright 结果不等于生产全角色验收。详见 [验收记录](./ACCEPTANCE_外部审查问题核验修复.md) 和 [待办](./TODO_外部审查问题核验修复.md)。

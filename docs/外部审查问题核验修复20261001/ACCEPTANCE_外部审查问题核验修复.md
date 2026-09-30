@@ -75,11 +75,12 @@
 - 正式发布前生成数据库备份 `code_review_20260930T195323Z_310ea1a80954.sql.gz`（约 450 MB），隔离恢复验证通过，包含 103 张表，Alembic 为 `058_roundtable_sessions`。
 - 发布后 Backend、Frontend、MySQL、Redis、ClamAV 均 healthy；`/healthz` 与 `/readyz` 各重复 3 次均为 HTTP 200，正文均报告版本 `4.0.35` 和 release SHA `310ea1a…`。HTTPS 首页重复 3 次为 200。
 - `prism-ops-executor.service` 已重启到新发布目录；`WorkingDirectory`、`ExecStart`、`EnvironmentFile` 和 `/proc/<pid>/cwd` 均指向 `/opt/prism-releases/310ea1a8095428d670c0404a05b4dc643ad0027e/deploy`。发布脚本即时 ops-check 的 release ledger 检查通过；发布后连续两次周期 `prism-ops-check.service`（`04:03:21`、`04:08:22 CST`）均退出码 0，确认旧 checkout 导致巡检失败的问题已复现、修复并经重复周期复测。
-- 当前 ops-check 为 `degraded`，唯一降级项是根盘使用率 87%（告警线 85%，临界线 95%）；容器、发布账本、备份校验、Alembic 和 HTTPS 检查通过，`blocking_checks=[]`。已运行 `cleanup.sh` 默认 dry-run，显示旧 Backend/Frontend 镜像标签和超过 168 小时的 builder cache 清理候选；未执行 `--apply`，也未删除镜像、缓存、备份或数据卷。
+- 当前 ops-check 为 `degraded`，唯一降级项是根盘使用率 87%（告警线 85%，临界线 95%）；容器、发布账本、备份校验、Alembic 和 HTTPS 检查通过，`blocking_checks=[]`。先运行 `cleanup.sh` dry-run 核对候选，再按用户明确批准的同一清单执行 `--apply`：清理脚本保留当前/上一 release、最近两个未保护的 Backend/Frontend 镜像和沙箱镜像；只移除了 dry-run 列出的旧 release 镜像 tag，并清理超过 168 小时的 Docker builder cache；没有删除 release 状态文件、数据库卷、证书、备份或业务数据。Docker builder prune 报告回收 `543.7MB`，`docker image prune` 报告 `0B`。清理后根盘从 `157G/24G` 变为 `156G/25G`（180G 总量），`df` 仍显示 `87%`，因此仍高于 85% 告警线，磁盘降级未解除；没有扩大清理范围。
+- 清理后手动触发一次 `prism-ops-check.service`：`Result=success`、退出码 0，巡检 JSON 为 `degraded/can_continue=true`，`blocking_checks=[]`。该次结果只因磁盘 `87% > 85%` 保持降级；release、容器（MySQL/Redis/ClamAV/Backend/Frontend）、备份 gzip/checksum、Alembic 和 HTTPS 均为 `ok`，内存使用率 42%。
 
 ### CSP、版本和证书
 
-- 外网对 `/healthz`、`/readyz` 和 `/` 各重复 3 次均为 HTTP 200。响应 `Server` 为 `nginx`，不含版本号；响应包含强制执行的 `Content-Security-Policy`，不再有 `Content-Security-Policy-Report-Only`。实际头部的脚本限制为 `script-src 'self'; script-src-attr 'none'`，WebSocket 来源仅为 `wss://lijiadong.cn` 和 `wss://www.lijiadong.cn`；`style-src 'unsafe-inline'` 仍保留供 Vue 动态样式使用。
+- 清理后外网对 `/healthz`、`/readyz` 和 `/` 各重复 3 次均为 HTTP 200；健康响应仍报告版本 `4.0.35`、SHA `310ea1a8095428d670c0404a05b4dc643ad0027e`，就绪响应为 `ready`。Backend 和 Frontend 容器仍为 healthy，MySQL、Redis、ClamAV 状态正常；AutoSurface 本机 `127.0.0.1:8621/health` 返回 200，而公网 `81.70.251.90:8621` 连接仍被拒绝。清理没有造成已观察服务中断。公网 `Server` 为 `nginx`，不含版本号；响应包含强制执行的 `Content-Security-Policy`，不再有 `Content-Security-Policy-Report-Only`。实际头部的脚本限制为 `script-src 'self'; script-src-attr 'none'`，WebSocket 来源仅为 `wss://lijiadong.cn` 和 `wss://www.lijiadong.cn`；`style-src 'unsafe-inline'` 仍保留供 Vue 动态样式使用。
 - 三次 health 响应均给出相同的版本和 SHA；TLS 证书验证成功，到期时间为 `2026-12-29 17:45:44 GMT`。`prism-cert-renew.timer` enabled/active，下一次执行为 `2026-10-02 03:20:15 CST`。
 - SSH 版本/回补核验沿用本轮已记录的 OpenCloudOS RPM、密钥认证状态；没有为本次前端发布额外改动 SSH 配置。公网 8888 仍是用户明确要求暂不调整的 BT-Panel 监听，本轮未改安全组或面板。
 
