@@ -77,6 +77,7 @@
 - `prism-ops-executor.service` 已重启到新发布目录；`WorkingDirectory`、`ExecStart`、`EnvironmentFile` 和 `/proc/<pid>/cwd` 均指向 `/opt/prism-releases/310ea1a8095428d670c0404a05b4dc643ad0027e/deploy`。发布脚本即时 ops-check 的 release ledger 检查通过；发布后连续两次周期 `prism-ops-check.service`（`04:03:21`、`04:08:22 CST`）均退出码 0，确认旧 checkout 导致巡检失败的问题已复现、修复并经重复周期复测。
 - 当前 ops-check 为 `degraded`，唯一降级项是根盘使用率 87%（告警线 85%，临界线 95%）；容器、发布账本、备份校验、Alembic 和 HTTPS 检查通过，`blocking_checks=[]`。先运行 `cleanup.sh` dry-run 核对候选，再按用户明确批准的同一清单执行 `--apply`：清理脚本保留当前/上一 release、最近两个未保护的 Backend/Frontend 镜像和沙箱镜像；只移除了 dry-run 列出的旧 release 镜像 tag，并清理超过 168 小时的 Docker builder cache；没有删除 release 状态文件、数据库卷、证书、备份或业务数据。Docker builder prune 报告回收 `543.7MB`，`docker image prune` 报告 `0B`。清理后根盘从 `157G/24G` 变为 `156G/25G`（180G 总量），`df` 仍显示 `87%`，因此仍高于 85% 告警线，磁盘降级未解除；没有扩大清理范围。
 - 清理后手动触发一次 `prism-ops-check.service`：`Result=success`、退出码 0，巡检 JSON 为 `degraded/can_continue=true`，`blocking_checks=[]`。该次结果只因磁盘 `87% > 85%` 保持降级；release、容器（MySQL/Redis/ClamAV/Backend/Frontend）、备份 gzip/checksum、Alembic 和 HTTPS 均为 `ok`，内存使用率 42%。
+- 另做只读空间盘点：`docker system df` 报告 Images `14.42GB`（可回收估计 `12.57GB`）、Build Cache `16.48GB`（Docker 总体可回收估计 `16.48GB`），journal 占用约 `3.5G`。此视图不提供与本次 `until=168h` 相同的缓存年龄分组，也不能证明镜像均不属于其他保留需求；没有对这些剩余项执行更宽范围 prune 或 journal 清理。根目录 `du -x --max-depth=1` 在 25 秒限制内未完成，无法据此归因 8GB/日增长来源。
 
 ### CSP、版本和证书
 
