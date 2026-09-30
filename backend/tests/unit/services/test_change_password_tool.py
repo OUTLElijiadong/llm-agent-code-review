@@ -44,24 +44,24 @@ def _bare_orchestrator() -> Orchestrator:
 
 
 def _change_password_arguments() -> dict[str, str]:
-    """返回满足长度约束的测试参数。"""
-    return {"old_password": "old-pass-1", "new_password": "new-pass-1"}
+    """返回满足当前策略的测试参数。"""
+    return {"old_password": "old-pass-1", "new_password": "a long memorable new passphrase"}
 
 
 @pytest.mark.parametrize(
     ("arguments", "reason"),
     [
-        ({"old_password": "abcde", "new_password": "new-pass-1"}, "过短旧密码"),
-        ({"old_password": "old-pass-1", "new_password": "abcde"}, "过短新密码"),
+        ({"old_password": "abcde", "new_password": "a long memorable new passphrase"}, "过短旧密码"),
+        ({"old_password": "old-pass-1", "new_password": "short-pass"}, "过短新密码"),
         ({"old_password": "old-pass-1"}, "缺失新密码"),
-        ({"new_password": "new-pass-1"}, "缺失旧密码"),
+        ({"new_password": "a long memorable new passphrase"}, "缺失旧密码"),
         ({}, "全部缺失"),
-        ({"old_password": "old-pass-1", "new_password": "x" * 33}, "超长新密码"),
-        ({"old_password": "x" * 33, "new_password": "new-pass-1"}, "超长旧密码"),
+        ({"old_password": "old-pass-1", "new_password": "x" * 65}, "超长新密码"),
+        ({"old_password": "x" * 65, "new_password": "a long memorable new passphrase"}, "超长旧密码"),
     ],
 )
 def test_change_own_password_arguments_reject_short_missing_or_long(arguments: dict[str, str], reason: str) -> None:
-    """修改自己密码的工具参数必须严格限制为两个 6-32 位密码。"""
+    """新密码需要至少 15 位，旧密码保持对历史凭证的兼容范围。"""
     del reason
     with pytest.raises(FixedToolArgumentError):
         validate_fixed_tool_arguments("change_own_password", arguments)
@@ -78,9 +78,9 @@ def test_change_own_password_arguments_accept_normal_and_is_registered() -> None
     schema = ChangeOwnPasswordArguments.model_json_schema()
     assert set(schema["required"]) == {"old_password", "new_password"}
     assert schema["properties"]["old_password"]["minLength"] == 6
-    assert schema["properties"]["old_password"]["maxLength"] == 32
-    assert schema["properties"]["new_password"]["minLength"] == 6
-    assert schema["properties"]["new_password"]["maxLength"] == 32
+    assert schema["properties"]["old_password"]["maxLength"] == 64
+    assert schema["properties"]["new_password"]["minLength"] == 15
+    assert schema["properties"]["new_password"]["maxLength"] == 64
 
 
 def test_change_own_password_requires_injected_context(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,7 +89,7 @@ def test_change_own_password_requires_injected_context(monkeypatch: pytest.Monke
     change_password = MagicMock()
     monkeypatch.setattr(auth_service_module, "change_password", change_password)
 
-    result = orch.change_own_password("old-pass-1", "new-pass-1")
+    result = orch.change_own_password("old-pass-1", "a long memorable new passphrase")
 
     assert result.success is False
     assert "DB 或用户上下文未注入" in (result.error or "")
@@ -110,7 +110,7 @@ def test_change_own_password_success_calls_auth_service_without_leaking_password
 
     result = orch.change_own_password(
         "old-pass-1",
-        "new-pass-1",
+        "a long memorable new passphrase",
         ctx=AgentContext(user_id=17),
     )
 
@@ -118,8 +118,8 @@ def test_change_own_password_success_calls_auth_service_without_leaking_password
     assert result.data == {"success": True, "message": "密码已修改，请重新登录"}
     assert result.error is None
     assert "old-pass-1" not in json.dumps(result.__dict__, default=str)
-    assert "new-pass-1" not in json.dumps(result.__dict__, default=str)
-    change_password.assert_called_once_with(db, user, "old-pass-1", "new-pass-1")
+    assert "a long memorable new passphrase" not in json.dumps(result.__dict__, default=str)
+    change_password.assert_called_once_with(db, user, "old-pass-1", "a long memorable new passphrase")
 
 
 @pytest.mark.parametrize(
@@ -141,12 +141,12 @@ def test_change_own_password_failure_returns_safe_error(
     change_password = MagicMock(side_effect=error)
     monkeypatch.setattr(orchestrator_module.auth_service, "change_password", change_password)
 
-    result = orch.change_own_password("old-pass-1", "new-pass-1")
+    result = orch.change_own_password("old-pass-1", "a long memorable new passphrase")
 
     assert result.success is False
     assert expected_fragment in (result.error or "")
     assert "old-pass-1" not in json.dumps(result.__dict__, default=str)
-    assert "new-pass-1" not in json.dumps(result.__dict__, default=str)
+    assert "a long memorable new passphrase" not in json.dumps(result.__dict__, default=str)
     change_password.assert_called_once()
 
 
@@ -165,7 +165,7 @@ def test_persisted_and_event_arguments_redact_both_password_fields() -> None:
     serialized = json.dumps(persisted, ensure_ascii=False, default=str)
 
     assert "old-pass-1" not in serialized
-    assert "new-pass-1" not in serialized
+    assert "a long memorable new passphrase" not in serialized
     assert persisted["old_password"].startswith("[REDACTED]:hmac-sha256:")
     assert persisted["new_password"].startswith("[REDACTED]:hmac-sha256:")
 
@@ -181,7 +181,7 @@ def test_persisted_and_event_arguments_redact_both_password_fields() -> None:
     )
     persisted_call = PrismToolExecutor._persisted_arguments(call)
     assert "old-pass-1" not in json.dumps(persisted_call, ensure_ascii=False, default=str)
-    assert "new-pass-1" not in json.dumps(persisted_call, ensure_ascii=False, default=str)
+    assert "a long memorable new passphrase" not in json.dumps(persisted_call, ensure_ascii=False, default=str)
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_prism_executor_requires_approval_and_persists_redacted_arguments(
     approval = db.query(ApprovalItem).one()
     approval_payload = json.dumps(approval.request_json or "{}", ensure_ascii=False)
     assert "old-pass-1" not in approval_payload
-    assert "new-pass-1" not in approval_payload
+    assert "a long memorable new passphrase" not in approval_payload
     assert "[REDACTED]" in approval_payload
 
     completed = await executor.execute(call, approved=True)
@@ -238,5 +238,5 @@ async def test_prism_executor_requires_approval_and_persists_redacted_arguments(
     )
     execution_row = db.query(AgentToolExecution).one()
     assert "old-pass-1" not in (execution_row.arguments_json or "")
-    assert "new-pass-1" not in (execution_row.arguments_json or "")
+    assert "a long memorable new passphrase" not in (execution_row.arguments_json or "")
     assert "[REDACTED]" in (execution_row.arguments_json or "")

@@ -1,5 +1,10 @@
 const rawVersion = (import.meta.env.VITE_APP_VERSION || '3.8.1').trim().replace(/^v/i, '')
+const rawBuildTime = (import.meta.env.VITE_APP_BUILD_TIME || '').trim()
 
 export const APP_VERSION = rawVersion
 export const APP_RELEASE_SHA = (import.meta.env.VITE_APP_RELEASE_SHA || 'local').trim()
 export const APP_DISPLAY_VERSION = `v${rawVersion.replace(/\.0$/, '')}`
+export const APP_BUILD_TIME = rawBuildTime
+export const APP_BUILD_TIME_DISPLAY = rawBuildTime
+  ? rawBuildTime.replace('T', ' ').replace(/Z$/, ' UTC')
+  : '构建时间未知'

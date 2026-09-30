@@ -32,6 +32,12 @@ docker run --rm \
   certbot/certbot renew --webroot -w /var/www/certbot --quiet
 
 # 让 nginx 重新加载新证书（reload 不断连接；失败则兜底重启容器）
-docker exec cr_frontend nginx -s reload 2>/dev/null \
-  || docker restart cr_frontend >/dev/null 2>&1 || true
+if docker exec cr_frontend nginx -s reload 2>/dev/null; then
+  echo "[$(date '+%F %T')] Nginx 已平滑加载续期状态。"
+elif docker restart cr_frontend >/dev/null 2>&1; then
+  echo "[$(date '+%F %T')] Nginx reload 失败，Frontend 容器已重启以加载续期状态。"
+else
+  echo "[$(date '+%F %T')] 证书续期检查完成，但 Nginx reload 和容器重启均失败。" >&2
+  exit 1
+fi
 echo "[$(date '+%F %T')] 续期检查完成。"

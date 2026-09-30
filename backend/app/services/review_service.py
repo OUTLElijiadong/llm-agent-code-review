@@ -23,6 +23,8 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, BaseAgent
+from app.agents.context_budget import serialized_chat_input_bytes
+from app.agents.contracts import compose_system_prompt
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
 from app.agents.registry import AgentRegistry
@@ -886,6 +888,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     # 自定义 Agent 也必须进入协同执行器；即使内置画像被治理停用，单个自定义
     # Agent 仍应获得一次独立调用，而不是被静态 Agent 注册表路径吞掉。
     use_collab = len(profiles) >= 2 or any(profile.is_custom for profile in profiles)
+    prompt_context_cache: dict[tuple[str, str, int], str] = {}
 
     _check_cancelled(db, task, execution_token, lock=True)
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
@@ -920,6 +923,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 chunk_findings = _review_chunk_sequential(
                     db, api_config, task, code_file, rules, user,
                     profiles, idx, chunk, experience_section=experience_section,
+                    prompt_context_cache=prompt_context_cache,
                 )
             llm_findings.extend(chunk_findings)
         except ReviewCoverageError as exc:
@@ -1007,6 +1011,7 @@ def _review_chunk_sequential(
     code_file: CodeFile, rules: list, user: User,
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
+    prompt_context_cache: Optional[dict[tuple[str, str, int], str]] = None,
 ) -> List[Finding]:
     """单代理串行审查(双引擎之引擎2:LLM 深度审查)
 
@@ -1072,6 +1077,42 @@ def _review_chunk_sequential(
                     ctx=ctx,
                 )
             elif hasattr(agent, "execute_review"):
+                # 预算并压缩规则之外的长上下文；规则、平台契约与源码保持原文。
+                # 大源码块先用首个有界源码窗做预算，实际恢复时复用同一组已核验上下文。
+                source_lines = chunk.text.splitlines(keepends=True)
+                recovery_window_chars = getattr(agent, "_recovery_window_chars", 6_000)
+                # Mock/custom Agent objects may expose arbitrary attributes; only
+                # trust a positive integer so a non-numeric value cannot fail
+                # review preflight before the Agent's own compatibility path runs.
+                if type(recovery_window_chars) is not int or recovery_window_chars <= 0:
+                    recovery_window_chars = 6_000
+                prompt_code = (
+                    "".join(source_lines[:60])
+                    if len(chunk.text) > recovery_window_chars
+                    else chunk.text
+                )
+                context_for_prompt = getattr(chunk, "context", "")
+                with usage_context(int(user.id), {
+                    **model_attribution(task),
+                    "_review_task_id": task.id,
+                    "_file_id": code_file.id,
+                    "_chunk_index": chunk_idx * 100 + agent_idx,
+                }, db=db):
+                    prepared_system, prepared_user, _estimated_input, bounded_sections = (
+                        _prepare_bounded_single_agent_prompts(
+                            DeepSeekAgent(api_config=api_config),
+                            profile,
+                            prompt_code,
+                            code_file.language or "plaintext",
+                            code_file.file_name,
+                            rules,
+                            chunk.start_line,
+                            experience_section,
+                            context_for_prompt,
+                            max(8_192, int(profile.max_tokens)),
+                            prompt_context_cache if prompt_context_cache is not None else {},
+                        )
+                    )
                 result = agent.execute_review(
                     code=chunk.text,
                     rules=rules,
@@ -1083,6 +1124,8 @@ def _review_chunk_sequential(
                     context_section=getattr(chunk, "context", ""),
                     api_config=api_config,
                     max_tokens=profile.max_tokens,
+                    prepared_prompts=(prepared_system, prepared_user),
+                    bounded_sections=bounded_sections,
                     ctx=ctx,
                 )
             else:
@@ -1661,6 +1704,7 @@ _REVIEW_CONTEXT_COMPACTOR_SYSTEM = (
     "\"summary\":\"有来源标记的摘要\"}；来源不清楚时返回 error。"
 )
 _REVIEW_CONTEXT_MAX_CALLS = 32
+_REVIEW_INPUT_RESERVE_TOKENS = 4_096
 
 
 def _render_single_agent_prompts(
@@ -1825,7 +1869,7 @@ def _review_context_summary(
     raise ValueError("审查非源码上下文多层压缩后仍超出预算，拒绝截断")
 
 
-def _bounded_single_agent_prompts(
+def _prepare_bounded_single_agent_prompts(
     agent: DeepSeekAgent,
     profile: ReviewAgentProfile,
     code: str,
@@ -1837,7 +1881,7 @@ def _bounded_single_agent_prompts(
     context_section: str,
     output_budget: int,
     cache: dict[tuple[str, str, int], str],
-) -> tuple[str, str, int]:
+) -> tuple[str, str, int, dict[str, str]]:
     sections = {
         "custom": profile.system_prompt if profile.is_custom else "",
         "agent": format_agent_section(profile),
@@ -1848,23 +1892,35 @@ def _bounded_single_agent_prompts(
         profile, code, language, file_name, rules, line_offset, sections,
     )
     window = int(settings.deepseek_context_window_tokens)
-    estimated_input = estimate_tokens({"system": system_prompt, "user": user_prompt})
-    if estimated_input + output_budget + 1024 < window:
-        return system_prompt, user_prompt, estimated_input
+    projected_input_bytes = serialized_chat_input_bytes(
+        user_prompt, compose_system_prompt("code_reviewer", system_prompt),
+    )
+    if projected_input_bytes + output_budget + 1_024 < window:
+        estimated_input = estimate_tokens({"system": system_prompt, "user": user_prompt})
+        return system_prompt, user_prompt, estimated_input, sections
 
     mandatory_sections = {"custom": "", "agent": "(代理上下文已按来源压缩)",
                           "experience": "", "context": "(符号上下文已按来源压缩)"}
     mandatory_system, mandatory_user = _render_single_agent_prompts(
         profile, code, language, file_name, rules, line_offset, mandatory_sections,
     )
-    mandatory_tokens = estimate_tokens({"system": mandatory_system, "user": mandatory_user})
-    if mandatory_tokens + output_budget + 1024 >= window:
+    mandatory_bytes = serialized_chat_input_bytes(
+        mandatory_user, compose_system_prompt("code_reviewer", mandatory_system),
+    )
+    if mandatory_bytes + output_budget + 1_024 >= window:
         raise ValueError(
             f"审查源码、规则及固定输出契约超出模型上下文容量: "
-            f"input≈{mandatory_tokens} tokens，output={output_budget} tokens"
+            f"input≈{mandatory_bytes} UTF-8 bytes，output={output_budget} tokens"
         )
     active = [(name, value) for name, value in sections.items() if value]
-    target_total = (window - mandatory_tokens - output_budget - 1024) // 2
+    # Summaries are budgeted in tokens but the actual chat guard uses bytes.
+    # Four input bytes per estimated token is the conservative ASCII bound;
+    # reserve the available input capacity for compressed optional sections;
+    # the exact byte guard below remains the final acceptance check.
+    target_total = max(
+        512,
+        (window - mandatory_bytes - output_budget - 1_024) // 4,
+    )
     # Short fields cost less in full than a sourced summary header. Keep them
     # verbatim and spend compression calls only on the actual long fields.
     preserved = [(name, value) for name, value in active if estimate_tokens(value) <= 512]
@@ -1886,11 +1942,35 @@ def _bounded_single_agent_prompts(
         profile, code, language, file_name, rules, line_offset, sections,
     )
     estimated_input = estimate_tokens({"system": system_prompt, "user": user_prompt})
-    if estimated_input + output_budget + 1024 >= window:
+    final_input_bytes = serialized_chat_input_bytes(
+        user_prompt, compose_system_prompt("code_reviewer", system_prompt),
+    )
+    if final_input_bytes + output_budget + 1_024 >= window:
         raise ValueError(
             f"审查非源码上下文压缩后仍超出模型上下文容量: "
-            f"input≈{estimated_input} tokens，output={output_budget} tokens"
+            f"input≈{final_input_bytes} UTF-8 bytes，output={output_budget} tokens"
         )
+    return system_prompt, user_prompt, estimated_input, sections
+
+
+def _bounded_single_agent_prompts(
+    agent: DeepSeekAgent,
+    profile: ReviewAgentProfile,
+    code: str,
+    language: str,
+    file_name: str,
+    rules: list,
+    line_offset: int,
+    experience_section: str,
+    context_section: str,
+    output_budget: int,
+    cache: dict[tuple[str, str, int], str],
+) -> tuple[str, str, int]:
+    """兼容遗留协同调用方，只返回已过预算门禁的提示词。"""
+    system_prompt, user_prompt, estimated_input, _sections = _prepare_bounded_single_agent_prompts(
+        agent, profile, code, language, file_name, rules, line_offset,
+        experience_section, context_section, output_budget, cache,
+    )
     return system_prompt, user_prompt, estimated_input
 
 def _call_single_agent(

@@ -126,7 +126,7 @@
             <th class="col-status">状态</th>
             <th class="col-score">评分</th>
             <th class="col-files">文件</th>
-            <th class="col-runs">Agent 运转</th>
+            <th class="col-runs">Agent 工具调用</th>
             <th class="col-last">最近审查</th>
             <th class="col-create">创建时间</th>
             <th class="col-act">操作</th>
@@ -147,7 +147,7 @@
             </td>
             <td>
               <span v-if="row.language" class="lang-chip font-mono">{{ row.language }}</span>
-              <span v-else class="muted">-</span>
+              <span v-else class="muted">未设置</span>
             </td>
             <td>
               <span class="status-pill" :class="`s-${row.status}`">
@@ -170,7 +170,7 @@
                   {{ displayScore(row) }}
                 </span>
               </div>
-              <span v-else class="muted font-mono" title="尚未审查或后端未返回评分">—</span>
+              <span v-else class="muted font-mono" title="尚未审查或后端未返回评分">未评分</span>
             </td>
             <td>
               <span class="file-count font-mono">{{ projectFileSummary(row) }}</span>
@@ -188,7 +188,7 @@
             <td>
               <span class="font-mono muted-2">{{ formatDate(row.create_time) }}</span>
             </td>
-            <td class="col-act" @click.stop>
+            <td class="col-act" @click.stop @keyup.enter.stop>
               <el-button link type="primary" @click="handleView(row)">详情</el-button>
               <el-button v-if="row.can_update" link type="primary" :disabled="loading || !!loadError" @click="handleEdit(row)">编辑</el-button>
               <el-button v-if="row.can_delete" link type="danger" :disabled="loading || !!loadError" @click="handleDelete(row.id)">删除</el-button>
@@ -219,7 +219,7 @@
           </span>
           <div class="head-meta">
             <div class="card-name">{{ row.project_name }}</div>
-            <div class="card-sub font-mono">{{ row.language || '未识别语言' }} · {{ projectFileSummary(row) }}</div>
+            <div class="card-sub font-mono">{{ row.language || '未设置' }} · {{ projectFileSummary(row) }}</div>
           </div>
           <span class="status-pill" :class="`s-${row.status}`">
             <span class="pill-dot"></span>{{ row.status === 'active' ? '活跃' : '归档' }}
@@ -236,11 +236,11 @@
         <footer class="card-foot">
           <div class="foot-meta">
             <span class="font-mono">{{ formatDate(row.last_review_at) || '暂未审查' }}</span>
-            <span v-if="(row.agent_run_count ?? 0) > 0" class="font-mono runs-badge" :title="`最近运转 ${formatDate(row.last_agent_run_at ?? undefined) || ''}`">
-              Agent 运转 {{ row.agent_run_count }} 次
+              <span v-if="(row.agent_run_count ?? 0) > 0" class="font-mono runs-badge" :title="`统计项目关联的 Agent 工具调用，最近 ${formatDate(row.last_agent_run_at ?? undefined) || '暂无记录'}`">
+              Agent 工具调用 {{ row.agent_run_count }} 次
             </span>
           </div>
-          <div v-if="row.can_update || row.can_delete" class="card-actions" @click.stop>
+          <div v-if="row.can_update || row.can_delete" class="card-actions" @click.stop @keyup.enter.stop>
             <el-tooltip v-if="row.can_update" content="编辑项目" placement="top">
               <el-button
                 class="card-action"
@@ -264,7 +264,7 @@
               />
             </el-tooltip>
           </div>
-          <div class="mini-gauge sm">
+          <div v-if="hasRealScore(row)" class="mini-gauge sm" :title="`评分 ${displayScore(row)}`">
             <svg viewBox="0 0 36 36" class="gauge-svg">
               <circle cx="18" cy="18" r="14" fill="none" stroke="var(--gray-100)" stroke-width="3"/>
               <circle
@@ -279,6 +279,7 @@
               {{ displayScore(row) }}
             </span>
           </div>
+          <span v-else class="muted font-mono score-unrated">未评分</span>
         </footer>
       </article>
 

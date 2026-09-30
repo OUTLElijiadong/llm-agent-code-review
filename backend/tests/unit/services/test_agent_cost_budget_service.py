@@ -290,4 +290,48 @@ def test_unknown_usage_does_not_block_unlimited_budget(db: Any) -> None:
 
     with agent_cost_budget_service.guard_automatic_model_call(db, "code_reviewer") as snapshot:
         assert snapshot.unknown_usage_calls == 1
-        assert snapshot.blocked is False
+    assert snapshot.blocked is False
+
+
+def test_daily_token_threshold_alert_is_warning_only_and_deduplicated(db: Any) -> None:
+    from app.models.agent_governance import AgentAlert
+    from app.services import agent_cost_budget_service
+
+    now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+    db.add(AiCallLog(
+        model_name="deepseek-v4-pro",
+        agent_label="chat_assistant",
+        status="success",
+        prompt_tokens=4_900_000,
+        completion_tokens=100_000,
+        total_tokens=0,
+        create_time=now,
+    ))
+    db.commit()
+
+    first = agent_cost_budget_service.ensure_daily_token_threshold_alert(
+        db, "chat_assistant", 5_000_000, now=now,
+    )
+    second = agent_cost_budget_service.ensure_daily_token_threshold_alert(
+        db, "chat_assistant", 5_000_000, now=now,
+    )
+
+    assert first is not None
+    assert first is second
+    assert first.severity == "warning"
+    assert first.category == "cost"
+    assert first.fingerprint == "daily-token:chat_assistant:2026-09-30"
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == first.fingerprint).count() == 1
+    assert agent_cost_budget_service.daily_budget_snapshot(db, "chat_assistant", now=now).used_tokens == 5_000_000
+
+
+def test_daily_token_threshold_alert_is_disabled_at_zero(db: Any) -> None:
+    from app.models.agent_governance import AgentAlert
+    from app.services import agent_cost_budget_service
+
+    result = agent_cost_budget_service.ensure_daily_token_threshold_alert(
+        db, "chat_assistant", 0,
+    )
+
+    assert result is None
+    assert db.query(AgentAlert).count() == 0

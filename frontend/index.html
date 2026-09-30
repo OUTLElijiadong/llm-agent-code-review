@@ -10,11 +10,12 @@
   <!-- 字体 CSS 非阻塞加载:先按 preload 取回,加载完成后切换为 stylesheet,
        避免阻塞首屏渲染; noscript 兜底保证禁用 JS 时仍可加载 -->
   <link
+    id="google-fonts"
     rel="preload"
     as="style"
     href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-    onload="this.onload=null;this.rel='stylesheet'"
   />
+  <script defer src="/load-fonts.js"></script>
   <noscript>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   </noscript>

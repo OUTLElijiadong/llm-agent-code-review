@@ -7,8 +7,10 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { changePassword } from '@/api/auth'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { goBack as safeGoBack } from '@/utils/navigation'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
 
@@ -35,7 +37,7 @@ const rules: FormRules = {
   ],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, max: 32, message: '密码长度在 6 到 32 个字符', trigger: 'blur' },
+    { min: 15, max: 64, message: '密码长度在 15 到 64 个字符', trigger: 'blur' },
   ],
   confirmPassword: [
     { required: true, message: '请确认新密码', trigger: 'blur' },
@@ -57,7 +59,8 @@ async function handleSubmit() {
         new_password: form.newPassword,
       })
       ElMessage.success('密码修改成功，请重新登录')
-      router.push('/login')
+      userStore.clearSession()
+      await router.replace('/login')
     } catch {
       ElMessage.error('密码修改失败，请检查旧密码是否正确')
     } finally {
@@ -94,6 +97,7 @@ function goBack() {
             v-model="form.oldPassword"
             type="password"
             placeholder="请输入旧密码"
+            maxlength="64"
             :prefix-icon="Lock"
             show-password
           />
@@ -103,6 +107,7 @@ function goBack() {
             v-model="form.newPassword"
             type="password"
             placeholder="请输入新密码"
+            maxlength="64"
             :prefix-icon="Lock"
             show-password
           />

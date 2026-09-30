@@ -12,7 +12,7 @@ from sqlalchemy import case, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.agent_governance import AgentProfile
+from app.models.agent_governance import AgentAlert, AgentProfile
 from app.models.ai_call_log import AiCallLog
 
 
@@ -148,6 +148,52 @@ def daily_budget_snapshot(
     """Read the configured budget and already-persisted usage without reserving it."""
 
     return _snapshot(db, agent_code, now=now)
+
+
+def ensure_daily_token_threshold_alert(
+    db: Session,
+    agent_code: str,
+    threshold_tokens: int,
+    *,
+    now: Optional[datetime] = None,
+) -> Optional[AgentAlert]:
+    """Create one warning per UTC day after an Agent crosses its configured usage threshold."""
+    threshold = max(0, int(threshold_tokens or 0))
+    if threshold == 0:
+        return None
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    snapshot = _snapshot(db, agent_code, now=current)
+    if snapshot.used_tokens < threshold:
+        return None
+
+    day = current.date().isoformat()
+    fingerprint = f"daily-token:{agent_code}:{day}"
+    existing = db.query(AgentAlert).filter(AgentAlert.fingerprint == fingerprint).first()
+    if existing:
+        return existing
+
+    from app.services.observability_service import create_alert
+
+    return create_alert(
+        db,
+        alert_type="ai.daily_token_threshold",
+        severity="warning",
+        title=f"{agent_code} 今日模型 Token 用量达到提醒阈值",
+        detail={
+            "agent_code": agent_code,
+            "used_tokens": snapshot.used_tokens,
+            "threshold_tokens": threshold,
+            "date_utc": day,
+            "action": "提醒管理员检查用量；不阻断用户会话",
+        },
+        category="cost",
+        source="cost_controller",
+        fingerprint=fingerprint,
+    )
 
 
 def _process_lock(agent_code: str) -> threading.RLock:

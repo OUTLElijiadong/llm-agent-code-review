@@ -23,6 +23,7 @@ from app.services.project_member_service import (
     list_members,
     remove_member,
     require_project_access,
+    search_member_candidates,
     update_member_role,
 )
 
@@ -62,6 +63,47 @@ def _make_project(db, pid, owner_user_id, name="proj"):
     db.add(project)
     db.commit()
     return project
+
+
+class TestSearchMemberCandidates:
+    def test_searches_active_accounts_by_username_or_email_without_returning_email(self, db):
+        owner = _make_user(db, 700, "owner700")
+        project = _make_project(db, 700, owner.id)
+        username_match = _make_user(db, 701, "find-candidate701")
+        username_match.nickname = "候选账号"
+        email_match = _make_user(db, 702, "other702")
+        email_match.email = "find-me@example.com"
+        disabled = _make_user(db, 703, "disabled703")
+        disabled.status = 0
+        already_member = _make_user(db, 704, "member704")
+        db.add(ProjectMember(project_id=project.id, user_id=already_member.id, role_in_project="reviewer"))
+        db.commit()
+
+        candidates = search_member_candidates(db, project.id, "find")
+        assert {item["id"] for item in candidates} == {username_match.id, email_match.id}
+        assert next(item for item in candidates if item["id"] == username_match.id)["nickname"] == "候选账号"
+        assert all(set(item) == {"id", "username", "nickname"} for item in candidates)
+        assert all(item["id"] not in {disabled.id, already_member.id} for item in candidates)
+
+    def test_search_rejects_short_terms_and_treats_wildcards_literally(self, db):
+        owner = _make_user(db, 710, "owner710")
+        project = _make_project(db, 710, owner.id)
+        _make_user(db, 711, "wild_user711")
+        _make_user(db, 712, "wildXuser712")
+        literal_match = _make_user(db, 713, "percent%user713")
+
+        with pytest.raises(BadRequestError, match="至少需要 2 个字符"):
+            search_member_candidates(db, project.id, " ")
+        assert [item["id"] for item in search_member_candidates(db, project.id, "wild_")] == [711]
+        assert [item["id"] for item in search_member_candidates(db, project.id, "%user")] == [literal_match.id]
+
+    def test_search_caps_result_count_at_ten(self, db):
+        owner = _make_user(db, 720, "owner720")
+        project = _make_project(db, 720, owner.id)
+        for index in range(721, 734):
+            _make_user(db, index, f"lookup{index}")
+
+        assert len(search_member_candidates(db, project.id, "lookup", limit=100)) == 10
 
 
 # ============ get_visible_project_ids 测试 ============

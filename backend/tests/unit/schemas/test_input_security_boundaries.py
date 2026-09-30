@@ -42,8 +42,9 @@ def test_tool_permission_rejects_unknown_decision(permission: str) -> None:
 
 def test_login_password_matches_business_length_boundary() -> None:
     assert LoginIn(username="user", password="x" * 32).password == "x" * 32
+    assert LoginIn(username="user", password="x" * 64).password == "x" * 64
     with pytest.raises(ValidationError):
-        LoginIn(username="user", password="x" * 33)
+        LoginIn(username="user", password="x" * 65)
 
 
 def test_report_template_has_explicit_capacity_budget() -> None:
@@ -57,7 +58,7 @@ def test_registration_username_rejects_markup_and_control_characters(username: s
     from app.schemas.auth import RegisterIn
 
     with pytest.raises(ValidationError):
-        RegisterIn(username=username, password="secret1")
+        RegisterIn(username=username, password="a long memorable test passphrase")
 
 
 def test_login_username_trims_legacy_safe_identifier() -> None:

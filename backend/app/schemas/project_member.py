@@ -35,3 +35,10 @@ class MemberOut(BaseModel):
     update_time: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class MemberCandidateOut(BaseModel):
+    """项目成员搜索候选，仅返回添加成员所需的最少资料。"""
+    id: int
+    username: str
+    nickname: Optional[str] = None

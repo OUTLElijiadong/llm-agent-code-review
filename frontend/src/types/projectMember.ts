@@ -22,6 +22,13 @@ export interface ProjectMemberOut {
   create_time: string
 }
 
+/** 项目成员搜索候选，不包含邮箱等不必要的个人资料。 */
+export interface ProjectMemberCandidate {
+  id: number
+  username: string
+  nickname?: string | null
+}
+
 /** 添加成员请求体（对应后端 MemberAddIn） */
 export interface ProjectMemberAddIn {
   /** 被加入的用户 ID */

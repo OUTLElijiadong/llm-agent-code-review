@@ -12,19 +12,36 @@ v2.4: 提供项目成员关系的 CRUD 接口
     - owner: 需 project:view 读取成员、project:member:manage 管理成员；与项目角色求交
     - reviewer: 可读成员列表,不可写
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import Resp
-from app.schemas.project_member import MemberAddIn, MemberOut, MemberRoleUpdateIn
+from app.schemas.project_member import MemberAddIn, MemberCandidateOut, MemberOut, MemberRoleUpdateIn
 from app.services import audit_service, project_member_service
 
 router = APIRouter()
+
+
+@router.get("/candidates", response_model=Resp[list[MemberCandidateOut]],
+            dependencies=[Depends(require_permission(PermissionCode.PROJECT_MEMBER_MANAGE))])
+def search_member_candidates(
+    project_id: int,
+    q: str = Query(min_length=2, max_length=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """只允许可管理当前项目成员的用户搜索可加入账号。"""
+    role = project_member_service.require_project_access(db, project_id, user, need_write=False)
+    if role == "reviewer":
+        raise ForbiddenError("需要项目拥有者权限", code=40300)
+    candidates = project_member_service.search_member_candidates(db, project_id, q, limit=10)
+    return Resp(data=[MemberCandidateOut(**item) for item in candidates])
 
 
 @router.get("", response_model=Resp[list[MemberOut]],

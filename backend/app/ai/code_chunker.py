@@ -45,20 +45,23 @@ class SymbolIndex:
     diagnostics: tuple[str, ...] = ()
 
 
+_JAVASCRIPT_SYMBOL_PATTERN = (
+    r"function[ \t]+\w+"
+    r"|(?:const|let|var)[ \t]+\w+[ \t]*=[ \t]*(?:async[ \t]*)?(?:\([^\n]*\)|[A-Za-z_$][\w$]*)[ \t]*=>"
+    r"|(?:const|let|var)[ \t]+\w+[ \t]*=[ \t]*\("
+    r"|class[ \t]+\w+"
+    r"|(?:async[ \t]+)?(?!(?:if|for|while|switch|catch|return|function|new|do|try)\b)"
+    r"[A-Za-z_$][\w$]*[ \t]*\([^;]*\)[ \t]*\{"
+)
+
 _FUNC_PATTERNS = {
     "python": re.compile(r"^[ \t]*(def|class)[ \t]+\w+", re.MULTILINE),
     "java": re.compile(
         r"^[ \t]*(public|private|protected|static|final|class)[ \t]+.+[{(]?[ \t]*$",
         re.MULTILINE,
     ),
-    "javascript": re.compile(
-        r"^[ \t]*(function[ \t]+\w+|const[ \t]+\w+[ \t]*=[ \t]*\(|class[ \t]+\w+)",
-        re.MULTILINE,
-    ),
-    "typescript": re.compile(
-        r"^[ \t]*(function[ \t]+\w+|const[ \t]+\w+[ \t]*=[ \t]*\(|class[ \t]+\w+)",
-        re.MULTILINE,
-    ),
+    "javascript": re.compile(r"^[ \t]*(" + _JAVASCRIPT_SYMBOL_PATTERN + r")", re.MULTILINE),
+    "typescript": re.compile(r"^[ \t]*(" + _JAVASCRIPT_SYMBOL_PATTERN + r")", re.MULTILINE),
     "go": re.compile(r"^[ \t]*func[ \t]+\w+", re.MULTILINE),
     "cpp": re.compile(r"^[ \t]*\w[\w \t*&]*[ \t]+\w+[ \t]*\(.*\)[ \t]*\{?", re.MULTILINE),
 }
@@ -90,8 +93,8 @@ def _split_by_boundaries(lines: list[str], boundaries: list[int], threshold: int
     chunks: list[CodeChunk] = []
     if starts[0] > 0:
         head = "".join(lines[: starts[0]])
-        if head.strip():
-            chunks.extend(_split_text_window(head, 0, threshold))
+        # 空白前导行也是输入源码覆盖的一部分；调用方依赖连续行区间来证明完整覆盖。
+        chunks.extend(_split_text_window(head, 0, threshold))
     cursor = 0
     while cursor < len(starts) - 1:
         start_line, end_line = starts[cursor], starts[cursor + 1]
@@ -386,14 +389,26 @@ def _canonical_name(name: str, aliases: dict[str, str]) -> str:
 
 def _build_lexical_index(content: str, language: str, diagnostics: tuple[str, ...] = ()) -> SymbolIndex:
     symbols: dict[str, Symbol] = {}
-    pattern = _FUNC_PATTERNS.get((language or "").lower(), _FUNC_PATTERNS["python"])
+    language_key = (language or "").lower()
+    pattern = _FUNC_PATTERNS.get(language_key, _FUNC_PATTERNS["python"])
     for line_no, line in enumerate(content.splitlines(), 1):
         if not pattern.match(line):
             continue
-        match = re.search(r"(?:def|class|function|func)\s+([A-Za-z_]\w*)", line)
+        match = re.search(r"(?:def|class|function|func)\s+([A-Za-z_$][\w$]*)", line)
+        kind = "class" if match and re.search(r"\bclass\s+", line) else "function"
+        if not match and language_key in {"javascript", "typescript", "js", "ts"}:
+            match = re.search(
+                r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^\n]*\)|[A-Za-z_$][\w$]*)\s*(?:=>|\()",
+                line,
+            )
+            if not match:
+                match = re.search(
+                    r"(?:(?:async)\s+)?(?!(?:if|for|while|switch|catch|return|function|new|do|try)\b)"
+                    r"([A-Za-z_$][\w$]*)\s*\([^;]*\)\s*\{",
+                    line.strip(),
+                )
         if match:
             name = match.group(1)
-            kind = "class" if "class" in line else "function"
             symbols.setdefault(name, Symbol(name, kind, line_no, line_no))
     return SymbolIndex(mode="lexical", symbols=dict(sorted(symbols.items())), diagnostics=diagnostics)
 

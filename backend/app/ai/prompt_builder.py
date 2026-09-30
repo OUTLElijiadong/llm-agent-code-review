@@ -159,6 +159,11 @@ def _format_rules(rules, language: str = "") -> str:
     return "\n".join(lines)
 
 
+def format_rules(rules, language: str = "") -> str:
+    """Render rule objects using the canonical text included in review prompts."""
+    return _format_rules(rules, language)
+
+
 def _format_experience(experiences) -> str:
     """将检索到的经验记忆格式化为 Prompt 段落(Agent 自进化 L1 注入)
 
@@ -210,7 +215,7 @@ def build_prompt(*, language: str, file_name: str, code: str,
         agent_section = "- 代理名称: 通用质量代理\n- 关注范围: 综合检查代码质量、安全、性能和可维护性。"
     user_prompt = (
         template
-        .replace("{rules_section}", _format_rules(rules, language))
+        .replace("{rules_section}", format_rules(rules, language))
         .replace("{experience_section}", experience_section)
         .replace("{agent_section}", agent_section)
         .replace("{context_section}", context_section or "(无可用符号索引;跨分片结论应降低置信度)")

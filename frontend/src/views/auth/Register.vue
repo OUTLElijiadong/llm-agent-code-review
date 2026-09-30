@@ -7,9 +7,11 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getCaptcha } from '@/api/auth'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 
 const router = useRouter()
 const userStore = useUserStore()
+const buildVersion = import.meta.env.VITE_APP_VERSION?.trim() ? APP_DISPLAY_VERSION : null
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
@@ -51,20 +53,16 @@ async function refreshCaptcha(): Promise<void> {
 onMounted(refreshCaptcha)
 
 /**
- * 密码强度评估: 依据长度与字符种类给出 0(空)/1(弱)/2(中)/3(强)
+ * 密码长度提示，不要求大小写、数字或符号组合。
  * @returns 强度等级与中文标签
  */
 const passwordStrength = computed<{ level: 0 | 1 | 2 | 3; label: string }>(() => {
   const v = form.password
   if (!v) return { level: 0, label: '' }
-  let score = 0
-  if (v.length >= 6) score++
-  if (v.length >= 10) score++
-  if (/\d/.test(v)) score++
-  if (/[a-z]/.test(v) && /[A-Z]/.test(v)) score++
-  if (/[^A-Za-z0-9]/.test(v)) score++
-  const level = (score <= 2 ? 1 : score <= 3 ? 2 : 3) as 1 | 2 | 3
-  return { level, label: ['', '弱', '中', '强'][level] }
+  const length = Array.from(v).length
+  if (length < 15) return { level: 1, label: '至少需要 15 个字符' }
+  if (length < 24) return { level: 2, label: '达到最低长度' }
+  return { level: 3, label: '较长' }
 })
 
 /**
@@ -89,7 +87,7 @@ const rules: FormRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 32, message: '密码长度在 6 到 32 个字符', trigger: 'blur' },
+    { min: 15, max: 64, message: '密码长度在 15 到 64 个字符', trigger: 'blur' },
   ],
   confirmPassword: [
     { required: true, message: '请确认密码', trigger: 'blur' },
@@ -194,8 +192,8 @@ function goLogin(): void {
       </div>
 
       <footer class="brand-bottom font-mono">
-        <span class="online-dot">DeepSeek V4 在线</span>
-        <span>v1.0 · 2026</span>
+        <span>PRISM · 棱镜</span>
+        <span v-if="buildVersion">{{ buildVersion }}</span>
       </footer>
     </aside>
 
@@ -222,7 +220,7 @@ function goLogin(): void {
           @keyup.enter="handleRegister"
         >
           <div class="form-grid">
-            <el-form-item prop="username" label="账号 / 学号">
+            <el-form-item prop="username" label="账号">
               <el-input
                 v-model="form.username"
                 placeholder="请输入用户名"
@@ -258,10 +256,11 @@ function goLogin(): void {
             <el-input
               v-model="form.password"
               type="password"
-              placeholder="请输入 6-32 位密码"
+              placeholder="至少 15 个字符，最多 64 个字符"
               :prefix-icon="Lock"
               size="large"
               show-password
+              maxlength="64"
               autocomplete="new-password"
             />
           </el-form-item>
@@ -270,7 +269,7 @@ function goLogin(): void {
             <span class="pwd-bar"></span>
             <span class="pwd-bar"></span>
             <span class="pwd-bar"></span>
-            <span class="pwd-strength-label font-mono">密码强度 · {{ passwordStrength.label }}</span>
+            <span class="pwd-strength-label font-mono">密码长度 · {{ passwordStrength.label }}</span>
           </div>
 
           <el-form-item prop="confirmPassword" label="确认密码">

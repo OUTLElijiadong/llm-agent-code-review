@@ -37,6 +37,7 @@ cd /path/to/project/deploy
 - [ ] Backend `/healthz`、`/readyz`、version、release 标识和日志通过后，脚本才切换前端。
 - [ ] 脚本自动调用 `sync-frontend-assets.sh` 同步 assets 卷；首页引用的新哈希资源均可读取。
 - [ ] HTTP 仅保留 ACME challenge，其余返回 308；HTTPS 首页和同源 `/healthz` 通过。
+- [ ] Certbot 所有现存证书 `--dry-run` 通过；`prism-cert-renew.timer` enabled 且显示下一次运行时间。
 - [ ] 生产 `/docs`、`/redoc`、`/openapi.json` 均不可公开访问。
 - [ ] MySQL、ClamAV、Backend、Frontend 四个容器均 healthy，ClamAV 3310 未映射公网。
 

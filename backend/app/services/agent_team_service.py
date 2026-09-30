@@ -2213,7 +2213,7 @@ def _apply_execution_strategy(
     automatic: bool,
     mode: str = "",
 ) -> dict[str, Any]:
-    """把改道固化到结构化输入，执行 Handler 会真正消费该字段。"""
+    """持久化改道审计元数据；运行时仅执行已实现的确定性策略。"""
 
     raw_input = _unjson(task.input_json, {})
     if not isinstance(raw_input, dict):
@@ -2231,7 +2231,11 @@ def _apply_execution_strategy(
         else:
             mode = "alternate_reasoning_with_failure_context"
 
-    changes = ["inject_failure_context", "use_fresh_execution_session"]
+    changes = (
+        ["bounded_source_review"]
+        if address == "agent:code_reviewer"
+        else ["inject_failure_context", "use_fresh_execution_session"]
+    )
     if "worker_code" in raw_input:
         raw_input["worker_code"] = ""
         changes.append("release_pinned_worker")
@@ -2239,9 +2243,11 @@ def _apply_execution_strategy(
         raw_input["page_size"] = max(10, raw_input["page_size"] // 2)
         changes.append("reduce_page_size")
     experience = str(raw_input.get("experience") or "").strip()
-    if address.startswith("custom:") or address == "agent:code_reviewer":
+    if address.startswith("custom:"):
         raw_input["experience"] = f"{experience}\n本次改道策略：{instruction}".strip()
         changes.append("inject_strategy_into_model_context")
+    # 内置审查器的代码切片与覆盖检查由确定性执行器完成；策略留在审计
+    # 元数据中，不能伪装成提示词改写了实际源码输入。
 
     strategy = {
         "version": 1,

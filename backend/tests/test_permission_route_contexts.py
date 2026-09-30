@@ -19,7 +19,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 337
+    assert len(plan["routes"]) == 338
     assert len({row["endpoint"] for row in plan["routes"]}) == 42
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
@@ -36,8 +36,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("POST", "/api/sandboxes/remote-target-authorization"),
         ("GET", "/api/admin/observability/alerts/page"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 323
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 253
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 324
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 254
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
         "/api/agent-responses/assets/{asset_id}/image",

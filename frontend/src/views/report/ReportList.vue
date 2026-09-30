@@ -63,7 +63,7 @@
           <span class="rc-band" :data-status="row.status" aria-hidden="true"></span>
           <div class="rc-main">
             <div class="rc-line1">
-              <b class="rc-name" :title="row.task_name || `审查 #${row.task_id}`">{{ row.task_name || `审查 #${row.task_id}` }}</b>
+              <b class="rc-name" :title="taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)">{{ taskDisplayTitle(row.task_name, `审查 #${row.task_id}`) }}</b>
               <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">{{ reviewTypeLabel(row.source.type) }}</el-tag>
               <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
                 {{ row.status === 'success' ? '通过' : '未通过' }}
@@ -137,6 +137,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -280,7 +281,7 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
     const extMap: Record<ReportFormat, string> = {
       json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
     }
-    const taskName = row.task_name || `task_${row.task_id}`
+    const taskName = taskDisplayTitle(row.task_name, `task_${row.task_id}`)
     downloadBlob(blob, `review_report_${taskName}_${row.task_id}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
   } catch (error) {
@@ -311,7 +312,7 @@ function retryExport(): void {
  */
 async function handleDelete(row: ReportListItem) {
   if (!canDeleteReport.value) return
-  const ok = await confirmDanger({ target: `删除报告「${row.task_name || `审查 #${row.task_id}`}」` })
+  const ok = await confirmDanger({ target: `删除报告「${taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)}」` })
   if (!ok) return
   try {
     await deleteReport(row.task_id)

@@ -85,7 +85,7 @@
               <input
                 type="checkbox"
                 :checked="selectedRows.some((t) => t.id === row.id)"
-                :aria-label="`选择 ${row.task_name || '任务'}`"
+                :aria-label="`选择 ${taskDisplayTitle(row.task_name, '任务')}`"
                 @change="toggleSelect(row)"
               >
             </label>
@@ -93,7 +93,7 @@
           <span class="tc-band" :data-status="row.status" aria-hidden="true"></span>
           <div class="tc-main">
             <div class="tc-line1">
-              <button class="tc-name" type="button" @click.stop="onRowClick(row)">{{ row.task_name || `审查 #${row.id}` }}</button>
+              <button class="tc-name" type="button" @click.stop="onRowClick(row)">{{ taskDisplayTitle(row.task_name, `审查 #${row.id}`) }}</button>
               <el-tag size="small" type="info" effect="plain">{{ reviewTypeLabel(row.review_type) }}</el-tag>
               <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
             </div>
@@ -167,6 +167,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -340,7 +341,7 @@ function onRowClick(row: TaskOut) {
 
 async function handleDelete(row: TaskOut) {
   if (!canCancelReview.value) return
-  const ok = await confirmDanger({ target: `删除任务「${row.task_name || `审查 #${row.id}`}」` })
+  const ok = await confirmDanger({ target: `删除任务「${taskDisplayTitle(row.task_name, `审查 #${row.id}`)}」` })
   if (!ok) return
   try {
     await deleteReviewTask(row.id)
@@ -354,7 +355,7 @@ async function handleDelete(row: TaskOut) {
 async function handleCancel(row: TaskOut) {
   if (!canCancelReview.value) return
   const ok = await confirmDanger({
-    target: `停止任务「${row.task_name || `审查 #${row.id}`}」`,
+    target: `停止任务「${taskDisplayTitle(row.task_name, `审查 #${row.id}`)}」`,
     consequence: '已处理的部分将保留',
     confirmText: '确定停止',
   })

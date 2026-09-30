@@ -80,7 +80,7 @@ watch(
 async function logout(): Promise<void> {
   try {
     await ElMessageBox.confirm('确定要退出管理后台吗？', '提示', {
-      confirmButtonText: '退出',
+      confirmButtonText: '确定',
       cancelButtonText: '取消',
       type: 'warning',
     })

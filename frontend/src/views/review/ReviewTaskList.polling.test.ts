@@ -2,12 +2,15 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { deferred, pageOf, scanMountOptions } from './scanRegressionTestUtils'
 
-const api = vi.hoisted(() => ({ tasks: vi.fn(), projects: vi.fn(), push: vi.fn(), canCancel: false }))
-vi.mock('@/api/review', () => ({ getReviewTasks: api.tasks, deleteReviewTask: vi.fn(), cancelReviewTask: vi.fn() }))
+const api = vi.hoisted(() => ({
+  tasks: vi.fn(), projects: vi.fn(), push: vi.fn(), delete: vi.fn(), cancel: vi.fn(),
+  confirm: vi.fn(), canCancel: false,
+}))
+vi.mock('@/api/review', () => ({ getReviewTasks: api.tasks, deleteReviewTask: api.delete, cancelReviewTask: api.cancel }))
 vi.mock('@/api/project', () => ({ getProjects: api.projects }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: (code: string) => code === 'review:cancel' && api.canCancel }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: api.push }) }))
-vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: vi.fn().mockResolvedValue(false) }))
+vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 import ReviewTaskList from './ReviewTaskList.vue'
 
 let wrapper: VueWrapper
@@ -15,6 +18,7 @@ const running = { id: 1, status: 'running' }
 beforeEach(() => {
   vi.resetAllMocks()
   api.canCancel = false
+  api.confirm.mockResolvedValue(false)
   vi.useFakeTimers()
   api.projects.mockResolvedValue(pageOf([]))
   api.tasks.mockResolvedValue(pageOf([running]))
@@ -232,6 +236,28 @@ describe('任务列表轮询恢复', () => {
 
 
 describe('审查卡片进度与可操作权限', () => {
+  it('停止和删除确认文案使用清理后的用户可读任务名', async () => {
+    api.canCancel = true
+    api.tasks.mockResolvedValue(pageOf([{
+      id: 179,
+      task_name: '项目167 完整代码审查（review_type=full）',
+      status: 'running',
+    }]))
+    const vm = await render()
+    const row = vm.tasks[0]
+
+    await vm.handleDelete(row)
+    expect(api.confirm).toHaveBeenLastCalledWith({ target: '删除任务「项目167 完整代码审查」' })
+    await vm.handleCancel(row)
+    expect(api.confirm).toHaveBeenLastCalledWith({
+      target: '停止任务「项目167 完整代码审查」',
+      consequence: '已处理的部分将保留',
+      confirmText: '确定停止',
+    })
+    expect(api.delete).not.toHaveBeenCalled()
+    expect(api.cancel).not.toHaveBeenCalled()
+  })
+
   it('有取消权限时，单任务停止与删除按钮保留在卡片且点击不进入详情', async () => {
     api.canCancel = true
     api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '运行任务', status: 'running' }]))

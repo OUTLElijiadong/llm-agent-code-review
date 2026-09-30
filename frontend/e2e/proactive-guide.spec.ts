@@ -28,6 +28,14 @@ test('用户端:进入页面主动弹出引导,一键唤起小菱并预填', asy
   await expect(page.getByPlaceholder(/输入问题/).first()).toHaveValue(/项目管理/, { timeout: 20_000 })
 })
 
+test('用户端:审查任务页引导显示统一术语', async ({ page }) => {
+  await login(page, USER, USER_PW)
+  await page.goto('/reviews')
+  await expect(page.locator('.proactive-guide')).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.guide-title')).toContainText('审查任务')
+  await expect(page.locator('.guide-title')).not.toContainText('审查记录')
+})
+
 test('管理端:进入管理页面主动弹出引导,一键唤起管理副驾驶并预填', async ({ page }) => {
   await login(page, ADMIN, ADMIN_PW)
   await page.goto('/admin/approvals')

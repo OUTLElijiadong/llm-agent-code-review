@@ -2,9 +2,14 @@
 
 import json
 import re
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
+from app.agents.base import AgentResult
+from app.agents.context_budget import serialized_chat_input_bytes
+from app.agents.contracts import compose_system_prompt
 from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
 from app.ai.multi_agent import GENERAL_AGENT
 from app.services import review_service
@@ -162,6 +167,156 @@ def test_code_and_rules_alone_over_window_fail_without_compressing_source(monkey
             experience_section="历史经验" * 100,
         )
     assert labels == []
+
+
+def test_default_sequential_review_prepares_source_checked_bounded_prompt(monkeypatch):
+    """quick/standard main path must pass compressed inputs to CodeReviewerAgent."""
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 32_768)
+    compaction_calls = []
+    executed = []
+
+    def fake_call_raw(_self, system_prompt, user_prompt, agent_label="", **_kwargs):
+        del system_prompt
+        compaction_calls.append(agent_label)
+        assert agent_label == "review_context_compaction"
+        source = json.loads(user_prompt)[0]
+        source_ids = source["covered_source_ids"]
+        inherited = source.get("source_quotes")
+        if isinstance(inherited, list) and inherited:
+            quotes = inherited
+        else:
+            source_id = source["source_id"]
+            text = source["content"]
+            quotes = [{"source_id": source_id, "quote": text[-20:].strip()}]
+        return json.dumps({
+            "covered_source_ids": source_ids,
+            "source_quotes": quotes,
+            "summary": "保留原始来源中的审查事实。",
+        }, ensure_ascii=False), {}
+
+    class RegisteredReviewer:
+        name = "code_reviewer"
+        _recovery_window_chars = 6_000
+
+        def execute_review(self, **kwargs):
+            executed.append(kwargs)
+            return AgentResult(success=True, data={"issues": [], "invalid_issue_count": 0})
+
+    reviewer = RegisteredReviewer()
+    monkeypatch.setattr(review_service.DeepSeekAgent, "call_raw", fake_call_raw)
+    monkeypatch.setattr(review_service, "_get_agent_for_profile", lambda _code: reviewer)
+    monkeypatch.setattr(review_service, "_emit_review_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(review_service, "_log_sequential_call", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(review_service, "model_attribution", lambda _task: {})
+    monkeypatch.setattr(review_service, "usage_context", lambda *_args, **_kwargs: nullcontext())
+
+    code = "def verify(token):\n    return token is not None\n"
+    long_experience = "experience-source-marker " * 5_000
+    long_context = "context-source-marker " * 6_000
+    rules = [{
+        "rule_type": "security", "rule_name": "认证检查", "rule_code": "AUTH-1",
+        "rule_content": "必须校验 token 的有效期", "severity": "高", "language": "python",
+    }]
+    review_service._review_chunk_sequential(
+        db=None,
+        api_config=None,
+        task=SimpleNamespace(id=71, project_id=14, review_type="standard"),
+        code_file=SimpleNamespace(id=597, language="python", file_name="auth.py"),
+        rules=rules,
+        user=SimpleNamespace(id=5),
+        profiles=(review_service.get_agent_profiles("standard")[0],),
+        chunk_idx=0,
+        chunk=SimpleNamespace(text=code, start_line=0, context=long_context),
+        experience_section=long_experience,
+        prompt_context_cache={},
+    )
+
+    assert compaction_calls
+    assert len(executed) == 1
+    passed = executed[0]
+    system_prompt, user_prompt = passed["prepared_prompts"]
+    sections = passed["bounded_sections"]
+    assert code in user_prompt
+    assert "必须校验 token 的有效期" in user_prompt
+    assert "来源 sha256=" in sections["experience"]
+    assert "来源 sha256=" in sections["context"]
+    assert long_experience not in user_prompt
+    assert long_context not in user_prompt
+    assert estimate_tokens({"system": system_prompt, "user": user_prompt}) + 8_192 + 4_096 < 32_768
+
+
+def test_ascii_context_uses_the_same_byte_guard_as_base_agent(monkeypatch):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
+    summaries = []
+
+    def fake_call_raw(_self, system_prompt, user_prompt, agent_label="", **_kwargs):
+        assert agent_label == "review_context_compaction"
+        source = json.loads(user_prompt)[0]
+        original = source["content"]
+        summaries.append(len(original))
+        return json.dumps({
+            "covered_source_ids": source["covered_source_ids"],
+            "source_quotes": _review_source_quotes(source),
+            "summary": "保留经验来源中的审查事实。",
+        }, ensure_ascii=False), {}
+
+    monkeypatch.setattr(review_service.DeepSeekAgent, "call_raw", fake_call_raw)
+    long_context = "ascii-review-context-marker " * 4_000
+    code = "def check():\n    return True\n"
+    output_budget = max(8_192, GENERAL_AGENT.max_tokens)
+    uncompressed_sections = {
+        "custom": "",
+        "agent": review_service.format_agent_section(GENERAL_AGENT),
+        "experience": "",
+        "context": long_context,
+    }
+    original_system, original_user = review_service._render_single_agent_prompts(
+        GENERAL_AGENT,
+        code,
+        "python",
+        "check.py",
+        [],
+        0,
+        uncompressed_sections,
+    )
+    # Reproduce the previous mismatch: the character-ratio estimator admits
+    # this prompt, but BaseAgent's exact serialized-byte guard rejects it.
+    old_estimate = estimate_tokens({"system": original_system, "user": original_user})
+    original_bytes = serialized_chat_input_bytes(
+        original_user,
+        compose_system_prompt("code_reviewer", original_system),
+    )
+    assert old_estimate + output_budget + 4_096 < 100_000
+    assert original_bytes + output_budget + 1_024 >= 100_000
+
+    system_prompt, user_prompt, _tokens, sections = review_service._prepare_bounded_single_agent_prompts(
+        review_service.DeepSeekAgent(),
+        GENERAL_AGENT,
+        code,
+        "python",
+        "check.py",
+        [],
+        0,
+        "",
+        long_context,
+        output_budget,
+        {},
+    )
+
+    from app.agents.review_agent import CodeReviewerAgent
+
+    projected, exceeded = CodeReviewerAgent()._project_input(
+        user_prompt,
+        system_prompt=compose_system_prompt("code_reviewer", system_prompt),
+        output_tokens=output_budget,
+    )
+    assert projected == user_prompt
+    assert not exceeded
+    assert summaries
+    assert sections["context"] != long_context
+    assert len(sections["context"].encode("utf-8")) + serialized_chat_input_bytes(
+        "", compose_system_prompt("code_reviewer", system_prompt),
+    ) < 100_000
 
 
 @pytest.mark.parametrize("long_section", ["instruction", "experience", "context"])

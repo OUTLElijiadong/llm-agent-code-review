@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 import httpx
 from loguru import logger
 
+from app.agents.context_budget import serialized_chat_input_bytes
 from app.core.config import settings
 from app.utils.public_http import pin_public_http_url
 
@@ -121,12 +122,8 @@ class BaseAgent:
         # 预留实际输出上限即可，额外 1024 token 留给协议开销。
         reserved = int(output_tokens or self._max_tokens)
         system_content = (self._system_prompt if system_prompt is None else system_prompt) or ""
-        messages_json = json_lib.dumps({"messages": [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_message},
-        ]}, ensure_ascii=False, separators=(",", ":"))
-        projected_tokens = len(messages_json.encode("utf-8"))
-        if projected_tokens + reserved + 1_024 < window:
+        projected_input_bytes = serialized_chat_input_bytes(user_message, system_content)
+        if projected_input_bytes + reserved + 1_024 < window:
             return user_message, False
         return user_message, True
 

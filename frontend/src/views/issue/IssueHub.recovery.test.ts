@@ -14,7 +14,10 @@ function render() {
   return mount(IssueHub, { global: {
     directives: { loading: () => {} },
     stubs: {
-      ElCard: Slot, ElSelect: Slot, ElOption: Slot, ElInput: Slot, ElTag: Slot, ElIcon: Slot, ElPagination: Slot,
+      ElCard: Slot, ElSelect: Slot,
+      ElOption: { props: ['label', 'value'], template: '<div :data-value="value">{{ label }}</div>' },
+      ElInput: Slot, ElTag: Slot, ElIcon: Slot, ElPagination: Slot,
+      ElDropdown: Slot, ElDropdownMenu: Slot, ElDropdownItem: Slot,
       ElAlert: { props: ['title'], template: '<section role="alert"><b>{{ title }}</b><slot /></section>' },
       ElButton: { props: ['loading', 'disabled'], template: '<button :disabled="loading || disabled"><slot /></button>' },
       EmptyState: { props: ['description'], template: '<div>{{ description }}</div>' },
@@ -28,6 +31,17 @@ beforeEach(() => {
 })
 
 describe('问题追踪失败恢复', () => {
+  it('筛选器明确显示后端默认的处理中范围，并保留全部状态入口', async () => {
+    const wrapper = render()
+    await flushPromises()
+
+    expect((wrapper.vm as any).filters.status).toBe('active')
+    expect(wrapper.text()).toContain('处理中（未修复/待复查）')
+    expect(wrapper.text()).toContain('全部状态')
+    expect(mocks.issues).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }))
+    wrapper.unmount()
+  })
+
   it.each(['2026-09-20T12:51:10', '2026-09-20T12:51:10Z', '2026-09-20T20:51:10+08:00'])('服务端时间 %s 在非 UTC 浏览器显示本地时间', async (createdAt) => {
     vi.stubEnv('TZ', 'Asia/Shanghai')
     const wrapper = render()

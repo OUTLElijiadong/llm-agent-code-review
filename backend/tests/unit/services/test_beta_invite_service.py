@@ -39,7 +39,7 @@ def _generate_one(db, admin_user, *, days=7) -> tuple[str, BetaInviteCode]:
 
 
 def _payload(username: str, code: str) -> RegisterIn:
-    return RegisterIn(username=username, password="secret12", beta_code=code)
+    return RegisterIn(username=username, password="a long memorable test passphrase", beta_code=code)
 
 
 def test_generated_code_is_hmac_only_and_has_fixed_format(db, admin_user):
@@ -110,7 +110,7 @@ def test_revoked_and_expired_codes_share_nondisclosing_error(db, admin_user, def
 def test_disabled_beta_registration_preserves_normal_registration(db, default_role, monkeypatch):
     monkeypatch.setattr(settings, "beta_registration_enabled", False)
 
-    user = auth_service.register(db, RegisterIn(username="open-user", password="secret12"))
+    user = auth_service.register(db, RegisterIn(username="open-user", password="a long memorable test passphrase"))
 
     assert user.username == "open-user"
     assert db.query(UserRole).filter(UserRole.user_id == user.id).count() == 1

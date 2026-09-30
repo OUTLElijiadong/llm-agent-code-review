@@ -272,6 +272,7 @@ onMounted(loadDashboard)
       <!-- 中:OWASP 热点 -->
       <div class="mid-col">
         <div class="col-title">OWASP 热点</div>
+        <p class="hotspot-version-note">历史问题保留审查时采用的 OWASP 版本；不同年份编号不宜直接横向比较。</p>
         <ul v-if="data.owasp_hotspots.length" class="hotspot-list">
           <li
             v-for="(h, idx) in data.owasp_hotspots"
@@ -543,6 +544,13 @@ onMounted(loadDashboard)
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.hotspot-version-note {
+  margin: 4px 0 8px;
+  color: var(--gray-500);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .hotspot-item {

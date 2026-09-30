@@ -334,7 +334,7 @@ const routes: RouteRecordRaw[] = [
         path: 'rollback',
         name: 'RollbackCenter',
         redirect: { path: '/admin/operations', query: { section: 'rollback' } },
-        meta: { title: '回滚中心', role: 'admin' },
+        meta: { title: '版本回退中心', role: 'admin' },
       },
       {
         path: 'users',

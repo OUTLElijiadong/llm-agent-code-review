@@ -218,13 +218,15 @@ systemd timer 失败必须接入云监控或日志告警；仅写入 journal 不
 
 - 首次签发：`./issue-cert.sh <domain> <email>`；
 - 续期检查：`./renew-cert.sh`；
+- systemd 自动检查：`systemd/install.sh --apply` 会启用 `prism-cert-renew.timer`，每日 03:00 左右执行续期检查；
+- 续期链路演练：`certbot renew --dry-run --webroot -w /var/www/certbot`；dry-run 不替代正式证书到期检查；
 - 证书：`deploy/certbot/conf`；
 - ACME webroot：`deploy/certbot/www`；
 - Nginx 模板：`frontend/nginx.conf.template`。
 
 多版本发布工作区应在 `.env` 中将 `CERTBOT_CONF_DIR` 和 `CERTBOT_WEBROOT_DIR` 指向同一份稳定证书/webroot 目录；否则 Compose 会按当前 release 工作区解析相对路径。`deploy.sh` 会在备份、构建和容器切换前验证域名证书及 webroot，缺失或不可访问时拒绝发布，避免新容器遮蔽生产证书。
 
-续期后应核对证书有效期、Nginx reload、HTTP 308、HTTPS 首页与同源 `/healthz`。证书私钥不得复制到 Git、备份日志或工单。
+systemd timer 应保持 enabled，并通过 `systemctl list-timers prism-cert-renew.timer` 查看下一次运行；失败通过 `systemctl status`/journal 处理。续期后核对证书有效期、Nginx reload、HTTP 308、HTTPS 首页与同源 `/healthz`。证书私钥不得复制到 Git、备份日志或工单。
 
 ## 11. 常用只读检查
 

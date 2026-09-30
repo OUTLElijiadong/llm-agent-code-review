@@ -11,7 +11,7 @@ usage() {
   cat <<'USAGE'
 用法: ./install.sh [--apply] [--deploy-dir DIR] [--unit-dir DIR]
 
-默认 dry-run；--apply 时需要 root，并会 daemon-reload、enable --now 三个 timer。
+默认 dry-run；--apply 时需要 root，并会 daemon-reload、enable --now Prism 运维 timer。
 USAGE
 }
 
@@ -67,8 +67,8 @@ render_service() {
   sed "s|@DEPLOY_DIR@|$(sed_replacement_escape "$deploy_dir")|g" "$template" > "$output"
 }
 
-services=(prism-backup.service prism-verify-backup.service prism-ops-check.service prism-ops-executor.service)
-timers=(prism-backup.timer prism-verify-backup.timer prism-ops-check.timer)
+services=(prism-backup.service prism-verify-backup.service prism-ops-check.service prism-ops-executor.service prism-cert-renew.service)
+timers=(prism-backup.timer prism-verify-backup.timer prism-ops-check.timer prism-cert-renew.timer)
 if [[ "$apply" != "1" ]]; then
   printf 'DRY-RUN deploy_dir=%s unit_dir=%s\n' "$deploy_dir" "$unit_dir"
   printf '将安装 service: %s\n' "${services[*]}"

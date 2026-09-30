@@ -52,7 +52,8 @@
           <el-option label="可维护性" value="可维护性" />
           <el-option label="注释完整性" value="注释完整性" />
         </el-select>
-        <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reload">
+        <el-select v-model="filters.status" placeholder="状态" style="width: 210px" @change="reload">
+          <el-option label="处理中（未修复/待复查）" value="active" />
           <el-option label="全部状态" value="all" />
           <el-option label="未修复" value="unfixed" />
           <el-option label="已修复" value="fixed" />
@@ -205,7 +206,8 @@ const filters = reactive({
   project_id: undefined as number | undefined,
   severity: '',
   issue_type: '',
-  status: '',
+  // 后端未指定状态时只返回未修复与待复查；将该默认范围显式呈现在筛选器里。
+  status: 'active',
   keyword: '',
 })
 
@@ -271,7 +273,7 @@ async function loadIssues(): Promise<void> {
       project_id: filters.project_id,
       severity: filters.severity || undefined,
       issue_type: filters.issue_type || undefined,
-      status: filters.status || undefined,
+      status: filters.status === 'active' || !filters.status ? undefined : filters.status,
       keyword: filters.keyword || undefined,
       page: page.value,
       page_size: pageSize.value,

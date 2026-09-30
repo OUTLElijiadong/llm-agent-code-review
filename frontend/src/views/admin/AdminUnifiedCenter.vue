@@ -8,6 +8,7 @@ const AdminOverview = defineAsyncComponent(() => import('./AdminOverview.vue'))
 const AgentGovernance = defineAsyncComponent(() => import('./AgentGovernance.vue'))
 const AgentStudio = defineAsyncComponent(() => import('@/views/agent/AgentStudio.vue'))
 const ApprovalHub = defineAsyncComponent(() => import('./ApprovalHub.vue'))
+const EvolutionCenter = defineAsyncComponent(() => import('./EvolutionCenter.vue'))
 const KnowledgeGovernance = defineAsyncComponent(() => import('./KnowledgeGovernance.vue'))
 const SkillManager = defineAsyncComponent(() => import('./SkillManager.vue'))
 const PolicyCenter = defineAsyncComponent(() => import('./PolicyCenter.vue'))
@@ -41,6 +42,7 @@ const tabs: Record<AdminCenterDomain, Tab[]> = {
     { name: 'agents', label: 'Agent目录', component: AgentGovernance },
     { name: 'studio', label: '创建与测试', component: AgentStudio },
     { name: 'approvals', label: '审批中心', component: ApprovalHub },
+    { name: 'evolution', label: '自进化', component: EvolutionCenter },
     { name: 'knowledge', label: '知识与记忆', component: KnowledgeGovernance },
     { name: 'skills', label: 'Skill', component: SkillManager },
   ],
@@ -80,6 +82,7 @@ const sectionDescription = computed(() => {
     agents: '维护 Agent 目录、创建流程和能力版本。',
     studio: '创建、测试并提交 Agent 版本。',
     approvals: '按事项类型处理发布、执行和规则提案审批。',
+    evolution: '查看意见采纳、经验记忆、评估集和各 Agent 的进化状态。',
     knowledge: '维护 Agent 可用的知识来源与记忆。',
     skills: '查看和管理可复用技能。',
     overview: '查看平台运行状态、任务积压和服务健康。',
@@ -122,10 +125,9 @@ function selectTab(value: string | number): void {
 
 <style scoped>
 .unified-center { min-width: 0; }
-.unified-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.unified-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 16px; }
 .unified-head p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
 @media (max-width: 860px) {
-  .unified-head { align-items: stretch; flex-direction: column; gap: 8px; }
   .unified-head :deep(.el-tabs__nav-wrap) { overflow-x: auto; }
 }
 </style>

@@ -8,7 +8,7 @@ SECURITY_HEADERS = (
     "X-Frame-Options",
     "Referrer-Policy",
     "Strict-Transport-Security",
-    "Content-Security-Policy-Report-Only",
+    "Content-Security-Policy",
 )
 
 
@@ -35,25 +35,33 @@ def test_static_child_locations_repeat_parent_security_headers() -> None:
             assert f"add_header {header} " in block
 
 
-def test_report_only_csp_covers_current_frontend_resource_types() -> None:
+def test_enforced_csp_covers_frontend_and_limits_scripts_and_websockets() -> None:
     source = TEMPLATE.read_text(encoding="utf-8")
+    html = (TEMPLATE.parent / "index.html").read_text(encoding="utf-8")
     csp = next(
         line.strip()
         for line in source.splitlines()
-        if "add_header Content-Security-Policy-Report-Only" in line
+        if "add_header Content-Security-Policy " in line
     )
 
     for directive in (
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline'",
+        "script-src 'self'",
+        "script-src-attr 'none'",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' data: https://fonts.gstatic.com",
-        "connect-src 'self' wss:",
+        "connect-src 'self' wss://$host",
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
     ):
         assert directive in csp
+    assert "Content-Security-Policy-Report-Only" not in source
+    assert "script-src 'self' 'unsafe-inline'" not in source
+    assert "connect-src 'self' wss:;" not in source
+    assert "onload=" not in html
+    assert '<script defer src="/load-fonts.js"></script>' in html
+    assert "server_tokens off;" in source
 
 
 def test_api_and_websocket_proxy_contracts_remain_present() -> None:

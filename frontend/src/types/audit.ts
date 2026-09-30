@@ -18,6 +18,7 @@ export interface AuditQuery {
   actor_id?: number
   start?: string
   end?: string
+  include_system_heartbeat?: boolean
   page?: number
   page_size?: number
 }

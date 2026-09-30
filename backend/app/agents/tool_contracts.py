@@ -330,8 +330,8 @@ class ListAgentSkillsArguments(FixedToolArguments):
 class ChangeOwnPasswordArguments(FixedToolArguments):
     """修改当前登录用户自己的密码；成功后旧会话全部失效。"""
 
-    old_password: str = Field(min_length=6, max_length=32, description="当前旧密码")
-    new_password: str = Field(min_length=6, max_length=32, description="新密码")
+    old_password: str = Field(min_length=6, max_length=64, description="当前旧密码")
+    new_password: str = Field(min_length=15, max_length=64, description="新密码，至少15个字符")
 
 
 # ── 管理员 AI 代管后台工具(仅管理员可用;写操作强制审批)──

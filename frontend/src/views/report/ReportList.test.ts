@@ -161,6 +161,22 @@ describe('报告列表领域导出', () => {
     expect(second).toBeInstanceOf(Promise)
   })
 
+  it('导出文件名清理内部 review_type 后缀', async () => {
+    let filename = ''
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      filename = this.download
+    })
+    wrapper = mountPage()
+    await flushPromises()
+    await (wrapper.vm as any).handleExport({
+      ...report,
+      task_name: '项目167 完整代码审查（review_type=full）',
+    }, 'json')
+
+    expect(filename).toBe('review_report_项目167 完整代码审查_42.json')
+    expect(filename).not.toContain('review_type=')
+  })
+
   it('错误 JSON 不触发下载，显示message和next_action并提供重试入口', async () => {
     api.export.mockRejectedValueOnce({ code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON' })
     wrapper = mountPage()

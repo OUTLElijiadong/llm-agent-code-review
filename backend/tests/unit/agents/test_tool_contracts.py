@@ -137,8 +137,8 @@ EXPECTED_FIXED_TOOL_NAMES = [
         ),
         (
             "change_own_password",
-            {"old_password": "oldpass123", "new_password": "newpass456"},
-            {"old_password": "oldpass123", "new_password": "newpass456"},
+            {"old_password": "oldpass123", "new_password": "NewPassphraseIsStrong123!"},
+            {"old_password": "oldpass123", "new_password": "NewPassphraseIsStrong123!"},
         ),
         ("trigger_evolution", {}, {}),
         ("list_agent_skills", {}, {}),

@@ -37,7 +37,7 @@ vi.mock('@/stores/user', () => ({
 }))
 
 import AppSidebar from './AppSidebar.vue'
-import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
+import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
 
 describe('AppSidebar ordinary member navigation', () => {
   beforeEach(() => {
@@ -106,6 +106,8 @@ describe('AppSidebar ordinary member navigation', () => {
   it('shows the current release and persists the collapsed island state', async () => {
     const wrapper = mountSidebar()
     expect(wrapper.text()).toContain(`${APP_DISPLAY_VERSION} · PRISM`)
+    expect(wrapper.get('.version-meta').text()).toBe(`构建 ${APP_BUILD_TIME_DISPLAY}`)
+    expect(wrapper.get('.version').attributes('title')).toContain(APP_RELEASE_SHA)
 
     await wrapper.get('.sidebar-toggle').trigger('click')
 

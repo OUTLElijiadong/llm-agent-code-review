@@ -29,6 +29,10 @@ async function mountGuide(path: string, surface: 'user' | 'admin'): Promise<{ wr
     history: createMemoryHistory(),
     routes: [
       { path: '/projects', component: { template: '<div>projects</div>' }, meta: { permissions: ['project:view'] } },
+      { path: '/reviews', component: { template: '<div>reviews</div>' }, meta: { permissions: ['review:view'] } },
+      { path: '/reports', component: { template: '<div>reports</div>' }, meta: { permissions: ['report:view'] } },
+      { path: '/issues', component: { template: '<div>issues</div>' }, meta: { permissions: ['issue:view'] } },
+      { path: '/knowledge', component: { template: '<div>knowledge</div>' }, meta: { permissions: ['knowledge:view'] } },
       { path: '/admin/overview', component: { template: '<div>overview</div>' }, meta: { role: 'admin' } },
       { path: '/admin/mcp-workers', component: { template: '<div>mcp</div>' }, meta: { role: 'admin', superAdmin: true } },
       { path: '/login', component: { template: '<div>login</div>' } },
@@ -62,6 +66,12 @@ describe('ProactivePageGuide', () => {
     const { wrapper } = await mountGuide('/projects', 'user')
     expect(wrapper.find('.proactive-guide').exists()).toBe(true)
     expect(wrapper.text()).toContain('下一步建议')
+  })
+
+  it('审查任务页面引导使用“审查任务”名称', async () => {
+    const { wrapper } = await mountGuide('/reviews', 'user')
+    expect(wrapper.get('.guide-title').text()).toContain('审查任务')
+    expect(wrapper.get('.guide-title').text()).not.toContain('审查记录')
   })
 
   it('点击引导派发用户端唤起事件并预填指令', async () => {
@@ -145,5 +155,19 @@ describe('ProactivePageGuide', () => {
     expect(localStorage.getItem('prism-page-guide-dismissed:user:user-7')).toBeNull()
     expect(second.wrapper.find('.proactive-guide').exists()).toBe(true)
     second.wrapper.unmount()
+  })
+
+  it('关闭一次后在报告、问题追踪和知识库页面都保持隐藏', async () => {
+    const { wrapper, router } = await mountGuide('/reports', 'user')
+    expect(wrapper.find('.proactive-guide').exists()).toBe(true)
+    await wrapper.get('.guide-close').trigger('click')
+
+    await router.push('/issues')
+    await flushPromises()
+    expect(wrapper.find('.proactive-guide').exists()).toBe(false)
+    await router.push('/knowledge')
+    await flushPromises()
+    expect(wrapper.find('.proactive-guide').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

@@ -15,6 +15,8 @@ const userStore = useUserStore()
 const routeLoading = ref(false)
 const agentVisible = ref(false)
 const agentPrefill = ref('')
+const agentPreferredSessionId = ref('')
+const agentSessionRequestId = ref(0)
 let showTimer: number | undefined
 let hideTimer: number | undefined
 const canUseAgent = computed(() => (
@@ -32,6 +34,7 @@ function agentVisibleStorageKey(): string {
 // 浮窗打开状态按账号持久化:此前只存内存,退出登录后组件卸载,
 // 重新登录时状态归零,用户感觉"悬浮窗不见了"。
 watch(agentVisible, (val) => {
+  if (!val) agentPreferredSessionId.value = ''
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
@@ -57,12 +60,14 @@ watch([canUseAgent, () => userStore.profile?.id], ([allowed, id]) => {
 }, { immediate: true })
 
 /** 两个权限隔离的会话 surface 共用小菱主控；管理员工具仍按当前角色授权。 */
-function openAgentChat(prefill = ''): void {
+function openAgentChat(prefill = '', preferredSessionId = ''): void {
   if (!canUseAgent.value) return
   if (userStore.isAdmin()) {
     window.dispatchEvent(new Event('prism:close-admin-copilot'))
   }
   if (prefill) agentPrefill.value = prefill
+  agentPreferredSessionId.value = preferredSessionId
+  agentSessionRequestId.value += 1
   agentVisible.value = true
 }
 
@@ -71,8 +76,8 @@ function handleAdminCopilotOpened(): void {
 }
 
 function handleOpenAgentChat(event: Event): void {
-  const detail = (event as CustomEvent<{ prefill?: string }>).detail
-  openAgentChat(detail?.prefill ?? '')
+  const detail = (event as CustomEvent<{ prefill?: string; sessionId?: string }>).detail
+  openAgentChat(detail?.prefill ?? '', detail?.sessionId ?? '')
 }
 
 provide('openAgentChat', () => openAgentChat())
@@ -141,6 +146,8 @@ onBeforeUnmount(() => {
     v-if="canUseAgent"
     v-model:visible="agentVisible"
     :prefill="agentPrefill"
+    :preferred-session-id="agentPreferredSessionId"
+    :preferred-session-request-id="agentSessionRequestId"
     :show-launcher="false"
     @consumed-prefill="agentPrefill = ''"
   />

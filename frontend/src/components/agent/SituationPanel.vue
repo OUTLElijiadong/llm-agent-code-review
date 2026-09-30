@@ -56,7 +56,7 @@ const peakBucket = computed(() => {
   <section class="situation" :class="{ 'is-loading': loading }">
     <div class="head">
       <span class="prism-mark" aria-hidden="true"></span>
-      <h2 class="title">态势感知</h2>
+      <h2 class="title">运行概览</h2>
       <span class="hint">{{ scopeLabel }} · 自动同步</span>
     </div>
 

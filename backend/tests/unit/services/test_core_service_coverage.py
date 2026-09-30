@@ -211,10 +211,10 @@ def test_register_creates_user_and_assigns_default_role(db, monkeypatch):
 
     user = auth_service.register(
         db,
-        RegisterIn(username="new-user", password="secret1", email="new@example.com"),
+        RegisterIn(username="new-user", password="a long memorable test passphrase", email="new@example.com"),
     )
 
-    assert user.password == "hashed:secret1"
+    assert user.password == "hashed:a long memorable test passphrase"
     assert user.nickname == "new-user"
     assert user.role == "user"
     assert assigned == [(user.id, [role.id])]
@@ -236,12 +236,12 @@ def test_register_rejects_duplicate_and_allows_missing_default_role(db, monkeypa
     with pytest.raises(ConflictError):
         auth_service.register(
             db,
-            RegisterIn(username="duplicate", password="secret1", email="dup@example.com"),
+            RegisterIn(username="duplicate", password="a long memorable test passphrase", email="dup@example.com"),
         )
 
     created = auth_service.register(
         db,
-        RegisterIn(username="roleless", password="secret1", nickname="自定义昵称"),
+        RegisterIn(username="roleless", password="a long memorable test passphrase", nickname="自定义昵称"),
     )
     assert created.nickname == "自定义昵称"
 
@@ -316,11 +316,11 @@ def test_change_password_validates_old_password_and_revokes_tokens(db, monkeypat
     monkeypatch.setattr(auth_service, "hash_password", lambda raw: f"new-hash:{raw}")
 
     with pytest.raises(AuthError):
-        auth_service.change_password(db, user, "wrong", "new-password")
+        auth_service.change_password(db, user, "wrong", "a different memorable passphrase")
 
-    auth_service.change_password(db, user, "old-password", "new-password")
+    auth_service.change_password(db, user, "old-password", "a different memorable passphrase")
     db.refresh(user)
-    assert user.password == "new-hash:new-password"
+    assert user.password == "new-hash:a different memorable passphrase"
     assert user.token_version == 1
 
 

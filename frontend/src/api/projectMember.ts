@@ -5,6 +5,7 @@
 import { get, post, put, del } from './http'
 import type {
   ProjectMemberOut,
+  ProjectMemberCandidate,
   ProjectMemberAddIn,
   ProjectMemberRoleUpdateIn,
 } from '@/types/projectMember'
@@ -16,6 +17,11 @@ import type {
  */
 export function listProjectMembers(projectId: number): Promise<ProjectMemberOut[]> {
   return get<ProjectMemberOut[]>(`/projects/${projectId}/members`)
+}
+
+/** 搜索当前项目可加入的启用账号（后端强制项目成员管理权限）。 */
+export function searchProjectMemberCandidates(projectId: number, query: string): Promise<ProjectMemberCandidate[]> {
+  return get<ProjectMemberCandidate[]>(`/projects/${projectId}/members/candidates`, { q: query })
 }
 
 /**

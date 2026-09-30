@@ -16,7 +16,7 @@ export const USER_PAGE_TIPS: PageGuideTip[] = [
   { route: '/projects', title: '项目管理', hint: '可以导入 GitHub 仓库、上传源码并直接发起审查。', prompt: '我正在项目管理页，请带我完成一次项目导入并给出推荐审查方案。' },
   { route: '/code', title: '代码中心', hint: '浏览文件、在线编辑后记得复测;修复副本适合重新跑一次审计。', prompt: '我正在代码中心，请根据当前项目文件推荐下一步：审查/修复/复测。' },
   { route: '/reviews/start', title: '发起审查', hint: '选好项目与文件即可发起黑白盒或全链路审计。', prompt: '我准备发起代码审查，请帮我选择最适合的审查类型并说明原因。' },
-  { route: '/reviews', title: '审查记录', hint: '查看任务进度、失败原因与重试入口。', prompt: '我在审查记录页，请帮我梳理当前任务并指出需要我处理的失败项。' },
+  { route: '/reviews', title: '审查任务', hint: '查看任务进度、失败原因与重试入口。', prompt: '我在审查任务页，请帮我梳理当前任务并指出需要我处理的失败项。' },
   { route: '/issues', title: '问题追踪', hint: '按严重度闭环问题,优先处理 high/critical。', prompt: '我在问题追踪页，请按严重度帮我排一个处理顺序并给出首个问题的处置建议。' },
   { route: '/reports', title: '审查报告', hint: '报告可直接导出、分享或转成修复计划。', prompt: '我在审查报告页，请帮我解读最新报告并给出下一步行动。' },
   { route: '/security', title: '安全与审查规则', hint: '统一查看安全态势并维护审查规则,高风险项目优先。', prompt: '我在安全与审查规则页，请分析当前安全态势并建议优先处理哪些高风险项目。' },

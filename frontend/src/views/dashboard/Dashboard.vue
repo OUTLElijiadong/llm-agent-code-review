@@ -93,11 +93,11 @@
           @click="goReviewDetail(item.id)"
         >
           <span class="ri-main">
-            <b>{{ item.task_name }}</b>
+            <b>{{ taskDisplayTitle(item.task_name, `审查任务 #${item.id}`) }}</b>
             <span class="ri-meta font-mono">{{ item.project_name }} · {{ item.status === 'pending' ? '排队中' : `${item.processed_files}/${item.total_files || '?'} 文件` }}</span>
           </span>
           <span class="ri-bar" :class="{ indeterminate: item.status === 'pending' || !item.total_files }"
-            role="progressbar" :aria-label="`${item.task_name}已处理文件`"
+            role="progressbar" :aria-label="`${taskDisplayTitle(item.task_name, `审查任务 #${item.id}`)}已处理文件`"
             :aria-valuenow="item.status === 'pending' || !item.total_files ? undefined : reviewProgress(item)"
             :aria-valuemin="0" :aria-valuemax="100"
           >
@@ -105,19 +105,23 @@
           </span>
           <span class="ri-pct font-mono">{{ item.status === 'pending' ? '…' : item.total_files ? `${reviewProgress(item)}%` : '运行中' }}</span>
         </button>
-        <div
+        <button
           v-for="item in runningData.agents"
           :key="`a-${item.run_id}`"
+          type="button"
           class="running-item agent"
-          :title="item.session_key"
+          :title="canUseAgent ? '打开这条小菱会话' : '当前账号无权使用小菱助手'"
+          :aria-label="`继续小菱会话：${AGENT_RUN_STATUS_LABELS[item.status] || item.status}`"
+          :disabled="!canUseAgent || !item.session_key"
+          @click="openAgentSession(item.session_key)"
         >
           <span class="agent-dot" aria-hidden="true"></span>
           <span class="ri-main">
             <b>小菱会话</b>
             <span class="ri-meta font-mono">{{ AGENT_RUN_STATUS_LABELS[item.status] || item.status }}</span>
           </span>
-          <span class="ri-tag">Agent</span>
-        </div>
+          <span class="ri-tag">对话</span>
+        </button>
       </div>
     </section>
 
@@ -257,6 +261,7 @@
 </template>
 
 <script setup lang="ts">
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
@@ -286,6 +291,7 @@ import { useUserStore } from '@/stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 const canViewReviews = computed(() => userStore.hasPermission('review:view'))
+const canUseAgent = computed(() => userStore.hasPermission('agent:chat'))
 const canStartReview = computed(() => userStore.hasPermission('review:start'))
 const canViewSecurity = computed(() => userStore.hasPermission('security:view'))
 const canExportWeeklyReport = computed(() => userStore.hasPermission('report:export:html'))
@@ -632,7 +638,7 @@ const activityFeed = computed<ActivityItem[]>(() => {
     const score = t.score ?? '未提供'
     const scoreLabel = taskScoreLabel(t)
     const status = t.status || 'pending'
-    const taskName = t.task_name || `任务 #${id}`
+    const taskName = taskDisplayTitle(t.task_name, `任务 #${id}`)
     const projectName = t.project_name || ''
     const displayName = projectName ? `${projectName} · ${taskName}` : taskName
     const safeDisplayName = escapeHtml(displayName)
@@ -798,7 +804,7 @@ function onWeeklyReport() {
       : '<tr><td colspan="2" style="color:#999">暂无数据</td></tr>'
   const taskRows = (s.recent_tasks || []).length
     ? (s.recent_tasks || []).map((t) =>
-        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(t.task_name)}</td><td style="text-align:right">${esc(taskScoreLabel(t))}：${esc(t.score ?? '未提供')}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
+        `<tr><td>#${esc(t.id)}</td><td>${esc(t.project_name)}</td><td>${esc(taskDisplayTitle(t.task_name, `任务 #${t.id}`))}</td><td style="text-align:right">${esc(taskScoreLabel(t))}：${esc(t.score ?? '未提供')}</td><td>${esc(String(t.create_time || '').slice(0, 10))}</td></tr>`).join('')
     : '<tr><td colspan="5" style="color:#999">暂无审查记录</td></tr>'
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -867,6 +873,11 @@ function goReviewDetail(id: number) {
 function goReviewList() {
   if (!canViewReviews.value) return
   router.push('/reviews')
+}
+
+function openAgentSession(sessionId: string): void {
+  if (!canUseAgent.value || !sessionId) return
+  window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { sessionId } }))
 }
 
 /**
@@ -1015,6 +1026,10 @@ button.link {
 .running-item.review:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
 .running-item.review:not(:disabled):hover { border-color: var(--brand-300, #a8c4fa); transform: translateY(-1px); }
 .running-item.agent { grid-template-columns: auto minmax(0, 1fr) auto; }
+.running-item.agent { width: 100%; border: 1px solid var(--gray-100, #eef0f4); font: inherit; color: inherit; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.running-item.agent:disabled { cursor: default; }
+.running-item.agent:not(:disabled):hover { border-color: var(--brand-300, #a8c4fa); transform: translateY(-1px); }
+.running-item.agent:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
 .ri-main { display: grid; min-width: 0; }
 .ri-main b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ri-meta { overflow-wrap: anywhere; font-size: 11px; color: var(--gray-500); margin-top: 2px; }

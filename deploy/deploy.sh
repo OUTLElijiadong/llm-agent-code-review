@@ -220,6 +220,7 @@ esac
 
 export APP_RELEASE="$target_sha"
 export APP_VERSION="$app_version"
+export APP_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export BACKEND_RELEASE="$desired_backend"
 export FRONTEND_RELEASE="$desired_frontend"
 write_release_state \

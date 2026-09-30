@@ -62,7 +62,7 @@
           <div class="project-summary-cards">
             <article class="summary-tile"><span>代码库文件</span><strong>{{ project.active_file_count ?? '—' }}</strong><small>已入库且有效的代码文件</small></article>
             <article class="summary-tile"><span>整包归档文件</span><strong>{{ project.archive_file_count ?? '—' }}</strong><small>归档成员数量，独立于代码库</small></article>
-            <article class="summary-tile"><span>Agent 历史执行</span><strong>{{ project.agent_run_count ?? 0 }} 次</strong><small>最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '暂无记录' }}</small></article>
+            <article class="summary-tile"><span>Agent 工具调用</span><strong>{{ project.agent_run_count ?? 0 }} 次</strong><small>统计此项目关联的 Agent 工具调用记录 · 最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '暂无记录' }}</small></article>
           </div>
           <p class="project-description">{{ project.description || '暂无项目介绍' }}</p>
           <details class="project-metadata">
@@ -308,14 +308,26 @@
       @closed="resetAddForm"
     >
       <el-form :model="addForm" label-width="90px">
-        <el-form-item label="用户 ID">
-          <el-input-number
+        <el-form-item label="查找用户">
+          <el-select
             v-model="addForm.user_id"
-            :min="1"
-            :controls="false"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchMemberCandidates"
+            :loading="memberCandidateLoading"
             style="width: 100%"
-            placeholder="请输入被添加用户的 ID"
-          />
+            placeholder="输入至少 2 个字符，搜索用户名或邮箱"
+            @change="selectMemberCandidate"
+          >
+            <el-option
+              v-for="candidate in memberCandidateOptions"
+              :key="candidate.id"
+              :label="candidate.nickname ? `${candidate.nickname}（${candidate.username}）` : candidate.username"
+              :value="candidate.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="项目角色">
           <el-select v-model="addForm.role_in_project" style="width: 100%">
@@ -352,6 +364,7 @@ import {
 import { upload, uploadFolder } from '@/api/codeFile'
 import {
   listProjectMembers,
+  searchProjectMemberCandidates,
   addProjectMember,
   updateProjectMemberRole,
   removeProjectMember,
@@ -360,6 +373,7 @@ import type { ProjectDetailOut } from '@/types/project'
 import type { SecurityScanOut } from '@/types/security'
 import type {
   ProjectMemberOut,
+  ProjectMemberCandidate,
   ProjectRole,
 } from '@/types/projectMember'
 import CodeFileList from '@/views/code/CodeFileList.vue'
@@ -447,6 +461,16 @@ const members = ref<ProjectMemberOut[]>([])
 const memberLoading = ref(false)
 const addMemberVisible = ref(false)
 const addSubmitting = ref(false)
+const memberCandidateLoading = ref(false)
+const memberCandidates = ref<ProjectMemberCandidate[]>([])
+const selectedMemberCandidate = ref<ProjectMemberCandidate | null>(null)
+const memberCandidateOptions = computed(() => {
+  if (!selectedMemberCandidate.value || memberCandidates.value.some((item) => item.id === selectedMemberCandidate.value?.id)) {
+    return memberCandidates.value
+  }
+  return [selectedMemberCandidate.value, ...memberCandidates.value]
+})
+let memberCandidateSearchVersion = 0
 const addForm = ref<{ user_id: number | null; role_in_project: ProjectRole }>({
   user_id: null,
   role_in_project: 'reviewer',
@@ -768,13 +792,46 @@ async function fetchMembers(): Promise<void> {
  */
 function openAddMemberDialog(): void {
   if (!canManageMembers.value) return
+  memberCandidates.value = []
+  selectedMemberCandidate.value = null
   addMemberVisible.value = true
+}
+
+async function searchMemberCandidates(value: string): Promise<void> {
+  const query = value.trim()
+  const version = ++memberCandidateSearchVersion
+  if (query.length < 2 || !canManageMembers.value) {
+    memberCandidates.value = []
+    memberCandidateLoading.value = false
+    return
+  }
+  memberCandidateLoading.value = true
+  try {
+    const candidates = await searchProjectMemberCandidates(projectId, query)
+    if (version === memberCandidateSearchVersion) memberCandidates.value = candidates
+  } catch {
+    if (version === memberCandidateSearchVersion) memberCandidates.value = []
+    /* 错误已由 HTTP 拦截器展示。 */
+  } finally {
+    if (version === memberCandidateSearchVersion) memberCandidateLoading.value = false
+  }
+}
+
+function selectMemberCandidate(userId: number | null): void {
+  selectedMemberCandidate.value = userId === null
+    ? null
+    : memberCandidates.value.find((item) => item.id === userId)
+      ?? selectedMemberCandidate.value
 }
 
 /**
  * 重置添加表单（对话框关闭时调用）
  */
 function resetAddForm(): void {
+  memberCandidateSearchVersion++
+  memberCandidates.value = []
+  selectedMemberCandidate.value = null
+  memberCandidateLoading.value = false
   addForm.value = { user_id: null, role_in_project: 'reviewer' }
 }
 
@@ -784,7 +841,7 @@ function resetAddForm(): void {
 async function submitAddMember(): Promise<void> {
   if (!canManageMembers.value || addSubmitting.value) return
   if (!addForm.value.user_id) {
-    ElMessage.warning('请输入用户 ID')
+    ElMessage.warning('请先搜索并选择一个用户')
     return
   }
   addSubmitting.value = true

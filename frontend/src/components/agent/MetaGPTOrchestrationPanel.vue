@@ -31,6 +31,32 @@ const info = ref<MetaGPTInfoOut | null>(null)
 const preview = ref<MetaGPTEnvironmentPreviewOut | null>(null)
 const mode = ref<'review' | 'discussion'>('review')
 
+const COMPONENT_PRESENTATION: Record<string, { name: string; description: string }> = {
+  Environment: { name: '团队执行空间', description: '保存本次协作参与者、任务状态与消息。' },
+  Role: { name: 'Agent 职责', description: '说明每位 Agent 在协作任务中的职责与目标。' },
+  RoleAdapter: { name: 'Agent 接入配置', description: '将可用 Agent 接入审查或讨论流程。' },
+  Message: { name: '协作消息', description: '在团队成员之间传递任务和阶段结果。' },
+}
+
+const FACTORY_PRESENTATION: Record<string, { name: string; description: string }> = {
+  build_review_environment: { name: '代码审查团队', description: '组合代码审查所需的 Agent，并按审查任务传递结果。' },
+  build_discussion_environment: { name: '圆桌讨论团队', description: '组合圆桌讨论参与者，并协调各轮发言。' },
+}
+
+const AGENT_PRESENTATION: Record<string, string> = {
+  code_reviewer: '代码质量审查 Agent',
+  security_sentinel: '安全审查 Agent',
+}
+
+const CATEGORY_PRESENTATION: Record<string, string> = {
+  review: '审查',
+  security: '安全',
+  performance: '性能',
+  reliability: '可靠性',
+  operations: '运维',
+  general: '通用',
+}
+
 // === 角色状态中文标签 ===
 const ROLE_STATE_LABELS: Record<string, string> = {
   idle: '空闲',
@@ -75,7 +101,7 @@ async function loadInfo(): Promise<void> {
   try {
     info.value = await getMetaGPTInfo()
   } catch {
-    ElMessage.error('加载 MetaGPT 信息失败')
+    ElMessage.error('加载 Agent 协作信息失败')
     info.value = null
   } finally {
     infoLoading.value = false
@@ -91,7 +117,7 @@ async function loadPreview(): Promise<void> {
   try {
     preview.value = await previewMetaGPTEnvironment(mode.value)
   } catch {
-    ElMessage.error('加载 Environment 预览失败')
+    ElMessage.error('加载执行方案预览失败')
     preview.value = null
   } finally {
     previewLoading.value = false
@@ -103,7 +129,7 @@ async function loadPreview(): Promise<void> {
  */
 async function refreshAll(): Promise<void> {
   await Promise.all([loadInfo(), loadPreview()])
-  ElMessage.success('已同步最新 MetaGPT 编排数据')
+  ElMessage.success('已同步最新 Agent 协作数据')
 }
 
 /**
@@ -122,7 +148,10 @@ async function switchMode(m: 'review' | 'discussion'): Promise<void> {
  */
 const componentList = computed(() => {
   if (!info.value?.components) return []
-  return Object.entries(info.value.components).map(([name, desc]) => ({ name, desc }))
+  return Object.entries(info.value.components).map(([key]) => COMPONENT_PRESENTATION[key] ?? {
+    name: '协作组件',
+    description: '参与 Agent 团队的执行与消息协调。',
+  })
 })
 
 /**
@@ -130,7 +159,10 @@ const componentList = computed(() => {
  */
 const factoryList = computed(() => {
   if (!info.value?.factories) return []
-  return Object.entries(info.value.factories).map(([name, desc]) => ({ name, desc }))
+  return Object.entries(info.value.factories).map(([key]) => FACTORY_PRESENTATION[key] ?? {
+    name: '内置协作方案',
+    description: '供审查或讨论任务调用的 Agent 团队配置。',
+  })
 })
 
 /**
@@ -141,17 +173,60 @@ const roles = computed<MetaGPTRoleInfo[]>(() => preview.value?.roles ?? [])
 /**
  * 可适配 Agent 列表(从 info 中取)
  */
-const adaptableAgents = computed(() => info.value?.adaptable_agents ?? [])
+const adaptableAgents = computed(() => (info.value?.adaptable_agents ?? []).map((agent) => ({
+  ...agent,
+  displayName: agentDisplayName(agent.name),
+  categoryLabel: CATEGORY_PRESENTATION[agent.category] || '通用',
+})))
 
 /**
  * 默认参与当前模式的 Agent 列表
  */
 const defaultAgents = computed(() => {
   if (!info.value) return []
-  return mode.value === 'review'
+  const codes = mode.value === 'review'
     ? info.value.default_review_agents
     : info.value.default_discussion_agents
+  return codes.map(agentDisplayName)
 })
+
+function agentDisplayName(code: string): string {
+  const known = AGENT_PRESENTATION[code]
+  if (known) return known
+  const description = info.value?.adaptable_agents.find((agent) => agent.name === code)?.description?.trim()
+  return description || '协作 Agent'
+}
+
+function roleDisplayName(role: MetaGPTRoleInfo): string {
+  const code = role.agent_name || role.name
+  return AGENT_PRESENTATION[code] || role.profile?.trim() || agentDisplayName(code)
+}
+
+function roleGoal(role: MetaGPTRoleInfo): string {
+  const code = role.agent_name || role.name
+  return (role.goal || '为当前任务提供专业分析')
+    .replace(code, agentDisplayName(code))
+    .replace(/^完成\s+/, '完成')
+}
+
+function messageActionLabel(action: string): string {
+  const known: Record<string, string> = {
+    StartReview: '收到审查开始消息',
+    CrossReview: '收到交叉复核消息',
+    DiscussTurn: '收到新一轮讨论消息',
+    StartDiscussion: '收到讨论开始消息',
+  }
+  if (known[action]) return known[action]
+  if (action.endsWith('_Reply')) return '收到其他 Agent 的审查结果'
+  if (action.endsWith('_Discuss')) return '收到其他 Agent 的讨论观点'
+  return '收到团队协作消息'
+}
+
+function outboundActionLabel(action: string): string {
+  if (action.endsWith('_Reply')) return '完成分析后提交审查结果'
+  if (action.endsWith('_Discuss')) return '完成发言后提交讨论观点'
+  return '完成分析后向团队提交结果'
+}
 
 // === 生命周期 ===
 
@@ -174,8 +249,8 @@ watch(mode, () => {
         <div>
           <h3 class="section-title">Agent 协作能力</h3>
           <p v-if="info" class="section-sub">
-            <el-tag size="small" type="success">{{ info.version }}</el-tag>
-            <span class="section-desc">{{ info.description }}</span>
+            <el-tag size="small" type="success">内置协作方案</el-tag>
+            <span class="section-desc">展示可用于审查与讨论的 Agent 协作方式；预览不会启动模型调用。</span>
           </p>
         </div>
         <div class="section-actions">
@@ -200,20 +275,20 @@ watch(mode, () => {
             class="component-card"
           >
             <code class="component-name">{{ comp.name }}</code>
-            <p class="component-desc">{{ comp.desc }}</p>
+            <p class="component-desc">{{ comp.description }}</p>
           </article>
         </div>
 
         <!-- 工厂函数 -->
         <div class="factories-block">
-          <div class="block-label">可用工厂函数</div>
+          <div class="block-label">内置协作方案</div>
           <el-descriptions :column="1" border size="small">
             <el-descriptions-item
               v-for="fac in factoryList"
               :key="fac.name"
               :label="fac.name"
             >
-              {{ fac.desc }}
+              {{ fac.description }}
             </el-descriptions-item>
           </el-descriptions>
         </div>
@@ -253,14 +328,11 @@ watch(mode, () => {
         <!-- 团队方案信息 -->
         <div class="env-meta">
           <el-descriptions :column="3" border size="small">
-            <el-descriptions-item label="方案名称">
-              <code>{{ preview.env_name }}</code>
+            <el-descriptions-item label="协作方案">
+              {{ mode === 'review' ? '代码审查团队' : '圆桌讨论团队' }}
             </el-descriptions-item>
-            <el-descriptions-item label="追踪 ID">
-              <code class="trace-id">{{ preview.trace_id }}</code>
-            </el-descriptions-item>
-            <el-descriptions-item label="最大协作层级">
-              {{ preview.max_depth }}
+            <el-descriptions-item label="最多协作轮次">
+              {{ preview.max_depth }} 轮
             </el-descriptions-item>
             <el-descriptions-item label="参与角色">
               {{ preview.roles.length }}
@@ -291,11 +363,10 @@ watch(mode, () => {
           >
             <header class="role-head">
               <div class="role-avatar" :style="{ background: role.agent_color || 'var(--brand-500)' }">
-                {{ role.name.charAt(0).toUpperCase() }}
+                {{ roleDisplayName(role).charAt(0) }}
               </div>
               <div class="role-meta">
-                <div class="role-name">{{ role.profile || role.name }}</div>
-                <code class="role-code">{{ role.name }}</code>
+                <div class="role-name">{{ roleDisplayName(role) }}</div>
               </div>
               <el-tag
                 size="small"
@@ -309,7 +380,7 @@ watch(mode, () => {
             <div class="role-body">
               <div class="role-field">
                 <span class="field-label">目标</span>
-                <span class="field-value">{{ role.goal || '—' }}</span>
+                <span class="field-value">{{ roleGoal(role) }}</span>
               </div>
               <div class="role-field">
                 <span class="field-label">约束</span>
@@ -317,7 +388,7 @@ watch(mode, () => {
               </div>
               <div class="role-field">
               <span class="field-label">响应规则</span>
-                <code class="field-code">{{ role.react_action }}</code>
+                <span class="field-value">{{ outboundActionLabel(role.react_action) }}</span>
               </div>
               <div class="role-field">
               <span class="field-label">接收消息</span>
@@ -329,7 +400,7 @@ watch(mode, () => {
                     type="warning"
                     effect="plain"
                   >
-                    {{ act }}
+                    {{ messageActionLabel(act) }}
                   </el-tag>
                 </div>
                 <span v-else class="field-value field-empty">接收全部</span>
@@ -376,13 +447,13 @@ watch(mode, () => {
           class="adaptable-card"
         >
           <div class="adaptable-avatar" :style="{ background: ag.color || 'var(--gray-400)' }">
-            {{ ag.name.charAt(0).toUpperCase() }}
+            {{ ag.displayName.charAt(0) }}
           </div>
           <div class="adaptable-info">
-            <div class="adaptable-name">{{ ag.name }}</div>
+            <div class="adaptable-name">{{ ag.displayName }}</div>
             <div class="adaptable-desc">{{ ag.description }}</div>
             <el-tag size="small" type="info" effect="plain">
-              {{ ag.category }}
+              {{ ag.categoryLabel }}
             </el-tag>
           </div>
         </article>

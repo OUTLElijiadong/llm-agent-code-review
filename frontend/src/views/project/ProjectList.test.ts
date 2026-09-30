@@ -1,8 +1,9 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const permissionState = vi.hoisted(() => ({ importAllowed: false, createAllowed: false }))
+const permissionState = vi.hoisted(() => ({ importAllowed: false, createAllowed: false, updateAllowed: false, deleteAllowed: false }))
 const routerState = vi.hoisted(() => ({ push: vi.fn() }))
+const messageBox = vi.hoisted(() => ({ confirm: vi.fn() }))
 const projectApi = vi.hoisted(() => ({
   getProjects: vi.fn(),
   deleteProject: vi.fn(),
@@ -18,6 +19,8 @@ vi.mock('@/stores/user', () => ({
     hasPermission: (code: string) => {
       if (code === 'project:import') return permissionState.importAllowed
       if (code === 'project:create') return permissionState.createAllowed
+      if (code === 'project:update') return permissionState.updateAllowed
+      if (code === 'project:delete') return permissionState.deleteAllowed
       return false
     },
   }),
@@ -26,7 +29,7 @@ vi.mock('vue-router', () => ({ useRouter: () => routerState }))
 vi.mock('@/api/project', () => projectApi)
 vi.mock('@/api/codeFile', () => ({ uploadFolder: vi.fn() }))
 vi.mock('element-plus/es/components/message-box/index', () => ({
-  ElMessageBox: { confirm: vi.fn() },
+  ElMessageBox: messageBox,
 }))
 vi.mock('element-plus/es/components/message/index', () => ({
   ElMessage: { success: vi.fn(), info: vi.fn(), warning: vi.fn(), error: vi.fn() },
@@ -66,7 +69,12 @@ function mountProjectList() {
 beforeEach(() => {
   permissionState.importAllowed = false
   permissionState.createAllowed = false
+  permissionState.updateAllowed = false
+  permissionState.deleteAllowed = false
   routerState.push.mockReset()
+  messageBox.confirm.mockReset()
+  projectApi.deleteProject.mockReset()
+  projectApi.getProjects.mockReset().mockResolvedValue({ items: [], total: 0 })
   projectApi.queueRemoteProjectImport.mockReset()
   projectApi.getRemoteProjectImport.mockReset()
   projectApi.cancelRemoteProjectImport.mockReset()
@@ -130,6 +138,57 @@ describe('ProjectList 视图切换', () => {
     expect(tableButton.attributes('aria-pressed')).toBe('true')
     expect(cardButton.attributes('aria-pressed')).toBe('false')
     expect(wrapper.find('.table-card').isVisible()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('ProjectList 卡片和表格的行内操作', () => {
+  it.each(['card', 'table'] as const)('%s 视图的编辑/删除点击不会冒泡成项目详情跳转', async (view) => {
+    permissionState.updateAllowed = true
+    permissionState.deleteAllowed = true
+    messageBox.confirm.mockResolvedValue('确认')
+    projectApi.deleteProject.mockResolvedValue(undefined)
+    projectApi.getProjects.mockResolvedValue({
+      total: 1,
+      items: [{
+        id: 41,
+        project_name: '按钮事件项目',
+        description: '',
+        language: null,
+        status: 'active',
+        file_count: 0,
+        can_update: true,
+        can_delete: true,
+        score: null,
+        create_time: '2026-09-30T00:00:00Z',
+      }],
+    })
+
+    const wrapper = mountProjectList()
+    await flushPromises()
+    ;(wrapper.vm as any).view = view
+    await flushPromises()
+
+    const actions = wrapper.findAll('button.card-action')
+    if (view === 'card') {
+      await actions[0].trigger('click')
+      expect((wrapper.vm as any).formVisible).toBe(true)
+      expect(routerState.push).not.toHaveBeenCalled()
+
+      await actions[1].trigger('click')
+    } else {
+      const tableActions = wrapper.findAll('.table-card td.col-act button')
+      await tableActions[1].trigger('click')
+      expect((wrapper.vm as any).formVisible).toBe(true)
+      expect(routerState.push).not.toHaveBeenCalled()
+
+      await tableActions[2].trigger('click')
+    }
+
+    await flushPromises()
+    expect(messageBox.confirm).toHaveBeenCalledOnce()
+    expect(projectApi.deleteProject).toHaveBeenCalledWith(41)
+    expect(routerState.push).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

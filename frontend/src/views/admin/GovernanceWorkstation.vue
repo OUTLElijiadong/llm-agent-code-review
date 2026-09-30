@@ -3,6 +3,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { confirmDanger } from '@/composables/useDangerConfirm'
 import { isScheduleValid } from '@/utils/cronValidate'
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { useRouter } from 'vue-router'
 const router = useRouter()
 import { computed, onMounted, ref, watch } from 'vue'
@@ -192,7 +193,7 @@ const pageSubtitle = computed(() => {
   const subtitles: Record<Mode, string> = {
     overview: '先看运行状况、待办和风险，再进入具体处理。',
     agents: '查看每个 Agent 的职责、能力、知识和运行优先级。',
-    approvals: '只保留需要人工确认的高风险事项。',
+    approvals: '只保留需要人工确认的高风险与危急事项。',
     policies: '用业务动作描述规则；内部编码仅用于高级配置。',
     tools: '查看工具实际执行结果，并控制高风险能力。',
     knowledge: '每条知识都保留来源、风险等级和生效状态。',
@@ -243,6 +244,14 @@ function statusText(value: string | number | null | undefined): string {
 
 function riskText(value: string | null | undefined): string {
   return ({ low: '低风险', medium: '中风险', high: '高风险', critical: '危急风险' } as Record<string, string>)[value || ''] || (value || '-')
+}
+
+function riskTagType(value: string | null | undefined): 'danger' | 'warning' {
+  return value === 'high' || value === 'critical' ? 'danger' : 'warning'
+}
+
+function approvalTitle(value: string | null | undefined): string {
+  return taskDisplayTitle(String(value || '-').replace(/^Responses Agent 请求执行\s*/, ''), '-')
 }
 
 function alertSeverityText(value: string | null | undefined): string {
@@ -802,8 +811,10 @@ onMounted(loadData)
               <template #empty>
                 <EmptyState compact description="无待审批事项,高风险操作会自动进入这里" />
               </template>
-            <el-table-column prop="title" label="事项" min-width="180" />
-            <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
+            <el-table-column label="事项" min-width="180">
+              <template #default="{ row }"><span :title="approvalTitle(row.title)">{{ approvalTitle(row.title) }}</span></template>
+            </el-table-column>
+            <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="riskTagType(row.risk_level)">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
             <el-table-column label="状态" width="110"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
           </el-table>
         </section>
@@ -886,16 +897,18 @@ onMounted(loadData)
             <p v-if="loading" class="approval-loading-state" role="status">正在加载待审批事项</p>
             <EmptyState v-else compact description="无待审批事项" />
           </template>
-        <el-table-column prop="title" label="审批事项" min-width="220" />
-        <el-table-column label="Agent(智能体)" width="120">
+        <el-table-column label="审批事项" min-width="220">
+          <template #default="{ row }"><span :title="row.title">{{ approvalTitle(row.title) }}</span></template>
+        </el-table-column>
+        <el-table-column label="发起 Agent" width="120">
             <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
           </el-table-column>
         <el-table-column label="动作" min-width="150">
             <template #default="{ row }"><span :title="row.action">{{ policyActionText(row.action) }}</span></template>
           </el-table-column>
-        <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="row.risk_level === 'high' ? 'danger' : 'warning'">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
-        <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="riskTagType(row.risk_level)">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
+        <el-table-column label="状态" width="110" fixed="right"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'pending'" link type="success" @click="onApprove(row)">通过</el-button>
             <el-button v-if="row.status === 'pending'" link type="danger" @click="onReject(row)">驳回</el-button>
@@ -1439,7 +1452,7 @@ onMounted(loadData)
   -webkit-overflow-scrolling: touch;
 }
 .approval-table-scroll :deep(.approval-table-content) {
-  /* 列最小宽度之和为 860px；留出单元格边距后让外层成为真实滚动容器。 */
+  /* 审批表保持可读的最小列宽；窄视口可横向滚动，状态和操作列固定在右侧。 */
   min-width: 900px;
 }
 .approval-table-scroll:focus-visible {

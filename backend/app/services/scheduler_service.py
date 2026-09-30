@@ -952,6 +952,15 @@ def _execute_ops_health_check(db: Session, job: AgentJob) -> Dict[str, Any]:
         },
         "application": application,
     }
+    from app.services import agent_cost_budget_service
+
+    cost_alert = agent_cost_budget_service.ensure_daily_token_threshold_alert(
+        db,
+        "chat_assistant",
+        settings.assistant_daily_token_alert_threshold,
+    )
+    if cost_alert:
+        summary["daily_token_alert_id"] = cost_alert.id
     # 旧确认协议表在滚动升级或新环境中可能尚未创建；清理它是兼容性
     # 收尾动作，不能让主巡检因此变成失败。真正的健康检查结果仍按上面
     # 的关键依赖判定，并把跳过原因留在结果里供人核对。

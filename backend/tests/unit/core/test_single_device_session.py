@@ -235,7 +235,7 @@ def test_stale_change_password_cannot_revoke_new_login(tmp_path, monkeypatch) ->
         _new_token, _, _ = auth_service.login(login_db, user.username, "old-password")
 
         with pytest.raises(AuthError) as stale:
-            auth_service.change_password(stale_db, stale_user, "old-password", "new-password")
+            auth_service.change_password(stale_db, stale_user, "old-password", "a different memorable passphrase")
         assert stale.value.code == 40102
         stale_db.expire_all()
         persisted = stale_db.get(User, user.id)

@@ -13,12 +13,12 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   message: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
 }))
-const permissions = vi.hoisted(() => ({ canExport: true, exportFormat: 'html', canViewSecurity: false }))
+const permissions = vi.hoisted(() => ({ canExport: true, exportFormat: 'html', canViewSecurity: false, canUseAgent: true }))
 
 vi.mock('@/api/dashboard', () => mocks)
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 vi.mock('@/stores/user', () => ({
-  useUserStore: () => ({ hasPermission: (code: string) => code === 'security:view' ? permissions.canViewSecurity : (!code.startsWith('report:export:') || (permissions.canExport && code === `report:export:${permissions.exportFormat}`)) }),
+  useUserStore: () => ({ hasPermission: (code: string) => code === 'security:view' ? permissions.canViewSecurity : code === 'agent:chat' ? permissions.canUseAgent : (!code.startsWith('report:export:') || (permissions.canExport && code === `report:export:${permissions.exportFormat}`)) }),
 }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: mocks.message }))
 vi.mock('@/composables/useCountUp', () => ({ useCountUp: (source: { value: number }) => computed(() => source.value) }))
@@ -89,6 +89,7 @@ beforeEach(() => {
   permissions.canExport = true
   permissions.exportFormat = 'html'
   permissions.canViewSecurity = false
+  permissions.canUseAgent = true
   Object.values(mocks).forEach((mock) => { if (vi.isMockFunction(mock)) mock.mockReset() })
   mocks.getSummary.mockResolvedValue(summary())
   mocks.getRiskDistribution.mockResolvedValue([])
@@ -101,6 +102,32 @@ beforeEach(() => {
 afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()) })
 
 describe('成员仪表盘真实读取状态', () => {
+  it('待你继续中的小菱会话可点击并带当前账号返回的会话 ID 唤起小菱', async () => {
+    const listener = vi.fn()
+    window.addEventListener('prism:open-agent-chat', listener as EventListener)
+    mocks.getRunning.mockResolvedValue({ reviews: [], agents: [{ run_id: 'run-1', session_key: 'session-owned-1', surface: 'user', status: 'waiting_approval' }] })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.get('button.running-item.agent')
+    expect(card.text()).toContain('小菱会话')
+    expect(card.attributes('aria-label')).toContain('等待审批')
+    await card.trigger('click')
+    expect((listener.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({ sessionId: 'session-owned-1' })
+
+    window.removeEventListener('prism:open-agent-chat', listener as EventListener)
+    wrapper.unmount()
+  })
+
+  it('缺少小菱权限时待办不允许点击', async () => {
+    permissions.canUseAgent = false
+    mocks.getRunning.mockResolvedValue({ reviews: [], agents: [{ run_id: 'run-2', session_key: 'session-2', surface: 'user', status: 'waiting_input' }] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('button.running-item.agent').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('未知维度不得从图表和图例消失，分项合计应等于真实总数', async () => {
     mocks.getIssueTypeStatistics.mockResolvedValue([
       { issue_type: 'security', count: 30 },
@@ -330,6 +357,40 @@ describe('成员仪表盘真实读取状态', () => {
     expect(html).toContain('<div class="n">9</div><div class="l">累计发现问题</div>')
   })
 
+  it('最近动态与周报均清理 review_type 展示后缀', async () => {
+    let report: Blob | undefined
+    class ReportURL extends URL {
+      static createObjectURL = vi.fn((blob: Blob) => { report = blob; return 'blob:https://review.example/title-cleanup' })
+      static revokeObjectURL = vi.fn()
+    }
+    vi.stubGlobal('URL', ReportURL)
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    mocks.getSummary.mockResolvedValue(summary({ recent_tasks: [{
+      id: 179,
+      task_name: '项目167 完整代码审查（review_type=full）',
+      project_id: 14,
+      project_name: '公务通',
+      review_type: 'full',
+      status: 'success',
+      score: 88,
+      create_time: '2026-09-29T12:00:00Z',
+    }] }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('.activity-feed').text()).toContain('项目167 完整代码审查')
+    expect(wrapper.get('.activity-feed').text()).not.toContain('review_type=')
+    await wrapper.get('[data-testid="export-dashboard"]').trigger('click')
+    const html = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = reject
+      reader.readAsText(report!)
+    })
+    expect(html).toContain('项目167 完整代码审查')
+    expect(html).not.toContain('review_type=')
+  })
+
   it('后端真实四类零计数不画出虚假的等分饼图且允许导出真实零', async () => {
     mocks.getRiskDistribution.mockResolvedValue(['严重', '高', '中', '低'].map((severity) => ({ severity, count: 0 })))
     const wrapper = mountPage()
@@ -515,6 +576,21 @@ describe('后台进度读取与恢复', () => {
     expect(wrapper.get('[data-testid="running-title"]').text()).toBe('待你继续')
     expect(wrapper.get('[data-testid="running-subtitle"]').text()).toContain('可在小菱助手继续')
     expect(wrapper.get('[data-testid="running-panel"]').text()).toContain('等待输入')
+  })
+
+  it('小菱会话使用对话类型标签，不显示泛化的 Agent 标签', async () => {
+    mocks.getRunning.mockResolvedValue({
+      reviews: [],
+      agents: [{
+        run_id: 'run-chat', surface: 'user', session_key: 'user-session', status: 'running',
+        update_time: '2026-09-30T12:00:00Z',
+      }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('.running-item.agent').text()).toContain('小菱会话')
+    expect(wrapper.get('.running-item.agent .ri-tag').text()).toBe('对话')
   })
 
   it('进度读取失败有独立重试且不伪装没有后台任务', async () => {

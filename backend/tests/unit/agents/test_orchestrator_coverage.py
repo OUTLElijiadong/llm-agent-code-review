@@ -328,7 +328,7 @@ def test_agent_wrapper_methods_forward_arguments_and_context(
     assert orch.audit_security_for_project(11, 20, False, ctx).data == "security-project"
     assert "ctx" not in orch.lang_agent.execute.call_args.kwargs
     assert "ctx" not in orch.project_agent.execute.call_args.kwargs
-    assert "ctx" not in orch.code_reviewer.execute.call_args.kwargs
+    assert orch.code_reviewer.execute.call_args.kwargs["ctx"] is ctx
 
 
 def test_run_full_project_validation_forces_combined_mode_and_forwards_revision(

@@ -23,7 +23,7 @@ import {
   Close,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
+import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
 import type { UserRole } from '@/utils/roleHome'
 import { isNavigationPathAllowed } from '@/utils/agentNavigation'
 
@@ -246,8 +246,9 @@ function go(item: MenuItem): void {
     </nav>
 
     <div class="sidebar-foot">
-      <div class="version font-mono" :title="APP_DISPLAY_VERSION">
+      <div class="version font-mono" :title="`${APP_DISPLAY_VERSION} · ${APP_BUILD_TIME_DISPLAY} · ${APP_RELEASE_SHA}`">
         {{ isCollapsed ? APP_DISPLAY_VERSION : `${APP_DISPLAY_VERSION} · PRISM` }}
+        <small v-if="!isCollapsed" class="version-meta">构建 {{ APP_BUILD_TIME_DISPLAY }}</small>
       </div>
     </div>
   </aside>
@@ -474,9 +475,18 @@ function go(item: MenuItem): void {
 }
 
 .version {
+  display: grid;
+  gap: 4px;
   font-size: 10px;
   color: var(--side-text-dim);
   letter-spacing: 0.1em;
+}
+
+.version-meta {
+  font-size: 8px;
+  letter-spacing: 0;
+  line-height: 1.3;
+  opacity: 0.75;
 }
 
 @media (max-width: 768px) {

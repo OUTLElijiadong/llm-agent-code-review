@@ -85,3 +85,26 @@ def test_source_over_60000_chars_is_fully_covered_by_bounded_chunks() -> None:
     assert chunks[0].start_line == 0
     assert chunks[-1].end_line == len(source.splitlines())
     assert all(chunk.context_fingerprint for chunk in chunks)
+
+
+def test_javascript_leading_blank_lines_remain_in_complete_chunk_coverage() -> None:
+    source = "\n\n" + "function alpha() {\n  return value;\n}\n" * 3
+
+    chunks = chunk_code_with_context(source, "javascript", threshold=32)
+
+    assert chunks[0].start_line == 0
+    assert chunks[-1].end_line == len(source.splitlines())
+    assert [(chunk.start_line, chunk.end_line) for chunk in chunks][0] == (0, 2)
+    assert "".join(chunk.text for chunk in chunks) == source
+
+
+def test_javascript_arrow_function_bindings_are_in_lexical_symbol_index() -> None:
+    source = "class Controller {\n  run() { return 1; }\n}\nconst handler = (value) => sink(value);\n"
+
+    index = build_symbol_index(source, "javascript")
+
+    assert index.mode == "lexical"
+    assert "Controller" in index.symbols
+    assert "handler" in index.symbols
+    assert "run" in index.symbols
+    assert index.call_edges == ()

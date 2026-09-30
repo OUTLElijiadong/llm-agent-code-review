@@ -18,6 +18,7 @@
           <el-option label="Agent 调用" value="ai" />
           <el-option label="项目变更" value="project" />
         </el-select>
+        <el-checkbox v-model="includeSystemHeartbeat" @change="reload">显示系统心跳</el-checkbox>
         <el-input
           v-model="filters.keyword"
           placeholder="搜索操作描述或操作者"
@@ -140,6 +141,7 @@ const filters = reactive({
   keyword: '',
 })
 const dateRange = ref<[string, string] | null>(null)
+const includeSystemHeartbeat = ref(false)
 
 /** 当前展开详情的日志 ID(null = 全部收起)。 */
 const expandedId = ref<number | null>(null)
@@ -183,6 +185,7 @@ async function loadLogs(): Promise<void> {
       keyword: filters.keyword || undefined,
       start: dateRange.value?.[0],
       end: dateRange.value?.[1],
+      include_system_heartbeat: includeSystemHeartbeat.value,
       page: page.value,
       page_size: pageSize.value,
     })

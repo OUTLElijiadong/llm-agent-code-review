@@ -31,8 +31,18 @@ def test_mesh_line_offset_accepts_supported_values(value):
     assert agent_mesh_dispatcher._validated_line_offset(value) == value
 
 
-@pytest.mark.parametrize("failure_kind", ["output_truncated", "coverage_incomplete"])
-def test_builtin_review_mesh_result_is_not_retryable_after_recovery_exhausted(failure_kind):
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_retryable"),
+    [
+        ("output_truncated", False),
+        ("coverage_incomplete", False),
+        ("invalid_response", False),
+        ("invalid_json", False),
+        ("incomplete_response", False),
+        ("transport_error", True),
+    ],
+)
+def test_builtin_review_mesh_failure_preserves_retry_policy(failure_kind, expected_retryable):
     result = AgentResult(
         success=False,
         error="审查覆盖不完整",
@@ -42,7 +52,68 @@ def test_builtin_review_mesh_result_is_not_retryable_after_recovery_exhausted(fa
     mesh_result = agent_mesh_dispatcher._as_mesh_result(result, action="代码审查")
 
     assert mesh_result["status"] == "failed"
+    assert mesh_result["retryable"] is expected_retryable
+    assert mesh_result["errors"][0]["code"] == failure_kind
+
+
+def test_unclassified_review_failure_is_not_replayed_as_same_source():
+    result = AgentResult(success=False, error="审查器未返回有效结果")
+
+    mesh_result = agent_mesh_dispatcher._as_mesh_result(result, action="代码审查")
+
+    assert mesh_result["status"] == "blocked"
     assert mesh_result["retryable"] is False
+
+
+def test_builtin_reviewer_receives_structured_retry_metadata_without_prompt_strategy(monkeypatch):
+    from app.services import agent_mesh_dispatcher
+
+    captured = {}
+
+    class FakeOrchestrator:
+        def review_code(self, code, rules, language, **kwargs):
+            captured.update(code=code, rules=rules, language=language, **kwargs)
+            return AgentResult(
+                success=False,
+                error="模型未返回最终内容(finish_reason=stop)",
+                failure_kind="invalid_response",
+                finish_reason="stop",
+            )
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "_require_runtime_permissions", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.agents.orchestrator.get_request_orchestrator",
+        lambda *_args, **_kwargs: FakeOrchestrator(),
+    )
+    code = "function readValue() { return input.value; }"
+    result = agent_mesh_dispatcher._runtime_handler(
+        object(),
+        SimpleNamespace(id=7),
+        "code_reviewer",
+        {
+            "user_id": 7,
+            "trace_id": "review-retry-test",
+            "message_id": "review-retry-message",
+            "payload": {
+                "code": code,
+                "language": "javascript",
+                "file_name": "sample.js",
+                "_execution_strategy": {
+                    "attempt": 2,
+                    "instruction": "改成 4 段处理",
+                },
+            },
+            "context": {"project_id": 14, "file_id": 597},
+        },
+    )
+
+    assert captured["code"] == code
+    assert captured["language"] == "javascript"
+    assert captured["ctx"].extra["execution_strategy"]["attempt"] == 2
+    assert "改成 4 段处理" not in captured["rules"]
+    assert result["status"] == "failed"
+    assert result["retryable"] is False
+    assert result["errors"][0]["code"] == "invalid_response"
 
 
 def _factory(tmp_path):

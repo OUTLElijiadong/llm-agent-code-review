@@ -12,7 +12,7 @@ from app.utils.input_validation import normalize_username
 class RegisterIn(BaseModel):
     """用户注册请求体"""
     username: str = Field(min_length=3, max_length=50)
-    password: str = Field(min_length=6, max_length=32)
+    password: str = Field(min_length=15, max_length=64)
     email: Optional[EmailStr] = None
     nickname: Optional[str] = Field(default=None, max_length=50)
     # 防批量注册:一次性数学验证码
@@ -40,7 +40,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     """用户登录请求体"""
     username: str = Field(min_length=1, max_length=50)
-    password: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=64)
 
     @field_validator("username", mode="before")
     @classmethod
@@ -82,5 +82,5 @@ class LoginOut(BaseModel):
 
 class ChangePasswordIn(BaseModel):
     """修改密码请求体"""
-    old_password: str = Field(min_length=6, max_length=32)
-    new_password: str = Field(min_length=6, max_length=32)
+    old_password: str = Field(min_length=6, max_length=64)
+    new_password: str = Field(min_length=15, max_length=64)

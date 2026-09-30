@@ -4,7 +4,7 @@
       <div>
         <h2>Agent 自进化中心</h2>
         <p class="page-sub">
-          从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门 + 人工审批后生效，全程可解释、可回滚
+          从审查反馈沉淀经验、蒸馏规则提案；经黄金集评估闸门 + 人工审批后生效，全程可解释、支持恢复
         </p>
       </div>
       <div class="header-actions">
@@ -138,7 +138,7 @@
             <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 160px" @change="loadProposals">
               <el-option v-for="(label, key) in STATUS_LABELS" :key="key" :label="label" :value="key" />
             </el-select>
-            <span class="hint">提案默认不生效，需先「评估」过闸门，再由管理员「审批」写入规则；已生效可「回滚」。</span>
+            <span class="hint">提案默认不生效，需先「评估」过闸门，再由管理员「审批」写入规则；已生效可「撤回」。</span>
           </div>
           <el-table v-loading="loading" :data="proposals" stripe empty-text="暂无提案，点右上角「运行一轮进化」生成">
             <el-table-column label="类型" width="110">
@@ -185,7 +185,7 @@
                 <el-button
                   v-if="row.status === 'promoted'" link type="danger" size="small"
                   @click="onRollback(row)"
-                >回滚</el-button>
+                >撤回</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -332,7 +332,7 @@ const STATUS_LABELS: Record<string, string> = {
   approved: '已审批',
   promoted: '已生效',
   rejected: '已驳回',
-  rolled_back: '已回滚',
+  rolled_back: '已撤回',
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -654,7 +654,7 @@ async function onApprove(row: EvolutionProposal): Promise<void> {
   busyId.value = row.id
   try {
     await approveProposal(row.id)
-    ElMessage.success('已生效，可在「审查规则」查看；如需撤回可在此回滚')
+    ElMessage.success('已生效，可在「审查规则」查看；如需撤回可在此恢复改动前状态')
     await loadProposals()
   } catch {
     ElMessage.error('审批提案失败，请稍后重试')
@@ -679,16 +679,16 @@ async function onReject(row: EvolutionProposal): Promise<void> {
 
 async function onRollback(row: EvolutionProposal): Promise<void> {
   try {
-    const { value } = await ElMessageBox.prompt('请填写回滚说明', '回滚已生效提案', {
+    const { value } = await ElMessageBox.prompt('请填写撤回说明', '撤回已生效提案', {
       inputPlaceholder: '为何撤回',
       type: 'warning',
     })
     await rollbackProposal(row.id, value || '')
-    ElMessage.success('已回滚，规则恢复改动前状态')
+    ElMessage.success('已撤回，规则已恢复到改动前状态')
     await loadProposals()
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
-    ElMessage.error('回滚提案失败，请稍后重试')
+    ElMessage.error('撤回提案失败，请稍后重试')
   }
 }
 

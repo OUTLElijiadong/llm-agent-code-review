@@ -12,7 +12,7 @@ beforeEach(() => { setActivePinia(createPinia()); api.list.mockReset() })
 function render() {
   return mount(SystemAudit, { global: { directives: { loading: () => undefined }, stubs: {
     'el-card': { template: '<div><slot /></div>' }, 'el-select': true, 'el-option': true, 'el-input': true,
-    'el-date-picker': true, 'el-tag': { template: '<span><slot /></span>' },
+    'el-date-picker': true, 'el-checkbox': true, 'el-tag': { template: '<span><slot /></span>' },
     'el-button': { inheritAttrs: false, emits: ['click'], template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>' },
     'el-icon': true, 'el-pagination': true,
     EmptyState: { props: ['description'], template: '<div class="empty-state">{{ description }}<slot /></div>' },
@@ -38,6 +38,18 @@ it('私人操作原文明确隔离且不会通过 title 属性旁路暴露', asy
   expect(wrapper.text()).toContain('原文按账号隔离')
   expect(wrapper.html()).not.toContain('不应出现的旧字段')
   expect(wrapper.text()).toContain('账号 A')
+  wrapper.unmount()
+})
+it('默认请求折叠系统心跳，开启后才显示系统心跳', async () => {
+  api.list.mockResolvedValue({ items: [], total: 0 })
+  const wrapper = render(); await flushPromises()
+  expect(api.list).toHaveBeenCalledWith(expect.objectContaining({ include_system_heartbeat: false }))
+
+  const vm = setupState<{ includeSystemHeartbeat: boolean; reload: () => void }>(wrapper)
+  vm.includeSystemHeartbeat = true
+  vm.reload()
+  await flushPromises()
+  expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ include_system_heartbeat: true }))
   wrapper.unmount()
 })
 it('旧账号未完成的审计列表不能回写到新账号', async () => {

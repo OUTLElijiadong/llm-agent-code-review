@@ -18,6 +18,7 @@ server {
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
+    server_tokens off;
     http2 on;
     server_name ${APP_DOMAIN} ${APP_DOMAIN_ALIASES} ${SERVER_IP};
 
@@ -44,9 +45,9 @@ server {
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     # HSTS:仅 HTTPS server 块下发,强制浏览器后续走 HTTPS
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    # 先以 Report-Only 观察现有资源兼容性；允许当前 Google Fonts、Blob worker、
-    # 同源 API 与 WSS。确认生产无违规后再切换为强制 CSP。
-    add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+    # The SPA has no inline script; keep script and handler execution same-origin only.
+    # Runtime Vue style attributes still require unsafe-inline under style-src.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss://${APP_DOMAIN} wss://${APP_DOMAIN_ALIASES}; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
 
     location = /docs { return 404; }
     location = /redoc { return 404; }
@@ -60,7 +61,7 @@ server {
         add_header X-Frame-Options SAMEORIGIN always;
         add_header Referrer-Policy strict-origin-when-cross-origin always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss://${APP_DOMAIN} wss://${APP_DOMAIN_ALIASES}; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
         add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         try_files $uri =404;
     }
@@ -72,7 +73,7 @@ server {
         add_header X-Frame-Options SAMEORIGIN always;
         add_header Referrer-Policy strict-origin-when-cross-origin always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss:; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' wss://${APP_DOMAIN} wss://${APP_DOMAIN_ALIASES}; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 

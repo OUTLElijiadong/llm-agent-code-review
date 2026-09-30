@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -431,6 +432,32 @@ def list_members(db: Session, project_id: int) -> list[dict]:
         }
         for r in rows
     ]
+
+
+def search_member_candidates(db: Session, project_id: int, query: str, *, limit: int = 10) -> list[dict]:
+    """按用户名/邮箱查找可加入该项目的启用账号，不返回邮箱等敏感字段。"""
+    term = query.strip()
+    if len(term) < 2:
+        raise BadRequestError("搜索词至少需要 2 个字符")
+
+    # 用户输入按字面匹配，避免把通配符变成跨账号目录扫描器。
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    existing_ids = select(ProjectMember.user_id).where(
+        ProjectMember.project_id == project_id
+    )
+    rows = (
+        db.query(User.id, User.username, User.nickname)
+        .filter(
+            User.status == 1,
+            ~User.id.in_(existing_ids),
+            (User.username.ilike(pattern, escape="\\") | User.email.ilike(pattern, escape="\\")),
+        )
+        .order_by(User.username.asc(), User.id.asc())
+        .limit(max(1, min(int(limit), 10)))
+        .all()
+    )
+    return [{"id": row[0], "username": row[1], "nickname": row[2]} for row in rows]
 
 
 def ensure_owner_member(db: Session, project_id: int, user_id: int) -> None:

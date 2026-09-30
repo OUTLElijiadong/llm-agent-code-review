@@ -92,6 +92,17 @@ describe('AppHeader navigation visibility', () => {
     expect(wrapper.get('#roundtable-header-slot')).toBeTruthy()
   })
 
+  it('功能导航包含问题追踪、代码沙箱和个人中心', () => {
+    const wrapper = mountHeader()
+    const items = (wrapper.vm as any).searchItems as Array<{ title: string; path?: string }>
+    expect(items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: '问题追踪', path: '/issues' }),
+      expect.objectContaining({ title: '代码沙箱', path: '/sandboxes' }),
+      expect.objectContaining({ title: '个人中心', path: '/profile' }),
+    ]))
+    wrapper.unmount()
+  })
+
   it('缺少 agent:chat 时不显示小菱按钮和搜索入口', () => {
     harness.agentPermission = false
     const wrapper = mountHeader()

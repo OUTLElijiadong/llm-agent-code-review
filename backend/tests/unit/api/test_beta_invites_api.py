@@ -104,7 +104,7 @@ def test_registration_requires_captcha_and_beta_code_together(beta_client, monke
         "/api/auth/register",
         json={
             "username": "captcha-fail",
-            "password": "secret12",
+            "password": "a long memorable test passphrase",
             "captcha_id": "captcha-1",
             "captcha_answer": "7",
             "beta_code": plain,
@@ -117,7 +117,7 @@ def test_registration_requires_captcha_and_beta_code_together(beta_client, monke
         "/api/auth/register",
         json={
             "username": "beta-success",
-            "password": "secret12",
+            "password": "a long memorable test passphrase",
             "captcha_id": "captcha-2",
             "captcha_answer": "8",
             "beta_code": plain,
@@ -132,7 +132,7 @@ def test_registration_requires_captcha_and_beta_code_together(beta_client, monke
         "/api/auth/register",
         json={
             "username": "beta-reuse",
-            "password": "secret12",
+            "password": "a long memorable test passphrase",
             "captcha_id": "captcha-3",
             "captcha_answer": "8",
             "beta_code": plain,
@@ -150,7 +150,7 @@ def test_missing_beta_code_uses_same_generic_error(beta_client, monkeypatch):
         "/api/auth/register",
         json={
             "username": "no-code",
-            "password": "secret12",
+            "password": "a long memorable test passphrase",
             "captcha_id": "captcha",
             "captcha_answer": "1",
         },

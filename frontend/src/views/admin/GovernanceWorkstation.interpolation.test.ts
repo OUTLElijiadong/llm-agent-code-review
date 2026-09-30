@@ -3,7 +3,7 @@ import path from 'node:path'
 import { NodeTypes, parse as parseTemplate, type RootNode, type TemplateChildNode } from '@vue/compiler-dom'
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ElementPlus, { ElPagination, ElTable } from 'element-plus'
+import ElementPlus, { ElPagination, ElTable, ElTableColumn } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -151,6 +151,24 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     approvals.unmount()
   })
 
+  it('审批总览卡片与执行审批主表统一隐藏来源前缀和已知任务类型后缀', async () => {
+    api.listApprovals.mockResolvedValue([{
+      id: 179,
+      title: 'Responses Agent 请求执行 项目167 完整代码审查（review_type=full）',
+      agent_code: 'manager', action: 'review.start', resource: 'project:167',
+      risk_level: 'high', status: 'pending',
+    }])
+    const overview = mountMode('overview')
+    await settle()
+    const overviewCells = tableCells(overview, 1)
+    expect(overviewCells[0]).toBe('项目167 完整代码审查')
+    overview.unmount()
+
+    const approvals = mountMode('approvals')
+    await settle()
+    expect(tableCells(approvals, 0)[0]).toBe('项目167 完整代码审查')
+  })
+
   it('has no single-brace function-call text in any admin Vue template', () => {
     const directory = path.resolve('src/views/admin')
     const candidates: string[] = []
@@ -185,6 +203,45 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     await settle()
     for (const [table, column, text] of cells) expect(tableCells(wrapper, table)[column]).toBe(text)
     for (const cell of wrapper.findAll('tbody td')) expect(cell.text()).not.toMatch(/\{\s*\w+\([^{}]*\)\s*\}/)
+  })
+
+  it('审批队列明确覆盖高风险与危急，critical 风险使用 danger 色', async () => {
+    api.listApprovals.mockResolvedValue([
+      { id: 1, title: '高风险样例', agent_code: 'review_orchestrator', action: 'knowledge.read', risk_level: 'high', status: 'pending' },
+      { id: 2, title: '危急样例', agent_code: 'review_orchestrator', action: 'knowledge.read', risk_level: 'critical', status: 'pending' },
+    ])
+
+    const wrapper = mountMode('approvals')
+    await settle()
+
+    expect(wrapper.get('.page-head p').text()).toContain('高风险与危急')
+    const rows = wrapper.findAll('.el-table__body-wrapper tbody tr.el-table__row')
+    expect(rows).toHaveLength(2)
+    expect(rows.map(row => row.find('.el-tag').text())).toEqual(['高风险', '危急风险'])
+    expect(rows.every(row => row.find('.el-tag').classes().includes('el-tag--danger'))).toBe(true)
+  })
+
+  it('审批事项显示具体动作，发起 Agent 独立呈现且不重复堆叠 Responses Agent', async () => {
+    api.listApprovals.mockResolvedValue([{
+      id: 239,
+      title: 'Responses Agent 请求执行 更新并应用全局 LLM 配置',
+      agent_code: 'manager',
+      action: 'llm.config.update',
+      resource: 'global',
+      risk_level: 'critical',
+      status: 'pending',
+    }])
+
+    const wrapper = mountMode('approvals')
+    await settle()
+    const cells = tableCells(wrapper, 0)
+
+    expect(cells[0]).toBe('更新并应用全局 LLM 配置')
+    expect(cells[1]).toBe('小菱·管理权限兼容模块（系统）')
+    expect(cells[0]).not.toContain('Responses Agent')
+    expect(wrapper.get('.approval-table-content').text()).toContain('发起 Agent')
+    const fixedColumns = wrapper.findAllComponents(ElTableColumn).filter(column => column.props('fixed') === 'right')
+    expect(fixedColumns).toHaveLength(2)
   })
 
   it('translates known operations job names, types, and schedules while preserving unknown expressions', async () => {

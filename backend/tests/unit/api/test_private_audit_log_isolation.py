@@ -10,9 +10,10 @@ from app.schemas.audit import AuditLogOut
 from app.schemas.common import PageOut
 
 
-def _list(db, *, viewer_id=7, keyword="", actor_id=None):
+def _list(db, *, viewer_id=7, keyword="", actor_id=None, include_system_heartbeat=False):
     result = audit.list_audit_logs(
         action="", keyword=keyword, actor_id=actor_id, start="", end="", page=1, page_size=20,
+        include_system_heartbeat=include_system_heartbeat,
         db=db, viewer=SimpleNamespace(id=viewer_id, role="admin"),
     ).data
     return PageOut[AuditLogOut].model_validate(result.model_dump())
@@ -68,3 +69,23 @@ def test_owner_private_detail_and_business_audit_remain_visible(db):
     assert _list(db, keyword="AUTHORIZED-BUSINESS").total == 1
     payload = _list(db).model_dump()
     assert "OWN-PRIVATE" in str(payload) and "AUTHORIZED-BUSINESS" in str(payload)
+
+
+def test_system_heartbeat_is_hidden_by_default_and_can_be_expanded(db):
+    db.add_all([
+        AuditLog(actor_id=None, actor_name="system", action="admin_copilot.ops.status",
+                 target_type="ops", detail="routine heartbeat", status="success"),
+        AuditLog(actor_id=7, actor_name="admin", action="user_role_update",
+                 target_type="user", target_id="8", detail="role changed", status="success"),
+    ])
+    db.commit()
+
+    default_page = _list(db)
+    expanded_page = _list(db, include_system_heartbeat=True)
+
+    assert default_page.total == 1
+    assert [row.action for row in default_page.items] == ["user_role_update"]
+    assert expanded_page.total == 2
+    assert {row.action for row in expanded_page.items} == {
+        "admin_copilot.ops.status", "user_role_update",
+    }

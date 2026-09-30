@@ -155,7 +155,13 @@ interface ChatMessage {
   teamIds?: number[]
 }
 
-const props = defineProps<{ visible: boolean; prefill?: string; showLauncher?: boolean }>()
+const props = defineProps<{
+  visible: boolean
+  prefill?: string
+  showLauncher?: boolean
+  preferredSessionId?: string
+  preferredSessionRequestId?: number
+}>()
 const emit = defineEmits<{ 'update:visible': [value: boolean]; 'consumed-prefill': [] }>()
 
 const router = useRouter()
@@ -2344,6 +2350,13 @@ watch(() => props.visible, async (val) => {
   restoreOrAnchor()
   switcherRef.value?.ensureFreshOnOpen()
   scrollToBottom()
+})
+
+watch([() => props.visible, () => props.preferredSessionRequestId], async ([visible, requestId]) => {
+  if (!visible || !requestId || !props.preferredSessionId) return
+  await nextTick()
+  // 仅在当前账号与 surface 的服务端会话目录确认该 ID 后才切换。
+  switcherRef.value?.refreshFromAgentMesh(props.preferredSessionId)
 })
 
 watch(() => props.prefill, (prefill) => {

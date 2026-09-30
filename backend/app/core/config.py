@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     openapi_enabled: bool = True
     app_release: str = "dev"
     app_version: str = "3.8.1"
+    # 小菱每日模型 Token 提醒阈值；仅告警，不阻断交互会话。0 表示关闭。
+    assistant_daily_token_alert_threshold: int = Field(default=5_000_000, ge=0, le=100_000_000)
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
     register_captcha_enabled: bool = True
     # 内测注册: 开启后注册必须携带管理员生成的一次性内测码。

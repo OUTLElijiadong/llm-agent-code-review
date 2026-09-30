@@ -8,6 +8,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AuthError, ConflictError, ForbiddenError
+from app.core.password_policy import validate_new_password
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import RegisterIn
@@ -30,6 +31,8 @@ def register(db: Session, payload: RegisterIn) -> User:
         ConflictError: 用户名已存在
         ValidationError: 内测码不可用
     """
+    validate_new_password(payload.password, username=payload.username)
+
     from app.core.config import settings
     from app.models.rbac import Role
     from app.services import beta_invite_service, rbac_service
@@ -167,6 +170,7 @@ def change_password(db: Session, user: User, old_password: str, new_password: st
     Raises:
         AuthError: 旧密码错误 / 登录状态已失效
     """
+    validate_new_password(new_password, username=user.username)
     expected_version = getattr(user, "token_version", 0) or 0
     try:
         locked_user = db.query(User).populate_existing().filter(User.id == user.id).with_for_update().one()

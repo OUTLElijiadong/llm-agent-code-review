@@ -20,6 +20,8 @@ def hash_password(plain: str) -> str:
     Returns:
         str: bcrypt哈希后的密码字符串
     """
+    if len(plain.encode("utf-8")) > 72:
+        raise ValueError("密码编码后不能超过 72 字节")
     return pwd_ctx.hash(plain)
 
 
@@ -33,6 +35,8 @@ def verify_password(plain: str, hashed: str) -> bool:
     Returns:
         bool: 匹配则True,否则False
     """
+    if len(plain.encode("utf-8")) > 72:
+        return False
     return pwd_ctx.verify(plain, hashed)
 
 

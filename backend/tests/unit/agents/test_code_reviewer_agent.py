@@ -9,6 +9,7 @@ mock LLM 调用,验证:
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -261,7 +262,7 @@ class TestLegacyExecuteOutputRecovery:
     def agent(self):
         return CodeReviewerAgent()
 
-    def test_truncated_full_review_retries_disjoint_scopes_with_full_file_context(
+    def test_truncated_full_review_retries_disjoint_source_slices_with_relation_context(
         self, agent, monkeypatch,
     ):
         code = "first()\nsecond()\nthird()\nfourth()"
@@ -276,11 +277,12 @@ class TestLegacyExecuteOutputRecovery:
                     failure_kind="output_truncated",
                     finish_reason="length",
                 )
-            assert code in message
+            assert code not in message
+            assert "当前代码单元的符号上下文" in message
             if "原文件行范围：101-102" in message:
                 issue_line = 1
             elif "原文件行范围：103-104" in message:
-                issue_line = 4
+                issue_line = 2
             else:
                 pytest.fail("恢复请求没有声明精确且连续的原文件行范围")
             return AgentResult(success=True, data={
@@ -334,7 +336,7 @@ class TestLegacyExecuteOutputRecovery:
 
 
 class TestExecuteReviewOutputRecovery:
-    def test_real_execute_review_path_recovers_with_full_source_and_absolute_lines(
+    def test_real_execute_review_path_recovers_with_bounded_source_and_absolute_lines(
         self, monkeypatch,
     ):
         agent = CodeReviewerAgent()
@@ -351,12 +353,13 @@ class TestExecuteReviewOutputRecovery:
 
         def fake_call_json(message, **kwargs):
             calls.append((message, kwargs))
-            assert code in message
+            assert code not in message
+            assert "当前代码单元的符号上下文" in message
             assert kwargs["recover_truncation"] is True
             if "原文件行范围：101-102" in message:
                 line = 1
             elif "原文件行范围：103-104" in message:
-                line = 4
+                line = 2
             else:
                 pytest.fail("恢复请求未携带主路径的精确源码范围")
             return AgentResult(success=True, data={
@@ -392,6 +395,225 @@ class TestExecuteReviewOutputRecovery:
         assert result.tokens == {"prompt": 24, "completion": 29, "total": 53}
         assert result.http_attempts == 3
         assert result.duration_ms == 17
+
+    def test_input_window_rejection_retries_only_with_bounded_compressed_context(self, monkeypatch):
+        agent = CodeReviewerAgent()
+        code = "first()\nsecond()\n"
+        bounded_context = "[来源 sha256=fixture] 已核验认证调用关系。"
+        original_context = "原始上下文必须不再进入重试。" * 2_000
+        monkeypatch.setattr(agent, "_recovery_window_lines", 1, raising=False)
+        monkeypatch.setattr(agent, "call", lambda *_args, **_kwargs: AgentResult(
+            success=False,
+            error="input exceeds model context",
+            failure_kind="input_exceeds_context",
+            http_attempts=0,
+        ))
+        retry_messages = []
+
+        def fake_call_json(message, **_kwargs):
+            retry_messages.append(message)
+            assert bounded_context in message
+            assert original_context not in message
+            return AgentResult(success=True, data={
+                "summary": "当前源码范围已完成检查，没有发现可靠问题。",
+                "score": 100,
+                "issues": [],
+            })
+
+        monkeypatch.setattr(agent, "call_json", fake_call_json)
+        result = agent.execute_review(
+            code=code,
+            rules=[],
+            language="python",
+            file_name="sample.py",
+            prepared_prompts=("固定审查系统提示", "预算后的初次用户提示"),
+            bounded_sections={"agent": "general", "experience": "", "context": bounded_context},
+            context_section=original_context,
+        )
+
+        assert result.success is True
+        assert len(retry_messages) == 2
+        assert result.data["coverage"]["recovered_from_output_truncation"] is False
+        assert result.data["coverage"]["reviewed_lines"] == 2
+
+    def test_team_legacy_review_uses_bounded_chunks_and_splits_empty_response(
+        self, monkeypatch,
+    ):
+        agent = CodeReviewerAgent()
+        code = "".join(
+            f"function handler_{i}() {{\n"
+            + f"  const value = request_{i}.query?.input_{i} || 'default'; // validate untrusted request {i:03d} "
+            + ("preserve request-to-render flow and inspect output escaping " * 3)
+            + f"context {i:03d}\n"
+            + f"  return render_template(value, component_{i}, options_{i}, config_{i});\n"
+            + "}\n"
+            for i in range(1, 118)
+        ) + "// end of source file\n"
+        assert len(code) > 39_000
+        calls = []
+
+        def fake_call_json(message, **kwargs):
+            calls.append((message, kwargs))
+            assert len(message) < 12_000
+            assert code not in message
+            assert kwargs["recover_truncation"] is True
+            assert kwargs["max_tokens"] == 8_192
+            if len(calls) == 1:
+                return AgentResult(
+                    success=False,
+                    error="finish_reason=length",
+                    failure_kind="output_truncated",
+                    finish_reason="length",
+                    http_attempts=1,
+                )
+            if len(calls) == 2:
+                return AgentResult(
+                    success=False,
+                    error="empty stop response",
+                    failure_kind="invalid_response",
+                    finish_reason="stop",
+                    http_attempts=1,
+                )
+            return AgentResult(
+                success=True,
+                data={"summary": "范围已审查", "score": 100, "issues": []},
+                finish_reason="stop",
+                http_attempts=1,
+            )
+
+        ctx = AgentContext(user_id=7, task_id=9, project_id=14, file_id=597)
+        monkeypatch.setattr(agent, "call_json", fake_call_json)
+        result = agent.execute(code, "检查质量", "javascript", "admin.js", ctx=ctx)
+
+        assert result.success is True
+        assert result.data["coverage"]["total_lines"] == 469
+        assert result.data["coverage"]["reviewed_lines"] == 469
+        assert result.data["coverage"]["context_mode"] == "lexical_symbol_index"
+        assert result.data["coverage"]["coverage_scope"] == "file"
+        assert result.data["coverage"]["recovered_from_output_truncation"] is True
+        assert result.data["coverage"]["index_counts"]["calls"] == 0
+        assert result.data["coverage"]["symbol_context_available"] is True
+        assert result.data["coverage"]["ranges"] == [[1, len(code.splitlines())]]
+        assert result.data["coverage"]["source_sha256"]
+        assert result.tokens == {"prompt": 0, "completion": 0, "total": 0}
+        assert len(calls) > 3
+        assert calls[0][0] != calls[1][0]
+        first_scope = calls[0][0].split("原文件行范围：", 1)[1].split("\n", 1)[0]
+        second_scope = calls[1][0].split("原文件行范围：", 1)[1].split("\n", 1)[0]
+        assert first_scope != second_scope
+
+    def test_initial_empty_response_recovers_by_splitting_instead_of_replaying_source(
+        self, monkeypatch,
+    ):
+        agent = CodeReviewerAgent()
+        calls = []
+        code = "one()\ntwo()\nthree()\nfour()"
+
+        def fake_call_json(message, **kwargs):
+            calls.append(message)
+            if len(calls) == 1:
+                return AgentResult(
+                    success=False, error="empty stop response",
+                    failure_kind="invalid_response", finish_reason="stop", http_attempts=1,
+                )
+            assert code not in message
+            return AgentResult(success=True, data={"summary": "完成", "score": 100, "issues": []})
+
+        monkeypatch.setattr(agent, "_recovery_window_lines", 2, raising=False)
+        monkeypatch.setattr(agent, "call_json", fake_call_json)
+        result = agent.execute(code, "检查", "python", "sample.py")
+
+        assert result.success is True
+        assert len(calls) == 3
+        assert len(set(calls)) == 3
+
+    def test_execute_review_recovery_preserves_rule_profile_experience_and_outer_context(
+        self, monkeypatch,
+    ):
+        agent = CodeReviewerAgent()
+        code = "first()\nsecond()\nthird()\nfourth()"
+        rule = SimpleNamespace(
+            rule_type="security",
+            severity="高",
+            language="javascript",
+            rule_name="输出转义",
+            rule_code="SEC-XSS-01",
+            rule_content="将不可信内容渲染到 DOM 前必须完成上下文转义。",
+        )
+        calls = []
+        monkeypatch.setattr(agent, "_recovery_window_lines", 2, raising=False)
+        monkeypatch.setattr(agent, "call", lambda *_a, **_k: AgentResult(
+            success=False, error="length", failure_kind="output_truncated",
+            finish_reason="length", http_attempts=1,
+        ))
+
+        def fake_call_json(message, **kwargs):
+            calls.append(message)
+            assert kwargs["max_tokens"] == 8_192
+            return AgentResult(success=True, data={"summary": "完成", "score": 100, "issues": []})
+
+        monkeypatch.setattr(agent, "call_json", fake_call_json)
+        result = agent.execute_review(
+            code=code,
+            rules=[rule],
+            language="javascript",
+            file_name="widget.js",
+            agent_section="安全审查画像：关注 DOM sink 与数据流。",
+            experience_section="历史经验：模板插值需要按 HTML 上下文转义。",
+            context_section=(
+                "全文件上下文：renderView 调用 sanitizeView。\n"
+                "symbol_index_truncated: true"
+            ),
+        )
+
+        assert result.success is True
+        assert len(calls) == 2
+        for prompt in calls:
+            assert "SEC-XSS-01" in prompt
+            assert "将不可信内容渲染到 DOM 前必须完成上下文转义。" in prompt
+            assert "安全审查画像：关注 DOM sink 与数据流。" in prompt
+            assert "历史经验：模板插值需要按 HTML 上下文转义。" in prompt
+            assert "全文件上下文：renderView 调用 sanitizeView。" in prompt
+        coverage = result.data["coverage"]
+        assert coverage["coverage_scope"] == "input_chunk"
+        assert coverage["upstream_context_preserved"] is True
+        assert coverage["upstream_context_index_truncated"] is True
+        assert coverage["context_index_truncated"] is True
+
+    @pytest.mark.parametrize(
+        "ranges",
+        [
+            [(0, 1, "index"), (3, 5, "index")],  # gap and out of bounds
+            [(0, 2, "index"), (1, 3, "index")],  # overlap
+            [(0, 4, "index")],  # endpoint out of bounds
+        ],
+    )
+    def test_invalid_recovery_ranges_fail_before_model_calls(self, monkeypatch, ranges):
+        agent = CodeReviewerAgent()
+        calls = []
+        monkeypatch.setattr(agent, "_recovery_ranges", lambda *_a, **_k: ranges)
+
+        def fake_call_json(*_args, **_kwargs):
+            calls.append("initial")
+            return AgentResult(
+                success=False,
+                error="truncated",
+                failure_kind="output_truncated",
+                finish_reason="length",
+                http_attempts=1,
+            )
+
+        monkeypatch.setattr(agent, "call_json", fake_call_json)
+
+        result = agent.execute(
+            "one()\ntwo()\nthree()", "检查", "python", "sample.py",
+        )
+
+        assert result.success is False
+        assert result.failure_kind == "coverage_incomplete"
+        assert result.data["coverage"]["calls"] == 1
+        assert result.data["coverage"]["recovered_from_output_truncation"] is True
+        assert calls == ["initial"]
 
     def test_recovery_rejects_end_line_outside_focus(self, monkeypatch):
         agent = CodeReviewerAgent()
@@ -447,9 +669,205 @@ class TestExecuteReviewOutputRecovery:
         result = agent.execute_review(code=code, rules=[], language="python", file_name="a.py")
 
         assert result.success is False
-        assert result.failure_kind == "coverage_incomplete"
+        assert result.failure_kind == "transport_error"
         assert result.usage_log_ids == [10, 11, 12]
         assert result.failed_usage_log_ids == [10, 12]
         assert result.tokens == {"prompt": 7, "completion": 10, "total": 17}
         assert result.http_attempts == 3
         assert result.duration_ms == 23
+        assert result.data["coverage"]["recovered_from_output_truncation"] is True
+
+        from app.services.agent_mesh_dispatcher import _as_mesh_result
+
+        mesh_result = _as_mesh_result(result, action="只读代码质量审查")
+        assert mesh_result["status"] == "failed"
+        assert mesh_result["retryable"] is True
+        assert mesh_result["errors"][0]["code"] == "transport_error"
+
+    def test_oversized_input_truncation_preserves_terminal_finish_reason(self, monkeypatch):
+        agent = CodeReviewerAgent()
+        monkeypatch.setattr(agent, "_recovery_window_chars", 6, raising=False)
+        monkeypatch.setattr(agent, "_recovery_window_lines", 2, raising=False)
+        monkeypatch.setattr(agent, "call_json", lambda *_a, **_k: AgentResult(
+            success=False,
+            error="输出达到上限",
+            failure_kind="output_truncated",
+            finish_reason="length",
+            http_attempts=1,
+        ))
+
+        result = agent.execute("a=1\nb=2\nc=3\nd=4", "检查", "python", "large.py")
+
+        assert result.success is False
+        assert result.failure_kind == "coverage_incomplete"
+        assert result.finish_reason == "length"
+        assert result.data["coverage"]["recovered_from_output_truncation"] is True
+
+
+def test_team_review_batches_oversized_rules_without_losing_source_or_rules(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    agent = CodeReviewerAgent()
+    source = "value = 1\n"
+    rules = [
+        {"rule_code": f"R-{index:04d}", "rule_content": f"RULE-{index:04d}-" + ("preserve-all-rule-text " * 18)}
+        for index in range(420)
+    ]
+    rule_text = json.dumps(rules, ensure_ascii=False, separators=(",", ":"))
+    requests = []
+    recovered = []
+
+    def guarded_call_json(message, **kwargs):
+        system_prompt = kwargs.get("system_prompt", agent._system_prompt)
+        _, exceeded = agent._project_input(
+            message,
+            system_prompt=system_prompt,
+            output_tokens=kwargs.get("max_tokens"),
+        )
+        assert not exceeded, "every team recovery request must pass the real BaseAgent byte guard"
+        request_rules = json.loads(message.rsplit("审查规则：\n", 1)[1])
+        requests.append(request_rules)
+        recovered.append(kwargs.get("recover_truncation"))
+        return AgentResult(
+            success=True,
+            data={"summary": "当前源码范围已按规则完成检查。", "score": 100, "issues": []},
+            http_attempts=1,
+        )
+
+    monkeypatch.setattr(agent, "call_json", guarded_call_json)
+    result = agent.execute(source, rule_text, "python", "sample.py")
+
+    observed = [item["rule_code"] for batch in requests for item in batch]
+    assert result.success
+    assert len(requests) > 1
+    assert all(recovered)
+    assert observed == [item["rule_code"] for item in rules]
+    assert result.data["coverage"]["rule_batches_completed"] == len(requests)
+    assert result.data["coverage"]["reviewed_lines"] == 1
+    assert result.data["coverage"]["source_sha256"]
+
+
+def test_team_review_refuses_single_rule_that_cannot_be_batched_losslessly(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    agent = CodeReviewerAgent()
+    called = []
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: called.append(True))
+    rules = json.dumps([{"rule_code": "oversized", "rule_content": "x" * 150_000}])
+
+    result = agent.execute("value = 1\n", rules, "python", "sample.py")
+
+    assert result.success is False
+    assert result.failure_kind == "input_exceeds_context"
+    assert "无损分批" in result.error
+    assert called == []
+
+
+def test_team_review_splits_rule_batch_when_context_guard_rejects_short_source(monkeypatch):
+    """The actual request envelope may exceed budget even when rule-byte batching passed."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    monkeypatch.setattr(settings, "deepseek_max_output_tokens", 65_536)
+    agent = CodeReviewerAgent(agent_section="agent-context " * 5_800)
+    source = "value = 1\n"
+    rules = [
+        {"rule_code": f"R-{index:02d}", "rule_content": f"rule-{index:02d} " + ("evidence " * 150)}
+        for index in range(10)
+    ]
+    rule_text = json.dumps(rules, ensure_ascii=False, separators=(",", ":"))
+    rejected_before_send = []
+    accepted_rule_batches = []
+
+    def guarded_call_json(message, **kwargs):
+        system_prompt = kwargs.get("system_prompt", agent._system_prompt)
+        _, exceeded = agent._project_input(
+            message,
+            system_prompt=system_prompt,
+            output_tokens=kwargs.get("max_tokens"),
+        )
+        if exceeded:
+            rejected_before_send.append(message)
+            return AgentResult(
+                success=False,
+                error="输入超过模型上下文容量",
+                failure_kind="input_exceeds_context",
+                http_attempts=0,
+            )
+        accepted_rule_batches.append(json.loads(message.rsplit("审查规则：\n", 1)[1]))
+        return AgentResult(
+            success=True,
+            data={"summary": "完整审查", "score": 100, "issues": []},
+            http_attempts=1,
+        )
+
+    monkeypatch.setattr(agent, "call_json", guarded_call_json)
+    result = agent.execute(source, rule_text, "python", "sample.py")
+
+    assert result.success is True
+    assert rejected_before_send, "the reproduction must hit the real BaseAgent preflight guard"
+    assert all(accepted_rule_batches)
+    assert [rule for batch in accepted_rule_batches for rule in batch] == rules
+    assert result.data["coverage"]["stage"] == "complete"
+    assert result.data["coverage"]["rule_batches_completed"] == len(accepted_rule_batches)
+
+
+def test_team_review_fails_closed_when_system_context_alone_exceeds_budget(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    agent = CodeReviewerAgent(agent_section="agent-context " * 9_000)
+    rejected_before_send = []
+    sent = []
+
+    def guarded_call_json(message, **kwargs):
+        system_prompt = kwargs.get("system_prompt", agent._system_prompt)
+        _, exceeded = agent._project_input(
+            message,
+            system_prompt=system_prompt,
+            output_tokens=kwargs.get("max_tokens"),
+        )
+        if exceeded:
+            rejected_before_send.append(message)
+            return AgentResult(
+                success=False,
+                error="输入超过模型上下文容量",
+                failure_kind="input_exceeds_context",
+                http_attempts=0,
+            )
+        sent.append(message)
+        return AgentResult(success=True, data={"summary": "完整审查", "score": 100, "issues": []}, http_attempts=1)
+
+    monkeypatch.setattr(agent, "call_json", guarded_call_json)
+
+    result = agent.execute("value = 1\n", '[{"rule_code":"R1","rule_content":"check"}]', "python", "sample.py")
+
+    assert result.success is False
+    assert result.failure_kind == "input_exceeds_context"
+    assert "覆盖不完整" in result.error
+    assert result.data["coverage"]["stage"] == "failed"
+    assert result.data["coverage"].get("ranges", []) == []
+    assert result.data["coverage"]["input_rejected_before_http"] is True
+    assert rejected_before_send
+    assert sent == []
+
+
+def test_team_review_failure_keeps_truncation_flag_from_failed_rule_batch(monkeypatch):
+    agent = CodeReviewerAgent()
+    monkeypatch.setattr(agent, "_recovery_window_chars", 6, raising=False)
+    monkeypatch.setattr(agent, "_recovery_window_lines", 1, raising=False)
+    monkeypatch.setattr(agent, "call_json", lambda *_args, **_kwargs: AgentResult(
+        success=False,
+        error="finish_reason=length",
+        failure_kind="output_truncated",
+        finish_reason="length",
+        http_attempts=1,
+    ))
+
+    result = agent.execute("a()\nb()", "检查", "python", "sample.py")
+
+    assert result.success is False
+    assert result.data["coverage"]["stage"] == "failed"
+    assert result.data["coverage"]["recovered_from_output_truncation"] is True

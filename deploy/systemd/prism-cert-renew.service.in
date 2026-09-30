@@ -1,0 +1,17 @@
+[Unit]
+Description=Renew Prism Let's Encrypt certificates
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+ExecStart=@DEPLOY_DIR@/renew-cert.sh
+UMask=0077
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=20min
+StandardOutput=journal
+StandardError=journal

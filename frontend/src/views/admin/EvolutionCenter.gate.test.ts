@@ -8,6 +8,11 @@ const api = vi.hoisted(() => ({
   approve: vi.fn(),
   evaluate: vi.fn(),
   confirm: vi.fn(),
+  prompt: vi.fn(),
+  rollback: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
 }))
 
 vi.mock('@/api/evolution', () => ({
@@ -18,7 +23,7 @@ vi.mock('@/api/evolution', () => ({
   listExperiences: vi.fn().mockResolvedValue([]),
   listEvalCases: vi.fn().mockResolvedValue([]),
   rejectProposal: vi.fn(),
-  rollbackProposal: vi.fn(),
+  rollbackProposal: api.rollback,
   runEvolution: vi.fn(),
   triggerEvolution: vi.fn(),
 }))
@@ -28,7 +33,10 @@ vi.mock('@/api/agent', () => ({
 }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 vi.mock('element-plus/es/components/message/index', () => ({
-  ElMessage: { success: vi.fn(), warning: vi.fn() },
+  ElMessage: { success: api.success, warning: api.warning, error: api.error },
+}))
+vi.mock('element-plus/es/components/message-box/index', () => ({
+  ElMessageBox: { prompt: api.prompt },
 }))
 
 const wrappers: ReturnType<typeof mount>[] = []
@@ -110,4 +118,32 @@ it('真实打开详情显示当前待重新评估，原记录状态单列且不�
   expect(sample.eval_score).toBeNull()
   expect(api.evaluate).not.toHaveBeenCalled()
   expect(api.approve).not.toHaveBeenCalled()
+})
+
+it('已生效提案使用撤回与恢复文案，仍调用原提案撤回接口', async () => {
+  const promoted = { ...sample, status: 'promoted' }
+  const withdrawn = { ...sample, id: 13, status: 'rolled_back' }
+  api.list.mockResolvedValue([promoted, withdrawn])
+  api.prompt.mockResolvedValue({ value: '不再需要该规则' })
+  api.rollback.mockResolvedValue(undefined)
+
+  const wrapper = render()
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('支持恢复')
+  expect(wrapper.text()).toContain('已生效可「撤回」')
+  expect(wrapper.text()).toContain('已撤回')
+  expect(wrapper.text()).not.toContain('回滚')
+  const withdraw = wrapper.findAll('button').find(button => button.text() === '撤回')
+  expect(withdraw).toBeDefined()
+
+  await withdraw!.trigger('click')
+  await flushPromises()
+
+  expect(api.prompt).toHaveBeenCalledWith('请填写撤回说明', '撤回已生效提案', expect.objectContaining({
+    inputPlaceholder: '为何撤回',
+    type: 'warning',
+  }))
+  expect(api.rollback).toHaveBeenCalledWith(promoted.id, '不再需要该规则')
+  expect(api.success).toHaveBeenCalledWith('已撤回，规则已恢复到改动前状态')
 })

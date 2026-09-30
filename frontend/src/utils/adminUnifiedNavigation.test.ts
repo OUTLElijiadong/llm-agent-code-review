@@ -4,7 +4,7 @@ import { resolveAdminSection, sectionQuery } from './adminUnifiedNavigation'
 describe('统一管理中心导航', () => {
   it.each([
     ['agents', 'releases', 'approvals'],
-    ['agents', 'evolution', 'approvals'],
+    ['agents', 'evolution', 'evolution'],
     ['operations', 'ai-logs', 'logs'],
     ['operations', 'audit', 'logs'],
   ] as const)('保留历史入口 %s/%s 并映射到 %s', (domain, legacySection, expected) => {

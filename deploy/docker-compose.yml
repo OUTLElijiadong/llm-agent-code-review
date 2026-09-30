@@ -183,6 +183,7 @@ services:
       args:
         VITE_APP_VERSION: ${APP_VERSION:-3.8.1}
         VITE_APP_RELEASE_SHA: ${APP_RELEASE:-local}
+        VITE_APP_BUILD_TIME: ${APP_BUILD_TIME:-unknown}
     container_name: cr_frontend
     restart: unless-stopped
     mem_limit: ${FRONTEND_MEM_LIMIT:-128m}

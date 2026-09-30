@@ -174,12 +174,28 @@ def _as_mesh_result(result: AgentResult, *, action: str) -> dict[str, Any]:
         failed["retryable"] = False
         return failed
     if result.failure_kind:
-        raise RuntimeError(result.error or f"{action}调用失败")
-    return _result(
+        retryable = result.failure_kind in {
+            "timeout", "transport_error", "rate_limited", "upstream_error",
+        }
+        failed = _result(
+            "failed",
+            result.error or f"{action}调用失败",
+            evidence=([{"source": "request_scoped_agent", "data": result.data}]
+                      if result.data is not None else []),
+            errors=[{
+                "code": result.failure_kind,
+                "finish_reason": result.finish_reason or None,
+            }],
+        )
+        failed["retryable"] = retryable
+        return failed
+    blocked = _result(
         "blocked",
         result.error or f"{action}未完成",
         errors=[{"code": "agent_rejected", "message": result.error or "执行未完成"}],
     )
+    blocked["retryable"] = False
+    return blocked
 
 
 def required_runtime_permissions(code: str, data: dict[str, Any]) -> tuple[str, ...]:
@@ -612,7 +628,9 @@ def _runtime_handler(
         rules = data.get("rules")
         rules_text = json.dumps(rules, ensure_ascii=False) if isinstance(rules, list) else str(rules or "通用质量审查")
         strategy_instruction = str((ctx.extra or {}).get("strategy_instruction") or "").strip()
-        if strategy_instruction:
+        # 内置审查器拥有代码级的有界切片与覆盖账本；自然语言“改道”不得
+        # 冒充实际切片，也不能改写用户原有审查规则。
+        if strategy_instruction and code != "code_reviewer":
             rules_text = f"{rules_text}\n\n本次失败后改道策略：{strategy_instruction}"
         result = orch.review_code(
             raw_code,

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Prism certificate renewal daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=prism-cert-renew.service
+
+[Install]
+WantedBy=timers.target

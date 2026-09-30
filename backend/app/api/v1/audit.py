@@ -22,11 +22,15 @@ def list_audit_logs(
     actor_id: Optional[int] = Query(None),
     start: str = Query(""),
     end: str = Query(""),
+    include_system_heartbeat: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     viewer: User = Depends(require_permission(PermissionCode.AUDIT_VIEW)),
 ):
     """审计日志列表(仅授予审计读取权限的账号)"""
-    result = audit_service.list_logs(db, action, keyword, actor_id, start, end, page, page_size, viewer=viewer)
+    result = audit_service.list_logs(
+        db, action, keyword, actor_id, start, end, page, page_size,
+        viewer=viewer, include_system_heartbeat=include_system_heartbeat,
+    )
     return Resp(data=PageOut(**result))

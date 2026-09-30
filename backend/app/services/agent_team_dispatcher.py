@@ -262,7 +262,13 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     team_id,
                     claimed["task_id"],
                     lease_token=claimed["lease_token"],
-                    result={"status": "failed", "summary": str(exc)},
+                    result={
+                        "status": "failed",
+                        "summary": str(exc)[:500],
+                        "errors": [{"code": "unhandled_dispatch_error"}],
+                        # 未分类异常可能发生在外部副作用之后；原样重派可能重复执行。
+                        "retryable": False,
+                    },
                     success=False,
                     error=str(exc),
                 )

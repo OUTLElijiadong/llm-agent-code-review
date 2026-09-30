@@ -86,6 +86,7 @@ def list_logs(
     page_size: int = 20,
     *,
     viewer: Optional[User] = None,
+    include_system_heartbeat: bool = False,
 ) -> dict:
     """分页查询审计日志
 
@@ -98,6 +99,7 @@ def list_logs(
         end: 结束日期 (YYYY-MM-DD)
         page: 页码
         page_size: 每页数量
+        include_system_heartbeat: 是否包含频繁的只读运维心跳；默认从人工审计视图折叠隐藏
 
     Returns:
         dict: 分页响应
@@ -108,6 +110,8 @@ def list_logs(
     q = db.query(AuditLog, private_content.label("private_content"))
     if action:
         q = q.filter(AuditLog.action == action)
+    if not include_system_heartbeat:
+        q = q.filter(or_(AuditLog.action.is_(None), ~AuditLog.action.startswith("admin_copilot.ops.")))
     if actor_id is not None:
         q = q.filter(AuditLog.actor_id == actor_id)
     if keyword:

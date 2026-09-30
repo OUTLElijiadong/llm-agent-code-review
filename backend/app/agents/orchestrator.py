@@ -256,7 +256,6 @@ class Orchestrator(BaseAgent):
     def review_code(self, *args, **kw) -> AgentResult:
         if disabled := self._disabled_result("code_reviewer"):
             return disabled
-        kw.pop("ctx", None)
         return self.code_reviewer.execute(*args, **kw)
 
     def _require_domain_tool_permission(self, tool_name: str) -> Optional[AgentResult]:
