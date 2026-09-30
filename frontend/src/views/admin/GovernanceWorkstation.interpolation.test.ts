@@ -276,8 +276,20 @@ describe('admin governance interpolation in real cells and agent cards', () => {
 
     expect(wrapper.text()).toContain('告警接口暂不可用')
     expect(wrapper.text()).toContain('开放告警（—）')
+    expect(wrapper.text()).not.toContain('共 0 条')
+    expect(wrapper.find('.alert-pagination-wrapper').exists()).toBe(false)
     expect(wrapper.findAllComponents(ElTable)[2]!.findAll('tbody tr.el-table__row')).toHaveLength(0)
     expect(wrapper.get('.alert-list-error button').text()).toBe('重试')
+  })
+
+  it('does not show a zero total while the first alert page is still loading', () => {
+    api.listAlertsPage.mockReturnValue(new Promise(() => {}))
+    const wrapper = mountMode('observability')
+
+    expect(wrapper.text()).toContain('开放告警（—）')
+    expect(wrapper.text()).not.toContain('共 0 条')
+    expect(wrapper.find('.alert-pagination-wrapper').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('changes alert page through the UI and requests that page instead of truncating the list', async () => {
@@ -301,6 +313,30 @@ describe('admin governance interpolation in real cells and agent cards', () => {
 
     expect(api.listAlertsPage).toHaveBeenLastCalledWith('open', 2, 20)
     expect(wrapper.text()).toContain('第 2 页告警')
+  })
+
+  it('reloads the selected page size through the pagination component contract', async () => {
+    api.listAlertsPage.mockResolvedValue({
+      items: Array.from({ length: 50 }, (_, index) => ({
+        id: 105 - index, alert_type: 'fixture', severity: 'warning', status: 'open', title: `告警 ${index + 1}`,
+      })),
+      total: 105,
+      page: 1,
+      page_size: 50,
+      pages: 3,
+    })
+    const wrapper = mountMode('observability')
+    await settle()
+
+    const pagination = wrapper.findComponent(ElPagination)
+    pagination.vm.$emit('update:page-size', 50)
+    pagination.vm.$emit('update:current-page', 1)
+    await settle()
+    pagination.vm.$emit('change', 1, 50)
+    await settle()
+
+    expect(api.listAlertsPage).toHaveBeenLastCalledWith('open', 1, 50)
+    expect(wrapper.findAllComponents(ElTable)[2]!.findAll('tbody tr.el-table__row')).toHaveLength(50)
   })
 
   it('returns to the last valid page when the alert count shrinks', async () => {

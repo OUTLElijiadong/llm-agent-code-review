@@ -496,6 +496,12 @@ def test_alert_pagination_reports_full_total_and_preserves_legacy_list(admin_api
         "/api/admin/observability/alerts/page",
         params={"status": "open", "page": 1, "page_size": 50},
     )
+    second_page = _ok(
+        client,
+        "get",
+        "/api/admin/observability/alerts/page",
+        params={"status": "open", "page": 2, "page_size": 50},
+    )
     third_page = _ok(
         client,
         "get",
@@ -517,8 +523,23 @@ def test_alert_pagination_reports_full_total_and_preserves_legacy_list(admin_api
     assert first_page["pages"] == 3
     assert len(first_page["items"]) == 50
     assert first_page["items"][0]["id"] > first_page["items"][-1]["id"]
+    assert second_page["total"] == 105
+    assert second_page["page"] == 2
+    assert len(second_page["items"]) == 50
     assert third_page["total"] == 105
+    assert third_page["page"] == 3
     assert len(third_page["items"]) == 5
+    paged_ids = [row["id"] for page in (first_page, second_page, third_page) for row in page["items"]]
+    db_rows = (
+        db.query(AgentAlert)
+        .filter(AgentAlert.status == "open")
+        .order_by(AgentAlert.id.desc())
+        .all()
+    )
+    db_ids = [row.id for row in db_rows]
+    assert len(paged_ids) == 105
+    assert len(set(paged_ids)) == 105
+    assert paged_ids == db_ids
     assert resolved_page["total"] == 4
     assert len(resolved_page["items"]) == 4
 

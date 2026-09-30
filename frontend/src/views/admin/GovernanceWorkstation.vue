@@ -1302,7 +1302,7 @@ onMounted(loadData)
             </template>
           </el-table-column>
         </el-table>
-        <div class="alert-pagination-wrapper">
+        <div v-if="alertTotal !== null" class="alert-pagination-wrapper">
           <el-pagination
             v-model:current-page="alertPage"
             v-model:page-size="alertPageSize"
