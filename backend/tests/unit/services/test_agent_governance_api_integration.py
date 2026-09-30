@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 from app.core.database import Base, get_db
-from app.core.dependencies import require_admin, require_super_admin
+from app.core.dependencies import get_current_user, require_admin, require_super_admin
 from app.core.security import create_access_token
 from app.main import app
 from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, ApprovalItem
@@ -474,6 +474,85 @@ def test_admin_governance_api_business_loop(admin_api_client):
     )
     rolled = _ok(client, "post", f"/api/admin/rollback/versions/{version['id']}/rollback")
     assert rolled["status"] == "rolled_back"
+
+
+def test_alert_pagination_reports_full_total_and_preserves_legacy_list(admin_api_client):
+    """旧列表继续兼容，新分页 API 应覆盖超过 100 条的完整告警集合。"""
+    client, db = admin_api_client
+    db.add_all([
+        AgentAlert(alert_type="pagination", severity="warning", status="open", title=f"告警 {index}")
+        for index in range(105)
+    ])
+    db.add_all([
+        AgentAlert(alert_type="pagination", severity="info", status="resolved", title=f"已关闭告警 {index}")
+        for index in range(4)
+    ])
+    db.commit()
+
+    legacy_rows = _ok(client, "get", "/api/admin/observability/alerts")
+    first_page = _ok(
+        client,
+        "get",
+        "/api/admin/observability/alerts/page",
+        params={"status": "open", "page": 1, "page_size": 50},
+    )
+    third_page = _ok(
+        client,
+        "get",
+        "/api/admin/observability/alerts/page",
+        params={"status": "open", "page": 3, "page_size": 50},
+    )
+    resolved_page = _ok(
+        client,
+        "get",
+        "/api/admin/observability/alerts/page",
+        params={"status": "resolved", "page": 1, "page_size": 20},
+    )
+
+    assert db.query(AgentAlert).filter(AgentAlert.status == "open").count() == 105
+    assert len(legacy_rows) == 100
+    assert first_page["total"] == 105
+    assert first_page["page"] == 1
+    assert first_page["page_size"] == 50
+    assert first_page["pages"] == 3
+    assert len(first_page["items"]) == 50
+    assert first_page["items"][0]["id"] > first_page["items"][-1]["id"]
+    assert third_page["total"] == 105
+    assert len(third_page["items"]) == 5
+    assert resolved_page["total"] == 4
+    assert len(resolved_page["items"]) == 4
+
+
+@pytest.mark.parametrize("params", [{"page": 0}, {"page_size": 0}, {"page_size": 101}])
+def test_alert_pagination_rejects_invalid_bounds(admin_api_client, params):
+    client, _ = admin_api_client
+    response = client.get("/api/admin/observability/alerts/page", params=params)
+    # 应用的统一参数校验处理器把 FastAPI 422 映射为业务 HTTP 400。
+    assert response.status_code == 400
+
+
+def test_alert_pagination_keeps_admin_authorization(admin_api_client):
+    client, db = admin_api_client
+    reviewer = User(
+        username="alert-page-reviewer",
+        password="x",
+        email="alert-page-reviewer@example.com",
+        nickname="审查员",
+        role="reviewer",
+        status=1,
+    )
+    db.add(reviewer)
+    db.commit()
+
+    admin_override = app.dependency_overrides.pop(require_admin)
+    app.dependency_overrides[get_current_user] = lambda: reviewer
+    try:
+        response = client.get("/api/admin/observability/alerts/page")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides[require_admin] = admin_override
+
+    assert response.status_code == 403
 
 
 def test_generic_approval_api_can_filter_agent_release_items(admin_api_client):

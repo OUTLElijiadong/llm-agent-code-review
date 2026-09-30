@@ -1,6 +1,7 @@
 import { get, post, put } from './http'
 import type {
   AgentAlert,
+  AgentAlertPage,
   AgentArtifactVersion,
   AgentJob,
   AgentKnowledgeDoc,
@@ -139,6 +140,10 @@ export function getObservabilityOverview(): Promise<Record<string, unknown>> {
 
 export function listAlerts(status = 'open'): Promise<AgentAlert[]> {
   return get<AgentAlert[]>('/admin/observability/alerts', { status })
+}
+
+export function listAlertsPage(status = 'open', page = 1, pageSize = 20): Promise<AgentAlertPage> {
+  return get<AgentAlertPage>('/admin/observability/alerts/page', { status, page, page_size: pageSize })
 }
 
 export function resolveAlert(id: number, note = ''): Promise<AgentAlert> {

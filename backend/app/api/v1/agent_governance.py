@@ -48,7 +48,7 @@ from app.schemas.agent_governance import (
     SecurityStatusOut,
     ToolCallLogOut,
 )
-from app.schemas.common import Resp
+from app.schemas.common import PageOut, Resp
 from app.services import (
     agent_governance_service,
     agent_knowledge_service,
@@ -723,6 +723,20 @@ def list_alerts(
     """
     rows = observability_service.list_alerts(db, status=status)
     return Resp(data=[AgentAlertOut.model_validate(row) for row in rows])
+
+
+@router.get("/observability/alerts/page", response_model=Resp[PageOut[AgentAlertOut]])
+def list_alerts_page(
+    status: str = Query("open"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """分页查询治理告警；旧 /alerts 列表接口保持原样兼容。"""
+    result = observability_service.list_alerts_page(db, status=status, page=page, page_size=page_size)
+    result["items"] = [AgentAlertOut.model_validate(row) for row in result["items"]]
+    return Resp(data=PageOut[AgentAlertOut](**result))
 
 
 @router.post("/observability/alerts/{alert_id}/resolve", response_model=Resp[AgentAlertOut])

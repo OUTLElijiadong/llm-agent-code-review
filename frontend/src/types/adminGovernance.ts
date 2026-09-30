@@ -122,6 +122,14 @@ export interface AgentAlert {
   create_time?: string | null
 }
 
+export interface AgentAlertPage {
+  items: AgentAlert[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 export interface AgentMemory {
   id: number
   agent_code: string

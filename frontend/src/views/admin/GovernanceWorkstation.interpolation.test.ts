@@ -3,7 +3,7 @@ import path from 'node:path'
 import { NodeTypes, parse as parseTemplate, type RootNode, type TemplateChildNode } from '@vue/compiler-dom'
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import ElementPlus, { ElTable } from 'element-plus'
+import ElementPlus, { ElPagination, ElTable } from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   listGovernanceAgents: vi.fn(),
   listApprovals: vi.fn(),
   listAlerts: vi.fn(),
+  listAlertsPage: vi.fn(),
   listToolCalls: vi.fn(),
   listPolicies: vi.fn(),
   listPolicyDecisions: vi.fn(),
@@ -97,6 +98,7 @@ beforeEach(() => {
     resource: 'fixture', risk_level: 'high', status: 'pending',
   }])
   api.listAlerts.mockResolvedValue([])
+  api.listAlertsPage.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
   api.listPolicies.mockResolvedValue([])
   api.listPolicyDecisions.mockResolvedValue([])
   api.listToolPermissions.mockResolvedValue([{
@@ -139,6 +141,7 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     const overview = mountMode('overview')
     await settle()
     expect(api.listApprovals).toHaveBeenLastCalledWith('pending', 'agent_package.publish')
+    expect(api.listAlerts).not.toHaveBeenCalled()
     expect(overview.text()).toContain('执行审批待办')
     overview.unmount()
 
@@ -231,12 +234,23 @@ describe('admin governance interpolation in real cells and agent cards', () => {
       tool_status: [{ status: 'failed', count: 43188 }],
       approval_status: [],
     })
-    api.listAlerts.mockResolvedValue([])
+    api.listAlertsPage.mockResolvedValue({
+      items: Array.from({ length: 20 }, (_, index) => ({
+        id: 105 - index, alert_type: 'fixture', severity: 'warning', status: 'open', title: `告警 ${index + 1}`,
+      })),
+      total: 105,
+      page: 1,
+      page_size: 20,
+      pages: 6,
+    })
     const wrapper = mountMode('observability')
     await settle()
 
     expect(wrapper.text()).toContain('工具调用、调度执行和奖惩均为累计记录；审批按事项当前状态分组；开放告警只统计当前未关闭项。')
     expect(wrapper.text()).toContain('当前开放告警')
+    expect(wrapper.text()).toContain('开放告警（105）')
+    expect(wrapper.text()).toContain('共 105 条')
+    expect(wrapper.findAllComponents(ElTable)[2]!.findAll('tbody tr.el-table__row')).toHaveLength(20)
     expect(wrapper.text()).toContain('调度执行次数（累计）')
     expect(wrapper.text()).toContain('工具执行结果（累计）')
     expect(wrapper.text()).toContain('审批事项当前状态分布')
@@ -244,7 +258,75 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     expect(wrapper.text()).toContain('暂无审批事项状态记录')
     expect(wrapper.text()).toContain('状态')
     expect(wrapper.text()).not.toContain('审批渠道状态为空')
+  })
+
+  it('retains the empty state when the paginated alert result is empty', async () => {
+    api.listAlertsPage.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+    const wrapper = mountMode('observability')
+    await settle()
+
     expect(wrapper.text()).toContain('当前没有未关闭告警。历史失败记录请查看工具执行统计。')
+    expect(wrapper.text()).toContain('共 0 条')
+  })
+
+  it('does not present stale alert rows or a false zero when pagination fails', async () => {
+    api.listAlertsPage.mockRejectedValue(new Error('告警接口暂不可用'))
+    const wrapper = mountMode('observability')
+    await settle()
+
+    expect(wrapper.text()).toContain('告警接口暂不可用')
+    expect(wrapper.text()).toContain('开放告警（—）')
+    expect(wrapper.findAllComponents(ElTable)[2]!.findAll('tbody tr.el-table__row')).toHaveLength(0)
+    expect(wrapper.get('.alert-list-error button').text()).toBe('重试')
+  })
+
+  it('changes alert page through the UI and requests that page instead of truncating the list', async () => {
+    api.listAlertsPage.mockImplementation(async (_status: string, page: number, pageSize: number) => ({
+      items: [{ id: 106 - page, alert_type: 'fixture', severity: 'warning', status: 'open', title: `第 ${page} 页告警` }],
+      total: 105,
+      page,
+      page_size: pageSize,
+      pages: Math.ceil(105 / pageSize),
+    }))
+    const wrapper = mountMode('observability')
+    await settle()
+
+    expect(api.listAlertsPage).toHaveBeenLastCalledWith('open', 1, 20)
+    const pagination = wrapper.findComponent(ElPagination)
+    expect(pagination.exists()).toBe(true)
+    const secondPage = wrapper.find('.el-pager li.number:nth-child(2)')
+    expect(secondPage.exists()).toBe(true)
+    await secondPage.trigger('click')
+    await settle()
+
+    expect(api.listAlertsPage).toHaveBeenLastCalledWith('open', 2, 20)
+    expect(wrapper.text()).toContain('第 2 页告警')
+  })
+
+  it('returns to the last valid page when the alert count shrinks', async () => {
+    let countShrank = false
+    api.listAlertsPage.mockImplementation(async (_status: string, page: number, pageSize: number) => {
+      if (page === 6) {
+        countShrank = true
+        return { items: [], total: 25, page, page_size: pageSize, pages: 2 }
+      }
+      return {
+        items: [{ id: 200 - page, alert_type: 'fixture', severity: 'warning', status: 'open', title: `有效页 ${page}` }],
+        total: countShrank ? 25 : 105,
+        page,
+        page_size: pageSize,
+        pages: countShrank ? 2 : 6,
+      }
+    })
+    const wrapper = mountMode('observability')
+    await settle()
+
+    await wrapper.find('.el-pager li.number:last-child').trigger('click')
+    await settle()
+
+    expect(api.listAlertsPage).toHaveBeenLastCalledWith('open', 2, 20)
+    expect(wrapper.text()).toContain('有效页 2')
+    expect(wrapper.text()).toContain('开放告警（25）')
   })
 
   it('renders all 35 agent cards without presenting the meta category as a second main agent', async () => {

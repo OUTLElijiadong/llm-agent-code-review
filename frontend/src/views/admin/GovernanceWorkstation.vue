@@ -23,7 +23,7 @@ import {
   listAgentKnowledge,
   listAgentKnowledgeSources,
   listAgentMemory,
-  listAlerts,
+  listAlertsPage,
   listArtifactVersions,
   listApprovals,
   listGovernanceAgents,
@@ -44,6 +44,7 @@ import {
 } from '@/api/adminGovernance'
 import type {
   AgentAlert,
+  AgentAlertPage,
   AgentArtifactVersion,
   AgentJob,
   AgentKnowledgeDoc,
@@ -95,6 +96,10 @@ const tools = ref<ToolCallLog[]>([])
 const toolPermissions = ref<AgentToolPermission[]>([])
 const jobs = ref<AgentJob[]>([])
 const alerts = ref<AgentAlert[]>([])
+const alertPage = ref(1)
+const alertPageSize = ref(20)
+const alertTotal = ref<number | null>(null)
+const alertLoadError = ref('')
 const observability = ref<Record<string, unknown>>({})
 const selectedAgent = ref('')
 const agentMemory = ref<AgentMemory[]>([])
@@ -266,7 +271,7 @@ function agentDisplayName(agent: GovernanceAgent): string {
 }
 
 const observabilityCards = computed(() => [
-  { label: '当前开放告警', value: Number(observability.value.open_alerts || 0) },
+  { label: '当前开放告警', value: alertTotal.value ?? '—' },
   { label: '调度执行次数（累计）', value: Number(observability.value.job_runs || 0) },
   { label: '累计奖惩分', value: Number(observability.value.reward_score_total || 0) },
   { label: '工具结果分类数', value: Array.isArray(observability.value.tool_status) ? observability.value.tool_status.length : 0 },
@@ -293,6 +298,7 @@ async function loadData(): Promise<void> {
   loading.value = true
   if (isAgentsRequest) agentLoadError.value = ''
   if (isApprovalsRequest) approvalLoadError.value = ''
+  if (requestMode === 'observability') alertLoadError.value = ''
   try {
     if (requestMode === 'overview') {
       const nextOverview = await getGovernanceOverview()
@@ -304,9 +310,6 @@ async function loadData(): Promise<void> {
       const nextApprovals = await listApprovals('pending', 'agent_package.publish')
       if (!requestIsCurrent()) return
       approvals.value = nextApprovals
-      const nextAlerts = await listAlerts()
-      if (!requestIsCurrent()) return
-      alerts.value = nextAlerts
     } else if (requestMode === 'agents') {
       const nextAgents = await listGovernanceAgents()
       if (!requestIsCurrent()) return
@@ -347,9 +350,15 @@ async function loadData(): Promise<void> {
       const nextObservability = await getObservabilityOverview()
       if (!requestIsCurrent()) return
       observability.value = nextObservability
-      const nextAlerts = await listAlerts()
+      let nextAlertsPage: AgentAlertPage = await listAlertsPage('open', alertPage.value, alertPageSize.value)
+      while (requestIsCurrent() && nextAlertsPage.pages > 0 && alertPage.value > nextAlertsPage.pages) {
+        alertPage.value = nextAlertsPage.pages
+        nextAlertsPage = await listAlertsPage('open', alertPage.value, alertPageSize.value)
+      }
       if (!requestIsCurrent()) return
-      alerts.value = nextAlerts
+      if (nextAlertsPage.pages === 0) alertPage.value = 1
+      alerts.value = nextAlertsPage.items
+      alertTotal.value = nextAlertsPage.total
     } else if (requestMode === 'rewards') {
       const nextObservability = await getObservabilityOverview()
       if (!requestIsCurrent()) return
@@ -372,6 +381,11 @@ async function loadData(): Promise<void> {
     else if (isApprovalsRequest) {
       approvals.value = []
       approvalLoadError.value = readable || '审批列表加载失败，请刷新重试'
+    } else if (requestMode === 'observability') {
+      alerts.value = []
+      alertTotal.value = null
+      alertLoadError.value = readable || '监控告警加载失败，请重试'
+      ElMessage.error(alertLoadError.value)
     } else throw error
   } finally {
     if (requestIsCurrent()) loading.value = false
@@ -1270,11 +1284,15 @@ onMounted(loadData)
         </el-table>
       </div>
       <div class="panel">
-        <h3>开放告警</h3>
-        <el-table :data="alerts" height="360">
-              <template #empty>
-                <EmptyState compact description="当前没有未关闭告警。历史失败记录请查看工具执行统计。" />
-              </template>
+        <h3>开放告警（{{ alertTotal ?? '—' }}）</h3>
+        <el-table :data="alerts" height="360" v-loading="loading">
+          <template #empty>
+            <div v-if="alertLoadError" class="alert-list-error">
+              <span>{{ alertLoadError }}</span>
+              <el-button link type="primary" @click="loadData">重试</el-button>
+            </div>
+            <EmptyState v-else compact description="当前没有未关闭告警。历史失败记录请查看工具执行统计。" />
+          </template>
           <el-table-column prop="title" label="告警" min-width="180" />
           <el-table-column label="级别" width="110"><template #default="{ row }">{{ alertSeverityText(row.severity) }}</template></el-table-column>
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
@@ -1284,6 +1302,16 @@ onMounted(loadData)
             </template>
           </el-table-column>
         </el-table>
+        <div class="alert-pagination-wrapper">
+          <el-pagination
+            v-model:current-page="alertPage"
+            v-model:page-size="alertPageSize"
+            :total="alertTotal ?? 0"
+            :page-sizes="[20, 50, 100]"
+            layout="total, sizes, prev, pager, next"
+            @change="loadData"
+          />
+        </div>
       </div>
     </section>
 
@@ -1471,6 +1499,28 @@ onMounted(loadData)
   color: var(--gray-500);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.alert-list-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 64px;
+  color: var(--color-danger, #d9304f);
+}
+
+.alert-pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.alert-pagination-wrapper :deep(.el-pagination) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 8px;
 }
 
 .job-schedule-editor { display: grid; gap: 4px; }

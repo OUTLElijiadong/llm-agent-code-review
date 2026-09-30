@@ -1,5 +1,6 @@
 """Agent 治理观测服务。"""
 import json
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -136,6 +137,32 @@ def list_alerts(db: Session, status: str = "open", limit: int = 100) -> list[Age
     if status:
         q = q.filter(AgentAlert.status == status)
     return q.order_by(AgentAlert.id.desc()).limit(limit).all()
+
+
+def list_alerts_page(
+    db: Session,
+    status: str = "open",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """分页查询治理告警，并返回完整匹配总数。"""
+    q = db.query(AgentAlert)
+    if status:
+        q = q.filter(AgentAlert.status == status)
+    total = q.count()
+    items = (
+        q.order_by(AgentAlert.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": math.ceil(total / page_size) if total else 0,
+    }
 
 
 def resolve_alert(db: Session, alert_id: int, admin_id: int, note: str = "") -> AgentAlert:
