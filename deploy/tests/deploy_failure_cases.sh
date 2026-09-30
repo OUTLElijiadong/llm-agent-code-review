@@ -4,7 +4,7 @@ run_deploy_failure_matrix() {
   local test_root="$1" scenario workspace rc expected_rollback expected_rc
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https rollback_failed; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https rollback_failed; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
@@ -12,6 +12,7 @@ run_deploy_failure_matrix() {
     printf '3.8.4\n' > "$workspace/repo/VERSION"
     printf 'isolated geolite fixture\n' > "$workspace/repo/backend/GeoLite2-City.mmdb"
     write_strong_database_test_env "$workspace/repo/deploy/.env"
+    write_frontend_tls_test_assets "$workspace/repo/deploy"
     cat >> "$workspace/repo/deploy/.env" <<ENV
 GEOLITE_DB_HOST_PATH=$workspace/repo/backend/GeoLite2-City.mmdb
 APP_RELEASE=$old_sha
@@ -19,6 +20,9 @@ APP_VERSION=3.8.2
 BACKEND_RELEASE=$old_sha
 FRONTEND_RELEASE=$old_sha
 ENV
+    if [[ "$scenario" == tls ]]; then
+      printf 'CERTBOT_CONF_DIR=%s/missing-certificates\n' "$workspace" >> "$workspace/repo/deploy/.env"
+    fi
     printf 'services: {}\n' > "$workspace/repo/deploy/docker-compose.yml"
     printf 'fixture\n' | gzip -c > "$workspace/backup.sql.gz"
     cat > "$workspace/releases/current.env" <<STATE
@@ -107,6 +111,7 @@ SCRIPT
     set -e
     expected_rc=1
     case "$scenario" in
+      tls) assert_contains "$workspace/output.log" 'Frontend TLS / ACME 持久化挂载未通过预检' ;;
       backup) expected_rc=41 ;;
       verify) expected_rc=42 ;;
       backend_build|migration|backend_up|frontend_build|frontend_up) expected_rc=44 ;;
@@ -133,12 +138,17 @@ SCRIPT
       }
     fi
     case "$scenario" in
-      backup|verify|backend_build|migration)
+      tls|backup|verify|backend_build|migration)
         expected_rollback=not_switched
         cmp "$workspace/original.env" "$workspace/releases/current.env"
         assert_not_contains "$workspace/docker.log" 'compose up -d --no-deps --no-build --pull never'
         assert_contains "$workspace/output.log" '应用尚未切换'
         [[ -f "$workspace/releases/pending.env" ]]
+        if [[ "$scenario" == tls ]]; then
+          assert_not_contains "$workspace/docker.log" 'compose build backend'
+          assert_not_contains "$workspace/docker.log" 'compose build frontend'
+          assert_not_contains "$workspace/docker.log" 'backup.sh'
+        fi
         ;;
       rollback_failed)
         expected_rollback=failed

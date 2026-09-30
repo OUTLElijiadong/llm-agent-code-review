@@ -222,6 +222,8 @@ systemd timer 失败必须接入云监控或日志告警；仅写入 journal 不
 - ACME webroot：`deploy/certbot/www`；
 - Nginx 模板：`frontend/nginx.conf.template`。
 
+多版本发布工作区应在 `.env` 中将 `CERTBOT_CONF_DIR` 和 `CERTBOT_WEBROOT_DIR` 指向同一份稳定证书/webroot 目录；否则 Compose 会按当前 release 工作区解析相对路径。`deploy.sh` 会在备份、构建和容器切换前验证域名证书及 webroot，缺失或不可访问时拒绝发布，避免新容器遮蔽生产证书。
+
 续期后应核对证书有效期、Nginx reload、HTTP 308、HTTPS 首页与同源 `/healthz`。证书私钥不得复制到 Git、备份日志或工单。
 
 ## 11. 常用只读检查

@@ -52,6 +52,49 @@ MYSQL_PASSWORD=AppCredentialForTests2026Beta002
 ENV
 }
 
+# 为部署事务替身准备可读 TLS 与可写 ACME webroot。
+# 参数: $1 为 deploy 目录。
+# 返回: fixture 创建成功时返回 0。
+write_frontend_tls_test_assets() {
+  local deploy_dir="$1"
+  mkdir -p "$deploy_dir/certbot/conf/live/example.test" "$deploy_dir/certbot/www"
+  printf 'test certificate\n' > "$deploy_dir/certbot/conf/live/example.test/fullchain.pem"
+  printf 'test private key\n' > "$deploy_dir/certbot/conf/live/example.test/privkey.pem"
+}
+
+# 验证 TLS 持久化挂载正例与证书/webroot 缺失拒绝分支。
+# 参数: $1 测试根目录。
+# 返回: 所有断言通过时返回 0。
+run_frontend_tls_asset_validation() {
+  local workspace="$1/frontend-tls" env_file="$1/frontend-tls/.env" output_file="$1/frontend-tls/output.log"
+  local common_file="$(pwd)/lib/common.sh"
+  mkdir -p "$workspace"
+  write_strong_database_test_env "$env_file"
+  write_frontend_tls_test_assets "$workspace"
+  (cd "$workspace" && source "$common_file" && assert_frontend_tls_assets "$env_file")
+
+  cat >> "$env_file" <<'ENV'
+CERTBOT_CONF_DIR=./missing-conf
+CERTBOT_WEBROOT_DIR=./certbot/www
+ENV
+  if (cd "$workspace" && source "$common_file" && assert_frontend_tls_assets "$env_file") > "$output_file" 2>&1; then
+    printf 'TLS 挂载预检接受了缺失证书目录\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" 'Frontend TLS 证书不可读或缺失'
+
+  cat > "$env_file" <<'ENV'
+APP_DOMAIN=example.test
+CERTBOT_CONF_DIR=./certbot/conf
+CERTBOT_WEBROOT_DIR=./missing-webroot
+ENV
+  if (cd "$workspace" && source "$common_file" && assert_frontend_tls_assets "$env_file") > "$output_file" 2>&1; then
+    printf 'TLS 挂载预检接受了缺失 ACME webroot\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" 'ACME webroot 不存在或不可写'
+}
+
 # 动态验证数据库凭据门禁的通过与拒绝分支。
 # 参数: $1 测试根目录。
 # 返回: 所有边界断言符合预期时返回 0。
@@ -1447,6 +1490,7 @@ run_deploy_failure_rollback_simulation() {
   printf '%s\n' '3.7.0' > "$repo/VERSION"
   printf '%s\n' 'test database' > "$repo/backend/GeoLite2-City.mmdb"
   write_strong_database_test_env "$repo/deploy/.env"
+  write_frontend_tls_test_assets "$repo/deploy"
   printf 'GEOLITE_DB_HOST_PATH=%s\n' "$repo/backend/GeoLite2-City.mmdb" >> "$repo/deploy/.env"
   printf '%s\n' 'services: {}' > "$repo/deploy/docker-compose.yml"
   printf '%s\n' 'backup' | gzip -c > "$backup_file"
@@ -1812,6 +1856,8 @@ assert_contains deploy.sh 'release_image_exists prism-frontend "$current_fronten
 assert_contains deploy.sh 'calibrate_default_env_file "$target_sha" "$desired_backend" "$desired_frontend" "$app_version"'
 assert_contains lib/common.sh 'calibrate_default_env_file() {'
 assert_contains docker-compose.yml '--general-log=0'
+assert_contains docker-compose.yml '${CERTBOT_CONF_DIR:-./certbot/conf}:/etc/letsencrypt:ro'
+assert_contains docker-compose.yml '${CERTBOT_WEBROOT_DIR:-./certbot/www}:/var/www/certbot:ro'
 assert_not_contains docker-compose.yml '--general-log=1'
 
 DEPLOY_ENV_FILE=.env.example \
@@ -1826,6 +1872,7 @@ PYTHON_BASE_IMAGE='python:3.11-slim' PYTHON_BASE_IMAGE_DIGEST="$digest_placehold
   docker compose -f sandbox/docker-compose.build.yml config --quiet
 
 run_database_credential_validation "$test_root"
+run_frontend_tls_asset_validation "$test_root"
 run_release_binding_tests "$test_root"
 run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_verify_backup_guard_simulation "$fake_bin" "$test_root"

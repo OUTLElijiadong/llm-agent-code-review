@@ -50,6 +50,7 @@ done
 
 require_commands docker git curl awk grep df dirname
 validate_compose_environment
+deploy_env_file="${DEPLOY_ENV_FILE:-.env}"
 repo_dir="$(cd .. && pwd)"
 git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || fatal "上级目录不是 Git 仓库"
 assert_deploy_sources_clean "$repo_dir" || fatal "拒绝从脏构建上下文发布"
@@ -144,6 +145,9 @@ on_deploy_error() {
   finish_deploy_failure "$rc" "未捕获命令失败"
 }
 trap on_deploy_error ERR
+
+assert_frontend_tls_assets "$deploy_env_file" \
+  || fatal "Frontend TLS / ACME 持久化挂载未通过预检，发布尚未修改运行服务"
 
 deploy_stage="capacity_preflight"
 assert_deploy_capacity "$repo_dir" "${BACKUP_DIR:-../backups}"

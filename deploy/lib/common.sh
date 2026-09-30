@@ -327,6 +327,35 @@ validate_compose_environment() {
     || fatal "docker compose 配置解析失败"
 }
 
+# 验证 Frontend TLS 与 ACME bind mount 指向可用的持久化目录。
+# 参数: $1 为 dotenv 路径；相对路径按当前 deploy/ 目录解析，与 Compose 一致。
+# 返回: 域名证书和 webroot 均可读写时返回 0，否则返回 1。
+assert_frontend_tls_assets() {
+  local env_file="${1:-${DEPLOY_ENV_FILE:-.env}}"
+  local domain conf_dir webroot_dir fullchain privkey
+  domain="$(read_env_value APP_DOMAIN "$env_file" 2>/dev/null || true)"
+  [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || {
+    log_warn "APP_DOMAIN 缺失或格式非法，无法验证 Frontend TLS 证书"
+    return 1
+  }
+  conf_dir="$(read_env_value CERTBOT_CONF_DIR "$env_file" 2>/dev/null || true)"
+  webroot_dir="$(read_env_value CERTBOT_WEBROOT_DIR "$env_file" 2>/dev/null || true)"
+  conf_dir="${conf_dir:-./certbot/conf}"
+  webroot_dir="${webroot_dir:-./certbot/www}"
+  [[ "$conf_dir" == /* ]] || conf_dir="$PWD/$conf_dir"
+  [[ "$webroot_dir" == /* ]] || webroot_dir="$PWD/$webroot_dir"
+  fullchain="$conf_dir/live/$domain/fullchain.pem"
+  privkey="$conf_dir/live/$domain/privkey.pem"
+  if [[ ! -s "$fullchain" || ! -r "$fullchain" || ! -s "$privkey" || ! -r "$privkey" ]]; then
+    log_warn "Frontend TLS 证书不可读或缺失(domain=$domain, cert_dir=$conf_dir)"
+    return 1
+  fi
+  if [[ ! -d "$webroot_dir" || ! -w "$webroot_dir" ]]; then
+    log_warn "ACME webroot 不存在或不可写(webroot=$webroot_dir)"
+    return 1
+  fi
+}
+
 # 验证登录来源地图使用的 GeoLite2 只读数据源。
 # 参数: 无；从 deploy 环境文件读取 GEOLITE_DB_HOST_PATH。
 # 返回: 文件存在、可读且为绝对路径时 0，否则终止脚本。

@@ -199,8 +199,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
+      - ${CERTBOT_CONF_DIR:-./certbot/conf}:/etc/letsencrypt:ro
+      - ${CERTBOT_WEBROOT_DIR:-./certbot/www}:/var/www/certbot:ro
       - frontend_assets:/usr/share/nginx/html/assets
     healthcheck:
       test: ["CMD-SHELL", "wget --no-check-certificate -q --spider https://127.0.0.1/ || exit 1"]
