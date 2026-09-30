@@ -23,9 +23,13 @@
 - 公网 `lijiadong.cn:8888` 三次根路径请求返回 HTTP 404、Server: nginx；主机 `ss` 确认监听进程是 BT-Panel，绑定 `*:8888`。只核对根路径；用户选择暂不改安全组。
 - 生产 TLS 证书三次握手均显示 2026-10-28 到期；systemd timers/unit、root crontab 和 `/etc/cron.*` 未找到 Certbot/ACME 续期项，BT-Panel 自身计划任务与续期演练仍未查。
 - 生产 22 banner 为 OpenSSH_9.3；`sshd -T` 显示密码和交互认证关闭、公钥认证开启；RPM 为 OpenCloudOS `openssh-server-9.3p2-15.oc9.x86_64`，尚未核对发行版安全回补。
-- 生产主站当前为 Nginx 1.27.5 和 Report-Only CSP。生产容器镜像自带有效配置，无 Nginx 配置 bind mount；运行配置 `nginx -t` 已通过。候选配置尚未发布。
+- 发布前观察的生产主站为 Nginx 1.27.5 和 Report-Only CSP。生产容器镜像自带有效配置，无 Nginx 配置 bind mount；当时运行配置 `nginx -t` 已通过。当前生产状态见末尾执行更新及 Acceptance 追加验收。
 - 报告各轮问题可能描述旧构建状态；以当前候选代码、可重现路径和实测为准。
 
 ## 证据边界
 
 代码审查、自动化测试、外部公开端口观察、主机配置和云安全组属于不同证据面。生产 `nginx -t` 只验证当前配置，不等价于候选配置语法或 CSP 浏览器兼容；证书日期不等价于续期自动化成功；SSH banner 不等价于发行版补丁状态。
+
+## 2026-10-01 执行边界更新
+
+以上是上线前的历史基线。用户随后明确要求完成修复并发布生产，因此本任务改用正式部署脚本发布 `v4.0.35`；本机 Docker 仍未启动，无痕/私密浏览仍未使用。当前生产证据和未完成事项以 Acceptance 末尾的生产追加验收、FINAL 与 TODO 为准。AutoSurface 的 8621 端口通过主机 systemd override 收窄为 loopback；Prism 运维执行器路径修复进入 `310ea1a8095428d670c0404a05b4dc643ad0027e`。
