@@ -1,10 +1,11 @@
 """Agent 治理观测服务。"""
+
 import json
 import math
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
@@ -17,6 +18,57 @@ from app.models.agent_governance import (
     PolicyDecisionLog,
     ToolCallLog,
 )
+
+_SECURITY_MONITOR_CATEGORIES = {
+    "attack",
+    "backup",
+    "brute_force",
+    "db_threat",
+    "integration",
+    "login",
+    "optimization",
+    "proxy_abuse",
+    "scanner",
+}
+_ASCII_WHITESPACE = " \t\n\r\v\f"
+
+
+def _sql_compact_alert_value(value):
+    """跨 SQLite/MySQL 删除告警字段中的 ASCII 空白，避免 SQL/Python 分类不一致。"""
+    for char in _ASCII_WHITESPACE:
+        value = func.replace(value, char, "")
+    return value
+
+
+def _compact_alert_value(value: Optional[str]) -> str:
+    """与 SQL 分类保持一致：小写并删除 ASCII 空白字符。"""
+    return "".join(char for char in (value or "").lower() if char not in _ASCII_WHITESPACE)
+
+
+def security_monitor_alert_clause():
+    """返回覆盖当前及未标记来源的历史安全告警分类条件。"""
+    source = _sql_compact_alert_value(func.lower(func.coalesce(AgentAlert.source, "")))
+    alert_type = _sql_compact_alert_value(func.lower(func.coalesce(AgentAlert.alert_type, "")))
+    category = _sql_compact_alert_value(func.lower(func.coalesce(AgentAlert.category, "")))
+    return or_(
+        source == "security_monitor",
+        alert_type.like("security.%"),
+        (source == "") & category.in_(_SECURITY_MONITOR_CATEGORIES),
+    )
+
+
+def is_security_monitor_alert(alert: AgentAlert) -> bool:
+    """按可信安全告警类型/类别识别记录，不依赖可空的迁移来源列。"""
+    alert_type = _compact_alert_value(alert.alert_type)
+    category = _compact_alert_value(alert.category)
+    source = _compact_alert_value(alert.source)
+    return source == "security_monitor" or alert_type.startswith("security.") or (
+        not source and category in _SECURITY_MONITOR_CATEGORIES
+    )
+
+
+def _exclude_security_monitor_alerts(query):
+    return query.filter(~security_monitor_alert_clause())
 
 
 def create_alert(
@@ -97,16 +149,8 @@ def overview(db: Session) -> dict:
     Returns:
         dict: 观测指标摘要。
     """
-    tool_status = (
-        db.query(ToolCallLog.status, func.count(ToolCallLog.id))
-        .group_by(ToolCallLog.status)
-        .all()
-    )
-    approval_status = (
-        db.query(ApprovalItem.status, func.count(ApprovalItem.id))
-        .group_by(ApprovalItem.status)
-        .all()
-    )
+    tool_status = db.query(ToolCallLog.status, func.count(ToolCallLog.id)).group_by(ToolCallLog.status).all()
+    approval_status = db.query(ApprovalItem.status, func.count(ApprovalItem.id)).group_by(ApprovalItem.status).all()
     risk_distribution = (
         db.query(PolicyDecisionLog.risk_level, func.count(PolicyDecisionLog.id))
         .group_by(PolicyDecisionLog.risk_level)
@@ -122,7 +166,13 @@ def overview(db: Session) -> dict:
     }
 
 
-def list_alerts(db: Session, status: str = "open", limit: int = 100) -> list[AgentAlert]:
+def list_alerts(
+    db: Session,
+    status: str = "open",
+    limit: int = 100,
+    *,
+    include_security_monitor: bool = True,
+) -> list[AgentAlert]:
     """查询治理告警。
 
     Args:
@@ -136,6 +186,8 @@ def list_alerts(db: Session, status: str = "open", limit: int = 100) -> list[Age
     q = db.query(AgentAlert)
     if status:
         q = q.filter(AgentAlert.status == status)
+    if not include_security_monitor:
+        q = _exclude_security_monitor_alerts(q)
     return q.order_by(AgentAlert.id.desc()).limit(limit).all()
 
 
@@ -144,18 +196,17 @@ def list_alerts_page(
     status: str = "open",
     page: int = 1,
     page_size: int = 20,
+    *,
+    include_security_monitor: bool = True,
 ) -> dict:
     """分页查询治理告警，并返回完整匹配总数。"""
     q = db.query(AgentAlert)
     if status:
         q = q.filter(AgentAlert.status == status)
+    if not include_security_monitor:
+        q = _exclude_security_monitor_alerts(q)
     total = q.count()
-    items = (
-        q.order_by(AgentAlert.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    items = q.order_by(AgentAlert.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {
         "items": items,
         "total": total,
@@ -165,7 +216,13 @@ def list_alerts_page(
     }
 
 
-def resolve_alert(db: Session, alert_id: int, admin_id: int, note: str = "") -> AgentAlert:
+def resolve_alert(
+    db: Session,
+    alert_id: int,
+    admin_id: int,
+    note: str = "",
+    admin_name: str = "",
+) -> AgentAlert:
     """关闭治理告警。
 
     Args:
@@ -186,8 +243,23 @@ def resolve_alert(db: Session, alert_id: int, admin_id: int, note: str = "") -> 
     alert.status = "resolved"
     alert.resolved_by = admin_id
     alert.resolved_at = datetime.now(timezone.utc)
-    if note:
-        alert.detail_json = note
+    try:
+        original = json.loads(alert.detail_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        original = {"legacy_detail": alert.detail_json}
+    if not isinstance(original, dict):
+        original = {"original_detail": original}
+    resolution = {
+        "note": str(note or "")[:2000],
+        "resolved_by": int(admin_id),
+        "resolved_by_name": str(admin_name or "")[:80] or None,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    history = original.get("resolutions")
+    history = history if isinstance(history, list) else []
+    original["resolutions"] = [*history[-19:], resolution]
+    original["resolution"] = resolution
+    alert.detail_json = json.dumps(original, ensure_ascii=False, default=str)
     db.commit()
     db.refresh(alert)
     return alert

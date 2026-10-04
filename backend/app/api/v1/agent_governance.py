@@ -1,4 +1,5 @@
 """Agent 治理平台管理端 API。"""
+
 import json
 from datetime import datetime, timezone
 
@@ -57,6 +58,7 @@ from app.services import (
     audit_service,
     observability_service,
     policy_engine,
+    rbac_service,
     reward_service,
     rollback_service,
     scheduler_service,
@@ -178,8 +180,11 @@ def create_agent_memory(
         source_ref=payload.source_ref,
     )
     audit_service.log(
-        db, _, "governance.agent_memory_create",
-        target_type="agent_memory", target_id=str(row.id),
+        db,
+        _,
+        "governance.agent_memory_create",
+        target_type="agent_memory",
+        target_id=str(row.id),
         detail=f"写入Agent记忆 {row.agent_code}/{row.memory_type}",
     )
     return Resp(data=AgentMemoryOut.model_validate(row))
@@ -229,8 +234,11 @@ def create_agent_knowledge_doc(
         confidence=payload.confidence,
     )
     audit_service.log(
-        db, _, "governance.knowledge_doc_create",
-        target_type="agent_knowledge_doc", target_id=str(row.id),
+        db,
+        _,
+        "governance.knowledge_doc_create",
+        target_type="agent_knowledge_doc",
+        target_id=str(row.id),
         detail=f"写入Agent知识 {row.title[:60]}",
     )
     return Resp(data=AgentKnowledgeDocOut.model_validate(row))
@@ -254,8 +262,11 @@ def activate_agent_knowledge_doc(
     """
     row = agent_knowledge_service.activate_document(db, doc_id, user_id=_.id)
     audit_service.log(
-        db, _, "governance.knowledge_doc_activate",
-        target_type="agent_knowledge_doc", target_id=str(doc_id),
+        db,
+        _,
+        "governance.knowledge_doc_activate",
+        target_type="agent_knowledge_doc",
+        target_id=str(doc_id),
         detail="激活Agent知识文档",
     )
     return Resp(data=AgentKnowledgeDocOut.model_validate(row))
@@ -353,12 +364,14 @@ def list_approvals(
     excluded = tuple(action.strip() for action in exclude_action.split(",") if action.strip())
     rows = approval_service.list_items(db, status=status, limit=limit, actor=actor, exclude_actions=excluded)
     session_resume_required = approval_service.session_resume_required_item_ids(db, rows)
-    return Resp(data=[
-        ApprovalItemOut.model_validate(row).model_copy(
-            update={"requires_session_resume": row.id in session_resume_required},
-        )
-        for row in rows
-    ])
+    return Resp(
+        data=[
+            ApprovalItemOut.model_validate(row).model_copy(
+                update={"requires_session_resume": row.id in session_resume_required},
+            )
+            for row in rows
+        ]
+    )
 
 
 @router.post("/approvals/{item_id}/approve", response_model=Resp[ApprovalItemOut])
@@ -454,19 +467,22 @@ def upsert_policy(
     row.enabled = payload.enabled
     db.commit()
     db.refresh(row)
-    snapshot = json.dumps({
-        "rule_id": row.id,
-        "rule_code": row.rule_code,
-        "name": row.name,
-        "subject": row.subject,
-        "action": row.action,
-        "resource": row.resource,
-        "effect": row.effect,
-        "risk_level": row.risk_level,
-        "condition_json": row.condition_json,
-        "priority": row.priority,
-        "enabled": row.enabled,
-    }, ensure_ascii=False)
+    snapshot = json.dumps(
+        {
+            "rule_id": row.id,
+            "rule_code": row.rule_code,
+            "name": row.name,
+            "subject": row.subject,
+            "action": row.action,
+            "resource": row.resource,
+            "effect": row.effect,
+            "risk_level": row.risk_level,
+            "condition_json": row.condition_json,
+            "priority": row.priority,
+            "enabled": row.enabled,
+        },
+        ensure_ascii=False,
+    )
     rollback_service.create_version(
         db,
         agent_code="policy",
@@ -477,8 +493,11 @@ def upsert_policy(
         status="stable",
     )
     audit_service.log(
-        db, _, "governance.policy_upsert",
-        target_type="policy_rule", target_id=str(row.id),
+        db,
+        _,
+        "governance.policy_upsert",
+        target_type="policy_rule",
+        target_id=str(row.id),
         detail=f"保存策略 {row.rule_code}: {row.subject}/{row.action} -> {row.effect}",
     )
     return Resp(data=PolicyRuleOut.model_validate(row))
@@ -593,8 +612,11 @@ def upsert_tool_permission(
     db.commit()
     db.refresh(row)
     audit_service.log(
-        db, current, "governance.tool_permission_upsert",
-        target_type="agent_tool_permission", target_id=str(row.id),
+        db,
+        current,
+        "governance.tool_permission_upsert",
+        target_type="agent_tool_permission",
+        target_id=str(row.id),
         detail=f"工具权限 {row.agent_code}/{row.tool_code} -> {row.permission} 启用={row.enabled}",
     )
     return Resp(data=AgentToolPermissionOut.model_validate(row))
@@ -637,8 +659,11 @@ def update_job(
     """
     row = scheduler_service.update_job(db, job_id, payload.model_dump(exclude_none=True), actor=actor)
     audit_service.log(
-        db, actor, "governance.job_update",
-        target_type="agent_job", target_id=str(job_id),
+        db,
+        actor,
+        "governance.job_update",
+        target_type="agent_job",
+        target_id=str(job_id),
         detail=f"更新调度任务 {payload.model_dump(exclude_none=True)}"[:300],
     )
     return Resp(data=AgentJobOut.model_validate(row))
@@ -658,17 +683,22 @@ def run_job(job_id: int, db: Session = Depends(get_db), actor: User = Depends(re
     """
     row = scheduler_service.run_job(db, job_id, actor=actor)
     audit_service.log(
-        db, actor, "governance.job_run",
-        target_type="agent_job", target_id=str(job_id),
+        db,
+        actor,
+        "governance.job_run",
+        target_type="agent_job",
+        target_id=str(job_id),
         detail=f"手动运行调度任务 run_id={row.id}",
     )
-    return Resp(data={
-        "id": row.id,
-        "job_id": row.job_id,
-        "status": row.status,
-        "result_json": row.result_json,
-        "error": row.error,
-    })
+    return Resp(
+        data={
+            "id": row.id,
+            "job_id": row.job_id,
+            "status": row.status,
+            "result_json": row.result_json,
+            "error": row.error,
+        }
+    )
 
 
 @router.get("/jobs/runs", response_model=Resp[list[dict]])
@@ -686,15 +716,20 @@ def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_a
     if not scheduler_service.can_access_restricted_jobs(db, actor):
         query = query.filter(~AgentJob.job_type.in_(scheduler_service.SUPER_ADMIN_JOB_TYPES))
     rows = query.order_by(AgentJobRun.id.desc()).limit(100).all()
-    return Resp(data=[{
-        "id": row.id,
-        "job_id": row.job_id,
-        "status": row.status,
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
-        "result_json": row.result_json,
-        "error": row.error,
-    } for row in rows])
+    return Resp(
+        data=[
+            {
+                "id": row.id,
+                "job_id": row.job_id,
+                "status": row.status,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+                "result_json": row.result_json,
+                "error": row.error,
+            }
+            for row in rows
+        ]
+    )
 
 
 @router.get("/observability/overview", response_model=Resp[dict])
@@ -715,7 +750,7 @@ def observability_overview(db: Session = Depends(get_db), _: User = Depends(requ
 def list_alerts(
     status: str = Query("open"),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    actor: User = Depends(require_admin),
 ):
     """查询治理告警。
 
@@ -727,7 +762,11 @@ def list_alerts(
     Returns:
         Resp[list[AgentAlertOut]]: 告警列表。
     """
-    rows = observability_service.list_alerts(db, status=status)
+    rows = observability_service.list_alerts(
+        db,
+        status=status,
+        include_security_monitor=rbac_service.is_super_admin_user(db, actor.id),
+    )
     return Resp(data=[AgentAlertOut.model_validate(row) for row in rows])
 
 
@@ -737,10 +776,16 @@ def list_alerts_page(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    actor: User = Depends(require_admin),
 ):
     """分页查询治理告警；旧 /alerts 列表接口保持原样兼容。"""
-    result = observability_service.list_alerts_page(db, status=status, page=page, page_size=page_size)
+    result = observability_service.list_alerts_page(
+        db,
+        status=status,
+        page=page,
+        page_size=page_size,
+        include_security_monitor=rbac_service.is_super_admin_user(db, actor.id),
+    )
     result["items"] = [AgentAlertOut.model_validate(row) for row in result["items"]]
     return Resp(data=PageOut[AgentAlertOut](**result))
 
@@ -763,8 +808,20 @@ def resolve_alert(
     Returns:
         Resp[AgentAlertOut]: 关闭后的告警。
     """
-    row = observability_service.resolve_alert(db, alert_id, admin.id, note=payload.note)
+    target = db.get(AgentAlert, alert_id)
+    if not target:
+        raise NotFoundError("治理告警不存在", code=40400)
+    if observability_service.is_security_monitor_alert(target) and not rbac_service.is_super_admin_user(db, admin.id):
+        raise NotFoundError("治理告警不存在", code=40400)
+    row = observability_service.resolve_alert(
+        db,
+        alert_id,
+        admin.id,
+        note=payload.note,
+        admin_name=admin.username,
+    )
     return Resp(data=AgentAlertOut.model_validate(row))
+
 
 @router.get("/observability/alerts/unread", response_model=Resp[list[AgentAlertOut]])
 def list_unread_alerts(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
@@ -780,17 +837,14 @@ def list_unread_alerts(db: Session = Depends(get_db), admin: User = Depends(requ
     Returns:
         Resp[list[AgentAlertOut]]: 未读告警列表。
     """
-    rows = (
-        db.query(AgentAlert)
-        .filter(
-            AgentAlert.status == "open",
-            AgentAlert.read_at.is_(None),
-            AgentAlert.user_id == admin.id,
-        )
-        .order_by(AgentAlert.id.desc())
-        .limit(50)
-        .all()
+    query = db.query(AgentAlert).filter(
+        AgentAlert.status == "open",
+        AgentAlert.read_at.is_(None),
+        AgentAlert.user_id == admin.id,
     )
+    if not rbac_service.is_super_admin_user(db, admin.id):
+        query = query.filter(~observability_service.security_monitor_alert_clause())
+    rows = query.order_by(AgentAlert.id.desc()).limit(50).all()
     return Resp(data=[AgentAlertOut.model_validate(row) for row in rows])
 
 
@@ -820,6 +874,8 @@ def mark_alert_read(
     alert = db.get(AgentAlert, alert_id)
     if not alert:
         raise NotFoundError("治理告警不存在", code=40400)
+    if observability_service.is_security_monitor_alert(alert) and not rbac_service.is_super_admin_user(db, admin.id):
+        raise NotFoundError("治理告警不存在", code=40400)
     if alert.user_id is not None and alert.user_id != admin.id:
         raise ForbiddenError("无权操作该告警", code=40300)
     alert.read_at = datetime.now(timezone.utc)
@@ -831,18 +887,18 @@ def mark_alert_read(
 @router.post("/observability/security/run-monitor", response_model=Resp[SecurityMonitorRunOut])
 def run_security_monitor_endpoint(
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    actor: User = Depends(require_super_admin),
 ):
     """手动触发一轮安全巡检（供最高管理员/Agent 运维使用）。
 
     Args:
         db: 数据库会话。
-        _: 唯一超级管理员。
+        actor: 唯一超级管理员，写入运维采集审计主体。
 
     Returns:
         Resp[SecurityMonitorRunOut]: 巡检摘要（新建告警/错误）。
     """
-    result = security_monitor_service.run_security_monitor(db)
+    result = security_monitor_service.run_security_monitor(db, actor=actor, source="admin_security_center")
     return Resp(data=SecurityMonitorRunOut(**result))
 
 
@@ -850,22 +906,25 @@ def run_security_monitor_endpoint(
 def security_status(
     since_hours: int = Query(24, ge=1, le=720),
     db: Session = Depends(get_db),
-    _: User = Depends(require_super_admin),
+    actor: User = Depends(require_super_admin),
 ):
     """查询安全态势聚合（登录/攻击/备份/最近 open 告警）。
 
     Args:
         since_hours: 回看窗口（小时）。
         db: 数据库会话。
-        _: 唯一超级管理员。
+        actor: 唯一超级管理员，写入运维采集审计主体。
 
     Returns:
         Resp[SecurityStatusOut]: 安全态势聚合。
     """
-    result = security_monitor_service.query_security_status(db, since_hours=since_hours)
+    result = security_monitor_service.query_security_status(
+        db,
+        since_hours=since_hours,
+        actor=actor,
+        source="admin_security_center",
+    )
     return Resp(data=SecurityStatusOut(**result))
-
-
 
 
 @router.get("/rollback/versions", response_model=Resp[list[dict]])
@@ -932,8 +991,11 @@ def rollback_version(version_id: int, db: Session = Depends(get_db), _: User = D
     """
     row = rollback_service.rollback_version(db, version_id)
     audit_service.log(
-        db, _, "governance.rollback_version",
-        target_type="artifact_version", target_id=str(version_id),
+        db,
+        _,
+        "governance.rollback_version",
+        target_type="artifact_version",
+        target_id=str(version_id),
         detail=f"回滚版本 {row.agent_code}/{row.artifact_type} 到 {row.version}",
     )
     return Resp(data=_version_to_dict(row))
@@ -951,14 +1013,19 @@ def list_rewards(db: Session = Depends(get_db), _: User = Depends(require_admin)
         Resp[list[dict]]: 奖惩事件列表。
     """
     rows = db.query(AgentRewardEvent).order_by(AgentRewardEvent.id.desc()).limit(100).all()
-    return Resp(data=[{
-        "id": row.id,
-        "agent_code": row.agent_code,
-        "event_type": row.event_type,
-        "score": row.score,
-        "reason": row.reason,
-        "create_time": row.create_time.isoformat() if row.create_time else None,
-    } for row in rows])
+    return Resp(
+        data=[
+            {
+                "id": row.id,
+                "agent_code": row.agent_code,
+                "event_type": row.event_type,
+                "score": row.score,
+                "reason": row.reason,
+                "create_time": row.create_time.isoformat() if row.create_time else None,
+            }
+            for row in rows
+        ]
+    )
 
 
 @router.post("/rewards/events", response_model=Resp[dict])
@@ -985,14 +1052,16 @@ def create_reward(
         reason=payload.reason,
         impact=payload.impact,
     )
-    return Resp(data={
-        "id": row.id,
-        "agent_code": row.agent_code,
-        "event_type": row.event_type,
-        "score": row.score,
-        "reason": row.reason,
-        "create_time": row.create_time.isoformat() if row.create_time else None,
-    })
+    return Resp(
+        data={
+            "id": row.id,
+            "agent_code": row.agent_code,
+            "event_type": row.event_type,
+            "score": row.score,
+            "reason": row.reason,
+            "create_time": row.create_time.isoformat() if row.create_time else None,
+        }
+    )
 
 
 def _version_to_dict(row: AgentArtifactVersion) -> dict:

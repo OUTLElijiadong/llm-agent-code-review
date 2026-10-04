@@ -8,6 +8,7 @@ from app.api.v1 import (
     admin_agent_releases,
     admin_copilot,
     admin_overview,
+    admin_security_center,
     agent_catalog,
     agent_governance,
     agent_mesh,
@@ -78,6 +79,7 @@ api_router.include_router(mcp_governance.router, prefix="/admin/mcp", tags=["MCP
 api_router.include_router(agent_governance.router, prefix="/admin", tags=["Agent治理"])
 api_router.include_router(admin_copilot.router, prefix="/admin/copilot", tags=["管理员副驾驶"])
 api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理员总览"])
+api_router.include_router(admin_security_center.router, prefix="/admin/security-center", tags=["管理员安全中心"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
 api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])
 api_router.include_router(agent_mesh.router, prefix="/agent-mesh", tags=["小菱 Agent Mesh"])

@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from app.main import app
 from app.services.admin_capability_registry import (
     ADMIN_CAPABILITIES,
@@ -51,6 +50,10 @@ FRONTEND_API_CAPABILITY = {
     "adminGovernance:runJob": "jobs.run",
     "adminGovernance:updateJob": "jobs.update",
     "adminGovernance:getObservabilityOverview": "observability.overview",
+    "adminSecurityCenter:getSecurityCenterOverview": "security_center.overview",
+    "adminSecurityCenter:getSecurityCenterEvents": "security_center.events",
+    "adminSecurityCenter:updateSecurityMonitorPolicy": "security_center.policy.update",
+    "adminSecurityCenter:runSecurityMonitor": "observability.security.run_monitor",
     "adminGovernance:listAlertsPage": "observability.alerts.list",
     "adminGovernance:resolveAlert": "observability.alerts.resolve",
     "adminGovernance:listRewardEvents": "rewards.events.list",
@@ -143,7 +146,8 @@ def _frontend_admin_routes() -> set[str]:
     admin_block = source.split("path: '/admin'", 1)[1].split("path: '/403'", 1)[0]
     children = set(
         re.findall(
-            r"(?m)^        path:\s*'([^']+)',\n        name:\s*'Admin(?:Governance|Operations|Access|Platform)Center'",
+            r"(?m)^        path:\s*'([^']+)',\n        name:\s*'"
+            r"Admin(?:Governance|Operations|Access|Platform|Security)Center'",
             admin_block,
         )
     )
@@ -185,7 +189,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 126
+    assert len(ADMIN_CAPABILITIES) == 130
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -223,6 +227,17 @@ def test_discovery_returns_exact_page_contracts() -> None:
     update = next(row for row in rows if row["capability"] == "llm.config.update")
     assert "api_key" in update["parameters"]["properties"]
     assert update["risk"] == "critical"
+
+
+def test_security_center_capabilities_are_explicitly_super_admin_only() -> None:
+    rows = describe_capabilities(app.openapi(), page="/admin/security-center")
+    assert {row["capability"] for row in rows} == {
+        "security_center.overview",
+        "security_center.events",
+        "security_center.policy.get",
+        "security_center.policy.update",
+    }
+    assert {row["permission"] for row in rows} == {"super_admin"}
 
 
 def test_admin_legacy_routes_redirect_to_a_canonical_center() -> None:

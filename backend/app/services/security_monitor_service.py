@@ -1,7 +1,7 @@
 """Agent 安全监控服务（规则引擎 + 去重 + 溯源富化 + SSE 弹窗推送）。
 
 职责：
-1. ``run_security_monitor``：通过 ``ops_service.execute`` 以调度身份拉取
+1. ``run_security_monitor``：通过 ``ops_service.execute`` 以调度或手动触发身份拉取
    ssh_login_events / flytrap_attack_events / nginx_attack_events / backup_audit / status，
    逐动作 try/except，单动作失败不中断整体，再按规则生成告警。
 2. ``query_security_status``：聚合安全态势（登录/攻击/备份/最近 open 告警），
@@ -11,6 +11,7 @@
 ``security_popup_min_severity`` 的新告警推送 SSE 事件（去重命中的 open 告警只刷新
 last_seen，不重复弹窗）。
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -26,7 +27,7 @@ from app.agents.events import AgentEventType, new_trace_id
 from app.core.config import settings
 from app.models.agent_governance import AgentAlert
 from app.models.user import User
-from app.services import observability_service, ops_service
+from app.services import observability_service, ops_service, security_center_service
 
 # 严重度等级映射：数值越大越严重
 SEVERITY_ORDER = {"info": 0, "warning": 1, "high": 2, "critical": 3}
@@ -47,8 +48,15 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _call_action(db: Session, action: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """以调度身份调用一次只读运维动作并解出执行器数据。
+def _call_action(
+    db: Session,
+    action: str,
+    params: Optional[dict[str, Any]] = None,
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> dict[str, Any]:
+    """以触发身份调用一次只读运维动作并解出执行器数据。
 
     Args:
         db: 数据库会话。
@@ -63,10 +71,10 @@ def _call_action(db: Session, action: str, params: Optional[dict[str, Any]] = No
     """
     execution = ops_service.execute(
         db,
-        None,
+        actor,
         action=action,
         params=params or {},
-        source="scheduler",
+        source=source,
         request_id=uuid.uuid4().hex,
     )
     executor_response = execution.get("result") if isinstance(execution.get("result"), dict) else {}
@@ -110,16 +118,23 @@ def _ip_allowed(ip: str, networks: list[ipaddress._BaseNetwork]) -> bool:
     return any(addr in network for network in networks)
 
 
-def _try_ip_attribution(db: Session, ip: str) -> Optional[dict[str, Any]]:
+def _try_ip_attribution(
+    db: Session,
+    ip: str,
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> Optional[dict[str, Any]]:
     """对来源 IP 做被动溯源富化；失败返回 None，不影响告警创建。"""
     try:
-        payload = _call_action(db, "ip_attribution", {"ip": ip})
+        payload = _call_action(db, "ip_attribution", {"ip": ip}, actor=actor, source=source)
     except Exception:  # noqa: BLE001 - 溯源失败不应阻断告警
         return None
     return payload if isinstance(payload, dict) else None
 
 
 def _maybe_notify(
+    db: Session,
     alert: AgentAlert,
     admin: Optional[User],
     *,
@@ -133,7 +148,7 @@ def _maybe_notify(
     弹窗条件：severity 属于 {warning, high, critical}，且等级不低于
     ``security_popup_min_severity``。找不到目标管理员时跳过 SSE，告警仍入库。
     """
-    min_severity = settings.security_popup_min_severity
+    min_severity = security_center_service.get_policy(db)["popup_min_severity"]
     if severity not in _POPUP_SEVERITIES:
         return
     if SEVERITY_ORDER.get(severity, 0) < SEVERITY_ORDER.get(min_severity, 0):
@@ -168,16 +183,22 @@ def _record_alert(
     suggestion: str = "",
     ip: Optional[str] = None,
     detail: Optional[dict[str, Any]] = None,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
 ) -> None:
     """去重写入告警；新告警按严重度触发溯源富化与 SSE 弹窗。
 
     去重：status="open" 且 fingerprint 相同的告警已存在时，只刷新 detail_json
     里的 last_seen 并跳过新建（不重复弹窗）。
     """
-    existing = db.query(AgentAlert).filter(
-        AgentAlert.status == "open",
-        AgentAlert.fingerprint == fingerprint,
-    ).first()
+    existing = (
+        db.query(AgentAlert)
+        .filter(
+            AgentAlert.status == "open",
+            AgentAlert.fingerprint == fingerprint,
+        )
+        .first()
+    )
     payload_detail = dict(detail or {})
     payload_detail["last_seen"] = _utcnow_iso()
     if existing is not None:
@@ -199,12 +220,10 @@ def _record_alert(
     )
     # 高危来源 IP 被动溯源富化（失败不影响告警创建）
     if ip and category in _ATTRIBUTION_CATEGORIES and severity in _POPUP_SEVERITIES:
-        attribution = _try_ip_attribution(db, ip)
+        attribution = _try_ip_attribution(db, ip, actor=actor, source=source)
         if attribution is not None:
             attribution_data = (
-                attribution.get("attribution")
-                if isinstance(attribution.get("attribution"), dict)
-                else attribution
+                attribution.get("attribution") if isinstance(attribution.get("attribution"), dict) else attribution
             )
             alert.detail_json = json.dumps(
                 {**payload_detail, "attribution": attribution_data},
@@ -212,17 +231,27 @@ def _record_alert(
                 default=str,
             )
             db.commit()
-    _maybe_notify(alert, admin, severity=severity, category=category, title=title, suggestion=suggestion)
-    created.append({
-        "alert_id": alert.id,
-        "fingerprint": fingerprint,
-        "severity": severity,
-        "category": category,
-        "title": title,
-    })
+    _maybe_notify(db, alert, admin, severity=severity, category=category, title=title, suggestion=suggestion)
+    created.append(
+        {
+            "alert_id": alert.id,
+            "fingerprint": fingerprint,
+            "severity": severity,
+            "category": category,
+            "title": title,
+        }
+    )
 
 
-def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]]) -> None:
+def _evaluate_ssh(
+    db: Session,
+    ssh: dict[str, Any],
+    created: list[dict[str, Any]],
+    policy: dict[str, Any],
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> None:
     """SSH 规则：成功登录（非白名单 high / 白名单 info）与失败爆破 warning。"""
     allowlist = _parse_allowlist(settings.security_ssh_allowlist_cidrs)
     for item in ssh.get("recent") or []:
@@ -243,14 +272,14 @@ def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]
             severity=severity,
             fingerprint=f"login:{ip}:{user}",
             title=f"SSH 登录：{ip}（{user}）",
-            suggestion=(
-                "" if allowed else "确认是否本人操作；非本人应立即吊销对应密钥并轮换"
-            ),
+            suggestion=("" if allowed else "确认是否本人操作；非本人应立即吊销对应密钥并轮换"),
             ip=ip,
             detail={"ip": ip, "user": user, "method": item.get("method") or ""},
+            actor=actor,
+            source=source,
         )
 
-    failed_threshold = settings.security_failed_login_threshold
+    failed_threshold = int(policy["ssh_failed_threshold"])
     for agg in ssh.get("failed_by_ip") or []:
         if not isinstance(agg, dict):
             continue
@@ -273,9 +302,11 @@ def _evaluate_ssh(db: Session, ssh: dict[str, Any], created: list[dict[str, Any]
             detail={
                 "ip": ip,
                 "failed_count": count,
-                "window_hours": settings.security_failed_login_window_hours,
+                "window_hours": int(policy["ssh_window_hours"]),
                 "threshold": failed_threshold,
             },
+            actor=actor,
+            source=source,
         )
 
 
@@ -297,24 +328,38 @@ def _retired_flytrap_payload(since_hours: int) -> dict[str, Any]:
     }
 
 
-def _evaluate_flytrap(db: Session, flytrap: dict[str, Any], created: list[dict[str, Any]]) -> None:
+def _evaluate_flytrap(
+    db: Session,
+    flytrap: dict[str, Any],
+    created: list[dict[str, Any]],
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> None:
     """蜜罐规则：同 IP 触碰次数达到阈值触发 warning。"""
     health_fingerprint = "integration:flytrap_upstream"
     if flytrap.get("status") == "retired" or flytrap.get("enabled") is False:
-        existing = db.query(AgentAlert).filter(
-            AgentAlert.status == "open",
-            AgentAlert.fingerprint == health_fingerprint,
-        ).first()
+        existing = (
+            db.query(AgentAlert)
+            .filter(
+                AgentAlert.status == "open",
+                AgentAlert.fingerprint == health_fingerprint,
+            )
+            .first()
+        )
         if existing is not None:
             admin = _find_admin(db)
             observability_service.resolve_alert(
                 db,
                 existing.id,
                 admin.id if admin else 0,
-                note=json.dumps({
-                    "resolution": "FlyTrap 集成已按退役计划停用",
-                    "resolved_at": _utcnow_iso(),
-                }, ensure_ascii=False),
+                note=json.dumps(
+                    {
+                        "resolution": "FlyTrap 集成已按退役计划停用",
+                        "resolved_at": _utcnow_iso(),
+                    },
+                    ensure_ascii=False,
+                ),
             )
         return
     if flytrap.get("degraded") is True:
@@ -327,28 +372,33 @@ def _evaluate_flytrap(db: Session, flytrap: dict[str, Any], created: list[dict[s
             severity="warning",
             fingerprint=health_fingerprint,
             title="FlyTrap 上游同步降级",
-            suggestion=(
-                "核对上游服务、防火墙和网络路由；本地蜜罐与持久队列可继续工作，"
-                "恢复后确认同步成功日志"
-            ),
+            suggestion=("核对上游服务、防火墙和网络路由；本地蜜罐与持久队列可继续工作，恢复后确认同步成功日志"),
             detail={"health": health, "human_actions": actions},
         )
     elif flytrap.get("ok") is True:
-        existing = db.query(AgentAlert).filter(
-            AgentAlert.status == "open",
-            AgentAlert.fingerprint == health_fingerprint,
-        ).first()
+        existing = (
+            db.query(AgentAlert)
+            .filter(
+                AgentAlert.status == "open",
+                AgentAlert.fingerprint == health_fingerprint,
+            )
+            .first()
+        )
         if existing is not None:
             admin = _find_admin(db)
             observability_service.resolve_alert(
                 db,
                 existing.id,
                 admin.id if admin else 0,
-                note=json.dumps({
-                    "resolution": "FlyTrap 上游同步已恢复",
-                    "health": flytrap.get("health") or {},
-                    "resolved_at": _utcnow_iso(),
-                }, ensure_ascii=False, default=str),
+                note=json.dumps(
+                    {
+                        "resolution": "FlyTrap 上游同步已恢复",
+                        "health": flytrap.get("health") or {},
+                        "resolved_at": _utcnow_iso(),
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
             )
 
     flytrap_threshold = settings.security_flytrap_threshold
@@ -374,11 +424,19 @@ def _evaluate_flytrap(db: Session, flytrap: dict[str, Any], created: list[dict[s
                 "window_hours": settings.security_flytrap_window_hours,
                 "threshold": flytrap_threshold,
             },
+            actor=actor,
+            source=source,
         )
 
 
-def _evaluate_nginx(db: Session, nginx: dict[str, Any], created: list[dict[str, Any]]) -> None:
-    """Nginx 规则：CONNECT 代理探测 info（不弹窗）；TLS 乱码同 IP ≥5 记 scanner。"""
+def _evaluate_nginx(
+    db: Session,
+    nginx: dict[str, Any],
+    created: list[dict[str, Any]],
+    policy: Optional[dict[str, Any]] = None,
+) -> None:
+    """Nginx 规则：代理探测/TLS 乱码观察告警；重复 HTTP 错误告警但不自动封禁。"""
+    policy = policy or security_center_service.get_policy(db)
     seen_proxy: set[str] = set()
     gibberish: dict[str, int] = {}
     for item in nginx.get("recent") or []:
@@ -419,6 +477,59 @@ def _evaluate_nginx(db: Session, nginx: dict[str, Any], created: list[dict[str, 
             detail={"ip": ip, "scanner_count": count},
         )
 
+    failure_threshold = int(policy["nginx_failure_threshold"])
+    window_hours = int(nginx.get("since_hours") or 1)
+    for item in nginx.get("http_failures_by_ip") or []:
+        if not isinstance(item, dict):
+            continue
+        ip = str(item.get("ip") or "").strip()
+        try:
+            ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            continue
+        raw_status_counts = item.get("status_counts")
+        if not isinstance(raw_status_counts, dict):
+            continue
+        status_counts: dict[str, int] = {}
+        for status, raw_count in raw_status_counts.items():
+            if str(status) not in {"400", "403", "444"}:
+                continue
+            try:
+                count = int(raw_count)
+            except (TypeError, ValueError):
+                continue
+            if count > 0:
+                status_counts[str(status)] = count
+        failure_count = sum(status_counts.values())
+        if failure_count < failure_threshold:
+            continue
+        source_truncated = bool(nginx.get("source_truncated"))
+        observed = f"至少 {failure_count}" if source_truncated else str(failure_count)
+        _record_alert(
+            db,
+            created,
+            category="scanner",
+            severity="warning",
+            fingerprint=f"nginx:http_failures:{ip}",
+            title=f"Nginx 重复 HTTP 异常：{ip}（{observed} 次）",
+            suggestion=(
+                "采集已达到日志行上限，计数是下界；需人工核对完整窗口。当前仅记录告警，不自动封禁或反制。"
+                if source_truncated
+                else "核对该来源在观察窗口内的请求状态；当前仅记录告警，不自动封禁或反制。"
+            ),
+            detail={
+                "ip": ip,
+                "failure_count": failure_count,
+                "status_counts": status_counts,
+                "window_hours": window_hours,
+                "threshold": failure_threshold,
+                "source_truncated": source_truncated,
+                "source_line_limit": nginx.get("source_line_limit"),
+                "source": "nginx_access_log",
+                "response_action": "alert_only",
+            },
+        )
+
 
 def _evaluate_backup(db: Session, backup: dict[str, Any], created: list[dict[str, Any]]) -> None:
     """备份规则：超龄 high / 校验缺失 critical / 目录过大 warning。"""
@@ -442,7 +553,8 @@ def _evaluate_backup(db: Session, backup: dict[str, Any], created: list[dict[str
 
     retention_hours = 24 * 14  # 与 backup.sh 默认保留期一致；超期文件将删除，不再告警
     unverified = [
-        row.get("name") for row in (backup.get("recent") or [])
+        row.get("name")
+        for row in (backup.get("recent") or [])
         if isinstance(row, dict)
         and row.get("has_sha256") is False
         and float(row.get("age_hours") or 0) <= retention_hours
@@ -494,10 +606,7 @@ def _evaluate_db(db: Session, db_signals: dict[str, Any], created: list[dict[str
             severity="critical",
             fingerprint="db:destructive",
             title=f"数据库破坏性操作：{destructive_total} 条（DROP/TRUNCATE/DELETE/权限变更）",
-            suggestion=(
-                "立即核对变更窗口与操作账号；若非授权变更，备份当前库并回滚，"
-                "排查应用层注入或被盗账号"
-            ),
+            suggestion=("立即核对变更窗口与操作账号；若非授权变更，备份当前库并回滚，排查应用层注入或被盗账号"),
             detail={
                 "count": destructive_total,
                 "window_hours": settings.security_db_window_hours,
@@ -517,10 +626,7 @@ def _evaluate_db(db: Session, db_signals: dict[str, Any], created: list[dict[str
             severity="critical",
             fingerprint="db:dump_exfil",
             title=f"数据库疑似批量导出/外泄：{dump_total} 条（SELECT INTO OUTFILE/LOAD_FILE）",
-            suggestion=(
-                "立即排查是否发生数据外泄，审查导出文件落点与发起账号；"
-                "必要时隔离数据库并轮换凭据"
-            ),
+            suggestion=("立即排查是否发生数据外泄，审查导出文件落点与发起账号；必要时隔离数据库并轮换凭据"),
             detail={
                 "count": dump_total,
                 "window_hours": settings.security_db_window_hours,
@@ -612,12 +718,20 @@ def _evaluate_status(db: Session, status: dict[str, Any], created: list[dict[str
         )
 
 
-def _evaluate(db: Session, results: dict[str, Any]) -> list[dict[str, Any]]:
+def _evaluate(
+    db: Session,
+    results: dict[str, Any],
+    policy: Optional[dict[str, Any]] = None,
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> list[dict[str, Any]]:
     """按规则表评估各动作结果并写入告警。"""
+    policy = policy or security_center_service.get_policy(db)
     created: list[dict[str, Any]] = []
-    _evaluate_ssh(db, results.get("ssh_login_events") or {}, created)
-    _evaluate_flytrap(db, results.get("flytrap_attack_events") or {}, created)
-    _evaluate_nginx(db, results.get("nginx_attack_events") or {}, created)
+    _evaluate_ssh(db, results.get("ssh_login_events") or {}, created, policy, actor=actor, source=source)
+    _evaluate_flytrap(db, results.get("flytrap_attack_events") or {}, created, actor=actor, source=source)
+    _evaluate_nginx(db, results.get("nginx_attack_events") or {}, created, policy)
     _evaluate_backup(db, results.get("backup_audit") or {}, created)
     _evaluate_db(db, results.get("db_threat_signals") or {}, created)
     _evaluate_db_health(db, results.get("db_health") or {}, created)
@@ -625,7 +739,13 @@ def _evaluate(db: Session, results: dict[str, Any]) -> list[dict[str, Any]]:
     return created
 
 
-def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
+def run_security_monitor(
+    db: Session,
+    job: Any = None,
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> dict[str, Any]:
     """执行一轮完整的安全监控巡检。
 
     依次拉取 ssh_login_events / flytrap_attack_events / nginx_attack_events /
@@ -638,11 +758,19 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
     Returns:
         dict[str, Any]: 各动作结果、新建告警列表与错误摘要。
     """
-    ssh_window = settings.security_failed_login_window_hours
-    attack_window = settings.security_flytrap_window_hours
+    policy = security_center_service.get_policy(db)
+    ssh_window = int(policy["ssh_window_hours"])
+    attack_window = int(policy["nginx_window_hours"])
     actions = [
         ("ssh_login_events", {"since_hours": ssh_window, "limit": 2000, "focus": "all"}),
-        ("nginx_attack_events", {"since_hours": attack_window, "limit": 2000}),
+        (
+            "nginx_attack_events",
+            {
+                "since_hours": attack_window,
+                "limit": 2000,
+                "failure_threshold": int(policy["nginx_failure_threshold"]),
+            },
+        ),
         ("backup_audit", {}),
         ("db_health", {}),
         ("status", {}),
@@ -656,10 +784,15 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
             ),
         )
     if settings.security_flytrap_enabled:
-        actions.insert(1, ("flytrap_attack_events", {"since_hours": attack_window, "limit": 2000}))
-    results: dict[str, Any] = {
-        "flytrap_attack_events": _retired_flytrap_payload(attack_window)
-    } if not settings.security_flytrap_enabled else {}
+        actions.insert(
+            1,
+            ("flytrap_attack_events", {"since_hours": settings.security_flytrap_window_hours, "limit": 2000}),
+        )
+    results: dict[str, Any] = (
+        {"flytrap_attack_events": _retired_flytrap_payload(settings.security_flytrap_window_hours)}
+        if not settings.security_flytrap_enabled
+        else {}
+    )
     errors: list[dict[str, Any]] = []
     completed_actions: list[str] = []
     failed_actions: list[str] = []
@@ -667,15 +800,13 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
     human_actions: list[dict[str, Any]] = []
     for action, params in actions:
         try:
-            payload = _call_action(db, action, params)
+            payload = _call_action(db, action, params, actor=actor, source=source)
             results[action] = payload
             completed_actions.append(action)
             if payload.get("degraded") is True:
                 degraded_actions.append(action)
                 action_human_actions = (
-                    payload.get("human_actions")
-                    if isinstance(payload.get("human_actions"), list)
-                    else []
+                    payload.get("human_actions") if isinstance(payload.get("human_actions"), list) else []
                 )
                 for item in action_human_actions:
                     if isinstance(item, dict) and item not in human_actions:
@@ -688,13 +819,15 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
                     ),
                     "请人工检查该数据源并在恢复后重新运行巡检",
                 )
-                errors.append({
-                    "action": action,
-                    "error": str(payload.get("reason") or f"动作 {action} 处于降级状态"),
-                    "degraded": True,
-                    "retryable": True,
-                    "next_action": next_action,
-                })
+                errors.append(
+                    {
+                        "action": action,
+                        "error": str(payload.get("reason") or f"动作 {action} 处于降级状态"),
+                        "degraded": True,
+                        "retryable": True,
+                        "next_action": next_action,
+                    }
+                )
         except Exception as exc:  # noqa: BLE001 - 单动作失败不中断整体巡检
             errors.append({"action": action, "error": str(exc)})
             failed_actions.append(action)
@@ -702,7 +835,7 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
 
     created_alerts: list[dict[str, Any]] = []
     try:
-        created_alerts = _evaluate(db, results)
+        created_alerts = _evaluate(db, results, policy, actor=actor, source=source)
     except Exception as exc:  # noqa: BLE001 - 评估失败不阻断返回摘要
         errors.append({"action": "evaluate", "error": str(exc)})
         failed_actions.append("evaluate")
@@ -724,16 +857,18 @@ def run_security_monitor(db: Session, job: Any = None) -> dict[str, Any]:
         "created_alerts": created_alerts,
         "actions": results,
         "errors": errors,
-        **(
-            {"error": "安全监控所有数据源均不可用，请人工核验执行器和日志"}
-            if fatal_failure
-            else {}
-        ),
+        **({"error": "安全监控所有数据源均不可用，请人工核验执行器和日志"} if fatal_failure else {}),
         "job_id": job.id if job is not None else None,
     }
 
 
-def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
+def query_security_status(
+    db: Session,
+    since_hours: int = 24,
+    *,
+    actor: Optional[User] = None,
+    source: str = "scheduler",
+) -> dict[str, Any]:
     """聚合安全态势，供 Agent 查询与 /status API 使用。
 
     Args:
@@ -743,24 +878,32 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
     Returns:
         dict[str, Any]: SSH 登录统计、攻击 Top IP、备份摘要与最近 open 告警。
     """
+    policy = security_center_service.get_policy(db)
     actions = [
         ("ssh_login_events", {"since_hours": since_hours, "limit": 2000, "focus": "all"}),
-        ("nginx_attack_events", {"since_hours": since_hours, "limit": 2000}),
+        (
+            "nginx_attack_events",
+            {
+                "since_hours": since_hours,
+                "limit": 2000,
+                "failure_threshold": int(policy["nginx_failure_threshold"]),
+            },
+        ),
         ("backup_audit", {}),
     ]
     if settings.security_flytrap_enabled:
         actions.insert(1, ("flytrap_attack_events", {"since_hours": since_hours, "limit": 2000}))
     if settings.security_db_monitor_enabled:
-        actions.append(
-            ("db_threat_signals", {"since_hours": since_hours, "limit": settings.security_db_sample_limit})
-        )
-    results: dict[str, Any] = {
-        "flytrap_attack_events": _retired_flytrap_payload(since_hours)
-    } if not settings.security_flytrap_enabled else {}
+        actions.append(("db_threat_signals", {"since_hours": since_hours, "limit": settings.security_db_sample_limit}))
+    results: dict[str, Any] = (
+        {"flytrap_attack_events": _retired_flytrap_payload(since_hours)}
+        if not settings.security_flytrap_enabled
+        else {}
+    )
     errors: list[dict[str, Any]] = []
     for action, params in actions:
         try:
-            results[action] = _call_action(db, action, params)
+            results[action] = _call_action(db, action, params, actor=actor, source=source)
         except Exception as exc:  # noqa: BLE001 - 单动作失败不阻断聚合
             errors.append({"action": action, "error": str(exc)})
 
@@ -770,11 +913,7 @@ def query_security_status(db: Session, since_hours: int = 24) -> dict[str, Any]:
     backup = results.get("backup_audit") or {}
     db_signals = results.get("db_threat_signals") or {}
     open_alerts = (
-        db.query(AgentAlert)
-        .filter(AgentAlert.status == "open")
-        .order_by(AgentAlert.id.desc())
-        .limit(20)
-        .all()
+        db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(20).all()
     )
     return {
         "since_hours": since_hours,

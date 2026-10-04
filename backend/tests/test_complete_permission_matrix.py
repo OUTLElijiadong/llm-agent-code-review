@@ -14,11 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.security import create_access_token
@@ -32,6 +27,10 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 _RUNNER_PATH = Path(__file__).resolve().parents[1] / "scripts/verify_permission_acceptance_https.py"
 _RUNNER_SPEC = importlib.util.spec_from_file_location("complete_permission_matrix_runner", _RUNNER_PATH)
@@ -71,7 +70,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 339, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 343, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,11 +80,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 339
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 339
-    assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 325
-    assert len(GUARDED_ROUTES) == 258
+    assert len(ROUTES) == 343
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 343
+    assert len({row["source"] for row in ROUTES}) == 43
+    assert len(AUTHENTICATED_ROUTES) == 329
+    assert len(GUARDED_ROUTES) == 262
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -119,6 +118,10 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/sandboxes/remote-target-authorization"): [],
         ("GET", "/api/admin/observability/alerts/page"): ["require_admin"],
         ("GET", "/api/projects/{project_id}/members/candidates"): ["project:member:manage"],
+        ("GET", "/api/admin/security-center/overview"): ["require_super_admin"],
+        ("GET", "/api/admin/security-center/events"): ["require_super_admin"],
+        ("GET", "/api/admin/security-center/policy"): ["require_super_admin"],
+        ("PUT", "/api/admin/security-center/policy"): ["require_super_admin"],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]

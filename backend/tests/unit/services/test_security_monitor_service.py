@@ -9,16 +9,16 @@ ssh/flytrap/nginx/backup/status 数据），验证：
 5. ip_attribution 富化失败不中断告警创建
 6. 单动作失败不中断整体巡检
 """
+
 from __future__ import annotations
 
 import json
 
 import pytest
-
 from app.agents.events import AgentEventType
 from app.core.config import settings
 from app.models.agent_governance import AgentAlert
-from app.services import observability_service, ops_service, security_monitor_service
+from app.services import observability_service, ops_service, security_center_service, security_monitor_service
 
 
 def _fake_execute(payloads, *, ip_attribution=None, fail_actions=()):
@@ -138,6 +138,26 @@ def test_ssh_accepted_non_whitelist_creates_high_alert_and_popup(db, super_admin
     assert event_kwargs["payload"]["suggestion"] == "确认是否本人操作；非本人应立即吊销对应密钥并轮换"
 
 
+def test_manual_monitor_run_preserves_admin_actor_and_source(db, super_admin_user, monkeypatch, emitted):
+    calls = []
+    execute = _fake_execute(_base_payloads())
+
+    def capture(db_arg, actor, **kwargs):
+        calls.append((actor, kwargs.get("source")))
+        return execute(db_arg, actor, **kwargs)
+
+    monkeypatch.setattr(ops_service, "execute", capture)
+    result = security_monitor_service.run_security_monitor(
+        db,
+        actor=super_admin_user,
+        source="admin_security_center",
+    )
+
+    assert result["success"] is True
+    assert calls
+    assert all(actor is super_admin_user and source == "admin_security_center" for actor, source in calls)
+
+
 def test_ssh_accepted_whitelist_info_without_popup(db, super_admin_user, monkeypatch, emitted):
     """白名单 IP 成功登录只入库不弹窗（severity=info，无 SSE）。"""
     monkeypatch.setattr(settings, "security_ssh_allowlist_cidrs", ["10.0.0.0/8"])
@@ -212,15 +232,23 @@ def test_nginx_proxy_connect_and_tls_scanner(db, super_admin_user, monkeypatch, 
     """Nginx CONNECT 代理探测 info；TLS 乱码同 IP ≥5 记 scanner（均不弹窗）。"""
     nginx_recent = [
         {
-            "ip": "104.249.59.148", "method": "CONNECT", "path": "CONNECT x:443",
-            "status": "400", "detail": "proxy_connect",
+            "ip": "104.249.59.148",
+            "method": "CONNECT",
+            "path": "CONNECT x:443",
+            "status": "400",
+            "detail": "proxy_connect",
         },
     ]
     for i in range(5):
-        nginx_recent.append({
-            "ip": "172.236.228.227", "method": "\\x16\\x03", "path": "\\x16\\x03",
-            "status": "400", "detail": "tls_gibberish",
-        })
+        nginx_recent.append(
+            {
+                "ip": "172.236.228.227",
+                "method": "\\x16\\x03",
+                "path": "\\x16\\x03",
+                "status": "400",
+                "detail": "tls_gibberish",
+            }
+        )
     payloads = {
         "ssh_login_events": _ssh_payload(),
         "flytrap_attack_events": {"total": 0, "by_ip": [], "recent": []},
@@ -239,6 +267,170 @@ def test_nginx_proxy_connect_and_tls_scanner(db, super_admin_user, monkeypatch, 
     assert scanner.severity == "info"
     assert scanner.category == "scanner"
     assert emitted == []
+
+
+def test_nginx_repeated_http_failures_alert_even_for_ssh_allowlisted_ip(db, super_admin_user, monkeypatch, emitted):
+    """SSH 白名单不应屏蔽同 IP 的重复 HTTP 拒绝告警；告警只记录，不溯源。"""
+    ip = "117.141.246.34"
+    monkeypatch.setattr(settings, "security_ssh_allowlist_cidrs", [f"{ip}/32"])
+    nginx = {
+        "total": 39,
+        "since_hours": 1,
+        "http_failure_threshold": 20,
+        "http_failures_by_ip": [
+            {
+                "ip": ip,
+                "failure_count": 39,
+                "status_counts": {"400": 23, "403": 16},
+            }
+        ],
+        # 故意不依赖有上限的 recent 样本，生产窗口统计应覆盖全部事件。
+        "recent": [],
+    }
+    payloads = {
+        "ssh_login_events": _ssh_payload(failed_by_ip=[{"value": ip, "count": 181}]),
+        "flytrap_attack_events": {"total": 0, "by_ip": [], "recent": []},
+        "nginx_attack_events": nginx,
+        "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+    monkeypatch.setattr(
+        security_monitor_service,
+        "_try_ip_attribution",
+        lambda *_args: pytest.fail("HTTP scanner 告警不应调用外部 IP 溯源"),
+    )
+
+    result = security_monitor_service.run_security_monitor(db)
+
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == f"nginx:http_failures:{ip}").one()
+    detail = json.loads(alert.detail_json)
+    assert result["success"] is True
+    assert alert.category == "scanner"
+    assert alert.severity == "warning"
+    assert detail["ip"] == ip
+    assert detail["failure_count"] == 39
+    assert detail["status_counts"] == {"400": 23, "403": 16}
+    assert detail["window_hours"] == 1
+    assert detail["threshold"] == 20
+    assert "attribution" not in detail
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == f"brute:{ip}").first() is None
+    assert len(emitted) == 1
+
+
+def test_nginx_http_failure_threshold_is_inclusive_and_deduplicated(db, super_admin_user, monkeypatch, emitted):
+    """低于阈值不报；达到阈值报一次，重复巡检只刷新告警。"""
+    ip = "203.0.113.77"
+    payloads = {
+        "ssh_login_events": _ssh_payload(),
+        "flytrap_attack_events": {"total": 0, "by_ip": [], "recent": []},
+        "nginx_attack_events": {
+            "total": 19,
+            "since_hours": 1,
+            "http_failure_threshold": 20,
+            "http_failures_by_ip": [
+                {
+                    "ip": ip,
+                    "failure_count": 19,
+                    "status_counts": {"403": 19},
+                }
+            ],
+            "recent": [],
+        },
+        "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
+        "status": {"checks": {"disk": {"used_percent": 40}}},
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    security_monitor_service.run_security_monitor(db)
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == f"nginx:http_failures:{ip}").first() is None
+
+    payloads["nginx_attack_events"]["total"] = 20
+    payloads["nginx_attack_events"]["http_failures_by_ip"][0]["failure_count"] = 20
+    payloads["nginx_attack_events"]["http_failures_by_ip"][0]["status_counts"]["403"] = 20
+    first = security_monitor_service.run_security_monitor(db)
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == f"nginx:http_failures:{ip}").one()
+    first_last_seen = json.loads(alert.detail_json)["last_seen"]
+    second = security_monitor_service.run_security_monitor(db)
+    db.refresh(alert)
+
+    assert len(first["created_alerts"]) == 1
+    assert second["created_alerts"] == []
+    assert json.loads(alert.detail_json)["last_seen"] >= first_last_seen
+    assert len(emitted) == 1
+
+
+def test_security_center_policy_changes_effective_nginx_alert_threshold(db, super_admin_user, monkeypatch, emitted):
+    """安全中心收紧后的阈值必须直接影响规则引擎，而不只是保存配置。"""
+    monkeypatch.setattr(settings, "security_nginx_failure_threshold", 5)
+    current = security_center_service.get_policy(db)
+    policy = security_center_service.update_policy(
+        db,
+        super_admin_user,
+        {
+            "ssh_failed_threshold": current["ssh_failed_threshold"],
+            "ssh_window_hours": current["ssh_window_hours"],
+            "nginx_failure_threshold": 2,
+            "nginx_window_hours": current["nginx_window_hours"],
+        },
+    )
+    assert policy["nginx_failure_threshold"] == 2
+
+    below = []
+    security_monitor_service._evaluate_nginx(
+        db,
+        {
+            "since_hours": 1,
+            "http_failures_by_ip": [{"ip": "203.0.113.31", "status_counts": {"403": 1}}],
+        },
+        below,
+    )
+    assert below == []
+    assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "nginx:http_failures:203.0.113.31").first() is None
+
+    at_threshold = []
+    security_monitor_service._evaluate_nginx(
+        db,
+        {
+            "since_hours": 1,
+            "http_failures_by_ip": [{"ip": "203.0.113.32", "status_counts": {"403": 2}}],
+        },
+        at_threshold,
+    )
+    assert len(at_threshold) == 1
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == "nginx:http_failures:203.0.113.32").one()
+    assert json.loads(alert.detail_json)["threshold"] == 2
+    assert len(emitted) == 1
+
+
+def test_nginx_http_failure_alert_marks_truncated_window_as_lower_bound(db, super_admin_user, emitted):
+    ip = "203.0.113.91"
+    created = []
+    security_monitor_service._evaluate_nginx(
+        db,
+        {
+            "since_hours": 1,
+            "source_truncated": True,
+            "source_line_limit": 30_000,
+            "http_failures_by_ip": [
+                {
+                    "ip": ip,
+                    "failure_count": 20,
+                    "status_counts": {"403": 20},
+                }
+            ],
+        },
+        created,
+    )
+
+    alert = db.query(AgentAlert).filter(AgentAlert.fingerprint == f"nginx:http_failures:{ip}").one()
+    detail = json.loads(alert.detail_json)
+    assert "至少 20 次" in alert.title
+    assert "计数是下界" in emitted[0][1]["payload"]["suggestion"]
+    assert detail["source_truncated"] is True
+    assert detail["source_line_limit"] == 30_000
+    assert created[0]["alert_id"] == alert.id
+    assert len(emitted) == 1
 
 
 def test_backup_rules_trigger(db, super_admin_user, monkeypatch, emitted):
@@ -270,8 +462,9 @@ def test_backup_rules_trigger(db, super_admin_user, monkeypatch, emitted):
     assert size.severity == "warning"
     assert "备份目录占用过大" in size.title
     # 建议文本随 SSE 弹窗载荷推送
-    assert any(kwargs["payload"].get("suggestion") == "清理超期备份与手工产物（审批后执行）"
-               for _args, kwargs in emitted)
+    assert any(
+        kwargs["payload"].get("suggestion") == "清理超期备份与手工产物（审批后执行）" for _args, kwargs in emitted
+    )
     assert len(emitted) == 3
 
 
@@ -373,7 +566,10 @@ def test_single_action_failure_does_not_break_whole(db, super_admin_user, monkey
 
 
 def test_flytrap_upstream_degradation_keeps_local_data_and_notifies_admin(
-    db, super_admin_user, monkeypatch, emitted,
+    db,
+    super_admin_user,
+    monkeypatch,
+    emitted,
 ):
     """上游同步异常应保留本地攻击数据，并作为可继续降级通知管理员。"""
     payloads = {
@@ -390,12 +586,14 @@ def test_flytrap_upstream_degradation_keeps_local_data_and_notifies_admin(
                 "status": "degraded",
                 "issues": [{"code": "flytrap_sync_error", "message": "同步周期超时"}],
             },
-            "human_actions": [{
-                "code": "flytrap_upstream_recovery",
-                "label": "检查 FlyTrap 上游连通性",
-                "message": "核对上游服务、防火墙和网络路由，恢复后确认同步成功日志。",
-                "requires_human": True,
-            }],
+            "human_actions": [
+                {
+                    "code": "flytrap_upstream_recovery",
+                    "label": "检查 FlyTrap 上游连通性",
+                    "message": "核对上游服务、防火墙和网络路由，恢复后确认同步成功日志。",
+                    "requires_human": True,
+                }
+            ],
         },
         "nginx_attack_events": {"total": 0, "by_ip": [], "by_detail": [], "recent": []},
         "backup_audit": {"sql_gz_count": 0, "sql_gz_bytes": 0, "other_bytes": 0, "recent": [], "newest": None},
@@ -414,16 +612,24 @@ def test_flytrap_upstream_degradation_keeps_local_data_and_notifies_admin(
     assert "flytrap_attack_events" not in result["failed_actions"]
     assert result["human_actions"][0]["code"] == "flytrap_upstream_recovery"
     assert any(item["action"] == "flytrap_attack_events" and item["degraded"] for item in result["errors"])
-    assert db.query(AgentAlert).filter(
-        AgentAlert.fingerprint == "integration:flytrap_upstream",
-        AgentAlert.status == "open",
-    ).count() == 1
+    assert (
+        db.query(AgentAlert)
+        .filter(
+            AgentAlert.fingerprint == "integration:flytrap_upstream",
+            AgentAlert.status == "open",
+        )
+        .count()
+        == 1
+    )
     assert db.query(AgentAlert).filter(AgentAlert.fingerprint == "attack:203.0.113.9").count() == 1
     assert any(event[1]["payload"]["category"] == "integration" for event in emitted)
 
 
 def test_flytrap_upstream_recovery_resolves_integration_alert(
-    db, super_admin_user, monkeypatch, emitted,
+    db,
+    super_admin_user,
+    monkeypatch,
+    emitted,
 ):
     """同步恢复后应自动关闭同一告警，避免人工处理入口永久悬挂。"""
     degraded_payload = {
@@ -460,15 +666,22 @@ def test_flytrap_upstream_recovery_resolves_integration_alert(
     result = security_monitor_service.run_security_monitor(db)
 
     assert result["success"] is True
-    alert = db.query(AgentAlert).filter(
-        AgentAlert.fingerprint == "integration:flytrap_upstream",
-    ).one()
+    alert = (
+        db.query(AgentAlert)
+        .filter(
+            AgentAlert.fingerprint == "integration:flytrap_upstream",
+        )
+        .one()
+    )
     assert alert.status == "resolved"
     assert alert.resolved_at is not None
 
 
 def test_retired_flytrap_is_not_scheduled_or_counted_as_degradation(
-    db, super_admin_user, monkeypatch, emitted,
+    db,
+    super_admin_user,
+    monkeypatch,
+    emitted,
 ):
     payloads = {
         "ssh_login_events": _ssh_payload(),
@@ -491,10 +704,15 @@ def test_retired_flytrap_is_not_scheduled_or_counted_as_degradation(
     assert result["actions"]["flytrap_attack_events"]["status"] == "retired"
     assert "flytrap_attack_events" not in result["degraded_actions"]
     assert not result["human_actions"]
-    assert db.query(AgentAlert).filter(
-        AgentAlert.fingerprint == "integration:flytrap_upstream",
-        AgentAlert.status == "open",
-    ).count() == 0
+    assert (
+        db.query(AgentAlert)
+        .filter(
+            AgentAlert.fingerprint == "integration:flytrap_upstream",
+            AgentAlert.status == "open",
+        )
+        .count()
+        == 0
+    )
 
 
 def test_security_status_exposes_retired_flytrap_without_executor_call(db, monkeypatch):
@@ -520,7 +738,10 @@ def test_security_status_exposes_retired_flytrap_without_executor_call(db, monke
 
 
 def test_all_security_sources_failure_requires_human_recovery(
-    db, super_admin_user, monkeypatch, emitted,
+    db,
+    super_admin_user,
+    monkeypatch,
+    emitted,
 ):
     """全部采集器不可用时必须暴露安全监控盲区，不能标为可继续。"""
     action_names = {
@@ -557,13 +778,20 @@ def test_query_security_status_aggregates(db, monkeypatch):
             failed_by_ip=[{"value": "1.2.3.4", "count": 20}],
         ),
         "flytrap_attack_events": {
-            "total": 15, "by_ip": [{"value": "203.0.113.9", "count": 10}], "recent": [],
+            "total": 15,
+            "by_ip": [{"value": "203.0.113.9", "count": 10}],
+            "recent": [],
         },
         "nginx_attack_events": {
-            "total": 6, "by_ip": [{"value": "104.249.59.148", "count": 1}], "by_detail": [], "recent": [],
+            "total": 6,
+            "by_ip": [{"value": "104.249.59.148", "count": 1}],
+            "by_detail": [],
+            "recent": [],
         },
         "backup_audit": {
-            "sql_gz_count": 2, "sql_gz_bytes": 100, "other_bytes": 200,
+            "sql_gz_count": 2,
+            "sql_gz_bytes": 100,
+            "other_bytes": 200,
             "newest": {"name": "x.sql.gz", "age_hours": 5},
         },
     }
@@ -623,8 +851,18 @@ def _db_payload(*, ok=True, destructive=0, dump=0, error=0, reason=None):
         "destructive_by_user": [{"value": "root[root] @ localhost []", "count": destructive}] if destructive else [],
         "error_by_user": [{"value": "app[app] @ 10.0.0.1 []", "count": error}] if error else [],
         "samples": {
-            "destructive": [{"user_host": "root[root] @ localhost []", "sql": "DROP TABLE ?", "event_time": "2026-08-05 10:00:00"}] * min(destructive, 1),  # noqa: E501
-            "dump_exfil": [{"user_host": "app[app] @ 10.0.0.1 []", "sql": "SELECT ? INTO OUTFILE ?", "event_time": "2026-08-05 10:02:00"}] * min(dump, 1),  # noqa: E501
+            "destructive": [
+                {"user_host": "root[root] @ localhost []", "sql": "DROP TABLE ?", "event_time": "2026-08-05 10:00:00"}
+            ]
+            * min(destructive, 1),  # noqa: E501
+            "dump_exfil": [
+                {
+                    "user_host": "app[app] @ 10.0.0.1 []",
+                    "sql": "SELECT ? INTO OUTFILE ?",
+                    "event_time": "2026-08-05 10:02:00",
+                }
+            ]
+            * min(dump, 1),  # noqa: E501
             "error": [],
         },
     }
@@ -703,7 +941,10 @@ def test_db_general_log_disabled_no_alert(db, super_admin_user, monkeypatch, emi
 
 
 def test_collector_source_failure_is_reported_without_blocking_other_sources(
-    db, super_admin_user, monkeypatch, emitted,
+    db,
+    super_admin_user,
+    monkeypatch,
+    emitted,
 ):
     payloads = _base_payloads()
     payloads["ssh_login_events"] = {

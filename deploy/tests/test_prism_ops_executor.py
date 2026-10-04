@@ -170,7 +170,8 @@ def test_certificate_status_absolute_shared_path_survives_release_switch(monkeyp
     monkeypatch.setattr(
         executor,
         "run",
-        lambda args, **_kwargs: commands.append(args) or {"exit_code": 0, "stdout": "notAfter=Dec 29 2026", "stderr": ""},
+        lambda args, **_kwargs: commands.append(args)
+        or {"exit_code": 0, "stdout": "notAfter=Dec 29 2026", "stderr": ""},
     )
 
     for release in ("release-a", "release-b"):
@@ -204,6 +205,67 @@ def test_parse_security_sources_and_keep_collection_failure_visible(monkeypatch)
     assert result["ok"] is False
     assert result["source_exit_code"] == 1
     assert "journal unavailable" in result["source_error"]
+
+
+def test_nginx_http_failure_aggregation_uses_full_window_not_recent_sample(monkeypatch) -> None:
+    """HTTP 错误按完整日志窗口聚合，recent 的展示上限不能造成漏报。"""
+    ip = "203.0.113.88"
+    lines = [
+        f'{ip} - - [01/Sep/2026:00:00:{index % 60:02d} +0000] "GET /probe HTTP/1.1" 403 10'
+        for index in range(350)
+    ]
+    below_threshold_ip = "203.0.113.89"
+    lines.extend(
+        f'{below_threshold_ip} - - [01/Sep/2026:00:01:{index % 60:02d} +0000] "POST /probe HTTP/1.1" 400 10'
+        for index in range(19)
+    )
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda *_args, **_kwargs: {"exit_code": 0, "stdout": "\n".join(lines), "stderr": ""},
+    )
+
+    result = executor._nginx_attack_events({"since_hours": 1, "limit": 1, "failure_threshold": 20})
+
+    assert result["ok"] is True
+    assert result["total"] == 369
+    assert len(result["recent"]) == 1
+    assert result["http_failure_threshold"] == 20
+    assert result["http_failures_by_ip"] == [
+        {"ip": ip, "failure_count": 350, "status_counts": {"403": 350}},
+    ]
+
+
+def test_nginx_http_failure_payload_marks_line_limit_as_incomplete(monkeypatch) -> None:
+    monkeypatch.setattr(executor, "NGINX_LOG_LINE_LIMIT", 2)
+    lines = [
+        '203.0.113.90 - - [01/Sep/2026:00:00:00 +0000] "GET /a HTTP/1.1" 403 10',
+        '203.0.113.90 - - [01/Sep/2026:00:00:01 +0000] "GET /b HTTP/1.1" 403 10',
+    ]
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda *_args, **_kwargs: {"exit_code": 0, "stdout": "\n".join(lines), "stderr": ""},
+    )
+
+    result = executor._nginx_attack_events({"since_hours": 1, "limit": 1, "failure_threshold": 2})
+
+    assert result["source_truncated"] is True
+    assert result["source_line_limit"] == 2
+    assert result["http_failures_by_ip"][0]["failure_count"] == 2
+
+
+def test_nginx_large_stdout_is_not_misreported_as_capped(monkeypatch) -> None:
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda *_args, **_kwargs: {"exit_code": 0, "stdout": "x" * 150_000, "stderr": ""},
+    )
+
+    result = executor._nginx_attack_events({"since_hours": 1, "limit": 1, "failure_threshold": 20})
+
+    assert result["stdout_capped"] is False
+    assert result["source_truncated"] is False
 
 
 def test_flytrap_parser_ignores_operational_json_without_remote_source() -> None:
@@ -303,7 +365,11 @@ def test_database_signal_parser_redacts_and_avoids_normal_update_false_positive(
         {"user_host": "root@localhost", "argument": "DROP TABLE users", "event_time": "now"},
         {"user_host": "app@backend", "argument": "UPDATE jobs SET error='none' WHERE id=12345", "event_time": "now"},
         {"user_host": "app@backend", "argument": "Access denied for user 'app'", "event_time": "now"},
-        {"user_host": "root@localhost", "argument": "SELECT * FROM users INTO OUTFILE '/tmp/users.sql'", "event_time": "now"},
+        {
+            "user_host": "root@localhost",
+            "argument": "SELECT * FROM users INTO OUTFILE '/tmp/users.sql'",
+            "event_time": "now",
+        },
     ])
 
     assert result["destructive_total"] == 1
@@ -326,6 +392,7 @@ def test_security_action_contract_is_in_sync_with_backend_scheduler() -> None:
     }
     assert expected <= executor.ACTION_PARAM_KEYS.keys()
     assert expected <= executor.READ_ONLY_ACTIONS
+    assert {"since_hours", "limit", "failure_threshold"} <= executor.ACTION_PARAM_KEYS["nginx_attack_events"]
 
 
 def test_executor_server_handles_independent_requests_concurrently() -> None:

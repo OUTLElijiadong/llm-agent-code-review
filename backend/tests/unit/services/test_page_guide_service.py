@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.main import app
 from app.services.admin_capability_registry import ADMIN_PAGE_ROUTES
 from app.services.agent_responses_service import _instructions
@@ -67,7 +66,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
     }
     frontend_static_admin_routes = {
         "/admin/governance", "/admin/operations", "/admin/access", "/admin/platform",
-        "/report/templates",
+        "/admin/security-center", "/report/templates",
     }
     user_block = user_guide_block()
     for route in frontend_static_user_routes:
@@ -92,6 +91,7 @@ def test_openapi_still_valid_for_all_capabilities() -> None:
         ("admin", "/admin/governance", "Agent 治理中心"),
         ("admin", "/admin/operations", "运行与审计中心"),
         ("admin", "/admin/access", "用户与权限中心"),
+        ("admin", "/admin/security-center", "小菱安全中心"),
     ],
 )
 def test_guide_labels_match_current_page_titles(surface: str, route: str, expected_title: str) -> None:

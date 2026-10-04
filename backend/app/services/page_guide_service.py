@@ -46,6 +46,7 @@ ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/admin/operations": ("运行与审计中心", "系统总览、策略、任务、监控、审计与运行记录"),
     "/admin/access": ("用户与权限中心", "用户、角色与权限管理"),
     "/admin/platform": ("平台配置中心", "模型、嵌入、内测码、MCP 与运行节点配置"),
+    "/admin/security-center": ("小菱安全中心", "查看服务器安全监控、告警证据、巡检状态并调整监控灵敏度"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
 }
 

@@ -6,6 +6,7 @@ import {
   Cpu,
   DataAnalysis,
   Histogram,
+  Lock,
   Setting,
   SwitchButton,
   User,
@@ -31,6 +32,7 @@ const contentRef = ref<HTMLElement | null>(null)
 const menuItems: AdminMenuItem[] = [
   { path: '/admin/governance', title: 'Agent 治理', icon: Cpu },
   { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis },
+  { path: '/admin/security-center', title: '安全中心', icon: Lock },
   { path: '/admin/access', title: '用户与权限', icon: User },
   { path: '/admin/platform', title: '平台配置', icon: Setting },
 ]

@@ -60,4 +60,10 @@ describe('authenticated route visibility permissions', () => {
     expect(route?.meta.roles).toContain('reviewer')
     expect(route?.meta.permissions).toContain('audit:view')
   })
+
+  it('服务器安全中心是仅超级管理员可进入的独立页面', () => {
+    const route = router.getRoutes().find((item) => item.name === 'AdminSecurityCenter')
+    expect(route?.path).toBe('/admin/security-center')
+    expect(route?.meta.superAdmin).toBe(true)
+  })
 })

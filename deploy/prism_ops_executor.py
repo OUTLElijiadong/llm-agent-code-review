@@ -22,12 +22,13 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 DEPLOY_DIR = Path(__file__).resolve().parent
 BACKUP_DIR = (DEPLOY_DIR.parent / "backups").resolve()
 SOCKET_PATH = Path(os.environ.get("OPS_EXECUTOR_SOCKET", "/run/prism-ops/agent.sock"))
 TOKEN = os.environ.get("OPS_EXECUTOR_TOKEN", "")
+NGINX_LOG_LINE_LIMIT = 30_000
 AUDIT_LOG = Path(os.environ.get("OPS_EXECUTOR_AUDIT_LOG", "/var/log/prism-ops/executions.jsonl"))
 FILE_BACKUP_DIR = Path(os.environ.get("OPS_FILE_BACKUP_DIR", "/var/lib/prism-ops/file-backups"))
 LEDGER_DIR = Path(os.environ.get("OPS_EXECUTOR_LEDGER_DIR", "/var/lib/prism-ops/execution-ledger"))
@@ -86,7 +87,7 @@ ACTION_PARAM_KEYS = {
     "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
     "ssh_login_events": {"since_hours", "limit", "focus"},
     "flytrap_attack_events": {"since_hours", "limit"},
-    "nginx_attack_events": {"since_hours", "limit"},
+    "nginx_attack_events": {"since_hours", "limit", "failure_threshold"},
     "backup_audit": set(),
     "db_threat_signals": {"since_hours", "limit"},
     "db_health": set(),
@@ -94,7 +95,13 @@ ACTION_PARAM_KEYS = {
 }
 
 
-def run(args: list[str], *, timeout: int = 900, allow_failure: bool = False) -> dict[str, Any]:
+def run(
+    args: list[str],
+    *,
+    timeout: int = 900,
+    allow_failure: bool = False,
+    stdout_tail_limit: Optional[int] = 100_000,
+) -> dict[str, Any]:
     completed = subprocess.run(
         args,
         cwd=DEPLOY_DIR,
@@ -104,7 +111,9 @@ def run(args: list[str], *, timeout: int = 900, allow_failure: bool = False) -> 
         check=False,
         env={**os.environ, "DEPLOY_ENV_FILE": ".env"},
     )
-    stdout = _redact_text(completed.stdout[-100_000:])
+    stdout = _redact_text(
+        completed.stdout if stdout_tail_limit is None else completed.stdout[-stdout_tail_limit:]
+    )
     stderr = _redact_text(completed.stderr[-20_000:])
     if completed.returncode != 0 and not allow_failure:
         raise RuntimeError(f"命令失败 exit={completed.returncode}: {stderr or stdout}"[:4000])
@@ -400,6 +409,16 @@ def _event_limit_arg(params: dict[str, Any], default: int = 1000) -> int:
     return limit
 
 
+def _http_failure_threshold_arg(params: dict[str, Any], default: int = 20) -> int:
+    try:
+        threshold = int(params.get("failure_threshold")) if params.get("failure_threshold") is not None else default
+    except (TypeError, ValueError) as exc:
+        raise ValueError("failure_threshold 必须是整数") from exc
+    if threshold < 1 or threshold > MAX_EVENT_LIMIT:
+        raise ValueError(f"failure_threshold 必须在 1 到 {MAX_EVENT_LIMIT} 之间")
+    return threshold
+
+
 def parse_ssh_log(lines: list[str]) -> dict[str, Any]:
     accepted_pattern = re.compile(
         r"Accepted (publickey|password|keyboard-interactive) for (\S+) from "
@@ -415,7 +434,14 @@ def parse_ssh_log(lines: list[str]) -> dict[str, Any]:
         line = str(raw).rstrip("\n")
         match = accepted_pattern.search(line)
         if match:
-            accepted.append({"method": match.group(1), "user": match.group(2), "ip": match.group(3), "detail": match.group(4) or ""})
+            accepted.append(
+                {
+                    "method": match.group(1),
+                    "user": match.group(2),
+                    "ip": match.group(3),
+                    "detail": match.group(4) or "",
+                }
+            )
             continue
         match = failed_pattern.search(line)
         if match:
@@ -551,7 +577,10 @@ def _aggregate(events: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     for event in events:
         value = str(event.get(key) or "unknown")
         counts[value] = counts.get(value, 0) + 1
-    return [{"value": value, "count": count} for value, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)][:30]
+    return [
+        {"value": value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    ][:30]
 
 
 def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
@@ -560,7 +589,21 @@ def _ssh_login_events(params: dict[str, Any]) -> dict[str, Any]:
     focus = str(params.get("focus") or "all")
     if focus not in SSH_FOCUS_VALUES:
         raise ValueError("focus 必须是 all/accepted/failed")
-    result = run(["journalctl", "-u", "sshd", "--since", f"{since_hours} hours ago", "--no-pager", "--output=short-iso", "-n", "20000"], timeout=90, allow_failure=True)
+    result = run(
+        [
+            "journalctl",
+            "-u",
+            "sshd",
+            "--since",
+            f"{since_hours} hours ago",
+            "--no-pager",
+            "--output=short-iso",
+            "-n",
+            "20000",
+        ],
+        timeout=90,
+        allow_failure=True,
+    )
     parsed = parse_ssh_log(result["stdout"].splitlines())
     accepted, failed = parsed["accepted"], parsed["failed"]
     selected = ([*accepted] if focus in {"all", "accepted"} else []) + ([*failed] if focus in {"all", "failed"} else [])
@@ -597,7 +640,21 @@ def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
             "by_username": [],
             "recent": [],
         }
-    result = run(["journalctl", "-u", "flytrap-agent", "--since", f"{since_hours} hours ago", "--no-pager", "--output=cat", "-n", "30000"], timeout=90, allow_failure=True)
+    result = run(
+        [
+            "journalctl",
+            "-u",
+            "flytrap-agent",
+            "--since",
+            f"{since_hours} hours ago",
+            "--no-pager",
+            "--output=cat",
+            "-n",
+            "30000",
+        ],
+        timeout=90,
+        allow_failure=True,
+    )
     events = parse_flytrap_log(result["stdout"].splitlines())
     agent_status = run(["systemctl", "is-active", "flytrap-agent.service"], timeout=20, allow_failure=True)
     sync_status = run(["systemctl", "is-active", "flytrap-sync.service"], timeout=20, allow_failure=True)
@@ -651,9 +708,47 @@ def _flytrap_attack_events(params: dict[str, Any]) -> dict[str, Any]:
 
 def _nginx_attack_events(params: dict[str, Any]) -> dict[str, Any]:
     since_hours, limit = _since_hours_arg(params), _event_limit_arg(params, default=1000)
-    result = run(["docker", "logs", "--since", f"{since_hours}h", "-n", "30000", "cr_frontend"], timeout=90, allow_failure=True)
-    events = parse_nginx_log(result["stdout"].splitlines())
-    return {"ok": result["exit_code"] == 0, "since_hours": since_hours, "total": len(events), "by_ip": _aggregate(events, "ip"), "by_detail": _aggregate(events, "detail"), "recent": events[-min(limit, 300):], "source_exit_code": result["exit_code"], "source_error": result["stderr"][:400] if result["exit_code"] else "", "stdout_capped": len(result["stdout"]) >= 100_000}
+    failure_threshold = _http_failure_threshold_arg(params)
+    result = run(
+        ["docker", "logs", "--since", f"{since_hours}h", "-n", str(NGINX_LOG_LINE_LIMIT), "cr_frontend"],
+        timeout=90,
+        allow_failure=True,
+        stdout_tail_limit=None,
+    )
+    log_lines = result["stdout"].splitlines()
+    events = parse_nginx_log(log_lines)
+    failures_by_ip: dict[str, dict[str, Any]] = {}
+    for event in events:
+        status = str(event.get("status") or "")
+        if event.get("detail") not in {"http_400", "http_403", "http_444"}:
+            continue
+        ip = str(event.get("ip") or "")
+        if not ip:
+            continue
+        item = failures_by_ip.setdefault(ip, {"ip": ip, "failure_count": 0, "status_counts": {}})
+        item["failure_count"] += 1
+        item["status_counts"][status] = item["status_counts"].get(status, 0) + 1
+    http_failures_by_ip = sorted(
+        (item for item in failures_by_ip.values() if item["failure_count"] >= failure_threshold),
+        key=lambda item: (-item["failure_count"], item["ip"]),
+    )
+    return {
+        "ok": result["exit_code"] == 0,
+        "since_hours": since_hours,
+        "total": len(events),
+        "by_ip": _aggregate(events, "ip"),
+        "by_detail": _aggregate(events, "detail"),
+        "http_failure_threshold": failure_threshold,
+        "http_failures_by_ip": http_failures_by_ip,
+        "source_line_limit": NGINX_LOG_LINE_LIMIT,
+        "source_truncated": len(log_lines) >= NGINX_LOG_LINE_LIMIT,
+        "recent": events[-min(limit, 300):],
+        "source_exit_code": result["exit_code"],
+        "source_error": result["stderr"][:400] if result["exit_code"] else "",
+        # 此采集显式禁用了 stdout 尾部裁剪；日志源行数上限由
+        # source_truncated 单独、准确地表示。
+        "stdout_capped": False,
+    }
 
 
 def _backup_audit() -> dict[str, Any]:
@@ -669,7 +764,16 @@ def _backup_audit() -> dict[str, Any]:
             modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
             size = path.stat().st_size
             total_gzip_bytes += size
-            rows.append({"name": path.name, "size": size, "age_hours": round((now - modified).total_seconds() / 3600, 2), "has_sha256": path.with_name(path.name + ".sha256").is_file(), "has_meta": path.with_name(path.name + ".meta").is_file(), "modified_at": modified.isoformat()})
+            rows.append(
+                {
+                    "name": path.name,
+                    "size": size,
+                    "age_hours": round((now - modified).total_seconds() / 3600, 2),
+                    "has_sha256": path.with_name(path.name + ".sha256").is_file(),
+                    "has_meta": path.with_name(path.name + ".meta").is_file(),
+                    "modified_at": modified.isoformat(),
+                }
+            )
         except OSError:
             continue
     rows.sort(key=lambda item: item["modified_at"], reverse=True)
@@ -687,11 +791,26 @@ def _backup_audit() -> dict[str, Any]:
                 other_bytes += path.stat().st_size
                 other_count += 1
             elif path.is_dir() and not path.is_symlink():
-                other_bytes += sum(item.stat().st_size for item in path.rglob("*") if item.is_file() and not item.is_symlink())
+                other_bytes += sum(
+                    item.stat().st_size
+                    for item in path.rglob("*")
+                    if item.is_file() and not item.is_symlink()
+                )
                 other_count += 1
         except OSError:
             continue
-    return {"ok": True, "dir": str(BACKUP_DIR), "sql_gz_count": len(rows), "sql_gz_bytes": total_gzip_bytes, "other_entries_count": other_count, "other_bytes": other_bytes, "older_than_14_days": sum(1 for row in rows if row["age_hours"] > 24 * 14), "newest": rows[0] if rows else None, "oldest": rows[-1] if rows else None, "recent": rows[:100]}
+    return {
+        "ok": True,
+        "dir": str(BACKUP_DIR),
+        "sql_gz_count": len(rows),
+        "sql_gz_bytes": total_gzip_bytes,
+        "other_entries_count": other_count,
+        "other_bytes": other_bytes,
+        "older_than_14_days": sum(1 for row in rows if row["age_hours"] > 24 * 14),
+        "newest": rows[0] if rows else None,
+        "oldest": rows[-1] if rows else None,
+        "recent": rows[:100],
+    }
 
 
 DB_SQL_MAX_LEN = 160
@@ -739,7 +858,10 @@ def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for item in items:
             value = str(item.get(key) or "")
             counts[value] = counts.get(value, 0) + 1
-        return [{"value": value, "count": count} for value, count in sorted(counts.items(), key=lambda pair: pair[1], reverse=True)][:20]
+        return [
+            {"value": value, "count": count}
+            for value, count in sorted(counts.items(), key=lambda pair: pair[1], reverse=True)
+        ][:20]
 
     return {
         "destructive_total": len(categories["destructive"]),
@@ -785,7 +907,14 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
             "event_time": parts[-1],
         })
     parsed = parse_db_general_log(rows)
-    parsed.update({"ok": True, "since_hours": since_hours, "sampled_rows": len(rows), "stdout_capped": len(result["stdout"]) >= 100_000})
+    parsed.update(
+        {
+            "ok": True,
+            "since_hours": since_hours,
+            "sampled_rows": len(rows),
+            "stdout_capped": len(result["stdout"]) >= 100_000,
+        }
+    )
     return parsed
 
 
@@ -815,8 +944,16 @@ def parse_db_error_log(lines: list[str]) -> dict[str, Any]:
 
 
 def _db_health() -> dict[str, Any]:
-    restart_count = run(["docker", "inspect", "cr_mysql", "--format", "{{.RestartCount}}"], timeout=30, allow_failure=True)
-    memory = run(["docker", "stats", "cr_mysql", "--no-stream", "--format", "{{.MemUsage}}"], timeout=30, allow_failure=True)
+    restart_count = run(
+        ["docker", "inspect", "cr_mysql", "--format", "{{.RestartCount}}"],
+        timeout=30,
+        allow_failure=True,
+    )
+    memory = run(
+        ["docker", "stats", "cr_mysql", "--no-stream", "--format", "{{.MemUsage}}"],
+        timeout=30,
+        allow_failure=True,
+    )
     logs = run(["docker", "logs", "cr_mysql", "--since", "24h"], timeout=60, allow_failure=True)
     combined = (logs.get("stdout") or "") + "\n" + (logs.get("stderr") or "")
     parsed = parse_db_error_log(combined.splitlines())
@@ -1033,7 +1170,10 @@ def _firewall_action(params: dict[str, Any]) -> dict[str, Any]:
                 with open(save_path, "w", encoding="utf-8") as fh:
                     fh.write(persist.get("stdout", ""))
             break
-    return {"change": change, "persist": persist or {"ok": False, "note": "未找到可写 iptables 持久化文件,规则仅临时生效"}}
+    return {
+        "change": change,
+        "persist": persist or {"ok": False, "note": "未找到可写 iptables 持久化文件,规则仅临时生效"},
+    }
 
 
 def _account_action(params: dict[str, Any]) -> dict[str, Any]:

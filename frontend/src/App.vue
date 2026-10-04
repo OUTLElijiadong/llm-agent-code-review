@@ -5,6 +5,7 @@ import PrismLoading from '@/components/common/PrismLoading.vue'
 import AgentActivityBorder from '@/components/ai/AgentActivityBorder.vue'
 import VirtualCursor from '@/components/ai/VirtualCursor.vue'
 import { useUserStore } from '@/stores/user'
+import { setupSecurityAlerts, type SecurityAlertsHandle } from '@/composables/useSecurityAlerts'
 
 const AgentChatDrawer = defineAsyncComponent(() => import('@/components/ai/AgentChatDrawer.vue'))
 const AdminCopilot = defineAsyncComponent(() => import('@/components/admin/AdminCopilot.vue'))
@@ -19,6 +20,7 @@ const agentPreferredSessionId = ref('')
 const agentSessionRequestId = ref(0)
 let showTimer: number | undefined
 let hideTimer: number | undefined
+let securityAlerts: SecurityAlertsHandle | null = null
 const canUseAgent = computed(() => (
   Boolean(userStore.token && userStore.profile)
   && userStore.hasPermission('agent:chat')
@@ -82,6 +84,18 @@ function handleOpenAgentChat(event: Event): void {
 
 provide('openAgentChat', () => openAgentChat())
 
+// 安全告警需要常驻在全局宿主中，不能依赖管理员是否正好打开监控页。
+// 账号、令牌或管理角色变化时先关闭旧 SSE，再为新身份单独建立订阅。
+const stopSecurityAlertWatch = watch(
+  [() => userStore.token, () => userStore.profile?.id, () => userStore.isAdmin()],
+  ([token, userId, isAdmin]) => {
+    securityAlerts?.dispose()
+    securityAlerts = null
+    if (token && userId && isAdmin) securityAlerts = setupSecurityAlerts()
+  },
+  { immediate: true },
+)
+
 /**
  * 启动路由级加载提示，短跳转延迟展示以避免页面闪烁
  * @returns void
@@ -123,6 +137,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopSecurityAlertWatch()
+  securityAlerts?.dispose()
+  securityAlerts = null
   window.clearTimeout(showTimer)
   window.clearTimeout(hideTimer)
   removeBeforeGuard()

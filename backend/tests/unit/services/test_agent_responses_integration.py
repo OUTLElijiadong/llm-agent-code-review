@@ -10,11 +10,6 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
-from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.dialects import mysql, sqlite
-from sqlalchemy.orm import sessionmaker
-
 from app.api.v1 import agent_responses as api_module
 from app.models.admin_chat import AdminChatMessage, OpsExecution
 from app.models.agent_governance import (
@@ -41,6 +36,10 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
     estimate_tokens,
 )
+from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy.orm import sessionmaker
 
 
 def test_admin_release_health_scope_matches_only_narrow_read_query() -> None:
@@ -2289,8 +2288,29 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
         "beta_codes.list",
         "beta_codes.generate",
         "beta_codes.revoke",
-        "beta_codes.delete",
     }
+
+    security_discovery = await executor.execute(
+        ToolCall(
+            "call_security_discovery",
+            "admin_describe_capabilities",
+            {"page": "/admin/security-center"},
+            '{"page":"/admin/security-center"}',
+        )
+    )
+    assert security_discovery.status == "error"
+    assert "没有找到匹配" in security_discovery.error
+
+    security_execution = await executor.execute(
+        ToolCall(
+            "call_security_overview",
+            "admin_execute_capability",
+            {"capability": "security_center.overview", "params": {}},
+            '{"capability":"security_center.overview","params":{}}',
+        )
+    )
+    assert security_execution.status == "error"
+    assert "仅唯一超级管理员" in security_execution.error
 
     monkeypatch.setattr(service_module.rbac_service, "is_admin_user", lambda *_args, **_kwargs: False)
     ordinary = PrismToolExecutor(

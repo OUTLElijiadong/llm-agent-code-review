@@ -265,7 +265,15 @@ _DANGER_TOOLS = {
 }
 # 注册表权限码与路由真实强制不一致的补丁: 这些能力路由层仅唯一超管放行,
 # 普通管理员经能力目录看到并批准也会 403, 前置拒绝避免注定失败的审批。
-_SUPER_ADMIN_ONLY_CAPABILITIES = frozenset({"beta_codes.delete"})
+_SUPER_ADMIN_ONLY_CAPABILITIES = frozenset({
+    "beta_codes.delete",
+    "observability.security.run_monitor",
+    "observability.security.status",
+    "security_center.overview",
+    "security_center.events",
+    "security_center.policy.get",
+    "security_center.policy.update",
+})
 
 _USER_CAPABILITY_NAMES = {
     "update_project",
@@ -2772,6 +2780,8 @@ class PrismToolExecutor:
             from app.main import app
 
             rows = describe_capabilities(app.openapi(), page=page, query=query)
+            if not self._is_super_admin:
+                rows = [row for row in rows if row["capability"] not in _SUPER_ADMIN_ONLY_CAPABILITIES]
             if not rows:
                 return ToolExecutionResult.failure("没有找到匹配的管理能力")
             return ToolExecutionResult.success({"count": len(rows), "items": rows})

@@ -243,6 +243,10 @@ class Settings(BaseSettings):
     security_ssh_allowlist_cidrs: List[str] = []
     security_failed_login_threshold: int = 20
     security_failed_login_window_hours: int = 1
+    # Nginx 同一来源在单个窗口内重复返回 HTTP 400/403/444 的告警阈值。
+    security_nginx_failure_threshold: int = Field(default=20, ge=1, le=5000)
+    # Nginx 访问日志独立观察窗口，不复用已退役 FlyTrap 的历史配置。
+    security_nginx_window_hours: int = Field(default=1, ge=1, le=24)
     # FlyTrap 已退役；默认不再采集、评估或生成上游恢复告警。
     security_flytrap_enabled: bool = False
     security_flytrap_threshold: int = 10
@@ -300,35 +304,31 @@ class Settings(BaseSettings):
             problems.append("DEEPSEEK_MAX_OUTPUT_TOKENS 必须小于上下文窗口")
         elif not 1_000 <= self.deepseek_compaction_threshold_tokens <= input_budget:
             problems.append("DEEPSEEK_COMPACTION_THRESHOLD_TOKENS 必须在 1000 到可用输入预算之间")
-        if not 1_000 <= self.deepseek_compaction_keep_recent_tokens <= max(
-            self.deepseek_compaction_threshold_tokens,
-            0,
+        if (
+            not 1_000
+            <= self.deepseek_compaction_keep_recent_tokens
+            <= max(
+                self.deepseek_compaction_threshold_tokens,
+                0,
+            )
         ):
             problems.append("DEEPSEEK_COMPACTION_KEEP_RECENT_TOKENS 必须在 1000 到压缩阈值之间")
         if self.security_semantic_min_split_chars >= self.security_semantic_batch_chars:
             problems.append("SECURITY_SEMANTIC_MIN_SPLIT_CHARS 必须小于初始语义批次字符数")
         if self.security_semantic_bounded_per_file_chars > self.security_semantic_bounded_total_chars:
-            problems.append(
-                "SECURITY_SEMANTIC_BOUNDED_PER_FILE_CHARS 不能超过有界语义总字符数"
-            )
+            problems.append("SECURITY_SEMANTIC_BOUNDED_PER_FILE_CHARS 不能超过有界语义总字符数")
         if (
             self.security_semantic_bounded_total_chars
-            > self.security_semantic_bounded_per_file_chars
-            * self.security_semantic_bounded_max_files
+            > self.security_semantic_bounded_per_file_chars * self.security_semantic_bounded_max_files
         ):
-            problems.append(
-                "SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 不能超过单文件上限与文件数上限的乘积"
-            )
+            problems.append("SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 不能超过单文件上限与文件数上限的乘积")
         # split 最坏可形成约 4 * chars / min_split 个叶片；invalid_item
         # 每个节点最多消耗原调用和契约修复各一次，并预留一次数据流请求。
         max_terminal_leaves = max(1, (self.security_semantic_max_requests + 1) // 4)
-        safe_bounded_chars = (
-            max_terminal_leaves * self.security_semantic_min_split_chars // 4
-        )
+        safe_bounded_chars = max_terminal_leaves * self.security_semantic_min_split_chars // 4
         if self.security_semantic_bounded_total_chars > safe_bounded_chars:
             problems.append(
-                "SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 超过共享请求预算的保守闭合上限 "
-                f"{safe_bounded_chars}"
+                f"SECURITY_SEMANTIC_BOUNDED_TOTAL_CHARS 超过共享请求预算的保守闭合上限 {safe_bounded_chars}"
             )
         # 分割点会尽量贴近换行边界，最坏时较大子叶约为父节点的 3/4。
         # 配置深度必须足以把有界窗口降至终端叶片上限。
@@ -339,19 +339,15 @@ class Settings(BaseSettings):
             required_split_depth += 1
         if self.security_semantic_max_split_depth < required_split_depth:
             problems.append(
-                "SECURITY_SEMANTIC_MAX_SPLIT_DEPTH 不足以在最坏分割下闭合有界语义窗口,"
-                f"至少需要 {required_split_depth}"
+                f"SECURITY_SEMANTIC_MAX_SPLIT_DEPTH 不足以在最坏分割下闭合有界语义窗口,至少需要 {required_split_depth}"
             )
         # 使用高于数据库当前 500 字符路径上限的保守开销，防止
         # 路径、语言和分隔标记使有界窗口意外拆成多个初始批次。
         bounded_batch_estimate = (
-            self.security_semantic_bounded_total_chars
-            + self.security_semantic_bounded_max_files * 2_168
+            self.security_semantic_bounded_total_chars + self.security_semantic_bounded_max_files * 2_168
         )
         if bounded_batch_estimate > self.security_semantic_batch_chars:
-            problems.append(
-                "有界语义窗口连同文件路径开销必须能够装入一个初始批次"
-            )
+            problems.append("有界语义窗口连同文件路径开销必须能够装入一个初始批次")
         if problems:
             raise ValueError("检测到无效的 DeepSeek 上下文预算: " + "; ".join(problems))
         return self

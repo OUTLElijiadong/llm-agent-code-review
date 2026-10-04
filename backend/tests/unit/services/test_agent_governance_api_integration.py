@@ -5,11 +5,6 @@ import re
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user, require_admin, require_super_admin
@@ -19,6 +14,10 @@ from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, Appro
 from app.models.agent_response_run import AgentResponseRun
 from app.models.rbac import Role, UserRole
 from app.models.user import User
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
@@ -346,7 +345,6 @@ def test_admin_governance_api_business_loop(admin_api_client):
     )
     assert manager["priority"] == 77
 
-
     memory = _ok(
         client,
         "post",
@@ -481,14 +479,18 @@ def test_admin_governance_api_business_loop(admin_api_client):
 def test_alert_pagination_reports_full_total_and_preserves_legacy_list(admin_api_client):
     """旧列表继续兼容，新分页 API 应覆盖超过 100 条的完整告警集合。"""
     client, db = admin_api_client
-    db.add_all([
-        AgentAlert(alert_type="pagination", severity="warning", status="open", title=f"告警 {index}")
-        for index in range(105)
-    ])
-    db.add_all([
-        AgentAlert(alert_type="pagination", severity="info", status="resolved", title=f"已关闭告警 {index}")
-        for index in range(4)
-    ])
+    db.add_all(
+        [
+            AgentAlert(alert_type="pagination", severity="warning", status="open", title=f"告警 {index}")
+            for index in range(105)
+        ]
+    )
+    db.add_all(
+        [
+            AgentAlert(alert_type="pagination", severity="info", status="resolved", title=f"已关闭告警 {index}")
+            for index in range(4)
+        ]
+    )
     db.commit()
 
     legacy_rows = _ok(client, "get", "/api/admin/observability/alerts")
@@ -532,12 +534,7 @@ def test_alert_pagination_reports_full_total_and_preserves_legacy_list(admin_api
     assert third_page["page"] == 3
     assert len(third_page["items"]) == 5
     paged_ids = [row["id"] for page in (first_page, second_page, third_page) for row in page["items"]]
-    db_rows = (
-        db.query(AgentAlert)
-        .filter(AgentAlert.status == "open")
-        .order_by(AgentAlert.id.desc())
-        .all()
-    )
+    db_rows = db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).all()
     db_ids = [row.id for row in db_rows]
     assert len(paged_ids) == 105
     assert len(set(paged_ids)) == 105
@@ -602,7 +599,10 @@ def test_generic_approval_api_can_filter_agent_release_items(admin_api_client):
     db.commit()
 
     listed = _ok(
-        client, "get", "/api/admin/approvals", params={"exclude_action": "agent_package.publish"},
+        client,
+        "get",
+        "/api/admin/approvals",
+        params={"exclude_action": "agent_package.publish"},
     )
     assert [item["id"] for item in listed] == [generic.id]
 
@@ -618,7 +618,10 @@ def test_generic_approval_api_can_filter_agent_release_items(admin_api_client):
     ],
 )
 def test_generic_approval_api_does_not_detach_response_run_from_its_approval(
-    admin_api_client, decision, payload_run_id, resource_run_id,
+    admin_api_client,
+    decision,
+    payload_run_id,
+    resource_run_id,
 ):
     """Responses 写操作必须通过原会话恢复，通用审批不能只改审批行状态。"""
     client, session = admin_api_client
@@ -636,16 +639,18 @@ def test_generic_approval_api_does_not_detach_response_run_from_its_approval(
         surface="admin",
         session_key="admin-session-approval-1",
         status="waiting_approval",
-        checkpoint_json=json.dumps({
-            "status": "waiting_approval",
-            "pending": {
-                "call": {
-                    "call_id": "call_global_config_update",
-                    "name": "admin_execute_capability",
-                    "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
+        checkpoint_json=json.dumps(
+            {
+                "status": "waiting_approval",
+                "pending": {
+                    "call": {
+                        "call_id": "call_global_config_update",
+                        "name": "admin_execute_capability",
+                        "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
+                    },
                 },
-            },
-        }),
+            }
+        ),
         version=1,
     )
     approval = ApprovalItem(
@@ -655,13 +660,15 @@ def test_generic_approval_api_does_not_detach_response_run_from_its_approval(
         risk_level="critical",
         status="pending",
         decision="escalate",
-        request_json=json.dumps({
-            "owner_user_id": admin.id,
-            "run_id": payload_run_id,
-            "call_id": "call_global_config_update",
-            "tool": "admin_execute_capability",
-            "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
-        }),
+        request_json=json.dumps(
+            {
+                "owner_user_id": admin.id,
+                "run_id": payload_run_id,
+                "call_id": "call_global_config_update",
+                "tool": "admin_execute_capability",
+                "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
+            }
+        ),
     )
     session.add_all([run, approval])
     session.commit()

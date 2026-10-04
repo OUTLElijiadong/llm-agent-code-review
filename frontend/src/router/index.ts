@@ -253,6 +253,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '运行与审计中心', role: 'admin', roles: ['admin'], unifiedDomain: 'operations' },
       },
       {
+        path: 'security-center',
+        name: 'AdminSecurityCenter',
+        component: () => import('@/views/admin/AdminSecurityCenter.vue'),
+        meta: { title: '安全中心', role: 'admin', roles: ['admin'], superAdmin: true },
+      },
+      {
         path: 'access',
         name: 'AdminAccessCenter',
         component: () => import('@/views/admin/AdminUnifiedCenter.vue'),

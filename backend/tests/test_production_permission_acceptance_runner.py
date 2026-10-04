@@ -8,11 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.core.database import Base, get_db
 from app.core.security import hash_password
 from app.main import app
@@ -21,6 +16,10 @@ from app.models.project import Project
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 PATH = Path(__file__).resolve().parents[1] / "scripts/verify_permission_acceptance_https.py"
 SPEC = importlib.util.spec_from_file_location("permission_https_runner", PATH)
@@ -54,8 +53,8 @@ def test_runner_rejects_unsafe_base_url_before_output_or_network(tmp_path, url):
 def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 325
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 258
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 329
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 262
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
         "/api/agent-responses/assets/{asset_id}/image",
