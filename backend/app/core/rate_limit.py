@@ -19,6 +19,8 @@ from slowapi.util import get_remote_address
 from app.core.config import settings
 from app.core.exceptions import ServiceUnavailableError
 
+RATE_LIMIT_KEY_PREFIX = "prism:api"
+
 
 def _parsed_ip(value: str) -> Optional[ipaddress._BaseAddress]:
     try:
@@ -94,7 +96,7 @@ def build_limiter(storage_uri: Optional[str] = None) -> Limiter:
         storage_uri=(storage_uri if storage_uri is not None else settings.redis_url) or "memory://",
         headers_enabled=True,
         retry_after="delta-seconds",
-        key_prefix="prism:api",
+        key_prefix=RATE_LIMIT_KEY_PREFIX,
     )
 
 

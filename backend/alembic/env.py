@@ -17,7 +17,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.db_url)
+# ConfigParser 先处理百分号；转义后读取才会还原 URL 中的凭据编码。
+config.set_main_option("sqlalchemy.url", settings.db_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

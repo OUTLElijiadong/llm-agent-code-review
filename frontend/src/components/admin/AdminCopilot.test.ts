@@ -71,6 +71,12 @@ function mountCopilot(): VueWrapper {
   })
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 async function openCopilot(wrapper: VueWrapper): Promise<void> {
   const trigger = document.querySelector('.copilot-trigger') as HTMLButtonElement | null
   if (trigger) trigger.click()
@@ -379,6 +385,41 @@ describe('AdminCopilot Responses stream', () => {
     // 空成员时不再显示「已创建 0 个子Agent」,退化为「创建中」语义
     expect(wrapper.find('.team-card').text()).toContain('子Agent创建中')
     expect(wrapper.find('.team-side-panel').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('管理员端迟到的旧团队详情不得覆盖新请求的完成状态', async () => {
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    const vm = wrapper.vm as any
+    vm.sessionId = 'admin-test'
+    teamApi.list.mockResolvedValue({
+      items: [{ team_id: 91, title: '管理端状态竞态', status: 'running' }], total: 1,
+    })
+    const old = deferred<Record<string, unknown>>()
+    let detailCalls = 0
+    teamApi.detail.mockImplementation(() => ++detailCalls === 1
+      ? old.promise
+      : Promise.resolve({
+          team_id: 91, title: '管理端状态竞态', surface: 'admin', session_id: 'admin-test', status: 'completed',
+          max_active_children: 1, trace_id: 'trace-91',
+          counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+          members: [], tasks: [], events: [], messages: [],
+        }))
+
+    const staleRequest = vm.refreshAgentTeam()
+    await flushPromises()
+    await vm.refreshAgentTeam()
+    expect(vm.agentTeams[0].status).toBe('completed')
+    old.resolve({
+      team_id: 91, title: '管理端状态竞态', surface: 'admin', session_id: 'admin-test', status: 'running',
+      max_active_children: 1, trace_id: 'trace-91',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    })
+    await staleRequest
+    expect(vm.agentTeams[0].status).toBe('completed')
     wrapper.unmount()
   })
 

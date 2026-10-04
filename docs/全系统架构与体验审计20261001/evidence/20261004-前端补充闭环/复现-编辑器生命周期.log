@@ -1,0 +1,146 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/code/CodeEditor.lifecycle.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts (6 tests | 6 failed) 61ms
+     × 同组件切换文件时加载新文件，保存使用新文件的版本和内容 37ms
+     × 加载旧文件期间切换路由，迟到响应不覆盖当前文件 5ms
+     × 已显示内容在读取权限撤回时立即清空，重新授权后可重新加载 4ms
+     × 保存回调在账号改变后不能把旧版本写入新账号内容 4ms
+     × 二进制下载在账号改变后不再触发旧账号文件下载 8ms
+     × 组件卸载后完成的详情请求不再发起项目元信息读取 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 同组件切换文件时加载新文件，保存使用新文件的版本和内容
+AssertionError: expected last "vi.fn()" call to have been called with [ 2 ]
+
+- Expected
++ Received
+
+  [
+-   2,
++   1,
+  ]
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:59:27
+     57|     route.params.fileId = '2'
+     58|     await flushPromises()
+     59|     expect(api.getDetail).toHaveBeenLastCalledWith(2)
+       |                           ^
+     60|     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value)…
+     61|     await (wrapper.vm as any).handleSave()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 加载旧文件期间切换路由，迟到响应不覆盖当前文件
+AssertionError: expected 'Back原文件.py 版本 v1python 保存 (Ctrl+S)' to contain '当前文件.py'
+
+Expected: "当前文件.py"
+Received: "Back原文件.py 版本 v1python 保存 (Ctrl+S)"
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:74:28
+     72|     old.resolve({ ...baseFile })
+     73|     await flushPromises()
+     74|     expect(wrapper.text()).toContain('当前文件.py')
+       |                            ^
+     75|     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value)…
+     76|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 已显示内容在读取权限撤回时立即清空，重新授权后可重新加载
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:84:47
+     82|     useUserStore().permissions = new Set()
+     83|     await flushPromises()
+     84|     expect(wrapper.find('textarea').exists()).toBe(false)
+       |                                               ^
+     85|     expect((wrapper.vm as any).codeContent).toBe('')
+     86|     useUserStore().permissions = new Set(['file:view'])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 保存回调在账号改变后不能把旧版本写入新账号内容
+AssertionError: expected 2 to be 7 // Object.is equality
+
+- Expected
++ Received
+
+- 7
++ 2
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:103:55
+    101|     saved.resolve({ version_no: 2 })
+    102|     await request
+    103|     expect((wrapper.vm as any).fileDetail.version_no).toBe(7)
+       |                                                       ^
+    104|     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value)…
+    105|     expect(messages.success).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 二进制下载在账号改变后不再触发旧账号文件下载
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Blob {},
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:119:37
+    117|     downloaded.resolve(new Blob(['OLD_ACCOUNT_BINARY']))
+    118|     await request
+    119|     expect(URL.createObjectURL).not.toHaveBeenCalled()
+       |                                     ^
+    120|     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled()
+    121|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 组件卸载后完成的详情请求不再发起项目元信息读取
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      7,
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:130:43
+    128|     loaded.resolve({ ...baseFile })
+    129|     await flushPromises()
+    130|     expect(projects.getProjectDetail).not.toHaveBeenCalled()
+       |                                           ^
+    131|   })
+    132| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  15:47:21
+   Duration  966ms (transform 193ms, setup 14ms, import 627ms, tests 61ms, environment 201ms)
+

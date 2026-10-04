@@ -1,13 +1,12 @@
 """
 审查任务API路由
 """
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.permission_codes import PermissionCode
-from app.core.rate_limit import authenticated_actor_key, limiter
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
 from app.schemas.common import PageOut, Resp
@@ -19,12 +18,7 @@ router = APIRouter()
 
 @router.post("/start", response_model=Resp[dict],
              dependencies=[Depends(require_permission(PermissionCode.REVIEW_START))])
-@limiter.limit(
-    "5/minute",
-    key_func=authenticated_actor_key,
-    error_message="审查发起过于频繁，请稍后重试",
-)
-def start(payload: ReviewStartIn, request: Request, response: Response, db: Session = Depends(get_db),
+def start(payload: ReviewStartIn, db: Session = Depends(get_db),
           user: User = Depends(get_current_user)):
     """启动代码审查(异步):立即返回 running 任务,前端轮询任务详情查看进度/结果"""
     task = review_service.start(db, user=user, payload=payload)

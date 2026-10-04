@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -14,7 +14,6 @@ from app.core.database import SessionLocal
 from app.models.agent_governance import AgentKnowledgeChunk, AgentKnowledgeDoc, AgentKnowledgeSource
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_doc import KnowledgeDoc
-
 
 TERMS = ("known_cves", "audit_knowledge", "CVE-2021-21381", "OWASP Top10 2021", "OWASP Top 10 2021")
 
@@ -31,8 +30,13 @@ def inspect_storage(db) -> dict:
     ):
         chunk_matches = or_(*(chunk_model.content.ilike(f"%{term}%") for term in TERMS))
         matched_doc_ids = {row[0] for row in db.query(chunk_model.doc_id).filter(chunk_matches).distinct().all()}
-        meta_matches = or_(*(column.ilike(f"%{term}%") for term in TERMS for column in (doc_model.title, doc_model.source_ref)))
-        docs = db.query(doc_model).filter(or_(doc_model.id.in_(matched_doc_ids), meta_matches)).order_by(doc_model.id).all()
+        meta_matches = or_(*(
+            column.ilike(f"%{term}%") for term in TERMS for column in (doc_model.title, doc_model.source_ref)
+        ))
+        docs = (
+            db.query(doc_model).filter(or_(doc_model.id.in_(matched_doc_ids), meta_matches))
+            .order_by(doc_model.id).all()
+        )
         details = []
         for doc in docs:
             chunks = db.query(chunk_model).filter(chunk_model.doc_id == doc.id).order_by(chunk_model.seq).all()
@@ -45,7 +49,12 @@ def inspect_storage(db) -> dict:
                 "title_sha256": _hash(doc.title), "declared_chunk_count": doc.chunk_count,
                 "actual_chunk_count": len(chunks), "exact_builtin_source": owned,
                 "chunk_content_sha256": [_hash(chunk.content) for chunk in chunks],
-                "matched_terms": [term for term in TERMS if term.lower() in ((doc.title or "") + (doc.source_ref or "") + "".join(chunk.content or "" for chunk in chunks)).lower()],
+                "matched_terms": [
+                    term for term in TERMS if term.lower() in (
+                        (doc.title or "") + (doc.source_ref or "")
+                        + "".join(chunk.content or "" for chunk in chunks)
+                    ).lower()
+                ],
             })
         result["tables"][doc_model.__tablename__] = {
             "total_docs": db.query(func.count(doc_model.id)).scalar(),

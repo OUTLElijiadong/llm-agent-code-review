@@ -2238,6 +2238,38 @@
       },
       "AgentTeamRetryIn": {
         "additionalProperties": false,
+        "description": "执行重试；高风险任务须回传同一计划的确认摘要。",
+        "properties": {
+          "strategy_changes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 100,
+            "title": "Strategy Changes",
+            "type": "object"
+          },
+          "supervisor_plan_sha256": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Supervisor Plan Sha256",
+            "type": "string"
+          },
+          "task_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Task Keys",
+            "type": "array"
+          }
+        },
+        "title": "AgentTeamRetryIn",
+        "type": "object"
+      },
+      "AgentTeamRetryPreviewIn": {
+        "additionalProperties": false,
+        "description": "只读预览本次重试范围和监督风险。",
         "properties": {
           "strategy_changes": {
             "additionalProperties": {
@@ -2256,7 +2288,7 @@
             "type": "array"
           }
         },
-        "title": "AgentTeamRetryIn",
+        "title": "AgentTeamRetryPreviewIn",
         "type": "object"
       },
       "AgentTeamTaskIn": {
@@ -4734,8 +4766,22 @@
             "title": "Change Desc"
           },
           "content": {
+            "maxLength": 5000000,
             "title": "Content",
             "type": "string"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "同步保存需提供读取文件时的版本号；缺失返回 40904，服务器文件保持不变。",
+            "title": "Expected Version"
           }
         },
         "required": [
@@ -24021,6 +24067,74 @@
         ]
       }
     },
+    "/api/agent-teams/{team_id}/retry/preview": {
+      "post": {
+        "operationId": "preview_retry_team_api_agent_teams__team_id__retry_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "title": "Team Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTeamRetryPreviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Retry Team",
+        "tags": [
+          "小菱动态子 Agent 团队"
+        ]
+      }
+    },
     "/api/agents": {
       "get": {
         "description": "v1.0 兼容: 列出 multi_agent 模块的 5 个静态画像",
@@ -27190,9 +27304,9 @@
       }
     },
     "/api/discuss/start": {
-      "get": {
+      "post": {
         "description": "预检并注册讨论,返回 session_id 和基本信息。\n\n前端调用此接口后:\n1. 连接到 ws://host:8000/api/ws/discuss/{session_id}?token=xxx\n2. 讨论自动开始,所有 Agent 发言实时推送到前端\n3. 用户可通过 WebSocket 发送 {action:\"user_input\",content:\"...\"} 参与讨论",
-        "operationId": "start_discussion_api_discuss_start_get",
+        "operationId": "start_discussion_api_discuss_start_post",
         "parameters": [
           {
             "in": "query",

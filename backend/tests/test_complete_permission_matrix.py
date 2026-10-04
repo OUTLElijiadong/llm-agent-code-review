@@ -23,7 +23,7 @@ from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.security import create_access_token
 from app.main import app
-from app.models.agent_team import AgentTeam
+from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 338, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 339, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,11 +81,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 338
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 338
+    assert len(ROUTES) == 339
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 339
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 324
-    assert len(GUARDED_ROUTES) == 254
+    assert len(AUTHENTICATED_ROUTES) == 325
+    assert len(GUARDED_ROUTES) == 255
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -102,6 +102,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert len(catalog) == 1
     assert catalog[0]["guards"] == ["security:view"]
     expected_new_routes = {
+        ("POST", "/api/agent-teams/{team_id}/retry/preview"): ["agent:chat"],
         ("GET", "/api/agent-responses/runs/{run_id}/assets"): ["agent:chat"],
         ("GET", "/api/agent-responses/assets/{asset_id}/image"): ["agent:chat"],
         ("GET", "/api/agent-responses/session/messages"): ["agent:chat"],
@@ -331,7 +332,7 @@ def test_rbac_self_service_is_open_but_other_accounts_are_forbidden(matrix_env, 
     ("POST", "/api/code-files", {"project_id": "{project}", "file_name": "forbidden.py", "content": "print(1)"}),
     ("GET", "/api/code-files/{file}", None),
     ("GET", "/api/code-files/{file}/meta", None),
-    ("PUT", "/api/code-files/{file}", {"content": "forbidden"}),
+    ("PUT", "/api/code-files/{file}", {"content": "forbidden", "expected_version": 1}),
     ("POST", "/api/code-files/{file}/rename", {"file_name": "forbidden.py"}),
     ("DELETE", "/api/code-files/{file}", None),
     ("GET", "/api/code-files/{file}/versions", None),
@@ -367,7 +368,7 @@ def test_other_project_resources_are_hidden_and_unchanged(matrix_env, account, m
 @pytest.mark.parametrize("method,path,body", [
     ("PUT", "/api/projects/{project}", {"description": "reviewer 写入"}),
     ("DELETE", "/api/projects/{project}", None),
-    ("PUT", "/api/code-files/{file}", {"content": "forbidden"}),
+    ("PUT", "/api/code-files/{file}", {"content": "forbidden", "expected_version": 1}),
     ("POST", "/api/code-files/{file}/rename", {"file_name": "forbidden.py"}),
     ("DELETE", "/api/code-files/{file}", None),
     ("POST", "/api/projects/{project}/members", {"user_id": 104, "role_in_project": "reviewer"}),
@@ -384,12 +385,65 @@ def test_project_reviewer_with_api_permission_still_cannot_write(matrix_env, met
 
 
 @pytest.mark.parametrize("suffix,method", [("", "GET"), ("/events", "GET"), ("/messages", "GET"),
-                                            ("/cancel", "POST"), ("/retry", "POST"), ("/archive", "POST")])
+                                            ("/cancel", "POST"), ("/retry/preview", "POST"),
+                                            ("/retry", "POST"), ("/archive", "POST")])
 def test_agent_teams_are_account_private_even_inside_same_project(matrix_env, suffix, method):
     team_id = matrix_env["resources"]["a"]["team"]
     response = _request(matrix_env, "member_a", method, f"/api/agent-teams/{team_id}{suffix}", json={})
     assert response.status_code == 404, response.text
     assert matrix_env["db"].get(AgentTeam, team_id).status == "completed"
+
+
+def test_retry_preview_uses_real_jwt_and_keeps_owner_private_state_unchanged(matrix_env):
+    """新增只读预览路由须保持权限、账号隔离和不排队的完整 HTTP 契约。"""
+    db = matrix_env["db"]
+    owner = matrix_env["users"]["owner_a"]
+    team = AgentTeam(
+        user_id=owner.id, surface="user", session_key="matrix-preview-owner",
+        title="账号隔离预览", objective="只读核对待确认范围", status="failed",
+        trace_id="matrix-preview-owner",
+    )
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(
+        team_id=team.id, member_key="reader", display_name="只读分析员",
+        address="agent:project_analyzer", kind="builtin", role="worker", status="failed",
+    )
+    db.add(member)
+    db.flush()
+    task = AgentTeamTask(
+        team_id=team.id, member_id=member.id, task_key="read", title="读取已授权外部资料",
+        instructions="只读取当前授权范围内资料", status="failed", attempt_count=1,
+        input_json='{"external_target_url":"https://target.example"}',
+    )
+    db.add(task)
+    db.commit()
+    team_id = team.id
+    before = (task.status, task.input_json, task.attempt_count,
+              db.query(AgentTeamEvent).filter_by(team_id=team_id).count())
+    payload = {"task_keys": ["read"], "strategy_changes": {"read": "改用分段读取并先核验授权范围"}}
+    path = f"/api/agent-teams/{team_id}/retry/preview"
+    try:
+        for account in ("member_a", "owner_b", "manager"):
+            response = _request(matrix_env, account, "POST", path, json=payload)
+            assert response.status_code == 404, response.text
+        permitted = _request(matrix_env, "owner_a", "POST", path, json=payload)
+        assert permitted.status_code == 200, permitted.text
+        preview = permitted.json()["data"]
+        assert preview["team_id"] == team_id
+        assert preview["requires_confirmation"] is True
+        assert len(preview["plan_sha256"]) == 64
+        assert [item["task_key"] for item in preview["tasks"]] == ["read"]
+        db.expire_all()
+        assert db.get(AgentTeam, team_id).status == "failed"
+        current = db.get(AgentTeamTask, task.id)
+        assert (current.status, current.input_json, current.attempt_count,
+                db.query(AgentTeamEvent).filter_by(team_id=team_id).count()) == before
+    finally:
+        db.query(AgentTeamTask).filter_by(team_id=team_id).delete()
+        db.query(AgentTeamMember).filter_by(team_id=team_id).delete()
+        db.query(AgentTeam).filter_by(id=team_id).delete()
+        db.commit()
 
 
 @pytest.mark.parametrize("method,path", [("GET", "/api/reports"), ("GET", "/api/reports/{task}"),
@@ -458,7 +512,9 @@ def test_normal_owner_project_file_member_crud_persists_across_http_clients(matr
     file_id = file.json()["data"]["file_id"]
     for method, path, payload in [
         ("PUT", f"/api/projects/{project_id}", {"description": "已更新"}),
-        ("PUT", f"/api/code-files/{file_id}", {"content": "print(2)\n", "change_desc": "验收更新"}),
+        ("PUT", f"/api/code-files/{file_id}", {
+            "content": "print(2)\n", "change_desc": "验收更新", "expected_version": 1,
+        }),
         ("POST", f"/api/code-files/{file_id}/rename", {"file_name": "renamed.py"}),
         ("POST", f"/api/projects/{project_id}/members", {"user_id": 102, "role_in_project": "reviewer"}),
     ]:

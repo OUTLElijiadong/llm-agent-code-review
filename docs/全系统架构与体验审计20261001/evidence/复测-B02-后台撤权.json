@@ -1,0 +1,123 @@
+[
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-member",
+    "type": "pentest",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": null,
+      "total_issues": null
+    },
+    "project_list_score": null
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-owner",
+    "type": "pentest",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": null,
+      "total_issues": null
+    },
+    "project_list_score": null
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-member",
+    "type": "sandbox_test",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": null,
+      "total_issues": null
+    },
+    "project_list_score": null
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-owner",
+    "type": "sandbox_test",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": null,
+      "total_issues": null
+    },
+    "project_list_score": null
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": false,
+    "review_start_permission": true,
+    "task_status": "failed",
+    "coverage_reason": "authorization_revoked",
+    "error_message": "项目成员资格已撤销，后续审查执行已阻断",
+    "executor_invocations": []
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": true,
+    "review_start_permission": false,
+    "task_status": "failed",
+    "coverage_reason": "authorization_revoked",
+    "error_message": "review:start 权限已撤销，后续审查执行已阻断",
+    "executor_invocations": []
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": false,
+    "review_start_permission": false,
+    "task_status": "failed",
+    "coverage_reason": "authorization_revoked",
+    "error_message": "项目成员资格已撤销，后续审查执行已阻断",
+    "executor_invocations": []
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 1,
+    "cached_version": 1,
+    "committed_version": 2,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 2,
+    "cached_version": 2,
+    "committed_version": 3,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 3,
+    "cached_version": 3,
+    "committed_version": 4,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "xiaoling_tool_review_admission",
+    "calls_same_account_same_minute": 6,
+    "accepted": 6,
+    "errors": [],
+    "background_execution": "disabled; zero model calls"
+  }
+]

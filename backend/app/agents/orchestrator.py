@@ -993,21 +993,47 @@ class Orchestrator(BaseAgent):
         team_id: int,
         task_keys: Optional[List[str]] = None,
         strategy_changes: Optional[Dict[str, str]] = None,
+        supervisor_plan_sha256: str = "",
         ctx: Optional[AgentContext] = None,
     ) -> AgentResult:
-        """改变方案后重新排队当前账户团队的失败节点。"""
-        del ctx
+        """先预览高风险重试；确认后用精确摘要重新排队。"""
         if self._db is None or self._user is None:
             return AgentResult(success=False, error="重试团队缺少 DB 或用户上下文")
         try:
             from app.services import agent_team_service
 
+            keys = list(task_keys or [])
+            changes = dict(strategy_changes or {})
+            preview = agent_team_service.preview_retry_team(
+                self._db,
+                self._user,
+                team_id,
+                task_keys=keys,
+                strategy_changes=changes,
+            )
+            if preview["requires_confirmation"] and not supervisor_plan_sha256:
+                return AgentResult(
+                    success=True,
+                    data={
+                        **preview,
+                        "status": "awaiting_user_confirmation",
+                        "next_action": (
+                            "向当前用户展示受影响任务、风险和原因；仅在其明确确认后再次调用并回传 plan_sha256"
+                        ),
+                    },
+                )
+            if supervisor_plan_sha256:
+                # Responses 监督层会把携带摘要的第二次调用升级为确认项；服务层
+                # 再校验摘要是否对应此刻的精确任务图，避免模型自行放宽授权。
+                if ctx is None or not bool((ctx.extra or {}).get("supervisor_user_confirmed")):
+                    return AgentResult(success=False, error="带确认摘要的重试必须先由当前用户确认本次计划")
             data = agent_team_service.retry_team(
                 self._db,
                 self._user,
                 team_id,
-                task_keys=list(task_keys or []),
-                strategy_changes=dict(strategy_changes or {}),
+                task_keys=keys,
+                strategy_changes=changes,
+                supervisor_plan_sha256=supervisor_plan_sha256,
             )
             return AgentResult(
                 success=True,

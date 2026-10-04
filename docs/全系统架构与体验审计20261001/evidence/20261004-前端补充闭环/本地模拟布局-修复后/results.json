@@ -1,0 +1,260 @@
+{
+  "scope": "local mocked isolated components, persistent normal Chrome profile, desktop viewport",
+  "results": [
+    {
+      "view": "team",
+      "width": 375,
+      "tailVisible": true,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 375,
+      "tailVisible": false,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 73
+    },
+    {
+      "view": "issues",
+      "width": 375,
+      "tailVisible": true,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 90,
+          "width": 231
+        },
+        {
+          "x": 90,
+          "width": 231
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 375,
+      "tailVisible": false,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "team",
+      "width": 768,
+      "tailVisible": true,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 768,
+      "tailVisible": false,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 49
+    },
+    {
+      "view": "issues",
+      "width": 768,
+      "tailVisible": true,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 522,
+          "width": 192
+        },
+        {
+          "x": 522,
+          "width": 192
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 768,
+      "tailVisible": false,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "team",
+      "width": 1280,
+      "tailVisible": true,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 1280,
+      "tailVisible": false,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 49
+    },
+    {
+      "view": "issues",
+      "width": 1280,
+      "tailVisible": true,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 1034,
+          "width": 192
+        },
+        {
+          "x": 1034,
+          "width": 192
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 1280,
+      "tailVisible": false,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    }
+  ],
+  "errors": [],
+  "serverRequests": [
+    {
+      "method": "GET",
+      "path": "/api/code-files/1",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/issues",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/1",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/issues",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/code-files/1",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/issues",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "mocked": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/7",
+      "mocked": true
+    }
+  ]
+}

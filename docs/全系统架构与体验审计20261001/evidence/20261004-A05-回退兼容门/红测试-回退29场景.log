@@ -1,0 +1,31 @@
+test_artifacts=/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP
+PASS write_version
+PASS legacy_labels
+PASS legacy_git
+PASS missing_evidence
+PASS conflicting_labels
+PASS wrong_revision
+PASS invalid_version
+PASS digest_changed
+PASS ops_default_drift
+PASS ops_masked_drift
+PASS ops_running_drift
+PASS ops_consistent
+PASS restore_missing_image
+PASS restore_missing_evidence
+PASS restore_invalid_heads
+PASS restore_pinned_image
+PASS rollback_version
+PASS rollback_legacy
+PASS rollback_missing_evidence
+FAIL rollback_ledger_compatible (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_compatible.log)
+FAIL rollback_ledger_empty_old (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_empty_old.log)
+FAIL rollback_ledger_written_old (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_written_old.log)
+FAIL rollback_ledger_reference_without_schema (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_reference_without_schema.log)
+FAIL rollback_ledger_invalid_json (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_invalid_json.log)
+FAIL rollback_ledger_probe_failure (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_probe_failure.log)
+FAIL rollback_ledger_probe_unknown (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_probe_unknown.log)
+FAIL rollback_ledger_db_failure (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_db_failure.log)
+FAIL rollback_ledger_schema_unknown (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_schema_unknown.log)
+FAIL rollback_ledger_legacy (/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T//prism-release-tests.A3KTqP/release-binding/rollback_ledger_legacy.log)
+release binding tests: passed=19 failed=10

@@ -300,7 +300,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     auth.roles = ['admin']
     const wrapper = mountPage()
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(30_000)
 
     expect(mocks.getSystemStatus).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('服务器状态')
@@ -319,7 +319,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     auth.roles = roles
     const wrapper = mountPage()
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(10_000)
+    await vi.advanceTimersByTimeAsync(30_000)
 
     expect(mocks.getSystemStatus).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('服务器状态')
@@ -342,7 +342,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     mocks.getSystemStatus.mockRejectedValueOnce(error)
     const wrapper = mountPage()
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(20_000)
+    await vi.advanceTimersByTimeAsync(120_000)
 
     expect(mocks.getSystemStatus).toHaveBeenCalledOnce()
     expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(5)
@@ -352,7 +352,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     await flushPromises()
     expect(mocks.getSystemStatus).toHaveBeenCalledTimes(2)
     expect(card(wrapper, '服务器状态').attributes('data-state')).toBe('success')
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     expect(mocks.getSystemStatus).toHaveBeenCalledTimes(3)
   })
 
@@ -362,7 +362,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     await flushPromises()
 
     expect(card(wrapper, '服务器状态').text()).not.toContain('自动刷新已暂停')
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     expect(mocks.getSystemStatus).toHaveBeenCalledTimes(2)
     expect(card(wrapper, '服务器状态').attributes('data-state')).toBe('success')
   })
@@ -439,7 +439,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     const wrapper = mountPage()
     await flushPromises()
     request.mockRejectedValueOnce(new Error('刷新失败'))
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
 
     const section = card(wrapper, title)
@@ -465,7 +465,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     mocks.getAgentsActivity.mockReturnValue(deferred().promise)
     const wrapper = mountPage()
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(10_000)
+    await vi.advanceTimersByTimeAsync(60_000)
 
     expect(mocks.getAgentsActivity).toHaveBeenCalledTimes(1)
     expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(3)
@@ -476,7 +476,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     const wrapper = mountPage()
     await flushPromises()
     mocks.getAgentsActivity.mockRejectedValueOnce(new Error('汇总查询失败'))
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     const [onEvent, options] = mocks.subscribeAgentEvents.mock.calls[0]
     options.onStatus('connected')
     onEvent({ type: 'progress', agent: 'review_agent', message: '单条实时事件', timestamp: '2026-09-06T00:01:00Z' } as AgentEvent)
@@ -487,6 +487,37 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     expect(section.text()).toContain('上次成功数据已过期')
     expect(section.attributes('data-state')).toBe('error')
     expect(section.text()).toContain('运行状态未知')
+  })
+
+  it('后台页签暂停定时请求和 SSE，回到前台立即刷新后恢复低频兜底', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get')
+    visibility.mockReturnValue('visible')
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(mocks.getSystemStatus).toHaveBeenCalledTimes(1)
+    expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(1)
+    expect(mocks.subscribeAgentEvents).toHaveBeenCalledOnce()
+
+    visibility.mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(mocks.getSystemStatus).toHaveBeenCalledTimes(1)
+    expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(1)
+    expect(mocks.closeStream).toHaveBeenCalledOnce()
+
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(mocks.getSystemStatus).toHaveBeenCalledTimes(2)
+    expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(2)
+    expect(mocks.subscribeAgentEvents).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(mocks.getSystemStatus).toHaveBeenCalledTimes(3)
+    expect(mocks.getSecurityPosture).toHaveBeenCalledTimes(3)
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    visibility.mockRestore()
   })
 
   it('卸载后清理轮询、事件流及地图，忽略尚未返回的数据', async () => {

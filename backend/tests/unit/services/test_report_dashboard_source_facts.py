@@ -9,6 +9,7 @@ from app.core.exceptions import NotFoundError
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
@@ -22,6 +23,14 @@ from app.services import dashboard_service, report_service, review_service, secu
 def source_owner(db):
     owner = User(username="source-owner", password="x", role="user", status=1)
     db.add(owner)
+    db.flush()
+    # 本组验证已授权来源的数据一致性；权限缺失/撤权另由真实 HTTP 矩阵覆盖。
+    role = Role(name="来源报告读者", code="user", status="active", is_builtin=1)
+    permission = Permission(code="report:view", name="报告查看", module="report", type="api")
+    db.add_all([role, permission])
+    db.flush()
+    db.add_all([UserRole(user_id=owner.id, role_id=role.id),
+                RolePermission(role_id=role.id, permission_id=permission.id)])
     db.flush()
     return owner
 
@@ -273,7 +282,7 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
     assert summary["review_count"] == 0
     assert summary["avg_score"] == 0
     assert summary["recent_tasks"] == []
-    assert summary["total_issues"] == 2
+    assert summary["total_issues"] == (0 if source == "pentest" else 2)
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
@@ -294,7 +303,10 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
         with pytest.raises(NotFoundError):
             report_service.get_report_detail(db, reader, task.id)
         assert report_service.list_reports(db, reader)["total"] == 0
-    assert dashboard_service.get_summary(db, member)["total_issues"] == 2
+    # 项目成员可见普通审查指标，但私域报告仍要求发起人/管理员及 report:view。
+    assert dashboard_service.get_summary(db, member)["total_issues"] == (
+        0 if source in {"sandbox_test", "pentest"} else 2
+    )
     assert dashboard_service.get_summary(db, outsider)["total_issues"] == 0
 
 

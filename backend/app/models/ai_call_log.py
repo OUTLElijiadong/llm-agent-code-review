@@ -20,6 +20,7 @@ class AiCallLog(Base, UsageAttributionMixin, IdMixin):
     __table_args__ = (
         Index("ix_ai_call_log_task", "task_id"),
         Index("ix_ai_call_log_user_create", "user_id", "create_time"),
+        Index("ix_ai_call_log_time_agent_model", "create_time", "agent_label", "model_name"),
         Index("ix_ai_call_log_status", "status"),
         Index("ix_ai_call_log_agent_label", "agent_label"),
     )

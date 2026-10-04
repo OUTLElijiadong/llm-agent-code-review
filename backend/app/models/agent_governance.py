@@ -141,6 +141,7 @@ class ToolCallLog(Base, IdMixin, TimestampMixin):
     __tablename__ = "tool_call_log"
     __table_args__ = (
         Index("ix_tool_call_agent", "agent_code"),
+        Index("ix_tool_call_time_agent", "create_time", "agent_code"),
         Index("ix_tool_call_status", "status"),
         Index("ix_tool_call_risk", "risk_level"),
         Index("ix_tool_call_copilot_request", "copilot_request_id", unique=True),

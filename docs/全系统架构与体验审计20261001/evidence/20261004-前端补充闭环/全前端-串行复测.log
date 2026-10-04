@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  132 passed (132)
+      Tests  1550 passed (1550)
+   Start at  16:26:15
+   Duration  18.62s (transform 9.65s, setup 1.46s, import 46.48s, tests 47.02s, environment 51.63s)
+

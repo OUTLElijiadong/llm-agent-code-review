@@ -1,0 +1,19 @@
+{
+  "removed": [
+    {
+      "path": "/opt/code-review/backups/mysql-general-log-20260819T192021/general_log.CSV",
+      "bytes": 26243998805,
+      "mtime": 1787138139.87932
+    },
+    {
+      "path": "/opt/code-review/backups/mysql-general-log-20260819T192021/general_log.CSM",
+      "bytes": 35,
+      "mtime": 1787138178.6055405
+    }
+  ],
+  "backup_sha256": "f5bb4386e9ffda2f349e6e07345920f73f706d2ce793faa35dd49930e9d15306",
+  "backup": "/opt/prism-releases/310ea1a8095428d670c0404a05b4dc643ad0027e/backups/code_review_20261004T081157Z_310ea1a80954.sql.gz",
+  "restore_gate": "cr_testdb/prism_verify_20261004081824_24910 103 tables / 058 verified for the fixed backup SHA",
+  "disk_before": "Filesystem        1B-blocks         Used   Available Use% Mounted on\n/dev/vda1      193205350400 171179376640 22025973760  89% /\n",
+  "disk_after": "Filesystem        1B-blocks         Used   Available Use% Mounted on\n/dev/vda1      193205350400 171179376640 22025973760  89% /\n"
+}

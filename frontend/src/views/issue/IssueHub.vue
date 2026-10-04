@@ -68,7 +68,7 @@
           @input="reloadDebounced"
           @change="reload"
         />
-        <el-button v-if="canBatchIssues" type="primary" :disabled="!selected.length" @click="onBatchMarkFixed">
+        <el-button v-if="canBatchIssues" type="primary" :loading="batchSubmitting" :disabled="!selected.length" @click="onBatchMarkFixed">
           批量标记已修复 ({{ selected.length }})
         </el-button>
       </div>
@@ -170,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -195,8 +195,10 @@ const loading = ref(false)
 const projectsLoading = ref(false)
 const projectLoadError = ref('')
 const issueLoadError = ref('')
+const lastSuccessfulIssueScope = ref('')
 const rows = ref<IssueListItemOut[]>([])
 const selected = ref<IssueListItemOut[]>([])
+const batchSubmitting = ref(false)
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -246,16 +248,20 @@ function statusLabel(s: string): string {
 }
 
 async function loadProjects(): Promise<void> {
-  if (projectsLoading.value) return
+  if (disposed || projectsLoading.value || !userStore.hasPermission('project:view')) return
+  const isCurrent = captureAccountTarget()
+  const generation = ++projectRequestGeneration
   projectsLoading.value = true
   try {
     const data = await getProjects({ page: 1, page_size: 100 })
+    if (!isCurrent() || generation !== projectRequestGeneration) return
     projects.value = data.items
     projectLoadError.value = ''
   } catch (error) {
+    if (!isCurrent() || generation !== projectRequestGeneration) return
     projectLoadError.value = requestErrorMessage(error, '暂时无法读取项目选项，请稍后重试。')
   } finally {
-    projectsLoading.value = false
+    if (isCurrent() && generation === projectRequestGeneration) projectsLoading.value = false
   }
 }
 
@@ -266,28 +272,95 @@ function requestErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+let issueRequestGeneration = 0
+let projectRequestGeneration = 0
+let accountGeneration = 0
+let scopeGeneration = 0
+let actionPermissionGeneration = 0
+let disposed = false
+function captureAccountTarget(): () => boolean {
+  const generation = accountGeneration
+  const accountId = userStore.profile?.id
+  const token = userStore.token
+  return () => !disposed && generation === accountGeneration
+    && accountId === userStore.profile?.id && token === userStore.token
+}
+onBeforeUnmount(() => {
+  disposed = true
+  accountGeneration += 1
+  projectRequestGeneration += 1
+  issueRequestGeneration += 1
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+function losesIssueVisibility(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const value = error as { code?: unknown; status?: unknown; response?: { status?: unknown } }
+  return [value.status, value.response?.status, value.code].some((candidate) => {
+    const numeric = Number(candidate)
+    return Number.isFinite(numeric)
+      && ([401, 403, 404].includes(numeric) || [401, 403, 404].includes(Math.floor(numeric / 100)))
+  })
+}
+
+function issueScopeLabel(query: {
+  project_id?: number
+  severity?: string
+  issue_type?: string
+  status?: string
+  keyword?: string
+  page: number
+}): string {
+  const project = projects.value.find((item) => item.id === query.project_id)?.project_name
+    || (query.project_id ? `项目 #${query.project_id}` : '全部项目')
+  return [
+    project,
+    query.severity ? `严重度 ${query.severity}` : '',
+    query.issue_type ? `类型 ${query.issue_type}` : '',
+    query.status ? `状态 ${statusLabel(query.status)}` : '状态 处理中',
+    query.keyword ? `关键词“${query.keyword}”` : '',
+    `第 ${query.page} 页`,
+  ].filter(Boolean).join(' · ')
+}
+
 async function loadIssues(): Promise<void> {
+  if (disposed || !userStore.hasPermission('issue:view')) return
+  const isCurrent = captureAccountTarget()
+  const requestGeneration = ++issueRequestGeneration
+  const query = {
+    project_id: filters.project_id,
+    severity: filters.severity || undefined,
+    issue_type: filters.issue_type || undefined,
+    status: filters.status === 'active' || !filters.status ? undefined : filters.status,
+    keyword: filters.keyword || undefined,
+    page: page.value,
+    page_size: pageSize.value,
+  }
   loading.value = true
   try {
-    const data = await listIssues({
-      project_id: filters.project_id,
-      severity: filters.severity || undefined,
-      issue_type: filters.issue_type || undefined,
-      status: filters.status === 'active' || !filters.status ? undefined : filters.status,
-      keyword: filters.keyword || undefined,
-      page: page.value,
-      page_size: pageSize.value,
-    })
+    const data = await listIssues(query)
+    if (!isCurrent() || requestGeneration !== issueRequestGeneration) return
     rows.value = data.items
     total.value = data.total
+    lastSuccessfulIssueScope.value = issueScopeLabel(query)
     issueLoadError.value = ''
     // 数据刷新后勾选可能指向已不存在的问题,按新列表收敛(与原表格 selection 随数据重置一致)
     selected.value = selected.value.filter((s) => rows.value.some((r) => r.id === s.id))
   } catch (error) {
+    if (!isCurrent() || requestGeneration !== issueRequestGeneration) return
     const message = requestErrorMessage(error, '暂时无法读取问题，请稍后重试。')
-    issueLoadError.value = rows.value.length ? `${message} 当前显示上次成功加载的结果。` : message
+    if (losesIssueVisibility(error)) {
+      rows.value = []
+      total.value = 0
+      selected.value = []
+      issueLoadError.value = `${message} 旧问题已清空，请确认当前账号仍有查看权限后重试。`
+    } else {
+      issueLoadError.value = rows.value.length
+        ? `${message} 当前显示上次成功加载的结果（范围：${lastSuccessfulIssueScope.value}）。`
+        : message
+    }
   } finally {
-    loading.value = false
+    if (isCurrent() && requestGeneration === issueRequestGeneration) loading.value = false
   }
 }
 
@@ -308,6 +381,51 @@ function reloadDebounced(): void {
 /** 展开区(描述全文)状态:按问题 id 记录,默认全部收起 */
 const expandedIds = ref<Set<number>>(new Set())
 
+watch(
+  [() => userStore.profile?.id, () => userStore.token, () => userStore.hasPermission('issue:view')],
+  () => {
+    const generation = ++accountGeneration
+    issueRequestGeneration += 1
+    projectRequestGeneration += 1
+    rows.value = []
+    total.value = 0
+    selected.value = []
+    expandedIds.value = new Set()
+    projects.value = []
+    projectLoadError.value = ''
+    issueLoadError.value = ''
+    lastSuccessfulIssueScope.value = ''
+    projectsLoading.value = false
+    loading.value = false
+    batchSubmitting.value = false
+    filters.project_id = undefined
+    if (searchTimer) clearTimeout(searchTimer)
+    void nextTick(() => {
+      if (!disposed && generation === accountGeneration) void Promise.all([loadProjects(), loadIssues()])
+    })
+  },
+  { flush: 'sync' },
+)
+
+watch(
+  () => [filters.project_id, filters.severity, filters.issue_type, filters.status, filters.keyword, page.value, pageSize.value],
+  () => { scopeGeneration += 1 },
+  { flush: 'sync' },
+)
+
+watch([canHandleIssues, canBatchIssues], () => { actionPermissionGeneration += 1 }, { flush: 'sync' })
+watch(
+  () => userStore.hasPermission('project:view'),
+  (allowed) => {
+    projectRequestGeneration += 1
+    projects.value = []
+    projectsLoading.value = false
+    projectLoadError.value = ''
+    if (allowed) void loadProjects()
+  },
+  { flush: 'sync' },
+)
+
 function toggleExpand(id: number): void {
   if (expandedIds.value.has(id)) expandedIds.value.delete(id)
   else expandedIds.value.add(id)
@@ -322,8 +440,12 @@ function toggleSelect(row: IssueListItemOut): void {
 
 async function onSetStatus(row: IssueListItemOut, status: string): Promise<void> {
   if (!canHandleIssues.value) return
+  const isCurrent = captureAccountTarget()
+  const requestedScope = scopeGeneration
+  const requestedPermission = actionPermissionGeneration
   try {
     await updateStatus(row.id, { status })
+    if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canHandleIssues.value) return
     ElMessage.success('状态已更新')
     if (status === 'fixed' || status === 'ignored') {
       loadIssues()
@@ -331,33 +453,51 @@ async function onSetStatus(row: IssueListItemOut, status: string): Promise<void>
       row.status = status
     }
   } catch {
+    if (!isCurrent()) return
     ElMessage.error('状态更新失败')
   }
 }
 
 async function onBatchMarkFixed(): Promise<void> {
-  if (!canBatchIssues.value) return
+  if (!canBatchIssues.value || batchSubmitting.value) return
   if (!selected.value.length) return
+  const ids = selected.value.map((row) => row.id)
+  const isCurrent = captureAccountTarget()
+  const requestedScope = scopeGeneration
+  const requestedPermission = actionPermissionGeneration
+  batchSubmitting.value = true
   try {
     // 二次确认,避免误点一次批量改几十条状态
     await ElMessageBox.confirm(
-      `确定将选中的 ${selected.value.length} 条问题标记为已修复吗?`,
+      `确定将选中的 ${ids.length} 条问题标记为已修复吗?`,
       '批量标记已修复',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
+    if (isCurrent()) batchSubmitting.value = false
     return // 用户取消
+  }
+  if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canBatchIssues.value) {
+    if (isCurrent()) {
+      batchSubmitting.value = false
+      ElMessage.error('账号、权限或筛选范围已变化，本次批量操作已取消。')
+    }
+    return
   }
   try {
     await batchUpdateStatus({
-      ids: selected.value.map((r) => r.id),
+      ids,
       status: 'fixed',
     })
-    ElMessage.success(`已批量标记 ${selected.value.length} 条为已修复`)
-    selected.value = []
+    if (!isCurrent() || requestedScope !== scopeGeneration) return
+    ElMessage.success(`已批量标记 ${ids.length} 条为已修复`)
+    selected.value = selected.value.filter((row) => !ids.includes(row.id))
     loadIssues()
   } catch {
+    if (!isCurrent()) return
     ElMessage.error('批量更新失败')
+  } finally {
+    if (isCurrent()) batchSubmitting.value = false
   }
 }
 

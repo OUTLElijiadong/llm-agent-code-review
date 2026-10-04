@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.language_detector import detect_language
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.agent_capability import SandboxEnvironment
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -596,20 +596,28 @@ def _create_file(db: Session, user: User, project_id: int, file_name: str,
 
 
 def _get_accessible_file(db: Session, user: User, file_id: int, *, need_write: bool = False) -> CodeFile:
-    """先校验项目可见性及成员权限，写操作与运维隔离共用项目行锁。"""
+    """先读取文件定位项目，再按项目行、文件行的顺序锁定并刷新写目标。"""
     code_file = db.get(CodeFile, file_id)
     if not code_file or code_file.status == "deleted":
         raise NotFoundError("文件不存在", code=40400)
     if need_write:
+        project_id = code_file.project_id
         project = (
             db.query(Project)
-            .filter(Project.id == code_file.project_id)
+            .filter(Project.id == project_id)
             .with_for_update()
             .populate_existing()
             .first()
         )
         if project is None:
             raise NotFoundError("项目不存在", code=40400)
+        # 项目行锁是所有文件写入的统一串行化点；随后以当前读刷新文件行，
+        # 防止等待锁期间 ORM identity map 仍持有旧 version_no/content。
+        db.refresh(code_file, with_for_update=True)
+        if code_file.status == "deleted":
+            raise NotFoundError("文件不存在", code=40400)
+        if code_file.project_id != project.id:
+            raise ConflictError("文件所属项目已变化，请刷新后重试", code=40904)
     require_project_access(db, code_file.project_id, user, need_write=need_write)
     return code_file
 
@@ -732,23 +740,14 @@ def get_file_meta(db: Session, user: User, file_id: int) -> dict:
     }
 
 
-def update_content(db: Session, user: User, file_id: int, content: str, change_desc: Optional[str] = None) -> int:
-    """更新文件内容并生成新版本
-
-    Args:
-        db: 数据库会话
-        user: 当前用户
-        file_id: 文件ID
-        content: 新的代码内容
-        change_desc: 修改说明
-
-    Returns:
-        int: 新版本号
-
-    Raises:
-        ValidationError: 二进制文件不允许在线编辑
-    """
-    code_file = _get_accessible_file(db, user, file_id, need_write=True)
+def _store_new_content_version(
+    db: Session,
+    user: User,
+    code_file: CodeFile,
+    content: str,
+    change_desc: Optional[str],
+) -> int:
+    """将已经锁定并校验权限的文件写入为新版本。"""
     if code_file.is_binary == 1:
         raise ValidationError("二进制文件不支持在线编辑", code=40001)
     code_file.content = content
@@ -767,6 +766,42 @@ def update_content(db: Session, user: User, file_id: int, content: str, change_d
     ))
     db.commit()
     return code_file.version_no
+
+
+def update_content(
+    db: Session,
+    user: User,
+    file_id: int,
+    content: str,
+    change_desc: Optional[str] = None,
+    *,
+    expected_version: int,
+) -> int:
+    """更新文件内容并生成新版本
+
+    Args:
+        db: 数据库会话
+        user: 当前用户
+        file_id: 文件ID
+        content: 新的代码内容
+        change_desc: 修改说明
+        expected_version: 编辑器打开时读到的版本号；必填，不一致时拒绝覆盖
+
+    Returns:
+        int: 新版本号
+
+    Raises:
+        ValidationError: 二进制文件不允许在线编辑
+        ConflictError: expected_version 与当前文件版本不匹配
+    """
+    code_file = _get_accessible_file(db, user, file_id, need_write=True)
+    if code_file.version_no != expected_version:
+        raise ConflictError(
+            f"文件已更新到 v{code_file.version_no}，当前草稿基于 v{expected_version}，未覆盖服务器内容",
+            code=40904,
+            next_action="本地草稿仍保留；复制草稿后刷新文件，与最新版本比较并合并后再保存",
+        )
+    return _store_new_content_version(db, user, code_file, content, change_desc)
 
 
 def rename_file(db: Session, user: User, file_id: int, file_name: str, file_path: Optional[str] = None) -> None:
@@ -856,4 +891,9 @@ def restore_version(db: Session, user: User, file_id: int, version_no: int) -> i
         int: 新版本号
     """
     version = get_version(db, user, file_id, version_no)
-    return update_content(db, user, file_id, version.content, f"回滚到版本v{version_no}")
+    # 历史恢复是用户显式选择的覆盖操作；先取得当前文件写锁，再从最新版本号递增，
+    # 避免恢复动作绕过统一锁序或使用进入服务前缓存的旧 CodeFile。
+    code_file = _get_accessible_file(db, user, file_id, need_write=True)
+    return _store_new_content_version(
+        db, user, code_file, version.content, f"回滚到版本v{version_no}",
+    )

@@ -1,0 +1,5 @@
+{"scenario": "high_risk_retry", "initially_confirmed": true, "task_queued_attempt": 2, "fingerprint_changed": true, "executed": false, "blocked_code": "supervisor_confirmation_required"}
+{"scenario": "dag_wave_barrier", "short_finished": true, "dependent_claimed_while_long_running": false, "dependent_claimed_after_long_finished": true, "events": ["claim:short", "claim:long", "start:short", "done:short", "start:long", "done:long", "claim:after_short", "start:after_short"]}
+{"scenario": "semantic_omission", "result_status": "completed", "original_fact_reached_compactor": true, "fact_in_final_model_input": true, "compactor_calls": 4}
+{"scenario": "published_delegate_version_drift", "parent_release_id": 2, "frozen_target_release_id": 1, "context_changed": false, "v1_prompt_present_after_update": true, "v2_prompt_leaked": false, "explicit_execution_node": true, "resolution_failed": false}
+{"scenario": "cumulative_checkpoints", "runs": 100, "unique_transcript_bytes": 1004190, "stored_checkpoint_bytes": 50736535, "storage_amplification": 50.52, "history_recovered_items": 100, "history_read_seconds": 0.128}

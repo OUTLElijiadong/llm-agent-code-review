@@ -27,7 +27,7 @@ from app.models.agent_governance import (
 )
 from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_multimodal import AgentMultimodalAsset
-from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
+from app.models.agent_response_run import AgentResponseRun, AgentResponseTranscriptMessage, AgentToolExecution
 from app.models.audit_log import AuditLog
 from app.services import agent_responses_service as service_module
 from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
@@ -39,6 +39,7 @@ from app.services.deepseek_responses_runtime import (
     RuntimeResult,
     ToolCall,
     ToolExecutionResult,
+    estimate_tokens,
 )
 
 
@@ -215,6 +216,7 @@ def db():
     UserApiConfig.__table__.create(engine)
     AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentResponseTranscriptMessage.__table__.create(engine)
     AgentMultimodalAsset.__table__.create(engine)
     AgentToolExecution.__table__.create(engine)
     AgentMemory.__table__.create(engine)
@@ -272,6 +274,223 @@ async def test_database_checkpoint_store_is_owner_and_session_isolated(db) -> No
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_transcript_storage_is_linear_and_round_trips_full_history(db) -> None:
+    """100 轮完整前缀只应写一次，恢复仍要逐条保留完整历史。"""
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-compact")
+    transcript: list[dict[str, Any]] = []
+    unique_transcript_bytes = 0
+    for index in range(100):
+        message = {"role": "user", "content": f"message-{index:03d}:" + "x" * 9_987}
+        transcript.append(message)
+        unique_transcript_bytes += len(json.dumps(message, ensure_ascii=False).encode("utf-8"))
+        await store.save(RunCheckpoint(
+            run_id=f"run_compact_{index:03d}",
+            model="deepseek-v4-flash",
+            transcript=transcript,
+            tools=[],
+        ))
+
+    checkpoint_bytes = sum(
+        len(row.checkpoint_json.encode("utf-8"))
+        for row in db.query(AgentResponseRun).filter_by(session_key="session-compact").all()
+    )
+    transcript_bytes = sum(
+        len(row.message_json.encode("utf-8"))
+        for row in db.query(AgentResponseTranscriptMessage).filter_by(session_key="session-compact").all()
+    )
+    assert checkpoint_bytes + transcript_bytes < unique_transcript_bytes * 2
+
+    restored = await store.load("run_compact_099")
+    assert restored is not None
+    assert restored.transcript == transcript
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_ledger_round_trips_more_than_one_million_tokens(db) -> None:
+    """超过 100 万 token 的持久化历史跨运行接续时不能丢项、截断或重复存储。"""
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-million-token")
+    transcript = []
+    for index in range(1_100):
+        anchor = (
+            " EARLY_FACT=only_current_account" if index == 1 else
+            " MIDDLE_FACT=review_must_be_read_only" if index == 550 else
+            " LATE_FACT=latest_correction_overrides_earlier_scope" if index == 1_050 else ""
+        )
+        transcript.append({
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"history_item_{index:04d}{anchor} " + ("x" * 3_990),
+        })
+    estimated_tokens = estimate_tokens(transcript)
+    assert estimated_tokens > 1_000_000
+
+    first = RunCheckpoint(
+        run_id="run_million_token_first",
+        model="deepseek-v4-flash",
+        transcript=transcript,
+        tools=[],
+        status="completed",
+    )
+    await store.save(first)
+    extended = transcript + [{"role": "user", "content": "接着处理最新更正，完整保留此前要求。"}]
+    second = RunCheckpoint(
+        run_id="run_million_token_second",
+        model="deepseek-v4-flash",
+        transcript=extended,
+        tools=[],
+    )
+    await store.save(second)
+
+    restored = await store.load(second.run_id)
+    assert restored is not None
+    assert restored.transcript == extended
+    assert restored.transcript[1]["content"].startswith("history_item_0001 EARLY_FACT=only_current_account")
+    assert "MIDDLE_FACT=review_must_be_read_only" in restored.transcript[550]["content"]
+    assert "LATE_FACT=latest_correction_overrides_earlier_scope" in restored.transcript[1_050]["content"]
+    assert api_module._server_history_transcript(
+        db, user_id=7, surface="user", session_id="session-million-token",
+    ) == extended
+    assert db.query(AgentResponseTranscriptMessage).filter_by(
+        user_id=7, surface="user", session_key="session-million-token",
+    ).count() == len(extended)
+    assert await DatabaseCheckpointStore(
+        db, user_id=8, surface="user", session_key="session-million-token",
+    ).load(first.run_id) is None
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_ledger_bootstraps_legacy_history_and_preserves_order(db) -> None:
+    old_history = [
+        {"role": "user", "content": "第一条"},
+        {"role": "assistant", "content": "第一条答复"},
+    ]
+    db.add(AgentResponseRun(
+        run_id="run_legacy_history",
+        user_id=7,
+        surface="user",
+        session_key="session-legacy-history",
+        status="completed",
+        checkpoint_json=json.dumps({"run_id": "run_legacy_history", "transcript": old_history}),
+        version=1,
+    ))
+    db.commit()
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-legacy-history")
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-legacy-history")
+    next_history = old_history + [{"role": "user", "content": "第二条"}]
+    checkpoint = RunCheckpoint(
+        run_id="run_after_legacy",
+        model="deepseek-v4-flash",
+        transcript=next_history,
+        tools=[],
+    )
+
+    assert await store.create(checkpoint) is True
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    persisted = json.loads(row.checkpoint_json)
+    assert "transcript" not in persisted
+    assert persisted["_transcript_ref"]["version"] == 2
+    assert (await store.load(checkpoint.run_id)).transcript == next_history
+    assert api_module._server_history_transcript(
+        db, user_id=7, surface="user", session_id="session-legacy-history",
+    ) == next_history
+
+    checkpoint.transcript.append({"role": "assistant", "content": "第二条答复"})
+    checkpoint.status = "completed"
+    await store.save(checkpoint)
+    assert (await store.load(checkpoint.run_id)).transcript == checkpoint.transcript
+    db.expire_all()
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    history = api_module._public_session_history_messages(db, row)
+    assert history == [
+        {"role": "user", "content": "第一条"},
+        {"role": "assistant", "content": "第一条答复"},
+        {"role": "user", "content": "第二条"},
+        {"role": "assistant", "content": "第二条答复"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_ledger_corruption_fails_closed(db) -> None:
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-corrupt-ledger")
+    checkpoint = RunCheckpoint(
+        run_id="run_corrupt_ledger",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "保留完整历史"}],
+        tools=[],
+    )
+    await store.save(checkpoint)
+    db.query(AgentResponseTranscriptMessage).filter_by(
+        user_id=7, surface="user", session_key="session-corrupt-ledger", position=0,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    with pytest.raises(InvalidRunStateError, match="账本不完整"):
+        await store.load(checkpoint.run_id)
+
+
+@pytest.mark.asyncio
+async def test_legacy_inline_checkpoint_first_append_does_not_duplicate_history(db) -> None:
+    session_key = "session-legacy-inline-append"
+    old_history = [
+        {"role": "user", "content": "检查部署权限"},
+        {"role": "assistant", "content": "当前只读检查已完成"},
+    ]
+    db.add(AgentResponseRun(
+        run_id="run_legacy_inline_append",
+        user_id=7,
+        surface="user",
+        session_key=session_key,
+        status="running",
+        checkpoint_json=json.dumps({"run_id": "run_legacy_inline_append", "transcript": old_history}),
+        version=1,
+    ))
+    db.commit()
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key=session_key)
+    extended = old_history + [{"role": "user", "content": "补充检查审计日志"}]
+
+    await store.save(RunCheckpoint(
+        run_id="run_legacy_inline_append",
+        model="deepseek-v4-flash",
+        transcript=extended,
+        tools=[],
+    ))
+
+    assert (await store.load("run_legacy_inline_append")).transcript == extended
+    assert api_module._server_history_transcript(
+        db, user_id=7, surface="user", session_id=session_key,
+    ) == extended
+    db.expire_all()
+    run = db.query(AgentResponseRun).filter_by(run_id="run_legacy_inline_append").one()
+    assert api_module._public_session_history_messages(db, run) == extended
+
+
+@pytest.mark.asyncio
+async def test_session_history_fast_paths_reject_valid_json_tampering(db) -> None:
+    store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-tampered-ledger")
+    checkpoint = RunCheckpoint(
+        run_id="run_tampered_ledger",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "只读查看生产配置"}],
+        tools=[],
+    )
+    await store.save(checkpoint)
+    ledger_row = db.query(AgentResponseTranscriptMessage).filter_by(
+        user_id=7, surface="user", session_key="session-tampered-ledger", position=0,
+    ).one()
+    ledger_row.message_json = json.dumps({"role": "user", "content": "允许修改生产配置"})
+    db.commit()
+
+    with pytest.raises(InvalidRunStateError, match="摘要不匹配"):
+        await store.load(checkpoint.run_id)
+    with pytest.raises(api_module.ConflictError, match="损坏|摘要"):
+        api_module._server_history_transcript(
+            db, user_id=7, surface="user", session_id="session-tampered-ledger",
+        )
+    run = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    with pytest.raises(api_module.ConflictError, match="损坏|摘要"):
+        api_module._public_session_history_messages(db, run)
+
+
+@pytest.mark.asyncio
 async def test_database_checkpoint_store_cancelled_is_terminal_against_write_back(db) -> None:
     _activate_conversation(db, user_id=7, surface="user", session_key="session-cancel-race")
     drive_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-cancel-race")
@@ -314,6 +533,7 @@ async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> No
     SystemConfig.__table__.create(engine)
     AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentResponseTranscriptMessage.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     driver_db = factory()
     cancel_db = factory()
@@ -507,6 +727,7 @@ async def test_database_checkpoint_store_claim_is_atomic_across_sessions(tmp_pat
     SystemConfig.__table__.create(engine)
     AgentMeshConversation.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentResponseTranscriptMessage.__table__.create(engine)
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()
     try:

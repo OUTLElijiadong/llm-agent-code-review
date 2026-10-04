@@ -4,9 +4,22 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+from sqlalchemy import event
+
+import app.api.v1.admin_overview as admin_overview
 from app.api.v1.admin_overview import _agent_activity
 from app.models.agent_governance import AgentProfile, ToolCallLog
 from app.models.ai_call_log import AiCallLog
+
+
+def _freeze_admin_overview_clock(monkeypatch, fixed_now: datetime) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now.astimezone(tz) if tz is not None else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(admin_overview, "datetime", FixedDateTime)
 
 
 def test_agent_activity_today_calls_merge_tool_and_ai_logs(db) -> None:
@@ -81,6 +94,57 @@ def test_agent_activity_excludes_old_ai_logs(db) -> None:
     assert by_code["manager"]["calls_today"] == 0
 
 
+def test_agent_activity_time_ranges_include_utc_midnight_and_exclude_previous_day(db, monkeypatch) -> None:
+    fixed_now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    _freeze_admin_overview_clock(monkeypatch, fixed_now)
+    today_start = datetime(2026, 10, 1)
+    db.add(AgentProfile(code="utc_boundary_agent", name="UTC边界探针", is_enabled=1))
+    db.add_all([
+        AiCallLog(
+            user_id=7,
+            agent_label="utc_boundary_agent",
+            model_name="deepseek-v4-flash",
+            status="success",
+            total_tokens=50,
+            create_time=today_start - timedelta(microseconds=1),
+        ),
+        AiCallLog(
+            user_id=7,
+            agent_label="utc_boundary_agent",
+            model_name="deepseek-v4-flash",
+            status="success",
+            total_tokens=30,
+            create_time=today_start,
+        ),
+    ])
+    db.add_all([
+        ToolCallLog(
+            agent_code="utc_boundary_agent",
+            tool_code="probe",
+            action=action,
+            resource="probe",
+            status="success",
+            risk_level="low",
+            decision="allow",
+            input_summary="",
+            output_summary="",
+            create_time=created_at,
+        )
+        for action, created_at in (
+            ("yesterday", today_start - timedelta(microseconds=1)),
+            ("today", today_start),
+        )
+    ])
+    db.commit()
+
+    row = next(item for item in _agent_activity(db) if item["agent_code"] == "utc_boundary_agent")
+    assert row["calls_today"] == 2
+    assert row["tool_calls_today"] == 1
+    assert row["model_calls_today"] == 1
+    assert row["model_tokens_today"] == 30
+    assert row["purpose"] == "today"
+
+
 def test_agent_activity_normalizes_discussion_labels_and_falls_back_to_component_tokens(db) -> None:
     """圆桌画像名与注册 Agent code 不一致时，仍须计入真实消费。"""
     db.add(AgentProfile(code="code_reviewer", name="代码审查员", is_enabled=1))
@@ -152,3 +216,64 @@ def test_agent_activity_attributes_multi_agent_logs_to_known_review_agents(db) -
     assert by_code["code_reviewer"]["model_calls_today"] == 1
     assert by_code["security_sentinel"]["model_calls_today"] == 1
     assert "unattributed_model" not in by_code
+
+
+@pytest.mark.parametrize("agent_count", [1, 10, 40])
+def test_agent_activity_tool_queries_stay_constant_as_profiles_grow(
+    db, monkeypatch, agent_count: int,
+) -> None:
+    fixed_now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    _freeze_admin_overview_clock(monkeypatch, fixed_now)
+    profiles = [
+        AgentProfile(code=f"probe_agent_{index:02d}", name=f"探针 Agent {index}", is_enabled=1)
+        for index in range(agent_count)
+    ]
+    db.add_all(profiles)
+    db.add_all([
+        AiCallLog(
+            user_id=7,
+            agent_label=profile.code,
+            model_name="deepseek-v4-flash",
+            status="success",
+            total_tokens=20,
+            create_time=fixed_now,
+        )
+        for profile in profiles
+    ])
+    db.add_all([
+        ToolCallLog(
+            agent_code=profile.code,
+            tool_code="probe",
+            action=action,
+            resource="probe",
+            status="success",
+            risk_level="low",
+            decision="allow",
+            input_summary="",
+            output_summary="",
+            create_time=fixed_now - timedelta(seconds=30),
+        )
+        for profile in profiles
+        for action, repeats in (("common", 3), ("rare", 1))
+        for _ in range(repeats)
+    ])
+    db.commit()
+
+    tool_selects: list[str] = []
+
+    def capture_tool_select(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+        normalized = statement.lstrip().lower()
+        if normalized.startswith("select") and "tool_call_log" in normalized:
+            tool_selects.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", capture_tool_select)
+    try:
+        rows = _agent_activity(db)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_tool_select)
+
+    by_code = {row["agent_code"]: row for row in rows}
+    assert len(tool_selects) == 3
+    assert all(by_code[profile.code]["purpose"] == "common" for profile in profiles)
+    assert all(by_code[profile.code]["calls_today"] == 5 for profile in profiles)

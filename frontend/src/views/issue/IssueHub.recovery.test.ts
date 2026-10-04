@@ -1,14 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
 import IssueHub from './IssueHub.vue'
 
-const mocks = vi.hoisted(() => ({ projects: vi.fn(), issues: vi.fn(), push: vi.fn() }))
+const mocks = vi.hoisted(() => ({ projects: vi.fn(), issues: vi.fn(), push: vi.fn(), update: vi.fn(), batch: vi.fn(), confirm: vi.fn() }))
 vi.mock('@/api/project', () => ({ getProjects: mocks.projects }))
-vi.mock('@/api/issue', () => ({ list: mocks.issues, updateStatus: vi.fn(), batchUpdateStatus: vi.fn() }))
-vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: () => false }) }))
+vi.mock('@/api/issue', () => ({ list: mocks.issues, updateStatus: mocks.update, batchUpdateStatus: mocks.batch }))
+vi.mock('@/stores/user', () => ({ useUserStore: () => user }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: { confirm: mocks.confirm } }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 
 const row = { id: 1, title: '问题一', task_id: 10, severity: '中', status: 'unfixed', issue_type: '安全漏洞' }
+const user = reactive({ profile: { id: 11 }, token: 'account-a', permissions: [] as string[], hasPermission: (code: string) => user.permissions.includes(code) })
 const Slot = { template: '<div><slot /></div>' }
 function render() {
   return mount(IssueHub, { global: {
@@ -25,9 +28,21 @@ function render() {
   } })
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   mocks.projects.mockReset().mockResolvedValue({ items: [] })
   mocks.issues.mockReset().mockResolvedValue({ items: [row], total: 1 })
+  mocks.batch.mockReset().mockResolvedValue({})
+  mocks.update.mockReset().mockResolvedValue({})
+  mocks.confirm.mockReset().mockResolvedValue(true)
+  user.profile = { id: 11 }
+  user.token = 'account-a'
+  user.permissions = ['issue:view', 'project:view']
 })
 
 describe('问题追踪失败恢复', () => {
@@ -100,6 +115,142 @@ describe('问题追踪失败恢复', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('暂无问题')
     expect(wrapper.find('.issue-card').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('迟到的旧项目问题响应不能覆盖当前项目筛选', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const old = deferred<any>()
+    const current = deferred<any>()
+    mocks.issues.mockImplementation((query: { project_id?: number }) => (
+      query.project_id === 1 ? old.promise : current.promise
+    ))
+    vm.filters.project_id = 1
+    const staleRequest = vm.loadIssues()
+    vm.filters.project_id = 2
+    const currentRequest = vm.loadIssues()
+    current.resolve({ items: [{ ...row, id: 2, title: '项目B问题' }], total: 1 })
+    await currentRequest
+    old.resolve({ items: [{ ...row, title: '项目A旧问题' }], total: 1 })
+    await staleRequest
+
+    expect(vm.filters.project_id).toBe(2)
+    expect(wrapper.text()).toContain('项目B问题')
+    expect(wrapper.text()).not.toContain('项目A旧问题')
+    wrapper.unmount()
+  })
+
+  it('读取权限撤销后清空旧问题、总数和勾选', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.selected = [row]
+    mocks.issues.mockRejectedValueOnce({ code: 40301, message: '没有查看权限' })
+
+    await vm.loadIssues()
+
+    expect(wrapper.text()).not.toContain('问题一')
+    expect(vm.total).toBe(0)
+    expect(vm.selected).toEqual([])
+    expect(wrapper.get('[data-testid="issue-load-error"]').text()).toContain('旧问题已清空')
+    wrapper.unmount()
+  })
+
+  it('批量确认期间勾选变化，只提交确认时冻结的问题ID', async () => {
+    user.permissions = ['issue:view', 'project:view', 'issue:batch']
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.selected = [row]
+    const confirmation = deferred<boolean>()
+    mocks.confirm.mockReturnValueOnce(confirmation.promise)
+    const request = vm.onBatchMarkFixed()
+    vm.selected = [{ ...row, id: 2, title: '未确认的问题' }]
+    confirmation.resolve(true)
+    await request
+    expect(mocks.batch).toHaveBeenCalledExactlyOnceWith({ ids: [1], status: 'fixed' })
+    wrapper.unmount()
+  })
+
+  it.each(['account', 'permission', 'filter'])('批量确认期间%s变化后取消旧操作', async (change) => {
+    user.permissions = ['issue:view', 'project:view', 'issue:batch']
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.selected = [row]
+    const confirmation = deferred<boolean>()
+    mocks.confirm.mockReturnValueOnce(confirmation.promise)
+    const request = vm.onBatchMarkFixed()
+    if (change === 'account') user.profile = { id: 12 }
+    if (change === 'permission') user.permissions = []
+    if (change === 'filter') vm.filters.project_id = 999
+    await flushPromises()
+    confirmation.resolve(true)
+    await request
+    expect(mocks.batch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('账号切换清空已有问题并忽略旧账号迟到的问题和项目选项', async () => {
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const oldIssues = deferred<any>()
+    const oldProjects = deferred<any>()
+    mocks.issues.mockReturnValueOnce(oldIssues.promise).mockResolvedValue({ items: [], total: 0 })
+    mocks.projects.mockReturnValueOnce(oldProjects.promise).mockResolvedValue({ items: [] })
+    const issueRequest = vm.loadIssues()
+    const projectRequest = vm.loadProjects()
+    user.profile = { id: 12 }
+    user.token = 'account-b'
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('问题一')
+    oldIssues.resolve({ items: [{ ...row, title: '旧账号迟到问题' }], total: 1 })
+    oldProjects.resolve({ items: [{ id: 7, project_name: '旧账号项目' }] })
+    await Promise.all([issueRequest, projectRequest])
+    expect(wrapper.text()).not.toContain('旧账号迟到问题')
+    expect(vm.projects).toEqual([])
+    wrapper.unmount()
+  })
+
+  it.each(['permission', 'filter'])('批量确认期间%s离开再恢复也不复用旧确认', async (change) => {
+    user.permissions = ['issue:view', 'project:view', 'issue:batch']
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.selected = [row]
+    const confirmation = deferred<boolean>()
+    mocks.confirm.mockReturnValueOnce(confirmation.promise)
+    const request = vm.onBatchMarkFixed()
+    if (change === 'permission') {
+      user.permissions = ['issue:view', 'project:view']
+      user.permissions = ['issue:view', 'project:view', 'issue:batch']
+    } else {
+      vm.filters.project_id = 999
+      vm.filters.project_id = undefined
+    }
+    confirmation.resolve(true)
+    await request
+    expect(mocks.batch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('待确认操作不能被重复点击生成第二次批量写请求', async () => {
+    user.permissions = ['issue:view', 'project:view', 'issue:batch']
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.selected = [row]
+    const confirmation = deferred<boolean>()
+    mocks.confirm.mockReturnValueOnce(confirmation.promise)
+    const request = vm.onBatchMarkFixed()
+    await vm.onBatchMarkFixed()
+    expect(mocks.confirm).toHaveBeenCalledTimes(1)
+    confirmation.resolve(true)
+    await request
+    expect(mocks.batch).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 })

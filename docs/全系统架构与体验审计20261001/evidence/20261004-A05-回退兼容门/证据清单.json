@@ -1,0 +1,106 @@
+{
+  "任务": "A05新对话账本的旧镜像回退兼容门",
+  "范围": "候选工作树部署保护；业务Python与Vue冻结；没有提交、发布或生产容器切换",
+  "设计": "immutable目标镜像实际reader的标准库AST行为fixture；059账本结构存在即要求v2 reader，空表不放行旧reader；精确JSONpath只读查询；未知拒绝；不恢复旧备份或删除新账本",
+  "本地能力场景": {
+    "通过": 5,
+    "执行": "bash deploy/tests/test_scripts.sh --reader-only",
+    "说明": "实际候选源码及等价旧load/坏摘要/损坏或缺失源码隔离fixture，无应用import、真实DB或模型"
+  },
+  "回退绑定场景": {
+    "红测试通过": 19,
+    "红测试失败": 10,
+    "绿测试通过": 29,
+    "绿测试失败": 0,
+    "说明": "真实rollback脚本配fake Docker/MySQL输出"
+  },
+  "发布故障矩阵": {
+    "通过": 17,
+    "说明": "隔离fake命令：新3场景验证空账本/已写引用/能力故障拒绝自动回退，保留原退出码、pending/current数据"
+  },
+  "完整回归": {
+    "退出码": 0,
+    "命令": "PRISM_KEEP_TEST_ARTIFACTS=1 PRISM_FAKE_DOCKER_ONLY=1 bash deploy/tests/test_scripts.sh",
+    "限制": "Docker已关闭，仅fake-only；真实Compose parser、目标镜像启动及生产MySQL查询尚需主代理验证"
+  },
+  "首次完整回归": "测试workspace仅复制common遗漏新helper，正确fail closed但旧fixture期待回退成功而失败；补测试复制与3个拒绝样本后重跑通过，保留首次失败日志",
+  "静态检查": [
+    "Python AST parse通过",
+    "PYTHONPYCACHEPREFIX=/tmp/prism-rollback-probe-bytecode-20261004 python3 -m py_compile deploy/lib/checkpoint_compatibility.py 退出0",
+    "git diff --check 退出0"
+  ],
+  "证据文件": [
+    {
+      "路径": "红测试-回退29场景.log",
+      "sha256": "345de6f0fdc9e5ed1e157a0455da8d84a3d6237d254710b6f42b2606c7a0dee5"
+    },
+    {
+      "路径": "红测试-能力探针.log",
+      "sha256": "57f33b7eab2b3d05b382d44f3d25bd080f0feeb3fd7e0dfd1eefc1a3a30ed7e3"
+    },
+    {
+      "路径": "绿测试-回退29场景.log",
+      "sha256": "0bfeb12a2f299e88189ff83227e5981c9fd3e4e9b73e70765084eb6ea8d31fe6"
+    },
+    {
+      "路径": "绿测试-能力探针5场景.log",
+      "sha256": "4a4679b1c469c84fbe58abafba881adbf9b53fa992fa520da0e0be82029026c8"
+    },
+    {
+      "路径": "首次完整回归-缺失helper的fixture中止.log",
+      "sha256": "c04b192a78addf3d49dc920716cc9326c3049a1dbac4ee0dae72518e82ec5918"
+    },
+    {
+      "路径": "最终完整回归.log",
+      "sha256": "e6ab4ba2cecad41bec63787ebe0f3496decc8ff5dc1547832782aaaf4c201ee5"
+    },
+    {
+      "路径": "独立复核-reader.log",
+      "sha256": "4a4679b1c469c84fbe58abafba881adbf9b53fa992fa520da0e0be82029026c8"
+    },
+    {
+      "路径": "独立复核-release.log",
+      "sha256": "289db5e045288a4a645eabf2460e248038659e4b9a25fb3be09bc13fc0b6498b"
+    },
+    {
+      "路径": "独立复核-failure-matrix.log",
+      "sha256": "e8b6e28471b8de970261806f425723757ef88c3a9ef0d50fac0a70f442608f5c"
+    },
+    {
+      "路径": "独立复核-reference查询拒绝.json",
+      "sha256": "fe39c76e20b524fe6d085ac85202336e2b48f62cc6d731af53bc3674a0a432a2"
+    },
+    {
+      "路径": "独立复核-范围与摘要.json",
+      "sha256": "9839656cfc241e44effde6525b820c8e89f1effa435e9b30c7e0c9163b690972"
+    }
+  ],
+  "源码文件": [
+    {
+      "路径": "deploy/lib/checkpoint_compatibility.py",
+      "sha256": "0388d0b893f4e0702f64aba1a5e3c6d4ed776d741681472666d5781de8e37f38"
+    },
+    {
+      "路径": "deploy/lib/common.sh",
+      "sha256": "83f5e72d53f98e2945257fc1f9f5bb965f00b1aa1ef5e5ddc8e1c1c59d4838ea"
+    },
+    {
+      "路径": "deploy/rollback.sh",
+      "sha256": "2996ea57717fffd114df7a7f58c9e3aa74256e59638afc8099ae0929859d35d6"
+    },
+    {
+      "路径": "deploy/tests/test_scripts.sh",
+      "sha256": "3cf6af578c339619166cf09149ac65a7e8ed42b0d4137f6473d13f3478cddf91"
+    },
+    {
+      "路径": "deploy/tests/deploy_failure_cases.sh",
+      "sha256": "f30645acd22d4459604d6b7e40fd79fe7a6b00598598d3d839be2aaa2a6152b1"
+    }
+  ],
+  "独立复核": {
+    "状态": "无新增阻断；产品源码未被复核者编辑，五源码SHA核对一致",
+    "次数": "reader 5 + release 29 + failure matrix 17，各一次独立执行退出0；新增第二次reference SQL失败/unknown 2负向场景退出1且未到切换",
+    "精确旧源码": "未重写310ea旧服务/runtime fixture输出unsupported，退出0",
+    "边界": "独立代理只做本地AST/fake Docker；真实旧镜像外部证据由主代理执行；新真实镜像与生产SQL待主代理核验"
+  }
+}

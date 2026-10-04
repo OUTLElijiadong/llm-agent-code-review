@@ -263,6 +263,12 @@ case "${1:-}" in
       build) : ;;
       exec)
         case "$*" in
+          *'prism_checkpoint_schema'*)
+            [[ "${FAKE_CHECKPOINT_DB_FAILURE:-0}" != 1 ]] || exit 71
+            if [[ "${FAKE_CHECKPOINT_SCHEMA_UNKNOWN:-0}" == 1 ]]; then echo unknown; else printf '%s\t1\t1\n' "${FAKE_CHECKPOINT_SCHEMA:-0}"; fi ;;
+          *'prism_checkpoint_references'*)
+            [[ "${FAKE_CHECKPOINT_DB_FAILURE:-0}" != 1 ]] || exit 71
+            printf '%s\t%s\n' "${FAKE_CHECKPOINT_INVALID:-0}" "${FAKE_CHECKPOINT_REFERENCE:-0}" ;;
           *'printf "%s" "$MYSQL_DATABASE"'*) printf 'code_review' ;;
           *'SELECT version_num'*) echo "$alembic_revision" ;;
           *'alembic heads'*) echo "$alembic_revision (head)" ;;
@@ -307,6 +313,10 @@ case "${1:-}" in
     esac ;;
   run)
     case "$*" in
+      *'--entrypoint python'* )
+        cat >/dev/null
+        [[ "${FAKE_CHECKPOINT_PROBE_FAILURE:-0}" != 1 ]] || exit 72
+        printf '%s\n' "${FAKE_CHECKPOINT_CAPABILITY:-unsupported}" ;;
       *'heads'*)
         [[ "${FAKE_RELEASE_MODE:-}" != invalid_heads ]] || exit 23
         echo "$alembic_revision (head)" ;;
@@ -328,6 +338,7 @@ run_release_binding_case() {
   local status_code
   mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups"
   cp lib/common.sh "$workspace/deploy/lib/common.sh"
+  [[ ! -f lib/checkpoint_compatibility.py ]] || cp lib/checkpoint_compatibility.py "$workspace/deploy/lib/"
   cp restore.sh rollback.sh ops-check.sh "$workspace/deploy/"
   write_strong_database_test_env "$workspace/deploy/.env"
   cat >> "$workspace/deploy/.env" <<ENV
@@ -487,6 +498,40 @@ PY
       assert_contains "$workspace/releases/current.env" 'APP_VERSION=3.8.2'
       assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
       assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
+    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy)
+      local expected_success=0 state_before
+      case "$test_case" in
+        rollback_ledger_compatible) export FAKE_CHECKPOINT_SCHEMA=1 FAKE_CHECKPOINT_REFERENCE=1 FAKE_CHECKPOINT_CAPABILITY=supported; expected_success=1 ;;
+        rollback_ledger_empty_old|rollback_ledger_written_old) export FAKE_CHECKPOINT_SCHEMA=1; [[ "$test_case" != rollback_ledger_written_old ]] || export FAKE_CHECKPOINT_REFERENCE=1 ;;
+        rollback_ledger_reference_without_schema) export FAKE_CHECKPOINT_REFERENCE=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
+        rollback_ledger_invalid_json) export FAKE_CHECKPOINT_INVALID=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
+        rollback_ledger_probe_failure) export FAKE_CHECKPOINT_PROBE_FAILURE=1 ;;
+        rollback_ledger_probe_unknown) export FAKE_CHECKPOINT_CAPABILITY=unknown ;;
+        rollback_ledger_db_failure) export FAKE_CHECKPOINT_DB_FAILURE=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
+        rollback_ledger_schema_unknown) export FAKE_CHECKPOINT_SCHEMA_UNKNOWN=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
+        rollback_ledger_legacy) expected_success=1 ;;
+      esac
+      printf 'pending fixture\n' > "$workspace/releases/pending.env"
+      state_before="$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")"
+      status_code=0
+      ./rollback.sh all --confirm ROLLBACK_APPLICATION > "$output_file" 2>&1 || status_code=$?
+      if [[ "$expected_success" == 1 ]]; then
+        [[ "$status_code" == 0 ]] || { cat "$output_file"; exit 1; }
+        assert_contains "$docker_log" 'compose up -d --no-deps --no-build --pull never backend'
+        assert_contains "$docker_log" 'prism_checkpoint_schema'
+        assert_contains "$docker_log" 'prism_checkpoint_references'
+        assert_contains "$docker_log" '--network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python sha256:'
+        assert_not_contains "$docker_log" '--env-file .env -'
+      else
+        [[ "$status_code" != 0 ]] || { printf '账本不兼容/未知仍被回退: %s\n' "$test_case" >&2; exit 1; }
+        assert_not_contains "$docker_log" 'compose up '
+        assert_not_contains "$docker_log" 'compose stop '
+        assert_not_contains "$docker_log" 'compose build '
+        assert_not_contains "$docker_log" 'DROP DATABASE'
+        assert_not_contains "$docker_log" 'UPDATE agent_response'
+        [[ "$state_before" == "$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")" ]] || { echo '拒绝后发布账本被修改' >&2; exit 1; }
+        [[ ! -e "$workspace/maintenance.lock" ]] || { echo '拒绝后维护锁未释放' >&2; exit 1; }
+      fi ;;
     *) echo "未知发布测试: $test_case" >&2; exit 1 ;;
   esac
   printf 'release binding case: %s PASS\n' "$test_case"
@@ -496,7 +541,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence; do
+  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else
@@ -505,6 +550,56 @@ run_release_binding_tests() {
   done
   printf 'release binding tests: passed=%s failed=%s\n' "$passed" "$failed"
   [[ "$failed" == 0 ]]
+}
+
+# 在本机仅执行部署 probe 的标准库隔离 fixture，不 import 应用或调用模型。
+run_checkpoint_reader_probe_tests() {
+  python3 - "$PWD/lib/checkpoint_compatibility.py" "$PWD/../backend/app" <<'PY'
+import ast
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+probe, app = map(pathlib.Path, sys.argv[1:])
+with tempfile.TemporaryDirectory(prefix="prism-reader-probe-") as temporary:
+    root = pathlib.Path(temporary)
+    (root / "services").mkdir()
+    for name in ("agent_responses_service.py", "deepseek_responses_runtime.py"):
+        shutil.copyfile(app / "services" / name, root / "services" / name)
+    def run(expected, code=0):
+        result = subprocess.run([sys.executable, str(probe), str(root)], capture_output=True, text=True, timeout=20)
+        assert result.returncode == code, (result.returncode, result.stdout, result.stderr)
+        assert result.stdout.strip() == expected, (result.stdout, result.stderr)
+    run("supported")
+    print("checkpoint reader probe: actual current load PASS")
+    source = root / "services" / "agent_responses_service.py"
+    original = source.read_text()
+    tree = ast.parse(original)
+    store = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "DatabaseCheckpointStore")
+    load = next(item for item in store.body if isinstance(item, ast.AsyncFunctionDef) and item.name == "load")
+    # 等价于已核对的旧 Store.load 末行，保留全部新 helper 名验证不能靠方法名放行。
+    load.body[-1] = ast.parse("return RunCheckpoint.from_dict(value)").body[0]
+    source.write_text(ast.unparse(ast.fix_missing_locations(tree)))
+    run("unsupported")
+    print("checkpoint reader probe: legacy decoder with misleading helper names PASS")
+    tree = ast.parse(original)
+    store = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "DatabaseCheckpointStore")
+    hydrate = next(item for item in store.body if isinstance(item, ast.FunctionDef) and item.name == "_checkpoint_from_payload")
+    for node in ast.walk(hydrate):
+        if isinstance(node, ast.If) and ast.unparse(node.test) == "self._transcript_digest(transcript) != expected_digest":
+            node.body = [ast.Pass()]
+    source.write_text(ast.unparse(ast.fix_missing_locations(tree)))
+    run("unsupported")
+    print("checkpoint reader probe: reader accepting corrupt digest PASS")
+    source.write_text("invalid Python !")
+    run("", 2)
+    print("checkpoint reader probe: corrupt source fail closed PASS")
+    source.unlink()
+    run("", 2)
+    print("checkpoint reader probe: unavailable source fail closed PASS")
+PY
 }
 
 # 写入可预测的 Docker 命令替身。
@@ -1695,6 +1790,10 @@ if [[ "${1:-}" == --release-only ]]; then
   run_release_binding_tests "$test_root"
   exit 0
 fi
+if [[ "${1:-}" == --reader-only ]]; then
+  run_checkpoint_reader_probe_tests
+  exit 0
+fi
 
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/prism-deploy-tests.XXXXXX")"
 trap cleanup_test_workspace EXIT
@@ -1786,7 +1885,8 @@ assert_contains ops-check.sh 'current_alembic_revision'
 assert_contains ops-check.sh 'http_redirect_code'
 assert_contains lib/common.sh 'container_id="$(service_container_id "$service")"'
 assert_not_contains lib/common.sh 'compose ps -a -q "$service"'
-assert_contains prism_ops_executor.py 'certbot" / "conf" / "live"'
+assert_contains prism_ops_executor.py '_configured_certbot_conf_dir() / "live"'
+assert_contains prism_ops_executor.py 'CERTBOT_CONF_DIR'
 assert_contains RELEASE_CHECKLIST.md './deploy.sh all --revision <FULL_COMMIT_SHA>'
 assert_not_contains RELEASE_CHECKLIST.md './deploy.sh backend --revision'
 assert_contains deploy.sh '当前仅支持 all，前后端必须使用同一提交发布。'
@@ -1900,6 +2000,7 @@ PYTHON_BASE_IMAGE='python:3.11-slim' PYTHON_BASE_IMAGE_DIGEST="$digest_placehold
 
 run_database_credential_validation "$test_root"
 run_frontend_tls_asset_validation "$test_root"
+run_checkpoint_reader_probe_tests
 run_release_binding_tests "$test_root"
 run_backup_archive_drift_simulation "$fake_bin" "$test_root"
 run_verify_backup_guard_simulation "$fake_bin" "$test_root"

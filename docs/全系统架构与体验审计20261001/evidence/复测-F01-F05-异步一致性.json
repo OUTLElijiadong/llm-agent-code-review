@@ -1,0 +1,62 @@
+{
+  "findings": ["F01", "F03", "F04", "F05"],
+  "status": "candidate_fix_verified_locally",
+  "baseline_reproduction": {
+    "result": "7 expected-behavior assertions failed before fixes",
+    "scenarios": [
+      "小菱同会话迟到的旧团队详情覆盖新完成状态",
+      "小菱团队详情局部失败删除已展示卡片",
+      "管理员端迟到的旧团队详情覆盖新完成状态",
+      "问题追踪旧筛选响应覆盖新筛选结果",
+      "问题读取返回403后旧问题仍显示",
+      "沙箱项目A迟到副本覆盖项目B副本",
+      "沙箱初始请求卸载后仍注册轮询并再次读取"
+    ]
+  },
+  "changed_paths": [
+    "frontend/src/components/ai/AgentChatDrawer.vue",
+    "frontend/src/components/ai/AgentChatDrawer.test.ts",
+    "frontend/src/components/admin/AdminCopilot.vue",
+    "frontend/src/components/admin/AdminCopilot.test.ts",
+    "frontend/src/views/issue/IssueHub.vue",
+    "frontend/src/views/issue/IssueHub.recovery.test.ts",
+    "frontend/src/views/sandbox/SandboxWorkstation.vue",
+    "frontend/src/views/sandbox/SandboxWorkstation.test.ts",
+    "docs/全系统架构与体验审计20261001/evidence/frontend-readonly-repros/chat-sync.test.ts",
+    "docs/全系统架构与体验审计20261001/evidence/frontend-readonly-repros/state-races.test.ts",
+    "docs/全系统架构与体验审计20261001/evidence/frontend-readonly-repros/run.sh"
+  ],
+  "fixes": {
+    "F01": "用户端和管理员端团队详情刷新使用请求代际；会话切换、账号变化和卸载令旧请求失效。当前清单中的详情局部失败保留对应团队最后成功快照并提示同步不完整；成功空列表仍清空已不存在团队。",
+    "F03": "问题请求快照筛选参数并使用请求代际；迟到响应不提交。401/403/404 HTTP 状态及 401xx/403xx/404xx 业务码会清空旧问题、总数和勾选。普通网络失败保留旧数据并标出上次成功筛选范围。",
+    "F04": "修复副本加载绑定 project_id 与请求代际；项目切换或卸载后到达的旧响应不能写入当前列表。",
+    "F05": "沙箱页面增加 disposed 守卫；每个初始/刷新 await 后检查生命周期，并在卸载后不注册任务监听器或轮询。"
+  },
+  "validation": {
+    "controlled_component_races": "state-races.test.ts + chat-sync.test.ts; 6 scenarios passed in each of 3 independent rounds (18 passes)",
+    "admin_chat_race": "AdminCopilot.test.ts filtered race case passed in 3 independent rounds",
+    "component_suites": {
+      "AgentChatDrawer.test.ts": "49 passed",
+      "AdminCopilot.test.ts": "48 passed",
+      "IssueHub.recovery.test.ts": "9 passed",
+      "SandboxWorkstation.test.ts": "10 passed",
+      "total": "116 passed"
+    },
+    "frontend_build": "vue-tsc and vite build passed",
+    "lint": "targeted ESLint checks passed",
+    "diff_check": "git diff --check passed",
+    "repeat_logs": [
+      "复测-F01-F05-第1轮.log",
+      "复测-F01-F05-第2轮.log",
+      "复测-F01-F05-第3轮.log",
+      "复测-F01-管理员端-第1轮.log",
+      "复测-F01-管理员端-第2轮.log",
+      "复测-F01-管理员端-第3轮.log"
+    ]
+  },
+  "limits": [
+    "所有复测为 Vitest/jsdom 控制 API Promise 的本地候选代码验证；没有调用生产 API 或进行生产浏览器点击。",
+    "F04 的证据是错误副本候选被阻止；后端现有 project source revision 归属检查仍是实际提交边界，本次没有发现或声称跨项目执行。",
+    "此项不包含 F02/F06 最终合并后的十场景整体验收；待 F06 完成后再统一重跑原完整组件复现集。"
+  ]
+}

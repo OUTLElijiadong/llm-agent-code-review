@@ -1,0 +1,237 @@
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+WebSocket connection to 'ws://127.0.0.1:5187/?token=KPFgcXjBWVhW' failed: Error in connection establishment: net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS
+[vite] failed to connect to websocket.
+your current setup:
+  (browser) 127.0.0.1:5187/ <--[HTTP]--> 127.0.0.1:5187/ (server)
+  (browser) 127.0.0.1:5187/ <--[WebSocket (failing)]--> 127.0.0.1:5187/ (server)
+Check out your Vite / network configuration and https://vite.dev/config/server-options.html#server-hmr .
+{
+  "results": [
+    {
+      "view": "team",
+      "width": 375,
+      "tailVisible": true,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 375,
+      "tailVisible": false,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 73
+    },
+    {
+      "view": "issues",
+      "width": 375,
+      "tailVisible": true,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 90,
+          "width": 231
+        },
+        {
+          "x": 90,
+          "width": 231
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 375,
+      "tailVisible": false,
+      "viewport": 375,
+      "pageScrollWidth": 375,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "team",
+      "width": 768,
+      "tailVisible": true,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 768,
+      "tailVisible": false,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 49
+    },
+    {
+      "view": "issues",
+      "width": 768,
+      "tailVisible": true,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 522,
+          "width": 192
+        },
+        {
+          "x": 522,
+          "width": 192
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 768,
+      "tailVisible": false,
+      "viewport": 768,
+      "pageScrollWidth": 768,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "team",
+      "width": 1280,
+      "tailVisible": true,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "code",
+      "width": 1280,
+      "tailVisible": false,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": 49
+    },
+    {
+      "view": "issues",
+      "width": 1280,
+      "tailVisible": true,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [
+        {
+          "x": 1034,
+          "width": 192
+        },
+        {
+          "x": 1034,
+          "width": 192
+        }
+      ],
+      "codeHeaderHeight": null
+    },
+    {
+      "view": "sandbox",
+      "width": 1280,
+      "tailVisible": false,
+      "viewport": 1280,
+      "pageScrollWidth": 1280,
+      "overflow": [],
+      "actions": [],
+      "codeHeaderHeight": null
+    }
+  ],
+  "errors": [],
+  "mockedRequests": 21
+}

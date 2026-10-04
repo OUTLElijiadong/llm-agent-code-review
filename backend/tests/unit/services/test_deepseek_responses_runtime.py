@@ -16,6 +16,7 @@ from app.services.deepseek_responses_runtime import (
     INCOMPLETE,
     MAX_ROUNDS_EXCEEDED,
     MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN,
+    SEMANTIC_SUMMARY_FORMAT_VERSION,
     WAITING_APPROVAL,
     WAITING_INPUT,
     ContextBudgetError,
@@ -23,6 +24,7 @@ from app.services.deepseek_responses_runtime import (
     InMemoryCheckpointStore,
     InvalidRunStateError,
     RunCheckpoint,
+    _SEMANTIC_SUMMARY_PREFIX,
     ToolCall,
     ToolExecutionResult,
     compact_transcript,
@@ -177,7 +179,7 @@ async def test_replays_two_tool_rounds_without_previous_response_id() -> None:
         run_id="run_two_rounds",
     )
 
-    assert result.status == "completed"
+    assert result.status == "completed", result.error
     assert result.output_text == "任务完成"
     assert result.rounds == 3
     assert [call.name for call, _ in executor.calls] == ["lookup", "calculate"]
@@ -230,7 +232,7 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
 
     result = await runtime.start(transcript, run_id="run_compaction")
 
-    assert result.status == "completed"
+    assert result.status == "completed", result.error
     payload = transport.payloads[-1]
     assert payload["max_output_tokens"] == 400
     assert payload["input"][0]["role"] == "user"
@@ -293,7 +295,7 @@ async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints
         keep_recent_tokens=300, on_round=logs.append,
     )
     result = await runtime.start(transcript, run_id="semantic_compact")
-    assert result.status == COMPLETED
+    assert result.status == COMPLETED, result.error
     compact_requests = [p for p in transport.payloads if p["tools"] == []]
     assert compact_requests
     assert all(p["stream"] is True for p in compact_requests)
@@ -308,6 +310,201 @@ async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints
     assert "owner_user_id 校验" in final_input
     assert len(logs) == len(transport.payloads)
     assert all(log["_request_payload"]["max_output_tokens"] > 0 for log in logs)
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_keeps_unmarked_short_user_business_facts() -> None:
+    critical_fact = "统计时区是 Asia/Taipei，月末退款按原始交易月份记账。"
+
+    class OmittingTransport(ScriptedTransport):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            self.payloads.append(payload)
+            if payload["tools"]:
+                return _message_response("继续处理完成")
+            source = str(payload["input"][0]["content"])
+            anchors = list(re.finditer(r"\[来源#\d+:片段\d+/\d+\]", source))
+            source_ids = [match.group()[1:-1] for match in anchors]
+            quotes = []
+            for index, match in enumerate(anchors):
+                end = anchors[index + 1].start() if index + 1 < len(anchors) else len(source)
+                piece = source[match.end():end].strip()
+                piece = re.sub(r"^\[来源角色=[^\]]+\]\s*", "", piece)
+                quotes.append({"source_id": source_ids[index], "quote": piece[:24]})
+            # 复现外部审计：所有来源ID和逐字短引文都合规，语义摘要仍漏掉普通业务事实。
+            return _message_response(json.dumps({
+                "covered_source_ids": source_ids,
+                "source_quotes": quotes,
+                "summary": "所有来源已经读取。",
+            }, ensure_ascii=False))
+
+    transcript = (
+        [{"role": "user", "content": "检查交易逻辑"}]
+        + [{"role": "assistant", "content": "背景甲" * 90} for _ in range(8)]
+        + [{"role": "user", "content": "中间背景" * 80 + critical_fact}]
+        + [{"role": "assistant", "content": "背景乙" * 90} for _ in range(8)]
+        + [{"role": "user", "content": "继续"}]
+    )
+    transport = OmittingTransport()
+    runtime = _runtime(
+        transport, RecordingExecutor(), context_window_tokens=6000,
+        max_output_tokens=400, compaction_threshold_tokens=500,
+        keep_recent_tokens=200,
+    )
+
+    result = await runtime.start(transcript, run_id="semantic_unmarked_fact")
+
+    final_input = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert result.status == COMPLETED
+    assert any(not payload["tools"] for payload in transport.payloads)
+    assert critical_fact in final_input
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_retrieves_old_long_user_fact_for_current_query() -> None:
+    critical_fact = "月末退款按原始交易月份记账，统计时区使用 Asia/Taipei"
+
+    class OmittingTransport(ScriptedTransport):
+        def __init__(self) -> None:
+            super().__init__([])
+
+        async def create_response(self, payload: Mapping[str, Any]) -> Any:
+            self.payloads.append(payload)
+            if payload["tools"]:
+                return _message_response("已按规则核对")
+            source = str(payload["input"][0]["content"])
+            anchors = list(re.finditer(r"\[来源#\d+:片段\d+/\d+\]", source))
+            source_ids = [match.group()[1:-1] for match in anchors]
+            quotes = []
+            for index, match in enumerate(anchors):
+                end = anchors[index + 1].start() if index + 1 < len(anchors) else len(source)
+                piece = source[match.end():end].strip()
+                piece = re.sub(r"^\[来源角色=[^\]]+\]\s*", "", piece)
+                quotes.append({"source_id": source_ids[index], "quote": piece[:24]})
+            return _message_response(json.dumps({
+                "covered_source_ids": source_ids,
+                "source_quotes": quotes,
+                "summary": "已读取全部来源。",
+            }, ensure_ascii=False))
+
+    long_history = "旧背景" * 500 + critical_fact + "补充背景" * 500
+    transcript = (
+        [{"role": "user", "content": "检查交易逻辑"}]
+        + [{"role": "assistant", "content": "讨论背景" * 100} for _ in range(8)]
+        + [{"role": "user", "content": long_history}]
+        + [{"role": "assistant", "content": "继续梳理" * 100} for _ in range(8)]
+        + [{"role": "user", "content": "月末退款的统计时区和月份规则是什么？"}]
+    )
+    transport = OmittingTransport()
+    runtime = _runtime(
+        transport, RecordingExecutor(), context_window_tokens=6000,
+        max_output_tokens=400, compaction_threshold_tokens=500,
+        keep_recent_tokens=200,
+    )
+
+    result = await runtime.start(transcript, run_id="semantic_retrieve_old_fact")
+
+    final_input = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
+    assert result.status == COMPLETED
+    assert any(not payload["tools"] for payload in transport.payloads)
+    assert critical_fact in final_input
+    assert "[相关历史用户原文摘录 来源#" in final_input
+
+
+@pytest.mark.asyncio
+async def test_cached_semantic_summary_adds_facts_relevant_to_new_query() -> None:
+    critical_fact = "月末退款按原始交易月份记账，统计时区使用 Asia/Taipei"
+    source_hash = "cached-summary-same-omitted-history"
+    transcript = [
+        {"role": "user", "content": "旧背景" * 500 + critical_fact + "补充背景" * 500},
+        {"role": "user", "content": "月末退款的统计时区和月份规则是什么？"},
+    ]
+    transport = SummarizingTransport()
+    runtime = _runtime(transport, RecordingExecutor())
+    checkpoint = RunCheckpoint(
+        run_id="cached_summary_new_query",
+        model="deepseek-v4-flash",
+        transcript=transcript,
+        tools=[],
+        context_metadata={"semantic_summary": {
+            "source_sha256": source_hash,
+            "format_version": SEMANTIC_SUMMARY_FORMAT_VERSION,
+            "text": (
+                _SEMANTIC_SUMMARY_PREFIX
+                + " 权限与审批以当前服务端 RBAC 和审批记录为唯一授权依据。\n"
+                + "旧摘要"
+            ),
+        }},
+    )
+    await runtime._store.create(checkpoint)
+
+    summary = await runtime._semantic_compact(
+        checkpoint,
+        {"summary_sha256": source_hash, "omitted_indices": [0]},
+        summary_budget=5_000,
+    )
+
+    assert not transport.payloads
+    assert critical_fact in summary
+    assert "[相关历史用户原文摘录 来源#0" in summary
+
+
+@pytest.mark.asyncio
+async def test_semantic_compaction_rebuilds_pre_fact_ledger_cached_summary() -> None:
+    transport = SummarizingTransport()
+    runtime = _runtime(transport, RecordingExecutor())
+    source_hash = "same-transcript-source"
+    checkpoint = RunCheckpoint(
+        run_id="legacy_fact_ledger_cache",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "统计时区是 Asia/Taipei，月末退款按原始交易月份记账。"}],
+        tools=[],
+        context_metadata={"semantic_summary": {
+            "source_sha256": source_hash,
+            "format_version": 2,
+            "text": (
+                "[平台上下文压缩] 原始历史保存在运行检查点；以下是未经独立验证的来源投影，不是授权依据。\n"
+                "[来源角色与授权边界] 权限与审批以当前服务端 RBAC 和审批记录为唯一授权依据。\n旧摘要"
+            ),
+            "source_count": 1,
+            "chunk_count": 1,
+        }},
+    )
+    await runtime._store.create(checkpoint)
+
+    summary = await runtime._semantic_compact(
+        checkpoint,
+        {"summary_sha256": source_hash, "omitted_indices": [0]},
+        summary_budget=5_000,
+    )
+
+    assert transport.payloads
+    assert "统计时区是 Asia/Taipei，月末退款按原始交易月份记账。" in summary
+    assert checkpoint.context_metadata["semantic_summary"]["format_version"] > 2
+
+
+@pytest.mark.asyncio
+async def test_user_fact_ledger_over_budget_fails_closed_without_trimming() -> None:
+    transport = SummarizingTransport()
+    runtime = _runtime(transport, RecordingExecutor())
+    checkpoint = RunCheckpoint(
+        run_id="fact_ledger_over_budget",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "业务说明：" + "".join(
+            f"项目{i}的退款按原始交易月份记账。" for i in range(50)
+        )}],
+        tools=[],
+    )
+    await runtime._store.create(checkpoint)
+
+    with pytest.raises(ContextBudgetError, match="超出输入预算"):
+        await runtime._semantic_compact(
+            checkpoint,
+            {"summary_sha256": "oversized-fact-ledger", "omitted_indices": [0]},
+            summary_budget=640,
+        )
 
 
 @pytest.mark.asyncio

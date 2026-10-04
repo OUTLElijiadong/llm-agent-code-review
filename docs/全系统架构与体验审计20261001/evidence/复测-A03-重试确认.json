@@ -1,0 +1,49 @@
+{
+  "finding": "A03 高风险团队重试授权闭环",
+  "status": "candidate_fix_verified_locally",
+  "baseline_reproduction": {
+    "test": "tests/unit/services/test_agent_team_service.py::test_high_risk_retry_has_preview_and_per_attempt_confirmation",
+    "result": "failed_before_fix",
+    "observed": "AttributeError: agent_team_service has no attribute preview_retry_team",
+    "scope": "服务没有提供在原团队上重新预览和确认高风险重试计划的入口"
+  },
+  "changed_paths": [
+    "backend/app/services/agent_team_service.py",
+    "backend/app/services/agent_team_dispatcher.py",
+    "backend/app/services/agent_supervisor_service.py",
+    "backend/app/schemas/agent_team.py",
+    "backend/app/api/v1/agent_teams.py",
+    "backend/app/agents/orchestrator.py",
+    "backend/app/agents/tool_contracts.py",
+    "backend/app/services/agent_responses_service.py",
+    "frontend/src/api/agentTeams.ts",
+    "frontend/src/components/ai/AgentTeamWindow.vue",
+    "frontend/src/api/agentTeams.test.ts",
+    "frontend/src/components/ai/AgentTeamWindow.target-freeze.test.ts",
+    "backend/tests/unit/services/test_agent_team_service.py",
+    "backend/tests/unit/services/test_agent_team_dispatcher.py",
+    "backend/tests/unit/api/test_agent_teams_api.py",
+    "backend/tests/unit/services/test_agent_governance_services.py"
+  ],
+  "verified_scenarios": [
+    "缺少当前重试摘要时不改变失败任务状态",
+    "摘要与任务策略不匹配时返回409且不重新排队",
+    "当前账号确认后记录 supervisor.retry_reauthorized 并允许精确指纹执行",
+    "同一高风险任务再次失败后旧摘要不能授权新尝试",
+    "团队重试确认只授权本人团队；其他账号读取预览返回404",
+    "重试策略保存在执行元数据，业务指令不被追加改写",
+    "小菱工具首次只返回预览；带摘要的执行调用须经过当前用户监督确认",
+    "前端最终确认逐任务显示当前状态、依赖、风险和原因"
+  ],
+  "validation": {
+    "backend_command": "cd backend && .venv311/bin/python -m pytest tests/unit/services/test_agent_team_service.py tests/unit/services/test_agent_team_dispatcher.py tests/unit/api/test_agent_teams_api.py tests/unit/services/test_agent_governance_services.py -q --no-cov --tb=short",
+    "backend_result": "226 passed; 2 dependency deprecation warnings",
+    "frontend_tests": "2 files, 12 passed; confirmation copy asserts status and dependencies",
+    "frontend_build": "npm run build: vue-tsc and vite build passed",
+    "lint": "targeted Ruff and ESLint checks passed"
+  },
+  "limits": [
+    "测试使用隔离 SQLite 和模型/执行器桩，未验证生产 MySQL 行锁、多进程竞争或真实模型调用",
+    "当前候选尚未发布，未做生产页面真实点击或部署后 API 复测"
+  ]
+}

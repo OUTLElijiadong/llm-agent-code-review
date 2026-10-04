@@ -215,7 +215,9 @@ def _write_file_operation(db, actor, file_id, operation):
     from app.services import code_file_service
 
     if operation == "update":
-        return code_file_service.update_content(db, actor, file_id, "fixture_value = 3\n")
+        return code_file_service.update_content(
+            db, actor, file_id, "fixture_value = 3\n", expected_version=2,
+        )
     if operation == "rename":
         return code_file_service.rename_file(db, actor, file_id, "renamed_fixture.py")
     if operation == "delete":

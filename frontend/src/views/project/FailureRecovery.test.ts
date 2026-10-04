@@ -59,6 +59,23 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = '' })
 
 describe('主页面失败恢复真实挂载', () => {
+  it('项目审查任务在指标无权限时用占位符展示，不显示 null', async () => {
+    api.getProjectDetail.mockResolvedValue({
+      ...project,
+      recent_tasks: [{
+        id: 451, review_type: 'pentest', score: null, total_issues: null,
+        status: 'success', create_time: '2026-10-01T00:00:00Z',
+      }],
+    })
+    render(ProjectDetail); await flushPromises()
+    state().activeTab = 'tasks'
+    await flushPromises()
+    const card = wrapper.get('.recent-task-card')
+    expect(card.text()).toContain('测试评分 —')
+    expect(card.text()).toContain('报告问题 —')
+    expect(card.text()).not.toContain('null')
+  })
+
   it('项目刷新503保留快照并显示失败；重试成功后移除提示', async () => {
     render(ProjectList); await flushPromises()
     api.getProjects.mockRejectedValueOnce(fail())

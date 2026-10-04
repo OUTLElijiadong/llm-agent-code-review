@@ -46,7 +46,7 @@ from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.pagination import Pagination
 from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentVersion, ReviewTaskAgentRelease
@@ -194,6 +194,9 @@ def start(
         NotFoundError: 项目或文件不存在
         ValidationError: 文件数量不合法
     """
+    from app.services.review_admission_service import admit_review_start
+
+    admit_review_start(int(user.id))
     project = db.get(Project, payload.project_id, populate_existing=True, with_for_update=True)
     if not project:
         raise NotFoundError("项目不存在", code=40400)
@@ -416,6 +419,9 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         if task.status != "running" or str(getattr(task, "execution_token", "") or "") != active_token:
             logger.info("[review] 后台任务 #{} 的执行租约已失效，跳过旧 Worker", task_id)
             return
+        def authorization_check() -> None:
+            _assert_review_execution_authorized(task_id, user_id, active_token)
+        authorization_check()
         if int(getattr(user, "status", 1) or 0) != 1:
             _check_cancelled(db, task, active_token, lock=True)
             task.status = "failed"
@@ -517,6 +523,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
                 profiles,
                 experience_section,
                 execution_token=active_token,
+                authorization_check=authorization_check,
             )
     except (TaskCancelledError, TaskSupersededError):
         if hasattr(db, "rollback"):
@@ -531,13 +538,55 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
                 task.status = "failed"
                 task.error_message = str(e)[:500]
                 task.end_time = datetime.now(timezone.utc)
-                task.coverage = {**(task.coverage or {}), "stage": "failed"}
+                task.coverage = {
+                    **(task.coverage or {}),
+                    "stage": "failed",
+                    "error": str(e)[:500],
+                    **({"reason": "authorization_revoked"} if isinstance(e, ReviewAuthorizationRevokedError) else {}),
+                }
                 _safe_commit(db, task)
             except (TaskCancelledError, TaskSupersededError):
                 db.rollback()
     finally:
         db.close()
         _REVIEW_SEMAPHORE.release()
+
+
+def _assert_review_execution_authorized(
+    task_id: int, user_id: int, execution_token: str,
+) -> None:
+    """用独立数据库会话核验后台正式审查的实时账号、项目与 RBAC 权限。"""
+    auth_db = SessionLocal()
+    try:
+        if not isinstance(auth_db, Session):
+            # Pure state-machine unit tests may supply a lightweight fake session;
+            # production SessionLocal always returns a real SQLAlchemy Session.
+            return
+        task = auth_db.get(ReviewTask, task_id, populate_existing=True)
+        user = auth_db.get(User, user_id, populate_existing=True)
+        if task is None or user is None:
+            raise ReviewAuthorizationRevokedError("账号或审查任务已不可用，审查执行已阻断")
+        if task.status != "running" or str(getattr(task, "execution_token", "") or "") != execution_token:
+            raise TaskSupersededError("审查任务执行租约已失效")
+        if int(getattr(user, "status", 0) or 0) != 1:
+            raise ReviewAuthorizationRevokedError("账号已停用或删除，后续审查执行已阻断")
+
+        from app.core.permission_codes import PermissionCode
+        from app.services import project_member_service, rbac_service
+
+        try:
+            project_member_service.require_project_access(auth_db, int(task.project_id), user)
+        except (ForbiddenError, NotFoundError) as exc:
+            raise ReviewAuthorizationRevokedError("项目成员资格已撤销，后续审查执行已阻断") from exc
+        if not rbac_service.check_permission(auth_db, int(user.id), PermissionCode.REVIEW_START):
+            raise ReviewAuthorizationRevokedError("review:start 权限已撤销，后续审查执行已阻断")
+    finally:
+        auth_db.close()
+
+
+def _check_review_authorization(authorization_check) -> None:
+    if callable(authorization_check):
+        authorization_check()
 
 
 def _get_agent_for_profile(profile_code: str) -> Optional[BaseAgent]:
@@ -673,6 +722,7 @@ def _execute_review(
     files: list, rules: list, profiles: tuple[ReviewAgentProfile, ...],
     experience_section: str,
     execution_token: Optional[str] = None,
+    authorization_check=None,
 ) -> None:
     """执行审查主循环并将统计结果落库。
 
@@ -701,6 +751,7 @@ def _execute_review(
         file_failures: list[str] = []
         for code_file in files:
             _check_cancelled(db, task, execution_token, lock=True)
+            _check_review_authorization(authorization_check)
             task.coverage = {**(task.coverage or {}), "stage": "analyzing", "current_file": code_file.file_name,
                              "total_files": int(task.total_files or len(files)),
                              "completed_files": int(task.processed_files or 0),
@@ -711,14 +762,19 @@ def _execute_review(
                     db, collab_agent, api_config, task, code_file, rules, user, profiles,
                     experience_section=experience_section,
                     execution_token=execution_token,
+                    authorization_check=authorization_check,
                 )
             except (TaskCancelledError, TaskSupersededError):
                 raise
+            except ReviewAuthorizationRevokedError:
+                raise
             except ReviewCoverageError as exc:
+                _check_review_authorization(authorization_check)
                 file_failures.append(f"{code_file.file_name}: {'; '.join(exc.failures)}")
                 continue
             except Exception as exc:  # noqa: BLE001 - 单文件失败不应阻断其余文件覆盖
                 _check_cancelled(db, task, execution_token, lock=True)
+                _check_review_authorization(authorization_check)
                 file_failures.append(f"{code_file.file_name}: {exc}")
                 coverage = task.coverage if isinstance(task.coverage, dict) else {}
                 ledger = dict(coverage.get("files") or {})
@@ -731,6 +787,7 @@ def _execute_review(
                 continue
             all_issues.extend(file_issues)
             _check_cancelled(db, task, execution_token, lock=True)
+            _check_review_authorization(authorization_check)
             task.processed_files += 1
             task.coverage = {**(task.coverage or {}), "completed_files": task.processed_files}
             _safe_commit(db)
@@ -745,6 +802,7 @@ def _execute_review(
             raise ReviewCoverageError(file_failures)
 
         _check_cancelled(db, task, execution_token, lock=True)
+        _check_review_authorization(authorization_check)
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
         for it in all_issues:
             # 归一化:LLM 偶发返回四类之外的 severity 时归入「中」,
@@ -776,6 +834,7 @@ def _execute_review(
         task.coverage = {**(task.coverage or {}), "stage": "complete", "current_file": None}
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
+        _check_review_authorization(authorization_check)
         _safe_commit(db)
         try:
             from app.services.dashboard_service import invalidate_dashboard_stats
@@ -817,6 +876,8 @@ def _execute_review(
         task.duration_ms = int((time.time() - t0) * 1000)
         _update_issue_counts(db, task)
         task.coverage = {**(task.coverage or {}), "stage": "failed", "error": str(e)[:500]}
+        if isinstance(e, ReviewAuthorizationRevokedError):
+            task.coverage = {**(task.coverage or {}), "reason": "authorization_revoked"}
         _safe_commit(db)
         _emit_review_event(AgentEventType.FAILED, task, user,
                            f"审查任务 #{task.id} 失败: {task.error_message}")
@@ -829,7 +890,8 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                      task: ReviewTask, code_file: CodeFile, rules: list, user: User,
                      profiles: tuple[ReviewAgentProfile, ...],
                      experience_section: str = "",
-                     execution_token: Optional[str] = None) -> list[ReviewIssue]:
+                     execution_token: Optional[str] = None,
+                     authorization_check=None) -> list[ReviewIssue]:
     """审查单个文件:双引擎 — 静态规则前置过滤 + LLM 深度审查 → 合并去重 → 入库
 
     T08 v3 双引擎流程:
@@ -891,6 +953,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     prompt_context_cache: dict[tuple[str, str, int], str] = {}
 
     _check_cancelled(db, task, execution_token, lock=True)
+    _check_review_authorization(authorization_check)
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     ledger = dict(coverage.get("files") or {})
     file_entry = {
@@ -918,14 +981,18 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
                 chunk_findings = _review_chunk_collaborative(
                     db, collab_agent, api_config, task, code_file, rules, user,
                     profiles, idx, chunk, experience_section=experience_section,
+                    authorization_check=authorization_check,
                 )
             else:
                 chunk_findings = _review_chunk_sequential(
                     db, api_config, task, code_file, rules, user,
                     profiles, idx, chunk, experience_section=experience_section,
                     prompt_context_cache=prompt_context_cache,
+                    authorization_check=authorization_check,
                 )
             llm_findings.extend(chunk_findings)
+        except ReviewAuthorizationRevokedError:
+            raise
         except ReviewCoverageError as exc:
             _check_cancelled(db, task, execution_token, lock=True)
             llm_findings.extend(exc.findings)
@@ -940,6 +1007,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
             _safe_commit(db, task)
             continue
         _check_cancelled(db, task, execution_token, lock=True)
+        _check_review_authorization(authorization_check)
         file_entry["completed_chunk_indexes"] = [*file_entry["completed_chunk_indexes"], idx]
         file_entry["completed_chunks"] = len(file_entry["completed_chunk_indexes"])
         ledger[str(code_file.id)] = dict(file_entry)
@@ -967,6 +1035,7 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     ]
     if issues_acc:
         _check_cancelled(db, task, execution_token, lock=True)
+        _check_review_authorization(authorization_check)
         db.add_all(issues_acc)
         db.commit()
     if failures:
@@ -1012,6 +1081,7 @@ def _review_chunk_sequential(
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
     prompt_context_cache: Optional[dict[tuple[str, str, int], str]] = None,
+    authorization_check=None,
 ) -> List[Finding]:
     """单代理串行审查(双引擎之引擎2:LLM 深度审查)
 
@@ -1052,7 +1122,10 @@ def _review_chunk_sequential(
             task_id=task.id,
             project_id=task.project_id,
             file_id=code_file.id,
-            extra={"trace_id": f"review_{task.id}_f{code_file.id}_c{chunk_idx}_{profile.code}"},
+            extra={
+                "trace_id": f"review_{task.id}_f{code_file.id}_c{chunk_idx}_{profile.code}",
+                "before_model_call": authorization_check,
+            },
         )
 
         _emit_review_event(
@@ -1111,6 +1184,7 @@ def _review_chunk_sequential(
                             context_for_prompt,
                             max(8_192, int(profile.max_tokens)),
                             prompt_context_cache if prompt_context_cache is not None else {},
+                            before_model_call=authorization_check,
                         )
                     )
                 result = agent.execute_review(
@@ -1172,6 +1246,8 @@ def _review_chunk_sequential(
                 f"发现 {len(chunk_findings)} 个问题",
                 agent_code=target_agent,
             )
+        except ReviewAuthorizationRevokedError:
+            raise
         except Exception as e:
             logger.warning(f"文件 {code_file.file_name} chunk {chunk_idx} {profile.code} 失败: {e}")
             failures.append(f"{profile.name}: {e}")
@@ -1349,6 +1425,7 @@ def _review_chunk_collaborative(
     code_file: CodeFile, rules: list, user: User,
     profiles: tuple[ReviewAgentProfile, ...], chunk_idx: int,
     chunk, experience_section: str = "",
+    authorization_check=None,
 ) -> List[Finding]:
     """多 Agent 协同审查：并行独立感知后执行确定性证据聚合。
 
@@ -1404,6 +1481,7 @@ def _review_chunk_collaborative(
                     profile, chunk.text, language, file_name, rules, line_offset,
                     experience_section, getattr(chunk, "context", ""),
                     api_config,
+                    authorization_check,
                 )
             future_map[future] = profile
 
@@ -1467,6 +1545,8 @@ def _review_chunk_collaborative(
                         "status": "success",
                         "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
                     })
+            except ReviewAuthorizationRevokedError:
+                raise
             except Exception as e:
                 logger.warning(f"并行审查 {profile.code}({agent_label}) 失败: {e}")
                 failures.append(f"{profile.name}: {e}")
@@ -1742,6 +1822,7 @@ def _review_context_summary(
     original: str,
     target_tokens: int,
     calls: list[int],
+    before_model_call=None,
 ) -> str:
     """Compress optional context while keeping source coverage and hard constraints."""
     if estimate_tokens(original) <= target_tokens:
@@ -1792,13 +1873,17 @@ def _review_context_summary(
                     raise ValueError("审查非源码上下文压缩超过 32 次模型调用上限")
                 calls[0] += 1
                 try:
-                    raw, _meta = agent.call_raw(
-                        system_prompt=_REVIEW_CONTEXT_COMPACTOR_SYSTEM,
-                        user_prompt=user_prompt,
-                        agent_label="review_context_compaction",
-                        temperature=0,
-                        max_tokens=trial_budget,
-                    )
+                    _check_review_authorization(before_model_call)
+                    call_kwargs = {
+                        "system_prompt": _REVIEW_CONTEXT_COMPACTOR_SYSTEM,
+                        "user_prompt": user_prompt,
+                        "agent_label": "review_context_compaction",
+                        "temperature": 0,
+                        "max_tokens": trial_budget,
+                    }
+                    if callable(before_model_call):
+                        call_kwargs["before_request"] = before_model_call
+                    raw, _meta = agent.call_raw(**call_kwargs)
                     break
                 except DeepSeekOutputTruncatedError:
                     continue
@@ -1881,6 +1966,7 @@ def _prepare_bounded_single_agent_prompts(
     context_section: str,
     output_budget: int,
     cache: dict[tuple[str, str, int], str],
+    before_model_call=None,
 ) -> tuple[str, str, int, dict[str, str]]:
     sections = {
         "custom": profile.system_prompt if profile.is_custom else "",
@@ -1936,6 +2022,7 @@ def _prepare_bounded_single_agent_prompts(
         if key not in cache:
             cache[key] = _review_context_summary(
                 agent, source_name=name, original=original, target_tokens=quota, calls=calls,
+                before_model_call=before_model_call,
             )
         sections[name] = cache[key]
     system_prompt, user_prompt = _render_single_agent_prompts(
@@ -1965,11 +2052,13 @@ def _bounded_single_agent_prompts(
     context_section: str,
     output_budget: int,
     cache: dict[tuple[str, str, int], str],
+    before_model_call=None,
 ) -> tuple[str, str, int]:
     """兼容遗留协同调用方，只返回已过预算门禁的提示词。"""
     system_prompt, user_prompt, estimated_input, _sections = _prepare_bounded_single_agent_prompts(
         agent, profile, code, language, file_name, rules, line_offset,
         experience_section, context_section, output_budget, cache,
+        before_model_call=before_model_call,
     )
     return system_prompt, user_prompt, estimated_input
 
@@ -1983,6 +2072,7 @@ def _call_single_agent(
     experience_section: str = "",
     context_section: str = "",
     api_config = None,
+    authorization_check=None,
 ) -> tuple:
     """单次代理并行调用 — 通过 DeepSeekAgent.call_raw() 统一入口
 
@@ -2061,14 +2151,19 @@ def _call_single_agent(
             system_prompt, user_prompt, _estimated_input = _bounded_single_agent_prompts(
                 agent, profile, source_code, language, file_name, rules, source_offset,
                 experience_section, context, max(output_budget, max_tokens), context_cache,
+                before_model_call=authorization_check,
             )
-            return agent.call_raw(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                agent_label=agent_label,
-                temperature=profile.temperature,
-                max_tokens=max_tokens,
-            )
+            _check_review_authorization(authorization_check)
+            call_kwargs = {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "agent_label": agent_label,
+                "temperature": profile.temperature,
+                "max_tokens": max_tokens,
+            }
+            if callable(authorization_check):
+                call_kwargs["before_request"] = authorization_check
+            return agent.call_raw(**call_kwargs)
 
         call_count += 1
         if call_count > 32:
@@ -2262,6 +2357,30 @@ def _can_view_task_report(
         report_service.is_report_available(task)
         and report_permission
         and (task.user_id == user.id or administrator)
+    )
+
+
+def can_view_task_metrics(
+    db: Session,
+    user: User,
+    task: ReviewTask,
+    *,
+    report_permission: Optional[bool] = None,
+    administrator: Optional[bool] = None,
+) -> bool:
+    """判断任务分数和问题统计能否在项目等摘要出口展示。
+
+    普通代码审查指标沿用项目成员可见范围；沙箱/渗透任务复用报告本身的
+    权限与对象范围，避免列表摘要绕过任务详情的脱敏规则。
+    """
+    if task.review_type not in _REPORT_BACKED_REVIEW_TYPES:
+        return True
+    return _can_view_task_report(
+        db,
+        user,
+        task,
+        report_permission=report_permission,
+        administrator=administrator,
     )
 
 
@@ -2694,6 +2813,10 @@ class TaskCancelledError(Exception):
 
 class TaskSupersededError(Exception):
     """当前 Worker 的数据库执行租约已被恢复调度器接管。"""
+
+
+class ReviewAuthorizationRevokedError(Exception):
+    """正式审查执行期间账号或项目权限已撤销。"""
 
 
 def _check_cancelled(

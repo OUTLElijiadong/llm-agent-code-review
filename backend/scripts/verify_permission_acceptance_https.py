@@ -502,7 +502,7 @@ class Runner:
             ("GET", "/api/code-files?project_id={p}", None),
             ("GET", "/api/code-files/{f}", None),
             ("GET", "/api/code-files/{f}/meta", None),
-            ("PUT", "/api/code-files/{f}", {"content": "不应写入"}),
+            ("PUT", "/api/code-files/{f}", {"content": "不应写入", "expected_version": 1}),
             ("POST", "/api/code-files/{f}/rename", {"file_name": "forbidden.py"}),
             ("DELETE", "/api/code-files/{f}", None),
             ("GET", "/api/code-files/{f}/versions", None),
@@ -543,7 +543,7 @@ class Runner:
             "owner_a",
             "PUT",
             f"/api/code-files/{fa}",
-            payload={"content": "print('version two')\n", "change_desc": "权限验收版本2"},
+            payload={"content": "print('version two')\n", "change_desc": "权限验收版本2", "expected_version": 1},
             purpose="owner源码真实版本2",
         )
         self.request(

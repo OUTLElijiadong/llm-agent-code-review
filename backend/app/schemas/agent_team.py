@@ -104,7 +104,7 @@ class AgentTeamCreateIn(_StrictModel):
         return value
 
 
-class AgentTeamRetryIn(_StrictModel):
+class _AgentTeamRetryBase(_StrictModel):
     task_keys: List[str] = Field(default_factory=list, max_length=100)
     strategy_changes: Dict[str, str] = Field(default_factory=dict, max_length=100)
 
@@ -117,6 +117,16 @@ class AgentTeamRetryIn(_StrictModel):
             if len(strategy.strip()) < 8 or len(strategy) > 4000:
                 raise ValueError("每条改道策略必须为 8 到 4000 个字符")
         return {key: strategy.strip() for key, strategy in value.items()}
+
+
+class AgentTeamRetryPreviewIn(_AgentTeamRetryBase):
+    """只读预览本次重试范围和监督风险。"""
+
+
+class AgentTeamRetryIn(_AgentTeamRetryBase):
+    """执行重试；高风险任务须回传同一计划的确认摘要。"""
+
+    supervisor_plan_sha256: str = Field(default="", max_length=64, pattern=r"^(?:[0-9a-f]{64})?$")
 
 
 class AgentTeamCancelIn(_StrictModel):

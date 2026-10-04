@@ -1,0 +1,86 @@
+{
+  "日期": "2026-10-04",
+  "范围": "候选工作树；隔离SQLite/真实JWT HTTP矩阵；未连接生产；不以OpenAPI代替权限验收",
+  "源HEAD": "fab823f71cda410cfdc03006f08fbca55f4644a9",
+  "HEAD真实OpenAPI对候选真实OpenAPI": {
+    "新增": [
+      [
+        "POST",
+        "/api/agent-teams/{team_id}/retry/preview"
+      ]
+    ],
+    "移除": [],
+    "脚本检测到的破坏变化": []
+  },
+  "路由矩阵": {
+    "总路由": 339,
+    "认证路由": 325,
+    "显式权限守卫路由": 255,
+    "来源文件数": 42,
+    "新增守卫": [
+      "agent:chat"
+    ]
+  },
+  "新增回归": "owner真实JWT预览200；同项目他人/其它owner/admin404；task input/status/attempt及event数量无写入",
+  "文件保存契约": "expected_version语法保持Optional；同步保存必须提供读取版本，缺失维持业务40904而非422；正常编辑/对象权限样本携带版本1",
+  "历史基线纠正": {
+    "提交": "8d0efdcffb2a7a3cc1adcda72187190cd929f370",
+    "提交日期": "2026-09-20",
+    "原因": "既有发布提交把有副作用的圆桌启动GET改POST，真实HEAD已为POST，生成OpenAPI仍残留GET",
+    "祖先关系": "git merge-base --is-ancestor确认其为HEAD祖先",
+    "参数与body变化": "旧GET与当前POST参数required/schema完全一致；均无requestBody"
+  },
+  "基线文件实际窄更新": [
+    {
+      "document": "docs/generated/openapi-baseline.json",
+      "changed_paths": [
+        "/api/agent-teams/{team_id}/retry/preview",
+        "/api/discuss/start"
+      ],
+      "changed_schemas": [
+        "AgentTeamRetryIn",
+        "AgentTeamRetryPreviewIn",
+        "CodeFileUpdateIn"
+      ]
+    },
+    {
+      "document": "docs/generated/openapi.json",
+      "changed_paths": [
+        "/api/agent-teams/{team_id}/retry/preview",
+        "/api/discuss/start"
+      ],
+      "changed_schemas": [
+        "AgentTeamRetryIn",
+        "AgentTeamRetryPreviewIn",
+        "CodeFileUpdateIn"
+      ]
+    }
+  ],
+  "复现与复测": {
+    "首次修矩阵后目标组": {
+      "失败": 1,
+      "通过": 1086,
+      "原因": "test_permission_route_contexts另一基线仍写338"
+    },
+    "同步第二份矩阵后": {
+      "通过": 1087,
+      "文件数": 4,
+      "警告数": 2
+    }
+  },
+  "测试命令": ".venv311/bin/pytest -o addopts= -q --tb=short tests/test_complete_permission_matrix.py tests/test_permission_route_contexts.py tests/unit/api/test_agent_teams_api.py tests/unit/scripts/test_project_contract_scripts.py",
+  "OpenAPI检查": {
+    "文件对文件": "PASS",
+    "live候选对窄修baseline": "PASS"
+  },
+  "静态检查": {
+    "Ruff": "目标3文件PASS",
+    "git diff --check": "PASS"
+  },
+  "未测边界": [
+    "生产HTTP/浏览器点击",
+    "生产MySQL并发锁",
+    "供应商真实调用",
+    "全量真实OpenAPI其它历史新增接口不属于此窄补范围"
+  ]
+}

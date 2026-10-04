@@ -25,7 +25,7 @@
 | 层 | 技术 |
 | --- | --- |
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Vue Router + ECharts + Monaco Editor + Axios |
-| 后端 | Python 3.9+ 本地开发 / Python 3.11 容器运行 + FastAPI + SQLAlchemy 2.x + Pydantic v2 + Alembic + Uvicorn |
+| 后端 | Python 3.11 本地开发与正式验收 / Python 3.11 容器运行 + FastAPI + SQLAlchemy 2.x + Pydantic v2 + Alembic + Uvicorn |
 | 数据库 | MySQL 8.0 |
 | AI 模型 | DeepSeek V4 (deepseek-v4-flash) + 多 Agent Prompt 编排 |
 | 报告导出 | python-docx (Word) + ReportLab (PDF) |

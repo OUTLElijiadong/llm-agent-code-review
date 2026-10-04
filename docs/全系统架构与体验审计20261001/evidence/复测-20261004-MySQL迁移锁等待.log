@@ -1,0 +1,131 @@
+INFO  [alembic.runtime.migration] Context impl MySQLImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 001, add user_api_config table
+INFO  [alembic.runtime.migration] Running upgrade 001 -> 002, add agent governance platform tables
+INFO  [alembic.runtime.migration] Running upgrade 002 -> 003, add review_issue vuln metadata and code_file binary support
+INFO  [alembic.runtime.migration] Running upgrade 003 -> 004, add project_member table
+INFO  [alembic.runtime.migration] Running upgrade 004 -> 005, add agent_name to evolution_proposal, create agent_skill_record table, add agent_label to ai_call_log
+INFO  [alembic.runtime.migration] Running upgrade 005 -> 006, add cvss/compliance_mapping/remediation/static_rule_hits to review_issue, add raw_size to code_file
+INFO  [alembic.runtime.migration] Running upgrade 006 -> 007, add rbac tables (role/permission/role_permission/user_role/menu/data_scope)
+INFO  [alembic.runtime.migration] Running upgrade 007 -> 008, create report_template and malware_scan_log tables
+INFO  [alembic.runtime.migration] Running upgrade 008 -> 009, enlarge review_issue.owasp and cwe columns
+INFO  [alembic.runtime.migration] Running upgrade 009 -> 010, seed report:template_manage permission + fix report-template menu path
+INFO  [alembic.runtime.migration] Running upgrade 010 -> 011, add user.last_login_ip column
+INFO  [alembic.runtime.migration] Running upgrade 011 -> 012, add unique admin copilot request id
+INFO  [alembic.runtime.migration] Running upgrade 012 -> 013, add direct copilot idempotency log
+INFO  [alembic.runtime.migration] Running upgrade 013 -> 014, add beta invite codes
+INFO  [alembic.runtime.migration] Running upgrade 014 -> 015, add declarative custom agent studio
+INFO  [alembic.runtime.migration] Running upgrade 015 -> 016, Add persistent admin copilot conversations and operations audit.
+INFO  [alembic.runtime.migration] Running upgrade 016 -> 017, Add persistent Responses Agent run checkpoints.
+INFO  [alembic.runtime.migration] Running upgrade 017 -> 018, Expand Responses Agent payload columns beyond MySQL TEXT limits.
+INFO  [alembic.runtime.migration] Running upgrade 018 -> 019, Add dedicated server operations permissions.
+INFO  [alembic.runtime.migration] Running upgrade 019 -> 020, Allow the protected manager to enter registered admin capabilities.
+INFO  [alembic.runtime.migration] Running upgrade 020 -> 021, Grant remote project import to ordinary project operators.
+INFO  [alembic.runtime.migration] Running upgrade 021 -> 022, Enforce the unique super administrator and server-operations boundary.
+INFO  [alembic.runtime.migration] Running upgrade 022 -> 023, Add MCP governance, capability aliases and sandbox lifecycle.
+INFO  [alembic.runtime.migration] Running upgrade 023 -> 024, Store quarantined whole-source archives outside editable code rows.
+INFO  [alembic.runtime.migration] Running upgrade 024 -> 025, Seed persistent Chinese aliases for source, testing and sandbox workflows.
+INFO  [alembic.runtime.migration] Running upgrade 025 -> 026, Expand source archive and binary member storage capacity.
+INFO  [alembic.runtime.migration] Running upgrade 026 -> 027, Extend agent_alert with security monitor fields.
+INFO  [alembic.runtime.migration] Running upgrade 027 -> 028, Add project_id to tool_call_log for per-project agent run stats.
+INFO  [alembic.runtime.migration] Running upgrade 028 -> 029, Add project_source_revision table for repaired source copies.
+INFO  [alembic.runtime.migration] Running upgrade 029 -> 030, Add durable Agent Mesh conversations, messages and message events.
+INFO  [alembic.runtime.migration] Running upgrade 030 -> 031, Add crash-safe dispatch leases to Agent Mesh messages.
+INFO  [alembic.runtime.migration] Running upgrade 031 -> 032, Add scoped execution strategy memory.
+INFO  [alembic.runtime.migration] Running upgrade 032 -> 033, Create persistent dynamic Agent team/work graph tables.
+INFO  [alembic.runtime.migration] Running upgrade 033 -> 034, Grant ordinary members private Agent draft lifecycle permissions.
+INFO  [alembic.runtime.migration] Running upgrade 034 -> 035, Grant ordinary members the security:scan permission.
+INFO  [alembic.runtime.migration] Running upgrade 035 -> 036, Add hot-path composite indexes for sandbox, mesh, team, and Responses tables.
+INFO  [alembic.runtime.migration] Running upgrade 036 -> 037, Add database-backed execution lease to review tasks.
+INFO  [alembic.runtime.migration] Running upgrade 037 -> 038, Persist immutable sandbox input and recovery lease.
+INFO  [alembic.runtime.migration] Running upgrade 038 -> 039, Persist the exact sandbox worker request snapshot.
+INFO  [alembic.runtime.migration] Running upgrade 039 -> 040, Persist the stable worker request envelope used for recovery.
+INFO  [alembic.runtime.migration] Running upgrade 040 -> 041a_remote_import_tasks, Create recoverable remote project import tasks.
+INFO  [alembic.runtime.migration] Running upgrade 040 -> 041_review_result_pipeline, Add review result provenance and versioned scoring metadata.
+INFO  [alembic.runtime.migration] Running upgrade 041_review_result_pipeline, 041a_remote_import_tasks -> 042_merge_review_import_heads, Merge the review-result and remote-import migration branches.
+INFO  [alembic.runtime.migration] Running upgrade 042_merge_review_import_heads -> 043_remote_import_lifecycle, Add cancellation and heartbeat fields to remote imports.
+INFO  [alembic.runtime.migration] Running upgrade 043_remote_import_lifecycle -> 044_pentest_domain, 授权渗透测试域: 四张表 + pentest 权限组种子。
+INFO  [alembic.runtime.migration] Running upgrade 044_pentest_domain -> 045_skill_asset_user_grant, 普通成员 Skill 工坊权限补种(与 agent_asset 对称, 修复成员面 Skill 能力 403)。
+INFO  [alembic.runtime.migration] Running upgrade 045_skill_asset_user_grant -> 046_finding_aggregation, Persist deterministic finding aggregation and human-review metadata.
+INFO  [alembic.runtime.migration] Running upgrade 046_finding_aggregation -> 047_review_input_snapshot, Persist verifiable scan input and execution coverage without inventing legacy snapshots.
+INFO  [alembic.runtime.migration] Running upgrade 047_review_input_snapshot -> 048_ai_usage_attribution, Add exact usage lineage without guessing or rewriting historical records.
+INFO  [alembic.runtime.migration] Running upgrade 048_ai_usage_attribution -> 049_agent_studio_reviewer_only, Restrict Agent Studio asset permissions to reviewer and above.
+INFO  [alembic.runtime.migration] Running upgrade 049_agent_studio_reviewer_only -> 050_user_avatar_preferences, add user avatar, avatar blob table and preference prompt state
+INFO  [alembic.runtime.migration] Running upgrade 050_user_avatar_preferences -> 051_agent_multimodal_assets, add agent multimodal asset table
+INFO  [alembic.runtime.migration] Running upgrade 051_agent_multimodal_assets -> 052_user_password_len, narrow user.password column to bcrypt's actual length
+INFO  [alembic.runtime.migration] Running upgrade 052_user_password_len -> 053_role_pentest_authorization, Merge auditor into reviewer and separate pentest approval.
+INFO  [alembic.runtime.migration] Running upgrade 053_role_pentest_authorization -> 054_archive_excess_conversations, archive legacy active Agent conversations above the account limit
+INFO  [alembic.runtime.migration] Running upgrade 054_archive_excess_conversations -> 055_backfill_conversation_titles, backfill meaningful Agent conversation titles and archive duplicate blanks
+INFO  [alembic.runtime.migration] Running upgrade 055_backfill_conversation_titles -> 056_older_run_titles, backfill placeholder titles from older Agent Response runs
+INFO  [alembic.runtime.migration] Running upgrade 056_older_run_titles -> 057_reviewer_audit_menu_route, route the merged reviewer audit menu to its permission-backed page
+INFO  [alembic.runtime.migration] Running upgrade 057_reviewer_audit_menu_route -> 058_roundtable_sessions, Persist owner-scoped roundtable sessions and ordered turns.
+INFO  [alembic.runtime.migration] Running upgrade 058_roundtable_sessions -> 059_response_transcript_ledger, Store Responses transcripts once per session and reference them by cursor.
+INFO  [alembic.runtime.migration] Context impl MySQLImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 059_response_transcript_ledger -> 060_transcript_message_sha256, Add per-message integrity digests to the Responses transcript ledger.
+INFO  [alembic.runtime.migration] Running upgrade 060_transcript_message_sha256 -> 061_overview_time_indexes, Index time-bounded Agent activity aggregation.
+{
+  "scope": "isolated_cr_testdb",
+  "schema": "prism_validation_8c0e791cf0d1",
+  "migration": {
+    "chain": "init.sql -> seed.sql -> 001..061",
+    "digests": 503,
+    "digest_not_null": true
+  },
+  "mysql_lock_regression": [
+    {
+      "round": 1,
+      "lock_wait_rows": 1,
+      "stale_conflict": 40904,
+      "next_save_version": 3
+    },
+    {
+      "round": 2,
+      "lock_wait_rows": 1,
+      "stale_conflict": 40904,
+      "next_save_version": 3
+    },
+    {
+      "round": 3,
+      "lock_wait_rows": 1,
+      "stale_conflict": 40904,
+      "next_save_version": 3
+    }
+  ],
+  "query_plans": {
+    "rows_per_table": 20000,
+    "tool": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "tool_call_log",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "ix_tool_call_agent,ix_tool_call_time_agent",
+        "key": "ix_tool_call_time_agent",
+        "key_len": "5",
+        "ref": null,
+        "rows": 1429,
+        "filtered": 100.0,
+        "Extra": "Using where; Using index; Using temporary"
+      }
+    ],
+    "ai": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "ai_call_log",
+        "partitions": null,
+        "type": "range",
+        "possible_keys": "ix_ai_call_log_time_agent_model",
+        "key": "ix_ai_call_log_time_agent_model",
+        "key_len": "5",
+        "ref": null,
+        "rows": 1429,
+        "filtered": 100.0,
+        "Extra": "Using index condition; Using temporary"
+      }
+    ]
+  },
+  "temporary_schema_removed": true
+}

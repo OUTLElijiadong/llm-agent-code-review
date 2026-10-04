@@ -4,8 +4,11 @@
 MySQL,因此无需外部依赖即可端到端验证自进化的模型与服务逻辑。
 """
 from datetime import datetime, timezone
+from threading import Lock
+from time import time
 
 import pytest
+from limits.util import WindowStats
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -46,7 +49,11 @@ from app.models.agent_mesh import (  # noqa: F401,E402
     AgentMeshMessageEvent,
 )
 from app.models.agent_multimodal import AgentMultimodalAsset  # noqa: F401,E402
-from app.models.agent_response_run import AgentResponseRun, AgentToolExecution  # noqa: F401,E402
+from app.models.agent_response_run import (  # noqa: F401,E402
+    AgentResponseRun,
+    AgentResponseTranscriptMessage,
+    AgentToolExecution,
+)
 from app.models.agent_team import (  # noqa: F401,E402
     AgentTeam,
     AgentTeamEvent,
@@ -106,6 +113,55 @@ def _clear_dashboard_stats_cache():
     yield
     _settings.dashboard_stats_cache_seconds = old_ttl
     _dashboard.invalidate_dashboard_stats()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_review_admission_bucket(monkeypatch):
+    """仅审查准入使用独立额度，保留 SlowAPI 包装器和其它限流作用域。"""
+    from app.core import rate_limit
+
+    class FixedWindowBucket:
+        def __init__(self):
+            self._windows = {}
+            self._lock = Lock()
+
+        def hit(self, item, *identifiers, cost=1):
+            key = item.key_for(*identifiers)
+            now = time()
+            with self._lock:
+                reset_at, count = self._windows.get(key, (now + item.get_expiry(), 0))
+                if reset_at <= now:
+                    reset_at, count = now + item.get_expiry(), 0
+                count += cost
+                self._windows[key] = (reset_at, count)
+                return count <= item.amount
+
+        def get_window_stats(self, item, *identifiers):
+            key = item.key_for(*identifiers)
+            now = time()
+            with self._lock:
+                reset_at, count = self._windows.get(key, (now + item.get_expiry(), 0))
+                if reset_at <= now:
+                    return WindowStats(now + item.get_expiry(), item.amount)
+                return WindowStats(reset_at, max(0, item.amount - count))
+
+    backend = rate_limit.limiter.limiter
+    original_hit = backend.hit
+    original_window_stats = backend.get_window_stats
+    bucket = FixedWindowBucket()
+
+    def hit(item, *identifiers, cost=1):
+        if identifiers and identifiers[-1] == "review_start_shared":
+            return bucket.hit(item, *identifiers, cost=cost)
+        return original_hit(item, *identifiers, cost=cost)
+
+    def get_window_stats(item, *identifiers):
+        if identifiers and identifiers[-1] == "review_start_shared":
+            return bucket.get_window_stats(item, *identifiers)
+        return original_window_stats(item, *identifiers)
+
+    monkeypatch.setattr(backend, "hit", hit)
+    monkeypatch.setattr(backend, "get_window_stats", get_window_stats)
 
 
 @pytest.fixture

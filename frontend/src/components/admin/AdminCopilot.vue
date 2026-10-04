@@ -292,6 +292,7 @@ const sessionLastPolledAt = ref('')
 const agentTeams = ref<AgentTeamDetail[]>([])
 const agentTeamLoading = ref(false)
 const agentTeamError = ref('')
+let agentTeamRefreshGeneration = 0
 const selectedTeamId = ref<number | null>(null)
 const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
 const activeThinkingTeamIds = computed(() => (
@@ -488,6 +489,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   if (wasBusy) switcherRef.value?.setBusy(sessionId.value, true)
   activeResponse?.abort()
   activeResponse = null
+  agentTeamRefreshGeneration += 1
   sessionPollStopped = true
   invalidateSessionPoll()
   sessionPollStopped = false
@@ -503,6 +505,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   cancelPromptVisible.value = false
   sessionRun.value = null
   agentTeams.value = []
+  agentTeamLoading.value = false
   agentTeamError.value = ''
   loading.value = false
   showTyping.value = false
@@ -598,8 +601,10 @@ function invalidateSessionPoll(): void {
 async function refreshAgentTeam(generation?: number): Promise<void> {
   const scopeCurrent = chatScope.capture()
   if (!sessionId.value) return
+  const requestGeneration = ++agentTeamRefreshGeneration
   const requestedSessionId = sessionId.value
   const isCurrent = (): boolean => scopeCurrent() && requestedSessionId === sessionId.value
+    && requestGeneration === agentTeamRefreshGeneration
     && (generation === undefined || generation === sessionPollGeneration)
   agentTeamLoading.value = true
   try {
@@ -618,8 +623,14 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       .map((result) => result.value)
     const failedCount = settled.length - details.length
     if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
-    agentTeams.value = details
-    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
+    const currentById = new Map<number, AgentTeamDetail>(
+      agentTeams.value.map((team) => [team.team_id, team]),
+    )
+    for (const team of details) currentById.set(team.team_id, team)
+    agentTeams.value = listed.items
+      .map((item) => currentById.get(item.team_id))
+      .filter((team): team is AgentTeamDetail => team !== undefined)
+    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留对应团队上次成功状态` : ''
   } catch {
     if (!scopeCurrent()) return
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
@@ -1800,6 +1811,7 @@ function handleVisibilityChange(): void {
 
 watch([() => userStore.profile?.id, () => userStore.token], () => {
   chatAccountEpoch.value += 1
+  agentTeamRefreshGeneration += 1
   meshBridge.stop()
   activeResponse = null
   sessionPollStopped = true
@@ -1842,6 +1854,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
 }, { flush: 'sync' })
 
 onBeforeUnmount(() => {
+  agentTeamRefreshGeneration += 1
   adminHeaderTriggerObserver?.disconnect()
   adminHeaderTriggerObserver = undefined
   clearUnconfirmedStart()

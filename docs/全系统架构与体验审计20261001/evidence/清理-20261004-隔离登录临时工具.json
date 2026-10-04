@@ -1,0 +1,43 @@
+{
+  "scope": "exact local files/directories created by this isolated-login validation; remote current container/wrapper/venv cleanup separately recorded",
+  "records": [
+    {
+      "path": "/tmp/prism-login-linux-wheels-20261004",
+      "kind": "directory",
+      "files": 26,
+      "removed": true
+    },
+    {
+      "path": "/tmp/prism-login-redis-validation-20261004.py",
+      "kind": "file",
+      "sha256": "5c2ed4cccf8aee1d27f7c37df9099b7b505e21a2142f5d8d9529824ffbdd210e",
+      "removed": true
+    },
+    {
+      "path": "/tmp/prism-login-lua-host-runner-20261004.py",
+      "kind": "file",
+      "sha256": "2086143e05bbafdef15ad23d9ec26fa71c9f16db6d231a3a0f2c111016a52f5c",
+      "removed": true
+    },
+    {
+      "path": "/tmp/prism-login-lua-host-orchestrate-20261004.py",
+      "kind": "file",
+      "sha256": "3331b8f421ad4dc887ecb8ba98b3fe7c66edf90718afbea32aadaae9da9ea19b",
+      "removed": true
+    },
+    {
+      "path": "/tmp/prism-login-lua-minimal-20261004.lock",
+      "kind": "file",
+      "sha256": "3d97c1f730e46865afd24e211f7f74a1547d1693e5839affde36aebb96993193",
+      "removed": true
+    },
+    {
+      "path": "/tmp/prism-login-lua-minimal-packages-20261004.json",
+      "kind": "file",
+      "sha256": "783bef7b79ee818ebe038e3e866ff26fde6bac1208c972cb020b4f4bb47b4ed3",
+      "removed": true
+    }
+  ],
+  "business_data_changed": false,
+  "prior_mount_guard_anonymous_volume": "first guard-failure container removed by exactID; possible automatically-created empty volume ownership was not recorded, so no guessed volume deletion or host-wide prune"
+}

@@ -105,6 +105,12 @@ async function settleAll(): Promise<void> {
   await flushPromises()
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   window.sessionStorage.clear()
@@ -514,6 +520,62 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
     expect(tracePanel.attributes('hidden')).toBeUndefined()
     expect(tracePanel.get('.agent-team-stats').isVisible()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('团队详情局部失败保留同会话的上次成功卡片并标记同步不完整', async () => {
+    const wrapper = await mountReadyDrawer()
+    const vm = wrapper.vm as any
+    const summary = (teamId: number) => ({ team_id: teamId, title: `团队${teamId}`, status: 'running' })
+    const full = (teamId: number, status = 'running') => ({
+      team_id: teamId, title: `团队${teamId}`, surface: 'user', session_id: 'user-test', status,
+      max_active_children: 2, trace_id: `trace-${teamId}`,
+      counts: { total: 1, completed: status === 'completed' ? 1 : 0, running: status === 'running' ? 1 : 0, queued: 0, failed: 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    })
+    teamApi.list.mockResolvedValue({ items: [summary(1), summary(2)], total: 2 })
+    teamApi.detail.mockImplementation((teamId: number) => Promise.resolve(full(teamId)))
+    await vm.refreshAgentTeam()
+    teamApi.detail.mockImplementation((teamId: number) => teamId === 1
+      ? Promise.resolve(full(teamId, 'completed'))
+      : Promise.reject(new Error('brief network error')))
+
+    await vm.refreshAgentTeam()
+
+    expect(vm.agentTeams.map((team: any) => team.team_id)).toEqual([1, 2])
+    expect(vm.agentTeams.find((team: any) => team.team_id === 2).status).toBe('running')
+    expect(vm.cachedAgentTeams.map((team: any) => team.team_id)).toEqual([1, 2])
+    expect(vm.agentTeamError).toContain('已保留对应团队上次成功状态')
+    wrapper.unmount()
+  })
+
+  it('同会话迟到的旧团队详情不得覆盖新完成状态', async () => {
+    const wrapper = await mountReadyDrawer()
+    const vm = wrapper.vm as any
+    teamApi.list.mockResolvedValue({ items: [{ team_id: 1, title: '团队1', status: 'running' }], total: 1 })
+    const old = deferred<any>()
+    let detailCalls = 0
+    teamApi.detail.mockImplementation(() => ++detailCalls === 1
+      ? old.promise
+      : Promise.resolve({
+          team_id: 1, title: '团队1', surface: 'user', session_id: 'user-test', status: 'completed',
+          max_active_children: 1, trace_id: 'trace-1',
+          counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+          members: [], tasks: [], events: [], messages: [],
+        }))
+
+    const staleRequest = vm.refreshAgentTeam()
+    await flushPromises()
+    await vm.refreshAgentTeam()
+    old.resolve({
+      team_id: 1, title: '团队1', surface: 'user', session_id: 'user-test', status: 'running',
+      max_active_children: 1, trace_id: 'trace-1',
+      counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    })
+    await staleRequest
+
+    expect(vm.agentTeams[0].status).toBe('completed')
     wrapper.unmount()
   })
 

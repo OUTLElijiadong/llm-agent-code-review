@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.v1.review import router
+from app.api.v1.projects import router as projects_router
 from app.core.database import Base, get_db
 from app.core.error_handlers import register_handlers
 from app.core.exceptions import ServiceUnavailableError
@@ -32,7 +33,7 @@ def review_http():
     users['disabled'].status = 0
     role = Role(id=1, name='普通用户', code='user', status='active', is_builtin=1)
     db.add_all([*users.values(), role])
-    for index, code in enumerate(('review:view', 'issue:view'), 1):
+    for index, code in enumerate(('review:view', 'issue:view', 'project:view'), 1):
         db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
         db.add(RolePermission(role_id=role.id, permission_id=index))
     for name in ('owner', 'member', 'outsider', 'disabled'):
@@ -50,6 +51,7 @@ def review_http():
     application = FastAPI()
     register_handlers(application)
     application.include_router(router, prefix='/api/review')
+    application.include_router(projects_router, prefix='/api/projects')
     application.dependency_overrides[get_db] = lambda: db
     client = TestClient(application, raise_server_exceptions=False)
     writes = []
@@ -186,7 +188,7 @@ def test_domain_report_body_requires_both_report_permission_and_owner_scope(revi
             score=0,
             create_time=datetime.now(timezone.utc),
         ))
-    report_permission = Permission(id=3, code="report:view", name="查看报告", module="report", type="api")
+    report_permission = Permission(id=4, code="report:view", name="查看报告", module="report", type="api")
     db.add(report_permission)
     db.add(RolePermission(role_id=1, permission_id=report_permission.id))
     db.commit()
@@ -233,14 +235,14 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         ))
 
     report_role = Role(id=2, name="审查员", code="reviewer", status="active", is_builtin=0)
-    report_permission = Permission(id=3, code="report:view", name="查看报告", module="report", type="api")
+    report_permission = Permission(id=4, code="report:view", name="查看报告", module="report", type="api")
     db.add_all([report_role, report_permission])
     db.flush()
     db.query(UserRole).filter(UserRole.user_id == users["owner"].id).delete()
     users["owner"].role = report_role.code
     db.add_all([
         RolePermission(role_id=report_role.id, permission_id=permission_id)
-        for permission_id in (1, 2, report_permission.id)
+        for permission_id in (1, 2, 3, report_permission.id)
     ])
     db.add(UserRole(user_id=users["owner"].id, role_id=report_role.id))
     db.commit()
@@ -250,12 +252,27 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     owner_list = client.get("/api/review/tasks", headers=headers(users["owner"]))
     member_detail = client.get("/api/review/tasks/11", headers=headers(users["member"]))
     owner_detail = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
+    member_projects = client.get("/api/projects", headers=headers(users["member"]))
+    owner_projects = client.get("/api/projects", headers=headers(users["owner"]))
+    member_project_detail = client.get("/api/projects/11", headers=headers(users["member"]))
+    owner_project_detail = client.get("/api/projects/11", headers=headers(users["owner"]))
 
-    assert all(response.status_code == 200 for response in (member_list, owner_list, member_detail, owner_detail))
+    assert all(response.status_code == 200 for response in (
+        member_list, owner_list, member_detail, owner_detail,
+        member_projects, owner_projects, member_project_detail, owner_project_detail,
+    ))
     member_row = next(item for item in member_list.json()["data"]["items"] if item["id"] == task.id)
     owner_row = next(item for item in owner_list.json()["data"]["items"] if item["id"] == task.id)
     member_data = member_detail.json()["data"]
     owner_data = owner_detail.json()["data"]
+    member_project_row = next(
+        item for item in member_projects.json()["data"]["items"] if item["id"] == 11
+    )
+    owner_project_row = next(
+        item for item in owner_projects.json()["data"]["items"] if item["id"] == 11
+    )
+    member_recent = member_project_detail.json()["data"]["recent_tasks"][0]
+    owner_recent = owner_project_detail.json()["data"]["recent_tasks"][0]
 
     for hidden in (member_row, member_data):
         assert hidden["total_issues"] is None
@@ -268,6 +285,14 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         assert hidden.get("report_issue_summary") is None
         assert hidden["can_view_report"] is False
         assert "REPORT_METRIC_SECRET" not in str(hidden)
+
+    # 项目列表和项目详情的近期任务也必须遵守同一报告权限。
+    assert member_project_row["score"] is None
+    assert member_recent["score"] is None
+    assert member_recent["total_issues"] is None
+    assert owner_project_row["score"] == 73
+    assert owner_recent["score"] == 73
+    assert owner_recent["total_issues"] == (1 if review_type == "sandbox_test" else 41)
 
     for visible in (owner_row, owner_data):
         assert visible["can_view_report"] is True
@@ -285,6 +310,8 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     writes.clear()
     member_with_report_permission = client.get("/api/review/tasks", headers=headers(users["member"]))
     member_detail_with_report_permission = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+    member_project_with_report_permission = client.get("/api/projects/11", headers=headers(users["member"]))
+    member_projects_with_report_permission = client.get("/api/projects", headers=headers(users["member"]))
     for response, key in (
         (member_with_report_permission, "items"),
         (member_detail_with_report_permission, None),
@@ -297,4 +324,27 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         assert hidden["severe_issues"] is None
         assert hidden["score"] is None
         assert hidden.get("report_issue_summary") is None
+    assert member_project_with_report_permission.status_code == 200
+    assert member_project_with_report_permission.json()["data"]["recent_tasks"][0]["score"] is None
+    assert member_project_with_report_permission.json()["data"]["recent_tasks"][0]["total_issues"] is None
+    assert next(item for item in member_projects_with_report_permission.json()["data"]["items"]
+                if item["id"] == 11)["score"] is None
     assert writes == []
+
+
+def test_standard_review_metrics_remain_visible_to_project_member(review_http):
+    client, users, _writes, db = review_http
+    task = db.get(ReviewTask, 11)
+    task.review_type = "quick"
+    task.score = 81
+    task.total_issues = 4
+    db.commit()
+
+    listing = client.get("/api/projects", headers=headers(users["member"]))
+    detail = client.get("/api/projects/11", headers=headers(users["member"]))
+
+    project_row = next(item for item in listing.json()["data"]["items"] if item["id"] == 11)
+    recent = detail.json()["data"]["recent_tasks"][0]
+    assert project_row["score"] == 81
+    assert recent["score"] == 81
+    assert recent["total_issues"] == 4

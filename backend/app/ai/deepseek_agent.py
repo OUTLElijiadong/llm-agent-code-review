@@ -259,6 +259,7 @@ class DeepSeekAgent:
         json_mode: bool = True,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        before_request=None,
     ) -> tuple:
         """线程安全的 DeepSeek 调用；受信作用域中每个请求独立记账。
 
@@ -302,6 +303,8 @@ class DeepSeekAgent:
 
         def raw_attempt(attempt):
             nonlocal http_attempts
+            if callable(before_request):
+                before_request()
             started = time.time()
             try:
                 response, duration = self._do_request(url, headers, payload)

@@ -249,6 +249,67 @@ current_alembic_revision() {
   printf '%s\n' "${revision:-unknown}"
 }
 
+# 只读查询当前数据库，不向宿主日志/新镜像传递数据库凭据。
+# 参数: $1 固定查询；stdout 原样返回，查询故障返回非零。
+checkpoint_database_query() {
+  compose exec -T mysql sh -ec '
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql \
+      --protocol=TCP -h 127.0.0.1 -uroot "$MYSQL_DATABASE" \
+      --connect-timeout=10 --batch --raw --skip-column-names -e "$1"
+  ' _ "$1" 2>/dev/null
+}
+
+# 在切换容器前拒绝不认识当前检查点格式的目标镜像。
+# 即使新账本暂空，也不能放行旧 reader：业务写者不受发布目录锁约束。
+# 无法确认镜像能力/数据库结构时拒绝；保留原数据库并使用前向修复。
+assert_checkpoint_rollback_compatible() {
+  local capability schema references ledger_schema run_schema checkpoint_column invalid_json has_reference
+  local probe_file="$(dirname "${BASH_SOURCE[0]}")/checkpoint_compatibility.py"
+  [[ "${BOUND_BACKEND_IMAGE_ID:-}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+    || fatal "回退检查点门缺少已绑定 Backend 镜像 ID"
+  [[ -r "$probe_file" ]] || fatal "回退检查点能力 probe 不可读，拒绝切换镜像"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$BOUND_BACKEND_IMAGE_ID" - < "$probe_file")" \
+    || fatal "目标镜像检查点能力验证失败，拒绝切换镜像；保留数据并前向修复"
+  [[ "$capability" == supported || "$capability" == unsupported ]] \
+    || fatal "目标镜像检查点能力未知，拒绝切换镜像"
+
+  schema="$(checkpoint_database_query "$(cat <<'SQL'
+    SELECT /*+ MAX_EXECUTION_TIME(15000) */ /* prism_checkpoint_schema */
+      (SELECT COUNT(*) FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'agent_response_transcript_message'),
+      (SELECT COUNT(*) FROM information_schema.tables
+       WHERE table_schema = DATABASE() AND table_name = 'agent_response_run' AND table_type = 'BASE TABLE'),
+      (SELECT COUNT(*) FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'agent_response_run' AND column_name = 'checkpoint_json')
+SQL
+  )" | tr -d '\r')" || fatal "无法只读确认当前检查点结构，拒绝切换镜像"
+  [[ "$schema" =~ ^[01]$'\t'1$'\t'1$ ]] \
+    || fatal "当前检查点结构缺失或未知，拒绝切换镜像"
+  IFS=$'\t' read -r ledger_schema run_schema checkpoint_column <<< "$schema"
+  references="$(checkpoint_database_query "$(cat <<'SQL'
+    SELECT /*+ MAX_EXECUTION_TIME(15000) */ /* prism_checkpoint_references */
+      EXISTS(SELECT 1 FROM agent_response_run WHERE
+        CASE WHEN JSON_VALID(checkpoint_json) = 1
+          THEN JSON_TYPE(checkpoint_json) <> 'OBJECT' ELSE 1 END),
+      EXISTS(SELECT 1 FROM agent_response_run WHERE
+        CASE WHEN JSON_VALID(checkpoint_json) = 1
+          THEN JSON_CONTAINS_PATH(checkpoint_json, 'one', '$._transcript_ref') ELSE 0 END)
+SQL
+  )" | tr -d '\r')" || fatal "无法只读确认当前检查点引用，拒绝切换镜像"
+  [[ "$references" =~ ^[01]$'\t'[01]$ ]] \
+    || fatal "当前检查点引用检查结果未知，拒绝切换镜像"
+  IFS=$'\t' read -r invalid_json has_reference <<< "$references"
+  [[ "$invalid_json" == 0 ]] || fatal "当前检查点存在无效 JSON/非对象，拒绝切换镜像；保留原文并前向修复"
+  [[ "$ledger_schema" == 1 || "$has_reference" == 0 ]] \
+    || fatal "当前检查点含账本引用但缺账本结构，拒绝切换镜像；不得删除引用或恢复旧备份"
+  if [[ "$ledger_schema" == 1 && "$capability" != supported ]]; then
+    fatal "已迁移新对话账本，目标镜像不支持 v2 引用；即使账本暂空也拒绝回退。保留当前数据并前向修复，不恢复旧备份"
+  fi
+  log_info "检查点回退兼容门通过(reader=$capability, ledger_schema=$ledger_schema)"
+}
+
 # 使用 mkdir 原子获取目录锁，防止并发备份或发布。
 # 参数: $1 为锁目录。
 # 返回: 成功时 0；锁已存在时终止脚本。

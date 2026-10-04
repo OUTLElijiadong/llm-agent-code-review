@@ -1,0 +1,32 @@
+{
+  "scope": "candidate dependency manifests/locks and sanitized strict-hash dry-run metadata only",
+  "lock_sha256": {
+    "requirements.lock": "784bdb1f7d8055d3a62f45f3669df80b8ba6ba3b73c7351f5a858e4dcb0f7c43",
+    "requirements-dev.lock": "dd558a356fdbb95504f6b370730899346ac6d1c1245ff5da8dd300b43d56e059",
+    "requirements-dev.txt": "b3843e2b80bf6160f53c1e9fbf28201500ce2d0e99a6ac654fe13dd36187e03f",
+    "requirements.txt": "09e449706c0139d2735cfeb796a7a2f8413c2d580ba70a45de937394e55781b8"
+  },
+  "matches_independent_reviewer_lock_snapshot": true,
+  "requirements_checks": {
+    "official_pypi_generator_urls_only": true,
+    "no_embedded_url_credentials_or_query_tokens": true,
+    "no_private_absolute_paths": true,
+    "no_extra_index_or_trusted_host_or_direct_url_bypass": true,
+    "no_matching_api_key_private_key_signatures": true,
+    "temporary_validation_env_files_absent": true
+  },
+  "dry_run_checks": {
+    "official_file_hosts_only": true,
+    "no_url_credentials": true,
+    "sha256_for_all_99_candidates": true,
+    "note": "metadata/hash resolution; not an installed runtime inventory"
+  },
+  "diff_whitespace_check": "passed",
+  "release_conclusion": "dependency-lock and fixture scope has no remaining observed blocker; overall release still requires final backend exit confirmation, true dependency-layer build and deployment/runtime acceptance by root",
+  "not_verified": [
+    "not a full repository secret scan",
+    "not a production container audit",
+    "not clean Linux/Windows installation",
+    "not external-provider or offensive testing"
+  ]
+}

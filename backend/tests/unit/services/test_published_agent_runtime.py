@@ -66,6 +66,116 @@ def test_xiaoling_can_pass_json_rules_to_published_agent(db, admin_user, monkeyp
     assert "证据不足、路径未闭合" in prompts[0]
 
 
+def test_frozen_custom_delegate_runs_before_parent_and_result_is_included(db, admin_user, monkeypatch):
+    parent_profile = _published_profile()
+    parent_profile = parent_profile.__class__(
+        **{**parent_profile.__dict__, "code": "root_reviewer", "release_id": 10, "version_id": 100},
+    )
+    child_profile = _published_profile().__class__(
+        **{**_published_profile().__dict__, "code": "auth_child", "release_id": 20, "version_id": 200},
+    )
+    child_snapshot = {
+        "kind": "custom",
+        "agent_code": "auth_child",
+        "release_id": 20,
+        "version_id": 200,
+        "package_checksum": "p" * 64,
+        "template_checksum": "t" * 64,
+        "max_depth": 2,
+    }
+    parent_definition = SimpleNamespace(
+        to_profile=lambda: parent_profile,
+        release_id=10,
+        version_id=100,
+        delegated_agents=(child_snapshot,),
+    )
+    child_definition = SimpleNamespace(
+        to_profile=lambda: child_profile,
+        release_id=20,
+        version_id=200,
+        delegated_agents=(),
+    )
+    monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_: None)
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_published",
+        lambda *_args, **_kwargs: parent_definition,
+    )
+    resolved_children = []
+
+    def resolve_child(_db, code, **kwargs):
+        resolved_children.append((code, kwargs))
+        return child_definition
+
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_release",
+        resolve_child,
+    )
+    calls = []
+
+    class Client:
+        def __init__(self, api_config):
+            pass
+
+        def call_raw(self, **kwargs):
+            calls.append(kwargs)
+            label = kwargs["agent_label"]
+            return '{"summary":"' + label + ' finished","score":90,"issues":[]}', {}
+
+        def log_deferred(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", Client)
+    result = published_agent_tools.invoke_published_agent(
+        db, admin_user, agent_code="root_reviewer", code="if user_id != owner_id: deny()",
+        language="python", file_name="access.py",
+    )
+
+    assert [call["agent_label"] for call in calls] == ["auth_child", "root_reviewer"]
+    assert resolved_children[0][0] == "auth_child"
+    assert resolved_children[0][1]["release_id"] == 20
+    assert resolved_children[0][1]["version_id"] == 200
+    assert "auth_child finished" in calls[1]["user_prompt"]
+    assert result["delegated_runs"][0]["release_id"] == 20
+    assert result["delegated_runs"][0]["version_id"] == 200
+
+
+def test_published_delegate_cycle_fails_before_any_model_call(db, admin_user, monkeypatch):
+    profile = _published_profile()
+    profile = profile.__class__(
+        **{**profile.__dict__, "release_id": 10, "version_id": 100},
+    )
+    definition = SimpleNamespace(
+        to_profile=lambda: profile,
+        release_id=10,
+        version_id=100,
+        delegated_agents=({
+            "kind": "custom", "agent_code": "cycle_agent", "release_id": 10, "version_id": 100,
+            "package_checksum": "p" * 64, "template_checksum": "t" * 64, "max_depth": 2,
+        },),
+    )
+    monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_: None)
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_published", lambda *_args, **_kwargs: definition,
+    )
+    monkeypatch.setattr(
+        published_agent_tools.DeclarativeReviewAgentFactory,
+        "resolve_release", lambda *_args, **_kwargs: definition,
+    )
+
+    class UnexpectedClient:
+        def __init__(self, *_args, **_kwargs):
+            pytest.fail("循环委派必须在模型调用前被阻止")
+
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", UnexpectedClient)
+    with pytest.raises(ValidationError, match="循环"):
+        published_agent_tools.invoke_published_agent(
+            db, admin_user, agent_code="cycle_agent", code="pass", language="python",
+        )
+
+
 def test_published_agent_retries_truncated_response_with_review_budget(db, admin_user, monkeypatch):
     """A published 4096-token version must retry before reporting an incomplete review."""
     _prepare_invocation(monkeypatch, _published_profile())

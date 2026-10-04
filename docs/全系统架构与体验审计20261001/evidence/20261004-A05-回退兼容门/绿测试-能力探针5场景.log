@@ -1,0 +1,5 @@
+checkpoint reader probe: actual current load PASS
+checkpoint reader probe: legacy decoder with misleading helper names PASS
+checkpoint reader probe: reader accepting corrupt digest PASS
+checkpoint reader probe: corrupt source fail closed PASS
+checkpoint reader probe: unavailable source fail closed PASS

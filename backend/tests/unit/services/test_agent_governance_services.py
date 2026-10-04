@@ -183,6 +183,55 @@ def test_supervisor_classifies_each_responses_tool_before_dispatch(tool_name, ar
     assert review["needs_confirmation"] is (decision == "escalate")
 
 
+def test_retry_agent_team_requires_confirmation_only_when_returning_preview_hash():
+    plain = agent_supervisor_service.review_response_tool("retry_agent_team", {
+        "team_id": 12,
+        "task_keys": ["read"],
+        "strategy_changes": {"read": "分段读取后复核完整性"},
+    })
+    confirmed = agent_supervisor_service.review_response_tool("retry_agent_team", {
+        "team_id": 12,
+        "task_keys": ["read"],
+        "strategy_changes": {"read": "分段读取后复核完整性"},
+        "supervisor_plan_sha256": "a" * 64,
+    })
+
+    assert plain["needs_confirmation"] is False
+    assert plain["risk_level"] == agent_supervisor_service.MEDIUM
+    assert confirmed["needs_confirmation"] is True
+    assert confirmed["risk_level"] == agent_supervisor_service.HIGH
+
+
+def test_retry_execution_strategy_changes_supervisor_fingerprint_without_mutating_business_instruction():
+    original = {
+        "task_key": "review",
+        "member_key": "reviewer",
+        "title": "只读审查",
+        "instructions": "只读检查当前代码",
+        "input": {"code": "print(1)"},
+    }
+    retried = {
+        **original,
+        "input": {
+            "code": "print(1)",
+            "_execution_strategy": {
+                "version": 1,
+                "attempt": 2,
+                "mode": "user_directed_alternate_strategy",
+                "instruction": "先拆分调用链，再逐段复核安全边界",
+                "automatic": False,
+                "changes": ["bounded_source_review"],
+            },
+        },
+    }
+
+    initial_fingerprint = agent_supervisor_service.task_fingerprint(original, "agent:code_reviewer")
+    retry_fingerprint = agent_supervisor_service.task_fingerprint(retried, "agent:code_reviewer")
+
+    assert original["instructions"] == retried["instructions"]
+    assert initial_fingerprint != retry_fingerprint
+
+
 @pytest.mark.parametrize(
     ("kind", "tool", "permission", "requires_approval", "declared", "decision", "risk"),
     [

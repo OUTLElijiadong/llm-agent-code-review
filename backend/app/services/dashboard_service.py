@@ -13,8 +13,8 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import case, func, select
 from sqlalchemy import false as sa_false
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
@@ -24,12 +24,12 @@ from app.models.project_source_archive import ProjectSourceArchive
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import get_visible_project_ids
-from app.services.report_service import load_task_issue_stats
+from app.services.report_service import load_task_issue_stats, task_metrics_access_filter
 
 # ── 仪表盘聚合缓存 ──────────────────────────────────────────────────────────
 # 工作台一次加载并发请求 summary/risk-distribution/issue-type-statistics 三个接口,
 # 它们各自重复执行同一份逐任务问题统计(含沙箱报告 markdown 正则解析)。这里按
-# (user_id, bucket, 当前可见项目集合) 缓存统计值；权限范围不缓存。
+# (user_id, bucket, 当前可见项目集合, 当前授权任务集合) 缓存统计值；权限范围不缓存。
 # TTL 内共享统计，同 key 并发请求只允许一个线程计算。
 _CACHE_LIMIT = 256
 _cache_lock = threading.Lock()
@@ -157,21 +157,26 @@ def _issue_stats(
     """
 
     visible_ids = _visible_project_ids(db, user)
+    # 权限和私域报告可用性每次查验，不能让旧缓存延迟其它 worker 的撤权。
+    tasks = (
+        db.query(ReviewTask)
+        .options(_issue_stats_task_columns)
+        .filter(
+            ReviewTask.status != "deleted", ReviewTask.project_id.in_(visible_ids),
+            task_metrics_access_filter(db, user),
+        )
+        .all()
+    )
 
     def _compute() -> list[dict]:
-        tasks = (
-            db.query(ReviewTask)
-            .options(_issue_stats_task_columns)
-            .filter(ReviewTask.status != "deleted", ReviewTask.project_id.in_(visible_ids))
-            .all()
-        )
         return list(load_task_issue_stats(db, tasks, since=since).values())
 
     if window_days is not None:
         bucket = f"days:{int(window_days)}"
     else:
         bucket = "all"
-    return _cached_compute(_stats_cache, (user.id, bucket, tuple(sorted(visible_ids))), _compute)
+    key = (user.id, bucket, tuple(sorted(visible_ids)), tuple(sorted(task.id for task in tasks)))
+    return _cached_compute(_stats_cache, key, _compute)
 
 
 def get_summary(db: Session, user: User) -> dict:
@@ -241,7 +246,10 @@ def get_summary(db: Session, user: User) -> dict:
     avg_score = round(float(score_value or 0), 1)
 
     recent_q = (
-        db.query(ReviewTask, Project.project_name)
+        db.query(
+            ReviewTask, Project.project_name,
+            case((task_metrics_access_filter(db, user), ReviewTask.score), else_=None).label("visible_score"),
+        )
         .join(Project, Project.id == ReviewTask.project_id)
         .filter(
             ReviewTask.status == "success",
@@ -259,10 +267,10 @@ def get_summary(db: Session, user: User) -> dict:
             "project_name": project_name,
             "status": task.status,
             "review_type": task.review_type,
-            "score": task.score if task.score is not None and 0 <= task.score <= 100 else None,
+            "score": visible_score if visible_score is not None and 0 <= visible_score <= 100 else None,
             "create_time": task.create_time.isoformat() if task.create_time else None,
         }
-        for task, project_name in recent_q.all()
+        for task, project_name, visible_score in recent_q.all()
     ]
 
     return {
@@ -333,6 +341,7 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
         .filter(
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
+            task_metrics_access_filter(db, user),
             # 领域任务/历史任务可能没有质量评分；过滤掉无效分数，避免
             # ScoreTrendItem 校验 500，也不在图表中伪造 0 分。
             ReviewTask.score.is_not(None),

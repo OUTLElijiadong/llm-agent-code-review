@@ -1,0 +1,132 @@
+[
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-member",
+    "type": "pentest",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": 17,
+      "total_issues": 23
+    },
+    "project_list_score": 17
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-owner",
+    "type": "pentest",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": 17,
+      "total_issues": 23
+    },
+    "project_list_score": 17
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-member",
+    "type": "sandbox_test",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": 17,
+      "total_issues": 23
+    },
+    "project_list_score": 17
+  },
+  {
+    "probe": "private_domain_metrics_secondary_outlet",
+    "actor": "probe-owner",
+    "type": "sandbox_test",
+    "direct_task": {
+      "can_view_report": false,
+      "score": null,
+      "total_issues": null
+    },
+    "project_recent_task": {
+      "score": 17,
+      "total_issues": 23
+    },
+    "project_list_score": 17
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": false,
+    "review_start_permission": true,
+    "executor_invocations": [
+      {
+        "user_id": 2,
+        "file_count": 1,
+        "snapshot_content": "x = 1\n"
+      }
+    ]
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": true,
+    "review_start_permission": false,
+    "executor_invocations": [
+      {
+        "user_id": 2,
+        "file_count": 1,
+        "snapshot_content": "x = 1\n"
+      }
+    ]
+  },
+  {
+    "probe": "worker_after_authorization_revoked",
+    "is_member": false,
+    "review_start_permission": false,
+    "executor_invocations": [
+      {
+        "user_id": 2,
+        "file_count": 1,
+        "snapshot_content": "x = 1\n"
+      }
+    ]
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 1,
+    "cached_version": 1,
+    "committed_version": 2,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 2,
+    "cached_version": 2,
+    "committed_version": 3,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "stale_file_before_project_lock_http",
+    "sample": 3,
+    "cached_version": 3,
+    "committed_version": 4,
+    "http_status": 500,
+    "error_code": 50000,
+    "message": "服务器内部错误"
+  },
+  {
+    "probe": "xiaoling_tool_review_admission",
+    "calls_same_account_same_minute": 6,
+    "accepted": 6,
+    "errors": [],
+    "background_execution": "disabled; zero model calls"
+  }
+]

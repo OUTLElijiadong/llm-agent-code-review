@@ -1,0 +1,14 @@
+[
+  {
+    "case": "reference_query_failure",
+    "exit_code": 1,
+    "reached_switch": false,
+    "error": "[2026-10-04T09:39:45Z] ERROR 无法只读确认当前检查点引用，拒绝切换镜像"
+  },
+  {
+    "case": "reference_unknown",
+    "exit_code": 1,
+    "reached_switch": false,
+    "error": "[2026-10-04T09:39:45Z] ERROR 当前检查点引用检查结果未知，拒绝切换镜像"
+  }
+]

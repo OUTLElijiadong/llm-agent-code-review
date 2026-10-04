@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-04",
+  "scope": "B01 dashboard and security-summary private report metrics; local candidate only",
+  "reproduced_outlets": [
+    "/api/dashboard/summary",
+    "/api/dashboard/risk-distribution",
+    "/api/dashboard/issue-type-statistics",
+    "/api/dashboard/score-trend",
+    "/api/security/dashboard-summary"
+  ],
+  "sources": [
+    "sandbox_test",
+    "pentest"
+  ],
+  "before": {
+    "tests": 28,
+    "failed": 22,
+    "passed": 6,
+    "evidence": "复现-B01-仪表盘私域出口-red.log",
+    "confirmed_behavior": "private counts/severity/type/scores visible to project members without report object scope and authors without report:view; warm cache remains visible after permission revoke"
+  },
+  "after": {
+    "new_regressions": 72,
+    "combined_test_files": 16,
+    "combined_passed": 437,
+    "warnings": 2,
+    "evidence": "复测-B01-B02-B04-扩展回归.log",
+    "ruff": "passed",
+    "compileall": "passed",
+    "git_diff_check": "passed"
+  },
+  "changes": [
+    "report_service.task_metrics_access_filter shares a SQL predicate across aggregate outlets; domain reports require availability, report:view and author/admin object scope",
+    "dashboard aggregates only metric-readable tasks; cache keys include a live authorized task set",
+    "recent-task score is shaped with SQL CASE; metadata visibility remains project membership based",
+    "score-trend applies scope before LIMIT",
+    "security summary limits domain source aggregates and latest scoring to metric-readable tasks"
+  ],
+  "expanded_samples": [
+    "ordinary member shared code metrics",
+    "private author with report:view",
+    "administrator",
+    "non-author member with report:view",
+    "private author without report:view",
+    "warm-cache report permission revocation",
+    "current project membership revocation",
+    "private scores filtered before limit=1",
+    "warm-cache report status becoming unavailable",
+    "40 source/status/actor combinations prove SQL predicate parity with existing can_view_task_metrics policy"
+  ],
+  "report_exports": {
+    "new_defect_confirmed": false,
+    "verified_scope": "existing HTTP route/RBAC/object authorization and domain export closure regression matrix; document renderers mocked where appropriate",
+    "covered": [
+      "author/admin positive",
+      "other project owner/member/outsider denied",
+      "current project membership removal",
+      "report:view required in addition to per-format grant",
+      "domain source export scope",
+      "unavailable parent/task rejection"
+    ]
+  },
+  "B02_B04": "existing local Worker revocation and shared-admission entry tests rerun; no additional gap confirmed in this scoped pass",
+  "limitations": [
+    "no production connection or production data",
+    "no MySQL or Redis real-process verification in this subtask",
+    "no real browser/mobile acceptance",
+    "no external model calls",
+    "no deploy/commit/push"
+  ]
+}

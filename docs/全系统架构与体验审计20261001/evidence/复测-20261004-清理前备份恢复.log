@@ -1,0 +1,2 @@
+[2026-10-04T08:18:25Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20261004081824_24910
+[2026-10-04T08:19:56Z] INFO  独立恢复验证通过(container=cr_testdb, tables=103, alembic=058_roundtable_sessions)

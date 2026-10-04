@@ -1,0 +1,37 @@
+{
+  "item": "B03",
+  "status": "candidate repair verified on isolated SQLite; MySQL lock integration remains unverified",
+  "reproduction": {
+    "before_fix": "3 real FastAPI PUT requests from stale SQLAlchemy sessions returned HTTP 500/code 50000 after another session committed the next CodeFile version",
+    "after_fix_repeated_api_rounds": 3,
+    "stale_version_requests": 9,
+    "missing_expected_version_requests": 9,
+    "all_after_fix_responses": "HTTP 409/code 40904; no 500 responses",
+    "round_logs": [
+      "复测-B03-API-第1轮.log",
+      "复测-B03-API-第2轮.log",
+      "复测-B03-API-第3轮.log"
+    ]
+  },
+  "changes": [
+    "All write paths lock Project then CodeFile and refresh the ORM object after acquiring the locks.",
+    "Editor saves send expected_version; stale and missing-version API writes return 40904 before file/history mutation.",
+    "The editor keeps its current draft and explains the safe refresh/merge path on 40904.",
+    "Explicit historical restore reuses the same project/file lock order and increments from the refreshed current version."
+  ],
+  "verification": {
+    "backend_regression_tests": "345 passed",
+    "frontend_permission_and_editor_tests": "18 passed",
+    "frontend_typecheck_build": "passed",
+    "backend_ruff": "passed",
+    "frontend_eslint_targeted": "passed",
+    "git_diff_check": "passed",
+    "version_history_and_sha256": "verified in isolated SQLite regression tests",
+    "rename_delete_with_stale_session": "verified; latest version/history preserved"
+  },
+  "scope_limits": [
+    "No production database or real user data was used.",
+    "No MySQL/MariaDB server is installed or running locally; Docker is closed, so engine-level FOR UPDATE wait/current-read behavior remains unverified.",
+    "Candidate changes remain local to the isolated worktree and are not deployed."
+  ]
+}

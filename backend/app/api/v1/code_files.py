@@ -12,7 +12,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ValidationError
+from app.core.exceptions import ConflictError, ValidationError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -209,7 +209,20 @@ def get_file_meta(file_id: int, db: Session = Depends(get_db),
 def update_file(file_id: int, payload: CodeFileUpdateIn,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """更新文件内容(生成新版本)"""
-    ver = code_file_service.update_content(db, user, file_id, payload.content, payload.change_desc)
+    if payload.expected_version is None:
+        raise ConflictError(
+            "保存请求缺少文件版本号，请刷新编辑器后重试",
+            code=40904,
+            next_action="刷新编辑器后重新应用本地草稿；服务器文件未被修改",
+        )
+    ver = code_file_service.update_content(
+        db,
+        user,
+        file_id,
+        payload.content,
+        payload.change_desc,
+        expected_version=payload.expected_version,
+    )
     return Resp(data={"version_no": ver})
 
 

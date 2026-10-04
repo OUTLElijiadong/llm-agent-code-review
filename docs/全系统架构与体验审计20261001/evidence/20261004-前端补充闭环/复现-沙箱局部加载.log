@@ -1,0 +1,84 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/sandbox/SandboxWorkstation.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts (17 tests | 1 failed) 123ms
+     × 项目读取失败仍显示已加载的沙箱任务，并提供重新加载恢复 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 项目读取失败仍显示已加载的沙箱任务，并提供重新加载恢复
+Error: Unable to get [data-testid="agent-timeline"] within: <div data-v-358a4867="" class="sandbox-workstation">
+  <header data-v-358a4867="" class="page-heading">
+    <div data-v-358a4867="">
+      <div data-v-358a4867="" class="eyebrow font-mono">ISOLATED EXECUTION</div>
+      <h1 data-v-358a4867="">代码沙箱</h1>
+      <p data-v-358a4867="">在隔离 worker 中执行源码整体白盒测试、运行态黑盒测试或临时部署。</p>
+    </div><button data-v-358a4867="" icon="[object Object]" loading="false">刷新</button>
+  </header>
+  <div data-v-358a4867="" class="workstation-grid">
+    <section data-v-358a4867="" class="config-panel" aria-label="创建沙箱任务">
+      <div data-v-358a4867="" class="section-title"><span data-v-358a4867="">任务配置</span><span data-v-358a4867="" size="small" type="info">默认保留 72h</span></div>
+      <form data-v-358a4867="" label-position="top">
+        <div data-v-358a4867="" label="项目源码">
+          <div data-v-358a4867="" filterable="" placeholder="选择有权访问的项目" style="width: 100%;"></div>
+        </div>
+        <!--v-if-->
+        <div data-v-358a4867="" label="执行目标">
+          <div data-v-358a4867="" modelvalue="test" class="segmented-control"><span data-v-358a4867="" value="test"><i data-v-358a4867=""><cpu-stub data-v-358a4867=""></cpu-stub></i> 测试</span><span data-v-358a4867="" value="deploy"><i data-v-358a4867=""><monitor-stub data-v-358a4867=""></monitor-stub></i> 部署</span></div>
+        </div>
+        <div data-v-358a4867="" label="语言运行时">
+          <div data-v-358a4867="" modelvalue="python" disabled="false" style="width: 100%;">
+            <el-option-stub data-v-358a4867="" label="Python" value="python"></el-option-stub>
+            <el-option-stub data-v-358a4867="" label="Node.js" value="node"></el-option-stub>
+            <el-option-stub data-v-358a4867="" label="Java" value="java"></el-option-stub>
+            <el-option-stub data-v-358a4867="" label="Go" value="go"></el-option-stub>
+            <el-option-stub data-v-358a4867="" label="PHP" value="php"></el-option-stub>
+          </div>
+          <!--v-if-->
+        </div>
+        <div data-v-358a4867="" label="数据库">
+          <div data-v-358a4867="" class="mode-options"><label data-v-358a4867="" class="mode-option active"><input data-v-358a4867="" type="radio" value="none"><span data-v-358a4867="" class="mode-option-body"><b data-v-358a4867="">无</b><small data-v-358a4867="">不使用数据库</small></span></label><label data-v-358a4867="" class="mode-option"><input data-v-358a4867="" type="radio" value="sqlite"><span data-v-358a4867="" class="mode-option-body"><b data-v-358a4867="">SQLite</b><small data-v-358a4867="">沙箱内置 SQLite,可做真实 SQL 注入探测</small></span></label><label data-v-358a4867="" class="mode-option"><input data-v-358a4867="" type="radio" value="mysql"><span data-v-358a4867="" class="mode-option-body"><b data-v-358a4867="">MySQL</b><small data-v-358a4867="">连接独立沙箱测试库,可做真实 SQL 注入探测</small></span></label></div>
+        </div>
+        <div data-v-358a4867="" label="测试模式">
+          <div data-v-358a4867="" class="mode-options"><label data-v-358a4867="" class="mode-option active"><input data-v-358a4867="" type="radio" value="whitebox"><span data-v-358a4867="" class="mode-title">白盒</span><span data-v-358a4867="" class="mode-hint">源码整体扫描与本地测试</span></label><label data-v-358a4867="" class="mode-option"><input data-v-358a4867="" type="radio" value="blackbox"><span data-v-358a4867="" class="mode-title">黑盒</span><span data-v-358a4867="" class="mode-hint">隔离环境运行态探测；真实渗透请走授权渗透委托</span></label><label data-v-358a4867="" class="mode-option"><input data-v-358a4867="" type="radio" value="combined"><span data-v-358a4867="" class="mode-title">组合</span><span data-v-358a4867="" class="mode-hint">先白盒再黑盒核验</span></label></div>
+        </div>
+        <!--v-if-->
+        <div data-v-358a4867="" class="inline-fields">
+          <div data-v-358a4867="" label="保留时长"><input data-v-358a4867="" modelvalue="72" min="1" max="168" controls-position="right"><span data-v-358a4867="" class="unit">小时</span></div>
+          <!--v-if-->
+        </div><button data-v-358a4867="" class="submit-button" native-type="submit" type="submit" icon="[object Object]" loading="false" disabled=""> 调用 测试 Agent </button>
+      </form>
+      <div data-v-358a4867="" class="capability-search">
+        <div data-v-358a4867="" class="section-title compact"><span data-v-358a4867="">能力检索</span></div><input data-v-358a4867="" modelvalue="" placeholder="输入近义词，如：渗透、整包扫描" clearable="">
+      </div>
+    </section>
+    <section data-v-358a4867="" class="execution-panel" aria-label="沙箱任务与 Agent 输出">
+      <div data-v-358a4867="" class="task-strip">
+        <div data-v-358a4867="" class="section-title"><span data-v-358a4867="">任务队列</span><span data-v-358a4867="" class="task-count font-mono">0</span></div>
+        <div data-v-358a4867="" description="暂无沙箱任务" image-size="72"></div>
+      </div>
+      <div data-v-358a4867="" class="detail-empty" description="选择任务查看 Agent 调用和测试结论"></div>
+    </section>
+  </div>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:420:20
+    418|     const wrapper = shallowMount(SandboxWorkstation, { ...mountOptions…
+    419|     await flushPromises()
+    420|     expect(wrapper.get('[data-testid="agent-timeline"]').text()).toCon…
+       |                    ^
+    421|     expect(wrapper.get('[data-testid="sandbox-load-error"]').text()).t…
+    422|     expect(errors).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 16 passed (17)
+   Start at  16:08:48
+   Duration  594ms (transform 168ms, setup 14ms, import 193ms, tests 123ms, environment 202ms)
+

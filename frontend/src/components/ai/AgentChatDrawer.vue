@@ -215,6 +215,7 @@ const agentTeams = ref<AgentTeamDetail[]>([])
 const cachedAgentTeams = ref<AgentTeamSummary[]>([])
 const agentTeamLoading = ref(false)
 const agentTeamError = ref('')
+let agentTeamRefreshGeneration = 0
 const sessionBusy = computed(() => isAgentResponseSessionOccupied(sessionRun.value?.status))
 
 /** 失败/未完成/超轮数的运行可手动重试（回退策略入口） */
@@ -513,6 +514,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   rememberCurrentDraft()
   activeResponse?.abort()
   activeResponse = null
+  agentTeamRefreshGeneration += 1
   clearLiveTeamPoll()
   sessionPollStopped = true
   invalidateSessionPoll()
@@ -532,6 +534,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   modelName.value = ORCHESTRATOR_MODEL
   agentTeams.value = []
   cachedAgentTeams.value = []
+  agentTeamLoading.value = false
   agentTeamError.value = ''
   teamWindowVisible.value = false
   teamWindowTeamId.value = null
@@ -978,16 +981,19 @@ function invalidateSessionPoll(): void {
 async function refreshAgentTeam(generation?: number): Promise<void> {
   const scopeCurrent = chatScope.capture()
   if (!sessionId.value) return
+  const requestGeneration = ++agentTeamRefreshGeneration
   const requestedSessionId = sessionId.value
   const isCurrent = (): boolean => scopeCurrent() && requestedSessionId === sessionId.value
+    && requestGeneration === agentTeamRefreshGeneration
     && (generation === undefined || generation === sessionPollGeneration)
   agentTeamLoading.value = true
   try {
     const listed = await listAgentTeams({ surface: 'user', session_id: requestedSessionId, limit: 20 })
     if (!isCurrent()) return
     if (!listed.items.length) {
-      // 短暂网络/账本延迟时不要把已展示的卡片清空;下次轮询会用服务端事实刷新。
-      if (!agentTeams.value.length) agentTeams.value = []
+      // 成功的空列表是服务端事实；只有请求失败或详情局部失败时才保留快照。
+      agentTeams.value = []
+      cachedAgentTeams.value = []
       agentTeamError.value = ''
       return
     }
@@ -999,9 +1005,16 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       .map((result) => result.value)
     const failedCount = settled.length - details.length
     if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
-    agentTeams.value = details
-    cachedAgentTeams.value = details
-    const unanchored = details.filter((team) => !anchoredTeamIds.value.has(team.team_id))
+    const currentById = new Map<number, AgentTeamDetail>(
+      agentTeams.value.map((team) => [team.team_id, team]),
+    )
+    for (const team of details) currentById.set(team.team_id, team)
+    const merged = listed.items
+      .map((item) => currentById.get(item.team_id))
+      .filter((team): team is AgentTeamDetail => team !== undefined)
+    agentTeams.value = merged
+    cachedAgentTeams.value = merged
+    const unanchored = merged.filter((team) => !anchoredTeamIds.value.has(team.team_id))
     if (unanchored.length) {
       let anchor = [...messages.value].reverse().find((message) => (
         message.role === 'assistant'
@@ -1027,7 +1040,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       }
       anchor.teamIds = [...new Set([...(anchor.teamIds ?? []), ...unanchored.map((team) => team.team_id)])]
     }
-    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留其余结果` : ''
+    agentTeamError.value = failedCount ? `${failedCount} 个团队状态暂时未同步，已保留对应团队上次成功状态` : ''
   } catch {
     if (!scopeCurrent()) return
     if (isCurrent()) agentTeamError.value = '团队状态同步暂时中断'
@@ -2400,6 +2413,7 @@ function handleVisibilityChange(): void {
 
 watch([() => userStore.profile?.id, () => userStore.token], () => {
   chatAccountEpoch.value += 1
+  agentTeamRefreshGeneration += 1
   meshBridge.stop()
   activeResponse = null
   sessionPollStopped = true
@@ -2448,6 +2462,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
 }, { flush: 'sync' })
 
 onBeforeUnmount(() => {
+  agentTeamRefreshGeneration += 1
   rememberCurrentDraft()
   meshBridge.stop()
   persistSnapshot()

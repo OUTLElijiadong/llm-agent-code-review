@@ -5,6 +5,7 @@ import time
 from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -16,6 +17,90 @@ from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_mesh_dispatcher, agent_team_dispatcher, agent_team_service, published_agent_tools
+
+
+def test_retry_confirmation_authorizes_only_the_exact_retried_high_risk_attempt(db, monkeypatch):
+    from app.services import agent_supervisor_service
+
+    user = User(username="retry-confirm-owner", password="x", role="user", status=1)
+    db.add(user)
+    db.flush()
+    team = AgentTeam(
+        user_id=user.id, surface="user", session_key="retry-confirm-session", title="重试确认闭环",
+        objective="精确授权单次高风险重试", status="failed", trace_id="retry-confirm-trace",
+    )
+    db.add(team)
+    db.flush()
+    member = AgentTeamMember(
+        team_id=team.id, member_key="analyzer", display_name="分析 Agent",
+        address="agent:project_analyzer", kind="runtime", role="verifier", status="failed",
+    )
+    db.add(member)
+    db.flush()
+    task = AgentTeamTask(
+        team_id=team.id, member_id=member.id, task_key="inspect", title="读取外部目标",
+        instructions="读取提供的外部目标并整理证据", status="dead_letter", attempt_count=1,
+        max_attempts=1, input_json='{"external_target_url":"https://target.example"}', errors_json="[]",
+    )
+    db.add(task)
+    fingerprint = agent_supervisor_service.task_fingerprint({
+        "task_key": task.task_key,
+        "member_key": member.member_key,
+        "title": task.title,
+        "instructions": task.instructions,
+        "input": {"external_target_url": "https://target.example"},
+    }, member.address)
+    agent_team_service._event(
+        db,
+        team,
+        "supervisor.plan_reviewed",
+        actor_address="agent:supervisor",
+        detail={
+            "confirmed_by_user_id": int(user.id),
+            "authorized_high_risk_fingerprints": [fingerprint],
+        },
+    )
+    db.commit()
+
+    strategies = {"inspect": "改用分段读取并先复核授权范围"}
+    preview = agent_team_service.preview_retry_team(
+        db, user, int(team.id), task_keys=["inspect"], strategy_changes=strategies,
+    )
+    with pytest.raises(agent_team_service.AgentTeamStateError, match="尚未由当前账户确认"):
+        agent_team_service.retry_team(
+            db, user, int(team.id), task_keys=["inspect"], strategy_changes=strategies,
+        )
+    with pytest.raises(agent_team_service.AgentTeamStateError, match="计划已变化"):
+        agent_team_service.retry_team(
+            db, user, int(team.id), task_keys=["inspect"], strategy_changes=strategies,
+            supervisor_plan_sha256="0" * 64,
+        )
+    agent_team_service.retry_team(
+        db, user, int(team.id), task_keys=["inspect"], strategy_changes=strategies,
+        supervisor_plan_sha256=preview["plan_sha256"],
+    )
+    claimed = agent_team_service.claim_next_task(db, int(team.id))
+    handler = Mock(return_value=("项目分析", {
+        "status": "completed", "summary": "外部目标读取完成", "evidence": [{"source": "fixture"}],
+    }))
+    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
+    monkeypatch.setattr(agent_team_dispatcher.rbac_service, "check_permission", lambda *_args: True)
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", handler)
+
+    outcome = agent_team_dispatcher._execute_claimed(int(team.id), claimed)
+
+    assert outcome == {"success": True}
+    handler.assert_called_once()
+    db.expire_all()
+    saved = db.get(AgentTeamTask, task.id)
+    assert saved.status == "completed"
+    retry_authorization = db.query(AgentTeamEvent).filter_by(
+        team_id=team.id, event_type="supervisor.retry_reauthorized",
+    ).one()
+    authorization_detail = agent_team_service._unjson(retry_authorization.detail_json, {})
+    assert authorization_detail["confirmed_by_user_id"] == user.id
+    assert authorization_detail["authorized_high_risk_fingerprints"] == [preview["tasks"][0]["fingerprint"]]
+    assert saved.instructions == "读取提供的外部目标并整理证据"
 
 
 @pytest.mark.parametrize("change", [
@@ -664,6 +749,91 @@ def test_dispatch_once_runs_three_independent_children_concurrently(monkeypatch,
     assert max_active == 3
     assert observed_leases
     assert min(observed_leases) >= int(agent_team_dispatcher.settings.agent_full_validation_wait_seconds) + 60
+
+
+def test_dispatch_once_refills_idle_worker_before_slow_sibling_finishes(monkeypatch):
+    """完成的短节点释放槽位后，应在同波慢节点结束前领取已就绪后继。"""
+    class DummySession:
+        def rollback(self):
+            return None
+
+        def expire_all(self):
+            return None
+
+        def close(self):
+            return None
+
+    short_finished = threading.Event()
+    long_started = threading.Event()
+    release_long = threading.Event()
+    long_finished = threading.Event()
+    followup_claimed = threading.Event()
+    claim_lock = threading.Lock()
+    claimed: set[str] = set()
+    tasks_by_team = {7: ["short", "after_short"], 8: ["long"]}
+    was_claimed_while_long_running = []
+
+    def claim_next_task(_db, team_id, **_kwargs):
+        with claim_lock:
+            for task_key in tasks_by_team[team_id]:
+                if task_key in claimed:
+                    continue
+                if task_key == "after_short":
+                    if not short_finished.is_set():
+                        continue
+                    was_claimed_while_long_running.append(
+                        long_started.is_set() and not long_finished.is_set(),
+                    )
+                    followup_claimed.set()
+                claimed.add(task_key)
+                return {"task_id": len(claimed), "task_key": task_key}
+        return None
+
+    def execute(_team_id, task):
+        if task["task_key"] == "short":
+            assert long_started.wait(timeout=1)
+            short_finished.set()
+            return {"success": True}
+        if task["task_key"] == "long":
+            long_started.set()
+            if not release_long.wait(timeout=3):
+                return {"success": False}
+            long_finished.set()
+        return {"success": True}
+
+    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(agent_team_dispatcher, "_candidate_teams", lambda *_args: [7, 8])
+    monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_enabled", True)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_max_active_children", 2)
+    monkeypatch.setattr(agent_team_service, "expire_due_teams", lambda *_args: 0)
+    monkeypatch.setattr(agent_team_service, "recover_expired_leases", lambda *_args: 0)
+    monkeypatch.setattr(agent_team_service, "cleanup_terminal_team_resources", lambda *_args: 0)
+    monkeypatch.setattr(agent_team_service, "claim_next_task", claim_next_task)
+    monkeypatch.setattr(agent_team_dispatcher, "_execute_claimed", execute)
+
+    outcomes = []
+    errors = []
+
+    def dispatch():
+        try:
+            outcomes.append(agent_team_dispatcher.dispatch_once(limit=2))
+        except Exception as exc:  # pragma: no cover - surfaced below
+            errors.append(exc)
+
+    dispatcher_thread = threading.Thread(target=dispatch)
+    dispatcher_thread.start()
+    try:
+        assert followup_claimed.wait(timeout=1), "短任务完成后没有及时补入就绪后继"
+        assert long_started.is_set() and not long_finished.is_set()
+        assert was_claimed_while_long_running == [True]
+    finally:
+        release_long.set()
+        dispatcher_thread.join(timeout=4)
+
+    assert not dispatcher_thread.is_alive()
+    assert errors == []
+    assert outcomes[0]["claimed"] == 3
+    assert outcomes[0]["completed"] == 3
 
 
 def test_custom_handler_forwards_frozen_release_snapshot(monkeypatch):

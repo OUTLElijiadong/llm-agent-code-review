@@ -38,11 +38,18 @@ def test_static_child_locations_repeat_parent_security_headers() -> None:
 def test_enforced_csp_covers_frontend_and_limits_scripts_and_websockets() -> None:
     source = TEMPLATE.read_text(encoding="utf-8")
     html = (TEMPLATE.parent / "index.html").read_text(encoding="utf-8")
-    csp = next(
+    csp_lines = [
         line.strip()
         for line in source.splitlines()
         if "add_header Content-Security-Policy " in line
-    )
+    ]
+    assert csp_lines
+    assert len(set(csp_lines)) == 1  # server、index 与 assets 使用同一份 enforce 策略。
+    csp = csp_lines[0]
+    directives = {
+        directive.strip().split()[0]: directive.strip()
+        for directive in csp.split('"')[1].split(';') if directive.strip()
+    }
 
     for directive in (
         "default-src 'self'",
@@ -50,12 +57,15 @@ def test_enforced_csp_covers_frontend_and_limits_scripts_and_websockets() -> Non
         "script-src-attr 'none'",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' data: https://fonts.gstatic.com",
-        "connect-src 'self' wss://$host",
+        "connect-src 'self' wss://${APP_DOMAIN} wss://${APP_DOMAIN_ALIASES}",
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
     ):
         assert directive in csp
+    assert directives["script-src"] == "script-src 'self'"
+    assert directives["connect-src"] == "connect-src 'self' wss://${APP_DOMAIN} wss://${APP_DOMAIN_ALIASES}"
+    assert "wss://$host" not in csp
     assert "Content-Security-Policy-Report-Only" not in source
     assert "script-src 'self' 'unsafe-inline'" not in source
     assert "connect-src 'self' wss:;" not in source

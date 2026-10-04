@@ -1,0 +1,19 @@
+{
+  "started_at_utc": "2026-10-04T08:57:45.801247+00:00",
+  "scope": "original local pytest file uses Unix-socket Redis in a temporary network-none container on the authorized production host; no production Redis connection or production login request",
+  "host": "81.70.251.90",
+  "container_name": "prism-login-audit-a06d54d111082ab7",
+  "wrapper_policy": "only inspect network mode and redis-cli Unix socket calls for exact created container; name is translated to exact ID; inspect guard checks ID/name/network/no ports for every call",
+  "sources": {
+    "tests/unit/core/test_login_rate_limit_real_redis.py": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+    "app/core/rate_limit.py": "28c4a325bc944729aa3ac885117b0c1b2eb13847d78085b73dffb9a18b0e42f6",
+    "tests/conftest.py": "f0db14ac765546ad94203b0691d3d75de77c902f6cab8ac2287d04a182f0f14e"
+  },
+  "production_services_changed": false,
+  "image_id_from_running_cr_redis": "sha256:2a51817f79255c8b69f86a974459c2e0359aff81417d80158f2b9e541e6f4b33",
+  "container_id": "eeaae57138bd6967c876675c83079e71ee5599312efe2a5e84534060ea122406",
+  "failure": "AssertionError: ",
+  "temporary_container_removed_by_exact_id": true,
+  "temporary_wrapper_removed": true,
+  "finished_at_utc": "2026-10-04T08:57:48.429583+00:00"
+}

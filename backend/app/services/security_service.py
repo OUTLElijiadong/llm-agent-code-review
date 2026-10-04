@@ -22,7 +22,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import get_visible_project_ids
-from app.services.report_service import load_task_issue_stats
+from app.services.report_service import load_task_issue_stats, task_metrics_access_filter
 
 _SEVERITY_KEYS = ("严重", "高", "中", "低")
 
@@ -103,7 +103,8 @@ def get_dashboard_summary(db: Session, user: Optional[User],
     task_rows = (
         db.query(ReviewTask)
         .filter(ReviewTask.project_id.in_(project_ids),
-                ReviewTask.status != "deleted")
+                ReviewTask.status != "deleted",
+                task_metrics_access_filter(db, user))
         .all()
     )
     task_ids_by_project: dict[int, list[int]] = defaultdict(list)

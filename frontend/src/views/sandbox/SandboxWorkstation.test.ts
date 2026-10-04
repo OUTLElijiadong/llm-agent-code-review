@@ -1,12 +1,13 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { nextTick } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, reactive } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   listSandboxes: vi.fn(), getSandbox: vi.fn(), createSandbox: vi.fn(), authorizeSandboxRemoteTarget: vi.fn(), stopSandbox: vi.fn(),
-  extendSandbox: vi.fn(), createSandboxPreviewSession: vi.fn(), searchSandboxCapabilities: vi.fn(),
+  extendSandbox: vi.fn(), downloadSandboxArtifact: vi.fn(), createSandboxPreviewSession: vi.fn(), searchSandboxCapabilities: vi.fn(),
 }))
-const projectApi = vi.hoisted(() => ({ getProjects: vi.fn() }))
+const projectApi = vi.hoisted(() => ({ getProjects: vi.fn(), getProjectDetail: vi.fn() }))
+const confirmation = vi.hoisted(() => vi.fn())
 const environment = {
   public_id: 'sbx_1', project_id: 7, owner_id: 2, worker_code: 'managed-1', agent_code: 'test_verifier',
   purpose: 'test', language: 'python', test_mode: 'combined', status: 'succeeded', runtime: 'runsc',
@@ -20,11 +21,13 @@ const environment = {
 vi.mock('@/api/sandbox', () => api)
 vi.mock('@/api/project', () => projectApi)
 vi.mock('@/api/mcpGovernance', () => ({ listSandboxWorkers: vi.fn().mockResolvedValue([]) }))
-vi.mock('@/stores/user', () => ({ useUserStore: () => ({ isSuperAdmin: () => false }) }))
+vi.mock('@/stores/user', () => ({ useUserStore: () => user }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
-vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: { confirm: vi.fn() } }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: { confirm: confirmation } }))
 
 import SandboxWorkstation from './SandboxWorkstation.vue'
+
+const user = reactive({ profile: { id: 11 }, token: 'account-a', isSuperAdmin: () => false })
 
 const mountOptions = {
   global: {
@@ -48,16 +51,37 @@ const mountOptions = {
   },
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
+  Object.values(api).forEach((mock) => mock.mockReset())
+  Object.values(projectApi).forEach((mock) => mock.mockReset())
+  confirmation.mockReset()
+  user.profile = { id: 11 }
+  user.token = 'account-a'
+  confirmation.mockResolvedValue(true)
   projectApi.getProjects.mockResolvedValue({
     items: [{ id: 7, project_name: '项目 A', status: 'active', file_count: 1, create_time: '' }],
     total: 1,
   })
+  projectApi.getProjectDetail.mockResolvedValue({ source_revisions: [] })
   api.listSandboxes.mockResolvedValue([environment])
   api.getSandbox.mockResolvedValue(environment)
   api.searchSandboxCapabilities.mockResolvedValue([])
   api.authorizeSandboxRemoteTarget.mockResolvedValue({ approval_token: '31.secret', expires_at: '2026-09-28T12:05:00' })
+  api.createSandbox.mockResolvedValue({ ...environment, public_id: 'sbx_created' })
+  api.stopSandbox.mockResolvedValue({ ...environment, status: 'stopped' })
+  api.extendSandbox.mockResolvedValue({ ...environment, status: 'ready' })
+  api.downloadSandboxArtifact.mockResolvedValue(new Blob(['sandbox-evidence']))
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('SandboxWorkstation Agent output ordering', () => {
@@ -184,6 +208,7 @@ describe('SandboxWorkstation Agent output ordering', () => {
     vm.form.language = 'python'
     vm.form.test_mode = 'blackbox'
     vm.form.remote_target_url = 'https://authorized.example/path'
+    await nextTick()
     vm.form.remote_target_authorized = true
 
     await vm.submit()
@@ -255,4 +280,219 @@ describe('SandboxWorkstation Agent output ordering', () => {
       vi.useRealTimers()
     }
   })
+
+  it('项目快速切换后只显示当前项目的修复副本', async () => {
+    projectApi.getProjects.mockResolvedValue({
+      items: [
+        { id: 7, project_name: '项目 A', language: 'python', status: 'active', file_count: 1, create_time: '' },
+        { id: 8, project_name: '项目 B', language: 'node', status: 'active', file_count: 1, create_time: '' },
+      ],
+      total: 2,
+    })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const revisionA = deferred<any>()
+    const revisionB = deferred<any>()
+    projectApi.getProjectDetail.mockImplementation((projectId: number) => (
+      projectId === 7 ? revisionA.promise : revisionB.promise
+    ))
+    vm.form.project_id = null
+    await nextTick()
+    vm.form.project_id = 7
+    await nextTick()
+    vm.form.project_id = 8
+    await nextTick()
+    revisionB.resolve({ source_revisions: [{ id: 202, revision_no: 2, repaired_files: [] }] })
+    await flushPromises()
+    revisionA.resolve({ source_revisions: [{ id: 101, revision_no: 1, repaired_files: [] }] })
+    await flushPromises()
+
+    expect(vm.form.project_id).toBe(8)
+    expect(vm.sourceRevisions.map((revision: { id: number }) => revision.id)).toEqual([202])
+    wrapper.unmount()
+  })
+
+  it('初始请求在卸载后完成时不注册轮询或重复读取沙箱', async () => {
+    vi.useFakeTimers()
+    const projects = deferred<any>()
+    projectApi.getProjects.mockReturnValue(projects.promise)
+    api.listSandboxes.mockResolvedValue([{ ...environment, status: 'running' }])
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await nextTick()
+    wrapper.unmount()
+    projects.resolve({ items: [{ id: 7, project_name: '项目 A', status: 'active', language: 'python' }], total: 1 })
+    await flushPromises()
+    const callsAfterUnmount = api.listSandboxes.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+
+    expect(api.listSandboxes).toHaveBeenCalledTimes(callsAfterUnmount)
+  })
+
+  it('关闭确认期间切换沙箱时取消操作，不能关闭另一任务', async () => {
+    api.listSandboxes.mockResolvedValue([{ ...environment, status: 'ready' }, { ...environment, public_id: 'sbx_2', status: 'ready' }])
+    api.stopSandbox.mockResolvedValueOnce({ ...environment, public_id: 'sbx_2', status: 'stopped' })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const pending = deferred<boolean>()
+    confirmation.mockReturnValueOnce(pending.promise)
+    const request = vm.stopCurrent()
+    vm.selectedId = 'sbx_2'
+    pending.resolve(true)
+    await request
+    expect(api.stopSandbox).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('远程目标授权等待期间配置变化时不使用旧授权创建新任务', async () => {
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.form.test_mode = 'blackbox'
+    vm.form.remote_target_url = 'https://authorized.example/'
+    await nextTick()
+    vm.form.remote_target_authorized = true
+    const approval = deferred<any>()
+    api.authorizeSandboxRemoteTarget.mockReturnValueOnce(approval.promise)
+    api.createSandbox.mockResolvedValue({ ...environment, public_id: 'sbx_new' })
+    const request = vm.submit()
+    vm.form.project_id = 8
+    vm.form.remote_target_url = 'https://changed.example/'
+    await nextTick()
+    approval.resolve({ approval_token: 'old-approved-target' })
+    await request
+    expect(api.createSandbox).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('重复提交在前一任务等待授权期间仅发起一次授权', async () => {
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.form.test_mode = 'blackbox'
+    vm.form.remote_target_url = 'https://authorized.example/'
+    await nextTick()
+    vm.form.remote_target_authorized = true
+    const approval = deferred<any>()
+    api.authorizeSandboxRemoteTarget.mockReturnValue(approval.promise)
+    api.createSandbox.mockResolvedValue({ ...environment, public_id: 'sbx_new' })
+    const request = vm.submit()
+    const duplicate = vm.submit()
+    expect(api.authorizeSandboxRemoteTarget).toHaveBeenCalledTimes(1)
+    approval.resolve({ approval_token: 'approved' })
+    await Promise.all([request, duplicate])
+    expect(api.createSandbox).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('账号切换立即清空旧沙箱，迟到的刷新不能恢复旧数据', async () => {
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    const stale = deferred<any>()
+    api.listSandboxes.mockReturnValueOnce(stale.promise).mockResolvedValue([])
+    projectApi.getProjects.mockResolvedValue({ items: [], total: 0 })
+    const request = vm.refreshSelected(true)
+    user.profile = { id: 12 }
+    user.token = 'account-b'
+    await flushPromises()
+    expect(vm.environments).toEqual([])
+    stale.resolve([environment])
+    await request
+    expect(vm.environments).toEqual([])
+    expect(vm.selectedId).toBe('')
+    wrapper.unmount()
+  })
+
+  it.each(['javascript:alert(1)', 'https://untrusted.example/api/sandboxes/sbx_1/preview/'])('预览拒绝不受控路径 %s', async (path) => {
+    api.listSandboxes.mockResolvedValue([{ ...environment, status: 'ready', preview_path: '/api/sandboxes/sbx_1/preview/' }])
+    const previewWindow = { opener: {}, location: { replace: vi.fn() }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow as any)
+    api.createSandboxPreviewSession.mockResolvedValueOnce({ path })
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    await (wrapper.vm as any).openPreview()
+    expect(previewWindow.location.replace).not.toHaveBeenCalled()
+    expect(previewWindow.close).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('项目读取失败仍显示已加载的沙箱任务，并提供重新加载恢复', async () => {
+    const errors = vi.fn()
+    projectApi.getProjects.mockRejectedValueOnce(new Error('项目服务暂时不可用'))
+    const wrapper = shallowMount(SandboxWorkstation, { ...mountOptions, global: { ...mountOptions.global, config: { errorHandler: errors } } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="agent-timeline"]').text()).toContain('已调用 worker')
+    expect(wrapper.get('[data-testid="sandbox-load-error"]').text()).toContain('项目服务暂时不可用')
+    expect(errors).not.toHaveBeenCalled()
+    await (wrapper.vm as any).loadInitial()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sandbox-load-error"]').exists()).toBe(false)
+    expect((wrapper.vm as any).projects).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('沙箱读取失败保留成功的项目选项，重试后恢复任务且清除局部错误', async () => {
+    const errors = vi.fn()
+    api.listSandboxes.mockRejectedValueOnce(new Error('任务服务暂时不可用'))
+    const wrapper = shallowMount(SandboxWorkstation, { ...mountOptions, global: { ...mountOptions.global, config: { errorHandler: errors } } })
+    await flushPromises()
+    expect((wrapper.vm as any).projects).toHaveLength(1)
+    expect(wrapper.get('[data-testid="sandbox-load-error"]').text()).toContain('任务服务暂时不可用')
+    expect(errors).not.toHaveBeenCalled()
+    await (wrapper.vm as any).loadInitial()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sandbox-load-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="agent-timeline"]').text()).toContain('已调用 worker')
+    wrapper.unmount()
+  })
+
+  it('安全的同源当前沙箱路径可以继续打开预览', async () => {
+    const path = '/api/sandboxes/sbx_1/preview/'
+    api.listSandboxes.mockResolvedValue([{ ...environment, status: 'ready', preview_path: path }])
+    api.createSandboxPreviewSession.mockResolvedValueOnce({ path })
+    const previewWindow = { opener: {}, location: { replace: vi.fn() }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(previewWindow as any)
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    await (wrapper.vm as any).openPreview()
+    expect(previewWindow.location.replace).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}${path}`)
+    expect(previewWindow.close).not.toHaveBeenCalled()
+    expect(previewWindow.opener).toBeNull()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['创建任务', 'submit', 'createSandbox', 'submitting'],
+    ['远程授权', 'submit', 'authorizeSandboxRemoteTarget', 'submitting'],
+    ['关闭任务', 'stopCurrent', 'stopSandbox', 'mutating'],
+    ['延长任务', 'extendCurrent', 'extendSandbox', 'mutating'],
+    ['下载证据', 'downloadArtifact', 'downloadSandboxArtifact', 'mutating'],
+    ['检索能力', 'searchCapabilities', 'searchSandboxCapabilities', 'capabilitiesLoading'],
+  ] as const)('%s接口失败不会泄漏未处理异常，原场景重试可恢复', async (_label, method, apiMethod, busyField) => {
+    api.listSandboxes.mockResolvedValue([{ ...environment, status: 'ready' }])
+    URL.createObjectURL = vi.fn(() => 'blob:sandbox-evidence')
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    if (apiMethod === 'authorizeSandboxRemoteTarget') {
+      vm.form.test_mode = 'blackbox'
+      vm.form.remote_target_url = 'https://authorized.example/'
+      await nextTick()
+      vm.form.remote_target_authorized = true
+    }
+    const args = method === 'downloadArtifact' ? [{ id: 4, artifact_type: 'evidence', file_name: 'evidence.txt' }] : []
+    api[apiMethod].mockRejectedValueOnce(new Error('临时网络失败'))
+    await expect(vm[method](...args)).resolves.toBeUndefined()
+    expect(vm[busyField]).toBe(false)
+    await expect(vm[method](...args)).resolves.toBeUndefined()
+    expect(api[apiMethod]).toHaveBeenCalledTimes(2)
+    expect(vm[busyField]).toBe(false)
+    wrapper.unmount()
+  })
+
 })

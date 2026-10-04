@@ -11,6 +11,7 @@ import {
   listAgentTeamEvents,
   listAgentTeamMessages,
   listAgentTeams,
+  previewRetryAgentTeam,
   retryAgentTeam,
 } from './agentTeams'
 
@@ -52,14 +53,19 @@ describe('agent teams api', () => {
 
     await createAgentTeam(input)
     await cancelAgentTeam(42, '用户取消')
-    await retryAgentTeam(42, ['read'], { read: '刷新实时状态后改用路径 B' })
+    await previewRetryAgentTeam(42, ['read'], { read: '刷新实时状态后改用路径 B' })
+    await retryAgentTeam(42, ['read'], { read: '刷新实时状态后改用路径 B' }, 'a'.repeat(64))
     await archiveAgentTeam(42, '已验收')
 
     expect(http.post).toHaveBeenNthCalledWith(1, '/agent-teams', input)
     expect(http.post).toHaveBeenNthCalledWith(2, '/agent-teams/42/cancel', { reason: '用户取消' })
-    expect(http.post).toHaveBeenNthCalledWith(3, '/agent-teams/42/retry', {
+    expect(http.post).toHaveBeenNthCalledWith(3, '/agent-teams/42/retry/preview', {
       task_keys: ['read'], strategy_changes: { read: '刷新实时状态后改用路径 B' },
     })
-    expect(http.post).toHaveBeenNthCalledWith(4, '/agent-teams/42/archive', { reason: '已验收' })
+    expect(http.post).toHaveBeenNthCalledWith(4, '/agent-teams/42/retry', {
+      task_keys: ['read'], strategy_changes: { read: '刷新实时状态后改用路径 B' },
+      supervisor_plan_sha256: 'a'.repeat(64),
+    })
+    expect(http.post).toHaveBeenNthCalledWith(5, '/agent-teams/42/archive', { reason: '已验收' })
   })
 })

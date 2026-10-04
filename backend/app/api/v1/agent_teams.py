@@ -11,7 +11,13 @@ from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, Va
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
-from app.schemas.agent_team import AgentTeamArchiveIn, AgentTeamCancelIn, AgentTeamCreateIn, AgentTeamRetryIn
+from app.schemas.agent_team import (
+    AgentTeamArchiveIn,
+    AgentTeamCancelIn,
+    AgentTeamCreateIn,
+    AgentTeamRetryIn,
+    AgentTeamRetryPreviewIn,
+)
 from app.schemas.common import Resp
 from app.services import agent_team_service, audit_service
 
@@ -169,6 +175,30 @@ def cancel_team(
 
 
 @router.post(
+    "/{team_id}/retry/preview",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def preview_retry_team(
+    team_id: int,
+    payload: AgentTeamRetryPreviewIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    try:
+        return Resp(data=agent_team_service.preview_retry_team(
+            db,
+            user,
+            team_id,
+            task_keys=payload.task_keys,
+            strategy_changes=payload.strategy_changes,
+        ))
+    except agent_team_service.AgentTeamError as exc:
+        _raise_team_error(exc)
+        raise AssertionError("unreachable")
+
+
+@router.post(
     "/{team_id}/retry", response_model=Resp[dict], dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))]
 )
 def retry_team(
@@ -184,6 +214,7 @@ def retry_team(
             team_id,
             task_keys=payload.task_keys,
             strategy_changes=payload.strategy_changes,
+            supervisor_plan_sha256=payload.supervisor_plan_sha256,
         )
         audit_service.log(
             db, user, "agent_team_retry",

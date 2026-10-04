@@ -1,0 +1,100 @@
+{
+  "生成时间": "2026-10-04T16:28:56.684926+08:00",
+  "工作树": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台",
+  "基准提交": "fab823f71cda410cfdc03006f08fbca55f4644a9",
+  "范围": "候选工作树四个Vue组件及配套测试；没有访问生产账号，没有提交、推送或部署。",
+  "规范检查": {
+    "全前端测试串行复测": {
+      "文件数": 132,
+      "通过": 1550,
+      "失败": 0,
+      "耗时秒": 18.62
+    },
+    "全前端首轮": {
+      "文件数": 132,
+      "通过": 1549,
+      "超时": 1,
+      "样本": "ReviewStart.regression.test.ts 500文件翻页，默认5000ms超时；不改测试时限或源码，随后独立32通过并串行全套1550通过"
+    },
+    "全前端ESLint": "exit 0",
+    "类型与Vite生产构建": "exit 0，Vite构建20.62秒",
+    "目标回归": {
+      "文件数": 8,
+      "每轮通过": 113,
+      "轮数": 3,
+      "失败": 0
+    }
+  },
+  "已确认场景": [
+    "代码编辑器路由、账号、读取权限、保存和下载回调绑定生命周期；冲突与编辑权限降级保持同账号草稿；授权请求乱序不会恢复旧可写结论。",
+    "问题追踪账号切换清空旧数据；批量确认冻结问题ID及账号、权限、筛选代际；撤回再恢复权限或筛选仍取消旧确认；防止重复提交。",
+    "沙箱确认与结果绑定账号和具体选中ID，远程审批冻结配置，防重复提交；预览只接受当前沙箱受控同源HTTP路径；局部初始化成功项保留并有重试入口。",
+    "沙箱创建、远程授权、关闭、续期、下载、能力检索失败不泄漏事件Promise，统一HTTP层负责提示；原场景失败后再试恢复。",
+    "团队复制和动作记录单调目标代际，切换后返回同ID仍拒绝旧回调；卸载后迟到确认不发API、不提示；同团队轮询保留展开状态。"
+  ],
+  "复现证据范围": "原始初次混合日志含CodeEditor测试模拟初始化错误，该错误不计产品缺陷；CodeEditor产品复现以独立6红日志为准。初次Sandbox关闭测试随后纠正为active状态后6红，见独立Sandbox日志。独立复核6红和沙箱失败恢复6红均为实际组件待完成Promise路径。",
+  "本地模拟浏览器": {
+    "来源": "主代理最初授权下的普通持久Chrome资料、headless桌面视口，接口完全mock、所有非loopback请求阻断；之后收到CUA要求即停止，不再用exec操作浏览器。",
+    "宽度": [
+      375,
+      768,
+      1280
+    ],
+    "组件数": 4,
+    "场景数": 12,
+    "已验证": "横向DOM几何；Team/Issue展开后尾部存在；代码标题高度；Issue独立操作列坐标。",
+    "限制": [
+      "截图早于最后生命周期和失败恢复补丁及依赖升级，不能当作当前最终构建的真实点击验收。",
+      "Sandbox隔离挂载全页截图屏下区域为空白，只能作为顶部视口与DOM几何佐证；未证明实际应用路由滚动或屏下视觉完整。",
+      "pageerror为0但控制台存在本地Vite HMR websocket提示，不能写控制台完全无错误。",
+      "不是CUA真实用户点击、生产验收、真实手机、键盘、剪贴板授权或无障碍全面验收。"
+    ]
+  },
+  "未验": [
+    "生产账号真实浏览器角色操作和发布后回归",
+    "真实手机及平台键盘/弹层/剪贴板权限",
+    "真实模型长上下文压缩或输出截断",
+    "当前最终bundle的浏览器布局复验"
+  ],
+  "文件摘要": {
+    "frontend/src/components/ai/AgentTeamWindow.vue": "d96387052ea4b7eb242988944366f46b4646c38c4c5d9394b085b99ce0d27201",
+    "frontend/src/components/ai/AgentTeamWindow.full-payload.test.ts": "09b1bc582c4f6211591bc34f3aa920cbb79b25c8a5833fadd597f1246ad61bff",
+    "frontend/src/components/ai/AgentTeamWindow.target-freeze.test.ts": "715530d1c9da0eaaf0ad04d9c915b57614de80d8d8822c73b64cdc3b8f111b2d",
+    "frontend/src/views/code/CodeEditor.vue": "c1008af6aea54c9a0ff7d7ed2ab4d496709e4ca4bd717c0a0edb3c0a2c64fd1d",
+    "frontend/src/views/code/CodeEditor.lifecycle.test.ts": "d7e5e32e8ebe895b190153cbb86762964231ebb16128a705069cc6f2095bc766",
+    "frontend/src/views/issue/IssueHub.vue": "5fdb9fc77f47e7e6199a03534429ab712e40bf2ac354d61f5c5b0148b0d805f4",
+    "frontend/src/views/issue/IssueHub.recovery.test.ts": "cc0c9dd6f787ea4b34a8e36de92fad20737361f2fa13bef270ec2e0e4c48bbfe",
+    "frontend/src/views/sandbox/SandboxWorkstation.vue": "5f99a6d4e85344db50322253c50636180576a8b821709dda5d53b886ad2c5ae1",
+    "frontend/src/views/sandbox/SandboxWorkstation.test.ts": "029e2fa3569d350c5ce4a25a8101eb4afbbbf9e14d9acbd4bc61d6a7a26f96f7"
+  },
+  "日志文件": [
+    "初次复现-问题批量确认与其他范围原始.log",
+    "复现-编辑器生命周期.log",
+    "复现-沙箱生命周期与预览.log",
+    "复现-团队离开后返回原目标.log",
+    "复现-沙箱局部加载.log",
+    "复现-独立复核新增生命周期.log",
+    "修复-独立复核新增生命周期.log",
+    "复现-沙箱失败后重试.log",
+    "修复-沙箱失败后重试.log",
+    "全前端-首轮含超时.log",
+    "全前端-串行复测.log",
+    "超时文件-独立复测.log",
+    "全前端-规范检查.log",
+    "全前端-类型与生产构建.log",
+    "本地模拟布局-修复前.log",
+    "本地模拟布局-修复后.log",
+    "最终目标回归-第1轮.log",
+    "最终目标回归-第2轮.log",
+    "最终目标回归-第3轮.log",
+    "最终独立复核-113项.log"
+  ],
+  "最终独立复核": {
+    "对象": "四组件生命周期、Sandbox五处catch与六类失败重试、证据来源与范围",
+    "目标回归通过": 113,
+    "轮数": 1,
+    "耗时秒": 1.92,
+    "源码摘要核验": 9,
+    "结论": "没有新增阻断；没有推断生产或真机通过"
+  }
+}

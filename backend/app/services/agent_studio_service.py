@@ -380,8 +380,12 @@ def _validate_skill_definition(db: Session, skill_type: str, definition: dict, c
         published = db.query(CustomAgent).filter(CustomAgent.code == target, CustomAgent.is_enabled == 1).first()
         if target not in CONTRACTS and not published:
             raise ValidationError("委派目标必须是已发布 Agent", code=40001)
-        if int(definition.get("max_depth", 2)) > 2:
-            raise ValidationError("委派深度不得超过 2", code=40001)
+        try:
+            max_depth = int(definition.get("max_depth", 2))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("委派深度必须为 1 或 2", code=40001) from exc
+        if max_depth not in {1, 2}:
+            raise ValidationError("委派深度必须为 1 或 2", code=40001)
     elif skill_type == "sequence_workflow":
         steps = definition.get("steps")
         if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
@@ -711,6 +715,131 @@ def _manifest(db: Session, version: CustomAgentVersion) -> dict:
     }
 
 
+def _freeze_skill_dependency_snapshots(db: Session, manifest: dict) -> dict[str, dict[str, Any]]:
+    """Freeze every Skill version and custom Agent release reachable by a package."""
+    snapshots: dict[str, dict[str, Any]] = {}
+    active_path: set[int] = set()
+
+    def visit(skill_version_id: int, depth: int = 0) -> None:
+        if depth > 8 or skill_version_id in active_path:
+            raise ValidationError("Agent Skill 依赖存在循环或超过8层，不能发布", code=40001)
+        if len(snapshots) >= 128:
+            raise ValidationError("Agent Skill 依赖闭包超过128个节点，不能发布", code=40001)
+        existing = snapshots.get(str(skill_version_id))
+        if existing:
+            return
+        version = db.get(CustomSkillVersion, skill_version_id)
+        if version is None:
+            raise ValidationError(f"Agent Skill 版本 {skill_version_id} 缺失，不能发布", code=40001)
+        _assert_skill_integrity(version)
+        entry: dict[str, Any] = {
+            "skill_type": version.skill_type,
+            "skill_checksum": version.checksum,
+        }
+        snapshots[str(skill_version_id)] = entry
+        active_path.add(skill_version_id)
+        definition = _load(version.definition_json, {})
+        if version.skill_type == "agent_delegate":
+            target_code = str(definition.get("agent_code") or "")
+            entry["max_depth"] = int(definition.get("max_depth", 2))
+            builtin = CONTRACTS.get(target_code)
+            if builtin is not None:
+                entry["delegate"] = {
+                    "kind": "builtin",
+                    "agent_code": target_code,
+                    "name": builtin.name,
+                    "mission": builtin.mission,
+                }
+            else:
+                target = (
+                    db.query(CustomAgent)
+                    .filter(CustomAgent.code == target_code, CustomAgent.is_enabled == 1)
+                    .with_for_update()
+                    .first()
+                )
+                if target is None or not target.current_published_version_id:
+                    raise ValidationError(f"委派目标 {target_code} 没有可冻结的已发布版本", code=40001)
+                target_version = db.get(CustomAgentVersion, int(target.current_published_version_id))
+                target_release = (
+                    db.query(CustomAgentRelease)
+                    .filter(
+                        CustomAgentRelease.agent_id == target.id,
+                        CustomAgentRelease.agent_version_id == target.current_published_version_id,
+                        CustomAgentRelease.status == "published",
+                        CustomAgentRelease.disabled_at.is_(None),
+                    )
+                    .order_by(CustomAgentRelease.id.desc())
+                    .with_for_update()
+                    .first()
+                )
+                if target_version is None or target_release is None or target_version.status != "published":
+                    raise ValidationError(f"委派目标 {target_code} 的发布包不可用，不能冻结", code=40001)
+                _assert_agent_integrity(target_version)
+                target_manifest = _load(target_release.package_manifest_json, {})
+                if _checksum(target_manifest) != target_release.package_checksum:
+                    raise ValidationError(f"委派目标 {target_code} 的发布包 checksum 不匹配", code=40001)
+                if _manifest_has_agent_delegate(db, target_manifest) and "dependency_snapshots" not in target_manifest:
+                    raise ValidationError(
+                        f"委派目标 {target_code} 的旧发布包未冻结其下游依赖，请先重新发布目标 Agent",
+                        code=40001,
+                    )
+                entry["delegate"] = {
+                    "kind": "custom",
+                    "agent_id": int(target.id),
+                    "agent_code": target.code,
+                    "release_id": int(target_release.id),
+                    "version_id": int(target_version.id),
+                    "version_number": int(target_version.version_number),
+                    "package_checksum": target_release.package_checksum,
+                    "template_checksum": target_version.checksum,
+                }
+        elif version.skill_type == "sequence_workflow":
+            steps = definition.get("steps", [])
+            for step in steps:
+                if isinstance(step, dict):
+                    child_id = int(step.get("skill_version_id") or 0)
+                    if child_id <= 0:
+                        raise ValidationError("顺序工作流包含无效 Skill 版本，不能发布", code=40001)
+                    visit(child_id, depth + 1)
+        active_path.remove(skill_version_id)
+
+    for item in manifest.get("skills", []):
+        if isinstance(item, dict):
+            skill_version_id = int(item.get("skill_version_id") or 0)
+            if skill_version_id <= 0:
+                raise ValidationError("Agent 发布清单包含无效 Skill 版本", code=40001)
+            visit(skill_version_id)
+    return snapshots
+
+
+def _manifest_has_agent_delegate(db: Session, manifest: dict) -> bool:
+    seen: set[int] = set()
+
+    def visit(skill_version_id: int) -> bool:
+        if skill_version_id in seen:
+            return False
+        seen.add(skill_version_id)
+        version = db.get(CustomSkillVersion, skill_version_id)
+        if not version:
+            return False
+        if version.skill_type == "agent_delegate":
+            return True
+        if version.skill_type != "sequence_workflow":
+            return False
+        definition = _load(version.definition_json, {})
+        return any(
+            visit(int(step.get("skill_version_id") or 0))
+            for step in definition.get("steps", [])
+            if isinstance(step, dict) and int(step.get("skill_version_id") or 0) > 0
+        )
+
+    return any(
+        visit(int(item.get("skill_version_id") or 0))
+        for item in manifest.get("skills", [])
+        if isinstance(item, dict) and int(item.get("skill_version_id") or 0) > 0
+    )
+
+
 def _sync_governance_profile(
     db: Session,
     asset: CustomAgent,
@@ -804,6 +933,7 @@ def publish_for_approval(db: Session, approval: ApprovalItem) -> CustomAgentRele
         .first()
     )
     manifest = _manifest(db, version)
+    manifest["dependency_snapshots"] = _freeze_skill_dependency_snapshots(db, manifest)
     release = CustomAgentRelease(
         agent_id=asset.id,
         agent_version_id=version.id,
@@ -955,6 +1085,8 @@ def rollback_agent(db: Session, admin: User, agent_id: int, target_release_id: i
         "rollback_of_release_id": current.id if current else None,
         "source_release_id": target.id,
     }
+    if "dependency_snapshots" not in rollback_manifest:
+        rollback_manifest["dependency_snapshots"] = _freeze_skill_dependency_snapshots(db, rollback_manifest)
     release = CustomAgentRelease(
         agent_id=agent_id,
         agent_version_id=target.agent_version_id,

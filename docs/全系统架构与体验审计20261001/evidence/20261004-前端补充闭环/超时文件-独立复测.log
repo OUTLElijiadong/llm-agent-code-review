@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/review/ReviewStart.regression.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
+   Start at  16:25:31
+   Duration  2.73s (transform 204ms, setup 15ms, import 583ms, tests 1.88s, environment 196ms)
+

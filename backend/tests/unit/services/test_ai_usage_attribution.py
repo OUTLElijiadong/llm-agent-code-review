@@ -1,5 +1,6 @@
 """精确根任务外键、执行尝试与未知用量回归。"""
 
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -35,9 +36,13 @@ def test_raw_missing_usage_stays_unknown(monkeypatch):
 
 def _run(db, user_id=7, key="root-run", **fields):
     from app.models.agent_response_run import AgentResponseRun
+    from app.services.deepseek_responses_runtime import RunCheckpoint
 
+    # 用量归因样本也会由真实 checkpoint store 恢复；有效空历史须显式保留。
+    checkpoint = RunCheckpoint(run_id=key, model="unit", transcript=[], tools=[], status="completed")
     row = AgentResponseRun(
-        user_id=user_id, run_id=key, surface="user", session_key=key, status="completed", checkpoint_json="{}", **fields
+        user_id=user_id, run_id=key, surface="user", session_key=key, status="completed",
+        checkpoint_json=json.dumps(checkpoint.to_dict()), **fields,
     )
     db.add(row)
     db.commit()

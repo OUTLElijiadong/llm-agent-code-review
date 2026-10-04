@@ -1,0 +1,22 @@
+{
+  "item": "B03",
+  "environment": "candidate worktree; isolated temporary SQLite; real FastAPI route, RBAC and production-shaped error handler",
+  "database_or_network": "no production database, no network, no model calls",
+  "baseline": {
+    "same_stale_session_repetitions": 3,
+    "http_statuses": [500, 500, 500],
+    "error_codes": [50000, 50000, 50000],
+    "cached_versions": [1, 2, 3],
+    "versions_committed_by_other_session": [2, 3, 4],
+    "cause": "stale ORM CodeFile instance survives while the request waits for the project lock; update_content increments an obsolete version_no and collides with the unique (file_id, version_no) constraint"
+  },
+  "fail_first_regression": {
+    "test_file": "backend/tests/unit/services/test_code_file_concurrency.py",
+    "tests": 2,
+    "failed_before_fix": 2,
+    "observed": "update_content had no expected_version parameter; the tests could not exercise an optimistic conflict contract"
+  },
+  "limitations": [
+    "MySQL/MariaDB is not installed or running locally; Docker is closed, so production-like FOR UPDATE lock behavior has not been exercised against MySQL."
+  ]
+}

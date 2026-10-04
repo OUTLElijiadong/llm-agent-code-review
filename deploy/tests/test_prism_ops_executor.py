@@ -111,6 +111,76 @@ def test_status_preserves_degraded_semantics(monkeypatch) -> None:
     assert result["checks"]["checks"]["disk"]["status"] == "degraded"
 
 
+@pytest.mark.parametrize(
+    ("file_conf_dir", "environment_conf_dir", "expected_relative"),
+    [
+        (None, None, "certbot/conf"),
+        ("", None, "certbot/conf"),
+        ("./certbot/conf", None, "certbot/conf"),
+        ("../shared/certificates", None, "../shared/certificates"),
+        ("./ignored/certificates", "/persistent/certbot/conf", None),
+    ],
+)
+def test_certificate_status_uses_compose_certificate_directory(
+    monkeypatch, tmp_path: Path, file_conf_dir: str | None,
+    environment_conf_dir: str | None, expected_relative: str | None,
+) -> None:
+    deploy_dir = tmp_path / "releases" / "release-a" / "deploy"
+    deploy_dir.mkdir(parents=True)
+    monkeypatch.setattr(executor, "DEPLOY_DIR", deploy_dir)
+    monkeypatch.delenv("CERTBOT_CONF_DIR", raising=False)
+    if environment_conf_dir is not None:
+        monkeypatch.setenv("CERTBOT_CONF_DIR", environment_conf_dir)
+
+    env = {"APP_DOMAIN": "example.invalid"}
+    if file_conf_dir is not None:
+        env["CERTBOT_CONF_DIR"] = file_conf_dir
+
+    def read_env(key: str) -> str:
+        if key not in env:
+            raise RuntimeError(f"missing {key}")
+        return env[key]
+
+    commands: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs):
+        commands.append(args)
+        return {"exit_code": 0, "stdout": "notAfter=Dec 29 2026", "stderr": ""}
+
+    monkeypatch.setattr(executor, "_read_env", read_env)
+    monkeypatch.setattr(executor, "run", fake_run)
+
+    executor.execute("certificate_status", {})
+
+    if environment_conf_dir:
+        expected_conf = Path(environment_conf_dir)
+    elif expected_relative:
+        expected_conf = deploy_dir / expected_relative
+    else:
+        expected_conf = Path("/persistent/certbot/conf")
+    expected_cert = (expected_conf / "live" / "example.invalid" / "fullchain.pem").resolve()
+    assert [Path(command[-1]).resolve() for command in commands] == [expected_cert, expected_cert]
+
+
+def test_certificate_status_absolute_shared_path_survives_release_switch(monkeypatch, tmp_path: Path) -> None:
+    shared_conf = tmp_path / "persistent" / "certbot" / "conf"
+    monkeypatch.setenv("CERTBOT_CONF_DIR", str(shared_conf))
+    monkeypatch.setattr(executor, "_read_env", lambda key: "example.invalid" if key == "APP_DOMAIN" else "")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        executor,
+        "run",
+        lambda args, **_kwargs: commands.append(args) or {"exit_code": 0, "stdout": "notAfter=Dec 29 2026", "stderr": ""},
+    )
+
+    for release in ("release-a", "release-b"):
+        monkeypatch.setattr(executor, "DEPLOY_DIR", tmp_path / "releases" / release / "deploy")
+        executor.execute("certificate_status", {})
+
+    expected = (shared_conf / "live" / "example.invalid" / "fullchain.pem").resolve()
+    assert [Path(command[-1]).resolve() for command in commands] == [expected] * 4
+
+
 def test_parse_security_sources_and_keep_collection_failure_visible(monkeypatch) -> None:
     ssh = executor.parse_ssh_log([
         "Accepted publickey for root from 10.0.0.2 port 1000 ssh2: ED25519 SHA256:test",

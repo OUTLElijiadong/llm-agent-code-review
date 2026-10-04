@@ -1,0 +1,198 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/sandbox/SandboxWorkstation.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts (16 tests | 6 failed) 112ms
+     × 关闭确认期间切换沙箱时取消操作，不能关闭另一任务 5ms
+     × 远程目标授权等待期间配置变化时不使用旧授权创建新任务 4ms
+     × 重复提交在前一任务等待授权期间仅发起一次授权 3ms
+     × 账号切换立即清空旧沙箱，迟到的刷新不能恢复旧数据 10ms
+     × 预览拒绝不受控路径 javascript:alert(1) 8ms
+     × 预览拒绝不受控路径 https://untrusted.example/api/sandboxes/sbx_1/preview/ 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 关闭确认期间切换沙箱时取消操作，不能关闭另一任务
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "sbx_2",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:337:33
+    335|     pending.resolve(true)
+    336|     await request
+    337|     expect(api.stopSandbox).not.toHaveBeenCalled()
+       |                                 ^
+    338|     wrapper.unmount()
+    339|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 远程目标授权等待期间配置变化时不使用旧授权创建新任务
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "db_type": "none",
+        "language": "python",
+        "project_id": 8,
+        "purpose": "test",
+        "remote_target_approval_token": "old-approved-target",
+        "remote_target_authorized": false,
+        "remote_target_url": "https://authorized.example/",
+        "source_revision_id": undefined,
+        "test_mode": "blackbox",
+        "ttl_hours": 72,
+        "worker_code": undefined,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:358:35
+    356|     approval.resolve({ approval_token: 'old-approved-target' })
+    357|     await request
+    358|     expect(api.createSandbox).not.toHaveBeenCalled()
+       |                                   ^
+    359|     wrapper.unmount()
+    360|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 重复提交在前一任务等待授权期间仅发起一次授权
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:375:46
+    373|     const request = vm.submit()
+    374|     const duplicate = vm.submit()
+    375|     expect(api.authorizeSandboxRemoteTarget).toHaveBeenCalledTimes(1)
+       |                                              ^
+    376|     approval.resolve({ approval_token: 'approved' })
+    377|     await Promise.all([request, duplicate])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 账号切换立即清空旧沙箱，迟到的刷新不能恢复旧数据
+AssertionError: expected [ { public_id: 'sbx_1', …(13) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "agent_code": "test_verifier",
++     "events": [
++       {
++         "create_time": "2026-08-02T10:00:02",
++         "event_type": "complete",
++         "id": 2,
++         "message": "测试通过",
++         "payload": {},
++         "stage": "conclusion",
++       },
++       {
++         "create_time": "2026-08-02T10:00:01",
++         "event_type": "dispatch",
++         "id": 1,
++         "message": "已调用 worker",
++         "payload": {},
++         "stage": "worker",
++       },
++     ],
++     "expires_at": "2026-08-05T00:00:00",
++     "language": "python",
++     "owner_id": 2,
++     "project_id": 7,
++     "public_id": "sbx_1",
++     "purpose": "test",
++     "result": {
++       "summary": "测试通过",
++     },
++     "runtime": "runsc",
++     "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++     "status": "succeeded",
++     "test_mode": "combined",
++     "worker_code": "managed-1",
++   },
++ ]
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:393:29
+    391|     user.token = 'account-b'
+    392|     await flushPromises()
+    393|     expect(vm.environments).toEqual([])
+       |                             ^
+    394|     stale.resolve([environment])
+    395|     await request
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 预览拒绝不受控路径 javascript:alert(1)
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "javascript:alert(1)",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:409:48
+    407|     await flushPromises()
+    408|     await (wrapper.vm as any).openPreview()
+    409|     expect(previewWindow.location.replace).not.toHaveBeenCalled()
+       |                                                ^
+    410|     expect(previewWindow.close).toHaveBeenCalledOnce()
+    411|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 预览拒绝不受控路径 https://untrusted.example/api/sandboxes/sbx_1/preview/
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "https://untrusted.example/api/sandboxes/sbx_1/preview/",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:409:48
+    407|     await flushPromises()
+    408|     await (wrapper.vm as any).openPreview()
+    409|     expect(previewWindow.location.replace).not.toHaveBeenCalled()
+       |                                                ^
+    410|     expect(previewWindow.close).toHaveBeenCalledOnce()
+    411|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 10 passed (16)
+   Start at  15:51:13
+   Duration  473ms (transform 155ms, setup 13ms, import 179ms, tests 112ms, environment 116ms)
+

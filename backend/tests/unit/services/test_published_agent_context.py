@@ -38,6 +38,12 @@ def test_delegate_prompt_is_not_silently_cut(db, monkeypatch):
         skill_id=11,
         definition_json='{"agent_code":"delegate_agent"}',
         skill_type="agent_delegate",
+        requested_capabilities_json="[]",
+        checksum=declarative_agent_runtime.agent_studio_service._checksum(
+            declarative_agent_runtime.agent_studio_service._skill_payload(
+                "agent_delegate", {"agent_code": "delegate_agent"}, [],
+            )
+        ),
     )
     skill = SimpleNamespace(name="委派")
     target_asset = SimpleNamespace(

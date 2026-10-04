@@ -1,0 +1,184 @@
+{
+  "scope": "only 26 Linux Python3.11 isolated LoginFailureLimiter validation dependencies; not the whole release image",
+  "minimal_lock_file": "隔离登录Lua-最小依赖-20261004.lock",
+  "minimal_lock_sha256": "3d97c1f730e46865afd24e211f7f74a1547d1693e5839affde36aebb96993193",
+  "development_lock_sha256": "dd558a356fdbb95504f6b370730899346ac6d1c1245ff5da8dd300b43d56e059",
+  "all_26_versions_and_complete_hash_sets_match_development_lock": true,
+  "all_26_installed_versions_match_minimal_lock": true,
+  "unused_pydantic_email_extra_removed_only_from_temporary_minimal_headers": true,
+  "release_and_development_lock_not_modified_for_this_test": true,
+  "wheel_artifacts": [
+    {
+      "filename": "annotated_doc-0.0.4-py3-none-any.whl",
+      "sha256": "571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320",
+      "package": "annotated-doc",
+      "version": "0.0.4"
+    },
+    {
+      "filename": "annotated_types-0.7.0-py3-none-any.whl",
+      "sha256": "1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53",
+      "package": "annotated-types",
+      "version": "0.7.0"
+    },
+    {
+      "filename": "anyio-4.14.2-py3-none-any.whl",
+      "sha256": "9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494",
+      "package": "anyio",
+      "version": "4.14.2"
+    },
+    {
+      "filename": "deprecated-1.3.1-py2.py3-none-any.whl",
+      "sha256": "597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f",
+      "package": "deprecated",
+      "version": "1.3.1"
+    },
+    {
+      "filename": "fastapi-0.139.0-py3-none-any.whl",
+      "sha256": "cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189",
+      "package": "fastapi",
+      "version": "0.139.0"
+    },
+    {
+      "filename": "greenlet-3.5.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "8540f1e6205bd13ca0ce685581037219ca54a1b41a0a15d228c6c9b8ad5903d7",
+      "package": "greenlet",
+      "version": "3.5.3"
+    },
+    {
+      "filename": "idna-3.18-py3-none-any.whl",
+      "sha256": "7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2",
+      "package": "idna",
+      "version": "3.18"
+    },
+    {
+      "filename": "iniconfig-2.3.0-py3-none-any.whl",
+      "sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12",
+      "package": "iniconfig",
+      "version": "2.3.0"
+    },
+    {
+      "filename": "limits-5.8.0-py3-none-any.whl",
+      "sha256": "ae1b008a43eb43073c3c579398bd4eb4c795de60952532dc24720ab45e1ac6b8",
+      "package": "limits",
+      "version": "5.8.0"
+    },
+    {
+      "filename": "loguru-0.7.3-py3-none-any.whl",
+      "sha256": "31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c",
+      "package": "loguru",
+      "version": "0.7.3"
+    },
+    {
+      "filename": "packaging-26.2-py3-none-any.whl",
+      "sha256": "5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e",
+      "package": "packaging",
+      "version": "26.2"
+    },
+    {
+      "filename": "pip-26.2.1-py3-none-any.whl",
+      "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
+      "package": "pip",
+      "version": "26.2.1"
+    },
+    {
+      "filename": "pluggy-1.6.0-py3-none-any.whl",
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+      "package": "pluggy",
+      "version": "1.6.0"
+    },
+    {
+      "filename": "pydantic-2.13.4-py3-none-any.whl",
+      "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba",
+      "package": "pydantic",
+      "version": "2.13.4"
+    },
+    {
+      "filename": "pydantic_core-2.46.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "f9fa868638bf362d3d138ea55829cefb3d5f4b0d7f142234382a15e2485dbec4",
+      "package": "pydantic-core",
+      "version": "2.46.4"
+    },
+    {
+      "filename": "pydantic_settings-2.14.2-py3-none-any.whl",
+      "sha256": "a20c97b37910b6550d5ea50fbcc2d4187defe58cd57070b73863d069419c9440",
+      "package": "pydantic-settings",
+      "version": "2.14.2"
+    },
+    {
+      "filename": "pygments-2.20.0-py3-none-any.whl",
+      "sha256": "81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176",
+      "package": "pygments",
+      "version": "2.20.0"
+    },
+    {
+      "filename": "pytest-9.0.3-py3-none-any.whl",
+      "sha256": "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9",
+      "package": "pytest",
+      "version": "9.0.3"
+    },
+    {
+      "filename": "python_dotenv-1.2.2-py3-none-any.whl",
+      "sha256": "1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a",
+      "package": "python-dotenv",
+      "version": "1.2.2"
+    },
+    {
+      "filename": "setuptools-83.0.0-py3-none-any.whl",
+      "sha256": "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3",
+      "package": "setuptools",
+      "version": "83.0.0"
+    },
+    {
+      "filename": "slowapi-0.1.10-py3-none-any.whl",
+      "sha256": "3acb61561dc9d687e3d3669362ff6a439de9ba44e2fed3a9c165da26b4b83e28",
+      "package": "slowapi",
+      "version": "0.1.10"
+    },
+    {
+      "filename": "sqlalchemy-2.0.51-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "436728ce18a80f6951a1e11cc6112c2ede9faf20766f1a26195a7c441ca12dbd",
+      "package": "sqlalchemy",
+      "version": "2.0.51"
+    },
+    {
+      "filename": "starlette-1.3.1-py3-none-any.whl",
+      "sha256": "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6",
+      "package": "starlette",
+      "version": "1.3.1"
+    },
+    {
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "package": "typing-extensions",
+      "version": "4.16.0"
+    },
+    {
+      "filename": "typing_inspection-0.4.2-py3-none-any.whl",
+      "sha256": "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7",
+      "package": "typing-inspection",
+      "version": "0.4.2"
+    },
+    {
+      "filename": "wrapt-2.2.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl",
+      "sha256": "a2d78c363f97d8bd718ee40432c66395685e9e98528ccaa423c3355d1715a26d",
+      "package": "wrapt",
+      "version": "2.2.2"
+    }
+  ],
+  "source_sha256": {
+    "app/core/rate_limit.py": "28c4a325bc944729aa3ac885117b0c1b2eb13847d78085b73dffb9a18b0e42f6",
+    "app/core/config.py": "7550bc5b3e61f377e8daf6cd134e94c52e05065bb40edf1a4078cd6c4213d467"
+  },
+  "test_sha256": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+  "independent_review": {
+    "reviewer": "context_integrity",
+    "logs": "three original files, each 5 passed (8.12/8.12/8.34s)",
+    "source_hashes": "original test, rate_limit and config match",
+    "scope": "isolated Redis original five Lua samples, not production login API acceptance"
+  },
+  "not_verified": [
+    "complete clean Linux release lock installation",
+    "production login API or browser acceptance",
+    "all timing under production load"
+  ]
+}

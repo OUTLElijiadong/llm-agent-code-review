@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import uuid
 from datetime import datetime, timezone
@@ -21,18 +23,24 @@ from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.agent_mesh import AgentMeshMessage
-from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
+from app.models.agent_response_run import (
+    AgentResponseRun,
+    AgentResponseTranscriptMessage,
+    AgentToolExecution,
+)
 from app.models.user import User
 from app.schemas.common import Resp, StrictInputModel
 from app.services import agent_mesh_service, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
+    DatabaseCheckpointStore,
     is_paused,
     redact_agent_event_value,
     redact_agent_output_text,
     terminal_event,
 )
 from app.services.ai_usage_context import model_attribution, usage_context
+from app.services.deepseek_responses_runtime import InvalidRunStateError
 from app.utils.api_resolver import resolve_api_config
 from app.utils.input_validation import normalize_plain_text
 
@@ -476,6 +484,24 @@ def _public_utc_time(value: Optional[datetime]) -> str:
     return aware.astimezone(timezone.utc).isoformat()
 
 
+def _stored_run_transcript(
+    db: Session, row: AgentResponseRun, checkpoint: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """兼容旧内嵌 transcript，并按所属账号/会话游标恢复压缩检查点。"""
+    if not isinstance(checkpoint, Mapping):
+        raise ConflictError("会话历史检查点格式错误，请联系管理员修复后重试", code=40931)
+    history_payload = {
+        key: checkpoint[key] for key in ("transcript", "_transcript_ref") if key in checkpoint
+    }
+    store = DatabaseCheckpointStore(
+        db, user_id=row.user_id, surface=row.surface, session_key=row.session_key,
+    )
+    try:
+        return [dict(item) for item in store._checkpoint_from_payload(history_payload).transcript]
+    except InvalidRunStateError as exc:
+        raise ConflictError(f"会话历史无法完整恢复：{exc}", code=40931) from exc
+
+
 def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Mapping[str, Any]) -> list[dict[str, Any]]:
     """恢复同账号、同会话的图片元数据；旧轮次只在历史前缀精确一致时关联。"""
     from app.models.agent_multimodal import AgentMultimodalAsset
@@ -509,7 +535,7 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
                 "id": int(asset.id), "mime": asset.mime, "sha256": asset.sha256,
             }
     messages = _public_transcript_messages(
-        checkpoint.get("transcript"), image_assets=assets_by_run.get(row.run_id, {}),
+        _stored_run_transcript(db, row, checkpoint), image_assets=assets_by_run.get(row.run_id, {}),
     )
     for previous in runs:
         if previous.id == row.id:
@@ -521,7 +547,8 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
         if not isinstance(old_checkpoint, dict):
             continue
         old_messages = _public_transcript_messages(
-            old_checkpoint.get("transcript"), image_assets=assets_by_run.get(previous.run_id, {}),
+            _stored_run_transcript(db, previous, old_checkpoint),
+            image_assets=assets_by_run.get(previous.run_id, {}),
         )
         if len(old_messages) > len(messages):
             continue
@@ -543,6 +570,55 @@ def _public_session_messages(db: Session, row: AgentResponseRun, checkpoint: Map
 def _public_session_history_messages(db: Session, selected: AgentResponseRun) -> list[dict[str, Any]]:
     """从完整运行账本重建同账号会话的可见消息，不截断模型上下文。"""
     from app.models.agent_multimodal import AgentMultimodalAsset
+
+    ledger = db.query(AgentResponseTranscriptMessage).filter(
+        AgentResponseTranscriptMessage.user_id == selected.user_id,
+        AgentResponseTranscriptMessage.surface == selected.surface,
+        AgentResponseTranscriptMessage.session_key == selected.session_key,
+    ).order_by(AgentResponseTranscriptMessage.position.asc()).all()
+    if ledger and all(item.run_id for item in ledger):
+        if any(item.position != index for index, item in enumerate(ledger)):
+            raise ConflictError("会话 transcript 账本不完整，拒绝返回不完整历史", code=40931)
+        run_ids = list(dict.fromkeys(item.run_id for item in ledger if item.run_id))
+        runs = db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id.in_(run_ids),
+            AgentResponseRun.user_id == selected.user_id,
+            AgentResponseRun.surface == selected.surface,
+            AgentResponseRun.session_key == selected.session_key,
+        ).all()
+        run_by_id = {run.run_id: run for run in runs}
+        assets_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+        assets = db.query(
+            AgentMultimodalAsset.id, AgentMultimodalAsset.run_id,
+            AgentMultimodalAsset.sha256, AgentMultimodalAsset.mime,
+        ).filter(
+            AgentMultimodalAsset.run_id.in_(run_ids),
+            AgentMultimodalAsset.user_id == selected.user_id,
+            AgentMultimodalAsset.surface == selected.surface,
+            AgentMultimodalAsset.role == "input",
+        ).all() if run_ids else []
+        for asset in assets:
+            assets_by_run.setdefault(asset.run_id, {})[asset.sha256] = {
+                "id": int(asset.id), "mime": asset.mime, "sha256": asset.sha256,
+            }
+        history: list[dict[str, Any]] = []
+        for item in ledger:
+            message_digest = hashlib.sha256(item.message_json.encode("utf-8")).hexdigest()
+            if not item.message_sha256 or not hmac.compare_digest(message_digest, item.message_sha256):
+                raise ConflictError("会话 transcript 账本消息摘要不匹配，拒绝返回不完整历史", code=40931)
+            try:
+                transcript_item = json.loads(item.message_json)
+            except (TypeError, json.JSONDecodeError):
+                raise ConflictError("会话 transcript 账本损坏，请联系管理员修复后重试", code=40931) from None
+            if not isinstance(transcript_item, Mapping):
+                raise ConflictError("会话 transcript 账本格式错误，请联系管理员修复后重试", code=40931)
+            run = run_by_id.get(str(item.run_id)) if item.run_id else None
+            if run is not None and run.mesh_message_id and str(transcript_item.get("role") or "") != "assistant":
+                continue
+            history.extend(_public_transcript_messages(
+                [transcript_item], image_assets=assets_by_run.get(str(item.run_id), {}),
+            ))
+        return history
 
     query = (
         db.query(AgentResponseRun)
@@ -581,7 +657,7 @@ def _public_session_history_messages(db: Session, selected: AgentResponseRun) ->
                 checkpoint = {}
             visible_by_run[int(run.id)] = (
                 _public_session_messages(db, run, checkpoint)
-                if has_images else _public_transcript_messages(checkpoint.get("transcript"))
+                if has_images else _public_transcript_messages(_stored_run_transcript(db, run, checkpoint))
             )
         runs[:0] = reversed(batch)
         offset += len(batch)
@@ -618,48 +694,38 @@ def _server_history_transcript(
 ) -> list[dict[str, Any]]:
     """按运行顺序接续同账号原始 transcript，保留工具调用、结果和图片资产引用。"""
 
+    ledger = db.query(AgentResponseTranscriptMessage).filter(
+        AgentResponseTranscriptMessage.user_id == user_id,
+        AgentResponseTranscriptMessage.surface == surface,
+        AgentResponseTranscriptMessage.session_key == session_id,
+    ).order_by(AgentResponseTranscriptMessage.position.asc()).all()
+    if ledger:
+        if any(item.position != index for index, item in enumerate(ledger)):
+            raise ConflictError("会话 transcript 账本不完整，拒绝继续不完整上下文", code=40931)
+        combined: list[dict[str, Any]] = []
+        for item in ledger:
+            message_digest = hashlib.sha256(item.message_json.encode("utf-8")).hexdigest()
+            if not item.message_sha256 or not hmac.compare_digest(message_digest, item.message_sha256):
+                raise ConflictError("会话 transcript 账本消息摘要不匹配，拒绝继续不完整上下文", code=40931)
+            try:
+                value = json.loads(item.message_json)
+            except (TypeError, json.JSONDecodeError):
+                raise ConflictError("会话 transcript 账本损坏，请联系管理员修复后重试", code=40931) from None
+            if not isinstance(value, Mapping):
+                raise ConflictError("会话 transcript 账本格式错误，请联系管理员修复后重试", code=40931)
+            combined.append(dict(value))
+        return combined
+
     rows = db.query(AgentResponseRun).filter(
         AgentResponseRun.user_id == user_id,
         AgentResponseRun.surface == surface,
         AgentResponseRun.session_key == session_id,
     ).order_by(AgentResponseRun.create_time.asc(), AgentResponseRun.id.asc()).all()
-    combined: list[dict[str, Any]] = []
-    for row in rows:
-        try:
-            checkpoint = json.loads(row.checkpoint_json or "{}")
-        except (TypeError, ValueError):
-            raise ConflictError("会话历史检查点损坏，请联系管理员修复后重试", code=40931) from None
-        transcript = checkpoint.get("transcript") if isinstance(checkpoint, Mapping) else None
-        if transcript is not None and not isinstance(transcript, list):
-            raise ConflictError("会话历史检查点格式错误，请联系管理员修复后重试", code=40931)
-        if not isinstance(transcript, list):
-            continue
-        source = [dict(item) for item in transcript if isinstance(item, Mapping)]
-        if not source:
-            continue
-        if source == combined and len(source) == 1 and source[0].get("role") == "user":
-            # 两次独立运行都只有相同的一句提问时，不可把后一次当成旧前缀吞掉。
-            combined.extend(source)
-            continue
-        if source[:len(combined)] == combined:
-            combined.extend(source[len(combined):])
-            continue
-        # 旧客户端只重传可见对话，下一轮 checkpoint 不含之前的工具证据；
-        # 找最长可见消息重叠后追加新后缀，保留已审计工具调用与结果。
-        old_visible = [_visible_transcript_key(item) for item in combined]
-        old_visible = [item for item in old_visible if item is not None]
-        source_visible = [
-            (index, key) for index, item in enumerate(source)
-            if (key := _visible_transcript_key(item)) is not None
-        ]
-        overlap = 0
-        for size in range(min(len(old_visible), len(source_visible)), 1, -1):
-            if old_visible[-size:] == [key for _, key in source_visible[:size]]:
-                overlap = size
-                break
-        start = source_visible[overlap - 1][0] + 1 if overlap else 0
-        combined.extend(source[start:])
-    return combined
+    store = DatabaseCheckpointStore(db, user_id=user_id, surface=surface, session_key=session_id)
+    try:
+        return store._merge_legacy_transcripts(rows)
+    except InvalidRunStateError as exc:
+        raise ConflictError(f"会话历史无法完整恢复：{exc}", code=40931) from exc
 
 
 def _visible_transcript_key(item: Mapping[str, Any]) -> Optional[str]:
@@ -869,6 +935,9 @@ def _public_completed_tool_events(
     串行执行工具。恢复协议不伪造未确认的 ``executing`` 结果，也不
     从模型 transcript 重放原始参数，只使用已脱敏的幂等账本。
     """
+
+    checkpoint = dict(checkpoint)
+    checkpoint["transcript"] = _stored_run_transcript(db, run, checkpoint)
 
     rows = (
         db.query(AgentToolExecution)

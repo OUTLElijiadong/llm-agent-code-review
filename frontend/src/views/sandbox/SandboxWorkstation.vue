@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   ArrowRight,
   CircleClose,
@@ -54,6 +54,7 @@ const workers = ref<SandboxWorker[]>([])
 const environments = ref<SandboxEnvironment[]>([])
 const selectedId = ref('')
 const loading = ref(false)
+const initialLoadError = ref('')
 const submitting = ref(false)
 const mutating = ref(false)
 const capabilitiesLoading = ref(false)
@@ -61,6 +62,32 @@ const capabilityQuery = ref('')
 const capabilityResults = ref<Awaited<ReturnType<typeof searchSandboxCapabilities>>>([])
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const pollInFlight = ref(false)
+let disposed = false
+let sourceRevisionRequestGeneration = 0
+let accountGeneration = 0
+let selectionGeneration = 0
+let formGeneration = 0
+let initialRequestGeneration = 0
+let capabilityRequestGeneration = 0
+
+function captureAccountTarget(): () => boolean {
+  const generation = accountGeneration
+  const accountId = userStore.profile?.id
+  const token = userStore.token
+  return () => !disposed && generation === accountGeneration
+    && accountId === userStore.profile?.id && token === userStore.token
+}
+
+function captureSelectedTarget() {
+  if (!selected.value) return null
+  const publicId = selected.value.public_id
+  const generation = selectionGeneration
+  const accountIsCurrent = captureAccountTarget()
+  return {
+    publicId,
+    isCurrent: () => accountIsCurrent() && generation === selectionGeneration && selectedId.value === publicId,
+  }
+}
 
 const form = reactive({
   project_id: null as number | null,
@@ -165,35 +192,64 @@ function resultEvidence(item: SandboxEnvironment): string {
 }
 
 async function loadInitial(): Promise<void> {
+  if (disposed) return
+  const isCurrent = captureAccountTarget()
+  const generation = ++initialRequestGeneration
   loading.value = true
   try {
-    const [projectPage, sandboxRows] = await Promise.all([
+    const [projectResult, sandboxResult] = await Promise.allSettled([
       getProjects({ page: 1, page_size: 100, status: 'active' }),
       listSandboxes(),
     ])
-    projects.value = projectPage.items.filter((item) => item.status === 'active')
-    environments.value = sandboxRows
-    if (!selectedId.value && sandboxRows.length) selectedId.value = sandboxRows[0].public_id
+    if (!isCurrent() || generation !== initialRequestGeneration) return
+    const errors: string[] = []
+    const errorMessage = (error: unknown, fallback: string) => (
+      error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+        ? error.message || fallback : fallback
+    )
+    if (projectResult.status === 'fulfilled') {
+      projects.value = projectResult.value.items.filter((item) => item.status === 'active')
+    } else {
+      errors.push(errorMessage(projectResult.reason, '项目选项加载失败'))
+    }
+    if (sandboxResult.status === 'fulfilled') {
+      environments.value = sandboxResult.value
+      if (!selectedId.value && sandboxResult.value.length) selectedId.value = sandboxResult.value[0].public_id
+    } else {
+      errors.push(errorMessage(sandboxResult.reason, '沙箱任务加载失败'))
+    }
+    initialLoadError.value = errors.join('；')
     if (!form.project_id && projects.value.length) {
       form.project_id = projects.value[0].id
       syncProjectLanguage(form.project_id)
     }
     if (userStore.isSuperAdmin()) {
-      try { workers.value = await listSandboxWorkers() } catch { workers.value = [] }
+      try {
+        const rows = await listSandboxWorkers()
+        if (!isCurrent() || generation !== initialRequestGeneration) return
+        workers.value = rows
+      } catch {
+        if (isCurrent() && generation === initialRequestGeneration) workers.value = []
+      }
     }
   } finally {
-    loading.value = false
+    if (isCurrent() && generation === initialRequestGeneration) loading.value = false
   }
 }
 
 async function refreshSelected(silent = false): Promise<void> {
-  if (pollInFlight.value) return
+  if (disposed || pollInFlight.value) return
+  const isCurrent = captureAccountTarget()
+  const requestedId = selectedId.value
+  const requestedSelection = selectionGeneration
   pollInFlight.value = true
   try {
     const rows = await listSandboxes()
+    if (!isCurrent()) return
     environments.value = rows
-    if (selectedId.value) {
-      const detail = await getSandbox(selectedId.value)
+    if (requestedId && requestedSelection === selectionGeneration) {
+      const detail = await getSandbox(requestedId)
+      if (!isCurrent() || requestedSelection !== selectionGeneration) return
       const index = environments.value.findIndex((item) => item.public_id === detail.public_id)
       if (index >= 0) environments.value.splice(index, 1, detail)
       else environments.value.unshift(detail)
@@ -201,13 +257,14 @@ async function refreshSelected(silent = false): Promise<void> {
     if (!selectedId.value && rows.length) selectedId.value = rows[0].public_id
     if (!silent) ElMessage.success('任务状态已刷新')
   } catch {
-    if (!silent) ElMessage.error('刷新沙箱状态失败')
+    if (isCurrent() && !silent) ElMessage.error('刷新沙箱状态失败')
   } finally {
-    pollInFlight.value = false
+    if (isCurrent()) pollInFlight.value = false
   }
 }
 
 async function submit(): Promise<void> {
+  if (disposed || submitting.value) return
   if (!form.project_id) {
     ElMessage.warning('请选择项目')
     return
@@ -224,80 +281,103 @@ async function submit(): Promise<void> {
     return
   }
   const language = deploymentLanguage || form.language
+  const isCurrent = captureAccountTarget()
+  const requestedFormGeneration = formGeneration
+  const remoteTargetUrl = form.remote_target_url.trim()
+  const requiresRemoteApproval = remoteAuthorizationRequired.value
+  const payload = {
+    project_id: form.project_id,
+    purpose: form.purpose,
+    language,
+    test_mode: form.purpose === 'deploy' ? 'deploy' as const : form.test_mode,
+    db_type: form.purpose === 'test' ? form.db_type : undefined,
+    worker_code: form.worker_code || undefined,
+    source_revision_id: form.source_revision_id || undefined,
+    ttl_hours: form.ttl_hours,
+    remote_target_url: remoteTargetUrl || undefined,
+    remote_target_authorized: requiresRemoteApproval && form.remote_target_authorized,
+  }
   submitting.value = true
   try {
-    const remoteTargetUrl = form.remote_target_url.trim()
-    const remoteTargetApproval = remoteAuthorizationRequired.value
+    const remoteTargetApproval = requiresRemoteApproval
       ? await authorizeSandboxRemoteTarget({
-        project_id: form.project_id,
+        project_id: payload.project_id,
         remote_target_url: remoteTargetUrl,
-        test_mode: form.test_mode as 'blackbox' | 'combined',
+        test_mode: payload.test_mode as 'blackbox' | 'combined',
         confirmed: true,
       })
       : null
+    if (!isCurrent() || requestedFormGeneration !== formGeneration) {
+      if (isCurrent()) ElMessage.warning('任务配置已变化，本次创建已取消，请重新确认当前配置。')
+      return
+    }
     const created = await createSandbox({
-      project_id: form.project_id,
-      purpose: form.purpose,
-      language,
-      test_mode: form.purpose === 'deploy' ? 'deploy' : form.test_mode,
-      db_type: form.purpose === 'test' ? form.db_type : undefined,
-      worker_code: form.worker_code || undefined,
-      source_revision_id: form.source_revision_id || undefined,
-      ttl_hours: form.ttl_hours,
-      remote_target_url: remoteTargetUrl || undefined,
-      remote_target_authorized: remoteAuthorizationRequired.value && form.remote_target_authorized,
+      ...payload,
       remote_target_approval_token: remoteTargetApproval?.approval_token,
     })
+    if (!isCurrent()) return
     environments.value.unshift(created)
     selectedId.value = created.public_id
     ElMessage.success('任务已交给专用 Agent，调用过程将在右侧持续更新')
+  } catch {
+    // API拦截器负责错误提示；保留配置，让用户能够重试，避免事件处理器继续抛出。
   } finally {
-    submitting.value = false
+    if (isCurrent()) submitting.value = false
   }
 }
 
 async function stopCurrent(): Promise<void> {
-  if (!selected.value) return
-  try {
-    await ElMessageBox.confirm('关闭后运行环境会立即回收，是否继续？', '关闭沙箱', {
-      type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
-    })
-  } catch { return }
+  const target = captureSelectedTarget()
+  if (!target || !selected.value || !canStopSandbox(selected.value.status) || mutating.value) return
   mutating.value = true
   try {
-    const updated = await stopSandbox(selected.value.public_id)
+    try {
+      await ElMessageBox.confirm('关闭后运行环境会立即回收，是否继续？', '关闭沙箱', {
+        type: 'warning', confirmButtonText: '关闭', cancelButtonText: '取消',
+      })
+    } catch { return }
+    if (!target.isCurrent() || !selected.value || !canStopSandbox(selected.value.status)) return
+    const updated = await stopSandbox(target.publicId)
+    if (!target.isCurrent()) return
     replaceEnvironment(updated)
     ElMessage.success('沙箱已关闭')
-  } finally { mutating.value = false }
+  } catch { /* API拦截器已提示，保留原任务以便刷新或重试。 */ } finally { if (target.isCurrent()) mutating.value = false }
 }
 
 async function extendCurrent(): Promise<void> {
-  if (!selected.value) return
+  const target = captureSelectedTarget()
+  if (!target || !selected.value || !canExtendSandbox(selected.value.status) || mutating.value) return
   mutating.value = true
   try {
-    const updated = await extendSandbox(selected.value.public_id, 24)
+    const updated = await extendSandbox(target.publicId, 24)
+    if (!target.isCurrent()) return
     replaceEnvironment(updated)
     ElMessage.success('已续期 24 小时')
-  } finally { mutating.value = false }
+  } catch { /* API拦截器已提示，保留原任务以便刷新或重试。 */ } finally { if (target.isCurrent()) mutating.value = false }
 }
 
 async function openPreview(): Promise<void> {
-  if (!selected.value) return
+  const selectedTarget = captureSelectedTarget()
+  if (!selectedTarget || !selected.value || selected.value.status !== 'ready' || !selected.value.preview_path || mutating.value) return
   // 用户点击时先同步创建空窗口，避免等待会话接口后被浏览器当作非用户触发弹窗拦截。
   const previewWindow = window.open('about:blank', '_blank')
   if (previewWindow) previewWindow.opener = null
   mutating.value = true
   try {
-    const session = await createSandboxPreviewSession(selected.value.public_id)
+    const session = await createSandboxPreviewSession(selectedTarget.publicId)
+    if (!selectedTarget.isCurrent()) { previewWindow?.close(); return }
     const previewPath = session.path || session.preview_path
     if (!previewPath) throw new Error('preview path missing')
-    const target = new URL(previewPath, window.location.origin).toString()
-    if (previewWindow) previewWindow.location.replace(target)
-    else window.open(target, '_blank', 'noopener,noreferrer')
+    const target = new URL(previewPath, window.location.origin)
+    const prefix = `/api/sandboxes/${encodeURIComponent(selectedTarget.publicId)}/preview/`
+    if (!['http:', 'https:'].includes(target.protocol) || target.origin !== window.location.origin
+      || target.username || target.password || !target.pathname.startsWith(prefix)) throw new Error('invalid preview path')
+    if (previewWindow) previewWindow.location.replace(target.href)
+    else window.open(target.href, '_blank', 'noopener,noreferrer')
   } catch {
     previewWindow?.close()
-    ElMessage.error('预览会话创建失败')
-  } finally { mutating.value = false }
+    if (selectedTarget.isCurrent()) ElMessage.error('预览会话创建失败')
+  } finally { if (selectedTarget.isCurrent()) mutating.value = false }
 }
 
 function reviewReportArtifact(env: SandboxEnvironment | null): SandboxArtifact | null {
@@ -310,17 +390,19 @@ const evidenceArtifacts = computed(() => visibleSandboxArtifacts(selected.value?
   .filter((artifact) => artifact.artifact_type !== 'review_report'))
 
 async function downloadArtifact(artifact: SandboxArtifact): Promise<void> {
-  if (!selected.value || !canDownloadSandboxArtifact(artifact)) return
+  const target = captureSelectedTarget()
+  if (!target || !canDownloadSandboxArtifact(artifact) || mutating.value) return
   mutating.value = true
   try {
-    const blob = await downloadSandboxArtifact(selected.value.public_id, artifact.id)
+    const blob = await downloadSandboxArtifact(target.publicId, artifact.id)
+    if (!target.isCurrent()) return
     const href = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = href
     anchor.download = artifact.file_name
     anchor.click()
     URL.revokeObjectURL(href)
-  } finally { mutating.value = false }
+  } catch { /* API拦截器已提示，下载失败不改变当前任务。 */ } finally { if (target.isCurrent()) mutating.value = false }
 }
 
 function replaceEnvironment(updated: SandboxEnvironment): void {
@@ -330,10 +412,14 @@ function replaceEnvironment(updated: SandboxEnvironment): void {
 }
 
 async function searchCapabilities(): Promise<void> {
+  const isCurrent = captureAccountTarget()
+  const generation = ++capabilityRequestGeneration
+  const query = capabilityQuery.value.trim()
   capabilitiesLoading.value = true
   try {
-    capabilityResults.value = await searchSandboxCapabilities(capabilityQuery.value.trim(), 8)
-  } finally { capabilitiesLoading.value = false }
+    const results = await searchSandboxCapabilities(query, 8)
+    if (isCurrent() && generation === capabilityRequestGeneration && capabilityQuery.value.trim() === query) capabilityResults.value = results
+  } catch { /* API拦截器已提示，保留查询条件以便重试。 */ } finally { if (isCurrent() && generation === capabilityRequestGeneration) capabilitiesLoading.value = false }
 }
 
 watch(() => form.purpose, (purpose) => {
@@ -358,6 +444,9 @@ watch(() => form.test_mode, (mode) => {
 
 watch(() => form.language, () => { form.worker_code = '' })
 watch(() => form.project_id, async (projectId) => {
+  const isCurrent = captureAccountTarget()
+  const requestGeneration = ++sourceRevisionRequestGeneration
+  const requestedProjectId = projectId
   syncProjectLanguage(projectId)
   form.worker_code = ''
   form.source_revision_id = null
@@ -365,11 +454,43 @@ watch(() => form.project_id, async (projectId) => {
   if (projectId) {
     try {
       const detail = await getProjectDetail(projectId)
+      if (!isCurrent() || requestGeneration !== sourceRevisionRequestGeneration || form.project_id !== requestedProjectId) return
       sourceRevisions.value = detail.source_revisions || []
     } catch { /* 副本列表失败不影响主流程 */ }
   }
 })
 watch(() => form.remote_target_url, () => { form.remote_target_authorized = false })
+
+watch(() => Object.values(form), () => { formGeneration += 1 }, { flush: 'sync' })
+watch(() => selectedId.value, () => { selectionGeneration += 1; mutating.value = false }, { flush: 'sync' })
+watch(
+  [() => userStore.profile?.id, () => userStore.token],
+  () => {
+    const generation = ++accountGeneration
+    initialRequestGeneration += 1
+    sourceRevisionRequestGeneration += 1
+    capabilityRequestGeneration += 1
+    projects.value = []
+    sourceRevisions.value = []
+    workers.value = []
+    environments.value = []
+    selectedId.value = ''
+    capabilityResults.value = []
+    capabilityQuery.value = ''
+    form.project_id = null
+    form.source_revision_id = null
+    form.remote_target_url = ''
+    form.remote_target_authorized = false
+    loading.value = false
+    initialLoadError.value = ''
+    pollInFlight.value = false
+    submitting.value = false
+    mutating.value = false
+    capabilitiesLoading.value = false
+    void nextTick(() => { if (!disposed && generation === accountGeneration) void loadInitial() })
+  },
+  { flush: 'sync' },
+)
 
 let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
 function onAgentTaskComplete(): void {
@@ -379,6 +500,7 @@ function onAgentTaskComplete(): void {
 
 onMounted(async () => {
   await loadInitial()
+  if (disposed) return
   window.addEventListener('prism:agent-task-complete', onAgentTaskComplete)
   pollTimer = setInterval(() => {
     if (environments.value.some((item) => isSandboxActive(item.status))) void refreshSelected(true)
@@ -386,6 +508,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  accountGeneration += 1
+  sourceRevisionRequestGeneration += 1
   if (pollTimer) clearInterval(pollTimer)
   if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
   window.removeEventListener('prism:agent-task-complete', onAgentTaskComplete)
@@ -402,6 +527,11 @@ onBeforeUnmount(() => {
       </div>
       <el-button :icon="Refresh" :loading="pollInFlight" @click="refreshSelected(false)">刷新</el-button>
     </header>
+
+    <el-alert v-if="initialLoadError" data-testid="sandbox-load-error" class="initial-load-error" type="warning" :closable="false" show-icon title="部分数据加载失败">
+      <p>{{ initialLoadError }}</p>
+      <el-button :loading="loading" @click="loadInitial">重新加载</el-button>
+    </el-alert>
 
     <div class="workstation-grid">
       <section class="config-panel" aria-label="创建沙箱任务">
@@ -610,6 +740,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .sandbox-workstation { max-width: 1520px; margin: 0 auto; }
+.initial-load-error { margin-bottom: 16px; }
 .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
 .page-heading h1 { margin: 3px 0 4px; font-size: 24px; line-height: 1.25; letter-spacing: 0; }
 .page-heading p { margin: 0; color: var(--gray-500); font-size: 13px; }
@@ -659,8 +790,9 @@ onBeforeUnmount(() => {
 .task-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--gray-500); }
 .task-detail { padding: 18px; }
 .detail-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.detail-toolbar > div:first-child { min-width: 0; max-width: 100%; }
 .detail-title { font-size: 16px; font-weight: 650; }
-.detail-meta { margin-top: 4px; font-size: 10px; color: var(--gray-500); }
+.detail-meta { margin-top: 4px; font-size: 10px; color: var(--gray-500); overflow-wrap: anywhere; }
 .detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .artifact-panel { margin-top: 16px; padding-top: 14px; border-top: var(--hairline); }
 .artifact-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

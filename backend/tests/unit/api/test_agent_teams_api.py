@@ -187,6 +187,64 @@ def test_supervisor_requires_current_account_confirmation_for_high_risk_team_pla
     assert created["events"][-1]["detail"]["confirmed_by_user_id"] == owner.id
 
 
+def test_high_risk_team_retry_api_requires_exact_preview_and_account_confirmation(team_api):
+    from app.models.agent_team import AgentTeamTask
+
+    owner = team_api["owner"]
+    payload = _team_payload()
+    payload["tasks"][0]["input"] = {"external_target_url": "https://target.example"}
+    payload["tasks"][0]["max_attempts"] = 1
+    created = _create_team_from_xiaoling(team_api, owner, payload)
+    claimed = agent_team_service.claim_next_task(team_api["db"], created["team_id"])
+    agent_team_service.complete_task(
+        team_api["db"], created["team_id"], claimed["task_id"], lease_token=claimed["lease_token"],
+        result={"status": "failed", "summary": "外部读取首次失败", "retryable": False},
+        success=False, error="外部读取首次失败",
+    )
+    strategy = "改用分段读取并先复核授权范围"
+    body = {"task_keys": ["analyze"], "strategy_changes": {"analyze": strategy}}
+
+    preview = _data(team_api["request"](
+        owner, "POST", f"/api/agent-teams/{created['team_id']}/retry/preview", json=body,
+    ))
+    assert preview["requires_confirmation"] is True
+    assert {item["task_key"] for item in preview["tasks"]} == {"analyze", "verify"}
+
+    missing = team_api["request"](
+        owner, "POST", f"/api/agent-teams/{created['team_id']}/retry", json=body,
+    )
+    assert missing.status_code == 409
+    assert missing.json()["code"] == 40931
+
+    changed_body = {
+        **body,
+        "strategy_changes": {"analyze": "改用新的采集策略并先复核授权范围"},
+        "supervisor_plan_sha256": preview["plan_sha256"],
+    }
+    stale = team_api["request"](
+        owner, "POST", f"/api/agent-teams/{created['team_id']}/retry", json=changed_body,
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == 40931
+    analyzed_task = team_api["db"].query(AgentTeamTask).filter_by(
+        team_id=created["team_id"], task_key="analyze",
+    ).one()
+    assert analyzed_task.status == "failed"
+
+    confirmed = _data(team_api["request"](
+        owner,
+        "POST",
+        f"/api/agent-teams/{created['team_id']}/retry",
+        json={**body, "supervisor_plan_sha256": preview["plan_sha256"]},
+    ))
+    assert confirmed["status"] == "queued"
+    authorization = next(
+        event for event in confirmed["events"]
+        if event["event_type"] == "supervisor.retry_reauthorized"
+    )
+    assert authorization["detail"]["confirmed_by_user_id"] == owner.id
+
+
 def test_agent_teams_plain_user_is_limited_to_own_account(team_api):
     request = team_api["request"]
     owner = team_api["owner"]
@@ -326,6 +384,7 @@ def test_admin_cannot_read_or_operate_other_accounts_private_team(team_api):
     for method, suffix, body in (
         ("GET", "", None), ("GET", "/messages", None), ("GET", "/events", None),
         ("POST", "/cancel", {"reason": "越权取消"}),
+        ("POST", "/retry/preview", {"task_keys": []}),
         ("POST", "/retry", {"task_keys": []}), ("POST", "/archive", {"reason": "越权归档"}),
     ):
         options = {"json": body} if body is not None else {}

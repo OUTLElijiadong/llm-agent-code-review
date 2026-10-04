@@ -134,7 +134,7 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
         }
     if action == "certificate_status":
         domain = _read_env("APP_DOMAIN")
-        cert = DEPLOY_DIR / "certbot" / "conf" / "live" / domain / "fullchain.pem"
+        cert = _configured_certbot_conf_dir() / "live" / domain / "fullchain.pem"
         details = run(["openssl", "x509", "-enddate", "-subject", "-noout", "-in", str(cert)], timeout=30)
         validity = run(
             ["openssl", "x509", "-checkend", str(30 * 24 * 60 * 60), "-noout", "-in", str(cert)],
@@ -1292,6 +1292,24 @@ def _read_env(key: str) -> str:
         if line.startswith(f"{key}="):
             return line.split("=", 1)[1].strip()
     raise RuntimeError(f"缺少配置 {key}")
+
+
+def _configured_certbot_conf_dir() -> Path:
+    """与 systemd EnvironmentFile/Compose bind mount 使用同一证书配置目录。"""
+    configured = os.environ.get("CERTBOT_CONF_DIR")
+    if configured is None:
+        try:
+            configured = _read_env("CERTBOT_CONF_DIR")
+        except RuntimeError:
+            configured = ""
+    configured = configured.strip()
+    if len(configured) >= 2 and configured[0] == configured[-1] and configured[0] in {"'", '"'}:
+        configured = configured[1:-1]
+    conf_dir = Path(configured or "./certbot/conf")
+    if not conf_dir.is_absolute():
+        # Compose resolves relative bind-mount sources from the compose/deploy directory.
+        conf_dir = DEPLOY_DIR / conf_dir
+    return conf_dir.resolve()
 
 
 def _update_env(key: str, value: str) -> None:

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # 被 test_scripts.sh source：真实发布/回滚脚本配隔离命令替身，无生产连接。
 run_deploy_failure_matrix() {
-  local test_root="$1" scenario workspace rc expected_rollback expected_rc
+  local test_root="$1" scenario workspace rc expected_rollback expected_rc ledger_schema ledger_reference probe_failure
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https rollback_failed; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
     cp lib/common.sh "$workspace/repo/deploy/lib/"
+    cp lib/checkpoint_compatibility.py "$workspace/repo/deploy/lib/"
     printf '3.8.4\n' > "$workspace/repo/VERSION"
     printf 'isolated geolite fixture\n' > "$workspace/repo/backend/GeoLite2-City.mmdb"
     write_strong_database_test_env "$workspace/repo/deploy/.env"
@@ -78,7 +79,7 @@ SCRIPT
 #!/usr/bin/env bash
 set -eu
 if [[ "${APP_RELEASE:-}" == bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ]]; then
-  case "$FAIL_SCENARIO:$*" in backend_smoke:*healthz*|rollback_failed:*healthz*|https:*https://*) exit 22 ;; esac
+  case "$FAIL_SCENARIO:$*" in backend_smoke:*healthz*|rollback_failed:*healthz*|ledger_empty_rollback_refused:*healthz*|ledger_written_rollback_refused:*healthz*|ledger_probe_failed:*healthz*|https:*https://*) exit 22 ;; esac
 fi
 case "$*" in
   *healthz*) printf '{"status":"ok","version":"%s","release":"%s"}' "$APP_VERSION" "$APP_RELEASE" ;;
@@ -100,9 +101,17 @@ esac
 SCRIPT
     chmod +x "$workspace/repo/deploy/"*.sh "$workspace/bin/"*
     : > "$workspace/docker.log"
+    ledger_schema=0 ledger_reference=0 probe_failure=0
+    case "$scenario" in
+      ledger_empty_rollback_refused) ledger_schema=1 ;;
+      ledger_written_rollback_refused) ledger_schema=1; ledger_reference=1 ;;
+      ledger_probe_failed) probe_failure=1 ;;
+    esac
     set +e
     env PATH="$workspace/bin:$PATH" FAIL_SCENARIO="$scenario" FAKE_RELEASE_SHA="$old_sha" \
       FAKE_RELEASE_VERSION=3.8.2 FAKE_ALEMBIC_REVISION=048_ai_usage_attribution \
+      FAKE_CHECKPOINT_SCHEMA="$ledger_schema" FAKE_CHECKPOINT_REFERENCE="$ledger_reference" \
+      FAKE_CHECKPOINT_PROBE_FAILURE="$probe_failure" \
       FAKE_RELEASE_WORKSPACE="$workspace" FAKE_DOCKER_LOG="$workspace/docker.log" \
       RELEASE_STATE_DIR="$workspace/releases" MAINTENANCE_LOCK_DIR="$workspace/lock" \
       DEPLOY_ENV_FILE=.env BACKEND_HEALTH_TIMEOUT=1 FRONTEND_HEALTH_TIMEOUT=1 \
@@ -150,11 +159,21 @@ SCRIPT
           assert_not_contains "$workspace/docker.log" 'backup.sh'
         fi
         ;;
-      rollback_failed)
+      rollback_failed|ledger_empty_rollback_refused|ledger_written_rollback_refused|ledger_probe_failed)
         expected_rollback=failed
         assert_contains "$workspace/output.log" '应用自动回滚失败'
         assert_not_contains "$workspace/output.log" '应用自动回滚完成'
         [[ -f "$workspace/releases/pending.env" ]]
+        if [[ "$scenario" == ledger_* ]]; then
+          assert_not_contains "$workspace/docker.log" "compose up -d --no-deps --no-build --pull never backend | release=$old_sha"
+          assert_not_contains "$workspace/docker.log" 'compose stop '
+          cmp "$workspace/original.env" "$workspace/releases/current.env"
+          if [[ "$scenario" == ledger_probe_failed ]]; then
+            assert_contains "$workspace/output.log" '目标镜像检查点能力验证失败'
+          else
+            assert_contains "$workspace/output.log" '即使账本暂空也拒绝回退'
+          fi
+        fi
         ;;
       *)
         expected_rollback=restored

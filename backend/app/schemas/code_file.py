@@ -20,6 +20,11 @@ class CodeFileUpdateIn(BaseModel):
     """更新代码内容请求体"""
     content: str = Field(max_length=5_000_000)
     change_desc: Optional[str] = Field(default=None, max_length=255)
+    # Schema 兼容旧客户端进入业务层，以 40904 反馈冲突，不以 422 拒绝请求。
+    expected_version: Optional[int] = Field(
+        default=None, ge=1,
+        description="同步保存需提供读取文件时的版本号；缺失返回 40904，服务器文件保持不变。",
+    )
 
 
 class RenameIn(BaseModel):

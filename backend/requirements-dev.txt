@@ -1,8 +1,15 @@
 -r requirements.txt
-pytest>=8.0.0,<9.0.0
-pytest-asyncio>=0.23.0,<1.0.0
+# 正式开发/验收环境与 Docker 均为 Python 3.11；安全修复工具最低要求 Python 3.10。
+# 开发测试复用发布锁的运行依赖，避免另行解析出过期或不同的应用版本。
+-c requirements.lock
+pytest>=9.0.3,<10.0.0
+pytest-asyncio>=1.3.0,<2.0.0
 pytest-cov>=4.1.0,<6.0.0
 httpx>=0.27.0,<1.0.0
 ruff>=0.3.0,<1.0.0
-black>=24.0.0,<25.0.0
+black>=26.3.1,<27.0.0
 pip-audit>=2.7.0,<3.0.0
+# 开发安装/审计工具链的已知公告修复下限，不进入应用发布依赖。
+pip>=26.2.1,<27.0.0
+setuptools>=83.0.0,<84.0.0
+urllib3>=2.8.0,<3.0.0

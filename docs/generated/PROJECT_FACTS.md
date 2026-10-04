@@ -6,17 +6,17 @@
 
 | 事实 | 数量/值 |
 | --- | ---: |
-| 业务 HTTP 路由 | 303 |
-| HTTP 操作 | 303 |
+| 业务 HTTP 路由 | 329 |
+| HTTP 操作 | 329 |
 | WebSocket 路由 | 1 |
-| ORM 表 | 86 |
+| ORM 表 | 91 |
 | Agent | 17 |
-| Vue 页面 | 61 |
-| 后端 Python 模块 | 311 |
-| 后端测试文件 | 183 |
-| 前端测试文件 | 77 |
-| Alembic 迁移 | 48 |
-| Alembic head | 047_review_input_snapshot |
+| Vue 页面 | 68 |
+| 后端 Python 模块 | 338 |
+| 后端测试文件 | 291 |
+| 前端测试文件 | 132 |
+| Alembic 迁移 | 62 |
+| Alembic head | 061_overview_time_indexes |
 
 ## HTTP 路由
 
@@ -58,6 +58,10 @@
 | GET | `/api/admin/llm/config` | get_config |
 | PUT | `/api/admin/llm/config` | update_config |
 | POST | `/api/admin/llm/models` | list_models |
+| PUT | `/api/admin/llm/models/assignments` | update_assignments |
+| GET | `/api/admin/llm/models/registry` | get_registry |
+| PUT | `/api/admin/llm/models/registry` | replace_registry |
+| POST | `/api/admin/llm/models/registry/sync` | sync_registry |
 | POST | `/api/admin/llm/test` | test_config |
 | GET | `/api/admin/mcp/aliases` | list_aliases |
 | POST | `/api/admin/mcp/aliases` | create_alias |
@@ -77,6 +81,7 @@
 | GET | `/api/admin/mcp/tools` | list_tools |
 | PUT | `/api/admin/mcp/tools/{tool_id}` | update_tool |
 | GET | `/api/admin/observability/alerts` | list_alerts |
+| GET | `/api/admin/observability/alerts/page` | list_alerts_page |
 | GET | `/api/admin/observability/alerts/unread` | list_unread_alerts |
 | POST | `/api/admin/observability/alerts/{alert_id}/read` | mark_alert_read |
 | POST | `/api/admin/observability/alerts/{alert_id}/resolve` | resolve_alert |
@@ -102,13 +107,19 @@
 | GET | `/api/agent-catalog` | list_catalog |
 | POST | `/api/agent-catalog/{agent_code}/invoke` | invoke_agent |
 | GET | `/api/agent-mesh/agents` | list_agents |
+| GET | `/api/agent-mesh/conversations` | list_conversations |
 | POST | `/api/agent-mesh/conversations/archive` | archive_session |
 | POST | `/api/agent-mesh/conversations/heartbeat` | heartbeat |
-| GET | `/api/agent-mesh/inbox` | pull_inbox |
+| POST | `/api/agent-mesh/conversations/restore` | restore_session |
+| GET | `/api/agent-mesh/inbox` | peek_inbox |
+| POST | `/api/agent-mesh/inbox/pull` | pull_inbox |
 | POST | `/api/agent-mesh/messages` | send_message |
 | POST | `/api/agent-mesh/messages/{message_id}/ack` | acknowledge_message |
 | GET | `/api/agent-mesh/traces/{trace_id}` | get_trace |
+| GET | `/api/agent-responses/assets/{asset_id}/image` | get_asset_image |
+| GET | `/api/agent-responses/runs/{run_id}/assets` | list_run_assets |
 | GET | `/api/agent-responses/session` | get_agent_response_session |
+| GET | `/api/agent-responses/session/messages` | get_agent_response_session_messages |
 | POST | `/api/agent-responses/stream` | stream_agent_response |
 | GET | `/api/agent-studio/agent-versions/{version_id}` | get_agent_version |
 | POST | `/api/agent-studio/agent-versions/{version_id}/skills` | bind_skill |
@@ -133,6 +144,7 @@
 | GET | `/api/agent-teams/{team_id}/events` | list_team_events |
 | GET | `/api/agent-teams/{team_id}/messages` | list_team_messages |
 | POST | `/api/agent-teams/{team_id}/retry` | retry_team |
+| POST | `/api/agent-teams/{team_id}/retry/preview` | preview_retry_team |
 | GET | `/api/agents` | list_agents |
 | POST | `/api/agents/clarify` | submit_clarification |
 | GET | `/api/agents/events` | stream_agent_events |
@@ -183,9 +195,12 @@
 | GET | `/api/dashboard/issue-type-statistics` | issue_type_statistics |
 | GET | `/api/dashboard/review-frequency` | review_frequency |
 | GET | `/api/dashboard/risk-distribution` | risk_distribution |
+| GET | `/api/dashboard/running` | running |
 | GET | `/api/dashboard/score-trend` | score_trend |
 | GET | `/api/dashboard/summary` | summary |
-| GET | `/api/discuss/start` | start_discussion |
+| GET | `/api/discuss/sessions` | list_discussions |
+| GET | `/api/discuss/sessions/{session_id}` | get_discussion |
+| POST | `/api/discuss/start` | start_discussion |
 | GET | `/api/evolution/eval-cases` | list_eval_cases |
 | GET | `/api/evolution/experiences` | list_experiences |
 | GET | `/api/evolution/feedback` | feedback_summary |
@@ -201,6 +216,7 @@
 | POST | `/api/feedback` | create_feedback |
 | GET | `/api/feedback/stats` | feedback_stats |
 | GET | `/api/feedback/{feedback_id}` | get_feedback |
+| POST | `/api/feedback/{feedback_id}/read` | mark_feedback_read |
 | PUT | `/api/feedback/{feedback_id}/reply` | reply_feedback |
 | POST | `/api/forum/assist` | assist_draft |
 | GET | `/api/forum/posts` | list_posts |
@@ -210,6 +226,7 @@
 | PUT | `/api/forum/posts/{post_id}` | update_post |
 | PUT | `/api/forum/posts/{post_id}/pin` | pin_post |
 | POST | `/api/forum/posts/{post_id}/replies` | create_reply |
+| POST | `/api/forum/posts/{post_id}/views` | record_post_view |
 | DELETE | `/api/forum/replies/{reply_id}` | delete_reply |
 | GET | `/api/issues` | list_issues |
 | POST | `/api/issues/batch-status` | batch_update_status |
@@ -231,8 +248,12 @@
 | GET | `/api/maintenance/{ticket_id}` | get_ticket |
 | POST | `/api/maintenance/{ticket_id}/close` | close_ticket |
 | PUT | `/api/maintenance/{ticket_id}/handle` | handle_ticket |
+| DELETE | `/api/me/avatar` | clear_avatar |
+| PUT | `/api/me/avatar` | set_avatar |
+| POST | `/api/me/avatar/image` | upload_avatar_image |
 | GET | `/api/me/profile` | get_profile |
 | PUT | `/api/me/profile` | update_profile |
+| POST | `/api/me/profile/preference-prompted` | mark_preference_prompt |
 | POST | `/api/me/profile/relearn` | relearn_profile |
 | GET | `/api/pentest/engagements` | list_engagements |
 | POST | `/api/pentest/engagements` | create_engagement |
@@ -241,6 +262,7 @@
 | POST | `/api/pentest/engagements/{public_id}/authorize` | authorize_engagement |
 | POST | `/api/pentest/engagements/{public_id}/cancel` | cancel_engagement |
 | POST | `/api/pentest/engagements/{public_id}/start` | start_engagement |
+| POST | `/api/pentest/engagements/{public_id}/submit-authorization` | submit_authorization_request |
 | GET | `/api/pentest/rules` | get_rules |
 | GET | `/api/projects` | list_projects |
 | POST | `/api/projects` | create_project |
@@ -256,6 +278,7 @@
 | GET | `/api/projects/{project_id}/audit-source-archive/result` | get_audit_source_archive_result |
 | GET | `/api/projects/{project_id}/members` | list_members |
 | POST | `/api/projects/{project_id}/members` | add_member |
+| GET | `/api/projects/{project_id}/members/candidates` | search_member_candidates |
 | DELETE | `/api/projects/{project_id}/members/{user_id}` | remove_member |
 | PUT | `/api/projects/{project_id}/members/{user_id}` | update_member_role |
 | GET | `/api/projects/{project_id}/source-archive` | download_project_source |
@@ -302,6 +325,7 @@
 | GET | `/api/sandboxes` | list_sandboxes |
 | POST | `/api/sandboxes` | create_sandbox |
 | GET | `/api/sandboxes/capabilities/search` | search_capabilities |
+| POST | `/api/sandboxes/remote-target-authorization` | authorize_sandbox_remote_target |
 | GET | `/api/sandboxes/workers` | list_workers |
 | POST | `/api/sandboxes/workers` | create_worker |
 | POST | `/api/sandboxes/workers/seed-production` | seed_production_worker |
@@ -316,12 +340,14 @@
 | GET | `/api/security/dashboard-summary` | dashboard_summary |
 | GET | `/api/security/findings` | list_findings |
 | POST | `/api/security/fullchain-audit` | fullchain_audit |
+| GET | `/api/security/rule-catalog` | get_rule_catalog |
 | POST | `/api/security/scan-all-projects` | scan_all_projects |
 | POST | `/api/security/scan-file` | scan_file |
 | POST | `/api/security/scan-project` | scan_project |
 | POST | `/api/security/scan-task` | scan_task |
 | GET | `/api/users` | list_users |
 | DELETE | `/api/users/{user_id}` | delete_user |
+| GET | `/api/users/{user_id}/avatar/image` | get_avatar_image |
 | POST | `/api/users/{user_id}/reset-password` | reset_password |
 | POST | `/api/users/{user_id}/role` | set_role |
 | POST | `/api/users/{user_id}/toggle-status` | toggle_status |
@@ -349,22 +375,24 @@
 | `agent_mcp_binding` | 9 |
 | `agent_memory` | 22 |
 | `agent_mesh_conversation` | 12 |
-| `agent_mesh_message` | 32 |
+| `agent_mesh_message` | 38 |
 | `agent_mesh_message_event` | 9 |
 | `agent_metric_snapshot` | 8 |
+| `agent_multimodal_asset` | 10 |
 | `agent_profile` | 16 |
 | `agent_reflection` | 9 |
-| `agent_response_run` | 11 |
+| `agent_response_run` | 17 |
+| `agent_response_transcript_message` | 10 |
 | `agent_reward_event` | 8 |
 | `agent_skill_binding` | 9 |
 | `agent_skill_record` | 12 |
-| `agent_team` | 19 |
+| `agent_team` | 25 |
 | `agent_team_event` | 15 |
 | `agent_team_member` | 15 |
 | `agent_team_task` | 22 |
 | `agent_tool_execution` | 12 |
 | `agent_tool_permission` | 9 |
-| `ai_call_log` | 16 |
+| `ai_call_log` | 22 |
 | `approval_item` | 15 |
 | `audit_log` | 10 |
 | `beta_invite_code` | 11 |
@@ -389,7 +417,7 @@
 | `mcp_tool` | 13 |
 | `menu` | 12 |
 | `ops_execution` | 15 |
-| `pentest_engagement` | 19 |
+| `pentest_engagement` | 26 |
 | `pentest_finding` | 19 |
 | `pentest_line_run` | 13 |
 | `pentest_phase_run` | 12 |
@@ -406,21 +434,24 @@
 | `review_issue` | 40 |
 | `review_report` | 7 |
 | `review_rule` | 13 |
-| `review_task` | 27 |
+| `review_task` | 33 |
 | `review_task_agent_release` | 8 |
 | `review_task_file` | 7 |
 | `role` | 9 |
 | `role_permission` | 5 |
+| `roundtable_session` | 19 |
+| `roundtable_turn` | 5 |
 | `sandbox_artifact` | 11 |
-| `sandbox_environment` | 33 |
+| `sandbox_environment` | 39 |
 | `sandbox_event` | 7 |
 | `sandbox_worker` | 19 |
 | `system_config` | 5 |
 | `tool_call_log` | 18 |
-| `user` | 12 |
+| `user` | 13 |
 | `user_api_config` | 9 |
+| `user_avatar` | 6 |
 | `user_feedback` | 11 |
-| `user_profile` | 14 |
+| `user_profile` | 16 |
 | `user_role` | 5 |
 
 ## Agent
@@ -435,7 +466,7 @@
 | `evolution` | meta | 4 | 进化引擎:从每次审查反馈里学习,自动沉淀新规则,越用越聪明 |
 | `language_detector` | analyzer | 3 | 语言侦察兵:自动识别项目用的编程语言,决定用哪套工具链测试 |
 | `operations` | operations | 14 | 运维特工:服务器巡检、防火墙/服务/软件变更(全部需管理员批准)、事后回滚 |
-| `orchestrator` | meta | 4 | 主调度 Agent, 协调所有子 Agent 完成全平台功能 |
+| `orchestrator` | meta | 4 | 小菱的内部调度引擎，执行已授权工具与任务图；不是独立对话主控 |
 | `project_analyzer` | analyzer | 4 | 项目体检员:看一眼文件结构就能判断这是什么项目、用什么技术、风险高不高 |
 | `project_manager` | manager | 3 | 项目管理员:创建/修改/删除项目,支持直接导入 GitHub 仓库 |
 | `reporter` | output | 4 | 报告管理员:查历史审查报告、对比多次审查的分数变化 |
@@ -443,15 +474,18 @@
 | `rule_manager` | manager | 3 | 规则管理员:增删改查审查规则,决定平台按什么标准挑毛病 |
 | `sandbox_deployer` | operations | 5 | 沙箱部署员:把项目部署到隔离环境持续运行,提供在线预览与生命周期管理 |
 | `security_sentinel` | security | 4 | 安全哨兵:全方位安全审计(OWASP Top10/硬编码密钥/威胁建模),并派出侦察员摸底 |
-| `test_verifier` | review | 4 | 黑盒测试员:把项目在隔离沙箱里真实运行,从外部发起真实攻击探测 |
+| `test_verifier` | review | 4 | 测试验证员:在隔离沙箱执行项目白盒检查与回环黑盒验证；外部目标仅做获批只读探测，真实渗透走独立授权流程 |
 
 ## Vue 页面
 
+- `frontend/src/views/admin/ActivityLogHub.vue`
 - `frontend/src/views/admin/AdminOverview.vue`
+- `frontend/src/views/admin/AdminUnifiedCenter.vue`
 - `frontend/src/views/admin/AgentGovernance.vue`
 - `frontend/src/views/admin/AgentReleaseAdmin.vue`
 - `frontend/src/views/admin/AiLogList.vue`
 - `frontend/src/views/admin/ApprovalCenter.vue`
+- `frontend/src/views/admin/ApprovalHub.vue`
 - `frontend/src/views/admin/BetaCodeAdmin.vue`
 - `frontend/src/views/admin/EmbeddingConfig.vue`
 - `frontend/src/views/admin/EvolutionCenter.vue`
@@ -470,9 +504,9 @@
 - `frontend/src/views/admin/SystemAudit.vue`
 - `frontend/src/views/admin/ToolGovernance.vue`
 - `frontend/src/views/admin/UserManage.vue`
-- `frontend/src/views/admin/UserRoleAssign.vue`
 - `frontend/src/views/agent/AgentCenter.vue`
 - `frontend/src/views/agent/AgentStudio.vue`
+- `frontend/src/views/agent/AgentWorkspace.vue`
 - `frontend/src/views/auth/Login.vue`
 - `frontend/src/views/auth/Register.vue`
 - `frontend/src/views/code/CodeEditor.vue`
@@ -506,8 +540,12 @@
 - `frontend/src/views/rule/RuleConfig.vue`
 - `frontend/src/views/sandbox/SandboxWorkstation.vue`
 - `frontend/src/views/security/SecurityCenter.vue`
+- `frontend/src/views/security/SecurityReviewCenter.vue`
+- `frontend/src/views/security/SecurityRuleCatalog.vue`
+- `frontend/src/views/security/SecurityRuleCenter.vue`
 - `frontend/src/views/support/FeedbackCenter.vue`
 - `frontend/src/views/support/MaintenanceCenter.vue`
+- `frontend/src/views/support/SupportCenter.vue`
 
 ## Alembic 迁移
 
@@ -561,3 +599,17 @@
 | `045_skill_asset_user_grant` | `044_pentest_domain` | `backend/alembic/versions/045_skill_asset_user_grant.py` |
 | `046_finding_aggregation` | `045_skill_asset_user_grant` | `backend/alembic/versions/046_finding_aggregation.py` |
 | `047_review_input_snapshot` | `046_finding_aggregation` | `backend/alembic/versions/047_review_input_snapshot.py` |
+| `048_ai_usage_attribution` | `047_review_input_snapshot` | `backend/alembic/versions/048_ai_usage_attribution.py` |
+| `049_agent_studio_reviewer_only` | `048_ai_usage_attribution` | `backend/alembic/versions/049_agent_studio_reviewer_only.py` |
+| `050_user_avatar_preferences` | `049_agent_studio_reviewer_only` | `backend/alembic/versions/050_user_avatar_preferences.py` |
+| `051_agent_multimodal_assets` | `050_user_avatar_preferences` | `backend/alembic/versions/051_agent_multimodal_assets.py` |
+| `052_user_password_len` | `051_agent_multimodal_assets` | `backend/alembic/versions/052_user_password_len.py` |
+| `053_role_pentest_authorization` | `052_user_password_len` | `backend/alembic/versions/053_role_and_pentest_authorization.py` |
+| `054_archive_excess_conversations` | `053_role_pentest_authorization` | `backend/alembic/versions/054_archive_excess_agent_conversations.py` |
+| `055_backfill_conversation_titles` | `054_archive_excess_conversations` | `backend/alembic/versions/055_backfill_agent_conversation_titles.py` |
+| `056_older_run_titles` | `055_backfill_conversation_titles` | `backend/alembic/versions/056_backfill_titles_from_older_runs.py` |
+| `057_reviewer_audit_menu_route` | `056_older_run_titles` | `backend/alembic/versions/057_reviewer_audit_menu_route.py` |
+| `058_roundtable_sessions` | `057_reviewer_audit_menu_route` | `backend/alembic/versions/058_roundtable_sessions.py` |
+| `059_response_transcript_ledger` | `058_roundtable_sessions` | `backend/alembic/versions/059_agent_response_transcript_ledger.py` |
+| `060_transcript_message_sha256` | `059_response_transcript_ledger` | `backend/alembic/versions/060_agent_response_transcript_message_digest.py` |
+| `061_overview_time_indexes` | `060_transcript_message_sha256` | `backend/alembic/versions/061_tool_call_time_agent_idx.py` |

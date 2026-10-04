@@ -18,7 +18,7 @@ from app.models.custom_agent import (  # noqa: F401
 from app.models.user import User
 from app.schemas.agent_studio import CatalogAgentOut
 from app.schemas.agent_team import AgentTeamCreateIn
-from app.services import agent_studio_service, agent_team_service, approval_service
+from app.services import agent_studio_service, agent_team_service, approval_service, published_agent_tools
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 
 
@@ -487,3 +487,127 @@ def test_sequence_workflow_expands_exact_skill_versions_at_runtime(db):
 
     assert "步骤 1" in rendered
     assert "Normalize the evidence" in rendered
+
+
+def test_published_delegate_uses_frozen_release_after_target_is_updated(db, admin_user, monkeypatch):
+    reviewer = _user(db, "reviewer_frozen_delegate", "reviewer")
+
+    def publish(version):
+        approval = _test_and_submit(db, reviewer, version)
+        approval_service.decide_item(db, admin_user, approval.id, approve=True, note="fixture publish")
+        return db.query(CustomAgentRelease).filter_by(approval_id=approval.id).one()
+
+    target, target_v1 = agent_studio_service.create_agent(
+        db, reviewer, code="frozen_delegate_target", name="Frozen target", description="",
+        prompt="Target V1 prompt", review_focus="Target V1 focus", model_config={},
+    )
+    target_release_v1 = publish(target_v1)
+    _, delegate_skill = agent_studio_service.create_skill(
+        db, reviewer, code="frozen_delegate_skill", name="Frozen delegate", description="",
+        skill_type="agent_delegate", definition={"agent_code": target.code}, requested_capabilities=[],
+    )
+    parent, parent_v1 = agent_studio_service.create_agent(
+        db, reviewer, code="frozen_delegate_parent", name="Frozen parent", description="",
+        prompt="Parent prompt", review_focus="Parent focus", model_config={},
+    )
+    agent_studio_service.bind_skill(
+        db, reviewer, parent_v1.id, skill_version_id=delegate_skill.id, position=0, config={},
+    )
+    parent_release = publish(parent_v1)
+
+    model_calls = []
+
+    class ModelClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def call_raw(self, **kwargs):
+            model_calls.append(kwargs)
+            return json.dumps({
+                "summary": f"{kwargs['agent_label']} completed",
+                "score": 90,
+                "issues": [],
+            }), {}
+
+        def log_deferred(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(published_agent_tools, "_require_invoke_permission", lambda *_: None)
+    monkeypatch.setattr(published_agent_tools, "DeepSeekAgent", ModelClient)
+    monkeypatch.setattr(published_agent_tools, "resolve_api_config", lambda *_: object())
+    monkeypatch.setattr(published_agent_tools, "resolve_subagent_config", lambda *_: object())
+
+    def invoke_parent():
+        return published_agent_tools.invoke_published_agent(
+            db, admin_user, agent_code=parent.code, code="if user_id != owner_id: deny()",
+            language="python", release_id=parent_release.id, version_id=parent_v1.id,
+            package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+        )
+
+    first_run = invoke_parent()
+    assert [call["agent_label"] for call in model_calls] == [target.code, parent.code]
+    assert first_run["delegated_runs"][0]["version_id"] == target_v1.id
+    before = DeclarativeReviewAgentFactory.resolve_release(
+        db, parent.code, release_id=parent_release.id, version_id=parent_v1.id,
+        package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+    )
+    before_context = before.skill_context
+
+    target_v2 = agent_studio_service.revise_agent(
+        db, reviewer, target.id, prompt="Target V2 prompt", review_focus="Target V2 focus",
+        model_config={}, note="update target after parent release",
+    )
+    publish(target_v2)
+
+    after = DeclarativeReviewAgentFactory.resolve_release(
+        db, parent.code, release_id=parent_release.id, version_id=parent_v1.id,
+        package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+    )
+
+    assert target_release_v1.agent_version_id == target_v1.id
+    assert before is not None and after is not None
+    assert after.skill_context == before_context
+    assert "Target V1 prompt" in after.skill_context
+    assert "Target V2 prompt" not in after.skill_context
+    assert f"release_id={target_release_v1.id}" in after.skill_context
+    assert "平台将独立调用的冻结子 Agent" in after.skill_context
+    second_run = invoke_parent()
+    assert [call["agent_label"] for call in model_calls] == [target.code, parent.code, target.code, parent.code]
+    assert second_run["delegated_runs"][0]["version_id"] == target_v1.id
+
+    legacy_manifest = json.loads(parent_release.package_manifest_json)
+    legacy_manifest.pop("dependency_snapshots")
+    parent_release.package_manifest_json = json.dumps(legacy_manifest, ensure_ascii=False)
+    parent_release.package_checksum = agent_studio_service._checksum(legacy_manifest)
+    db.commit()
+    legacy = DeclarativeReviewAgentFactory.resolve_release(
+        db, parent.code, release_id=parent_release.id, version_id=parent_v1.id,
+        package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+    )
+    assert legacy is not None
+    assert legacy.dependency_snapshot_policy == "legacy_resolved_at_invocation"
+    assert "Target V2 prompt" in legacy.skill_context
+    assert "本次执行已在入口时解析并冻结子Agent版本" in legacy.skill_context
+
+    agent_studio_service.disable_agent(db, admin_user, target.id)
+    with pytest.raises(ValidationError, match="没有可冻结|冻结委派发布版本不可用"):
+        DeclarativeReviewAgentFactory.resolve_release(
+            db, parent.code, release_id=parent_release.id, version_id=parent_v1.id,
+            package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+        )
+    target.is_enabled = 1
+    target.status = "published"
+    target_v2.status = "published"
+    db.query(CustomAgentRelease).filter_by(agent_version_id=target_v2.id).one().status = "published"
+    db.query(CustomAgentRelease).filter_by(agent_version_id=target_v2.id).one().disabled_at = None
+    db.commit()
+
+    tampered_manifest = json.loads(parent_release.package_manifest_json)
+    tampered_manifest["dependency_snapshots"] = {str(delegate_skill.id): {"skill_checksum": "tampered"}}
+    parent_release.package_manifest_json = json.dumps(tampered_manifest, ensure_ascii=False)
+    db.commit()
+    tampered = DeclarativeReviewAgentFactory.resolve_release(
+        db, parent.code, release_id=parent_release.id, version_id=parent_v1.id,
+        package_checksum=parent_release.package_checksum, template_checksum=parent_v1.checksum,
+    )
+    assert tampered is None

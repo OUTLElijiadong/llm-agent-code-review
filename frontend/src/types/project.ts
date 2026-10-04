@@ -55,7 +55,7 @@ export interface ProjectDetailOut {
   last_agent_run_at?: string | null
   create_time: string
   update_time: string
-  recent_tasks: { id: number; review_type?: string; score: number; total_issues: number; status: string; create_time: string }[]
+  recent_tasks: { id: number; review_type?: string; score: number | null; total_issues: number | null; status: string; create_time: string }[]
   source_revisions: { id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes?: string; create_time?: string | null }[]
 }
 
@@ -146,6 +146,7 @@ export interface CodeFileCreateIn {
 export interface CodeFileUpdateIn {
   content: string
   change_desc?: string
+  expected_version: number
 }
 
 export interface CodeFileRenameIn {

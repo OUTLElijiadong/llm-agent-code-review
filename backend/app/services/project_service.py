@@ -119,6 +119,12 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
         )
 
     is_admin = rbac_service.is_admin_user(db, int(user.id))
+    from app.core.permission_codes import PermissionCode
+    from app.services import review_service
+
+    report_permission = rbac_service.check_permission(
+        db, int(user.id), PermissionCode.REPORT_VIEW,
+    )
     items = []
     for row in rows:
         last_task = last_tasks.get(row.id)
@@ -130,6 +136,16 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
         )
         # v2.0 B2: 用最近一次成功审查的真实评分,前端不再 hash 派生
         run_stats = agent_runs.get(row.id)
+        metrics_visible = bool(
+            last_task
+            and review_service.can_view_task_metrics(
+                db,
+                user,
+                last_task,
+                report_permission=report_permission,
+                administrator=is_admin,
+            )
+        )
         items.append({
             "id": row.id, "project_name": row.project_name,
             "description": row.description, "language": row.language,
@@ -144,7 +160,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "can_update": can_write,
             "can_delete": can_write,
             "last_review_at": last_task.create_time if last_task else None,
-            "score": last_task.score if last_task else None,
+            "score": last_task.score if metrics_visible else None,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -240,6 +256,31 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         ReviewTask.project_id == project_id,
         ReviewTask.status != "deleted",
     ).order_by(ReviewTask.create_time.desc()).limit(5).all()
+    from app.core.permission_codes import PermissionCode
+    from app.services import review_service
+
+    is_admin = rbac_service.is_admin_user(db, int(user.id))
+    report_permission = rbac_service.check_permission(
+        db, int(user.id), PermissionCode.REPORT_VIEW,
+    )
+    task_metrics_visible = {
+        task.id: review_service.can_view_task_metrics(
+            db,
+            user,
+            task,
+            report_permission=report_permission,
+            administrator=is_admin,
+        )
+        for task in recent_tasks
+    }
+    visible_domain_tasks = [
+        task for task in recent_tasks
+        if task_metrics_visible[task.id]
+        and task.review_type in {"sandbox_test", "pentest"}
+    ]
+    from app.services.report_service import load_task_issue_stats
+
+    domain_issue_stats = load_task_issue_stats(db, visible_domain_tasks)
 
     return {
         "id": project.id,
@@ -275,8 +316,18 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         "create_time": project.create_time,
         "update_time": project.update_time,
         "recent_tasks": [
-            {"id": t.id, "review_type": t.review_type, "score": t.score, "total_issues": t.total_issues,
-             "status": t.status, "create_time": t.create_time}
+            {
+                "id": t.id,
+                "review_type": t.review_type,
+                "score": t.score if task_metrics_visible[t.id] else None,
+                "total_issues": (
+                    domain_issue_stats[t.id]["total_issues"]
+                    if task_metrics_visible[t.id] and t.id in domain_issue_stats
+                    else (t.total_issues if task_metrics_visible[t.id] else None)
+                ),
+                "status": t.status,
+                "create_time": t.create_time,
+            }
             for t in recent_tasks
         ],
         "source_revisions": project_source_revision_service.list_revisions(db, user, project_id),

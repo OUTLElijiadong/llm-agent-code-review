@@ -211,6 +211,25 @@ export interface AgentTeamMutationResult {
   trace_id?: string
 }
 
+export interface AgentTeamRetryPreview {
+  team_id: number
+  requires_confirmation: boolean
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  plan_sha256: string
+  tasks: Array<{
+    task_key: string
+    member_key: string
+    title: string
+    status: string
+    depends_on: string[]
+    risk_level: 'low' | 'medium' | 'high' | 'critical'
+    reason: string
+    classification: string
+    needs_confirmation: boolean
+    fingerprint: string
+  }>
+}
+
 export function listAgentTeams(query?: AgentTeamListQuery): Promise<AgentTeamListResponse> {
   return get<AgentTeamListResponse>('/agent-teams', query)
 }
@@ -253,8 +272,21 @@ export function retryAgentTeam(
   teamId: number,
   task_keys: string[] = [],
   strategy_changes: Record<string, string> = {},
+  supervisor_plan_sha256 = '',
 ): Promise<AgentTeamMutationResult> {
   return post<AgentTeamMutationResult>(`/agent-teams/${encodeURIComponent(String(teamId))}/retry`, {
+    task_keys,
+    strategy_changes,
+    supervisor_plan_sha256,
+  })
+}
+
+export function previewRetryAgentTeam(
+  teamId: number,
+  task_keys: string[] = [],
+  strategy_changes: Record<string, string> = {},
+): Promise<AgentTeamRetryPreview> {
+  return post<AgentTeamRetryPreview>(`/agent-teams/${encodeURIComponent(String(teamId))}/retry/preview`, {
     task_keys,
     strategy_changes,
   })

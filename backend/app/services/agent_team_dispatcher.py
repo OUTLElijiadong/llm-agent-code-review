@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any
 
 from loguru import logger
@@ -127,28 +127,43 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
             task_key = str(claimed.get("task_key") or _task.task_key)
             task_title = str(claimed.get("title") or _task.title)
             task_instructions = str(claimed.get("instructions") or _task.instructions)
+            execution_strategy = task_input.get("_execution_strategy")
+            execution_strategy = execution_strategy if isinstance(execution_strategy, dict) else {}
+            strategy_instruction = str(execution_strategy.get("instruction") or "").strip()
+            review_instructions = (
+                f"{task_instructions}\n\n本次重试策略：{strategy_instruction}"
+                if strategy_instruction else task_instructions
+            )
             supervisor_review = agent_supervisor_service.review_team_task(
                 address=str(claimed["address"]),
                 task_key=task_key,
                 title=task_title,
-                instructions=task_instructions,
+                instructions=review_instructions,
                 task_input=task_input,
             )
-            plan_event = (
+            plan_events = (
                 db.query(AgentTeamEvent)
                 .filter(
                     AgentTeamEvent.team_id == int(team.id),
-                    AgentTeamEvent.event_type == "supervisor.plan_reviewed",
+                    AgentTeamEvent.event_type.in_((
+                        "supervisor.plan_reviewed",
+                        "supervisor.retry_reauthorized",
+                    )),
                 )
-                .order_by(AgentTeamEvent.id.desc())
-                .first()
+                .order_by(AgentTeamEvent.id.asc())
+                .all()
             )
-            plan_detail = {}
-            if plan_event is not None:
+            authorized_fingerprints: set[str] = set()
+            for plan_event in plan_events:
                 try:
                     plan_detail = json.loads(plan_event.detail_json or "{}")
                 except (TypeError, ValueError):
-                    plan_detail = {}
+                    continue
+                if plan_detail.get("confirmed_by_user_id") != int(team.user_id):
+                    continue
+                authorized_fingerprints.update(
+                    str(item) for item in plan_detail.get("authorized_high_risk_fingerprints") or [] if item
+                )
             fingerprint = agent_supervisor_service.task_fingerprint(
                 {
                     "task_key": task_key,
@@ -159,12 +174,7 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                 },
                 str(claimed["address"]),
             )
-            authorized_fingerprints = set(plan_detail.get("authorized_high_risk_fingerprints") or [])
-            confirmed_by = plan_detail.get("confirmed_by_user_id")
-            high_risk_authorized = (
-                confirmed_by == int(team.user_id)
-                and fingerprint in authorized_fingerprints
-            )
+            high_risk_authorized = fingerprint in authorized_fingerprints
             review_data = agent_supervisor_service.public_review(supervisor_review)
             agent_team_service.record_supervisor_task_review(
                 db,
@@ -308,36 +318,40 @@ def dispatch_once(*, limit: int = 20) -> dict[str, int]:
             int(settings.agent_team_task_lease_seconds),
             int(settings.agent_full_validation_wait_seconds) + 60,
         )
-        task_budget = max(1, min(int(limit), 100)) * worker_count
+        remaining_claims = max(1, min(int(limit), 100)) * worker_count
         with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="agent-team") as executor:
-            while task_budget > 0:
-                wave: list[tuple[int, dict[str, Any]]] = []
-                # 按团队轮转领取，避免单个大团队长期占满全局 worker。
-                while len(wave) < min(worker_count, task_budget):
-                    progressed = False
-                    for team_id in team_ids:
-                        if len(wave) >= min(worker_count, task_budget):
-                            break
-                        claimed = agent_team_service.claim_next_task(
+            future_map = {}
+            team_cursor = 0
+            while remaining_claims > 0 or future_map:
+                # 仅补满空闲槽；每完成一个 Future 就重新读取依赖并立即补槽，
+                # 不等待本批次/波次里其他较慢的任务结束。
+                while remaining_claims > 0 and len(future_map) < worker_count and team_ids:
+                    claimed_item = None
+                    team_id = 0
+                    # 按团队轮转，保持多团队公平；若当前均无可运行节点则等待
+                    # 任一在途节点完成后再刷新其提交结果并重试领取。
+                    for _ in range(len(team_ids)):
+                        team_id = team_ids[team_cursor]
+                        team_cursor = (team_cursor + 1) % len(team_ids)
+                        claimed_item = agent_team_service.claim_next_task(
                             db,
                             team_id,
                             lease_seconds=effective_lease_seconds,
                         )
-                        if claimed is not None:
-                            wave.append((team_id, claimed))
-                            stats["claimed"] += 1
-                            progressed = True
-                    if not progressed:
+                        if claimed_item is not None:
+                            break
+                    if claimed_item is None:
                         break
-                if not wave:
-                    break
+                    future = executor.submit(_execute_claimed, team_id, claimed_item)
+                    future_map[future] = (team_id, claimed_item["task_id"])
+                    stats["claimed"] += 1
+                    remaining_claims -= 1
 
-                future_map = {
-                    executor.submit(_execute_claimed, team_id, claimed): (team_id, claimed["task_id"])
-                    for team_id, claimed in wave
-                }
-                for future in as_completed(future_map):
-                    team_id, task_id = future_map[future]
+                if not future_map:
+                    break
+                completed, _ = wait(tuple(future_map), return_when=FIRST_COMPLETED)
+                for future in completed:
+                    team_id, task_id = future_map.pop(future)
                     try:
                         outcome = future.result()
                         stats["completed" if outcome.get("success") else "failed"] += 1
@@ -346,8 +360,8 @@ def dispatch_once(*, limit: int = 20) -> dict[str, int]:
                             "[agent-team-dispatcher] team={} task={} worker crashed: {}", team_id, task_id, exc
                         )
                         stats["failed"] += 1
-                task_budget -= len(wave)
-                # 使后续波次看到 worker Session 已提交的依赖结果。
+                # worker 使用独立 Session 提交；主 Session 在下一次 claim 前清理
+                # 快照，让依赖更新及其他进程的队列变化可见。
                 db.rollback()
                 db.expire_all()
         return stats

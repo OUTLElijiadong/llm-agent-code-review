@@ -8,6 +8,7 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import inspect as sa_inspect
@@ -2519,9 +2520,6 @@ def complete_task(
                 error=error or str(normalized_result.get("summary") or ""),
                 automatic=True,
             )
-            task.instructions = (
-                f"{task.instructions}\n\n[小菱自动改道第 {task.attempt_count + 1} 次] {strategy_change}"
-            )
             task.status = "queued"
             task.completed_at = None
             raw_retry_after = normalized_result.get("retry_after_seconds")
@@ -2916,29 +2914,29 @@ def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户�
     return _team_out(db, team, include_events=True)
 
 
-def retry_team(
-    db: Session,
-    user: User,
-    team_id: int,
-    *,
-    task_keys: Optional[list[str]] = None,
-    strategy_changes: Optional[dict[str, str]] = None,
-) -> dict[str, Any]:
-    team = _team_or_raise(db, user, team_id, lock=True)
-    if team.status not in {"failed", "completed", "queued", "running"}:
-        raise AgentTeamStateError("当前团队状态不允许重试")
-    wanted = set(task_keys or [])
-    all_tasks = _locked_team_tasks(db, team)
+def _select_retry_tasks(all_tasks: list[AgentTeamTask], wanted: set[str]) -> list[AgentTeamTask]:
+    task_by_key = {str(task.task_key): task for task in all_tasks}
+    retryable = {"failed", "dead_letter", "blocked", "expired"}
+    if wanted:
+        missing = wanted - set(task_by_key)
+        if missing:
+            raise AgentTeamValidationError(f"重试任务不存在：{', '.join(sorted(missing))}")
+        unavailable = {
+            key for key in wanted
+            if task_by_key[key].status not in {"failed", "dead_letter", "blocked", "expired"}
+        }
+        if unavailable:
+            raise AgentTeamStateError(f"所选任务当前不可作为重试起点：{', '.join(sorted(unavailable))}")
+
     rows = [
-        task
-        for task in all_tasks
-        if task.status in {"failed", "dead_letter", "blocked"} and (not wanted or task.task_key in wanted)
+        task for task in all_tasks
+        if task.status in retryable and (not wanted or task.task_key in wanted)
     ]
     if not rows:
         raise AgentTeamStateError("没有可重试的失败任务")
+
     # 自动带上由重试根节点阻断的后继，也使依赖该根节点的已完成后继失效。
-    # 否则旧 verifier/summarizer 结果会在上游重跑后被误当成新结论。
-    selected_keys = {task.task_key for task in rows}
+    selected_keys = {str(task.task_key) for task in rows}
     changed = True
     while changed:
         changed = False
@@ -2956,29 +2954,211 @@ def retry_team(
             }
             if dependencies & selected_keys or (task.status == "blocked" and failed_keys & selected_keys):
                 rows.append(task)
-                selected_keys.add(task.task_key)
+                selected_keys.add(str(task.task_key))
                 changed = True
+    return rows
+
+
+def _build_retry_preview(
+    db: Session,
+    team: AgentTeam,
+    all_tasks: list[AgentTeamTask],
+    *,
+    task_keys: Optional[list[str]],
+    strategy_changes: Optional[dict[str, str]],
+) -> dict[str, Any]:
+    from app.services import agent_supervisor_service
+
+    wanted = {str(key) for key in (task_keys or [])}
+    rows = _select_retry_tasks(all_tasks, wanted)
+    selected_keys = {str(task.task_key) for task in rows}
     changes = {str(key): str(value).strip() for key, value in (strategy_changes or {}).items()}
+    unexpected_changes = set(changes) - selected_keys
+    if unexpected_changes:
+        raise AgentTeamValidationError(f"改道策略对应的任务不在本次重试范围：{', '.join(sorted(unexpected_changes))}")
+    non_root_changes = {
+        key for key in changes
+        if key not in {str(task.task_key) for task in rows if task.status in {"failed", "dead_letter"}}
+    }
+    if non_root_changes:
+        raise AgentTeamValidationError(f"改道策略只能指定失败起点任务：{', '.join(sorted(non_root_changes))}")
+
+    prepared: list[dict[str, Any]] = []
     for task in rows:
-        if task.status not in {"failed", "dead_letter"}:
-            continue
-        change = changes.get(task.task_key, "")
-        if len(change) < 8 or change in task.instructions:
-            raise AgentTeamValidationError(f"任务 {task.task_key} 重试前必须明确改变方案，不能原样重试")
+        change = changes.get(str(task.task_key), "")
+        if task.status in {"failed", "dead_letter"}:
+            if len(change) < 8 or change in task.instructions:
+                raise AgentTeamValidationError(f"任务 {task.task_key} 重试前必须明确改变方案，不能原样重试")
+        else:
+            # 每个实际重跑的节点都需要唯一尝试指纹，包括过期任务及被上游重置的后继。
+            # 原始业务指令保留不动；依赖结果变化会在新尝试上下文中重新核验。
+            change = "根据本次重试后的依赖结果重新核验并执行任务"
+
+        member = db.get(AgentTeamMember, int(task.member_id))
+        task_input = _unjson(task.input_json, {})
+        task_input = dict(task_input) if isinstance(task_input, dict) else {}
+        simulated = SimpleNamespace(
+            attempt_count=int(task.attempt_count or 0),
+            input_json=_json(task_input),
+        )
+        _apply_execution_strategy(
+            simulated,
+            member,
+            instruction=change,
+            error=_json(_unjson(task.errors_json, [])),
+            automatic=False,
+            mode="user_directed_alternate_strategy",
+        )
+        task_input = _unjson(simulated.input_json, {})
+        task_input = dict(task_input) if isinstance(task_input, dict) else {}
+
+        address = str(member.address if member else "")
+        task_row = {
+            "task_key": str(task.task_key),
+            "member_key": str(member.member_key if member else ""),
+            "title": str(task.title or ""),
+            "instructions": str(task.instructions or ""),
+            "depends_on": [str(key) for key in _unjson(task.dependency_keys_json, [])],
+            "input": task_input,
+        }
+        review = agent_supervisor_service.review_team_task(
+            address=address,
+            task_key=task_row["task_key"],
+            title=task_row["title"],
+            instructions=task_row["instructions"],
+            task_input=task_input,
+        )
+        fingerprint = agent_supervisor_service.task_fingerprint(task_row, address)
+        prepared.append({
+            "task_key": task_row["task_key"],
+            "member_key": task_row["member_key"],
+            "title": task_row["title"],
+            "status": str(task.status),
+            "depends_on": task_row["depends_on"],
+            "risk_level": review.risk_level,
+            "reason": review.reason,
+            "classification": review.classification,
+            "needs_confirmation": bool(review.needs_confirmation),
+            "fingerprint": fingerprint,
+        })
+
+    required = any(item["needs_confirmation"] for item in prepared)
+    risk_level = agent_supervisor_service.maximum_risk(*(item["risk_level"] for item in prepared))
+    canonical = {
+        "team_id": int(team.id),
+        "owner_user_id": int(team.user_id),
+        "requested_task_keys": sorted(wanted),
+        "affected_task_keys": [item["task_key"] for item in prepared],
+        "strategy_changes": {key: changes[key] for key in sorted(changes)},
+        "tasks": [
+            {
+                "task_key": item["task_key"],
+                "fingerprint": item["fingerprint"],
+                "status": item["status"],
+                "depends_on": item["depends_on"],
+                "risk_level": item["risk_level"],
+                "reason": item["reason"],
+                "classification": item["classification"],
+                "needs_confirmation": item["needs_confirmation"],
+            }
+            for item in prepared
+        ],
+    }
+    encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return {
+        "team_id": int(team.id),
+        "requires_confirmation": required,
+        "risk_level": risk_level,
+        "plan_sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "tasks": prepared,
+    }
+
+
+def preview_retry_team(
+    db: Session,
+    user: User,
+    team_id: int,
+    *,
+    task_keys: Optional[list[str]] = None,
+    strategy_changes: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """生成只读、账号绑定的重试风险预览和确定性确认摘要。"""
+    team = _team_or_raise(db, user, team_id, lock=True)
+    if team.status not in {"failed", "completed", "queued", "running"}:
+        raise AgentTeamStateError("当前团队状态不允许重试")
+    return _build_retry_preview(
+        db,
+        team,
+        _locked_team_tasks(db, team),
+        task_keys=task_keys,
+        strategy_changes=strategy_changes,
+    )
+
+
+def retry_team(
+    db: Session,
+    user: User,
+    team_id: int,
+    *,
+    task_keys: Optional[list[str]] = None,
+    strategy_changes: Optional[dict[str, str]] = None,
+    supervisor_plan_sha256: str = "",
+) -> dict[str, Any]:
+    from app.services import agent_supervisor_service
+
+    team = _team_or_raise(db, user, team_id, lock=True)
+    if team.status not in {"failed", "completed", "queued", "running"}:
+        raise AgentTeamStateError("当前团队状态不允许重试")
+    all_tasks = _locked_team_tasks(db, team)
+    wanted = {str(key) for key in (task_keys or [])}
+    changes = {str(key): str(value).strip() for key, value in (strategy_changes or {}).items()}
+    preview = _build_retry_preview(
+        db, team, all_tasks, task_keys=task_keys, strategy_changes=changes,
+    )
+    if supervisor_plan_sha256 and not secrets.compare_digest(supervisor_plan_sha256, preview["plan_sha256"]):
+        raise AgentTeamStateError("重试计划已变化，请重新预览并确认")
+    if preview["requires_confirmation"] and not secrets.compare_digest(
+        supervisor_plan_sha256, preview["plan_sha256"],
+    ):
+        raise AgentTeamStateError("高风险重试尚未由当前账户确认，请重新预览并确认")
+
+    if preview["requires_confirmation"]:
+        authorized = [
+            item["fingerprint"] for item in preview["tasks"]
+            if item["risk_level"] in {agent_supervisor_service.HIGH, agent_supervisor_service.CRITICAL}
+        ]
+        _event(
+            db,
+            team,
+            "supervisor.retry_reauthorized",
+            actor_address=f"user:{user.id}",
+            detail={
+                "decision": agent_supervisor_service.ESCALATE,
+                "risk_level": preview["risk_level"],
+                "plan_sha256": preview["plan_sha256"],
+                "tasks": preview["tasks"],
+                "confirmed_by_user_id": int(user.id),
+                "authorized_high_risk_fingerprints": authorized,
+            },
+        )
+
+    rows = _select_retry_tasks(all_tasks, wanted)
     for task in rows:
         previous_status = task.status
         previous_hash = _task_strategy_hash(task)
-        if task.status in {"failed", "dead_letter"}:
-            member = db.get(AgentTeamMember, task.member_id)
-            _apply_execution_strategy(
-                task,
-                member,
-                instruction=changes[task.task_key],
-                error=_json(_unjson(task.errors_json, [])),
-                automatic=False,
-                mode="user_directed_alternate_strategy",
-            )
-            task.instructions = f"{task.instructions.rstrip()}\n\n重试改道策略：{changes[task.task_key]}"
+        member = db.get(AgentTeamMember, task.member_id)
+        strategy_instruction = changes.get(
+            str(task.task_key),
+            "根据本次重试后的依赖结果重新核验并执行任务",
+        )
+        execution_strategy = _apply_execution_strategy(
+            task,
+            member,
+            instruction=strategy_instruction,
+            error=_json(_unjson(task.errors_json, [])),
+            automatic=False,
+            mode="user_directed_alternate_strategy",
+        )
         task.status = "queued" if not _unjson(task.dependency_keys_json, []) else "waiting_dependency"
         # 保留历史尝试次数，确保每次领取生成新的请求消息 ID，且审计能还原完整重试链。
         task.next_attempt_at = _now() if task.status == "queued" else None
@@ -2998,7 +3178,8 @@ def retry_team(
             to_status=task.status,
             actor_address=f"user:{user.id}",
             detail={
-                "strategy_change": changes.get(task.task_key, "依赖恢复"),
+                "strategy_change": strategy_instruction,
+                "execution_strategy": execution_strategy,
                 "previous_strategy_hash": previous_hash,
                 "new_strategy_hash": new_hash,
             },
@@ -3014,7 +3195,11 @@ def retry_team(
         from_status="failed",
         to_status="queued",
         actor_address=f"user:{user.id}",
-        detail={"task_keys": list(wanted), "strategy_changes": sorted(changes)},
+        detail={
+            "task_keys": list(wanted),
+            "strategy_changes": sorted(changes),
+            "supervisor_plan_sha256": preview["plan_sha256"],
+        },
     )
     _refresh_member_statuses(db, team)
     db.commit()

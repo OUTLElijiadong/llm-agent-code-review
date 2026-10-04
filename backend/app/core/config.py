@@ -8,6 +8,7 @@ from typing import List
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 _ENV_FILE = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
@@ -275,10 +276,15 @@ class Settings(BaseSettings):
         """构建数据库连接URL"""
         if self.db_host.lower() == "sqlite" or "sqlite" in self.db_name:
             return f"sqlite:///./{self.db_name}.db"
-        return (
-            f"mysql+pymysql://{self.db_user}:{self.db_password}@"
-            f"{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
-        )
+        return URL.create(
+            "mysql+pymysql",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
+            query={"charset": "utf8mb4"},
+        ).render_as_string(hide_password=False)
 
     @model_validator(mode="after")
     def _guard_deepseek_context_budget(self) -> "Settings":

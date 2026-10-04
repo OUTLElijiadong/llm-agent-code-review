@@ -433,6 +433,8 @@ def test_create_team_auto_adds_verifier_task_when_member_exists(db, team_user):
 
 
 def test_published_custom_member_uses_server_release_snapshot(db):
+    from app.services import agent_studio_service
+
     admin = SimpleNamespace(id=7, role="admin", username="manager")
     custom = CustomAgent(
         code="published_reviewer",
@@ -452,18 +454,21 @@ def test_published_custom_member_uses_server_release_snapshot(db):
         model_config_json="{}",
         input_schema_json="{}",
         output_schema_json="{}",
-        checksum="v" * 64,
+        checksum=agent_studio_service._checksum(agent_studio_service._agent_payload(
+            "复核前置任务证据", "可靠性", {},
+        )),
         status="published",
         original_author_id=admin.id,
     )
     db.add(version)
     db.flush()
     custom.current_published_version_id = version.id
+    manifest = {"agent_checksum": version.checksum, "skills": [], "dependency_snapshots": {}}
     release = CustomAgentRelease(
         agent_id=custom.id,
         agent_version_id=version.id,
-        package_manifest_json="{}",
-        package_checksum="p" * 64,
+        package_manifest_json=json.dumps(manifest),
+        package_checksum=agent_studio_service._checksum(manifest),
         status="published",
         published_by=admin.id,
         published_at=datetime.now(timezone.utc),
@@ -518,18 +523,21 @@ def test_published_custom_member_uses_server_release_snapshot(db):
         model_config_json="{}",
         input_schema_json="{}",
         output_schema_json="{}",
-        checksum="n" * 64,
+        checksum=agent_studio_service._checksum(agent_studio_service._agent_payload(
+            "新版本提示词", "新版本", {},
+        )),
         status="published",
         original_author_id=admin.id,
     )
     db.add(version_v2)
     db.flush()
+    manifest_v2 = {"agent_checksum": version_v2.checksum, "skills": [], "dependency_snapshots": {}}
     db.add(
         CustomAgentRelease(
             agent_id=custom.id,
             agent_version_id=version_v2.id,
-            package_manifest_json="{}",
-            package_checksum="q" * 64,
+            package_manifest_json=json.dumps(manifest_v2),
+            package_checksum=agent_studio_service._checksum(manifest_v2),
             status="published",
             published_by=admin.id,
             published_at=datetime.now(timezone.utc),
@@ -544,8 +552,8 @@ def test_published_custom_member_uses_server_release_snapshot(db):
         custom.code,
         release_id=release.id,
         version_id=version.id,
-        package_checksum="p" * 64,
-        template_checksum="v" * 64,
+        package_checksum=release.package_checksum,
+        template_checksum=version.checksum,
         user=admin,
     )
     assert current is not None and current.version_id == version_v2.id
@@ -567,8 +575,8 @@ def test_published_custom_member_uses_server_release_snapshot(db):
         "template_id": custom.id,
         "version_id": version.id,
         "release_id": release.id,
-        "package_checksum": "p" * 64,
-        "template_checksum": "v" * 64,
+        "package_checksum": release.package_checksum,
+        "template_checksum": version.checksum,
     }
 
 
@@ -2120,7 +2128,8 @@ def test_failure_is_learned_and_retry_requires_changed_strategy(db, team_user):
         strategy_changes={"read": "先刷新实时状态，再使用路径 B 并缩小读取范围"},
     )
     assert retried["status"] == "queued"
-    assert "路径 B" in retried["tasks"][0]["instructions"]
+    assert retried["tasks"][0]["instructions"] == "使用路径 A"
+    assert "路径 B" in retried["tasks"][0]["input"]["_execution_strategy"]["instruction"]
     assert retried["tasks"][0]["attempt_count"] == 1
     event = (
         db.query(AgentTeamEvent)
@@ -2129,6 +2138,221 @@ def test_failure_is_learned_and_retry_requires_changed_strategy(db, team_user):
     )
     detail = agent_team_service._unjson(event.detail_json, {})
     assert detail["previous_strategy_hash"] != detail["new_strategy_hash"]
+
+
+def test_high_risk_retry_has_preview_and_per_attempt_confirmation(db, team_user):
+    """高风险重试必须有新的、绑定本次变更任务的账户确认路径。"""
+    from app.services import agent_supervisor_service
+
+    payload = _payload(tasks=[
+        {
+            "task_key": "read",
+            "member_key": "reader",
+            "title": "读取外部目标",
+            "instructions": "读取提供的外部目标并整理证据",
+            "input": {"external_target_url": "https://target.example"},
+            "depends_on": [],
+            "max_attempts": 1,
+        },
+        {
+            "task_key": "verify",
+            "member_key": "reviewer",
+            "title": "复核结果",
+            "instructions": "复核读取结果",
+            "depends_on": ["read"],
+        },
+    ])
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        payload,
+        supervisor_plan_sha256=review["plan_sha256"],
+        supervisor_confirmed_by=int(team_user.id),
+    )
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    agent_team_service.complete_task(
+        db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+        result={"status": "failed", "summary": "首次读取失败", "retryable": False},
+        success=False, error="首次读取失败",
+    )
+
+    preview = agent_team_service.preview_retry_team(
+        db,
+        team_user,
+        created["team_id"],
+        task_keys=["read"],
+        strategy_changes={"read": "改用分段读取并先复核授权范围"},
+    )
+    read_preview = next(item for item in preview["tasks"] if item["task_key"] == "read")
+    assert preview["requires_confirmation"] is True
+    assert read_preview["risk_level"] == agent_supervisor_service.HIGH
+
+    with pytest.raises(agent_team_service.AgentTeamStateError, match="重新预览并确认"):
+        agent_team_service.retry_team(
+            db, team_user, created["team_id"], task_keys=["read"],
+            strategy_changes={"read": "改用分段读取并先复核授权范围"},
+        )
+
+    retried = agent_team_service.retry_team(
+        db, team_user, created["team_id"], task_keys=["read"],
+        strategy_changes={"read": "改用分段读取并先复核授权范围"},
+        supervisor_plan_sha256=preview["plan_sha256"],
+    )
+    retried_read = next(item for item in retried["tasks"] if item["task_key"] == "read")
+    assert retried_read["instructions"] == "读取提供的外部目标并整理证据"
+    assert retried_read["input"]["_execution_strategy"]["instruction"] == "改用分段读取并先复核授权范围"
+    authorization = next(event for event in retried["events"] if event["event_type"] == "supervisor.retry_reauthorized")
+    assert authorization["actor_address"] == f"user:{team_user.id}"
+    assert authorization["detail"]["confirmed_by_user_id"] == team_user.id
+    assert read_preview["fingerprint"] in authorization["detail"]["authorized_high_risk_fingerprints"]
+
+
+def test_xiaoling_retry_tool_waits_for_supervisor_approval_after_preview(db, team_user):
+    from app.agents.orchestrator import Orchestrator
+    from app.services import agent_supervisor_service
+
+    payload = _payload(tasks=[{
+        "task_key": "read",
+        "member_key": "reader",
+        "title": "读取外部目标",
+        "instructions": "读取提供的外部目标并整理证据",
+        "input": {"external_target_url": "https://target.example"},
+        "depends_on": [],
+        "max_attempts": 1,
+    }])
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        payload,
+        supervisor_plan_sha256=review["plan_sha256"],
+        supervisor_confirmed_by=int(team_user.id),
+    )
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    agent_team_service.complete_task(
+        db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+        result={"status": "failed", "summary": "首次读取失败", "retryable": False},
+        success=False, error="首次读取失败",
+    )
+    orchestrator = Orchestrator(register=False)
+    orchestrator._db = db
+    orchestrator._user = team_user
+    strategy_changes = {"read": "改用分段读取并先复核授权范围"}
+
+    pending = orchestrator.retry_agent_team(
+        created["team_id"], task_keys=["read"], strategy_changes=strategy_changes,
+    )
+    assert pending.success is True
+    assert pending.data["status"] == "awaiting_user_confirmation"
+    digest = pending.data["plan_sha256"]
+
+    without_approval = orchestrator.retry_agent_team(
+        created["team_id"], task_keys=["read"], strategy_changes=strategy_changes,
+        supervisor_plan_sha256=digest, ctx=SimpleNamespace(extra={"supervisor_user_confirmed": False}),
+    )
+    assert without_approval.success is False
+    assert "必须先由当前用户确认" in without_approval.error
+    assert db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="read").one().status == "failed"
+
+    approved = orchestrator.retry_agent_team(
+        created["team_id"], task_keys=["read"], strategy_changes=strategy_changes,
+        supervisor_plan_sha256=digest, ctx=SimpleNamespace(extra={"supervisor_user_confirmed": True}),
+    )
+    assert approved.success is True
+    assert approved.data["status"] == "queued"
+
+
+def test_expired_high_risk_task_requires_a_fresh_confirmation_for_each_attempt(db, team_user):
+    from app.services import agent_supervisor_service
+
+    payload = _payload(tasks=[{
+        "task_key": "read",
+        "member_key": "reader",
+        "title": "读取外部目标",
+        "instructions": "读取提供的外部目标并整理证据",
+        "input": {"external_target_url": "https://target.example"},
+        "depends_on": [],
+    }])
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        payload,
+        supervisor_plan_sha256=review["plan_sha256"],
+        supervisor_confirmed_by=int(team_user.id),
+    )
+    team = db.get(AgentTeam, created["team_id"])
+    task = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="read").one()
+    team.status = "failed"
+    task.status = "expired"
+    db.commit()
+
+    first_preview = agent_team_service.preview_retry_team(db, team_user, team.id, task_keys=["read"])
+    agent_team_service.retry_team(
+        db, team_user, team.id, task_keys=["read"], supervisor_plan_sha256=first_preview["plan_sha256"],
+    )
+    first_claim = agent_team_service.claim_next_task(db, team.id)
+    agent_team_service.complete_task(
+        db, team.id, first_claim["task_id"], lease_token=first_claim["lease_token"],
+        result={"status": "failed", "summary": "重试后仍失败", "retryable": False},
+        success=False, error="重试后仍失败",
+    )
+    second_preview = agent_team_service.preview_retry_team(
+        db,
+        team_user,
+        team.id,
+        task_keys=["read"],
+        strategy_changes={"read": "缩小读取范围后重新核验授权证据"},
+    )
+    assert first_preview["tasks"][0]["fingerprint"] != second_preview["tasks"][0]["fingerprint"]
+
+    with pytest.raises(agent_team_service.AgentTeamStateError, match="计划已变化"):
+        agent_team_service.retry_team(
+            db,
+            team_user,
+            team.id,
+            task_keys=["read"],
+            strategy_changes={"read": "缩小读取范围后重新核验授权证据"},
+            supervisor_plan_sha256=first_preview["plan_sha256"],
+        )
+    assert task.status == "failed"
+    second = agent_team_service.retry_team(
+        db,
+        team_user,
+        team.id,
+        task_keys=["read"],
+        strategy_changes={"read": "缩小读取范围后重新核验授权证据"},
+        supervisor_plan_sha256=second_preview["plan_sha256"],
+    )
+    assert second["status"] == "queued"
+
+
+def test_expired_task_shown_as_retryable_can_be_requeued_without_strategy_change(db, team_user):
+    created = agent_team_service.create_team_from_xiaoling(
+        db,
+        team_user,
+        _payload(tasks=[{
+            "task_key": "read",
+            "member_key": "reader",
+            "title": "读取",
+            "instructions": "按既定范围读取",
+            "depends_on": [],
+        }]),
+    )
+    team = db.get(AgentTeam, created["team_id"])
+    task = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="read").one()
+    team.status = "failed"
+    task.status = "expired"
+    db.commit()
+
+    retried = agent_team_service.retry_team(db, team_user, created["team_id"], task_keys=["read"])
+
+    assert retried["tasks"][0]["task_key"] == "read"
+    assert retried["tasks"][0]["status"] == "queued"
+    event = db.query(AgentTeamEvent).filter_by(event_type="task.retry_requested", task_id=task.id).one()
+    assert event.to_status == "queued"
 
 
 def test_automatic_retry_honors_bounded_resource_backoff(db, team_user, monkeypatch):
@@ -2280,7 +2504,7 @@ def test_failure_with_remaining_budget_is_automatically_requeued_with_new_strate
     )
     read_task = next(item for item in retried["tasks"] if item["task_key"] == "read")
     assert read_task["status"] == "queued"
-    assert "自动改道" in read_task["instructions"]
+    assert read_task["instructions"] == "读取项目"
     strategy = read_task["input"]["_execution_strategy"]
     assert strategy["attempt"] == 2
     assert strategy["mode"] != "repeat_same_input"
@@ -2290,10 +2514,11 @@ def test_failure_with_remaining_budget_is_automatically_requeued_with_new_strate
 
 
 def test_automatic_retry_preserves_full_long_instruction(db, team_user):
+    original_instructions = "原始上下文：" + "中段证据" * 2995
     created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload(
         tasks=[{
             "task_key": "read", "member_key": "reader", "title": "读取",
-            "instructions": "原始上下文：" + "中段证据" * 2995,
+            "instructions": original_instructions,
             "depends_on": [], "max_attempts": 2,
         }]
     ))
@@ -2303,8 +2528,11 @@ def test_automatic_retry_preserves_full_long_instruction(db, team_user):
         result={"status": "failed", "summary": "读取超时"}, success=False, error="读取超时",
     )
     read_task = db.get(AgentTeamTask, claimed["task_id"])
-    assert len(read_task.instructions) > 12000
-    assert read_task.instructions.endswith("先复核前置依赖并缩小输入范围，再执行本任务")
+    assert read_task.instructions == original_instructions
+    assert read_task.input_json
+    assert agent_team_service._unjson(read_task.input_json, {})["_execution_strategy"]["instruction"] == (
+        "先复核前置依赖并缩小输入范围，再执行本任务"
+    )
 
 
 def test_team_detail_pages_all_messages_with_a_stable_ledger_cursor(db, team_user):

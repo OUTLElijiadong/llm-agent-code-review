@@ -1,6 +1,46 @@
 import time
 
-from app.services.context_fidelity import extract_protected_facts
+from app.services.context_fidelity import (
+    extract_protected_facts,
+    extract_user_fact_ledger,
+    retrieve_relevant_user_facts,
+)
+
+
+def test_user_fact_ledger_keeps_unmarked_business_facts_verbatim() -> None:
+    text = "统计时区是 Asia/Taipei，月末退款按原始交易月份记账。"
+
+    assert extract_user_fact_ledger(text) == [text]
+
+
+def test_user_fact_ledger_keeps_short_sentences_inside_longer_messages() -> None:
+    fact = "月末退款按原始交易月份记账。"
+    text = "旧背景" * 800 + "。" + fact + "补充背景" * 800
+
+    assert extract_user_fact_ledger(text) == [fact]
+
+
+def test_user_fact_ledger_does_not_copy_long_unpunctuated_filler_messages() -> None:
+    assert extract_user_fact_ledger("历史-46-" + "x" * 180) == []
+
+
+def test_retrieves_relevant_fact_from_long_unpunctuated_user_history() -> None:
+    fact = "月末退款按原始交易月份记账，统计时区使用 Asia/Taipei"
+    transcript = [
+        {"role": "user", "content": "旧背景" * 500 + fact + "补充背景" * 500},
+        {"role": "user", "content": "月末退款的统计时区和月份规则是什么？"},
+    ]
+
+    retrieved = retrieve_relevant_user_facts(
+        transcript,
+        [0],
+        transcript[-1]["content"],
+    )
+
+    assert retrieved
+    assert retrieved[0][0] == 0
+    assert fact in retrieved[0][1]
+    assert len(retrieved[0][1]) <= 1_200
 
 
 def test_extracts_chinese_negation_scope_and_numeric_constraints() -> None:

@@ -1,0 +1,51 @@
+独立证据复核（2026-10-01）
+复核 Agent：independent_audit_verifier
+工作树：/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台
+HEAD：fab823f71cda410cfdc03006f08fbca55f4644a9
+范围：本轮四个 Python 只读探针与三个 Vue 组件测试文件；检查探针加载路径及生产外呼隔离。未改应用代码、未连接生产数据库、未执行模型调用。
+
+路径与隔离检查
+- xiaoling-probe.py 和 reproduce_certificate_path.py 的 Path(__file__).resolve().parents[3] 正确指向当前审计工作树。
+- backend-probe.py 从该工作树 backend 目录用 PYTHONPATH=. 运行。tests/conftest.py 只导入注册 ORM 模型，未调用 fixture 或生产初始化。
+- SQLite 均为新建临时文件或内存数据库；Worker 模型入口和启动审查线程已替换，语义压缩使用本地 Transport 桩。
+- 前端 run.sh 以 git rev-parse 解析当前工作树，/tmp 创建临时 Vitest 根，加载该工作树实际 Vue 组件。API 与审批调用均为 mock。
+
+独立实际运行与结果（全部 exit_code=0）
+1. backend 目录：PYTHONPATH=. .venv311/bin/python ../docs/全系统架构与体验审计20261001/evidence/backend-probe.py
+   私域指标：pentest/sandbox_test × 项目成员/owner 四种组合；直接任务的 can_view_report=false，score/total_issues=null；项目详情仍为17/23，项目列表评分仍为17。
+   执行时撤权：成员撤销、review:start撤销、二者撤销三种组合；模型执行捕获器均被调用1次，冻结文件数1。用户账户仍启用。
+   过期 ORM 文件版本：SQLite 两个 Session 的三种样本，PUT 全部500/code50000；缓存版本1/2/3，其他会话先提交2/3/4。
+   小菱启动审查：同账号同一分钟6次工具调用接受6次，模型线程禁用；不证明生产模型费用或整个HTTP入口没有限流。
+2. backend 目录：.venv311/bin/python ../docs/全系统架构与体验审计20261001/evidence/xiaoling-probe.py
+   高风险重试：已确认，自动重试到attempt=2，fingerprint改变；调度拒绝执行，supervisor_confirmation_required。
+   DAG波次：short完成时after_short尚未领取；long结束后才领取。此为调度器模型桩，不是生产耗时统计。
+   语义遗漏：原事实进入压缩器；桩返回来源覆盖与合法引文但空泛摘要，最终输入没有该事实，run状态completed；compactor_calls=4。证明校验器接受语义遗漏，不证明DeepSeek实际漏此事实或完成真实100万token验收。
+   委派依赖漂移：固定Skill id501/checksum不变，child发布指针201→202后编译上下文v1→v2。根发布版本固定不覆盖此嵌套动态依赖。
+   累积检查点：100 runs，唯一文本1,004,190 bytes，保存50,736,535 bytes，50.52倍；恢复100项，独立读取耗时0.207s。是合成存储样本，不是生产磁盘增长归因。
+3. backend 目录：PYTHONPATH=. .venv311/bin/python ../docs/全系统架构与体验审计20261001/evidence/reproduce_overview_queries.py
+   1/10/40个存在模型使用记录的Agent，SELECT为5/14/44，符合4+N。支持N+1查询，不证明生产页面已超时。
+4. 仓库根：python3 docs/全系统架构与体验审计20261001/evidence/reproduce_certificate_path.py
+   配置 /persistent/certbot/conf，实际解析 /release/deploy/certbot/conf/live/example.invalid/fullchain.pem；CERTBOT_CONF_DIR被忽略。
+   只证明监控路径错误，不证明证书过期或自动续期失败；生产证据另由主Agent检查。
+5. 仓库根：bash docs/全系统架构与体验审计20261001/evidence/frontend-readonly-repros/run.sh
+   Vitest 4.1.11，3个测试文件、10条缺陷存在断言全部通过，运行耗时3.29s。
+   两条聊天团队状态同步样本；四条问题筛选/403陈旧状态/沙箱副本竞态/卸载后轮询样本；四条团队确认目标/失败集合变化/160字符摘要样本。
+   最新README归并为6类F01–F06。10条“通过”表示错误行为可重复，不能写产品功能通过。
+
+结论精度复核
+- 项目私域评分/问题数从次级出口暴露已在隔离服务实测；没有证明泄漏正文报告。
+- 执行时撤权缺口需要按执行授权契约修复或明确保留已授权任务策略；不得写任意用户可直接启动他人任务。
+- SQLite失锁与缓存版本异常不可等同MySQL生产并发实测；真实MySQL双连接锁等待场景仍待补。
+- 高风险改道导致重新确认属于可用性和审批衔接问题，当前代码是安全拒绝，不是绕过审批。
+- 前端403保留先前已取得数据，不等同后端返回未授权数据或跨账号泄漏。
+- 前端团队确认期间切换目标为组件契约样本；同团队失败集合变化有后台同步触发路径，跨团队样本尚未生产手点复现。
+- 160字符截短仅团队浮窗展示，聊天AgentTeamTrace另有完整结构化详情；不能称模型输出/数据库记录丢失。
+- 三角色全页面、手机全页面、真实100万token、多Agent真实付费完整工作流不在本独立复核覆盖范围。
+
+最终报告追加复核
+- FINAL所列16类：A01–A05五类、B01–B04四类、F01–F06六类、O01一类；O02单列优化项，不混入缺陷数量。
+- 独立枚举backend/app为337个Python文件/114345行，frontend/src为377个Vue/TS文件/91072行，共714文件；与FINAL一致。这是文件规模，不代表逐行全审计。
+- 热点独立计数：sandbox_service.py5107，agent_responses_service.py4155，agent_team_service.py3032，deepseek_responses_runtime.py2474，AgentChatDrawer.vue4384；与FINAL一致。
+- 独立pytest tests/unit/agents/test_c13_semantic_coverage.py -q --no-cov：4 passed、1 warning、无xfail；说明旧设计strict xfail描述已过期，不能推断任意语义事实已保护。
+- 独立生产只读SSH核实prism-cert-renew.timer：is-enabled=enabled、is-active=active；下一次2026-10-02 03:20:15 CST、上次2026-10-01 03:21:01 CST。实际持久路径证书openssl -enddate：Dec 29 17:45:44 2026 GMT。证书有效与timer启用确认；未在本复核中执行续期。
+- 已提醒主Agent修订F01“按team_id合并单调状态”：应以刷新代际为准，不能拒绝合法重试导致的状态回到running。F02应区分同团队后台失败集合变化与跨团队props契约样本。

@@ -227,6 +227,7 @@ const mapRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
+const ACTIVITY_REFRESH_INTERVAL_MS = 30_000
 const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
 let disposed = false
 
@@ -412,6 +413,36 @@ async function loadAll(): Promise<void> {
   await Promise.all([loadSystem(false), loadPosture(false), loadGeo(false), loadAgents(false)])
 }
 
+function startEventStream(): void {
+  if (disposed || eventStream) return
+  eventStreamStatus.value = 'connecting'
+  eventStream = subscribeAgentEvents(applyAgentEvent, {
+    replay: 10,
+    onStatus: (status) => { eventStreamStatus.value = status },
+  })
+}
+
+function startPolling(): void {
+  if (timer) return
+  timer = setInterval(() => {
+    if (document.visibilityState === 'visible') void loadAll()
+  }, ACTIVITY_REFRESH_INTERVAL_MS)
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState !== 'visible') {
+    if (timer) clearInterval(timer)
+    timer = null
+    eventStream?.close()
+    eventStream = null
+    eventStreamStatus.value = 'closed'
+    return
+  }
+  void loadAll()
+  startEventStream()
+  startPolling()
+}
+
 function applyAgentEvent(event: AgentEvent): void {
   const statusMap: Record<string, AgentActivity['status']> = {
     dispatch: 'thinking', thinking: 'thinking', progress: 'working',
@@ -430,16 +461,17 @@ function applyAgentEvent(event: AgentEvent): void {
 function onResize(): void { mapChart?.resize() }
 
 onMounted(() => {
-  loadAll()
-  eventStream = subscribeAgentEvents(applyAgentEvent, {
-    replay: 10,
-    onStatus: (status) => { eventStreamStatus.value = status },
-  })
+  document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('resize', onResize)
-  timer = setInterval(loadAll, 5_000) // SSE 实时事件 + 5s 数据兜底
+  if (document.visibilityState === 'visible') {
+    void loadAll()
+    startEventStream()
+    startPolling()
+  }
 })
 onBeforeUnmount(() => {
   disposed = true
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
   eventStream?.close()

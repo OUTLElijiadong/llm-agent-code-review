@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 
 _DIRECTIVE_MARKER = re.compile(
     r"必须|不得(?!不)|禁止|严禁|不允许|不可以|不能(?:够)?|不可|不准|不要|请勿|请不要|"
@@ -77,6 +78,130 @@ _NUMERIC_CONSTRAINT = re.compile(
 )
 _SENTENCE_BOUNDARY = re.compile(r"[。！？!?；;\r\n]+")
 _MAX_PROTECTED_FACT_CHARS = 2_000
+_MAX_LEDGER_STATEMENT_CHARS = 1_200
+_MAX_UNMARKED_MESSAGE_LEDGER_CHARS = 128
+
+
+def extract_user_fact_ledger(text: str) -> list[str]:
+    """保留短用户陈述原文，覆盖不带约束关键词的普通业务事实。
+
+    较长消息按句界拆开，只收纳能完整放入账本的语句；超长无句界内容仍由
+    语义压缩器处理，并由 extract_protected_facts 另行保留可识别的约束。
+    账本超出上下文预算时由调用方拒绝发送，不截断或静默丢弃。
+    """
+    content = text.strip()
+    if not content:
+        return []
+    if len(content) <= _MAX_UNMARKED_MESSAGE_LEDGER_CHARS:
+        return [content]
+    if not _SENTENCE_BOUNDARY.search(content):
+        return []
+    statements = re.split(r"(?<=[。！？!?；;\r\n])", content)
+    return [
+        statement.strip()
+        for statement in statements
+        if statement.strip() and len(statement.strip()) <= _MAX_LEDGER_STATEMENT_CHARS
+    ]
+
+
+_QUERY_STOPWORDS = frozenset({
+    "帮我", "请问", "一下", "这个", "那个", "如何", "怎么", "什么", "哪个", "是否",
+    "可以", "继续", "说明", "内容", "情况", "事情", "问题", "处理", "进行", "相关",
+    "背景", "历史", "审查", "项目", "保留", "所有", "证据", "填充", "讨论",
+})
+
+
+def _context_query_terms(text: str) -> set[str]:
+    terms = {
+        term.casefold()
+        for term in re.findall(r"[A-Za-z0-9_]{2,}", text)
+        if term.casefold() not in _QUERY_STOPWORDS
+        and not re.fullmatch(r"(.)\1{2,}", term.casefold())
+    }
+    for sequence in re.findall(r"[\u3400-\u9fff]{2,}", text):
+        terms.update(sequence[index:index + 2] for index in range(len(sequence) - 1))
+    return terms - _QUERY_STOPWORDS
+
+
+def retrieve_relevant_user_facts(
+    transcript: Sequence[Mapping[str, object]],
+    source_indices: Sequence[int],
+    query: str,
+    *,
+    max_sources: int = 4,
+) -> list[tuple[int, str]]:
+    """按当前用户问题从被压缩原文中检索匹配句段，保留来源索引。"""
+    query_terms = _context_query_terms(query)
+    if not query_terms or max_sources <= 0:
+        return []
+    query_patterns = [re.compile(re.escape(term), re.IGNORECASE) for term in query_terms]
+
+    candidates: list[tuple[int, int, str]] = []
+    for index in source_indices:
+        if index < 0 or index >= len(transcript):
+            continue
+        item = transcript[index]
+        if str(item.get("role") or "").casefold() != "user":
+            continue
+        raw_content = item.get("content")
+        if isinstance(raw_content, str):
+            content = raw_content
+        elif isinstance(raw_content, list):
+            content = "\n".join(
+                str(part.get("text") or part.get("input_text") or "")
+                for part in raw_content if isinstance(part, Mapping)
+            )
+        else:
+            continue
+        best: tuple[int, int, int, str] | None = None
+        for statement in re.split(r"(?<=[。！？!?；;\r\n])", content):
+            statement = statement.strip()
+            if not statement:
+                continue
+            candidate = _matching_fact_excerpt(statement, query_patterns)
+            if candidate is not None and (
+                best is None
+                or (-candidate[0], candidate[1], -candidate[2]) < (-best[0], best[1], -best[2])
+            ):
+                best = candidate
+        if best:
+            candidates.append((best[0], index, best[3]))
+
+    selected = sorted(candidates, key=lambda item: (item[0], item[1]), reverse=True)[:max_sources]
+    return [(index, text) for _, index, text in sorted(selected, key=lambda item: item[1])]
+
+
+def _matching_fact_excerpt(
+    statement: str, query_patterns: Sequence[re.Pattern[str]],
+) -> tuple[int, int, int, str] | None:
+    """只对连续原文窗口打分，避免分散词项把摘录中心移到无关内容。"""
+    context_chars = 160
+    # 匹配窗口加两侧上下文和两个省略标记，仍不超过原摘录上限。
+    window_chars = _MAX_LEDGER_STATEMENT_CHARS - context_chars * 2 - 2
+    is_long = len(statement) > _MAX_LEDGER_STATEMENT_CHARS
+    starts = range(0, len(statement), window_chars // 2) if is_long else (0,)
+    best: tuple[int, int, int, str] | None = None
+    for offset in starts:
+        window = statement[offset:offset + window_chars] if is_long else statement
+        # 查询的英文词项已经 casefold；直接在原文上匹配以保持字符坐标。
+        # ß/İ 等字符经 casefold 会改变长度，不能用转换后的坐标切原文。
+        matches = [match for pattern in query_patterns if (match := pattern.search(window)) is not None]
+        score = len(matches)
+        # 一次偶然词面碰撞（例如“历史 46”）不足以判定相关。
+        if score < 3:
+            continue
+        first = offset + min(match.start() for match in matches)
+        last = offset + max(match.end() for match in matches)
+        if is_long:
+            start, end = max(0, first - context_chars), min(len(statement), last + context_chars)
+            excerpt = ("…" if start else "") + statement[start:end] + ("…" if end < len(statement) else "")
+        else:
+            excerpt = statement
+        candidate = (score, last - first, first, excerpt)
+        # 相同覆盖优先更密集的原文，再保留较后的陈述；不合并或改写事实。
+        if best is None or (-score, last - first, -first) < (-best[0], best[1], -best[2]):
+            best = candidate
+    return best
 
 
 def _bounded_fact_excerpt(sentence: str, markers: list[re.Match[str]]) -> str:

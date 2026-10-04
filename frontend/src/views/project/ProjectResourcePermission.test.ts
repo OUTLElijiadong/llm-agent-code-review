@@ -46,7 +46,7 @@ beforeEach(() => {
   membersApi.listProjectMembers.mockResolvedValue([reviewer])
   membersApi.searchProjectMemberCandidates.mockResolvedValue([{ id: 105, username: 'candidate105', nickname: '候选账号' }])
   fileApi.list.mockResolvedValue({ items: [file], total: 1 })
-  fileApi.getDetail.mockResolvedValue(file)
+  fileApi.getDetail.mockResolvedValue({ ...file })
   fileApi.listVersions.mockResolvedValue({ items: [{ version_no: 1, create_time: file.update_time }], total: 1 })
   fileApi.getVersion.mockResolvedValue({ content: 'print(1)', version_no: 1 })
   fileApi.update.mockResolvedValue({ version_no: 2 })
@@ -188,8 +188,22 @@ describe('文件编辑与版本恢复真实项目授权', () => {
     render(CodeEditor); await flushPromises()
     expect(wrapper.get('.editor-probe').attributes('readonly')).toBeUndefined()
     await button('保存 (Ctrl+S)').trigger('click'); await flushPromises()
-    expect(fileApi.update).toHaveBeenCalledExactlyOnceWith(1892, { content: 'print(1)' })
+    expect(fileApi.update).toHaveBeenCalledExactlyOnceWith(1892, { content: 'print(1)', expected_version: 1 })
     expect(wrapper.text()).toContain('v2')
+  })
+
+  it('文件版本已变化时用当前版本号提交，并保留用户草稿供合并', async () => {
+    render(CodeEditor); await flushPromises()
+    const draft = 'print("local draft")'
+    ;(wrapper.vm as unknown as { codeContent: string }).codeContent = draft
+    fileApi.update.mockRejectedValueOnce({ code: 40904, message: '文件已更新' })
+    await button('保存 (Ctrl+S)').trigger('click'); await flushPromises()
+    expect(fileApi.update).toHaveBeenCalledExactlyOnceWith(1892, {
+      content: draft,
+      expected_version: 1,
+    })
+    expect((wrapper.vm as unknown as { codeContent: string }).codeContent).toBe(draft)
+    expect(wrapper.text()).toContain('当前编辑草稿仍保留')
   })
 
   it('reviewer 能查看历史，但恢复按钮和处理函数均拒绝', async () => {

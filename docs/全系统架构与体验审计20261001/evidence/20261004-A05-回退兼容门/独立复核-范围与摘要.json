@@ -1,0 +1,59 @@
+{
+  "scope": "candidate source read-only review; AST fixture and fake Docker only; no production DB/model/container switch",
+  "independent_runs": {
+    "reader_fixtures": 5,
+    "release_binding_cases": 29,
+    "deploy_failure_matrix_cases": 17,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "bash_n_exit": 0,
+    "additional_reference_query_negative_cases": 2,
+    "additional_reference_query_exit_codes": [
+      1,
+      1
+    ]
+  },
+  "exact_old_git_source_fixture": {
+    "release": "310ea1a8095428d670c0404a05b4dc643ad0027e",
+    "files": [
+      "agent_responses_service.py",
+      "deepseek_responses_runtime.py"
+    ],
+    "rewritten": false,
+    "python": "candidate .venv311",
+    "capability": "unsupported",
+    "exit_code": 0
+  },
+  "verified_boundaries": [
+    "immutable image ID probe without .env/network/application import",
+    "schema exists requires v2 reader even if ledger empty",
+    "unknown capability and failed DB/schema/reference queries reject before compose switching",
+    "whole digest mismatch rejected by actual extracted load",
+    "legacy inline messages remain readable",
+    "fixed SELECT-only SQL; no transcript rewrite or database restore",
+    "rejected rollback leaves release files unchanged and releases maintenance lock"
+  ],
+  "not_verified": [
+    "independent reviewer did not execute actual Docker images; parent old-image unsupported output read separately; new actual image remains pending",
+    "production MySQL query execution and latency",
+    "all application/schema backward compatibility",
+    "full model semantic understanding"
+  ],
+  "source_sha256": {
+    "deploy/lib/checkpoint_compatibility.py": "0388d0b893f4e0702f64aba1a5e3c6d4ed776d741681472666d5781de8e37f38",
+    "deploy/lib/common.sh": "83f5e72d53f98e2945257fc1f9f5bb965f00b1aa1ef5e5ddc8e1c1c59d4838ea",
+    "deploy/rollback.sh": "2996ea57717fffd114df7a7f58c9e3aa74256e59638afc8099ae0929859d35d6",
+    "deploy/tests/test_scripts.sh": "3cf6af578c339619166cf09149ac65a7e8ed42b0d4137f6473d13f3478cddf91",
+    "deploy/tests/deploy_failure_cases.sh": "f30645acd22d4459604d6b7e40fd79fe7a6b00598598d3d839be2aaa2a6152b1"
+  },
+  "product_sources_edited_by_independent_reviewer": false,
+  "parent_old_image_evidence": {
+    "log": "复测-20261004-旧生产镜像检查点能力.log",
+    "saved_stdout": "unsupported",
+    "parent_reported_image_id": "sha256:9d6df35e9b7045c9d76e854a2af5112df8beafbbf54429b55bbce9d1fdeadd8d",
+    "independent_reviewer_ran_remote_probe": false
+  }
+}

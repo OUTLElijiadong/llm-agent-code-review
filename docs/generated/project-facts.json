@@ -105,7 +105,7 @@
       {
         "category": "meta",
         "code": "orchestrator",
-        "description": "主调度 Agent, 协调所有子 Agent 完成全平台功能",
+        "description": "小菱的内部调度引擎，执行已授权工具与任务图；不是独立对话主控",
         "name": "orchestrator",
         "skills": [
           "orchestrator.plan_graph",
@@ -200,22 +200,22 @@
       {
         "category": "review",
         "code": "test_verifier",
-        "description": "黑盒测试员:把项目在隔离沙箱里真实运行,从外部发起真实攻击探测",
+        "description": "测试验证员:在隔离沙箱执行项目白盒检查与回环黑盒验证；外部目标仅做获批只读探测，真实渗透走独立授权流程",
         "name": "test_verifier",
         "skills": [
           "verification.run_suite",
           "原始证据归档",
-          "授权远程黑盒测试",
-          "项目动态白盒测试"
+          "授权远程只读探测",
+          "隔离环境白盒与黑盒验证"
         ]
       }
     ]
   },
   "alembic": {
     "heads": [
-      "047_review_input_snapshot"
+      "061_overview_time_indexes"
     ],
-    "migration_count": 48,
+    "migration_count": 62,
     "revisions": [
       {
         "down_revisions": [],
@@ -551,11 +551,109 @@
         ],
         "file": "backend/alembic/versions/047_review_input_snapshot.py",
         "revision": "047_review_input_snapshot"
+      },
+      {
+        "down_revisions": [
+          "047_review_input_snapshot"
+        ],
+        "file": "backend/alembic/versions/048_ai_usage_attribution.py",
+        "revision": "048_ai_usage_attribution"
+      },
+      {
+        "down_revisions": [
+          "048_ai_usage_attribution"
+        ],
+        "file": "backend/alembic/versions/049_agent_studio_reviewer_only.py",
+        "revision": "049_agent_studio_reviewer_only"
+      },
+      {
+        "down_revisions": [
+          "049_agent_studio_reviewer_only"
+        ],
+        "file": "backend/alembic/versions/050_user_avatar_preferences.py",
+        "revision": "050_user_avatar_preferences"
+      },
+      {
+        "down_revisions": [
+          "050_user_avatar_preferences"
+        ],
+        "file": "backend/alembic/versions/051_agent_multimodal_assets.py",
+        "revision": "051_agent_multimodal_assets"
+      },
+      {
+        "down_revisions": [
+          "051_agent_multimodal_assets"
+        ],
+        "file": "backend/alembic/versions/052_user_password_len.py",
+        "revision": "052_user_password_len"
+      },
+      {
+        "down_revisions": [
+          "052_user_password_len"
+        ],
+        "file": "backend/alembic/versions/053_role_and_pentest_authorization.py",
+        "revision": "053_role_pentest_authorization"
+      },
+      {
+        "down_revisions": [
+          "053_role_pentest_authorization"
+        ],
+        "file": "backend/alembic/versions/054_archive_excess_agent_conversations.py",
+        "revision": "054_archive_excess_conversations"
+      },
+      {
+        "down_revisions": [
+          "054_archive_excess_conversations"
+        ],
+        "file": "backend/alembic/versions/055_backfill_agent_conversation_titles.py",
+        "revision": "055_backfill_conversation_titles"
+      },
+      {
+        "down_revisions": [
+          "055_backfill_conversation_titles"
+        ],
+        "file": "backend/alembic/versions/056_backfill_titles_from_older_runs.py",
+        "revision": "056_older_run_titles"
+      },
+      {
+        "down_revisions": [
+          "056_older_run_titles"
+        ],
+        "file": "backend/alembic/versions/057_reviewer_audit_menu_route.py",
+        "revision": "057_reviewer_audit_menu_route"
+      },
+      {
+        "down_revisions": [
+          "057_reviewer_audit_menu_route"
+        ],
+        "file": "backend/alembic/versions/058_roundtable_sessions.py",
+        "revision": "058_roundtable_sessions"
+      },
+      {
+        "down_revisions": [
+          "058_roundtable_sessions"
+        ],
+        "file": "backend/alembic/versions/059_agent_response_transcript_ledger.py",
+        "revision": "059_response_transcript_ledger"
+      },
+      {
+        "down_revisions": [
+          "059_response_transcript_ledger"
+        ],
+        "file": "backend/alembic/versions/060_agent_response_transcript_message_digest.py",
+        "revision": "060_transcript_message_sha256"
+      },
+      {
+        "down_revisions": [
+          "060_transcript_message_sha256"
+        ],
+        "file": "backend/alembic/versions/061_tool_call_time_agent_idx.py",
+        "revision": "061_overview_time_indexes"
       }
     ]
   },
   "code": {
-    "backend_python_module_count": 311,
+    "backend_python_module_count": 338,
     "backend_python_modules": [
       "backend/app/__init__.py",
       "backend/app/agents/__init__.py",
@@ -566,6 +664,7 @@
       "backend/app/agents/chat_agent.py",
       "backend/app/agents/chat_planner.py",
       "backend/app/agents/clarify_store.py",
+      "backend/app/agents/context_budget.py",
       "backend/app/agents/contracts.py",
       "backend/app/agents/dashboard_agent.py",
       "backend/app/agents/deployment_coordinator_agent.py",
@@ -612,6 +711,7 @@
       "backend/app/agents/skills/rule_manager.py",
       "backend/app/agents/skills/security_sentinel.py",
       "backend/app/agents/skills/self_improvement.py",
+      "backend/app/agents/source_context.py",
       "backend/app/agents/syntax_repair_agent.py",
       "backend/app/agents/test_case_generator_agent.py",
       "backend/app/agents/test_review_reporter_agent.py",
@@ -652,6 +752,7 @@
       "backend/app/api/v1/api_config.py",
       "backend/app/api/v1/audit.py",
       "backend/app/api/v1/auth.py",
+      "backend/app/api/v1/avatars.py",
       "backend/app/api/v1/beta_invites.py",
       "backend/app/api/v1/code_files.py",
       "backend/app/api/v1/dashboard.py",
@@ -678,6 +779,7 @@
       "backend/app/api/v1/ws_discussion.py",
       "backend/app/constants/__init__.py",
       "backend/app/constants/compliance.py",
+      "backend/app/constants/security_catalog.py",
       "backend/app/core/__init__.py",
       "backend/app/core/captcha.py",
       "backend/app/core/config.py",
@@ -688,9 +790,11 @@
       "backend/app/core/logger.py",
       "backend/app/core/observability.py",
       "backend/app/core/pagination.py",
+      "backend/app/core/password_policy.py",
       "backend/app/core/permission_codes.py",
       "backend/app/core/rate_limit.py",
       "backend/app/core/rbac_dependency.py",
+      "backend/app/core/request_size_limit.py",
       "backend/app/core/security.py",
       "backend/app/core/super_admin.py",
       "backend/app/exporters/__init__.py",
@@ -702,6 +806,7 @@
       "backend/app/models/agent_capability.py",
       "backend/app/models/agent_governance.py",
       "backend/app/models/agent_mesh.py",
+      "backend/app/models/agent_multimodal.py",
       "backend/app/models/agent_response_run.py",
       "backend/app/models/agent_skill_record.py",
       "backend/app/models/agent_team.py",
@@ -735,8 +840,11 @@
       "backend/app/models/review_rule.py",
       "backend/app/models/review_task.py",
       "backend/app/models/review_task_file.py",
+      "backend/app/models/roundtable.py",
       "backend/app/models/system_config.py",
+      "backend/app/models/usage_attribution.py",
       "backend/app/models/user.py",
+      "backend/app/models/user_avatar.py",
       "backend/app/models/user_feedback.py",
       "backend/app/models/user_profile.py",
       "backend/app/schemas/__init__.py",
@@ -786,13 +894,18 @@
       "backend/app/services/agent_memory_service.py",
       "backend/app/services/agent_mesh_dispatcher.py",
       "backend/app/services/agent_mesh_service.py",
+      "backend/app/services/agent_model_service.py",
       "backend/app/services/agent_responses_service.py",
       "backend/app/services/agent_scheduler_runtime.py",
       "backend/app/services/agent_service.py",
       "backend/app/services/agent_studio_service.py",
+      "backend/app/services/agent_supervisor_service.py",
       "backend/app/services/agent_team_dispatcher.py",
+      "backend/app/services/agent_team_review.py",
       "backend/app/services/agent_team_service.py",
+      "backend/app/services/agent_team_summary.py",
       "backend/app/services/ai_log_service.py",
+      "backend/app/services/ai_usage_context.py",
       "backend/app/services/api_config_service.py",
       "backend/app/services/approval_service.py",
       "backend/app/services/audit_service.py",
@@ -801,6 +914,7 @@
       "backend/app/services/beta_invite_service.py",
       "backend/app/services/capability_catalog_service.py",
       "backend/app/services/code_file_service.py",
+      "backend/app/services/context_fidelity.py",
       "backend/app/services/dashboard_service.py",
       "backend/app/services/declarative_agent_runtime.py",
       "backend/app/services/decompilation_service.py",
@@ -813,6 +927,7 @@
       "backend/app/services/feedback_service.py",
       "backend/app/services/forum_service.py",
       "backend/app/services/geoip_service.py",
+      "backend/app/services/governance_log_privacy_service.py",
       "backend/app/services/issue_merger.py",
       "backend/app/services/issue_service.py",
       "backend/app/services/jarvis_patrol_service.py",
@@ -821,6 +936,7 @@
       "backend/app/services/managed_mcp_adapter.py",
       "backend/app/services/mcp_governance_service.py",
       "backend/app/services/mcp_tool_provider.py",
+      "backend/app/services/multimodal_service.py",
       "backend/app/services/observability_service.py",
       "backend/app/services/ops_service.py",
       "backend/app/services/page_guide_service.py",
@@ -841,20 +957,25 @@
       "backend/app/services/report_service.py",
       "backend/app/services/report_template_service.py",
       "backend/app/services/report_word_exporter.py",
+      "backend/app/services/review_admission_service.py",
       "backend/app/services/review_input_service.py",
       "backend/app/services/review_service.py",
       "backend/app/services/reward_service.py",
       "backend/app/services/rollback_service.py",
+      "backend/app/services/roundtable_followup_service.py",
       "backend/app/services/rule_service.py",
+      "backend/app/services/sandbox_report_summary.py",
       "backend/app/services/sandbox_service.py",
       "backend/app/services/scheduler_service.py",
       "backend/app/services/security_monitor_service.py",
       "backend/app/services/security_posture_service.py",
+      "backend/app/services/security_rule_catalog_service.py",
       "backend/app/services/security_service.py",
       "backend/app/services/skill_service.py",
       "backend/app/services/strategy_learning_service.py",
       "backend/app/services/system_config_service.py",
       "backend/app/services/system_service.py",
+      "backend/app/services/temporary_agent_runtime.py",
       "backend/app/services/tool_gateway.py",
       "backend/app/services/user_capability_registry.py",
       "backend/app/services/user_feedback_service.py",
@@ -864,52 +985,86 @@
       "backend/app/utils/archive_extractor.py",
       "backend/app/utils/encoding_utils.py",
       "backend/app/utils/file_validator.py",
+      "backend/app/utils/image_utils.py",
+      "backend/app/utils/input_validation.py",
       "backend/app/utils/malware_scanner.py",
+      "backend/app/utils/multipart_limits.py",
       "backend/app/utils/public_http.py",
       "backend/app/utils/sanitize.py",
-      "backend/app/utils/source_archive_gate.py"
+      "backend/app/utils/source_archive_gate.py",
+      "backend/app/utils/upload_reader.py"
     ],
-    "backend_test_file_count": 183,
+    "backend_test_file_count": 291,
     "backend_test_files": [
       "backend/tests/fixtures/xiaoling_acceptance/test_main.py",
+      "backend/tests/test_c28_report_consistency.py",
       "backend/tests/test_code_chunk_context.py",
       "backend/tests/test_code_file_service.py",
+      "backend/tests/test_complete_permission_matrix.py",
       "backend/tests/test_compliance_dict.py",
+      "backend/tests/test_dashboard_private_report_scope.py",
       "backend/tests/test_finding_aggregator.py",
       "backend/tests/test_issue_aggregation_workflow.py",
       "backend/tests/test_issue_merger.py",
       "backend/tests/test_malware_scanner.py",
+      "backend/tests/test_manual_auth_anonymous_contract.py",
       "backend/tests/test_observability.py",
+      "backend/tests/test_permission_route_contexts.py",
       "backend/tests/test_prism_sandbox_executor.py",
+      "backend/tests/test_production_permission_acceptance_runner.py",
       "backend/tests/test_project_lifecycle_guards.py",
       "backend/tests/test_rbac_api.py",
       "backend/tests/test_rbac_service.py",
+      "backend/tests/test_release_readonly_collector.py",
       "backend/tests/test_report_api.py",
       "backend/tests/test_report_exporter.py",
+      "backend/tests/test_report_object_authorization.py",
+      "backend/tests/test_report_project_scope_snapshot.py",
       "backend/tests/test_result_parser.py",
       "backend/tests/test_result_parser_contract.py",
+      "backend/tests/test_review_admission_fixture.py",
       "backend/tests/test_review_input_lifecycle.py",
       "backend/tests/test_review_recovery_integrity.py",
       "backend/tests/test_review_result_pipeline_regression.py",
       "backend/tests/test_review_service_v3.py",
+      "backend/tests/test_review_task_access_errors.py",
+      "backend/tests/test_security_catalog_current.py",
       "backend/tests/test_vulnerability_e2e.py",
       "backend/tests/test_vulnerability_summary.py",
       "backend/tests/unit/agents/test_agent_contracts.py",
       "backend/tests/unit/agents/test_agent_project_quarantine.py",
+      "backend/tests/unit/agents/test_base_agent_input_capacity.py",
+      "backend/tests/unit/agents/test_c12_context_projection.py",
+      "backend/tests/unit/agents/test_c13_semantic_coverage.py",
       "backend/tests/unit/agents/test_chat_agent_coverage.py",
       "backend/tests/unit/agents/test_chat_planner_coverage.py",
       "backend/tests/unit/agents/test_code_reviewer_agent.py",
       "backend/tests/unit/agents/test_discussion_gc.py",
       "backend/tests/unit/agents/test_event_bus_coverage.py",
       "backend/tests/unit/agents/test_evolution_agent.py",
+      "backend/tests/unit/agents/test_file_agent_keyword.py",
       "backend/tests/unit/agents/test_finding_locate_evidence.py",
+      "backend/tests/unit/agents/test_fullchain_context_coverage.py",
       "backend/tests/unit/agents/test_metagpt.py",
+      "backend/tests/unit/agents/test_operations_context.py",
       "backend/tests/unit/agents/test_orchestrator_coverage.py",
+      "backend/tests/unit/agents/test_project_agent_full_file_context.py",
+      "backend/tests/unit/agents/test_project_manager_no_silent_truncation.py",
+      "backend/tests/unit/agents/test_review_issue_tool_result.py",
+      "backend/tests/unit/agents/test_review_prompt_isolation.py",
+      "backend/tests/unit/agents/test_roundtable_followup.py",
+      "backend/tests/unit/agents/test_roundtable_lifecycle.py",
+      "backend/tests/unit/agents/test_roundtable_restart_recovery.py",
+      "backend/tests/unit/agents/test_sandbox_agent_context.py",
       "backend/tests/unit/agents/test_scan_entry_input_closure.py",
       "backend/tests/unit/agents/test_security_sentinel_review.py",
       "backend/tests/unit/agents/test_self_improvement_boundaries.py",
+      "backend/tests/unit/agents/test_source_context_provenance.py",
       "backend/tests/unit/agents/test_tool_contracts.py",
+      "backend/tests/unit/agents/test_v4_review_input_selection.py",
       "backend/tests/unit/agents/test_ws_discussion_coverage.py",
+      "backend/tests/unit/ai/test_audit_knowledge_coverage.py",
+      "backend/tests/unit/ai/test_c15_output_contract.py",
       "backend/tests/unit/ai/test_deepseek_agent_label.py",
       "backend/tests/unit/ai/test_deepseek_agent_response.py",
       "backend/tests/unit/ai/test_multi_agent.py",
@@ -919,94 +1074,155 @@
       "backend/tests/unit/api/test_admin_copilot_api.py",
       "backend/tests/unit/api/test_admin_overview.py",
       "backend/tests/unit/api/test_admin_overview_activity.py",
+      "backend/tests/unit/api/test_agent_release_decision_scope.py",
       "backend/tests/unit/api/test_agent_teams_api.py",
       "backend/tests/unit/api/test_agents_api_coverage.py",
       "backend/tests/unit/api/test_auth_rate_limit_api.py",
+      "backend/tests/unit/api/test_auth_redis_unavailability_api.py",
+      "backend/tests/unit/api/test_avatar_api.py",
       "backend/tests/unit/api/test_beta_invites_api.py",
+      "backend/tests/unit/api/test_c22_c23_chat_persistence.py",
+      "backend/tests/unit/api/test_folder_upload_resource_cleanup.py",
       "backend/tests/unit/api/test_mcp_governance_api.py",
       "backend/tests/unit/api/test_pentest_api.py",
+      "backend/tests/unit/api/test_personalization_resilience.py",
+      "backend/tests/unit/api/test_private_agent_account_isolation.py",
+      "backend/tests/unit/api/test_private_audit_log_isolation.py",
+      "backend/tests/unit/api/test_private_governance_log_isolation.py",
       "backend/tests/unit/api/test_project_import_lifecycle_api.py",
+      "backend/tests/unit/api/test_project_member_candidates_api.py",
       "backend/tests/unit/api/test_project_source_download_audit.py",
       "backend/tests/unit/api/test_responses_api.py",
+      "backend/tests/unit/api/test_review_start_rate_limit.py",
       "backend/tests/unit/api/test_security_monitor_api.py",
+      "backend/tests/unit/core/test_app_lifespan_contract.py",
       "backend/tests/unit/core/test_config_security.py",
       "backend/tests/unit/core/test_login_rate_limit.py",
+      "backend/tests/unit/core/test_login_rate_limit_real_redis.py",
+      "backend/tests/unit/core/test_login_redis_unavailability.py",
+      "backend/tests/unit/core/test_password_policy.py",
       "backend/tests/unit/core/test_single_device_session.py",
+      "backend/tests/unit/core/test_upload_request_size_limit.py",
+      "backend/tests/unit/schemas/test_input_security_boundaries.py",
       "backend/tests/unit/scripts/test_project_contract_scripts.py",
       "backend/tests/unit/scripts/test_quarantine_projects.py",
+      "backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py",
       "backend/tests/unit/services/test_admin_capability_registry.py",
       "backend/tests/unit/services/test_admin_copilot_service.py",
       "backend/tests/unit/services/test_agent_cost_budget_service.py",
+      "backend/tests/unit/services/test_agent_count_explicit_source.py",
+      "backend/tests/unit/services/test_agent_count_scope.py",
       "backend/tests/unit/services/test_agent_governance_api_integration.py",
       "backend/tests/unit/services/test_agent_governance_services.py",
+      "backend/tests/unit/services/test_agent_mesh_dispatch_rbac_regression.py",
       "backend/tests/unit/services/test_agent_mesh_dispatcher.py",
       "backend/tests/unit/services/test_agent_mesh_service.py",
+      "backend/tests/unit/services/test_agent_response_server_history_images.py",
+      "backend/tests/unit/services/test_agent_response_session_history.py",
       "backend/tests/unit/services/test_agent_responses_admin_tools.py",
       "backend/tests/unit/services/test_agent_responses_integration.py",
+      "backend/tests/unit/services/test_agent_role_instructions.py",
       "backend/tests/unit/services/test_agent_runtime_v2.py",
       "backend/tests/unit/services/test_agent_service.py",
       "backend/tests/unit/services/test_agent_status_events.py",
       "backend/tests/unit/services/test_agent_studio_service.py",
       "backend/tests/unit/services/test_agent_team_dispatcher.py",
+      "backend/tests/unit/services/test_agent_team_review.py",
       "backend/tests/unit/services/test_agent_team_service.py",
       "backend/tests/unit/services/test_agent_test_cases.py",
       "backend/tests/unit/services/test_ai_prompt_agent.py",
+      "backend/tests/unit/services/test_ai_usage_attribution.py",
+      "backend/tests/unit/services/test_ai_usage_recording.py",
       "backend/tests/unit/services/test_api_config_service.py",
       "backend/tests/unit/services/test_audit_service.py",
       "backend/tests/unit/services/test_authorization_guards.py",
+      "backend/tests/unit/services/test_background_usage_sources.py",
       "backend/tests/unit/services/test_beta_invite_service.py",
+      "backend/tests/unit/services/test_c07_tool_authorization.py",
       "backend/tests/unit/services/test_change_password_tool.py",
+      "backend/tests/unit/services/test_chat_history_assets.py",
       "backend/tests/unit/services/test_chat_security_intent.py",
       "backend/tests/unit/services/test_clarify_v2.py",
+      "backend/tests/unit/services/test_code_file_concurrency.py",
+      "backend/tests/unit/services/test_code_file_keyword_literal.py",
       "backend/tests/unit/services/test_code_file_service_v2.py",
       "backend/tests/unit/services/test_community_service_coverage.py",
+      "backend/tests/unit/services/test_context_fidelity.py",
+      "backend/tests/unit/services/test_context_recall_case_integrity.py",
       "backend/tests/unit/services/test_core_service_coverage.py",
+      "backend/tests/unit/services/test_dashboard_live_progress.py",
+      "backend/tests/unit/services/test_dashboard_stats_cache.py",
       "backend/tests/unit/services/test_decompilation_service.py",
       "backend/tests/unit/services/test_deepseek_responses_runtime.py",
       "backend/tests/unit/services/test_deepseek_responses_service.py",
+      "backend/tests/unit/services/test_deploy_verify_runner_regressions.py",
       "backend/tests/unit/services/test_domain_report_export_closure.py",
       "backend/tests/unit/services/test_embedding_service.py",
+      "backend/tests/unit/services/test_embedding_usage_recording.py",
       "backend/tests/unit/services/test_eval_gate.py",
       "backend/tests/unit/services/test_event_bus_v2.py",
       "backend/tests/unit/services/test_evolution_service.py",
       "backend/tests/unit/services/test_experience_service.py",
       "backend/tests/unit/services/test_feedback_service.py",
+      "backend/tests/unit/services/test_forum_context_compaction.py",
       "backend/tests/unit/services/test_frontend_api_contract.py",
       "backend/tests/unit/services/test_fuzzy_project_resolve.py",
       "backend/tests/unit/services/test_github_project_import.py",
       "backend/tests/unit/services/test_jarvis_patrol_service.py",
       "backend/tests/unit/services/test_knowledge_notebook_tools.py",
+      "backend/tests/unit/services/test_legacy_transcript_shape_integrity.py",
       "backend/tests/unit/services/test_llm_config_runtime.py",
       "backend/tests/unit/services/test_llm_endpoint_service.py",
       "backend/tests/unit/services/test_managed_mcp_adapter.py",
       "backend/tests/unit/services/test_mcp_governance_service.py",
       "backend/tests/unit/services/test_mcp_tool_provider.py",
       "backend/tests/unit/services/test_mesh_archive_and_team_normalize.py",
+      "backend/tests/unit/services/test_model_independent_paths.py",
+      "backend/tests/unit/services/test_model_registry.py",
+      "backend/tests/unit/services/test_multimodal_recovery_regressions.py",
+      "backend/tests/unit/services/test_multimodal_service.py",
       "backend/tests/unit/services/test_page_guide_service.py",
       "backend/tests/unit/services/test_personalization_service_coverage.py",
+      "backend/tests/unit/services/test_private_agent_knowledge.py",
+      "backend/tests/unit/services/test_private_approval_isolation.py",
       "backend/tests/unit/services/test_project_agent_runs.py",
       "backend/tests/unit/services/test_project_import_lifecycle.py",
       "backend/tests/unit/services/test_project_import_tasks.py",
       "backend/tests/unit/services/test_project_member_service.py",
       "backend/tests/unit/services/test_project_quarantine.py",
+      "backend/tests/unit/services/test_project_source_revision_integrity.py",
       "backend/tests/unit/services/test_project_source_service.py",
       "backend/tests/unit/services/test_published_agent_capability_search.py",
+      "backend/tests/unit/services/test_published_agent_context.py",
+      "backend/tests/unit/services/test_published_agent_runtime.py",
+      "backend/tests/unit/services/test_published_dependency_integrity.py",
       "backend/tests/unit/services/test_real_data_sources.py",
       "backend/tests/unit/services/test_remote_archive_streaming.py",
+      "backend/tests/unit/services/test_remote_target_authorization.py",
       "backend/tests/unit/services/test_report_dashboard_source_facts.py",
       "backend/tests/unit/services/test_report_service.py",
+      "backend/tests/unit/services/test_responses_usage_attempts.py",
+      "backend/tests/unit/services/test_review_admission_shared.py",
       "backend/tests/unit/services/test_review_dynamic_roles.py",
+      "backend/tests/unit/services/test_review_non_code_compaction.py",
+      "backend/tests/unit/services/test_review_report_context.py",
       "backend/tests/unit/services/test_review_service_helpers.py",
       "backend/tests/unit/services/test_review_service_state_coverage.py",
       "backend/tests/unit/services/test_review_service_v2.py",
+      "backend/tests/unit/services/test_review_team_execution_guards.py",
+      "backend/tests/unit/services/test_review_truncation_retry.py",
+      "backend/tests/unit/services/test_review_worker_reauthorization.py",
+      "backend/tests/unit/services/test_sandbox_api_authorization.py",
       "backend/tests/unit/services/test_sandbox_decompilation.py",
       "backend/tests/unit/services/test_sandbox_multi_agent_review.py",
       "backend/tests/unit/services/test_sandbox_optimizations.py",
       "backend/tests/unit/services/test_sandbox_report_publish.py",
+      "backend/tests/unit/services/test_sandbox_report_summary.py",
       "backend/tests/unit/services/test_scheduler_configuration_closure.py",
       "backend/tests/unit/services/test_scheduler_skill_contract.py",
       "backend/tests/unit/services/test_security_hardening.py",
       "backend/tests/unit/services/test_security_monitor_service.py",
+      "backend/tests/unit/services/test_security_rule_catalog_service.py",
       "backend/tests/unit/services/test_security_sentinel_agent.py",
       "backend/tests/unit/services/test_security_service_coverage.py",
       "backend/tests/unit/services/test_server_ops_service.py",
@@ -1016,11 +1232,17 @@
       "backend/tests/unit/services/test_surface_persona_separation.py",
       "backend/tests/unit/services/test_system_config_api_key_rotation.py",
       "backend/tests/unit/services/test_team_and_beta_permissions.py",
+      "backend/tests/unit/services/test_temporary_agent_runtime.py",
+      "backend/tests/unit/services/test_temporary_team_definition.py",
+      "backend/tests/unit/services/test_temporary_team_independent_boundaries.py",
       "backend/tests/unit/services/test_user_capability_registry.py",
+      "backend/tests/unit/services/test_v4_team_review_contracts.py",
       "backend/tests/unit/services/test_xiaoling_slim_observability.py",
       "backend/tests/unit/test_ac2_e2e_fixes.py",
       "backend/tests/unit/test_alembic_metadata_imports.py",
+      "backend/tests/unit/test_db_url_credentials.py",
       "backend/tests/unit/test_discussion_orchestrator_coverage.py",
+      "backend/tests/unit/test_export_agent_contracts.py",
       "backend/tests/unit/test_json_field_serialization_check.py",
       "backend/tests/unit/test_migration_020_manager_admin_capability.py",
       "backend/tests/unit/test_migration_021_project_import.py",
@@ -1044,28 +1266,47 @@
       "backend/tests/unit/test_migration_044_pentest.py",
       "backend/tests/unit/test_migration_046_finding_aggregation.py",
       "backend/tests/unit/test_migration_047_review_input_snapshot.py",
+      "backend/tests/unit/test_migration_048_ai_usage_attribution.py",
+      "backend/tests/unit/test_migration_049_agent_studio_reviewer_only.py",
+      "backend/tests/unit/test_migration_053_role_pentest_authorization.py",
+      "backend/tests/unit/test_migration_054_archive_excess_conversations.py",
+      "backend/tests/unit/test_migration_055_backfill_agent_conversation_titles.py",
+      "backend/tests/unit/test_migration_056_backfill_titles_from_older_runs.py",
+      "backend/tests/unit/test_migration_057_reviewer_audit_menu_route.py",
+      "backend/tests/unit/test_mysql_init_user_contract.py",
       "backend/tests/unit/test_nginx_security_headers.py",
       "backend/tests/unit/test_orchestrator_model_tiering.py",
       "backend/tests/unit/test_pentest_service.py",
       "backend/tests/unit/test_pure_logic_export_coverage.py",
       "backend/tests/unit/test_schema_field_coverage_r1_r8.py",
+      "backend/tests/unit/test_security_finding_review_schema.py",
       "backend/tests/unit/test_seed_rules_security.py",
       "backend/tests/unit/utils/test_api_resolver.py",
       "backend/tests/unit/utils/test_api_url_security.py",
       "backend/tests/unit/utils/test_archive_extractor.py",
-      "backend/tests/unit/utils/test_pdf_exporter.py"
+      "backend/tests/unit/utils/test_multipart_limits.py",
+      "backend/tests/unit/utils/test_pdf_exporter.py",
+      "backend/tests/unit/utils/test_upload_reader.py"
     ],
-    "frontend_test_file_count": 77,
+    "frontend_test_file_count": 132,
     "frontend_test_files": [
       "frontend/src/App.test.ts",
+      "frontend/src/api/agentResponses.cancel.test.ts",
+      "frontend/src/api/agentResponses.image.test.ts",
       "frontend/src/api/agentTeams.test.ts",
+      "frontend/src/api/forum.test.ts",
       "frontend/src/api/http.test.ts",
       "frontend/src/api/llmConfig.test.ts",
       "frontend/src/api/project.test.ts",
       "frontend/src/api/report.test.ts",
       "frontend/src/api/sandbox.test.ts",
       "frontend/src/components/admin/AdminCopilot.test.ts",
+      "frontend/src/components/admin/AdminLayout.logout.test.ts",
       "frontend/src/components/admin/AdminLayout.test.ts",
+      "frontend/src/components/agent/AgentDiscussionPanel.test.ts",
+      "frontend/src/components/agent/C31PollCadence.test.ts",
+      "frontend/src/components/agent/GlobalDiscussionHost.test.ts",
+      "frontend/src/components/agent/MetaGPTOrchestrationPanel.test.ts",
       "frontend/src/components/ai/AgentActivityBorder.test.ts",
       "frontend/src/components/ai/AgentChatDrawer.test.ts",
       "frontend/src/components/ai/AgentMemberWorkCard.regression.test.ts",
@@ -1074,17 +1315,31 @@
       "frontend/src/components/ai/AgentSessionSwitcher.test.ts",
       "frontend/src/components/ai/AgentTeamCard.test.ts",
       "frontend/src/components/ai/AgentTeamSidePanel.test.ts",
+      "frontend/src/components/ai/AgentTeamTime.regression.test.ts",
       "frontend/src/components/ai/AgentTeamTrace.test.ts",
+      "frontend/src/components/ai/AgentTeamWindow.full-payload.test.ts",
+      "frontend/src/components/ai/AgentTeamWindow.target-freeze.test.ts",
+      "frontend/src/components/ai/AuthenticatedChatImage.test.ts",
+      "frontend/src/components/ai/PrismMascot.test.ts",
       "frontend/src/components/ai/ProactivePageGuide.test.ts",
+      "frontend/src/components/ai/TemporaryAgentBadge.test.ts",
       "frontend/src/components/ai/VirtualCursor.test.ts",
+      "frontend/src/components/ai/XiaolingGreeter.test.ts",
+      "frontend/src/components/ai/XiaolingPreferenceDialog.test.ts",
       "frontend/src/components/ai/mobileInteraction.regression.test.ts",
+      "frontend/src/components/ai/responses/ResponseToolTimeline.test.ts",
+      "frontend/src/components/chart/BaseChart.test.ts",
+      "frontend/src/components/code/CodeViewer.test.ts",
       "frontend/src/components/common/TriEndUx.regression.test.ts",
+      "frontend/src/components/common/UserAvatar.test.ts",
       "frontend/src/components/issue/IssueDetailDrawer.test.ts",
       "frontend/src/components/layout/AppHeader.test.ts",
+      "frontend/src/components/layout/AppLayout.test.ts",
       "frontend/src/components/layout/AppSidebar.test.ts",
       "frontend/src/components/security/SecurityPostureCard.test.ts",
       "frontend/src/components/security/SecurityScanModal.test.ts",
       "frontend/src/composables/useAgentTeamEvents.test.ts",
+      "frontend/src/composables/useChatImages.test.ts",
       "frontend/src/composables/useCountUp.test.ts",
       "frontend/src/composables/useFloatingChatPosition.test.ts",
       "frontend/src/composables/useSecurityAlerts.test.ts",
@@ -1093,23 +1348,31 @@
       "frontend/src/constants/pentest.test.ts",
       "frontend/src/router/guards.test.ts",
       "frontend/src/router/index.test.ts",
+      "frontend/src/router/permissionMatrix.test.ts",
       "frontend/src/stores/user.test.ts",
+      "frontend/src/utils/adminApprovalType.test.ts",
+      "frontend/src/utils/adminUnifiedNavigation.test.ts",
       "frontend/src/utils/agentActivityPresentation.test.ts",
       "frontend/src/utils/agentChatSessions.test.ts",
       "frontend/src/utils/agentEventStream.test.ts",
       "frontend/src/utils/agentMeshBridge.test.ts",
       "frontend/src/utils/agentMeshTimeline.test.ts",
       "frontend/src/utils/agentNavigation.test.ts",
+      "frontend/src/utils/agentSessionHistory.test.ts",
       "frontend/src/utils/autoValidation.test.ts",
       "frontend/src/utils/clarifyProjectOptions.test.ts",
       "frontend/src/utils/coreUtils.test.ts",
       "frontend/src/utils/discussionStream.test.ts",
       "frontend/src/utils/elementPlusContracts.test.ts",
+      "frontend/src/utils/markdown.security.test.ts",
       "frontend/src/utils/pageGuideTips.test.ts",
       "frontend/src/utils/responsesStream.test.ts",
       "frontend/src/utils/responsesTimeline.test.ts",
       "frontend/src/utils/reviewScore.test.ts",
+      "frontend/src/utils/roundtableNotifications.test.ts",
+      "frontend/src/utils/sandboxArtifactAccess.test.ts",
       "frontend/src/utils/sandboxPresentation.test.ts",
+      "frontend/src/utils/taskDisplayTitle.test.ts",
       "frontend/src/utils/thinkingCityEngine.test.ts",
       "frontend/src/utils/thinkingCityMemory.test.ts",
       "frontend/src/utils/tilt.test.ts",
@@ -1117,33 +1380,61 @@
       "frontend/src/utils/xiaolingNavigation.test.ts",
       "frontend/src/views/admin/AdminOverview.test.ts",
       "frontend/src/views/admin/AgentReleaseAdmin.test.ts",
+      "frontend/src/views/admin/AiLogList.privacy.test.ts",
       "frontend/src/views/admin/BetaCodeAdmin.responsive.test.ts",
+      "frontend/src/views/admin/EvolutionCenter.gate.test.ts",
+      "frontend/src/views/admin/GovernanceWorkstation.agents.test.ts",
+      "frontend/src/views/admin/GovernanceWorkstation.approvals.test.ts",
+      "frontend/src/views/admin/GovernanceWorkstation.interpolation.test.ts",
       "frontend/src/views/admin/GovernanceWorkstation.scheduler.test.ts",
       "frontend/src/views/admin/LlmConfig.test.ts",
+      "frontend/src/views/admin/PermissionList.test.ts",
       "frontend/src/views/admin/RoleManage.test.ts",
+      "frontend/src/views/admin/SystemAudit.privacy.test.ts",
+      "frontend/src/views/admin/UserManage.test.ts",
+      "frontend/src/views/agent/AgentCountScope.test.ts",
+      "frontend/src/views/agent/AgentStudio.recovery.test.ts",
       "frontend/src/views/auth/Login.test.ts",
       "frontend/src/views/auth/Register.test.ts",
+      "frontend/src/views/code/CodeEditor.lifecycle.test.ts",
+      "frontend/src/views/code/CodeHub.recovery.test.ts",
+      "frontend/src/views/dashboard/Dashboard.test.ts",
+      "frontend/src/views/issue/IssueHub.recovery.test.ts",
+      "frontend/src/views/knowledge/KnowledgeBase.privacy.test.ts",
+      "frontend/src/views/pentest/PentestList.regression.test.ts",
       "frontend/src/views/pentest/PentestStart.regression.test.ts",
       "frontend/src/views/permissionVisibility.regression.test.ts",
+      "frontend/src/views/profile/ApiConfig.test.ts",
       "frontend/src/views/profile/ChangePassword.test.ts",
+      "frontend/src/views/project/FailureRecovery.test.ts",
       "frontend/src/views/project/ProjectList.test.ts",
+      "frontend/src/views/project/ProjectResourcePermission.test.ts",
+      "frontend/src/views/report/FailureRecoveryIndependent.test.ts",
+      "frontend/src/views/report/ReportDetail.permissionMounted.test.ts",
       "frontend/src/views/report/ReportDetail.test.ts",
       "frontend/src/views/report/ReportList.test.ts",
       "frontend/src/views/review/ReviewStart.regression.test.ts",
       "frontend/src/views/review/ReviewTaskDetail.test.ts",
       "frontend/src/views/review/ReviewTaskList.polling.test.ts",
       "frontend/src/views/rule/RuleConfig.test.ts",
-      "frontend/src/views/sandbox/SandboxWorkstation.test.ts"
+      "frontend/src/views/sandbox/SandboxWorkstation.test.ts",
+      "frontend/src/views/security/SecurityCenter.test.ts",
+      "frontend/src/views/security/SecurityRuleCenter.test.ts",
+      "frontend/src/views/security/owasp-knowledge.test.ts",
+      "frontend/src/views/support/SupportRecovery.test.ts"
     ]
   },
   "frontend": {
-    "view_count": 61,
+    "view_count": 68,
     "views": [
+      "frontend/src/views/admin/ActivityLogHub.vue",
       "frontend/src/views/admin/AdminOverview.vue",
+      "frontend/src/views/admin/AdminUnifiedCenter.vue",
       "frontend/src/views/admin/AgentGovernance.vue",
       "frontend/src/views/admin/AgentReleaseAdmin.vue",
       "frontend/src/views/admin/AiLogList.vue",
       "frontend/src/views/admin/ApprovalCenter.vue",
+      "frontend/src/views/admin/ApprovalHub.vue",
       "frontend/src/views/admin/BetaCodeAdmin.vue",
       "frontend/src/views/admin/EmbeddingConfig.vue",
       "frontend/src/views/admin/EvolutionCenter.vue",
@@ -1162,9 +1453,9 @@
       "frontend/src/views/admin/SystemAudit.vue",
       "frontend/src/views/admin/ToolGovernance.vue",
       "frontend/src/views/admin/UserManage.vue",
-      "frontend/src/views/admin/UserRoleAssign.vue",
       "frontend/src/views/agent/AgentCenter.vue",
       "frontend/src/views/agent/AgentStudio.vue",
+      "frontend/src/views/agent/AgentWorkspace.vue",
       "frontend/src/views/auth/Login.vue",
       "frontend/src/views/auth/Register.vue",
       "frontend/src/views/code/CodeEditor.vue",
@@ -1198,13 +1489,17 @@
       "frontend/src/views/rule/RuleConfig.vue",
       "frontend/src/views/sandbox/SandboxWorkstation.vue",
       "frontend/src/views/security/SecurityCenter.vue",
+      "frontend/src/views/security/SecurityReviewCenter.vue",
+      "frontend/src/views/security/SecurityRuleCatalog.vue",
+      "frontend/src/views/security/SecurityRuleCenter.vue",
       "frontend/src/views/support/FeedbackCenter.vue",
-      "frontend/src/views/support/MaintenanceCenter.vue"
+      "frontend/src/views/support/MaintenanceCenter.vue",
+      "frontend/src/views/support/SupportCenter.vue"
     ]
   },
   "http": {
-    "business_route_count": 303,
-    "operation_count": 303,
+    "business_route_count": 329,
+    "operation_count": 329,
     "routes": [
       {
         "methods": [
@@ -1460,6 +1755,34 @@
       },
       {
         "methods": [
+          "PUT"
+        ],
+        "name": "update_assignments",
+        "path": "/api/admin/llm/models/assignments"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_registry",
+        "path": "/api/admin/llm/models/registry"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "replace_registry",
+        "path": "/api/admin/llm/models/registry"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "sync_registry",
+        "path": "/api/admin/llm/models/registry/sync"
+      },
+      {
+        "methods": [
           "POST"
         ],
         "name": "test_config",
@@ -1590,6 +1913,13 @@
         ],
         "name": "list_alerts",
         "path": "/api/admin/observability/alerts"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_alerts_page",
+        "path": "/api/admin/observability/alerts/page"
       },
       {
         "methods": [
@@ -1768,6 +2098,13 @@
       },
       {
         "methods": [
+          "GET"
+        ],
+        "name": "list_conversations",
+        "path": "/api/agent-mesh/conversations"
+      },
+      {
+        "methods": [
           "POST"
         ],
         "name": "archive_session",
@@ -1782,10 +2119,24 @@
       },
       {
         "methods": [
+          "POST"
+        ],
+        "name": "restore_session",
+        "path": "/api/agent-mesh/conversations/restore"
+      },
+      {
+        "methods": [
           "GET"
         ],
-        "name": "pull_inbox",
+        "name": "peek_inbox",
         "path": "/api/agent-mesh/inbox"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "pull_inbox",
+        "path": "/api/agent-mesh/inbox/pull"
       },
       {
         "methods": [
@@ -1812,8 +2163,29 @@
         "methods": [
           "GET"
         ],
+        "name": "get_asset_image",
+        "path": "/api/agent-responses/assets/{asset_id}/image"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "list_run_assets",
+        "path": "/api/agent-responses/runs/{run_id}/assets"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
         "name": "get_agent_response_session",
         "path": "/api/agent-responses/session"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_agent_response_session_messages",
+        "path": "/api/agent-responses/session/messages"
       },
       {
         "methods": [
@@ -1982,6 +2354,13 @@
         ],
         "name": "retry_team",
         "path": "/api/agent-teams/{team_id}/retry"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "preview_retry_team",
+        "path": "/api/agent-teams/{team_id}/retry/preview"
       },
       {
         "methods": [
@@ -2337,6 +2716,13 @@
         "methods": [
           "GET"
         ],
+        "name": "running",
+        "path": "/api/dashboard/running"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
         "name": "score_trend",
         "path": "/api/dashboard/score-trend"
       },
@@ -2350,6 +2736,20 @@
       {
         "methods": [
           "GET"
+        ],
+        "name": "list_discussions",
+        "path": "/api/discuss/sessions"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "get_discussion",
+        "path": "/api/discuss/sessions/{session_id}"
+      },
+      {
+        "methods": [
+          "POST"
         ],
         "name": "start_discussion",
         "path": "/api/discuss/start"
@@ -2461,6 +2861,13 @@
       },
       {
         "methods": [
+          "POST"
+        ],
+        "name": "mark_feedback_read",
+        "path": "/api/feedback/{feedback_id}/read"
+      },
+      {
+        "methods": [
           "PUT"
         ],
         "name": "reply_feedback",
@@ -2521,6 +2928,13 @@
         ],
         "name": "create_reply",
         "path": "/api/forum/posts/{post_id}/replies"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "record_post_view",
+        "path": "/api/forum/posts/{post_id}/views"
       },
       {
         "methods": [
@@ -2671,6 +3085,27 @@
       },
       {
         "methods": [
+          "DELETE"
+        ],
+        "name": "clear_avatar",
+        "path": "/api/me/avatar"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "name": "set_avatar",
+        "path": "/api/me/avatar"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "upload_avatar_image",
+        "path": "/api/me/avatar/image"
+      },
+      {
+        "methods": [
           "GET"
         ],
         "name": "get_profile",
@@ -2682,6 +3117,13 @@
         ],
         "name": "update_profile",
         "path": "/api/me/profile"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "mark_preference_prompt",
+        "path": "/api/me/profile/preference-prompted"
       },
       {
         "methods": [
@@ -2738,6 +3180,13 @@
         ],
         "name": "start_engagement",
         "path": "/api/pentest/engagements/{public_id}/start"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "name": "submit_authorization_request",
+        "path": "/api/pentest/engagements/{public_id}/submit-authorization"
       },
       {
         "methods": [
@@ -2843,6 +3292,13 @@
         ],
         "name": "add_member",
         "path": "/api/projects/{project_id}/members"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "name": "search_member_candidates",
+        "path": "/api/projects/{project_id}/members/candidates"
       },
       {
         "methods": [
@@ -3168,6 +3624,13 @@
       },
       {
         "methods": [
+          "POST"
+        ],
+        "name": "authorize_sandbox_remote_target",
+        "path": "/api/sandboxes/remote-target-authorization"
+      },
+      {
+        "methods": [
           "GET"
         ],
         "name": "list_workers",
@@ -3266,6 +3729,13 @@
       },
       {
         "methods": [
+          "GET"
+        ],
+        "name": "get_rule_catalog",
+        "path": "/api/security/rule-catalog"
+      },
+      {
+        "methods": [
           "POST"
         ],
         "name": "scan_all_projects",
@@ -3308,6 +3778,13 @@
       },
       {
         "methods": [
+          "GET"
+        ],
+        "name": "get_avatar_image",
+        "path": "/api/users/{user_id}/avatar/image"
+      },
+      {
+        "methods": [
           "POST"
         ],
         "name": "reset_password",
@@ -3337,7 +3814,7 @@
     ]
   },
   "orm": {
-    "table_count": 86,
+    "table_count": 91,
     "tables": [
       {
         "column_count": 12,
@@ -4440,7 +4917,7 @@
         "name": "agent_mesh_conversation"
       },
       {
-        "column_count": 32,
+        "column_count": 38,
         "columns": [
           {
             "foreign_keys": [],
@@ -4646,6 +5123,60 @@
             "type": "TEXT"
           },
           {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
             "foreign_keys": [],
             "name": "id",
             "nullable": false,
@@ -4799,6 +5330,82 @@
           }
         ],
         "name": "agent_metric_snapshot"
+      },
+      {
+        "column_count": 10,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "run_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "user_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "surface",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(20)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "role",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(10)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "mime",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(32)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "data",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BLOB"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "agent_multimodal_asset"
       },
       {
         "column_count": 16,
@@ -4988,7 +5595,7 @@
         "name": "agent_reflection"
       },
       {
-        "column_count": 11,
+        "column_count": 17,
         "columns": [
           {
             "foreign_keys": [],
@@ -5047,6 +5654,60 @@
             "type": "INTEGER"
           },
           {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
             "foreign_keys": [],
             "name": "id",
             "nullable": false,
@@ -5069,6 +5730,82 @@
           }
         ],
         "name": "agent_response_run"
+      },
+      {
+        "column_count": 10,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "user_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "surface",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(24)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "session_key",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(128)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "position",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(80)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "message_json",
+            "nullable": false,
+            "primary_key": false,
+            "type": "LONGTEXT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "message_sha256",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "agent_response_transcript_message"
       },
       {
         "column_count": 8,
@@ -5292,7 +6029,7 @@
         "name": "agent_skill_record"
       },
       {
-        "column_count": 19,
+        "column_count": 25,
         "columns": [
           {
             "foreign_keys": [],
@@ -5405,6 +6142,60 @@
             "nullable": true,
             "primary_key": false,
             "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -5972,7 +6763,7 @@
         "name": "agent_tool_permission"
       },
       {
-        "column_count": 16,
+        "column_count": 22,
         "columns": [
           {
             "foreign_keys": [],
@@ -6078,6 +6869,60 @@
             "nullable": false,
             "primary_key": false,
             "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -8180,7 +9025,7 @@
         "name": "ops_execution"
       },
       {
-        "column_count": 19,
+        "column_count": 26,
         "columns": [
           {
             "foreign_keys": [],
@@ -8240,6 +9085,13 @@
           },
           {
             "foreign_keys": [],
+            "name": "authorized_by_user_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
             "name": "authorized_at",
             "nullable": true,
             "primary_key": false,
@@ -8293,6 +9145,60 @@
             "nullable": true,
             "primary_key": false,
             "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -10046,7 +10952,7 @@
         "name": "review_rule"
       },
       {
-        "column_count": 27,
+        "column_count": 33,
         "columns": [
           {
             "foreign_keys": [],
@@ -10215,6 +11121,60 @@
             "nullable": false,
             "primary_key": false,
             "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
           },
           {
             "foreign_keys": [],
@@ -10468,6 +11428,188 @@
         "name": "role_permission"
       },
       {
+        "column_count": 19,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "session_id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "owner_user_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "task_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "project_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "file_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "file_name",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(255)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "review_type",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "status",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(20)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "max_rounds",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "report_task_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "agents",
+            "nullable": false,
+            "primary_key": false,
+            "type": "JSON"
+          },
+          {
+            "foreign_keys": [],
+            "name": "progress",
+            "nullable": false,
+            "primary_key": false,
+            "type": "JSON"
+          },
+          {
+            "foreign_keys": [],
+            "name": "last_turn_seq",
+            "nullable": false,
+            "primary_key": false,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "origin_surface",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(24)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "origin_session_key",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(128)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "continued_from_session_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "created_at",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "updated_at",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "closed_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "roundtable_session"
+      },
+      {
+        "column_count": 5,
+        "columns": [
+          {
+            "foreign_keys": [
+              "roundtable_session.session_id"
+            ],
+            "name": "session_id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "VARCHAR(64)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "seq",
+            "nullable": false,
+            "primary_key": true,
+            "type": "INTEGER"
+          },
+          {
+            "foreign_keys": [],
+            "name": "owner_user_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "turn",
+            "nullable": false,
+            "primary_key": false,
+            "type": "JSON"
+          },
+          {
+            "foreign_keys": [],
+            "name": "created_at",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "roundtable_turn"
+      },
+      {
         "column_count": 11,
         "columns": [
           {
@@ -10551,7 +11693,7 @@
         "name": "sandbox_artifact"
       },
       {
-        "column_count": 33,
+        "column_count": 39,
         "columns": [
           {
             "foreign_keys": [],
@@ -10783,6 +11925,60 @@
             "nullable": false,
             "primary_key": false,
             "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "root_agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_response_run.id"
+            ],
+            "name": "agent_run_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_tool_execution.id"
+            ],
+            "name": "tool_execution_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team.id"
+            ],
+            "name": "agent_team_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_task.id"
+            ],
+            "name": "agent_team_task_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [
+              "agent_team_event.id"
+            ],
+            "name": "agent_execution_event_id",
+            "nullable": true,
+            "primary_key": false,
+            "type": "BIGINT"
           }
         ],
         "name": "sandbox_environment"
@@ -11155,7 +12351,7 @@
         "name": "tool_call_log"
       },
       {
-        "column_count": 12,
+        "column_count": 13,
         "columns": [
           {
             "foreign_keys": [],
@@ -11169,7 +12365,7 @@
             "name": "password",
             "nullable": false,
             "primary_key": false,
-            "type": "VARCHAR(255)"
+            "type": "VARCHAR(60)"
           },
           {
             "foreign_keys": [],
@@ -11184,6 +12380,13 @@
             "nullable": true,
             "primary_key": false,
             "type": "VARCHAR(50)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "avatar",
+            "nullable": true,
+            "primary_key": false,
+            "type": "VARCHAR(64)"
           },
           {
             "foreign_keys": [],
@@ -11316,6 +12519,54 @@
         "name": "user_api_config"
       },
       {
+        "column_count": 6,
+        "columns": [
+          {
+            "foreign_keys": [],
+            "name": "user_id",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "mime",
+            "nullable": false,
+            "primary_key": false,
+            "type": "VARCHAR(32)"
+          },
+          {
+            "foreign_keys": [],
+            "name": "data",
+            "nullable": false,
+            "primary_key": false,
+            "type": "BLOB"
+          },
+          {
+            "foreign_keys": [],
+            "name": "id",
+            "nullable": false,
+            "primary_key": true,
+            "type": "BIGINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "create_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "update_time",
+            "nullable": false,
+            "primary_key": false,
+            "type": "DATETIME"
+          }
+        ],
+        "name": "user_avatar"
+      },
+      {
         "column_count": 11,
         "columns": [
           {
@@ -11399,7 +12650,7 @@
         "name": "user_feedback"
       },
       {
-        "column_count": 14,
+        "column_count": 16,
         "columns": [
           {
             "foreign_keys": [],
@@ -11474,6 +12725,20 @@
           {
             "foreign_keys": [],
             "name": "last_learned_at",
+            "nullable": true,
+            "primary_key": false,
+            "type": "DATETIME"
+          },
+          {
+            "foreign_keys": [],
+            "name": "preference_prompted",
+            "nullable": false,
+            "primary_key": false,
+            "type": "SMALLINT"
+          },
+          {
+            "foreign_keys": [],
+            "name": "preference_prompted_at",
             "nullable": true,
             "primary_key": false,
             "type": "DATETIME"

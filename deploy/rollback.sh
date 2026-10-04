@@ -14,6 +14,7 @@ usage() {
 用法: ./rollback.sh [all|backend|frontend] --confirm ROLLBACK_APPLICATION
 
 说明: 仅切换应用镜像，不执行 Alembic downgrade 或数据库恢复。
+      对话账本迁移后仅允许支持 v2 引用的镜像；旧 reader 须前向修复。
 USAGE
 }
 
@@ -78,6 +79,8 @@ if [[ "$target" == "all" || "$target" == "frontend" ]]; then
     || fatal "回滚 Frontend 镜像不存在: prism-frontend:$FRONTEND_RELEASE"
 fi
 
+assert_checkpoint_rollback_compatible
+
 log_warn "开始应用层回滚(target=$target, release=$previous_sha)；数据库保持当前 revision"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
   compose up -d --no-deps --no-build --pull never backend
@@ -103,5 +106,5 @@ if [[ -f "$rollback_from" ]]; then
   cp "$rollback_from" "$previous_state"
 fi
 rm -f "$pending_state"
-log_info "应用层回滚完成(release=$previous_sha)；请确认数据库向后兼容性"
+log_info "应用层回滚完成(release=$previous_sha)；检查点格式门已通过，数据库未降级"
 compose ps || log_warn "应用回滚已完成，但容器列表读取失败；请重试只读运维检查"

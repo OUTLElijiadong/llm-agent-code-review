@@ -1,0 +1,212 @@
+{
+  "recorded_at_utc": "2026-10-04T08:45:11.362659+00:00",
+  "scope": "candidate worktree only; Python 3.11.15 on macOS; no production connection or exploit reproduction",
+  "finding_class": "dependency advisory/version risks; not a demonstrated exploitable Prism vulnerability",
+  "before_development_lock_audit": {
+    "source_records": 23,
+    "unique_advisory_ids": 20,
+    "packages": 5,
+    "log": "复现-20261004-后端开发锁依赖审计.log"
+  },
+  "locks": {
+    "production_before_count": 63,
+    "production_after_count": 63,
+    "development_before_count": 98,
+    "development_after_count": 99,
+    "changes": {
+      "requirements.lock": {
+        "pyjwt": {
+          "before": "2.13.0",
+          "after": "2.15.0"
+        }
+      },
+      "requirements-dev.lock": {
+        "async-timeout": {
+          "before": "5.0.1",
+          "after": null
+        },
+        "black": {
+          "before": "24.10.0",
+          "after": "26.3.1"
+        },
+        "pip": {
+          "before": "26.1.2",
+          "after": "26.2.1"
+        },
+        "pyjwt": {
+          "before": "2.13.0",
+          "after": "2.15.0"
+        },
+        "pytest": {
+          "before": "8.4.2",
+          "after": "9.0.3"
+        },
+        "pytest-asyncio": {
+          "before": "0.26.0",
+          "after": "1.3.0"
+        },
+        "pytokens": {
+          "before": null,
+          "after": "0.4.1"
+        },
+        "setuptools": {
+          "before": null,
+          "after": "83.0.0"
+        },
+        "urllib3": {
+          "before": "2.7.0",
+          "after": "2.8.0"
+        }
+      },
+      "environment_planned_changes": [
+        {
+          "name": "black",
+          "before": "24.10.0",
+          "after": "26.3.1"
+        },
+        {
+          "name": "pytest",
+          "before": "8.4.2",
+          "after": "9.0.3"
+        },
+        {
+          "name": "pytest-asyncio",
+          "before": "0.26.0",
+          "after": "1.3.0"
+        },
+        {
+          "name": "pytokens",
+          "before": null,
+          "after": "0.4.1"
+        },
+        {
+          "name": "setuptools",
+          "before": "82.0.1",
+          "after": "83.0.0"
+        }
+      ]
+    },
+    "production_entries_exactly_reused_by_development_lock": true,
+    "sha256": {
+      "requirements.lock": "784bdb1f7d8055d3a62f45f3669df80b8ba6ba3b73c7351f5a858e4dcb0f7c43",
+      "requirements-dev.lock": "dd558a356fdbb95504f6b370730899346ac6d1c1245ff5da8dd300b43d56e059"
+    }
+  },
+  "installed_environment": {
+    "environment_changes": {
+      "black": {
+        "before": "24.10.0",
+        "after": "26.3.1"
+      },
+      "pytest": {
+        "before": "8.4.2",
+        "after": "9.0.3"
+      },
+      "pytest-asyncio": {
+        "before": "0.26.0",
+        "after": "1.3.0"
+      },
+      "pytokens": {
+        "before": null,
+        "after": "0.4.1"
+      },
+      "setuptools": {
+        "before": "82.0.1",
+        "after": "83.0.0"
+      }
+    },
+    "production_locked_package_count": 63,
+    "black_project_config_smoke": "PASS",
+    "pytest_cov_kept": "5.0.0",
+    "python": "3.11.15"
+  },
+  "supported_validation_runtime": {
+    "tested": "Python 3.11.15",
+    "security_updated_dev_tools_minimum": "Python 3.10",
+    "py39_target": "Black/Ruff syntax target; does not claim tooling runtime support"
+  },
+  "official_sources": [
+    "https://pypi.org/project/PyJWT/2.15.0/",
+    "https://pypi.org/project/black/26.3.1/",
+    "https://pypi.org/project/pytest/9.0.3/",
+    "https://pypi.org/project/pytest-asyncio/0.26.0/",
+    "https://pypi.org/project/pytest-asyncio/1.3.0/",
+    "https://pypi.org/project/setuptools/83.0.0/",
+    "https://pypi.org/project/pip/26.2.1/",
+    "https://pypi.org/project/urllib3/2.8.0/"
+  ],
+  "generator": {
+    "python": "3.11",
+    "pip-tools": "7.6.1",
+    "separate_environment": "/tmp/prism-dev-lock-tools-20261004",
+    "index_url": "https://pypi.org/simple",
+    "targeted_upgrades_only": true
+  },
+  "strict_hash_dry_run": {
+    "result": "passed",
+    "locked_packages_resolved": 99,
+    "log": "复测-20261004-开发锁严格解析.log",
+    "scope": "resolver/hash dry-run, not a clean environment install"
+  },
+  "tests": {
+    "compatibility_group": {
+      "log": "复测-20261004-开发工具兼容回归.log",
+      "result": "1277 passed, 2 warnings"
+    },
+    "coverage_combined": {
+      "log": "复测-20261004-覆盖率插件联合组.log",
+      "result": "1073 passed, 2 warnings"
+    },
+    "fixture_before": {
+      "log": "复现-20261004-准入fixture边界.log",
+      "result": "6 failed"
+    },
+    "coverage_original_failure": {
+      "log": "复测-20261004-覆盖率插件兼容.log",
+      "result": "15 failed, 5 passed, 2 warnings"
+    },
+    "coverage_original_retest": {
+      "log": "复测-20261004-覆盖率插件单文件复测.log",
+      "result": "20 passed, 2 warnings"
+    },
+    "fixture_extended": {
+      "log": "复测-20261004-准入fixture边界与真实限流.log",
+      "result": "31 passed, 2 warnings"
+    }
+  },
+  "audits": {
+    "production_lock": {
+      "result": "No known vulnerabilities found",
+      "log": "复测-20261004-后端发布锁升级后审计.log"
+    },
+    "development_lock": {
+      "result": "No known vulnerabilities found",
+      "log": "复测-20261004-后端开发锁升级后审计.log"
+    },
+    "current_environment": {
+      "result": "No known vulnerabilities found",
+      "log": "复测-20261004-后端当前环境升级后审计.log"
+    }
+  },
+  "fixture_repair": {
+    "code": "backend/tests/conftest.py",
+    "regression": "backend/tests/test_review_admission_fixture.py",
+    "cause": "whole SlowAPI wrapper replaced by namespace before app import; auth decorator missing .limit",
+    "change": "retain real wrapper/backend; isolate hit/get_window_stats only for final identifier review_start_shared; delegate other scopes and cost to originals; use original WindowStats interface",
+    "full_backend_after_fixture_change": "pending parent run"
+  },
+  "independent_review": {
+    "agent": "context_integrity",
+    "dependency_evidence": "独立复核-20261004-依赖锁边界.json",
+    "result": "version/hash delta, 63 common exact entries and installed Python/plugin metadata independently confirmed",
+    "fixture_review": "26 passed (fixture6 + route-contexts20); real wrapper and non-review delegated methods independently reviewed; 2 existing deprecation warnings",
+    "fixture_reviewer": "context_integrity"
+  },
+  "limits": [
+    "No production deployment or live account/browser acceptance in this subtask",
+    "No Python 3.9/3.10 runtime execution or Windows/Linux dependency install here",
+    "No claim that database advisory absence proves absence of all vulnerabilities",
+    "Full updated fixture backend regression delegated to root; earlier target tests are local scope only"
+  ],
+  "final_release_lock_check": "核查-20261004-发布锁门禁.json"
+}

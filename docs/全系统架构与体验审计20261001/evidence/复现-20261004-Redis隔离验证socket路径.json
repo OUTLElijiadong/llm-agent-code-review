@@ -1,0 +1,16 @@
+{
+  "started_at_utc": "2026-10-04T08:57:23.395886+00:00",
+  "scope": "original local pytest file uses Unix-socket Redis in a temporary network-none container on the authorized production host; no production Redis connection or production login request",
+  "host": "81.70.251.90",
+  "container_name": "prism-login-audit-a68398166bacfdd3",
+  "wrapper_policy": "only inspect network mode and redis-cli Unix socket calls for exact created container; name is translated to exact ID; inspect guard checks ID/name/network/no ports for every call",
+  "sources": {
+    "tests/unit/core/test_login_rate_limit_real_redis.py": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+    "app/core/rate_limit.py": "28c4a325bc944729aa3ac885117b0c1b2eb13847d78085b73dffb9a18b0e42f6",
+    "tests/conftest.py": "f0db14ac765546ad94203b0691d3d75de77c902f6cab8ac2287d04a182f0f14e"
+  },
+  "production_services_changed": false,
+  "failure": "CalledProcessError: Command '['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=8', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=60', '-o', 'ControlPath=/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-login-isolated-20261004-xakt47tn/ssh-control', 'root@81.70.251.90', \"docker inspect --format '{{.Image}}' cr_redis\"]' returned non-zero exit status 255.",
+  "temporary_wrapper_removed": true,
+  "finished_at_utc": "2026-10-04T08:57:24.119634+00:00"
+}

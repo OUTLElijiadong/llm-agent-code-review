@@ -246,6 +246,11 @@ class BaseAgent:
                 last_error = "模型调用超过语义审计全局时限"
                 last_failure_kind = "semantic_budget_exhausted"
                 break
+            before_model_call = (ctx.extra or {}).get("before_model_call") if ctx else None
+            if callable(before_model_call):
+                # Permission failures are control-flow signals, not provider errors:
+                # run before the retry/HTTP try block so revocation stops immediately.
+                before_model_call()
             if attempt > 0 and retry_reserver is not None and not retry_reserver():
                 last_error = "模型调用超过语义审计请求预算"
                 last_failure_kind = "semantic_budget_exhausted"

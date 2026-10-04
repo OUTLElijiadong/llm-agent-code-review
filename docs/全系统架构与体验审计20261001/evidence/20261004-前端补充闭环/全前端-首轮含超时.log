@@ -1,0 +1,31 @@
+
+> code-review-platform@1.0.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/review/ReviewStart.regression.test.ts (32 tests | 1 failed) 17926ms
+     × 超过500个可选文件时仍可明确选择后续页文件，不自动截取前500项 5806ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/review/ReviewStart.regression.test.ts > 审查扫描范围失败回归 > 超过500个可选文件时仍可明确选择后续页文件，不自动截取前500项
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/views/review/ReviewStart.regression.test.ts:312:3
+    310|   })
+    311|
+    312|   it('超过500个可选文件时仍可明确选择后续页文件，不自动截取前500项', async () => {
+       |   ^
+    313|     const vm = await render()
+    314|     api.files.mockResolvedValueOnce(pageOf(Array.from({ length: 500 },…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 131 passed (132)
+      Tests  1 failed | 1549 passed (1550)
+   Start at  16:23:23
+   Duration  44.47s (transform 23.78s, setup 2.50s, import 116.20s, tests 128.84s, environment 119.01s)
+

@@ -1,0 +1,5 @@
+{
+  "configured_path": "/persistent/certbot/conf/live/example.invalid/fullchain.pem",
+  "executor_path": "/persistent/certbot/conf/live/example.invalid/fullchain.pem",
+  "uses_configured_certificate_directory": true
+}

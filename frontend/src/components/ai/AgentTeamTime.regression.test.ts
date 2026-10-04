@@ -1,4 +1,5 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentTeamDetail, AgentTeamMember } from '@/api/agentTeams'
@@ -41,6 +42,7 @@ describe('团队 UTC 时间回归', () => {
   beforeAll(() => vi.stubEnv('TZ', 'Asia/Shanghai'))
   afterAll(() => vi.unstubAllEnvs())
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-20T12:51:05Z'))
     // 必须在非 UTC 环境复现，不能让 CI 的 UTC 时区掩盖缺陷。

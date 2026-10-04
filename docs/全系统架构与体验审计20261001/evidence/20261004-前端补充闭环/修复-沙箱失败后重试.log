@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/sandbox/SandboxWorkstation.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  25 passed (25)
+   Start at  16:22:46
+   Duration  757ms (transform 248ms, setup 18ms, import 280ms, tests 245ms, environment 154ms)
+

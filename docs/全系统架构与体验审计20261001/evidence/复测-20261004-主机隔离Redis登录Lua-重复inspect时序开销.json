@@ -1,0 +1,168 @@
+{
+  "scope": "isolated host venv; original five pytest cases without root conftest; local Docker Unix socket CLI in network-none temporary Redis; not production login acceptance",
+  "started_at_utc": "2026-10-04T09:17:34.614187+00:00",
+  "host_python": "3.11.6",
+  "dependency_source": "official PyPI hash-checked Linux CPython3.11 wheels transferred to temporary directory; strict hash offline install",
+  "container_name": "prism-login-audit-xg9jh19a",
+  "candidate_backend": "/tmp/prism-mysql-validation-20261004/backend",
+  "test_sha256": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+  "core_source_sha256": {
+    "app/core/rate_limit.py": "28c4a325bc944729aa3ac885117b0c1b2eb13847d78085b73dffb9a18b0e42f6",
+    "app/core/config.py": "7550bc5b3e61f377e8daf6cd134e94c52e05065bb40edf1a4078cd6c4213d467"
+  },
+  "minimal_lock_sha256": "3d97c1f730e46865afd24e211f7f74a1547d1693e5839affde36aebb96993193",
+  "runs": [
+    {
+      "round": 1,
+      "exit_code": 1,
+      "seconds": 15.037,
+      "log": "pytest-round-1.log"
+    },
+    {
+      "round": 2,
+      "exit_code": 1,
+      "seconds": 12.869,
+      "log": "pytest-round-2.log"
+    },
+    {
+      "round": 3,
+      "exit_code": 1,
+      "seconds": 11.194,
+      "log": "pytest-round-3.log"
+    }
+  ],
+  "installed_packages": [
+    {
+      "name": "annotated-doc",
+      "version": "0.0.4"
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.7.0"
+    },
+    {
+      "name": "anyio",
+      "version": "4.14.2"
+    },
+    {
+      "name": "Deprecated",
+      "version": "1.3.1"
+    },
+    {
+      "name": "fastapi",
+      "version": "0.139.0"
+    },
+    {
+      "name": "greenlet",
+      "version": "3.5.3"
+    },
+    {
+      "name": "idna",
+      "version": "3.18"
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.0"
+    },
+    {
+      "name": "limits",
+      "version": "5.8.0"
+    },
+    {
+      "name": "loguru",
+      "version": "0.7.3"
+    },
+    {
+      "name": "packaging",
+      "version": "26.2"
+    },
+    {
+      "name": "pip",
+      "version": "26.2.1"
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0"
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.4"
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.46.4"
+    },
+    {
+      "name": "pydantic-settings",
+      "version": "2.14.2"
+    },
+    {
+      "name": "Pygments",
+      "version": "2.20.0"
+    },
+    {
+      "name": "pytest",
+      "version": "9.0.3"
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.2"
+    },
+    {
+      "name": "setuptools",
+      "version": "83.0.0"
+    },
+    {
+      "name": "slowapi",
+      "version": "0.1.10"
+    },
+    {
+      "name": "SQLAlchemy",
+      "version": "2.0.51"
+    },
+    {
+      "name": "starlette",
+      "version": "1.3.1"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0"
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.2"
+    },
+    {
+      "name": "wrapt",
+      "version": "2.2.2"
+    }
+  ],
+  "image_id_from_running_cr_redis": "sha256:2a51817f79255c8b69f86a974459c2e0359aff81417d80158f2b9e541e6f4b33",
+  "container_id": "dd3bbdc879654a99983bff75cdb2244a4029d17839dc92baab591e558d2b7da8",
+  "isolation": {
+    "NetworkMode": "none",
+    "PortBindings": {},
+    "CapDrop": [
+      "ALL"
+    ],
+    "SecurityOpt": [
+      "no-new-privileges"
+    ],
+    "ReadonlyRootfs": true,
+    "Memory": 67108864,
+    "MemorySwap": 67108864,
+    "NanoCpus": 250000000,
+    "PidsLimit": 64,
+    "Tmpfs": {
+      "/data": "rw,noexec,nosuid,nodev,size=16m,mode=1777",
+      "/tmp": "rw,noexec,nosuid,nodev,size=16m,mode=1777"
+    }
+  },
+  "redis_port": 0,
+  "failure": "AssertionError: one or more original Redis tests failed",
+  "container_removed_by_exact_id": true,
+  "wrapper_removed": true,
+  "finished_at_utc": "2026-10-04T09:18:28.000860+00:00",
+  "temporary_venv_directory_removed": true,
+  "host": "81.70.251.90"
+}

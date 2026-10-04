@@ -1,0 +1,13 @@
+{
+  "environment": "isolated in-memory SQLite; no model or production connection",
+  "old_release": "310ea1a8095428d670c0404a05b4dc643ad0027e",
+  "old_decoder_ast_matches_current_from_dict": true,
+  "old_store_load_calls_from_dict_without_ledger_resolution": true,
+  "new_checkpoint_has_inline_transcript": false,
+  "new_checkpoint_reference_version": 2,
+  "persisted_ledger_messages": 2,
+  "current_store_restored_messages": 2,
+  "old_store_decoder_restored_messages": 0,
+  "old_decoder_silently_returns_empty": true,
+  "source_ledger_rows_deleted": false
+}

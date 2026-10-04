@@ -157,8 +157,8 @@ class RecentTaskOut(BaseModel):
     """最近审查任务概要"""
     id: int
     review_type: str = ""
-    score: int
-    total_issues: int
+    score: Optional[int] = None
+    total_issues: Optional[int] = None
     status: str
     create_time: datetime
 

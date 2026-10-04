@@ -29,6 +29,27 @@ class AgentResponseRun(Base, UsageAttributionMixin, IdMixin, TimestampMixin):
     version = Column(Integer, nullable=False, default=1)
 
 
+class AgentResponseTranscriptMessage(Base, IdMixin, TimestampMixin):
+    """会话级追加 transcript 账本；检查点只保存游标，避免每轮复制完整历史。"""
+
+    __tablename__ = "agent_response_transcript_message"
+    __table_args__ = (
+        Index(
+            "uq_agent_response_transcript_position",
+            "user_id", "surface", "session_key", "position", unique=True,
+        ),
+        Index("ix_agent_response_transcript_run", "run_id"),
+    )
+
+    user_id = Column(BigInteger, nullable=False)
+    surface = Column(String(24), nullable=False)
+    session_key = Column(String(128), nullable=False)
+    position = Column(Integer, nullable=False)
+    run_id = Column(String(80), nullable=True)
+    message_json = Column(LONGTEXT().with_variant(Text, "sqlite"), nullable=False)
+    message_sha256 = Column(String(64), nullable=False)
+
+
 class AgentToolExecution(Base, IdMixin, TimestampMixin):
     """按 run_id + call_id 去重的工具执行结果账本。"""
 

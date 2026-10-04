@@ -1,0 +1,147 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/code/CodeEditor.lifecycle.test.ts src/components/ai/AgentTeamWindow.target-freeze.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/components/ai/AgentTeamWindow.target-freeze.test.ts (14 tests | 4 failed) 65ms
+     × 重试方案确认期间卸载窗口后不再请求预览 4ms
+     × 最终重试确认期间卸载窗口后不提交并保持安静 2ms
+     × 取消确认期间卸载窗口后不再发出取消请求 2ms
+     × 复制成功回调在窗口卸载后不再提示旧窗口内容 6ms
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts (11 tests | 2 failed) 133ms
+     × 撤回再授予file:edit后，旧项目授权请求不能覆盖新的只读结论 7ms
+     × 撤回再授予project:view后，旧项目授权请求不能覆盖新的只读结论 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ai/AgentTeamWindow.target-freeze.test.ts > AgentTeamWindow retry target freeze > 重试方案确认期间卸载窗口后不再请求预览
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      1,
+      Array [
+        "failure-a",
+      ],
+      Object {
+        "failure-a": "先按新的证据分片顺序重新审查并核对回归样本",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/ai/AgentTeamWindow.target-freeze.test.ts:301:31
+    299|     confirmation.resolve({ value: '先按新的证据分片顺序重新审查并核对回归样本' })
+    300|     await flushPromises()
+    301|     expect(mocks.preview).not.toHaveBeenCalled()
+       |                               ^
+    302|     expect(mocks.retry).not.toHaveBeenCalled()
+    303|     expect(mocks.error).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/components/ai/AgentTeamWindow.target-freeze.test.ts > AgentTeamWindow retry target freeze > 最终重试确认期间卸载窗口后不提交并保持安静
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      1,
+      Array [
+        "failure-a",
+      ],
+      Object {
+        "failure-a": "先按新的证据分片顺序重新审查并核对回归样本",
+      },
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/ai/AgentTeamWindow.target-freeze.test.ts:319:29
+    317|     confirmation.resolve()
+    318|     await flushPromises()
+    319|     expect(mocks.retry).not.toHaveBeenCalled()
+       |                             ^
+    320|     expect(mocks.error).not.toHaveBeenCalled()
+    321|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/components/ai/AgentTeamWindow.target-freeze.test.ts > AgentTeamWindow retry target freeze > 取消确认期间卸载窗口后不再发出取消请求
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      1,
+      "用户在悬浮窗手动取消",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/ai/AgentTeamWindow.target-freeze.test.ts:334:30
+    332|     confirmation.resolve()
+    333|     await flushPromises()
+    334|     expect(mocks.cancel).not.toHaveBeenCalled()
+       |                              ^
+    335|     expect(mocks.success).not.toHaveBeenCalled()
+    336|     expect(mocks.error).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/components/ai/AgentTeamWindow.target-freeze.test.ts > AgentTeamWindow retry target freeze > 复制成功回调在窗口卸载后不再提示旧窗口内容
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "已复制完整内容",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/components/ai/AgentTeamWindow.target-freeze.test.ts:353:31
+    351|     copied.resolve()
+    352|     await flushPromises()
+    353|     expect(mocks.success).not.toHaveBeenCalled()
+       |                               ^
+    354|   })
+    355|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 撤回再授予file:edit后，旧项目授权请求不能覆盖新的只读结论
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts > CodeEditor 路由和账号异步生命周期 > 撤回再授予project:view后，旧项目授权请求不能覆盖新的只读结论
+AssertionError: expected undefined to be defined
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts:162:60
+    160|     staleAuthority.resolve({ id: 7, can_update: true })
+    161|     await flushPromises()
+    162|     expect(wrapper.get('textarea').attributes('readonly')).toBeDefined…
+       |                                                            ^
+    163|     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value)…
+    164|     await (wrapper.vm as any).handleSave()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 failed | 19 passed (25)
+   Start at  16:15:51
+   Duration  1.09s (transform 446ms, setup 36ms, import 1.09s, tests 197ms, environment 315ms)
+

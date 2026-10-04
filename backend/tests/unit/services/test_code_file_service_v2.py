@@ -228,7 +228,7 @@ class TestUpdateContentBinary:
         )
 
         with pytest.raises(ValidationError, match="二进制文件不支持在线编辑"):
-            code_file_service.update_content(db, user, file_id, "new content")
+            code_file_service.update_content(db, user, file_id, "new content", expected_version=1)
 
 
 # ============ 压缩包上传 ============

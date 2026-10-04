@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from slowapi.errors import RateLimitExceeded
 
@@ -11,10 +11,11 @@ from app.api.v1 import review as review_api
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.error_handlers import register_handlers
-from app.core.rate_limit import limiter
+from app.core import rate_limit
 from app.core.security import create_access_token
 from app.main import _rate_limit_handler
 from app.models.user import User
+from app.services import review_admission_service
 
 
 @pytest.fixture
@@ -29,26 +30,35 @@ def review_start_client(db, monkeypatch):
     start_route = next(route for route in review_api.router.routes if route.path == "/start")
     permission_dependency = start_route.dependant.dependencies[0].call
     test_app = FastAPI()
-    test_app.state.limiter = limiter
+    test_limiter = rate_limit.build_limiter("memory://")
+    monkeypatch.setattr(rate_limit, "limiter", test_limiter)
+    test_app.state.limiter = test_limiter
     test_app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
     register_handlers(test_app)
     test_app.include_router(review_api.router, prefix="/api/review")
     test_app.dependency_overrides[get_db] = override_db
-    test_app.dependency_overrides[get_current_user] = lambda: user
+    def current_user(request: Request):
+        token = request.headers.get("authorization", "").partition(" ")[2]
+        from app.core.security import decode_token
+
+        payload = decode_token(token)
+        return User(id=int(payload["sub"]), username=f"rate-limit-{payload['sub']}",
+                    password="x", role="reviewer", status=1)
+
+    test_app.dependency_overrides[get_current_user] = current_user
     test_app.dependency_overrides[permission_dependency] = lambda: None
     starts = []
 
     def fake_start(_db, *, user, payload):
+        review_admission_service.admit_review_start(user.id)
         starts.append((user.id, payload.project_id))
         return SimpleNamespace(id=len(starts), status="running")
 
     monkeypatch.setattr(review_api.review_service, "start", fake_start)
-    limiter.reset()
     try:
         with TestClient(test_app) as client:
             yield client, user, starts
     finally:
-        limiter.reset()
         test_app.dependency_overrides.clear()
 
 

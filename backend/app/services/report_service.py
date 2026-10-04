@@ -6,8 +6,9 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_, true
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.ai.scoring import compute_score
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, PermissionError
@@ -35,6 +36,29 @@ def is_report_available(task: ReviewTask | None) -> bool:
             or (task.status == "failed" and task.review_type == "sandbox_test")
         )
     )
+
+
+def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[bool]:
+    """私域摘要查询沿用报告可用性、查看权限与发起人/管理员范围。
+
+    项目可见性仍由调用者限定；普通代码审查指标保留项目成员共享。
+    ``None`` 仅供已有内部全局统计调用，HTTP 必须传入当前认证账号。
+    """
+    if user is None:
+        return true()
+    public_metrics = or_(
+        ReviewTask.review_type.notin_(("sandbox_test", "pentest")),
+        ReviewTask.review_type.is_(None),
+    )
+    if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
+        return public_metrics
+    available_domain_report = or_(
+        ReviewTask.status == "success",
+        and_(ReviewTask.review_type == "sandbox_test", ReviewTask.status == "failed"),
+    )
+    if not rbac_service.is_admin_user(db, int(user.id)):
+        available_domain_report = and_(available_domain_report, ReviewTask.user_id == user.id)
+    return or_(public_metrics, available_domain_report)
 
 
 def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTask:

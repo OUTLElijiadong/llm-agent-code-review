@@ -1,10 +1,12 @@
 <template>
   <div class="code-editor-page">
     <div class="page-header">
-      <el-page-header @back="goBack(router)">
+      <el-page-header title="返回" @back="goBack(router)">
         <template #content>
-          <span class="header-title">{{ fileDetail?.file_name || '代码编辑器' }}</span>
-          <el-tag v-if="isBinary" size="small" type="warning" class="binary-tag">二进制</el-tag>
+          <div class="header-file-info">
+            <span class="header-title" :title="fileDetail?.file_name || '代码编辑器'">{{ fileDetail?.file_name || '代码编辑器' }}</span>
+            <el-tag v-if="isBinary" size="small" type="warning" class="binary-tag">二进制</el-tag>
+          </div>
         </template>
         <template #extra>
           <div class="header-extra">
@@ -70,6 +72,14 @@
             保存 (Ctrl+S)
           </el-button>
         </div>
+        <el-alert
+          v-if="saveConflict"
+          class="save-conflict"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="文件已有新版本；当前编辑草稿仍保留。请复制草稿后刷新并与最新版本合并。"
+        />
         <MonacoEditor
           v-model="codeContent"
           :language="editorLang"
@@ -91,7 +101,7 @@
  *  - 移除任何直接以 base64 字符串显示的逻辑
  *  - 支持展示 MD5/SHA-256/MIME 类型等元信息
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
 
@@ -112,11 +122,15 @@ const projectWritable = ref(false)
 const canEdit = computed(() => projectWritable.value && userStore.hasPermission('file:edit'))
 const canDownload = computed(() => userStore.hasPermission('file:download'))
 
-const fileId = Number(route.params.fileId)
+const fileId = computed(() => Number(route.params.fileId))
+let lifecycleGeneration = 0
+let authorityRequestGeneration = 0
+let disposed = false
 
 const loading = ref(false)
 const saving = ref(false)
 const downloading = ref(false)
+const saveConflict = ref(false)
 const fileDetail = ref<CodeFileDetailOut | null>(null)
 const codeContent = ref('')
 
@@ -191,29 +205,51 @@ function formatDateTime(dateStr: string): string {
  * 获取文件详情
  * v3: 二进制文件 content 由后端置空,前端不读取 base64,直接展示元信息卡片
  */
-async function fetchDetail(): Promise<void> {
+function captureFileTarget() {
+  const generation = lifecycleGeneration
+  const requestedId = fileId.value
+  const accountId = userStore.profile?.id
+  const token = userStore.token
+  return {
+    fileId: requestedId,
+    isCurrent: () => !disposed && generation === lifecycleGeneration
+      && requestedId === fileId.value && accountId === userStore.profile?.id && token === userStore.token,
+  }
+}
+
+async function refreshProjectWritable(detail: CodeFileDetailOut): Promise<void> {
+  const target = captureFileTarget()
+  const authorityGeneration = ++authorityRequestGeneration
   projectWritable.value = false
+  if (!userStore.hasPermission('project:view') || !userStore.hasPermission('file:edit')) return
+  try {
+    const project = await getProjectDetail(detail.project_id)
+    if (!target.isCurrent() || authorityGeneration !== authorityRequestGeneration || fileDetail.value !== detail) return
+    projectWritable.value = userStore.hasPermission('file:edit')
+      && userStore.hasPermission('project:view') && project.id === detail.project_id && project.can_update
+  } catch { /* 资源授权未确认时保留只读查看。 */ }
+}
+
+async function fetchDetail(): Promise<void> {
+  const target = captureFileTarget()
   if (!userStore.hasPermission('file:view')) return
+  if (!Number.isSafeInteger(target.fileId) || target.fileId <= 0) return
   loading.value = true
   try {
-    const detail = await getDetail(fileId)
+    const detail = await getDetail(target.fileId)
+    if (!target.isCurrent() || !userStore.hasPermission('file:view')) return
     fileDetail.value = detail
-    if (userStore.hasPermission('project:view') && userStore.hasPermission('file:edit')) {
-      try {
-        const project = await getProjectDetail(detail.project_id)
-        projectWritable.value = project.id === detail.project_id && project.can_update
-      } catch { /* 资源授权未确认时保留只读查看。 */ }
-    }
     // v3: 仅文本文件将 content 注入编辑器;二进制文件 content 已被后端置空,跳过
     if (detail.is_binary !== 1) {
       codeContent.value = detail.content
     } else {
       codeContent.value = ''
     }
+    await refreshProjectWritable(fileDetail.value)
   } catch {
-    fileDetail.value = null
+    if (target.isCurrent()) fileDetail.value = null
   } finally {
-    loading.value = false
+    if (target.isCurrent()) loading.value = false
   }
 }
 
@@ -222,15 +258,27 @@ async function fetchDetail(): Promise<void> {
  */
 async function handleSave(): Promise<void> {
   if (!canEdit.value || saving.value || !fileDetail.value || isBinary.value) return
+  const target = captureFileTarget()
+  const detail = fileDetail.value
+  const content = codeContent.value
+  const expectedVersion = detail.version_no
   saving.value = true
+  saveConflict.value = false
   try {
-    const result = await update(fileId, { content: codeContent.value })
+    const result = await update(target.fileId, {
+      content,
+      expected_version: expectedVersion,
+    })
+    if (!target.isCurrent() || fileDetail.value !== detail || !canEdit.value) return
     fileDetail.value.version_no = result.version_no
     ElMessage.success('保存成功')
-  } catch {
+  } catch (error: unknown) {
+    if (target.isCurrent() && typeof error === 'object' && error !== null && 'code' in error && error.code === 40904) {
+      saveConflict.value = true
+    }
     // 错误已在拦截器处理
   } finally {
-    saving.value = false
+    if (target.isCurrent()) saving.value = false
   }
 }
 
@@ -239,14 +287,17 @@ async function handleSave(): Promise<void> {
  */
 async function handleDownload(): Promise<void> {
   if (!canDownload.value || downloading.value || !fileDetail.value) return
+  const target = captureFileTarget()
+  const fileName = fileDetail.value.file_name
   downloading.value = true
   try {
-    const blob = await downloadBinary(fileId)
+    const blob = await downloadBinary(target.fileId)
+    if (!target.isCurrent() || !canDownload.value || !userStore.hasPermission('file:view')) return
     // 触发浏览器下载
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = fileDetail.value.file_name
+    a.download = fileName
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -254,7 +305,7 @@ async function handleDownload(): Promise<void> {
   } catch {
     // 错误已在拦截器处理
   } finally {
-    downloading.value = false
+    if (target.isCurrent()) downloading.value = false
   }
 }
 
@@ -268,12 +319,39 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+watch(
+  [() => fileId.value, () => userStore.profile?.id, () => userStore.token, () => userStore.hasPermission('file:view')],
+  () => {
+    const generation = ++lifecycleGeneration
+    fileDetail.value = null
+    codeContent.value = ''
+    projectWritable.value = false
+    saveConflict.value = false
+    saving.value = false
+    downloading.value = false
+    loading.value = false
+    // 同次登录中token和profile可能分别更新，只读取最终身份对应的文件。
+    void nextTick(() => { if (!disposed && generation === lifecycleGeneration) void fetchDetail() })
+  },
+  { immediate: true, flush: 'sync' },
+)
+
+watch(
+  [() => userStore.hasPermission('file:edit'), () => userStore.hasPermission('project:view')],
+  () => {
+    projectWritable.value = false
+    if (fileDetail.value) void refreshProjectWritable(fileDetail.value)
+  },
+  { flush: 'sync' },
+)
+
 onMounted(() => {
-  fetchDetail()
   document.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  lifecycleGeneration += 1
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -289,15 +367,24 @@ onBeforeUnmount(() => {
   padding: 12px 24px;
   border-bottom: 1px solid var(--el-border-color-light);
   flex-shrink: 0;
+
+  :deep(.el-page-header__content) { flex: 1; min-width: 0; }
+  :deep(.el-page-header__left) { min-width: 0; }
 }
+
+.header-file-info { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
 
 .header-title {
   font-size: 16px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .binary-tag {
-  margin-left: 8px;
+  flex: none;
 }
 
 .header-extra {
@@ -309,6 +396,7 @@ onBeforeUnmount(() => {
 
 .editor-content {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -345,6 +433,7 @@ onBeforeUnmount(() => {
 
 .binary-info {
   max-width: 560px;
+  min-width: 0;
   width: 100%;
 
   h3 {
@@ -386,5 +475,15 @@ onBeforeUnmount(() => {
     display: flex;
     gap: 12px;
   }
+}
+
+@media (max-width: 600px) {
+  .page-header { padding: 12px; }
+  .header-file-info { flex-wrap: wrap; gap: 4px; }
+  .header-title { width: 100%; font-size: 14px; }
+  .header-extra { margin-left: 8px; }
+  .binary-view { flex-direction: column; justify-content: flex-start; padding: 20px 16px; }
+  .binary-icon { font-size: 48px; margin: 0 0 12px; }
+  .binary-info h3 { font-size: 18px; }
 }
 </style>

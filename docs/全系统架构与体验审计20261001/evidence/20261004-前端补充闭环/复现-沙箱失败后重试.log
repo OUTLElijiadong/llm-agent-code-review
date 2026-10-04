@@ -1,0 +1,43 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/sandbox/SandboxWorkstation.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts (25 tests | 6 failed) 470ms
+     × 创建任务接口失败不会泄漏未处理异常，原场景重试可恢复 15ms
+     × 远程授权接口失败不会泄漏未处理异常，原场景重试可恢复 13ms
+     × 关闭任务接口失败不会泄漏未处理异常，原场景重试可恢复 12ms
+     × 延长任务接口失败不会泄漏未处理异常，原场景重试可恢复 11ms
+     × 下载证据接口失败不会泄漏未处理异常，原场景重试可恢复 11ms
+     × 检索能力接口失败不会泄漏未处理异常，原场景重试可恢复 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 创建任务接口失败不会泄漏未处理异常，原场景重试可恢复
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 远程授权接口失败不会泄漏未处理异常，原场景重试可恢复
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 关闭任务接口失败不会泄漏未处理异常，原场景重试可恢复
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 延长任务接口失败不会泄漏未处理异常，原场景重试可恢复
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 下载证据接口失败不会泄漏未处理异常，原场景重试可恢复
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 检索能力接口失败不会泄漏未处理异常，原场景重试可恢复
+AssertionError: promise rejected "Error: 临时网络失败" instead of resolving
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:490:37
+    488|     const args = method === 'downloadArtifact' ? [{ id: 4, artifact_ty…
+    489|     api[apiMethod].mockRejectedValueOnce(new Error('临时网络失败'))
+    490|     await expect(vm[method](...args)).resolves.toBeUndefined()
+       |                                     ^
+    491|     expect(vm[busyField]).toBe(false)
+    492|     await expect(vm[method](...args)).resolves.toBeUndefined()
+
+Caused by: Error: 临时网络失败
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:489:42
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 19 passed (25)
+   Start at  16:22:08
+   Duration  1.54s (transform 632ms, setup 31ms, import 697ms, tests 470ms, environment 236ms)
+

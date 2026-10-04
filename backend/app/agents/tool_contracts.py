@@ -521,7 +521,7 @@ class CancelAgentTeamArguments(FixedToolArguments):
 
 
 class RetryAgentTeamArguments(FixedToolArguments):
-    """改变执行方案后重新排队当前账户团队的失败任务。"""
+    """预览并按确认摘要重新排队当前账户团队的失败任务。"""
 
     team_id: int = Field(gt=0)
     task_keys: List[str] = Field(default_factory=list, max_length=100)
@@ -529,6 +529,12 @@ class RetryAgentTeamArguments(FixedToolArguments):
         default_factory=dict,
         max_length=100,
         description="按 task_key 提供与原方案不同的重试方案，每条至少 8 个字符",
+    )
+    supervisor_plan_sha256: str = Field(
+        default="",
+        max_length=64,
+        pattern=r"^(?:[0-9a-f]{64})?$",
+        description="仅在当前用户确认本次高风险预览后回传；服务端会重新计算并校验",
     )
 
 

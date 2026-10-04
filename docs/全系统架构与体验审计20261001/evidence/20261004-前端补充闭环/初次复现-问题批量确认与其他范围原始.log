@@ -1,0 +1,302 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/code/CodeEditor.lifecycle.test.ts src/views/issue/IssueHub.recovery.test.ts src/views/sandbox/SandboxWorkstation.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts (16 tests | 6 failed) 137ms
+     × 关闭确认期间切换沙箱时取消操作，不能关闭另一任务 6ms
+     × 远程目标授权等待期间配置变化时不使用旧授权创建新任务 5ms
+     × 重复提交在前一任务等待授权期间仅发起一次授权 7ms
+     × 账号切换立即清空旧沙箱，迟到的刷新不能恢复旧数据 5ms
+     × 预览拒绝不受控路径 javascript:alert(1) 5ms
+     × 预览拒绝不受控路径 https://untrusted.example/api/sandboxes/sbx_1/preview/ 10ms
+ ❯ src/views/issue/IssueHub.recovery.test.ts (14 tests | 5 failed) 93ms
+     × 批量确认期间勾选变化，只提交确认时冻结的问题ID 11ms
+     × 批量确认期间account变化后取消旧操作 7ms
+     × 批量确认期间permission变化后取消旧操作 11ms
+     × 批量确认期间filter变化后取消旧操作 6ms
+     × 账号切换清空已有问题并忽略旧账号迟到的问题和项目选项 3ms
+ ❯ src/views/code/CodeEditor.lifecycle.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/code/CodeEditor.lifecycle.test.ts [ src/views/code/CodeEditor.lifecycle.test.ts ]
+Error: [vitest] No "createRouter" export is defined on the "vue-router" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("vue-router"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ src/router/index.ts:427:16
+    425| ]
+    426|
+    427| const router = createRouter({
+       |                ^
+    428|   history: createWebHistory(),
+    429|   routes,
+ ❯ src/api/http.ts:3:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 批量确认期间勾选变化，只提交确认时冻结的问题ID
+AssertionError: expected "vi.fn()" to be called once with arguments: [ { ids: [ 1 ], status: 'fixed' } ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    {
+      "ids": [
+-       1,
++       2,
+      ],
+      "status": "fixed",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/views/issue/IssueHub.recovery.test.ts:173:25
+    171|     confirmation.resolve(true)
+    172|     await request
+    173|     expect(mocks.batch).toHaveBeenCalledExactlyOnceWith({ ids: [1], st…
+       |                         ^
+    174|     wrapper.unmount()
+    175|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 批量确认期间account变化后取消旧操作
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 批量确认期间permission变化后取消旧操作
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 批量确认期间filter变化后取消旧操作
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "ids": Array [
+          1,
+        ],
+        "status": "fixed",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/issue/IssueHub.recovery.test.ts:192:29
+    190|     confirmation.resolve(true)
+    191|     await request
+    192|     expect(mocks.batch).not.toHaveBeenCalled()
+       |                             ^
+    193|     wrapper.unmount()
+    194|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 账号切换清空已有问题并忽略旧账号迟到的问题和项目选项
+AssertionError: expected '问题追踪中心跨项目统一查看所有审查问题，支持筛选与状态流转查看审查任务严重…' not to contain '问题一'
+
+Expected: "问题一"
+Received: "问题追踪中心跨项目统一查看所有审查问题，支持筛选与状态流转查看审查任务严重高中低代码规范潜在Bug安全漏洞性能问题异常处理命名规范可维护性注释完整性处理中（未修复/待复查）全部状态未修复已修复已忽略待复查中问题一未修复安全漏洞未知文件任务 #10- 详情查看任务"
+
+ ❯ src/views/issue/IssueHub.recovery.test.ts:209:32
+    207|     user.token = 'account-b'
+    208|     await flushPromises()
+    209|     expect(wrapper.text()).not.toContain('问题一')
+       |                                ^
+    210|     oldIssues.resolve({ items: [{ ...row, title: '旧账号迟到问题' }], total: …
+    211|     oldProjects.resolve({ items: [{ id: 7, project_name: '旧账号项目' }] })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 关闭确认期间切换沙箱时取消操作，不能关闭另一任务
+TypeError: Cannot read properties of undefined (reading 'public_id')
+ ❯ src/views/sandbox/SandboxWorkstation.vue:339:83
+    337|
+    338| function replaceEnvironment(updated: SandboxEnvironment): void {
+    339|   const index = environments.value.findIndex((item) => item.public_id …
+       |                                                                                   ^
+    340|   if (index >= 0) environments.value.splice(index, 1, updated)
+    341|   else environments.value.unshift(updated)
+ ❯ wrappedFn node_modules/@vue/reactivity/dist/reactivity.cjs.js:928:19
+ ❯ apply node_modules/@vue/reactivity/dist/reactivity.cjs.js:936:27
+ ❯ Proxy.findIndex node_modules/@vue/reactivity/dist/reactivity.cjs.js:827:12
+ ❯ replaceEnvironment src/views/sandbox/SandboxWorkstation.vue:339:36
+ ❯ Proxy.stopCurrent src/views/sandbox/SandboxWorkstation.vue:281:5
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:335:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 远程目标授权等待期间配置变化时不使用旧授权创建新任务
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "db_type": "none",
+        "language": "python",
+        "project_id": 8,
+        "purpose": "test",
+        "remote_target_approval_token": "old-approved-target",
+        "remote_target_authorized": false,
+        "remote_target_url": "https://authorized.example/",
+        "source_revision_id": undefined,
+        "test_mode": "blackbox",
+        "ttl_hours": 72,
+        "worker_code": undefined,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:357:35
+    355|     approval.resolve({ approval_token: 'old-approved-target' })
+    356|     await request
+    357|     expect(api.createSandbox).not.toHaveBeenCalled()
+       |                                   ^
+    358|     wrapper.unmount()
+    359|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 重复提交在前一任务等待授权期间仅发起一次授权
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:374:46
+    372|     const request = vm.submit()
+    373|     const duplicate = vm.submit()
+    374|     expect(api.authorizeSandboxRemoteTarget).toHaveBeenCalledTimes(1)
+       |                                              ^
+    375|     approval.resolve({ approval_token: 'approved' })
+    376|     await Promise.all([request, duplicate])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 账号切换立即清空旧沙箱，迟到的刷新不能恢复旧数据
+AssertionError: expected [ { public_id: 'sbx_1', …(13) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "agent_code": "test_verifier",
++     "events": [
++       {
++         "create_time": "2026-08-02T10:00:02",
++         "event_type": "complete",
++         "id": 2,
++         "message": "测试通过",
++         "payload": {},
++         "stage": "conclusion",
++       },
++       {
++         "create_time": "2026-08-02T10:00:01",
++         "event_type": "dispatch",
++         "id": 1,
++         "message": "已调用 worker",
++         "payload": {},
++         "stage": "worker",
++       },
++     ],
++     "expires_at": "2026-08-05T00:00:00",
++     "language": "python",
++     "owner_id": 2,
++     "project_id": 7,
++     "public_id": "sbx_1",
++     "purpose": "test",
++     "result": {
++       "summary": "测试通过",
++     },
++     "runtime": "runsc",
++     "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++     "status": "succeeded",
++     "test_mode": "combined",
++     "worker_code": "managed-1",
++   },
++ ]
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:392:29
+    390|     user.token = 'account-b'
+    391|     await flushPromises()
+    392|     expect(vm.environments).toEqual([])
+       |                             ^
+    393|     stale.resolve([environment])
+    394|     await request
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 预览拒绝不受控路径 javascript:alert(1)
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "javascript:alert(1)",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:407:48
+    405|     await flushPromises()
+    406|     await (wrapper.vm as any).openPreview()
+    407|     expect(previewWindow.location.replace).not.toHaveBeenCalled()
+       |                                                ^
+    408|     expect(previewWindow.close).toHaveBeenCalledOnce()
+    409|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  src/views/sandbox/SandboxWorkstation.test.ts > SandboxWorkstation Agent output ordering > 预览拒绝不受控路径 https://untrusted.example/api/sandboxes/sbx_1/preview/
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "https://untrusted.example/api/sandboxes/sbx_1/preview/",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/sandbox/SandboxWorkstation.test.ts:407:48
+    405|     await flushPromises()
+    406|     await (wrapper.vm as any).openPreview()
+    407|     expect(previewWindow.location.replace).not.toHaveBeenCalled()
+       |                                                ^
+    408|     expect(previewWindow.close).toHaveBeenCalledOnce()
+    409|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  11 failed | 19 passed (30)
+   Start at  15:46:31
+   Duration  954ms (transform 400ms, setup 52ms, import 565ms, tests 230ms, environment 794ms)
+

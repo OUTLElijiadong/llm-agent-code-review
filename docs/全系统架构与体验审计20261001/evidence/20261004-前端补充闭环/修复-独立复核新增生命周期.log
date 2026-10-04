@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/code/CodeEditor.lifecycle.test.ts src/components/ai/AgentTeamWindow.target-freeze.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  16:16:40
+   Duration  1.05s (transform 450ms, setup 42ms, import 1.01s, tests 203ms, environment 357ms)
+

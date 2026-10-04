@@ -1,0 +1,20 @@
+{
+  "scope": "isolated host venv; original five pytest cases without root conftest; local Docker Unix socket CLI in network-none temporary Redis; not production login acceptance",
+  "started_at_utc": "2026-10-04T09:14:10.211809+00:00",
+  "host_python": "3.11.6",
+  "dependency_source": "official PyPI hash-checked Linux CPython3.11 wheels transferred to temporary directory; strict hash offline install",
+  "container_name": "prism-login-audit-d7kqhvl2",
+  "candidate_backend": "/tmp/prism-mysql-validation-20261004/backend",
+  "test_sha256": "769a5a72099bae5c541fc0802d4d92cc18ec7f3eb5e9cbb025d2e2beff5c6cfd",
+  "core_source_sha256": {
+    "app/core/rate_limit.py": "28c4a325bc944729aa3ac885117b0c1b2eb13847d78085b73dffb9a18b0e42f6",
+    "app/core/config.py": "7550bc5b3e61f377e8daf6cd134e94c52e05065bb40edf1a4078cd6c4213d467"
+  },
+  "minimal_lock_sha256": "1ccae8b6db07da1e8bb3588c8d8bb4c66cb999b0418965bc734760acc892d368",
+  "runs": [],
+  "failure": "AssertionError: minimal strict hash installation failed",
+  "wrapper_removed": true,
+  "finished_at_utc": "2026-10-04T09:14:15.494453+00:00",
+  "temporary_venv_directory_removed": true,
+  "host": "81.70.251.90"
+}

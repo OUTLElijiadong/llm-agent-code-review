@@ -204,8 +204,10 @@ def review_agent_team_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
-    """绑定一项任务的目标、内容和授权相关输入，忽略服务端补齐的 operation。"""
+    """绑定任务内容、目标、授权输入和独立的执行策略。"""
     raw_input = task.get("input") if isinstance(task.get("input"), Mapping) else {}
+    execution_strategy = raw_input.get("_execution_strategy")
+    execution_strategy = execution_strategy if isinstance(execution_strategy, Mapping) else {}
     payload = {
         "task_key": task.get("task_key"),
         "member_key": task.get("member_key"),
@@ -217,6 +219,11 @@ def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
             if key != "operation" and key != "remote_target_authorized" and not str(key).startswith("_")
         },
     }
+    if execution_strategy:
+        # 重试策略通过单独的执行元数据注入模型上下文，不改写业务指令；
+        # 它仍影响本次实际运行，必须参与精确授权指纹。空策略不进入旧指纹，
+        # 以便部署期间旧任务的既有确认仍按原算法校验。
+        payload["execution_strategy"] = dict(execution_strategy)
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -359,6 +366,14 @@ def review_response_tool(tool_name: str, arguments: Mapping[str, Any]) -> dict[s
         )
         action = f"agent_message.{target or 'unknown'}"
         resource = target or "unknown_agent"
+    elif name == "retry_agent_team" and str(arguments.get("supervisor_plan_sha256") or ""):
+        review = SupervisionReview(
+            ESCALATE,
+            HIGH,
+            "重试已绑定监督复核摘要；执行前必须由当前账号确认本次任务和策略",
+            True,
+            "confirmed_retry_plan",
+        )
     elif name in _HIGH_RESPONSE_TOOLS:
         review = SupervisionReview(ESCALATE, HIGH, "该工具涉及高风险写入或权限边界，等待当前账号确认", True,
                                   "registered_high_risk_tool")

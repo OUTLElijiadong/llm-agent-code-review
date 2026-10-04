@@ -1,0 +1,30 @@
+{
+  "reviewer": "remaining_permissions",
+  "scope": "read-only independent review of four transcript restoration functions plus original new49 local SQLite/fixture regressions; no external provider or production database",
+  "sha256": {
+    "backend/app/services/agent_responses_service.py": "8f3112748fae230a1cfe91fd575335d20895584590cd8964c4dd5a56a0b7c2c6",
+    "backend/app/api/v1/agent_responses.py": "339404c7339b41420812407fd1e1d9de9798cde29c61ce32c73ef8409c5961e3",
+    "backend/tests/unit/services/test_legacy_transcript_shape_integrity.py": "e998a255f9b66c6610b8202cbb9e5b1d80c22e1c25afa9c59fbb82e585d676a3"
+  },
+  "test_result": "49 passed,1 existing crypt deprecation warning,4.65s",
+  "log": "独立复核-20261004-A05旧历史形状.log",
+  "reviewed_functions": [
+    "DatabaseCheckpointStore._merge_legacy_transcripts",
+    "DatabaseCheckpointStore._checkpoint_from_payload",
+    "agent_responses._stored_run_transcript",
+    "agent_responses._server_history_transcript"
+  ],
+  "confirmed": [
+    "non-Mapping root or transcript entries and missing/null transcript are rejected explicitly rather than silently filtered",
+    "valid empty inline transcript and empty v2 reference round-trip; nonempty references use user/surface/session-scoped ledger with cursor/order and digest verification",
+    "conflicting inline transcript/reference and unsupported reference version are rejected",
+    "legacy original JSON/version and tool/image evidence are retained; later bad run does not partially initialize ledger",
+    "history API returns 40931 for observed corrupt legacy cases; stream fails before model start"
+  ],
+  "limitations": [
+    "not a guarantee of semantic losslessness",
+    "checksums/shape checks are not proof against an external actor able to rewrite both data and checksum",
+    "direct API function tests/SQLite only; final whole-suite and production/browser acceptance are parent responsibilities"
+  ],
+  "conclusion": "no new blocker observed within these four functions and the49 test scope"
+}

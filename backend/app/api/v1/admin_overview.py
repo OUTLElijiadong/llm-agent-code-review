@@ -83,17 +83,43 @@ def _agent_activity(db: Session) -> list[dict]:
     recent_tool_cutoff = now - timedelta(seconds=15)
     active_event_cutoff = now - timedelta(seconds=90)
     today = now.date()
+    today_start = datetime.combine(today, datetime.min.time())
+    tomorrow_start = today_start + timedelta(days=1)
 
     profiles = db.query(AgentProfile).all()
     # 工具活动和模型调用必须分开统计。前者包含本地定时巡检，不产生模型
     # Token 费用；合并成一个“今日调用”会让管理员误判真实模型消费。
     tool_today_rows = (
         db.query(ToolCallLog.agent_code, func.count(ToolCallLog.id).label("cnt"))
-        .filter(func.date(ToolCallLog.create_time) == today)
+        .filter(
+            ToolCallLog.create_time >= today_start,
+            ToolCallLog.create_time < tomorrow_start,
+        )
         .group_by(ToolCallLog.agent_code)
         .all()
     )
     tool_today_map = {r[0]: int(r[1] or 0) for r in tool_today_rows}
+    top_action_rows = (
+        db.query(
+            ToolCallLog.agent_code,
+            ToolCallLog.action,
+            func.count(ToolCallLog.id).label("cnt"),
+        )
+        .filter(
+            ToolCallLog.create_time >= today_start,
+            ToolCallLog.create_time < tomorrow_start,
+        )
+        .group_by(ToolCallLog.agent_code, ToolCallLog.action)
+        .order_by(
+            func.count(ToolCallLog.id).desc(),
+            ToolCallLog.agent_code.asc(),
+            ToolCallLog.action.asc(),
+        )
+        .all()
+    )
+    top_action_map: dict[str, str] = {}
+    for agent_code, action, _count in top_action_rows:
+        top_action_map.setdefault(agent_code, action or "")
     component_total = (
         func.coalesce(AiCallLog.prompt_tokens, 0)
         + func.coalesce(AiCallLog.completion_tokens, 0)
@@ -122,7 +148,8 @@ def _agent_activity(db: Session) -> list[dict]:
             func.coalesce(func.sum(unknown_usage), 0).label("unknown_usage_calls"),
         )
         .filter(
-            func.date(AiCallLog.create_time) == today,
+            AiCallLog.create_time >= today_start,
+            AiCallLog.create_time < tomorrow_start,
             or_(AiCallLog.agent_label.isnot(None), AiCallLog.model_name.isnot(None)),
         )
         .group_by(AiCallLog.agent_label, AiCallLog.model_name)
@@ -224,14 +251,7 @@ def _agent_activity(db: Session) -> list[dict]:
         elif latest_tool and latest_tool.action:
             purpose = latest_tool.action
         elif calls:
-            top_action = (
-                db.query(ToolCallLog.action, func.count(ToolCallLog.id).label("c"))
-                .filter(func.date(ToolCallLog.create_time) == today, ToolCallLog.agent_code == p.code)
-                .group_by(ToolCallLog.action)
-                .order_by(func.count(ToolCallLog.id).desc())
-                .first()
-            )
-            purpose = top_action[0] if top_action else ""
+            purpose = top_action_map.get(p.code, "")
         result.append({
             "agent_code": p.code,
             "name": getattr(p, "name", p.code),

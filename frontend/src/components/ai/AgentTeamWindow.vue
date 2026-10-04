@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 import {
   cancelAgentTeam,
+  previewRetryAgentTeam,
   retryAgentTeam,
   type AgentTeamDetail,
   type AgentTeamMember,
@@ -14,6 +15,7 @@ import {
 } from '@/api/agentTeams'
 import AgentMemberWorkCard from '@/components/ai/AgentMemberWorkCard.vue'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
+import { useUserStore } from '@/stores/user'
 import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
 
 /**
@@ -41,8 +43,13 @@ const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveD
   useFloatingChatPosition('agent-team-window')
 
 const actionSubmitting = ref(false)
+const userStore = useUserStore()
+let targetGeneration = 0
+let disposed = false
 /** 气泡滚动容器:新消息到达时自动滚到底部。 */
 const chatBodyRef = ref<HTMLElement | null>(null)
+/** 按消息ID记录展开状态，切换团队时清空，避免内容状态串到另一会话。 */
+const expandedMessageIds = ref<Set<string>>(new Set())
 
 const members = computed<AgentTeamMember[]>(() => props.team?.members ?? [])
 const tasks = computed<AgentTeamTask[]>(() => props.team?.tasks ?? [])
@@ -83,11 +90,21 @@ const failedTaskKeys = computed(() =>
     .filter((task) => ['failed', 'dead_letter', 'expired'].includes(task.status))
     .map((task) => task.task_key),
 )
-const canRetry = computed(() => failedTaskKeys.value.length > 0 && !actionSubmitting.value)
+const canRetry = computed(() => failedTaskKeys.value.length > 0 && userStore.profile?.id != null && !actionSubmitting.value)
 const canCancel = computed(() => {
   const status = props.team?.status
   return Boolean(status && ['draft', 'queued', 'running', 'verifying'].includes(status)) && !actionSubmitting.value
 })
+
+watch(
+  [() => props.team?.team_id, () => props.team?.session_id, () => props.visible, () => userStore.profile?.id, () => userStore.token],
+  () => {
+    targetGeneration += 1
+    expandedMessageIds.value = new Set()
+    actionSubmitting.value = false
+  },
+  { flush: 'sync' },
+)
 
 const TEAM_STATUS_LABELS: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '运行中', verifying: '验证中',
@@ -190,19 +207,109 @@ function formatTime(value?: string | null): string {
 function formatFullDetail(value: unknown): string {
   if (value === undefined || value === null) return ''
   try {
-    return typeof value === 'string' ? value : JSON.stringify(value) || ''
+    if (typeof value === 'string') return value
+    return JSON.stringify(value, null, 2) || ''
   } catch {
     return String(value)
   }
 }
 
-function summarize(value: unknown, limit = 160): string {
-  const text = formatFullDetail(value)
-  return text.length > limit ? `${text.slice(0, limit)}...` : text
+const renderedMessages = computed(() => messages.value.map((message) => {
+  const payloadText = formatFullDetail(message.payload)
+  const characters = Array.from(payloadText)
+  return {
+    message,
+    payloadText,
+    payloadPreview: characters.length > 160 ? `${characters.slice(0, 160).join('')}…` : payloadText,
+    hasPayload: message.payload !== undefined && message.payload !== null && payloadText.length > 0,
+    hasLongPayload: characters.length > 160,
+  }
+}))
+
+function isPayloadExpanded(message: AgentTeamMessage): boolean {
+  return expandedMessageIds.value.has(message.message_id)
+}
+
+function togglePayload(message: AgentTeamMessage): void {
+  const next = new Set(expandedMessageIds.value)
+  if (next.has(message.message_id)) next.delete(message.message_id)
+  else next.add(message.message_id)
+  expandedMessageIds.value = next
+}
+
+async function copyPayload(message: AgentTeamMessage): Promise<void> {
+  const team = props.team
+  if (!team) return
+  const target = {
+    generation: targetGeneration,
+    teamId: team.team_id,
+    sessionId: team.session_id,
+    accountId: userStore.profile?.id ?? null,
+    token: userStore.token,
+  }
+  const targetIsCurrent = () => Boolean(
+    !disposed && props.visible
+    && target.generation === targetGeneration
+    && props.team?.team_id === target.teamId
+    && props.team.session_id === target.sessionId
+    && (userStore.profile?.id ?? null) === target.accountId
+    && userStore.token === target.token,
+  )
+  try {
+    const clipboard = globalThis.navigator?.clipboard
+    if (!clipboard?.writeText) throw new Error('Clipboard API unavailable')
+    await clipboard.writeText(formatFullDetail(message.payload))
+    if (!targetIsCurrent()) return
+    ElMessage.success('已复制完整内容')
+  } catch {
+    if (!targetIsCurrent()) return
+    const next = new Set(expandedMessageIds.value)
+    next.add(message.message_id)
+    expandedMessageIds.value = next
+    ElMessage.error('无法访问剪贴板，已展开完整内容，请手动复制')
+  }
 }
 
 function close(): void {
   emit('update:visible', false)
+}
+
+interface TeamOperationTarget {
+  generation: number
+  teamId: number
+  sessionId: string
+  accountId: number
+  token: string
+}
+
+/** 在弹出确认框前冻结团队、会话和身份，避免异步等待后操作漂移。 */
+function captureTeamOperationTarget(): TeamOperationTarget | null {
+  const team = props.team
+  const accountId = userStore.profile?.id
+  if (disposed || !props.visible || !team || accountId == null) return null
+  return {
+    generation: targetGeneration,
+    teamId: team.team_id,
+    sessionId: team.session_id,
+    accountId,
+    token: userStore.token,
+  }
+}
+
+function isTeamOperationTargetCurrent(target: TeamOperationTarget): boolean {
+  return Boolean(
+    !disposed && props.visible
+    && target.generation === targetGeneration
+    && props.team?.team_id === target.teamId
+    && props.team.session_id === target.sessionId
+    && userStore.profile?.id === target.accountId
+    && userStore.token === target.token,
+  )
+}
+
+function notifyChangedTarget(): void {
+  if (disposed) return
+  ElMessage.error('团队、会话或账号已变化，本次操作已取消，请重新核对目标。')
 }
 
 watch(
@@ -211,6 +318,7 @@ watch(
     if (!val) return
     // 等待浮窗渲染完成后再恢复/锚定位置
     await nextTick()
+    if (disposed || !props.visible) return
     restoreOrAnchor()
   },
 )
@@ -227,49 +335,138 @@ watch(
   { flush: 'post' },
 )
 
+onBeforeUnmount(() => {
+  disposed = true
+  targetGeneration += 1
+  expandedMessageIds.value = new Set()
+  actionSubmitting.value = false
+})
+
 async function retryFailed(): Promise<void> {
-  if (!props.team || !canRetry.value) return
-  try {
-    await ElMessageBox.confirm(
-      `将重试 ${failedTaskKeys.value.length} 个失败任务,其余已完成任务不会重跑。要继续吗?`,
-      '重试失败任务',
-      { confirmButtonText: '重试', cancelButtonText: '先不了', type: 'warning' },
-    )
-  } catch {
-    return
-  }
+  const target = captureTeamOperationTarget()
+  const taskKeys = [...failedTaskKeys.value]
+  if (!target || !taskKeys.length || actionSubmitting.value) return
+  const selectedTasks = tasks.value.filter((task) => taskKeys.includes(task.task_key))
   actionSubmitting.value = true
   try {
-    await retryAgentTeam(props.team.team_id, failedTaskKeys.value)
+    let value: string
+    try {
+      const prompted = await ElMessageBox.prompt(
+        `以下任务将作为本次重试起点：\n${selectedTasks.map((task) => `· ${task.title}（${task.task_key}）`).join('\n')}\n\n因依赖变化，后续阻断或已完成任务也可能重置；下一步会显示完整影响范围。`,
+        '预览失败任务重试',
+        {
+          confirmButtonText: '生成预览',
+          cancelButtonText: '先不了',
+          inputType: 'textarea',
+          inputPlaceholder: '例如：先按模块拆分，再逐段复核失败证据和边界条件',
+          inputValidator: (raw: string) => {
+            const strategy = raw.trim()
+            if ([...strategy].length < 8) return '请填写至少 8 个字符的新执行方案'
+            if (selectedTasks.some((task) => task.instructions?.includes(strategy))) return '新方案不能与原执行指令重复'
+            return true
+          },
+        },
+      )
+      value = prompted.value
+    } catch {
+      return
+    }
+    if (!isTeamOperationTargetCurrent(target)) {
+      notifyChangedTarget()
+      return
+    }
+    const strategy = value.trim()
+    if ([...strategy].length < 8 || selectedTasks.some((task) => task.instructions?.includes(strategy))) {
+      ElMessage.error('新方案无效或与原执行指令重复，请重新核对后再试')
+      return
+    }
+    const strategyChanges = Object.fromEntries(taskKeys.map((taskKey) => [taskKey, strategy]))
+    const preview = await previewRetryAgentTeam(target.teamId, taskKeys, strategyChanges)
+    if (!isTeamOperationTargetCurrent(target)) {
+      notifyChangedTarget()
+      return
+    }
+    const riskName: Record<string, string> = {
+      low: '低', medium: '中', high: '高', critical: '危急',
+    }
+    const taskStatusName: Record<string, string> = {
+      queued: '待执行', waiting_dependency: '等待依赖', running: '执行中', completed: '已完成',
+      failed: '失败', blocked: '已阻断', expired: '已过期', dead_letter: '失败终止', cancelled: '已取消',
+    }
+    const confirmationTasks = preview.tasks.map((task) => {
+      const risk = riskName[task.risk_level] ?? '未分类'
+      const status = taskStatusName[task.status] ?? task.status
+      const dependencies = task.depends_on.length ? `；依赖：${task.depends_on.join('、')}` : ''
+      const marker = task.needs_confirmation ? '（需监督确认）' : ''
+      return `· ${task.title}（${task.task_key}；当前${status}${dependencies}；${risk}风险${marker}）：${task.reason}`
+    })
+    try {
+      await ElMessageBox.confirm(
+        h('div', { style: {
+          whiteSpace: 'pre-line',
+          lineHeight: '1.65',
+          maxHeight: '50vh',
+          overflowY: 'auto',
+          paddingRight: '8px',
+        } }, [
+          `本次重试将影响 ${preview.tasks.length} 个任务，最高风险为${riskName[preview.risk_level] ?? '未分类'}。`,
+          '只会授权下面列出的本次任务和执行策略；任务状态或策略变化后必须重新预览。',
+          ...confirmationTasks,
+        ].join('\n\n')),
+        preview.requires_confirmation ? '确认高风险重试' : '确认重试',
+        {
+          confirmButtonText: preview.requires_confirmation ? '确认本次高风险重试' : '确认本次重试',
+          cancelButtonText: '取消',
+          type: preview.requires_confirmation ? 'warning' : 'info',
+          confirmButtonClass: preview.requires_confirmation ? 'el-button--danger' : '',
+        },
+      )
+    } catch {
+      return
+    }
+    if (!isTeamOperationTargetCurrent(target)) {
+      notifyChangedTarget()
+      return
+    }
+    await retryAgentTeam(target.teamId, taskKeys, strategyChanges, preview.plan_sha256)
+    if (!isTeamOperationTargetCurrent(target)) return
     ElMessage.success('已发起重试,团队会继续执行失败任务')
     emit('refreshed')
   } catch {
+    if (!isTeamOperationTargetCurrent(target)) return
     ElMessage.error('重试发起失败,请稍后再试')
   } finally {
-    actionSubmitting.value = false
+    if (isTeamOperationTargetCurrent(target)) actionSubmitting.value = false
   }
 }
 
 async function cancelTeam(): Promise<void> {
-  if (!props.team || !canCancel.value) return
-  try {
-    await ElMessageBox.confirm(
-      '取消后团队内未完成的任务都会停止,该操作不可撤销。确定取消这个团队吗?',
-      '取消团队',
-      { confirmButtonText: '取消团队', cancelButtonText: '先不了', type: 'warning', confirmButtonClass: 'el-button--danger' },
-    )
-  } catch {
-    return
-  }
+  const target = captureTeamOperationTarget()
+  if (!target || !canCancel.value) return
   actionSubmitting.value = true
   try {
-    await cancelAgentTeam(props.team.team_id, '用户在悬浮窗手动取消')
+    try {
+      await ElMessageBox.confirm(
+        '取消后团队内未完成的任务都会停止,该操作不可撤销。确定取消这个团队吗?',
+        '取消团队',
+        { confirmButtonText: '取消团队', cancelButtonText: '先不了', type: 'warning', confirmButtonClass: 'el-button--danger' },
+      )
+    } catch {
+      return
+    }
+    if (!isTeamOperationTargetCurrent(target)) {
+      notifyChangedTarget()
+      return
+    }
+    await cancelAgentTeam(target.teamId, '用户在悬浮窗手动取消')
+    if (!isTeamOperationTargetCurrent(target)) return
     ElMessage.success('团队已取消')
     emit('refreshed')
   } catch {
+    if (!isTeamOperationTargetCurrent(target)) return
     ElMessage.error('取消失败,请稍后再试')
   } finally {
-    actionSubmitting.value = false
+    if (isTeamOperationTargetCurrent(target)) actionSubmitting.value = false
   }
 }
 </script>
@@ -346,29 +543,53 @@ async function cancelTeam(): Promise<void> {
           <!-- 多 Agent 群聊气泡流 -->
           <section v-if="messages.length" class="team-window-section team-window-chat" aria-label="协作消息">
             <div
-              v-for="message in messages"
-              :key="message.message_id"
+              v-for="(entry, messageIndex) in renderedMessages"
+              :key="entry.message.message_id"
               class="team-chat-row"
             >
               <span
                 class="team-chat-avatar"
-                :class="`is-${resolveSpeaker(message.sent_from).theme}`"
+                :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`"
                 aria-hidden="true"
-              >{{ resolveSpeaker(message.sent_from).initial }}</span>
+              >{{ resolveSpeaker(entry.message.sent_from).initial }}</span>
               <div class="team-chat-main">
                 <div class="team-chat-head">
-                  <span class="team-chat-name">{{ resolveSpeaker(message.sent_from).name }}</span>
+                  <span class="team-chat-name">{{ resolveSpeaker(entry.message.sent_from).name }}</span>
                   <span
-                    v-if="resolveSpeaker(message.sent_from).badge"
+                    v-if="resolveSpeaker(entry.message.sent_from).badge"
                     class="team-chat-badge"
-                    :class="`is-${resolveSpeaker(message.sent_from).theme}`"
-                  >{{ resolveSpeaker(message.sent_from).badge }}</span>
-                  <span v-if="mentionLabel(message)" class="team-chat-mention">{{ mentionLabel(message) }}</span>
-                  <time class="team-chat-time">{{ formatTime(message.create_time ?? message.created_at) }}</time>
+                    :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`"
+                  >{{ resolveSpeaker(entry.message.sent_from).badge }}</span>
+                  <span v-if="mentionLabel(entry.message)" class="team-chat-mention">{{ mentionLabel(entry.message) }}</span>
+                  <time class="team-chat-time">{{ formatTime(entry.message.create_time ?? entry.message.created_at) }}</time>
                 </div>
-                <div class="team-chat-bubble" :class="`is-${resolveSpeaker(message.sent_from).theme}`">
-                  <p class="team-chat-subject">{{ message.subject || message.message_type }}</p>
-                  <p v-if="message.payload" class="team-chat-payload">{{ summarize(message.payload) }}</p>
+                <div class="team-chat-bubble" :class="`is-${resolveSpeaker(entry.message.sent_from).theme}`">
+                  <p class="team-chat-subject">{{ entry.message.subject || entry.message.message_type }}</p>
+                  <div v-if="entry.hasPayload" class="team-chat-payload">
+                    <pre
+                      :id="`team-message-payload-${messageIndex}`"
+                      class="team-chat-payload-text"
+                      :class="{
+                        'is-expanded': isPayloadExpanded(entry.message),
+                        'team-chat-payload-full': isPayloadExpanded(entry.message),
+                        'team-chat-payload-preview': !isPayloadExpanded(entry.message),
+                      }"
+                    >{{ isPayloadExpanded(entry.message) ? entry.payloadText : entry.payloadPreview }}</pre>
+                    <div v-if="entry.hasLongPayload" class="team-chat-payload-actions">
+                      <button
+                        class="team-chat-payload-toggle"
+                        type="button"
+                        :aria-expanded="isPayloadExpanded(entry.message)"
+                        :aria-controls="`team-message-payload-${messageIndex}`"
+                        @click="togglePayload(entry.message)"
+                      >{{ isPayloadExpanded(entry.message) ? '收起' : '展开全文' }}</button>
+                      <button
+                        class="team-chat-payload-copy"
+                        type="button"
+                        @click="copyPayload(entry.message)"
+                      >复制完整内容</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -393,7 +614,7 @@ async function cancelTeam(): Promise<void> {
                 </small>
                 <details v-if="task.errors?.length" class="team-window-task-error">
                   <summary>错误信息</summary>
-                  <code>{{ formatFullDetail(task.errors) }}</code>
+                  <code class="team-window-task-error-content">{{ formatFullDetail(task.errors) }}</code>
                 </details>
               </li>
             </ol>
@@ -634,6 +855,32 @@ async function cancelTeam(): Promise<void> {
   font-size: 10.5px;
   overflow-wrap: anywhere;
 }
+.team-chat-payload-text {
+  max-width: 100%;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.team-chat-payload-text.is-expanded {
+  max-height: min(36vh, 220px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.team-chat-payload-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; }
+.team-chat-payload-actions button {
+  min-height: 28px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-600);
+  font: inherit;
+  cursor: pointer;
+}
+.team-chat-payload-actions button:hover { text-decoration: underline; }
+.team-chat-payload-actions button:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
 
 .team-window-empty { margin: var(--sp-3) 0; color: var(--color-text-placeholder); text-align: center; }
 
@@ -669,7 +916,17 @@ async function cancelTeam(): Promise<void> {
 .team-window-tasks small { display: block; margin-top: 2px; color: var(--color-text-placeholder); overflow-wrap: anywhere; }
 .team-window-task-error { margin-top: 4px; color: var(--color-text-secondary); }
 .team-window-task-error summary { cursor: pointer; color: var(--color-danger); font-size: 10px; }
-.team-window-task-error code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; }
+.team-window-task-error-content {
+  display: block;
+  max-width: 100%;
+  max-height: min(30vh, 180px);
+  margin-top: 4px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+  overscroll-behavior: contain;
+}
 
 .team-window-item-status { flex: none; color: var(--color-text-secondary); font-size: 10px; white-space: nowrap; }
 
@@ -707,6 +964,9 @@ async function cancelTeam(): Promise<void> {
   .team-window-drag { display: none; }
   .team-window-close { width: 40px; height: 40px; }
   .team-window-action { min-height: 40px; }
+  .team-chat-payload-actions button { min-height: 36px; }
+  .team-chat-payload-text.is-expanded { max-height: min(32vh, 200px); }
+  .team-window-task-error-content { max-height: min(28vh, 160px); }
   .team-window-progress-top { flex-wrap: wrap; }
   .team-window-progress-mini { flex: 1 0 100%; margin-left: 0; white-space: normal; }
 }

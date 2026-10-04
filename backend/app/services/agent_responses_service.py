@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 import httpx
 from pydantic import Field
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -44,7 +44,11 @@ from app.core.observability import database_is_ready, observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_mesh import AgentMeshConversation
-from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
+from app.models.agent_response_run import (
+    AgentResponseRun,
+    AgentResponseTranscriptMessage,
+    AgentToolExecution,
+)
 from app.models.user import User
 from app.services import (
     admin_agent_tools,
@@ -431,6 +435,260 @@ class DatabaseCheckpointStore:
         )
         return row is not None and str(row.status) == "active"
 
+    def _ledger_query(self):
+        return self._db.query(AgentResponseTranscriptMessage).filter(
+            AgentResponseTranscriptMessage.user_id == self._user_id,
+            AgentResponseTranscriptMessage.surface == self._surface,
+            AgentResponseTranscriptMessage.session_key == self._session_key,
+        )
+
+    def _read_ledger(self, start: int, end: int) -> list[dict[str, Any]]:
+        if start < 0 or end < start:
+            raise InvalidRunStateError("运行 transcript 游标无效")
+        rows = self._ledger_query().filter(
+            AgentResponseTranscriptMessage.position >= start,
+            AgentResponseTranscriptMessage.position < end,
+        ).order_by(AgentResponseTranscriptMessage.position.asc()).all()
+        if len(rows) != end - start or any(row.position != start + index for index, row in enumerate(rows)):
+            raise InvalidRunStateError("运行 transcript 账本不完整，拒绝恢复不完整上下文")
+        messages: list[dict[str, Any]] = []
+        for row in rows:
+            message_digest = hashlib.sha256(row.message_json.encode("utf-8")).hexdigest()
+            if not row.message_sha256 or not hmac.compare_digest(message_digest, row.message_sha256):
+                raise InvalidRunStateError("运行 transcript 账本消息摘要不匹配，拒绝恢复不完整上下文")
+            try:
+                value = json.loads(row.message_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise InvalidRunStateError("运行 transcript 账本损坏，拒绝恢复不完整上下文") from exc
+            if not isinstance(value, Mapping):
+                raise InvalidRunStateError("运行 transcript 账本格式错误，拒绝恢复不完整上下文")
+            messages.append(copy.deepcopy(dict(value)))
+        return messages
+
+    def _next_ledger_position(self) -> int:
+        first, latest, count = self._ledger_query().with_entities(
+            func.min(AgentResponseTranscriptMessage.position),
+            func.max(AgentResponseTranscriptMessage.position),
+            func.count(AgentResponseTranscriptMessage.id),
+        ).one()
+        if latest is None:
+            if int(count or 0) != 0:
+                raise InvalidRunStateError("运行 transcript 账本不完整")
+            return 0
+        position = int(latest)
+        # 聚合检查可发现缺口而不反复读取全部历史；恢复时会校验消息摘要。
+        if int(first or 0) != 0 or int(count or 0) != position + 1:
+            raise InvalidRunStateError("运行 transcript 账本不完整")
+        return position + 1
+
+    def _append_ledger(self, messages: Sequence[Mapping[str, Any]], *, start: int, run_id: Optional[str]) -> int:
+        next_position = self._next_ledger_position()
+        if next_position != start:
+            raise InvalidRunStateError("运行 transcript 账本游标已变化，拒绝覆盖或丢弃上下文")
+        for offset, message in enumerate(messages):
+            message_json = json.dumps(dict(message), ensure_ascii=False, separators=(",", ":"), default=str)
+            self._db.add(AgentResponseTranscriptMessage(
+                user_id=self._user_id,
+                surface=self._surface,
+                session_key=self._session_key,
+                position=start + offset,
+                run_id=run_id,
+                message_json=message_json,
+                message_sha256=hashlib.sha256(message_json.encode("utf-8")).hexdigest(),
+            ))
+        self._db.flush()
+        return start + len(messages)
+
+    @staticmethod
+    def _visible_transcript_key(item: Mapping[str, Any]) -> Optional[str]:
+        if str(item.get("role") or "") not in {"user", "assistant"}:
+            return None
+        if str(item.get("type") or "message") != "message":
+            return None
+        return json.dumps(
+            {"role": item.get("role"), "content": item.get("content")},
+            ensure_ascii=False, sort_keys=True, default=str,
+        )
+
+    def _merge_legacy_transcripts(self, rows: Sequence[AgentResponseRun]) -> list[dict[str, Any]]:
+        combined: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                checkpoint = json.loads(row.checkpoint_json or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise InvalidRunStateError("历史检查点损坏，无法安全初始化 transcript 账本") from exc
+            if not isinstance(checkpoint, Mapping):
+                raise InvalidRunStateError("历史检查点格式错误，无法安全初始化 transcript 账本")
+            if "transcript" not in checkpoint:
+                transcript = self._checkpoint_from_payload({
+                    "_transcript_ref": checkpoint.get("_transcript_ref"),
+                }).transcript
+            else:
+                if self._transcript_ref(checkpoint) is not None:
+                    raise InvalidRunStateError("运行检查点 transcript 游标与内嵌历史冲突")
+                transcript = checkpoint.get("transcript")
+            if not isinstance(transcript, list) or any(not isinstance(item, Mapping) for item in transcript):
+                raise InvalidRunStateError("历史 transcript 格式错误，无法安全初始化账本")
+            source = [copy.deepcopy(dict(item)) for item in transcript]
+            if not source:
+                continue
+            if source == combined and len(source) == 1 and source[0].get("role") == "user":
+                combined.extend(source)
+                continue
+            if source[:len(combined)] == combined:
+                combined.extend(source[len(combined):])
+                continue
+            old_visible = [self._visible_transcript_key(item) for item in combined]
+            old_visible = [item for item in old_visible if item is not None]
+            source_visible = [
+                (index, key) for index, item in enumerate(source)
+                if (key := self._visible_transcript_key(item)) is not None
+            ]
+            overlap = 0
+            for size in range(min(len(old_visible), len(source_visible)), 1, -1):
+                if old_visible[-size:] == [key for _, key in source_visible[:size]]:
+                    overlap = size
+                    break
+            start = source_visible[overlap - 1][0] + 1 if overlap else 0
+            combined.extend(source[start:])
+        return combined
+
+    def _ensure_session_ledger(self) -> int:
+        next_position = self._next_ledger_position()
+        if next_position:
+            return next_position
+        legacy_rows = self._db.query(AgentResponseRun).filter(
+            AgentResponseRun.user_id == self._user_id,
+            AgentResponseRun.surface == self._surface,
+            AgentResponseRun.session_key == self._session_key,
+        ).order_by(AgentResponseRun.create_time.asc(), AgentResponseRun.id.asc()).all()
+        transcript = self._merge_legacy_transcripts(legacy_rows)
+        if transcript:
+            return self._append_ledger(transcript, start=0, run_id=None)
+        return 0
+
+    def _checkpoint_payload(
+        self, checkpoint: RunCheckpoint, *, start: int, end: int,
+    ) -> str:
+        if end - start != len(checkpoint.transcript):
+            raise InvalidRunStateError("运行 transcript 游标与消息数量不一致")
+        value = checkpoint.to_dict()
+        value.pop("transcript", None)
+        value["_transcript_ref"] = {
+            "version": 2,
+            "start": start,
+            "end": end,
+            "sha256": self._transcript_digest(checkpoint.transcript),
+        }
+        return json.dumps(value, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _transcript_digest(transcript: Sequence[Mapping[str, Any]]) -> str:
+        encoded = json.dumps(
+            [dict(item) for item in transcript], ensure_ascii=False,
+            separators=(",", ":"), default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _transcript_ref(value: Mapping[str, Any]) -> Optional[tuple[int, int, str]]:
+        reference = value.get("_transcript_ref")
+        if reference is None:
+            return None
+        if (
+            not isinstance(reference, Mapping)
+            or reference.get("version") != 2
+            or not isinstance(reference.get("sha256"), str)
+        ):
+            raise InvalidRunStateError("运行 transcript 游标格式无效")
+        try:
+            start, end = int(reference["start"]), int(reference["end"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InvalidRunStateError("运行 transcript 游标格式无效") from exc
+        if start < 0 or end < start:
+            raise InvalidRunStateError("运行 transcript 游标无效")
+        return start, end, str(reference["sha256"])
+
+    def _checkpoint_from_payload(self, value: Mapping[str, Any]) -> RunCheckpoint:
+        payload = copy.deepcopy(dict(value))
+        reference = self._transcript_ref(payload)
+        if reference is None:
+            if not isinstance(payload.get("transcript"), list):
+                raise InvalidRunStateError("运行检查点缺少 transcript，拒绝恢复不完整上下文")
+            if any(not isinstance(item, Mapping) for item in payload["transcript"]):
+                raise InvalidRunStateError("运行 transcript 消息格式错误，拒绝恢复不完整上下文")
+        else:
+            if "transcript" in payload:
+                raise InvalidRunStateError("运行检查点 transcript 游标与内嵌历史冲突")
+            start, end, expected_digest = reference
+            transcript = self._read_ledger(start, end)
+            if self._transcript_digest(transcript) != expected_digest:
+                raise InvalidRunStateError("运行 transcript 摘要不匹配，拒绝恢复不完整上下文")
+            payload["transcript"] = transcript
+            payload.pop("_transcript_ref", None)
+        return RunCheckpoint.from_dict(payload)
+
+    def _new_run_transcript_range(
+        self, transcript: Sequence[Mapping[str, Any]], *, run_id: str,
+    ) -> tuple[int, int]:
+        next_position = self._ensure_session_ledger()
+        existing = self._read_ledger(0, next_position)
+        source = [copy.deepcopy(dict(item)) for item in transcript if isinstance(item, Mapping)]
+        # 只把完整的既有前缀识别为复用历史。单句重复提问必须作为新消息追加。
+        duplicate_single_question = (
+            len(source) == len(existing) == 1 and source[0] == existing[0]
+            and source[0].get("role") == "user"
+        )
+        if not duplicate_single_question and len(source) >= len(existing) and source[:len(existing)] == existing:
+            start = 0
+            suffix = source[len(existing):]
+            end = self._append_ledger(suffix, start=next_position, run_id=run_id) if suffix else next_position
+            return start, end
+        start = next_position
+        end = self._append_ledger(source, start=start, run_id=run_id) if source else start
+        return start, end
+
+    def _legacy_run_transcript_range(
+        self, checkpoint: RunCheckpoint,
+    ) -> tuple[int, int]:
+        next_position = self._ensure_session_ledger()
+        existing = self._read_ledger(0, next_position)
+        source = [copy.deepcopy(dict(item)) for item in checkpoint.transcript if isinstance(item, Mapping)]
+        if len(source) >= len(existing) and source[:len(existing)] == existing:
+            suffix = source[len(existing):]
+            end = (
+                self._append_ledger(suffix, start=next_position, run_id=checkpoint.run_id)
+                if suffix else next_position
+            )
+            return 0, end
+        if len(source) <= len(existing) and existing[:len(source)] == source:
+            return 0, len(source)
+        start = next_position
+        end = self._append_ledger(source, start=start, run_id=checkpoint.run_id) if source else start
+        return start, end
+
+    def _extend_run_transcript(self, row: AgentResponseRun, checkpoint: RunCheckpoint) -> tuple[int, int]:
+        try:
+            stored = json.loads(row.checkpoint_json or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise InvalidRunStateError(f"运行 {row.run_id} 的检查点损坏") from exc
+        if not isinstance(stored, Mapping):
+            raise InvalidRunStateError(f"运行 {row.run_id} 的检查点格式错误")
+        reference = self._transcript_ref(stored)
+        if reference is None:
+            return self._legacy_run_transcript_range(checkpoint)
+        start, end, expected_digest = reference
+        source = [copy.deepcopy(dict(item)) for item in checkpoint.transcript if isinstance(item, Mapping)]
+        previous_count = end - start
+        if len(source) < previous_count or self._transcript_digest(source[:previous_count]) != expected_digest:
+            raise InvalidRunStateError("运行 transcript 与已保存前缀不一致，拒绝覆盖对话历史")
+        next_position = self._next_ledger_position()
+        if next_position != end:
+            raise InvalidRunStateError("会话 transcript 已被其他运行推进，拒绝覆盖或截断历史")
+        suffix = source[previous_count:]
+        new_end = self._append_ledger(suffix, start=end, run_id=checkpoint.run_id) if suffix else end
+        return start, new_end
+
     async def create(self, checkpoint: RunCheckpoint) -> bool:
         if not self._lock_active_conversation():
             self._db.rollback()
@@ -452,6 +710,7 @@ class DatabaseCheckpointStore:
         if self._db.query(AgentResponseRun.id).filter(AgentResponseRun.run_id == checkpoint.run_id).first():
             self._db.rollback()
             return False
+        start, end = self._new_run_transcript_range(checkpoint.transcript, run_id=checkpoint.run_id)
         self._db.add(
             AgentResponseRun(
                 **current_attribution(self._user_id),
@@ -460,7 +719,7 @@ class DatabaseCheckpointStore:
                 surface=self._surface,
                 session_key=self._session_key,
                 status=checkpoint.status,
-                checkpoint_json=json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str),
+                checkpoint_json=self._checkpoint_payload(checkpoint, start=start, end=end),
                 version=1,
             )
         )
@@ -472,8 +731,15 @@ class DatabaseCheckpointStore:
         return True
 
     async def save(self, checkpoint: RunCheckpoint) -> None:
-        row = self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == checkpoint.run_id).first()
+        row = (
+            self._db.query(AgentResponseRun)
+            .filter(AgentResponseRun.run_id == checkpoint.run_id)
+            .with_for_update()
+            .populate_existing()
+            .first()
+        )
         if row is None:
+            start, end = self._new_run_transcript_range(checkpoint.transcript, run_id=checkpoint.run_id)
             self._db.add(
                 AgentResponseRun(
                     **current_attribution(self._user_id),
@@ -482,7 +748,7 @@ class DatabaseCheckpointStore:
                     surface=self._surface,
                     session_key=self._session_key,
                     status=checkpoint.status,
-                    checkpoint_json=json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str),
+                    checkpoint_json=self._checkpoint_payload(checkpoint, start=start, end=end),
                     version=1,
                 )
             )
@@ -494,7 +760,9 @@ class DatabaseCheckpointStore:
         # 保证并发交错下取消仍最终获胜(先取消者先提交即赢)。
         if row.status == CANCELLED and checkpoint.status != CANCELLED:
             return
-        payload = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
+        start, end = self._extend_run_transcript(row, checkpoint)
+        payload = self._checkpoint_payload(checkpoint, start=start, end=end)
+        self._db.flush()
         updated = (
             self._db.query(AgentResponseRun)
             .filter(
@@ -514,6 +782,7 @@ class DatabaseCheckpointStore:
         if updated == 0:
             # 并发取消已先落库;保持 cancelled 终态,放弃本次回写。
             return
+        self._db.expire(row, ["status", "checkpoint_json", "version", "update_time"])
 
     async def load(self, run_id: str) -> Optional[RunCheckpoint]:
         row = (
@@ -532,7 +801,9 @@ class DatabaseCheckpointStore:
             value = json.loads(row.checkpoint_json)
         except (TypeError, json.JSONDecodeError) as exc:
             raise InvalidRunStateError(f"运行 {run_id} 的检查点损坏") from exc
-        return RunCheckpoint.from_dict(value)
+        if not isinstance(value, Mapping):
+            raise InvalidRunStateError(f"运行 {run_id} 的检查点格式错误")
+        return self._checkpoint_from_payload(value)
 
     async def delete(self, run_id: str) -> None:
         row = (
@@ -592,7 +863,13 @@ class DatabaseCheckpointStore:
             .one()
         )
         try:
-            checkpoint = RunCheckpoint.from_dict(json.loads(row.checkpoint_json))
+            stored = json.loads(row.checkpoint_json)
+            if not isinstance(stored, Mapping):
+                raise InvalidRunStateError(f"运行 {run_id} 的检查点格式错误")
+            checkpoint = self._checkpoint_from_payload(stored)
+        except InvalidRunStateError:
+            self._db.rollback()
+            raise
         except (TypeError, json.JSONDecodeError) as exc:
             self._db.rollback()
             raise InvalidRunStateError(f"运行 {run_id} 的检查点损坏") from exc
@@ -606,7 +883,13 @@ class DatabaseCheckpointStore:
             self._db.rollback()
             return None
         checkpoint.status = claimed_status
-        row.checkpoint_json = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
+        try:
+            reference = self._transcript_ref(stored)
+            start, end = reference[:2] if reference is not None else self._legacy_run_transcript_range(checkpoint)
+        except InvalidRunStateError:
+            self._db.rollback()
+            raise
+        row.checkpoint_json = self._checkpoint_payload(checkpoint, start=start, end=end)
         self._db.commit()
         return checkpoint
 
@@ -1293,6 +1576,8 @@ class PrismToolExecutor:
             agent_context.extra["supervisor_plan_sha256"] = team_supervision["plan_sha256"]
             agent_context.extra["supervisor_confirmed_by"] = int(self._user.id) if approved and \
                 team_supervision["needs_confirmation"] else None
+        if call.name == "retry_agent_team" and call.arguments.get("supervisor_plan_sha256"):
+            agent_context.extra["supervisor_user_confirmed"] = bool(approved)
         return await self._execute_once(
             call,
             lambda: self._agent_result(
@@ -3592,7 +3877,10 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "list_agents 中 team_dispatch_state=team_governed 的受治理 Agent(test_verifier、sandbox_deployer、"
         "operations)即使 dispatch_state=approval_required 也可作为团队成员,团队调度会接管其审批,"
         "不要因此拒绝组队或追问用户；用 get_agent_team 查看实际状态和证据，"
-        "失败节点需要改变方案后再用 retry_agent_team，用户要求停止时调用 cancel_agent_team。"
+        "失败节点要先改变方案并调用 retry_agent_team 预览；若返回 awaiting_user_confirmation，"
+        "必须先展示具体任务、风险和原因并等待当前用户明确确认，之后才可把 plan_sha256 回传再次调用。"
+        "绝不能在同一轮自行把确认摘要回传，也不能把之前创建团队的确认复用于新的重试。"
+        "用户要求停止时调用 cancel_agent_team。"
         "唯一超级管理员在管理小菱中创建服务器运维团队时，成员必须使用 agent:operations，"
         "任务 input 必须是 {action,params}，且 action 必须来自 list_agents 返回的 team_input_contract.action；"
         "不得用 monitor、security_sentinel 或 dashboard 代替服务器运维。团队只允许只读运维，"

@@ -1,0 +1,37 @@
+{
+  "item": "A04",
+  "status": "candidate repair verified with deterministic worker/event probes",
+  "reproduction": {
+    "before_fix": {
+      "short_task_finished": true,
+      "ready_followup_claimed_while_sibling_running": false,
+      "ready_followup_claimed_only_after_sibling_finished": true,
+      "evidence": "复现-A04-wave屏障.log"
+    },
+    "fail_first_test": "test_dispatch_once_refills_idle_worker_before_slow_sibling_finishes failed before implementation because the follow-up remained unclaimed during the blocked sibling",
+    "after_fix_repetitions": 3,
+    "followup_claimed_while_slow_sibling_running": [true, true, true],
+    "round_logs": [
+      "复测-A04-wave-第1轮.log",
+      "复测-A04-wave-第2轮.log",
+      "复测-A04-wave-第3轮.log"
+    ]
+  },
+  "changes": [
+    "Replace fixed wave completion barriers with FIRST_COMPLETED handling.",
+    "After each completed Future, discard the dispatcher session snapshot, refresh task/dependency state, and fill free worker slots immediately.",
+    "Keep bounded dispatch claim budget, configured global worker count, lease length, and round-robin team selection."
+  ],
+  "verification": {
+    "dispatcher_and_team_service_tests": "153 passed",
+    "multi_team_short_long_dependency_test": "passed; dependent task claimed while another team's long task remained blocked",
+    "existing_independent_concurrency_test": "passed; max configured parallel workers preserved",
+    "team_failure_cancel_retry_and_lease_service_coverage": "included in passing dispatcher/service test files",
+    "backend_ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "scope_limits": [
+    "Timing behavior used deterministic local thread events and service stubs; no model calls or production queue data.",
+    "Candidate changes remain local to the isolated worktree and are not deployed."
+  ]
+}

@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run --run src/views/code/CodeEditor.lifecycle.test.ts src/views/issue/IssueHub.recovery.test.ts src/views/sandbox/SandboxWorkstation.test.ts src/components/ai/AgentTeamWindow.full-payload.test.ts src/components/ai/AgentTeamWindow.target-freeze.test.ts src/components/ai/AgentTeamTime.regression.test.ts src/views/project/ProjectResourcePermission.test.ts src/views/permissionVisibility.regression.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  8 passed (8)
+      Tests  113 passed (113)
+   Start at  16:30:21
+   Duration  1.92s (transform 2.43s, setup 139ms, import 6.05s, tests 1.84s, environment 2.08s)
+

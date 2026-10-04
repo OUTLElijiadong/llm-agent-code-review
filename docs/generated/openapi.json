@@ -338,6 +338,7 @@
         "type": "object"
       },
       "AdminReviseIn": {
+        "additionalProperties": false,
         "properties": {
           "model_config_json": {
             "additionalProperties": true,
@@ -515,17 +516,25 @@
             "type": "string"
           },
           "content": {
+            "maxLength": 1000000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
           },
           "snapshot": {
             "default": "",
+            "maxLength": 1000000,
             "title": "Snapshot",
             "type": "string"
           },
           "status": {
             "default": "draft",
+            "enum": [
+              "draft",
+              "gray",
+              "stable",
+              "rolled_back"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -546,6 +555,7 @@
         "type": "object"
       },
       "AgentCreateIn": {
+        "additionalProperties": false,
         "properties": {
           "code": {
             "maxLength": 80,
@@ -725,12 +735,19 @@
             "type": "number"
           },
           "content": {
+            "maxLength": 2000000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
           },
           "risk_level": {
             "default": "low",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
             "title": "Risk Level",
             "type": "string"
           },
@@ -742,7 +759,14 @@
           },
           "source_type": {
             "default": "manual",
-            "maxLength": 30,
+            "enum": [
+              "manual",
+              "project",
+              "docs",
+              "url",
+              "github",
+              "official"
+            ],
             "title": "Source Type",
             "type": "string"
           },
@@ -963,13 +987,18 @@
         "description": "Agent 记忆创建输入。",
         "properties": {
           "content": {
+            "maxLength": 262144,
             "minLength": 1,
             "title": "Content",
             "type": "string"
           },
           "memory_type": {
             "default": "long_term",
-            "maxLength": 30,
+            "enum": [
+              "short_term",
+              "long_term",
+              "reflection"
+            ],
             "title": "Memory Type",
             "type": "string"
           },
@@ -1184,6 +1213,7 @@
           "supervision_correlation_id": {
             "anyOf": [
               {
+                "maxLength": 160,
                 "type": "string"
               },
               {
@@ -1206,6 +1236,7 @@
           "supervision_objective": {
             "anyOf": [
               {
+                "maxLength": 4000,
                 "type": "string"
               },
               {
@@ -1574,6 +1605,12 @@
           "status": {
             "anyOf": [
               {
+                "enum": [
+                  "idle",
+                  "working",
+                  "disabled",
+                  "error"
+                ],
                 "type": "string"
               },
               {
@@ -1587,11 +1624,20 @@
         "type": "object"
       },
       "AgentResponseMessage": {
+        "additionalProperties": false,
         "properties": {
           "content": {
             "maxLength": 100000,
             "title": "Content",
             "type": "string"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4,
+            "title": "Images",
+            "type": "array"
           },
           "role": {
             "enum": [
@@ -1610,6 +1656,7 @@
         "type": "object"
       },
       "AgentResponsesRequest": {
+        "additionalProperties": false,
         "properties": {
           "action": {
             "default": "start",
@@ -1682,6 +1729,11 @@
             ],
             "title": "Surface",
             "type": "string"
+          },
+          "use_server_history": {
+            "default": false,
+            "title": "Use Server History",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1691,6 +1743,7 @@
         "type": "object"
       },
       "AgentReviseIn": {
+        "additionalProperties": false,
         "properties": {
           "model_config_json": {
             "additionalProperties": true,
@@ -1734,6 +1787,10 @@
           },
           "event_type": {
             "default": "reward",
+            "enum": [
+              "reward",
+              "penalty"
+            ],
             "title": "Event Type",
             "type": "string"
           },
@@ -1939,12 +1996,12 @@
           },
           "idle": {
             "default": 0,
-            "description": "空闲数量",
+            "description": "可见集合中非执行态数量，不作为存活判定",
             "title": "Idle",
             "type": "integer"
           },
           "online": {
-            "description": "当前在岗 Agent 数",
+            "description": "与当前办公室列表一致的可见 Agent 数，不代表在线进程",
             "title": "Online",
             "type": "integer"
           },
@@ -1965,7 +2022,7 @@
           },
           "working": {
             "default": 0,
-            "description": "工作中数量(M2 阶段接入)",
+            "description": "当前可见集合中近90秒事件处于执行态的数量",
             "title": "Working",
             "type": "integer"
           }
@@ -2172,6 +2229,7 @@
           "address": {
             "maxLength": 200,
             "minLength": 1,
+            "pattern": "^(?:agent|custom|temporary):[A-Za-z0-9_-]+$",
             "title": "Address",
             "type": "string"
           },
@@ -2179,6 +2237,16 @@
             "additionalProperties": true,
             "title": "Capabilities",
             "type": "object"
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemporaryAgentDefinition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "display_name": {
             "maxLength": 200,
@@ -2238,6 +2306,38 @@
       },
       "AgentTeamRetryIn": {
         "additionalProperties": false,
+        "description": "执行重试；高风险任务须回传同一计划的确认摘要。",
+        "properties": {
+          "strategy_changes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 100,
+            "title": "Strategy Changes",
+            "type": "object"
+          },
+          "supervisor_plan_sha256": {
+            "default": "",
+            "maxLength": 64,
+            "pattern": "^(?:[0-9a-f]{64})?$",
+            "title": "Supervisor Plan Sha256",
+            "type": "string"
+          },
+          "task_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Task Keys",
+            "type": "array"
+          }
+        },
+        "title": "AgentTeamRetryIn",
+        "type": "object"
+      },
+      "AgentTeamRetryPreviewIn": {
+        "additionalProperties": false,
+        "description": "只读预览本次重试范围和监督风险。",
         "properties": {
           "strategy_changes": {
             "additionalProperties": {
@@ -2256,7 +2356,7 @@
             "type": "array"
           }
         },
-        "title": "AgentTeamRetryIn",
+        "title": "AgentTeamRetryPreviewIn",
         "type": "object"
       },
       "AgentTeamTaskIn": {
@@ -2410,11 +2510,22 @@
           },
           "permission": {
             "default": "allow",
+            "enum": [
+              "allow",
+              "deny",
+              "escalate"
+            ],
             "title": "Permission",
             "type": "string"
           },
           "risk_level": {
             "default": "low",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
             "title": "Risk Level",
             "type": "string"
           },
@@ -2512,6 +2623,17 @@
       "AiLogDetailOut": {
         "description": "AI日志详情(含Prompt和Response)",
         "properties": {
+          "agent_execution_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Execution Event Id"
+          },
           "agent_label": {
             "anyOf": [
               {
@@ -2522,6 +2644,39 @@
               }
             ],
             "title": "Agent Label"
+          },
+          "agent_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Run Id"
+          },
+          "agent_team_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Team Id"
+          },
+          "agent_team_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Team Task Id"
           },
           "chunk_index": {
             "anyOf": [
@@ -2544,6 +2699,11 @@
               }
             ],
             "title": "Completion Tokens"
+          },
+          "content_redacted": {
+            "default": false,
+            "title": "Content Redacted",
+            "type": "boolean"
           },
           "create_time": {
             "anyOf": [
@@ -2663,6 +2823,28 @@
             ],
             "title": "Response"
           },
+          "root_agent_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Agent Run Id"
+          },
+          "root_agent_run_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Agent Run Key"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2689,6 +2871,17 @@
             ],
             "title": "Task Name"
           },
+          "tool_execution_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Execution Id"
+          },
           "total_tokens": {
             "anyOf": [
               {
@@ -2699,6 +2892,11 @@
               }
             ],
             "title": "Total Tokens"
+          },
+          "usage_state": {
+            "default": "unknown",
+            "title": "Usage State",
+            "type": "string"
           },
           "user_id": {
             "anyOf": [
@@ -2735,6 +2933,17 @@
       "AiLogOut": {
         "description": "AI日志列表项",
         "properties": {
+          "agent_execution_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Execution Event Id"
+          },
           "agent_label": {
             "anyOf": [
               {
@@ -2745,6 +2954,39 @@
               }
             ],
             "title": "Agent Label"
+          },
+          "agent_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Run Id"
+          },
+          "agent_team_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Team Id"
+          },
+          "agent_team_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Team Task Id"
           },
           "chunk_index": {
             "anyOf": [
@@ -2853,6 +3095,28 @@
             ],
             "title": "Prompt Tokens"
           },
+          "root_agent_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Agent Run Id"
+          },
+          "root_agent_run_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Agent Run Key"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2879,6 +3143,17 @@
             ],
             "title": "Task Name"
           },
+          "tool_execution_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Execution Id"
+          },
           "total_tokens": {
             "anyOf": [
               {
@@ -2889,6 +3164,11 @@
               }
             ],
             "title": "Total Tokens"
+          },
+          "usage_state": {
+            "default": "unknown",
+            "title": "Usage State",
+            "type": "string"
           },
           "user_id": {
             "anyOf": [
@@ -3606,6 +3886,7 @@
         "description": "论坛发帖助手(RAG)",
         "properties": {
           "draft": {
+            "maxLength": 100000,
             "minLength": 1,
             "title": "Draft",
             "type": "string"
@@ -3651,6 +3932,11 @@
               }
             ],
             "title": "Actor Name"
+          },
+          "content_redacted": {
+            "default": false,
+            "title": "Content Redacted",
+            "type": "boolean"
           },
           "create_time": {
             "format": "date-time",
@@ -3717,6 +4003,22 @@
           "create_time"
         ],
         "title": "AuditLogOut",
+        "type": "object"
+      },
+      "AvatarSetIn": {
+        "description": "设置头像:内置 key(如 cat)或 'upload'",
+        "properties": {
+          "avatar": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Avatar",
+            "type": "string"
+          }
+        },
+        "required": [
+          "avatar"
+        ],
+        "title": "AvatarSetIn",
         "type": "object"
       },
       "BetaInviteGenerateIn": {
@@ -3855,7 +4157,7 @@
       "Body_upload_audit_source_archive_api_projects__project_id__audit_source_archive_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           }
@@ -3866,10 +4168,24 @@
         "title": "Body_upload_audit_source_archive_api_projects__project_id__audit_source_archive_post",
         "type": "object"
       },
+      "Body_upload_avatar_image_api_me_avatar_image_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_avatar_image_api_me_avatar_image_post",
+        "type": "object"
+      },
       "Body_upload_code_api_code_files_upload_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           },
@@ -3891,28 +4207,6 @@
           "file"
         ],
         "title": "Body_upload_code_api_code_files_upload_post",
-        "type": "object"
-      },
-      "Body_upload_folder_api_code_files_upload_folder_post": {
-        "properties": {
-          "files": {
-            "items": {
-              "format": "binary",
-              "type": "string"
-            },
-            "title": "Files",
-            "type": "array"
-          },
-          "project_id": {
-            "title": "Project Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "project_id",
-          "files"
-        ],
-        "title": "Body_upload_folder_api_code_files_upload_folder_post",
         "type": "object"
       },
       "CapabilityAliasIn": {
@@ -4029,10 +4323,6 @@
             "title": "Name",
             "type": "string"
           },
-          "owner_id": {
-            "title": "Owner Id",
-            "type": "integer"
-          },
           "release_id": {
             "title": "Release Id",
             "type": "integer"
@@ -4059,7 +4349,6 @@
           "code",
           "name",
           "description",
-          "owner_id",
           "version_id",
           "version_number",
           "release_id",
@@ -4069,6 +4358,7 @@
         "type": "object"
       },
       "CatalogInvokeIn": {
+        "additionalProperties": false,
         "properties": {
           "code": {
             "maxLength": 200000,
@@ -4121,13 +4411,13 @@
         "description": "修改密码请求体",
         "properties": {
           "new_password": {
-            "maxLength": 32,
-            "minLength": 6,
+            "maxLength": 64,
+            "minLength": 15,
             "title": "New Password",
             "type": "string"
           },
           "old_password": {
-            "maxLength": 32,
+            "maxLength": 64,
             "minLength": 6,
             "title": "Old Password",
             "type": "string"
@@ -4144,12 +4434,17 @@
         "properties": {
           "content": {
             "description": "消息内容",
+            "maxLength": 100000,
+            "minLength": 1,
             "title": "Content",
             "type": "string"
           },
           "role": {
             "default": "user",
-            "description": "角色: user/assistant",
+            "enum": [
+              "user",
+              "assistant"
+            ],
             "title": "Role",
             "type": "string"
           }
@@ -4167,6 +4462,8 @@
             "items": {
               "$ref": "#/components/schemas/ChatMessage"
             },
+            "maxItems": 100,
+            "minItems": 1,
             "title": "Messages",
             "type": "array"
           },
@@ -4179,6 +4476,7 @@
           "trace_id": {
             "anyOf": [
               {
+                "maxLength": 80,
                 "type": "string"
               },
               {
@@ -4261,13 +4559,14 @@
             "type": "object"
           },
           "clarify_id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Clarify Id",
             "type": "string"
           }
         },
         "required": [
-          "clarify_id",
-          "answers"
+          "clarify_id"
         ],
         "title": "ClarifyAnswers",
         "type": "object"
@@ -4489,6 +4788,7 @@
         "description": "在线新增代码文件请求体",
         "properties": {
           "content": {
+            "maxLength": 5000000,
             "minLength": 0,
             "title": "Content",
             "type": "string"
@@ -4524,6 +4824,7 @@
             "title": "Language"
           },
           "project_id": {
+            "exclusiveMinimum": 0.0,
             "title": "Project Id",
             "type": "integer"
           }
@@ -4744,8 +5045,22 @@
             "title": "Change Desc"
           },
           "content": {
+            "maxLength": 5000000,
             "title": "Content",
             "type": "string"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "同步保存需提供读取文件时的版本号；缺失返回 40904，服务器文件保持不变。",
+            "title": "Expected Version"
           }
         },
         "required": [
@@ -4883,6 +5198,7 @@
                 "items": {
                   "type": "integer"
                 },
+                "maxItems": 1000,
                 "type": "array"
               },
               {
@@ -4906,6 +5222,7 @@
         "type": "object"
       },
       "DecisionIn": {
+        "additionalProperties": false,
         "properties": {
           "note": {
             "default": "",
@@ -4948,6 +5265,7 @@
         "description": "手动添加一篇知识文档",
         "properties": {
           "content": {
+            "maxLength": 2000000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -5291,6 +5609,7 @@
         "type": "object"
       },
       "FeedbackIn": {
+        "additionalProperties": false,
         "description": "提交反馈",
         "properties": {
           "contact": {
@@ -5306,6 +5625,7 @@
             "title": "Contact"
           },
           "content": {
+            "maxLength": 20000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -5414,11 +5734,13 @@
         "type": "object"
       },
       "FeedbackReplyIn": {
+        "additionalProperties": false,
         "description": "管理员回复反馈",
         "properties": {
           "admin_reply": {
             "anyOf": [
               {
+                "maxLength": 20000,
                 "type": "string"
               },
               {
@@ -5450,12 +5772,14 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 2000,
             "title": "File Names",
             "type": "array"
           },
           "folder_name": {
             "default": "",
             "description": "文件夹名称",
+            "maxLength": 500,
             "title": "Folder Name",
             "type": "string"
           }
@@ -5525,6 +5849,7 @@
           },
           "project_id": {
             "description": "项目 ID",
+            "exclusiveMinimum": 0.0,
             "title": "Project Id",
             "type": "integer"
           },
@@ -5647,6 +5972,8 @@
             "items": {
               "type": "integer"
             },
+            "maxItems": 500,
+            "minItems": 1,
             "title": "Ids",
             "type": "array"
           },
@@ -6635,11 +6962,14 @@
           "description": {
             "default": "",
             "description": "项目描述",
+            "maxLength": 2000,
             "title": "Description",
             "type": "string"
           },
           "project_name": {
             "description": "项目名称",
+            "maxLength": 100,
+            "minLength": 1,
             "title": "Project Name",
             "type": "string"
           }
@@ -7103,10 +7433,14 @@
         "description": "用户登录请求体",
         "properties": {
           "password": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Password",
             "type": "string"
           },
           "username": {
+            "maxLength": 50,
+            "minLength": 1,
             "title": "Username",
             "type": "string"
           }
@@ -7119,7 +7453,7 @@
         "type": "object"
       },
       "LoginOut": {
-        "description": "登录成功响应",
+        "description": "登录成功响应(first_login=注册后首次登录,用于触发小菱新手引导)",
         "properties": {
           "access_token": {
             "title": "Access Token",
@@ -7128,6 +7462,11 @@
           "expires_in": {
             "title": "Expires In",
             "type": "integer"
+          },
+          "first_login": {
+            "default": false,
+            "title": "First Login",
+            "type": "boolean"
           },
           "token_type": {
             "default": "Bearer",
@@ -7361,6 +7700,36 @@
         "title": "MemberAddIn",
         "type": "object"
       },
+      "MemberCandidateOut": {
+        "description": "项目成员搜索候选，仅返回添加成员所需的最少资料。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "MemberCandidateOut",
+        "type": "object"
+      },
       "MemberOut": {
         "description": "项目成员响应项\n\nR8 修复(2026-06-25):补齐 update_time,对齐 ProjectMember ORM。",
         "properties": {
@@ -7538,6 +7907,202 @@
         "title": "MenuOut",
         "type": "object"
       },
+      "ModelAssignmentsIn": {
+        "description": "角色->模型分配;空串清除该角色回退全局默认。",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Assignments",
+            "type": "object"
+          }
+        },
+        "title": "ModelAssignmentsIn",
+        "type": "object"
+      },
+      "ModelRegistryItemIn": {
+        "description": "注册表条目(管理员手工新增/编辑;vision 能力标记可改)。",
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "vision": {
+            "default": false,
+            "title": "Vision",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelRegistryItemIn",
+        "type": "object"
+      },
+      "ModelRegistryItemOut": {
+        "properties": {
+          "added_at": {
+            "default": "",
+            "title": "Added At",
+            "type": "string"
+          },
+          "capability_source": {
+            "default": "manual",
+            "title": "Capability Source",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          },
+          "vision": {
+            "default": false,
+            "title": "Vision",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ModelRegistryItemOut",
+        "type": "object"
+      },
+      "ModelRegistryOut": {
+        "description": "模型注册表 + 角色分配 + 角色说明。",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Assignments",
+            "type": "object"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRegistryItemOut"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "roles": {
+            "additionalProperties": true,
+            "title": "Roles",
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "ModelRegistryOut",
+        "type": "object"
+      },
+      "ModelRegistryReplaceIn": {
+        "description": "整表保存注册表(手工编辑)。",
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRegistryItemIn"
+            },
+            "maxItems": 500,
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "title": "ModelRegistryReplaceIn",
+        "type": "object"
+      },
+      "ModelRegistrySyncOut": {
+        "description": "从 provider 拉取并合并进注册表的结果。",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "fetched": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fetched",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRegistryItemOut"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "ModelRegistrySyncOut",
+        "type": "object"
+      },
       "OwaspHotspotOut": {
         "properties": {
           "count": {
@@ -7554,6 +8119,42 @@
           "count"
         ],
         "title": "OwaspHotspotOut",
+        "type": "object"
+      },
+      "PageOut_AgentAlertOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAlertOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "PageOut[AgentAlertOut]",
         "type": "object"
       },
       "PageOut_AiLogOut_": {
@@ -8113,6 +8714,7 @@
         "type": "object"
       },
       "PentestAuthorizeIn": {
+        "additionalProperties": false,
         "description": "前期交互·授权确认。",
         "properties": {
           "ack_rules": {
@@ -8135,6 +8737,7 @@
         "type": "object"
       },
       "PentestCreateIn": {
+        "additionalProperties": false,
         "description": "创建渗透测试委托(前期交互·范围确定)。",
         "properties": {
           "notes": {
@@ -8340,6 +8943,11 @@
             "title": "Action",
             "type": "string"
           },
+          "content_redacted": {
+            "default": false,
+            "title": "Content Redacted",
+            "type": "boolean"
+          },
           "context_json": {
             "anyOf": [
               {
@@ -8436,6 +9044,8 @@
         "description": "策略试算输入。",
         "properties": {
           "action": {
+            "maxLength": 120,
+            "minLength": 1,
             "title": "Action",
             "type": "string"
           },
@@ -8446,11 +9056,13 @@
           },
           "resource": {
             "default": "*",
+            "maxLength": 160,
             "title": "Resource",
             "type": "string"
           },
           "subject": {
             "default": "agent:unknown",
+            "maxLength": 120,
             "title": "Subject",
             "type": "string"
           }
@@ -8574,6 +9186,11 @@
           },
           "effect": {
             "default": "allow",
+            "enum": [
+              "allow",
+              "deny",
+              "escalate"
+            ],
             "title": "Effect",
             "type": "string"
           },
@@ -8605,6 +9222,12 @@
           },
           "risk_level": {
             "default": "low",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
             "title": "Risk Level",
             "type": "string"
           },
@@ -8716,6 +9339,7 @@
             "type": "string"
           },
           "content": {
+            "maxLength": 100000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -8818,6 +9442,7 @@
           "content": {
             "anyOf": [
               {
+                "maxLength": 100000,
                 "minLength": 1,
                 "type": "string"
               },
@@ -8842,6 +9467,23 @@
           }
         },
         "title": "PostUpdateIn",
+        "type": "object"
+      },
+      "PreferencePromptIn": {
+        "description": "小菱偏好询问结果上报(已答/跳过)",
+        "properties": {
+          "state": {
+            "description": "1=已答 2=跳过",
+            "maximum": 2.0,
+            "minimum": 1.0,
+            "title": "State",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "PreferencePromptIn",
         "type": "object"
       },
       "ProfileOut": {
@@ -8897,10 +9539,32 @@
             ],
             "title": "Last Learned At"
           },
+          "preference_prompted": {
+            "default": 0,
+            "title": "Preference Prompted",
+            "type": "integer"
+          },
+          "preference_prompted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preference Prompted At"
+          },
           "preferred_language": {
             "default": "",
             "title": "Preferred Language",
             "type": "string"
+          },
+          "should_prompt": {
+            "default": true,
+            "title": "Should Prompt",
+            "type": "boolean"
           },
           "tech_stack": {
             "default": "",
@@ -8944,10 +9608,15 @@
             ],
             "title": "Auto Learn"
           },
+          "clear_learned": {
+            "default": false,
+            "title": "Clear Learned",
+            "type": "boolean"
+          },
           "experience_level": {
             "anyOf": [
               {
-                "pattern": "^(beginner|intermediate|advanced)$",
+                "pattern": "^(|beginner|intermediate|advanced)$",
                 "type": "string"
               },
               {
@@ -8962,6 +9631,7 @@
                 "items": {
                   "type": "string"
                 },
+                "maxItems": 50,
                 "type": "array"
               },
               {
@@ -8994,6 +9664,19 @@
             ],
             "title": "Hobbies"
           },
+          "preference_prompted": {
+            "anyOf": [
+              {
+                "maximum": 2.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preference Prompted"
+          },
           "preferred_language": {
             "anyOf": [
               {
@@ -9025,9 +9708,19 @@
       "ProjectDetailOut": {
         "description": "项目详情响应",
         "properties": {
+          "active_file_count": {
+            "default": 0,
+            "title": "Active File Count",
+            "type": "integer"
+          },
           "agent_run_count": {
             "default": 0,
             "title": "Agent Run Count",
+            "type": "integer"
+          },
+          "archive_file_count": {
+            "default": 0,
+            "title": "Archive File Count",
             "type": "integer"
           },
           "can_delete": {
@@ -9185,9 +9878,19 @@
       "ProjectOut": {
         "description": "项目列表项响应\n\nv2.0 新增 `score`: 最近一次成功审查的评分,前端 ProjectList 使用真实评分,\n不再 hash 派生假数字。无审查记录时为 None。\nR6 修复(2026-06-25):补齐 update_time,对齐 Project ORM。",
         "properties": {
+          "active_file_count": {
+            "default": 0,
+            "title": "Active File Count",
+            "type": "integer"
+          },
           "agent_run_count": {
             "default": 0,
             "title": "Agent Run Count",
+            "type": "integer"
+          },
+          "archive_file_count": {
+            "default": 0,
+            "title": "Archive File Count",
             "type": "integer"
           },
           "can_delete": {
@@ -9690,8 +10393,8 @@
             "title": "Nickname"
           },
           "password": {
-            "maxLength": 32,
-            "minLength": 6,
+            "maxLength": 64,
+            "minLength": 15,
             "title": "Password",
             "type": "string"
           },
@@ -10059,6 +10762,7 @@
       "ReplyIn": {
         "properties": {
           "content": {
+            "maxLength": 50000,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -10275,6 +10979,7 @@
         "properties": {
           "content": {
             "description": "Jinja2 模板字符串",
+            "maxLength": 262144,
             "minLength": 1,
             "title": "Content",
             "type": "string"
@@ -10388,6 +11093,7 @@
           "content": {
             "anyOf": [
               {
+                "maxLength": 262144,
                 "minLength": 1,
                 "type": "string"
               },
@@ -11280,7 +11986,7 @@
             "type": "string"
           }
         },
-        "title": "Resp[List[app.schemas.rbac.MenuOut]]",
+        "title": "Resp[List[MenuOut]]",
         "type": "object"
       },
       "Resp_List_PermissionOut__": {
@@ -11310,7 +12016,7 @@
             "type": "string"
           }
         },
-        "title": "Resp[List[app.schemas.rbac.PermissionOut]]",
+        "title": "Resp[List[PermissionOut]]",
         "type": "object"
       },
       "Resp_List_ReportTemplateOut__": {
@@ -11340,7 +12046,7 @@
             "type": "string"
           }
         },
-        "title": "Resp[List[app.schemas.report_template.ReportTemplateOut]]",
+        "title": "Resp[List[ReportTemplateOut]]",
         "type": "object"
       },
       "Resp_List_RoleOut__": {
@@ -11370,7 +12076,7 @@
             "type": "string"
           }
         },
-        "title": "Resp[List[app.schemas.rbac.RoleOut]]",
+        "title": "Resp[List[RoleOut]]",
         "type": "object"
       },
       "Resp_List_str__": {
@@ -11507,6 +12213,58 @@
         "title": "Resp[MemberOut]",
         "type": "object"
       },
+      "Resp_ModelRegistryOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelRegistryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[ModelRegistryOut]",
+        "type": "object"
+      },
+      "Resp_ModelRegistrySyncOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelRegistrySyncOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[ModelRegistrySyncOut]",
+        "type": "object"
+      },
       "Resp_NoneType_": {
         "properties": {
           "code": {
@@ -11525,6 +12283,32 @@
           }
         },
         "title": "Resp[NoneType]",
+        "type": "object"
+      },
+      "Resp_PageOut_AgentAlertOut__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageOut_AgentAlertOut_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[PageOut[AgentAlertOut]]",
         "type": "object"
       },
       "Resp_PageOut_AiLogOut__": {
@@ -12255,6 +13039,32 @@
         "title": "Resp[RoleOut]",
         "type": "object"
       },
+      "Resp_RunningOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[RunningOut]",
+        "type": "object"
+      },
       "Resp_SandboxEnvironmentOut_": {
         "properties": {
           "code": {
@@ -12279,6 +13089,32 @@
           }
         },
         "title": "Resp[SandboxEnvironmentOut]",
+        "type": "object"
+      },
+      "Resp_SandboxRemoteTargetAuthorizationOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxRemoteTargetAuthorizationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[SandboxRemoteTargetAuthorizationOut]",
         "type": "object"
       },
       "Resp_SecurityChecklistOut_": {
@@ -12357,6 +13193,32 @@
           }
         },
         "title": "Resp[SecurityMonitorRunOut]",
+        "type": "object"
+      },
+      "Resp_SecurityRuleCatalogOut_": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRuleCatalogOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[SecurityRuleCatalogOut]",
         "type": "object"
       },
       "Resp_SecurityScanOut_": {
@@ -13269,6 +14131,36 @@
         "title": "Resp[list[IssueTypeItem]]",
         "type": "object"
       },
+      "Resp_list_MemberCandidateOut__": {
+        "properties": {
+          "code": {
+            "default": 0,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MemberCandidateOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "default": "ok",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "Resp[list[MemberCandidateOut]]",
+        "type": "object"
+      },
       "Resp_list_MemberOut__": {
         "properties": {
           "code": {
@@ -13730,6 +14622,7 @@
             "type": "array"
           },
           "project_id": {
+            "exclusiveMinimum": 0.0,
             "title": "Project Id",
             "type": "integer"
           },
@@ -13886,6 +14779,7 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 500,
             "title": "Permission Codes",
             "type": "array"
           },
@@ -14047,6 +14941,7 @@
                 "items": {
                   "type": "string"
                 },
+                "maxItems": 500,
                 "type": "array"
               },
               {
@@ -14102,6 +14997,7 @@
             "type": "string"
           },
           "rule_content": {
+            "maxLength": 100000,
             "minLength": 1,
             "title": "Rule Content",
             "type": "string"
@@ -14113,14 +15009,26 @@
             "type": "string"
           },
           "rule_type": {
-            "maxLength": 50,
-            "minLength": 1,
+            "enum": [
+              "security",
+              "correctness",
+              "performance",
+              "robustness",
+              "maintainability",
+              "style",
+              "documentation"
+            ],
             "title": "Rule Type",
             "type": "string"
           },
           "severity": {
             "default": "中",
-            "maxLength": 10,
+            "enum": [
+              "严重",
+              "高",
+              "中",
+              "低"
+            ],
             "title": "Severity",
             "type": "string"
           }
@@ -14249,6 +15157,7 @@
           "rule_content": {
             "anyOf": [
               {
+                "maxLength": 100000,
                 "type": "string"
               },
               {
@@ -14272,7 +15181,15 @@
           "rule_type": {
             "anyOf": [
               {
-                "maxLength": 50,
+                "enum": [
+                  "security",
+                  "correctness",
+                  "performance",
+                  "robustness",
+                  "maintainability",
+                  "style",
+                  "documentation"
+                ],
                 "type": "string"
               },
               {
@@ -14284,7 +15201,12 @@
           "severity": {
             "anyOf": [
               {
-                "maxLength": 10,
+                "enum": [
+                  "严重",
+                  "高",
+                  "中",
+                  "低"
+                ],
                 "type": "string"
               },
               {
@@ -14311,6 +15233,129 @@
         "title": "RunIn",
         "type": "object"
       },
+      "RunningAgentItem": {
+        "description": "本人进行中的小菱/管理 Agent 运行",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "session_key": {
+            "title": "Session Key",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          },
+          "update_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Time"
+          }
+        },
+        "required": [
+          "run_id",
+          "surface",
+          "session_key",
+          "status"
+        ],
+        "title": "RunningAgentItem",
+        "type": "object"
+      },
+      "RunningOut": {
+        "description": "首页「后台进行中」面板数据",
+        "properties": {
+          "agents": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunningAgentItem"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "reviews": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunningReviewItem"
+            },
+            "title": "Reviews",
+            "type": "array"
+          }
+        },
+        "title": "RunningOut",
+        "type": "object"
+      },
+      "RunningReviewItem": {
+        "description": "进行中的审查任务(进度=processed_files/total_files)",
+        "properties": {
+          "create_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create Time"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "processed_files": {
+            "default": 0,
+            "title": "Processed Files",
+            "type": "integer"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          },
+          "review_type": {
+            "title": "Review Type",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_name": {
+            "title": "Task Name",
+            "type": "string"
+          },
+          "total_files": {
+            "default": 0,
+            "title": "Total Files",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "task_name",
+          "project_id",
+          "project_name",
+          "review_type",
+          "status"
+        ],
+        "title": "RunningReviewItem",
+        "type": "object"
+      },
       "SandboxArtifactOut": {
         "properties": {
           "artifact_type": {
@@ -14320,6 +15365,11 @@
           "byte_size": {
             "title": "Byte Size",
             "type": "integer"
+          },
+          "download_allowed": {
+            "default": false,
+            "title": "Download Allowed",
+            "type": "boolean"
           },
           "file_name": {
             "title": "File Name",
@@ -14384,6 +15434,18 @@
             ],
             "title": "Purpose",
             "type": "string"
+          },
+          "remote_target_approval_token": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Target Approval Token"
           },
           "remote_target_authorized": {
             "default": false,
@@ -14480,6 +15542,22 @@
             "title": "Events",
             "type": "array"
           },
+          "execution_round": {
+            "default": 0,
+            "title": "Execution Round",
+            "type": "integer"
+          },
+          "execution_source_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Source Sha256"
+          },
           "expires_at": {
             "format": "date-time",
             "title": "Expires At",
@@ -14516,6 +15594,17 @@
             "title": "Purpose",
             "type": "string"
           },
+          "remote_target_approval_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote Target Approval Id"
+          },
           "remote_target_url": {
             "anyOf": [
               {
@@ -14546,6 +15635,28 @@
               }
             ],
             "title": "Source Revision Id"
+          },
+          "source_revision_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision No"
+          },
+          "source_revision_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Sha256"
           },
           "source_sha256": {
             "title": "Source Sha256",
@@ -14579,6 +15690,14 @@
             ],
             "title": "Stopped At"
           },
+          "syntax_repair_revisions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Syntax Repair Revisions",
+            "type": "array"
+          },
           "test_mode": {
             "title": "Test Mode",
             "type": "string"
@@ -14593,6 +15712,17 @@
               }
             ],
             "title": "Worker Code"
+          },
+          "worker_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Request Id"
           }
         },
         "required": [
@@ -14663,6 +15793,61 @@
           "hours"
         ],
         "title": "SandboxExtendIn",
+        "type": "object"
+      },
+      "SandboxRemoteTargetAuthorizationIn": {
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "project_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Project Id",
+            "type": "integer"
+          },
+          "remote_target_url": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Remote Target Url",
+            "type": "string"
+          },
+          "test_mode": {
+            "enum": [
+              "blackbox",
+              "combined"
+            ],
+            "title": "Test Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "remote_target_url",
+          "test_mode",
+          "confirmed"
+        ],
+        "title": "SandboxRemoteTargetAuthorizationIn",
+        "type": "object"
+      },
+      "SandboxRemoteTargetAuthorizationOut": {
+        "properties": {
+          "approval_token": {
+            "title": "Approval Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_token",
+          "expires_at"
+        ],
+        "title": "SandboxRemoteTargetAuthorizationOut",
         "type": "object"
       },
       "SandboxWorkerUpsertIn": {
@@ -14834,6 +16019,7 @@
         "description": "知识库检索(联调/演示用)",
         "properties": {
           "query": {
+            "maxLength": 4000,
             "minLength": 1,
             "title": "Query",
             "type": "string"
@@ -14863,6 +16049,13 @@
             "title": "Cwe",
             "type": "string"
           },
+          "cwe_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cwe Refs",
+            "type": "array"
+          },
           "description": {
             "default": "",
             "title": "Description",
@@ -14876,6 +16069,11 @@
             "default": "",
             "title": "Owasp",
             "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
           }
         },
         "required": [
@@ -14888,6 +16086,11 @@
       "SecurityChecklistOut": {
         "description": "检查清单:OWASP Top10 + 内置正则规则 + 静态语义规则",
         "properties": {
+          "catalog_metadata": {
+            "additionalProperties": true,
+            "title": "Catalog Metadata",
+            "type": "object"
+          },
           "owasp_top10": {
             "items": {
               "$ref": "#/components/schemas/SecurityChecklistItem"
@@ -15152,6 +16355,30 @@
             "description": "问题标题",
             "title": "Title",
             "type": "string"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "enum": [
+                  "confirmed",
+                  "plausible",
+                  "refuted",
+                  "unreviewed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "对抗复核结论；缺省表示旧结果未提供复核状态",
+            "title": "Verification"
+          },
+          "verification_reason": {
+            "default": "",
+            "description": "对抗复核理由",
+            "title": "Verification Reason",
+            "type": "string"
           }
         },
         "required": [
@@ -15205,8 +16432,238 @@
         "title": "SecurityMonitorRunOut",
         "type": "object"
       },
+      "SecurityRuleCatalogItemOut": {
+        "description": "统一规则目录中的一条规则投影。",
+        "properties": {
+          "builtin": {
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "cwe": {
+            "default": "",
+            "title": "Cwe",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "executable": {
+            "title": "Executable",
+            "type": "boolean"
+          },
+          "executor": {
+            "title": "Executor",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "default": "*",
+            "title": "Language",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "owasp": {
+            "default": "",
+            "title": "Owasp",
+            "type": "string"
+          },
+          "severity": {
+            "default": "中",
+            "title": "Severity",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "category",
+          "origin",
+          "executor",
+          "executable",
+          "enabled",
+          "builtin"
+        ],
+        "title": "SecurityRuleCatalogItemOut",
+        "type": "object"
+      },
+      "SecurityRuleCatalogOut": {
+        "description": "统一规则事实目录；不改变各规则源的写入职责。",
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "engines": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityRuleEngineOut"
+            },
+            "title": "Engines",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityRuleCatalogItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mapping_note": {
+            "default": "",
+            "title": "Mapping Note",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityRuleSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "title": "SecurityRuleCatalogOut",
+        "type": "object"
+      },
+      "SecurityRuleEngineOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "documentation_url": {
+            "default": "",
+            "title": "Documentation Url",
+            "type": "string"
+          },
+          "executable": {
+            "title": "Executable",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_message": {
+            "default": "",
+            "title": "Status Message",
+            "type": "string"
+          },
+          "suites": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suites",
+            "type": "array"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "kind",
+          "executable",
+          "status"
+        ],
+        "title": "SecurityRuleEngineOut",
+        "type": "object"
+      },
+      "SecurityRuleSourceOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "role",
+          "url"
+        ],
+        "title": "SecurityRuleSourceOut",
+        "type": "object"
+      },
       "SecurityScanAllProjectsIn": {
         "properties": {
+          "scan_mode": {
+            "default": "triage",
+            "description": "full=逐项目全量语义, static_full=整包静态+有界语义, triage=风险优先抽样",
+            "enum": [
+              "full",
+              "static_full",
+              "triage"
+            ],
+            "title": "Scan Mode",
+            "type": "string"
+          },
           "top_n_per_project": {
             "default": 50,
             "description": "每个项目最多扫描的文件数",
@@ -15229,12 +16686,17 @@
         "properties": {
           "file_id": {
             "description": "代码文件 ID",
+            "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
           },
           "scan_depth": {
             "default": "standard",
-            "description": "quick / standard / deep",
+            "enum": [
+              "quick",
+              "standard",
+              "deep"
+            ],
             "title": "Scan Depth",
             "type": "string"
           }
@@ -15325,6 +16787,7 @@
         "properties": {
           "project_id": {
             "description": "项目 ID",
+            "exclusiveMinimum": 0.0,
             "title": "Project Id",
             "type": "integer"
           },
@@ -15360,6 +16823,7 @@
         "properties": {
           "task_id": {
             "description": "审查任务 ID",
+            "exclusiveMinimum": 0.0,
             "title": "Task Id",
             "type": "integer"
           }
@@ -15419,6 +16883,7 @@
         "type": "object"
       },
       "SkillBindingIn": {
+        "additionalProperties": false,
         "properties": {
           "config": {
             "additionalProperties": true,
@@ -15445,6 +16910,7 @@
         "type": "object"
       },
       "SkillCreateIn": {
+        "additionalProperties": false,
         "properties": {
           "code": {
             "maxLength": 100,
@@ -15613,6 +17079,7 @@
         "type": "object"
       },
       "SkillReviseIn": {
+        "additionalProperties": false,
         "properties": {
           "definition": {
             "additionalProperties": true,
@@ -15727,6 +17194,7 @@
         "type": "object"
       },
       "SubmitIn": {
+        "additionalProperties": false,
         "properties": {
           "note": {
             "default": "",
@@ -15741,9 +17209,19 @@
       "SummaryOut": {
         "description": "仪表盘汇总数据",
         "properties": {
+          "archive_file_count": {
+            "default": 0,
+            "title": "Archive File Count",
+            "type": "integer"
+          },
           "avg_score": {
             "title": "Avg Score",
             "type": "number"
+          },
+          "code_review_count": {
+            "default": 0,
+            "title": "Code Review Count",
+            "type": "integer"
           },
           "file_count": {
             "title": "File Count",
@@ -15835,6 +17313,11 @@
           "aggregation_summary": {
             "$ref": "#/components/schemas/AggregationSummaryOut"
           },
+          "can_view_report": {
+            "default": false,
+            "title": "Can View Report",
+            "type": "boolean"
+          },
           "coverage": {
             "anyOf": [
               {
@@ -15887,20 +17370,41 @@
             "type": "array"
           },
           "high_issues": {
-            "title": "High Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High Issues"
           },
           "id": {
             "title": "Id",
             "type": "integer"
           },
           "low_issues": {
-            "title": "Low Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Issues"
           },
           "medium_issues": {
-            "title": "Medium Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium Issues"
           },
           "model_name": {
             "anyOf": [
@@ -15926,13 +17430,32 @@
             "title": "Project Name",
             "type": "string"
           },
+          "report_issue_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Issue Summary"
+          },
           "review_type": {
             "title": "Review Type",
             "type": "string"
           },
           "score": {
-            "title": "Score",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
           },
           "score_breakdown": {
             "anyOf": [
@@ -15958,8 +17481,15 @@
             "title": "Score Version"
           },
           "severe_issues": {
-            "title": "Severe Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severe Issues"
           },
           "start_time": {
             "anyOf": [
@@ -16004,8 +17534,15 @@
             "type": "integer"
           },
           "total_issues": {
-            "title": "Total Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Issues"
           }
         },
         "required": [
@@ -16015,12 +17552,6 @@
           "status",
           "total_files",
           "processed_files",
-          "total_issues",
-          "severe_issues",
-          "high_issues",
-          "medium_issues",
-          "low_issues",
-          "score",
           "duration_ms",
           "create_time"
         ],
@@ -16096,6 +17627,11 @@
       "TaskOut": {
         "description": "审查任务列表项",
         "properties": {
+          "can_view_report": {
+            "default": false,
+            "title": "Can View Report",
+            "type": "boolean"
+          },
           "create_time": {
             "format": "date-time",
             "title": "Create Time",
@@ -16106,19 +17642,44 @@
             "type": "integer"
           },
           "high_issues": {
-            "title": "High Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High Issues"
           },
           "id": {
             "title": "Id",
             "type": "integer"
           },
           "low_issues": {
-            "title": "Low Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Issues"
           },
           "medium_issues": {
-            "title": "Medium Issues",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Medium Issues"
+          },
+          "processed_files": {
+            "title": "Processed Files",
             "type": "integer"
           },
           "project_id": {
@@ -16130,13 +17691,32 @@
             "title": "Project Name",
             "type": "string"
           },
+          "report_issue_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Issue Summary"
+          },
           "review_type": {
             "title": "Review Type",
             "type": "string"
           },
           "score": {
-            "title": "Score",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
           },
           "score_breakdown": {
             "anyOf": [
@@ -16162,8 +17742,15 @@
             "title": "Score Version"
           },
           "severe_issues": {
-            "title": "Severe Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severe Issues"
           },
           "status": {
             "title": "Status",
@@ -16185,8 +17772,15 @@
             "type": "integer"
           },
           "total_issues": {
-            "title": "Total Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Issues"
           }
         },
         "required": [
@@ -16195,16 +17789,35 @@
           "review_type",
           "status",
           "total_files",
-          "total_issues",
-          "severe_issues",
-          "high_issues",
-          "medium_issues",
-          "low_issues",
-          "score",
+          "processed_files",
           "duration_ms",
           "create_time"
         ],
         "title": "TaskOut",
+        "type": "object"
+      },
+      "TemporaryAgentDefinition": {
+        "additionalProperties": false,
+        "description": "任务内的专项分析职责；不接受权限、代码或模型端点覆盖。",
+        "properties": {
+          "instructions": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "purpose": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "instructions"
+        ],
+        "title": "TemporaryAgentDefinition",
         "type": "object"
       },
       "ThreatModelOut": {
@@ -16248,11 +17861,13 @@
         "type": "object"
       },
       "TicketHandleIn": {
+        "additionalProperties": false,
         "description": "管理员受理工单",
         "properties": {
           "admin_reply": {
             "anyOf": [
               {
+                "maxLength": 50000,
                 "type": "string"
               },
               {
@@ -16290,6 +17905,7 @@
         "type": "object"
       },
       "TicketIn": {
+        "additionalProperties": false,
         "description": "创建工单",
         "properties": {
           "category": {
@@ -16299,6 +17915,7 @@
             "type": "string"
           },
           "description": {
+            "maxLength": 50000,
             "minLength": 1,
             "title": "Description",
             "type": "string"
@@ -16434,6 +18051,11 @@
             ],
             "title": "Approval Id"
           },
+          "content_redacted": {
+            "default": false,
+            "title": "Content Redacted",
+            "type": "boolean"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -16558,6 +18180,17 @@
       "UserListItem": {
         "description": "用户列表项\n\nR6 修复(2026-06-25):补齐 update_time,对齐 User ORM。",
         "properties": {
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -16653,6 +18286,17 @@
       "UserOut": {
         "description": "用户信息公开响应",
         "properties": {
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -16731,6 +18375,7 @@
             "items": {
               "type": "integer"
             },
+            "maxItems": 4,
             "title": "Role Ids",
             "type": "array"
           }
@@ -16820,6 +18465,7 @@
         "type": "object"
       },
       "VersionTestIn": {
+        "additionalProperties": false,
         "properties": {
           "sample_output": {
             "anyOf": [
@@ -17221,9 +18867,27 @@
             "title": "Project Name",
             "type": "string"
           },
+          "review_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Type"
+          },
           "score": {
-            "title": "Score",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
           },
           "status": {
             "title": "Status",
@@ -17239,8 +18903,7 @@
           "task_name",
           "project_id",
           "project_name",
-          "status",
-          "score"
+          "status"
         ],
         "title": "RecentTaskOut",
         "type": "object"
@@ -17257,23 +18920,40 @@
             "title": "Id",
             "type": "integer"
           },
+          "review_type": {
+            "default": "",
+            "title": "Review Type",
+            "type": "string"
+          },
           "score": {
-            "title": "Score",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
           },
           "status": {
             "title": "Status",
             "type": "string"
           },
           "total_issues": {
-            "title": "Total Issues",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Issues"
           }
         },
         "required": [
           "id",
-          "score",
-          "total_issues",
           "status",
           "create_time"
         ],
@@ -17717,7 +19397,7 @@
     },
     "/api/admin/approvals": {
       "get": {
-        "description": "查询治理审批事项。\n\nArgs:\n    status: 可选状态过滤。\n    db: 数据库会话。\n    actor: 当前管理员。\n\nReturns:\n    Resp[list[ApprovalItemOut]]: 审批事项列表。",
+        "description": "查询治理审批事项。\n\nArgs:\n    status: 可选状态过滤。\n    exclude_action: 逗号分隔的动作过滤，供分类审批页排除其它类型事项。\n    db: 数据库会话。\n    actor: 当前管理员。\n\nReturns:\n    Resp[list[ApprovalItemOut]]: 审批事项列表。",
         "operationId": "list_approvals_api_admin_approvals_get",
         "parameters": [
           {
@@ -17728,6 +19408,28 @@
               "default": "",
               "title": "Status",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_action",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Exclude Action",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           },
           {
@@ -17915,7 +19617,7 @@
     },
     "/api/admin/audit": {
       "get": {
-        "description": "审计日志列表(仅管理员)",
+        "description": "审计日志列表(仅授予审计读取权限的账号)",
         "operationId": "list_audit_logs_api_admin_audit_get",
         "parameters": [
           {
@@ -17972,6 +19674,16 @@
               "default": "",
               "title": "End",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_system_heartbeat",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include System Heartbeat",
+              "type": "boolean"
             }
           },
           {
@@ -18364,7 +20076,7 @@
     },
     "/api/admin/copilot/history": {
       "get": {
-        "description": "读取当前管理员自己的副驾驶历史，支持增量轮询。",
+        "description": "拒绝旧副驾驶历史协议，避免 GET 隐式创建空会话。",
         "operationId": "history_api_admin_copilot_history_get",
         "parameters": [
           {
@@ -19116,7 +20828,7 @@
     },
     "/api/admin/governance/overview": {
       "get": {
-        "description": "返回 Agent 治理大屏总览。\n\nArgs:\n    db: 数据库会话。\n    _: 管理员用户。\n\nReturns:\n    Resp[GovernanceOverviewOut]: 治理大屏指标。",
+        "description": "返回 Agent 治理大屏总览。\n\nArgs:\n    db: 数据库会话。\n    actor: 当前管理员;待办指标遵循当前账号可见性。\n\nReturns:\n    Resp[GovernanceOverviewOut]: 治理大屏指标。",
         "operationId": "governance_overview_api_admin_governance_overview_get",
         "parameters": [
           {
@@ -19555,6 +21267,234 @@
           }
         },
         "summary": "List Models",
+        "tags": [
+          "大模型配置"
+        ]
+      }
+    },
+    "/api/admin/llm/models/assignments": {
+      "put": {
+        "description": "更新角色->模型分配;空串清除。",
+        "operationId": "update_assignments_api_admin_llm_models_assignments_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelAssignmentsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_ModelRegistryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Assignments",
+        "tags": [
+          "大模型配置"
+        ]
+      }
+    },
+    "/api/admin/llm/models/registry": {
+      "get": {
+        "description": "查看模型注册表与角色分配。",
+        "operationId": "get_registry_api_admin_llm_models_registry_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_ModelRegistryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Registry",
+        "tags": [
+          "大模型配置"
+        ]
+      },
+      "put": {
+        "description": "整表保存注册表(手工新增/删除/编辑能力标记)。",
+        "operationId": "replace_registry_api_admin_llm_models_registry_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRegistryReplaceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_ModelRegistryOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Registry",
+        "tags": [
+          "大模型配置"
+        ]
+      }
+    },
+    "/api/admin/llm/models/registry/sync": {
+      "post": {
+        "description": "从 provider 拉取最新模型列表并合并进注册表(不删除既有条目)。",
+        "operationId": "sync_registry_api_admin_llm_models_registry_sync_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmModelsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_ModelRegistrySyncOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Registry",
         "tags": [
           "大模型配置"
         ]
@@ -20686,6 +22626,89 @@
           }
         },
         "summary": "List Alerts",
+        "tags": [
+          "Agent治理"
+        ]
+      }
+    },
+    "/api/admin/observability/alerts/page": {
+      "get": {
+        "description": "分页查询治理告警；旧 /alerts 列表接口保持原样兼容。",
+        "operationId": "list_alerts_page_api_admin_observability_alerts_page_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_PageOut_AgentAlertOut__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Alerts Page",
         "tags": [
           "Agent治理"
         ]
@@ -22044,6 +24067,26 @@
         "operationId": "list_agents_api_agent_mesh_agents_get",
         "parameters": [
           {
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "user",
+                    "admin"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Surface"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -22083,6 +24126,123 @@
           }
         },
         "summary": "List Agents",
+        "tags": [
+          "小菱 Agent Mesh"
+        ]
+      }
+    },
+    "/api/agent-mesh/conversations": {
+      "get": {
+        "operationId": "list_conversations_api_agent_mesh_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "user",
+                    "admin"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Surface"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "enum": [
+                "active",
+                "archived"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations",
         "tags": [
           "小菱 Agent Mesh"
         ]
@@ -22206,9 +24366,154 @@
         ]
       }
     },
+    "/api/agent-mesh/conversations/restore": {
+      "post": {
+        "operationId": "restore_session_api_agent_mesh_conversations_restore_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentMeshArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Session",
+        "tags": [
+          "小菱 Agent Mesh"
+        ]
+      }
+    },
     "/api/agent-mesh/inbox": {
       "get": {
-        "operationId": "pull_inbox_api_agent_mesh_inbox_get",
+        "operationId": "peek_inbox_api_agent_mesh_inbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "required": true,
+            "schema": {
+              "enum": [
+                "user",
+                "admin"
+              ],
+              "title": "Surface",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Peek Inbox",
+        "tags": [
+          "小菱 Agent Mesh"
+        ]
+      }
+    },
+    "/api/agent-mesh/inbox/pull": {
+      "post": {
+        "operationId": "pull_inbox_api_agent_mesh_inbox_pull_post",
         "parameters": [
           {
             "in": "query",
@@ -22502,6 +24807,120 @@
         ]
       }
     },
+    "/api/agent-responses/assets/{asset_id}/image": {
+      "get": {
+        "description": "查看留档的多模态图片(内联,仅本人)。",
+        "operationId": "get_asset_image_api_agent_responses_assets__asset_id__image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset Image",
+        "tags": [
+          "Responses Agent"
+        ]
+      }
+    },
+    "/api/agent-responses/runs/{run_id}/assets": {
+      "get": {
+        "description": "列出一次运行留档的多模态资产(输入/输出图片元数据;仅本人)。",
+        "operationId": "list_run_assets_api_agent_responses_runs__run_id__assets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Run Assets",
+        "tags": [
+          "Responses Agent"
+        ]
+      }
+    },
     "/api/agent-responses/session": {
       "get": {
         "description": "恢复当前用户会话最近一次 Responses 运行及待处理动作。",
@@ -22573,6 +24992,111 @@
           }
         },
         "summary": "Get Agent Response Session",
+        "tags": [
+          "Responses Agent"
+        ]
+      }
+    },
+    "/api/agent-responses/session/messages": {
+      "get": {
+        "description": "按会话内稳定的零基序号取更早消息，不传回整段无界历史。",
+        "operationId": "get_agent_response_session_messages_api_agent_responses_session_messages_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "default": "user",
+              "enum": [
+                "user",
+                "admin"
+              ],
+              "title": "Surface",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_message",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Message"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent Response Session Messages",
         "tags": [
           "Responses Agent"
         ]
@@ -24128,6 +26652,74 @@
         ]
       }
     },
+    "/api/agent-teams/{team_id}/retry/preview": {
+      "post": {
+        "operationId": "preview_retry_team_api_agent_teams__team_id__retry_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "team_id",
+            "required": true,
+            "schema": {
+              "title": "Team Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTeamRetryPreviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Retry Team",
+        "tags": [
+          "小菱动态子 Agent 团队"
+        ]
+      }
+    },
     "/api/agents": {
       "get": {
         "description": "v1.0 兼容: 列出 multi_agent 模块的 5 个静态画像",
@@ -24240,7 +26832,7 @@
     },
     "/api/agents/events": {
       "get": {
-        "description": "SSE 实时事件流: Agent 调度 / 思考 / 完成 / 失败 / 追问\n\nv2.4 隔离策略:\n    - admin: 接收全部事件\n    - 非 admin: 仅接收 user_id 匹配的事件,以及 user_id=None 的系统级事件\n\nArgs:\n    replay: 订阅初期回放最近 N 条历史事件,默认 20\n    token: 可选,SSE 鉴权令牌(等价于 Authorization: Bearer)",
+        "description": "SSE 实时事件流: Agent 调度 / 思考 / 完成 / 失败 / 追问\n\n私人对话事件只发送给所属账号；管理员也不能订阅其他账号的对话。\n未标明归属的内部事件不能当作公开广播。\n\nArgs:\n    replay: 订阅初期回放最近 N 条历史事件,默认 20\n    token: 可选,SSE 鉴权令牌(等价于 Authorization: Bearer)",
         "operationId": "stream_agent_events_api_agents_events_get",
         "parameters": [
           {
@@ -25012,6 +27604,46 @@
             "required": false,
             "schema": {
               "title": "User Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "root_agent_run_id",
+            "required": false,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Root Agent Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_team_id",
+            "required": false,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Agent Team Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_team_task_id",
+            "required": false,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Agent Team Task Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tool_execution_id",
+            "required": false,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Tool Execution Id",
               "type": "integer"
             }
           },
@@ -25793,7 +28425,7 @@
     },
     "/api/api-config/test": {
       "post": {
-        "description": "测试 API 连接\n\n发送最小化请求验证连通性和认证，不存储任何数据。",
+        "description": "测试 API 连接\n\n发送最小化请求验证连通性和认证，不保存 API 配置，记录实际调用用量。",
         "operationId": "test_connection_api_api_config_test_post",
         "parameters": [
           {
@@ -26372,16 +29004,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_folder_api_code_files_upload_folder_post"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -26998,7 +29620,7 @@
     },
     "/api/dashboard/issue-type-statistics": {
       "get": {
-        "description": "问题类型分布",
+        "description": "问题类型分布;days=0 表示累计全部",
         "operationId": "issue_type_statistics_api_dashboard_issue_type_statistics_get",
         "parameters": [
           {
@@ -27007,6 +29629,8 @@
             "required": false,
             "schema": {
               "default": 30,
+              "maximum": 3650,
+              "minimum": 0,
               "title": "Days",
               "type": "integer"
             }
@@ -27067,6 +29691,8 @@
             "required": false,
             "schema": {
               "default": 30,
+              "maximum": 3650,
+              "minimum": 0,
               "title": "Days",
               "type": "integer"
             }
@@ -27118,7 +29744,7 @@
     },
     "/api/dashboard/risk-distribution": {
       "get": {
-        "description": "风险等级分布",
+        "description": "风险等级分布;days=0 表示累计全部",
         "operationId": "risk_distribution_api_dashboard_risk_distribution_get",
         "parameters": [
           {
@@ -27127,6 +29753,8 @@
             "required": false,
             "schema": {
               "default": 30,
+              "maximum": 3650,
+              "minimum": 0,
               "title": "Days",
               "type": "integer"
             }
@@ -27171,6 +29799,56 @@
           }
         },
         "summary": "Risk Distribution",
+        "tags": [
+          "仪表盘"
+        ]
+      }
+    },
+    "/api/dashboard/running": {
+      "get": {
+        "description": "后台进行中:排队/运行中的审查(带文件进度)与本人进行中的 Agent 运行",
+        "operationId": "running_api_dashboard_running_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_RunningOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Running",
         "tags": [
           "仪表盘"
         ]
@@ -27296,10 +29974,165 @@
         ]
       }
     },
-    "/api/discuss/start": {
+    "/api/discuss/sessions": {
       "get": {
+        "description": "当前账号的圆桌按运行中优先、更新时间倒序分页。",
+        "operationId": "list_discussions_api_discuss_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Discussions"
+      }
+    },
+    "/api/discuss/sessions/{session_id}": {
+      "get": {
+        "description": "读取当前账号圆桌元数据与有界发言，旧发言用 before_seq 翻页。",
+        "operationId": "get_discussion_api_discuss_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_seq",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Seq"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Discussion"
+      }
+    },
+    "/api/discuss/start": {
+      "post": {
         "description": "预检并注册讨论,返回 session_id 和基本信息。\n\n前端调用此接口后:\n1. 连接到 ws://host:8000/api/ws/discuss/{session_id}?token=xxx\n2. 讨论自动开始,所有 Agent 发言实时推送到前端\n3. 用户可通过 WebSocket 发送 {action:\"user_input\",content:\"...\"} 参与讨论",
-        "operationId": "start_discussion_api_discuss_start_get",
+        "operationId": "start_discussion_api_discuss_start_post",
         "parameters": [
           {
             "in": "query",
@@ -27601,7 +30434,9 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 100,
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -28373,6 +31208,65 @@
         ]
       }
     },
+    "/api/feedback/{feedback_id}/read": {
+      "post": {
+        "description": "显式标记反馈已读，避免 GET 详情产生写副作用。",
+        "operationId": "mark_feedback_read_api_feedback__feedback_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feedback_id",
+            "required": true,
+            "schema": {
+              "title": "Feedback Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_FeedbackOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Feedback Read",
+        "tags": [
+          "用户反馈"
+        ]
+      }
+    },
     "/api/feedback/{feedback_id}/reply": {
       "put": {
         "description": "回复反馈(管理员)",
@@ -28969,6 +31863,65 @@
           }
         },
         "summary": "Create Reply",
+        "tags": [
+          "开发者论坛"
+        ]
+      }
+    },
+    "/api/forum/posts/{post_id}/views": {
+      "post": {
+        "description": "显式记录帖子浏览，避免 GET 详情写库。",
+        "operationId": "record_post_view_api_forum_posts__post_id__views_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "post_id",
+            "required": true,
+            "schema": {
+              "title": "Post Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_PostListItemOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Post View",
         "tags": [
           "开发者论坛"
         ]
@@ -30342,9 +33295,177 @@
         ]
       }
     },
+    "/api/me/avatar": {
+      "delete": {
+        "description": "恢复默认头像(同时清掉自定义图片)。",
+        "operationId": "clear_avatar_api_me_avatar_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Avatar",
+        "tags": [
+          "用户头像"
+        ]
+      },
+      "put": {
+        "description": "设置头像:内置('builtin:<key>' 或裸 key)或 'upload'(须已上传图片)。",
+        "operationId": "set_avatar_api_me_avatar_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AvatarSetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Avatar",
+        "tags": [
+          "用户头像"
+        ]
+      }
+    },
+    "/api/me/avatar/image": {
+      "post": {
+        "description": "上传自定义头像图片(≤512KB,png/jpeg/webp/gif 按魔数校验)。",
+        "operationId": "upload_avatar_image_api_me_avatar_image_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_avatar_image_api_me_avatar_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Avatar Image",
+        "tags": [
+          "用户头像"
+        ]
+      }
+    },
     "/api/me/profile": {
       "get": {
-        "description": "获取本人画像(不存在则初始化空画像)",
+        "description": "获取本人画像；不存在时返回未持久化的空画像。",
         "operationId": "get_profile_api_me_profile_get",
         "parameters": [
           {
@@ -30450,6 +33571,66 @@
         ]
       }
     },
+    "/api/me/profile/preference-prompted": {
+      "post": {
+        "description": "小菱偏好询问结果上报(已答/跳过),防反复打扰",
+        "operationId": "mark_preference_prompt_api_me_profile_preference_prompted_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferencePromptIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_ProfileOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Preference Prompt",
+        "tags": [
+          "用户画像"
+        ]
+      }
+    },
     "/api/me/profile/relearn": {
       "post": {
         "description": "触发隐式学习:从行为数据重新推断画像",
@@ -30502,7 +33683,7 @@
     },
     "/api/pentest/engagements": {
       "get": {
-        "description": "委托列表(scope=all 需要 pentest:manage)。",
+        "description": "委托列表(scope=all 需要 pentest:manage 或 pentest:authorize)。",
         "operationId": "list_engagements_api_pentest_engagements_get",
         "parameters": [
           {
@@ -30781,7 +33962,7 @@
     },
     "/api/pentest/engagements/{public_id}/authorize": {
       "post": {
-        "description": "前期交互·授权确认: 签署规则并设定时间窗。",
+        "description": "审查员/管理员独立批准授权；禁止申请人自批。",
         "operationId": "authorize_engagement_api_pentest_engagements__public_id__authorize_post",
         "parameters": [
           {
@@ -30810,16 +33991,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PentestAuthorizeIn"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -30961,6 +34132,75 @@
           }
         },
         "summary": "Start Engagement",
+        "tags": [
+          "渗透测试"
+        ]
+      }
+    },
+    "/api/pentest/engagements/{public_id}/submit-authorization": {
+      "post": {
+        "description": "申请人签署规则、声明资产范围并提交给审查员。",
+        "operationId": "submit_authorization_request_api_pentest_engagements__public_id__submit_authorization_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_id",
+            "required": true,
+            "schema": {
+              "title": "Public Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PentestAuthorizeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Authorization Request",
         "tags": [
           "渗透测试"
         ]
@@ -31930,6 +35170,76 @@
           }
         },
         "summary": "Add Member",
+        "tags": [
+          "项目成员"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/members/candidates": {
+      "get": {
+        "description": "只允许可管理当前项目成员的用户搜索可加入账号。",
+        "operationId": "search_member_candidates_api_projects__project_id__members_candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_list_MemberCandidateOut__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Member Candidates",
         "tags": [
           "项目成员"
         ]
@@ -34897,6 +38207,65 @@
         ]
       }
     },
+    "/api/sandboxes/remote-target-authorization": {
+      "post": {
+        "operationId": "authorize_sandbox_remote_target_api_sandboxes_remote_target_authorization_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxRemoteTargetAuthorizationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SandboxRemoteTargetAuthorizationOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authorize Sandbox Remote Target",
+        "tags": [
+          "代码沙箱"
+        ]
+      }
+    },
     "/api/sandboxes/workers": {
       "get": {
         "operationId": "list_workers_api_sandboxes_workers_get",
@@ -35718,9 +39087,59 @@
         ]
       }
     },
+    "/api/security/rule-catalog": {
+      "get": {
+        "description": "统一返回提示规则、平台静态规则、敏感规则和外部执行器状态。",
+        "operationId": "get_rule_catalog_api_security_rule_catalog_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resp_SecurityRuleCatalogOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Rule Catalog",
+        "tags": [
+          "安全审计"
+        ]
+      }
+    },
     "/api/security/scan-all-projects": {
       "post": {
-        "description": "全量项目安全扫描:扫描当前用户可见的全部活跃项目",
+        "description": "按显式模式扫描当前用户可见的全部活跃项目。",
         "operationId": "scan_all_projects_api_security_scan_all_projects_post",
         "parameters": [
           {
@@ -36117,6 +39536,63 @@
         "summary": "Delete User",
         "tags": [
           "用户管理"
+        ]
+      }
+    },
+    "/api/users/{user_id}/avatar/image": {
+      "get": {
+        "description": "下发用户自定义头像(内联,带鉴权);内置/默认头像由前端本地渲染。",
+        "operationId": "get_avatar_image_api_users__user_id__avatar_image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Avatar Image",
+        "tags": [
+          "用户头像"
         ]
       }
     },

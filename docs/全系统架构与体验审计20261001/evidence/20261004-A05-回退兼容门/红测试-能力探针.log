@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "<stdin>", line 18, in <module>
+  File "<stdin>", line 16, in run
+AssertionError: (2, '', "/Library/Developer/CommandLineTools/usr/bin/python3: can't open file '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/lib/checkpoint_compatibility.py': [Errno 2] No such file or directory\n")

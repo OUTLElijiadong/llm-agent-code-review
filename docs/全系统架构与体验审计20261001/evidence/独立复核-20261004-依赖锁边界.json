@@ -1,0 +1,118 @@
+{
+  "基准提交": "fab823f71cda410cfdc03006f08fbca55f4644a9",
+  "范围": "只读候选锁与本地已安装包metadata；未编辑锁、升级环境或运行全量测试。",
+  "锁文件": {
+    "requirements.lock": {
+      "旧包数": 63,
+      "新包数": 63,
+      "版本差异": {
+        "pyjwt": {
+          "before": "2.13.0",
+          "after": "2.15.0"
+        }
+      },
+      "既有包摘要集合变更": [
+        "pyjwt"
+      ],
+      "当前文件摘要": "784bdb1f7d8055d3a62f45f3669df80b8ba6ba3b73c7351f5a858e4dcb0f7c43"
+    },
+    "requirements-dev.lock": {
+      "旧包数": 98,
+      "新包数": 99,
+      "版本差异": {
+        "async-timeout": {
+          "before": "5.0.1",
+          "after": null
+        },
+        "black": {
+          "before": "24.10.0",
+          "after": "26.3.1"
+        },
+        "pip": {
+          "before": "26.1.2",
+          "after": "26.2.1"
+        },
+        "pyjwt": {
+          "before": "2.13.0",
+          "after": "2.15.0"
+        },
+        "pytest": {
+          "before": "8.4.2",
+          "after": "9.0.3"
+        },
+        "pytest-asyncio": {
+          "before": "0.26.0",
+          "after": "1.3.0"
+        },
+        "pytokens": {
+          "before": null,
+          "after": "0.4.1"
+        },
+        "setuptools": {
+          "before": null,
+          "after": "83.0.0"
+        },
+        "urllib3": {
+          "before": "2.7.0",
+          "after": "2.8.0"
+        }
+      },
+      "既有包摘要集合变更": [
+        "black",
+        "pip",
+        "pyjwt",
+        "pytest",
+        "pytest-asyncio",
+        "urllib3"
+      ],
+      "当前文件摘要": "dd558a356fdbb95504f6b370730899346ac6d1c1245ff5da8dd300b43d56e059"
+    }
+  },
+  "开发与生产共同应用包版本及摘要集合相同数": 63,
+  "已安装包要求": [
+    {
+      "package": "black",
+      "installed": "26.3.1",
+      "requires_python": ">=3.10",
+      "pytest_dependency": []
+    },
+    {
+      "package": "pytest",
+      "installed": "9.0.3",
+      "requires_python": ">=3.10",
+      "pytest_dependency": []
+    },
+    {
+      "package": "pytest-asyncio",
+      "installed": "1.3.0",
+      "requires_python": ">=3.10",
+      "pytest_dependency": [
+        "pytest<10,>=8.2"
+      ]
+    },
+    {
+      "package": "pip",
+      "installed": "26.2.1",
+      "requires_python": ">=3.10",
+      "pytest_dependency": []
+    },
+    {
+      "package": "setuptools",
+      "installed": "83.0.0",
+      "requires_python": ">=3.10",
+      "pytest_dependency": []
+    },
+    {
+      "package": "urllib3",
+      "installed": "2.8.0",
+      "requires_python": ">=3.10",
+      "pytest_dependency": []
+    },
+    {
+      "package": "pytokens",
+      "installed": "0.4.1",
+      "requires_python": ">=3.8",
+      "pytest_dependency": []
+    }
+  ]
+}
