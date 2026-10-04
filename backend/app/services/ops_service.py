@@ -93,7 +93,7 @@ ACTION_PARAM_KEYS = {
     "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
     "ssh_login_events": {"since_hours", "limit", "focus"},
     "flytrap_attack_events": {"since_hours", "limit"},
-    "nginx_attack_events": {"since_hours", "limit"},
+    "nginx_attack_events": {"since_hours", "limit", "failure_threshold"},
     "backup_audit": set(),
     "db_threat_signals": {"since_hours", "limit"},
     "db_health": set(),
@@ -141,6 +141,7 @@ ACTION_PARAM_TYPES = {
     "public_key": str,
     "fingerprint": str,
     "since_hours": int,
+    "failure_threshold": int,
     "focus": str,
     "ip": str,
 }
@@ -182,7 +183,7 @@ ACTION_PARAM_SCHEMAS = {
     "ssh_authorized_key_action": _object_schema({"operation": {"type": "string", "enum": ["add", "remove"]}, "username": {"type": "string", "maxLength": 32}, "public_key": {"type": "string", "maxLength": 16_384}, "fingerprint": {"type": "string", "maxLength": 80}}, {"operation", "username"}),  # noqa: E501
     "ssh_login_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}, "focus": {"type": "string", "enum": ["all", "accepted", "failed"]}}),  # noqa: E501
     "flytrap_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
-    "nginx_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
+    "nginx_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}, "failure_threshold": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
     "backup_audit": _object_schema({}),
     "db_threat_signals": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 20000}}),  # noqa: E501
     "db_health": _object_schema({}),

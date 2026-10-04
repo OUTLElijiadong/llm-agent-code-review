@@ -752,12 +752,13 @@ def _nginx_attack_events(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _backup_audit() -> dict[str, Any]:
-    if not BACKUP_DIR.is_dir():
-        return {"ok": False, "error": "备份目录不存在", "dir": str(BACKUP_DIR)}
+    backup_dir = _configured_backup_dir()
+    if not backup_dir.is_dir():
+        return {"ok": False, "error": "备份目录不存在", "dir": str(backup_dir)}
     now = datetime.now(timezone.utc)
     rows: list[dict[str, Any]] = []
     total_gzip_bytes = 0
-    for path in BACKUP_DIR.glob("*.sql.gz"):
+    for path in backup_dir.glob("*.sql.gz"):
         try:
             if not path.is_file() or path.is_symlink():
                 continue
@@ -780,7 +781,7 @@ def _backup_audit() -> dict[str, Any]:
     other_bytes = 0
     other_count = 0
     try:
-        children = list(BACKUP_DIR.iterdir())
+        children = list(backup_dir.iterdir())
     except OSError:
         children = []
     for path in children:
@@ -801,7 +802,7 @@ def _backup_audit() -> dict[str, Any]:
             continue
     return {
         "ok": True,
-        "dir": str(BACKUP_DIR),
+        "dir": str(backup_dir),
         "sql_gz_count": len(rows),
         "sql_gz_bytes": total_gzip_bytes,
         "other_entries_count": other_count,
@@ -1421,10 +1422,22 @@ def _write_ledger(request_id: str, payload: dict[str, Any]) -> None:
 def _backup_file(name: str) -> Path:
     if not re.fullmatch(r"code_review_[A-Za-z0-9_.-]+\.sql\.gz", name):
         raise ValueError("备份文件名不合法")
-    path = (BACKUP_DIR / name).resolve()
-    if path.parent != BACKUP_DIR or not path.is_file():
+    backup_dir = _configured_backup_dir()
+    path = (backup_dir / name).resolve()
+    if path.parent != backup_dir or not path.is_file():
         raise ValueError("备份文件不存在")
     return path
+
+
+def _configured_backup_dir() -> Path:
+    """读取跨版本持久备份目录；未配置时沿用原默认路径。"""
+    raw = os.environ.get("BACKUP_DIR", "").strip()
+    if not raw:
+        return BACKUP_DIR
+    path = Path(raw)
+    if not path.is_absolute():
+        path = DEPLOY_DIR / path
+    return path.resolve()
 
 
 def _read_env(key: str) -> str:

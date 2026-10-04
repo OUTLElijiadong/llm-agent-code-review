@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
+
 from app.agents.events import AgentEventType
 from app.core.config import settings
 from app.models.agent_governance import AgentAlert
@@ -156,6 +157,30 @@ def test_manual_monitor_run_preserves_admin_actor_and_source(db, super_admin_use
     assert result["success"] is True
     assert calls
     assert all(actor is super_admin_user and source == "admin_security_center" for actor, source in calls)
+
+
+def test_monitor_and_status_use_supported_nginx_action_parameters(db, super_admin_user, monkeypatch, emitted):
+    """生产运维动作白名单仅允许窗口与条数，两个调用入口必须遵守同一契约。"""
+    payloads = _base_payloads()
+    calls = []
+    execute = _fake_execute(payloads)
+
+    def capture(db_arg, actor, **kwargs):
+        if kwargs.get("action") == "nginx_attack_events":
+            calls.append(ops_service.validate_action_params(kwargs["action"], kwargs.get("params") or {}))
+        return execute(db_arg, actor, **kwargs)
+
+    monkeypatch.setattr(ops_service, "execute", capture)
+
+    result = security_monitor_service.run_security_monitor(db, actor=super_admin_user)
+    status = security_monitor_service.query_security_status(db, since_hours=12, actor=super_admin_user)
+    expected_threshold = security_center_service.get_policy(db)["nginx_failure_threshold"]
+
+    assert result["success"] is True
+    assert status["attacks"]["nginx_total"] == 0
+    assert len(calls) == 2
+    assert all(set(params) == {"since_hours", "limit", "failure_threshold"} for params in calls)
+    assert all(params["failure_threshold"] == expected_threshold for params in calls)
 
 
 def test_ssh_accepted_whitelist_info_without_popup(db, super_admin_user, monkeypatch, emitted):

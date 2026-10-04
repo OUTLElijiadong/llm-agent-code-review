@@ -62,6 +62,22 @@ def test_write_text_file_is_atomic_and_creates_rollback_backup(tmp_path: Path, m
         )
 
 
+def test_backup_audit_and_restore_lookup_use_configured_backup_dir(tmp_path: Path, monkeypatch) -> None:
+    backup_dir = tmp_path / "persistent-backups"
+    backup_dir.mkdir()
+    backup = backup_dir / "code_review_test.sql.gz"
+    backup.write_bytes(b"gzip placeholder")
+    monkeypatch.setenv("BACKUP_DIR", str(backup_dir))
+
+    audit = executor._backup_audit()
+    lookup = executor._backup_file(backup.name)
+
+    assert audit["ok"] is True
+    assert audit["dir"] == str(backup_dir.resolve())
+    assert audit["sql_gz_count"] == 1
+    assert lookup == backup.resolve()
+
+
 def test_ledger_is_atomic_and_request_digest_binds_arguments(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(executor, "LEDGER_DIR", tmp_path / "ledger")
     first_digest = executor._request_digest("host_inventory", {})
