@@ -1,0 +1,216 @@
+{
+  "checked_at_utc": "2026-10-04T17:29:29.924586+00:00",
+  "reviewer": "remaining_permissions",
+  "status": "pass_for_document_data_consistency",
+  "scope": "6文档与本地证据只读核查；复算摘要/测试结果行及c591源Git对象。没有访问生产、联网、SSH、CUA或执行模型，只写本收据。新发布稿全文，其他文档为最新顶部/历史分界及收口相关节。",
+  "documents": [
+    {
+      "path": "docs/全系统架构与体验审计20261001/发布与验收20261005.md",
+      "bytes": 11528,
+      "sha256": "980c57556699200f294f0c61bf24c8806691c6f24909f061b17d3b03e5e02fa2"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/ACCEPTANCE_全系统审计.md",
+      "bytes": 30347,
+      "sha256": "ba6fd2cb9e9b093b1d64bbf18bbe805a40dee65b7d9a472286da1924ed83d912"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/FINAL_全系统审计.md",
+      "bytes": 18180,
+      "sha256": "47e53eae5c9a4c8276974f155ee7a04bfafadcc06aa6ae54308efd5a9146105a"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/TODO_全系统审计.md",
+      "bytes": 18871,
+      "sha256": "7eb7002b4208310d8e04a88a0a08ed7d2d17ca74471f3d2587759faad7ff5a32"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/发布与验收20261004.md",
+      "bytes": 13402,
+      "sha256": "9c63b2601cb73c00eed3c560622cc62880dd671f8c8baab7aa384faf9f6c4491"
+    },
+    {
+      "path": "docs/外部审查问题核验修复20261001/复核对照20261004.md",
+      "bytes": 19152,
+      "sha256": "ac2a3205cb333058c91807d549d81f56062f50e83b7b1197ea4bb0f320076931"
+    }
+  ],
+  "verified": {
+    "version": "4.0.38",
+    "app_source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+    "release_completed_utc": "2026-10-04T16:34:32+00:00",
+    "release_completed_taipei": "2026-10-05T00:34:32+08:00",
+    "backend": {
+      "passed": 5962,
+      "skipped": 5,
+      "failed": 0,
+      "collected": 5967,
+      "warnings": 5,
+      "seconds": 248.0,
+      "coverage_percent": 83,
+      "exit0_basis": "根实际session25765/chunk ece913收据，独立者未重跑全量"
+    },
+    "frontend": {
+      "files": 137,
+      "passed": 1705,
+      "seconds": 14.83,
+      "exit0_basis": "既有独立工具收据与本轮原日志交叉读取"
+    },
+    "freeze": {
+      "files": 114,
+      "current_mismatches": [],
+      "c591_object_mismatches": []
+    },
+    "bundle": {
+      "bytes": 1608204,
+      "sha256": "04104a8694123b4e241e1f2bb70711ad0fc546a0d44141028a6921e75f7e5c7e"
+    },
+    "backup": {
+      "bytes": 451619738,
+      "sha256": "a9e51daea895f3895996f982bd7f1618d06e465c55ebb716a106e482d80e2263",
+      "tables": 104,
+      "restored_and_running_alembic": "061_overview_time_indexes",
+      "new_migration": false,
+      "cleanup_basis": "本地verify-backup.sh在成功INFO前必须drop_verify_database成功，原实际发布日志成功；本轮没有生产查库"
+    },
+    "dependencies": {
+      "packages": 63,
+      "version_mismatches": [],
+      "pyjwt": "2.15.0",
+      "pip_check": "No broken requirements found."
+    },
+    "ledger": {
+      "sample_rows": 46,
+      "digest_mismatches": 0,
+      "all_history_validation": false
+    },
+    "compatibility": {
+      "new_checkpoint_and_member": "supported",
+      "old37": "rejected_exit1",
+      "containers_unchanged": true,
+      "rollback_executed": false
+    },
+    "public_get": {
+      "count": 6,
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "build_info_version_sha_expected": true,
+      "captcha_png_dimensions": [
+        168,
+        56
+      ],
+      "challenge_answered_or_registration": false,
+      "zero_side_effect_claim": false
+    },
+    "disk": {
+      "snapshot_utc": "2026-10-04T16:36:26Z",
+      "used_percent": 79,
+      "available_bytes": 42279952384,
+      "available_GiB": 39.37627,
+      "growth_cause_closed": false
+    },
+    "push": {
+      "ref": "refs/heads/codex/prism-v4.0.23-context-mobile",
+      "readback_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+      "root_push_exit_code": 0,
+      "new_network_call_by_this_review": false
+    }
+  },
+  "input_hash_size_mismatches": [],
+  "correction_closed": "审批234最新措辞已改为本轮未批准/应用、此前待审批快照、当前处理结果未复查；没有把旧日期动态状态冒称当前。",
+  "history_and_limits": {
+    "all_current_prefaces_match": true,
+    "old36_37_and_candidate_sections_marked_historical": true,
+    "scope_statements_present": {
+      "不相加成全量零跳过": true,
+      "46 条聊天账本采样": true,
+      "一次水位不证明增长根因": true,
+      "没有向供应商发送百万 token": true,
+      "不是整站 XSS": true,
+      "未解题、注册或创建凭据": true,
+      "不能称它们已包含在应用源码提交c591f814中": true
+    },
+    "private_UI": "frontend_completion独立复核负责；本轮不读取私人AX/JPEG，不自行新增UI通过结论",
+    "tokenizer": "三个合成内容样本为官方本地分词百万token量级，0供应商调用；不当作真实模型语义理解",
+    "raw_logs_in_c591": {
+      "复测-20261005-v4038收口完整后端.log": false,
+      "生产发布-20261005-v4038.log": false,
+      "生产运行核验-20261005-v4038.log": false
+    },
+    "followup_commit": "c591应用源码与后续验收文档/原日志提交明确区分；3原日志尚不在c591",
+    "whitespace": "新稿如实记录plain staged check的2末尾空行/6尾空格及精确排除8原日志说明；该计数来自根实际回执，本独立者未再次运行门。"
+  },
+  "inputs": [
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口源码冻结.json",
+      "bytes": 20858,
+      "sha256": "8cd1682c26b157e824db3948655f4cb2907d2a4269d221db45a9ef53c0b4fc1d"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口完整后端.log",
+      "bytes": 857843,
+      "sha256": "c3a2b54c03392bc4efec0bbc4f09e72d060d0ea2aec081862c1ff2b22f9c358e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/独立复核-20261005-v4038收口数据与发布前只读脚本.json",
+      "bytes": 6171,
+      "sha256": "45e5f1218781582dc8adbbb36497b784051e8efccde335732ba9cbdfd3e9591d"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终完整前端.log",
+      "bytes": 354,
+      "sha256": "30b7db04697f5623f1711aa8ed9fc162bd6a1fafc4c9645cec5a50a01ae08b51"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/独立复核-20261004-v4038最终前端部署静态数据.json",
+      "bytes": 8220,
+      "sha256": "79a6b126a599024efdf85b72e5468ba87f93568747eb35beacce147105bd2cfa"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log",
+      "bytes": 35457,
+      "sha256": "da33d4e15fdf4bde48b9401cd3df8af946018e83ff7c751dc59bdfd0ce5e3b0e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/生产运行核验-20261005-v4038.log",
+      "bytes": 2779,
+      "sha256": "b14e0380973d8b85595217ea5c8dde6add578f6cdab77db33b49f4018de60c79"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/公网核验-20261005-v4038.json",
+      "bytes": 1426,
+      "sha256": "aa6ec3fdb7a03ad893cdc34544574afc537dc221ddd4b5d1c4a59ac0dbb57770"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/独立复核-20261005-v4038生产基础门.json",
+      "bytes": 6780,
+      "sha256": "2a9519a5bf515fb969b46db3678d7771810886a958b91855a98fabafcf5b0260"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/发布制品-20261005-v4038.json",
+      "bytes": 976,
+      "sha256": "956744bab5bc25802fc6574e8834be2121f1468aba0db60a6ba01cf7dd6e36a3"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/提交推送-20261005-v4038.json",
+      "bytes": 970,
+      "sha256": "6ae160067483c52b554eb06a039183b41af187fd5cf8c4b80dcfad70c5d319e9"
+    }
+  ],
+  "actual_data_errors_remaining": [],
+  "tool_note": "首次本收据脚本使用不存在的连续文案“未注册或创建凭据”导致纯字符串断言失败；最终校准为实际“未解题、注册或创建凭据”，不当作产品或报告数据错误。",
+  "not_established": [
+    "全业务/全角色/全部权限/手机通过",
+    "供应商真实百万token理解或零幻觉",
+    "真实外部执行/扫描/高风险写",
+    "真实生产回退",
+    "最新国内漏洞库同步",
+    "当前审批234状态及磁盘增长根因"
+  ]
+}

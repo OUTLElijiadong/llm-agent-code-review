@@ -1,0 +1,1155 @@
+{
+  "标题": "v4.0.38真实点击制品独立复核",
+  "生成时间": "2026-10-05T01:16:29.299180+08:00",
+  "独立代理": "frontend_completion",
+  "候选仓库HEAD": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+  "复核性质": "根代理在真实生产普通Safari进行操作；本代理仅本地读取工件、相关AX核验、选取JPEG目视与格式/字节/SHA/Git忽略核验，没有重演点击或读取生产API。",
+  "来源范围": {
+    "审查员": "28–50及41b，共24组",
+    "管理员": "v4038-01–07，共7组",
+    "普通账号": "20261005目录01–08及05b，共9组",
+    "总文件": 80,
+    "AX": 40,
+    "JPEG": 40,
+    "已目视JPEG": 31,
+    "JPEG原始像素分布": {
+      "2174×1612": 39,
+      "1052×780": 1
+    },
+    "全部私有制品Git忽略": true,
+    "已跟踪私有制品": 0
+  },
+  "结果总述": "15项限定事实与保存的工件及根代理动作记录相符；不推广为全站、全权限或全部用户流程通过。",
+  "检验项": [
+    {
+      "编号": "V38-01",
+      "事项": "角色与版本标签",
+      "判定": "限定范围相符",
+      "实际结果": "审查员与普通账号已登录页分别显示对应角色及 v4.0.38；管理员操作审计截图显示超级管理员界面。",
+      "限制": "本回执不核后端运行SHA、权限点全集、角色变更或全站访问矩阵。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/28-v4038代码沙箱刷新.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-02管理员操作审计.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-01普通账号工作台.txt"
+      ]
+    },
+    {
+      "编号": "V38-02",
+      "事项": "项目详情删除确认取消",
+      "判定": "限定范围相符",
+      "实际结果": "确认对话框显示目标与取消/删除按钮；取消后仍在项目167详情且确认对话框不在终态。",
+      "限制": "没有确认删除；不证明生产DELETE成功或数据库未发生任何写入。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/30-v4038删除目标确认.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/30-v4038删除目标确认.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/31-v4038取消删除仍在原项目.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/31-v4038取消删除仍在原项目.jpg"
+      ]
+    },
+    {
+      "编号": "V38-03",
+      "事项": "成员只读选项、用户名搜索与取消",
+      "判定": "限定范围相符",
+      "实际结果": "角色下拉包含只读成员及用途说明；用户名搜索呈现一个候选；取消后回成员列表。捕获的已选角色仍是审查员。",
+      "限制": "未选定/提交只读成员，未创建/降级成员，未生产验收viewer实际执行拒绝；成员权限由独立本地样本另行支持，不能混为本次点击结果。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/32-v4038只读成员选项.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/32-v4038只读成员选项.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/33-v4038成员用户名搜索.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/33-v4038成员用户名搜索.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/34-v4038取消添加成员.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/34-v4038取消添加成员.jpg"
+      ]
+    },
+    {
+      "编号": "V38-04",
+      "事项": "历史问题展开与抽屉判定解释",
+      "判定": "限定范围相符",
+      "实际结果": "现有历史问题可展开；问题抽屉显示源码引用匹配，并明确引用匹配、多来源一致与置信度不能代替漏洞验证。",
+      "限制": "仅既有历史验收项目/报告显示；未提交人工裁决、运行审查、验证漏洞条件或重生成历史聚合元数据。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/35-v4038历史问题展开.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/36-v4038引用与漏洞判定区分.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/36-v4038引用与漏洞判定区分.jpg"
+      ]
+    },
+    {
+      "编号": "V38-05",
+      "事项": "报告180三次刷新终态",
+      "判定": "限定范围相符",
+      "实际结果": "初次报告及三轮刷新均在 reports/180，评分终态为64；三份刷新AX字节相同，三张对应JPEG均已目视核对64。",
+      "限制": "这是同一历史报告的显示稳定性，不是三份独立报告或评分权威性/重新计算验证；未点击生成/导出。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/37-v4038报告180.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/38-v4038报告刷新1终态.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/38-v4038报告刷新1终态.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/39-v4038报告刷新2终态.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/39-v4038报告刷新2终态.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/40-v4038报告刷新3终态.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/40-v4038报告刷新3终态.jpg"
+      ]
+    },
+    {
+      "编号": "V38-06",
+      "事项": "审查员引导首次捕获排除",
+      "判定": "限定范围相符",
+      "实际结果": "41首次捕获已无引导，根代理记录该次关闭按钮匹配0并未点击；41b即时恢复捕获有报告引导及关闭按钮。",
+      "限制": "41与源代码12秒自动隐藏一致，未测量实际精确触发时间；不能将41记为点击关闭成功。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/41-v4038菜单恢复报告引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/41b-v4038即时恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/41b-v4038即时恢复引导.jpg"
+      ]
+    },
+    {
+      "编号": "V38-07",
+      "事项": "审查员实际关闭后跨页刷新与菜单恢复",
+      "判定": "限定范围相符",
+      "实际结果": "根代理记录41b后实际点击×；42问题页与43刷新无引导；44菜单恢复有问题引导；45最终关闭无引导，AX与已目视JPEG相符。",
+      "限制": "限定当前审查员账号与当前普通Safari资料；实际动作来自根代理CUA记录，本独立者仅核保存状态；不证明跨设备/跨浏览器同步或管理员surface行为。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/41b-v4038即时恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/42-v4038关闭后跨页无引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/42-v4038关闭后跨页无引导.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/43-v4038关闭后刷新无引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/43-v4038关闭后刷新无引导.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/44-v4038跨页刷新后菜单恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/44-v4038跨页刷新后菜单恢复引导.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/45-v4038最终关闭引导.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/45-v4038最终关闭引导.jpg"
+      ]
+    },
+    {
+      "编号": "V38-08",
+      "事项": "注册验证码图片首次及两次刷新",
+      "判定": "限定范围相符",
+      "实际结果": "三份AX均有注册验证码图片控件；三份JPEG摘要各不相同，已目视确认验证码图片在视口下沿显示并随刷新变化。",
+      "限制": "截图自身是JPEG，文件名中的PNG不证明生产HTTP图片响应格式；图像位置在截图下沿，未验证完整表单提交、解答验证码、有效期、自动化抵抗或无障碍替代。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/48-v4038注册PNG首次加载.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/48-v4038注册PNG首次加载.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/49-v4038注册PNG刷新1.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/49-v4038注册PNG刷新1.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/50-v4038注册PNG刷新2.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/50-v4038注册PNG刷新2.jpg"
+      ]
+    },
+    {
+      "编号": "V38-09",
+      "事项": "管理员系统心跳默认关闭",
+      "判定": "限定范围相符",
+      "实际结果": "操作审计AX显示系统心跳Value:0，截图复选框未选中。",
+      "限制": "只核该次初始筛选状态；未打开/再次切换过滤，不验证后台查询或总条数完整一致。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-02管理员操作审计.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-02管理员操作审计.jpg"
+      ]
+    },
+    {
+      "编号": "V38-10",
+      "事项": "管理员Agent目录系统条目折叠",
+      "判定": "限定范围相符",
+      "实际结果": "AX显示已加载目录与两条内部调度/兼容条目默认收起，系统内部Agent按钮为collapsed。",
+      "限制": "未打开折叠组、未审核所有Agent唯一性/配置、未发布Agent或验证调度。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-03管理员Agent目录.txt"
+      ]
+    },
+    {
+      "编号": "V38-11",
+      "事项": "自进化路由及刷新恢复",
+      "判定": "限定范围相符",
+      "实际结果": "两个AX与已目视JPEG保持 governance?section=evolution，自进化tab选中、监控指标/控制台可见，没有回落至审批中心。",
+      "限制": "没有运行进化/黄金集或处理提案；指标显示不证明统计口径或AI效果正确。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-04自进化监控路由.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-04自进化监控路由.jpg",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-05自进化刷新恢复.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-05自进化刷新恢复.jpg"
+      ]
+    },
+    {
+      "编号": "V38-12",
+      "事项": "普通账号首次自动隐藏不作为关闭验收",
+      "判定": "限定范围相符",
+      "实际结果": "02个人中心捕获无引导，根代理记录此时关闭匹配0未动作；03菜单恢复后AX/JPEG显示个人中心引导与×。",
+      "限制": "02不得记录点击关闭成功；既有12秒隐藏解释只来自源码与操作描述，未独立计时。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-02普通账号个人中心.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-03普通账号恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-03普通账号恢复引导.jpg"
+      ]
+    },
+    {
+      "编号": "V38-13",
+      "事项": "普通账号实际关闭、跨页刷新终态与恢复",
+      "判定": "限定范围相符",
+      "实际结果": "根代理记录03后实际×；04代码中心无引导；05仍有正在加载提示，05b已无加载提示且无引导；06菜单恢复再次出现代码引导，随后根代理记录实际×。",
+      "限制": "05不能充当加载完成；本分区无06后单独关闭状态捕获，后续07仅退出对话框，不能由07扩大为最终×状态独立证明；只覆盖一个普通账号当前浏览器。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-03普通账号恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-04普通账号关闭后代码中心.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-04普通账号关闭后代码中心.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05普通账号刷新代码中心.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05普通账号刷新代码中心.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05b普通账号刷新终态.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05b普通账号刷新终态.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-06普通账号跨页恢复引导.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-06普通账号跨页恢复引导.jpg"
+      ]
+    },
+    {
+      "编号": "V38-14",
+      "事项": "三角色退出确认与登录终态",
+      "判定": "限定范围相符",
+      "实际结果": "三份确认AX和JPEG的确认按钮均为确定；三份退出终态在/login并显示v4.0.38，AX无缺少token或404，已目视截图没有对应应用错误提示。",
+      "限制": "各角色本轮一次；普通Safari原有密码管理器建议浮层属于浏览器UI，不代表保存了新密码。本回执未操作浏览器、未核HTTP401/令牌吊销/所有竞态或任何时刻都无toast。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/46-v4038审查员退出确认.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/46-v4038审查员退出确认.jpg",
+        "frontend/test-results/production-acceptance/20261004-审查员/47-v4038审查员退出到登录.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/47-v4038审查员退出到登录.jpg",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-06管理员退出确认.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-06管理员退出确认.jpg",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-07管理员退出登录页.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4038-07管理员退出登录页.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-07普通账号退出确认.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-07普通账号退出确认.jpg",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-08普通账号退出终态.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-08普通账号退出终态.jpg"
+      ]
+    },
+    {
+      "编号": "V38-15",
+      "事项": "沙箱页刷新与个人中心建议显示",
+      "判定": "限定范围相符",
+      "实际结果": "审查员沙箱页有v4.0.38与只读展示状态；两用户角色个人中心AX具有新版密码安全建议。",
+      "限制": "未创建/预览/续期/停止环境或修改密码，不证明沙箱完整流程/密码更改成功。",
+      "证据": [
+        "frontend/test-results/production-acceptance/20261004-审查员/28-v4038代码沙箱刷新.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/29-v4038个人中心文案.txt",
+        "frontend/test-results/production-acceptance/20261005-普通账号/v4038-02普通账号个人中心.txt"
+      ]
+    }
+  ],
+  "源码辅助解释": {
+    "结论": "恢复立即显示且重新启动12秒隐藏；自动隐藏不等于点击×持久关闭。",
+    "位置": [
+      "ProactivePageGuide.vue:34–44（关闭/恢复）",
+      "ProactivePageGuide.vue:48–71（清旧计时/显示/12秒隐藏）",
+      "ProactivePageGuide.vue:84（v-if）",
+      "AppHeader.vue:188–190及271（恢复事件/菜单）"
+    ],
+    "源码快照": [
+      {
+        "路径": "frontend/src/components/ai/ProactivePageGuide.vue",
+        "字节": 6279,
+        "SHA256": "9e5735302e1d1d5ea02c655cb8c3630ef392280b0331c5649ffff3cd24e0ac3c"
+      },
+      {
+        "路径": "frontend/src/components/layout/AppHeader.vue",
+        "字节": 19285,
+        "SHA256": "bccd04042ea7f6a9f5dfed195dd7ebb4d2bf4079b7a54bbce6a98a4b90238c9e"
+      }
+    ],
+    "边界": "只读辅助解释；本次未执行定时单元测试或测量浏览器实际毫秒时刻。"
+  },
+  "已排除误报": [
+    "审查员41和普通02首次无引导不能记为已点关闭。",
+    "普通05加载中不能记为刷新完成；以05b终态为准。",
+    "截图文件名含PNG但实际截图为JPEG；不把视觉图片呈现写成生产响应PNG格式或反自动化通过。",
+    "成员下拉存在只读角色不等于已经新增/降级成员或生产viewer权限验收。",
+    "历史报告稳定64与引用匹配展示不等于漏洞验证、国内库最新同步或评分认证。"
+  ],
+  "未验边界": [
+    "真实手机/375或390px响应式、所有页面全部按钮及全站无错位。",
+    "HTTP网络状态/401复测、服务端令牌失效、账号数据全边界及正式viewer资源权限。",
+    "完整注册/修改密码/新增成员/删除项目/审批发布等业务写入。",
+    "本轮AI模型调用/新聊天/临时团队/正式审查/圆桌5分钟追问/百万token理解完整性。",
+    "环境搭建/运行/Worker/渗透或外部目标扫描。",
+    "验证码无障碍替代、抗OCR/抗自动化能力以及多worker共享存储。"
+  ],
+  "隐私处理": "本回执仅结果、路径、尺寸与摘要，不复制账号名称、邮箱、密码、验证码字符、项目内容、问题描述、聊天正文或审计原始行；完整AX/JPEG继续留在ignored目录。",
+  "制品清单": [
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/28-v4038代码沙箱刷新.jpg",
+      "字节": 275452,
+      "SHA256": "c1d18dec0a4903dffb0066feebbb55e254ea336be8dfcab95afef5db202ed5cd",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/28-v4038代码沙箱刷新.txt",
+      "字节": 6539,
+      "SHA256": "5d6779987f30da5af3b850f6ea35478cbb0fa79d7da663f7829a60927432db9a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/29-v4038个人中心文案.jpg",
+      "字节": 305100,
+      "SHA256": "7ffd59dca9af4525ce12d1da4ec2645bf279f6b23d9b39c72b7b7d616177731b",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/29-v4038个人中心文案.txt",
+      "字节": 6038,
+      "SHA256": "9c20aac66feb5e0e51e76e5362fa2f1a3d1075dd1f6484cec53b46f5698e325b",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/30-v4038删除目标确认.jpg",
+      "字节": 227628,
+      "SHA256": "a360ed419b4a466c54c5ea353ce83ecaf75898b492063f22ffe3aa323394bcb5",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/30-v4038删除目标确认.txt",
+      "字节": 3448,
+      "SHA256": "f8f1b8c0bbe71697f227a9ad5e3ccd97a8942f972a42102705462850ade17a77",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/31-v4038取消删除仍在原项目.jpg",
+      "字节": 256489,
+      "SHA256": "4d364fb8c2a515376b0e57b233590349517f84fd9dc7fa27f9a6e35bda9b5304",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/31-v4038取消删除仍在原项目.txt",
+      "字节": 4925,
+      "SHA256": "a6d9f93921280ec6b66b9afa06b5846763631033f26ca3aea59a204920748055",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/32-v4038只读成员选项.jpg",
+      "字节": 215489,
+      "SHA256": "afdea664e9dafe44116e3b5676eeaca7fa3ce888c88de2cc3931f69d23673969",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/32-v4038只读成员选项.txt",
+      "字节": 3986,
+      "SHA256": "902810233e32a7a5f478c47ba367741c750c3dcaf97e17a2ea736e6f7f48959b",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/33-v4038成员用户名搜索.jpg",
+      "字节": 214346,
+      "SHA256": "e9a8bb95c4ab98eb60abb829faa3cd6010ae504f887f746e36fb017533ac54c9",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/33-v4038成员用户名搜索.txt",
+      "字节": 3976,
+      "SHA256": "dd2e7c1a8de11db1363af1393b655423d8a3bb6f72d3618fc8841d7bbd98249f",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/34-v4038取消添加成员.jpg",
+      "字节": 90175,
+      "SHA256": "bd341b6f1be1680e5622fc33a207bfeb427a80cf0ee0d8352f3627d83ea15db1",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        1052,
+        780
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/34-v4038取消添加成员.txt",
+      "字节": 4826,
+      "SHA256": "0529f0119ab02a50da58a3f3a5942da2f541d7e6fe8a84dbed0e2a861095ca5f",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/35-v4038历史问题展开.jpg",
+      "字节": 428003,
+      "SHA256": "9ad1f0728cb5e0e7efe85d18d801502f495ee9729c3bff2b91fc753ed28fbca7",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/35-v4038历史问题展开.txt",
+      "字节": 9158,
+      "SHA256": "24e91075e32e5fecd584f5338e3049e2c9bab6f8480e243c818f2f62067c1699",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/36-v4038引用与漏洞判定区分.jpg",
+      "字节": 359997,
+      "SHA256": "9b97f96d935ae61cf1c3b67e83b0c8c15b1a84f65ac9ee0146570657e1be376e",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/36-v4038引用与漏洞判定区分.txt",
+      "字节": 11453,
+      "SHA256": "595569d02628b206e7732b58c925cd9c1bacaa87fcde80365dc047b94cc5f493",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/37-v4038报告180.jpg",
+      "字节": 354943,
+      "SHA256": "205523e1cab2eb5ad50ac94fdcc6959da84e90db33aec7e3888cf5ef2326f762",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/37-v4038报告180.txt",
+      "字节": 7664,
+      "SHA256": "3b707dcb888ca755495d10414981fbf2abbf84c4d40a6ed7d76499a73317777a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/38-v4038报告刷新1终态.jpg",
+      "字节": 354953,
+      "SHA256": "84c15d50da0ea3c423fc3900424413b269bad79bc85a2652e7e0462d7863a5f4",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/38-v4038报告刷新1终态.txt",
+      "字节": 7664,
+      "SHA256": "3b707dcb888ca755495d10414981fbf2abbf84c4d40a6ed7d76499a73317777a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/39-v4038报告刷新2终态.jpg",
+      "字节": 354967,
+      "SHA256": "3b9fe1813b5357ccac67e82416b219523401fe717d55677f98fbc3ea98b42380",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/39-v4038报告刷新2终态.txt",
+      "字节": 7664,
+      "SHA256": "3b707dcb888ca755495d10414981fbf2abbf84c4d40a6ed7d76499a73317777a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/40-v4038报告刷新3终态.jpg",
+      "字节": 354971,
+      "SHA256": "18db8fd043aa62556dd33e5751e2fc9523c961c10bb87d434c2948e1fa57e89d",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/40-v4038报告刷新3终态.txt",
+      "字节": 7664,
+      "SHA256": "3b707dcb888ca755495d10414981fbf2abbf84c4d40a6ed7d76499a73317777a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/41-v4038菜单恢复报告引导.jpg",
+      "字节": 355004,
+      "SHA256": "a2e97930351f894fbb3543c8c74b27c4a50bc4cdbd43ee8d6cbab49ff43dd522",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/41-v4038菜单恢复报告引导.txt",
+      "字节": 7618,
+      "SHA256": "7aa4e1ff130e840adc7f50b60c3ee1f0458712a72c7ba391a6df2e2c04b0bce1",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/41b-v4038即时恢复引导.jpg",
+      "字节": 368520,
+      "SHA256": "5c6e2f2df78ba6fc7d61378d9f77a50f0ad007fcf9530a20dc0a1815f4fe26ff",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/41b-v4038即时恢复引导.txt",
+      "字节": 7829,
+      "SHA256": "aa3a100ca7165231b72a9c03c71903d187541830702c3f73fa931cb8746bc87c",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/42-v4038关闭后跨页无引导.jpg",
+      "字节": 373360,
+      "SHA256": "9979e3206e52f888afe7931aa3caaca31400a89899808e26acffdfb6562cc4d6",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/42-v4038关闭后跨页无引导.txt",
+      "字节": 8956,
+      "SHA256": "bb8609d8d0815843e60e16f987263fa297727b014a6899da5fc41e5928aba1f1",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/43-v4038关闭后刷新无引导.jpg",
+      "字节": 404544,
+      "SHA256": "d53a13e9c284a2435ad500e814167e4d9523a7c03cdb11883a213aee590aff23",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/43-v4038关闭后刷新无引导.txt",
+      "字节": 8887,
+      "SHA256": "ecd80b38b998002f605b582dd8a8d8b6f4c042ead30c0601d220137e38b3a608",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/44-v4038跨页刷新后菜单恢复引导.jpg",
+      "字节": 423502,
+      "SHA256": "c9090377e92fe08c1417534ac8a79c905e7ce716dcfbded2e95e929a32d1e3e0",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/44-v4038跨页刷新后菜单恢复引导.txt",
+      "字节": 9072,
+      "SHA256": "0ad126eb038e752adb8f44d961c52581c9a44e72cefaf892f9d7b56efad67574",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/45-v4038最终关闭引导.jpg",
+      "字节": 416758,
+      "SHA256": "75be23623606627f056a1bd1e5c3aaa761f6ed6a4ca9e8fc067745cbfc3e5165",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/45-v4038最终关闭引导.txt",
+      "字节": 8887,
+      "SHA256": "ecd80b38b998002f605b582dd8a8d8b6f4c042ead30c0601d220137e38b3a608",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/46-v4038审查员退出确认.jpg",
+      "字节": 320946,
+      "SHA256": "f16c52e05ab91c42f790383ec05cd64f4250b45bea497da48716307880745fcd",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/46-v4038审查员退出确认.txt",
+      "字节": 3354,
+      "SHA256": "79c6ee83f0c8e7c8c3a59be3dc629fb066ff7673939d3720d0851935f7a6a898",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/47-v4038审查员退出到登录.jpg",
+      "字节": 304179,
+      "SHA256": "146582d56d3b7ed99e600171ac842f36c5c478cac3f24d7ce883c39ce7ec5d2f",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/47-v4038审查员退出到登录.txt",
+      "字节": 4280,
+      "SHA256": "f907570ae7dfb331a33fb65242aca7b19892c41b559fffa093d1c2e32fa9127a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/48-v4038注册PNG首次加载.jpg",
+      "字节": 327177,
+      "SHA256": "5fbe10011635ffaf6896a1fc65f10a6d7a9207c0d491463be03b19946bfea75e",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/48-v4038注册PNG首次加载.txt",
+      "字节": 4969,
+      "SHA256": "f6dda4db8a6fdbebdefa182ed6402c3f171e76542f65c665a60ece96c57f5554",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/49-v4038注册PNG刷新1.jpg",
+      "字节": 326666,
+      "SHA256": "4d24241e9ae8580f1df5b8b723b5c5ca5cb54348ff80a32ce9f8c56994f62bf0",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/49-v4038注册PNG刷新1.txt",
+      "字节": 4969,
+      "SHA256": "f6dda4db8a6fdbebdefa182ed6402c3f171e76542f65c665a60ece96c57f5554",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/50-v4038注册PNG刷新2.jpg",
+      "字节": 326707,
+      "SHA256": "d75fd890aed1b47ef595434b6142c557c4cf8234cbfa903a4de5682bda1ed084",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-审查员/50-v4038注册PNG刷新2.txt",
+      "字节": 4969,
+      "SHA256": "f6dda4db8a6fdbebdefa182ed6402c3f171e76542f65c665a60ece96c57f5554",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-01管理员总览.jpg",
+      "字节": 294182,
+      "SHA256": "a1bc79409cc8cacb573dd5c522a5a169e6a659e03b5697f2650f8596a8464101",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-01管理员总览.txt",
+      "字节": 16423,
+      "SHA256": "d175c43731e04b00f7662f717e65f3d92888bf01509b17521f9aa633ed2ab53b",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-02管理员操作审计.jpg",
+      "字节": 324392,
+      "SHA256": "e4fc383b2cbb72176f1ba462b13780a0b5734040a6e1a8a19a9c85dc05f5da8b",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-02管理员操作审计.txt",
+      "字节": 10207,
+      "SHA256": "53fe38c9338159e5cc2168e5ff5ba2948241567ca2e559639cc3dc4ea422bc93",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-03管理员Agent目录.jpg",
+      "字节": 317466,
+      "SHA256": "d83e854ba83fb07864c42ec62a67d1c3e6608ca45c41be4325edfdba868a4cc6",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-03管理员Agent目录.txt",
+      "字节": 28343,
+      "SHA256": "6d1545718badfce1d4de8a050daa709f29cdc182b9701487239e7ab8136292fe",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-04自进化监控路由.jpg",
+      "字节": 323813,
+      "SHA256": "ac1327480701602dfabc93bdfd1fb865e90d38b31cdad8e3714808eb82faa67c",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-04自进化监控路由.txt",
+      "字节": 6443,
+      "SHA256": "378958b0bb97d1d1b5da12a5f595deafb3589612a4bc22e4991acb54af58e381",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-05自进化刷新恢复.jpg",
+      "字节": 323830,
+      "SHA256": "d531ca55c7c5c72146864cb907eb945588e346d47c181cedfcacbfb37eaeb915",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-05自进化刷新恢复.txt",
+      "字节": 6504,
+      "SHA256": "ba6117af56d199578d4635948e4e0530f213a5bffcaac813f5bad15cc2a27b81",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-06管理员退出确认.jpg",
+      "字节": 261522,
+      "SHA256": "9c336c084a7e234e12909d43c56a3f855f9069c891628814f3232d52d511f144",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-06管理员退出确认.txt",
+      "字节": 3446,
+      "SHA256": "bc7f614279b43627119feff6ff521c1e9fcb01338bffb0e38acdd086318bdeda",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-07管理员退出登录页.jpg",
+      "字节": 301767,
+      "SHA256": "b86829d263f08df63a3fddf75dfdb296cfeb1154a62a5db04b026febe35916d2",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261004-管理员/v4038-07管理员退出登录页.txt",
+      "字节": 4280,
+      "SHA256": "f907570ae7dfb331a33fb65242aca7b19892c41b559fffa093d1c2e32fa9127a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-01普通账号工作台.jpg",
+      "字节": 385515,
+      "SHA256": "7d5af3157183bd8462a7049541741f055a5ee07d57782b59a1992a9dac54b92a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-01普通账号工作台.txt",
+      "字节": 10609,
+      "SHA256": "5bb14c24267d1026672dcf918539558f60919270871467d317d358ace7cb4a49",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-02普通账号个人中心.jpg",
+      "字节": 300320,
+      "SHA256": "b077fb9a887aefade3539679bab742387db39acfd579f3946432e006895102c5",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": false
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-02普通账号个人中心.txt",
+      "字节": 6067,
+      "SHA256": "8fcde4899d3574c1dd288d464a1551f5bdbd4c4ee2ebdf996b32eb4a3b57e794",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-03普通账号恢复引导.jpg",
+      "字节": 318056,
+      "SHA256": "bb93e91edd9605b08acfcb3f7b856b1f7b48f07e8f1a1ec2df89e94a1bbeb9ea",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-03普通账号恢复引导.txt",
+      "字节": 6203,
+      "SHA256": "61f785f6eaeab6ad96a587bbdb62c2b489dafd87ee9779c4008fe9229c47ba16",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-04普通账号关闭后代码中心.jpg",
+      "字节": 412318,
+      "SHA256": "a9d8bdc222677a2cfdbf201da3f0508d42e77cfa979ae00fc611eed8e4f1367e",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-04普通账号关闭后代码中心.txt",
+      "字节": 4946,
+      "SHA256": "5584e2205eeabe705f53eaeb5020add6264bbbb5e38f96fe7d2e054cc068cc93",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05b普通账号刷新终态.jpg",
+      "字节": 411286,
+      "SHA256": "52104d0e7b729d59359a6568f27e3fdf745d043737c0f0600fc02556c7c89779",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05b普通账号刷新终态.txt",
+      "字节": 4918,
+      "SHA256": "9c32f0e2b9165fc9c9eab49130029398bca6049e4c3691b2055d0959af61f1dd",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05普通账号刷新代码中心.jpg",
+      "字节": 408225,
+      "SHA256": "68f81095d8c39695f83949d43a9bfdde010039793e9afcd360a0e47801bdd2c3",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-05普通账号刷新代码中心.txt",
+      "字节": 4907,
+      "SHA256": "19db8568de0d0fa823c00a238ef8898132239539568a64368fbaaa7af4a4ee43",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-06普通账号跨页恢复引导.jpg",
+      "字节": 434422,
+      "SHA256": "562edb326319a3b149fcfcb7b18c59de566b425721e2dd415fed395df7c510bd",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-06普通账号跨页恢复引导.txt",
+      "字节": 5118,
+      "SHA256": "90048082b3731c06dbcd71e99fb7e752fea860bc78341bf0528611c38e87120e",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-07普通账号退出确认.jpg",
+      "字节": 333060,
+      "SHA256": "c24cec3e7be49b56a5d7c652ea28e528ab29369b4b1fe7ec7aa8e66bf9d7b5f4",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-07普通账号退出确认.txt",
+      "字节": 3350,
+      "SHA256": "528cd818e3c5c85d0ea8c7f2efc3e3966264697a79ae39608d68d0a23b98e1a1",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-08普通账号退出终态.jpg",
+      "字节": 302406,
+      "SHA256": "751941124514c7b2b7c2e0fb50b6b8867253da92f5b7fab52a67171cbe3cf742",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "JPEG",
+      "原始像素": [
+        2174,
+        1612
+      ],
+      "已目视复核": true
+    },
+    {
+      "路径": "frontend/test-results/production-acceptance/20261005-普通账号/v4038-08普通账号退出终态.txt",
+      "字节": 4280,
+      "SHA256": "f907570ae7dfb331a33fb65242aca7b19892c41b559fffa093d1c2e32fa9127a",
+      "Git忽略": true,
+      "Git已跟踪": false,
+      "实际格式": "UTF-8 AX文本",
+      "已读取并核验相关状态": true
+    }
+  ]
+}

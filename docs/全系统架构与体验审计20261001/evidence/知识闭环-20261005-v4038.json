@@ -1,0 +1,53 @@
+{
+  "checked_at_utc": "2026-10-04T17:14:38Z",
+  "task_receipts": [
+    "20261004-113909-d43aa345ee.json",
+    "20261004-125043-964345fcac.json"
+  ],
+  "validation_before_postflight": {
+    "files": 898,
+    "errors": 0,
+    "warnings": 0
+  },
+  "postflight": [
+    {
+      "task": "继续完整做完",
+      "result": "postflight-created",
+      "validation_files": 898,
+      "errors": 0,
+      "warnings": 0,
+      "file": "任务闭环-20261004-171437.md"
+    },
+    {
+      "task": "这个是报告，请你也一并修复",
+      "result": "postflight-created",
+      "validation_files": 899,
+      "errors": 0,
+      "warnings": 0,
+      "file": "任务闭环-20261004-171438.md"
+    }
+  ],
+  "scope": "知识Harness按两份实际读取收据闭环；不把Harness通过当产品全部验收；私人主库正文未复制",
+  "production_evidence_files": [
+    {
+      "name": "生产发布-20261005-v4038.log",
+      "bytes": 35457,
+      "sha256": "da33d4e15fdf4bde48b9401cd3df8af946018e83ff7c751dc59bdfd0ce5e3b0e"
+    },
+    {
+      "name": "生产运行核验-20261005-v4038.log",
+      "bytes": 2779,
+      "sha256": "b14e0380973d8b85595217ea5c8dde6add578f6cdab77db33b49f4018de60c79"
+    },
+    {
+      "name": "公网核验-20261005-v4038.json",
+      "bytes": 1426,
+      "sha256": "aa6ec3fdb7a03ad893cdc34544574afc537dc221ddd4b5d1c4a59ac0dbb57770"
+    },
+    {
+      "name": "提交推送-20261005-v4038.json",
+      "bytes": 970,
+      "sha256": "6ae160067483c52b554eb06a039183b41af187fd5cf8c4b80dcfad70c5d319e9"
+    }
+  ]
+}

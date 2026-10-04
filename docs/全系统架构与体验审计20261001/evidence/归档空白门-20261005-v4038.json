@@ -1,0 +1,43 @@
+{
+  "checked_at_utc": "2026-10-04T17:24:19.320907+00:00",
+  "plain_diff_check_exit": 2,
+  "plain_diff_check_output": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终前端lint.log:4: new blank line at EOF.\ndocs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终完整前端.log:13: new blank line at EOF.\ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:4: trailing whitespace.\n+732f48f6929ceda1585bcae2489a0b01f0f2c5fb \ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:133: trailing whitespace.\n+#10 14.09 \ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:135: trailing whitespace.\n+#10 14.09 \ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:149: trailing whitespace.\n+#12 0.369 \ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:152: trailing whitespace.\n+#12 0.369 \ndocs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log:483: trailing whitespace.\n+cr_embedding   ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.3   \"text-embeddings-rou…\"   embedding   5 weeks ago      Up 5 weeks                \n",
+  "normal_documents_diff_check_exit": 0,
+  "excluded_exact_logs": [
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口完整后端.log",
+      "sha256": "c3a2b54c03392bc4efec0bbc4f09e72d060d0ea2aec081862c1ff2b22f9c358e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终完整前端.log",
+      "sha256": "30b7db04697f5623f1711aa8ed9fc162bd6a1fafc4c9645cec5a50a01ae08b51"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终前端lint.log",
+      "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终前端build.log",
+      "sha256": "e1c4911a35a9b2e769cd829cae84271acc88bd9abb8f7dfd2d7b6d371b30d6d2"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终部署命令替身.log",
+      "sha256": "8625fdf60a889df488918948becf1d33f5438c48456e50eebbc167c41e2b3025"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终后端静态门.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/生产发布-20261005-v4038.log",
+      "sha256": "da33d4e15fdf4bde48b9401cd3df8af946018e83ff7c751dc59bdfd0ce5e3b0e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/生产运行核验-20261005-v4038.log",
+      "sha256": "b14e0380973d8b85595217ea5c8dde6add578f6cdab77db33b49f4018de60c79"
+    }
+  ],
+  "reason": "保留原始工具输出的2个末尾空行和6个尾空格，精确区分取证与普通文档门；不是产品错误，无Git持久配置变更",
+  "source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+  "scope": "当前暂存仅文档与验收证据；未改产品源码或原日志字节"
+}

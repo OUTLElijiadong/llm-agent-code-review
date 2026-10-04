@@ -1,0 +1,27 @@
+{
+  "checked_at_utc": "2026-10-04T16:47:32.687464+00:00",
+  "source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+  "branch": "codex/prism-v4.0.23-context-mobile",
+  "attempts": [
+    {
+      "session": 21974,
+      "exit_code": 128,
+      "result": "github.com443连接75秒超时"
+    },
+    {
+      "session": 16386,
+      "exit_code": 128,
+      "result": "直连低速阈值60秒失败"
+    },
+    {
+      "session": 79908,
+      "exit_code": 0,
+      "result": "复用现有127.0.0.1:17891系统代理，Git临时配置、严格TLS、正常push，6dad1dea..c591f814"
+    }
+  ],
+  "target_ref_read_back": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49 refs/heads/codex/prism-v4.0.23-context-mobile",
+  "read_back_exit_code": 0,
+  "persistent_network_configuration_changed": false,
+  "independent_read_back": "remaining_permissions同一精确ref只读exit0；未代push",
+  "scope": "正式源码提交推送；后续验收文件提交与生产源码身份分开"
+}

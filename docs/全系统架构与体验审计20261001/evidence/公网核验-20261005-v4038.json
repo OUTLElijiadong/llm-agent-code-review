@@ -1,0 +1,53 @@
+{
+  "checked_at_utc": "2026-10-04T16:35:42.199777+00:00",
+  "scope": "六个公开GET；无账号注册、挑战作答、模型调用或业务执行",
+  "html_http_status": 200,
+  "entry": {
+    "path": "/assets/index-C3_oPbnL.js",
+    "http_status": 200,
+    "sha256": "16b0205ccaa7663a35c8145fa5caf4a94cbc2db06126fc258336a7a814ee005d"
+  },
+  "build_info": {
+    "path": "/assets/buildInfo-BvpoDVEP.js",
+    "http_status": 200,
+    "sha256": "5c5ba8bbe2129bc02614c87bf8861bc6ce3300d6e3e8f0117934f8cfa17db5b9",
+    "has_expected_version": true,
+    "has_expected_source_sha": true
+  },
+  "csp_enforce_header_present": true,
+  "csp_report_only_header_present": false,
+  "server_header": "nginx",
+  "healthz": {
+    "http_status": 200,
+    "body": {
+      "status": "ok",
+      "version": "4.0.38",
+      "release": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49"
+    }
+  },
+  "readyz": {
+    "http_status": 200,
+    "body": {
+      "status": "ready",
+      "version": "4.0.38",
+      "release": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49"
+    }
+  },
+  "captcha": {
+    "http_status": 200,
+    "keys": [
+      "beta_registration_enabled",
+      "captcha_id",
+      "image_data",
+      "question"
+    ],
+    "question_is_generic": true,
+    "png_bytes": 2911,
+    "png_sha256": "dfe22a6499a7415fda39f391f808595d7e352d2a4a4b97c996eaa20c6b4cf397",
+    "png_dimensions": [
+      168,
+      56
+    ],
+    "challenge_answered": false
+  }
+}

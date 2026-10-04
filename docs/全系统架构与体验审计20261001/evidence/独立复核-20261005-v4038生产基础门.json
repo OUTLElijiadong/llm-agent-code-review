@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "checked_at_utc": "2026-10-04T16:42:08.377999+00:00",
+  "reviewer": "context_integrity",
+  "status": "pass_for_production_foundation_gates",
+  "scope": "重新读取实际发布、运行及六个公开GET收据；只在本地复算制品与文件摘要、交叉核对结果；未访问服务器、CUA或执行发布脚本",
+  "release": {
+    "source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+    "version": "4.0.38",
+    "local_HEAD_VERSION_bundle_ref_match": true,
+    "release_completed_at_utc": "2026-10-04T16:34:32Z",
+    "timezone_note": "日志UTC为10月4日；证据名10月5日对应台北跨日"
+  },
+  "execution_attestations": {
+    "source": "根代理提供的实际工具exit结果；独立复核者没有重跑远程命令",
+    "release": {
+      "root_session": 98148,
+      "exit_code": 0
+    },
+    "runtime": {
+      "root_session": 26656,
+      "exit_code": 0
+    },
+    "public_get": {
+      "root_session": 51899,
+      "exit_code": 0
+    },
+    "git_push": {
+      "root_session": 79908,
+      "exit_code": 0,
+      "remote_ref_requeried_by_this_reviewer": false
+    }
+  },
+  "local_artifacts_verified": [
+    {
+      "name": "prism-v4.0.38-c591f8141412f3c4c8d43d0ab4c50f67a17f1b49.bundle",
+      "bytes": 1608204,
+      "sha256": "04104a8694123b4e241e1f2bb70711ad0fc546a0d44141028a6921e75f7e5c7e"
+    },
+    {
+      "name": "prism-release-v4038-from-bundle-20261004.sh",
+      "bytes": 1259,
+      "sha256": "ecf2f976f4161fc273170e44c4ffeb474fb89ef4e284686621d55ccdc41c34a7"
+    },
+    {
+      "name": "prism-v4038-readonly-verification.sh",
+      "bytes": 2462,
+      "sha256": "76c10110eb60fc4f0eb230e5069ced525a1b1c559d2dc2df2a2d5f8a2ea8c7d0"
+    },
+    {
+      "name": "prism-v4038-public-verification.py",
+      "bytes": 3415,
+      "sha256": "5beae57f2aeb1438ab4aeddbb08853f71fb1772eb2097a0c7b7da0a2401468c9"
+    }
+  ],
+  "running_images_from_actual_log": {
+    "cr_backend": {
+      "image_tag": "prism-backend:c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+      "immutable_image_id": "sha256:0c984da91f0c48841120f11ea23d155ff700971995628bf958efdd85f092a523",
+      "health": "healthy"
+    },
+    "cr_frontend": {
+      "image_tag": "prism-frontend:c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+      "immutable_image_id": "sha256:c91f2d1d8759d81d807d331c3b4a83e52ccbaf6ad834ef0a1d93e7aa72a0c313",
+      "health": "healthy"
+    }
+  },
+  "backup_and_schema": {
+    "backup_bytes": 451619738,
+    "backup_sha256": "a9e51daea895f3895996f982bd7f1618d06e465c55ebb716a106e482d80e2263",
+    "backup_path": "/opt/prism-releases/c591f8141412f3c4c8d43d0ab4c50f67a17f1b49/backups/code_review_20261004T162754Z_c591f8141412.sql.gz",
+    "independent_restore_container": "cr_testdb",
+    "restored_tables": 104,
+    "restored_alembic": "061_overview_time_indexes",
+    "running_alembic": "061_overview_time_indexes",
+    "migration_note": "本轮发布日志显示已处于061 head；不写成再次执行058到061迁移或覆盖生产恢复"
+  },
+  "dependencies": {
+    "locked_application_packages": 63,
+    "version_mismatches": [],
+    "pyjwt": "2.15.0",
+    "lock_sha256": "784bdb1f7d8055d3a62f45f3669df80b8ba6ba3b73c7351f5a858e4dcb0f7c43",
+    "local_lock_matches_actual_receipt": true,
+    "pip_check": "No broken requirements found."
+  },
+  "ledger_and_compatibility": {
+    "transcript_rows": 46,
+    "digest_mismatches": 0,
+    "digest_scope": "message_sha256与现存message_json的SHA2一致；不证明模型语义完整理解",
+    "current_checkpoint_reader": "supported",
+    "current_member_reader": "supported",
+    "old_v4037_member_reader": "rejected_exit_1",
+    "backend_frontend_container_ids_unchanged_during_probe": true,
+    "rollback_executed": false,
+    "probe_scope": "无网只读临时镜像容器的真实reader能力与只读数据门；不是生产回退演练"
+  },
+  "ops": {
+    "actual_check_time_utc": "2026-10-04T16:36:26Z",
+    "status": "ok",
+    "blocking_checks": [],
+    "ops_executor_bound_to_source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+    "ops_executor_state": "active/running",
+    "disk_used_percent": 79,
+    "df_used_bytes": 150925398016,
+    "df_available_bytes": 42279952384,
+    "disk_note": "发布后这一时点的磁盘水位，不是增长趋势或长期容量闭环"
+  },
+  "public_get": {
+    "checked_at_utc": "2026-10-04T16:35:42.199777+00:00",
+    "request_count": 6,
+    "http_statuses": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "build_info_expected_version_and_sha": true,
+    "csp_enforce_present": true,
+    "csp_report_only_present": false,
+    "server_header": "nginx",
+    "captcha_png_dimensions": [
+      168,
+      56
+    ],
+    "captcha_answered": false,
+    "scope_note": "脚本仅生成一个300秒内存挑战及通常访问日志，未注册/登录/作答/调用模型或执行业务；不称零副作用"
+  },
+  "non_blocking_observations": [
+    "pip不可写缓存目录警告，缓存禁用；pip check正常",
+    "旧37成员reader预期ERROR后明确记录exit1与容器不变，是拒绝门证明，不是发布失败",
+    "前端构建保留whatwg-encoding/glob弃用告警；构建最终完成"
+  ],
+  "not_established": [
+    "全业务及三角色全部流程通过",
+    "真实手机验收",
+    "真实供应商100万token调用、计费或压缩语义达标",
+    "所有模型永不截断或无幻觉",
+    "实际生产回退成功",
+    "全部子Agent包已重新发布"
+  ],
+  "input_evidence": [
+    {
+      "name": "生产发布-20261005-v4038.log",
+      "bytes": 35457,
+      "sha256": "da33d4e15fdf4bde48b9401cd3df8af946018e83ff7c751dc59bdfd0ce5e3b0e"
+    },
+    {
+      "name": "生产运行核验-20261005-v4038.log",
+      "bytes": 2779,
+      "sha256": "b14e0380973d8b85595217ea5c8dde6add578f6cdab77db33b49f4018de60c79"
+    },
+    {
+      "name": "公网核验-20261005-v4038.json",
+      "bytes": 1426,
+      "sha256": "aa6ec3fdb7a03ad893cdc34544574afc537dc221ddd4b5d1c4a59ac0dbb57770"
+    },
+    {
+      "name": "发布制品-20261005-v4038.json",
+      "bytes": 976,
+      "sha256": "956744bab5bc25802fc6574e8834be2121f1468aba0db60a6ba01cf7dd6e36a3"
+    },
+    {
+      "name": "核查-20261005-prism-release-v4038-from-bundle-20261004.sh",
+      "bytes": 1259,
+      "sha256": "ecf2f976f4161fc273170e44c4ffeb474fb89ef4e284686621d55ccdc41c34a7"
+    },
+    {
+      "name": "核查-20261005-prism-v4038-readonly-verification.sh",
+      "bytes": 2462,
+      "sha256": "76c10110eb60fc4f0eb230e5069ced525a1b1c559d2dc2df2a2d5f8a2ea8c7d0"
+    },
+    {
+      "name": "核查-20261005-prism-v4038-public-verification.py",
+      "bytes": 3415,
+      "sha256": "5beae57f2aeb1438ab4aeddbb08853f71fb1772eb2097a0c7b7da0a2401468c9"
+    }
+  ],
+  "source_or_test_modified": false
+}

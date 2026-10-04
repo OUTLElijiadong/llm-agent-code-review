@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "checked_at_utc": "2026-10-04T17:19:54.678495+00:00",
+  "reviewer": "context_integrity",
+  "status": "pass_with_commit_membership_correction",
+  "scope": "仅本地核对已发布源码集合、提交成员与两份实际日志归档内容；未重跑测试、访问服务器、CUA或修改源码",
+  "published_source_sha": "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+  "snapshot_file_count": 114,
+  "snapshot_current_commit_byte_and_sha_mismatches": [],
+  "source_git_diff_argv": [
+    "git",
+    "diff",
+    "--quiet",
+    "c591f8141412f3c4c8d43d0ab4c50f67a17f1b49",
+    "--",
+    "backend",
+    "frontend/src",
+    "deploy",
+    "VERSION"
+  ],
+  "source_git_diff_returncode": 0,
+  "nonignored_untracked_source_count": 0,
+  "remaining_worktree_changes_are_docs_or_evidence": true,
+  "snapshot_and_test_log_commit_membership": [
+    {
+      "name": "复测-20261005-v4038收口源码冻结.json",
+      "bytes": 20858,
+      "sha256": "8cd1682c26b157e824db3948655f4cb2907d2a4269d221db45a9ef53c0b4fc1d",
+      "in_c591_commit": true,
+      "commit_bytes_match": true
+    },
+    {
+      "name": "复测-20261005-v4038收口完整后端.log",
+      "bytes": 857843,
+      "sha256": "c3a2b54c03392bc4efec0bbc4f09e72d060d0ea2aec081862c1ff2b22f9c358e",
+      "in_c591_commit": false,
+      "commit_bytes_match": false
+    }
+  ],
+  "required_wording_correction": "114份产品/测试源码及冻结JSON已提交c591；最终完整后端原.log受忽略规则影响，当前不在c591，须作为后续证据归档，不写成原日志已提交c591",
+  "archive_logs_reviewed": [
+    {
+      "name": "生产发布-20261005-v4038.log",
+      "bytes": 35457,
+      "sha256": "da33d4e15fdf4bde48b9401cd3df8af946018e83ff7c751dc59bdfd0ce5e3b0e",
+      "lines": 486,
+      "credential_or_private_payload_candidate_locations": [],
+      "suitable_for_this_evidence_archive": true
+    },
+    {
+      "name": "生产运行核验-20261005-v4038.log",
+      "bytes": 2779,
+      "sha256": "b14e0380973d8b85595217ea5c8dde6add578f6cdab77db33b49f4018de60c79",
+      "lines": 38,
+      "credential_or_private_payload_candidate_locations": [],
+      "suitable_for_this_evidence_archive": true
+    }
+  ],
+  "archive_content_scope": "发布制品/镜像摘要、构建路径、服务健康、备份摘要与聚合数量；聚焦扫描凭据赋值、Authorization、私钥、供应商密钥、带密码URI、JWT和原始对话payload，未发现具体敏感值。未复制任何疑似敏感正文。",
+  "source_or_test_modified": false,
+  "production_commands_executed": false,
+  "full_backend_synthetic_credential_url_findings": [
+    {
+      "log_line": 1439,
+      "source_file": "backend/tests/test_production_permission_acceptance_runner.py",
+      "source_line": 46,
+      "source_sha256": "2aafedc607a5a8f76bc18c2556f219b5b1d85952925001fa608397843b7a84c7",
+      "source_bytes_equal_c591": true,
+      "parameter_exactly_matches_committed_static_fixture_literal": true,
+      "host": "example.invalid",
+      "test_function": "test_runner_rejects_unsafe_base_url_before_output_or_network",
+      "classification": "合成拒绝URL参数；由pytest参数ID打印，非真实账号/API凭据或环境输出",
+      "credential_values_recorded": false
+    },
+    {
+      "log_line": 4049,
+      "source_file": "backend/tests/unit/services/test_github_project_import.py",
+      "source_line": 60,
+      "source_sha256": "6e21ab02c47784abdcf4f8a0d11be91060c8002c48f7082d8bded613ddfd8d87",
+      "source_bytes_equal_c591": true,
+      "parameter_exactly_matches_committed_static_fixture_literal": true,
+      "host": "github.com",
+      "test_function": "test_normalize_github_project_url_rejects_unsafe_urls",
+      "classification": "合成拒绝URL参数；由pytest参数ID打印，非真实账号/API凭据或环境输出",
+      "credential_values_recorded": false
+    },
+    {
+      "log_line": 4700,
+      "source_file": "backend/tests/unit/services/test_project_source_service.py",
+      "source_line": 78,
+      "source_sha256": "aa681773eecdf190989fae75b07031bfd44843476f2ff2338de73b51cc435f98",
+      "source_bytes_equal_c591": true,
+      "parameter_exactly_matches_committed_static_fixture_literal": true,
+      "host": "example.com",
+      "test_function": "test_public_url_rejects_unsafe_schemes_credentials_and_ports",
+      "classification": "合成拒绝URL参数；由pytest参数ID打印，非真实账号/API凭据或环境输出",
+      "credential_values_recorded": false
+    },
+    {
+      "log_line": 5926,
+      "source_file": "backend/tests/unit/utils/test_api_url_security.py",
+      "source_line": 27,
+      "source_sha256": "76f21a371041a2e261bc0e9963c4aa45e1d10c322f5bd420d2ccbf14f6591ecf",
+      "source_bytes_equal_c591": true,
+      "parameter_exactly_matches_committed_static_fixture_literal": true,
+      "host": "api.example.com",
+      "test_function": "test_validate_ai_base_url_rejects_unsafe_urls",
+      "classification": "合成拒绝URL参数；由pytest参数ID打印，非真实账号/API凭据或环境输出",
+      "credential_values_recorded": false
+    }
+  ],
+  "full_backend_original_log_sha256_unchanged": "c3a2b54c03392bc4efec0bbc4f09e72d060d0ea2aec081862c1ff2b22f9c358e",
+  "full_backend_archive_followup": "四处带userinfo的URL已逐项与c591静态测试参数精确匹配，均为防御性拒绝样本，允许保留原始日志归档；本补核不改变原日志字节、不记录凭据值、不执行这些URL。原.log在c591之外的归档成员区别继续保留。"
+}
