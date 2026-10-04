@@ -126,6 +126,17 @@ read_env_value() {
   printf '%s\n' "$raw"
 }
 
+# 统一解析生产备份目录：进程环境显式值优先，其次读取部署 dotenv，最后使用旧默认值。
+# 参数: 无。
+# 返回: stdout 输出相对 deploy 目录的路径或配置的绝对路径。
+configured_backup_dir() {
+  local configured="${BACKUP_DIR:-}"
+  if [[ -z "$configured" ]]; then
+    configured="$(read_env_value BACKUP_DIR "${DEPLOY_ENV_FILE:-.env}" || true)"
+  fi
+  printf '%s\n' "${configured:-../backups}"
+}
+
 # 计算文件 SHA-256，兼容 Linux sha256sum 与 macOS shasum。
 # 参数: $1 为文件路径。
 # 返回: stdout 输出十六进制摘要。

@@ -150,7 +150,7 @@ assert_frontend_tls_assets "$deploy_env_file" \
   || fatal "Frontend TLS / ACME 持久化挂载未通过预检，发布尚未修改运行服务"
 
 deploy_stage="capacity_preflight"
-assert_deploy_capacity "$repo_dir" "${BACKUP_DIR:-../backups}"
+assert_deploy_capacity "$repo_dir" "$(configured_backup_dir)"
 deploy_stage="preflight"
 
 if [[ -f "$current_state" ]]; then

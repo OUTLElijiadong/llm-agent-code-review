@@ -13,13 +13,13 @@ usage() {
   cat <<'USAGE'
 用法: ./backup.sh [--reason TEXT] [--output-dir DIR] [--retention-days N]
 
-默认输出目录: BACKUP_DIR 或 ../backups
+默认输出目录: 进程 BACKUP_DIR、dotenv BACKUP_DIR 或 ../backups
 默认保留天数: BACKUP_RETENTION_DAYS 或 14
 USAGE
 }
 
 reason="manual"
-backup_dir="${BACKUP_DIR:-../backups}"
+backup_dir="$(configured_backup_dir)"
 retention_days="${BACKUP_RETENTION_DAYS:-14}"
 
 while [[ $# -gt 0 ]]; do

@@ -22,7 +22,7 @@ stdout 仅输出 JSON；ok/degraded 退出码为 0，阻断性 error 退出码�
   OPS_MEMORY_MAX_PERCENT     内存使用率上限，默认 90
   OPS_MEMORY_CRITICAL_PERCENT 内存临界使用率，默认 98
   BACKUP_MAX_AGE_HOURS       最近备份最大年龄，默认 30
-  BACKUP_DIR                 备份目录，默认 ../backups
+  BACKUP_DIR                 备份目录，优先取进程环境或 dotenv，默认 ../backups
   OPS_HTTPS_REQUIRED         是否要求 HTTPS，默认 true
   DEPLOY_ENV_FILE            Compose dotenv，默认 .env
 USAGE
@@ -186,7 +186,7 @@ else
   memory_critical_threshold=98
 fi
 backup_max_age="${BACKUP_MAX_AGE_HOURS:-30}"
-backup_dir="${BACKUP_DIR:-../backups}"
+backup_dir="$(configured_backup_dir)"
 https_required="${OPS_HTTPS_REQUIRED:-true}"
 if ! valid_percent "$disk_threshold" || ! valid_percent "$disk_critical_threshold" \
   || ! valid_percent "$memory_threshold" || ! valid_percent "$memory_critical_threshold" \

@@ -96,6 +96,7 @@ cd /path/to/project/deploy
 
 - [ ] 发布树中的 `deploy/prism_ops_executor.py` 已同步到生产（如 `/opt/prism-releases/<sha>/deploy/`），且 `prism-ops-executor.service` 的 `WorkingDirectory/ExecStart` 指向该发布树；发布后 `systemctl restart prism-ops-executor.service` 并确认 active。
 - [ ] `deploy/.env` 已按需配置 `SECURITY_MONITOR_*`、`SECURITY_SSH_ALLOWLIST_CIDRS`（本人常用 IP 段）、`THREAT_INTEL_BASE_URL`（默认 http://ip-api.com/json，可覆盖）与跨版本持久备份目录 `BACKUP_DIR`；备份审计和备份读取须指向同一目录。
+- [ ] 备份、隔离恢复验证、发布容量门禁和 `ops-check.sh` 均读取同一 `BACKUP_DIR`（进程变量优先，其次当前部署 dotenv，再回退默认目录）；发布后直接运行 `./ops-check.sh` 与 systemd 定时巡检均通过。
 - [ ] Alembic 迁移 027 已执行：`agent_alert` 含 category/source/user_id/read_at/fingerprint 列与索引。
 - [ ] `security_monitor` 调度任务已注册（interval@5m）且仅超级管理员可改；`AGENT_GOVERNANCE_SCHEDULER_ENABLED=true`。
 - [ ] 手动触发 `POST /api/admin/observability/security/run-monitor` 可生成告警；SSH 成功登录（非白名单 IP）产生 high 告警。

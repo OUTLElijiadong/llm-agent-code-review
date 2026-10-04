@@ -13,7 +13,7 @@ usage() {
   cat <<'USAGE'
 用法: ./verify-backup.sh [BACKUP.sql.gz]
 
-未指定文件时自动选择 BACKUP_DIR（默认 ../backups）中的最新备份。
+未指定文件时自动选择进程或 dotenv 配置的 BACKUP_DIR（默认 ../backups）中的最新备份。
 默认恢复到独立容器 cr_testdb；VERIFY_DB_CONTAINER 不得指向生产 MySQL。
 USAGE
 }
@@ -24,7 +24,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 [[ $# -le 1 ]] || fatal "参数过多"
 
-backup_dir="${BACKUP_DIR:-../backups}"
+backup_dir="$(configured_backup_dir)"
 backup_file="${1:-}"
 if [[ -z "$backup_file" ]]; then
   backup_file="$(latest_file_by_mtime "$backup_dir" 'code_review_*.sql.gz' || true)"

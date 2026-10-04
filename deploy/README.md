@@ -142,7 +142,7 @@ cd /opt/code-review/deploy
 - `.sha256` 校验和；
 - `.meta`（创建时间、Git SHA、Alembic revision、表数等）。
 
-默认保留 14 天，可通过 `BACKUP_DIR`、`BACKUP_RETENTION_DAYS` 或命令参数调整。备份目录必须限制权限，并复制到服务器之外的加密存储；本机备份不等于灾难恢复。
+默认保留 14 天，可通过 `deploy/.env` 中的 `BACKUP_DIR`、`BACKUP_RETENTION_DAYS` 或命令参数调整；进程环境变量优先于 dotenv。备份、隔离恢复验证、发布容量门禁和 `ops-check.sh` 共用同一目录解析规则，systemd 定时服务也会读取当前发布目录的 `.env`。备份目录必须限制权限，并复制到服务器之外的加密存储；本机备份不等于灾难恢复。
 
 ### 6.2 隔离恢复验证
 

@@ -938,6 +938,7 @@ APP_VERSION=3.8.2
 BACKEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 FRONTEND_RELEASE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ENV
+  printf 'BACKUP_DIR=%s\n' "$persistent_backup_dir" >> "$env_file"
   cat > "$RELEASE_STATE_DIR/current.env" <<'STATE'
 RELEASE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 APP_VERSION=3.8.2
@@ -954,11 +955,11 @@ STATE
   fi
 
   : > "$workspace/docker-ops.log"
-  PATH="$fake_bin:$PATH" \
+  env -u BACKUP_DIR \
+    PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_LOG="$workspace/docker-ops.log" \
     FAKE_DF_PERCENT=50 \
     DEPLOY_ENV_FILE="$env_file" \
-    BACKUP_DIR="$backup_dir" \
     BACKUP_MAX_AGE_HOURS=48 \
     OPS_DISK_MAX_PERCENT=100 \
     OPS_MEMORY_MAX_PERCENT=100 \
@@ -1843,6 +1844,7 @@ sandbox_preview="$(./sandbox/install.sh --deploy-dir "$PWD" \
   --unit-dir "${TMPDIR:-/tmp}/prism-sandbox-systemd-preview")"
 printf '%s\n' "$sandbox_preview" | grep -Fq 'DRY-RUN'
 printf '%s\n' "$sandbox_preview" | grep -Fq '未执行生产预检'
+bash tests/test_backup_directory_config.sh
 
 assert_contains backup.sh '--single-transaction'
 assert_contains backup.sh 'sha256_file'
