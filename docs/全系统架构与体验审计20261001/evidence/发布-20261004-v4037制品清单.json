@@ -1,0 +1,18 @@
+{
+  "version": "4.0.37",
+  "source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "prerequisite_sha": "62a46e318c0b4ee816a2d69117180340a09025cc",
+  "bundle_path": "/tmp/prism-v4.0.37-732f48f6929ceda1585bcae2489a0b01f0f2c5fb.bundle",
+  "bytes": 1083110,
+  "sha256": "980afa5c57f8682fc90985b1a310a3dfed7da65e915f43da2f7c3700fda7e360",
+  "state": "uploaded_hash_verified_and_deployed",
+  "transaction_exit_code": 0,
+  "transaction_log": "发布-20261004-v4037生产事务.log",
+  "verification_exit_code": 0,
+  "verification_log": "复测-20261004-v4037生产发布核验.log",
+  "backup_bytes": 451415406,
+  "backup_sha256": "cc21ae6934263356f151cced394be45d3b4d7670ba710ce64827a607d6bcb76b",
+  "independent_restore_tables": 104,
+  "independent_restore_alembic": "061_overview_time_indexes",
+  "deployed_at_utc": "2026-10-04T11:05:39Z"
+}

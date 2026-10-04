@@ -1,0 +1,484 @@
+The bundle contains this ref:
+732f48f6929ceda1585bcae2489a0b01f0f2c5fb HEAD
+The bundle requires this ref:
+62a46e318c0b4ee816a2d69117180340a09025cc 
+The bundle uses this hash algorithm: sha1
+/tmp/prism-v4.0.37-732f48f6929ceda1585bcae2489a0b01f0f2c5fb.bundle is okay
+Cloning into '/opt/prism-releases/732f48f6929ceda1585bcae2489a0b01f0f2c5fb'...
+done.
+From /tmp/prism-v4.0.37-732f48f6929ceda1585bcae2489a0b01f0f2c5fb.bundle
+ * branch                HEAD       -> FETCH_HEAD
+Previous HEAD position was 62a46e318 fix: harden agent context, permissions and async UI for v4.0.36
+HEAD is now at 732f48f69 fix: close production logout race and assistant guidance gaps
+[2026-10-04T10:58:35Z] INFO  发布容量检查通过(repository: used=77%, available_kib=44265616, min_free_gib=12)
+[2026-10-04T10:58:35Z] INFO  发布容量检查通过(backup: used=77%, available_kib=44265616, min_free_gib=12)
+[2026-10-04T10:58:35Z] INFO  发布容量检查通过(docker: used=77%, available_kib=44265616, min_free_gib=12)
+[2026-10-04T10:58:37Z] INFO  发布预检通过(target=all, version=4.0.37, sha=732f48f6929ceda1585bcae2489a0b01f0f2c5fb)
+ Container cr_clamav  Running
+ Container cr_mysql  Recreate
+ Container cr_mysql  Recreated
+ Container cr_mysql  Starting
+ Container cr_mysql  Started
+[2026-10-04T10:58:54Z] INFO  服务 mysql 已就绪(status=healthy)
+[2026-10-04T10:58:54Z] INFO  服务 clamav 已就绪(status=healthy)
+[2026-10-04T11:00:55Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20261004110053_27809
+[2026-10-04T11:02:38Z] INFO  独立恢复验证通过(container=cr_testdb, tables=104, alembic=061_overview_time_indexes)
+[2026-10-04T11:02:38Z] INFO  发布前备份已完成
+ Service backend  Building
+#0 building with "default" instance using docker driver
+
+#1 [backend internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.36kB 0.0s done
+#1 DONE 0.1s
+
+#2 [backend internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 0.0s
+
+#3 [backend internal] load .dockerignore
+#3 transferring context:
+#3 transferring context: 179B done
+#3 DONE 0.1s
+
+#4 [backend builder 1/6] FROM docker.io/library/python:3.11-slim
+#4 DONE 0.0s
+
+#5 [backend internal] load build context
+#5 transferring context: 72.73MB 1.7s done
+#5 DONE 1.7s
+
+#6 [backend builder 3/6] RUN (sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null      || sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list 2>/dev/null || true)     && apt-get update && apt-get install -y --no-install-recommends     build-essential default-libmysqlclient-dev     && rm -rf /var/lib/apt/lists/*
+#6 CACHED
+
+#7 [backend builder 4/6] RUN python -m venv "/opt/venv"
+#7 CACHED
+
+#8 [backend builder 5/6] COPY requirements.lock .
+#8 CACHED
+
+#9 [backend builder 6/6] RUN python -m pip install     --no-cache-dir     --require-hashes     --index-url "https://mirrors.cloud.tencent.com/pypi/simple"     -r requirements.lock
+#9 CACHED
+
+#10 [backend builder 2/6] WORKDIR /app
+#10 CACHED
+
+#11 [backend runtime 3/6] RUN (sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null      || sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list 2>/dev/null || true)     && apt-get update && apt-get install -y --no-install-recommends curl libarchive13t64     && groupadd --system --gid 991 prism-ops     && groupadd --system --gid 992 prism-sandbox     && useradd --system --uid 10001 --gid prism-ops --home-dir /app --shell /usr/sbin/nologin prism     && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [backend runtime 4/6] COPY --from=builder /opt/venv /opt/venv
+#12 CACHED
+
+#13 [backend runtime 5/6] COPY --chown=prism:prism . .
+#13 DONE 0.4s
+
+#14 [backend runtime 6/6] RUN install -d -o 10001 -g 991 -m 0750 /app/logs
+#14 DONE 0.4s
+
+#15 [backend] exporting to image
+#15 exporting layers
+#15 exporting layers 6.3s done
+#15 writing image sha256:279a3a8a8b3d981f08d1af1e3a61b5b256b1316bf8f1b03916dfc9f38946cb26 done
+#15 naming to docker.io/library/prism-backend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb 0.0s done
+#15 DONE 6.3s
+
+#16 [backend] resolving provenance for metadata file
+#16 DONE 0.1s
+ Service backend  Built
+INFO  [alembic.runtime.migration] Context impl MySQLImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+[2026-10-04T11:02:54Z] INFO  Alembic 已位于 head=061_overview_time_indexes
+ Container cr_backend  Recreate
+ Container cr_backend  Recreated
+ Container cr_backend  Starting
+ Container cr_backend  Started
+[2026-10-04T11:03:15Z] INFO  服务 backend 已就绪(status=healthy)
+[2026-10-04T11:03:15Z] INFO  Backend API 冒烟通过(version=4.0.37, release=732f48f6929ceda1585bcae2489a0b01f0f2c5fb)
+ Service frontend  Building
+#0 building with "default" instance using docker driver
+
+#1 [frontend internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.63kB done
+#1 DONE 0.0s
+
+#2 [frontend internal] load metadata for docker.io/library/node:20-alpine
+#2 DONE 0.4s
+
+#3 [frontend internal] load metadata for docker.io/library/nginx:1.27-alpine
+#3 DONE 1.2s
+
+#4 [frontend internal] load .dockerignore
+#4 transferring context: 246B done
+#4 DONE 0.0s
+
+#5 [frontend builder 1/6] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#5 DONE 0.0s
+
+#6 [frontend stage-1 1/6] FROM docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+#6 DONE 0.0s
+
+#7 [frontend internal] load build context
+#7 transferring context: 5.11MB 0.1s done
+#7 DONE 0.2s
+
+#8 [frontend builder 2/6] WORKDIR /app
+#8 CACHED
+
+#9 [frontend builder 3/6] COPY package*.json ./
+#9 CACHED
+
+#10 [frontend builder 4/6] RUN npm ci --registry=https://registry.npmmirror.com
+#10 4.076 npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+#10 6.843 npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+#10 13.71 
+#10 13.71 added 343 packages in 13s
+#10 13.71 
+#10 13.71 91 packages are looking for funding
+#10 13.71   run `npm fund` for details
+#10 13.71 npm notice
+#10 13.71 npm notice New major version of npm available! 10.8.2 -> 12.2.0
+#10 13.71 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+#10 13.71 npm notice To update run: npm install -g npm@12.2.0
+#10 13.71 npm notice
+#10 DONE 14.1s
+
+#11 [frontend builder 5/6] COPY . .
+#11 DONE 0.1s
+
+#12 [frontend builder 6/6] RUN npm run build
+#12 0.392 
+#12 0.392 > code-review-platform@1.0.0 build
+#12 0.392 > vue-tsc && vite build
+#12 0.392 
+#12 30.30 vite v7.3.6 building client environment for production...
+#12 30.49 transforming...
+#12 93.71 ✓ 3732 modules transformed.
+#12 95.59 rendering chunks...
+#12 97.35 computing gzip size...
+#12 97.88 dist/index.html                                     1.62 kB │ gzip:   0.79 kB
+#12 97.88 dist/assets/codicon-Hscy-R9e.ttf                   77.40 kB
+#12 97.88 dist/assets/editor.worker-C1D5gvZv.js             210.03 kB
+#12 97.88 dist/assets/json.worker-bnrXfYhC.js               338.22 kB
+#12 97.88 dist/assets/html.worker-BFMxblS8.js               647.65 kB
+#12 97.88 dist/assets/css.worker-DNtCY59s.js                984.06 kB
+#12 97.88 dist/assets/ts.worker-CSYc2wKu.js               4,840.50 kB
+#12 97.88 dist/assets/ApprovalHub-BkhjpXdE.css                0.29 kB │ gzip:   0.18 kB
+#12 97.88 dist/assets/ActivityLogHub-DtZEKOJ5.css             0.29 kB │ gzip:   0.18 kB
+#12 97.88 dist/assets/EmbeddingConfig-Djwx1JIn.css            0.35 kB │ gzip:   0.19 kB
+#12 97.88 dist/assets/AdminUnifiedCenter-BIAiuiip.css         0.36 kB │ gzip:   0.24 kB
+#12 97.89 dist/assets/RoleManage-BDz8Gz_t.css                 0.38 kB │ gzip:   0.24 kB
+#12 97.89 dist/assets/AgentWorkspace-NECJpha5.css             0.43 kB │ gzip:   0.25 kB
+#12 97.89 dist/assets/UserAvatar-D2grfy1E.css                 0.43 kB │ gzip:   0.26 kB
+#12 97.89 dist/assets/SecurityReviewCenter-CxZhRBly.css       0.46 kB │ gzip:   0.25 kB
+#12 97.89 dist/assets/VersionHistory-DITWY8An.css             0.47 kB │ gzip:   0.27 kB
+#12 97.89 dist/assets/RuleConfig-C0sDm4-W.css                 0.52 kB │ gzip:   0.24 kB
+#12 97.89 dist/assets/reviewScore-DWXWpd1j.css                0.54 kB │ gzip:   0.31 kB
+#12 97.89 dist/assets/ChangePassword-Bwm_eX6F.css             0.54 kB │ gzip:   0.29 kB
+#12 97.89 dist/assets/ForumPostEdit-B_pAD1-b.css              0.61 kB │ gzip:   0.33 kB
+#12 97.89 dist/assets/Forbidden-CodpZIPk.css                  0.73 kB │ gzip:   0.29 kB
+#12 97.89 dist/assets/NotFound-uQ0VMZd5.css                   0.73 kB │ gzip:   0.28 kB
+#12 97.89 dist/assets/PersonalizationCenter-BhhNmQu6.css      0.86 kB │ gzip:   0.37 kB
+#12 97.89 dist/assets/EmptyState-Dw0iXMix.css                 1.07 kB │ gzip:   0.49 kB
+#12 97.89 dist/assets/ForumList-BatYiPMR.css                  1.25 kB │ gzip:   0.44 kB
+#12 97.89 dist/assets/KnowledgeBase-DVMdLqmc.css              1.45 kB │ gzip:   0.49 kB
+#12 97.89 dist/assets/PermissionList-CDlFu8VD.css             1.51 kB │ gzip:   0.49 kB
+#12 97.89 dist/assets/ApiConfig-Ipsx-C7W.css                  1.65 kB │ gzip:   0.55 kB
+#12 97.89 dist/assets/ReportTemplateManage-BwsRvREI.css       1.78 kB │ gzip:   0.66 kB
+#12 97.89 dist/assets/McpWorkerGovernance-gkXuBKkn.css        1.99 kB │ gzip:   0.64 kB
+#12 97.89 dist/assets/CodeHub-DdlnlbXN.css                    2.25 kB │ gzip:   0.82 kB
+#12 97.89 dist/assets/ProjectDetail-ByVpW6vf.css              2.28 kB │ gzip:   0.70 kB
+#12 97.89 dist/assets/ProactivePageGuide-BjKmH-76.css         2.36 kB │ gzip:   0.93 kB
+#12 97.89 dist/assets/PentestList-UPjradR7.css                2.48 kB │ gzip:   0.84 kB
+#12 97.89 dist/assets/CodeEditor-CCciBCGg.css                 2.55 kB │ gzip:   0.80 kB
+#12 97.89 dist/assets/AgentAvatar-BVh_pNUc.css                2.73 kB │ gzip:   0.82 kB
+#12 97.89 dist/assets/ForumPostDetail-Nkwk35xu.css            2.80 kB │ gzip:   0.74 kB
+#12 97.89 dist/assets/ProfileCenter-bLWoI0MX.css              2.82 kB │ gzip:   0.91 kB
+#12 97.89 dist/assets/CodeFileList-CT9EeDl_.css               2.85 kB │ gzip:   0.77 kB
+#12 97.89 dist/assets/PentestStart-DUDaIClW.css               2.93 kB │ gzip:   0.85 kB
+#12 97.89 dist/assets/SystemAudit-B_6AxS6V.css                3.19 kB │ gzip:   1.06 kB
+#12 97.89 dist/assets/ReportList-DFmRexPJ.css                 3.23 kB │ gzip:   1.02 kB
+#12 97.89 dist/assets/SupportCenter-BEtObT8Z.css              3.35 kB │ gzip:   0.75 kB
+#12 97.89 dist/assets/EvolutionCenter-D_K39Ew8.css            3.50 kB │ gzip:   1.05 kB
+#12 97.89 dist/assets/LlmConfig-CHMdFLbP.css                  3.56 kB │ gzip:   0.98 kB
+#12 97.89 dist/assets/BetaCodeAdmin-8QfsSpka.css              3.57 kB │ gzip:   1.10 kB
+#12 97.89 dist/assets/UserManage-DF0Vy-1c.css                 3.89 kB │ gzip:   1.22 kB
+#12 97.89 dist/assets/AiPromptModal-BelepD3O.css              4.26 kB │ gzip:   1.17 kB
+#12 97.89 dist/assets/ReviewTaskList-YNjMC8e-.css             4.31 kB │ gzip:   1.35 kB
+#12 97.89 dist/assets/SkillManager-VX1mDpyC.css               4.48 kB │ gzip:   1.21 kB
+#12 97.89 dist/assets/ReviewStart-DNS0PRdH.css                4.51 kB │ gzip:   1.10 kB
+#12 97.89 dist/assets/IssueHub-B_s-0nZA.css                   4.60 kB │ gzip:   1.42 kB
+#12 97.90 dist/assets/PentestDetail-PHb87zeX.css              5.18 kB │ gzip:   1.19 kB
+#12 97.90 dist/assets/AgentReleaseAdmin-BzxGx4HK.css          5.28 kB │ gzip:   1.41 kB
+#12 97.90 dist/assets/AiLogList-DAmaq28Y.css                  5.38 kB │ gzip:   1.55 kB
+#12 97.90 dist/assets/AdminLayout-BfPDdsm0.css                5.68 kB │ gzip:   1.61 kB
+#12 97.90 dist/assets/AgentStudio-CGidbSqA.css                6.99 kB │ gzip:   1.84 kB
+#12 97.90 dist/assets/Login-C853qBtN.css                      7.15 kB │ gzip:   2.02 kB
+#12 97.90 dist/assets/GovernanceWorkstation-DQDtYo1V.css      7.31 kB │ gzip:   1.84 kB
+#12 97.90 dist/assets/Register-CAMBh9SC.css                   7.66 kB │ gzip:   2.12 kB
+#12 97.90 dist/assets/SecurityCenter-D7Orc7Ym.css             8.79 kB │ gzip:   2.03 kB
+#12 97.90 dist/assets/SandboxWorkstation-CmxIFx__.css         9.88 kB │ gzip:   2.18 kB
+#12 97.90 dist/assets/AdminOverview-EJS7cHuO.css             10.33 kB │ gzip:   2.51 kB
+#12 97.90 dist/assets/ProjectList-9t_iaUiD.css               11.14 kB │ gzip:   2.55 kB
+#12 97.90 dist/assets/ReportDetail-CKVG0yes.css              12.59 kB │ gzip:   2.82 kB
+#12 97.90 dist/assets/SecurityScanModal-C1Sy67hQ.css         14.27 kB │ gzip:   2.84 kB
+#12 97.90 dist/assets/AgentCenter-aKl_Y2mf.css               14.31 kB │ gzip:   3.05 kB
+#12 97.90 dist/assets/GlobalDiscussionHost-B7NFgG7_.css      14.63 kB │ gzip:   3.60 kB
+#12 97.90 dist/assets/ReviewTaskDetail-rhquubae.css          15.61 kB │ gzip:   3.11 kB
+#12 97.90 dist/assets/AppLayout-DLp51ksK.css                 17.95 kB │ gzip:   3.84 kB
+#12 97.90 dist/assets/Dashboard-C4o3v1ax.css                 19.61 kB │ gzip:   4.14 kB
+#12 97.90 dist/assets/useChatImages-uAiektGV.css             30.02 kB │ gzip:   5.81 kB
+#12 97.90 dist/assets/AdminCopilot-C4R9DriQ.css              42.19 kB │ gzip:   8.31 kB
+#12 97.90 dist/assets/AgentChatDrawer-Ct63EDe3.css           53.62 kB │ gzip:   9.25 kB
+#12 97.90 dist/assets/MonacoEditor-uyRRenjq.css             117.22 kB │ gzip:  19.16 kB
+#12 97.90 dist/assets/index-DweBEoOF.css                    233.48 kB │ gzip:  34.71 kB
+#12 97.90 dist/assets/navigation-DgX1H_SI.js                  0.09 kB │ gzip:   0.10 kB
+#12 97.90 dist/assets/taskDisplayTitle-BcvywBXO.js            0.16 kB │ gzip:   0.17 kB
+#12 97.90 dist/assets/buildInfo-DbINQuaS.js                   0.25 kB │ gzip:   0.23 kB
+#12 97.90 dist/assets/reviewType-BvGlIFP9.js                  0.26 kB │ gzip:   0.25 kB
+#12 97.90 dist/assets/profile-D0Ktuvl7.js                     0.28 kB │ gzip:   0.18 kB
+#12 97.90 dist/assets/issue-DRdPbRFS.js                       0.29 kB │ gzip:   0.19 kB
+#12 97.90 dist/assets/discussion-ctwH67LH.js                  0.32 kB │ gzip:   0.23 kB
+#12 97.90 dist/assets/format-DfxmGqf1.js                      0.32 kB │ gzip:   0.22 kB
+#12 97.90 dist/assets/severity-Dedt6OzT.js                    0.36 kB │ gzip:   0.25 kB
+#12 97.90 dist/assets/review-Cfz5CfRZ.js                      0.39 kB │ gzip:   0.20 kB
+#12 97.90 dist/assets/projectPresentation-BjCAtXcy.js         0.39 kB │ gzip:   0.24 kB
+#12 97.90 dist/assets/security-BuMjIN0P.js                    0.41 kB │ gzip:   0.21 kB
+#12 97.91 dist/assets/useAgentChatScope-eaxhdb9D.js           0.47 kB │ gzip:   0.31 kB
+#12 97.91 dist/assets/useDangerConfirm-Bn20yQlT.js            0.47 kB │ gzip:   0.39 kB
+#12 97.91 dist/assets/JobCenter-B36fY5-f.js                   0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/ToolGovernance-DS0vGsd8.js              0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/RewardCenter-C4m9sH7b.js                0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/PolicyCenter-DEeHAUiL.js                0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/AgentGovernance-BXt_6RoN.js             0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/RollbackCenter-Bq6rZE29.js              0.54 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/ApprovalCenter-BzajKZvP.js              0.55 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/KnowledgeGovernance-C_wlL63O.js         0.55 kB │ gzip:   0.35 kB
+#12 97.92 dist/assets/ObservabilityCenter-V4rZ7adu.js         0.55 kB │ gzip:   0.36 kB
+#12 97.92 dist/assets/knowledge-0vYx9WPm.js                   0.57 kB │ gzip:   0.24 kB
+#12 97.92 dist/assets/forum-CSVw67fL.js                       0.67 kB │ gzip:   0.30 kB
+#12 97.92 dist/assets/markdown-C4MQAZYo.js                    0.67 kB │ gzip:   0.43 kB
+#12 97.92 dist/assets/agent-Bl-7xHp-.js                       0.68 kB │ gzip:   0.33 kB
+#12 97.92 dist/assets/azcli-1IWB1ccx.js                       0.71 kB │ gzip:   0.28 kB
+#12 97.92 dist/assets/evolution-Iz9Bn0Gv.js                   0.79 kB │ gzip:   0.33 kB
+#12 97.92 dist/assets/codeFile-CjxSEuWs.js                    0.79 kB │ gzip:   0.37 kB
+#12 97.92 dist/assets/Forbidden-BXBEF35B.js                   0.93 kB │ gzip:   0.59 kB
+#12 97.92 dist/assets/javascript-eM1ctr1C.js                  0.93 kB │ gzip:   0.51 kB
+#12 97.92 dist/assets/NotFound-1LZVsHXw.js                    0.95 kB │ gzip:   0.61 kB
+#12 97.92 dist/assets/ini-BvajGCUy.js                         0.96 kB │ gzip:   0.49 kB
+#12 97.92 dist/assets/withFeedback-Bl4ORbtq.js                0.98 kB │ gzip:   0.50 kB
+#12 97.92 dist/assets/EmptyState-DCAEB6JF.js                  1.02 kB │ gzip:   0.60 kB
+#12 97.92 dist/assets/project-DMmymIkr.js                     1.07 kB │ gzip:   0.49 kB
+#12 97.92 dist/assets/mcpGovernance-CCzZbZFa.js               1.26 kB │ gzip:   0.44 kB
+#12 97.92 dist/assets/csp-C46ZqvIl.js                         1.28 kB │ gzip:   0.49 kB
+#12 97.92 dist/assets/agentStudio-DKIVzczb.js                 1.40 kB │ gzip:   0.42 kB
+#12 97.92 dist/assets/report-gMwaPWKB.js                      1.46 kB │ gzip:   0.71 kB
+#12 97.92 dist/assets/agentEventStream-DHnomTqR.js            1.49 kB │ gzip:   0.89 kB
+#12 97.92 dist/assets/pla-CjnFlu4u.js                         1.54 kB │ gzip:   0.60 kB
+#12 97.92 dist/assets/scheme-Dhb-2j9p.js                      1.63 kB │ gzip:   0.78 kB
+#12 97.92 dist/assets/flow9-Cac8vKd7.js                       1.67 kB │ gzip:   0.81 kB
+#12 97.92 dist/assets/sb-BYAiYHFx.js                          1.69 kB │ gzip:   0.78 kB
+#12 97.92 dist/assets/bat-DPkNLes8.js                         1.71 kB │ gzip:   0.83 kB
+#12 97.92 dist/assets/dockerfile-DLk6rpji.js                  1.73 kB │ gzip:   0.63 kB
+#12 97.92 dist/assets/ActivityLogHub-B1BeYuCM.js              1.78 kB │ gzip:   1.00 kB
+#12 97.92 dist/assets/pascaligo-5jv8CcQD.js                   1.86 kB │ gzip:   0.87 kB
+#12 97.92 dist/assets/lua-D28Ae8-K.js                         1.98 kB │ gzip:   0.89 kB
+#12 97.92 dist/assets/cameligo-CGrWLZr3.js                    2.05 kB │ gzip:   0.92 kB
+#12 97.92 dist/assets/graphql-LQdxqEYJ.js                     2.12 kB │ gzip:   0.99 kB
+#12 97.93 dist/assets/SecurityReviewCenter-DT4xtf9t.js        2.14 kB │ gzip:   1.13 kB
+#12 97.93 dist/assets/adminGovernance-CQ9L07T1.js             2.20 kB │ gzip:   0.68 kB
+#12 97.93 dist/assets/objective-c-B1aVtJYH.js                 2.26 kB │ gzip:   1.02 kB
+#12 97.93 dist/assets/lexon-Canl7DCW.js                       2.30 kB │ gzip:   0.88 kB
+#12 97.93 dist/assets/AgentWorkspace-tt-7ydgR.js              2.31 kB │ gzip:   1.26 kB
+#12 97.93 dist/assets/bicep-Corcdgou.js                       2.40 kB │ gzip:   0.93 kB
+#12 97.93 dist/assets/sparql-KEyrF7De.js                      2.41 kB │ gzip:   1.12 kB
+#12 97.93 dist/assets/xml-D1ua7aTG.js                         2.42 kB │ gzip:   1.00 kB
+#12 97.93 dist/assets/mips-CdjsipkG.js                        2.44 kB │ gzip:   1.03 kB
+#12 97.93 dist/assets/go-O9LJTZXk.js                          2.52 kB │ gzip:   1.11 kB
+#12 97.93 dist/assets/dim-BPgVsPzs.js                         2.56 kB │ gzip:   1.21 kB
+#12 97.93 dist/assets/sophia-RYC1BQQz.js                      2.62 kB │ gzip:   1.17 kB
+#12 97.93 dist/assets/m3-DPitgjJI.js                          2.68 kB │ gzip:   1.28 kB
+#12 97.93 dist/assets/ApprovalHub-Clx8uGdb.js                 2.68 kB │ gzip:   1.40 kB
+#12 97.93 dist/assets/qsharp-gaqVKiJ_.js                      2.80 kB │ gzip:   1.32 kB
+#12 97.93 dist/assets/fsharp-fd1GTHhf.js                      2.84 kB │ gzip:   1.28 kB
+#12 97.93 dist/assets/pascal-BhNW15KB.js                      2.86 kB │ gzip:   1.35 kB
+#12 97.93 dist/assets/ChangePassword-TFBBnu33.js              2.93 kB │ gzip:   1.34 kB
+#12 97.93 dist/assets/shell-CsDZo4DB.js                       2.93 kB │ gzip:   1.16 kB
+#12 97.93 dist/assets/r-BIFz-_sK.js                           2.99 kB │ gzip:   1.24 kB
+#12 97.93 dist/assets/java-SYsfObOQ.js                        3.08 kB │ gzip:   1.36 kB
+#12 97.93 dist/assets/powershell-Bu_VLpJB.js                  3.13 kB │ gzip:   1.34 kB
+#12 97.93 dist/assets/cypher-D84EuPTj.js                      3.25 kB │ gzip:   1.40 kB
+#12 97.93 dist/assets/kotlin-qQ0MG-9I.js                      3.30 kB │ gzip:   1.44 kB
+#12 97.93 dist/assets/pentest-D5FLwitv.js                     3.36 kB │ gzip:   1.61 kB
+#12 97.93 dist/assets/CodeHub-DO0NZeZb.js                     3.38 kB │ gzip:   1.90 kB
+#12 97.93 dist/assets/PermissionList-vMpDmVA9.js              3.40 kB │ gzip:   1.85 kB
+#12 97.93 dist/assets/redis-CHOsPHWR.js                       3.42 kB │ gzip:   1.44 kB
+#12 97.93 dist/assets/tcl-PloMZuKG.js                         3.43 kB │ gzip:   1.33 kB
+#12 97.93 dist/assets/coffee-B7EJu28W.js                      3.45 kB │ gzip:   1.26 kB
+#12 97.93 dist/assets/hcl-DxDQ3s82.js                         3.45 kB │ gzip:   1.45 kB
+#12 97.93 dist/assets/ForumList-6RXe8Teg.js                   3.49 kB │ gzip:   1.79 kB
+#12 97.93 dist/assets/python-DDe1p1F7.js                      3.62 kB │ gzip:   1.62 kB
+#12 97.93 dist/assets/markdown-B811l8j2.js                    3.65 kB │ gzip:   1.35 kB
+#12 97.93 dist/assets/restructuredtext-CghPJEOS.js            3.75 kB │ gzip:   1.33 kB
+#12 97.93 dist/assets/less-GGFNNJHn.js                        3.76 kB │ gzip:   1.38 kB
+#12 97.93 dist/assets/ForumPostEdit-dtE84rSB.js               3.79 kB │ gzip:   1.97 kB
+#12 97.93 dist/assets/apex-DnsZk_dE.js                        3.81 kB │ gzip:   1.73 kB
+#12 97.93 dist/assets/VersionHistory-DR2slvy0.js              3.86 kB │ gzip:   1.89 kB
+#12 97.93 dist/assets/EmbeddingConfig-CP71R0_1.js             3.91 kB │ gzip:   2.06 kB
+#12 97.94 dist/assets/AdminLayout-ZJztw8YJ.js                 3.93 kB │ gzip:   1.98 kB
+#12 97.94 dist/assets/liquid-CvE2608V.js                      3.96 kB │ gzip:   1.69 kB
+#12 97.94 dist/assets/yaml-rczPfBIJ.js                        4.02 kB │ gzip:   1.56 kB
+#12 97.94 dist/assets/rust-DMDD0SHb.js                        4.02 kB │ gzip:   1.79 kB
+#12 97.94 dist/assets/dart-D8lhlL1r.js                        4.11 kB │ gzip:   1.61 kB
+#12 97.94 dist/assets/ForumPostDetail-DynzxlMy.js             4.27 kB │ gzip:   1.91 kB
+#12 97.94 dist/assets/css-DQU6DXDx.js                         4.37 kB │ gzip:   1.34 kB
+#12 97.94 dist/assets/csharp-BoL64M5l.js                      4.38 kB │ gzip:   1.69 kB
+#12 97.94 dist/assets/pug-kFxLfcjb.js                         4.69 kB │ gzip:   1.61 kB
+#12 97.94 dist/assets/msdax-CYqgjx_P.js                       4.77 kB │ gzip:   1.90 kB
+#12 97.94 dist/assets/swift-D7IUmUK8.js                       4.77 kB │ gzip:   2.00 kB
+#12 97.94 dist/assets/mdx-XrsjAenr.js                         4.87 kB │ gzip:   1.48 kB
+#12 97.94 dist/assets/html-DQ-z8C--.js                        5.02 kB │ gzip:   1.43 kB
+#12 97.94 dist/assets/agentNavigation-BlRBZtqC.js             5.04 kB │ gzip:   2.51 kB
+#12 97.94 dist/assets/ecl-BO6FnfXk.js                         5.20 kB │ gzip:   2.19 kB
+#12 97.94 dist/assets/cpp-BaF-TIV3.js                         5.34 kB │ gzip:   2.10 kB
+#12 97.94 dist/assets/typescript-D3DajFnp.js                  5.41 kB │ gzip:   2.20 kB
+#12 97.94 dist/assets/AgentAvatar-B1UchQ7U.js                 5.44 kB │ gzip:   1.88 kB
+#12 97.94 dist/assets/vb-BwAE3J76.js                          5.65 kB │ gzip:   2.02 kB
+#12 97.94 dist/assets/ProactivePageGuide-CXyFWUfG.js          5.76 kB │ gzip:   2.90 kB
+#12 97.94 dist/assets/ProfileCenter-CEWODYVG.js               5.80 kB │ gzip:   2.63 kB
+#12 97.94 dist/assets/twig-BfRIq3la.js                        5.83 kB │ gzip:   1.48 kB
+#12 97.94 dist/assets/AiPromptModal-ByLBspQv.js               5.97 kB │ gzip:   2.87 kB
+#12 97.94 dist/assets/Login-D3qyZd0y.js                       6.18 kB │ gzip:   3.09 kB
+#12 97.94 dist/assets/scss-CTwUZ5N7.js                        6.27 kB │ gzip:   1.71 kB
+#12 97.94 dist/assets/PersonalizationCenter-CzoWSDJT.js       6.28 kB │ gzip:   2.79 kB
+#12 97.94 dist/assets/PentestList-DlAGyBD1.js                 6.42 kB │ gzip:   2.87 kB
+#12 97.94 dist/assets/handlebars-CNdDxR2q.js                  6.78 kB │ gzip:   1.64 kB
+#12 97.94 dist/assets/SystemAudit-OgtvyMii.js                 6.94 kB │ gzip:   3.16 kB
+#12 97.94 dist/assets/BetaCodeAdmin-CDk75neC.js               7.00 kB │ gzip:   3.05 kB
+#12 97.94 dist/assets/julia-DQXNmw_w.js                       7.01 kB │ gzip:   2.62 kB
+#12 97.94 dist/assets/scala-Bqvq8jcR.js                       7.18 kB │ gzip:   2.06 kB
+#12 97.94 dist/assets/adminGovernance-BoGoYQXB.js             7.18 kB │ gzip:   3.14 kB
+#12 97.95 dist/assets/wgsl-Dksx_ONF.js                        7.19 kB │ gzip:   2.71 kB
+#12 97.95 dist/assets/st-C7iG7M4S.js                          7.26 kB │ gzip:   2.21 kB
+#12 97.95 dist/assets/systemverilog-DgMryOEJ.js               7.46 kB │ gzip:   2.72 kB
+#12 97.95 dist/assets/CodeEditor-BWh_lX2T.js                  7.69 kB │ gzip:   3.31 kB
+#12 97.95 dist/assets/postiats-CQpG440k.js                    7.72 kB │ gzip:   2.40 kB
+#12 97.95 dist/assets/PentestStart-BUNvsOfs.js                7.79 kB │ gzip:   3.67 kB
+#12 97.95 dist/assets/KnowledgeBase-C1jTTW5P.js               7.87 kB │ gzip:   3.33 kB
+#12 97.95 dist/assets/php-120yhfDK.js                         7.89 kB │ gzip:   2.04 kB
+#12 97.95 dist/assets/perl-DlYyT36c.js                        8.12 kB │ gzip:   3.10 kB
+#12 97.95 dist/assets/Register-Io3tf35M.js                    8.25 kB │ gzip:   3.34 kB
+#12 97.95 dist/assets/ruby-CYWGW-b1.js                        8.36 kB │ gzip:   2.54 kB
+#12 97.95 dist/assets/AdminUnifiedCenter-CE_J9J07.js          8.60 kB │ gzip:   3.57 kB
+#12 97.95 dist/assets/razor-Pvr9pbre.js                       8.78 kB │ gzip:   2.33 kB
+#12 97.95 dist/assets/protobuf-IBS6jZEB.js                    8.91 kB │ gzip:   2.04 kB
+#12 97.95 dist/assets/ReportList-DcXUsRHm.js                  9.02 kB │ gzip:   3.89 kB
+#12 97.95 dist/assets/RoleManage-CUDW_hw_.js                  9.07 kB │ gzip:   3.63 kB
+#12 97.95 dist/assets/RuleConfig-gFtQ-S7O.js                  9.21 kB │ gzip:   3.37 kB
+#12 97.95 dist/assets/ApiConfig-D4ugfZvQ.js                   9.24 kB │ gzip:   3.87 kB
+#12 97.95 dist/assets/ReportTemplateManage-wTowHuwc.js        9.24 kB │ gzip:   3.43 kB
+#12 97.95 dist/assets/CodeFileList-CnCokXsb.js                9.47 kB │ gzip:   3.63 kB
+#12 97.95 dist/assets/clojure-D9WOWImG.js                     9.50 kB │ gzip:   3.57 kB
+#12 97.95 dist/assets/SkillManager-CaVnG9ld.js                9.51 kB │ gzip:   3.63 kB
+#12 97.95 dist/assets/PentestDetail-Cn0f_75O.js               9.52 kB │ gzip:   3.88 kB
+#12 97.95 dist/assets/UserManage-DkBInzIM.js                 10.03 kB │ gzip:   4.15 kB
+#12 97.95 dist/assets/elixir-BRjLKONM.js                     10.12 kB │ gzip:   2.50 kB
+#12 97.95 dist/assets/sql-BdTr02Mf.js                        10.16 kB │ gzip:   3.79 kB
+#12 97.95 dist/assets/mysql-BHd6q0vd.js                      11.13 kB │ gzip:   4.01 kB
+#12 97.95 dist/assets/ReviewTaskList-CSGq4Zpf.js             11.48 kB │ gzip:   4.76 kB
+#12 97.95 dist/assets/AiLogList-DJoUzQl_.js                  11.62 kB │ gzip:   4.26 kB
+#12 97.95 dist/assets/redshift-CBifECDb.js                   11.66 kB │ gzip:   4.30 kB
+#12 97.95 dist/assets/IssueHub-WkWQfot6.js                   12.69 kB │ gzip:   5.10 kB
+#12 97.95 dist/assets/pgsql-Dy0bjov7.js                      13.32 kB │ gzip:   4.46 kB
+#12 97.95 dist/assets/UserAvatar-CsgxfQp1.js                 13.63 kB │ gzip:   3.15 kB
+#12 97.95 dist/assets/abap-CRCWOmpq.js                       14.02 kB │ gzip:   5.27 kB
+#12 97.95 dist/assets/AgentReleaseAdmin-ZDnD9-gU.js          14.17 kB │ gzip:   4.95 kB
+#12 97.95 dist/assets/freemarker2-Cou2YaOV.js                16.10 kB │ gzip:   4.19 kB
+#12 97.95 dist/assets/powerquery-DdJtto1Z.js                 16.80 kB │ gzip:   4.81 kB
+#12 97.95 dist/assets/SupportCenter-CZ_WDeTu.js              17.01 kB │ gzip:   5.25 kB
+#12 97.95 dist/assets/LlmConfig-itvO2cqJ.js                  17.24 kB │ gzip:   6.15 kB
+#12 97.95 dist/assets/AgentStudio-Cy86WBWc.js                18.11 kB │ gzip:   6.17 kB
+#12 97.95 dist/assets/solidity-CME5AdoB.js                   18.46 kB │ gzip:   4.41 kB
+#12 97.95 dist/assets/EvolutionCenter-D8xeZlw6.js            18.66 kB │ gzip:   6.53 kB
+#12 97.95 dist/assets/ProjectDetail-BzoTNMz3.js              20.76 kB │ gzip:   7.48 kB
+#12 97.95 dist/assets/ReviewStart-SsgmfdtV.js                21.78 kB │ gzip:   7.61 kB
+#12 97.95 dist/assets/tsMode-BsntJ4Qd.js                     22.91 kB │ gzip:   6.54 kB
+#12 97.95 dist/assets/SecurityScanModal-4wILtWu6.js          23.99 kB │ gzip:   8.39 kB
+#12 97.95 dist/assets/AppLayout-DtOzrwCQ.js                  24.41 kB │ gzip:   9.44 kB
+#12 97.95 dist/assets/SandboxWorkstation-CHzzw_q9.js         25.57 kB │ gzip:   9.37 kB
+#12 97.97 dist/assets/McpWorkerGovernance-DkWYezKa.js        25.79 kB │ gzip:   7.20 kB
+#12 97.97 dist/assets/ReportDetail-CfHzXmQ8.js               27.74 kB │ gzip:  10.09 kB
+#12 97.97 dist/assets/GlobalDiscussionHost-CckxKeMk.js       28.76 kB │ gzip:  10.77 kB
+#12 97.97 dist/assets/AgentCenter-BTDGovwG.js                28.98 kB │ gzip:  11.00 kB
+#12 97.98 dist/assets/cssMode-BFb6nXvZ.js                    33.44 kB │ gzip:   8.81 kB
+#12 97.98 dist/assets/ProjectList-DivmJLs8.js                33.45 kB │ gzip:  11.79 kB
+#12 97.98 dist/assets/htmlMode-BUnCe9Nw.js                   33.99 kB │ gzip:   8.94 kB
+#12 97.98 dist/assets/Dashboard-C02HUrk2.js                  36.89 kB │ gzip:  13.46 kB
+#12 97.98 dist/assets/ReviewTaskDetail-BlUFTXd6.js           39.26 kB │ gzip:  13.99 kB
+#12 97.98 dist/assets/jsonMode-LpYCMmKJ.js                   39.47 kB │ gzip:  10.98 kB
+#12 97.98 dist/assets/SecurityCenter-wkXcwlkJ.js             39.58 kB │ gzip:  16.18 kB
+#12 97.98 dist/assets/GovernanceWorkstation-CeGvS2Fe.js      45.57 kB │ gzip:  12.72 kB
+#12 97.98 dist/assets/index-DHDwn2h8.js                      58.79 kB │ gzip:  21.19 kB
+#12 97.98 dist/assets/AdminCopilot-DSMWD-sK.js               63.69 kB │ gzip:  22.42 kB
+#12 97.98 dist/assets/useChatImages-CSAaIejG.js              82.71 kB │ gzip:  29.94 kB
+#12 97.98 dist/assets/AgentChatDrawer-BfpdwWdJ.js            86.64 kB │ gzip:  29.28 kB
+#12 97.98 dist/assets/vue-core-4cGIvkab.js                  113.71 kB │ gzip:  44.29 kB
+#12 97.98 dist/assets/reviewScore-DqC9793M.js               153.06 kB │ gzip:  52.86 kB
+#12 97.98 dist/assets/vendor-BhEtITpM.js                    289.69 kB │ gzip: 114.11 kB
+#12 97.98 dist/assets/element-plus-DGYbNxvr.js              471.53 kB │ gzip: 147.15 kB
+#12 97.98 dist/assets/installCanvasRenderer-DY2d1k6D.js     577.19 kB │ gzip: 195.68 kB
+#12 97.98 dist/assets/AdminOverview-DAwc4AuL.js           1,027.56 kB │ gzip: 288.67 kB
+#12 97.98 dist/assets/MonacoEditor-Dv-sgsmf.js            3,100.37 kB │ gzip: 800.06 kB
+#12 97.99 ✓ built in 1m 8s
+#12 DONE 99.1s
+
+#6 [frontend stage-1 1/6] FROM docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+#6 CACHED
+
+#13 [frontend stage-1 2/6] COPY --from=builder /app/dist /usr/share/nginx/html
+#13 DONE 0.1s
+
+#14 [frontend stage-1 3/6] COPY --from=builder /app/dist /opt/prism-dist
+#14 DONE 0.1s
+
+#15 [frontend stage-1 4/6] COPY --chmod=0755 docker-entrypoint.d/30-retain-versioned-assets.sh /docker-entrypoint.d/30-retain-versioned-assets.sh
+#15 DONE 0.0s
+
+#16 [frontend stage-1 5/6] COPY nginx.conf /etc/nginx/nginx.conf
+#16 DONE 0.0s
+
+#17 [frontend stage-1 6/6] COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+#17 DONE 0.0s
+
+#18 [frontend] exporting to image
+#18 exporting layers
+#18 exporting layers 1.2s done
+#18 writing image sha256:9e780927f274cfd1106a3ecef0339befa33804a90d2a802f5327c9a0cff11405 done
+#18 naming to docker.io/library/prism-frontend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb done
+#18 DONE 1.2s
+
+#19 [frontend] resolving provenance for metadata file
+#19 DONE 0.0s
+ Service frontend  Built
+[2026-10-04T11:05:14Z] INFO  同步前端 assets: prism-frontend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb -> 卷 deploy_frontend_assets
+[2026-10-04T11:05:15Z] INFO  前端 assets 同步完成: prism-frontend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb
+ Container cr_frontend  Recreate
+ Container cr_frontend  Recreated
+ Container cr_frontend  Starting
+ Container cr_frontend  Started
+[2026-10-04T11:05:22Z] INFO  服务 frontend 已就绪(status=healthy)
+[2026-10-04T11:05:22Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)
+[2026-10-04T11:05:23Z] INFO  默认 Compose 环境已随发布校准: 732f48f6929ceda1585bcae2489a0b01f0f2c5fb / 4.0.37
+NEXT                            LEFT LAST                              PASSED UNIT                      ACTIVATES
+Sun 2026-10-04 19:07:58 CST 2min 33s Sun 2026-10-04 19:02:58 CST 2min 26s ago prism-ops-check.timer     prism-ops-check.service
+Mon 2026-10-05 02:20:27 CST       7h Sun 2026-10-04 02:17:01 CST      16h ago prism-backup.timer        prism-backup.service
+Mon 2026-10-05 03:11:14 CST       8h Sun 2026-10-04 03:03:42 CST      16h ago prism-cert-renew.timer    prism-cert-renew.service
+Sun 2026-10-11 03:17:23 CST   6 days Sun 2026-10-04 03:20:15 CST      15h ago prism-verify-backup.timer prism-verify-backup.service
+
+4 timers listed.
+[2026-10-04T11:05:39Z] INFO  运维执行器已绑定当前发布树，巡检发布账本通过
+[2026-10-04T11:05:39Z] INFO  发布完成(target=all, sha=732f48f6929ceda1585bcae2489a0b01f0f2c5fb, alembic=061_overview_time_indexes)
+NAME           IMAGE                                                     COMMAND                  SERVICE     CREATED          STATUS                    PORTS
+cr_backend     prism-backend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb    "uvicorn app.main:ap…"   backend     2 minutes ago    Up 2 minutes (healthy)    127.0.0.1:8000->8000/tcp
+cr_clamav      clamav/clamav:stable                                      "/init"                  clamav      2 months ago     Up 7 weeks (healthy)      3310/tcp, 7357/tcp
+cr_embedding   ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.3   "text-embeddings-rou…"   embedding   4 weeks ago      Up 4 weeks                
+cr_frontend    prism-frontend:732f48f6929ceda1585bcae2489a0b01f0f2c5fb   "/docker-entrypoint.…"   frontend    25 seconds ago   Up 24 seconds (healthy)   0.0.0.0:80->80/tcp, :::80->80/tcp, 0.0.0.0:443->443/tcp, :::443->443/tcp
+cr_mysql       mysql:8.0                                                 "docker-entrypoint.s…"   mysql       7 minutes ago    Up 6 minutes (healthy)    33060/tcp, 127.0.0.1:3307->3306/tcp
+cr_redis       redis:7-alpine                                            "docker-entrypoint.s…"   redis       2 months ago     Up 7 weeks (healthy)      6379/tcp

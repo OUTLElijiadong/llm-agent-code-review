@@ -1,0 +1,117 @@
+{
+  "checked_at_utc": "2026-10-04T11:29:42.637255+00:00",
+  "release": "4.0.37",
+  "source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "source_file": "backend/app/api/v1/admin_overview.py",
+  "source_file_sha256": "8a62a10ad21493a3b2f8e6e71c3cf18a81363cb142ae399914c2597e2806a46b",
+  "compiled_at_utc": "2026-10-04T11:24:27.585193+00:00",
+  "mode": "EXPLAIN only, read-only transaction, no ANALYZE or business query execution",
+  "queries": [
+    {
+      "name": "tool_day_count",
+      "sql": "EXPLAIN SELECT tool_call_log.agent_code, count(tool_call_log.id) AS cnt FROM tool_call_log WHERE tool_call_log.create_time >= '2026-10-04 00:00:00' AND tool_call_log.create_time < '2026-10-05 00:00:00' GROUP BY tool_call_log.agent_code",
+      "plans": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "tool_call_log",
+          "partitions": null,
+          "type": "range",
+          "possible_keys": "ix_tool_call_agent,ix_tool_call_time_agent",
+          "key": "ix_tool_call_time_agent",
+          "key_len": "5",
+          "ref": null,
+          "rows": 1098,
+          "filtered": 100,
+          "Extra": "Using where; Using index; Using temporary"
+        }
+      ]
+    },
+    {
+      "name": "tool_day_actions",
+      "sql": "EXPLAIN SELECT tool_call_log.agent_code, tool_call_log.action, count(tool_call_log.id) AS cnt FROM tool_call_log WHERE tool_call_log.create_time >= '2026-10-04 00:00:00' AND tool_call_log.create_time < '2026-10-05 00:00:00' GROUP BY tool_call_log.agent_code, tool_call_log.action ORDER BY count(tool_call_log.id) DESC, tool_call_log.agent_code ASC, tool_call_log.action ASC",
+      "plans": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "tool_call_log",
+          "partitions": null,
+          "type": "range",
+          "possible_keys": "ix_tool_call_time_agent",
+          "key": "ix_tool_call_time_agent",
+          "key_len": "5",
+          "ref": null,
+          "rows": 1098,
+          "filtered": 100,
+          "Extra": "Using index condition; Using temporary; Using filesort"
+        }
+      ]
+    },
+    {
+      "name": "model_day_usage",
+      "sql": "EXPLAIN SELECT ai_call_log.agent_label, ai_call_log.model_name, count(ai_call_log.id) AS cnt, coalesce(sum(CASE WHEN (coalesce(ai_call_log.total_tokens, 0) >= coalesce(ai_call_log.prompt_tokens, 0) + coalesce(ai_call_log.completion_tokens, 0)) THEN coalesce(ai_call_log.total_tokens, 0) ELSE coalesce(ai_call_log.prompt_tokens, 0) + coalesce(ai_call_log.completion_tokens, 0) END), 0) AS tokens, coalesce(sum(CASE WHEN (ai_call_log.total_tokens IS NULL AND (ai_call_log.prompt_tokens IS NULL OR ai_call_log.completion_tokens IS NULL)) THEN 1 ELSE 0 END), 0) AS unknown_usage_calls FROM ai_call_log WHERE ai_call_log.create_time >= '2026-10-04 00:00:00' AND ai_call_log.create_time < '2026-10-05 00:00:00' AND (ai_call_log.agent_label IS NOT NULL OR ai_call_log.model_name IS NOT NULL) GROUP BY ai_call_log.agent_label, ai_call_log.model_name",
+      "plans": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "ai_call_log",
+          "partitions": null,
+          "type": "range",
+          "possible_keys": "ix_ai_call_log_time_agent_model",
+          "key": "ix_ai_call_log_time_agent_model",
+          "key_len": "5",
+          "ref": null,
+          "rows": 12,
+          "filtered": 100,
+          "Extra": "Using index condition; Using temporary"
+        }
+      ]
+    },
+    {
+      "name": "recent_tool_activity",
+      "sql": "EXPLAIN SELECT tool_call_log.agent_code, tool_call_log.tool_code, tool_call_log.action, tool_call_log.resource, tool_call_log.status, tool_call_log.risk_level, tool_call_log.decision, tool_call_log.input_summary, tool_call_log.output_summary, tool_call_log.error, tool_call_log.duration_ms, tool_call_log.policy_decision_id, tool_call_log.approval_id, tool_call_log.copilot_request_id, tool_call_log.project_id, tool_call_log.id, tool_call_log.create_time, tool_call_log.update_time FROM tool_call_log WHERE tool_call_log.create_time >= '2026-10-04 11:24:12.585193' ORDER BY tool_call_log.create_time DESC, tool_call_log.id DESC",
+      "plans": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "tool_call_log",
+          "partitions": null,
+          "type": "range",
+          "possible_keys": "ix_tool_call_time_agent",
+          "key": "ix_tool_call_time_agent",
+          "key_len": "5",
+          "ref": null,
+          "rows": 8,
+          "filtered": 100,
+          "Extra": "Using index condition; Using filesort"
+        }
+      ]
+    },
+    {
+      "name": "login_30day_geo",
+      "sql": "EXPLAIN SELECT audit_log.ip, count(audit_log.id) AS cnt FROM audit_log WHERE audit_log.action = 'login' AND audit_log.status = 'success' AND audit_log.create_time >= '2026-09-04 11:24:27.585193' AND audit_log.ip IS NOT NULL AND audit_log.ip != '' GROUP BY audit_log.ip ORDER BY count(audit_log.id) DESC LIMIT 200",
+      "plans": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "audit_log",
+          "partitions": null,
+          "type": "range",
+          "possible_keys": "idx_action_time,idx_create_time",
+          "key": "idx_action_time",
+          "key_len": "167",
+          "ref": null,
+          "rows": 427,
+          "filtered": 8.1,
+          "Extra": "Using index condition; Using where; Using temporary; Using filesort"
+        }
+      ]
+    }
+  ],
+  "mysql_version": "8.0.46",
+  "limits": [
+    "Optimizer estimates, not measured row counts",
+    "Does not prove response time, throughput, lock impact or every date query",
+    "Temporary/filesort or alternate index choice alone is not a confirmed defect"
+  ]
+}

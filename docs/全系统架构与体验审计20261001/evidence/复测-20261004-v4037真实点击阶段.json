@@ -1,0 +1,62 @@
+{
+  "recorded_at_utc": "2026-10-04T11:20:51.407537+00:00",
+  "release": "4.0.37",
+  "source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "browser": "普通Safari，非无痕",
+  "checks": [
+    {
+      "role": "审查员",
+      "scope": "刷新生产页、问题列表10条及中文问题引导",
+      "result": "实际显示v4.0.37；关联任务已知技术后缀消失，指引为危急和高严重度",
+      "status": "passed"
+    },
+    {
+      "role": "审查员",
+      "scope": "从问题行点击查看任务180，再进入关联报告180",
+      "result": "任务详情标题与报告任务名均不显示review_type=full；未改数据库名称或保存文件",
+      "status": "passed"
+    },
+    {
+      "role": "管理员与审查员",
+      "scope": "两处日志页退出原场景的生产重复验收",
+      "result": "下一段点击时工具返回Mac锁屏、自动解锁失败；已请求用户解锁",
+      "status": "blocked_by_locked_screen",
+      "boundary": "不能由已通过的本地18个生命周期样本替代真实退出复测，不能判定未执行步骤成功"
+    }
+  ],
+  "limitations": [
+    "仅上述桌面可见页面和行为，不代表所有HTTP/控制台无错误或真实手机验收",
+    "尚未完成新版正常退出重复点击或新版模型能力查询自动重试",
+    "不将4.0.36正常退出报错误记为4.0.37生产仍发生，也不将未测记为通过"
+  ],
+  "private_evidence": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/12-v4037问题名与中文引导.txt",
+      "bytes": 8935,
+      "sha256": "ca68167abb111e472563df6aab25115427e2ff7d474ece660349f97afb864214",
+      "format": "UTF-8 AX text",
+      "file_written_at_utc": "2026-10-04T11:07:33.641794+00:00"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/12-v4037问题名与中文引导.jpg",
+      "bytes": 422225,
+      "sha256": "a7884345177d030d028dbcbefa93cf4febca816bc399dc10555eef7fbe0aa408",
+      "format": "JPEG",
+      "file_written_at_utc": "2026-10-04T11:07:33.701267+00:00"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/13-v4037任务详情标题.txt",
+      "bytes": 6350,
+      "sha256": "d390451490328c47dfe1af8be2b6b2ef167a1f6dbcb0a004e3f73f9d22cd45b5",
+      "format": "UTF-8 AX text",
+      "file_written_at_utc": "2026-10-04T11:10:29.529862+00:00"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/14-v4037报告任务名.txt",
+      "bytes": 7566,
+      "sha256": "7a089859ddc3fb6ac01347c761c67fef9ce1d2f163accd8d4b5c78de4f078721",
+      "format": "UTF-8 AX text",
+      "file_written_at_utc": "2026-10-04T11:10:43.452222+00:00"
+    }
+  ]
+}

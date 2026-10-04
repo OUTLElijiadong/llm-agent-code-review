@@ -1,0 +1,36 @@
+{
+  "checked_at_utc": "2026-10-04T11:09:19.984671+00:00",
+  "html_http_status": 200,
+  "entry": {
+    "path": "/assets/index-DHDwn2h8.js",
+    "http_status": 200,
+    "sha256": "f35d644bbea2864486d383482c431302f3cfea8d846e117c6507df4809345215"
+  },
+  "build_info": {
+    "path": "/assets/buildInfo-DbINQuaS.js",
+    "http_status": 200,
+    "sha256": "e81d2df7796909aa5d4f9e86df4b6e76502bb3f45e72c793c65d2a3cd9090d05",
+    "has_expected_version": true,
+    "has_expected_source_sha": true
+  },
+  "health": {
+    "http_status": 200,
+    "body": {
+      "status": "ok",
+      "version": "4.0.37",
+      "release": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb"
+    }
+  },
+  "ready": {
+    "http_status": 200,
+    "body": {
+      "status": "ready",
+      "version": "4.0.37",
+      "release": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb"
+    }
+  },
+  "csp_enforce_header_present": true,
+  "csp_report_only_header_present": false,
+  "server_header": "nginx",
+  "probe_note": "Explicit type=module HTML entry; first generic script is load-fonts.js and does not carry build metadata."
+}

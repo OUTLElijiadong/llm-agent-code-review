@@ -1,0 +1,36 @@
+{
+  "checked_at_utc": "2026-10-04 11:35:33 UTC",
+  "reviewer": "context_integrity 子 Agent",
+  "scope": "仅 O02 五条生产只读 EXPLAIN 计划及其源码、时间窗口；未连接生产或修改文件",
+  "source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "source_file_sha256": "8a62a10ad21493a3b2f8e6e71c3cf18a81363cb142ae399914c2597e2806a46b",
+  "artifacts": [
+    {
+      "file": "复测-20261004-O02生产查询计划-编译快照.json",
+      "sha256": "fd39260c82fd648447119edfc692f63be564fd34288d2569ee6a415084923321"
+    },
+    {
+      "file": "复测-20261004-O02生产查询计划.json",
+      "sha256": "c24ec57d775bd90b82c7cf95bc3890e4dd9ba06eec7fd89d6be428982d3050c0"
+    },
+    {
+      "file": "核查-20261004-O02生产只读计划.py",
+      "sha256": "d3d83418fdf1851a860f060a2f9680eaf26a656e88b52487365aba75b90274a9"
+    }
+  ],
+  "checks": [
+    "两快照共10条SQL重新捕获实际ORM后完整形状一致",
+    "刷新窗口为15秒、30天及UTC当日，截止值准确",
+    "五plan均range；工具三条与模型一条选择061新索引，审计选择既有idx_action_time",
+    "只读事务、EXPLAIN、rollback；无ANALYZE或DML",
+    "rows为优化器估算值，编译旧窗口与刷新窗口分开记录"
+  ],
+  "result": "限定计划门核验通过",
+  "not_proven": [
+    "实测行数",
+    "延迟/吞吐/并发",
+    "索引DDL锁影响",
+    "所有日期查询",
+    "真实浏览器网络行为"
+  ]
+}
