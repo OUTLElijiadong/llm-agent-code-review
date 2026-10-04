@@ -1,0 +1,138 @@
+{
+  "observed_at_utc": "2026-10-04T11:52:06.242717+00:00",
+  "version": "4.0.37",
+  "source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "browser": "普通Safari，非无痕",
+  "records": [
+    {
+      "role": "审查员",
+      "origin": "/audit",
+      "repeats": 3,
+      "result": "各轮从已加载日志页真实点击账号菜单→退出登录→确定，立即回到/login，未再见缺少token或可见404",
+      "private_evidence": [
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/15-v4037退出前操作审计.txt",
+          "bytes": 8817,
+          "sha256": "3d600a706803ce998cd37b21e7a95abcd22b8cc37c8618da36f778e41698c182",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.jpg",
+          "bytes": 285208,
+          "sha256": "cd256d034d73741444681ab7d73f14cb806d0c78716f6368f7fae4eff8b5605a",
+          "format": "JPEG"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-加载起点.txt",
+          "bytes": 9173,
+          "sha256": "e68045f8793eb010e7c75831e2951f048f548f04f44afebe61a27c52077c66fb",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.jpg",
+          "bytes": 284709,
+          "sha256": "8f55ccb513380731a08939e9fd5ced673bd79d27d3290198b75f4f7568bc4e68",
+          "format": "JPEG"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-加载起点.txt",
+          "bytes": 9182,
+          "sha256": "e4f760db71431847729cb37a06e23dcd3c6051abda2bdfa3b83ec7fb2081c231",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.jpg",
+          "bytes": 284667,
+          "sha256": "26e159dab0ecc3e2daae28aefffe9d865c97396252ce9f11c1c3e1f1984fc1bc",
+          "format": "JPEG"
+        }
+      ]
+    },
+    {
+      "role": "管理员",
+      "origin": "/admin/operations?section=logs&logType=ai",
+      "repeats": 3,
+      "result": "各轮从已加载日志页真实点击账号菜单→退出登录→确定，立即回到/login，未再见缺少token或可见404",
+      "private_evidence": [
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/06-v4037退出前AI日志.txt",
+          "bytes": 12838,
+          "sha256": "b10070ce1e5c2c81782ca2420c801cdd5301902a372ae970a2a2b930a2c6663d",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.jpg",
+          "bytes": 285259,
+          "sha256": "7aba9369003edb2e6caf06653d98724f85ad9f92879f0bcbf612dae528bd9fa3",
+          "format": "JPEG"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-加载起点.txt",
+          "bytes": 12358,
+          "sha256": "4290ef97ec6fef3b910c45cad5d4aee0fe51f488cbfe41374a33ced3478f0778",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.jpg",
+          "bytes": 285265,
+          "sha256": "471fe274e3601e6dbcc26339ed144c887a8c8262d25f631bce47328eecea806e",
+          "format": "JPEG"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-加载起点.txt",
+          "bytes": 12399,
+          "sha256": "b96d0a4b8afaf9c4d781cc73f3f30105cdef8e0c08714a96241739030714aad5",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.txt",
+          "bytes": 4251,
+          "sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+          "format": "UTF-8 AX text"
+        },
+        {
+          "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.jpg",
+          "bytes": 285236,
+          "sha256": "5cc0f9343638d62fc13ba6e4f9e034169bd7360d9cfdfc2fbd7e5e646cc81242",
+          "format": "JPEG"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "仅此两原场景各三轮，不证明全部退出/异常恢复/HTTP无错",
+    "未抓开发者工具网络，不声明没有匿名请求或服务端401",
+    "初次动作匹配焦点说明重复以及切换到另一www标签页未计作退出样本；回到原/audit确认框后重新从实际点击计数",
+    "两角色确认按钮均实际显示确定，未将旧报告的按钮退出残留外推为当前问题"
+  ]
+}

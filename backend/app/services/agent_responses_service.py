@@ -2213,6 +2213,12 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
         if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
+        if action in {"user_input", "resume"}:
+            project_id = int(getattr(session, "project_id", 0) or 0)
+            if project_id <= 0:
+                return ToolExecutionResult.failure("圆桌缺少真实项目范围，无法继续执行")
+            from app.ai.discussion_orchestrator import _require_discussion_actor
+            _require_discussion_actor(self._db, int(self._user.id), project_id)
         if session.status == "concluded":
             if action != "user_input":
                 return ToolExecutionResult.failure("圆桌讨论已经结束，只能提交纠正意见发起续会")

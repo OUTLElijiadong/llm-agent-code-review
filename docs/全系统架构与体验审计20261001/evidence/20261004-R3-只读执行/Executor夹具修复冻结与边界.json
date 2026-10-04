@@ -1,0 +1,244 @@
+{
+  "核查时间UTC": "2026-10-04T16:06:34.988021+00:00",
+  "状态": "候选测试夹具已冻结；仅本地回归，完整后端仍以根代理最终全量为准，未发布",
+  "唯一编辑文件": {
+    "backend/tests/test_prism_sandbox_executor.py": {
+      "bytes": 73734,
+      "sha256": "3a1cc0d0fc4ecf86afd857da0f01ebf5f87b1eee3279401e994524fd7f74d79e"
+    }
+  },
+  "原夹具快照": {
+    "bytes": 68178,
+    "sha256": "69afec2a75af4dbe5d795b57d085d8a073934a82dbc14dcdca914fc44a214445"
+  },
+  "产品无变核对": {
+    "backend/app/services/sandbox_service.py": {
+      "bytes": 238320,
+      "sha256": "890fae2811567e2a0a94fa6fe79149f6a8f99deab1da521b8a896a546e1181a2",
+      "与本分区冻结一致": true
+    },
+    "backend/app/agents/security_sentinel_agent.py": {
+      "bytes": 174217,
+      "sha256": "c17f2159e33da856ade5c6a162d5e742fa66590bf15f3cae6dfefa532500ec01",
+      "与本分区冻结一致": true
+    },
+    "backend/app/agents/fullchain_audit_agent.py": {
+      "bytes": 38250,
+      "sha256": "49fb7b71353ddd8d5d4e4d80a1a59734734f873000d52a5e1eee701a021e835a",
+      "与本分区冻结一致": true
+    },
+    "backend/app/schemas/agent_capability.py": {
+      "bytes": 5878,
+      "sha256": "ee9c851fdca1989b1714b1c941747e36b7ba80c701543e02f6c8a9492cefa64b",
+      "与本分区冻结一致": true
+    }
+  },
+  "原场景实证": {
+    "有效原始复跑": "18 failed / 34 passed / 1 warning，原全量与单文件同18条；5个不完整身份/事务桩、13个真实身份缺现有全局权限。",
+    "逐项分类": {
+      "不完整身份及伪DB桩": [
+        "test_create_environment_maps_decompilation_input_error_to_validation",
+        "test_remote_only_blackbox_never_selects_or_dispatches_a_worker",
+        "test_remote_combined_selects_whitebox_worker",
+        "test_fast_terminal_execute_response_persists_worker_events_before_conclusion",
+        "test_preview_session_token_scope_version_and_expiry"
+      ],
+      "真实身份缺明确全局权限": [
+        "test_deployment_uses_project_language_instead_of_stale_requested_profile",
+        "test_deployment_rejects_project_language_without_controlled_runtime",
+        "test_quarantined_project_allowed_deploy_in_sandbox",
+        "test_deploy_creation_locks_project_even_with_archive",
+        "test_quarantine_allows_new_and_existing_preview_sessions",
+        "test_late_browser_worker_result_respects_current_sandbox_state[stopping-False]",
+        "test_late_browser_worker_result_respects_current_sandbox_state[stopped-False]",
+        "test_late_browser_worker_result_respects_current_sandbox_state[expired-False]",
+        "test_late_browser_worker_result_respects_current_sandbox_state[succeeded-True]",
+        "test_late_browser_worker_result_respects_current_sandbox_state[succeeded-False]",
+        "test_browser_blackbox_reviewer_cannot_execute_owner_environment",
+        "test_browser_blackbox_rejects_target_drift_before_worker_call",
+        "test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts"
+      ]
+    },
+    "首轮授权校准": "51 passed / 1 failed / 2 warnings；剩制品追加失败为内存SQLite双Session共用物理连接，独立授权Session收尾回滚主事务未提交截图并复用ID，未证生产MySQL问题",
+    "独立事务夹具": "只给制品追加样本临时文件SQLite，实际授权方法仍运行；52 passed / 1 warning，原3制品顺序和旧制品保留断言通过",
+    "名字与真实状态": "三个quarantine命名正向用例实际Project.status=active，ProjectSourceArchive.storage_status=active/malware_status=clean；不证明隐藏quarantined状态可见或可执行，不增加权限例外"
+  },
+  "夹具修复": [
+    "明确User.status=1、普通User.role=user及唯一一致RBAC角色；只授予现有PROJECT_VIEW与FILE_VIEW真实关系，不升级管理员、不替换check_permission/require_project_execution",
+    "前三创建用例使用真实User/Project与SQLite；移除原require_project_access放行替身，仅保留源码字节、DNS、事件和不启动工作线程的良性桩",
+    "fast terminal使用真实环境/worker/工作Session，仅包装统计rollback/close；事件顺序、源回执、最终成功、rollback0与close1均保持",
+    "preview使用真实User/Worker/Project/Environment并移除_get_visible/db.get伪授权；作用域/版本/过期拒绝与原返回身份均保留"
+  ],
+  "原断言保留核查": {
+    "原测试函数42个全部保留": true,
+    "每个原函数assert总数均相同": true,
+    "有表达式变动的原函数": [
+      {
+        "函数": "test_fast_terminal_execute_response_persists_worker_events_before_conclusion",
+        "原断言数": 10,
+        "最终断言数": 10
+      },
+      {
+        "函数": "test_preview_session_token_scope_version_and_expiry",
+        "原断言数": 11,
+        "最终断言数": 11
+      }
+    ],
+    "变动说明": "fast terminal原db统计引用迁到真实worker_db spy；preview两个伪getter key断言变成真实ORM身份取值断言；没有删业务正向或拒绝条件"
+  },
+  "新增样本": {
+    "数量": 6,
+    "参数矩阵": {
+      "撤销方式": [
+        "项目reviewer降为viewer",
+        "撤销FILE_VIEW真实RolePermission"
+      ],
+      "入口": [
+        "创建环境",
+        "创建预览会话",
+        "认证旧预览令牌"
+      ]
+    },
+    "真实事务": "临时文件SQLite两个driver_connection明确不相同，独立事务提交后原member身份映射仍reviewer；产品fresh角色/权限读取拒绝",
+    "结果": "viewer40300/global40303；0源码生成/worker调用/线程启动，现有环境数量保持1"
+  },
+  "最终复测": {
+    "command": [
+      ".venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/unit/services/test_viewer_execution_boundaries.py",
+      "tests/unit/services/test_security_sentinel_agent.py",
+      "tests/unit/services/test_sandbox_optimizations.py",
+      "tests/unit/services/test_agent_test_cases.py",
+      "tests/unit/services/test_remote_target_authorization.py",
+      "tests/unit/services/test_model_independent_paths.py",
+      "tests/unit/agents/test_agent_project_quarantine.py",
+      "tests/unit/services/test_sandbox_multi_agent_review.py",
+      "tests/unit/services/test_sandbox_report_publish.py",
+      "tests/unit/services/test_sandbox_report_summary.py",
+      "tests/unit/services/test_sandbox_decompilation.py",
+      "tests/unit/services/test_managed_mcp_adapter.py",
+      "tests/unit/agents/test_security_sentinel_review.py",
+      "tests/unit/agents/test_fullchain_context_coverage.py",
+      "tests/unit/services/test_deploy_verify_runner_regressions.py",
+      "tests/unit/services/test_sandbox_api_authorization.py",
+      "tests/unit/services/test_background_usage_sources.py::test_sandbox_worker_recovers_persisted_origin_and_resets_context",
+      "tests/unit/agents/test_scan_entry_input_closure.py::test_security_api_does_not_serialize_empty_input_as_success",
+      "tests/test_security_catalog_current.py",
+      "tests/test_prism_sandbox_executor.py"
+    ],
+    "test_source_sha256": "3a1cc0d0fc4ecf86afd857da0f01ebf5f87b1eee3279401e994524fd7f74d79e",
+    "source_unchanged": true,
+    "results": [
+      {
+        "round": 1,
+        "exit_code": 0,
+        "seconds": 21.399,
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第1轮.log",
+        "bytes": 3335,
+        "sha256": "0887438e915aaaaeec0e03ddf91332b8ab20ddc3d1aacc4e0c4278ed44325a49",
+        "tail": "======================= 324 passed, 2 warnings in 20.26s ======================="
+      },
+      {
+        "round": 2,
+        "exit_code": 0,
+        "seconds": 22.232,
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第2轮.log",
+        "bytes": 3335,
+        "sha256": "fcf64dc2f96306b15015b8c9f3677b6cd7f0d392a67e7ce42e93cf244befd8d7",
+        "tail": "======================= 324 passed, 2 warnings in 20.90s ======================="
+      },
+      {
+        "round": 3,
+        "exit_code": 0,
+        "seconds": 22.403,
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第3轮.log",
+        "bytes": 3335,
+        "sha256": "1fc1ec96e9a8931508d64979145cbc6b2ff06ab3eb000ac30a9460b75df421d1",
+        "tail": "======================= 324 passed, 2 warnings in 21.20s ======================="
+      }
+    ]
+  },
+  "基础快照说明": "先前324×3快照3a1c前的444a只缺两个真实ORM身份取值断言，三日志已改名基础快照且保留原SHA；最终324×3按3a1c SHA重新执行，不能混用两组",
+  "静态检查": "Ruff仅该测试文件exit0",
+  "零外部执行": "实际工作线程不启动，模型/worker/DNS均良性阻断桩；执行器本地协议/语法用例不连接任何目标、不启动Docker/容器、不发供应商请求",
+  "未验证": [
+    "生产沙箱/真实执行器/浏览器网络测试",
+    "生产MySQL制品事务行为",
+    "全后端最终回归（根代理正在独立全跑）",
+    "隐藏quarantined项目的所有路径",
+    "供应商真实百万token语义完整理解"
+  ],
+  "证据文件": {
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor原场景-18失败.log": {
+      "bytes": 62207,
+      "sha256": "dd8cb74f848eca47848937ad89d70026fd047ff7bbf3fb3c3273ae55528b4c55",
+      "tail": "=================== 18 failed, 34 passed, 1 warning in 2.03s ==================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor真实授权夹具-首次校准.log": {
+      "bytes": 4849,
+      "sha256": "de55098f78466455b3d4f46fe0ce928af61487a40b3c7a6b69aa61f5c5039536",
+      "tail": "=================== 1 failed, 51 passed, 2 warnings in 1.19s ==================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor真实独立事务夹具-52绿.log": {
+      "bytes": 1245,
+      "sha256": "bafc5f07522588b0f90771fcf433c222afd05af2c94f0e5f4ff6a4d7ff27cb6b",
+      "tail": "======================== 52 passed, 1 warning in 1.23s ========================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor新增撤权对照-58项.log": {
+      "bytes": 1245,
+      "sha256": "3c70fc043012d8d3bdf988c53374fb23f7061cd0df8212cf36daf5770d03caca",
+      "tail": "======================== 58 passed, 1 warning in 1.67s ========================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/ExecutorRuff最终.log": {
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "tail": "All checks passed!"
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor测试夹具校准.diff": {
+      "bytes": 18288,
+      "sha256": "fffad668533e36e4c7bc969fd7ae19f3a84ae5a328ddfa762d74796124e758e7"
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor三轮基础快照回执.json": {
+      "bytes": 2772,
+      "sha256": "bf14a2a3a70c7375e7854fdae8d132e8ffff4da0b24ee676719864d22ee58dca"
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor三轮回执.json": {
+      "bytes": 2763,
+      "sha256": "1e1c5118b2c9cd94ef71f7045aca9d14c35a5f0c5a1523e82abcd4dd7f825954"
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第1轮.log": {
+      "bytes": 3335,
+      "sha256": "7c917a79b597eea2e53bf7fc2623525d5eac143233d2d30aa9f845893ced81d4",
+      "tail": "======================= 324 passed, 2 warnings in 18.82s ======================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第2轮.log": {
+      "bytes": 3335,
+      "sha256": "b2e1b32f43ffb77e29de8770abf9bf85e7d4b1d78fce28f982b0ae7f719652be",
+      "tail": "======================= 324 passed, 2 warnings in 18.69s ======================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第3轮.log": {
+      "bytes": 3335,
+      "sha256": "dada122b06709abb994c2582121cd4f4dee05f00880a7d37d9af688c0e3534aa",
+      "tail": "======================= 324 passed, 2 warnings in 18.64s ======================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第1轮.log": {
+      "bytes": 3335,
+      "sha256": "0887438e915aaaaeec0e03ddf91332b8ab20ddc3d1aacc4e0c4278ed44325a49",
+      "tail": "======================= 324 passed, 2 warnings in 20.26s ======================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第2轮.log": {
+      "bytes": 3335,
+      "sha256": "fcf64dc2f96306b15015b8c9f3677b6cd7f0d392a67e7ce42e93cf244befd8d7",
+      "tail": "======================= 324 passed, 2 warnings in 20.90s ======================="
+    },
+    "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第3轮.log": {
+      "bytes": 3335,
+      "sha256": "1fc1ec96e9a8931508d64979145cbc6b2ff06ab3eb000ac30a9460b75df421d1",
+      "tail": "======================= 324 passed, 2 warnings in 21.20s ======================="
+    }
+  }
+}

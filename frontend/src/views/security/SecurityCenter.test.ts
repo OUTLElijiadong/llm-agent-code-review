@@ -6,6 +6,7 @@ vi.mock('@/api/security', () => ({ getSecurityChecklist: mocks.checklist, getSec
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ hasPermission: () => false }) }))
 import SecurityCenter from './SecurityCenter.vue'
+import { CN_SECURITY_STANDARDS } from './cnnvd-knowledge'
 
 const emptyChecklist = { owasp_top10: [], secret_patterns: [], static_rules: [] }
 const dashboard = { project_count: 7, scanned_project_count: 0, avg_risk_score: null }
@@ -97,5 +98,22 @@ describe('安全中心独立读取恢复', () => {
     expect(page.get('[data-testid="dashboard-error"]').text()).toContain('保留上次成功结果')
     expect(page.get('[data-testid="dashboard-error"]').text()).toContain('尚未更新')
     page.unmount()
+  })
+})
+
+describe('国内参考规范展示边界', () => {
+  it('国标名称采用官方标题，不将源代码漏洞测试误称为安全测试', () => {
+    expect(CN_SECURITY_STANDARDS.map(({ code, name }) => ({ code, name }))).toEqual([
+      { code: 'GB/T 30279-2020', name: '信息安全技术 网络安全漏洞分类分级指南' },
+      { code: 'GB/T 34943-2017', name: 'C/C++语言源代码漏洞测试规范' },
+      { code: 'GB/T 34944-2017', name: 'Java语言源代码漏洞测试规范' },
+      { code: 'GB/T 34946-2017', name: 'C#语言源代码漏洞测试规范' },
+    ])
+  })
+
+  it.each(CN_SECURITY_STANDARDS)('$code 明示参考规范，引用不能证明认证或全部条款覆盖', ({ note }) => {
+    expect(note).toContain('参考规范')
+    expect(note).toContain('不代表认证或全部条款已覆盖')
+    expect(note).not.toContain('国标规则集')
   })
 })

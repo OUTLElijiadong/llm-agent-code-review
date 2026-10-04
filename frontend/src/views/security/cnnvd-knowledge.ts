@@ -40,7 +40,7 @@ export const CN_VULN_PORTALS: CnPortal[] = [
   },
 ]
 
-/** 相关国家标准 */
+/** 相关参考规范；展示引用不代表平台认证或完整条款覆盖。 */
 export interface CnStandard {
   code: string
   name: string
@@ -50,23 +50,23 @@ export interface CnStandard {
 export const CN_SECURITY_STANDARDS: CnStandard[] = [
   {
     code: 'GB/T 30279-2020',
-    name: '网络安全漏洞分类分级指南',
-    note: '规定漏洞分类与超危/高危/中危/低危四级分级方法,CNNVD 分级的国标依据。',
+    name: '信息安全技术 网络安全漏洞分类分级指南',
+    note: '漏洞分类分级参考规范；平台内部扣分不等于该标准的漏洞分级，引用不代表认证或全部条款已覆盖。',
   },
   {
     code: 'GB/T 34943-2017',
-    name: 'C/C++ 语言源代码安全测试规范',
-    note: '源代码漏洞静态测试的国标规则集。',
+    name: 'C/C++语言源代码漏洞测试规范',
+    note: 'C/C++ 源代码漏洞测试参考规范；引用不代表认证或全部条款已覆盖。',
   },
   {
     code: 'GB/T 34944-2017',
-    name: 'Java 语言源代码漏洞测试规范',
-    note: 'Java 源代码漏洞静态测试的国标规则集。',
+    name: 'Java语言源代码漏洞测试规范',
+    note: 'Java 源代码漏洞测试参考规范；引用不代表认证或全部条款已覆盖。',
   },
   {
     code: 'GB/T 34946-2017',
-    name: 'C# 语言源代码漏洞测试规范',
-    note: 'C# 源代码漏洞静态测试的国标规则集。',
+    name: 'C#语言源代码漏洞测试规范',
+    note: 'C# 源代码漏洞测试参考规范；引用不代表认证或全部条款已覆盖。',
   },
 ]
 

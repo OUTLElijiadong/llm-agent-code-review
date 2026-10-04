@@ -38,7 +38,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/admin/observability/alerts/page"),
     } <= paths
     assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 325
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 255
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 258
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
         "/api/agent-responses/assets/{asset_id}/image",

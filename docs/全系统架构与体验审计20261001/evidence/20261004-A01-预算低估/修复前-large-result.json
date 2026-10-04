@@ -1,0 +1,44 @@
+[
+  {
+    "sample": "ascii_numeric_1m",
+    "messages": 22,
+    "largest_message_chars": 53000,
+    "official_local_content_tokens_sum": 1060022,
+    "official_local_serialized_history_tokens": 1060198,
+    "application_estimate_tokens": 265188,
+    "compacted": false,
+    "projected_tokens_estimated": 265188,
+    "input_unchanged": true,
+    "projected_equal_original": true,
+    "input_sha256": "41f7890d99b9e487dc13ed9f3dc0ffdfdff8e6b71d875b8396131a3de67e0e31",
+    "estimate_below_trigger_and_local_count_above_window": true
+  },
+  {
+    "sample": "ascii_words_1m",
+    "messages": 42,
+    "largest_message_chars": 53000,
+    "official_local_content_tokens_sum": 1060022,
+    "official_local_serialized_history_tokens": 1060358,
+    "application_estimate_tokens": 530333,
+    "compacted": false,
+    "projected_tokens_estimated": 530333,
+    "input_unchanged": true,
+    "projected_equal_original": true,
+    "input_sha256": "3414df46eeb024391f22e92bf4bf622d8f563105c10c7b671f8461a1703d0956",
+    "estimate_below_trigger_and_local_count_above_window": true
+  },
+  {
+    "sample": "ascii_code_1m",
+    "messages": 29,
+    "largest_message_chars": 50000,
+    "official_local_content_tokens_sum": 1080022,
+    "official_local_serialized_history_tokens": 1080281,
+    "application_estimate_tokens": 405239,
+    "compacted": false,
+    "projected_tokens_estimated": 405239,
+    "input_unchanged": true,
+    "projected_equal_original": true,
+    "input_sha256": "6ce05095ad00d19d278f4cb773f9751ccb2aadc46feded36df7c1c376c861e33",
+    "estimate_below_trigger_and_local_count_above_window": true
+  }
+]

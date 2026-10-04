@@ -1,0 +1,440 @@
+{
+  "kind": "local_framing_math_not_provider",
+  "samples": [
+    {
+      "index": 12,
+      "role": "user",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30080,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "user",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47978,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "user",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47980,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "assistant",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30090,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "assistant",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47983,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "assistant",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47985,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "tool",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30080,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "tool",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47978,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "tool",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47980,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "unclassified",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30096,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "unclassified",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47986,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 12,
+      "role": "unclassified",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47988,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "user",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30081,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "user",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47979,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "user",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47981,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "assistant",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30091,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "assistant",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47984,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "assistant",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47986,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "tool",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30081,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "tool",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47979,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "tool",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47981,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "unclassified",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30097,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "unclassified",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47987,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 123,
+      "role": "unclassified",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47989,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "user",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30082,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "user",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47980,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "user",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47982,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "assistant",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30092,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "assistant",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47985,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "assistant",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47987,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "tool",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30082,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "tool",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47980,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "tool",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47982,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "unclassified",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30098,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "unclassified",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47988,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 1100,
+      "role": "unclassified",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47990,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "user",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30083,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "user",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47981,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "user",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47983,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "assistant",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30093,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "assistant",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47986,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "assistant",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47988,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "tool",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30083,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "tool",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47981,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "tool",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47983,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "unclassified",
+      "sample": "ascii",
+      "parts": 1,
+      "max_budget": 30099,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "unclassified",
+      "sample": "code",
+      "parts": 5,
+      "max_budget": 47989,
+      "within_chunk": true,
+      "original_reconstructed": true
+    },
+    {
+      "index": 10000,
+      "role": "unclassified",
+      "sample": "escaped",
+      "parts": 16,
+      "max_budget": 47991,
+      "within_chunk": true,
+      "original_reconstructed": true
+    }
+  ],
+  "all_within_chunk": true,
+  "maximum": 47991,
+  "limitation": "仅这48个来源/角色/文本样本，未声称未知模型协议的通用数学保证，也未复现产品缺陷。"
+}

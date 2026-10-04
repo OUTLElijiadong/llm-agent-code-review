@@ -1,0 +1,36 @@
+    async def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
+        """按会话归属发送暂停、恢复、停止或用户发言。"""
+
+        from app.agents.discussion_bus import DiscussionBus
+        session_id = str(call.arguments["session_id"])
+        action = str(call.arguments["action"])
+        content = str(call.arguments.get("content") or "").strip()
+        bus = DiscussionBus.instance()
+        session = bus.get_session(session_id, owner_user_id=int(self._user.id))
+        if session is None and isinstance(self._db, Session):
+            bus.enable_persistence(sessionmaker(bind=self._db.get_bind(), expire_on_commit=False))
+            session = bus.get_session(session_id, owner_user_id=int(self._user.id))
+        if session is None:
+            return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
+        if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
+            return ToolExecutionResult.failure("无权控制该圆桌讨论")
+        if session.status == "concluded":
+            if action != "user_input":
+                return ToolExecutionResult.failure("圆桌讨论已经结束，只能提交纠正意见发起续会")
+            if not content:
+                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+            return await self._continue_roundtable_discussion(session, content)
+        if action == "user_input":
+            if not content:
+                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+            accepted = bus.accept_user_input(session_id, content)
+        else:
+            accepted = bus.control_session(session_id, action)
+        if not accepted:
+            return ToolExecutionResult.failure("讨论尚未启动或控制器已结束")
+        return ToolExecutionResult.success({
+            "session_id": session_id,
+            "action": action,
+            "accepted": True,
+            "status": session.status,
+        })

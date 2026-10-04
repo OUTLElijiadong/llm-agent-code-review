@@ -33,6 +33,7 @@
           <el-descriptions-item label="真实来源">{{ issue.confirmation_count ?? issue.source_details?.length ?? 1 }} 个</el-descriptions-item>
           <el-descriptions-item label="置信度">{{ formatConfidence(issue.confidence) }}</el-descriptions-item>
           <el-descriptions-item label="证据等级">{{ evidenceQualityLabel(issue.evidence_quality) }}</el-descriptions-item>
+          <el-descriptions-item label="人工复核">{{ humanReviewStatusLabel(issue.human_review_status) }}</el-descriptions-item>
           <el-descriptions-item label="风险分">{{ formatRiskScore(issue.risk_score) }}</el-descriptions-item>
           <el-descriptions-item label="冲突状态">
             <el-tag :type="issue.conflict_status === 'unresolved' ? 'warning' : 'success'" size="small">
@@ -40,6 +41,9 @@
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
+        <p class="drawer-content">
+          证据等级表示引用与源码的匹配情况，不等同于漏洞条件或影响已验证。多来源一致与模型置信度不能代替漏洞验证。
+        </p>
         <div v-if="issue.source_details?.length" class="claim-list">
           <div v-for="claim in issue.source_details" :key="claim.claim_id || claim.source" class="claim-row">
             <span>{{ claim.agent_name || claim.source }}</span>
@@ -48,7 +52,7 @@
         </div>
       </div>
 
-      <div v-if="needsHumanReview" class="drawer-section review-panel">
+      <div v-if="needsHumanReview && canReviewIssue" class="drawer-section review-panel">
         <div class="drawer-label">人工复核</div>
         <el-input
           v-model="reviewNote"
@@ -176,6 +180,7 @@
       v-model="promptVisible"
       source="issue"
       :ref-id="issue?.id ?? null"
+      :can-polish="issue?.can_execute === true"
     />
   </el-drawer>
 </template>
@@ -192,7 +197,7 @@
  *  - 新增 漏洞证据代码片段(evidence,使用 <pre><code> 高亮显示)
  *  - 字段缺失时不显示对应区块,避免空白
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { formatDateTime } from '@/utils/format'
 import { MagicStick } from '@element-plus/icons-vue'
@@ -200,6 +205,7 @@ import SeverityTag from './SeverityTag.vue'
 import AiPromptModal from './AiPromptModal.vue'
 import type { IssueOut, ComplianceMapping } from '@/types/review'
 import { reviewDecision } from '@/api/issue'
+import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{
   modelValue: boolean
@@ -219,6 +225,11 @@ const visible = computed({
 const title = computed(() => props.issue?.title ?? '问题详情')
 const reviewNote = ref('')
 const reviewing = ref(false)
+const userStore = useUserStore()
+const canReviewIssue = computed(() => Boolean(userStore.token && userStore.profile)
+  && userStore.hasPermission('issue:handle') && props.issue?.can_handle === true)
+let reviewGeneration = 0
+let disposed = false
 const hasAggregation = computed(() => Boolean(
   props.issue?.aggregation_version
   || props.issue?.source_details?.length
@@ -230,7 +241,24 @@ const needsHumanReview = computed(() => (
   || props.issue?.conflict_status === 'unresolved'
 ))
 
-watch(() => props.issue?.id, () => { reviewNote.value = '' })
+function invalidateReview(clearDraft: boolean): void {
+  reviewGeneration += 1
+  reviewing.value = false
+  if (clearDraft) reviewNote.value = ''
+}
+
+watch(canReviewIssue, () => invalidateReview(false), { flush: 'sync' })
+
+watch(
+  [() => props.issue?.id, () => props.issue?.task_id, () => userStore.token, () => userStore.profile?.id],
+  () => invalidateReview(true),
+  { flush: 'sync' },
+)
+watch(() => props.modelValue, () => invalidateReview(false), { flush: 'sync' })
+onBeforeUnmount(() => {
+  disposed = true
+  reviewGeneration += 1
+})
 
 /** 仅信任后端标记为有效 v3.1 向量派生的分数。 */
 const verifiedCvssScore = computed<number | null>(() => {
@@ -339,7 +367,17 @@ function formatRiskScore(value?: number | null): string {
 }
 
 function evidenceQualityLabel(value?: string | null): string {
-  return ({ verified: '源码已核验', direct: '直接证据', inferred: '路径推断', unsupported: '证据不足' } as Record<string, string>)[value || ''] || '未评估'
+  return ({ verified: '源码引用匹配', direct: '引用未匹配', inferred: '路径推断', unsupported: '证据不足' } as Record<string, string>)[value || ''] || '未评估'
+}
+
+function humanReviewStatusLabel(value?: string | null): string {
+  return ({
+    pending: '待人工核实',
+    evidence_requested: '需补充证据',
+    accepted: '人工接受结论',
+    rejected: '人工驳回结论',
+    not_required: '未要求人工复核（不代表漏洞已验证）',
+  } as Record<string, string>)[value || ''] || '未提供复核状态'
 }
 
 function conflictLabel(value?: string | null): string {
@@ -347,17 +385,26 @@ function conflictLabel(value?: string | null): string {
 }
 
 async function submitReview(decision: 'accepted' | 'rejected' | 'evidence_requested'): Promise<void> {
-  if (!props.issue || reviewing.value) return
+  const issue = props.issue
+  const accountId = userStore.profile?.id
+  if (disposed || !props.modelValue || !issue || reviewing.value || !canReviewIssue.value || accountId == null) return
+  const generation = reviewGeneration
+  const token = userStore.token
+  const isCurrent = () => !disposed && props.modelValue && canReviewIssue.value
+    && generation === reviewGeneration
+    && props.issue?.id === issue.id && props.issue?.task_id === issue.task_id
+    && userStore.token === token && userStore.profile?.id === accountId
   reviewing.value = true
   try {
-    const updated = await reviewDecision(props.issue.id, { decision, note: reviewNote.value.trim() || undefined })
+    const updated = await reviewDecision(issue.id, { decision, note: reviewNote.value.trim() || undefined })
+    if (!isCurrent()) return
     ElMessage.success({ accepted: '已接受聚合结论', rejected: '已驳回聚合结论', evidence_requested: '已记录补充证据要求' }[decision])
     emit('reviewed', updated)
     reviewNote.value = ''
   } catch {
-    ElMessage.error('复核决定保存失败，问题仍保持待复核，可稍后重试')
+    if (isCurrent()) ElMessage.error('复核决定保存失败，问题仍保持待复核，可稍后重试')
   } finally {
-    reviewing.value = false
+    if (isCurrent()) reviewing.value = false
   }
 }
 
@@ -428,6 +475,7 @@ function openAiPrompt(): void {
  * 抽屉关闭回调
  */
 function onClose(): void {
+  invalidateReview(false)
   promptVisible.value = false
   emit('update:modelValue', false)
 }

@@ -13,6 +13,7 @@ from app.services.sandbox_service import (
     _inject_deployment_patch,
     _source_summary_for_agent_tests,
 )
+from tests.unit.services.execution_test_rows import authorized_sandbox_environment
 
 
 def _zip_with(files: dict[str, str]) -> str:
@@ -107,7 +108,6 @@ def test_inject_deployment_patch_adds_launch_script() -> None:
 
 
 def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch) -> None:
-    from types import SimpleNamespace
 
     from app.services import sandbox_service
 
@@ -117,7 +117,7 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
         "untouched.php": "<?php echo 'keep';\n",
         "_agent_tests/test_generated.php": "<?php echo 'runner-only';\n",
     })
-    environment = SimpleNamespace(
+    environment = authorized_sandbox_environment(db,
         public_id="sbx_repair", owner_id=7, project_id=9, language="php", source_sha256="parent-sha",
     )
 
@@ -221,11 +221,10 @@ def test_large_source_does_not_call_dynamic_test_agent_with_partial_context(db, 
 
 
 def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
-    from types import SimpleNamespace
 
     from app.services.sandbox_service import _generate_deployment_patch
 
-    environment = SimpleNamespace(
+    environment = authorized_sandbox_environment(db,
         id=1, public_id="sbx_deploy_patch", project_id=1, owner_id=1,
         test_mode="blackbox", language="python",
     )

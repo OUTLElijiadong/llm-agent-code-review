@@ -1,0 +1,122 @@
+{
+  "scope": "Synthetic fixtures and stub compactor; not provider usage or semantic evaluation",
+  "production_or_supplier_calls": 0,
+  "review_service_sha256": "ddbac7ec24699cd3171f55d3bf6f40334da652a576283314e324561e54b7fea3",
+  "fixture_sha256": "c349bf77dd7a5f0870523b401baae97beeadd7eb1545f6fd5171a3052ee50d2b",
+  "cases": [
+    {
+      "window": 32768,
+      "expected_fit": false,
+      "sections": [
+        {
+          "name": "experience",
+          "original_budget_bytes": 125002,
+          "original_sha256": "3a4251280be68e44d7d839c92c56466eaa246da13b57d8ed6141ca6c2aea8b7d",
+          "quota_budget_bytes": 2616,
+          "shared_calls_before": 0,
+          "shared_calls_after": 32
+        }
+      ],
+      "mandatory_serialized_input_bytes": 9610,
+      "reserved_output_tokens": 16384,
+      "framing_reserve": 1024,
+      "available_optional_budget_bytes": 5750,
+      "former_divide_by_four_budget": 1437,
+      "explicit_rejection": "审查非源码上下文压缩超过 32 次模型调用上限",
+      "local_fixture_assertions_passed": true
+    },
+    {
+      "window": 40000,
+      "expected_fit": true,
+      "sections": [
+        {
+          "name": "experience",
+          "original_budget_bytes": 125002,
+          "original_sha256": "3a4251280be68e44d7d839c92c56466eaa246da13b57d8ed6141ca6c2aea8b7d",
+          "quota_budget_bytes": 6133,
+          "shared_calls_before": 0,
+          "shared_calls_after": 8,
+          "result_budget_bytes": 2561
+        },
+        {
+          "name": "context",
+          "original_budget_bytes": 132002,
+          "original_sha256": "690730f5a66da6b22e38f0aeecbca14e52db81d881ec24b75feddc63e584786a",
+          "quota_budget_bytes": 6477,
+          "shared_calls_before": 8,
+          "shared_calls_after": 16,
+          "result_budget_bytes": 2487
+        }
+      ],
+      "mandatory_serialized_input_bytes": 9610,
+      "reserved_output_tokens": 16384,
+      "framing_reserve": 1024,
+      "available_optional_budget_bytes": 12982,
+      "former_divide_by_four_budget": 3245,
+      "assembled_final_input_bytes": 14953,
+      "local_fixture_assertions_passed": true
+    },
+    {
+      "window": 65536,
+      "expected_fit": true,
+      "sections": [
+        {
+          "name": "experience",
+          "original_budget_bytes": 125002,
+          "original_sha256": "3a4251280be68e44d7d839c92c56466eaa246da13b57d8ed6141ca6c2aea8b7d",
+          "quota_budget_bytes": 18553,
+          "shared_calls_before": 0,
+          "shared_calls_after": 6,
+          "result_budget_bytes": 2000
+        },
+        {
+          "name": "context",
+          "original_budget_bytes": 132002,
+          "original_sha256": "690730f5a66da6b22e38f0aeecbca14e52db81d881ec24b75feddc63e584786a",
+          "quota_budget_bytes": 19593,
+          "shared_calls_before": 6,
+          "shared_calls_after": 12,
+          "result_budget_bytes": 1943
+        }
+      ],
+      "mandatory_serialized_input_bytes": 9610,
+      "reserved_output_tokens": 16384,
+      "framing_reserve": 1024,
+      "available_optional_budget_bytes": 38518,
+      "former_divide_by_four_budget": 9629,
+      "assembled_final_input_bytes": 13848,
+      "local_fixture_assertions_passed": true
+    },
+    {
+      "window": 32768,
+      "expected_fit": true,
+      "sections": [
+        {
+          "name": "experience",
+          "original_budget_bytes": 30002,
+          "original_sha256": "233d37644da197edcaef320c9b0d11a3d88e93c676fee288385960294532dde2",
+          "quota_budget_bytes": 2654,
+          "shared_calls_before": 0,
+          "shared_calls_after": 3,
+          "result_budget_bytes": 1157
+        },
+        {
+          "name": "context",
+          "original_budget_bytes": 30802,
+          "original_sha256": "a9e588c836ac36d16a576b7af85de3dc13a4e11d06395d63ba443ee1fa67b6cf",
+          "quota_budget_bytes": 2724,
+          "shared_calls_before": 3,
+          "shared_calls_after": 6,
+          "result_budget_bytes": 1127
+        }
+      ],
+      "mandatory_serialized_input_bytes": 9610,
+      "reserved_output_tokens": 16384,
+      "framing_reserve": 1024,
+      "available_optional_budget_bytes": 5750,
+      "former_divide_by_four_budget": 1437,
+      "assembled_final_input_bytes": 12189,
+      "local_fixture_assertions_passed": true
+    }
+  ]
+}

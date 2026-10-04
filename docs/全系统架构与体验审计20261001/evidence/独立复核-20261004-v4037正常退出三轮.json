@@ -1,0 +1,338 @@
+{
+  "reviewed_at_utc": "2026-10-04T12:15:32.086234+00:00",
+  "reviewer": "frontend_completion，独立只读归档复核；未执行这些生产点击",
+  "source": {
+    "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4037正常退出三轮.json",
+    "bytes": 6353,
+    "sha256": "e3d2462a641f3becd0c9296b327266337a8d72d0b4db7a68a348e6ea30ed23a8",
+    "declared_release": "4.0.37",
+    "declared_source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+    "declared_browser": "普通Safari，非无痕"
+  },
+  "scope": "管理员AI调用日志与审查员操作审计，各三轮正常退出的已归档AX/截图；不是新生产运行或HTTP抓包",
+  "result": "18文件完整性全部一致；六组退出前页面与退出后/login登录表单一致，结果AX与人工查看的六JPEG无可见缺少token/404",
+  "counts": {
+    "private_files": 18,
+    "utf8_ax": 12,
+    "jpeg": 6,
+    "rounds": 6,
+    "roles": 2,
+    "private_tracked_files": 0,
+    "all_private_files_ignored": true
+  },
+  "rounds": [
+    {
+      "role": "审查员",
+      "round": 1,
+      "origin_route": "/audit",
+      "destination_route": "/login",
+      "before_table_row_count": 2851,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": false,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-审查员/15-v4037退出前操作审计.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.jpg"
+      ],
+      "status": "passed"
+    },
+    {
+      "role": "审查员",
+      "round": 2,
+      "origin_route": "/audit",
+      "destination_route": "/login",
+      "before_table_row_count": 2852,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": false,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-加载起点.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.jpg"
+      ],
+      "status": "passed"
+    },
+    {
+      "role": "审查员",
+      "round": 3,
+      "origin_route": "/audit",
+      "destination_route": "/login",
+      "before_table_row_count": 2853,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": false,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-加载起点.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.txt",
+        "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.jpg"
+      ],
+      "status": "passed"
+    },
+    {
+      "role": "管理员",
+      "round": 1,
+      "origin_route": "/admin/operations?section=logs&logType=ai",
+      "destination_route": "/login",
+      "before_table_row_count": 10627,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": false,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-管理员/06-v4037退出前AI日志.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.jpg"
+      ],
+      "status": "passed"
+    },
+    {
+      "role": "管理员",
+      "round": 2,
+      "origin_route": "/admin/operations?section=logs&logType=ai",
+      "destination_route": "/login",
+      "before_table_row_count": 10627,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": false,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-加载起点.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.jpg"
+      ],
+      "status": "passed"
+    },
+    {
+      "role": "管理员",
+      "round": 3,
+      "origin_route": "/admin/operations?section=logs&logType=ai",
+      "destination_route": "/login",
+      "before_table_row_count": 10627,
+      "before_existing_rows_visible": true,
+      "before_loading_indicator": true,
+      "role_ui_matches_declared_scope": true,
+      "login_form_visible_in_ax": true,
+      "missing_token_text_in_result_ax": false,
+      "visible_404_text_in_result_ax": false,
+      "screenshot_manually_viewed": true,
+      "screenshot_visual_result": "登录页、空账号和密码栏、构建版本v4.0.37，无可见缺少token/404提示",
+      "screenshot_dimensions": [
+        2174,
+        1612
+      ],
+      "paths": [
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-加载起点.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.txt",
+        "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.jpg"
+      ],
+      "status": "passed_with_loading_boundary"
+    }
+  ],
+  "file_checks": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/15-v4037退出前操作审计.txt",
+      "actual_bytes": 8817,
+      "actual_sha256": "3d600a706803ce998cd37b21e7a95abcd22b8cc37c8618da36f778e41698c182",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/16-v4037正常退出-第1轮.jpg",
+      "actual_bytes": 285208,
+      "actual_sha256": "cd256d034d73741444681ab7d73f14cb806d0c78716f6368f7fae4eff8b5605a",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-加载起点.txt",
+      "actual_bytes": 9173,
+      "actual_sha256": "e68045f8793eb010e7c75831e2951f048f548f04f44afebe61a27c52077c66fb",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第2轮-结果.jpg",
+      "actual_bytes": 284709,
+      "actual_sha256": "8f55ccb513380731a08939e9fd5ced673bd79d27d3290198b75f4f7568bc4e68",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-加载起点.txt",
+      "actual_bytes": 9182,
+      "actual_sha256": "e4f760db71431847729cb37a06e23dcd3c6051abda2bdfa3b83ec7fb2081c231",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/v4037退出-第3轮-结果.jpg",
+      "actual_bytes": 284667,
+      "actual_sha256": "26e159dab0ecc3e2daae28aefffe9d865c97396252ce9f11c1c3e1f1984fc1bc",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/06-v4037退出前AI日志.txt",
+      "actual_bytes": 12838,
+      "actual_sha256": "b10070ce1e5c2c81782ca2420c801cdd5301902a372ae970a2a2b930a2c6663d",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/07-v4037正常退出-第1轮.jpg",
+      "actual_bytes": 285259,
+      "actual_sha256": "7aba9369003edb2e6caf06653d98724f85ad9f92879f0bcbf612dae528bd9fa3",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-加载起点.txt",
+      "actual_bytes": 12358,
+      "actual_sha256": "4290ef97ec6fef3b910c45cad5d4aee0fe51f488cbfe41374a33ced3478f0778",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第2轮-结果.jpg",
+      "actual_bytes": 285265,
+      "actual_sha256": "471fe274e3601e6dbcc26339ed144c887a8c8262d25f631bce47328eecea806e",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-加载起点.txt",
+      "actual_bytes": 12399,
+      "actual_sha256": "b96d0a4b8afaf9c4d781cc73f3f30105cdef8e0c08714a96241739030714aad5",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.txt",
+      "actual_bytes": 4251,
+      "actual_sha256": "b30c3950287f1457014c854e7143c925d32adf24a1f5f1fff3465e04f4669325",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/v4037退出-第3轮-结果.jpg",
+      "actual_bytes": 285236,
+      "actual_sha256": "5cc0f9343638d62fc13ba6e4f9e034169bd7360d9cfdfc2fbd7e5e646cc81242",
+      "bytes_match": true,
+      "sha256_match": true,
+      "format": "JPEG"
+    }
+  ],
+  "calibrations": [
+    "管理员第3轮起点虽已显示既有数据/总数10627，仍有正在加载数据提示，应归为带刷新中的退出，不声称所有请求已结束。",
+    "六结果AX字节及摘要相同，对应同一稳定登录结构；六JPEG摘要各不相同。静态首尾归档与主代理记录兼容，但本复核没有重新见证菜单和确认中间步骤。",
+    "管理员起点以管理控制台/AI调用日志结构核对角色兼容性；未通过后端独立验证登录账号或最高管理员权限。",
+    "截图人工读到版本v4.0.37；source_sha来自主代理清单，未用此只读文件复核替代运行镜像/公网SHA核验。"
+  ],
+  "probe_setup_notes": [
+    "首次Git忽略路径集合比较因Git默认对中文路径quote输出而失败，未发现证据字节/摘要不符；改用NUL输入输出精确比较。",
+    "第一次NUL尝试未带--stdin被Git退出128拒绝；修正为git check-ignore --no-index --stdin -z后18路径完全匹配、tracked=0。两次为只读核验脚本设置问题，不归类产品缺陷。"
+  ],
+  "limits": [
+    "仅两原入口各三轮的可见结果，不证明全部退出、异常退出、刷新恢复、权限和所有账号场景。",
+    "没有CUA/鼠标/SSH/API/模型请求；未修改源代码、私有证据或原归档JSON，只新写本独立复核JSON。",
+    "未抓开发者工具或网络日志；不能宣称没有匿名请求、401或所有HTTP/控制台无错误。",
+    "普通Safari桌面截图，2174×1612为图片像素，不代表CSS视口或真实手机验收。",
+    "无可见错误仅对应保存瞬间，不把六次通过当作消除所有偶发问题。"
+  ]
+}

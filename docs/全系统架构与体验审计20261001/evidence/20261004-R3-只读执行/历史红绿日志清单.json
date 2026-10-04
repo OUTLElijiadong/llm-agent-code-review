@@ -1,0 +1,187 @@
+{
+  "修复前-首次夹具错误.log": {
+    "bytes": 32557,
+    "sha256": "ca5ec28b28a53df651f224fc44ea86451494ccbb441dc86734c5751f25254fcd",
+    "original": "/tmp/prism-viewer-execution-initial-fixture-errors-20261004.log",
+    "tail": [
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_sentinel_viewer_fails_before_model_static_or_archive_work[project]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_fullchain_explicit_actor_cannot_bypass_unbound_sentinel",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_execution_permission_revoked_does_not_revoke_cleanup_lease",
+      "======================== 13 failed, 2 warnings in 0.97s ========================"
+    ],
+    "说明": "首次13失败包含2夹具错误（MCP管理类型、JWT时区）；不能将其13项都计为有效产品红。"
+  },
+  "修复后-25扩展绿.log": {
+    "bytes": 1245,
+    "sha256": "4ac4a526597a13450900902f689979a9c68b4b06de65ee41cf3200b4d9d9fea5",
+    "original": "/tmp/prism-viewer-expanded-green-20261004.log",
+    "tail": [
+      "    from crypt import crypt as _crypt",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "======================== 25 passed, 1 warning in 0.87s ========================="
+    ]
+  },
+  "修复后-25守卫扩展绿.log": {
+    "bytes": 1245,
+    "sha256": "22b012c524c492ec17e95c318c4c9c1f2e652c9537976b4e8f605473884deb46",
+    "original": "/tmp/prism-viewer-expanded-afterguards-20261004.log",
+    "tail": [
+      "    from crypt import crypt as _crypt",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "======================== 25 passed, 1 warning in 0.93s ========================="
+    ]
+  },
+  "既有夹具-首次24失败142通过.log": {
+    "bytes": 55521,
+    "sha256": "f10540e0dc2741479c38279c6866dd8ed1a3ffab47ffc80673ac589abd4771de",
+    "original": "/tmp/prism-viewer-existing-first-20261004.log",
+    "tail": [
+      "FAILED tests/unit/services/test_security_sentinel_agent.py::test_scan_project_fails_when_new_audit_generation_takes_over",
+      "FAILED tests/unit/services/test_security_sentinel_agent.py::test_scan_project_preserves_raw_dataflow_link_total_after_bounding",
+      "FAILED tests/unit/services/test_security_sentinel_agent.py::test_scan_task_labels_existing_security_issues",
+      "================== 24 failed, 142 passed, 1 warning in 1.76s ==================="
+    ]
+  },
+  "既有夹具-另一组首次12失败216通过.log": {
+    "bytes": 28939,
+    "sha256": "e975aaa5f4087d3a1935a0d7a3fdef394df8903a28b33d335b30f7cc4030e88d",
+    "original": "/tmp/prism-viewer-secondary-first-20261004.log",
+    "tail": [
+      "FAILED tests/unit/services/test_background_usage_sources.py::test_sandbox_worker_recovers_persisted_origin_and_resets_context",
+      "FAILED tests/unit/agents/test_agent_project_quarantine.py::test_active_and_archived_member_access_remains_allowed",
+      "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_security_api_does_not_serialize_empty_input_as_success[file]",
+      "================= 12 failed, 216 passed, 2 warnings in 25.49s =================="
+    ]
+  },
+  "既有夹具-校准首次2失败88通过.log": {
+    "bytes": 26830,
+    "sha256": "188de430652e0373dd43e8c0bb8cffaa632c8cd834f428caf100e0c58eec6913",
+    "original": "/tmp/prism-viewer-fixture-calibration-first-20261004.log",
+    "tail": [
+      "=========================== short test summary info ============================",
+      "FAILED tests/unit/services/test_sandbox_optimizations.py::test_generate_agent_tests_cache_hits_and_uses_archive_sha256",
+      "FAILED tests/unit/services/test_sandbox_optimizations.py::test_generate_agent_tests_cache_expires_and_regenerates",
+      "=================== 2 failed, 88 passed, 1 warning in 10.39s ==================="
+    ]
+  },
+  "共享圆桌未完成-24失败231通过.log": {
+    "bytes": 85359,
+    "sha256": "bcb10116ed62eab6c5ecaf1474ab3a2f602524497a659d4fad1e5a5027394de9",
+    "original": "/tmp/prism-viewer-calibrated-related-20261004.log",
+    "tail": [
+      "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_cancellation_while_finalizer_runs_revokes_worker_before_late_result[task]",
+      "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_cancellation_while_finalizer_runs_revokes_worker_before_late_result[stop]",
+      "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_rest_pending_to_websocket_keeps_preflight_version",
+      "================= 24 failed, 231 passed, 2 warnings in 29.05s =================="
+    ]
+  },
+  "既有夹具-主组校准175通过.log": {
+    "bytes": 2215,
+    "sha256": "7a19c34ccce6d3fc733c854f2fa03e5245768e927e1f1044445414a01c918808",
+    "original": "/tmp/prism-viewer-primary-calibrated-20261004.log",
+    "tail": [
+      "    return self._open_to_write(zinfo, force_zip64=force_zip64)",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "======================= 175 passed, 2 warnings in 11.29s ======================="
+    ]
+  },
+  "既有夹具-另一组校准108通过.log": {
+    "bytes": 2206,
+    "sha256": "1beff256a54a6e09b36b1126519606e80ca805a9a552cbfe2cb0abeeb70c1301",
+    "original": "/tmp/prism-viewer-other-calibrated-20261004.log",
+    "tail": [
+      "    from crypt import crypt as _crypt",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "======================== 108 passed, 1 warning in 6.10s ========================"
+    ]
+  },
+  "修复后-31扩展绿.log": {
+    "bytes": 1245,
+    "sha256": "bd1688b91a7a7003329180cb4b3b2223fc04a9ad05ec43908d5435653496ccc9",
+    "original": "/tmp/prism-viewer-expanded31-20261004.log",
+    "tail": [
+      "    from crypt import crypt as _crypt",
+      "",
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "======================== 31 passed, 1 warning in 1.02s ========================="
+    ]
+  },
+  "静态-首次38样式错误.log": {
+    "bytes": 22479,
+    "sha256": "6c427704df78a98242763ba263c111275d3559cfaf6304b971768d7968230934",
+    "original": "/tmp/prism-viewer-ruff-first-20261004.log",
+    "tail": [
+      "    |",
+      "",
+      "Found 38 errors.",
+      "[*] 7 fixable with the `--fix` option."
+    ]
+  },
+  "静态-最终Ruff通过.log": {
+    "bytes": 19,
+    "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "original": "/tmp/prism-viewer-ruff-final-20261004.log",
+    "tail": [
+      "All checks passed!"
+    ]
+  },
+  "最终四产品.diff": {
+    "bytes": 29560,
+    "sha256": "9c865ea3460339be59c456e0f16110362fa1451190d1b299cf521fa5ceb09827",
+    "original": "/tmp/prism-viewer-product-final.diff",
+    "tail": [
+      "+    _require_sandbox_execution(db, actor, row.project_id)",
+      "     if not _can_manage(db, actor, row):",
+      "         raise ForbiddenError(\"只有创建者或超级管理员可续期\", code=40300)",
+      "     if row.status not in ACTIVE_STATES:"
+    ]
+  },
+  "命名冲突-实际为其它分区16失败.log": {
+    "bytes": 20837,
+    "sha256": "6db9499e49d14a43760ee8fdab88d3b4eaeb5893a988a5667d6c0394cda94f9c",
+    "original": "/tmp/prism-viewer-execution-red-20261004.log",
+    "tail": [
+      "FAILED tests/unit/services/test_project_viewer_execution.py::test_ai_prompt_source_still_requires_actual_global_read_permission[project]",
+      "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_model_boundary_reloads_viewer_before_call",
+      "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_direct_start_requires_execution_before_registration",
+      "======================== 16 failed, 1 warning in 1.25s ========================="
+    ],
+    "说明": "共享临时路径被context分区覆盖；实际为test_project_viewer_execution的16失败，不能作本分区13有效红证据。"
+  },
+  "命名冲突-实际为其它分区1失败15通过.log": {
+    "bytes": 2233,
+    "sha256": "1164fc91cf77749659ba09a37a99c65f6ed0f9b8e976c76695adfa41e580886b",
+    "original": "/tmp/prism-viewer-execution-green-20261004.log",
+    "tail": [
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "=========================== short test summary info ============================",
+      "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_model_boundary_reloads_viewer_before_call",
+      "=================== 1 failed, 15 passed, 1 warning in 1.14s ===================="
+    ],
+    "说明": "共享临时路径被context分区覆盖；实际为test_project_viewer_execution的1失败15通过，不能作本分区13绿证据。"
+  },
+  "静态-最终单文件Black.log": {
+    "bytes": 46,
+    "sha256": "c78d4bc341e5cfb6cba20095bbb680bc8471adaac200271c9ee2cc1424564efe",
+    "original": "/tmp/prism-viewer-new-tests-format-final.log",
+    "tail": [
+      "All done! ✨ 🍰 ✨",
+      "1 file left unchanged."
+    ]
+  },
+  "静态-首次新增两文件Black.log": {
+    "bytes": 168,
+    "sha256": "11dd4f9d9dea92ee6b5c0726cec98cae9880d0aa612359952ece7e7d9472214f",
+    "original": "/tmp/prism-viewer-new-tests-format.log",
+    "tail": [
+      "reformatted tests/unit/services/test_viewer_execution_boundaries.py",
+      "",
+      "All done! ✨ 🍰 ✨",
+      "2 files reformatted."
+    ]
+  }
+}

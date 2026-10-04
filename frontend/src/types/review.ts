@@ -35,6 +35,9 @@ export interface IssueOut {
   fixed_code?: string
   status: string
   create_time: string
+  /** 当前账号可处理此问题；缺值不授予操作能力。 */
+  can_handle?: boolean
+  can_execute?: boolean
   /** v3: 由有效 CVSS v3.1 向量确定性计算的评分(0-10) */
   cvss_score?: number | null
   /** v3: CVSS 向量字符串,如 "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" */
@@ -102,6 +105,8 @@ export interface TaskOut {
   review_type: string
   status: string
   can_view_report?: boolean
+  can_cancel?: boolean
+  can_execute?: boolean
   total_files: number
   processed_files: number
   total_issues: number | null
@@ -147,6 +152,8 @@ export interface TaskDetailOut {
   review_type: string
   status: string
   can_view_report?: boolean
+  can_cancel?: boolean
+  can_execute?: boolean
   total_files: number
   processed_files: number
   total_issues: number | null

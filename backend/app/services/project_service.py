@@ -159,6 +159,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "source_malware_status": source_archive.malware_status if source_archive else None,
             "can_update": can_write,
             "can_delete": can_write,
+            "can_execute": can_write or member_roles.get(row.id) == "reviewer",
             "last_review_at": last_task.create_time if last_task else None,
             "score": last_task.score if metrics_visible else None,
             "create_time": row.create_time,
@@ -216,6 +217,7 @@ def create_project(
             role_in_project="owner",
         ))
         db.flush()
+    project.can_execute = True
     return project
 
 
@@ -311,6 +313,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         ),
         "can_update": project_role in {"admin", "owner"},
         "can_delete": project_role in {"admin", "owner"},
+        "can_execute": project_role in {"admin", "owner", "reviewer"},
         "agent_run_count": agent_runs[0] if agent_runs else 0,
         "last_agent_run_at": agent_runs[1] if agent_runs else None,
         "create_time": project.create_time,

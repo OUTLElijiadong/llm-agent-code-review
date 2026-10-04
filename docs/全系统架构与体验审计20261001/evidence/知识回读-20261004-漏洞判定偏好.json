@@ -1,0 +1,15 @@
+{
+  "query": "Prism 审计 明确漏洞判定 按规范流程 2026-10-04",
+  "recorded_at": "2026-10-04T13:18:37.877Z",
+  "source": "user_habits.md",
+  "document_id": 2,
+  "chunk_id": "8ab3efc88393eb24ed037b3905b43961cdb0d16cdce56f99e8aba09a46141f59",
+  "chunk_index": 6,
+  "score": 0.758583,
+  "updated": "2026-10-04",
+  "observed_statement": "- 用户于 2026-10-04 明确要求：Prism审计要说明如何认定发现属于漏洞，并按规范流程适配；具体证据字段、程序门禁和评分说明属于项目工程方案，不冒充用户指定算法或产品认证结论。来源：`myself/01_知识整理/内容地图/用户与AI习惯.md`，Harness 收据 `20261004-113909-d43aa345ee`。",
+  "limits": [
+    "仅本轮聚焦检索回执，不扫描其他会话",
+    "ingest此前真实工具输出seen5/imported1/skipped4/removed0/chunks9，未另保存完整日志；不能当独立重跑"
+  ]
+}

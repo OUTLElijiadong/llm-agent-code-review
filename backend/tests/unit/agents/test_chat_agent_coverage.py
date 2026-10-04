@@ -1176,7 +1176,7 @@ def test_long_chat_history_preserves_all_turns_and_latest_message_tail(
     body = {"choices": [{"finish_reason": "stop", "message": {"content": "收到"}}]}
     requests = _install_http(monkeypatch, [FakeHttpResponse(200, body)])
     messages = [
-        {"role": "user", "content": f"第{i}轮开头\n" + "说明。" * 1000 + f"\n必须保留第{i}轮尾部约束"}
+        {"role": "user", "content": f"第{i}轮开头\n" + "说明。" * 600 + f"\n必须保留第{i}轮尾部约束"}
         for i in range(99)
     ]
     messages.append({"role": "user", "content": "当前任务\n" + "代码。" * 25_000 + "\n最终约束：禁止跨账号读记录"})
@@ -1415,7 +1415,7 @@ def test_chat_compacts_more_than_one_million_estimated_tokens_with_ordered_const
     agent: ChatAssistantAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """百万级对话历史执行分层压缩，头/中/尾约束仍进入最终上下文。"""
+    """百万级字节预算执行分层压缩；这不是供应商 tokenizer/usage 统计。"""
     import re
 
     from app.core.config import settings
@@ -1440,7 +1440,7 @@ def test_chat_compacts_more_than_one_million_estimated_tokens_with_ordered_const
             marker = " 末尾更正：最多保留 2 条记录。"
         messages.append({
             "role": "user" if index % 2 == 0 else "assistant",
-            "content": f"history_item_{index:04d}{marker} " + ("x" * 3_990),
+            "content": f"history_item_{index:04d}{marker} " + ("x" * 900),
         })
     messages.append({"role": "user", "content": "现在按最新要求总结"})
     original = json.loads(json.dumps(messages, ensure_ascii=False))
@@ -1590,7 +1590,7 @@ def test_chat_compactor_increases_output_budget_after_length(
     """压缩器自身被模型截断时提高输出预算，不能使用不完整 JSON。"""
     from app.core.config import settings
 
-    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 40_000)
     agent._max_retries = 0
     budgets: list[int] = []
 
@@ -1609,12 +1609,12 @@ def test_chat_compactor_increases_output_budget_after_length(
         "choices": [{"finish_reason": "stop", "message": {"content": "完成"}}],
     })])
     result = agent._handle_chat([
-        {"role": "user", "content": "甲" * 8_000 + "保留此结论"},
+        {"role": "user", "content": "甲" * 16_000 + "保留此结论"},
         {"role": "user", "content": "继续"},
     ], None)
 
     assert result.success is True
-    assert budgets[:2] == [4096, 5000]
+    assert budgets[:2] == [4096, 8192]
     assert "保留此结论" in requests[0]["json"]["messages"][1]["content"]
 
 
@@ -1688,8 +1688,12 @@ def test_chat_rejects_current_message_that_cannot_fit_context(
 
     assert result.success is False
     assert result.failure_kind == "context_compaction_incomplete"
-    # 唯一调用是压缩器；因没有可用压缩结果，回答模型不能收到不完整上下文。
-    assert len(requests) == 1
+    # 只调用压缩器；分片个数随预算而变，但回答模型不能收到不完整上下文。
+    from app.agents.chat_agent import _COMPACTION_SYSTEM
+
+    assert requests
+    assert all(request["json"]["messages"][0]["content"] == _COMPACTION_SYSTEM
+               for request in requests)
 
 
 def test_handle_chat_restarts_complete_answer_after_length(

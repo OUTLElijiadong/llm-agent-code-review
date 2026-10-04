@@ -1,0 +1,180 @@
+{
+  "recorded_at_utc": "2026-10-04T15:27:55.357354+00:00",
+  "mode": "候选工作树只读文件与日志核验；未重新运行测试、部署或生产访问",
+  "log_metadata": {
+    "复测-20261004-v4038最终完整前端.log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终完整前端.log",
+      "bytes": 354,
+      "sha256": "30b7db04697f5623f1711aa8ed9fc162bd6a1fafc4c9645cec5a50a01ae08b51"
+    },
+    "复测-20261004-v4038最终前端lint.log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终前端lint.log",
+      "bytes": 47,
+      "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea"
+    },
+    "复测-20261004-v4038最终前端build.log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终前端build.log",
+      "bytes": 21948,
+      "sha256": "e1c4911a35a9b2e769cd829cae84271acc88bd9abb8f7dfd2d7b6d371b30d6d2"
+    },
+    "复测-20261004-v4038最终部署命令替身.log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终部署命令替身.log",
+      "bytes": 2642,
+      "sha256": "8625fdf60a889df488918948becf1d33f5438c48456e50eebbc167c41e2b3025"
+    },
+    "复测-20261004-v4038最终后端静态门.log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终后端静态门.log",
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    }
+  },
+  "actual_log_results": {
+    "复测-20261004-v4038最终完整前端.log": [
+      " Test Files  137 passed (137)",
+      "      Tests  1705 passed (1705)",
+      "   Duration  14.83s (transform 8.10s, setup 1.25s, import 38.53s, tests 39.61s, environment 37.28s)"
+    ],
+    "复测-20261004-v4038最终前端lint.log": [],
+    "复测-20261004-v4038最终前端build.log": [
+      "✓ built in 12.28s"
+    ],
+    "复测-20261004-v4038最终部署命令替身.log": [
+      "docker_mode=fake-only (Compose parser integration not exercised)",
+      "release binding tests: passed=33 failed=0",
+      "deploy shell and operations tests: PASS"
+    ],
+    "复测-20261004-v4038最终后端静态门.log": [
+      "All checks passed!"
+    ]
+  },
+  "counts": {
+    "frontend_files": 137,
+    "frontend_tests": 1705,
+    "deploy_release_cases": 33,
+    "deploy_release_unique": 33,
+    "deploy_failure_cases": 20,
+    "deploy_failure_unique": 20,
+    "checkpoint_reader_behavior_scenarios": 5
+  },
+  "process_exit_evidence": {
+    "source": "根代理 /root 本轮工具结果消息；日志本身不含进程exit字段，不由静态文本推断",
+    "frontend_full": {
+      "session_id": 47638,
+      "chunk_id": "a1bb26",
+      "exit_code": 0
+    },
+    "eslint": {
+      "session_id": 83489,
+      "chunk_id": "35dd88",
+      "exit_code": 0
+    },
+    "build": {
+      "session_id": 9286,
+      "chunk_id": "5de3a5",
+      "exit_code": 0
+    },
+    "deploy_command_substitute": {
+      "session_id": 70764,
+      "chunk_id": "c4b07f",
+      "exit_code": 0
+    },
+    "backend_static": {
+      "chunk_id": "44ee85",
+      "exit_code": 0,
+      "command_contract": "python3收集git diff --name-only -z及git ls-files --others --exclude-standard -z，取backend/app或deploy/lib下.py；使用绝对backend/.venv311/bin/python -m ruff check --select F,E9 *files，仅检查不修复"
+    }
+  },
+  "frontend_viewer_manifest": {
+    "manifest": {
+      "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/证据与边界.json",
+      "bytes": 33906,
+      "sha256": "31623f15bc34504c6c1fac434b6ef03d3636e6ea4477eb26ebef41efb518e8ba"
+    },
+    "snapshot_entries": 28,
+    "kinds": {
+      "product": 14,
+      "test": 12,
+      "fixture": 1,
+      "unchanged_regression_input": 1
+    },
+    "log_entries": 37,
+    "hash_size_mismatches": [],
+    "final_targeted_log_results": [
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第1轮.log",
+        "bytes": 963,
+        "sha256": "c18b14ed74ee5e351be584a7c8404b1a12928d60d32a446b89c343112d6e6524",
+        "result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  13.10s (transform 918ms, setup 67ms, import 3.55s, tests 6.63s, environment 1.97s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第2轮.log",
+        "bytes": 963,
+        "sha256": "e30c969f7fd4668adf9a30079e58f17f631ddba9f645092facb511c7b8eec02d",
+        "result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  10.95s (transform 834ms, setup 53ms, import 3.02s, tests 5.55s, environment 1.61s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第3轮.log",
+        "bytes": 962,
+        "sha256": "247710360696e656a531cbde248b2535db6a0cc6a3aa5c58567e32405c2228dc",
+        "result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  9.62s (transform 685ms, setup 48ms, import 2.58s, tests 4.76s, environment 1.53s)"
+        ]
+      }
+    ],
+    "contract_read_review": "服务端SandboxOut can_execute/can_preview/can_stop独立缺省false；前端preview交project:view/file:view而不借creator续期门，stop仅交can_stop保留安全回收；ReportList交can_delete及实际review:cancel；AiPrompt source对应既有read权限且canPolish严格true才LLM。未发现接口命名或充分条件误用。",
+    "scope": "本段只读源码/摘要核对，没有第二次运行308样本；根最新完整137/1705为另行运行证据。"
+  },
+  "root_pre_final_snapshot": {
+    "metadata": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终源冻结前快照.json",
+      "bytes": 33332,
+      "sha256": "6a66cd9dc76ffc574909b971f9abba46da3657e30217260fbd674c31a97bff83"
+    },
+    "status": "前端冻结，Pentest拒绝门尚未冻结；非最终提交清单",
+    "entries": 165,
+    "mismatches": [
+      {
+        "path": "backend/app/services/pentest_service.py",
+        "field": "bytes",
+        "expected": 144904,
+        "actual": 145088
+      },
+      {
+        "path": "backend/app/services/pentest_service.py",
+        "field": "sha256",
+        "expected": "0b0c58aaa00284411f63d2aa3fa31c150a5f6e7fe6044c02715e6a850bd2cd45",
+        "actual": "77919ccf6541dc77bd49548d73d208cefb65ce419f27234664fc8580d5b690ea"
+      },
+      {
+        "path": "backend/tests/unit/services/test_pentest_viewer_boundaries.py",
+        "field": "bytes",
+        "expected": 5105,
+        "actual": 10308
+      },
+      {
+        "path": "backend/tests/unit/services/test_pentest_viewer_boundaries.py",
+        "field": "sha256",
+        "expected": "66ed47050bcea6eefed45bc6cf8f5e883a7e583c648282da07703fa165af9cdd",
+        "actual": "3dfb38698384cc5cd82a0cac30c8c4dbb5bddef4a45c8940154ddc4d97ff178c"
+      }
+    ],
+    "interpretation": "快照明确非最终提交清单；当前仅Pentest服务及其专属测试变更符合仍未冻结分区。不可拿该初始快照证明最终全源不变。"
+  },
+  "limits": [
+    "完整前端Vitest、ESLint及vue-tsc/Vite build是本地候选检查，不等于生产真实点击、手机或全角色HTTP验收。",
+    "部署日志明确fake-only；33绑定及20故障恢复为命令替身，没有真实Compose parser或生产数据库/容器替换。",
+    "5个checkpoint reader为行为场景，包含故意不兼容或坏摘要decoder，不是5种生产reader通过。",
+    "后端静态只选择F,E9，不等于全部Ruff规则、完整类型检查或所有后端测试通过；Pentest仍改动，最终静态和全后端须再次执行。",
+    "日志清单只归档本轮文件内容和根工具进程收据，没有合并旧轮次通过数量。"
+  ]
+}

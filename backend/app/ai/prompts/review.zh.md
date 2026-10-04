@@ -49,14 +49,14 @@
 - `description`: 中文描述,30-200 字
 - `suggestion`: 中文修改建议,30-200 字
 - `fixed_code`: 必须是可直接替换原代码的片段,包含必要的上下文
-- `owasp`: OWASP 编号,如 A05:2025-Injection(安全类必填,其他类填空字符串)
-- `cwe`: CWE 编号,如 CWE-89(安全类必填,其他类填空字符串)
+- `owasp`: 有明确分类映射时填写 OWASP 编号,如 A05:2025-Injection;其他类或分类未知时填空字符串
+- `cwe`: 有明确弱点映射时填写 CWE 编号,如 CWE-89;其他类或分类未知时填空字符串
 - `evidence`: 关键代码片段(1-3 行,直接从代码中复制,不要改写)
 - `exploit_scenario`: 30-200 字攻击场景描述(安全类必填,其他类填空字符串)
 - `references`: 参考链接 URL 数组(可空数组)
 - `confidence`: 0.0-1.0 的浮点数,表示你对这条问题的把握程度
-- `cvss_score`: CVSS v3.1 基础分(0.0-10.0,保留 1 位小数;安全类必填,其他类填 0)
-- `cvss_vector`: CVSS v3.1 向量字符串(如 AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H;安全类必填,其他类填空字符串)
+- `cvss_score`: CVSS v3.1 基础分(0.0-10.0,保留 1 位小数);必要指标未获证据核实时，cvss_score 填 null、cvss_vector 填空字符串
+- `cvss_vector`: 已有证据支持全部必要指标时填写合法 CVSS v3.1 向量字符串;非安全类或必要指标未知时填空字符串
 - `remediation`: 详细修复方案(50-500 字,包含修复步骤、配置示例、验证方法;安全类必填,其他类可填空字符串)
 - `compliance_mapping`: 字段由后端根据 cwe 自动反查填充,**LLM 不需要输出此字段**
 
@@ -71,13 +71,13 @@
 - 静态参考资料标注核验日期、编号、适用版本与官方链接;记录不是精确匹配时不得作为确认依据
 
 ## 安全类问题强制要求
-当 `issue_type` 为"安全漏洞"时,以下字段**必须**填充(不可为空字符串):
-- `owasp`: 必须是 OWASP Top 10 编号(如 A01:2025-Broken Access Control)
-- `cwe`: 必须是 CWE 编号(如 CWE-89)
+当 `issue_type` 为"安全漏洞"时,须提供代码证据与有依据的说明;分类编号与 CVSS 单独遵循证据约束:
+- 分类编号映射依据不明确时填空字符串，不得为满足格式而编造编号
+- `owasp`: 有明确对应分类时填写 OWASP Top 10 编号(如 A01:2025-Broken Access Control)，否则填空字符串
+- `cwe`: 有明确对应弱点时填写 CWE 编号(如 CWE-89)，否则填空字符串
 - `evidence`: 必须直接引用代码中的关键行
 - `exploit_scenario`: 必须描述具体的攻击路径,而非泛泛而谈
-- `cvss_score`: 必须给出 0.0-10.0 之间的数值
-- `cvss_vector`: 必须给出合法的 CVSS v3.1 向量字符串
+- `cvss_score` / `cvss_vector`: 仅在全部必要指标已有证据时填写;未知时保留未评分,不得为满足格式而编造指标
 - `remediation`: 必须给出可执行的详细修复方案(50-500 字)
 
 ## 其他要求

@@ -8,13 +8,13 @@ import io
 import json
 import zipfile
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
 
 from app.models.agent_capability import SandboxEnvironment, SandboxEvent
 from app.models.agent_governance import AgentAlert
 from app.models.project import Project
+from app.models.user import User
 from app.services import sandbox_service
 from app.services.sandbox_service import (
     _agent_test_cache_key,
@@ -40,15 +40,27 @@ def _clear_agent_test_cache(monkeypatch):
     sandbox_service._AGENT_TEST_CACHE.clear()
 
 
-def _cache_environment() -> SimpleNamespace:
-    return SimpleNamespace(
+def _cache_environment(db) -> SandboxEnvironment:
+    existing = db.get(SandboxEnvironment, 1)
+    if existing is not None:
+        return existing
+    db.add(User(id=7, username="cache-local", password="local", role="admin", status=1))
+    db.add(Project(id=9, user_id=7, project_name="cache local", status="active"))
+    environment = SandboxEnvironment(
         id=1,
         public_id="sbx_cache",
         project_id=9,
         owner_id=7,
+        agent_code="test_verifier",
         source_sha256="legacy-field-value",
         agent_config_json='{"db_type":"none"}',
+        execution_token="cache-local-lease", purpose="test", language="python", test_mode="whitebox",
+        runtime="runsc", image_ref="unused", resource_policy_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
     )
+    db.add(environment)
+    db.commit()
+    return environment
 
 
 def _fake_generator(calls: list[list[dict[str, str]]]) -> type:
@@ -78,14 +90,14 @@ def test_generate_agent_tests_cache_hits_and_uses_archive_sha256(db, monkeypatch
 
     first = _generate_agent_test_cases(
         db,
-        _cache_environment(),
+        _cache_environment(db),
         archive,
         "python",
         "whitebox",
     )
     second = _generate_agent_test_cases(
         db,
-        _cache_environment(),
+        _cache_environment(db),
         archive,
         "python",
         "whitebox",
@@ -108,7 +120,7 @@ def test_generate_agent_tests_cache_expires_and_regenerates(db, monkeypatch) -> 
     )
     monkeypatch.setattr("app.services.sandbox_service._append_event", lambda *_args, **_kwargs: None)
 
-    environment = _cache_environment()
+    environment = _cache_environment(db)
     first = _generate_agent_test_cases(db, environment, archive, "python", "whitebox")
     assert first is not None
     assert len(calls) == 1

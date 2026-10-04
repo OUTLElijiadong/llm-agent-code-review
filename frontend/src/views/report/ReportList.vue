@@ -112,7 +112,7 @@
                   <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" command="export:html">导出 HTML</el-dropdown-item>
                   <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" command="export:pdf">导出 PDF</el-dropdown-item>
                   <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" command="export:word">导出 Word</el-dropdown-item>
-                  <el-dropdown-item v-if="canDeleteReport" command="delete" divided>
+                  <el-dropdown-item v-if="canDeleteReport && row.can_delete === true" command="delete" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
@@ -138,7 +138,7 @@
 
 <script setup lang="ts">
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowDown, MagicStick, View as ViewIcon } from '@element-plus/icons-vue'
@@ -159,6 +159,13 @@ const userStore = useUserStore()
 const loading = ref(false)
 const loadErrorMessage = ref('')
 let loadRequestGeneration = 0
+let lifecycleGeneration = 0
+let deleteGeneration = 0
+let disposed = false
+function captureAccount() {
+  const generation = lifecycleGeneration
+  return () => !disposed && generation === lifecycleGeneration
+}
 const reports = ref<ReportListItem[]>([])
 const projects = ref<ProjectOut[]>([])
 const total = ref(0)
@@ -193,6 +200,8 @@ function scoreClass(score: number) {
 }
 
 async function loadData() {
+  if (disposed) return
+  const current = captureAccount()
   const requestGeneration = ++loadRequestGeneration
   loading.value = true
   loadErrorMessage.value = ''
@@ -208,22 +217,25 @@ async function loadData() {
     }
 
     const data = await getReports(params)
-    if (requestGeneration !== loadRequestGeneration) return
+    if (!current() || requestGeneration !== loadRequestGeneration) return
     reports.value = data.items
     total.value = data.total
   } catch {
-    if (requestGeneration !== loadRequestGeneration) return
+    if (!current() || requestGeneration !== loadRequestGeneration) return
     reports.value = []
     total.value = 0
     loadErrorMessage.value = '报告列表加载失败，请重试。'
   } finally {
-    if (requestGeneration === loadRequestGeneration) loading.value = false
+    if (current() && requestGeneration === loadRequestGeneration) loading.value = false
   }
 }
 
 async function loadProjects() {
-  const data = await getProjects({ page_size: 100 })
-  projects.value = data.items
+  const current = captureAccount()
+  try {
+    const data = await getProjects({ page_size: 100 })
+    if (current()) projects.value = data.items
+  } catch { /* 筛选选项失败不阻断报告列表；HTTP 拦截器负责提示。 */ }
 }
 
 function onRowClick(row: ReportListItem) {
@@ -267,6 +279,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 async function handleExport(row: ReportListItem, format: ReportFormat): Promise<void> {
   if (!canExport(format)) return
   if (exportingTaskId.value !== null) return
+  const current = captureAccount()
   if (isDomainReport(row) && format !== 'json') {
     showExportError({ message: `领域报告不支持 ${format.toUpperCase()}`, next_action: '请导出真实领域 JSON' }, format, row)
     return
@@ -278,6 +291,7 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
   retryExportFormat.value = null
   try {
     const blob = await exportReport(row.task_id, format, 'detailed')
+    if (!current() || !canExport(format)) return
     const extMap: Record<ReportFormat, string> = {
       json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
     }
@@ -285,9 +299,9 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
     downloadBlob(blob, `review_report_${taskName}_${row.task_id}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
   } catch (error) {
-    showExportError(error, format, row)
+    if (current()) showExportError(error, format, row)
   } finally {
-    exportingTaskId.value = null
+    if (current()) exportingTaskId.value = null
   }
 }
 
@@ -311,17 +325,42 @@ function retryExport(): void {
  * @param row - 报告行数据
  */
 async function handleDelete(row: ReportListItem) {
-  if (!canDeleteReport.value) return
+  if (!canDeleteReport.value || row.can_delete !== true || disposed) return
+  const accountCurrent = captureAccount()
+  const generation = deleteGeneration
+  const current = () => accountCurrent() && generation === deleteGeneration && canDeleteReport.value && row.can_delete === true
+    && !reports.value.some(report => report.task_id === row.task_id && report.can_delete !== true)
   const ok = await confirmDanger({ target: `删除报告「${taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)}」` })
-  if (!ok) return
+  if (!ok || !current()) return
   try {
     await deleteReport(row.task_id)
+    if (!current()) return
     ElMessage.success('报告已删除')
     await loadData()
   } catch {
     /* http 拦截器已处理 */
   }
 }
+
+watch(canDeleteReport, () => { deleteGeneration++ }, { flush: 'sync' })
+watch(() => reports.value.map(row => `${row.task_id}:${row.can_delete}`).join('|'), () => { deleteGeneration++ }, { flush: 'sync' })
+watch(() => [userStore.token, userStore.profile?.id], () => {
+  lifecycleGeneration++
+  deleteGeneration++
+  loadRequestGeneration++
+  reports.value = []
+  projects.value = []
+  total.value = 0
+  loading.value = false
+  exportingTaskId.value = null
+  exportErrorMessage.value = ''
+  retryExportRow.value = null
+  if (userStore.token && userStore.profile) {
+    void loadData()
+    void loadProjects()
+  }
+}, { flush: 'sync' })
+onBeforeUnmount(() => { disposed = true; lifecycleGeneration++; loadRequestGeneration++ })
 
 /**
  * 卡片「导出」下拉命令分发:export:* 导出,delete 删除。

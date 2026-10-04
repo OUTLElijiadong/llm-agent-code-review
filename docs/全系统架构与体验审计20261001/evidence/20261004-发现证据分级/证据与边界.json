@@ -1,0 +1,671 @@
+{
+  "检查时间": "2026-10-04T12:40:52.616113+00:00",
+  "状态": "未发布候选；定向三轮完成；独立核验交由第二代理",
+  "范围": {
+    "源码快照": {
+      "backend/app/ai/finding_aggregator.py": {
+        "bytes": 26398,
+        "sha256": "784d38e3504a6a70ee179609efe8f26db89b38e97fa42b4b1dbb4db7f9669a85"
+      },
+      "backend/app/ai/prompts/review.zh.md": {
+        "bytes": 6227,
+        "sha256": "06e1ff9aede30bcd0c615487fe9a923d3a38f8a590710d153d3a7172f10340c7"
+      },
+      "backend/app/services/report_exporter.py": {
+        "bytes": 31438,
+        "sha256": "a6059314052bba648155cc2671f02430cea7864e9f5d57a500a92d97347c03bb"
+      },
+      "backend/tests/test_finding_aggregator.py": {
+        "bytes": 20814,
+        "sha256": "d5dadf8a2a58264fdb4540741362a58e47bf58a9fb4a72f89ac9fc5956797a62"
+      },
+      "backend/tests/test_security_catalog_current.py": {
+        "bytes": 9799,
+        "sha256": "20edd08516c1dc65d39bb4892635b23b529d3c84f0847f4e1aafdc50db77c77f"
+      },
+      "backend/tests/test_report_exporter.py": {
+        "bytes": 44502,
+        "sha256": "d9d8c8a09f9f987b8ae32d70521769e37b8255ed639ca8156c2fd420f17e47f5"
+      },
+      "frontend/src/views/security/cnnvd-knowledge.ts": {
+        "bytes": 3159,
+        "sha256": "194c450883500628ca6db11f975da41c309b0bc5ea13db6e7634409752e12c3c"
+      },
+      "frontend/src/views/security/SecurityCenter.test.ts": {
+        "bytes": 5791,
+        "sha256": "b95cffb407a182a4d43b8a3398b1e5a0f4770676d0d33aa953e3008f92dc71d7"
+      }
+    },
+    "详情组件基础快照": {
+      "说明": "此两文件之后已交 frontend_completion 独占实施另一个已复现生命周期补修；以下 SHA 对应本判定组最终三轮之前的基础，不声称是后续最终版本。",
+      "frontend/src/components/issue/IssueDetailDrawer.vue": {
+        "sha256": "ce5f397eba9e7901745bccce9ea311929fdd200ee6842eef6666cb778b232a17",
+        "bytes": 18729
+      },
+      "frontend/src/components/issue/IssueDetailDrawer.test.ts": {
+        "sha256": "ff97729cfacf7f7f673ebcc3c5109ee378ca53dea61356b19bdcbf24fdd1fa3c",
+        "bytes": 4419
+      }
+    },
+    "聚合版本": "finding-aggregation-v2",
+    "风险算法版本未改": "claim-risk-v2"
+  },
+  "先红后绿": [
+    {
+      "阶段": "原聚合/未知CVSS格式约束",
+      "后端": "后端-原实现红回归.log",
+      "结果": "14 failed / 24 passed；部分失败是原状态已 pending 但缺新理由元数据，不能将全部 14 项称为已复现自动接受缺陷。",
+      "前端": "前端-原实现红回归.log",
+      "前端结果": "3 failed / 3 passed"
+    },
+    {
+      "阶段": "评分口径解释和官方标题",
+      "后端": "后端-评分口径原实现红.log",
+      "结果": "7 failed / 61 passed",
+      "前端": "前端-国标文案原实现红.log",
+      "前端结果": "5 failed / 7 passed"
+    },
+    {
+      "阶段": "聚合版本与未知分类提示",
+      "后端": "后端-版本及未知分类原实现红.log",
+      "结果": "2 failed / 3 passed；该红阶段基于已局部修复但尚为 v1 的候选，不是全部原始 HEAD。"
+    }
+  ],
+  "本地纯逻辑回执": {
+    "聚合样本": [
+      {
+        "issue_type": "安全漏洞",
+        "evidence": "nonexistent_line()",
+        "evidence_quality": "direct",
+        "human_review_status": "pending",
+        "decision": "human_review",
+        "review_reasons": [
+          "source_quote_unverified",
+          "security_claim_requires_verification"
+        ],
+        "confirmation_count": 1,
+        "risk_score": 75.0,
+        "aggregation_version": "finding-aggregation-v2"
+      },
+      {
+        "issue_type": "安全漏洞",
+        "evidence": "return True",
+        "evidence_quality": "verified",
+        "human_review_status": "pending",
+        "decision": "human_review",
+        "review_reasons": [
+          "security_claim_requires_verification"
+        ],
+        "confirmation_count": 1,
+        "risk_score": 75.0,
+        "aggregation_version": "finding-aggregation-v2"
+      },
+      {
+        "issue_type": "命名规范",
+        "evidence": "return True",
+        "evidence_quality": "verified",
+        "human_review_status": "not_required",
+        "decision": "accepted",
+        "review_reasons": [],
+        "confirmation_count": 1,
+        "risk_score": 75.0,
+        "aggregation_version": "finding-aggregation-v2"
+      }
+    ],
+    "报告分数": 72,
+    "原评分明细保持": {
+      "version": "severity-deduction-v1",
+      "base_score": 100,
+      "weights": {
+        "严重": 15,
+        "高": 8,
+        "中": 3,
+        "低": 1
+      },
+      "counts": {
+        "严重": 1,
+        "高": 1,
+        "中": 1,
+        "低": 2
+      },
+      "deductions": {
+        "严重": 15,
+        "高": 8,
+        "中": 3,
+        "低": 2
+      },
+      "total_deduction": 28,
+      "raw_score": 72,
+      "score": 72,
+      "risk_level": "中风险",
+      "score_source": "review_issues"
+    },
+    "新解释元数据": {
+      "version": "assessment-disclosure-v1",
+      "score_source": "review_issues",
+      "issue_scope": "all_reported_review_issues",
+      "human_review_counts": {
+        "pending": 1,
+        "evidence_requested": 1,
+        "accepted": 1,
+        "rejected": 1,
+        "not_required": 0,
+        "unrecorded": 1
+      },
+      "confidence_semantics": "model_estimate_not_vulnerability_verification",
+      "confirmation_count_semantics": "retained_source_count_not_vulnerability_verification",
+      "evidence_quality_semantics": "source_quote_match_not_condition_or_impact_verification",
+      "manual_status_semantics": "manual_disposition_not_retest_verification",
+      "domestic_database_freshness": "not_verified_by_this_export",
+      "official_rating": "not_provided_by_this_export"
+    },
+    "共享可见说明": [
+      "任务状态：未记录；文件处理进度：0/0（不等同于语义覆盖率）",
+      "统计来源：{}",
+      "覆盖记录：未记录，不能据此判定完整覆盖",
+      "评分口径：平台内部问题扣分，按报告问题的严重度计数计算，不是官方漏洞评分。",
+      "复核范围：待核实 2 项、人工驳回 1 项仍纳入现有评分口径；复核状态未记录 1 项，不能补认定为已验证。",
+      "证据边界：源码引用匹配、模型置信度及 confirmation_count 来源数均不代表漏洞条件或影响已验证；人工接受/驳回是复核裁决，已修复标记不等于复测通过。",
+      "漏洞库时效：本导出未核验国内漏洞库的记录版本或更新时间，不能据此声明已同步最新库或获得权威认证。",
+      "文件清单未记录，不能由问题列表推断全部送审文件。"
+    ],
+    "样本代码SHA256": "e0fa6d88acef74e619739271e65c72334abca4547d80dbbc478a8f2cbf22ed1b",
+    "样本代码": "def healthy():\n    return True\n",
+    "回执生成方式": "本地 .venv311 调用真实 aggregate_agent_findings 和 export_to_dict 的纯 Python 防御性探针；代码哈希只对应此良性输入片段，不是产品文件哈希，产品8文件哈希在范围.源码快照。"
+  },
+  "兼容与下游": [
+    "新增 aggregation.review_reasons 是既有自由 JSON 的可选项；无表结构/API必填字段迁移。新 v2 不重写历史无版本或 v1 记录。",
+    "原字段 verified 仅代表逐字引用在当前代码片段中存在；不校验所有前置条件/环境/影响，也不代表漏洞已验证。",
+    "聚合→实际 Worker 转换→SQLite→既有详情 API 函数→IssueOut 的 pending 及三种人工裁决已验证；这是本地函数入口，不是 HTTP 权限或生产接口验收。",
+    "人工 note 仍为可选文本；accepted/rejected 是人工裁决，不是形式化证据工件或修复运行复测成功。",
+    "报告仍将全部报告问题（包括 pending/evidence_requested/rejected）纳入原扣分口径，只新增说明，不改变 100 扣 15/8/3/1。",
+    "正式上游安全类别仅“安全漏洞”：前后端枚举、单/多 Agent parser、圆桌 parser/merge、静态和 Sentinel 路径一致；未发现合法安全别名遗漏。非法类别降为“其他”的既有边界未在本轮重写。"
+  ],
+  "实际复测": {
+    "后端三轮": [
+      {
+        "轮次": 1,
+        "passed": 266,
+        "warnings": 2,
+        "log": "后端-最终扩大复测第1轮.log"
+      },
+      {
+        "轮次": 2,
+        "passed": 266,
+        "warnings": 2,
+        "log": "后端-最终扩大复测第2轮.log"
+      },
+      {
+        "轮次": 3,
+        "passed": 266,
+        "warnings": 2,
+        "log": "后端-最终扩大复测第3轮.log"
+      }
+    ],
+    "前端三轮": [
+      {
+        "轮次": 1,
+        "passed": 140,
+        "files": 5,
+        "log": "前端-最终扩大复测第1轮.log"
+      },
+      {
+        "轮次": 2,
+        "passed": 140,
+        "files": 5,
+        "log": "前端-最终扩大复测第2轮.log"
+      },
+      {
+        "轮次": 3,
+        "passed": 140,
+        "files": 5,
+        "log": "前端-最终扩大复测第3轮.log"
+      }
+    ],
+    "静态检查": "Ruff / ESLint / vue-tsc --noEmit / 限定 diff --check 均 exit 0",
+    "环境": "候选 backend/.venv311 Python 3.11.15；前端 Node 24.14.1 / npm 11.11.0；无供应商调用、无生产连接。"
+  },
+  "国内数据现状": {
+    "运行分类元数据": {
+      "owasp_version": "2025",
+      "owasp_release": "Final",
+      "owasp_source_url": "https://owasp.org/Top10/2025/",
+      "cwe_version": "4.20",
+      "cwe_release_date": "2026-04-30",
+      "cwe_source_url": "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip",
+      "cwe_source_sha256": "3976f599e5e5200219a3108bb896d06e2a88fbb293369e1883cb423a5e9d7d50",
+      "cwe_weakness_count": 944,
+      "mapped_cwe_count": 249,
+      "mapped_weakness_count": 246,
+      "verified_at": "2026-09-07",
+      "mapping_note": "OWASP 各分类页面合计列出 249 个 CWE 标识；按 MITRE 4.20 类型核对为 246 个 Weakness 和 3 个 Category（16、320、1035）。官网介绍页另称 248，本库按可复核列表计数。",
+      "cve_scope": "已核验 41 条 PHP 生态 CVE 参考记录，另有 1 条尚无 CVE 编号的维护者公告；参考记录核验于 2026-09-12。不代表全量 CVE/NVD 数据库，也不代表项目已命中漏洞。",
+      "licenses": [
+        "OWASP CC BY 3.0",
+        "MITRE CWE Terms of Use: https://cwe.mitre.org/about/termsofuse.html"
+      ],
+      "cve_reference_count": 41,
+      "cve_verified_at": "2026-09-12",
+      "supplementary_advisory_count": 1,
+      "cve_reference_sha256": "6c19ae6ed5f89a1da7df4d58629d390da9c4036ac45c1b15a7d3d348e9a66413",
+      "cve_sources": [
+        "https://cveawg.mitre.org/api/cve/",
+        "https://www.php.net/ChangeLog-8.php",
+        "https://github.com/laravel/framework/security/advisories/",
+        "https://github.com/php/php-src/security/advisories/"
+      ]
+    },
+    "公告文件SHA256": "6c19ae6ed5f89a1da7df4d58629d390da9c4036ac45c1b15a7d3d348e9a66413",
+    "未实现边界": "当前 CNVD/CNNVD 为门户参考；目录构建由本地快照离线生成，没有实时国内记录接入、刷新成功/失败/时效过期状态或可核验官方记录匹配回执。",
+    "官方标题与时效核验日期": "2026-10-04",
+    "官方来源": [
+      {
+        "标准": "GB/T 30279-2020",
+        "名称": "信息安全技术 网络安全漏洞分类分级指南",
+        "状态": "现行；20260806-T-469 是正在征求意见的修订计划，不当成生效新标准",
+        "url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=B4C25880C3E01CB3E05397BE0A0A92D0"
+      },
+      {
+        "标准": "GB/T 34943-2017",
+        "名称": "C/C++语言源代码漏洞测试规范",
+        "状态": "现行；2025-03-27 复审继续有效",
+        "url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D825CCD3A7E05397BE0A0AB82A"
+      },
+      {
+        "标准": "GB/T 34944-2017",
+        "名称": "Java语言源代码漏洞测试规范",
+        "状态": "现行",
+        "url": "https://std.samr.gov.cn/gb/search/gbDetailedCNF?id=71F772D825B6D3A7E05397BE0A0AB82A"
+      },
+      {
+        "标准": "GB/T 34946-2017",
+        "名称": "C#语言源代码漏洞测试规范",
+        "状态": "现行",
+        "url": "https://std.samr.gov.cn/gb/search/gbDetailedCNF?id=71F772D825CED3A7E05397BE0A0AB82A"
+      },
+      {
+        "标准": "GB/T 39412-2020",
+        "名称": "信息安全技术 代码安全审计规范",
+        "状态": "现行；2026-09-09 复审继续有效；仅本轮研究依据，未在 UI 声称通过条款认证",
+        "url": "https://std.samr.gov.cn/gb/search/gbDetailed?id=B4C25880C2F31CB3E05397BE0A0A92D0"
+      },
+      {
+        "来源": "CNCERT管理CNVD及官方符合性测试说明",
+        "url": "https://www.cert.org.cn/publish/main/12/2026/20260918105103376726138/20260918105103376726138_.html",
+        "边界": "存在官方符合性测试服务不表示本平台已通过。"
+      },
+      {
+        "来源": "CNNVD官网技术文档",
+        "url": "https://www.cnnvd.org.cn/home/tech",
+        "边界": "官网有 XML 获取接口文档，未验证平台接入、数据授权、配额或匿名完整增量访问。"
+      }
+    ]
+  },
+  "未验与限制": [
+    "此候选尚未发布；三轮只指该明确测试集合，不替代全后端/全前端或全站生产验收。",
+    "不存在本轮实际漏洞利用、渗透进攻、生产越权重放；没有证明模型无幻觉或源码条件/影响已经运行验证。",
+    "没有实现国内实时漏洞库接入/更新时间监控；静态来源和局部快照不可称最新完整国内库。",
+    "JSON/dict 总是带元数据；三套内置 HTML、实际 PDF 构建和 Word 文档结构已经验证共享范围说明。历史/自定义 HTML 模板只有显式渲染 scope_lines 时才显示该说明，未强改模板契约。",
+    "未新增人工证据工件必填门、修复版本→复测运行强关联，未修改候选/驳回项的原评分算法或多来源确认历史字段名称。",
+    "详情异步旧响应污染属于随后独立补修，由另一代理负责；本组 140 前端计数对应该补修之前的基础快照。"
+  ],
+  "日志完整性": {
+    "前端-ESLint.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_summary_lines": []
+    },
+    "前端-TypeScript.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_summary_lines": []
+    },
+    "前端-修复后首轮.log": {
+      "bytes": 400,
+      "sha256": "e06849af9d57fc961b69337bf19d8afed5c5ae68841512b62e2a11461d9023c3",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  1 passed (1)",
+        "      Tests  6 passed (6)",
+        "   Start at  20:01:18",
+        "   Duration  936ms (transform 327ms, setup 19ms, import 670ms, tests 30ms, environment 151ms)",
+        ""
+      ]
+    },
+    "前端-原实现红回归.log": {
+      "bytes": 4774,
+      "sha256": "645bc236d6aa9ab3178a10ccadcf701a6fa2c9ac3baacc811b2d8df61404d197",
+      "last_summary_lines": [
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯",
+        "",
+        "",
+        " Test Files  1 failed (1)",
+        "      Tests  3 failed | 3 passed (6)",
+        "   Start at  19:59:30",
+        "   Duration  4.02s (transform 1.44s, setup 137ms, import 2.75s, tests 116ms, environment 792ms)",
+        ""
+      ]
+    },
+    "前端-国标文案原实现红.log": {
+      "bytes": 6114,
+      "sha256": "0208bb9c1e6e653494ad0c70d0de6752a6f3f6682798ef1c9c7ce9c59a40950b",
+      "last_summary_lines": [
+        "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯",
+        "",
+        "",
+        " Test Files  1 failed (1)",
+        "      Tests  5 failed | 7 passed (12)",
+        "   Start at  20:16:13",
+        "   Duration  871ms (transform 313ms, setup 23ms, import 500ms, tests 72ms, environment 213ms)",
+        ""
+      ]
+    },
+    "前端-国标文案首轮绿.log": {
+      "bytes": 397,
+      "sha256": "08771b902b38ed823821b9ea667226fd6369a268b2b57a365b12439dfa83a17e",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  1 passed (1)",
+        "      Tests  12 passed (12)",
+        "   Start at  20:18:05",
+        "   Duration  865ms (transform 313ms, setup 19ms, import 507ms, tests 68ms, environment 204ms)",
+        ""
+      ]
+    },
+    "前端-扩大复测第1轮.log": {
+      "bytes": 536,
+      "sha256": "d082fdbe6a46b0e5d0b57642ce011520a2cd3db1028663f9e64bddd68c0aca1b",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  4 passed (4)",
+        "      Tests  128 passed (128)",
+        "   Start at  20:04:11",
+        "   Duration  11.81s (transform 1.62s, setup 64ms, import 6.54s, tests 3.18s, environment 1.43s)",
+        ""
+      ]
+    },
+    "前端-扩大复测第2轮.log": {
+      "bytes": 536,
+      "sha256": "3556fbcb78d9fb55b96eb51c57d490c56caa0d9dd85937fc62e49b1349676616",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  4 passed (4)",
+        "      Tests  128 passed (128)",
+        "   Start at  20:04:23",
+        "   Duration  14.32s (transform 1.82s, setup 86ms, import 6.88s, tests 4.40s, environment 2.05s)",
+        ""
+      ]
+    },
+    "前端-扩大复测第3轮.log": {
+      "bytes": 536,
+      "sha256": "37d37705adf5d602030f5404c2f5510052fd01a2b9b71b4e3b157b14d7a0ce34",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  4 passed (4)",
+        "      Tests  128 passed (128)",
+        "   Start at  20:04:39",
+        "   Duration  14.63s (transform 1.84s, setup 89ms, import 7.00s, tests 4.50s, environment 2.17s)",
+        ""
+      ]
+    },
+    "前端-最终ESLint.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_summary_lines": []
+    },
+    "前端-最终TypeScript.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "last_summary_lines": []
+    },
+    "前端-最终扩大复测第1轮.log": {
+      "bytes": 579,
+      "sha256": "fc7ab5d55320e59c52a7c71158e287faaee99682acd0dd4b0cb11c1422441722",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  5 passed (5)",
+        "      Tests  140 passed (140)",
+        "   Start at  20:31:03",
+        "   Duration  18.85s (transform 2.19s, setup 138ms, import 8.60s, tests 5.53s, environment 3.25s)",
+        ""
+      ]
+    },
+    "前端-最终扩大复测第2轮.log": {
+      "bytes": 579,
+      "sha256": "9446eff63959ab39d2256bf6cea78144a31b3201711b0b39d02229cdfbcb49fa",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  5 passed (5)",
+        "      Tests  140 passed (140)",
+        "   Start at  20:31:23",
+        "   Duration  16.54s (transform 2.03s, setup 115ms, import 7.96s, tests 4.83s, environment 2.55s)",
+        ""
+      ]
+    },
+    "前端-最终扩大复测第3轮.log": {
+      "bytes": 578,
+      "sha256": "967d7bc5d5d527c9c6ba0636a69c6d757d44f18267a1f73ed82a25ee6f312ca8",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  5 passed (5)",
+        "      Tests  140 passed (140)",
+        "   Start at  20:31:40",
+        "   Duration  14.75s (transform 1.89s, setup 97ms, import 6.78s, tests 4.36s, environment 2.41s)",
+        ""
+      ]
+    },
+    "后端-Ruff.log": {
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "last_summary_lines": [
+        "All checks passed!"
+      ]
+    },
+    "后端-修复后首轮.log": {
+      "bytes": 1245,
+      "sha256": "5a0d4329edd04f1407349d09052bb49bdab2df83b74530c64c8dea2cff753889",
+      "last_summary_lines": [
+        "",
+        "=============================== warnings summary ===============================",
+        ".venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13",
+        "    from crypt import crypt as _crypt",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 38 passed, 1 warning in 0.45s ========================="
+      ]
+    },
+    "后端-原实现红回归.log": {
+      "bytes": 20961,
+      "sha256": "6bf5c4e84526fe61af7cb35525cab8df67e198014fa84d72243f3910f0384bc6",
+      "last_summary_lines": [
+        "FAILED tests/test_finding_aggregator.py::test_unmatched_or_absent_source_quote_requires_human_review[\\u4ee3\\u7801\\u89c4\\u8303-   -0]",
+        "FAILED tests/test_finding_aggregator.py::test_matching_source_quote_does_not_verify_security_claim[\\u5b89\\u5168\\u6f0f\\u6d1e]",
+        "FAILED tests/test_finding_aggregator.py::test_matching_source_quote_does_not_verify_security_claim[security]",
+        "FAILED tests/test_finding_aggregator.py::test_case_or_string_whitespace_changes_are_not_verified_quotes[label = \"alpha beta\"]",
+        "FAILED tests/test_finding_aggregator.py::test_case_or_string_whitespace_changes_are_not_verified_quotes[label = \"Alpha  Beta\"]",
+        "FAILED tests/test_finding_aggregator.py::test_multiple_sources_do_not_replace_security_claim_verification",
+        "FAILED tests/test_security_catalog_current.py::test_review_prompt_allows_unavailable_cvss_when_metrics_are_unverified",
+        "=================== 14 failed, 24 passed, 1 warning in 2.58s ==================="
+      ]
+    },
+    "后端-扩大复测第1轮.log": {
+      "bytes": 2378,
+      "sha256": "bea42f5b0ec64795be86f3e5767651d1c620306a0ec4a8b1f4632fc79103afbf",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 242 passed, 2 warnings in 10.98s ======================="
+      ]
+    },
+    "后端-扩大复测第2轮.log": {
+      "bytes": 2378,
+      "sha256": "e9889a9ee6a4b8ecfad4982292c764d41c9e2ee9f331e0d2c8ff2069c3358a65",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 242 passed, 2 warnings in 14.76s ======================="
+      ]
+    },
+    "后端-扩大复测第3轮.log": {
+      "bytes": 2378,
+      "sha256": "1a5bfa528d731b8d23e0616de8c7907b0d4a7d19c363b87ae680dd07c3207329",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 242 passed, 2 warnings in 12.33s ======================="
+      ]
+    },
+    "后端-最终Ruff.log": {
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "last_summary_lines": [
+        "All checks passed!"
+      ]
+    },
+    "后端-最终扩大复测第1轮.log": {
+      "bytes": 2458,
+      "sha256": "5327639328f3495603d163b9dd4d81ab04d30696d1026c082210d07cbfa47ab2",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 15.32s ======================="
+      ]
+    },
+    "后端-最终扩大复测第2轮.log": {
+      "bytes": 2458,
+      "sha256": "e55d8d29c15a6f0eff8b19967c7cc0230bab7b8918c520c0c3bf51c134448f37",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 14.67s ======================="
+      ]
+    },
+    "后端-最终扩大复测第3轮.log": {
+      "bytes": 2458,
+      "sha256": "a32e49ae66f644c9574fb6323f796da38bc4d1f35c65d690e2368310ff7e5e46",
+      "last_summary_lines": [
+        "    from crypt import crypt as _crypt",
+        "",
+        ".venv311/lib/python3.11/site-packages/fastapi/testclient.py:1",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.",
+        "    from starlette.testclient import TestClient as TestClient  # noqa",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 13.11s ======================="
+      ]
+    },
+    "后端-版本及未知分类原实现红.log": {
+      "bytes": 3753,
+      "sha256": "b67550a18b61b96dedc55d93e311147cb6b2b6dd6f112e3d46b4695c6821a176",
+      "last_summary_lines": [
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13",
+        "    from crypt import crypt as _crypt",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "=========================== short test summary info ============================",
+        "FAILED tests/test_finding_aggregator.py::test_new_evidence_semantics_are_distinguishable_from_historical_v1",
+        "FAILED tests/test_security_catalog_current.py::test_review_prompt_and_output_schema_allow_unknown_classification_without_invention",
+        "==================== 2 failed, 3 passed, 1 warning in 0.90s ===================="
+      ]
+    },
+    "后端-评分口径原实现红.log": {
+      "bytes": 7739,
+      "sha256": "8dc8a3463c581adf6e3b59b2606f0807a4cb1800aab4d95b70c297bdaf27aa51",
+      "last_summary_lines": [
+        "FAILED tests/test_report_exporter.py::test_report_discloses_review_candidates_and_rejections_without_changing_score",
+        "FAILED tests/test_report_exporter.py::test_empty_historical_score_disclosure_does_not_infer_verified_coverage[100]",
+        "FAILED tests/test_report_exporter.py::test_empty_historical_score_disclosure_does_not_infer_verified_coverage[72]",
+        "FAILED tests/test_report_exporter.py::test_builtin_html_reports_display_evidence_and_score_scope[simple]",
+        "FAILED tests/test_report_exporter.py::test_builtin_html_reports_display_evidence_and_score_scope[detailed]",
+        "FAILED tests/test_report_exporter.py::test_builtin_html_reports_display_evidence_and_score_scope[compliance]",
+        "FAILED tests/test_report_exporter.py::test_word_report_retains_assessment_scope_without_upgrading_manual_acceptance",
+        "========================= 7 failed, 61 passed in 0.87s ========================="
+      ]
+    },
+    "后端-评分口径首轮绿.log": {
+      "bytes": 732,
+      "sha256": "79f1ed50e2d3ca055e2ba7fc79f8317380b642f44eb6e6da5780d7efece23aaa",
+      "last_summary_lines": [
+        "plugins: cov-5.0.0, asyncio-1.3.0, platformdirs-4.12.1, anyio-4.15.1",
+        "asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function",
+        "collected 68 items",
+        "",
+        "tests/test_report_exporter.py .......................................... [ 61%]",
+        "..........................                                               [100%]",
+        "",
+        "============================== 68 passed in 0.75s =============================="
+      ]
+    },
+    "独立复核-backend-132项.log": {
+      "bytes": 1566,
+      "sha256": "5258647498ad4ce0b20488c5588026c093bd92ab90a55c393eb9bc11dd43c84a",
+      "last_summary_lines": [
+        "",
+        "=============================== warnings summary ===============================",
+        ".venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854",
+        "  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13",
+        "    from crypt import crypt as _crypt",
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 132 passed, 1 warning in 3.70s ========================"
+      ]
+    },
+    "独立复核-frontend-18项.log": {
+      "bytes": 445,
+      "sha256": "a50f4e0581054cf73e7060fab358f9bfd5adf5fe3aa6e54f120d21db61af6cee",
+      "last_summary_lines": [
+        " RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+        "",
+        "",
+        " Test Files  2 passed (2)",
+        "      Tests  18 passed (18)",
+        "   Start at  20:36:10",
+        "   Duration  2.45s (transform 566ms, setup 25ms, import 1.58s, tests 301ms, environment 391ms)",
+        ""
+      ]
+    }
+  },
+  "敏感模式轻量检查": "本证据日志未命中给定密码/常见密钥/Bearer长凭据模式；没有读取或输出 .env。"
+}

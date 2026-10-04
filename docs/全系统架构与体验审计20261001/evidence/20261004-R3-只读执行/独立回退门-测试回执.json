@@ -1,0 +1,143 @@
+{
+  "日期": "2026-10-04",
+  "范围": "本地标准库源码probe及fake Docker/curl/DB命令的发布脚本契约回归，不是实际目标镜像或生产回退",
+  "源码冻结前": {
+    "deploy/lib/project_member_compatibility.py": {
+      "bytes": 6204,
+      "sha256": "d2e73d59654cd9bb5add663dd08f23c323897615054ccd763624fc30c6b2117f"
+    },
+    "deploy/lib/common.sh": {
+      "bytes": 38875,
+      "sha256": "e55464c28bfd9ee8e1d1756b5db94c5ab39b7ab6e5a1328853fd6cccef0abedd"
+    },
+    "deploy/rollback.sh": {
+      "bytes": 3958,
+      "sha256": "76a46ff11d952f9f442f5f6bfb3d5eb28997e4d17461d90a5806ecb8db958b6f"
+    },
+    "deploy/tests/test_project_member_probe.py": {
+      "bytes": 3097,
+      "sha256": "7cd933c19506e09dc0b001302faff079d15c66a7d9f4fcc89a152199051d8cfc"
+    },
+    "deploy/tests/test_scripts.sh": {
+      "bytes": 93216,
+      "sha256": "424800cde8de7687421c86fbade3bc530a2792622bdafb810a872e00e82662e6"
+    },
+    "deploy/tests/deploy_failure_cases.sh": {
+      "bytes": 11525,
+      "sha256": "7c4b4e6b3953085b2e7fc965dabd57e808124daa2a711217ee620106806f6d0b"
+    }
+  },
+  "源码冻结后": {
+    "deploy/lib/project_member_compatibility.py": {
+      "bytes": 6204,
+      "sha256": "d2e73d59654cd9bb5add663dd08f23c323897615054ccd763624fc30c6b2117f"
+    },
+    "deploy/lib/common.sh": {
+      "bytes": 38875,
+      "sha256": "e55464c28bfd9ee8e1d1756b5db94c5ab39b7ab6e5a1328853fd6cccef0abedd"
+    },
+    "deploy/rollback.sh": {
+      "bytes": 3958,
+      "sha256": "76a46ff11d952f9f442f5f6bfb3d5eb28997e4d17461d90a5806ecb8db958b6f"
+    },
+    "deploy/tests/test_project_member_probe.py": {
+      "bytes": 3097,
+      "sha256": "7cd933c19506e09dc0b001302faff079d15c66a7d9f4fcc89a152199051d8cfc"
+    },
+    "deploy/tests/test_scripts.sh": {
+      "bytes": 93216,
+      "sha256": "424800cde8de7687421c86fbade3bc530a2792622bdafb810a872e00e82662e6"
+    },
+    "deploy/tests/deploy_failure_cases.sh": {
+      "bytes": 11525,
+      "sha256": "7c4b4e6b3953085b2e7fc965dabd57e808124daa2a711217ee620106806f6d0b"
+    }
+  },
+  "源码未变化": true,
+  "运行": [
+    {
+      "name": "8项标准库probe",
+      "command": [
+        "backend/.venv311/bin/python",
+        "deploy/tests/test_project_member_probe.py"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.223,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-8项标准库probe.log",
+      "bytes": 1026,
+      "sha256": "ae2d4c4aa3806d6d8d93aa08a736bf19e514cdfa5aaa34c7ce561fcfddacc078",
+      "tail": [
+        "test_invalid_source_fails_closed (__main__.MemberReaderProbeTest.test_invalid_source_fails_closed) ... ok",
+        "test_missing_execution_gate_fails_closed (__main__.MemberReaderProbeTest.test_missing_execution_gate_fails_closed) ... ok",
+        "test_missing_source_fails_closed (__main__.MemberReaderProbeTest.test_missing_source_fails_closed) ... ok",
+        "test_real_current_contract (__main__.MemberReaderProbeTest.test_real_current_contract) ... ok",
+        "test_reject_everything_is_not_compatibility (__main__.MemberReaderProbeTest.test_reject_everything_is_not_compatibility) ... ok",
+        "test_unknown_role_cannot_be_read_as_valid (__main__.MemberReaderProbeTest.test_unknown_role_cannot_be_read_as_valid) ... ok",
+        "test_write_gate_must_deny_viewer (__main__.MemberReaderProbeTest.test_write_gate_must_deny_viewer) ... ok",
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 8 tests in 0.188s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "33项发布绑定",
+      "command": [
+        "bash",
+        "deploy/tests/test_scripts.sh",
+        "--release-only"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 14.552,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-33项发布绑定.log",
+      "bytes": 1029,
+      "sha256": "4c117b1ac9fa82f1d743319fee7258532364d3194edd0da717f943283104ecf2",
+      "tail": [
+        "PASS rollback_ledger_reference_without_schema",
+        "PASS rollback_ledger_invalid_json",
+        "PASS rollback_ledger_probe_failure",
+        "PASS rollback_ledger_probe_unknown",
+        "PASS rollback_ledger_db_failure",
+        "PASS rollback_ledger_schema_unknown",
+        "PASS rollback_ledger_legacy",
+        "PASS rollback_member_supported",
+        "PASS rollback_member_old",
+        "PASS rollback_member_unknown",
+        "PASS rollback_member_probe_failure",
+        "release binding tests: passed=33 failed=0"
+      ]
+    },
+    {
+      "name": "20项失败矩阵",
+      "command": [
+        "bash",
+        "deploy/tests/test_scripts.sh",
+        "--failure-matrix-only"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 26.586,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-20项失败矩阵.log",
+      "bytes": 1270,
+      "sha256": "f9e08d851ea55347a0c6db01781a984f7e536a66675c8db79d1ed77706ac8a26",
+      "tail": [
+        "failure_case=frontend_build exit=44 recovery=restored PASS",
+        "failure_case=frontend_up exit=44 recovery=restored PASS",
+        "failure_case=assets exit=43 recovery=restored PASS",
+        "failure_case=frontend_health exit=1 recovery=restored PASS",
+        "failure_case=https exit=1 recovery=restored PASS",
+        "failure_case=rollback_failed exit=1 recovery=failed PASS",
+        "failure_case=ledger_empty_rollback_refused exit=1 recovery=failed PASS",
+        "failure_case=ledger_written_rollback_refused exit=1 recovery=failed PASS",
+        "failure_case=ledger_probe_failed exit=1 recovery=failed PASS",
+        "failure_case=member_empty_old_refused exit=1 recovery=failed PASS",
+        "failure_case=member_unknown_refused exit=1 recovery=failed PASS",
+        "failure_case=member_probe_failed exit=1 recovery=failed PASS"
+      ]
+    }
+  ],
+  "实际Docker调用": 0,
+  "SSH调用": 0,
+  "生产数据库连接": 0,
+  "有限范围": "role helper行为探测不证明所有实际API/worker已正确调用helper。目标只回植helper但遗漏调用点仍可通过probe，因此与本轮实际入口拒绝回归共同判断，不能由此宣称全站兼容。"
+}

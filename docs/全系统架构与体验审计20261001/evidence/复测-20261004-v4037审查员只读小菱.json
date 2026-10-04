@@ -1,0 +1,73 @@
+{
+  "version": "4.0.37",
+  "deployed_source_sha": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "recorded_at_utc": "2026-10-04T13:03:33.981629+00:00",
+  "scope": "普通Safari审查员只读小菱角色与可见项目问答",
+  "observed": [
+    "当前角色显示审查员，说明原审计员角色已合并",
+    "查看项目列表与检索知识库两步已完成，折叠摘要2/2并可展开工具结果",
+    "实际项目清单total=1与项目管理页共1个一致",
+    "回答区分会话身份与工具返回，未声称工具查询角色",
+    "解除电脑控制工具阻断后，普通Safari三次真实刷新均恢复同一问题、两步工具摘要及最终回复，顺序一致；刷新期间明确显示正在恢复"
+  ],
+  "limits": [
+    "仅验证本次可见页面和工具回执；未验证全部权限或所有账号聊天隔离",
+    "知识工具展示含TRUNCATED预览，未据此断定完整模型输入被截断",
+    "回答引导到操作审计，但未执行该工具查询，不将自然语言当权限证明",
+    "没有新建审查、Agent、团队或沙箱",
+    "此前锁屏检查阻断保留为阶段记录；其后完成三轮恢复，不能推出所有对话/全部历史通过",
+    "未抓取每项网络状态，不把无可见404等同全部HTTP请求通过"
+  ],
+  "private_artifacts": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/17-v4037小菱只读角色项目回答.jpg",
+      "bytes": 394500,
+      "sha256": "a06038ba82a64f8e4909896054b30aa632f99f869f3b1ee0f3ab1cab641a9e14"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/17-v4037小菱只读角色项目回答.txt",
+      "bytes": 9721,
+      "sha256": "69a94348875e482946ad99efb170943074303813c0a506c7e35cdb3284c93d86"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/18-v4037小菱工具展开.jpg",
+      "bytes": 278296,
+      "sha256": "3e275b58ee4fbbdfbc66f9a299f8094f37414361e0667330aaf7cf95a973b12d"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/18-v4037小菱工具展开.txt",
+      "bytes": 11575,
+      "sha256": "bc1816fcb0459930242c99d6f4e2a6a336d38f1eb192233ba8f474f7af1072ef"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/19-v4037小菱刷新恢复.jpg",
+      "bytes": 385018,
+      "sha256": "bbb2fe83fc6dd551beb602eb167f71b2b59d2ca3cbb9f67d46d655522f0bcd88"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/19-v4037小菱刷新恢复.txt",
+      "bytes": 9613,
+      "sha256": "bd9bb77022026147f3458d4be73c1f228dba506b75c53bd7697cca50b586f3db"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/20-v4037小菱刷新恢复-第2轮.jpg",
+      "bytes": 384905,
+      "sha256": "ed624f0696179d6e6f1a9f6e36f769b9eadfa6b95fe9f42e0255a1557fd96f2f"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/20-v4037小菱刷新恢复-第2轮.txt",
+      "bytes": 9613,
+      "sha256": "5a72b65f08166086238b0b990bd3c1aa11038dee51884b670da19a3cbaabbb7a"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/21-v4037小菱刷新恢复-第3轮.jpg",
+      "bytes": 384982,
+      "sha256": "499bdc9dd52fc12db817f8ca042a8e59bf68f6b9dfac2c12da813009269c0577"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/21-v4037小菱刷新恢复-第3轮.txt",
+      "bytes": 9613,
+      "sha256": "cf9177b464f092ef3c9fcecc465bb878f8f4ae58a884da85b32a96a4cb9e6b98"
+    }
+  ]
+}

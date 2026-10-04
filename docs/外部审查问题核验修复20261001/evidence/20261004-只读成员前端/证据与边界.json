@@ -1,0 +1,754 @@
+{
+  "recorded_at_utc": "2026-10-04T15:05:09.881594+00:00",
+  "state": "最终前端源码冻结，未声称已部署或生产 viewer 通过",
+  "known_production_at_review": "v4.0.37；本候选后端和发布由主代理另行验收",
+  "source_scope": {
+    "product_files": 14,
+    "modified_test_files": 12,
+    "fixture_files": 1,
+    "unchanged_extra_regression_input_files": 1,
+    "entries": [
+      {
+        "path": "frontend/src/types/project.ts",
+        "kind": "product",
+        "bytes": 4268,
+        "sha256": "6808932edf84864a6f03f0f95574d52982241760fdc368da942369a5719506f9"
+      },
+      {
+        "path": "frontend/src/types/projectMember.ts",
+        "kind": "product",
+        "bytes": 1229,
+        "sha256": "abc9509e4978d6287092540f7fd0a99e9c51d637f8605a659b1146b30c0641da"
+      },
+      {
+        "path": "frontend/src/types/review.ts",
+        "kind": "product",
+        "bytes": 5875,
+        "sha256": "99298423ddcf8e28dc9699e936d80eb20b9097a3c2615ea0677461bbb7aa3723"
+      },
+      {
+        "path": "frontend/src/types/sandbox.ts",
+        "kind": "product",
+        "bytes": 2213,
+        "sha256": "ef4a5b07172fca107df829296c2603cfebbe9d71b0e7e0d0d3a45fd79540c2fa"
+      },
+      {
+        "path": "frontend/src/types/report.ts",
+        "kind": "product",
+        "bytes": 5145,
+        "sha256": "38cd2c987500a3e86665cc8c470e33479f92108d394ec6459562eefb8172e36c"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewStart.vue",
+        "kind": "product",
+        "bytes": 37773,
+        "sha256": "b8b5fbdb87d7c172aec95628fe63f3c203be1028872e46a7e9833b3fa5c77c12"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewTaskList.vue",
+        "kind": "product",
+        "bytes": 22413,
+        "sha256": "136d5f4969ede7328a54a5b50442ce1d6f19fcf9b74963bedd47bd0eed94ac80"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewTaskDetail.vue",
+        "kind": "product",
+        "bytes": 55604,
+        "sha256": "407a6f9baae968e42a4f7e2a8ccd16905886eab8d88c021b0bbb3b3acbaeb341"
+      },
+      {
+        "path": "frontend/src/views/issue/IssueHub.vue",
+        "kind": "product",
+        "bytes": 25241,
+        "sha256": "a6baee617761fbaeb88332a45bf0436c5cd681b765a69ba6190eb244c6e2fcc1"
+      },
+      {
+        "path": "frontend/src/components/issue/IssueDetailDrawer.vue",
+        "kind": "product",
+        "bytes": 20144,
+        "sha256": "d80299fb6d572819215b7228eece1d47619158bd8636f89db036bdf5aa29e0fb"
+      },
+      {
+        "path": "frontend/src/components/issue/AiPromptModal.vue",
+        "kind": "product",
+        "bytes": 14232,
+        "sha256": "f9a1e2e8315172d96c44a5ce7b39d62aa51c7ed22e5fa9599ef30d58b11323ac"
+      },
+      {
+        "path": "frontend/src/views/project/ProjectDetail.vue",
+        "kind": "product",
+        "bytes": 38394,
+        "sha256": "48f73a6a8355afbbeb2f1c1f08339c37ee1ee3efc615b45c6f127ec4c0bd2e71"
+      },
+      {
+        "path": "frontend/src/views/sandbox/SandboxWorkstation.vue",
+        "kind": "product",
+        "bytes": 46135,
+        "sha256": "da5132113988782995a8fcb5f89b7941edbd4baa9a40b30c164b0a090422d231"
+      },
+      {
+        "path": "frontend/src/views/report/ReportList.vue",
+        "kind": "product",
+        "bytes": 18325,
+        "sha256": "2b6e42c00464540726c75622f67811b7dc6884620baad40f2e68de21e7679c35"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewStart.regression.test.ts",
+        "kind": "test",
+        "bytes": 23093,
+        "sha256": "dc9112b9d1244ee1929594a26b4bde76008c7cf5221065c9ac9c210443e724fc"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewTaskList.viewer.test.ts",
+        "kind": "test",
+        "bytes": 3369,
+        "sha256": "c37dd94746706b6bb257b328d4444b1d57eee92a09e9504e7ca0705ddb2b4d0b"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewTaskList.polling.test.ts",
+        "kind": "test",
+        "bytes": 12709,
+        "sha256": "729c9c20157e813751bc0ef4e576f2366ce3caac71e56199327bc97092d524b7"
+      },
+      {
+        "path": "frontend/src/views/review/ReviewTaskDetail.test.ts",
+        "kind": "test",
+        "bytes": 38201,
+        "sha256": "10855bd2b0eed6646b7a1a32ce212ce8a713942b1159fdc300228d0deb02d6b9"
+      },
+      {
+        "path": "frontend/src/views/issue/IssueHub.recovery.test.ts",
+        "kind": "test",
+        "bytes": 12924,
+        "sha256": "c3754d3e0c0a95988561b35beb15868908bbf65a481cb3ac22a9228fa62ea5c1"
+      },
+      {
+        "path": "frontend/src/components/issue/IssueDetailDrawer.test.ts",
+        "kind": "test",
+        "bytes": 15406,
+        "sha256": "f6063e4e51766268baae615de604e5e3713992da92fbbd2eb55ebd4fde01ecc1"
+      },
+      {
+        "path": "frontend/src/components/issue/AiPromptModal.viewer.test.ts",
+        "kind": "test",
+        "bytes": 5088,
+        "sha256": "3f7707d9fb1cd5046cc9a35a93557896f8d12ebe81e5490d04dd6696d312cc2e"
+      },
+      {
+        "path": "frontend/src/views/project/ProjectResourcePermission.test.ts",
+        "kind": "test",
+        "bytes": 22211,
+        "sha256": "42cb0d289d4d880e7f0fe498edd5abe64bd913eb3625751cb59db2e8df051816"
+      },
+      {
+        "path": "frontend/src/views/sandbox/SandboxWorkstation.test.ts",
+        "kind": "test",
+        "bytes": 22115,
+        "sha256": "972ca4b8f0b4a34a8a8fc5fe5c80d4909d8c7d200d23cef97f4efb558336db5f"
+      },
+      {
+        "path": "frontend/src/views/sandbox/SandboxWorkstation.viewer.test.ts",
+        "kind": "test",
+        "bytes": 14541,
+        "sha256": "dbf49b8b49d0df7a7a41a0554f806bd331fdbefaa79b7753a610e9ec390134e7"
+      },
+      {
+        "path": "frontend/src/views/report/ReportList.viewer.test.ts",
+        "kind": "test",
+        "bytes": 4348,
+        "sha256": "bc74e78c0bef0b669fea91052423d7e052ce53ef6d0759764b737ac92ace2189"
+      },
+      {
+        "path": "frontend/src/views/permissionVisibility.regression.test.ts",
+        "kind": "test",
+        "bytes": 10134,
+        "sha256": "cf3ca062834015be6cff35ab3ad718ba60ba00836ea056cdb5bd85cd47dd5ff8"
+      },
+      {
+        "path": "frontend/src/views/review/scanRegressionTestUtils.ts",
+        "kind": "fixture",
+        "bytes": 2997,
+        "sha256": "0f5517561cc12c8fc1ea074108058cbb54d52a0f38219f950f873169bcd469f4"
+      },
+      {
+        "path": "frontend/src/views/report/ReportList.test.ts",
+        "kind": "unchanged_regression_input",
+        "bytes": 8439,
+        "sha256": "26c60bd0baeae0f207d26d4c10ba0d73ca8ae36999a5775f8b4c1b058f118b3b"
+      }
+    ]
+  },
+  "log_inventory": {
+    "count": 37,
+    "entries": [
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/ESLint-首次.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "actual_result_lines": []
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/任务取消入口-完整绿.log",
+        "bytes": 451,
+        "sha256": "983193d3c77eef365f5fc7c9f3b22dc8bccebfb3e1806a8554ccdca0d8027f28",
+        "actual_result_lines": [
+          " Test Files  2 passed (2)",
+          "      Tests  27 passed (27)",
+          "   Duration  1.64s (transform 215ms, setup 18ms, import 607ms, tests 651ms, environment 252ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/任务取消入口-有效红.log",
+        "bytes": 3077,
+        "sha256": "d878c1aa55a0a2eb1e19cbb753e2d53d8bb531b1b320d3bb1ffb6fb79e9af976",
+        "actual_result_lines": [
+          " ❯ src/views/review/ReviewTaskList.viewer.test.ts (6 tests | 5 failed) 209ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  5 failed | 1 passed (6)",
+          "   Duration  943ms (transform 206ms, setup 18ms, import 460ms, tests 209ms, environment 196ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/任务安全复审入口-有效红.log",
+        "bytes": 3698,
+        "sha256": "4af71cb1c916a2bb0f3d3f4d66d34c45f24ce27da69c14b1bf9a0d3150827d4f",
+        "actual_result_lines": [
+          " ❯ src/views/review/ReviewTaskDetail.test.ts (69 tests | 3 failed | 66 skipped) 53ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  3 failed | 66 skipped (69)",
+          "   Duration  1.01s (transform 254ms, setup 14ms, import 687ms, tests 53ms, environment 198ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/修复手册入口-有效红.log",
+        "bytes": 7030,
+        "sha256": "6e70c65bb47f4196afa6bfaad731a12ab84b31a9512e4d3819893595bc229ded",
+        "actual_result_lines": [
+          " ❯ src/components/issue/AiPromptModal.viewer.test.ts (10 tests | 9 failed) 42ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  9 failed | 1 passed (10)",
+          "   Duration  582ms (transform 173ms, setup 18ms, import 263ms, tests 42ms, environment 199ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/修复手册入口-首次绿.log",
+        "bytes": 405,
+        "sha256": "089b80b6f0c63c89e272e8248b8020d0e169599565584a52862f27941bf4b234",
+        "actual_result_lines": [
+          " Test Files  1 passed (1)",
+          "      Tests  10 passed (10)",
+          "   Duration  462ms (transform 167ms, setup 14ms, import 235ms, tests 36ms, environment 122ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/全前端ESLint.log",
+        "bytes": 47,
+        "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea",
+        "actual_result_lines": []
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/全前端回归.log",
+        "bytes": 369,
+        "sha256": "0a64d083b7b9da2a30e378a270fc84ef62396f60fc4e407addb7408e5cb2bf91",
+        "actual_result_lines": [
+          " Test Files  137 passed (137)",
+          "      Tests  1684 passed (1684)",
+          "   Duration  50.88s (transform 2.27s, setup 417ms, import 12.82s, tests 13.66s, environment 16.55s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/六组入口-回归.log",
+        "bytes": 644,
+        "sha256": "f996c0e747d4a301f7b609dd2f05b136e5fc8c8f8c5ab0f4868c4ac216679526",
+        "actual_result_lines": [
+          " Test Files  6 passed (6)",
+          "      Tests  147 passed (147)",
+          "   Duration  5.99s (transform 566ms, setup 29ms, import 1.58s, tests 3.30s, environment 741ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/回收门修正全前端ESLint.log",
+        "bytes": 47,
+        "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea",
+        "actual_result_lines": []
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/回收门修正类型及完整构建.log",
+        "bytes": 21948,
+        "sha256": "2d1da7baea2cdf3b2607e76f9abae3a75b6106487eb5c9613de152cca7c0ad9a",
+        "actual_result_lines": [
+          "✓ built in 13.58s"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/审查入口-有效红.log",
+        "bytes": 5257,
+        "sha256": "846c8136d3f885959a02ea31cad79553043708ae78b185b238bf9f991d81046d",
+        "actual_result_lines": [
+          " ❯ src/views/review/ReviewStart.regression.test.ts (37 tests | 5 failed | 32 skipped) 198ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  5 failed | 32 skipped (37)",
+          "   Duration  1.14s (transform 229ms, setup 18ms, import 655ms, tests 198ms, environment 203ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/审查入口-首次测试环境失败.log",
+        "bytes": 1331,
+        "sha256": "0515720dd7f44fa1c47cbb2d645bce4e56d401b288242abb81cc4d2324a87ee9",
+        "actual_result_lines": [
+          " Test Files  1 failed (1)",
+          "      Tests  no tests",
+          "   Duration  505ms (transform 57ms, setup 14ms, import 0ms, tests 0ms, environment 121ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/审查入口-首次绿及旧回归.log",
+        "bytes": 2738,
+        "sha256": "6c1b333e0605f3ef684f481c4b6335369aa156970aff8078a149034c1e802d09",
+        "actual_result_lines": [
+          " ❯ src/views/review/ReviewStart.regression.test.ts (37 tests | 3 failed) 1682ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  3 failed | 34 passed (37)",
+          "   Duration  2.37s (transform 212ms, setup 13ms, import 499ms, tests 1.68s, environment 122ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/扩大回归-第一轮.log",
+        "bytes": 963,
+        "sha256": "e33111e49cc1660fe1cb9bf1b1a35db448552efce68ac309ce87f6635d658cf7",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  287 passed (287)",
+          "   Duration  10.05s (transform 713ms, setup 52ms, import 2.92s, tests 4.70s, environment 1.65s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/报告删除入口-有效红.log",
+        "bytes": 8713,
+        "sha256": "565f523106b6808cc7fbce41dbf78b51f49ba8662bea21f8e790ceea63ceff13",
+        "actual_result_lines": [
+          " ❯ src/views/report/ReportList.viewer.test.ts (6 tests | 5 failed) 38ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  5 failed | 1 passed (6)",
+          "   Duration  537ms (transform 176ms, setup 13ms, import 308ms, tests 38ms, environment 122ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/报告导出账号回执-有效红.log",
+        "bytes": 2502,
+        "sha256": "72d476c1546b1b01485c6aeff132f8db00c912c18e1b399dd0cc0cda1d8d3575",
+        "actual_result_lines": [
+          " ❯ src/views/report/ReportList.viewer.test.ts (7 tests | 1 failed | 6 skipped) 24ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  1 failed | 6 skipped (7)",
+          "   Duration  748ms (transform 196ms, setup 18ms, import 420ms, tests 24ms, environment 220ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终回收门修正扩大回归-第1轮.log",
+        "bytes": 963,
+        "sha256": "74ee897af11f386a31e9407d4c8fa0e872b1cd24fb18e26973ddf3cb4a5674af",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  295 passed (295)",
+          "   Duration  11.94s (transform 846ms, setup 62ms, import 3.34s, tests 5.88s, environment 1.84s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终回收门修正扩大回归-第2轮.log",
+        "bytes": 963,
+        "sha256": "354b6594de0fe3abc0bd5fbc7f25cae2b17526b0824c0018c78feb7b6f190dc4",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  295 passed (295)",
+          "   Duration  11.76s (transform 953ms, setup 61ms, import 3.38s, tests 5.72s, environment 1.80s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终回收门修正扩大回归-第3轮.log",
+        "bytes": 963,
+        "sha256": "9fe7f260420ec1ecb490849be97a5ae0c797c4c66e8f1a59d319523dc32723ae",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  295 passed (295)",
+          "   Duration  10.60s (transform 799ms, setup 50ms, import 2.86s, tests 5.37s, environment 1.60s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终扩大回归-第1轮.log",
+        "bytes": 963,
+        "sha256": "1b20d23749a8aedde13a827992bee025d1dd5a0a8520486669d2d6c309ad18a0",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  287 passed (287)",
+          "   Duration  11.76s (transform 864ms, setup 61ms, import 3.25s, tests 5.75s, environment 1.86s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终扩大回归-第2轮.log",
+        "bytes": 963,
+        "sha256": "f1f03bf10d06e870fc727b55ba16cb6ec27d36b8f3be3dc3ebbfc802334c4873",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  287 passed (287)",
+          "   Duration  11.50s (transform 847ms, setup 59ms, import 3.15s, tests 5.72s, environment 1.75s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终扩大回归-第3轮.log",
+        "bytes": 962,
+        "sha256": "2e6823b92aeaae589d14aa5d1dfb3a59c0245f1b27e5265ca231302e48112990",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  287 passed (287)",
+          "   Duration  9.68s (transform 701ms, setup 51ms, import 2.61s, tests 4.78s, environment 1.55s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第1轮.log",
+        "bytes": 963,
+        "sha256": "c18b14ed74ee5e351be584a7c8404b1a12928d60d32a446b89c343112d6e6524",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  13.10s (transform 918ms, setup 67ms, import 3.55s, tests 6.63s, environment 1.97s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第2轮.log",
+        "bytes": 963,
+        "sha256": "e30c969f7fd4668adf9a30079e58f17f631ddba9f645092facb511c7b8eec02d",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  10.95s (transform 834ms, setup 53ms, import 3.02s, tests 5.55s, environment 1.61s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第3轮.log",
+        "bytes": 962,
+        "sha256": "247710360696e656a531cbde248b2535db6a0cc6a3aa5c58567e32405c2228dc",
+        "actual_result_lines": [
+          " Test Files  13 passed (13)",
+          "      Tests  308 passed (308)",
+          "   Duration  9.62s (transform 685ms, setup 48ms, import 2.58s, tests 4.76s, environment 1.53s)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/沙箱入口-有效红.log",
+        "bytes": 14050,
+        "sha256": "e56d9e443ab95eb30fe85da6fc86fc3a6e5f71d8b2eb8919f9f760e9460a2934",
+        "actual_result_lines": [
+          " ❯ src/views/sandbox/SandboxWorkstation.viewer.test.ts (6 tests | 5 failed) 79ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  5 failed | 1 passed (6)",
+          "   Duration  523ms (transform 192ms, setup 16ms, import 244ms, tests 79ms, environment 121ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/独立回收能力适配-有效红.log",
+        "bytes": 3635,
+        "sha256": "afbf2853d5d2d9500e067b7cac5f989971f3db32b1d23ecdb3498120f212ba38",
+        "actual_result_lines": [
+          " ❯ src/views/sandbox/SandboxWorkstation.viewer.test.ts (11 tests | 4 failed | 7 skipped) 48ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  4 failed | 7 skipped (11)",
+          "   Duration  473ms (transform 184ms, setup 13ms, import 237ms, tests 48ms, environment 120ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/独立回收能力适配-首次绿.log",
+        "bytes": 453,
+        "sha256": "07b9db79e99c3be77e44d528b141a989b829e4ce3e967b35ef83df3fbd1fbab9",
+        "actual_result_lines": [
+          " Test Files  2 passed (2)",
+          "      Tests  36 passed (36)",
+          "   Duration  864ms (transform 198ms, setup 17ms, import 279ms, tests 222ms, environment 237ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/独立预览能力适配-有效红.log",
+        "bytes": 4706,
+        "sha256": "fb06040cbaeb8e493ba4be8dd7b12c17dd783f9d8cec8452d93e08720d2cf388",
+        "actual_result_lines": [
+          " ❯ src/views/sandbox/SandboxWorkstation.viewer.test.ts (21 tests | 5 failed | 14 skipped) 61ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  1 failed (1)",
+          "      Tests  5 failed | 2 passed | 14 skipped (21)",
+          "   Duration  503ms (transform 191ms, setup 16ms, import 244ms, tests 61ms, environment 125ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/独立预览能力适配-首次绿.log",
+        "bytes": 453,
+        "sha256": "1d825822136f060a405d1533b350795b04939854ff2a68002e4783218429bcd8",
+        "actual_result_lines": [
+          " Test Files  2 passed (2)",
+          "      Tests  46 passed (46)",
+          "   Duration  1.05s (transform 211ms, setup 22ms, import 309ms, tests 292ms, environment 315ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/类型及完整构建.log",
+        "bytes": 21948,
+        "sha256": "cf1d8d723c92d3fe0d584e419c2900ad549a03bd83d087b40a923946cfa5ab28",
+        "actual_result_lines": [
+          "✓ built in 13.23s"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/详情及报告-完整绿.log",
+        "bytes": 527,
+        "sha256": "33d43071097aef0128b1e8b4ace0ca7739fc708cbf559595c24cb79ee760ec66",
+        "actual_result_lines": [
+          " Test Files  4 passed (4)",
+          "      Tests  94 passed (94)",
+          "   Duration  2.93s (transform 515ms, setup 23ms, import 1.34s, tests 861ms, environment 487ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/问题及项目入口-有效红.log",
+        "bytes": 6746,
+        "sha256": "7fdd2adba44e943df56f65aa4edff8c30198ae9b5b0e99143fab29c1cdd396ed",
+        "actual_result_lines": [
+          " ❯ src/views/project/ProjectResourcePermission.test.ts (27 tests | 3 failed | 24 skipped) 258ms",
+          " ❯ src/components/issue/IssueDetailDrawer.test.ts (32 tests | 2 failed | 30 skipped) 26ms",
+          " ❯ src/views/issue/IssueHub.recovery.test.ts (20 tests | 2 failed | 18 skipped) 33ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  3 failed (3)",
+          "      Tests  7 failed | 72 skipped (79)",
+          "   Duration  2.15s (transform 459ms, setup 22ms, import 1.20s, tests 316ms, environment 443ms)"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/预览门修正全前端ESLint.log",
+        "bytes": 47,
+        "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea",
+        "actual_result_lines": []
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/预览门修正类型及完整构建.log",
+        "bytes": 21948,
+        "sha256": "281f227b17f4c708ac2946c7befd346e1050cbfdc0606af99d833a3ebc5943f2",
+        "actual_result_lines": [
+          "✓ built in 12.91s"
+        ]
+      },
+      {
+        "path": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/首批入口-完整回归.log",
+        "bytes": 3897,
+        "sha256": "bef52bc33fa087201d81582d46007f9328c864ad7dd0b39832bad8dcb10a2344",
+        "actual_result_lines": [
+          " ❯ src/views/project/ProjectResourcePermission.test.ts (27 tests | 3 failed) 1106ms",
+          " ❯ src/components/issue/IssueDetailDrawer.test.ts (32 tests | 2 failed) 96ms",
+          "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯",
+          " Test Files  2 failed | 2 passed (4)",
+          "      Tests  5 failed | 111 passed (116)",
+          "   Duration  5.38s (transform 514ms, setup 26ms, import 1.52s, tests 3.05s, environment 560ms)"
+        ]
+      }
+    ]
+  },
+  "final_verification": {
+    "targeted_suite": {
+      "files": 13,
+      "passed_per_run": 308,
+      "runs": 3,
+      "exit_code_each": 0,
+      "logs": [
+        "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第1轮.log",
+        "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第2轮.log",
+        "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/最终预览门修正扩大回归-第3轮.log"
+      ]
+    },
+    "eslint": {
+      "command": "npm run lint",
+      "exit_code": 0,
+      "log": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/预览门修正全前端ESLint.log"
+    },
+    "types_and_build": {
+      "command": "npm run build",
+      "exit_code": 0,
+      "vite_build_seconds": 12.91,
+      "log": "docs/外部审查问题核验修复20261001/evidence/20261004-只读成员前端/预览门修正类型及完整构建.log"
+    },
+    "full_suite": {
+      "latest_scope_not_yet_executed_by_this_agent": true,
+      "owner": "root",
+      "prior_snapshot_only": "137 files / 1684 passed / 50.88s；在 can_stop 和 can_preview 精确契约修正之前，不能当作最终全量"
+    },
+    "prior_targeted_snapshots": [
+      "13 files / 287 passed x3：独立回收门之前",
+      "13 files / 295 passed x3：独立回收门修正后，独立预览门之前"
+    ]
+  },
+  "red_evidence": [
+    {
+      "log": "审查入口-有效红.log",
+      "failed": 5,
+      "passed": 0,
+      "skipped": 32
+    },
+    {
+      "log": "问题及项目入口-有效红.log",
+      "failed": 7,
+      "passed": 0,
+      "skipped": 72
+    },
+    {
+      "log": "沙箱入口-有效红.log",
+      "failed": 5,
+      "passed": 1,
+      "skipped": 0
+    },
+    {
+      "log": "任务取消入口-有效红.log",
+      "failed": 5,
+      "passed": 1,
+      "skipped": 0
+    },
+    {
+      "log": "修复手册入口-有效红.log",
+      "failed": 9,
+      "passed": 1,
+      "skipped": 0
+    },
+    {
+      "log": "任务安全复审入口-有效红.log",
+      "failed": 3,
+      "passed": 0,
+      "skipped": 66
+    },
+    {
+      "log": "报告删除入口-有效红.log",
+      "failed": 5,
+      "passed": 1,
+      "skipped": 0
+    },
+    {
+      "log": "报告导出账号回执-有效红.log",
+      "failed": 1,
+      "passed": 0,
+      "skipped": 6
+    },
+    {
+      "log": "独立回收能力适配-有效红.log",
+      "failed": 4,
+      "passed": 0,
+      "skipped": 7,
+      "scope": "候选 viewer UI 与保留自有 cleanup 合同不一致，未称生产漏洞"
+    },
+    {
+      "log": "独立预览能力适配-有效红.log",
+      "failed": 5,
+      "passed": 2,
+      "skipped": 14,
+      "scope": "候选 viewer UI 与原审查员非创建者共享预览合同不一致，未称生产漏洞"
+    }
+  ],
+  "setup_and_fixture_failures": [
+    {
+      "log": "审查入口-首次测试环境失败.log",
+      "meaning": "0个测试，缺 createRouter 夹具；不算产品红"
+    },
+    {
+      "log": "审查入口-首次绿及旧回归.log",
+      "meaning": "3失败34通过；旧竞态样本选择 project2 却没有对应可执行资源夹具，已补明确合法 project2"
+    },
+    {
+      "log": "首批入口-完整回归.log",
+      "meaning": "5失败111通过；隐藏后的不存在按钮改直接 handler、下载有两个入口改存在断言、原合法审查员资源 fixture 显式 can_execute=true"
+    }
+  ],
+  "contracts": {
+    "fail_closed": "所有可选服务器资源能力只有严格 true 才开放；必须再与已有真实全局权限求交，不造新权限码",
+    "viewer": "复用 role_in_project=viewer；可依权限读取项目/代码/模板/任务指标，不能发正式任务或模型执行、写源码、改成员",
+    "issue": "can_handle 与现有 issue:handle/batch 求交；can_execute 仅供 LLM 增强，缺值 false",
+    "task": "can_cancel 与 review:cancel 求交；任务安全复审需 can_execute + security:scan",
+    "report_delete": "can_delete 与真实 review:cancel 求交；不借 can_cancel，保留后端合法审查员作者删除自己报告边界",
+    "prompt": "source 对应 issue:view/review:view/project:view；纯模板可读，use_llm=true 还需 canPolish=true；缺值不给模型润色",
+    "sandbox_execute": "创建需要 Project.can_execute；环境续期需要 Sandbox.can_execute + project:view/file:view",
+    "sandbox_preview": "Sandbox.can_preview + project:view/file:view；保留合法审查员非创建者共享预览，不交创建者；状态、同源路径、当前会话回执继续复核",
+    "sandbox_stop": "Sandbox.can_stop；真实服务端仅创建者/唯一超级管理员 + 当前项目read，不依赖执行能力，不由前端推断普通管理员",
+    "lifecycle": "账号/权限/资源能力及显示目标世代作废迟到确认、响应与 finally；ABA 撤销后再授予不继续旧操作；有效失败可以重试"
+  },
+  "preserved_root_R2_delete": {
+    "original_component_snapshot": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R2详情删除/冻结组件快照.txt",
+      "kind": "root_frozen_source_snapshot",
+      "bytes": 37862,
+      "sha256": "b8158a6c51396bb8b311eb161d8160a48e36f4e1987e5e988de895f59dbb4023"
+    },
+    "original_test_snapshot": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R2详情删除/冻结测试快照.txt",
+      "kind": "root_frozen_test_snapshot",
+      "bytes": 19835,
+      "sha256": "5eac1e05992c63259e192c8f5e3baef58e3de10fe59dde00a2f726bb8407820c"
+    },
+    "handleDeleteProject_identical": true,
+    "handleDeleteProject_sha256": "ff0ff4d5d933ce278598624dcae68492d026d000e2b4db4149fd7509bae73543",
+    "six_delete_test_cases_identical": true,
+    "delete_test_section_sha256": "9de97fa8d142d25dc337af81f2df8a360492a701b3cbef6ab972c3829a8ca6d1",
+    "six_cases": [
+      "负责人成功返回列表",
+      "取消",
+      "撤权",
+      "换账号",
+      "确认目标变化",
+      "删除完成前换账号拒绝迟到导航"
+    ]
+  },
+  "source_locations": [
+    {
+      "path": "frontend/src/views/sandbox/SandboxWorkstation.vue",
+      "points": {
+        "const canAccessExecution": 128,
+        "const canPreviewSelected": 131,
+        "const canStopSelected": 132,
+        "function capturePreviewTarget": 152,
+        "async function openPreview": 411
+      }
+    },
+    {
+      "path": "frontend/src/views/project/ProjectDetail.vue",
+      "points": {
+        "async function handleDeleteProject": 785,
+        "can_execute": 44,
+        "viewer": 260
+      }
+    },
+    {
+      "path": "frontend/src/components/issue/AiPromptModal.vue",
+      "points": {
+        "canPolish": 27,
+        "useLlm": 50,
+        "capture": 56
+      }
+    },
+    {
+      "path": "frontend/src/views/report/ReportList.vue",
+      "points": {
+        "can_delete": 115,
+        "async function handleExport": 279,
+        "async function handleDelete": 327
+      }
+    }
+  ],
+  "limits": [
+    "本组前端组件、真实 Pinia 或既有 reactive store、API 桩验证；无外部模型、worker、扫描或生产任务调用",
+    "没有生产成员或角色更改、正式审查/团队/圆桌/沙箱创建、数据删除或攻击测试",
+    "不等于真实手机、生产 HTTP 权限、全角色全流程或运行态攻防验收",
+    "CodeEditor 产品文件未改；其原写能力门和 viewer 只读样本由 ProjectResourcePermission 关联回归",
+    "全局 read 权限与资源读范围由后端单独实现和验收；前端动作隐藏不是安全授权的替代",
+    "本组源码与日志在此时间冻结；最终发布、完整后端、生产复测由主代理另行记录"
+  ]
+}

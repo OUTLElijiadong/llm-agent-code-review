@@ -10,6 +10,7 @@ import zipfile
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.orm import Session
 
 from app.agents.base import AgentResult
 from app.agents.events import AgentEventType
@@ -23,10 +24,76 @@ from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.project_source_archive import ProjectSourceArchive
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import project_source_service
+
+
+@pytest.fixture(autouse=True)
+def _real_execution_authorization_rows(db, monkeypatch):
+    """Keep mocked audit data but give the new auth transaction real local rows.
+
+    Existing positive tests explicitly model authorized execution. The foreign
+    project test still mirrors its foreign owner and must continue to reject.
+    """
+    original_inject = SecuritySentinelAgent.inject
+    makers = {name: globals()[name] for name in ("_make_project", "_make_file", "_make_task")}
+
+    def mirror_project(project_id, *, user_id=1, name="local auth scope", status="active"):
+        row = db.get(Project, project_id)
+        if row is None:
+            row = Project(id=project_id, user_id=user_id, project_name=name, status=status)
+            db.add(row)
+        else:
+            row.user_id, row.project_name, row.status = user_id, name, status
+        db.commit()
+
+    def mirror(name):
+        def make(*args, **kwargs):
+            row = makers[name](*args, **kwargs)
+            if name == "_make_project":
+                mirror_project(row.id, user_id=row.user_id, name=row.project_name, status=row.status)
+            elif db.get(Project, row.project_id) is None:
+                mirror_project(row.project_id)
+            return row
+        return make
+
+    for name in makers:
+        monkeypatch.setitem(globals(), name, mirror(name))
+
+    def inject(agent, database, user=None):
+        if user is not None:
+            auth_db = database if isinstance(database, Session) else db
+            if isinstance(database, MagicMock):
+                database.get_bind.return_value = db.get_bind()
+            current = auth_db.get(User, user.id)
+            if current is None:
+                current = User(id=user.id, username=f"local-auth-{user.id}", password="local",
+                               role=user.role, status=user.status)
+                auth_db.add(current)
+            if user.role not in {"admin", "super_admin"}:
+                role = auth_db.query(Role).filter_by(code=user.role).first()
+                if role is None:
+                    role = Role(code=user.role, name=user.role, status="active")
+                    auth_db.add(role)
+                    auth_db.flush()
+                if auth_db.query(UserRole).filter_by(user_id=user.id, role_id=role.id).first() is None:
+                    auth_db.add(UserRole(user_id=user.id, role_id=role.id))
+                permission = auth_db.query(Permission).filter_by(code="security:scan").first()
+                if permission is None:
+                    permission = Permission(code="security:scan", name="local scan", module="security")
+                    auth_db.add(permission)
+                    auth_db.flush()
+                grant = auth_db.query(RolePermission).filter_by(
+                    role_id=role.id, permission_id=permission.id,
+                ).first()
+                if grant is None:
+                    auth_db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+            auth_db.commit()
+        original_inject(agent, database, user)
+    monkeypatch.setattr(SecuritySentinelAgent, "inject", inject)
 
 
 def _make_user(role="admin", uid=1):

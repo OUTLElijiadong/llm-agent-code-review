@@ -1,0 +1,64 @@
+{
+  "recorded_at_utc": "2026-10-04T15:37:53.390099+00:00",
+  "original_tests": [
+    {
+      "path": "backend/tests/test_review_task_access_errors.py",
+      "bytes": 16650,
+      "sha256": "9578a6131e76695a3668f60875e51bcb629406b924bd4ee4ab89e52eba047aba",
+      "snapshot": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-1.txt"
+    },
+    {
+      "path": "backend/tests/unit/services/test_authorization_guards.py",
+      "bytes": 7750,
+      "sha256": "5fa205ccdc6dca58d1bb3150e17973ca04ecdc016eb35ac26035451a88916976",
+      "snapshot": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-2.txt"
+    },
+    {
+      "path": "backend/tests/unit/services/test_user_capability_registry.py",
+      "bytes": 32812,
+      "sha256": "61ef713cd96c530695c512852dc94b5de972c9b1d2337ef3ae7ba686421607f1",
+      "snapshot": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-3.txt"
+    }
+  ],
+  "root_full_log": {
+    "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4038最终完整后端.log",
+    "bytes": 933207,
+    "sha256": "d7c3aeebeca64837f9c294f72b3b634b321c6f09198ed6fc26629f9df7b67ced"
+  },
+  "excerpt_path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/根完整回归六项失败原文.log",
+  "setup_failure": {
+    "cwd": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend",
+    "argv": [
+      "/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/bin/python3.11",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/test_review_task_access_errors.py::test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error",
+      "tests/unit/services/test_authorization_guards.py::test_discussion_preflight_rejects_empty_scan_before_registration",
+      "tests/unit/services/test_user_capability_registry.py::test_concluded_roundtable_user_input_starts_owned_continuation"
+    ],
+    "exit_code": 1,
+    "log": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/首次命令解析环境失败.log",
+    "summary": [],
+    "classification": "工具环境错误：Path.resolve展开venv解释器symlink导致丢失venv；非有效测试红证据"
+  },
+  "original_reproduction": {
+    "cwd": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend",
+    "argv": [
+      "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/test_review_task_access_errors.py::test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error",
+      "tests/unit/services/test_authorization_guards.py::test_discussion_preflight_rejects_empty_scan_before_registration",
+      "tests/unit/services/test_user_capability_registry.py::test_concluded_roundtable_user_input_starts_owned_continuation"
+    ],
+    "exit_code": 1,
+    "log": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原六项单独复现红.log",
+    "summary": [
+      "======================== 6 failed, 2 warnings in 0.93s ========================="
+    ]
+  }
+}

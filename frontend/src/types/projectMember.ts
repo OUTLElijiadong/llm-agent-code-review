@@ -3,8 +3,8 @@
  * 对应后端 schemas/project_member.py 的 MemberOut / MemberAddIn / MemberRoleUpdateIn
  */
 
-/** 项目内角色枚举（与后端 pattern ^(owner|reviewer)$ 对齐） */
-export type ProjectRole = 'owner' | 'reviewer'
+/** 项目内角色枚举（与后端成员角色校验对齐） */
+export type ProjectRole = 'owner' | 'reviewer' | 'viewer'
 
 /** 项目成员响应项（对应后端 MemberOut） */
 export interface ProjectMemberOut {

@@ -1,0 +1,375 @@
+{
+  "日期": "2026-10-04",
+  "状态": "候选分区源码/专属样本冻结，非生产验收、非完整项目完成",
+  "已发布基准": "v4.0.37 / 732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "本轮范围": {
+    "沙箱": "viewer执行拒绝； PROJECT_VIEW+FILE_VIEW实际RBAC与项目角色求交；排队/模型前/执行提交前使用独立会话重新检查授权；旧preview令牌降级后拒绝。租约提交/cleanup不与执行授权混合。",
+    "预览": "can_preview保留合法非creator reviewer共享预览，执行仍需项目执行+实际全局读点；交互预览不是静态产物读取。",
+    "回收": "can_stop保留原creator或唯一且一致super_admin管理+项目read，viewer自己可安全回收，普通admin/其他viewer不能关闭他人环境；不加入执行RBAC以免降级阻塞清理。",
+    "cap": "SandboxEnvironmentOut仅can_execute/can_stop/can_preview三个bool默认false；can_execute=can_preview交原管理能力；前端缺字段拒绝。",
+    "安全入口": "注入actor时安全哨兵 file/task/project执行门与既有SECURITY_SCAN求交，模型每次调用前复核原actor；全链路explicit actor在阶段间重新检查，原读取发现不改。",
+    "MCP": "未改managed_mcp_adapter.py，其真实create工具复用sandbox_service真实拒绝门，有本地样本。"
+  },
+  "冻结源码与专属夹具": {
+    "backend/app/services/sandbox_service.py": {
+      "bytes": 238320,
+      "sha256": "890fae2811567e2a0a94fa6fe79149f6a8f99deab1da521b8a896a546e1181a2"
+    },
+    "backend/app/agents/security_sentinel_agent.py": {
+      "bytes": 174217,
+      "sha256": "c17f2159e33da856ade5c6a162d5e742fa66590bf15f3cae6dfefa532500ec01"
+    },
+    "backend/app/agents/fullchain_audit_agent.py": {
+      "bytes": 38250,
+      "sha256": "49fb7b71353ddd8d5d4e4d80a1a59734734f873000d52a5e1eee701a021e835a"
+    },
+    "backend/app/schemas/agent_capability.py": {
+      "bytes": 5878,
+      "sha256": "ee9c851fdca1989b1714b1c941747e36b7ba80c701543e02f6c8a9492cefa64b"
+    },
+    "backend/tests/unit/services/test_viewer_execution_boundaries.py": {
+      "bytes": 18351,
+      "sha256": "a41ab2110e0cfc4a5661a6a6b80e5c70ca31fa77d21903a65214a8db5542b3b5"
+    },
+    "backend/tests/unit/services/execution_test_rows.py": {
+      "bytes": 1379,
+      "sha256": "245ece5bbe8496203deae14fee2fcde98d665568146d344c88e0ab0f8a2ed9ad"
+    },
+    "backend/tests/unit/services/test_security_sentinel_agent.py": {
+      "bytes": 98622,
+      "sha256": "44d221a3573d38b6a1374352f8c97018613f9656ff26882d7c7ff5478709d120"
+    },
+    "backend/tests/unit/services/test_sandbox_optimizations.py": {
+      "bytes": 7647,
+      "sha256": "8b230e8ff61b4953b7a79e5bf5c72a98ac0632b07ddf855565efa9f0b40a29f0"
+    },
+    "backend/tests/unit/services/test_agent_test_cases.py": {
+      "bytes": 10063,
+      "sha256": "a9758293c5472cf054895f5d46d077f93cf95b43611a693333d8d1d7532d82a2"
+    },
+    "backend/tests/unit/services/test_remote_target_authorization.py": {
+      "bytes": 5348,
+      "sha256": "46a3c38f67bce0242b3155d4df3870213256353736fcb70db1e4940bad97e03d"
+    },
+    "backend/tests/unit/services/test_model_independent_paths.py": {
+      "bytes": 9043,
+      "sha256": "4e26b16de1fdc7316f08f1de906df3e25d75f2256c84615f239f6765dcd73509"
+    },
+    "backend/tests/unit/agents/test_agent_project_quarantine.py": {
+      "bytes": 6637,
+      "sha256": "a5991b4558ae1e1fb64eed4d7f053cbd841579a2e841a94a39e0b570d0e9404e"
+    }
+  },
+  "冻结原SHA核对": true,
+  "共享未独占文件": {
+    "backend/tests/unit/services/test_background_usage_sources.py": "本分区只校准沙箱worker完整本地actor/project/lease行；圆桌其它夹具已交context独占，只定向选沙箱node，不把整文件算稳定。",
+    "backend/tests/unit/agents/test_scan_entry_input_closure.py": "本分区只校准security_api真实本地admin行；圆桌其它夹具已交context独占，只定向选security_api node，不把整文件算稳定。"
+  },
+  "先红证据": {
+    "自然首次": "修复前-首次夹具错误.log：13失败，其中MCPkind/JWT时区两项是夹具错误，不能把13全部当有效产品红。",
+    "临时日志命名冲突": "此前声称的原13有效红/13绿同名临时文件被其它分区覆盖；归档实际16失败/1失败15通过原内容并明确不可作为本分区证据。",
+    "受控补证": "受控旧37回放-13场景.log/JSON：三个可信旧git源码模块在独立pytest进程内回放，当前helper/schema/最终夹具不变；13失败中一项为新增cap缺失，其他按实际拒绝门断言评估。不是自然首次旧37全栈/当前生产漏洞实弹。"
+  },
+  "复测": {
+    "新增原语义样本": 35,
+    "定向目标数": 19,
+    "命令": [
+      ".venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/unit/services/test_viewer_execution_boundaries.py",
+      "tests/unit/services/test_security_sentinel_agent.py",
+      "tests/unit/services/test_sandbox_optimizations.py",
+      "tests/unit/services/test_agent_test_cases.py",
+      "tests/unit/services/test_remote_target_authorization.py",
+      "tests/unit/services/test_model_independent_paths.py",
+      "tests/unit/agents/test_agent_project_quarantine.py",
+      "tests/unit/services/test_sandbox_multi_agent_review.py",
+      "tests/unit/services/test_sandbox_report_publish.py",
+      "tests/unit/services/test_sandbox_report_summary.py",
+      "tests/unit/services/test_sandbox_decompilation.py",
+      "tests/unit/services/test_managed_mcp_adapter.py",
+      "tests/unit/agents/test_security_sentinel_review.py",
+      "tests/unit/agents/test_fullchain_context_coverage.py",
+      "tests/unit/services/test_deploy_verify_runner_regressions.py",
+      "tests/unit/services/test_sandbox_api_authorization.py",
+      "tests/unit/services/test_background_usage_sources.py::test_sandbox_worker_recovers_persisted_origin_and_resets_context",
+      "tests/unit/agents/test_scan_entry_input_closure.py::test_security_api_does_not_serialize_empty_input_as_success",
+      "tests/test_security_catalog_current.py"
+    ],
+    "工作目录": "backend",
+    "三轮": [
+      {
+        "round": 1,
+        "exit_code": 0,
+        "seconds": 18.294,
+        "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第1轮.log",
+        "bytes": 3175,
+        "sha256": "410064177774984e2f11374859ac0fa26fff09ad29735701c3a9cefec8fbae5a",
+        "tail": "======================= 266 passed, 2 warnings in 17.33s =======================",
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第1轮.log"
+      },
+      {
+        "round": 2,
+        "exit_code": 0,
+        "seconds": 17.764,
+        "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第2轮.log",
+        "bytes": 3175,
+        "sha256": "83b6154ba72eb416b55305bfbc92c721fcd2fbae3a25d2fc175e657d88c744f7",
+        "tail": "======================= 266 passed, 2 warnings in 16.84s =======================",
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第2轮.log"
+      },
+      {
+        "round": 3,
+        "exit_code": 0,
+        "seconds": 17.867,
+        "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第3轮.log",
+        "bytes": 3175,
+        "sha256": "41869287f2471b1dc02c5729d56a3bfa3e049c9b27f98adb54869126459cb999",
+        "tail": "======================= 266 passed, 2 warnings in 16.92s =======================",
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第3轮.log"
+      }
+    ],
+    "范围": "每轮266 passed /2既有warnings（35新+231既有），不相加为798独立样本，不是全后端/生产性能证据。"
+  },
+  "旧夹具校准": "既有合法正向夹具补持久化身份/project/lease/RBAC真实关系。保留24/12/2与共享24失败日志；授权helper没有Mock放行、不删未知/陌生人/缺权限/隔离/租约拒绝。175/108组有26重叠不可相加。共享圆桌未完成日志不是本分区全绿。",
+  "独立核验": "frontend_completion只读四产品diff与35专属样本，实跑35passed/1warning；独立复核-35项.log，尚待其manifest终核回执。",
+  "静态验证": "最终Ruff本分区4产品+8专属文件通过。新两文件首次Black 2reformatted，最终单文件复查1unchanged（不误写最终2文件）。不对巨大旧文件做全量格式改写。",
+  "零外部执行": {
+    "实际模型或供应商调用": 0,
+    "实际Worker或Docker运行": 0,
+    "实际目标扫描或渗透": 0,
+    "实际网络目标请求": 0,
+    "生产或SSH连接": 0,
+    "部署或Git提交": 0,
+    "方式": "本地SQLite/RBAC真实行+良性阻断桩；安全流水线合法样本四phase全桩，实际验证代码/攻击体不执行不增强。"
+  },
+  "回退门独立核验": "独立回退门-测试回执.json：8标准库probe+33绑定+20失败矩阵实际exit0；6被审文件前后SHA相同。精确目标镜像ID的无网只读probe于容器切换前，不supported即闭锁，暂空成员也不跳过；只helper契约，漏实际caller的回植反例仍可能pass，不能推全站RBAC兼容。旧37回退角色语义-独立核验.json原纯SQLite结论保留。",
+  "未验证": "真实生产成员降级/正式沙箱Worker/全部角色浏览器/真实手机/真实供应商超长上下文/外部黑白盒运行。无本轮生产发布证据；项目整体完整回归和发布由root执行。",
+  "实际证据日志": {
+    "修复前-首次夹具错误.log": {
+      "bytes": 32557,
+      "sha256": "ca5ec28b28a53df651f224fc44ea86451494ccbb441dc86734c5751f25254fcd",
+      "tail": [
+        "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_fullchain_explicit_actor_cannot_bypass_unbound_sentinel",
+        "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_execution_permission_revoked_does_not_revoke_cleanup_lease",
+        "======================== 13 failed, 2 warnings in 0.97s ========================"
+      ]
+    },
+    "修复后-25守卫扩展绿.log": {
+      "bytes": 1245,
+      "sha256": "22b012c524c492ec17e95c318c4c9c1f2e652c9537976b4e8f605473884deb46",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 25 passed, 1 warning in 0.93s ========================="
+      ]
+    },
+    "修复后-25扩展绿.log": {
+      "bytes": 1245,
+      "sha256": "4ac4a526597a13450900902f689979a9c68b4b06de65ee41cf3200b4d9d9fea5",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 25 passed, 1 warning in 0.87s ========================="
+      ]
+    },
+    "修复后-31扩展绿.log": {
+      "bytes": 1245,
+      "sha256": "bd1688b91a7a7003329180cb4b3b2223fc04a9ad05ec43908d5435653496ccc9",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 31 passed, 1 warning in 1.02s ========================="
+      ]
+    },
+    "共享圆桌未完成-24失败231通过.log": {
+      "bytes": 85359,
+      "sha256": "bcb10116ed62eab6c5ecaf1474ab3a2f602524497a659d4fad1e5a5027394de9",
+      "tail": [
+        "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_cancellation_while_finalizer_runs_revokes_worker_before_late_result[stop]",
+        "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_rest_pending_to_websocket_keeps_preflight_version",
+        "================= 24 failed, 231 passed, 2 warnings in 29.05s =================="
+      ]
+    },
+    "受控旧37回放-13场景.log": {
+      "bytes": 27046,
+      "sha256": "f919a4ed75e19389f1a018e936b1366f4d14fc103bf4fe924524b9fdd43631fb",
+      "tail": [
+        "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_fullchain_explicit_actor_cannot_bypass_unbound_sentinel",
+        "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_execution_permission_revoked_does_not_revoke_cleanup_lease",
+        "======================== 13 failed, 1 warning in 0.39s ========================="
+      ]
+    },
+    "命名冲突-实际为其它分区16失败.log": {
+      "bytes": 20837,
+      "sha256": "6db9499e49d14a43760ee8fdab88d3b4eaeb5893a988a5667d6c0394cda94f9c",
+      "tail": [
+        "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_model_boundary_reloads_viewer_before_call",
+        "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_direct_start_requires_execution_before_registration",
+        "======================== 16 failed, 1 warning in 1.25s ========================="
+      ]
+    },
+    "命名冲突-实际为其它分区1失败15通过.log": {
+      "bytes": 2233,
+      "sha256": "1164fc91cf77749659ba09a37a99c65f6ed0f9b8e976c76695adfa41e580886b",
+      "tail": [
+        "=========================== short test summary info ============================",
+        "FAILED tests/unit/services/test_project_viewer_execution.py::test_roundtable_model_boundary_reloads_viewer_before_call",
+        "=================== 1 failed, 15 passed, 1 warning in 1.14s ===================="
+      ]
+    },
+    "既有夹具-主组校准175通过.log": {
+      "bytes": 2215,
+      "sha256": "7a19c34ccce6d3fc733c854f2fa03e5245768e927e1f1044445414a01c918808",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 175 passed, 2 warnings in 11.29s ======================="
+      ]
+    },
+    "既有夹具-另一组校准108通过.log": {
+      "bytes": 2206,
+      "sha256": "1beff256a54a6e09b36b1126519606e80ca805a9a552cbfe2cb0abeeb70c1301",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 108 passed, 1 warning in 6.10s ========================"
+      ]
+    },
+    "既有夹具-另一组首次12失败216通过.log": {
+      "bytes": 28939,
+      "sha256": "e975aaa5f4087d3a1935a0d7a3fdef394df8903a28b33d335b30f7cc4030e88d",
+      "tail": [
+        "FAILED tests/unit/agents/test_agent_project_quarantine.py::test_active_and_archived_member_access_remains_allowed",
+        "FAILED tests/unit/agents/test_scan_entry_input_closure.py::test_security_api_does_not_serialize_empty_input_as_success[file]",
+        "================= 12 failed, 216 passed, 2 warnings in 25.49s =================="
+      ]
+    },
+    "既有夹具-校准首次2失败88通过.log": {
+      "bytes": 26830,
+      "sha256": "188de430652e0373dd43e8c0bb8cffaa632c8cd834f428caf100e0c58eec6913",
+      "tail": [
+        "FAILED tests/unit/services/test_sandbox_optimizations.py::test_generate_agent_tests_cache_hits_and_uses_archive_sha256",
+        "FAILED tests/unit/services/test_sandbox_optimizations.py::test_generate_agent_tests_cache_expires_and_regenerates",
+        "=================== 2 failed, 88 passed, 1 warning in 10.39s ==================="
+      ]
+    },
+    "既有夹具-首次24失败142通过.log": {
+      "bytes": 55521,
+      "sha256": "f10540e0dc2741479c38279c6866dd8ed1a3ffab47ffc80673ac589abd4771de",
+      "tail": [
+        "FAILED tests/unit/services/test_security_sentinel_agent.py::test_scan_project_preserves_raw_dataflow_link_total_after_bounding",
+        "FAILED tests/unit/services/test_security_sentinel_agent.py::test_scan_task_labels_existing_security_issues",
+        "================== 24 failed, 142 passed, 1 warning in 1.76s ==================="
+      ]
+    },
+    "最终四产品.diff": {
+      "bytes": 29560,
+      "sha256": "9c865ea3460339be59c456e0f16110362fa1451190d1b299cf521fa5ceb09827",
+      "tail": [
+        "     if not _can_manage(db, actor, row):",
+        "         raise ForbiddenError(\"只有创建者或超级管理员可续期\", code=40300)",
+        "     if row.status not in ACTIVE_STATES:"
+      ]
+    },
+    "最终定向-第1轮.log": {
+      "bytes": 3175,
+      "sha256": "410064177774984e2f11374859ac0fa26fff09ad29735701c3a9cefec8fbae5a",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 17.33s ======================="
+      ]
+    },
+    "最终定向-第2轮.log": {
+      "bytes": 3175,
+      "sha256": "83b6154ba72eb416b55305bfbc92c721fcd2fbae3a25d2fc175e657d88c744f7",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 16.84s ======================="
+      ]
+    },
+    "最终定向-第3轮.log": {
+      "bytes": 3175,
+      "sha256": "41869287f2471b1dc02c5729d56a3bfa3e049c9b27f98adb54869126459cb999",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================= 266 passed, 2 warnings in 16.92s ======================="
+      ]
+    },
+    "独立回退门-20项失败矩阵.log": {
+      "bytes": 1270,
+      "sha256": "f9e08d851ea55347a0c6db01781a984f7e536a66675c8db79d1ed77706ac8a26",
+      "tail": [
+        "failure_case=member_empty_old_refused exit=1 recovery=failed PASS",
+        "failure_case=member_unknown_refused exit=1 recovery=failed PASS",
+        "failure_case=member_probe_failed exit=1 recovery=failed PASS"
+      ]
+    },
+    "独立回退门-33项发布绑定.log": {
+      "bytes": 1029,
+      "sha256": "4c117b1ac9fa82f1d743319fee7258532364d3194edd0da717f943283104ecf2",
+      "tail": [
+        "PASS rollback_member_unknown",
+        "PASS rollback_member_probe_failure",
+        "release binding tests: passed=33 failed=0"
+      ]
+    },
+    "独立回退门-8项标准库probe.log": {
+      "bytes": 1026,
+      "sha256": "ae2d4c4aa3806d6d8d93aa08a736bf19e514cdfa5aaa34c7ce561fcfddacc078",
+      "tail": [
+        "Ran 8 tests in 0.188s",
+        "",
+        "OK"
+      ]
+    },
+    "独立复核-35项.log": {
+      "bytes": 1245,
+      "sha256": "ac8869513c7bf07c0e3889173275e5327d37cccecc758be006c24fb3e688b892",
+      "tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "======================== 35 passed, 1 warning in 1.19s ========================="
+      ]
+    },
+    "静态-最终Ruff通过.log": {
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "tail": [
+        "All checks passed!"
+      ]
+    },
+    "静态-最终单文件Black.log": {
+      "bytes": 46,
+      "sha256": "c78d4bc341e5cfb6cba20095bbb680bc8471adaac200271c9ee2cc1424564efe",
+      "tail": [
+        "All done! ✨ 🍰 ✨",
+        "1 file left unchanged."
+      ]
+    },
+    "静态-首次38样式错误.log": {
+      "bytes": 22479,
+      "sha256": "6c427704df78a98242763ba263c111275d3559cfaf6304b971768d7968230934",
+      "tail": [
+        "",
+        "Found 38 errors.",
+        "[*] 7 fixable with the `--fix` option."
+      ]
+    },
+    "静态-首次新增两文件Black.log": {
+      "bytes": 168,
+      "sha256": "11dd4f9d9dea92ee6b5c0726cec98cae9880d0aa612359952ece7e7d9472214f",
+      "tail": [
+        "",
+        "All done! ✨ 🍰 ✨",
+        "2 files reformatted."
+      ]
+    }
+  }
+}

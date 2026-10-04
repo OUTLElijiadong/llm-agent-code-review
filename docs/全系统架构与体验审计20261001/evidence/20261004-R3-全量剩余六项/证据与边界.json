@@ -1,0 +1,253 @@
+{
+  "recorded_at_utc": "2026-10-04T16:03:46.346821+00:00",
+  "state": "产品与测试已冻结；完整后端和生产验证由根代理另行执行",
+  "request_scope": "根全量27失败中分配六处；先单独复现，再校准3旧测试；同链路发现活动圆桌执行门遗漏后获明确追加授权，仅补_control_roundtable_discussion及相邻单负向fixture",
+  "product_files": [
+    {
+      "path": "backend/app/services/agent_responses_service.py",
+      "bytes": 216623,
+      "sha256": "a6ad8b5c995e86e4932f61d8fc2c666a18f2ad56799ca0557c577678ba3d692a"
+    }
+  ],
+  "test_files": [
+    {
+      "path": "backend/tests/test_review_task_access_errors.py",
+      "bytes": 16650,
+      "sha256": "9e055b51d9b0862d3e1fa53c0c55e24eb6dba4a0bd772afda59d1fc0fc031237"
+    },
+    {
+      "path": "backend/tests/unit/services/test_authorization_guards.py",
+      "bytes": 11473,
+      "sha256": "221cecf90782637852ecc861716cc9c84e5c854b8ab089be49ebaa6e6739f34d"
+    },
+    {
+      "path": "backend/tests/unit/services/test_user_capability_registry.py",
+      "bytes": 42990,
+      "sha256": "2ba6c3fd3ad29fd33ddaade5b46a554df63f8e73894227bf1440cdf6a481371b"
+    },
+    {
+      "path": "backend/tests/unit/api/test_private_agent_account_isolation.py",
+      "bytes": 23945,
+      "sha256": "d62af076b9088c2f6d27dbc58292db648097f7fa1e793b3edc03f3c14fcf53db"
+    }
+  ],
+  "existing_test_ast_preservation": [
+    {
+      "path": "backend/tests/test_review_task_access_errors.py",
+      "changed_existing_functions": [
+        "test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_error"
+      ],
+      "added_functions": [],
+      "other_existing_functions_ast_identical": true
+    },
+    {
+      "path": "backend/tests/unit/services/test_authorization_guards.py",
+      "changed_existing_functions": [
+        "test_discussion_preflight_rejects_empty_scan_before_registration"
+      ],
+      "added_functions": [
+        "_grant_review_start",
+        "test_discussion_preflight_preserves_empty_input_rejection_for_authorized_reviewer",
+        "test_discussion_rejects_missing_review_permission_before_empty_input_validation",
+        "test_discussion_preflight_denies_non_executing_project_role_before_registration"
+      ],
+      "other_existing_functions_ast_identical": true
+    },
+    {
+      "path": "backend/tests/unit/services/test_user_capability_registry.py",
+      "changed_existing_functions": [
+        "test_roundtable_tools_read_and_control_only_owned_session_after_approval",
+        "test_concluded_roundtable_user_input_starts_owned_continuation"
+      ],
+      "added_functions": [
+        "_grant_review_start",
+        "test_concluded_roundtable_continuation_rechecks_execution_scope_before_registration",
+        "test_active_roundtable_control_rejects_viewer_before_controller_call",
+        "test_active_roundtable_authorized_reviewer_retains_controller_access",
+        "test_roundtable_owner_can_stop_or_pause_after_execution_scope_is_unavailable"
+      ],
+      "other_existing_functions_ast_identical": true
+    },
+    {
+      "path": "backend/tests/unit/api/test_private_agent_account_isolation.py",
+      "changed_existing_functions": [
+        "test_roundtable_tool_rejects_unhandled_input_without_ghost_turn"
+      ],
+      "added_functions": [],
+      "other_existing_functions_ast_identical": true
+    }
+  ],
+  "original_six": {
+    "reproduction": "原六项单独复现红.log",
+    "exit_code": 1,
+    "actual": "6 failed, 2 warnings in 0.93s",
+    "classification": [
+      "2项HTTP仅统一术语后的next_action旧断言。404防枚举、无内部详情、无写入断言保留。",
+      "3项空输入preflight原owner缺实际REVIEW_START，正确403先于原空源码校验；只在合法样本补Role/UserRole/Permission/RolePermission。",
+      "1项concluded续会普通owner同样缺REVIEW_START；原详细错误为permission_denied/当前账户没有发起审查的权限。合法owner及项目reviewer续会、原报告/来源/长纠正原文断言保留。"
+    ],
+    "three_file_expanded_green": "85 passed, 2 warnings in 3.58s（额外加入同链路活动控制样本后的最终单轮）"
+  },
+  "additional_product_defect": {
+    "local_observation": "活动session owner拥有原圆桌但当前项目不能执行时，Responses user_input/resume原先仍接受、调用良性controller并追加用户发言；concluded续会因真实start_discussion先校验而正确拒绝。",
+    "initial_red": "活动圆桌控制真实范围红.log: 2 failed, 1 warning in 0.99s",
+    "expanded_red": "活动圆桌控制扩大拒绝红.log: 14 failed, 6 passed, 1 warning in 1.49s",
+    "reject_samples": "viewer、未知项目成员角色、缺REVIEW_START、独立事务降级为viewer、账号停用、0scope、不存在项目，分别user_input/resume；有真实角色/权限或缺失对照，授权函数未mock。",
+    "fix": "仅6行：user_input/resume取真实session.project_id，0拒绝；复用独立授权Session的_require_discussion_actor，在controller/accept_user_input/续会前拒绝。",
+    "preserved": "owner历史读取、pause/stop继续可用；正常授权reviewer的resume/user_input可用，原项目owner续会可用。"
+  },
+  "private_negative_fixture": {
+    "path": "backend/tests/unit/api/test_private_agent_account_isolation.py",
+    "only_function": "test_roundtable_tool_rejects_unhandled_input_without_ghost_turn",
+    "reason": "原object DB/project0会被新scope提前拒绝而掩盖无controller负向场景。已补真实owner/Project/REVIEW_START，保持error/空turn断言并新增精确无controller错误文本；其它旧函数AST一致。"
+  },
+  "final_related": {
+    "receipt": "最终关联三轮回执.json",
+    "files": 11,
+    "passed_per_run": 355,
+    "runs": 3,
+    "durations_seconds": [
+      10.29,
+      10.16,
+      10.24
+    ],
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "warnings_per_run": 2
+  },
+  "static": {
+    "files": 5,
+    "ruff_selection": "F,E9",
+    "ruff_exit_code": 0,
+    "log": "五文件静态F与E9.log",
+    "diff_check_exit_code": 0,
+    "diff_log": "五文件diff-check.log",
+    "product_ast_evidence": "唯一产品函数差异.json"
+  },
+  "setup_failure": {
+    "log": "首次命令解析环境失败.log",
+    "reason": "Path.resolve展开venv解释器symlink丢失虚拟环境，No module named pytest；单列非有效红。后续使用保留venv路径的绝对命令。"
+  },
+  "evidence_files": [
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/三测试文件扩大首轮.log",
+      "bytes": 1817,
+      "sha256": "c553adb9ed84395167db33360e305a9d713f820c983523c6115ed6679d68ffe3"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/五文件diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/五文件静态F与E9.log",
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/修复前活动圆桌函数快照.txt",
+      "bytes": 2047,
+      "sha256": "0618663fbabbf374ac5fb5a0b9d3c27198f94de767dfee3786f2e22ad854d7a7"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原六项单独复现红.log",
+      "bytes": 18854,
+      "sha256": "dd2867d01d902b5760c90a5b8668bbca789033bfa80deebcb3ea66a14d14cf32"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原场景与活动圆桌扩大绿.log",
+      "bytes": 1817,
+      "sha256": "90e746859330a1b024c0225db6a27d64edb36dc6c171de8e2689116de30e2416"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原场景复现回执.json",
+      "bytes": 3421,
+      "sha256": "4e9a761960fd967ed89cb742622c4f42b6e88485b1de97e1cf32469b069334cb"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-1.txt",
+      "bytes": 16650,
+      "sha256": "9578a6131e76695a3668f60875e51bcb629406b924bd4ee4ab89e52eba047aba"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-2.txt",
+      "bytes": 7750,
+      "sha256": "5fa205ccdc6dca58d1bb3150e17973ca04ecdc016eb35ac26035451a88916976"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/原始夹具-3.txt",
+      "bytes": 32812,
+      "sha256": "61ef713cd96c530695c512852dc94b5de972c9b1d2337ef3ae7ba686421607f1"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/唯一产品函数差异.json",
+      "bytes": 449,
+      "sha256": "fe2258e5e27a1bc8e6df618939f719f2c030bbdc6a845a8cd0c4eada504c9f28"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/扩大首轮回执.json",
+      "bytes": 1788,
+      "sha256": "51f75c3a65bc14714d188701e63c4c3174d073d070431d74a81ade291f170c9d"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/最终关联三轮回执.json",
+      "bytes": 6749,
+      "sha256": "28f6481def7d0343df83d47e399677777f534bbca2b72e22ee66ec1a4a63c373"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/最终十一文件关联-第1轮.log",
+      "bytes": 2858,
+      "sha256": "ee81a6c3499d12a6437640731b3420e74b8b3f14072d9e14df150b02a0df2cd1"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/最终十一文件关联-第2轮.log",
+      "bytes": 2858,
+      "sha256": "8e93a9b13d621d8bd9a0459c926f52be98741d6e3bf14141aab15dc8e0e5032e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/最终十一文件关联-第3轮.log",
+      "bytes": 2858,
+      "sha256": "16b5881e276fa13bcecb54c9f92ab5b45b71657f7b4720381ac1f4e070045e4a"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/根完整回归六项失败原文.log",
+      "bytes": 16165,
+      "sha256": "2c17b31e65c36698c1246ff94f90fff6e1d7f61ee4512f0cd2a6cfd2da346a1d"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/活动圆桌控制扩大拒绝红.log",
+      "bytes": 42005,
+      "sha256": "499edeef58d0daa14e5897892c75fb036df12cfe965bc410b1cfaefbe21a397e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/活动圆桌控制扩大红回执.json",
+      "bytes": 3341,
+      "sha256": "03ba50ad173ef88ea0656e5ee923d431f7bf70b0db392d37f2d66d1a181833f6"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/活动圆桌控制真实范围红.log",
+      "bytes": 7549,
+      "sha256": "8bf41fd03f50d17e137e2c75fbe241cbba9e848916365a89f552a4c1f13ecba8"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/续会原场景错误详情红.log",
+      "bytes": 7334,
+      "sha256": "e34229a111d128dd341fcfee7b5a4a3b1c0f26c7ccd0aebbfdc553be2ed9b584"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/首次命令解析环境失败.log",
+      "bytes": 69,
+      "sha256": "38e18e997ed547bea8818527a8d7126ba0c6ab88b8a51d60a12734676cadc161"
+    }
+  ],
+  "limits": [
+    "全部样本为本地SQLite、真实RBAC和良性controller/launch桩，无供应商模型、生产写入、真实圆桌执行或外部扫描。",
+    "活动控制缺陷只证明本地授权入口接受与controller/聊天发言副作用，未推断已绕过其它worker模型前后门或执行了外部行为。",
+    "正常续会的长纠正断言是原有本地原文保持检查，不证明真实百万token供应商输入、压缩后语义无损或模型无幻觉。",
+    "十一文件关联355三轮不等于完整后端或全站通过；根27失败其余分区及最终全量仍需各自闭环。",
+    "仅有当前产品/测试冻结快照，不提交、推送、部署、不调用CUA。"
+  ]
+}

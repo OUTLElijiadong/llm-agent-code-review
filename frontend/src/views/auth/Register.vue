@@ -26,16 +26,24 @@ const form = reactive({
   captcha_answer: '',
 })
 
-// 注册验证码(防批量注册)
-const captcha = ref<{ captcha_id: string; question: string; beta_registration_enabled: boolean }>({
+// 位图挑战仅作注册防护的一环，不代表强人机验证。
+const captcha = ref<{ captcha_id: string; question: string; image_data: string; beta_registration_enabled: boolean }>({
   captcha_id: '',
   question: '',
+  image_data: '',
   beta_registration_enabled: false,
 })
 const captchaLoading = ref(false)
+const captchaImageFailed = ref(false)
+const captchaImage = computed(() => {
+  const image = captcha.value.image_data || ''
+  return image.length <= 32768 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image) ? image : ''
+})
+const captchaReady = computed(() => !captchaLoading.value && !captchaImageFailed.value && Boolean(captcha.value.captcha_id && captchaImage.value))
 
 async function refreshCaptcha(): Promise<void> {
   captchaLoading.value = true
+  captchaImageFailed.value = false
   form.captcha_answer = ''
   try {
     captcha.value = await getCaptcha()
@@ -43,6 +51,7 @@ async function refreshCaptcha(): Promise<void> {
     captcha.value = {
       captcha_id: '',
       question: '加载失败,请重试',
+      image_data: '',
       beta_registration_enabled: false,
     }
   } finally {
@@ -119,7 +128,7 @@ const rules: FormRules = {
  * @returns Promise<void>
  */
 async function handleRegister(): Promise<void> {
-  if (!formRef.value) return
+  if (!formRef.value || !captchaReady.value || loading.value) return
   await formRef.value.validate(async (valid) => {
     if (!valid) return
     loading.value = true
@@ -299,15 +308,19 @@ function goLogin(): void {
 
           <el-form-item prop="captcha_answer" label="人机验证">
             <div class="captcha-row">
-              <div class="captcha-q font-mono" :class="{ loading: captchaLoading }">
-                {{ captcha.question || '…' }}
+              <div class="captcha-q" :class="{ loading: captchaLoading }">
+                <img v-if="captchaImage && !captchaImageFailed" :src="captchaImage" alt="注册验证码图片" width="168" height="56" @error="captchaImageFailed = true" />
+                <span v-else>{{ captchaLoading ? '正在加载…' : '加载失败，请刷新' }}</span>
               </div>
               <el-input
                 v-model="form.captcha_answer"
-                placeholder="请输入计算结果"
+                placeholder="图片中的6位字符"
+                aria-label="验证码，不区分大小写"
+                maxlength="6"
+                :disabled="!captchaReady"
                 size="large"
                 autocomplete="off"
-                style="flex: 1"
+                class="captcha-answer"
               />
               <el-button
                 :icon="Refresh"
@@ -317,13 +330,14 @@ function goLogin(): void {
                 @click="refreshCaptcha"
               />
             </div>
+            <p class="captcha-hint">不区分大小写；看不清可刷新图片。</p>
           </el-form-item>
 
           <button
             type="button"
             class="btn-register font-display"
             :class="{ loading }"
-            :disabled="loading"
+            :disabled="loading || !captchaReady"
             @click="handleRegister"
           >
             <span v-if="!loading">创建账号</span>
@@ -344,12 +358,14 @@ function goLogin(): void {
   align-items: center;
   gap: 10px;
   width: 100%;
+  flex-wrap: wrap;
 }
+.captcha-answer { flex: 1; min-width: 100px; }
+.captcha-hint { width: 100%; margin: 6px 0 0; color: var(--gray-600, #606266); font-size: 12px; }
 .captcha-q {
   flex-shrink: 0;
-  min-width: 96px;
-  padding: 0 14px;
-  height: 40px;
+  width: 168px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -360,6 +376,8 @@ function goLogin(): void {
   letter-spacing: 1px;
   color: var(--gray-800, #303133);
   user-select: none;
+  overflow: hidden;
+  img { display: block; width: 168px; height: 56px; }
 
   &.loading { opacity: 0.5; }
 }

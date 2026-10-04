@@ -200,6 +200,23 @@ def _is_session_version_active(user_id: int, token_version: int) -> bool:
         db.close()
 
 
+def _is_discussion_execution_active(user_id: int, project_id: int, token_version: int | None = None) -> bool:
+    """Fresh execution authorization; history subscription itself remains a read operation."""
+    if project_id <= 0:
+        return False
+    if token_version is not None and not _is_session_version_active(user_id, token_version):
+        return False
+    db = SessionLocal()
+    try:
+        from app.ai.discussion_orchestrator import _require_discussion_actor
+        _require_discussion_actor(db, user_id, project_id)
+        return True
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
 async def _run_pending_discussion(pending: PendingDiscussion) -> None:
     """运行圆桌编排，并在创建它的登录版本失效时终止后台任务。"""
 
@@ -207,17 +224,15 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
 
     bus = DiscussionBus.instance()
     user_id = int(pending.kwargs.get("user_id") or 0)
-    if pending.session_token_version is not None:
-        active = await asyncio.to_thread(
-            _is_session_version_active,
-            user_id,
-            pending.session_token_version,
-        )
-        if not active:
-            bus.request_stop(pending.session_id)
-            bus.publish_control(pending.session_id, "cancelled", {"task_id": 0})
-            bus.close_session(pending.session_id)
-            return
+    project_id = int(pending.kwargs.get("project_id") or 0)
+    active = await asyncio.to_thread(
+        _is_discussion_execution_active, user_id, project_id, pending.session_token_version,
+    )
+    if not active:
+        bus.request_stop(pending.session_id)
+        bus.publish_control(pending.session_id, "cancelled", {"task_id": 0})
+        bus.close_session(pending.session_id)
+        return
 
     orchestrator_task = asyncio.create_task(
         DiscussionOrchestrator().start_discussion(
@@ -228,16 +243,12 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
     )
     monitor_task: asyncio.Task | None = None
     try:
-        if pending.session_token_version is None:
-            await orchestrator_task
-            return
-
         async def monitor_session() -> None:
             while True:
                 await asyncio.sleep(_SESSION_CHECK_INTERVAL)
                 active = await asyncio.to_thread(
-                    _is_session_version_active,
-                    user_id,
+                    _is_discussion_execution_active,
+                    user_id, project_id,
                     pending.session_token_version,
                 )
                 if not active:
@@ -466,6 +477,16 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
                     await websocket.send_text('{"type":"pong"}')
                     continue
 
+                if action in {"user_input", "resume"}:
+                    current = bus.get_session(session_id, owner_user_id=owner_user_id)
+                    project_id = int(getattr(current, "project_id", 0) or 0)
+                    active = await asyncio.to_thread(_is_discussion_execution_active, int(user.id), project_id)
+                    if not active:
+                        await websocket.send_text(json_lib.dumps({
+                            "type": "control", "action": "input_rejected",
+                            "payload": {"reason": "当前项目执行权限已撤销，仍可查看历史"},
+                        }, ensure_ascii=False))
+                        continue
                 if action == "user_input":
                     content = data.get("content", "")
                     if not isinstance(content, str) or not content.strip():

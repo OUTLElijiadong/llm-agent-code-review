@@ -412,6 +412,120 @@ def test_empty_report_preserves_explicit_historical_score(explicit_score):
     assert breakdown["risk_level"] == ("低风险" if explicit_score == 100 else "中风险")
 
 
+def test_report_discloses_review_candidates_and_rejections_without_changing_score():
+    """原扣分口径包含未核实与驳回项，报告必须明示而非冒充已验证漏洞评分。"""
+    issues = [
+        _make_issue(id=1, severity="严重", human_review_status="pending"),
+        _make_issue(id=2, severity="高", human_review_status="rejected", status="ignored"),
+        _make_issue(id=3, severity="中", human_review_status="accepted", confirmation_count=99),
+        _make_issue(id=4, severity="低", human_review_status="evidence_requested"),
+        _make_issue(id=5, severity="低", human_review_status=None, evidence_quality="verified"),
+    ]
+    result = export_to_dict(_make_task(), issues, "", 1)
+
+    assert result["score"] == 72  # 15 + 8 + 3 + 1 + 1，保留现有算法与问题范围。
+    assert result["statistics"]["score_breakdown"]["total_deduction"] == 28
+    basis = result["statistics"]["assessment_basis"]
+    assert basis["score_source"] == "review_issues"
+    assert basis["issue_scope"] == "all_reported_review_issues"
+    assert basis["human_review_counts"] == {
+        "pending": 1, "evidence_requested": 1, "accepted": 1,
+        "rejected": 1, "not_required": 0, "unrecorded": 1,
+    }
+    assert basis["confirmation_count_semantics"] == "retained_source_count_not_vulnerability_verification"
+    assert basis["evidence_quality_semantics"] == "source_quote_match_not_condition_or_impact_verification"
+    assert basis["manual_status_semantics"] == "manual_disposition_not_retest_verification"
+    assert basis["domestic_database_freshness"] == "not_verified_by_this_export"
+    assert basis["official_rating"] == "not_provided_by_this_export"
+    assert result["issues"][4]["human_review_status"] is None  # 历史未知不补成已核实。
+    text = "\n".join(result["scope_lines"])
+    assert "待核实 2 项、人工驳回 1 项仍纳入现有评分口径" in text
+    assert "confirmation_count 来源数" in text
+    assert "不代表漏洞条件或影响已验证" in text
+    assert "已修复标记不等于复测通过" in text
+    assert "不能据此声明已同步最新库或获得权威认证" in text
+
+
+@pytest.mark.parametrize("explicit_score", [100, 72])
+def test_empty_historical_score_disclosure_does_not_infer_verified_coverage(explicit_score):
+    result = export_to_dict(_make_task(score=explicit_score), [], "", explicit_score)
+
+    assert result["score"] == explicit_score
+    assert result["statistics"]["assessment_basis"]["score_source"] == "task_explicit_empty_report"
+    assert all(value == 0 for value in result["statistics"]["assessment_basis"]["human_review_counts"].values())
+    assert "空问题报告保留历史显式分数，不代表已验证无漏洞" in "\n".join(result["scope_lines"])
+
+
+@pytest.mark.parametrize("template_type", ["simple", "detailed", "compliance"])
+def test_builtin_html_reports_display_evidence_and_score_scope(template_type):
+    issue = _make_issue(human_review_status="pending", confirmation_count=5)
+    html = export_to_html(_make_task(), [issue], "", 1, load_builtin_template(template_type))
+
+    assert "平台内部问题扣分" in html
+    assert "待核实 1 项、人工驳回 0 项仍纳入现有评分口径" in html
+    assert "不代表漏洞条件或影响已验证" in html
+    assert "不能据此声明已同步最新库或获得权威认证" in html
+    assert "92/100" in html  # 待核实的高等级问题仍按现有权重扣 8 分。
+
+
+def test_word_report_retains_assessment_scope_without_upgrading_manual_acceptance():
+    word = export_to_word(
+        _make_task(), [_make_issue(human_review_status="accepted", status="fixed")], "", 1,
+    )
+    with zipfile.ZipFile(io.BytesIO(word)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "平台内部问题扣分" in document_xml
+    assert "不代表漏洞条件或影响已验证" in document_xml
+    assert "已修复标记不等于复测通过" in document_xml
+
+
+@pytest.mark.parametrize(
+    "status,expected_key",
+    [
+        ("pending", "pending"), ("evidence_requested", "evidence_requested"),
+        ("accepted", "accepted"), ("rejected", "rejected"),
+        ("not_required", "not_required"), (None, "unrecorded"),
+        ("", "unrecorded"), ("historical_unknown", "unrecorded"),
+    ],
+)
+def test_json_assessment_metadata_preserves_recorded_and_unknown_review_statuses(status, expected_key):
+    import json
+
+    issue = _make_issue(human_review_status=status, confirmation_count=99, confidence=1.0)
+    result = json.loads(export_to_json(_make_task(), [issue], "", 1))
+    counts = result["statistics"]["assessment_basis"]["human_review_counts"]
+
+    assert counts[expected_key] == 1
+    assert sum(counts.values()) == 1
+    assert result["score"] == 92
+    assert result["issues"][0]["human_review_status"] == status
+    assert result["issues"][0]["confirmation_count"] == 99
+    assert result["statistics"]["assessment_basis"]["confidence_semantics"] == "model_estimate_not_vulnerability_verification"
+
+
+def test_pdf_report_actually_builds_visible_assessment_scope(monkeypatch):
+    from reportlab.platypus import SimpleDocTemplate
+
+    original_build = SimpleDocTemplate.build
+    visible_text = []
+
+    def capture_build(doc, flowables, *args, **kwargs):
+        visible_text.extend(
+            element.getPlainText() for element in flowables if hasattr(element, "getPlainText")
+        )
+        return original_build(doc, flowables, *args, **kwargs)
+
+    monkeypatch.setattr(SimpleDocTemplate, "build", capture_build)
+    pdf = export_to_pdf(_make_task(), [_make_issue(human_review_status="rejected")], "", 1)
+
+    assert pdf.startswith(b"%PDF")
+    text = "\n".join(visible_text)
+    assert "人工驳回 1 项仍纳入现有评分口径" in text
+    assert "不代表漏洞条件或影响已验证" in text
+    assert "不能据此声明已同步最新库或获得权威认证" in text
+
+
 def test_task_name_and_name_are_bidirectionally_compatible():
     """新旧报告调用方使用 name 或 task_name 都得到两个稳定别名。"""
     result = export_to_dict(

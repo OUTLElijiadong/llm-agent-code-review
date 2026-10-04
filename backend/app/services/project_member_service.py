@@ -19,6 +19,9 @@ from app.models.user import User
 from app.services.rbac_service import is_admin_user
 
 HIDDEN_PROJECT_STATUSES = ("deleted", "quarantined")
+PROJECT_MEMBER_ROLES = frozenset({"owner", "reviewer", "viewer"})
+PROJECT_WRITE_ROLES = frozenset({"admin", "owner"})
+PROJECT_EXECUTION_ROLES = frozenset({"admin", "owner", "reviewer"})
 
 
 def _require_visible_project(db: Session, project_id: int) -> Project:
@@ -66,7 +69,9 @@ def get_visible_project_ids(db: Session, user: Optional[User]) -> tuple[list[int
     member_rows = (
         db.query(ProjectMember.project_id)
         .join(Project, Project.id == ProjectMember.project_id)
-        .filter(ProjectMember.user_id == user.id, Project.status.notin_(HIDDEN_PROJECT_STATUSES))
+        .filter(ProjectMember.user_id == user.id,
+                ProjectMember.role_in_project.in_(PROJECT_MEMBER_ROLES),
+                Project.status.notin_(HIDDEN_PROJECT_STATUSES))
         .all()
     )
     member_ids = [r[0] for r in member_rows]
@@ -91,6 +96,7 @@ def is_project_member(
             - (True, "admin"): 管理员
             - (True, "owner"): 项目拥有者
             - (True, "reviewer"): 项目成员(审查员)
+            - (True, "viewer"): 项目只读成员
             - (False, ""): 无访问权限
     """
     # owner 检查
@@ -110,13 +116,14 @@ def is_project_member(
     # member 检查
     member = (
         db.query(ProjectMember)
+        .populate_existing()
         .filter(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user.id,
         )
         .first()
     )
-    if member:
+    if member and member.role_in_project in PROJECT_MEMBER_ROLES:
         return True, member.role_in_project
 
     return False, ""
@@ -139,7 +146,7 @@ def require_project_access(
         need_write: 是否需要写权限(True 时仅 owner/admin 通过)
 
     Returns:
-        str: 用户角色("admin"/"owner"/"reviewer")
+        str: 用户角色("admin"/"owner"/"reviewer"/"viewer")
 
     Raises:
         NotFoundError: 项目不存在
@@ -158,12 +165,12 @@ def require_project_access(
             )
         raise NotFoundError("项目不存在", code=40400)
 
-    if need_write and role == "reviewer":
+    if need_write and role not in PROJECT_WRITE_ROLES:
         # 写权限不足:记录失败审计
         _audit_project_access(
             db, user, project_id,
             mode="write", role=role, status="failed",
-            detail=f"审查员写权限被拒绝 project_id={project_id}",
+            detail=f"{'审查员' if role == 'reviewer' else '只读成员'}写权限被拒绝 project_id={project_id}",
         )
         raise ForbiddenError("需要项目拥有者权限", code=40300)
 
@@ -176,6 +183,90 @@ def require_project_access(
         )
 
     return role
+
+
+def require_project_execution(db: Session, project_id: int, user: User) -> str:
+    """项目只读资格不授予审查、模型或环境执行；全局 RBAC 仍由入口求交。"""
+    role = require_project_access(db, project_id, user, need_write=False)
+    if role not in PROJECT_EXECUTION_ROLES:
+        raise ForbiddenError("只读项目成员不能执行审查、讨论或环境任务", code=40300)
+    return role
+
+
+def require_scoped_project_execution(db: Session, user: User, payload: dict) -> set[int]:
+    """Resolve structured resource IDs against rows, never against model text or client claims.
+
+    A task without project resources keeps its original global/tool gates. Caller context's
+    agent_team_task_id is deliberately not treated as a formal review task ID.
+    """
+    from app.models.code_file import CodeFile
+    from app.models.review_task import ReviewTask
+    from app.models.project_source_revision import ProjectSourceRevision
+    from app.models.agent_capability import SandboxEnvironment
+
+    def identifier(value):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise BadRequestError("项目资源标识必须为正整数", code=40000)
+        return value
+
+    projects = set()
+    declared = {identifier(payload[key]) for key in ("project_id", "context_project_id")
+                if payload.get(key) is not None}
+    if len(declared) > 1:
+        raise BadRequestError("项目资源范围不一致", code=40000)
+    projects.update(declared)
+    files = []
+    if payload.get("file_id") is not None:
+        files.append(identifier(payload["file_id"]))
+    if payload.get("file_ids") is not None:
+        if not isinstance(payload["file_ids"], list):
+            raise BadRequestError("文件资源标识必须为列表", code=40000)
+        files.extend(identifier(value) for value in payload["file_ids"])
+    resources = [(CodeFile, value) for value in set(files)]
+    for key, model in (("task_id", ReviewTask), ("source_revision_id", ProjectSourceRevision)):
+        if payload.get(key) is not None:
+            resources.append((model, identifier(payload[key])))
+    for model, resource_id in resources:
+        row = db.get(model, resource_id, populate_existing=True)
+        if row is None or getattr(row, "status", "active") == "deleted":
+            raise NotFoundError("项目资源不存在", code=40400)
+        projects.add(int(row.project_id))
+    if payload.get("public_id") is not None:
+        public_id = payload["public_id"]
+        if not isinstance(public_id, str) or not public_id.strip():
+            raise BadRequestError("环境资源标识无效", code=40000)
+        row = db.query(SandboxEnvironment).filter_by(public_id=public_id).populate_existing().one_or_none()
+        if row is None:
+            raise NotFoundError("项目资源不存在", code=40400)
+        projects.add(int(row.project_id))
+    if declared and any(project_id not in declared for project_id in projects):
+        raise BadRequestError("项目资源范围不一致", code=40000)
+    for project_id in projects:
+        require_project_execution(db, project_id, user)
+    return projects
+
+
+def project_resource_capabilities(db: Session, user: User, project_ids, *, projects=None) -> dict[int, dict[str, bool]]:
+    """批量资源角色能力；不代替动作的全局 RBAC、作者、状态或审批校验。"""
+    ids = {int(project_id) for project_id in project_ids if project_id is not None}
+    if not ids:
+        return {}
+    project_rows = (db.query(Project.id, Project.user_id).filter(
+        Project.id.in_(ids), Project.status.notin_(HIDDEN_PROJECT_STATUSES),
+    ).all() if projects is None else [
+        (project.id, project.user_id) for project in projects
+        if project.id in ids and project.status not in HIDDEN_PROJECT_STATUSES
+    ])
+    member_roles = dict(db.query(ProjectMember.project_id, ProjectMember.role_in_project).filter(
+        ProjectMember.project_id.in_(ids), ProjectMember.user_id == user.id,
+    ).all())
+    administrator = is_admin_user(db, int(user.id))
+    result = {}
+    for project_id, owner_id in project_rows:
+        role = "admin" if administrator else "owner" if owner_id == user.id else member_roles.get(project_id, "")
+        result[project_id] = {"can_write": role in PROJECT_WRITE_ROLES,
+                              "can_execute": role in PROJECT_EXECUTION_ROLES}
+    return result
 
 
 def _audit_project_access(
@@ -247,6 +338,8 @@ def add_member(
         ForbiddenError: 操作者无权限
         BadRequestError: 已是项目成员
     """
+    if role not in PROJECT_MEMBER_ROLES:
+        raise BadRequestError("项目内角色必须为负责人、审查员或只读成员", code=40000)
     if operator is not None:
         require_project_access(db, project_id, operator, need_write=True)
 
@@ -367,6 +460,8 @@ def update_member_role(
         ForbiddenError: 操作者无权限
         BadRequestError: 不能降级 owner 为 reviewer(需先转移 owner)
     """
+    if new_role not in PROJECT_MEMBER_ROLES:
+        raise BadRequestError("项目内角色必须为负责人、审查员或只读成员", code=40000)
     if operator is not None:
         require_project_access(db, project_id, operator, need_write=True)
     _require_visible_project(db, project_id)

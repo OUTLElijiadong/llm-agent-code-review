@@ -1,0 +1,35 @@
+{
+  "argv": [
+    "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "--no-cov",
+    "-q",
+    "tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call",
+    "tests/unit/services/test_user_capability_registry.py::test_active_roundtable_authorized_reviewer_retains_controller_access",
+    "tests/unit/services/test_user_capability_registry.py::test_roundtable_owner_can_stop_or_pause_after_execution_scope_is_unavailable"
+  ],
+  "exit_code": 1,
+  "log": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-全量剩余六项/活动圆桌控制扩大拒绝红.log",
+  "product_before_sha256": "8febd1201495c19ef3bb6c59bf351ebf98185e19b9f9559bdcd2d85dd9f4ce9b",
+  "summary": [
+    "",
+    "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+    "=========================== short test summary info ============================",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[viewer-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[viewer-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[unknown-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[unknown-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[no_permission-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[no_permission-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[downgraded-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[downgraded-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[disabled-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[disabled-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[missing_scope-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[missing_scope-resume]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[missing_project-user_input]",
+    "FAILED tests/unit/services/test_user_capability_registry.py::test_active_roundtable_control_rejects_viewer_before_controller_call[missing_project-resume]",
+    "=================== 14 failed, 6 passed, 1 warning in 1.49s ===================="
+  ]
+}

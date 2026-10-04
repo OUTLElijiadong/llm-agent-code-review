@@ -622,7 +622,15 @@ def _normalize_verification_graph(payload: AgentTeamCreateIn) -> AgentTeamCreate
 
 
 def _validate_task_scope(db: Session, user: User, task_input: Any, address: str) -> None:
+    from app.core.exceptions import AppError
+    from app.services.project_member_service import require_scoped_project_execution
+
     raw = task_input.input
+    def check_execution_scope():
+        try:
+            require_scoped_project_execution(db, user, raw)
+        except AppError as exc:
+            raise AgentTeamValidationError("项目执行权限不足或资源范围不一致") from exc
     project_id = raw.get("project_id")
     revision_id = raw.get("source_revision_id")
     if project_id is not None and (isinstance(project_id, bool) or not isinstance(project_id, int) or project_id <= 0):
@@ -647,6 +655,7 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
             raise AgentTeamValidationError("源码修订不存在或不属于当前可见项目")
 
     if address.startswith("custom:"):
+        check_execution_scope()
         code = raw.get("code")
         file_id = raw.get("file_id")
         if code is not None and (not isinstance(code, str) or not code.strip()):
@@ -684,6 +693,7 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
         return
 
     if not address.startswith("agent:"):
+        check_execution_scope()
         return
     code = address.split(":", 1)[1]
     from app.services import rbac_service
@@ -699,6 +709,7 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
             raise AgentTeamAccessError(
                 f"当前账户没有 {permission} 权限，不能创建该读取任务"
             )
+    check_execution_scope()
     if code == "security_sentinel":
         from app.core.permission_codes import PermissionCode
         from app.services.rbac_service import check_permission
@@ -3095,6 +3106,32 @@ def preview_retry_team(
     )
 
 
+def require_task_project_execution(db: Session, user: User, task: AgentTeamTask) -> None:
+    """Dependent model tasks inherit their persisted ancestors' resource scope."""
+    from app.core.exceptions import BadRequestError
+    from app.services.project_member_service import require_scoped_project_execution
+
+    rows = db.query(AgentTeamTask).filter_by(team_id=task.team_id).populate_existing().all()
+    by_key = {row.task_key: row for row in rows}
+    visited = set()
+    visiting = set()
+    def visit(row):
+        if row.task_key in visiting:
+            raise BadRequestError("团队依赖范围存在循环", code=40000)
+        if row.task_key in visited:
+            return
+        visiting.add(row.task_key)
+        require_scoped_project_execution(db, user, _unjson(row.input_json, {}))
+        for key in _unjson(row.dependency_keys_json, []):
+            dependency = by_key.get(key)
+            if dependency is None:
+                raise BadRequestError("团队依赖范围不存在", code=40000)
+            visit(dependency)
+        visiting.remove(row.task_key)
+        visited.add(row.task_key)
+    visit(task)
+
+
 def retry_team(
     db: Session,
     user: User,
@@ -3143,6 +3180,8 @@ def retry_team(
         )
 
     rows = _select_retry_tasks(all_tasks, wanted)
+    for task in rows:
+        require_task_project_execution(db, user, task)
     for task in rows:
         previous_status = task.status
         previous_hash = _task_strategy_hash(task)

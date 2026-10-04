@@ -1,0 +1,53 @@
+{
+  "argv": [
+    "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "--no-cov",
+    "-q",
+    "tests/unit/api/test_project_viewer_api.py",
+    "tests/unit/services/test_project_viewer_permissions.py",
+    "tests/unit/services/test_project_viewer_resources.py",
+    "tests/unit/services/test_project_viewer_execution.py",
+    "tests/unit/services/test_ai_prompt_agent.py",
+    "tests/unit/services/test_agent_team_service.py",
+    "tests/unit/services/test_agent_team_dispatcher.py",
+    "tests/unit/services/test_agent_team_review.py",
+    "tests/unit/services/test_agent_mesh_dispatcher.py",
+    "tests/unit/services/test_temporary_agent_runtime.py",
+    "tests/unit/test_discussion_orchestrator_coverage.py",
+    "tests/unit/agents/test_ws_discussion_coverage.py",
+    "tests/unit/services/test_review_service_helpers.py",
+    "tests/unit/services/test_review_service_state_coverage.py",
+    "tests/unit/services/test_review_service_v2.py",
+    "tests/test_review_service_v3.py",
+    "tests/unit/services/test_background_usage_sources.py",
+    "tests/unit/agents/test_scan_entry_input_closure.py",
+    "tests/unit/agents/test_agent_project_quarantine.py",
+    "tests/unit/api/test_project_member_candidates_api.py",
+    "tests/unit/services/test_project_member_service.py",
+    "tests/unit/services/test_report_service.py",
+    "tests/unit/api/test_review_start_rate_limit.py"
+  ],
+  "results": [
+    {
+      "round": 1,
+      "exit_code": 0,
+      "log": "context_integrity-关联复测-1.log",
+      "summary": "======================= 621 passed, 2 warnings in 15.99s ======================="
+    },
+    {
+      "round": 2,
+      "exit_code": 0,
+      "log": "context_integrity-关联复测-2.log",
+      "summary": "======================= 621 passed, 2 warnings in 16.39s ======================="
+    },
+    {
+      "round": 3,
+      "exit_code": 0,
+      "log": "context_integrity-关联复测-3.log",
+      "summary": "======================= 621 passed, 2 warnings in 16.35s ======================="
+    }
+  ],
+  "scope": "23 local test files; no provider/API/production execution"
+}

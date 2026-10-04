@@ -49,7 +49,7 @@
     :initial-turns="selected.turns"
     :initial-has-earlier="selected.has_earlier"
     :initial-next-before-seq="selected.next_before_seq"
-    @close="visible = false"
+    @close="closePanel"
     @settled="loadSessions"
   />
 </template>
@@ -79,6 +79,7 @@ const headerSlotAvailable = ref(false)
 const followupClock = ref(Date.now())
 let authGeneration = 0
 let listGeneration = 0
+let detailGeneration = 0
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let followupTimer: ReturnType<typeof setInterval> | null = null
 let headerSlotObserver: MutationObserver | null = null
@@ -164,19 +165,25 @@ async function loadMore(): Promise<void> {
 
 async function openSession(sessionId: string): Promise<void> {
   const owner = props.userId
-  const generation = authGeneration
+  const auth = authGeneration
+  const generation = ++detailGeneration
   try {
     const detail = await getDiscussionSession(sessionId)
-    if (owner !== props.userId || generation !== authGeneration) return
+    if (owner !== props.userId || auth !== authGeneration || generation !== detailGeneration) return
     if (!detail || detail.session_id !== sessionId) return
     selected.value = { ...detail, agents: Array.isArray(detail.agents) ? detail.agents : [] }
     visible.value = true
     showChoices.value = false
     listError.value = ''
   } catch {
-    if (owner !== props.userId || generation !== authGeneration) return
+    if (owner !== props.userId || auth !== authGeneration || generation !== detailGeneration) return
     listError.value = '圆桌会话已失效或当前账号无权查看'
   }
+}
+
+function closePanel(): void {
+  detailGeneration++
+  visible.value = false
 }
 
 function openFromDock(): void {
@@ -189,6 +196,7 @@ function openFromDock(): void {
     return
   }
   showChoices.value = !showChoices.value
+  if (!showChoices.value) detailGeneration++
 }
 
 function statusLabel(status: string, progressPhase?: string, followupUntil?: number): string {
@@ -229,6 +237,7 @@ function syncHeaderSlot(): void {
 watch(() => props.userId, () => {
   authGeneration++
   listGeneration++
+  detailGeneration++
   moreLoading.value = false
   sessions.value = []
   nextOffset.value = null
@@ -260,6 +269,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   authGeneration++
   listGeneration++
+  detailGeneration++
   headerSlotObserver?.disconnect()
   headerSlotObserver = null
   document.removeEventListener('visibilitychange', onVisibilityChange)

@@ -1,0 +1,311 @@
+{
+  "状态": "候选源码与测试冻结；生产与付费模型不在本轮通过范围",
+  "产品文件": [
+    "backend/app/services/deepseek_responses_runtime.py",
+    "backend/app/services/review_service.py"
+  ],
+  "测试文件": [
+    "backend/tests/unit/services/test_responses_context_token_budget.py",
+    "backend/tests/unit/services/test_deepseek_responses_runtime.py",
+    "backend/tests/unit/services/test_deepseek_responses_service.py",
+    "backend/tests/unit/agents/test_chat_agent_coverage.py",
+    "backend/tests/unit/test_discussion_orchestrator_coverage.py",
+    "backend/tests/unit/agents/test_c12_context_projection.py",
+    "backend/tests/unit/agents/test_c13_semantic_coverage.py",
+    "backend/tests/unit/services/test_review_non_code_compaction.py"
+  ],
+  "源与测试摘要": {
+    "backend/app/services/deepseek_responses_runtime.py": "87fec56120f24e70daffcde19926a333275270e72a87f6dea0df0cb293e526af",
+    "backend/tests/unit/services/test_responses_context_token_budget.py": "626e882788b84924e1a1b4d03827e787914653a8d02471a21a28142df8bfa0e9",
+    "backend/tests/unit/services/test_deepseek_responses_runtime.py": "c7f6aa31beb19d7c3f41886f5eac39827c91b4b9e1d33a170fe5f74e2d46d11d",
+    "backend/tests/unit/services/test_deepseek_responses_service.py": "a76761b3d4c16f7065ec34152c41335969b507a4311d8bafd6be1593330fa0f5",
+    "backend/tests/unit/agents/test_chat_agent_coverage.py": "c0c874cf4680d9bc77f0cca00c1238cf2ba2f5f1a0b2d09ea1022f60e4471881",
+    "backend/tests/unit/test_discussion_orchestrator_coverage.py": "0c4e660a785ac3ccf76294279f8669ffda88363c0d94804ffbe258048ed66b07",
+    "backend/app/services/review_service.py": "ddbac7ec24699cd3171f55d3bf6f40334da652a576283314e324561e54b7fea3",
+    "backend/tests/unit/agents/test_c12_context_projection.py": "d17fa7fb0fa800d8b5f104ddebbee6648e492323546243675bf2d6e37356df83",
+    "backend/tests/unit/agents/test_c13_semantic_coverage.py": "bc31604bb69c50fb52b47ad54d379981968bfd1b4efbc8b48ae6558f4242b1e9",
+    "backend/tests/unit/services/test_review_non_code_compaction.py": "c349bf77dd7a5f0870523b401baae97beeadd7eb1545f6fd5171a3052ee50d2b"
+  },
+  "初始新用例": {
+    "失败": 8,
+    "正常对照": 2,
+    "结构Schema漏预算首次失败": 1
+  },
+  "重试协议红证据": "受控重放可信旧commit单method，使用新估算器；不是自然首次测试",
+  "第一阶段回归": {
+    "核心": 83,
+    "关联文件": 23,
+    "每轮": 667,
+    "重复轮数": 3,
+    "耗时秒": [
+      45.65,
+      46.91,
+      175.58
+    ],
+    "性能含义": "无，第三轮与父代理完整后端并行"
+  },
+  "完整集追加发现": {
+    "首次完整后端": {
+      "失败": 9,
+      "通过": 5768,
+      "跳过": 5
+    },
+    "自然复现3文件": {
+      "失败": 9,
+      "正常对照": 19
+    },
+    "单位适配6红": "受控重放可信HEAD旧单函数，当前字节估算器，本地桩；不是自然首次运行"
+  },
+  "最终回归": {
+    "追加核心": 42,
+    "关联文件": 26,
+    "每轮": 709,
+    "重复轮数": 3,
+    "耗时秒": [
+      11.88,
+      11.76,
+      11.66
+    ],
+    "性能含义": "无；各阶段有重叠，不相加为不重复总数"
+  },
+  "官方本地tokenizer": {
+    "实际成功重计量": 2,
+    "第三次": "公开文件下载TLS EOF/连接超时；未完成计量",
+    "模型": "DeepSeek-V4.1-Flash",
+    "revision": "2cba9e42aa026125f3ed06c6d98c1db82f7ca027",
+    "原文内容token合计": [
+      1060022,
+      1060022,
+      1080022
+    ],
+    "供应商API调用": 0,
+    "计费usage": null,
+    "语义理解验收": false,
+    "候选依赖变更": false,
+    "计量样本限制": "相同合成样本的重复，不代表自然语义复杂度"
+  },
+  "来源封装额外检查": {
+    "样本": 48,
+    "最大预算": 47991,
+    "预算": 48000,
+    "复现缺陷": false
+  },
+  "工具边界": [
+    "曾误写不存在测试路径而0测试；未计通过",
+    "新fixture误把Runtime fallback32768当生产settings65536，2失败后校正为两套参数各自验证；未改产品默认",
+    "第三次公开下载严格TLS失败；未关闭证书校验、未换供应商、临时目录finally删除",
+    "追加日志原文件名green但实际1fail，以及一次夹具相同行误命中后校正日志均保留，未计通过"
+  ],
+  "未完成": [
+    "真实供应商百万token语义验收",
+    "各业务入口实际计费/权限/工作集流程",
+    "真手机与全站账号回归"
+  ],
+  "证据文件": [
+    {
+      "名称": "archive_evidence.py",
+      "字节": 5653,
+      "sha256": "c9b6b4d4bd776621daaed3baa6762fb3a07fc9e359073c945c2922a0c5763672"
+    },
+    {
+      "名称": "probe_review_budget.py",
+      "字节": 4629,
+      "sha256": "540f64f7532595a7c2d4f3ac1f8e197851090eed6277bc6733955e79a77e7cf8"
+    },
+    {
+      "名称": "remeasure_official_tokenizer.py",
+      "字节": 7820,
+      "sha256": "167c4a0a53a945c33eebb7d9dc9f275301131b0b3d546382061aacd6429c14f1"
+    },
+    {
+      "名称": "replay_original_compactor_guard.py",
+      "字节": 1633,
+      "sha256": "d36bb07ca2562d28d855f36cb4491495c7ace6dc69a3a6cabcd5526012b69dd1"
+    },
+    {
+      "名称": "临时工具清理.json",
+      "字节": 225,
+      "sha256": "c34330ca0e7beb02f6a0cecd6ec1cbbc13337c65cf7f884ec4a9568945480ef6"
+    },
+    {
+      "名称": "修复前-8红2绿.log",
+      "字节": 12711,
+      "sha256": "8636d0ed943bca6d49a220bacff6bac4a4b8dfb9c2948b88d1afc2e7a2070d05"
+    },
+    {
+      "名称": "修复前-large-result.json",
+      "字节": 1600,
+      "sha256": "dfc7078836f791dd968b643b10ecc894c6eb690af20d9ad8d51ef8f7d8f7d3c6"
+    },
+    {
+      "名称": "修复前-manifest.json",
+      "字节": 1027,
+      "sha256": "e5dfb51894b21039c3000e5978b023b2ae5a597ae63a20d9ec8df9e2da834e12"
+    },
+    {
+      "名称": "修复前-schema协议开销.log",
+      "字节": 8955,
+      "sha256": "0c705b4c0575d961d4d6b2434d4d85f1d0ba0063d1189c0fc42b8bfe7e12b7cc"
+    },
+    {
+      "名称": "修复前-small-result.json",
+      "字节": 1923,
+      "sha256": "19cf54b31c374b77f9efa93b92cfee41c88f5bffbcbde192e67059f07ff5dd27"
+    },
+    {
+      "名称": "关联首次-4失败408通过.log",
+      "字节": 14783,
+      "sha256": "66dc91292f7080630e40e60fd1d70ac4a5fa107c6fe28818a66ccf703fdac777"
+    },
+    {
+      "名称": "关联首绿-662项.log",
+      "字节": 4138,
+      "sha256": "e963866b12be21d0f4f76e91a276b375a370f73c77972b67d39223ed627222cd"
+    },
+    {
+      "名称": "冻结关联-667项-第1轮.log",
+      "字节": 4138,
+      "sha256": "43d8bd08175cc790b897589a270461652408f75bfb58ee722ca874517877e7fa"
+    },
+    {
+      "名称": "冻结关联-667项-第2轮.log",
+      "字节": 4138,
+      "sha256": "bc2ff09939ffa1e56088835b89b7539da99ccc80c64dc03c2bfeb996af2d972a"
+    },
+    {
+      "名称": "冻结关联-667项-第3轮.log",
+      "字节": 4138,
+      "sha256": "5902229eb527bfa35aef2b995d4967a4e34ba26a4b9c57cd09f48adf2a6ff488"
+    },
+    {
+      "名称": "受控重放旧审查配额-6红.log",
+      "字节": 19329,
+      "sha256": "8fb45edff67a397e04c3e47b2abefdb8e71cefb09cf7c53c80322bdb58e72f63"
+    },
+    {
+      "名称": "子Agent首次-9失败170通过.log",
+      "字节": 55756,
+      "sha256": "017f9a084eb1080ff8269d2e4ad6dff4a5e71ea8414781f1e71bd272c7d0e01a"
+    },
+    {
+      "名称": "完整集追加边界-9红19绿.log",
+      "字节": 81705,
+      "sha256": "539128b79207a37f23aaf5506358b465f3fa2b17d39f0ea5f5c5617014c50723"
+    },
+    {
+      "名称": "官方本地计量-通过1.json",
+      "字节": 4404,
+      "sha256": "fc11de0793d29279b193c4d9769647e66527e9cd8089c11277711bd3ab81392e"
+    },
+    {
+      "名称": "官方本地计量-通过2.json",
+      "字节": 4404,
+      "sha256": "fc11de0793d29279b193c4d9769647e66527e9cd8089c11277711bd3ab81392e"
+    },
+    {
+      "名称": "官方计量第三次-严格TLS重试失败.log",
+      "字节": 5735,
+      "sha256": "9ee975b0cb1bc7b21c5ac0ee7e1317468d60a44abb7b00e7cc268356064ac317"
+    },
+    {
+      "名称": "官方计量第三次-标准库TLS失败.log",
+      "字节": 5528,
+      "sha256": "62a2062c932bf8a002f4f6fccd28182886267fa70b682446e4f7db87f555c9ce"
+    },
+    {
+      "名称": "实测Runtime源码快照.txt",
+      "字节": 114061,
+      "sha256": "725797800eb527e574f79eed2b24521665ca30d5084ff37d1c6b8ee4559e6c06"
+    },
+    {
+      "名称": "实测快照与冻结代码等价.json",
+      "字节": 551,
+      "sha256": "3c9e6a5ff4e62eba37e00dabd4ebf1c10d5388af830299e575e771e6db8eb678"
+    },
+    {
+      "名称": "审查配额与固定契约-本地实参.json",
+      "字节": 4286,
+      "sha256": "a7f2a125c4f051a399649faec1bc7f8b25a4c90f3f9b40c6239cae7343687f01"
+    },
+    {
+      "名称": "扩大-134项.log",
+      "字节": 1566,
+      "sha256": "ff55d8cfca9b07dac4613c62e2ebd5a2b95f6aa670c9b81c4375b84a85f8f68b"
+    },
+    {
+      "名称": "最终关联-709项-第1轮.log",
+      "字节": 4458,
+      "sha256": "77b79d5d889714c00de232335c0fadb6be04d5af786c9d51cf6c0f00f0a22a51"
+    },
+    {
+      "名称": "最终关联-709项-第2轮.log",
+      "字节": 4458,
+      "sha256": "4060825f106852fa69948517d2d169235adb02f487df6e93d92ebd5a883a1a3c"
+    },
+    {
+      "名称": "最终关联-709项-第3轮.log",
+      "字节": 4458,
+      "sha256": "0c4d62553c8471fa81e6a1e8546179d8685f5cc18c74e2aeee4d32f73f96fe94"
+    },
+    {
+      "名称": "来源封装-48样本.json",
+      "字节": 9585,
+      "sha256": "3a3b1d220abd4420a9ae3e7ae2414edb7f5584372899adc4d3cdcfdf8b2cd4f5"
+    },
+    {
+      "名称": "核心冻结-83项.log",
+      "字节": 892,
+      "sha256": "8b4c25383f1a5d508caf48307d184dcafef6150270c1da103716725169654a90"
+    },
+    {
+      "名称": "独立复核-核心83项.log",
+      "字节": 892,
+      "sha256": "b99cfbcbaf1c94e6f9b1281dff0ee73a6d6e6f662eba73940aa92c84335933be"
+    },
+    {
+      "名称": "独立复核-追加边界42项.log",
+      "字节": 1405,
+      "sha256": "8e4689306fed7cb36bde1066a2486d9bec7d0c5bb68cb4ebbe071d867c2cddda"
+    },
+    {
+      "名称": "独立复核-追加配额与夹具边界.json",
+      "字节": 5426,
+      "sha256": "939e48465874cdafbfb091f44da4c08d18b79d29c1a97547a359a4272f7e6f87"
+    },
+    {
+      "名称": "独立复核-预算与计量边界.json",
+      "字节": 12056,
+      "sha256": "036309026bad42f75e03484a50ebf160c7c5c13873f64727c839f022e958143f"
+    },
+    {
+      "名称": "范围与验收计划.md",
+      "字节": 14568,
+      "sha256": "06eb9d63d6c01ff9b77d3d12c03cb35a7f0fb1200f0733363afbe5e2d38d2e76"
+    },
+    {
+      "名称": "追加-单位修复后仍32k拒绝.log",
+      "字节": 16939,
+      "sha256": "97470a36ff1a7c6c8030c8679bbf01589b3f949f547f3751a9cbe12bf32d7912"
+    },
+    {
+      "名称": "追加-夹具校准中间失败.log",
+      "字节": 4922,
+      "sha256": "a61c39dc1305b644c072ed2144848521c53b4431a2ce6bc801089f6d2455d908"
+    },
+    {
+      "名称": "追加核心-42项.log",
+      "字节": 1405,
+      "sha256": "71fe3d47e50b7aab6d1e58bb8783698da87e65d64b7213134f4f0504b1555af6"
+    },
+    {
+      "名称": "重放旧guard-重试协议1红.log",
+      "字节": 8523,
+      "sha256": "d9c2090c76394222604c18e171998ec8a3aa4d7de148426f557dc848e5b6c70c"
+    },
+    {
+      "名称": "首次适配-123绿11失败.log",
+      "字节": 92808,
+      "sha256": "4bf3e18e93cc701475926e5759f79c440d30fd9072679c993aeaaad5e9bb7500"
+    }
+  ]
+}

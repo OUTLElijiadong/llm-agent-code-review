@@ -22,7 +22,9 @@ from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services.project_member_service import require_project_access
+from app.services.project_member_service import require_project_access, require_project_execution
+from app.core.permission_codes import PermissionCode
+from app.services import rbac_service
 from app.utils.encoding_utils import BASE64_PREFIX
 
 SUPPORTED_TOOLS: Tuple[str, ...] = (
@@ -150,15 +152,16 @@ class AiPromptAgent(BaseAgent):
             return AgentResult(success=False, error="DB 未注入")
         return None
 
-    def _authz_issue(self, issue: ReviewIssue) -> Optional[AgentResult]:
+    def _authz_issue(self, issue: ReviewIssue, *, use_llm: bool = False) -> Optional[AgentResult]:
         task = self._db.get(ReviewTask, issue.task_id)
         if task is None:
             return AgentResult(success=False, error="无权访问该问题")
-        if (err := self._authz_project(task.project_id, "无权访问该问题")) is not None:
+        if (err := self._authz_project(task.project_id, "无权访问该问题", use_llm=use_llm, permission=PermissionCode.ISSUE_VIEW)) is not None:
             return err
         return None
 
-    def _authz_project(self, project_id: int, message: str) -> Optional[AgentResult]:
+    def _authz_project(self, project_id: int, message: str, *, use_llm: bool = False,
+                       permission: str = PermissionCode.PROJECT_VIEW) -> Optional[AgentResult]:
         """所有提示词入口均复用项目可见性和成员读权限。"""
         if self._db is None:
             return AgentResult(success=False, error="DB 未注入")
@@ -173,7 +176,17 @@ class AiPromptAgent(BaseAgent):
                 return AgentResult(success=False, error=message)
             return None
         try:
-            require_project_access(self._db, project_id, self._user, need_write=False)
+            # A model call may outlive the original transaction; use a fresh authorization snapshot.
+            with Session(bind=self._db.get_bind(), autoflush=False) as auth_db:
+                current = auth_db.get(User, int(self._user.id), populate_existing=True)
+                if current is None or int(current.status or 0) != 1:
+                    return AgentResult(success=False, error=message)
+                if not rbac_service.check_permission(auth_db, int(current.id), permission):
+                    return AgentResult(success=False, error=message)
+                if use_llm:
+                    require_project_execution(auth_db, project_id, current)
+                else:
+                    require_project_access(auth_db, project_id, current, need_write=False)
         except AppError:
             return AgentResult(success=False, error=message)
         return None
@@ -399,9 +412,11 @@ class AiPromptAgent(BaseAgent):
         issue = self._db.get(ReviewIssue, issue_id)
         if issue is None:
             return AgentResult(success=False, error="问题不存在")
-        if (err := self._authz_issue(issue)) is not None:
+        if (err := self._authz_issue(issue, use_llm=use_llm)) is not None:
             return err
         prompt = self._build_for_issue(issue, target_tool, use_llm)
+        if (err := self._authz_issue(issue, use_llm=use_llm)) is not None:
+            return err
         return AgentResult(
             success=True,
             data={
@@ -424,7 +439,7 @@ class AiPromptAgent(BaseAgent):
         task = self._db.get(ReviewTask, task_id)
         if task is None:
             return AgentResult(success=False, error="审查任务不存在")
-        if (err := self._authz_project(task.project_id, "无权访问该任务")) is not None:
+        if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
             return err
         q = self._db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
         if severity_filter:
@@ -436,7 +451,13 @@ class AiPromptAgent(BaseAgent):
                 success=False,
                 error="该任务下没有匹配的问题,无法生成提示词",
             )
-        prompts = [self._build_for_issue(i, target_tool, use_llm) for i in issues]
+        prompts = []
+        for issue in issues:
+            if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
+                return err
+            prompts.append(self._build_for_issue(issue, target_tool, use_llm))
+        if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
+            return err
         # 一键修复全部:把整批问题合成一条完整提示词(≥2 个问题时才有意义)
         aggregates: list[dict] = []
         if len(issues) >= 2:
@@ -470,7 +491,7 @@ class AiPromptAgent(BaseAgent):
         project = self._db.get(Project, project_id)
         if project is None:
             return AgentResult(success=False, error="项目不存在")
-        if (err := self._authz_project(project_id, "无权访问该项目")) is not None:
+        if (err := self._authz_project(project_id, "无权访问该项目", use_llm=use_llm)) is not None:
             return err
         # 严重度排序: 严重 > 高 > 中 > 低
         severity_order = ["严重", "高", "中", "低"]
@@ -498,7 +519,13 @@ class AiPromptAgent(BaseAgent):
                 success=False,
                 error="该项目下没有待修复的问题,无法生成提示词",
             )
-        prompts = [self._build_for_issue(i, target_tool, use_llm) for i in all_issues]
+        prompts = []
+        for issue in all_issues:
+            if (err := self._authz_project(project_id, "无权访问该项目", use_llm=use_llm)) is not None:
+                return err
+            prompts.append(self._build_for_issue(issue, target_tool, use_llm))
+        if (err := self._authz_project(project_id, "无权访问该项目", use_llm=use_llm)) is not None:
+            return err
         # 一键修复全部:项目跨多个审查任务,按「审查任务」分组各生成一条完整提示词
         by_task: dict[int, list[ReviewIssue]] = {}
         for iss in all_issues:

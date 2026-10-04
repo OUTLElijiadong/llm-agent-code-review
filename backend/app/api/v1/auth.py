@@ -27,7 +27,7 @@ def _client_ip(request: Request) -> str:
 @router.get("/captcha", response_model=Resp[dict])
 @limiter.limit("30/minute")
 def get_captcha(request: Request, response: Response):
-    """获取注册验证码(数学题)。返回 captcha_id 与题目,不返回答案。"""
+    """获取一次性注册位图挑战，不返回明文答案。"""
     data = create_captcha()
     data["beta_registration_enabled"] = settings.beta_registration_enabled
     return Resp(data=data)

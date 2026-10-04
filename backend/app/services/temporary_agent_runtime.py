@@ -179,6 +179,8 @@ def _recheck_access(db, user_id, project_id, file_ids, source_snapshots):
         _require(db, current, PermissionCode.PROJECT_VIEW)
         _require(db, current, PermissionCode.FILE_VIEW)
         project_service.get_project(db, current, project_id)
+        from app.services.project_member_service import require_project_execution
+        require_project_execution(db, project_id, current)
     for file_id in file_ids:
         metadata = code_file_service.get_file_meta(db, user=current, file_id=file_id)
         if metadata["is_binary"]:
@@ -224,6 +226,8 @@ def _prepare_context(db, user, message):
     payload = message.get("payload") or {}
     if not isinstance(payload, dict):
         raise _Blocked("任务输入必须是对象")
+    from app.services.project_member_service import require_scoped_project_execution
+    require_scoped_project_execution(db, user, payload)
     project_id = _identifier(payload.get("project_id"), "project_id")
     file_ids = _selected_file_ids(payload)
     task_input = {

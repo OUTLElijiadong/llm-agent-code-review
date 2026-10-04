@@ -1,0 +1,57 @@
+{
+  "command": [
+    ".venv311/bin/python",
+    "-m",
+    "pytest",
+    "--no-cov",
+    "-q",
+    "tests/unit/services/test_viewer_execution_boundaries.py",
+    "tests/unit/services/test_security_sentinel_agent.py",
+    "tests/unit/services/test_sandbox_optimizations.py",
+    "tests/unit/services/test_agent_test_cases.py",
+    "tests/unit/services/test_remote_target_authorization.py",
+    "tests/unit/services/test_model_independent_paths.py",
+    "tests/unit/agents/test_agent_project_quarantine.py",
+    "tests/unit/services/test_sandbox_multi_agent_review.py",
+    "tests/unit/services/test_sandbox_report_publish.py",
+    "tests/unit/services/test_sandbox_report_summary.py",
+    "tests/unit/services/test_sandbox_decompilation.py",
+    "tests/unit/services/test_managed_mcp_adapter.py",
+    "tests/unit/agents/test_security_sentinel_review.py",
+    "tests/unit/agents/test_fullchain_context_coverage.py",
+    "tests/unit/services/test_deploy_verify_runner_regressions.py",
+    "tests/unit/services/test_sandbox_api_authorization.py",
+    "tests/unit/services/test_background_usage_sources.py::test_sandbox_worker_recovers_persisted_origin_and_resets_context",
+    "tests/unit/agents/test_scan_entry_input_closure.py::test_security_api_does_not_serialize_empty_input_as_success",
+    "tests/test_security_catalog_current.py"
+  ],
+  "results": [
+    {
+      "round": 1,
+      "exit_code": 0,
+      "seconds": 18.294,
+      "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第1轮.log",
+      "bytes": 3175,
+      "sha256": "410064177774984e2f11374859ac0fa26fff09ad29735701c3a9cefec8fbae5a",
+      "tail": "======================= 266 passed, 2 warnings in 17.33s ======================="
+    },
+    {
+      "round": 2,
+      "exit_code": 0,
+      "seconds": 17.764,
+      "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第2轮.log",
+      "bytes": 3175,
+      "sha256": "83b6154ba72eb416b55305bfbc92c721fcd2fbae3a25d2fc175e657d88c744f7",
+      "tail": "======================= 266 passed, 2 warnings in 16.84s ======================="
+    },
+    {
+      "round": 3,
+      "exit_code": 0,
+      "seconds": 17.867,
+      "log": "../docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第3轮.log",
+      "bytes": 3175,
+      "sha256": "41869287f2471b1dc02c5729d56a3bfa3e049c9b27f98adb54869126459cb999",
+      "tail": "======================= 266 passed, 2 warnings in 16.92s ======================="
+    }
+  ]
+}

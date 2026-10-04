@@ -1,0 +1,21 @@
+{
+  "范围": "可信历史完整源码的本地SQLite角色门；没有调用API、外部工具或生产数据",
+  "旧源码提交": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "旧源码SHA256": "65476fdac64bb4e60cfaada1ad9b921371f4f21d2b7454134ffbed3f88f1d602",
+  "旧只读": "viewer",
+  "旧need_write": "viewer",
+  "旧execution_helper存在": false,
+  "当前只读": "viewer",
+  "当前need_write": {
+    "exception": "ForbiddenError",
+    "code": 40300
+  },
+  "当前execution": {
+    "exception": "ForbiddenError",
+    "code": 40300
+  },
+  "结论": "旧37角色门把viewer成员need_write视为通过；新数据不能由该旧语义安全回退",
+  "门建议": "精确目标镜像无网实际角色行为探针；即使无viewer记录也拒不支持目标，消除并发写入窗口",
+  "门边界": "helper角色契约通过不证明所有执行入口已复用helper，探针不能称所有RBAC验收",
+  "首次夹具错误": "此前独立脚本未预先导入AuditLog导致该本地表未创建；本次明确导入建表后复跑，不计首次为产品错误"
+}

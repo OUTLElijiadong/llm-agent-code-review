@@ -224,7 +224,7 @@ async def test_compacts_model_projection_but_preserves_full_audit_transcript() -
         transport=transport,
         tool_executor=RecordingExecutor(),
         checkpoint_store=store,
-        context_window_tokens=4_000,
+        context_window_tokens=16_000,
         max_output_tokens=400,
         compaction_threshold_tokens=900,
         keep_recent_tokens=500,
@@ -267,7 +267,7 @@ def test_compaction_covers_late_user_constraint_message_tail_and_tool_fact() -> 
     ])
     transcript.extend({"role": "assistant", "content": "填充历史" + "乙" * 200} for _ in range(15))
     projected, metadata = compact_transcript(
-        transcript, context_window_tokens=9000, max_output_tokens=500,
+        transcript, context_window_tokens=16_000, max_output_tokens=500,
         compaction_threshold_tokens=1000, keep_recent_tokens=300,
     )
     summary = json.dumps(projected, ensure_ascii=False)
@@ -290,7 +290,7 @@ async def test_semantic_compaction_reads_every_source_and_keeps_late_constraints
     transport = SummarizingTransport()
     logs: List[Mapping[str, Any]] = []
     runtime = _runtime(
-        transport, RecordingExecutor(), context_window_tokens=5000,
+        transport, RecordingExecutor(), context_window_tokens=16_000,
         max_output_tokens=500, compaction_threshold_tokens=1000,
         keep_recent_tokens=300, on_round=logs.append,
     )
@@ -349,7 +349,7 @@ async def test_semantic_compaction_keeps_unmarked_short_user_business_facts() ->
     )
     transport = OmittingTransport()
     runtime = _runtime(
-        transport, RecordingExecutor(), context_window_tokens=6000,
+        transport, RecordingExecutor(), context_window_tokens=16_000,
         max_output_tokens=400, compaction_threshold_tokens=500,
         keep_recent_tokens=200,
     )
@@ -399,7 +399,7 @@ async def test_semantic_compaction_retrieves_old_long_user_fact_for_current_quer
     )
     transport = OmittingTransport()
     runtime = _runtime(
-        transport, RecordingExecutor(), context_window_tokens=6000,
+        transport, RecordingExecutor(), context_window_tokens=16_000,
         max_output_tokens=400, compaction_threshold_tokens=500,
         keep_recent_tokens=200,
     )
@@ -508,8 +508,9 @@ async def test_user_fact_ledger_over_budget_fails_closed_without_trimming() -> N
 
 
 @pytest.mark.asyncio
-async def test_semantic_compaction_handles_more_than_one_million_estimated_tokens() -> None:
-    """以真实量级历史验证分块、来源覆盖和预算；模拟模型不证明语义理解。"""
+@pytest.mark.parametrize("output_budget", [16_000, 65_536], ids=["bounded-output", "configured-default-output"])
+async def test_semantic_compaction_handles_more_than_one_million_estimated_tokens(output_budget: int) -> None:
+    """以百万级字节预算验证分块/来源覆盖；模拟模型不证明真实 token 数或语义理解。"""
     anchor_facts = {
         "EARLY_FACT=only_current_account",
         "MIDDLE_FACT=review_must_be_read_only",
@@ -545,7 +546,7 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
             facts = " LATE_FACT=latest_correction_overrides_earlier_scope"
         transcript.append({
             "role": "user" if index % 2 == 0 else "assistant",
-            "content": f"history_item_{index:04d}{facts} " + ("x" * 3990),
+            "content": f"history_item_{index:04d}{facts} " + ("x" * 900),
         })
 
     original_token_estimate = estimate_tokens(transcript)
@@ -557,14 +558,14 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
         transport,
         RecordingExecutor(),
         context_window_tokens=1_000_000,
-        max_output_tokens=16_000,
+        max_output_tokens=output_budget,
         compaction_threshold_tokens=850_000,
         keep_recent_tokens=150_000,
     )
     projected, metadata = compact_transcript(
         transcript,
         context_window_tokens=1_000_000,
-        max_output_tokens=16_000,
+        max_output_tokens=output_budget,
         compaction_threshold_tokens=850_000,
         keep_recent_tokens=150_000,
         semantic_summary="[平台上下文压缩] 正在生成带来源锚点的语义摘要。",
@@ -586,7 +587,7 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
     final_projection, final_metadata = compact_transcript(
         transcript,
         context_window_tokens=1_000_000,
-        max_output_tokens=16_000,
+        max_output_tokens=output_budget,
         compaction_threshold_tokens=850_000,
         keep_recent_tokens=150_000,
         semantic_summary=semantic_summary,
@@ -611,9 +612,8 @@ async def test_semantic_compaction_handles_more_than_one_million_estimated_token
         assert schema["additionalProperties"] is False
         assert "不得复制整条来源消息" in payload["instructions"]
         estimated_request = estimate_tokens({
-            "instructions": payload["instructions"],
-            "input": payload["input"],
-        })
+            key: value for key, value in payload.items() if key != "max_output_tokens"
+        }) + 1024
         assert estimated_request + int(payload["max_output_tokens"]) < 1_000_000
 
 
@@ -754,7 +754,7 @@ async def test_semantic_compaction_canonicalizes_missing_source_markers() -> Non
     transcript = [{"role": "user", "content": "初始目标"}]
     transcript.extend({"role": "user", "content": f"独立约束 {i}"} for i in range(30))
     runtime = _runtime(
-        transport, RecordingExecutor(), context_window_tokens=4000,
+        transport, RecordingExecutor(), context_window_tokens=16_000,
         max_output_tokens=400, compaction_threshold_tokens=200,
         keep_recent_tokens=100,
     )
@@ -818,7 +818,7 @@ async def test_semantic_compaction_rejects_unverifiable_quotes_and_source_covera
     await store.create(checkpoint)
     runtime = DeepSeekResponsesRuntime(
         transport=InvalidContractTransport(), tool_executor=RecordingExecutor(), checkpoint_store=store,
-        context_window_tokens=5000, max_output_tokens=400,
+        context_window_tokens=16_000, max_output_tokens=400,
         compaction_threshold_tokens=1000, keep_recent_tokens=250,
     )
     with pytest.raises(ContextBudgetError, match="引文|来源|标记"):
@@ -907,7 +907,7 @@ async def test_cancellation_between_compaction_chunks_stops_paid_requests() -> N
     transcript.extend({"role": "user", "content": f"第 {i} 条独立条件 " + "甲" * 150} for i in range(35))
     runtime = DeepSeekResponsesRuntime(
         transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
-        context_window_tokens=4000, max_output_tokens=400,
+        context_window_tokens=16_000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
     result = await runtime.start(transcript, run_id="cancel_compaction")
@@ -945,7 +945,7 @@ async def test_secondary_compaction_rejects_missing_compressed_block_markers() -
     transport = LosingReducer()
     runtime = DeepSeekResponsesRuntime(
         transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
-        context_window_tokens=4000, max_output_tokens=400,
+        context_window_tokens=16_000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
     with pytest.raises(ContextBudgetError, match="缺失压缩块"):
@@ -971,7 +971,7 @@ async def test_semantic_compaction_call_cap_rejects_without_provider_request() -
     transport = SummarizingTransport()
     runtime = DeepSeekResponsesRuntime(
         transport=transport, tool_executor=RecordingExecutor(), checkpoint_store=store,
-        context_window_tokens=4000, max_output_tokens=400,
+        context_window_tokens=16_000, max_output_tokens=400,
         compaction_threshold_tokens=600, keep_recent_tokens=250,
     )
     with pytest.raises(
@@ -1020,7 +1020,7 @@ async def test_manual_retry_after_length_incomplete_never_repeats_same_budget() 
     ])
     executor = RecordingExecutor()
     runtime = _runtime(
-        transport, executor, context_window_tokens=5000,
+        transport, executor, context_window_tokens=16_000,
         max_output_tokens=400, compaction_threshold_tokens=1000,
         keep_recent_tokens=300,
     )

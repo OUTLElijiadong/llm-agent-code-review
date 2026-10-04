@@ -160,3 +160,34 @@ def test_supplementary_maintainer_advisory_is_not_counted_as_a_cve():
     assert row["vulnerabilities"][1]["vulnerable_version_range"] == "<v13.30.0"
     assert "GHSA-jh5r-qr3c-85q8" in _read("known_cves")
     assert "不计入 CVE 参考数量" in _read("known_cves")
+
+
+def test_review_prompt_allows_unavailable_cvss_when_metrics_are_unverified():
+    """合法向量可重算不代表指标事实已验证；缺指标时不得强迫模型编造。"""
+    prompt = (Path(__file__).resolve().parents[1] / "app/ai/prompts/review.zh.md").read_text()
+    assert "必要指标未获证据核实时，cvss_score 填 null、cvss_vector 填空字符串" in prompt
+    assert "必须给出 0.0-10.0 之间的数值" not in prompt
+    assert "必须给出合法的 CVSS v3.1 向量字符串" not in prompt
+    parsed = parse(json.dumps({"issues": [{"issue_type": "安全漏洞", "title": "待核实的规则主张",
+                                          "cvss_score": None, "cvss_vector": ""}]})).issues[0]
+    assert parsed.cvss_score is None and parsed.cvss_source == "unavailable"
+
+
+def test_review_prompt_and_output_schema_allow_unknown_classification_without_invention():
+    from datetime import datetime
+
+    from app.schemas.review import IssueOut
+
+    prompt = (Path(__file__).resolve().parents[1] / "app/ai/prompts/review.zh.md").read_text()
+    assert "分类编号映射依据不明确时填空字符串，不得为满足格式而编造编号" in prompt
+    assert "`owasp`: 必须是 OWASP Top 10 编号" not in prompt
+    assert "`cwe`: 必须是 CWE 编号" not in prompt
+    parsed = parse(json.dumps({"issues": [{
+        "issue_type": "安全漏洞", "title": "待核实的组件行为", "description": "需要完整环境才能评估。",
+        "cwe": "", "owasp": "", "cvss_score": None, "cvss_vector": "",
+    }]})).issues[0]
+    assert parsed.cwe == parsed.owasp == ""
+    model = IssueOut(id=1, task_id=1, issue_type=parsed.issue_type, severity=parsed.severity,
+                     description=parsed.description, status="pending_review", create_time=datetime(2026, 10, 4),
+                     cwe=parsed.cwe, owasp=parsed.owasp, cvss_score=parsed.cvss_score)
+    assert model.cwe == model.owasp == "" and model.cvss_score is None

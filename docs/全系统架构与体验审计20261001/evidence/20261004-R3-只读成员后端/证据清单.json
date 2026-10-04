@@ -1,0 +1,508 @@
+{
+  "date": "2026-10-04",
+  "source_state": "context_integrity-owned files frozen; other agents remain separate",
+  "products": [
+    {
+      "path": "backend/app/models/project_member.py",
+      "kind": "product",
+      "sha256": "22aec2c68dadb8f74f8a8cd88e88a45963e0fd83ef9167fdd9eb82b1ec763d65",
+      "bytes": 1329
+    },
+    {
+      "path": "backend/app/schemas/project_member.py",
+      "kind": "product",
+      "sha256": "6774eb1c2507edee5283b43b1c08b3cea900c792f6efe992d6400378a23ce666",
+      "bytes": 1247
+    },
+    {
+      "path": "backend/app/schemas/project.py",
+      "kind": "product",
+      "sha256": "43d0b44a893d1f627cf30af4b8ef8847dd95ce9c535c1a216b4993109742684f",
+      "bytes": 6436
+    },
+    {
+      "path": "backend/app/schemas/review.py",
+      "kind": "product",
+      "sha256": "56d7f7e18b65df8f522d5b00eeabe5066e08429941bb5e4008b25468acf52349",
+      "bytes": 7894
+    },
+    {
+      "path": "backend/app/schemas/report.py",
+      "kind": "product",
+      "sha256": "e14e2e252ead126df9f075a55a8ed1c80efa3e1e4ddc0730809af4409cfe1346",
+      "bytes": 1285
+    },
+    {
+      "path": "backend/app/api/v1/project_members.py",
+      "kind": "product",
+      "sha256": "d0b0def2d7ce1a80a9e1330fd8349aa4f7ad0b650ae9ea071d98bb5dcb180979",
+      "bytes": 5732
+    },
+    {
+      "path": "backend/app/api/v1/discussion.py",
+      "kind": "product",
+      "sha256": "a0dcd02028c81898b627dbeb2ecd8b71d0f361bc71e5d4bcda2abfbd5f86dee7",
+      "bytes": 8772
+    },
+    {
+      "path": "backend/app/api/v1/ws_discussion.py",
+      "kind": "product",
+      "sha256": "95ed27f679fe3a0970eecadf3c91521553683aa86fda97cf0e36a145103f6faa",
+      "bytes": 22874
+    },
+    {
+      "path": "backend/app/api/v1/ai_prompt.py",
+      "kind": "product",
+      "sha256": "4f8f2630edc89fa5dabcf2597010297e871997893511366280d8c9b1d393c6eb",
+      "bytes": 4905
+    },
+    {
+      "path": "backend/app/services/project_member_service.py",
+      "kind": "product",
+      "sha256": "19e7dd775c493a82281765bb79f2308ffc9afbbc399583be1236c9c871495938",
+      "bytes": 20205
+    },
+    {
+      "path": "backend/app/services/project_service.py",
+      "kind": "product",
+      "sha256": "6d7662a0034307d18999acfffd2717d777f8f0a13f98354a6affebacc2d2d7dd",
+      "bytes": 15235
+    },
+    {
+      "path": "backend/app/services/issue_service.py",
+      "kind": "product",
+      "sha256": "2a5f8e44fc319289db239138d06388ab48e961a223e5bc652f799a8871cdb691",
+      "bytes": 10058
+    },
+    {
+      "path": "backend/app/services/review_service.py",
+      "kind": "product",
+      "sha256": "045a5f35e585249f9fa8353747b5597daba4514b98cb0018ee3ec49bcda496fb",
+      "bytes": 127127
+    },
+    {
+      "path": "backend/app/services/report_service.py",
+      "kind": "product",
+      "sha256": "3c45456936b7c9b06ddf8ac7a91fe675399973ac1de11ef8571d3530436ae683",
+      "bytes": 28066
+    },
+    {
+      "path": "backend/app/services/agent_team_review.py",
+      "kind": "product",
+      "sha256": "1f17f5e4259202320ec94d1b018a5462d49a876a4d9f37d2867995940fdd3acd",
+      "bytes": 9712
+    },
+    {
+      "path": "backend/app/services/agent_team_service.py",
+      "kind": "product",
+      "sha256": "fb5cdf19c98a7bce5540e158fffb0a055808db53fdbd4398c5c51dc9097aed93",
+      "bytes": 133925
+    },
+    {
+      "path": "backend/app/services/agent_team_dispatcher.py",
+      "kind": "product",
+      "sha256": "bee6b8c72368e30de71952a74e5c8dd2187d766c8b2c5ac0bcdcd72bd43c6a75",
+      "bytes": 19355
+    },
+    {
+      "path": "backend/app/services/temporary_agent_runtime.py",
+      "kind": "product",
+      "sha256": "9b14e633ef334586a630556c650376133447691614e2b3978dae30824c936262",
+      "bytes": 39313
+    },
+    {
+      "path": "backend/app/services/agent_mesh_dispatcher.py",
+      "kind": "product",
+      "sha256": "fb6c1680efa0d75eec7e11f8a1ec54b7152f88e707b5da7bb4f7b9c3c4f744cd",
+      "bytes": 64800
+    },
+    {
+      "path": "backend/app/ai/discussion_orchestrator.py",
+      "kind": "product",
+      "sha256": "bed323129e9edfed5a121b1b0a3100061ff980c1f2e92f37a7eab63342429ec4",
+      "bytes": 115519
+    },
+    {
+      "path": "backend/app/agents/ai_prompt_agent.py",
+      "kind": "product",
+      "sha256": "21f7a98bbcf5779e0f3fa11ed11d9e50933e33f4dc97b0f22d9d3bed6cf42328",
+      "bytes": 25347
+    }
+  ],
+  "tests_and_fixtures": [
+    {
+      "path": "backend/tests/unit/services/test_project_viewer_permissions.py",
+      "kind": "test_or_fixture",
+      "sha256": "74a52ceab598a82b4b5cb1dbc5fb94caa027b392fc86f6b28191f94846880126",
+      "bytes": 5616
+    },
+    {
+      "path": "backend/tests/unit/services/test_project_viewer_resources.py",
+      "kind": "test_or_fixture",
+      "sha256": "d092a0b9b7c0f31cdffb4d149069b065eed5ee723d7c7f4e12117d3dead391b2",
+      "bytes": 5247
+    },
+    {
+      "path": "backend/tests/unit/services/test_project_viewer_execution.py",
+      "kind": "test_or_fixture",
+      "sha256": "21dedcb5a0dec018e92ae2e8374ea823472694edf8342add8c7592d43281b7ac",
+      "bytes": 14478
+    },
+    {
+      "path": "backend/tests/unit/api/test_project_viewer_api.py",
+      "kind": "test_or_fixture",
+      "sha256": "670ccedf33477781feb51013690569cd1ac35e5cd73aa95a605e695b24fb8fc8",
+      "bytes": 5764
+    },
+    {
+      "path": "backend/tests/unit/services/test_ai_prompt_agent.py",
+      "kind": "test_or_fixture",
+      "sha256": "8d6e0b7de76e7f3184fbbb0cc4a16d4f5bc86a84f639cef02a0182f568de8fcd",
+      "bytes": 8450
+    },
+    {
+      "path": "backend/tests/unit/test_discussion_orchestrator_coverage.py",
+      "kind": "test_or_fixture",
+      "sha256": "734aee186dcbc4849d9de62640fd96e5017468e15338186199d7b4a340e194c4",
+      "bytes": 107213
+    },
+    {
+      "path": "backend/tests/unit/agents/test_ws_discussion_coverage.py",
+      "kind": "test_or_fixture",
+      "sha256": "9b5c4ac4a21dc60f5e6eda64bd4ddba3f68545428b11d36cbda14ee5d4ecf545",
+      "bytes": 32101
+    },
+    {
+      "path": "backend/tests/unit/services/test_background_usage_sources.py",
+      "kind": "test_or_fixture",
+      "sha256": "869afe6978e231e3ad44a6deeafc73abb5039e1b6bb987057be90dbc2317bf84",
+      "bytes": 12254
+    },
+    {
+      "path": "backend/tests/unit/agents/test_scan_entry_input_closure.py",
+      "kind": "test_or_fixture",
+      "sha256": "e418f14b27507ab3fce911b01eeb77a142bd1902f05bcfa67475127c5fea9f4e",
+      "bytes": 25742
+    }
+  ],
+  "handoff": "pentest_service.py create-only restriction transferred to remaining_permissions; its final hash and further refusal tests belong to that agent/root",
+  "core": {
+    "helper": 17,
+    "resource": 8,
+    "execution": 30,
+    "real_http": 10,
+    "total": 65,
+    "log": "context_integrity-context-viewer-core-final-20261004.log"
+  },
+  "final_related": {
+    "argv": [
+      "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/unit/api/test_project_viewer_api.py",
+      "tests/unit/services/test_project_viewer_permissions.py",
+      "tests/unit/services/test_project_viewer_resources.py",
+      "tests/unit/services/test_project_viewer_execution.py",
+      "tests/unit/services/test_ai_prompt_agent.py",
+      "tests/unit/services/test_agent_team_service.py",
+      "tests/unit/services/test_agent_team_dispatcher.py",
+      "tests/unit/services/test_agent_team_review.py",
+      "tests/unit/services/test_agent_mesh_dispatcher.py",
+      "tests/unit/services/test_temporary_agent_runtime.py",
+      "tests/unit/test_discussion_orchestrator_coverage.py",
+      "tests/unit/agents/test_ws_discussion_coverage.py",
+      "tests/unit/services/test_review_service_helpers.py",
+      "tests/unit/services/test_review_service_state_coverage.py",
+      "tests/unit/services/test_review_service_v2.py",
+      "tests/test_review_service_v3.py",
+      "tests/unit/services/test_background_usage_sources.py",
+      "tests/unit/agents/test_scan_entry_input_closure.py",
+      "tests/unit/agents/test_agent_project_quarantine.py",
+      "tests/unit/api/test_project_member_candidates_api.py",
+      "tests/unit/services/test_project_member_service.py",
+      "tests/unit/services/test_report_service.py",
+      "tests/unit/api/test_review_start_rate_limit.py"
+    ],
+    "results": [
+      {
+        "round": 1,
+        "exit_code": 0,
+        "log": "context_integrity-关联复测-1.log",
+        "summary": "======================= 621 passed, 2 warnings in 15.99s ======================="
+      },
+      {
+        "round": 2,
+        "exit_code": 0,
+        "log": "context_integrity-关联复测-2.log",
+        "summary": "======================= 621 passed, 2 warnings in 16.39s ======================="
+      },
+      {
+        "round": 3,
+        "exit_code": 0,
+        "log": "context_integrity-关联复测-3.log",
+        "summary": "======================= 621 passed, 2 warnings in 16.35s ======================="
+      }
+    ],
+    "scope": "23 local test files; no provider/API/production execution"
+  },
+  "logs": [
+    {
+      "file": "context_integrity-viewer-helper-red-20261004.log",
+      "sha256": "a3ba6baa8e76b0caa935126641f34f28948ff56219fdd947ed1d070fea1f2216",
+      "bytes": 17527,
+      "summary": "========================= 16 failed, 1 passed in 0.48s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-helper-green-20261004.log",
+      "sha256": "7dfea20e15050e0fbdd683f7888b9b5ed12c67c6b6087743ff59834a73c85d5f",
+      "bytes": 1897,
+      "summary": "======================== 50 passed, 2 warnings in 1.81s ========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-resources-red-20261004.log",
+      "sha256": "b282ddd5fb6be4d18cacdba790c86cbea14c82df7f2d568d1ab877255c59128e",
+      "bytes": 7950,
+      "summary": "==================== 6 failed, 1 passed, 1 warning in 0.55s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-resources-green-20261004.log",
+      "sha256": "34e39187aee9a226f308e2a3095f3b46830bfb31d3deb1f5c4a84ffce25912ab",
+      "bytes": 14887,
+      "summary": "==================== 4 failed, 3 passed, 1 warning in 0.60s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-resources-green-final-20261004.log",
+      "sha256": "dfcb0cde8a3ebecc40a6d767d043ff78c100da664227227cf0ccc20adb7d1f90",
+      "bytes": 1164,
+      "summary": "========================= 7 passed, 1 warning in 0.49s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-red-20261004.log",
+      "sha256": "6db9499e49d14a43760ee8fdab88d3b4eaeb5893a988a5667d6c0394cda94f9c",
+      "bytes": 20837,
+      "summary": "======================== 16 failed, 1 warning in 1.25s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-red-valid-20261004.log",
+      "sha256": "536fe44eb8128e8b8c918a4f107190cf127174e56ce6cfbf31d68c7ff1bea697",
+      "bytes": 28098,
+      "summary": "======================== 16 failed, 1 warning in 1.24s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-green-20261004.log",
+      "sha256": "1164fc91cf77749659ba09a37a99c65f6ed0f9b8e976c76695adfa41e580886b",
+      "bytes": 2233,
+      "summary": "=================== 1 failed, 15 passed, 1 warning in 1.14s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-green-final-20261004.log",
+      "sha256": "063fbaa873df9dc65483477f03cd6c173d6d102a6a6f3c5c2d6cac754fdb46f7",
+      "bytes": 1165,
+      "summary": "======================== 16 passed, 1 warning in 1.19s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-live-downgrade-red-20261004.log",
+      "sha256": "a20adb8599ef6891c96f11e9b98fa41cc2edcb755d26018c7b993bf1b7390021",
+      "bytes": 6360,
+      "summary": "=================== 3 failed, 16 passed, 1 warning in 1.05s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-live-downgrade-red-valid-20261004.log",
+      "sha256": "9d496f2aebe2ad333574884bd7316831ab52e8506077be032ed61b5b0fdddf53",
+      "bytes": 3423,
+      "summary": "=================== 2 failed, 17 passed, 1 warning in 1.04s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-live-downgrade-green-20261004.log",
+      "sha256": "5074fa4cb1e0e9e9287d5613a09c2d4d02d16ce626f558f1d9b45f69dbf0bec4",
+      "bytes": 1165,
+      "summary": "======================== 19 passed, 1 warning in 1.15s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-associated-first-20261004.log",
+      "sha256": "f95ec9ee98d3982ffdcfa7859a2c28de09a36d8311200cd8cc5c68d15765b55e",
+      "bytes": 650,
+      "summary": "============================ no tests ran in 0.01s =============================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-associated-first-valid-20261004.log",
+      "sha256": "05c75c92418b116cdfb12cfa8969095048171d7fd2c750bce6f3db0a160ab4ed",
+      "bytes": 85483,
+      "summary": "================== 17 failed, 396 passed, 1 warning in 10.85s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-associated-second-20261004.log",
+      "sha256": "d302f7d5e2cf1003d7e8d4d0e701525c68b8228d8119b7b03f1132776be1438f",
+      "bytes": 52717,
+      "summary": "================== 11 failed, 402 passed, 1 warning in 10.63s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-roundtable-adapted-20261004.log",
+      "sha256": "c63dc2685823103e5053fc0e4844cf0c00b86845c216c2a771b6a0d662e8db71",
+      "bytes": 32379,
+      "summary": "=================== 5 failed, 174 passed, 1 warning in 7.52s ===================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-http-first-20261004.log",
+      "sha256": "fab24aa6086dd3e287c2273700844cfa3a869864ca95cab78bb2aa76a932a2d6",
+      "bytes": 477373,
+      "summary": "======================== 10 failed, 2 warnings in 5.41s ========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-http-roundtable-retest-20261004.log",
+      "sha256": "56db807e06db6293fe7755d9e0e6c1bb08a28fd8c9b0ad4eb4e10e851bdbdfa4",
+      "bytes": 5519,
+      "summary": "================== 1 failed, 188 passed, 2 warnings in 6.59s ===================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-expanded-20261004.log",
+      "sha256": "d7c9b83a9e1bfaedab1d3c60e34c070b873f7130e2c76397b4c535d06dd52586",
+      "bytes": 14325,
+      "summary": "=================== 1 failed, 28 passed, 1 warning in 1.48s ====================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-dependency-red-20261004.log",
+      "sha256": "db8b68658f65f69112b527cbb5db602c61df977197cbe76ddbf572504ff5cb39",
+      "bytes": 3713,
+      "summary": "================= 1 failed, 29 deselected, 1 warning in 0.32s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-dependency-red-valid-20261004.log",
+      "sha256": "1b09247436eb13abcaca561f5211d2a7d0d7ceeb1fecac198eb6af7f242f25b6",
+      "bytes": 4453,
+      "summary": "================= 1 failed, 29 deselected, 1 warning in 0.36s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-dependency-red-ready-20261004.log",
+      "sha256": "7a1e55a198b6ae1fdf9e50c875212791708dc43607abd7662326cc80d043e17a",
+      "bytes": 4431,
+      "summary": "================= 1 failed, 29 deselected, 1 warning in 0.38s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-dependency-real-red-20261004.log",
+      "sha256": "3865a7eb5c2efb27caf60ab4dce13874f618304d6c5c00dff0c064f6ae53f223",
+      "bytes": 5851,
+      "summary": "================= 1 failed, 29 deselected, 1 warning in 0.47s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-dependency-final-red-20261004.log",
+      "sha256": "c17820497ee8a05f0664c4d3dc7c403f15c48740da5c1d2ee40bff08d4a44e34",
+      "bytes": 3730,
+      "summary": "================= 1 failed, 29 deselected, 1 warning in 0.45s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-final-20261004.log",
+      "sha256": "b1ce59b39cce35aa342d10be064876a1b178f0de2c3703ddeb2b3c4091c4259a",
+      "bytes": 2949,
+      "summary": "========================= 1 warning, 1 error in 0.41s ==========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-execution-final-valid-20261004.log",
+      "sha256": "c479d3847701d2bdcb9214495f5cec4ad852268ab63d9984cd93fa752c0fef16",
+      "bytes": 1245,
+      "summary": "======================== 30 passed, 1 warning in 2.31s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-integrated-expanded-20261004.log",
+      "sha256": "91d664e9332643b6f73da7049194420f1d1f64fe7f6741942045fa341a338972",
+      "bytes": 6907,
+      "summary": "================== 1 failed, 692 passed, 2 warnings in 30.65s ==================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-report-batch-regression-20261004.log",
+      "sha256": "57b58d2d514337f82eac9e5d76b94e92ab4956790edb5823e400eed8c7b8b2da",
+      "bytes": 1405,
+      "summary": "======================== 42 passed, 1 warning in 1.65s =========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-context-viewer-core-final-20261004.log",
+      "sha256": "a6c72f8d88956c90081267f1a84e079f5b7fa050ad4456ed64c709c2131e242b",
+      "bytes": 1977,
+      "summary": "======================== 65 passed, 2 warnings in 2.24s ========================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-viewer-integration-first-20261004.log",
+      "sha256": "07a9641b47eae97be85d191adf3d8494838640b39f694546312c1955c695de92",
+      "bytes": 3658,
+      "summary": "======================= 555 passed, 2 warnings in 15.56s =======================",
+      "original_pytest_exit_captured": null
+    },
+    {
+      "file": "context_integrity-关联复测-1.log",
+      "sha256": "a257d7ffaf8e0e760c077442ee33ecdad6b2ca7b4f824c400bbb772d58996954",
+      "bytes": 4058,
+      "summary": "======================= 621 passed, 2 warnings in 15.99s =======================",
+      "pytest_exit_code": 0
+    },
+    {
+      "file": "context_integrity-关联复测-2.log",
+      "sha256": "0e15a784e601b6b3d66d547582d801ba1b934deba5330a98d0381ac3013c85c7",
+      "bytes": 4058,
+      "summary": "======================= 621 passed, 2 warnings in 16.39s =======================",
+      "pytest_exit_code": 0
+    },
+    {
+      "file": "context_integrity-关联复测-3.log",
+      "sha256": "318074f49ed742a32ace0ef0bcf1187fcc64d8462710f5e00f882b438809be30",
+      "bytes": 4058,
+      "summary": "======================= 621 passed, 2 warnings in 16.35s =======================",
+      "pytest_exit_code": 0
+    }
+  ],
+  "static": [
+    {
+      "check": "diff-check",
+      "exit_code": 0,
+      "log": "context_integrity-diff-check.log"
+    },
+    {
+      "check": "compileall",
+      "exit_code": 0,
+      "log": "context_integrity-compileall.log"
+    }
+  ],
+  "boundaries": [
+    "All DBs local SQLite; models, workers, external executors use benign/rejecting stubs. No production, paid model, attack or sandbox workload executed.",
+    "65 core cases and 621 related cases overlap; do not add them to independent counts. 23 related files ran three times, not the full backend.",
+    "First 16-case red includes six nonexistent inject API fixture errors; only corrected red-valid is the effective execution red.",
+    "Initial live downgrade 3-red includes one wrong model-stub token object; corrected 2-red/17-green is the effective new result boundary.",
+    "Dependency setup had four fixture/plan preparation failures before valid 1-red did-not-raise; preserve every log and do not count setup errors as vulnerabilities.",
+    "Initial HTTP no-such-table failures came from multithread local SQLite harness; StaticPool fixed tests, not production schema.",
+    "Report list extra Project query was reproduced by unchanged old batch budget test and fixed by reusing fresh batch rows, not loosening its assertion.",
+    "Old legitimate roundtable fixtures now have real User/Project/REVIEW_START grants; role drift and authorization-negative tests were not weakened.",
+    "Viewer is a project resource restriction, not a replacement account role; global RBAC, sandbox creator scope and report author/admin privacy remain separate.",
+    "Free-form copied source and conversations are not inferred as project resource IDs; execution gates use server-resolved structured references.",
+    "No claim of provider semantic fidelity, hallucination-free AI, complete production acceptance, or all account/browser/mobile flows."
+  ]
+}

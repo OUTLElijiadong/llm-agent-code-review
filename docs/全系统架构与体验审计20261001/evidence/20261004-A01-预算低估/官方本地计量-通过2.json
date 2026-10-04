@@ -1,0 +1,117 @@
+{
+  "repo": "deepseek-ai/DeepSeek-V4.1-Flash",
+  "revision": "2cba9e42aa026125f3ed06c6d98c1db82f7ca027",
+  "kind": "official_local_content_tokenizer_not_provider_usage",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "paid_model_calls": 0,
+  "database_operations": 0,
+  "artifacts": {
+    "tokenizer.json": {
+      "sha256": "c90dfa01249db1be4245780a052ede752e1361c612ac6d08e2bdada7d599476b",
+      "bytes": 6367257,
+      "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/resolve/2cba9e42aa026125f3ed06c6d98c1db82f7ca027/tokenizer.json"
+    },
+    "tokenizer_config.json": {
+      "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+      "bytes": 801,
+      "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/resolve/2cba9e42aa026125f3ed06c6d98c1db82f7ca027/tokenizer_config.json"
+    },
+    "tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl": {
+      "sha256": "986670e43691469dcee610ea0f846f91a8f84e91fc6f7a48d4c064414c0ec2bf",
+      "bytes": 3101593,
+      "url": "https://files.pythonhosted.org/packages/67/49/22da045a91732384d3a3771816bf188dc5a1f702c32e635afa7c679c0bef/tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl"
+    }
+  },
+  "small_samples": [
+    {
+      "sample": "words",
+      "official_local_content_tokens": 10000,
+      "application_budget": 20002,
+      "upper_bound_holds": true,
+      "input_sha256": "b8c2c6f894b00a1bec9a56366030948f7bacc964fb84728c7b4e8bc3d5523561"
+    },
+    {
+      "sample": "punctuation",
+      "official_local_content_tokens": 10000,
+      "application_budget": 20002,
+      "upper_bound_holds": true,
+      "input_sha256": "b034430fdd3ddac323504fd1688225a11c056242b538a53b293f35a4588168b1"
+    },
+    {
+      "sample": "numbers",
+      "official_local_content_tokens": 20000,
+      "application_budget": 20002,
+      "upper_bound_holds": true,
+      "input_sha256": "a06105ac4b9d34f482c171de303fb3f801823751129ead61ed0b5f0d036340d6"
+    },
+    {
+      "sample": "json",
+      "official_local_content_tokens": 40001,
+      "application_budget": 100002,
+      "upper_bound_holds": true,
+      "input_sha256": "c0455dacdea4e8ab6ec829e2dbb7e32360023e7f7a14a4774ca4de54977438e1"
+    },
+    {
+      "sample": "code",
+      "official_local_content_tokens": 40000,
+      "application_budget": 60002,
+      "upper_bound_holds": true,
+      "input_sha256": "4f6444da42cbb8b6cf6fcbcbb62e62886d1a55933b53801d4d79ebbc28b022ea"
+    },
+    {
+      "sample": "chinese",
+      "official_local_content_tokens": 10000,
+      "application_budget": 60002,
+      "upper_bound_holds": true,
+      "input_sha256": "30080dd9da3036ceb58b857cc107e6b3383b67a5ddeb902852a3d622b3ebc96e"
+    },
+    {
+      "sample": "rare-chinese",
+      "official_local_content_tokens": 20000,
+      "application_budget": 30002,
+      "upper_bound_holds": true,
+      "input_sha256": "e8a5ce09b09b4198311841b685faa957d67f217f858521dbb182e7538f8b0574"
+    }
+  ],
+  "large_samples": [
+    {
+      "sample": "million-numbers",
+      "messages": 22,
+      "largest_message_chars": 53000,
+      "official_local_content_tokens_sum": 1060022,
+      "official_local_serialized_history_tokens": 1060198,
+      "application_budget": 1060751,
+      "compacted": true,
+      "projected_budget": 159384,
+      "original_unchanged": true,
+      "input_sha256": "41f7890d99b9e487dc13ed9f3dc0ffdfdff8e6b71d875b8396131a3de67e0e31"
+    },
+    {
+      "sample": "million-words",
+      "messages": 42,
+      "largest_message_chars": 53000,
+      "official_local_content_tokens_sum": 1060022,
+      "official_local_serialized_history_tokens": 1060358,
+      "application_budget": 2121331,
+      "compacted": true,
+      "projected_budget": 159384,
+      "original_unchanged": true,
+      "input_sha256": "3414df46eeb024391f22e92bf4bf622d8f563105c10c7b671f8461a1703d0956"
+    },
+    {
+      "sample": "million-code",
+      "messages": 29,
+      "largest_message_chars": 50000,
+      "official_local_content_tokens_sum": 1080022,
+      "official_local_serialized_history_tokens": 1080281,
+      "application_budget": 1620954,
+      "compacted": true,
+      "projected_budget": 180384,
+      "original_unchanged": true,
+      "input_sha256": "6ce05095ad00d19d278f4cb773f9751ccb2aadc46feded36df7c1c376c861e33"
+    }
+  ],
+  "runtime_sha256": "725797800eb527e574f79eed2b24521665ca30d5084ff37d1c6b8ee4559e6c06",
+  "budget_passed": true,
+  "temporary_tree_removed": true
+}

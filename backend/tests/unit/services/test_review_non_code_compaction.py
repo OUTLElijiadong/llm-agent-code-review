@@ -31,6 +31,67 @@ def _review_source_quotes(source):
     ]
 
 
+@pytest.mark.parametrize("window", [32_768, 65_536])
+@pytest.mark.parametrize("piece", [
+    "ascii-background-source ",
+    "中文背景资料甲乙丙。",
+    'line = "ab\\cd"\r\n',
+], ids=["ascii", "chinese", "escaped-code"])
+def test_optional_review_quota_uses_bytes_without_a_second_ratio_conversion(
+    monkeypatch, window, piece,
+):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", window)
+    original = piece * 6_000
+    calls = []
+
+    def bounded_stub(_agent, **kwargs):
+        calls.append(kwargs)
+        return "短摘要：来源仍由独立压缩器验证。"
+
+    monkeypatch.setattr(review_service, "_review_context_summary", bounded_stub)
+    code = "def verify(value):\n    return bool(value)\n"
+    rules = [{"rule_content": "必须保留本规则原文", "rule_code": "KEEP-1"}]
+    mandatory_system, mandatory_user = review_service._render_single_agent_prompts(
+        GENERAL_AGENT, code, "python", "auth.py", rules, 0,
+        {"custom": "", "agent": "(代理上下文已按来源压缩)",
+         "experience": "", "context": "(符号上下文已按来源压缩)"},
+    )
+    mandatory_bytes = serialized_chat_input_bytes(
+        mandatory_user, compose_system_prompt("code_reviewer", mandatory_system),
+    )
+    available_bytes = window - mandatory_bytes - 8192 - 1024
+    short_sections = [review_service.format_agent_section(GENERAL_AGENT)]
+    preserved_bytes = sum(estimate_tokens(value) for value in short_sections
+                          if estimate_tokens(value) <= 512)
+    system, user, _budget, sections = review_service._prepare_bounded_single_agent_prompts(
+        review_service.DeepSeekAgent(), GENERAL_AGENT, code, "python", "auth.py",
+        rules, 0, original, original, 8192, {},
+    )
+
+    assert {item["source_name"] for item in calls} == {"experience", "context"}
+    assert all(item["original"] == original for item in calls)
+    # Only proportional integer rounding may go unassigned; the budget is
+    # already UTF-8 bytes and must not silently shrink to its former quarter.
+    assert sum(item["target_tokens"] for item in calls) + preserved_bytes >= available_bytes - 2
+    assert code in user
+    assert rules[0]["rule_content"] in user
+    assert sections["experience"] == sections["context"]
+    assert serialized_chat_input_bytes(
+        user, compose_system_prompt("code_reviewer", system),
+    ) + 8192 + 1024 < window
+
+
+def test_optional_review_byte_quota_does_not_bypass_final_assembled_guard(monkeypatch):
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 65_536)
+    original = "long-background-source " * 6_000
+    monkeypatch.setattr(review_service, "_review_context_summary", lambda _agent, **_kw: original)
+    with pytest.raises(ValueError, match="压缩后仍超出模型上下文容量"):
+        review_service._prepare_bounded_single_agent_prompts(
+            review_service.DeepSeekAgent(), GENERAL_AGENT, "pass\n", "python",
+            "auth.py", [], 0, "", original, 8192, {},
+        )
+
+
 def test_oversized_profile_is_source_checked_without_changing_code_or_rules(monkeypatch):
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
     calls = []
@@ -85,7 +146,10 @@ def test_unverified_non_code_summary_rejects_review_before_main_model(monkeypatc
     assert labels == ["review_context_compaction"]
 
 
-def test_review_summary_retains_rules_and_permissions_when_source_ids_are_complete(monkeypatch):
+@pytest.mark.parametrize("target_budget,should_fit", [(500, False), (1150, True)])
+def test_review_summary_retains_rules_and_permissions_when_source_ids_are_complete(
+    monkeypatch, target_budget, should_fit,
+):
     monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 100_000)
     rules = (
         "审查规则：必须检查管理员创建子 Agent 前已完成审批。\n"
@@ -101,14 +165,22 @@ def test_review_summary_retains_rules_and_permissions_when_source_ids_are_comple
                 "summary": "保留来源，但只审查代码风格。",
             }, ensure_ascii=False), {}
 
-    result = review_service._review_context_summary(
-        Agent(), source_name="skill", original=rules + "背景说明。" * 2_000,
-        target_tokens=500, calls=[0],
-    )
+    original = rules + "背景说明。" * 2_000
+    call_kwargs = dict(source_name="skill", original=original,
+                       target_tokens=target_budget, calls=[0])
+    if not should_fit:
+        with pytest.raises(ValueError, match="多层压缩后仍超出预算，拒绝截断"):
+            review_service._review_context_summary(Agent(), **call_kwargs)
+        assert call_kwargs["original"] == original
+        assert call_kwargs["calls"][0] <= 32
+        return
+    # The protected rules and full source/quote ledger cost 1118 budget bytes.
+    result = review_service._review_context_summary(Agent(), **call_kwargs)
     assert "必须检查管理员创建子 Agent 前已完成审批" in result
     assert "普通用户不得读取其他账号的聊天记录" in result
     assert "role=review_context" in result
     assert "授权以服务端 RBAC/审批记录为准" in result
+    assert estimate_tokens(result) <= target_budget
 
 
 @pytest.mark.parametrize("quote_mode", ["missing", "fabricated"])
@@ -169,9 +241,17 @@ def test_code_and_rules_alone_over_window_fail_without_compressing_source(monkey
     assert labels == []
 
 
-def test_default_sequential_review_prepares_source_checked_bounded_prompt(monkeypatch):
+@pytest.mark.parametrize("window,experience_repeats,context_repeats,should_fit", [
+    (32_768, 5_000, 6_000, False),
+    (40_000, 5_000, 6_000, True),
+    (65_536, 5_000, 6_000, True),
+    (32_768, 1_200, 1_400, True),
+])
+def test_default_sequential_review_prepares_source_checked_bounded_prompt(
+    monkeypatch, window, experience_repeats, context_repeats, should_fit,
+):
     """quick/standard main path must pass compressed inputs to CodeReviewerAgent."""
-    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", 32_768)
+    monkeypatch.setattr(review_service.settings, "deepseek_context_window_tokens", window)
     compaction_calls = []
     executed = []
 
@@ -211,13 +291,13 @@ def test_default_sequential_review_prepares_source_checked_bounded_prompt(monkey
     monkeypatch.setattr(review_service, "usage_context", lambda *_args, **_kwargs: nullcontext())
 
     code = "def verify(token):\n    return token is not None\n"
-    long_experience = "experience-source-marker " * 5_000
-    long_context = "context-source-marker " * 6_000
+    long_experience = "experience-source-marker " * experience_repeats
+    long_context = "context-source-marker " * context_repeats
     rules = [{
         "rule_type": "security", "rule_name": "认证检查", "rule_code": "AUTH-1",
         "rule_content": "必须校验 token 的有效期", "severity": "高", "language": "python",
     }]
-    review_service._review_chunk_sequential(
+    call_kwargs = dict(
         db=None,
         api_config=None,
         task=SimpleNamespace(id=71, project_id=14, review_type="standard"),
@@ -230,6 +310,13 @@ def test_default_sequential_review_prepares_source_checked_bounded_prompt(monkey
         experience_section=long_experience,
         prompt_context_cache={},
     )
+    if not should_fit:
+        with pytest.raises(review_service.ReviewCoverageError, match="32 次模型调用上限"):
+            review_service._review_chunk_sequential(**call_kwargs)
+        assert len(compaction_calls) == 32
+        assert executed == []
+        return
+    review_service._review_chunk_sequential(**call_kwargs)
 
     assert compaction_calls
     assert len(executed) == 1
@@ -242,7 +329,11 @@ def test_default_sequential_review_prepares_source_checked_bounded_prompt(monkey
     assert "来源 sha256=" in sections["context"]
     assert long_experience not in user_prompt
     assert long_context not in user_prompt
-    assert estimate_tokens({"system": system_prompt, "user": user_prompt}) + 8_192 + 4_096 < 32_768
+    assert estimate_tokens({"system": system_prompt, "user": user_prompt}) + 8_192 + 4_096 < window
+    assert serialized_chat_input_bytes(
+        user_prompt, compose_system_prompt("code_reviewer", system_prompt),
+    ) + 8_192 + 1024 < window
+    assert len(compaction_calls) <= 32
 
 
 def test_ascii_context_uses_the_same_byte_guard_as_base_agent(monkeypatch):
@@ -281,12 +372,18 @@ def test_ascii_context_uses_the_same_byte_guard_as_base_agent(monkeypatch):
     )
     # Reproduce the previous mismatch: the character-ratio estimator admits
     # this prompt, but BaseAgent's exact serialized-byte guard rejects it.
-    old_estimate = estimate_tokens({"system": original_system, "user": original_user})
+    # Freeze the former ASCII/4 + non-ASCII*2 implementation for this contrast;
+    # the production estimator has deliberately stopped using that average.
+    old_text = json.dumps({"system": original_system, "user": original_user},
+                          ensure_ascii=False, separators=(",", ":"))
+    ascii_chars = sum(ord(character) < 128 for character in old_text)
+    old_estimate = max(1, (ascii_chars + 3) // 4 + (len(old_text) - ascii_chars) * 2)
     original_bytes = serialized_chat_input_bytes(
         original_user,
         compose_system_prompt("code_reviewer", original_system),
     )
     assert old_estimate + output_budget + 4_096 < 100_000
+    assert estimate_tokens({"system": original_system, "user": original_user}) + output_budget + 1024 >= 100_000
     assert original_bytes + output_budget + 1_024 >= 100_000
 
     system_prompt, user_prompt, _tokens, sections = review_service._prepare_bounded_single_agent_prompts(
@@ -400,7 +497,10 @@ def test_review_context_compactor_retries_length_with_larger_output_budget(
 
     result = review_service._review_context_summary(
         Agent(), source_name="skill", original="审查约束" * 20_000,
-        target_tokens=1_500, calls=[0],
+        # Eleven separately covered source pieces need their full quote ledger;
+        # this test concerns retry budgets, not an impossible 1500-byte result.
+        target_tokens=4_000, calls=[0],
     )
     assert "来源 sha256=" in result
     assert budgets[:2] == expected
+    assert estimate_tokens(result) <= 4_000

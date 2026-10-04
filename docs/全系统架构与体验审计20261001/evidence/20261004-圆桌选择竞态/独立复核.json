@@ -1,0 +1,31 @@
+{
+  "reviewed_at_utc": "2026-10-04T12:36:28.569900+00:00",
+  "reviewer": "root",
+  "scope": "独立阅读圆桌详情选择/关闭/账号/卸载请求归属并重跑宿主和面板关联用例",
+  "tests": {
+    "files": 2,
+    "passed": 43,
+    "exit_code": 0
+  },
+  "limits": [
+    "隔离组件回归，不等于生产真实点击或手机验收",
+    "列表/详情仍由原服务端权限控制，无新增权限/API"
+  ],
+  "artifacts": [
+    {
+      "path": "frontend/src/components/agent/GlobalDiscussionHost.vue",
+      "bytes": 13985,
+      "sha256": "3c79b05c175a95e4e0bbd63c7899fdde2d30a013ed75d874c1778d796ffb956b"
+    },
+    {
+      "path": "frontend/src/components/agent/GlobalDiscussionHost.test.ts",
+      "bytes": 22962,
+      "sha256": "6cda63eb8ac8058344671d40bb1401b97ab10d6eec28936b59f799e620397020"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/独立复核-43项.log",
+      "bytes": 292,
+      "sha256": "ced13651ed0c50699762c819b97df9a6bdfe78cdd0c969974026b0ad90f4ad7f"
+    }
+  ]
+}

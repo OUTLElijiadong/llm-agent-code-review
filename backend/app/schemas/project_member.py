@@ -12,12 +12,12 @@ from pydantic import BaseModel, Field
 class MemberAddIn(BaseModel):
     """添加项目成员请求体"""
     user_id: int = Field(..., description="被加入的用户ID")
-    role_in_project: str = Field(default="reviewer", pattern="^(owner|reviewer)$", description="项目内角色")
+    role_in_project: str = Field(default="reviewer", pattern="^(owner|reviewer|viewer)$", description="项目内角色")
 
 
 class MemberRoleUpdateIn(BaseModel):
     """更新成员角色请求体"""
-    role_in_project: str = Field(..., pattern="^(owner|reviewer)$", description="新的项目内角色")
+    role_in_project: str = Field(..., pattern="^(owner|reviewer|viewer)$", description="新的项目内角色")
 
 
 class MemberOut(BaseModel):

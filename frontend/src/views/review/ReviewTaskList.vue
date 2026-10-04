@@ -81,7 +81,7 @@
           @click="onRowClick(row)"
         >
           <div class="tc-check-slot">
-            <label v-if="canCancelReview" class="tc-check" @click.stop>
+            <label v-if="canCancelReview && row.can_cancel === true" class="tc-check" @click.stop>
               <input
                 type="checkbox"
                 :checked="selectedRows.some((t) => t.id === row.id)"
@@ -123,11 +123,11 @@
           </div>
           <div class="tc-actions" @click.stop>
             <el-button
-              v-if="canCancelReview && row.status === 'running'"
+              v-if="canCancelReview && row.can_cancel === true && row.status === 'running'"
               link type="warning" size="small"
               @click="handleCancel(row)"
             >停止</el-button>
-            <el-button v-if="canCancelReview" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button v-if="canCancelReview && row.can_cancel === true" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </div>
         </article>
       </div>
@@ -169,7 +169,7 @@
 <script setup lang="ts">
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
@@ -260,6 +260,16 @@ let failureCount = 0
 let loadRequest = 0
 let requestKey = ''
 let disposed = false
+let actionGeneration = 0
+let accountGeneration = 0
+function canCancelTask(row: TaskOut): boolean {
+  return !disposed && canCancelReview.value && row.can_cancel === true
+    && tasks.value.some(task => task.id === row.id && task.can_cancel === true)
+}
+function captureAction(rows: TaskOut[]) {
+  const generation = actionGeneration
+  return () => !disposed && generation === actionGeneration && rows.every(canCancelTask)
+}
 
 function clearPoll() {
   if (pollTimer) {
@@ -298,19 +308,20 @@ async function loadData(silent = false) {
   if (refreshing.value && requestKey === nextKey) return
   requestKey = nextKey
   const request = ++loadRequest
+  const account = accountGeneration
   clearPoll()
   refreshing.value = true
   if (!silent) loading.value = true
   try {
     const data = await getReviewTasks(params)
-    if (disposed || request !== loadRequest) return
+    if (disposed || request !== loadRequest || account !== accountGeneration) return
     tasks.value = data.items
     total.value = data.total
     loadError.value = ''
     lastUpdatedAt.value = new Date().toISOString()
     failureCount = 0
   } catch (error) {
-    if (disposed || request !== loadRequest) return
+    if (disposed || request !== loadRequest || account !== accountGeneration) return
     loadError.value = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
       ? error.message || '任务状态读取失败' : '任务状态读取失败'
     failureCount = Math.min(failureCount + 1, 4)
@@ -325,13 +336,14 @@ async function loadData(silent = false) {
 }
 
 async function loadProjects() {
+  const account = accountGeneration
   try {
     const data = await getProjects({ page_size: 100 })
-    if (disposed) return
+    if (disposed || account !== accountGeneration) return
     projects.value = data.items
     projectsError.value = ''
   } catch {
-    if (!disposed) projectsError.value = '项目筛选加载失败，仍可查看任务列表或重试'
+    if (!disposed && account === accountGeneration) projectsError.value = '项目筛选加载失败，仍可查看任务列表或重试'
   }
 }
 
@@ -340,11 +352,13 @@ function onRowClick(row: TaskOut) {
 }
 
 async function handleDelete(row: TaskOut) {
-  if (!canCancelReview.value) return
+  if (!canCancelTask(row)) return
+  const current = captureAction([row])
   const ok = await confirmDanger({ target: `删除任务「${taskDisplayTitle(row.task_name, `审查 #${row.id}`)}」` })
-  if (!ok) return
+  if (!ok || !current()) return
   try {
     await deleteReviewTask(row.id)
+    if (!current()) return
     ElMessage.success('任务已删除')
     await loadData()
   } catch {
@@ -353,15 +367,17 @@ async function handleDelete(row: TaskOut) {
 }
 
 async function handleCancel(row: TaskOut) {
-  if (!canCancelReview.value) return
+  if (!canCancelTask(row)) return
+  const current = captureAction([row])
   const ok = await confirmDanger({
     target: `停止任务「${taskDisplayTitle(row.task_name, `审查 #${row.id}`)}」`,
     consequence: '已处理的部分将保留',
     confirmText: '确定停止',
   })
-  if (!ok) return
+  if (!ok || !current()) return
   try {
     await cancelReviewTask(row.id)
+    if (!current()) return
     ElMessage.success('任务已停止')
     await loadData()
   } catch {
@@ -377,7 +393,7 @@ const batchDeleting = ref(false)
 const selectedRunning = computed(() => selectedRows.value.filter((t) => t.status === 'running'))
 
 function toggleSelect(row: TaskOut) {
-  if (!canCancelReview.value) return
+  if (!canCancelTask(row)) return
   const index = selectedRows.value.findIndex((t) => t.id === row.id)
   if (index >= 0) selectedRows.value.splice(index, 1)
   else selectedRows.value.push(row)
@@ -389,54 +405,62 @@ function clearSelection() {
 
 async function handleBatchStop() {
   if (!canCancelReview.value) return
-  const targets = selectedRunning.value
-  if (!targets.length) return
+  const targets = [...selectedRunning.value]
+  if (!targets.length || !targets.every(canCancelTask)) return
+  const current = captureAction(targets)
+  const account = accountGeneration
   const ok = await confirmDanger({
     target: `停止选中的 ${targets.length} 个运行中任务`,
     consequence: '各任务已处理的部分将保留',
     confirmText: '确定停止',
   })
-  if (!ok) return
+  if (!ok || !current()) return
   batchStopping.value = true
   let failed = 0
   try {
     for (const t of targets) {
+      if (!current()) return
       try {
         await cancelReviewTask(t.id)
       } catch {
         failed++
       }
     }
+    if (!current()) return
     if (failed) ElMessage.warning(`${failed} 个任务停止失败，其余已停止`)
     else ElMessage.success(`已停止 ${targets.length} 个任务`)
     await loadData()
   } finally {
-    batchStopping.value = false
+    if (account === accountGeneration && !disposed) batchStopping.value = false
   }
 }
 
 async function handleBatchDelete() {
   if (!canCancelReview.value) return
-  const targets = selectedRows.value
-  if (!targets.length) return
+  const targets = [...selectedRows.value]
+  if (!targets.length || !targets.every(canCancelTask)) return
+  const current = captureAction(targets)
+  const account = accountGeneration
   const ok = await confirmDanger({ target: `删除选中的 ${targets.length} 个任务` })
-  if (!ok) return
+  if (!ok || !current()) return
   batchDeleting.value = true
   let failed = 0
   try {
     for (const t of targets) {
+      if (!current()) return
       try {
         await deleteReviewTask(t.id)
       } catch {
         failed++
       }
     }
+    if (!current()) return
     if (failed) ElMessage.warning(`${failed} 个任务删除失败，其余已删除`)
     else ElMessage.success(`已删除 ${targets.length} 个任务`)
     clearSelection()
     await loadData()
   } finally {
-    batchDeleting.value = false
+    if (account === accountGeneration && !disposed) batchDeleting.value = false
   }
 }
 
@@ -444,6 +468,27 @@ onMounted(() => {
   loadProjects()
   loadData()
 })
+
+watch(() => [userStore.token, userStore.profile?.id, canCancelReview.value], () => { actionGeneration++ }, { flush: 'sync' })
+watch(() => tasks.value.map(row => `${row.id}:${row.can_cancel}`).join('|'), () => { actionGeneration++ }, { flush: 'sync' })
+watch(() => [userStore.token, userStore.profile?.id], () => {
+  accountGeneration++
+  loadRequest++
+  clearPoll()
+  tasks.value = []
+  projects.value = []
+  selectedRows.value = []
+  batchStopping.value = false
+  batchDeleting.value = false
+  loading.value = false
+  refreshing.value = false
+  hasLoaded.value = false
+  loadError.value = ''
+  if (userStore.token && userStore.profile) {
+    void loadProjects()
+    void loadData()
+  }
+}, { flush: 'sync' })
 
 onUnmounted(() => {
   disposed = true

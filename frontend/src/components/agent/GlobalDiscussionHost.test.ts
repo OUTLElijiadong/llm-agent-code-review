@@ -40,8 +40,9 @@ async function mountHost(userId = 5) {
 
 function deferred<Value>() {
   let resolve!: (value: Value) => void
-  const promise = new Promise<Value>((done) => { resolve = done })
-  return { promise, resolve }
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<Value>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
 }
 
 beforeEach(() => {
@@ -97,6 +98,202 @@ it('旧账号详情的迟到响应不能在新账号显示', async () => {
   await flushPromises()
   expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
   wrapper.unmount()
+})
+
+it.each([1, 2, 3])('同账号快速选择会话只保留最后选择：A慢B快A晚（第%d轮）', async () => {
+  const oldDetail = deferred<typeof current>()
+  const latestDetail = deferred<typeof current>()
+  const latest = { ...current, session_id: 'disc-latest', file_name: 'latest.py' }
+  discussionApi.list.mockResolvedValue({ items: [current, latest], next_offset: null })
+  discussionApi.detail.mockImplementation((id: string) => (
+    id === current.session_id ? oldDetail.promise : latestDetail.promise
+  ))
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.findAll('.roundtable-choice')[0].trigger('click')
+    await wrapper.findAll('.roundtable-choice')[1].trigger('click')
+    expect(discussionApi.detail.mock.calls.map(([id]) => id)).toEqual([current.session_id, latest.session_id])
+
+    latestDetail.resolve(latest)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(latest.session_id)
+
+    oldDetail.resolve(current)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(latest.session_id)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('同账号更早选择的迟到错误不能污染已打开的新会话', async () => {
+  const oldDetail = deferred<typeof current>()
+  const latest = { ...current, session_id: 'disc-latest' }
+  discussionApi.list.mockResolvedValue({ items: [current, latest], next_offset: null })
+  discussionApi.detail.mockImplementation((id: string) => (
+    id === current.session_id ? oldDetail.promise : Promise.resolve(latest)
+  ))
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.findAll('.roundtable-choice')[0].trigger('click')
+    await wrapper.findAll('.roundtable-choice')[1].trigger('click')
+    await flushPromises()
+    oldDetail.reject(new Error('old selection unavailable'))
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(latest.session_id)
+    expect(wrapper.find('.roundtable-dock-error').exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('同账号A切B再切回A时，第一次A的响应不能覆盖第二次A的新历史', async () => {
+  const first = { ...current, turns: [{ seq: 1, turn_id: 1, role: 'agent', content: 'older snapshot' }] }
+  const latest = { ...current, turns: [{ seq: 2, turn_id: 2, role: 'agent', content: 'latest snapshot' }] }
+  const oldA = deferred<typeof first>()
+  const pendingB = deferred<typeof current>()
+  const latestA = deferred<typeof latest>()
+  discussionApi.detail
+    .mockReturnValueOnce(oldA.promise)
+    .mockReturnValueOnce(pendingB.promise)
+    .mockReturnValueOnce(latestA.promise)
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    window.dispatchEvent(new CustomEvent('prism:open-roundtable', { detail: { sessionId: 'disc-other' } }))
+    window.dispatchEvent(new CustomEvent('prism:open-roundtable', { detail: { sessionId: current.session_id } }))
+
+    latestA.resolve(latest)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AgentDiscussionPanel' }).props('initialTurns')).toEqual(latest.turns)
+
+    pendingB.resolve({ ...current, session_id: 'disc-other' })
+    oldA.resolve(first)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(current.session_id)
+    expect(wrapper.findComponent({ name: 'AgentDiscussionPanel' }).props('initialTurns')).toEqual(latest.turns)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('最后选择失败时保留当前错误，更早的成功响应不能覆盖该选择', async () => {
+  const oldDetail = deferred<typeof current>()
+  const latestDetail = deferred<typeof current>()
+  const latest = { ...current, session_id: 'disc-latest' }
+  discussionApi.list.mockResolvedValue({ items: [current, latest], next_offset: null })
+  discussionApi.detail.mockImplementation((id: string) => (
+    id === current.session_id ? oldDetail.promise : latestDetail.promise
+  ))
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.findAll('.roundtable-choice')[0].trigger('click')
+    await wrapper.findAll('.roundtable-choice')[1].trigger('click')
+    latestDetail.reject(new Error('latest selection unavailable'))
+    await flushPromises()
+    expect(wrapper.get('.roundtable-dock-error').text()).toContain('圆桌会话已失效或当前账号无权查看')
+
+    oldDetail.resolve(current)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
+    expect(wrapper.get('.roundtable-dock-error').text()).toContain('圆桌会话已失效或当前账号无权查看')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it.each(['success', 'failure'] as const)('显式关闭面板后待处理的新会话%s响应不能重新打开或报旧错误', async (result) => {
+  const pending = deferred<typeof current>()
+  const latest = { ...current, session_id: 'disc-latest' }
+  discussionApi.detail.mockImplementation((id: string) => (
+    id === current.session_id ? Promise.resolve(current) : pending.promise
+  ))
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+    window.dispatchEvent(new CustomEvent('prism:open-roundtable', { detail: { sessionId: latest.session_id } }))
+    expect(discussionApi.detail).toHaveBeenLastCalledWith(latest.session_id)
+    wrapper.findComponent({ name: 'AgentDiscussionPanel' }).vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
+
+    if (result === 'success') pending.resolve(latest)
+    else pending.reject(new Error('closed selection unavailable'))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
+    expect(wrapper.find('.roundtable-dock-error').exists()).toBe(false)
+
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(current.session_id)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('选择器关闭后迟到的详情不能自动打开面板，下次选择仍可成功', async () => {
+  const pending = deferred<typeof current>()
+  discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-other' }], next_offset: null })
+  discussionApi.detail.mockReturnValueOnce(pending.promise).mockResolvedValue(current)
+  const { wrapper } = await mountHost()
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.findAll('.roundtable-choice')[0].trigger('click')
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    expect(wrapper.find('.roundtable-choices').exists()).toBe(false)
+
+    pending.resolve(current)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
+
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.findAll('.roundtable-choice')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(current.session_id)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it.each(['success', 'failure'] as const)('账号切换后回到原账号仍拒绝旧选择的迟到%s详情', async (result) => {
+  const pending = deferred<typeof current>()
+  const latest = { ...current, session_id: 'disc-latest' }
+  discussionApi.detail.mockReturnValueOnce(pending.promise).mockResolvedValue(latest)
+  const { wrapper } = await mountHost(5)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await wrapper.setProps({ userId: 73 })
+    discussionApi.list.mockResolvedValue({ items: [latest], next_offset: null })
+    await wrapper.setProps({ userId: 5 })
+    await flushPromises()
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+
+    if (result === 'success') pending.resolve(current)
+    else pending.reject(new Error('old account selection unavailable'))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe(latest.session_id)
+    expect(wrapper.find('.roundtable-dock-error').exists()).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('宿主卸载后不读取迟到详情内容', async () => {
+  const pending = deferred<typeof current>()
+  const readContent = vi.fn(() => current.agents)
+  discussionApi.detail.mockReturnValue(pending.promise)
+  const { wrapper } = await mountHost()
+  await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+  wrapper.unmount()
+  pending.resolve({ ...current, get agents() { return readContent() } })
+  await flushPromises()
+  expect(readContent).not.toHaveBeenCalled()
 })
 
 it('圆桌超过首批列表时可逐页加载，单条首批也能打开选择器', async () => {

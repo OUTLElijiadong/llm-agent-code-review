@@ -41,6 +41,7 @@
       v-model="aiPromptVisible"
       source="project"
       :ref-id="projectId"
+      :can-polish="resourceReady && project?.can_execute === true"
     />
 
     <SecurityScanModal
@@ -65,6 +66,9 @@
             <article class="summary-tile"><span>Agent 工具调用</span><strong>{{ project.agent_run_count ?? 0 }} 次</strong><small>统计此项目关联的 Agent 工具调用记录 · 最近 {{ project.last_agent_run_at ? formatDate(project.last_agent_run_at) : '暂无记录' }}</small></article>
           </div>
           <p class="project-description">{{ project.description || '暂无项目介绍' }}</p>
+          <div v-if="canDeleteRevision" class="section-actions project-management-actions">
+            <el-button type="danger" plain :loading="deletingProject" @click="handleDeleteProject">删除项目</el-button>
+          </div>
           <details class="project-metadata">
             <summary>项目属性与时间</summary>
             <dl>
@@ -235,7 +239,7 @@
               <el-table-column label="项目角色" width="140" align="center">
                 <template #default="{ row }">
                   <el-tag :type="row.role_in_project === 'owner' ? 'warning' : 'info'" size="small">
-                    {{ row.role_in_project === 'owner' ? '负责人' : '审查员' }}
+                    {{ memberRoleLabel(row.role_in_project) }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -255,6 +259,7 @@
                   >
                     <el-option label="审查员" value="reviewer" />
                     <el-option label="负责人" value="owner" />
+                    <el-option label="只读成员" value="viewer" />
                   </el-select>
                   <el-button
                     v-if="canManageMembers && row.role_in_project !== 'owner'"
@@ -333,7 +338,9 @@
           <el-select v-model="addForm.role_in_project" style="width: 100%">
             <el-option label="审查员" value="reviewer" />
             <el-option label="负责人" value="owner" />
+            <el-option label="只读成员" value="viewer" />
           </el-select>
+          <p class="form-hint">只读成员可按账号权限查看和下载，不能发起任务、修改源码或管理成员。</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -358,6 +365,7 @@ import {
   getAuditSourceArchiveResult,
   getProjectDetail,
   deleteSourceRevision,
+  deleteProject,
   downloadProjectSource,
   uploadAuditSourceArchive,
 } from '@/api/project'
@@ -395,7 +403,10 @@ const canUpload = computed(() => canViewProject.value && resourceReady.value && 
 const canManageMembers = computed(() => canViewProject.value && resourceReady.value && !!project.value?.can_update && userStore.hasPermission('project:member:manage'))
 const canDeleteRevision = computed(() => canViewProject.value && resourceReady.value && !!project.value?.can_delete && userStore.hasPermission('project:delete'))
 const canDownloadSource = computed(() => canViewProject.value && !!project.value && userStore.hasPermission('file:download'))
-const canScan = computed(() => canViewProject.value && resourceReady.value && userStore.hasPermission('security:scan'))
+const canScan = computed(() => canViewProject.value && resourceReady.value && project.value?.can_execute === true && userStore.hasPermission('security:scan'))
+function memberRoleLabel(role: string): string {
+  return ({ owner: '负责人', reviewer: '审查员', viewer: '只读成员' } as Record<string, string>)[role] || '未知角色'
+}
 
 const projectId = Number(route.params.id)
 const loading = ref(false)
@@ -413,6 +424,7 @@ const auditArchiveInputRef = ref<HTMLInputElement>()
 const uploading = ref(false)
 const uploadingAudit = ref(false)
 const downloadingSource = ref(false)
+const deletingProject = ref(false)
 const archiveExtensions = [
   '.zip', '.7z', '.rar', '.tar', '.gz', '.tgz', '.bz2', '.tbz2', '.xz', '.txz',
   '.zst', '.tzst', '.lz', '.lzma', '.lzip', '.z', '.cpio', '.cab', '.ar', '.xar',
@@ -768,6 +780,34 @@ async function onAuditArchiveSelected(e: Event): Promise<void> {
 
 function onFileUploaded(): void {
   fileListKey.value++
+}
+
+async function handleDeleteProject(): Promise<void> {
+  const target = project.value
+  const token = userStore.token
+  const actorId = userStore.profile?.id
+  if (disposed || deletingProject.value || !canDeleteRevision.value || !target || !token || actorId == null) return
+  const targetId = target.id
+  const targetName = target.project_name
+  const version = detailRequestVersion
+  const isCurrent = () => !disposed && canDeleteRevision.value && detailRequestVersion === version
+    && project.value?.id === targetId && project.value?.project_name === targetName
+    && userStore.token === token && userStore.profile?.id === actorId
+  deletingProject.value = true
+  try {
+    await ElMessageBox.confirm(`确认删除项目“${targetName}”？该项目将从当前列表移除。`, '删除项目', {
+      type: 'warning', confirmButtonText: '删除项目', cancelButtonText: '取消',
+    })
+    if (!isCurrent()) return
+    await deleteProject(targetId)
+    if (!isCurrent()) return
+    ElMessage.success('项目已删除')
+    await router.push('/projects')
+  } catch {
+    /* 取消不执行；请求错误由 HTTP 拦截器反馈。 */
+  } finally {
+    if (!disposed) deletingProject.value = false
+  }
 }
 
 // ── 成员管理逻辑 ──

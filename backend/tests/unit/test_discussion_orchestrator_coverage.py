@@ -30,6 +30,28 @@ from app.models.review_task_file import ReviewTaskFile
 _REAL_CALL_FOR_TASK = module._call_raw_for_task
 
 
+def _seed_execution_actor(db, user_id, project_id):
+    from app.models.user import User
+    from app.models.project import Project
+    from app.models.rbac import Permission, Role, RolePermission, UserRole
+    from app.core.permission_codes import PermissionCode
+    if db.get(User, user_id) is None:
+        db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
+    if db.get(Project, project_id) is None:
+        db.add(Project(id=project_id, user_id=user_id, project_name=f"authorized-scope-{project_id}", status="active"))
+    role = db.query(Role).filter_by(code="user").first()
+    if role is None:
+        role = Role(name="local roundtable executor", code="user", status="active")
+    permission = db.query(Permission).filter_by(code=PermissionCode.REVIEW_START).first()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
+        db.add(permission)
+    db.add(role); db.flush()
+    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
+
+
+
 class RecordingAgent:
     """按顺序返回预设结果并记录 LLM 调用参数的 fake Agent。"""
 
@@ -754,7 +776,7 @@ def test_summarize_preserves_window_coverage_when_projected_consensus_truncates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """源码已投影分窗但共识输出截断时，保留逐窗覆盖账并标记不完整。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 32_000)
 
     class ProjectThenTruncateAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
@@ -834,7 +856,7 @@ def test_host_projects_complete_oversized_source_before_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """专家分窗已完成时，主持不应因再次塞入完整大源码而只能回退。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12_000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 32_000)
 
     class HostAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
@@ -849,7 +871,7 @@ def test_host_projects_complete_oversized_source_before_summary(
                     entries.append({
                         "source_id": source_id,
                         "summary": "此处源码已覆盖",
-                        "quotes": [prior_quote.group(1) if prior_quote else body[:8]],
+                        "quotes": [prior_quote.group(1) if prior_quote else body.strip()[:24]],
                     })
                 return json.dumps({"entries": entries}, ensure_ascii=False), {"model_name": "compress"}
             assert "完整源码窗口的证据投影" in kwargs["user_prompt"]
@@ -1127,6 +1149,7 @@ def test_create_review_task_persists_task_and_file_link(
         return db
 
     monkeypatch.setattr(module, "SessionLocal", get_session)
+    _seed_execution_actor(db, 3, 4)
     db.add(CodeFile(
         id=5, project_id=4, file_name="demo.py", file_path="demo.py",
         language="python", content="value = 1\n", version_no=1, is_binary=0, status="active",
@@ -1322,7 +1345,7 @@ def test_extract_issues_semantically_compresses_all_long_history_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """输入超预算时每段都有来源和原文引文，不能直接砍掉旧轮次。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 16000)
     monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_args, **_kwargs: None))
 
     class CompressingAgent(RecordingAgent):
@@ -1506,7 +1529,7 @@ def test_history_compression_uses_second_level_without_losing_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """首层摘要仍超预算时，再压缩并逐项校验原文引文。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 16000)
 
     class LayeredAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
@@ -1529,7 +1552,7 @@ def test_history_compression_uses_second_level_without_losing_provenance(
                for index in range(1, 9)]
     agent = LayeredAgent()
     projected = module._compress_roundtable_history(
-        records, agent=agent, task_id=11, user_id=12, file_id=13, target_tokens=500,
+        records, agent=agent, task_id=11, user_id=12, file_id=13, target_tokens=1000,
     )
     assert any("上一层摘要" in call["system_prompt"] for call in agent.calls)
     for source_id, _content in records:
@@ -1553,7 +1576,7 @@ async def test_speaker_and_host_compress_long_history_without_losing_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """发言和主持两个阶段都能投影长历史，且保留每个来源 ID。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 12000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 32000)
 
     class CompressingAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
@@ -1632,7 +1655,7 @@ async def test_speaker_reviews_full_oversized_source_in_numbered_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """源码超过单次输入预算时逐窗审查，原始每行都可核对。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 10000)
     class WindowAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
             self.calls.append(kwargs)
@@ -1677,10 +1700,10 @@ async def test_speaker_rejects_more_than_bounded_windows_without_silent_cut(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """超出可审查的窗口数量时明确失败，不能把未读源码计为完成。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 10000)
     agent = RecordingAgent(responses=[('{"action":"silent"}', None)])
     decision, meta, ok = await _make_orchestrator()._speaker_turn(
-        agent=agent, profile=SECURITY_AGENT, code="A" * 50_000,
+        agent=agent, profile=SECURITY_AGENT, code="A" * 200_000,
         language="python", file_name="too-large.py", all_turns=[],
         user_inputs=[], round_idx=0, speaker_idx=0,
     )
@@ -1694,7 +1717,7 @@ async def test_speaker_does_not_claim_complete_when_middle_window_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """任一源码窗口未完成时，该 Agent 整轮不得被标记为成功。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 10000)
 
     class FailingWindowAgent(RecordingAgent):
         def call_raw(self, **kwargs: Any) -> tuple[str, dict[str, Any]]:
@@ -1742,14 +1765,14 @@ async def test_speaker_checks_total_session_budget_before_window_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """多 Agent 尚未发言时，单个大文件不得占满全部会话调用预算。"""
-    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 6000)
+    monkeypatch.setattr(module.settings, "deepseek_context_window_tokens", 10000)
     budget = module._RoundtableCallBudget(limit=12)
     token = module._roundtable_call_budget.set(budget)
     agent = RecordingAgent(responses=[('{"action":"speak","content":"伪成功"}', None)])
     try:
         decision, meta, ok = await _make_orchestrator()._speaker_turn(
             agent=agent, profile=SECURITY_AGENT,
-            code="\n".join(f"line_{index:03d}()" for index in range(1, 301)),
+            code="\n".join(f"line_{index:03d}()" for index in range(1, 1001)),
             language="python", file_name="budget.py", all_turns=[],
             user_inputs=[], round_idx=0, speaker_idx=0, remaining_turns=4,
         )
@@ -1825,6 +1848,7 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
         total_files=1,
         processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
     logs: list[dict[str, Any]] = []
@@ -1989,6 +2013,7 @@ def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
         user_id=4, project_id=5, task_name="部分圆桌",
         review_type="discuss", status="running", total_files=1, processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
     monkeypatch.setattr(module, "SessionLocal", lambda: db)
@@ -2037,6 +2062,7 @@ def test_finalize_review_persists_failed_host_compression_as_partial(
         user_id=7, project_id=8, task_name="摘要压缩失败", review_type="discuss",
         status="running", total_files=1, processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
     monkeypatch.setattr(module, "SessionLocal", lambda: db)
@@ -2135,6 +2161,7 @@ def test_finalize_review_marks_task_failed_when_extraction_fails(
         total_files=1,
         processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
 
@@ -2200,6 +2227,7 @@ def test_finalize_review_marks_task_failed_when_normalization_fails(
         total_files=1,
         processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
 
@@ -2245,6 +2273,7 @@ def test_finalize_review_marks_task_failed_when_issue_persistence_fails(
         total_files=1,
         processed_files=0,
     )
+    _seed_execution_actor(db, task.user_id, task.project_id)
     db.add(task)
     db.commit()
 

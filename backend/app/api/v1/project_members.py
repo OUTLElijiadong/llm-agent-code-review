@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -37,9 +36,7 @@ def search_member_candidates(
     user: User = Depends(get_current_user),
 ):
     """只允许可管理当前项目成员的用户搜索可加入账号。"""
-    role = project_member_service.require_project_access(db, project_id, user, need_write=False)
-    if role == "reviewer":
-        raise ForbiddenError("需要项目拥有者权限", code=40300)
+    project_member_service.require_project_access(db, project_id, user, need_write=True)
     candidates = project_member_service.search_member_candidates(db, project_id, q, limit=10)
     return Resp(data=[MemberCandidateOut(**item) for item in candidates])
 

@@ -81,6 +81,7 @@ export interface ReportIssue {
 /** 报告列表项(与后端 ReportListItem 对齐) */
 export interface ReportListItem {
   task_id: number
+  can_delete?: boolean
   task_name?: string
   project_name: string
   total_issues: number
@@ -92,6 +93,7 @@ export interface ReportListItem {
 
 /** 报告详情(与后端 ReportDetailOut 对齐,issues 需前端单独调用 issue API 获取) */
 export interface ReportDetailOut {
+  can_execute?: boolean
   project: Record<string, unknown>
   task: Record<string, unknown>
   stats: Record<string, unknown>

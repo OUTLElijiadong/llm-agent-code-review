@@ -16,11 +16,11 @@ import hashlib
 import json as json_lib
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Iterator, List, Optional, Tuple
 
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
@@ -38,14 +38,15 @@ from app.constants.security_catalog import (
     owasp_reference,
 )
 from app.core.config import settings
-from app.core.exceptions import AppError, ConflictError, ValidationError
+from app.core.exceptions import AppError, ConflictError, ForbiddenError, PermissionError, ValidationError
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import project_source_service, rbac_service
-from app.services.project_member_service import get_visible_project_ids, require_project_access
+from app.services.project_member_service import get_visible_project_ids, require_project_execution
 from app.services.review_input_service import validate_review_input
 from app.utils.encoding_utils import MAX_AUDIT_TEXT_LINES_PER_FILE
 from app.utils.source_archive_gate import source_archive_workload
@@ -328,6 +329,35 @@ class SecuritySentinelAgent(BaseAgent):
             return AgentResult(success=False, error="DB 未注入")
         return None
 
+    def _require_current_execution(self, project_id: int, actor: Optional[User] = None) -> None:
+        """Use a fresh authorization transaction before execution and each model attempt."""
+        actor = actor or self._user
+        if self._db is None or actor is None:
+            return
+        bind = self._db.get_bind()
+        factory = sessionmaker(bind=getattr(bind, "engine", bind), expire_on_commit=False)
+        with factory() as auth_db:
+            current = auth_db.get(User, actor.id)
+            if current is None or current.status != 1:
+                raise ForbiddenError("当前账号不能执行安全审查", code=40300)
+            require_project_execution(auth_db, project_id, current)
+            if not rbac_service.check_permission(auth_db, current.id, PermissionCode.SECURITY_SCAN):
+                raise PermissionError("无操作权限: 需要 security:scan")
+
+    def _execution_context(self, project_id: int, ctx: Optional[AgentContext],
+                           actor: Optional[User] = None) -> Optional[AgentContext]:
+        actor = actor or self._user
+        if actor is None:
+            return ctx
+        self._require_current_execution(project_id, actor)
+        previous = (ctx.extra or {}).get("before_model_call") if ctx else None
+        def check() -> None:
+            self._require_current_execution(project_id, actor)
+            if callable(previous):
+                previous()
+        base = ctx or AgentContext(user_id=actor.id, project_id=project_id)
+        return replace(base, extra={**(base.extra or {}), "before_model_call": check})
+
     def _authz_project(self, project: Project) -> Optional[AgentResult]:
         if self._db is None:
             return AgentResult(success=False, error="DB 未注入")
@@ -342,9 +372,9 @@ class SecuritySentinelAgent(BaseAgent):
                 return AgentResult(success=False, error="无权访问该项目")
             return None
         try:
-            require_project_access(self._db, project.id, self._user, need_write=False)
+            self._require_current_execution(project.id)
         except AppError:
-            return AgentResult(success=False, error="无权访问该项目")
+            return AgentResult(success=False, error="无权执行该项目", failure_kind="authorization_revoked")
         return None
 
     def _authz_task(self, task: ReviewTask) -> Optional[AgentResult]:
@@ -361,9 +391,9 @@ class SecuritySentinelAgent(BaseAgent):
                 return AgentResult(success=False, error="无权访问该任务")
             return None
         try:
-            require_project_access(self._db, task.project_id, self._user, need_write=False)
+            self._require_current_execution(task.project_id)
         except AppError:
-            return AgentResult(success=False, error="无权访问该任务")
+            return AgentResult(success=False, error="无权执行该任务", failure_kind="authorization_revoked")
         return None
 
     def _authz_file(self, file: CodeFile) -> Optional[AgentResult]:
@@ -380,9 +410,9 @@ class SecuritySentinelAgent(BaseAgent):
                 return AgentResult(success=False, error="无权访问该文件")
             return None
         try:
-            require_project_access(self._db, file.project_id, self._user, need_write=False)
+            self._require_current_execution(file.project_id)
         except AppError:
-            return AgentResult(success=False, error="无权访问该文件")
+            return AgentResult(success=False, error="无权执行该文件", failure_kind="authorization_revoked")
         return None
 
     # ---- checklist ----
@@ -439,6 +469,7 @@ class SecuritySentinelAgent(BaseAgent):
             return AgentResult(success=False, error="代码文件不存在或已删除")
         if (err := self._authz_file(file)) is not None:
             return err
+        ctx = self._execution_context(file.project_id, ctx)
 
         t0 = time.time()
         try:
@@ -575,6 +606,7 @@ class SecuritySentinelAgent(BaseAgent):
             return AgentResult(success=False, error="审查任务不存在")
         if (err := self._authz_task(task)) is not None:
             return err
+        ctx = self._execution_context(task.project_id, ctx)
 
         t0 = time.time()
         self._emit(
@@ -717,6 +749,7 @@ class SecuritySentinelAgent(BaseAgent):
             return AgentResult(success=False, error="项目不存在或已删除")
         if (err := self._authz_project(project)) is not None:
             return err
+        ctx = self._execution_context(project_id, ctx)
 
         if scan_mode not in {"full", "static_full", "triage"}:
             return AgentResult(

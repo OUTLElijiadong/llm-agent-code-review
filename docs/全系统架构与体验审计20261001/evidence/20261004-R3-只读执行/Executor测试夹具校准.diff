@@ -1,0 +1,411 @@
+--- /tmp/remaining_permissions-executor-before-20261004.py	2026-10-04 23:49:43
++++ /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/tests/test_prism_sandbox_executor.py	2026-10-05 00:01:01
+@@ -22,11 +22,16 @@
+ from unittest.mock import MagicMock
+ 
+ import pytest
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
+ 
++from app.core.database import Base
++from app.core.permission_codes import PermissionCode
+ from app.models.agent_capability import SandboxArtifact, SandboxEnvironment, SandboxEvent, SandboxWorker
+ from app.models.project import Project
+ from app.models.project_member import ProjectMember
+ from app.models.project_source_archive import ProjectSourceArchive
++from app.models.rbac import Permission, Role, RolePermission, UserRole
+ from app.models.user import User
+ from app.services import sandbox_service
+ 
+@@ -44,6 +49,16 @@
+         for name, content in files.items():
+             bundle.writestr(name, content.encode("utf-8") if isinstance(content, str) else content)
+     return output.getvalue()
++
++
++@pytest.fixture
++def independent_transaction_db(tmp_path: Path):
++    """独立授权事务使用不同 SQLite 连接，不回滚主事务未提交的制品。"""
++    engine = create_engine(f"sqlite:///{tmp_path / 'executor.db'}")
++    Base.metadata.create_all(engine)
++    with sessionmaker(bind=engine, expire_on_commit=False)() as session:
++        yield session
++    engine.dispose()
+ 
+ 
+ def _payload(archive: bytes, **overrides) -> dict[str, object]:
+@@ -829,17 +844,49 @@
+         self.started = True
+ 
+ 
+-def _patch_environment_creation(monkeypatch, archive: bytes) -> MagicMock:
+-    db = MagicMock()
+-    project_query = MagicMock()
+-    project_query.filter.return_value.with_for_update.return_value.first.return_value = SimpleNamespace(
+-        id=91, language="python", status="active"
++def _grant_sandbox_globals(db, actor: User) -> None:
++    """正向场景使用真实普通身份及明确权限，不替换产品授权判定。"""
++    role = db.query(Role).filter_by(code=actor.role).one_or_none()
++    if role is None:
++        role = Role(code=actor.role, name="本地沙箱授权夹具", status="active")
++        db.add(role)
++        db.flush()
++    if db.query(UserRole).filter_by(user_id=actor.id, role_id=role.id).first() is None:
++        db.add(UserRole(user_id=actor.id, role_id=role.id))
++    for code in (PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW):
++        permission = db.query(Permission).filter_by(code=code).one_or_none()
++        if permission is None:
++            permission = Permission(code=code, name=code, module="local", type="api")
++            db.add(permission)
++            db.flush()
++        if db.query(RolePermission).filter_by(role_id=role.id, permission_id=permission.id).first() is None:
++            db.add(RolePermission(role_id=role.id, permission_id=permission.id))
++    db.commit()
++
++
++def _persist_execution_owner(db) -> User:
++    actor = User(id=17, username="executor-local-owner", password="local", role="user", status=1)
++    db.add(actor)
++    db.flush()
++    db.add(Project(id=91, user_id=actor.id, project_name="executor-local", language="python", status="active"))
++    _grant_sandbox_globals(db, actor)
++    return actor
++
++
++def _persist_execution_worker(db) -> SandboxWorker:
++    worker = SandboxWorker(
++        id=8, code="gvisor-01", name="本地桩执行器", worker_type="local", transport="unix",
++        endpoint="/run/prism-sandbox/never-used.sock", supported_languages_json='["python"]',
++        supported_modes_json='["whitebox","deploy"]', runtime="runsc", status="healthy", enabled=1,
+     )
+-    active_test_query = MagicMock()
+-    active_test_query.filter.return_value.first.return_value = None
+-    db.query.side_effect = [project_query, active_test_query]
++    db.add(worker)
++    db.commit()
++    return worker
++
++
++def _patch_environment_creation(db, monkeypatch, archive: bytes) -> User:
++    actor = _persist_execution_owner(db)
+     _DormantThread.created.clear()
+-    monkeypatch.setattr(sandbox_service, "require_project_access", lambda *_args, **_kwargs: None)
+     monkeypatch.setattr(
+         sandbox_service.project_source_service,
+         "build_source_archive",
+@@ -854,12 +901,12 @@
+     monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+     monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
+     monkeypatch.setattr(sandbox_service.threading, "Thread", _DormantThread)
+-    return db
++    return actor
+ 
+ 
+-def test_create_environment_maps_decompilation_input_error_to_validation(monkeypatch) -> None:
++def test_create_environment_maps_decompilation_input_error_to_validation(db, monkeypatch) -> None:
+     archive = _archive({"main.py": "print('invalid archive')\n"})
+-    db = _patch_environment_creation(monkeypatch, archive)
++    actor = _patch_environment_creation(db, monkeypatch, archive)
+     monkeypatch.setattr(
+         sandbox_service.decompilation_service,
+         "plan_decompilation_archive",
+@@ -869,7 +916,7 @@
+     with pytest.raises(sandbox_service.ValidationError) as exc_info:
+         sandbox_service.create_environment(
+             db,
+-            SimpleNamespace(id=17),
++            actor,
+             {
+                 "project_id": 91,
+                 "purpose": "test",
+@@ -882,9 +929,9 @@
+     assert "源码归档无法读取" in exc_info.value.message
+ 
+ 
+-def test_remote_only_blackbox_never_selects_or_dispatches_a_worker(monkeypatch) -> None:
++def test_remote_only_blackbox_never_selects_or_dispatches_a_worker(db, monkeypatch) -> None:
+     archive = _archive({"main.py": "print('remote')\n"})
+-    db = _patch_environment_creation(monkeypatch, archive)
++    actor = _patch_environment_creation(db, monkeypatch, archive)
+ 
+     def fail_select(*_args, **_kwargs):
+         raise AssertionError("remote-only blackbox must not select a worker")
+@@ -892,7 +939,7 @@
+     monkeypatch.setattr(sandbox_service, "_select_worker", fail_select)
+     environment = sandbox_service.create_environment(
+         db,
+-        SimpleNamespace(id=17),
++        actor,
+         {
+             "project_id": 91,
+             "purpose": "test",
+@@ -912,10 +959,10 @@
+     assert _DormantThread.created[0].started is True
+ 
+ 
+-def test_remote_combined_selects_whitebox_worker(monkeypatch) -> None:
++def test_remote_combined_selects_whitebox_worker(db, monkeypatch) -> None:
+     archive = _archive({"main.py": "print('combined')\n"})
+-    db = _patch_environment_creation(monkeypatch, archive)
+-    worker = SimpleNamespace(id=8, code="gvisor-01", runtime="runsc")
++    actor = _patch_environment_creation(db, monkeypatch, archive)
++    worker = _persist_execution_worker(db)
+     selections: list[dict[str, object]] = []
+ 
+     def select_worker(_db, **kwargs):
+@@ -925,7 +972,7 @@
+     monkeypatch.setattr(sandbox_service, "_select_worker", select_worker)
+     environment = sandbox_service.create_environment(
+         db,
+-        SimpleNamespace(id=17),
++        actor,
+         {
+             "project_id": 91,
+             "purpose": "test",
+@@ -947,6 +994,7 @@
+     owner = User(username="deploy_language_owner", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(
+         user_id=owner.id,
+         project_name="php-deployment",
+@@ -1007,6 +1055,7 @@
+     owner = User(username="deploy_unknown_language_owner", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(
+         user_id=owner.id,
+         project_name="unknown-language-deployment",
+@@ -1033,8 +1082,10 @@
+     assert "项目主语言" in exc_info.value.message
+ 
+ 
+-def test_fast_terminal_execute_response_persists_worker_events_before_conclusion(monkeypatch) -> None:
+-    environment = SimpleNamespace(
++def test_fast_terminal_execute_response_persists_worker_events_before_conclusion(db, monkeypatch) -> None:
++    _persist_execution_owner(db)
++    _persist_execution_worker(db)
++    environment = SandboxEnvironment(
+         id=101,
+         public_id="sbx_fast_terminal",
+         project_id=91,
+@@ -1049,6 +1100,7 @@
+         image_ref="prism-sandbox-python:test",
+         image_digest=None,
+         source_sha256=hashlib.sha256(b"source").hexdigest(),
++        execution_token="fast-terminal-lease",
+         resource_policy_json=sandbox_service._json({"network": "none"}),
+         agent_config_json=sandbox_service._json({"worker_mode": "whitebox", "remote_only": False}),
+         remote_target_url=None,
+@@ -1060,11 +1112,10 @@
+         result_json=None,
+         error=None,
+     )
+-    worker = SimpleNamespace(id=8, code="gvisor-01", runtime="runsc")
+-    db = MagicMock()
+-    db.get.side_effect = lambda model, _key: (
+-        environment if model is sandbox_service.SandboxEnvironment else worker
+-    )
++    db.add(environment)
++    db.commit()
++    # 包装真实工作事务只统计收尾，不改变 ORM 或授权查询。
++    worker_db = MagicMock(wraps=sessionmaker(bind=db.get_bind(), expire_on_commit=False)())
+     worker_calls: list[str] = []
+     stored_events: list[tuple[str, str, str, dict[str, object]]] = []
+ 
+@@ -1100,7 +1151,7 @@
+         stored_events.append((event_type, stage, message, payload or {}))
+         return SimpleNamespace(id=len(stored_events))
+ 
+-    monkeypatch.setattr(sandbox_service, "SessionLocal", lambda: db)
++    monkeypatch.setattr(sandbox_service, "SessionLocal", lambda: worker_db)
+     monkeypatch.setattr(sandbox_service, "_call_worker", call_worker)
+     monkeypatch.setattr(sandbox_service, "_append_event", append_event)
+     monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+@@ -1112,6 +1163,7 @@
+ 
+     sandbox_service._execute_environment(environment.id, "c291cmNl")
+ 
++    db.refresh(environment)
+     stages = [event[1] for event in stored_events]
+     assert worker_calls == ["/execute"]
+     # 本用例显式跳过多 Agent 审查,验证 worker 事件先于最终结论持久化。
+@@ -1124,36 +1176,36 @@
+         "request_id": environment.public_id,
+         "source_sha256": hashlib.sha256(b"source").hexdigest(),
+     }
+-    assert db.rollback.call_count == 0
+-    assert db.close.call_count == 1
++    assert worker_db.rollback.call_count == 0
++    assert worker_db.close.call_count == 1
+ 
+ 
+-def test_preview_session_token_scope_version_and_expiry(monkeypatch) -> None:
+-    actor = SimpleNamespace(id=17, status=1, token_version=6)
+-    worker = SimpleNamespace(id=8, code="gvisor-01")
+-    environment = SimpleNamespace(
++def test_preview_session_token_scope_version_and_expiry(db, monkeypatch) -> None:
++    actor = _persist_execution_owner(db)
++    actor.token_version = 6
++    worker = _persist_execution_worker(db)
++    environment = SandboxEnvironment(
+         public_id="sbx_preview_a",
+         project_id=91,
++        owner_id=actor.id,
++        agent_code="sandbox_deployer",
+         purpose="deploy",
++        language="python",
++        test_mode="deploy",
+         status="ready",
++        runtime="runsc",
++        image_ref="local-unused",
++        source_sha256="0" * 64,
++        resource_policy_json="{}",
++        agent_config_json="{}",
+         expires_at=datetime.utcnow() + timedelta(minutes=10),
+         worker_id=worker.id,
+         preview_path=None,
+     )
+-    db = MagicMock()
+-    db.query.return_value.filter.return_value.first.return_value = None
+-
+-    def get_record(model, key):
+-        if model is sandbox_service.User:
+-            assert key == actor.id
+-            return actor
+-        if model is sandbox_service.SandboxWorker:
+-            assert key == worker.id
+-            return worker
+-        raise AssertionError(f"unexpected model lookup: {model}")
+-
+-    db.get.side_effect = get_record
+-    monkeypatch.setattr(sandbox_service, "_get_visible", lambda *_args: environment)
++    db.add(environment)
++    db.commit()
++    assert db.get(User, actor.id) is actor
++    assert db.get(SandboxWorker, worker.id) is worker
+     monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
+ 
+     session = sandbox_service.create_preview_session(db, actor, environment.public_id)
+@@ -1213,6 +1265,59 @@
+     assert expiry_error.value.code == 40101
+ 
+ 
++@pytest.mark.parametrize("revocation", ["viewer", "global_permission"])
++@pytest.mark.parametrize("entry", ["create", "preview", "existing_preview"])
++def test_executor_entry_rechecks_committed_execution_revocation(
++    independent_transaction_db, monkeypatch, revocation: str, entry: str,
++) -> None:
++    """真实已授权会话撤权后，创建与旧预览令牌均不得恢复执行能力。"""
++    db = independent_transaction_db
++    _persist_execution_owner(db)
++    worker = _persist_execution_worker(db)
++    actor = User(id=18, username="executor-local-member", password="local", role="user", status=1)
++    db.add(actor)
++    db.flush()
++    _grant_sandbox_globals(db, actor)
++    member = ProjectMember(project_id=91, user_id=actor.id, role_in_project="reviewer")
++    environment = SandboxEnvironment(
++        public_id="sbx_revoked_preview", project_id=91, owner_id=actor.id, worker_id=worker.id,
++        agent_code="sandbox_deployer", purpose="deploy", language="python", test_mode="deploy",
++        status="ready", runtime="runsc", image_ref="local-unused", source_sha256="0" * 64,
++        execution_token="local-revoked-lease", resource_policy_json="{}", agent_config_json="{}",
++        expires_at=datetime.utcnow() + timedelta(hours=1),
++    )
++    db.add_all([member, environment])
++    db.commit()
++    monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
++    session = sandbox_service.create_preview_session(db, actor, environment.public_id)
++    # 用另一个真实事务提交变更；原事务仍持有旧身份映射。
++    with sessionmaker(bind=db.get_bind(), expire_on_commit=False)() as auth_db:
++        assert db.connection().connection.driver_connection is not auth_db.connection().connection.driver_connection
++        if revocation == "viewer":
++            auth_db.get(ProjectMember, member.id).role_in_project = "viewer"
++        else:
++            permission = auth_db.query(Permission).filter_by(code=PermissionCode.FILE_VIEW).one()
++            auth_db.query(RolePermission).filter_by(permission_id=permission.id).delete()
++        auth_db.commit()
++    assert member.role_in_project == "reviewer"
++    external_call = MagicMock(side_effect=AssertionError("拒绝后不得下载、运行或调度"))
++    monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", external_call)
++    monkeypatch.setattr(sandbox_service, "_call_worker", external_call)
++    monkeypatch.setattr(sandbox_service.threading, "Thread", external_call)
++    with pytest.raises(sandbox_service.ForbiddenError) as error:
++        if entry == "create":
++            sandbox_service.create_environment(
++                db, actor, {"project_id": 91, "purpose": "test", "language": "python", "test_mode": "whitebox"},
++            )
++        elif entry == "preview":
++            sandbox_service.create_preview_session(db, actor, environment.public_id)
++        else:
++            sandbox_service.authenticate_preview_session(db, environment.public_id, session["token"])
++    assert error.value.code == (40300 if revocation == "viewer" else 40303)
++    external_call.assert_not_called()
++    assert db.query(SandboxEnvironment).count() == 1
++
++
+ def _persist_source_archive(db, project: Project, owner: User) -> ProjectSourceArchive:
+     raw = _archive({"src/index.php": "<?php echo 'audit';\n"})
+     row = ProjectSourceArchive(
+@@ -1273,6 +1378,7 @@
+     owner = User(username="isolated_owner", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(user_id=owner.id, project_name="isolated-deploy", status="active", language="php")
+     db.add(project)
+     db.commit()
+@@ -1323,6 +1429,7 @@
+     owner = User(username="lock_owner", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(user_id=owner.id, project_name="locked", status="active", language="php")
+     db.add(project)
+     db.commit()
+@@ -1374,6 +1481,7 @@
+     owner = User(username="preview_owner", password="x", role="user", status=1, token_version=4)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(user_id=owner.id, project_name="preview-isolation", status="active")
+     worker = SandboxWorker(
+         code="preview-worker",
+@@ -1490,6 +1598,7 @@
+     owner = User(username="sandbox_late_browser_owner", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()
++    _grant_sandbox_globals(db, owner)
+     project = Project(user_id=owner.id, project_name="late-browser", status="active")
+     db.add(project)
+     db.flush()
+@@ -1653,6 +1762,7 @@
+ 
+ 
+ def _persist_browser_environment(db, owner: User, *, suffix: str) -> tuple[Project, SandboxEnvironment]:
++    _grant_sandbox_globals(db, owner)
+     project = Project(user_id=owner.id, project_name=f"browser-{suffix}", status="active")
+     db.add(project)
+     db.flush()
+@@ -1685,6 +1795,7 @@
+     reviewer = User(username="browser_reviewer_acl", password="x", role="user", status=1)
+     db.add_all([owner, reviewer])
+     db.flush()
++    _grant_sandbox_globals(db, reviewer)
+     project, environment = _persist_browser_environment(db, owner, suffix="acl_01")
+     db.add(ProjectMember(project_id=project.id, user_id=reviewer.id, role_in_project="reviewer"))
+     db.commit()
+@@ -1728,7 +1839,10 @@
+     worker_call.assert_not_called()
+ 
+ 
+-def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(db, monkeypatch) -> None:
++def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(
++    independent_transaction_db, monkeypatch,
++) -> None:
++    db = independent_transaction_db
+     owner = User(username="browser_owner_artifact", password="x", role="user", status=1)
+     db.add(owner)
+     db.flush()

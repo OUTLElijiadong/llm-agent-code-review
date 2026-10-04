@@ -1,0 +1,8 @@
+{
+  "实测快照重建摘要": "725797800eb527e574f79eed2b24521665ca30d5084ff37d1c6b8ee4559e6c06",
+  "冻结源码摘要": "87fec56120f24e70daffcde19926a333275270e72a87f6dea0df0cb293e526af",
+  "唯一差异": "estimate_tokens docstring增加未知tokenizer/协议不保证说明",
+  "去文档字符串AST完全一致": true,
+  "两份实测JSON内容相同": "仅可重复相同计数结果，不证明不同模型或不同样本",
+  "方法": "最终源码移除精确两行说明并恢复旧结尾；重建SHA与两份JSON runtime_sha256相同"
+}

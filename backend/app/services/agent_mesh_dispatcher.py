@@ -1109,6 +1109,8 @@ def _custom_handler(
                 for permission in (PermissionCode.AGENT_CHAT, PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW)
             ):
                 raise agent_team_service.AgentTeamAccessError("当前账户没有读取项目源码的权限")
+            from app.services.project_member_service import require_project_execution
+            require_project_execution(db, project_id, effective_user)
             metadata = code_file_service.get_file_meta(db, user=effective_user, file_id=file_id)
             if metadata["is_binary"]:
                 raise agent_team_service.AgentTeamValidationError("二进制文件不能供已发布审查 Agent 读取")
@@ -1193,6 +1195,7 @@ def _custom_handler(
     if source_evidence is not None:
         # 模型调用会提交用量；用新事务确认期间未撤权、取消团队或替换源码。
         try:
+            db.rollback()
             db.expire_all()
             fresh_user = db.get(User, int(user.id))
             if fresh_user is None or int(fresh_user.status or 0) != 1:
@@ -1209,6 +1212,7 @@ def _custom_handler(
                 owner_user_id=int(user.id),
                 lease_token=str(context.get("lease_token") or ""),
             )
+            require_project_execution(db, project_id, fresh_user)
             current_meta = code_file_service.get_file_meta(db, user=fresh_user, file_id=file_id)
             if current_meta["is_binary"]:
                 raise ValueError("源码已变为二进制文件")

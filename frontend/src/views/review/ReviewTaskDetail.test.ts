@@ -3,6 +3,8 @@ import { createHash, webcrypto } from 'node:crypto'
 import { TextEncoder } from 'node:util'
 import ElementPlus from 'element-plus'
 import { reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskDetailOut, TaskFileOut } from '@/types/review'
 import type { VersionDetailOut } from '@/types/project'
@@ -13,6 +15,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn() }))
 const route = reactive({ params: { id: '21' } })
 
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => navigation }))
+vi.mock('@/router', () => ({ default: navigation }))
 vi.mock('@/api/review', () => review)
 vi.mock('@/api/codeFile', () => files)
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { error: vi.fn() } }))
@@ -77,6 +80,11 @@ function button(label: string) {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
+  const user = useUserStore()
+  user.token = 'local-task-reader'
+  user.profile = { id: 11, username: 'local', role: 'user', status: 1 }
+  user.permissions = new Set(['review:view', 'issue:view', 'project:view', 'security:scan'])
   vi.useFakeTimers()
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('TextEncoder', TextEncoder)
@@ -331,6 +339,19 @@ describe('审查输入快照预览', () => {
 })
 
 describe('报告入口权限与可用状态', () => {
+  it.each([false, undefined])('R3 只读任务或执行能力缺值时不能发起安全复审 %s', async canExecute => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({ can_execute: canExecute, high_issues: 1 }))
+    await renderDetail()
+    expect(wrapper.text()).not.toContain('🛡 安全复审')
+  })
+
+  it('R3 合法可执行任务没有全局扫描权限也不显示安全复审', async () => {
+    useUserStore().permissions.delete('security:scan')
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({ can_execute: true, high_issues: 1 }))
+    await renderDetail()
+    expect(wrapper.text()).not.toContain('🛡 安全复审')
+  })
+
   it('同项目任务成员无报告访问权时不显示会产生 404 的报告入口', async () => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({ status: 'success', can_view_report: false }))
     await renderDetail()

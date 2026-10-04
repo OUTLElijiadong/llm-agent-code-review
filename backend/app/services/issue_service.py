@@ -20,6 +20,7 @@ from app.models.user import User
 from app.services.project_member_service import (
     get_visible_project_ids,
     require_project_access,
+    project_resource_capabilities,
 )
 
 
@@ -46,7 +47,9 @@ def get_issue(db: Session, user: User, issue_id: int) -> ReviewIssue:
     if not task or task.status == "deleted":
         raise NotFoundError("问题不存在", code=40400)
     # v2.4: 用 project_member 关系校验,reviewer 可读同项目的问题
-    require_project_access(db, task.project_id, user, need_write=False)
+    role = require_project_access(db, task.project_id, user, need_write=False)
+    issue.can_handle = role in {"admin", "owner"}
+    issue.can_execute = role in {"admin", "owner", "reviewer"}
     return issue
 
 
@@ -150,6 +153,7 @@ def list_issues(
         .all()
     )
 
+    capabilities = project_resource_capabilities(db, user, [task.project_id for _issue, task, _project in rows])
     items = []
     for issue, task, project in rows:
         # R1 修复(2026-06-25):补齐 v2/v3 漏洞元数据字段,
@@ -173,6 +177,8 @@ def list_issues(
                 "suggestion": issue.suggestion,
                 "fixed_code": issue.fixed_code,
                 "status": issue.status,
+                "can_handle": capabilities.get(task.project_id, {}).get("can_write", False),
+                "can_execute": capabilities.get(task.project_id, {}).get("can_execute", False),
                 "create_time": issue.create_time,
                 # === v2 漏洞元数据 ===
                 "owasp": issue.owasp,
@@ -263,4 +269,6 @@ def review_decision(
     issue.handled_at = now
     db.commit()
     db.refresh(issue)
+    issue.can_handle = True
+    issue.can_execute = True
     return issue

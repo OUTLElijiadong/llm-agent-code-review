@@ -96,7 +96,7 @@
           :class="{ 'is-expanded': expandedIds.has(row.id) }"
           role="listitem"
         >
-          <label v-if="canBatchIssues" class="ic-check" @click.stop>
+          <label v-if="canBatchIssues && row.can_handle === true" class="ic-check" @click.stop>
             <input
               type="checkbox"
               :checked="selected.some((i) => i.id === row.id)"
@@ -139,7 +139,7 @@
             </button>
             <el-button link type="primary" size="small" @click="onJump(row)">查看任务</el-button>
             <span class="ic-status-slot">
-              <el-dropdown v-if="canHandleIssues" trigger="click" @command="(s: string) => onSetStatus(row, s)">
+              <el-dropdown v-if="canHandleIssues && row.can_handle === true" trigger="click" @command="(s: string) => onSetStatus(row, s)">
                 <el-button link type="primary" size="small">改状态<el-icon><ArrowDown /></el-icon></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -415,6 +415,7 @@ watch(
 )
 
 watch([canHandleIssues, canBatchIssues], () => { actionPermissionGeneration += 1 }, { flush: 'sync' })
+watch(() => rows.value.map(row => `${row.id}:${row.can_handle}`).join('|'), () => { actionPermissionGeneration += 1 }, { flush: 'sync' })
 watch(
   () => userStore.hasPermission('project:view'),
   (allowed) => {
@@ -433,20 +434,20 @@ function toggleExpand(id: number): void {
 }
 
 function toggleSelect(row: IssueListItemOut): void {
-  if (!canBatchIssues.value) return
+  if (!canBatchIssues.value || row.can_handle !== true) return
   const index = selected.value.findIndex((i) => i.id === row.id)
   if (index >= 0) selected.value.splice(index, 1)
   else selected.value.push(row)
 }
 
 async function onSetStatus(row: IssueListItemOut, status: string): Promise<void> {
-  if (!canHandleIssues.value) return
+  if (!canHandleIssues.value || row.can_handle !== true) return
   const isCurrent = captureAccountTarget()
   const requestedScope = scopeGeneration
   const requestedPermission = actionPermissionGeneration
   try {
     await updateStatus(row.id, { status })
-    if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canHandleIssues.value) return
+    if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canHandleIssues.value || row.can_handle !== true) return
     ElMessage.success('状态已更新')
     if (status === 'fixed' || status === 'ignored') {
       loadIssues()
@@ -461,7 +462,7 @@ async function onSetStatus(row: IssueListItemOut, status: string): Promise<void>
 
 async function onBatchMarkFixed(): Promise<void> {
   if (!canBatchIssues.value || batchSubmitting.value) return
-  if (!selected.value.length) return
+  if (!selected.value.length || selected.value.some(row => row.can_handle !== true)) return
   const ids = selected.value.map((row) => row.id)
   const isCurrent = captureAccountTarget()
   const requestedScope = scopeGeneration
@@ -478,7 +479,8 @@ async function onBatchMarkFixed(): Promise<void> {
     if (isCurrent()) batchSubmitting.value = false
     return // 用户取消
   }
-  if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canBatchIssues.value) {
+  if (!isCurrent() || requestedScope !== scopeGeneration || requestedPermission !== actionPermissionGeneration || !canBatchIssues.value
+    || ids.some(id => !rows.value.some(row => row.id === id && row.can_handle === true))) {
     if (isCurrent()) {
       batchSubmitting.value = false
       ElMessage.error('账号、权限或筛选范围已变化，本次批量操作已取消。')

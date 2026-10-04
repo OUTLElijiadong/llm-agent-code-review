@@ -1,4 +1,4 @@
-"""多智能体 finding-aggregation-v1 确定性聚合契约。"""
+"""多智能体确定性聚合契约，以及历史版本的持久化兼容。"""
 
 from __future__ import annotations
 
@@ -301,3 +301,187 @@ def test_mysql_text_byte_limit_not_character_limit() -> None:
     )
 
     assert result.issues[0]["suggestion"] == claims[0]["suggestion"]
+
+
+@pytest.mark.parametrize("evidence,line", [
+    ("nonexistent_line()", 2),
+    ("", 2),
+    ("", 0),
+    ("   ", 0),
+])
+@pytest.mark.parametrize("issue_type", ["安全漏洞", "代码规范"])
+def test_unmatched_or_absent_source_quote_requires_human_review(evidence, line, issue_type) -> None:
+    """自报置信度不能把虚构、只有位置或空引用提升为已接受结论。"""
+    result = aggregate_agent_findings(
+        {"one": [{"title": "待核实的规则主张", "description": "缺少缺陷条件和影响证明。",
+                  "issue_type": issue_type, "severity": "高", "confidence": 1,
+                  "evidence": evidence, "line_number": line}]},
+        {"one": "单一模型来源"}, code="def healthy():\n    return True\n",
+        file_name="benign.py", chunk_id="quote-test",
+    )
+
+    issue = result.issues[0]
+    assert issue["human_review_status"] == "pending"
+    assert issue["aggregation"]["decision"] == "human_review"
+    assert "source_quote_unverified" in issue["aggregation"]["review_reasons"]
+    assert result.summary["pending_human_review_count"] == 1
+
+
+@pytest.mark.parametrize("issue_type", ["安全漏洞", "security", "security_vulnerability", "vulnerability", " SECURITY "])
+def test_matching_source_quote_does_not_verify_security_claim(issue_type) -> None:
+    result = aggregate_agent_findings(
+        {"one": [{"title": "未获验证的安全主张", "description": "原文存在不证明缺陷条件及影响。",
+                  "issue_type": issue_type, "severity": "高", "confidence": 1,
+                  "evidence": "return True", "line_number": 2,
+                  "verification": "confirmed", "human_review_status": "accepted"}]},
+        {"one": "单一模型来源"}, code="def healthy():\n    return True\n",
+        file_name="benign.py", chunk_id="quote-test",
+    )
+
+    issue = result.issues[0]
+    assert issue["evidence_quality"] == "verified"  # 仅引用匹配，非漏洞验证。
+    assert issue["human_review_status"] == "pending"
+    assert issue["aggregation"]["decision"] == "human_review"
+    assert "security_claim_requires_verification" in issue["aggregation"]["review_reasons"]
+
+
+@pytest.mark.parametrize("evidence", ['label = "alpha beta"', 'label = "Alpha  Beta"'])
+def test_case_or_string_whitespace_changes_are_not_verified_quotes(evidence) -> None:
+    result = aggregate_agent_findings(
+        {"one": [{"title": "常量规则主张", "issue_type": "代码规范", "severity": "低",
+                  "confidence": 1, "evidence": evidence}]},
+        {"one": "单一模型来源"}, code='label = "Alpha Beta"\n',
+        file_name="constants.py", chunk_id="quote-test",
+    )
+
+    assert result.issues[0]["evidence_quality"] != "verified"
+    assert result.issues[0]["human_review_status"] == "pending"
+
+
+def test_verified_non_security_quote_keeps_existing_positive_path() -> None:
+    result = aggregate_agent_findings(
+        {"one": [{"title": "命名规范主张", "issue_type": "命名规范", "severity": "低",
+                  "confidence": 0.9, "evidence": 'label = "Alpha Beta"'}]},
+        {"one": "单一模型来源"}, code='label = "Alpha Beta"\n',
+        file_name="constants.py", chunk_id="quote-test",
+    )
+
+    assert result.issues[0]["evidence_quality"] == "verified"
+    assert result.issues[0]["human_review_status"] == "not_required"
+    assert result.issues[0]["aggregation"]["decision"] == "accepted"
+
+
+def test_new_evidence_semantics_are_distinguishable_from_historical_v1() -> None:
+    result = aggregate_agent_findings(
+        {"one": [{"title": "命名规范主张", "issue_type": "命名规范", "severity": "低",
+                  "confidence": 0.9, "evidence": 'label = "Alpha Beta"'}]},
+        {}, code='label = "Alpha Beta"\n', file_name="constants.py", chunk_id="version-test",
+    )
+
+    assert result.schema_version == AGGREGATION_VERSION == "finding-aggregation-v2"
+    assert result.issues[0]["aggregation_version"] == "finding-aggregation-v2"
+    assert result.issues[0]["aggregation"]["schema_version"] == "finding-aggregation-v2"
+    assert result.risk_scoring_version == "claim-risk-v2"  # 风险分算法版本保持原值。
+
+
+@pytest.mark.parametrize("version", [None, "finding-aggregation-v1", "finding-aggregation-v2"])
+def test_legacy_aggregation_version_is_not_rewritten_by_persistence_or_api(db, admin_user, version) -> None:
+    from app.api.v1 import issues as issues_api
+    from app.models.code_file import CodeFile
+    from app.models.project import Project
+    from app.models.review_issue import ReviewIssue
+    from app.models.review_task import ReviewTask
+
+    project = Project(user_id=admin_user.id, project_name="旧聚合版本", language="python", status="active")
+    db.add(project)
+    db.flush()
+    task = ReviewTask(user_id=admin_user.id, project_id=project.id, task_name="旧聚合版本",
+                      review_type="standard", status="success")
+    code_file = CodeFile(project_id=project.id, file_name="benign.py", language="python", content="label = 'ok'")
+    db.add_all([task, code_file])
+    db.flush()
+    metadata = {"schema_version": version, "decision": "accepted"} if version else None
+    issue = ReviewIssue(task_id=task.id, file_id=code_file.id, issue_type="命名规范", severity="低",
+                        description="保留历史人工复核元数据。", aggregation_version=version,
+                        aggregation_json=metadata, human_review_status="not_required")
+    db.add(issue)
+    db.commit()
+
+    response = issues_api.get_issue(issue.id, db=db, user=admin_user).data
+    assert response.aggregation_version == version
+    assert response.aggregation_json == metadata
+    assert response.human_review_status == "not_required"
+    assert not db.dirty and not db.deleted
+
+
+def test_multiple_sources_do_not_replace_security_claim_verification() -> None:
+    common = {"title": "同一规则主张", "severity": "高", "evidence": "return True", "line_number": 2}
+    result = aggregate_agent_findings(
+        {"quality": [{**common, "issue_type": "代码规范", "confidence": 0.98}],
+         "security": [{**common, "issue_type": "安全漏洞", "confidence": 0.6}]},
+        {"quality": "规范来源", "security": "安全来源"},
+        code="def healthy():\n    return True\n", file_name="benign.py", chunk_id="quote-test",
+    )
+
+    issue = result.issues[0]
+    assert issue["issue_type"] == "代码规范"  # 最佳引用仍来自原规范来源。
+    assert issue["confirmation_count"] == 2  # 表示两个来源，非两次验证。
+    assert issue["human_review_status"] == "pending"
+    assert "security_claim_requires_verification" in issue["aggregation"]["review_reasons"]
+
+
+@pytest.mark.parametrize("decision", ["accepted", "rejected", "evidence_requested"])
+def test_pending_claim_survives_persistence_api_and_manual_adjudication(db, admin_user, decision) -> None:
+    """真实聚合结果经既有Worker转换、SQLite、API序列化后不自动接受。"""
+    from app.api.v1 import issues as issues_api
+    from app.models.code_file import CodeFile
+    from app.models.project import Project
+    from app.models.review_task import ReviewTask
+    from app.services import issue_service, review_service
+
+    code = "def healthy():\n    return True\n"
+    project = Project(user_id=admin_user.id, project_name="引用复核", language="python", status="active")
+    db.add(project)
+    db.flush()
+    task = ReviewTask(user_id=admin_user.id, project_id=project.id, task_name="引用复核",
+                      review_type="standard", status="success")
+    code_file = CodeFile(project_id=project.id, file_name="benign.py", language="python", content=code)
+    db.add_all([task, code_file])
+    db.flush()
+    item = aggregate_agent_findings(
+        {"one": [{"title": "未获验证的安全主张", "issue_type": "安全漏洞", "severity": "高",
+                  "description": "片段存在不证明主张成立。", "evidence": "return True", "confidence": 1}]},
+        {"one": "单一模型来源"}, code=code, file_name=code_file.file_name, chunk_id="persistence-test",
+    ).issues[0]
+    finding = review_service._final_issue_to_finding(item)
+    issue = review_service._finding_to_review_issue(task.id, code_file, finding)
+    db.add(issue)
+    db.commit()
+    db.refresh(issue)
+
+    response = issues_api.get_issue(issue.id, db=db, user=admin_user).data
+    assert response.human_review_status == "pending" and response.status == "pending_review"
+    assert response.evidence_quality == "verified"
+    assert response.aggregation_json["review_reasons"] == ["security_claim_requires_verification"]
+    original_claims = response.aggregation_json["claims"]
+
+    updated = issue_service.review_decision(db, admin_user, issue.id, decision, "记录人工核对范围")
+    after = issues_api.get_issue(updated.id, db=db, user=admin_user).data
+    assert after.human_review_status == decision
+    assert after.aggregation_json["claims"] == original_claims
+    assert after.aggregation_json["human_review"]["reviewer_id"] == admin_user.id
+    assert after.aggregation_json["human_review"]["note"] == "记录人工核对范围"
+
+
+def test_noncanonical_unmatched_quote_also_requires_review() -> None:
+    common = {"title": "同一规范主张", "issue_type": "代码规范", "severity": "低", "source_anchor": "same-anchor"}
+    result = aggregate_agent_findings(
+        {"matched": [{**common, "evidence": "return True", "confidence": 0.95}],
+         "unmatched": [{**common, "evidence": "nonexistent_line()", "confidence": 0.8}]},
+        {}, code="def healthy():\n    return True\n", file_name="benign.py", chunk_id="quote-test",
+    )
+
+    issue = result.issues[0]
+    assert issue["evidence_quality"] == "verified"
+    assert issue["human_review_status"] == "pending"
+    assert "source_quote_unverified" in issue["aggregation"]["review_reasons"]

@@ -1,0 +1,124 @@
+{
+  "recorded_at_utc": "2026-10-04T16:16:12.944964+00:00",
+  "mode": "只读文件/日志/源审阅；没有运行全量、公开GET、SSH、生产SQL或临时探针",
+  "source_freeze": {
+    "metadata": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口源码冻结.json",
+      "bytes": 20858,
+      "sha256": "8cd1682c26b157e824db3948655f4cb2907d2a4269d221db45a9ef53c0b4fc1d"
+    },
+    "timestamp_utc": "2026-10-04T16:08:23.196986+00:00",
+    "timestamp_taipei": "2026-10-05T00:08:23.196986+08:00",
+    "files": 114,
+    "current_hash_or_size_mismatches": []
+  },
+  "full_backend": {
+    "metadata": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口完整后端.log",
+      "bytes": 857843,
+      "sha256": "c3a2b54c03392bc4efec0bbc4f09e72d060d0ea2aec081862c1ff2b22f9c358e"
+    },
+    "collected": 5967,
+    "passed_result_rows": 5962,
+    "skipped_result_rows": 5,
+    "failed_result_rows": 0,
+    "summary": "5962 passed, 5 skipped, 5 warnings in 248.00s",
+    "exit_receipt": {
+      "source": "根代理实际工具结果",
+      "session_id": 25765,
+      "chunk_id": "ece913",
+      "exit_code": 0
+    },
+    "coverage": {
+      "statements": 49475,
+      "missed": 8528,
+      "reported_percent": 83,
+      "scope": "pytest-cov报告中的app语句覆盖，非分支覆盖或生产业务验收"
+    }
+  },
+  "skipped_tests": [
+    "tests/unit/core/test_login_rate_limit_real_redis.py::test_real_lua_keeps_same_window_blocked",
+    "tests/unit/core/test_login_rate_limit_real_redis.py::test_real_lua_subsecond_remaining_reports_one_second_and_then_expires",
+    "tests/unit/core/test_login_rate_limit_real_redis.py::test_real_lua_admission_near_expiry_does_not_restart_window",
+    "tests/unit/core/test_login_rate_limit_real_redis.py::test_real_lua_failure_settlement_near_expiry_does_not_restart_window",
+    "tests/unit/core/test_login_rate_limit_real_redis.py::test_real_lua_check_and_legacy_increment_preserve_subsecond_window"
+  ],
+  "skip_reason": {
+    "source": "backend/tests/unit/core/test_login_rate_limit_real_redis.py module skipif(not PRISM_LOGIN_TEST_REDIS_CONTAINER)",
+    "reason": "Requires explicitly created isolated local Redis container",
+    "interpretation": "此完整进程未运行5项隔离Redis Lua检查；旧5项三轮为独立历史证据，没有加进本轮5962计数。"
+  },
+  "warnings": [
+    {
+      "type": "StarletteDeprecationWarning",
+      "message": "Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead."
+    },
+    {
+      "type": "DeprecationWarning",
+      "message": "'crypt' is deprecated and slated for removal in Python 3.13"
+    },
+    {
+      "type": "PytestCollectionWarning",
+      "message": "cannot collect test class 'TestVerifierAgent' because it has a __init__ constructor (from: tests/unit/agents/test_sandbox_agent_context.py)"
+    },
+    {
+      "type": "PytestCollectionWarning",
+      "message": "cannot collect test class 'TestReviewReporterAgent' because it has a __init__ constructor (from: tests/unit/services/test_review_dynamic_roles.py)"
+    },
+    {
+      "type": "UserWarning",
+      "message": "Duplicate name: 'main.php'"
+    }
+  ],
+  "warning_type_counts": {
+    "StarletteDeprecationWarning": 1,
+    "DeprecationWarning": 1,
+    "PytestCollectionWarning": 2,
+    "UserWarning": 1
+  },
+  "static": {
+    "metadata": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261005-v4038收口后端静态收据.json",
+      "bytes": 1885,
+      "sha256": "273c4566709d181c4177a750726ea2480ccc2afc44158c8597e457483993a255"
+    },
+    "returncode": 0,
+    "selected_rules": "F,E9",
+    "python_files": 33,
+    "scope": "冻结变更Python产品与部署probe的F/E9静态门，非全Ruff规则"
+  },
+  "planned_runtime_scripts": {
+    "shell": {
+      "metadata": {
+        "path": "/tmp/prism-v4038-readonly-verification.sh",
+        "bytes": 2462,
+        "sha256": "76c10110eb60fc4f0eb230e5069ced525a1b1c559d2dc2df2a2d5f8a2ea8c7d0"
+      },
+      "business_database_ops": "current_alembic_revision、账本digest COUNT/SUM及回退门schema/ref查询均SELECT；无INSERT/UPDATE/DELETE、migrate、restore、Compose up/stop或systemctl状态修改。",
+      "probes": "新镜像checkpoint+project member实际源码probe及旧37member拒绝probe使用immutable image ID、network none、read-only、cap-drop ALL、no-new-privileges、内存/PID限制；仅固定本地AST/哨兵，不导入应用或连接DB。",
+      "container_identity": "新旧probe前后比对cr_backend/cr_frontend容器Id相同；旧37返回1是预期拒绝，不切换。",
+      "ops_check": "读取发布账本/镜像/Compose配置、健康、磁盘/内存、备份、Alembic及本机HTTPS；systemctl show只查状态。",
+      "bounded_side_effects": "docker run --rm会创建并清理隔离临时probe容器；docker exec/python可能存在运行工具开销。脚本不等于零主机状态变化，但不改业务或替换运行容器。"
+    },
+    "public": {
+      "metadata": {
+        "path": "/tmp/prism-v4038-public-verification.py",
+        "bytes": 3415,
+        "sha256": "5beae57f2aeb1438ab4aeddbb08853f71fb1772eb2097a0c7b7da0a2401468c9"
+      },
+      "requests": [
+        "GET /?acceptance=<expected sha>",
+        "GET /assets/index-*.js",
+        "GET /assets/buildInfo-*.js",
+        "GET /healthz",
+        "GET /readyz",
+        "GET /api/auth/captcha"
+      ],
+      "count": 6,
+      "scope": "检查公开构建版本/SHA、health/ready release、CSP头以及PNG挑战字段/尺寸；不登录、不注册、不解答CAPTCHA、不调用模型或业务执行。",
+      "bounded_side_effects": "GET captcha按正常产品逻辑生成1个进程内300秒挑战；同时公共接口限流/访问日志可能记录请求，不描述为严格零副作用。",
+      "limits": "未执行这些脚本；构建字段/依赖/digest/ops/回退门结论仍须真实发布后回执。备份gzip/hash读取不替代恢复演练。"
+    }
+  },
+  "release_state": "发布待根实际事务与运行回执；本独立核验不预写成功。"
+}

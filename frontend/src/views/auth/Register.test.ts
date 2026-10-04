@@ -32,12 +32,50 @@ beforeEach(() => {
   authApi.getCaptcha.mockResolvedValue({
     captcha_id: 'captcha-1',
     question: '2 + 2 = ?',
+    image_data: 'data:image/png;base64,aGVsbG8=',
     beta_registration_enabled: false,
   })
   userStore.register.mockResolvedValue(undefined)
 })
 
 describe('Register 选填邮箱', () => {
+  it('显示位图挑战，题目或字符不作为可复制文本展示', async () => {
+    const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.find('img[alt="注册验证码图片"]').attributes('src')).toBe('data:image/png;base64,aGVsbG8=')
+    expect(wrapper.text()).not.toContain('2 + 2 = ?')
+    wrapper.unmount()
+  })
+
+  it('挑战加载失败时禁用提交并提供刷新入口', async () => {
+    authApi.getCaptcha.mockRejectedValueOnce(new Error('unavailable'))
+    const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.find('.btn-register').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[aria-label="刷新验证码"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('图片解码失败可刷新恢复，失败期间不提交注册', async () => {
+    const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.get('img[alt="注册验证码图片"]').trigger('error')
+    expect(wrapper.find('.btn-register').attributes('disabled')).toBeDefined()
+    await wrapper.find('button[aria-label="刷新验证码"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('img[alt="注册验证码图片"]').exists()).toBe(true)
+    expect(wrapper.find('.btn-register').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('非PNG数据地址不会渲染也不能提交', async () => {
+    authApi.getCaptcha.mockResolvedValueOnce({ captcha_id: 'bad-image', question: 'hidden', image_data: 'data:image/svg+xml,<svg/>', beta_registration_enabled: false })
+    const wrapper = mount(Register, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.find('.btn-register').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
   it('把纯空白邮箱当作未填，不阻断注册也不向 API 发空白串', async () => {
     const wrapper = await mountRegister('   ')
 

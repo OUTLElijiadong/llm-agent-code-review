@@ -23,7 +23,9 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import rbac_service
-from app.services.project_member_service import get_visible_project_ids, require_project_access
+from app.services.project_member_service import (
+    get_visible_project_ids, require_project_access, require_project_execution, project_resource_capabilities,
+)
 from app.services.report_exporter import build_report_score_facts
 
 
@@ -115,12 +117,14 @@ def list_reports(db: Session, user: User, project_id: int = None,
     projects_by_id = (
         {
             project.id: project
-            for project in db.query(Project).filter(Project.id.in_(project_ids)).all()
+            for project in db.query(Project).filter(Project.id.in_(project_ids)).populate_existing().all()
         }
         if project_ids
         else {}
     )
 
+    capabilities = project_resource_capabilities(db, user, project_ids, projects=projects_by_id.values())
+    can_delete = rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
     items = []
     for row in rows:
         project = projects_by_id.get(row.project_id)
@@ -131,6 +135,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
+            "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
             "total_issues": issue_count, "score": score, "status": row.status,
             "source": issue_stats[row.id]["source"],
             "create_time": row.create_time.isoformat() if row.create_time else None,
@@ -162,7 +167,11 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
 
     from app.services.review_service import _task_agent_release_summaries
 
+    capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
     return {
+        "can_delete": (rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
+                       and capabilities.get("can_execute", False)),
+        "can_execute": capabilities.get("can_execute", False),
         "project": {"id": project.id, "project_name": project.project_name,
                      "language": project.language} if project else {},
         "task": {"id": task.id, "name": task.task_name, "task_name": task.task_name,
@@ -601,7 +610,9 @@ def delete_report(db: Session, user: User, task_id: int) -> None:
         raise NotFoundError("报告不存在", code=40400)
     if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
         raise ForbiddenError("无权限删除此报告", code=40300)
-    require_project_access(db, task.project_id, user, need_write=False)
+    # Preserve existing author/admin deletion for reviewer authors, while a
+    # later downgrade to project viewer cannot delete the historical report.
+    require_project_execution(db, task.project_id, user)
     task.status = "deleted"
     # 渗透报告删除联动: 清空委托的 report_task_id, 防止详情页"查看报告"跳 404
     if task.review_type == "pentest":

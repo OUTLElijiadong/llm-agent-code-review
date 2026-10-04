@@ -180,7 +180,7 @@ def test_task_prompt_generation_does_not_silently_limit_to_fifty(monkeypatch):
     db.get.return_value = SimpleNamespace(project_id=3, task_name="完整任务")
     db.query.return_value.filter.return_value = query
     agent._db = db
-    monkeypatch.setattr(agent, "_authz_project", lambda *_args: None)
+    monkeypatch.setattr(agent, "_authz_project", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(agent, "_build_for_issue", lambda issue, *_args: {"issue_id": issue.id, "tokens": {}})
     monkeypatch.setattr(agent, "_build_aggregate", lambda group, *_args, **_kwargs: {"issue_id": -9})
 

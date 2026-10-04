@@ -32,6 +32,7 @@ from app.agents.audit_board import AuditBoard
 from app.agents.base import AgentContext, AgentResult
 from app.agents.events import AgentEventType
 from app.ai.php_attack_surface import AttackSurface, category_meta, profile_php_file
+from app.core.exceptions import AppError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
@@ -656,6 +657,10 @@ class FullChainAuditOrchestrator:
         # 复用哨兵的鉴权
         if (err := self._sentinel._authz_project(project)) is not None:
             return err
+        try:
+            ctx = self._sentinel._execution_context(project_id, ctx, actor)
+        except AppError:
+            return AgentResult(success=False, error="无权执行该项目", failure_kind="authorization_revoked")
 
         t0 = time.time()
         board = AuditBoard(project_name=project.project_name or f"项目#{project_id}")
@@ -674,10 +679,18 @@ class FullChainAuditOrchestrator:
 
         # 1. Recon
         recon = self._recon(files, board, ctx)
+        try:
+            self._sentinel._require_current_execution(project_id, actor)
+        except AppError:
+            return AgentResult(success=False, error="项目执行权限已失效", failure_kind="authorization_revoked")
         # 2. Analysis(复用白盒主引擎)
         analysis = self._analysis(project_id, top_n, trace_dataflow, board, ctx)
         if not analysis.success:
             return analysis
+        try:
+            self._sentinel._require_current_execution(project_id, actor)
+        except AppError:
+            return AgentResult(success=False, error="项目执行权限已失效", failure_kind="authorization_revoked")
         # 3. Verification(隔离沙箱脚本可选，回报不等于独立复现)
         try:
             verification = self._verification(
@@ -686,6 +699,10 @@ class FullChainAuditOrchestrator:
             )
         except Exception as exc:  # noqa: BLE001 - 不允许漏评高危后仍报告审计完成
             return AgentResult(success=False, error=f"全链漏洞验证不完整: {exc}", failure_kind="partial_coverage")
+        try:
+            self._sentinel._require_current_execution(project_id, actor)
+        except AppError:
+            return AgentResult(success=False, error="项目执行权限已失效", failure_kind="authorization_revoked")
         # 4. Report
         duration_ms = int((time.time() - t0) * 1000)
         report = self._report(project, recon, analysis, verification, board, duration_ms)

@@ -1646,6 +1646,24 @@ class DiscussionOrchestrator:
 
 # ════════════════ 报告沉淀(同步,运行在线程池) ════════════════
 
+def _require_discussion_actor(db, user_id: int, project_id: int) -> None:
+    from app.models.user import User
+    from app.core.exceptions import ForbiddenError
+    from app.core.permission_codes import PermissionCode
+    from app.services.project_member_service import require_project_execution
+    from app.services.rbac_service import check_permission
+
+    from sqlalchemy.orm import Session
+    # Caller may hold a report transaction; identity refresh alone does not end MySQL's old snapshot.
+    with Session(bind=db.get_bind(), autoflush=False) as auth_db:
+        user = auth_db.get(User, int(user_id), populate_existing=True)
+        if user is None or int(user.status or 0) != 1:
+            raise ForbiddenError("圆桌所属账户已停用或不存在", code=40300)
+        require_project_execution(auth_db, int(project_id), user)
+        if not check_permission(auth_db, int(user_id), PermissionCode.REVIEW_START):
+            raise ForbiddenError("圆桌执行权限已撤销", code=40300)
+
+
 def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
                        usage_file_id: Optional[int] = None, usage_chunk_index: Optional[int] = None, **kwargs):
     """线程池从持久任务恢复来源；独立提交用量，不被报告解析失败回滚。"""
@@ -1659,6 +1677,7 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
         task = log_db.get(ReviewTask, task_id)
         if task is None or task.user_id != user_id:
             raise RuntimeError("圆桌模型调用缺少可信任务来源")
+        _require_discussion_actor(log_db, user_id, int(task.project_id))
         fields = {
             **model_attribution(task), "_review_task_id": task_id,
             "_file_id": usage_file_id, "_chunk_index": usage_chunk_index,
@@ -1667,7 +1686,11 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
             try:
                 if call_budget:
                     call_budget.reserve()
-                return agent.call_raw(**kwargs)
+                result = agent.call_raw(**kwargs)
+                # Do not return an in-flight model result after project execution was revoked.
+                with SessionLocal() as auth_db:
+                    _require_discussion_actor(auth_db, user_id, int(task.project_id))
+                return result
             finally:
                 log_db.commit()
     finally:
@@ -1683,6 +1706,7 @@ def _create_review_task(
     """把实际输入匹配的历史版本与 running 任务原子保存，禁止改用新内容。"""
     db = SessionLocal()
     try:
+        _require_discussion_actor(db, user_id, project_id)
         validate_review_input(SimpleNamespace(content=code, file_name=file_name, is_binary=0))
         code_file = db.query(CodeFile).filter_by(
             id=file_id, project_id=project_id, status="active",
@@ -1792,6 +1816,7 @@ def _finalize_review(
         db.rollback()
         if stopped:
             return _cancel_review_task(task_id)
+        _require_discussion_actor(db, user_id, int(task.project_id))
         if not metrics.get("valid_speeches"):
             raise RuntimeError("圆桌讨论没有产生有效审查发言，不能生成成功报告")
         _ensure_running(task_id)
@@ -1815,6 +1840,7 @@ def _finalize_review(
         if task is None or task.status != "running":
             db.rollback()
             return task_id
+        _require_discussion_actor(db, user_id, int(task.project_id))
         # 1) 补写讨论期间的全部 LLM 调用日志(真实数据)
         for log_info in deferred_logs:
             try:

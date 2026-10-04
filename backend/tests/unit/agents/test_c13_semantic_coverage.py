@@ -16,6 +16,7 @@ from app.services.deepseek_responses_runtime import (
     DeepSeekResponsesRuntime,
     InMemoryCheckpointStore,
     compact_transcript,
+    estimate_tokens,
 )
 
 _FACTS = (
@@ -122,7 +123,10 @@ def test_source_compaction_preserves_middle_permission_fact_when_model_summary_o
 
 
 @pytest.mark.asyncio
-async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_anchors() -> None:
+@pytest.mark.parametrize("window,should_fit", [(5000, False), (16000, True)])
+async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_anchors(
+    window, should_fit,
+) -> None:
     middle_fact = "中段权限：不得跨账号读取聊天"
     transcript = [{"role": "user", "content": "审查目标：仅核查当前项目"}]
     transcript.extend({"role": "assistant", "content": f"历史讨论 {i}：" + "甲" * 80} for i in range(9))
@@ -160,13 +164,22 @@ async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_a
         transport=transport,
         tool_executor=SimpleNamespace(),
         checkpoint_store=InMemoryCheckpointStore(),
-        context_window_tokens=5000,
+        # This full 21-message source ledger and JSON schema do not fit 5000
+        # UTF-8 budget bytes. Keep the original history and compression trigger.
+        context_window_tokens=window,
         max_output_tokens=400,
         compaction_threshold_tokens=600,
         keep_recent_tokens=200,
         stream=False,
     )
     result = await runtime.start(transcript, run_id="c13_missing_middle")
+    checkpoint = await runtime.get_checkpoint("c13_missing_middle")
+    assert checkpoint.transcript[:len(transcript)] == transcript
+    if not should_fit:
+        assert result.status == "failed"
+        assert "语义压缩模型自身没有足够输入预算" in result.error
+        assert transport.payloads == []
+        return
     compact_payloads = [payload for payload in transport.payloads if not payload["tools"]]
     assert any(middle_fact in json.dumps(payload, ensure_ascii=False) for payload in compact_payloads)
     model_payload = transport.payloads[-1]
@@ -178,6 +191,11 @@ async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_a
     assert '"source_role":"assistant"' in projected_summary
     assert "来源角色与授权边界" in final_input
     assert "唯一授权依据" in final_input
+    assert all(
+        estimate_tokens({key: value for key, value in payload.items() if key != "max_output_tokens"})
+        + payload["max_output_tokens"] + 1024 < window
+        for payload in transport.payloads
+    )
 
 
 def _message_response(text: str) -> dict:

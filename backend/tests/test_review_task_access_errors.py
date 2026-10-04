@@ -88,7 +88,7 @@ def test_missing_invisible_deleted_and_parent_unavailable_have_identical_review_
     assert all(body == bodies[0] for body in bodies)
     assert bodies[0]['message'] == '审查任务不存在或当前账号无权访问'
     assert bodies[0]['retryable'] is False
-    assert bodies[0]['next_action'] == '请返回审查记录列表重新选择；如需访问，请联系项目负责人确认权限'
+    assert bodies[0]['next_action'] == '请返回审查任务列表重新选择；如需访问，请联系项目负责人确认权限'
     assert writes == []
 
 

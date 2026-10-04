@@ -1,0 +1,85 @@
+{
+  "范围": "发现判定/分类与评分解释，生命周期补修之前的只读独立冻结快照",
+  "核查": [
+    "exact源码引用匹配不等同漏洞条件/影响成立",
+    "合法安全IssueType上游仅安全漏洞，未发现guard集合外的合法别名",
+    "CWE/OWASP未知空契约保留，提示强制编造冲突已移除",
+    "评分算法/历史原值保留，JSON/HTML/Word/PDF说明本报告不核验国内库时效或认证",
+    "聚合v2仅新生成对象；历史无版本/v1/v2持久化和API不重写"
+  ],
+  "独立测试": [
+    {
+      "命令": "backend/.venv311/bin/python -m pytest tests/test_finding_aggregator.py tests/test_security_catalog_current.py tests/test_issue_aggregation_workflow.py tests/test_report_exporter.py --no-cov -q",
+      "通过": 132,
+      "警告": 1,
+      "秒": 3.7,
+      "退出码": 0
+    },
+    {
+      "命令": "npm run test -- src/components/issue/IssueDetailDrawer.test.ts src/views/security/SecurityCenter.test.ts --maxWorkers=1",
+      "通过": 18,
+      "文件": 2,
+      "秒": 2.45,
+      "退出码": 0
+    }
+  ],
+  "限制": [
+    "不是漏洞条件实测",
+    "不是真实模型或最新国内数据库同步验证",
+    "不是HTTP全权限/生产浏览器/真实手机验收",
+    "国标官方标题核验来源由原实现Agent保存，本独立复核未新浏览网页",
+    "以下Drawer两文件之后已交接生命周期补修；不能将本快照SHA当最终补修SHA"
+  ],
+  "冻结文件": [
+    {
+      "路径": "backend/app/ai/finding_aggregator.py",
+      "sha256": "784d38e3504a6a70ee179609efe8f26db89b38e97fa42b4b1dbb4db7f9669a85",
+      "字节": 26398
+    },
+    {
+      "路径": "backend/app/ai/prompts/review.zh.md",
+      "sha256": "06e1ff9aede30bcd0c615487fe9a923d3a38f8a590710d153d3a7172f10340c7",
+      "字节": 6227
+    },
+    {
+      "路径": "backend/app/services/report_exporter.py",
+      "sha256": "a6059314052bba648155cc2671f02430cea7864e9f5d57a500a92d97347c03bb",
+      "字节": 31438
+    },
+    {
+      "路径": "backend/tests/test_finding_aggregator.py",
+      "sha256": "d5dadf8a2a58264fdb4540741362a58e47bf58a9fb4a72f89ac9fc5956797a62",
+      "字节": 20814
+    },
+    {
+      "路径": "backend/tests/test_report_exporter.py",
+      "sha256": "d9d8c8a09f9f987b8ae32d70521769e37b8255ed639ca8156c2fd420f17e47f5",
+      "字节": 44502
+    },
+    {
+      "路径": "backend/tests/test_security_catalog_current.py",
+      "sha256": "20edd08516c1dc65d39bb4892635b23b529d3c84f0847f4e1aafdc50db77c77f",
+      "字节": 9799
+    },
+    {
+      "路径": "frontend/src/components/issue/IssueDetailDrawer.vue",
+      "sha256": "ce5f397eba9e7901745bccce9ea311929fdd200ee6842eef6666cb778b232a17",
+      "字节": 18729
+    },
+    {
+      "路径": "frontend/src/components/issue/IssueDetailDrawer.test.ts",
+      "sha256": "ff97729cfacf7f7f673ebcc3c5109ee378ca53dea61356b19bdcbf24fdd1fa3c",
+      "字节": 4419
+    },
+    {
+      "路径": "frontend/src/views/security/SecurityCenter.test.ts",
+      "sha256": "b95cffb407a182a4d43b8a3398b1e5a0f4770676d0d33aa953e3008f92dc71d7",
+      "字节": 5791
+    },
+    {
+      "路径": "frontend/src/views/security/cnnvd-knowledge.ts",
+      "sha256": "194c450883500628ca6db11f975da41c309b0bc5ea13db6e7634409752e12c3c",
+      "字节": 3159
+    }
+  ]
+}

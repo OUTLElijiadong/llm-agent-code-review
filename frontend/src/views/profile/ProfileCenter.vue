@@ -72,7 +72,7 @@
         <div class="action-row">
           <div>
             <p class="action-title">修改密码</p>
-            <p class="action-desc">建议每 90 天更换一次密码</p>
+            <p class="action-desc">发现密码泄露或账户异常时及时修改，避免重复使用密码</p>
           </div>
           <el-button type="primary" @click="goChangePassword">前往修改</el-button>
         </div>
@@ -86,7 +86,7 @@
         <div class="action-row">
           <div>
             <p class="action-title">退出登录</p>
-            <p class="action-desc">清除本机 Token 并返回登录页</p>
+            <p class="action-desc">结束当前登录并返回登录页</p>
           </div>
           <el-button @click="handleLogout">退出</el-button>
         </div>

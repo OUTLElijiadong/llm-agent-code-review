@@ -6,15 +6,18 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.orm import Session
 
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import DiscussionTurn
-from app.core.permission_codes import ALL_PERMISSION_CODES
+from app.core.permission_codes import ALL_PERMISSION_CODES, PermissionCode
 from app.main import app
 from app.models.agent_governance import ApprovalItem
 from app.models.agent_response_run import AgentToolExecution
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.services import agent_responses_service as service_module
 from app.services.admin_capability_registry import operation_contract
@@ -46,6 +49,17 @@ def _user(db) -> User:
     db.add(value)
     db.commit()
     return value
+
+
+def _grant_review_start(db, user: User) -> None:
+    """仅对合法圆桌执行样本配置现有真实权限，不影响其它能力夹具。"""
+    role = Role(name="普通用户", code=user.role, status="active", is_builtin=1)
+    permission = Permission(code=PermissionCode.REVIEW_START, name="发起审查", module="review", type="api")
+    db.add_all([role, permission])
+    db.flush()
+    db.add_all([UserRole(user_id=user.id, role_id=role.id),
+                RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
 
 
 def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolExecutor:
@@ -410,6 +424,10 @@ async def test_fixed_download_tools_reject_path_injection_and_non_binary_file(db
 @pytest.mark.asyncio
 async def test_roundtable_tools_read_and_control_only_owned_session_after_approval(db, monkeypatch) -> None:
     user = _user(db)
+    _grant_review_start(db, user)
+    project = Project(user_id=user.id, project_name="owned-roundtable-project", status="active")
+    db.add(project)
+    db.commit()
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     DiscussionBus._instance = None
     bus = DiscussionBus.instance()
@@ -418,6 +436,7 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
         task_id=0,
         file_name="main.py",
         owner_user_id=user.id,
+        project_id=project.id,
         max_rounds=2,
     )
     controls: list[tuple[str, dict[str, Any]]] = []
@@ -478,22 +497,33 @@ async def test_roundtable_tools_read_and_control_only_owned_session_after_approv
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("project_role", ["owner", "reviewer"])
 async def test_concluded_roundtable_user_input_starts_owned_continuation(
     db,
     monkeypatch,
+    project_role,
 ) -> None:
     from app.api.v1 import discussion as discussion_api
     from app.api.v1 import ws_discussion
 
     user = _user(db)
+    _grant_review_start(db, user)
+    owner = user
+    if project_role == "reviewer":
+        owner = User(username="continuation-project-owner", password="x", role="user", status=1)
+        db.add(owner)
+        db.flush()
     project = Project(
-        user_id=user.id,
+        user_id=owner.id,
         project_name="continuation-project",
         language="python",
         status="active",
     )
     db.add(project)
     db.commit()
+    if project_role == "reviewer":
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role_in_project="reviewer"))
+        db.commit()
     code_file = CodeFile(
         project_id=project.id,
         file_name="main.py",
@@ -559,7 +589,7 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
 
     completed = await executor.execute(call)
 
-    assert completed.status == "success"
+    assert completed.status == "success", completed.error
     assert completed.output["session_id"] == "disc_continued"
     assert completed.output["continued_from_session_id"] == original.session_id
     assert completed.output["previous_report_task_id"] == 731
@@ -595,6 +625,186 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     ws_discussion._session_owners.pop("disc_continued", None)
     ws_discussion._owner_registered_at.pop("disc_continued", None)
     DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["no_permission", "revoked_permission", "viewer", "unknown", "downgraded"])
+async def test_concluded_roundtable_continuation_rechecks_execution_scope_before_registration(
+    db, monkeypatch, scope,
+) -> None:
+    from app.api.v1 import discussion as discussion_api
+    from app.api.v1 import ws_discussion
+
+    actor = _user(db)
+    if scope != "no_permission":
+        _grant_review_start(db, actor)
+    owner = actor
+    if scope in {"viewer", "unknown", "downgraded"}:
+        owner = User(username="continuation-scope-owner", password="x", role="user", status=1)
+        db.add(owner)
+        db.flush()
+    project = Project(user_id=owner.id, project_name="continuation-scope", language="python", status="active")
+    db.add(project)
+    db.flush()
+    source = CodeFile(project_id=project.id, file_name="scope.py", file_path="scope.py",
+                      language="python", content="print('local')\n", status="active", is_binary=0)
+    db.add(source)
+    member = None
+    if owner.id != actor.id:
+        role = "reviewer" if scope == "downgraded" else scope
+        member = ProjectMember(project_id=project.id, user_id=actor.id, role_in_project=role)
+        db.add(member)
+    db.commit()
+    if scope == "revoked_permission":
+        db.query(RolePermission).delete()
+        db.commit()
+    elif scope == "downgraded":
+        with Session(bind=db.get_bind()) as writer:
+            writer.query(ProjectMember).filter_by(id=member.id).update({"role_in_project": "viewer"})
+            writer.commit()
+
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(discussion_api.rule_service, "get_enabled_rules",
+                        lambda *_args, **_kwargs: pytest.fail("unauthorized continuation reached rule loading"))
+    launched = []
+    monkeypatch.setattr(ws_discussion, "launch_pending_discussion", lambda pending: launched.append(pending))
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    original = bus.create_session(
+        session_id="disc_scope_concluded", task_id=0, file_name=source.file_name, owner_user_id=actor.id,
+        project_id=project.id, file_id=source.id, review_type="full",
+        origin_surface="user", origin_session_key="scope-original",
+    )
+    bus.close_session(original.session_id)
+
+    try:
+        result = await _executor(db, actor, "run-continuation-denied-scope").execute(ToolCall(
+            "call-continuation-denied-scope", "control_roundtable_discussion",
+            {"session_id": original.session_id, "action": "user_input", "content": "复核当前授权证据。"}, "{}",
+        ))
+        assert result.status == "error"
+        expected = "权限" if scope in {"no_permission", "revoked_permission"} else "项目"
+        assert expected in result.error
+        assert launched == []
+        assert list(bus._sessions) == [original.session_id]
+        assert original.status == "concluded"
+        assert original.turns == []
+    finally:
+        DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["user_input", "resume"])
+@pytest.mark.parametrize("scope", ["viewer", "unknown", "no_permission", "downgraded", "disabled",
+                                   "missing_scope", "missing_project"])
+async def test_active_roundtable_control_rejects_viewer_before_controller_call(db, monkeypatch, action, scope) -> None:
+    actor = _user(db)
+    if scope != "no_permission":
+        _grant_review_start(db, actor)
+    owner = User(username="active-roundtable-project-owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="active-roundtable-scope", status="active")
+    db.add(project)
+    db.flush()
+    role = scope if scope in {"viewer", "unknown"} else "reviewer"
+    member = ProjectMember(project_id=project.id, user_id=actor.id, role_in_project=role)
+    db.add(member)
+    db.commit()
+    if scope == "downgraded":
+        with Session(bind=db.get_bind()) as writer:
+            writer.query(ProjectMember).filter_by(id=member.id).update({"role_in_project": "viewer"})
+            writer.commit()
+    elif scope == "disabled":
+        actor.status = 0
+        db.commit()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    project_id = 0 if scope == "missing_scope" else (999999 if scope == "missing_project" else project.id)
+    session = bus.create_session(session_id="disc_active_viewer", task_id=0, file_name="local.py",
+                                 owner_user_id=actor.id, project_id=project_id)
+    calls = []
+    bus.set_controller(session.session_id, lambda control, payload: calls.append((control, payload)))
+
+    try:
+        result = await _executor(db, actor, "run-active-viewer").execute(ToolCall(
+            "call-active-viewer", "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": action, "content": "仅用于本地授权边界验证。"}, "{}",
+        ))
+        assert result.status == "error"
+        assert calls == []
+        assert session.turns == []
+    finally:
+        DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["user_input", "resume"])
+async def test_active_roundtable_authorized_reviewer_retains_controller_access(db, monkeypatch, action) -> None:
+    actor = _user(db)
+    _grant_review_start(db, actor)
+    owner = User(username="authorized-roundtable-owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="authorized-roundtable-project", status="active")
+    db.add(project)
+    db.flush()
+    db.add(ProjectMember(project_id=project.id, user_id=actor.id, role_in_project="reviewer"))
+    db.commit()
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    session = bus.create_session(session_id="disc_active_authorized", task_id=0, file_name="local.py",
+                                 owner_user_id=actor.id, project_id=project.id)
+    calls = []
+    bus.set_controller(session.session_id, lambda control, payload: calls.append((control, payload)))
+    try:
+        result = await _executor(db, actor, "run-active-authorized").execute(ToolCall(
+            "call-active-authorized", "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": action, "content": "授权后的本地发言。"}, "{}",
+        ))
+        assert result.status == "success", result.error
+        assert len(calls) == 1 and calls[0][0] == action
+        assert [turn.content for turn in session.turns] == (["授权后的本地发言。"] if action == "user_input" else [])
+    finally:
+        DiscussionBus._instance = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["stop", "pause"])
+@pytest.mark.parametrize("scoped", [False, True])
+async def test_roundtable_owner_can_stop_or_pause_after_execution_scope_is_unavailable(
+    db, monkeypatch, action, scoped,
+) -> None:
+    actor = _user(db)
+    project_id = 0
+    if scoped:
+        owner = User(username="cleanup-roundtable-project-owner", password="x", role="user", status=1)
+        db.add(owner)
+        db.flush()
+        project = Project(user_id=owner.id, project_name="cleanup-roundtable-project", status="active")
+        db.add(project)
+        db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=actor.id, role_in_project="viewer"))
+        db.commit()
+        project_id = project.id
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    DiscussionBus._instance = None
+    bus = DiscussionBus.instance()
+    session = bus.create_session(session_id="disc_cleanup_owned", task_id=0, file_name="local.py",
+                                 owner_user_id=actor.id, project_id=project_id)
+    calls = []
+    bus.set_controller(session.session_id, lambda control, payload: calls.append((control, payload)))
+    try:
+        executor = _executor(db, actor, "run-cleanup-owned")
+        result = await executor.execute(ToolCall("call-cleanup-owned", "control_roundtable_discussion",
+                                                {"session_id": session.session_id, "action": action}, "{}"))
+        assert result.status == "success", result.error
+        assert len(calls) == 1 and calls[0][0] == action
+        assert session.turns == []
+    finally:
+        DiscussionBus._instance = None
 
 
 @pytest.mark.asyncio

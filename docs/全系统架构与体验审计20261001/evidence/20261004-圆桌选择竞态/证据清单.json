@@ -1,0 +1,146 @@
+{
+  "recorded_at_utc": "2026-10-04T12:00:28.628053+00:00",
+  "candidate_base_sha": "6dad1dea26f037b6467f94613250588addf3628d",
+  "scope": "本地Vue宿主组件/API延迟桩；无CUA/生产/真实手机/模型请求",
+  "old_component_sha256": "7300919cd0025997d21d3852a64c007bec1986e05b2d547a2b13952ea9745d0f",
+  "changed_product_files": [
+    "frontend/src/components/agent/GlobalDiscussionHost.vue"
+  ],
+  "changed_tests": [
+    "frontend/src/components/agent/GlobalDiscussionHost.test.ts"
+  ],
+  "commands": {
+    "host": "npm test -- --maxWorkers=1 src/components/agent/GlobalDiscussionHost.test.ts",
+    "integration": "npm test -- --maxWorkers=1 src/components/agent/GlobalDiscussionHost.test.ts src/components/agent/AgentDiscussionPanel.test.ts",
+    "all": "npm test -- --maxWorkers=1",
+    "lint": "npm run lint",
+    "build": "npm run build",
+    "diff": "git diff --check"
+  },
+  "results": {
+    "red_original": {
+      "exit": 1,
+      "tests": 15,
+      "failed": 3,
+      "passed": 12
+    },
+    "red_expanded": {
+      "exit": 1,
+      "tests": 22,
+      "failed": 8,
+      "passed": 14
+    },
+    "green_initial": {
+      "exit": 0,
+      "tests": 22,
+      "passed": 22
+    },
+    "green_integration": [
+      {
+        "exit": 0,
+        "files": 2,
+        "passed": 43,
+        "seconds": 2.51
+      },
+      {
+        "exit": 0,
+        "files": 2,
+        "passed": 43,
+        "seconds": 1.53
+      },
+      {
+        "exit": 0,
+        "files": 2,
+        "passed": 43,
+        "seconds": 1.55
+      }
+    ],
+    "full_frontend": {
+      "exit": 0,
+      "files": 133,
+      "passed": 1590,
+      "seconds": 74.29
+    },
+    "lint": {
+      "exit": 0
+    },
+    "build": {
+      "exit": 0,
+      "vite_seconds": 17.17
+    },
+    "diff_check": {
+      "exit": 0
+    }
+  },
+  "independent_review": {
+    "status": "pending",
+    "note": "未收到第二人独立复核结果；不得以此清单当作独立通过"
+  },
+  "manifest": [
+    {
+      "path": "frontend/src/components/agent/GlobalDiscussionHost.vue",
+      "bytes": 13985,
+      "sha256": "3c79b05c175a95e4e0bbd63c7899fdde2d30a013ed75d874c1778d796ffb956b"
+    },
+    {
+      "path": "frontend/src/components/agent/GlobalDiscussionHost.test.ts",
+      "bytes": 22962,
+      "sha256": "6cda63eb8ac8058344671d40bb1401b97ab10d6eec28936b59f799e620397020"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/build.log",
+      "bytes": 21948,
+      "sha256": "b820e59b1008591606a32ec8b75b93b7b414bdc55e6bdabc547e9737875eac7d"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/diffcheck.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/green-整合第一轮.log",
+      "bytes": 456,
+      "sha256": "7eb54af3d9bf89e4156ee42581c57b73d8f3f47feb0d02ac666d4a45836f8925"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/green-整合第三轮.log",
+      "bytes": 456,
+      "sha256": "634cbd336273236fbab742a9f650bc782ae519c28af99c524819fe52328ce97c"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/green-整合第二轮.log",
+      "bytes": 456,
+      "sha256": "1fb8bc9fe7875940b6d5e11a01fedf4d5ecfd8cc6ec3ca1fcad4b4ced14a7302"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/green-详情选择.log",
+      "bytes": 405,
+      "sha256": "cf9c3d2deb6bb82cb6ba166bbb8a6da698383572182496b8851449e0c8f740e2"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/lint.log",
+      "bytes": 47,
+      "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/red-原场景三轮.log",
+      "bytes": 1788,
+      "sha256": "8e7f7bdc6901786a1edd3fb0bcfa4628bb1145e9410a393f81979854532a1776"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/red-扩展边界.log",
+      "bytes": 5921,
+      "sha256": "0f08777492f874517f20e2767b6348627ef0bab6342d0a551b1c2d129507fce9"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/全前端.log",
+      "bytes": 369,
+      "sha256": "3a73e238b438d35be54b323f207e884218d3e1e413bfd7cb6eb9475ad808d45f"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-圆桌选择竞态/范围与复现说明.md",
+      "bytes": 2444,
+      "sha256": "fcab9ceb1523941a42a406c9e7fadee9f95ccca98125e8697eb061a6588d77ce"
+    }
+  ]
+}

@@ -51,6 +51,11 @@ export interface SandboxEnvironment {
   public_id: string
   project_id: number
   owner_id: number
+  can_execute?: boolean
+  /** 项目共享预览的独立能力，不要求环境创建者；缺值拒绝。 */
+  can_preview?: boolean
+  /** 安全回收自有环境的独立能力，不依赖执行能力；缺值拒绝。 */
+  can_stop?: boolean
   worker_code?: string | null
   agent_code: string
   purpose: SandboxPurpose

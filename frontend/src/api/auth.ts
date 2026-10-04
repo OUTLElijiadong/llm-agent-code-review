@@ -20,15 +20,16 @@ export function register(body: RegisterIn): Promise<{ user_id: number; username:
 }
 
 /**
- * 获取注册验证码(数学题)
- * @returns captcha_id 与题目
+ * 获取一次性注册位图挑战。
+ * @returns 挑战标识、固定提示与 PNG 数据地址，不包含明文答案
  */
 export function getCaptcha(): Promise<{
   captcha_id: string
   question: string
+  image_data: string
   beta_registration_enabled: boolean
 }> {
-  return get<{ captcha_id: string; question: string; beta_registration_enabled: boolean }>('/auth/captcha')
+  return get<{ captcha_id: string; question: string; image_data: string; beta_registration_enabled: boolean }>('/auth/captcha')
 }
 
 /**

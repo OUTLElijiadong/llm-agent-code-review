@@ -23,7 +23,7 @@
           <div class="scope-hint">
             <template v-if="form.scope === 'whole'">读取完整文件范围，审查全部有效非空文本文件；空标记文件保留，不参与扫描。</template>
             <template v-else-if="form.scope === 'files'">手动选择有效非空文件；二进制文件不参与文本扫描。</template>
-            <template v-else>为每个活跃项目创建后台任务；逐项校验完整范围，超限或失败不截断、不冒充无文件。</template>
+            <template v-else>为有执行权限的活跃项目创建后台任务，排除仅可查看的项目；逐项校验完整范围，超限或失败不截断、不冒充无文件。</template>
           </div>
         </el-form-item>
 
@@ -40,8 +40,9 @@
             <el-option
               v-for="p in projects"
               :key="p.id"
-              :label="p.project_name"
+              :label="p.can_execute === true ? p.project_name : `${p.project_name}（${p.can_execute === false ? '仅可查看' : '未确认执行权限'}）`"
               :value="p.id"
+              :disabled="p.can_execute !== true"
             />
           </el-select>
         </el-form-item>
@@ -52,8 +53,9 @@
 
         <el-form-item v-if="form.scope === 'all'" label="项目范围">
           <div class="all-projects-summary">
-            将审查全部 <b>{{ projects.length }}</b> 个活跃项目
-            <span v-if="projects.length === 0" class="form-hint">（暂无活跃项目）</span>
+            将审查全部 <b>{{ executableProjects.length }}</b> 个可执行的活跃项目
+            <span v-if="excludedProjectsCount" class="form-hint">；已排除 {{ excludedProjectsCount }} 个仅可查看或未确认执行权限的项目</span>
+            <span v-if="executableProjects.length === 0" class="form-hint">（暂无可执行项目）</span>
           </div>
         </el-form-item>
 
@@ -202,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { confirmDanger } from '@/composables/useDangerConfirm'
@@ -217,10 +219,12 @@ import { startDiscussion } from '@/api/discussion'
 import type { ProjectOut, CodeFileOut } from '@/types/project'
 import type { Page } from '@/types/common'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useUserStore } from '@/stores/user'
 
 const MAX_FILES = 500
 
 const router = useRouter()
+const userStore = useUserStore()
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const reviewingVisible = ref(false)
@@ -239,6 +243,34 @@ const filesProjectId = ref<number | null>(null)
 let projectsRequest = 0
 let filesRequest = 0
 let disposed = false
+let accountGeneration = 0
+let executionGeneration = 0
+const canStartReview = computed(() => Boolean(userStore.token && userStore.profile) && userStore.hasPermission('review:start'))
+const executableProjects = computed(() => projects.value.filter(project => project.can_execute === true))
+const excludedProjectsCount = computed(() => projects.value.length - executableProjects.value.length)
+
+function captureAccount() {
+  const generation = accountGeneration
+  return () => !disposed && generation === accountGeneration && Boolean(userStore.token && userStore.profile)
+}
+
+function canExecuteProject(projectId: number): boolean {
+  return canStartReview.value && executableProjects.value.some(project => project.id === projectId)
+}
+function captureSubmission() {
+  const accountCurrent = captureAccount()
+  const generation = executionGeneration
+  return () => accountCurrent() && generation === executionGeneration && canStartReview.value
+}
+watch([canStartReview, () => projects.value.map(project => `${project.id}:${project.can_execute}`).join('|')], () => {
+  executionGeneration++
+  if (submitting.value) {
+    submitting.value = false
+    reviewingVisible.value = false
+    batchProcessing.value = false
+    submissionError.value = '账号权限或项目执行能力已变化，未发出的任务已取消；已发出的请求请在任务列表核对。'
+  }
+}, { flush: 'sync' })
 
 const form = reactive({
   task_name: '',
@@ -326,13 +358,15 @@ const submitLabel = computed(() => {
 })
 
 const selectionIssue = computed(() => {
+  if (!canStartReview.value) return '当前账号无发起审查权限'
   if (loadingProjects.value) return '项目范围尚未读取完成，请稍候'
   if (projectsError.value) return '项目范围读取失败，请重试，不会使用不完整范围'
   if (form.scope === 'all') {
     if (form.review_type === 'discuss') return '圆桌讨论仅支持单文件'
-    return projects.value.length ? '' : '暂无活跃项目'
+    return executableProjects.value.length ? '' : '暂无可执行的活跃项目'
   }
   if (!form.project_id) return '请选择项目'
+  if (!canExecuteProject(form.project_id)) return '该项目仅可查看或未确认执行权限，不能发起审查'
   if (loadingFiles.value) return '文件范围尚未读取完成，请稍候'
   if (filesError.value || filesProjectId.value !== form.project_id) return '请重新加载所选项目的完整文件范围'
   if (form.review_type === 'discuss' && (form.scope !== 'files' || form.file_ids.length !== 1)) {
@@ -389,7 +423,9 @@ async function readCompletePages<Item extends { id: number }>(
 async function loadProjects() {
   if (submitting.value) return
   const request = ++projectsRequest
-  const current = () => !disposed && request === projectsRequest
+  const accountCurrent = captureAccount()
+  const current = () => accountCurrent() && request === projectsRequest
+  if (!current() || !userStore.hasPermission('project:view')) return
   loadingProjects.value = true
   projectsError.value = ''
   projects.value = []
@@ -411,14 +447,15 @@ async function loadProjects() {
 async function onProjectChange(projectId: number | null) {
   if (submitting.value) return
   const request = ++filesRequest
-  const current = () => !disposed && request === filesRequest && form.project_id === projectId
+  const accountCurrent = captureAccount()
+  const current = () => accountCurrent() && request === filesRequest && form.project_id === projectId && Boolean(projectId && canExecuteProject(projectId))
   form.file_ids = []
   files.value = []
   filesProjectId.value = null
   filesError.value = ''
   submissionError.value = ''
   loadingFiles.value = false
-  if (!projectId) return
+  if (!projectId || !current()) return
   loadingFiles.value = true
   filesProgress.value = '等待读取文件总数'
   try {
@@ -457,6 +494,7 @@ function onScopeChange() {
 }
 
 async function submitSingleProject(): Promise<void> {
+  const current = captureSubmission()
   if (selectionIssue.value) throw new Error(selectionIssue.value)
   const fileIds = form.scope === 'whole' ? reviewableFiles.value.map(file => file.id) : [...form.file_ids]
   submissionStage.value = form.review_type === 'discuss' ? '正在创建单文件圆桌会话' : '正在提交审查任务'
@@ -469,7 +507,7 @@ async function submitSingleProject(): Promise<void> {
       file_id: fileIds[0],
       review_type: 'full',
     })
-    if (disposed) return
+    if (!current() || !canStartReview.value) return
     await router.push({
       name: 'AgentCenter',
       query: {
@@ -488,7 +526,7 @@ async function submitSingleProject(): Promise<void> {
     review_type: form.review_type,
     task_name: form.task_name || undefined,
   })
-  if (disposed) return
+  if (!current() || !canStartReview.value) return
   submissionStage.value = res?.status === 'pending' ? '任务已排队' : '任务已创建'
   reviewingSublabel.value = '前往任务详情查看后台实际执行状态'
   await router.push(res?.task_id ? `/reviews/${res.task_id}` : '/reviews')
@@ -514,9 +552,10 @@ const batchStatusLabel: Record<BatchResult['status'], string> = {
 }
 let batchInput = { review_type: 'standard', task_name: '' }
 
-async function processBatch(results: BatchResult[]): Promise<void> {
+async function processBatch(results: BatchResult[], accountCurrent: () => boolean): Promise<void> {
   for (const result of results) {
-    if (disposed) break
+    const current = () => accountCurrent() && canExecuteProject(result.project.id)
+    if (!current()) break
     result.status = 'loading'
     result.retryable = false
     result.message = '等待读取文件总数'
@@ -527,8 +566,9 @@ async function processBatch(results: BatchResult[]): Promise<void> {
       const items = await readCompletePages(
         page => getCodeFiles({ project_id: result.project.id, page, page_size: 500, exclude_binary: true }),
         (loaded, total) => { result.message = `已读取 ${loaded} / ${total} 个文本文件` },
+        current,
       )
-      if (disposed) break
+      if (!current()) break
       if (items.some(file => file.project_id !== result.project.id)) throw new Error('文件与项目不匹配，未创建任务')
       if (items.some(file => file.size_bytes > 0 && !file.is_binary && typeof file.is_reviewable !== 'boolean')) {
         throw new Error('部分文件缺少可审查状态，未创建任务')
@@ -557,36 +597,39 @@ async function processBatch(results: BatchResult[]): Promise<void> {
         review_type: batchInput.review_type,
         task_name: batchInput.task_name || undefined,
       })
+      if (!current()) break
       result.status = 'created'
       result.taskId = response?.task_id
       result.message = `${coverage}；${response?.status === 'pending' ? '已排队' : '已创建，请查看任务状态'}`
     } catch (error) {
+      if (!current()) break
       result.status = 'failed'
       result.retryable = !creating
       result.message = `${result.message}；${errorMessage(error, creating ? '创建请求失败' : '文件范围读取失败')}`
         + (creating ? '；请先在任务列表核对创建结果，再决定是否重新提交，避免重复任务' : '；未创建任务，可重试读取')
     }
   }
-  submissionStage.value = '批量提交处理结束'
+  if (accountCurrent()) submissionStage.value = '批量提交处理结束'
 }
 
 async function submitAllProjects(): Promise<void> {
-  const selectedProjects = projects.value.map(project => ({ ...project }))
+  const current = captureSubmission()
+  const selectedProjects = executableProjects.value.map(project => ({ ...project }))
   const ok = await confirmDanger({
     target: `为全部 ${selectedProjects.length} 个项目各创建一个审查任务`,
     consequence: '将串行校验完整范围并创建任务，消耗 AI 审查额度。空白文件排除并列明，超限不截断，失败保留原因。',
     confirmText: '确认批量创建',
   })
-  if (!ok || disposed) return
+  if (!ok || !current() || !canStartReview.value) return
   batchInput = { review_type: form.review_type, task_name: form.task_name }
   batchResults.value = selectedProjects.map(project => ({ project, status: 'pending', message: '等待校验文件范围', retryable: false }))
   batchProcessing.value = true
   try {
-    await processBatch(batchResults.value)
+    await processBatch(batchResults.value, current)
   } finally {
-    batchProcessing.value = false
+    if (current()) batchProcessing.value = false
   }
-  if (disposed) return
+  if (!current()) return
   const summary = `成功 ${batchCreated.value}，失败 ${batchFailed.value}，跳过 ${batchSkipped.value}；详情保留在本页`
   if (batchFailed.value) ElMessage.warning(summary)
   else if (batchCreated.value) ElMessage.success(summary)
@@ -594,8 +637,9 @@ async function submitAllProjects(): Promise<void> {
 }
 
 async function retryBatchFailures() {
-  if (submitting.value) return
-  const retryable = batchResults.value.filter(result => result.retryable)
+  if (submitting.value || !canStartReview.value) return
+  const current = captureSubmission()
+  const retryable = batchResults.value.filter(result => result.retryable && canExecuteProject(result.project.id))
   if (!retryable.length) return
   submitting.value = true
   try {
@@ -604,13 +648,15 @@ async function retryBatchFailures() {
       consequence: '只重试未发出创建请求的项目；已创建及提交结果未确认的项目不会重复提交。',
       confirmText: '确认重试',
     })
-    if (!ok || disposed) return
+    if (!ok || !current() || !canStartReview.value) return
     for (const result of retryable) result.status = 'pending'
     batchProcessing.value = true
-    await processBatch(retryable)
+    await processBatch(retryable, current)
   } finally {
-    batchProcessing.value = false
-    submitting.value = false
+    if (current()) {
+      batchProcessing.value = false
+      submitting.value = false
+    }
   }
 }
 
@@ -621,10 +667,11 @@ async function onSubmit() {
     return
   }
   submitting.value = true
+  const current = captureSubmission()
   submissionError.value = ''
   try {
     if (formRef.value && !await formRef.value.validate().catch(() => false)) return
-    if (disposed) return
+    if (!current()) return
     if (selectionIssue.value) throw new Error(selectionIssue.value)
     if (form.scope === 'all') {
       await submitAllProjects()
@@ -632,10 +679,13 @@ async function onSubmit() {
       await submitSingleProject()
     }
   } catch (error) {
+    if (!current()) return
     submissionError.value = `${errorMessage(error, '提交失败')}；输入已保留。请先核对任务列表或圆桌会话，再重试，避免重复提交。`
   } finally {
-    reviewingVisible.value = false
-    submitting.value = false
+    if (current()) {
+      reviewingVisible.value = false
+      submitting.value = false
+    }
   }
 }
 
@@ -656,6 +706,19 @@ function onReset() {
 }
 
 onMounted(() => { loadProjects() })
+
+watch(() => [userStore.token, userStore.profile?.id], () => {
+  accountGeneration++
+  submitting.value = false
+  reviewingVisible.value = false
+  batchProcessing.value = false
+  projectsRequest++
+  projects.value = []
+  loadingProjects.value = false
+  projectsError.value = ''
+  onReset()
+  void loadProjects()
+}, { flush: 'sync' })
 
 onBeforeUnmount(() => {
   disposed = true

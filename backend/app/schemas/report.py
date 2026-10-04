@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class ReportListItem(BaseModel):
     """报告列表项"""
+    can_delete: bool = False
     task_id: int
     task_name: Optional[str] = None
     project_name: str = ""
@@ -21,6 +22,8 @@ class ReportListItem(BaseModel):
 
 class ReportDetailOut(BaseModel):
     """报告详情"""
+    can_delete: bool = False
+    can_execute: bool = False
     project: dict
     task: dict
     stats: dict

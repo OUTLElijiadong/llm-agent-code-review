@@ -1,0 +1,45 @@
+{
+  "核查时间UTC": "2026-10-04T13:16:48.886407+00:00",
+  "核查方式": "仅本地只读源码与bash -n；未执行helper、SSH、Docker或deploy",
+  "helper": {
+    "path": "/tmp/prism-release-v4038-from-bundle-20261004.sh",
+    "bytes": 1259,
+    "sha256": "ecf2f976f4161fc273170e44c4ffeb474fb89ef4e284686621d55ccdc41c34a7",
+    "mode": "0o700",
+    "bash_n_exit": 0
+  },
+  "门禁实证": {
+    "固定基线": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+    "输入校验": "完整40位commit/64位SHA256/数字字节数；bundle存在且目标目录不存在",
+    "制品验证": "GNU stat字节数、sha256sum、固定基线HEAD、git bundle verify",
+    "源码隔离": "git clone --no-hardlinks --no-checkout；bundle HEAD取回并detached checkout，完整SHA/VERSION4.0.38/porcelain空断言",
+    "敏感配置": "仅由可信基线复制deploy/.env与current/previous.env，0600；release目录0700；未读取或输出配置内容",
+    "正常入口": "exec ./deploy.sh all --revision \"$sha\"；未使用运行时替代Dockerfile或跳过部署脚本",
+    "既有部署门": "候选deploy.sh仍包含精确干净源码、前后端同SHA、TLS/容量、备份与独立恢复校验、正式backend build、Alembic head、健康/同源HTTPS、systemd与ops账本绑定",
+    "回退边界": "异常调用正常rollback.sh，后者仍调用真实镜像reader兼容门；不自动数据库降级/恢复旧备份"
+  },
+  "候选门源码": [
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/deploy.sh",
+      "bytes": 13768,
+      "sha256": "f3a62501a16d1a120f33f6165886240f6b1ae2a59b41c94d82b895c28c8803aa"
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/lib/common.sh",
+      "bytes": 37699,
+      "sha256": "83f5e72d53f98e2945257fc1f9f5bb965f00b1aa1ef5e5ddc8e1c1c59d4838ea"
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/rollback.sh",
+      "bytes": 3834,
+      "sha256": "2996ea57717fffd114df7a7f58c9e3aa74256e59638afc8099ae0929859d35d6"
+    }
+  ],
+  "结论": "helper本地语法与静态发布路径无新增阻断；不能据此宣布正式制品/生产发布通过",
+  "未验边界": [
+    "Linux主机依赖/固定基线/真实新bundle尚未在本核查执行；GNU stat等不在mac实跑",
+    "最终新bundle的commit、实际hash与bytes需父代理在冻结后对照",
+    "正常deploy不替代完整源码回归；父代理已报告本轮完整后端9失败，当前仍阻止发布",
+    "只读核查未触及生产配置或运行容器"
+  ]
+}

@@ -1,0 +1,303 @@
+{
+  "recorded_at_utc": "2026-10-04T15:12:58.079555+00:00",
+  "review_type": "独立只读复核；仅写此证据JSON，未改产品/对方测试",
+  "manifest": {
+    "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/本分区冻结与证据范围.json",
+    "bytes": 19608,
+    "sha256": "c5f7f82b1fc7d765f25ea353d1dab0af9c437de4ba5f700b711a0b1dc6bfca2d"
+  },
+  "mechanical_integrity": {
+    "source_and_fixture_entries": 12,
+    "artifact_entries": 25,
+    "artifact_kind_detail": "24个.log与1个四产品.diff；不把diff称测试日志",
+    "all_hash_and_size_matches": true,
+    "source_entries": [
+      {
+        "path": "backend/app/services/sandbox_service.py",
+        "bytes": 238320,
+        "sha256": "890fae2811567e2a0a94fa6fe79149f6a8f99deab1da521b8a896a546e1181a2",
+        "matches": true
+      },
+      {
+        "path": "backend/app/agents/security_sentinel_agent.py",
+        "bytes": 174217,
+        "sha256": "c17f2159e33da856ade5c6a162d5e742fa66590bf15f3cae6dfefa532500ec01",
+        "matches": true
+      },
+      {
+        "path": "backend/app/agents/fullchain_audit_agent.py",
+        "bytes": 38250,
+        "sha256": "49fb7b71353ddd8d5d4e4d80a1a59734734f873000d52a5e1eee701a021e835a",
+        "matches": true
+      },
+      {
+        "path": "backend/app/schemas/agent_capability.py",
+        "bytes": 5878,
+        "sha256": "ee9c851fdca1989b1714b1c941747e36b7ba80c701543e02f6c8a9492cefa64b",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_viewer_execution_boundaries.py",
+        "bytes": 18351,
+        "sha256": "a41ab2110e0cfc4a5661a6a6b80e5c70ca31fa77d21903a65214a8db5542b3b5",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/execution_test_rows.py",
+        "bytes": 1379,
+        "sha256": "245ece5bbe8496203deae14fee2fcde98d665568146d344c88e0ab0f8a2ed9ad",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_security_sentinel_agent.py",
+        "bytes": 98622,
+        "sha256": "44d221a3573d38b6a1374352f8c97018613f9656ff26882d7c7ff5478709d120",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_sandbox_optimizations.py",
+        "bytes": 7647,
+        "sha256": "8b230e8ff61b4953b7a79e5bf5c72a98ac0632b07ddf855565efa9f0b40a29f0",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_agent_test_cases.py",
+        "bytes": 10063,
+        "sha256": "a9758293c5472cf054895f5d46d077f93cf95b43611a693333d8d1d7532d82a2",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_remote_target_authorization.py",
+        "bytes": 5348,
+        "sha256": "46a3c38f67bce0242b3155d4df3870213256353736fcb70db1e4940bad97e03d",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/services/test_model_independent_paths.py",
+        "bytes": 9043,
+        "sha256": "4e26b16de1fdc7316f08f1de906df3e25d75f2256c84615f239f6765dcd73509",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/agents/test_agent_project_quarantine.py",
+        "bytes": 6637,
+        "sha256": "a5991b4558ae1e1fb64eed4d7f053cbd841579a2e841a94a39e0b570d0e9404e",
+        "matches": true
+      }
+    ],
+    "artifact_entries_detail": [
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/修复前-首次夹具错误.log",
+        "bytes": 32557,
+        "sha256": "ca5ec28b28a53df651f224fc44ea86451494ccbb441dc86734c5751f25254fcd",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/修复后-25守卫扩展绿.log",
+        "bytes": 1245,
+        "sha256": "22b012c524c492ec17e95c318c4c9c1f2e652c9537976b4e8f605473884deb46",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/修复后-25扩展绿.log",
+        "bytes": 1245,
+        "sha256": "4ac4a526597a13450900902f689979a9c68b4b06de65ee41cf3200b4d9d9fea5",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/修复后-31扩展绿.log",
+        "bytes": 1245,
+        "sha256": "bd1688b91a7a7003329180cb4b3b2223fc04a9ad05ec43908d5435653496ccc9",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/共享圆桌未完成-24失败231通过.log",
+        "bytes": 85359,
+        "sha256": "bcb10116ed62eab6c5ecaf1474ab3a2f602524497a659d4fad1e5a5027394de9",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/受控旧37回放-13场景.log",
+        "bytes": 27046,
+        "sha256": "f919a4ed75e19389f1a018e936b1366f4d14fc103bf4fe924524b9fdd43631fb",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/命名冲突-实际为其它分区16失败.log",
+        "bytes": 20837,
+        "sha256": "6db9499e49d14a43760ee8fdab88d3b4eaeb5893a988a5667d6c0394cda94f9c",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/命名冲突-实际为其它分区1失败15通过.log",
+        "bytes": 2233,
+        "sha256": "1164fc91cf77749659ba09a37a99c65f6ed0f9b8e976c76695adfa41e580886b",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/既有夹具-主组校准175通过.log",
+        "bytes": 2215,
+        "sha256": "7a19c34ccce6d3fc733c854f2fa03e5245768e927e1f1044445414a01c918808",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/既有夹具-另一组校准108通过.log",
+        "bytes": 2206,
+        "sha256": "1beff256a54a6e09b36b1126519606e80ca805a9a552cbfe2cb0abeeb70c1301",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/既有夹具-另一组首次12失败216通过.log",
+        "bytes": 28939,
+        "sha256": "e975aaa5f4087d3a1935a0d7a3fdef394df8903a28b33d335b30f7cc4030e88d",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/既有夹具-校准首次2失败88通过.log",
+        "bytes": 26830,
+        "sha256": "188de430652e0373dd43e8c0bb8cffaa632c8cd834f428caf100e0c58eec6913",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/既有夹具-首次24失败142通过.log",
+        "bytes": 55521,
+        "sha256": "f10540e0dc2741479c38279c6866dd8ed1a3ffab47ffc80673ac589abd4771de",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终四产品.diff",
+        "bytes": 29560,
+        "sha256": "9c865ea3460339be59c456e0f16110362fa1451190d1b299cf521fa5ceb09827",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第1轮.log",
+        "bytes": 3175,
+        "sha256": "410064177774984e2f11374859ac0fa26fff09ad29735701c3a9cefec8fbae5a",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第2轮.log",
+        "bytes": 3175,
+        "sha256": "83b6154ba72eb416b55305bfbc92c721fcd2fbae3a25d2fc175e657d88c744f7",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第3轮.log",
+        "bytes": 3175,
+        "sha256": "41869287f2471b1dc02c5729d56a3bfa3e049c9b27f98adb54869126459cb999",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-20项失败矩阵.log",
+        "bytes": 1270,
+        "sha256": "f9e08d851ea55347a0c6db01781a984f7e536a66675c8db79d1ed77706ac8a26",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-33项发布绑定.log",
+        "bytes": 1029,
+        "sha256": "4c117b1ac9fa82f1d743319fee7258532364d3194edd0da717f943283104ecf2",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立回退门-8项标准库probe.log",
+        "bytes": 1026,
+        "sha256": "ae2d4c4aa3806d6d8d93aa08a736bf19e514cdfa5aaa34c7ce561fcfddacc078",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立复核-35项.log",
+        "bytes": 1245,
+        "sha256": "ac8869513c7bf07c0e3889173275e5327d37cccecc758be006c24fb3e688b892",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/静态-最终Ruff通过.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/静态-最终单文件Black.log",
+        "bytes": 46,
+        "sha256": "c78d4bc341e5cfb6cba20095bbb680bc8471adaac200271c9ee2cc1424564efe",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/静态-首次38样式错误.log",
+        "bytes": 22479,
+        "sha256": "6c427704df78a98242763ba263c111275d3559cfaf6304b971768d7968230934",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/静态-首次新增两文件Black.log",
+        "bytes": 168,
+        "sha256": "11dd4f9d9dea92ee6b5c0726cec98cae9880d0aa612359952ece7e7d9472214f",
+        "matches": true
+      }
+    ]
+  },
+  "semantic_review_scope": [
+    "backend/app/services/sandbox_service.py：本分区完整diff、执行授权helper、preview创建/消费、cap输出、原回收和续期合同",
+    "backend/app/agents/security_sentinel_agent.py：本分区完整diff、三入口和真实actor模型前检查",
+    "backend/app/agents/fullchain_audit_agent.py：本分区完整diff、explicit actor阶段间检查",
+    "backend/app/schemas/agent_capability.py：三个bool默认false",
+    "backend/tests/unit/services/test_viewer_execution_boundaries.py：全部35个实际参数化样本",
+    "其它8个专属夹具/关联测试仅机械hash核验，不宣称全文语义审完；两个共享未独占测试不以整文件冻结推断"
+  ],
+  "independent_test": {
+    "command": ".venv311/bin/python -m pytest --no-cov -q tests/unit/services/test_viewer_execution_boundaries.py",
+    "workdir": "backend",
+    "exit_code": 0,
+    "passed": 35,
+    "warnings": 1,
+    "seconds": 1.19,
+    "log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立复核-35项.log",
+      "bytes": 1245,
+      "sha256": "ac8869513c7bf07c0e3889173275e5327d37cccecc758be006c24fb3e688b892"
+    }
+  },
+  "peer_original_round_logs_read_only": [
+    {
+      "round": 1,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第1轮.log",
+      "actual_summary": "======================= 266 passed, 2 warnings in 17.33s =======================",
+      "independent_rerun": false
+    },
+    {
+      "round": 2,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第2轮.log",
+      "actual_summary": "======================= 266 passed, 2 warnings in 16.84s =======================",
+      "independent_rerun": false
+    },
+    {
+      "round": 3,
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/最终定向-第3轮.log",
+      "actual_summary": "======================= 266 passed, 2 warnings in 16.92s =======================",
+      "independent_rerun": false
+    }
+  ],
+  "contract_findings": [
+    "can_preview仅真实项目execution与PROJECT_VIEW/FILE_VIEW求交，合法reviewer非creator为true，viewer/unknown/缺global false；创建会话和消费令牌都复核实际授权、状态/TTL",
+    "can_execute再交原creator或唯一super_admin管理能力；不把共享preview误缩为创建者专用",
+    "can_stop仅原creator或唯一super_admin管理+项目read；自有viewer可回收，普通admin/其他viewer不能关闭他人；没有执行global也可cleanup",
+    "当前worker/模型前授权使用独立事务读取最新actor/项目角色；保留租约身份与cleanup分离，授权撤销不得继续执行，但可收回资源",
+    "安全哨兵的合法执行仍交既有SECURITY_SCAN；模型guard冻结原actor不被后来inject覆盖；全链explicit actor各阶段复核",
+    "良性正向四phase全部桩，未执行实际扫描/渗透或生成攻击工作流"
+  ],
+  "historical_evidence_limits": [
+    "自然首次13失败包含两项MCP/JWT测试夹具错误，不能称13个有效产品红",
+    "两个同名临时日志曾被其它分区覆盖；现保留的是实际16失败、1失败15通过，对本分区先红证明明确排除",
+    "受控旧37回放13场景基于三个可信旧模块＋当前helper/schema/最终夹具；不等于旧37全栈、当前生产实弹或自然首次全量，含新增cap缺失一项",
+    "266×3原日志准确；本独立执行仅35项，不把三轮相加成798不同样本",
+    "没有将旧manifest扩大成后续pentest拒绝分区已测"
+  ],
+  "limits": [
+    "仅本地SQLite/RBAC真实行与良性阻断桩；无真实外部模型、网络目标、worker/Docker、SSH/生产/部署/角色变更",
+    "不等于全后端、全部权限、生产全流程、浏览器或真实手机验收",
+    "回退门制品在此仅校验hash与原文边界，不宣称本独立轮再次执行其8/33/20组",
+    "未新增产品阻断；后续全量、发布与真实账号复测由root另记"
+  ]
+}

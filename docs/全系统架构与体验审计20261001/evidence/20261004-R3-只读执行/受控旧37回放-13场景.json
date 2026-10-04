@@ -1,0 +1,59 @@
+{
+  "日期": "2026-10-04",
+  "性质": "受控旧37源码内存回放，非自然首次红；当前helper/RBAC/schema及最终测试夹具保持候选状态，仅3旧业务模块在独立pytest进程内替换",
+  "旧源码": {
+    "app.services.sandbox_service": {
+      "source": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb:backend/app/services/sandbox_service.py",
+      "bytes": 233089,
+      "sha256": "043c110ccae117a159db59850265749018476536dccc21fc8bbd862aa77a9b4c"
+    },
+    "app.agents.security_sentinel_agent": {
+      "source": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb:backend/app/agents/security_sentinel_agent.py",
+      "bytes": 172310,
+      "sha256": "99186a19ca0377844763030d26f7346ebfc914626fccdece78f180bfd4857e91"
+    },
+    "app.agents.fullchain_audit_agent": {
+      "source": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb:backend/app/agents/fullchain_audit_agent.py",
+      "bytes": 37284,
+      "sha256": "546c645aedce3db2d46e11e82c02d230adb1c24737468c3b9d8e2347eea9b406"
+    }
+  },
+  "命令": [
+    "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/bin/python",
+    "/tmp/remaining_permissions-viewer-old37-replay-20261004.py"
+  ],
+  "选取原场景": [
+    "test_viewer_rejected_before_environment_or_target_work",
+    "test_downgraded_creator_cannot_continue_execution",
+    "test_viewer_capability_false_but_own_cleanup_and_metadata_remain",
+    "test_sentinel_viewer_fails_before_model_static_or_archive_work",
+    "test_fullchain_explicit_actor_cannot_bypass_unbound_sentinel",
+    "test_execution_permission_revoked_does_not_revoke_cleanup_lease"
+  ],
+  "退出码": 1,
+  "日志": {
+    "bytes": 27046,
+    "sha256": "f919a4ed75e19389f1a018e936b1366f4d14fc103bf4fe924524b9fdd43631fb",
+    "tail": [
+      "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+      "=========================== short test summary info ============================",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_viewer_rejected_before_environment_or_target_work[create]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_viewer_rejected_before_environment_or_target_work[mcp_create]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_viewer_rejected_before_environment_or_target_work[authorize]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_downgraded_creator_cannot_continue_execution[extend]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_downgraded_creator_cannot_continue_execution[browser]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_downgraded_creator_cannot_continue_execution[preview]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_downgraded_creator_cannot_continue_execution[preview_token]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_viewer_capability_false_but_own_cleanup_and_metadata_remain",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_sentinel_viewer_fails_before_model_static_or_archive_work[file]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_sentinel_viewer_fails_before_model_static_or_archive_work[task]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_sentinel_viewer_fails_before_model_static_or_archive_work[project]",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_fullchain_explicit_actor_cannot_bypass_unbound_sentinel",
+      "FAILED tests/unit/services/test_viewer_execution_boundaries.py::test_execution_permission_revoked_does_not_revoke_cleanup_lease",
+      "======================== 13 failed, 1 warning in 0.39s ========================="
+    ]
+  },
+  "不修改候选文件": true,
+  "实际外部调用": 0,
+  "范围限制": "当前新增can_stop/can_execute字段在旧版本缺失可能导致展示断言失败，不把这项当旧37真实安全漏洞；有效写/执行拒绝行为按各入口实际日志逐项核对。"
+}

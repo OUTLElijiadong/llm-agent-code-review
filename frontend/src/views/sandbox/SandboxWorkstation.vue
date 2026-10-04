@@ -69,6 +69,10 @@ let selectionGeneration = 0
 let formGeneration = 0
 let initialRequestGeneration = 0
 let capabilityRequestGeneration = 0
+let executionGeneration = 0
+let previewGeneration = 0
+let stopGeneration = 0
+let mutationKind: 'execution' | 'preview' | 'stop' | 'read' | null = null
 
 function captureAccountTarget(): () => boolean {
   const generation = accountGeneration
@@ -121,8 +125,48 @@ const dbTypes: Array<{ value: 'none' | 'sqlite' | 'mysql'; label: string; hint: 
 ]
 
 const selected = computed(() => environments.value.find((item) => item.public_id === selectedId.value) || null)
+const canAccessExecution = computed(() => Boolean(userStore.token && userStore.profile)
+  && userStore.hasPermission('project:view') && userStore.hasPermission('file:view'))
+const canExecuteSelected = computed(() => canAccessExecution.value && selected.value?.can_execute === true)
+const canPreviewSelected = computed(() => canAccessExecution.value && selected.value?.can_preview === true)
+const canStopSelected = computed(() => Boolean(userStore.token && userStore.profile)
+  && selected.value?.can_stop === true)
+function captureStopTarget() {
+  const target = captureSelectedTarget()
+  const generation = stopGeneration
+  if (disposed || !target || !canStopSelected.value) return null
+  return { publicId: target.publicId, isCurrent: () => target.isCurrent()
+    && generation === stopGeneration && canStopSelected.value }
+}
+watch(canStopSelected, () => {
+  stopGeneration++
+  if (mutationKind === 'stop') mutating.value = false
+}, { flush: 'sync' })
+function captureExecutionTarget() {
+  const target = captureSelectedTarget()
+  const generation = executionGeneration
+  if (!target || !canExecuteSelected.value) return null
+  return { publicId: target.publicId, isCurrent: () => target.isCurrent()
+    && generation === executionGeneration && canExecuteSelected.value }
+}
+function capturePreviewTarget() {
+  const target = captureSelectedTarget()
+  const generation = previewGeneration
+  if (!target || !canPreviewSelected.value) return null
+  return { publicId: target.publicId, isCurrent: () => target.isCurrent()
+    && generation === previewGeneration && canPreviewSelected.value }
+}
+watch(canPreviewSelected, () => {
+  previewGeneration++
+  if (mutationKind === 'preview') mutating.value = false
+}, { flush: 'sync' })
 
 const selectedFormProject = computed(() => projects.value.find((item) => item.id === form.project_id) || null)
+watch([canAccessExecution, () => selected.value?.can_execute, () => selectedFormProject.value?.can_execute], () => {
+  executionGeneration++
+  formGeneration++
+  if (mutationKind === 'execution') mutating.value = false
+}, { flush: 'sync' })
 const selectedProjectLanguage = computed(() => projectSandboxLanguage(selectedFormProject.value?.language))
 const selectedEvents = computed(() => sortSandboxEvents(selected.value?.events || []))
 const selectedProjectName = computed(() => {
@@ -145,6 +189,8 @@ const availableWorkers = computed(() => workers.value.filter((worker) => (
 )))
 const submitDisabled = computed(() => (
   !form.project_id
+  || !canAccessExecution.value
+  || selectedFormProject.value?.can_execute !== true
   || submitting.value
   || (form.purpose === 'deploy' && !selectedProjectLanguage.value)
   || (remoteAuthorizationRequired.value && !form.remote_target_authorized)
@@ -220,7 +266,7 @@ async function loadInitial(): Promise<void> {
     }
     initialLoadError.value = errors.join('；')
     if (!form.project_id && projects.value.length) {
-      form.project_id = projects.value[0].id
+      form.project_id = (projects.value.find(project => project.can_execute === true) || projects.value[0]).id
       syncProjectLanguage(form.project_id)
     }
     if (userStore.isSuperAdmin()) {
@@ -269,6 +315,10 @@ async function submit(): Promise<void> {
     ElMessage.warning('请选择项目')
     return
   }
+  if (!canAccessExecution.value || selectedFormProject.value?.can_execute !== true) {
+    ElMessage.warning('该项目仅可查看或未确认执行权限，不能创建任务')
+    return
+  }
   if (remoteAuthorizationRequired.value && !form.remote_target_authorized) {
     ElMessage.warning('请确认本次远程目标测试已获得授权')
     return
@@ -307,7 +357,7 @@ async function submit(): Promise<void> {
         confirmed: true,
       })
       : null
-    if (!isCurrent() || requestedFormGeneration !== formGeneration) {
+    if (!isCurrent() || requestedFormGeneration !== formGeneration || !canAccessExecution.value || selectedFormProject.value?.can_execute !== true) {
       if (isCurrent()) ElMessage.warning('任务配置已变化，本次创建已取消，请重新确认当前配置。')
       return
     }
@@ -327,8 +377,9 @@ async function submit(): Promise<void> {
 }
 
 async function stopCurrent(): Promise<void> {
-  const target = captureSelectedTarget()
+  const target = captureStopTarget()
   if (!target || !selected.value || !canStopSandbox(selected.value.status) || mutating.value) return
+  mutationKind = 'stop'
   mutating.value = true
   try {
     try {
@@ -345,8 +396,9 @@ async function stopCurrent(): Promise<void> {
 }
 
 async function extendCurrent(): Promise<void> {
-  const target = captureSelectedTarget()
-  if (!target || !selected.value || !canExtendSandbox(selected.value.status) || mutating.value) return
+  const target = captureExecutionTarget()
+  if (!target || !canExecuteSelected.value || !selected.value || !canExtendSandbox(selected.value.status) || mutating.value) return
+  mutationKind = 'execution'
   mutating.value = true
   try {
     const updated = await extendSandbox(target.publicId, 24)
@@ -357,15 +409,16 @@ async function extendCurrent(): Promise<void> {
 }
 
 async function openPreview(): Promise<void> {
-  const selectedTarget = captureSelectedTarget()
+  const selectedTarget = capturePreviewTarget()
   if (!selectedTarget || !selected.value || selected.value.status !== 'ready' || !selected.value.preview_path || mutating.value) return
+  mutationKind = 'preview'
   // 用户点击时先同步创建空窗口，避免等待会话接口后被浏览器当作非用户触发弹窗拦截。
   const previewWindow = window.open('about:blank', '_blank')
   if (previewWindow) previewWindow.opener = null
   mutating.value = true
   try {
     const session = await createSandboxPreviewSession(selectedTarget.publicId)
-    if (!selectedTarget.isCurrent()) { previewWindow?.close(); return }
+    if (!selectedTarget.isCurrent() || selected.value?.status !== 'ready' || !selected.value.preview_path) { previewWindow?.close(); return }
     const previewPath = session.path || session.preview_path
     if (!previewPath) throw new Error('preview path missing')
     const target = new URL(previewPath, window.location.origin)
@@ -392,6 +445,7 @@ const evidenceArtifacts = computed(() => visibleSandboxArtifacts(selected.value?
 async function downloadArtifact(artifact: SandboxArtifact): Promise<void> {
   const target = captureSelectedTarget()
   if (!target || !canDownloadSandboxArtifact(artifact) || mutating.value) return
+  mutationKind = 'read'
   mutating.value = true
   try {
     const blob = await downloadSandboxArtifact(target.publicId, artifact.id)
@@ -543,8 +597,9 @@ onBeforeUnmount(() => {
         <el-form label-position="top" @submit.prevent="submit">
           <el-form-item label="项目源码">
             <el-select v-model="form.project_id" filterable placeholder="选择有权访问的项目" style="width: 100%">
-              <el-option v-for="project in projects" :key="project.id" :label="project.project_name" :value="project.id" />
+              <el-option v-for="project in projects" :key="project.id" :label="project.can_execute === true ? project.project_name : `${project.project_name}（${project.can_execute === false ? '仅可查看' : '未确认执行权限'}）`" :value="project.id" :disabled="project.can_execute !== true" />
             </el-select>
+            <div v-if="selectedFormProject && selectedFormProject.can_execute !== true" class="field-hint">该项目仅可查看，不能创建或运行环境。</div>
           </el-form-item>
 
           <el-form-item v-if="sourceRevisions.length" label="源码版本">
@@ -668,9 +723,9 @@ onBeforeUnmount(() => {
               <div class="detail-meta font-mono">{{ selected.agent_code }} / {{ selected.worker_code || 'auto' }} / {{ selected.runtime }}</div>
             </div>
             <div class="detail-actions">
-              <el-button v-if="selected.status === 'ready' && selected.preview_path" type="primary" :icon="Monitor" :loading="mutating" @click="openPreview">打开预览</el-button>
-              <el-button v-if="canExtendSandbox(selected.status)" :icon="Clock" :loading="mutating" @click="extendCurrent">续期 24h</el-button>
-              <el-button v-if="canStopSandbox(selected.status)" type="danger" plain :icon="CircleClose" :loading="mutating" @click="stopCurrent">关闭</el-button>
+              <el-button v-if="canPreviewSelected && selected.status === 'ready' && selected.preview_path" type="primary" :icon="Monitor" :loading="mutating" @click="openPreview">打开预览</el-button>
+              <el-button v-if="canExecuteSelected && canExtendSandbox(selected.status)" :icon="Clock" :loading="mutating" @click="extendCurrent">续期 24h</el-button>
+              <el-button v-if="canStopSelected && canStopSandbox(selected.status)" type="danger" plain :icon="CircleClose" :loading="mutating" @click="stopCurrent">关闭</el-button>
             </div>
           </div>
 

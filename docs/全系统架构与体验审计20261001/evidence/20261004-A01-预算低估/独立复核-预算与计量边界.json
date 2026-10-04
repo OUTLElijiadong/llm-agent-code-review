@@ -1,0 +1,231 @@
+{
+  "独立核验时间": "2026-10-04T12:57:19.156818+00:00",
+  "结论": "已读完整产品diff、新24项测试与4文件校准diff；核心83项独立通过；未发现本轮预算修复阻断。限定文字与协议预算，不外推语义或供应商验收。",
+  "来源与测试冻结": {
+    "backend/app/services/deepseek_responses_runtime.py": {
+      "bytes": 114201,
+      "sha256": "87fec56120f24e70daffcde19926a333275270e72a87f6dea0df0cb293e526af"
+    },
+    "backend/tests/unit/services/test_responses_context_token_budget.py": {
+      "bytes": 9896,
+      "sha256": "626e882788b84924e1a1b4d03827e787914653a8d02471a21a28142df8bfa0e9"
+    },
+    "backend/tests/unit/services/test_deepseek_responses_runtime.py": {
+      "bytes": 84383,
+      "sha256": "c7f6aa31beb19d7c3f41886f5eac39827c91b4b9e1d33a170fe5f74e2d46d11d"
+    },
+    "backend/tests/unit/services/test_deepseek_responses_service.py": {
+      "bytes": 45036,
+      "sha256": "a76761b3d4c16f7065ec34152c41335969b507a4311d8bafd6be1593330fa0f5"
+    },
+    "backend/tests/unit/agents/test_chat_agent_coverage.py": {
+      "bytes": 70897,
+      "sha256": "c0c874cf4680d9bc77f0cca00c1238cf2ba2f5f1a0b2d09ea1022f60e4471881"
+    },
+    "backend/tests/unit/test_discussion_orchestrator_coverage.py": {
+      "bytes": 105645,
+      "sha256": "0c4e660a785ac3ccf76294279f8669ffda88363c0d94804ffbe258048ed66b07"
+    }
+  },
+  "独立复跑": {
+    "命令": ".venv311/bin/python -m pytest --no-cov -q tests/unit/services/test_responses_context_token_budget.py tests/unit/services/test_deepseek_responses_runtime.py",
+    "exit_code": 0,
+    "passed": 83,
+    "duration_seconds": 42.8,
+    "网络或付费模型调用": 0,
+    "说明": "测试里的供应商 transport 由本地替身提供；不是实际供应商请求。"
+  },
+  "产品边界核对": [
+    "ASCII/4替换为JSON序列化UTF-8字节预算，加入token_estimate_kind以区分预算与usage；上游usage仍为成本记账依据。",
+    "压缩器发送前计算实际完整payload（去除单独预留的max_output_tokens）含JSONSchema/expected source IDs/验证重试新指令，并另预留1024协议预算，超窗在transport前拒绝。",
+    "分块预算为(context-output-4096)//2且最大48000，给嵌套JSON转义、来源坐标与schema留下余量；实际完整请求还要过发送门。",
+    "正常Runtime额外预留1024协议成本；原transcript保持原文，投影不在原账本上截断。",
+    "完整新测试包含小预算、长指令与工具schema、默认65536输出、引用重组/控制字符、首条目标无法容纳则拒绝、压缩修复重试超窗不发送。"
+  ],
+  "四文件校准核对": [
+    {
+      "文件": "test_deepseek_responses_runtime.py",
+      "结论": "小窗口提高至16K给结构化契约留空间，压缩阈值/keep_recent仍小使原分支触发；百万估算用例改为字节预算命名并涵盖16K/65536输出；来源覆盖/迟到约束/工具对/取消/重试拒绝原断言保留。"
+    },
+    {
+      "文件": "test_deepseek_responses_service.py",
+      "结论": "3个隔离小窗口由6K改16K，full replay/history原文/来源约束及事实账本过预算失败断言保留，未改产品配置。"
+    },
+    {
+      "文件": "test_chat_agent_coverage.py",
+      "结论": "直接发送足够窗口正向样本由重复1000改600，仍断言101条与首/尾原文；百万字节估算样本保持压缩与约束；40K/16K中文样本仍触发截断后增加输出预算；失败断言改为全部请求只能是压缩器而非固定1次，未允许回答模型收到残缺上下文。"
+    },
+    {
+      "文件": "test_discussion_orchestrator_coverage.py",
+      "结论": "小窗口16K/32K/10K按新预算校准，source quote用strip后24字符，不改产品规则；64窗口拒绝样本增至200K、会话调用上限样本增至1000行，仍在模型调用前拒绝且calls为空；未删除原失窗/来源/分层压缩断言。"
+    }
+  ],
+  "官方本地计量回执核对": {
+    "定义": "公开合成文本在指定DeepSeek-V4.1-Flash revision的官方本地tokenizer内容计数；不是在线usage、全prompt计数或语义理解。",
+    "repository": "deepseek-ai/DeepSeek-V4.1-Flash",
+    "revision": "2cba9e42aa026125f3ed06c6d98c1db82f7ca027",
+    "制品": {
+      "tokenizer.json": {
+        "sha256": "c90dfa01249db1be4245780a052ede752e1361c612ac6d08e2bdada7d599476b",
+        "bytes": 6367257,
+        "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/resolve/2cba9e42aa026125f3ed06c6d98c1db82f7ca027/tokenizer.json"
+      },
+      "tokenizer_config.json": {
+        "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+        "bytes": 801,
+        "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/resolve/2cba9e42aa026125f3ed06c6d98c1db82f7ca027/tokenizer_config.json"
+      },
+      "tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl": {
+        "sha256": "986670e43691469dcee610ea0f846f91a8f84e91fc6f7a48d4c064414c0ec2bf",
+        "bytes": 3101593,
+        "url": "https://files.pythonhosted.org/packages/67/49/22da045a91732384d3a3771816bf188dc5a1f702c32e635afa7c679c0bef/tokenizers-0.23.2-cp310-abi3-macosx_11_0_arm64.whl"
+      }
+    },
+    "两份回执相同": true,
+    "边界": "支持同一来源与相同样本的重复相同结果，不代表两个模型、不同样本、独立新供应商验收；我没有把冻结数字当成重新实测tokenizer。",
+    "实测源码SHA": "725797800eb527e574f79eed2b24521665ca30d5084ff37d1c6b8ee4559e6c06",
+    "冻结源码SHA": "87fec56120f24e70daffcde19926a333275270e72a87f6dea0df0cb293e526af",
+    "去docstring_AST一致": true,
+    "AST_SHA256": "2ad31a012658ee5f0072024c1805a1aaa7f068abb12963f06d2b90c111eeba39",
+    "唯一文本差异": "--- \n+++ \n@@ -1811,7 +1811,9 @@\n     Callers must still reserve instructions/tools, protocol and output space.\n \n     This is a deliberately conservative budget, not a real tokenizer count or\n-    provider usage. Usage accounting must continue to use the upstream usage.\n+    provider usage. It is not a mathematical guarantee for an unknown tokenizer\n+    without byte-fallback semantics or a provider-specific prompt encoding.\n+    Usage accounting must continue to use the upstream usage.\n     \"\"\"\n     try:\n         text = json.dumps(value, ensure_ascii=False, separators=(\",\", \":\"), default=str)\n",
+    "已独立复算合成样本与产品预算": {
+      "7小样本": [
+        {
+          "样本": "words",
+          "冻存的官方本地内容token数": 10000,
+          "独立复算当前预算": 20002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "punctuation",
+          "冻存的官方本地内容token数": 10000,
+          "独立复算当前预算": 20002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "numbers",
+          "冻存的官方本地内容token数": 20000,
+          "独立复算当前预算": 20002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "json",
+          "冻存的官方本地内容token数": 40001,
+          "独立复算当前预算": 100002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "code",
+          "冻存的官方本地内容token数": 40000,
+          "独立复算当前预算": 60002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "chinese",
+          "冻存的官方本地内容token数": 10000,
+          "独立复算当前预算": 60002,
+          "样本SHA匹配": true
+        },
+        {
+          "样本": "rare-chinese",
+          "冻存的官方本地内容token数": 20000,
+          "独立复算当前预算": 30002,
+          "样本SHA匹配": true
+        }
+      ],
+      "3百万样本": [
+        {
+          "样本": "million-numbers",
+          "冻存的官方内容token和": 1060022,
+          "冻存的序列化内容token数": 1060198,
+          "独立复算预算": 1060751,
+          "独立复算投影预算": 159384,
+          "预算内投影计划": true,
+          "原文未修改": true,
+          "样本SHA匹配": true,
+          "说明": "此复算没有重新运行tokenizer，也没有真实模型语义压缩。"
+        },
+        {
+          "样本": "million-words",
+          "冻存的官方内容token和": 1060022,
+          "冻存的序列化内容token数": 1060358,
+          "独立复算预算": 2121331,
+          "独立复算投影预算": 159384,
+          "预算内投影计划": true,
+          "原文未修改": true,
+          "样本SHA匹配": true,
+          "说明": "此复算没有重新运行tokenizer，也没有真实模型语义压缩。"
+        },
+        {
+          "样本": "million-code",
+          "冻存的官方内容token和": 1080022,
+          "冻存的序列化内容token数": 1080281,
+          "独立复算预算": 1620954,
+          "独立复算投影预算": 180384,
+          "预算内投影计划": true,
+          "原文未修改": true,
+          "样本SHA匹配": true,
+          "说明": "此复算没有重新运行tokenizer，也没有真实模型语义压缩。"
+        }
+      ]
+    },
+    "第三次": "未完成计量；标准库HTTPS发生TLS EOF，保持严格TLS的curl重试最终超时退出28。没有新通过回执，不称三轮官方计量均成功。",
+    "临时清理": {
+      "临时目录精确删除": true,
+      "生产API调用数": 0,
+      "模型权重下载数": 0,
+      "候选依赖修改": false,
+      "工具环境": "隔离临时venv+官方tokenizers wheel",
+      "含用户文本或凭据": false
+    }
+  },
+  "明确未验": [
+    "未知非byte-fallback tokenizer、供应商私有prompt包装或图片token计量不能由字节预算数学保证；源docstring已明示该限制。",
+    "我没有再次下载模型/tokenizer或安装依赖；现有官方制品仅核对回执声明的URL/hash/byte数与固定来源，未把此次纯预算复算写成第三次官方重测。",
+    "3个百万样本只验证输入规模与投影计划；固定semantic_summary和模拟摘要均不证明压缩后完整理解全部上下文。",
+    "83项本地目标集合不替代root当前完整后端/生产发布，百万token真实供应商语义召回、实际所有子Agent与多模态仍不在本核验范围。",
+    "未把运行耗时写为性能基准；没有SSH/CUA/生产写/环境升级。"
+  ],
+  "证据完整性": {
+    "官方本地计量-通过1.json": {
+      "bytes": 4404,
+      "sha256": "fc11de0793d29279b193c4d9769647e66527e9cd8089c11277711bd3ab81392e"
+    },
+    "官方本地计量-通过2.json": {
+      "bytes": 4404,
+      "sha256": "fc11de0793d29279b193c4d9769647e66527e9cd8089c11277711bd3ab81392e"
+    },
+    "实测Runtime源码快照.txt": {
+      "bytes": 114061,
+      "sha256": "725797800eb527e574f79eed2b24521665ca30d5084ff37d1c6b8ee4559e6c06"
+    },
+    "实测快照与冻结代码等价.json": {
+      "bytes": 551,
+      "sha256": "3c9e6a5ff4e62eba37e00dabd4ebf1c10d5388af830299e575e771e6db8eb678"
+    },
+    "remeasure_official_tokenizer.py": {
+      "bytes": 7820,
+      "sha256": "167c4a0a53a945c33eebb7d9dc9f275301131b0b3d546382061aacd6429c14f1"
+    },
+    "修复前-manifest.json": {
+      "bytes": 1027,
+      "sha256": "e5dfb51894b21039c3000e5978b023b2ae5a597ae63a20d9ec8df9e2da834e12"
+    },
+    "官方计量第三次-标准库TLS失败.log": {
+      "bytes": 5528,
+      "sha256": "62a2062c932bf8a002f4f6fccd28182886267fa70b682446e4f7db87f555c9ce"
+    },
+    "官方计量第三次-严格TLS重试失败.log": {
+      "bytes": 5735,
+      "sha256": "9ee975b0cb1bc7b21c5ac0ee7e1317468d60a44abb7b00e7cc268356064ac317"
+    },
+    "临时工具清理.json": {
+      "bytes": 225,
+      "sha256": "c34330ca0e7beb02f6a0cecd6ec1cbbc13337c65cf7f884ec4a9568945480ef6"
+    },
+    "独立复核-核心83项.log": {
+      "bytes": 892,
+      "sha256": "b99cfbcbaf1c94e6f9b1281dff0ee73a6d6e6f662eba73940aa92c84335933be"
+    }
+  }
+}

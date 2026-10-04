@@ -225,7 +225,7 @@ describe('细粒度权限的页内操作可见性', () => {
   it('报告删除要求 review:cancel，权限恢复后才允许执行', async () => {
     const wrapper = mountView(ReportList)
     await flushPromises()
-    const row = { task_id: 8, task_name: '只读报告' }
+    const row = { task_id: 8, task_name: '只读报告', can_delete: true }
 
     expect((wrapper.vm as any).canDeleteReport).toBe(false)
     await (wrapper.vm as any).handleDelete(row)

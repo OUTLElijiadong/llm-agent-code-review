@@ -14,7 +14,7 @@ vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm })
 import ReviewTaskList from './ReviewTaskList.vue'
 
 let wrapper: VueWrapper
-const running = { id: 1, status: 'running' }
+const running = { id: 1, status: 'running', can_cancel: true }
 beforeEach(() => {
   vi.resetAllMocks()
   api.canCancel = false
@@ -241,7 +241,7 @@ describe('审查卡片进度与可操作权限', () => {
     api.tasks.mockResolvedValue(pageOf([{
       id: 179,
       task_name: '项目167 完整代码审查（review_type=full）',
-      status: 'running',
+      can_cancel: true, status: 'running',
     }]))
     const vm = await render()
     const row = vm.tasks[0]
@@ -260,7 +260,7 @@ describe('审查卡片进度与可操作权限', () => {
 
   it('有取消权限时，单任务停止与删除按钮保留在卡片且点击不进入详情', async () => {
     api.canCancel = true
-    api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '运行任务', status: 'running' }]))
+    api.tasks.mockResolvedValue(pageOf([{ id: 8, task_name: '运行任务', status: 'running', can_cancel: true }]))
     await render()
     const actions = wrapper.get('.tc-actions')
     expect(actions.text()).toContain('停止')

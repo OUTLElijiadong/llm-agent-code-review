@@ -23,7 +23,7 @@ from app.models.user import User
 from app.schemas.common import Resp
 from app.services import rule_service
 from app.services.ai_usage_context import current_attribution
-from app.services.project_member_service import require_project_access
+from app.services.project_member_service import require_project_execution
 from app.services.review_input_service import validate_review_input
 
 router = APIRouter()
@@ -147,7 +147,12 @@ def start_discussion(
     project = db.get(Project, project_id)
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
-    require_project_access(db, project_id, user, need_write=False)
+    require_project_execution(db, project_id, user)
+    from app.core.permission_codes import PermissionCode
+    from app.core.exceptions import ForbiddenError
+    from app.services.rbac_service import check_permission
+    if not check_permission(db, int(user.id), PermissionCode.REVIEW_START):
+        raise ForbiddenError("当前账户没有发起审查的权限", code=40300)
 
     code_file = db.query(CodeFile).filter(
         CodeFile.id == file_id,

@@ -11,6 +11,8 @@ export interface ProjectOut {
   source_malware_status?: 'clean' | 'infected' | 'degraded' | 'error' | null
   can_update: boolean
   can_delete: boolean
+  /** 当前账号可执行项目任务；缺值视为未授权，仍须与全局动作权限相交。 */
+  can_execute?: boolean
   last_review_at?: string
   /** v2.0: 最近一次成功审查的真实评分,无审查记录时为 null */
   score?: number | null
@@ -51,6 +53,7 @@ export interface ProjectDetailOut {
   source_archive?: ProjectSourceArchiveOut | null
   can_update: boolean
   can_delete: boolean
+  can_execute?: boolean
   agent_run_count?: number
   last_agent_run_at?: string | null
   create_time: string

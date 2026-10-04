@@ -14,6 +14,28 @@ from app.models.review_task import ReviewTask
 from app.services.ai_usage_context import current_attribution, model_attribution, record_usage_attempt, usage_context
 
 
+def _seed_execution_actor(db, user_id, project_id):
+    from app.models.user import User
+    from app.models.project import Project
+    from app.models.rbac import Permission, Role, RolePermission, UserRole
+    from app.core.permission_codes import PermissionCode
+    if db.get(User, user_id) is None:
+        db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
+    if db.get(Project, project_id) is None:
+        db.add(Project(id=project_id, user_id=user_id, project_name=f"authorized-scope-{project_id}", status="active"))
+    role = db.query(Role).filter_by(code="user").first()
+    if role is None:
+        role = Role(name="local roundtable executor", code="user", status="active")
+    permission = db.query(Permission).filter_by(code=PermissionCode.REVIEW_START).first()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
+        db.add(permission)
+    db.add(role); db.flush()
+    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
+
+
+
 def _origin(db):
     root = AgentResponseRun(
         user_id=7,
@@ -67,6 +89,7 @@ def test_published_report_inherits_persisted_origin_and_rerun_replaces_scope(db,
 def test_discussion_task_uses_captured_origin_after_thread_context_is_gone(db, monkeypatch):
     from app.ai import discussion_orchestrator as discussion
 
+    _seed_execution_actor(db, 7, 4)
     origin = _origin(db)
     db.add(
         CodeFile(
@@ -105,6 +128,7 @@ def test_discussion_model_failure_keeps_usage_after_report_rollback(db, monkeypa
 
     from app.ai import discussion_orchestrator as discussion
 
+    _seed_execution_actor(db, 7, 1)
     origin = _origin(db)
     task = ReviewTask(user_id=7, project_id=1, task_name="unit", review_type="discuss", status="running", **origin)
     db.add(task)
@@ -259,9 +283,10 @@ async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint
 
 def test_sandbox_worker_recovers_persisted_origin_and_resets_context(db, monkeypatch):
     from app.services import sandbox_service as sandbox
+    from tests.unit.services.execution_test_rows import authorized_sandbox_environment
 
     origin = _origin(db)
-    row = SandboxEnvironment(
+    row = authorized_sandbox_environment(db,
         public_id="unit-sandbox",
         project_id=1,
         owner_id=7,

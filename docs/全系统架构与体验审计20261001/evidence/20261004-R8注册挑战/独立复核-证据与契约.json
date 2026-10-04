@@ -1,0 +1,197 @@
+{
+  "recorded_at_utc": "2026-10-04T14:59:26.998608+00:00",
+  "review_type": "独立只读复核",
+  "state": "候选源码和本地测试，未作生产验收声明",
+  "reviewed_manifest": {
+    "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R8注册挑战/证据与边界.json",
+    "bytes": 5228,
+    "sha256": "2b928970633bae9c583f8e24e1f16c0d8f951669338a797ccc11294b7230a124"
+  },
+  "manifest_check": {
+    "total_entries": 20,
+    "source_and_test_entries": 7,
+    "original_log_entries": 13,
+    "all_hashes_and_sizes_match": true,
+    "entries": [
+      {
+        "path": "backend/app/core/captcha.py",
+        "bytes": 3265,
+        "sha256": "ecec3d28fe078bbab0a65d42bf0fc8ffe07d885bab57d75cbea4e0ad42c1e9a0",
+        "matches": true
+      },
+      {
+        "path": "backend/app/api/v1/auth.py",
+        "bytes": 5689,
+        "sha256": "e45fe7168dfe0cb568cb20cc4d6e79134df0c455e489d01703cda054e2bf7da7",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/test_captcha_image.py",
+        "bytes": 2957,
+        "sha256": "638aea01d2096b62a0befbcbd3b8e8bfa8bf0f2cc8b6961913dc473f2f3bf86f",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/unit/api/test_beta_invites_api.py",
+        "bytes": 6709,
+        "sha256": "6682e1e0bcc7a9827e37f505d3564fef3ed5bc5e724920a13b0faebd363e5ce4",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/api/auth.ts",
+        "bytes": 1546,
+        "sha256": "8f2ae83cf108ba7c3a13216b4bcd4f1cc8b5667ef18b0fe7c9f63a2f20f292be",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/views/auth/Register.vue",
+        "bytes": 20440,
+        "sha256": "84fe0c5015212afa2f23538a79f7d1310192b47f52be02f7853ddd9ea8de8152",
+        "matches": true
+      },
+      {
+        "path": "frontend/src/views/auth/Register.test.ts",
+        "bytes": 5249,
+        "sha256": "a3f57cac0fc49171494d4b54bdd65cb7af8c33e7f80397bb7743067ad29e2d5f",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8注册位图冻结绿-第1轮.log",
+        "bytes": 408,
+        "sha256": "57e0ad6d357c3806aa67c1aa7b7281c7e7ddd596cf168436b60afd1063b041ee",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8注册位图冻结绿-第2轮.log",
+        "bytes": 408,
+        "sha256": "ab0181b97b7f499250786084a2d7bbd723e6bc72dfbce72ad3244dec67e23ecb",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8注册位图冻结绿-第3轮.log",
+        "bytes": 408,
+        "sha256": "2dd0a599c0d7d9900b08d0cc208a9b953a67bc83191b11a19d29b471f9603b5a",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8注册位图原场景红.log",
+        "bytes": 2790,
+        "sha256": "1c5e2d12e10c239f0daa3c923cead735e21ab32620ced5d37a6ce3a743600b47",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8注册位图绿-第1轮.log",
+        "bytes": 408,
+        "sha256": "3dd134bf919aa06063bb758636b8bd891ff958198bc79239d22a08c8ec001bee",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码冻结绿-第1轮.log",
+        "bytes": 4580,
+        "sha256": "765706670a3132868bcfa18451277e67132767a98425b8381ae428ed1f639962",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码冻结绿-第2轮.log",
+        "bytes": 4580,
+        "sha256": "a6ab91079e0e4296c69eab628cb8763b83d061df682eec1ff488ab353eb51f0d",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码冻结绿-第3轮.log",
+        "bytes": 4580,
+        "sha256": "038bf67974d54d872bb40960325cec2c1bd2bbe0fffac20e6622eb1d361d969e",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码原场景红-有效.log",
+        "bytes": 2976,
+        "sha256": "9aa3aed9d0c5c70f9bb3bf7af6786bb76297a9fb4d09f9d6b26f908ad39819ae",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码原场景红.log",
+        "bytes": 5374,
+        "sha256": "2189979d05ad11c278d54251b2fcf8899d150ac74db80514f41fa72690f21685",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码容量过期边界红.log",
+        "bytes": 3255,
+        "sha256": "ccceeb3c05acb4385167a322486341bd6e8628d757cf9942831d690cff20354a",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码绿-第1轮.log",
+        "bytes": 4695,
+        "sha256": "a07bf2c052a8f8560191664e69cae54b9d2db83f328cef6b6c0c11af52306dd2",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R8验证码绿-第2轮.log",
+        "bytes": 4395,
+        "sha256": "442a3d34585740574f90bdd05b1e9fcdab47d932f5a4b19a750a7e6a1bad0007",
+        "matches": true
+      }
+    ]
+  },
+  "independent_test_results": [
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R8注册挑战/独立复核-前端8项.log",
+      "bytes": 386,
+      "sha256": "e13c5b0580294c7707b1099cb25f81afcf5f35e2301e96f0318a1b1b16ae1b40",
+      "actual_result_lines": [
+        " Test Files  1 passed (1)",
+        "      Tests  8 passed (8)",
+        "   Duration  987ms (transform 179ms, setup 17ms, import 589ms, tests 150ms, environment 157ms)"
+      ]
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R8注册挑战/独立复核-核心与API13项.log",
+      "bytes": 1657,
+      "sha256": "475c809bc57a8a13a8d9d618032d59a7095a0d84a72a466c10b7da10cb20ea97",
+      "actual_result_lines": [
+        "======================== 13 passed, 2 warnings in 1.41s ========================"
+      ]
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/20261004-R8注册挑战/独立复核-额外内测码关联项.log",
+      "bytes": 1737,
+      "sha256": "6ccbfe57b4a9d48659524c78eb9525660015a0c9f36337ff19f0be5d6b20d4b1",
+      "actual_result_lines": [
+        "======================== 21 passed, 2 warnings in 1.91s ========================"
+      ]
+    }
+  ],
+  "exact_test_scope": [
+    {
+      "command": ".venv311/bin/python -m pytest tests/unit/test_captcha_image.py tests/unit/api/test_beta_invites_api.py --no-cov -q",
+      "result": "13 passed / 2 warnings / 1.41s"
+    },
+    {
+      "command": "npm run test -- src/views/auth/Register.test.ts --maxWorkers=1",
+      "result": "1 file / 8 passed / 987ms"
+    },
+    {
+      "command": ".venv311/bin/python -m pytest tests/unit/test_captcha_image.py tests/unit/api/test_beta_invites_api.py tests/unit/services/test_beta_invite_service.py --no-cov -q",
+      "result": "21 passed / 2 warnings / 1.91s",
+      "note": "额外内测码服务关联子集，不是原纪录的25项组"
+    }
+  ],
+  "source_findings": [
+    "captcha core uses Pillow RGB PNG 168x56, no metadata; no answer or arithmetic in challenge response",
+    "strip + ASCII check + uppercase compare_digest; non-ASCII rejects and consumes challenge once",
+    "expiry exp <= now; capacity refuses new challenges without deleting live ones; image failure does not store challenge",
+    "Register image source regex and max size checked; load/API/image errors clear readiness; submit refuses unready challenge; refresh remains available",
+    "30/minute challenge and 10/minute registration rate-limit decorators preserved",
+    "Register test image fixture is a mocked data URI, not actual PNG bytes; actual PNG format/size statement comes from the core image test",
+    "original 25-item logs remain accurate and unchanged; independent 13/8/21 subsets are recorded separately"
+  ],
+  "limits": [
+    "无生产注册、真实验证码解答、攻击或压力测试",
+    "视觉挑战的无障碍替代未实现",
+    "当前挑战存储为单进程，不代表多worker共享存储通过",
+    "不宣称强抗OCR、强反机器人或无障碍全通过",
+    "无CUA、SSH、生产账号或资源变更"
+  ]
+}

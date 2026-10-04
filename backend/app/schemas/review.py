@@ -26,6 +26,8 @@ class TaskOut(BaseModel):
     review_type: str
     status: str
     can_view_report: bool = False
+    can_cancel: bool = False
+    can_execute: bool = False
     total_files: int
     processed_files: int
     total_issues: Optional[int] = None
@@ -79,6 +81,8 @@ class TaskDetailOut(BaseModel):
     review_type: str
     status: str
     can_view_report: bool = False
+    can_cancel: bool = False
+    can_execute: bool = False
     total_files: int
     processed_files: int
     total_issues: Optional[int] = None
@@ -135,6 +139,8 @@ class IssueOut(BaseModel):
     suggestion: Optional[str] = None
     fixed_code: Optional[str] = None
     status: str
+    can_handle: bool = False
+    can_execute: bool = False
     create_time: datetime
     # R2 修复:补齐处理人/处理时间/更新时间,与 ORM ReviewIssue 字段对齐
     handled_by: Optional[int] = None

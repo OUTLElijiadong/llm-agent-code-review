@@ -1,0 +1,21 @@
+{
+  "recorded_at_utc": "2026-10-04T14:54:09.599171+00:00",
+  "scope": "production_read_only_no_member_mutation",
+  "actual_result": {
+    "release": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+    "uvicorn_processes": [
+      {
+        "pid": "1",
+        "explicit_workers_flag": false
+      }
+    ],
+    "web_concurrency": null,
+    "viewer_member_rows": 0
+  },
+  "limits": [
+    "实际单次只读容器 /proc 与 role count；不证明未来部署仍为单进程",
+    "首次探测仅匹配argv[0]错误得到0，已修为匹配前两argv的uvicorn可执行名，此0不计为通过",
+    "首次证据保存及独立测试指令工作目录错误，均未执行产品流程；后续重新执行",
+    "没有读取凭据、改成员角色、调用模型或开启任务"
+  ]
+}

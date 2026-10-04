@@ -1,0 +1,171 @@
+{
+  "核查时间UTC": "2026-10-04T13:16:48.886407+00:00",
+  "版本": "4.0.37",
+  "运行源码SHA": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+  "范围": "独立读取既有普通Safari审查员这次只读小菱会话的5份AX和5份JPG；没有再次真实点击",
+  "来源清单": {
+    "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/docs/全系统架构与体验审计20261001/evidence/复测-20261004-v4037审查员只读小菱.json",
+    "bytes": 3692,
+    "sha256": "159edbcc9a707d94702b99647f1d89c1fec7c43c85597e2d33d61072d49295c0"
+  },
+  "私有制品核验": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/17-v4037小菱只读角色项目回答.jpg",
+      "bytes": 394500,
+      "sha256": "a06038ba82a64f8e4909896054b30aa632f99f869f3b1ee0f3ab1cab641a9e14",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "jpeg_magic_and_eoi": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/17-v4037小菱只读角色项目回答.txt",
+      "bytes": 9721,
+      "sha256": "69a94348875e482946ad99efb170943074303813c0a506c7e35cdb3284c93d86",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "utf8_valid": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/18-v4037小菱工具展开.jpg",
+      "bytes": 278296,
+      "sha256": "3e275b58ee4fbbdfbc66f9a299f8094f37414361e0667330aaf7cf95a973b12d",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "jpeg_magic_and_eoi": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/18-v4037小菱工具展开.txt",
+      "bytes": 11575,
+      "sha256": "bc1816fcb0459930242c99d6f4e2a6a336d38f1eb192233ba8f474f7af1072ef",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "utf8_valid": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/19-v4037小菱刷新恢复.jpg",
+      "bytes": 385018,
+      "sha256": "bbb2fe83fc6dd551beb602eb167f71b2b59d2ca3cbb9f67d46d655522f0bcd88",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "jpeg_magic_and_eoi": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/19-v4037小菱刷新恢复.txt",
+      "bytes": 9613,
+      "sha256": "bd9bb77022026147f3458d4be73c1f228dba506b75c53bd7697cca50b586f3db",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "utf8_valid": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/20-v4037小菱刷新恢复-第2轮.jpg",
+      "bytes": 384905,
+      "sha256": "ed624f0696179d6e6f1a9f6e36f769b9eadfa6b95fe9f42e0255a1557fd96f2f",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "jpeg_magic_and_eoi": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/20-v4037小菱刷新恢复-第2轮.txt",
+      "bytes": 9613,
+      "sha256": "5a72b65f08166086238b0b990bd3c1aa11038dee51884b670da19a3cbaabbb7a",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "utf8_valid": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/21-v4037小菱刷新恢复-第3轮.jpg",
+      "bytes": 384982,
+      "sha256": "499bdc9dd52fc12db817f8ca042a8e59bf68f6b9dfac2c12da813009269c0577",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "jpeg_magic_and_eoi": true
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/21-v4037小菱刷新恢复-第3轮.txt",
+      "bytes": 9613,
+      "sha256": "cf9177b464f092ef3c9fcecc465bb878f8f4ae58a884da85b32a96a4cb9e6b98",
+      "bytes_match": true,
+      "sha_match": true,
+      "git_ignored": true,
+      "utf8_valid": true
+    }
+  ],
+  "AX定向核验": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/17-v4037小菱只读角色项目回答.txt",
+      "question_sha256": "3952b7b2b1389b3f0c8ef31c9c34299bbe82feb6edb0cf53834e6ed89e0b3ed2",
+      "answer_sha256": "622f12946f69bf438600b7045f115823b8edb8bbc28b42d24c3b92e91da9baa1",
+      "question_step_answer_ordered": true,
+      "page_role_reviewer": true,
+      "page_project_count_one": true,
+      "recovering_hint_in_success_snapshot": false
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/18-v4037小菱工具展开.txt",
+      "question_sha256": "3952b7b2b1389b3f0c8ef31c9c34299bbe82feb6edb0cf53834e6ed89e0b3ed2",
+      "answer_sha256": "622f12946f69bf438600b7045f115823b8edb8bbc28b42d24c3b92e91da9baa1",
+      "question_step_answer_ordered": true,
+      "page_role_reviewer": true,
+      "page_project_count_one": true,
+      "recovering_hint_in_success_snapshot": false
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/19-v4037小菱刷新恢复.txt",
+      "question_sha256": "3952b7b2b1389b3f0c8ef31c9c34299bbe82feb6edb0cf53834e6ed89e0b3ed2",
+      "answer_sha256": "622f12946f69bf438600b7045f115823b8edb8bbc28b42d24c3b92e91da9baa1",
+      "question_step_answer_ordered": true,
+      "page_role_reviewer": true,
+      "page_project_count_one": true,
+      "recovering_hint_in_success_snapshot": false
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/20-v4037小菱刷新恢复-第2轮.txt",
+      "question_sha256": "3952b7b2b1389b3f0c8ef31c9c34299bbe82feb6edb0cf53834e6ed89e0b3ed2",
+      "answer_sha256": "622f12946f69bf438600b7045f115823b8edb8bbc28b42d24c3b92e91da9baa1",
+      "question_step_answer_ordered": true,
+      "page_role_reviewer": true,
+      "page_project_count_one": true,
+      "recovering_hint_in_success_snapshot": false
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/21-v4037小菱刷新恢复-第3轮.txt",
+      "question_sha256": "3952b7b2b1389b3f0c8ef31c9c34299bbe82feb6edb0cf53834e6ed89e0b3ed2",
+      "answer_sha256": "622f12946f69bf438600b7045f115823b8edb8bbc28b42d24c3b92e91da9baa1",
+      "question_step_answer_ordered": true,
+      "page_role_reviewer": true,
+      "page_project_count_one": true,
+      "recovering_hint_in_success_snapshot": false
+    }
+  ],
+  "展开工具回执": {
+    "tools_present": [
+      "查看项目列表",
+      "检索知识库"
+    ],
+    "two_readonly_supervision_labels": true,
+    "two_low_risk_pass_labels": true,
+    "two_done_labels": true,
+    "tool_total_one": true,
+    "knowledge_preview_truncated": true
+  },
+  "归一化说明": "仅剥离各AX行开头的节点索引/缩进，哈希问句行与最终回答区；未保存其原文，未把全AX字节差异改写为全文相同",
+  "结论": "10制品元数据全匹配；5份AX同问句/最终回复，问句→2/2步骤摘要→回复顺序一致；19/20/21支撑这次会话三轮刷新后的限定恢复；18支撑两个只读工具的展开回执",
+  "未验边界": [
+    "成功快照不含正在恢复，瞬态提示仍需另一个原工具记录；本核查未独立证明该句",
+    "未核全部角色权限、跨账号隔离、所有聊天、创建审查/Agent/团队/沙箱或写操作",
+    "知识工具出现预览TRUNCATED，不证明模型完整输入截断",
+    "回复中操作审计引导未实际调用，自然语言不是权限证明",
+    "JPEG magic/EOI不等于全部视觉布局验收；未抓每个网络状态，不能写全部HTTP无404",
+    "只存私有制品路径/bytes/hash及非敏感核验布尔值，不把私有原文加入Git"
+  ]
+}

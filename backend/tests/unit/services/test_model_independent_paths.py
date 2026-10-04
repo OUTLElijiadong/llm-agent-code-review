@@ -108,7 +108,6 @@ def test_independent_instances_share_config_without_changing_other_requests(
 
 
 def test_deployment_service_consumes_config_before_missing_key_fallback(db, monkeypatch):
-    from types import SimpleNamespace
 
     from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
     from app.services.sandbox_service import _generate_deployment_patch
@@ -125,7 +124,9 @@ def test_deployment_service_consumes_config_before_missing_key_fallback(db, monk
         seen.append(self._model)
         return {"launch_script": "exec python main.py", "notes": "isolated"}
     monkeypatch.setattr(DeploymentCoordinatorAgent, "plan", plan)
-    environment = SimpleNamespace(id=1, public_id="isolated", project_id=1, owner_id=42, test_mode="blackbox")
+    from tests.unit.services.execution_test_rows import authorized_sandbox_environment
+    environment = authorized_sandbox_environment(db, id=1, public_id="isolated", project_id=1, owner_id=42,
+                                                test_mode="blackbox")
     result = _generate_deployment_patch(db, environment, _zip_with({"main.py": "pass"}), "python")
     assert result["launch_script"] == "exec python main.py"
     assert seen == ["sandbox-model"]

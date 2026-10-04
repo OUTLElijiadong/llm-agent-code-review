@@ -10,6 +10,8 @@ import pytest
 
 from app.core.exceptions import ForbiddenError
 from app.models.agent_governance import ApprovalItem
+from app.models.project import Project
+from app.models.user import User
 from app.services import sandbox_service
 
 
@@ -21,13 +23,22 @@ def _stub_public_dns(monkeypatch):
         lambda value, **_kwargs: SimpleNamespace(original_url=value),
     )
     monkeypatch.setattr(sandbox_service.audit_service, "log", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sandbox_service, "require_project_access", lambda *_args, **_kwargs: None)
 
 
 def _issue(db, actor=None):
+    supplied = actor or SimpleNamespace(id=7, username="reviewer")
+    # This ticket-consumption fixture is an authorized local admin; project/global
+    # denial is tested independently against actual permission rows.
+    actor = db.get(User, supplied.id)
+    if actor is None:
+        actor = User(id=supplied.id, username=f"ticket-local-{supplied.id}", password="local", role="admin", status=1)
+        db.add(actor)
+    if db.get(Project, 91) is None:
+        db.add(Project(id=91, user_id=actor.id, project_name="local authorized target", status="active"))
+    db.commit()
     return sandbox_service.issue_remote_target_authorization(
         db,
-        actor or SimpleNamespace(id=7, username="reviewer"),
+        actor,
         project_id=91,
         remote_target_url="https://target.example/path",
         test_mode="blackbox",

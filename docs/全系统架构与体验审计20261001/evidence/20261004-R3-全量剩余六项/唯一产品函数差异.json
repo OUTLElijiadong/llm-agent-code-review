@@ -1,0 +1,10 @@
+{
+  "head_source_sha256": "8febd1201495c19ef3bb6c59bf351ebf98185e19b9f9559bdcd2d85dd9f4ce9b",
+  "before_fix_source_sha256": "8febd1201495c19ef3bb6c59bf351ebf98185e19b9f9559bdcd2d85dd9f4ce9b",
+  "head_equals_before": true,
+  "current_sha256": "a6ad8b5c995e86e4932f61d8fc2c666a18f2ad56799ca0557c577678ba3d692a",
+  "changed_executor_methods_ast": [
+    "_control_roundtable_discussion"
+  ],
+  "expected_only_method": "_control_roundtable_discussion"
+}

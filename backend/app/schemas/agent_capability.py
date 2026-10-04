@@ -138,6 +138,9 @@ class SandboxEnvironmentOut(BaseModel):
     public_id: str
     project_id: int
     owner_id: int
+    can_execute: bool = False
+    can_stop: bool = False
+    can_preview: bool = False
     worker_code: Optional[str] = None
     agent_code: str
     purpose: str

@@ -13,11 +13,15 @@ from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import AgentEvent, AgentEventType, DiscussionTurn
 from app.api.v1 import agent_responses, agents, ai_logs, ws_discussion
 from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.permission_codes import PermissionCode
 from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_multimodal import AgentMultimodalAsset
 from app.models.agent_response_run import AgentResponseRun
 from app.models.agent_team import AgentTeam
 from app.models.ai_call_log import AiCallLog
+from app.models.project import Project
+from app.models.rbac import Permission, Role, RolePermission, UserRole
+from app.models.user import User
 from app.services import agent_mesh_service, agent_responses_service, agent_team_service
 from app.services.deepseek_responses_runtime import ToolCall, ToolExecutionResult
 
@@ -159,13 +163,22 @@ async def test_roundtable_owner_can_read_and_control_own_chat(monkeypatch, role)
 
 
 @pytest.mark.asyncio
-async def test_roundtable_tool_rejects_unhandled_input_without_ghost_turn(monkeypatch):
+async def test_roundtable_tool_rejects_unhandled_input_without_ghost_turn(db, monkeypatch):
+    owner = User(id=7, username="unhandled-roundtable-owner", password="isolated", role="user", status=1)
+    project = Project(user_id=owner.id, project_name="unhandled-roundtable-project", status="active")
+    role = Role(name="普通用户", code="user", status="active", is_builtin=1)
+    permission = Permission(code=PermissionCode.REVIEW_START, name="发起审查", module="review", type="api")
+    db.add_all([owner, project, role, permission])
+    db.flush()
+    db.add_all([UserRole(user_id=owner.id, role_id=role.id),
+                RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
     bus = DiscussionBus()
-    session = bus.create_session("unhandled-roundtable", 1, "own.py", owner_user_id=7)
+    session = bus.create_session("unhandled-roundtable", 1, "own.py", owner_user_id=7, project_id=project.id)
     monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
     executor = object.__new__(agent_responses_service.PrismToolExecutor)
-    executor._user = SimpleNamespace(id=7, role="user")
-    executor._db = object()
+    executor._user = owner
+    executor._db = db
     executor._surface = "user"
 
     result = await executor._control_roundtable_discussion(
@@ -176,6 +189,7 @@ async def test_roundtable_tool_rejects_unhandled_input_without_ghost_turn(monkey
     )
 
     assert result.status == "error"
+    assert result.error == "讨论尚未启动或控制器已结束"
     assert session.turns == []
 
 

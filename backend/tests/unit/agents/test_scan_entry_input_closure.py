@@ -76,6 +76,28 @@ def test_security_project_rejects_no_effective_input(monkeypatch, scan_mode, con
         finish.assert_not_called()
 
 
+def _seed_execution_actor(db, user_id, project_id):
+    from app.models.user import User
+    from app.models.project import Project
+    from app.models.rbac import Permission, Role, RolePermission, UserRole
+    from app.core.permission_codes import PermissionCode
+    if db.get(User, user_id) is None:
+        db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
+    if db.get(Project, project_id) is None:
+        db.add(Project(id=project_id, user_id=user_id, project_name=f"authorized-scope-{project_id}", status="active"))
+    role = db.query(Role).filter_by(code="user").first()
+    if role is None:
+        role = Role(name="local roundtable executor", code="user", status="active")
+    permission = db.query(Permission).filter_by(code=PermissionCode.REVIEW_START).first()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
+        db.add(permission)
+    db.add(role); db.flush()
+    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
+
+
+
 @pytest.fixture
 def roundtable_store(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'roundtable.sqlite'}", connect_args={"check_same_thread": False})
@@ -83,6 +105,7 @@ def roundtable_store(tmp_path, monkeypatch):
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     monkeypatch.setattr(discussion, "SessionLocal", factory)
     with factory() as database:
+        _seed_execution_actor(database, 3, 7)
         database.add(CodeFile(id=11, project_id=7, file_name="before.py", file_path="before.py",
                               language="python", content="value = 2\n", version_no=2,
                               is_binary=0, status="active", line_count=1))
@@ -383,16 +406,12 @@ async def test_rest_pending_to_websocket_keeps_preflight_version(
     monkeypatch.setattr(rest, "_gen_session_id", lambda: "rest-to-ws")
     monkeypatch.setattr(rest.rule_service, "get_enabled_rules", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(websocket, "_is_session_version_active", lambda *_args: True)
+    monkeypatch.setattr(websocket, "SessionLocal", roundtable_store)
     monkeypatch.setattr(websocket, "_pending", {})
     monkeypatch.setattr(websocket, "_session_owners", {})
     monkeypatch.setattr(websocket, "_owner_registered_at", {})
     with roundtable_store() as database:
-        owner = User(
-            id=3, username="offline-owner", password="offline",
-            email="owner@example.test", role="admin", status=1,
-        )
-        database.add(owner)
-        database.add(Project(id=7, user_id=3, project_name="offline-project", language="python", status="active"))
+        owner = database.get(User, 3)
         code_file = database.get(CodeFile, 11)
         code_file.content = "value = 1\n"
         code_file.version_no = 1
@@ -499,7 +518,8 @@ def test_security_api_does_not_serialize_empty_input_as_success(db, monkeypatch,
     from app.schemas.security import SecurityScanAllProjectsIn, SecurityScanFileIn
 
     agent = SecuritySentinelAgent()
-    owner = User(id=7, username="offline-api", role="admin", status=1)
+    owner = User(id=7, username="offline-api", password="local", role="admin", status=1)
+    db.add(owner); db.commit()
     agent.inject(db, user=owner)
     monkeypatch.setattr(security_api, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace(
         security_sentinel=agent,

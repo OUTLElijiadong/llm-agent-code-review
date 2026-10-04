@@ -142,6 +142,7 @@ class ProjectOut(BaseModel):
     source_malware_status: Optional[str] = None
     can_update: bool = False
     can_delete: bool = False
+    can_execute: bool = False
     last_review_at: Optional[datetime] = None
     score: Optional[int] = None
     agent_run_count: int = 0
@@ -188,6 +189,7 @@ class ProjectDetailOut(BaseModel):
     source_archive: Optional[ProjectSourceArchiveOut] = None
     can_update: bool = False
     can_delete: bool = False
+    can_execute: bool = False
     agent_run_count: int = 0
     last_agent_run_at: Optional[datetime] = None
     create_time: datetime

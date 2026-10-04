@@ -16,6 +16,21 @@ from app.api.v1 import ws_discussion as module
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
 
 
+@pytest.fixture
+def db():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, expire_on_commit=False)()
+    try:
+        yield session
+    finally:
+        session.close(); engine.dispose()
+
+
 @pytest.fixture(autouse=True)
 def _restore_ws_registries() -> Iterator[None]:
     """隔离并恢复 pending、owner 与 owner 注册时间三份模块状态。"""
@@ -170,6 +185,27 @@ class FakeDiscussionBus:
 def _install_bus(monkeypatch: pytest.MonkeyPatch, bus: FakeDiscussionBus) -> None:
     """把 DiscussionBus 单例替换为当前测试的 fake 实例。"""
     monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+
+
+def _seed_execution_actor(db, user_id, project_id):
+    from app.models.user import User
+    from app.models.project import Project
+    from app.models.rbac import Permission, Role, RolePermission, UserRole
+    from app.core.permission_codes import PermissionCode
+    if db.get(User, user_id) is None:
+        db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
+    if db.get(Project, project_id) is None:
+        db.add(Project(id=project_id, user_id=user_id, project_name=f"authorized-scope-{project_id}", status="active"))
+    role = db.query(Role).filter_by(code="user").first()
+    if role is None:
+        role = Role(name="local roundtable executor", code="user", status="active")
+    permission = db.query(Permission).filter_by(code=PermissionCode.REVIEW_START).first()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
+        db.add(permission)
+    db.add(role); db.flush()
+    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.commit()
 
 
 def _user(user_id: int, *, role: str = "user", status: int = 1) -> SimpleNamespace:
@@ -333,14 +369,17 @@ async def test_ws_rejects_unknown_and_unauthorized_sessions_without_consuming_pe
 
 @pytest.mark.asyncio
 async def test_ws_message_flow_uses_owner_registry_and_cleans_subscription(
-    monkeypatch: pytest.MonkeyPatch,
+    db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """已登记会话应处理心跳、用户输入和控制指令，并在断线后取消订阅。"""
+    from sqlalchemy.orm import Session
+    _seed_execution_actor(db, 11, 901)
+    monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "registry-session"
     module._session_owners[session_id] = 11
     module._owner_registered_at[session_id] = time.time()
     bus = FakeDiscussionBus(
-        session=SimpleNamespace(owner_user_id=11, status="active"),
+        session=SimpleNamespace(owner_user_id=11, project_id=901, status="active"),
         outbound=['{"type":"control","action":"ready"}'],
     )
     callback_calls: list[tuple[str, dict[str, Any]]] = []
@@ -407,14 +446,17 @@ async def test_ws_rejects_late_input_without_broadcast(monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_ws_accepts_completed_roundtable_followup_and_starts_background_answer(
-    monkeypatch: pytest.MonkeyPatch,
+    db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """圆桌主流程结束后，当前账号可经同一 WS 追问并获得持久接收回执。"""
     from app.agents.discussion_bus import DiscussionBus
     from app.services import roundtable_followup_service
 
+    from sqlalchemy.orm import Session
+    _seed_execution_actor(db, 7, 901)
+    monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     bus = DiscussionBus()
-    session = bus.create_session("disc_followup_ws", 42, "main.py", owner_user_id=7)
+    session = bus.create_session("disc_followup_ws", 42, "main.py", owner_user_id=7, project_id=901)
     session.report_task_id = 42
     bus.publish_control(session.session_id, "done", {"status": "success", "task_id": 42})
     bus.close_session(session.session_id)
@@ -596,17 +638,21 @@ async def test_ws_queue_overflow_replays_every_turn_and_terminal_in_order(
 
 @pytest.mark.asyncio
 async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
-    monkeypatch: pytest.MonkeyPatch,
+    db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """合法 pending 会话应在鉴权后消费上下文并异步启动讨论编排器。"""
     import app.ai.discussion_orchestrator as orchestrator_module
 
+    from sqlalchemy.orm import Session
+    _seed_execution_actor(db, 21, 901)
+    monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "pending-session"
     bus = FakeDiscussionBus()
     _install_bus(monkeypatch, bus)
     module.register_pending(
         session_id,
         user_id=21,
+        project_id=901,
         code="print('hello')",
         language="python",
         profiles=("security",),
@@ -627,7 +673,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
     )
 
     await module.ws_discuss(websocket, session_id)
-    await _ORIGINAL_ASYNCIO_SLEEP(0)
+    await asyncio.wait_for(bus.discussion_tasks[session_id], timeout=1)
 
     assert websocket.accepted == ["prism-auth"]
     assert session_id not in module._pending
@@ -635,6 +681,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
         {
             "session_id": session_id,
             "user_id": 21,
+            "project_id": 901,
             "code": "print('hello')",
             "language": "python",
             "profiles": ("security",),
@@ -646,12 +693,15 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
 
 @pytest.mark.asyncio
 async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
-    monkeypatch: pytest.MonkeyPatch,
+    db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """创建圆桌的登录版本失效后，应取消后台编排而不是继续写入结果。"""
     import app.ai.discussion_orchestrator as orchestrator_module
     from app.agents.discussion_bus import DiscussionBus
 
+    from sqlalchemy.orm import Session
+    _seed_execution_actor(db, 21, 901)
+    monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "expired-owner-session"
     bus = DiscussionBus()
     bus.create_session(session_id, task_id=0, file_name="expired.py", owner_user_id=21)
@@ -679,6 +729,7 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
     pending = module.PendingDiscussion(
         session_id,
         user_id=21,
+        project_id=901,
         session_token_version=4,
     )
 

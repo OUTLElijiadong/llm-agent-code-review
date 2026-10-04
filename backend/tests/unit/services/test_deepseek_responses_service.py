@@ -174,7 +174,7 @@ async def test_non_stream_replays_complete_transcript_and_isolates_bearer_creden
 async def test_previous_response_compacts_with_verified_sources_and_keeps_full_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 16_000)
     monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
     history = [
         {"type": "message", "role": "user", "content": [
@@ -224,7 +224,7 @@ async def test_previous_response_compacts_with_verified_sources_and_keeps_full_r
     assert final["input"][0]["role"] == "user"
     assert "来源 sha256=" in final["input"][0]["content"][0]["text"]
     assert final["input"][-1] == latest
-    assert estimate_tokens(final["input"]) + 512 < 6_000
+    assert estimate_tokens(final["input"]) + 512 < 16_000
     stored = await storage.load(_fingerprint("key"), "resp_after")
     assert stored is not None
     assert stored.transcript == history + [latest]
@@ -234,7 +234,7 @@ async def test_previous_response_compacts_with_verified_sources_and_keeps_full_r
 async def test_proxy_compaction_preserves_omitted_user_constraints_even_with_complete_source_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 16_000)
     monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
     constraints = "必须按当前账号隔离聊天记录。不得向其他账号显示。最多创建两个临时 Agent。"
     older_user_input = constraints + "\n" + "ordinary background " * 200
@@ -290,7 +290,7 @@ async def test_proxy_compaction_preserves_omitted_user_constraints_even_with_com
 async def test_proxy_compaction_fails_when_protected_fact_ledger_exceeds_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 6_000)
+    monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_context_window_tokens", 16_000)
     monkeypatch.setattr("app.services.deepseek_responses_service.settings.deepseek_max_output_tokens", 512)
     constraints = "\n".join(
         f"第{index}条：必须保留当前账号的专属边界，严禁删除第{index}条限制；"

@@ -168,7 +168,8 @@ def test_captcha_exposes_only_beta_switch(beta_client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["beta_registration_enabled"] is True
-    assert set(data) == {"captcha_id", "question", "beta_registration_enabled"}
+    assert set(data) == {"captcha_id", "question", "image_data", "beta_registration_enabled"}
+    assert data["image_data"].startswith("data:image/png;base64,")
 
 
 def test_super_admin_can_delete_beta_code_in_any_state(beta_client):

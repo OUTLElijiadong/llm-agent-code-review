@@ -4,6 +4,7 @@
 建立项目与用户的成员关系,支持按项目成员关系做数据隔离。
 - role_in_project='owner': 项目拥有者(创建者),拥有读写权限
 - role_in_project='reviewer': 审查员,拥有项目相关数据的读权限 + 发起审查权限
+- role_in_project='viewer': 只读成员,不授予源码写入或任务执行权限
 """
 from sqlalchemy import BigInteger, Column, Index, String, UniqueConstraint
 
@@ -17,7 +18,7 @@ class ProjectMember(Base, IdMixin, TimestampMixin):
     Attributes:
         project_id: 项目ID,关联project.id
         user_id: 用户ID,关联user.id
-        role_in_project: 项目内角色(owner/reviewer)
+        role_in_project: 项目内角色(owner/reviewer/viewer)
     """
 
     __tablename__ = "project_member"
@@ -33,5 +34,5 @@ class ProjectMember(Base, IdMixin, TimestampMixin):
         String(20),
         nullable=False,
         default="reviewer",
-        comment="项目内角色: owner/reviewer",
+        comment="项目内角色: owner/reviewer/viewer",
     )

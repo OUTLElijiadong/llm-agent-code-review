@@ -1,0 +1,86 @@
+{
+  "核查时间UTC": "2026-10-04T13:32:43.977882+00:00",
+  "范围": "只读1个产品函数与3个关联测试文件的完整diff/测试正文；本地独立重跑42项，未调用供应商、SSH、CUA或生产",
+  "冻结源码与测试": [
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/app/services/review_service.py",
+      "bytes": 126151,
+      "sha256": "ddbac7ec24699cd3171f55d3bf6f40334da652a576283314e324561e54b7fea3"
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/tests/unit/agents/test_c12_context_projection.py",
+      "bytes": 8159,
+      "sha256": "d17fa7fb0fa800d8b5f104ddebbee6648e492323546243675bf2d6e37356df83"
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/tests/unit/agents/test_c13_semantic_coverage.py",
+      "bytes": 8773,
+      "sha256": "bc31604bb69c50fb52b47ad54d379981968bfd1b4efbc8b48ae6558f4242b1e9"
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_review_non_code_compaction.py",
+      "bytes": 22682,
+      "sha256": "c349bf77dd7a5f0870523b401baae97beeadd7eb1545f6fd5171a3052ee50d2b"
+    }
+  ],
+  "产品变化独立AST核查": {
+    "HEAD其余模块语义AST完全相同": true,
+    "目标函数除target_total赋值外AST完全相同": true,
+    "唯一产品行为改变": "估算器已采用UTF-8字节预算，target_total不再重复//4；实际源码/规则、固定契约、最终拼装byte门、来源/引文校验、共享32次调用上限不变"
+  },
+  "红绿定位": {
+    "自然旧组": "9 failed/19 passed；不能称9项都是产品缺陷，包含原ASCII平均计量下的固定夹具容量",
+    "配额真实单位缺陷": "可信HEAD旧adapter在当前byte估算器下受控重放6项红，三内容类别×32k/64k两窗口；非自然原版本六缺陷",
+    "容量校准失败留存": "文件名review-unit-adapter-green实际1 failed，不纳入通过；只去//4后32k长来源仍超32次调用门",
+    "扩展正反向": "C12提高可装载来源账本的正向预算，新增原1800小预算2拒绝；C13保留原5000拒绝/无transport，增加16000正向；review保留500摘要拒绝/源不变/调用≤32与1150正向，原32k长来源拒绝/0主审查、40k/64k长来源及32k较小来源成功",
+    "新增6配额样本": "调用参数中完整原文相同；额度汇总与剩余byte容量相符，只允许整数舍入；源码/规则原文不变；另完整超长伪摘要仍被最终拼装门拒绝"
+  },
+  "日志数据核对": [
+    {
+      "path": "/tmp/prism-a01-full-suite-boundary-red-20261004.log",
+      "bytes": 81705,
+      "sha256": "539128b79207a37f23aaf5506358b465f3fa2b17d39f0ea5f5c5617014c50723",
+      "实际summary": "=================== 9 failed, 19 passed, 1 warning in 0.91s ===================="
+    },
+    {
+      "path": "/tmp/prism-a01-review-quota-old-adapter-red-20261004.log",
+      "bytes": 19329,
+      "sha256": "8fb45edff67a397e04c3e47b2abefdb8e71cefb09cf7c53c80322bdb58e72f63",
+      "实际summary": "========================= 6 failed, 1 warning in 0.12s ========================="
+    },
+    {
+      "path": "/tmp/prism-a01-review-unit-adapter-green-20261004.log",
+      "bytes": 16939,
+      "sha256": "97470a36ff1a7c6c8030c8679bbf01589b3f949f547f3751a9cbe12bf32d7912",
+      "实际summary": "========================= 1 failed, 1 warning in 0.40s ========================="
+    },
+    {
+      "path": "/tmp/prism-a01-boundary-expanded-green-20261004.log",
+      "bytes": 1405,
+      "sha256": "71fe3d47e50b7aab6d1e58bb8783698da87e65d64b7213134f4f0504b1555af6",
+      "实际summary": "======================== 42 passed, 1 warning in 0.78s ========================="
+    },
+    {
+      "path": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/docs/全系统架构与体验审计20261001/evidence/20261004-A01-预算低估/独立复核-追加边界42项.log",
+      "bytes": 1405,
+      "sha256": "8e4689306fed7cb36bde1066a2486d9bec7d0c5bb68cb4ebbe071d867c2cddda",
+      "实际summary": "======================== 42 passed, 1 warning in 0.77s ========================="
+    }
+  ],
+  "独立运行": {
+    "命令": ".venv311/bin/python -m pytest --no-cov -q tests/unit/agents/test_c12_context_projection.py tests/unit/agents/test_c13_semantic_coverage.py tests/unit/services/test_review_non_code_compaction.py",
+    "exit_code": 0,
+    "passed": 42,
+    "warnings": 1,
+    "seconds": 0.77,
+    "warning": "既有passlib crypt弃用"
+  },
+  "结论": "本轮配额单位修复与夹具校准边界可信，独立42项通过，无新增源级阻断；根完整后端与R8尚需各自冻结后的最终验收",
+  "未验边界": [
+    "42项为隔离供应商transport/stub与本地确定性预算，不是供应商真实上下文/压缩语义验收",
+    "来源ID/逐字引文/指定保护事实通过，不等于所有语义完全无损",
+    "没有重跑26关联709或全量后端，本次不得以它们替代独立42实跑",
+    "两个先前官方tokenizer回执与第三次下载失败边界不变；本次未重新计量或推算新供应商用量",
+    "未修改产品源码、测试夹具或环境"
+  ]
+}

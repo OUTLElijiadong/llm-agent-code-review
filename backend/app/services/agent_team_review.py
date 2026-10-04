@@ -46,7 +46,7 @@ def cancel_team_reviews(db: Session, *, team_id: int, reason: str, task_id: int 
 
 
 def _require_actor(db: Session, user_id: int, project_id: int) -> User:
-    from app.services.project_member_service import require_project_access
+    from app.services.project_member_service import require_project_execution
     from app.services.rbac_service import check_permission
 
     user = db.get(User, user_id, populate_existing=True)
@@ -54,7 +54,7 @@ def _require_actor(db: Session, user_id: int, project_id: int) -> User:
         raise agent_team_service.AgentTeamAccessError("账户已停用或删除，正式审查已停止")
     if not check_permission(db, user_id, PermissionCode.REVIEW_START):
         raise agent_team_service.AgentTeamAccessError("当前账户已无发起审查的权限")
-    require_project_access(db, project_id, user, need_write=False)
+    require_project_execution(db, project_id, user)
     return user
 
 

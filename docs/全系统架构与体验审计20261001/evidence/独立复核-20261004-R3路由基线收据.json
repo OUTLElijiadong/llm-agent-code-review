@@ -1,0 +1,115 @@
+{
+  "recorded_at_utc": "2026-10-04T16:01:25.335318+00:00",
+  "review_type": "独立只读核验三处路由基线校准，仅读源码与原证据；未改源",
+  "reviewed_receipt": {
+    "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R3新路由授权基线收据.json",
+    "bytes": 1807,
+    "sha256": "123eb60cac3da7bfb1894b56a0dc4a763a4c374c631c5c693fd4cb69cecb6c4e"
+  },
+  "receipt_integrity": {
+    "source_entries": 3,
+    "original_log_entries": 2,
+    "all_hash_and_size_match": true,
+    "entries": [
+      {
+        "path": "backend/tests/test_complete_permission_matrix.py",
+        "bytes": 30242,
+        "sha256": "4f9fb9ef7d46af6397979f1fb290fed1aa5fc9c08633558f8b792ba73e68c13e",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/test_permission_route_contexts.py",
+        "bytes": 10339,
+        "sha256": "f0ba900a2820d6b80d7a3997e0a722a1b0d36fa338b7a0377f26b09ab82e54fe",
+        "matches": true
+      },
+      {
+        "path": "backend/tests/test_production_permission_acceptance_runner.py",
+        "bytes": 6928,
+        "sha256": "2aafedc607a5a8f76bc18c2556f219b5b1d85952925001fa608397843b7a84c7",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R3新路由授权基线红.log",
+        "bytes": 5504,
+        "sha256": "e54c10bf934fe71e58005a4a521b517c009d026dc90a767dadebd23f6183a68e",
+        "matches": true
+      },
+      {
+        "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R3新路由授权基线扩大绿.log",
+        "bytes": 2939,
+        "sha256": "2e5de394aa19cf548d1d5ce1fb0fae3d01f9c0526a72a42795995caca5f3a41e",
+        "matches": true
+      }
+    ]
+  },
+  "product_runner_unchanged": {
+    "path": "backend/scripts/verify_permission_acceptance_https.py",
+    "bytes": 30773,
+    "sha256": "c9cbdae0d3dbdc41b88a869361bdc3beefa692fd3b14f5792e690a623f757391",
+    "baseline_git_ref": "732f48f6929ceda1585bcae2489a0b01f0f2c5fb",
+    "byte_identical_to_baseline": true
+  },
+  "actual_AiPrompt_product_source": {
+    "path": "backend/app/api/v1/ai_prompt.py",
+    "bytes": 4905,
+    "sha256": "4f8f2630edc89fa5dabcf2597010297e871997893511366280d8c9b1d393c6eb",
+    "reviewed": "全文；三个endpoint的真实Depends，以及模板read与use_llm执行资源门"
+  },
+  "baseline_findings": {
+    "registered_routes": 339,
+    "authenticated_routes": 325,
+    "endpoint_sources": 42,
+    "guarded_routes_before": 255,
+    "guarded_routes_now": 258,
+    "precise_new_assertions": {
+      "POST /api/ai-prompt/issue": "issue:view",
+      "POST /api/ai-prompt/task": "review:view",
+      "POST /api/ai-prompt/project": "project:view"
+    },
+    "actual_change": "三个既有AiPrompt端点新增真实全局Depends，路由总数/认证总数/source总数未变；三处guard计数255改258，主矩阵再逐条断言真实路径与权限，不删路由或弱化未知依赖闭锁"
+  },
+  "independent_run": {
+    "command": [
+      ".venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/test_complete_permission_matrix.py::test_route_inventory_is_complete_and_studio_guard_is_included",
+      "tests/test_permission_route_contexts.py::test_complete_real_app_including_hidden_endpoints_without_lifespan",
+      "tests/test_production_permission_acceptance_runner.py::test_plan_matches_actual_routes_and_rejects_changed_source"
+    ],
+    "workdir": "backend",
+    "exit_code": 0,
+    "passed": 3,
+    "warnings": 2,
+    "seconds": 1.27,
+    "log": {
+      "path": "docs/全系统架构与体验审计20261001/evidence/独立复核-20261004-R3路由基线3项.log",
+      "bytes": 1736,
+      "sha256": "d1dd51491590d1e4f3779e4051f7c8d521fb796b9c834ad06f3ad13c073ac933"
+    },
+    "actual_scope": "仅三条实际app路由发现/计划/source绑定测试；本次没有实例化 matrix_env、没有发HTTP业务请求或注册/创建任务，不能把其它JWT/CRUD样本计为本人执行"
+  },
+  "root_evidence_read_only": {
+    "red": "3 failed / 2 warnings / 1.39s，全部为旧255期望与真实258不符",
+    "green": "1083 passed / 2 warnings / 11.71s，原日志hash/字节和收据数值相符，非本人复跑1083"
+  },
+  "source_review": {
+    "all_three_test_files_read": true,
+    "full_diff_reviewed": true,
+    "existing_negative_source_and_unknown_dependency_checks_preserved": true,
+    "lifespan_started": false,
+    "external_requests": 0,
+    "actual_model_or_worker_calls": 0,
+    "production_or_SSH_or_CUA": 0
+  },
+  "limits": [
+    "不等于生产339路由权限矩阵",
+    "不含WebSocket连接、真实角色浏览器/手机、模型执行或业务授权全流程",
+    "root完整后端失败的其它样本未由本3绿结果闭环",
+    "本补丁只测试基线校准，产品runner未改"
+  ],
+  "conclusion": "三处校准与真实新增授权一致，未发现该限定改动的新增阻断"
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 import { CopyDocument, Download, MagicStick } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -23,10 +24,12 @@ interface Props {
   /** issue/task/project 模式: 传对应 id */
   refId: number | null
   initialTool?: string
+  canPolish?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialTool: 'generic',
+  canPolish: false,
 })
 
 const emit = defineEmits<{
@@ -39,11 +42,21 @@ const visible = computed({
 })
 
 const tools = ref<AiPromptToolOut[]>([])
+const userStore = useUserStore()
+const canReadSource = computed(() => Boolean(userStore.token && userStore.profile)
+  && userStore.hasPermission(({ issue: 'issue:view', task: 'review:view', project: 'project:view' } as const)[props.source]))
+const canUseLlm = computed(() => canReadSource.value && props.canPolish === true)
 const targetTool = ref<string>(props.initialTool)
-const useLlm = ref<boolean>(true)
+const useLlm = ref<boolean>(canUseLlm.value)
 const loading = ref(false)
 const bundle = ref<AiPromptBundleOut | null>(null)
 const activeIdx = ref(0)
+let generation = 0
+let disposed = false
+function captureGeneration() {
+  const requestedGeneration = generation
+  return () => !disposed && props.modelValue && generation === requestedGeneration && canReadSource.value
+}
 
 // 聚合「一键修复全部」条目排在最前,其后是逐条修复提示词
 const displayItems = computed<AiPromptItemOut[]>(() => {
@@ -94,54 +107,68 @@ async function confirmExternalPolish(): Promise<boolean> {
 }
 
 async function generate(): Promise<void> {
+  if (loading.value || disposed || !props.modelValue || !canReadSource.value) return
   if (props.refId === null) {
     ElMessage.warning('缺少必要的 ID 参数')
     return
   }
-  if (!(await confirmExternalPolish())) return
+  if (useLlm.value && !canUseLlm.value) return
+  const current = captureGeneration()
+  const source = props.source
+  const refId = props.refId
+  const requestedTool = targetTool.value
+  const polish = useLlm.value
   loading.value = true
   bundle.value = null
   activeIdx.value = 0
   try {
-    if (props.source === 'issue') {
-      bundle.value = await generatePromptForIssue({
-        issue_id: props.refId,
-        target_tool: targetTool.value,
-        use_llm: useLlm.value,
+    if (!(await confirmExternalPolish()) || !current() || (polish && !canUseLlm.value)) return
+    let generated: AiPromptBundleOut
+    if (source === 'issue') {
+      generated = await generatePromptForIssue({
+        issue_id: refId,
+        target_tool: requestedTool,
+        use_llm: polish,
       })
-    } else if (props.source === 'task') {
-      bundle.value = await generatePromptForTask({
-        task_id: props.refId,
-        target_tool: targetTool.value,
-        use_llm: useLlm.value,
+    } else if (source === 'task') {
+      generated = await generatePromptForTask({
+        task_id: refId,
+        target_tool: requestedTool,
+        use_llm: polish,
       })
     } else {
-      bundle.value = await generatePromptForProject({
-        project_id: props.refId,
-        target_tool: targetTool.value,
+      generated = await generatePromptForProject({
+        project_id: refId,
+        target_tool: requestedTool,
         top_n: 30,
-        use_llm: useLlm.value,
+        use_llm: polish,
       })
     }
+    if (!current()) return
+    bundle.value = generated
     if (!bundle.value?.prompts?.length) {
       ElMessage.warning('未生成任何提示词')
     }
+  } catch {
+    // API 拦截器负责错误提示，保留当前参数供重试。
   } finally {
-    loading.value = false
+    if (current()) loading.value = false
   }
 }
 
 async function copyPrompt(p: AiPromptItemOut): Promise<void> {
+  if (!props.modelValue || !canReadSource.value || disposed) return
+  const current = captureGeneration()
   try {
     await navigator.clipboard.writeText(p.prompt_text)
-    ElMessage.success('已复制到剪贴板')
+    if (current()) ElMessage.success('已复制到剪贴板')
   } catch {
-    ElMessage.error('复制失败,请手动选择文本复制')
+    if (current()) ElMessage.error('复制失败,请手动选择文本复制')
   }
 }
 
 function downloadAll(): void {
-  if (!displayItems.value.length) return
+  if (!props.modelValue || !canReadSource.value || disposed || !displayItems.value.length) return
   const md = displayItems.value
     .map((p, i) =>
       [
@@ -172,6 +199,8 @@ function downloadAll(): void {
  * @returns 无返回值。
  */
 function resetGeneratedBundle(): void {
+  generation++
+  loading.value = false
   bundle.value = null
   activeIdx.value = 0
 }
@@ -180,7 +209,12 @@ watch(visible, (v) => {
   if (v) loadTools()
 })
 
-watch([() => props.source, () => props.refId, targetTool, useLlm], resetGeneratedBundle)
+watch([() => props.source, () => props.refId, targetTool, useLlm], resetGeneratedBundle, { flush: 'sync' })
+watch([visible, () => userStore.token, () => userStore.profile?.id, canReadSource, canUseLlm], () => {
+  resetGeneratedBundle()
+  if (!canUseLlm.value) useLlm.value = false
+}, { flush: 'sync' })
+onBeforeUnmount(() => { disposed = true; generation++ })
 </script>
 
 <template>
@@ -204,12 +238,13 @@ watch([() => props.source, () => props.refId, targetTool, useLlm], resetGenerate
         </el-select>
       </div>
       <div class="tb-right">
-        <el-checkbox v-model="useLlm" size="small">让 AI 润色一遍</el-checkbox>
+        <el-checkbox v-model="useLlm" :disabled="!canUseLlm" size="small">让 AI 润色一遍</el-checkbox>
         <el-button
           size="small"
           type="primary"
           :icon="MagicStick"
           :loading="loading"
+          :disabled="!canReadSource"
           @click="generate"
         >
           {{ bundle ? '重新生成' : '生成' }}

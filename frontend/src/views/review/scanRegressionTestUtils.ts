@@ -26,7 +26,7 @@ export function deferred<Value>() {
 export function project(id: number): ProjectOut {
   return {
     id, project_name: `项目${id}`, status: 'active', file_count: 1,
-    can_update: true, can_delete: true, create_time: '2026-09-05T00:00:00Z',
+    can_update: true, can_delete: true, can_execute: true, create_time: '2026-09-05T00:00:00Z',
   }
 }
 

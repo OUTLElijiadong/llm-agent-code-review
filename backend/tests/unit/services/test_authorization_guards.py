@@ -5,9 +5,11 @@ from app.agents.discussion_bus import DiscussionSession
 from app.api.v1.discussion import start_discussion
 from app.api.v1.ws_discussion import _can_access_session
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
-from app.models.rbac import Role, UserRole
+from app.models.project_member import ProjectMember
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_rule import ReviewRule
 from app.models.review_task import ReviewTask
@@ -57,6 +59,25 @@ def _project(db, owner: User) -> Project:
     db.commit()
     db.refresh(row)
     return row
+
+
+def _grant_review_start(db, user: User) -> None:
+    """合法执行样本使用真实 RBAC 关联，不能绕过圆桌的授权门。"""
+    role = db.query(Role).filter_by(code=user.role).one_or_none()
+    if role is None:
+        role = Role(name=user.role, code=user.role, status="active", is_builtin=1)
+        db.add(role)
+        db.flush()
+    permission = db.query(Permission).filter_by(code=PermissionCode.REVIEW_START).one_or_none()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REVIEW_START, name="发起审查", module="review", type="api")
+        db.add(permission)
+        db.flush()
+    if db.query(UserRole).filter_by(user_id=user.id, role_id=role.id).first() is None:
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+    if db.query(RolePermission).filter_by(role_id=role.id, permission_id=permission.id).first() is None:
+        db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    db.commit()
 
 
 def _code_file(db, project: Project) -> CodeFile:
@@ -215,6 +236,7 @@ def test_discussion_start_requires_project_owner(db, monkeypatch):
 @pytest.mark.parametrize("content,binary", [("", 0), (" \t\n\u3000", 0), ("encoded", 1)])
 def test_discussion_preflight_rejects_empty_scan_before_registration(db, monkeypatch, content, binary):
     owner = _user(db, "empty-disc-owner")
+    _grant_review_start(db, owner)
     project = _project(db, owner)
     code_file = _code_file(db, project)
     code_file.content = content
@@ -224,6 +246,64 @@ def test_discussion_preflight_rejects_empty_scan_before_registration(db, monkeyp
     monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
     with pytest.raises(ValidationError, match="有效非空"):
         start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=owner)
+    assert not registered
+
+
+@pytest.mark.parametrize("content,binary", [("", 0), (" \t\n\u3000", 0), ("encoded", 1)])
+def test_discussion_preflight_preserves_empty_input_rejection_for_authorized_reviewer(
+    db, monkeypatch, content, binary,
+):
+    owner = _user(db, "empty-disc-project-owner")
+    reviewer = _user(db, "empty-disc-authorized-reviewer")
+    _grant_review_start(db, reviewer)
+    project = _project(db, owner)
+    db.add(ProjectMember(project_id=project.id, user_id=reviewer.id, role_in_project="reviewer"))
+    code_file = _code_file(db, project)
+    code_file.content = content
+    code_file.is_binary = binary
+    db.commit()
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+
+    with pytest.raises(ValidationError, match="有效非空"):
+        start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=reviewer)
+    assert not registered
+
+
+@pytest.mark.parametrize("content,binary", [("", 0), (" \t\n\u3000", 0), ("encoded", 1)])
+def test_discussion_rejects_missing_review_permission_before_empty_input_validation(
+    db, monkeypatch, content, binary,
+):
+    owner = _user(db, "empty-disc-no-review-permission")
+    project = _project(db, owner)
+    code_file = _code_file(db, project)
+    code_file.content = content
+    code_file.is_binary = binary
+    db.commit()
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+
+    with pytest.raises(ForbiddenError, match="发起审查"):
+        start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=owner)
+    assert not registered
+
+
+@pytest.mark.parametrize("project_role,error_type", [("viewer", ForbiddenError), ("unknown", NotFoundError)])
+def test_discussion_preflight_denies_non_executing_project_role_before_registration(
+    db, monkeypatch, project_role, error_type,
+):
+    owner = _user(db, "disc-project-owner")
+    actor = _user(db, "disc-non-executing-member")
+    _grant_review_start(db, actor)
+    project = _project(db, owner)
+    db.add(ProjectMember(project_id=project.id, user_id=actor.id, role_in_project=project_role))
+    code_file = _code_file(db, project)
+    db.commit()
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+
+    with pytest.raises(error_type):
+        start_discussion(project_id=project.id, file_id=code_file.id, review_type="full", db=db, user=actor)
     assert not registered
 
 

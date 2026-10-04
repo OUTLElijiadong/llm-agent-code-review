@@ -15,6 +15,7 @@ usage() {
 
 说明: 仅切换应用镜像，不执行 Alembic downgrade 或数据库恢复。
       对话账本迁移后仅允许支持 v2 引用的镜像；旧 reader 须前向修复。
+      只读成员启用后仅允许支持其读、写及执行边界的镜像。
 USAGE
 }
 
@@ -80,6 +81,7 @@ if [[ "$target" == "all" || "$target" == "frontend" ]]; then
 fi
 
 assert_checkpoint_rollback_compatible
+assert_project_member_rollback_compatible
 
 log_warn "开始应用层回滚(target=$target, release=$previous_sha)；数据库保持当前 revision"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then

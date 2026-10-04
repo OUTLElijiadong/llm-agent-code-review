@@ -1,0 +1,54 @@
+{
+  "time": "2026-10-04T15:51:55.038227+00:00",
+  "scope": "仅维护实际新增AiPrompt3授权路由的基线，产品验收runner未改",
+  "red": {
+    "returncode": 1,
+    "failed": 3,
+    "warnings": 2,
+    "seconds": 1.39
+  },
+  "green": {
+    "returncode": 0,
+    "passed": 1083,
+    "warnings": 2,
+    "seconds": 11.71
+  },
+  "routes": 339,
+  "authenticated": 325,
+  "endpoint_sources": 42,
+  "guarded_before": 255,
+  "guarded_after": 258,
+  "asserted_guards": {
+    "POST /api/ai-prompt/issue": "issue:view",
+    "POST /api/ai-prompt/task": "review:view",
+    "POST /api/ai-prompt/project": "project:view"
+  },
+  "files": [
+    {
+      "path": "backend/tests/test_complete_permission_matrix.py",
+      "bytes": 30242,
+      "sha256": "4f9fb9ef7d46af6397979f1fb290fed1aa5fc9c08633558f8b792ba73e68c13e"
+    },
+    {
+      "path": "backend/tests/test_permission_route_contexts.py",
+      "bytes": 10339,
+      "sha256": "f0ba900a2820d6b80d7a3997e0a722a1b0d36fa338b7a0377f26b09ab82e54fe"
+    },
+    {
+      "path": "backend/tests/test_production_permission_acceptance_runner.py",
+      "bytes": 6928,
+      "sha256": "2aafedc607a5a8f76bc18c2556f219b5b1d85952925001fa608397843b7a84c7"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R3新路由授权基线红.log",
+      "bytes": 5504,
+      "sha256": "e54c10bf934fe71e58005a4a521b517c009d026dc90a767dadebd23f6183a68e"
+    },
+    {
+      "path": "docs/全系统架构与体验审计20261001/evidence/复测-20261004-R3新路由授权基线扩大绿.log",
+      "bytes": 2939,
+      "sha256": "2e5de394aa19cf548d1d5ce1fb0fae3d01f9c0526a72a42795995caca5f3a41e"
+    }
+  ],
+  "boundary": "SQLite/TestClient/真实JWT；不启动lifespan、不发任何外部目标或模型请求，非生产权限矩阵"
+}

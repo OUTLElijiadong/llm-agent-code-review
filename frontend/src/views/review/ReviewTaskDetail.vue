@@ -123,12 +123,12 @@
 
       <div class="head-actions">
         <el-button
-          v-if="task?.severe_issues || task?.high_issues || task?.medium_issues"
+          v-if="canScanTask && (task?.severe_issues || task?.high_issues || task?.medium_issues)"
           :icon="Lock"
           size="small"
           type="danger"
           plain
-          @click="securityScanVisible = true"
+          @click="openTaskSecurityScan"
         >
           🛡 安全复审
         </el-button>
@@ -181,6 +181,7 @@
       v-model="aiPromptVisible"
       source="task"
       :ref-id="taskId"
+      :can-polish="task?.can_execute === true"
     />
 
     <SecurityScanModal
@@ -391,9 +392,11 @@ import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constan
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const taskId = computed(() => Number(route.params.id))
 
 type TraceFileItem = Partial<TaskFileOut> & {
@@ -420,6 +423,11 @@ const snapshotFileIds = new Set<number>()
 let detailRequest: { generation: number; promise: Promise<void> } | null = null
 let issueRequest: { key: string; promise: Promise<void> } | null = null
 const task = ref<TaskDetailOut | null>(null)
+const canScanTask = computed(() => Boolean(userStore.token && userStore.profile)
+  && userStore.hasPermission('security:scan') && task.value?.can_execute === true)
+function openTaskSecurityScan() {
+  if (canScanTask.value) securityScanVisible.value = true
+}
 const isSandboxReport = computed(() => task.value?.review_type === 'sandbox_test')
 const reportMetricsRestricted = computed(() => (
   ['sandbox_test', 'pentest'].includes(task.value?.review_type || '')

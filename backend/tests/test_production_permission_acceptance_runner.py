@@ -55,7 +55,7 @@ def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
     assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 325
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 255
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 258
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
         "/api/agent-responses/assets/{asset_id}/image",

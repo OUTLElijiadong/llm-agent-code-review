@@ -1,0 +1,65 @@
+[
+  {
+    "sample": "ascii_word",
+    "unit": " a",
+    "chars": 20000,
+    "utf8_bytes": 20000,
+    "official_local_content_tokens": 10000,
+    "application_estimate_tokens": 5001,
+    "body_sha256": "b8c2c6f894b00a1bec9a56366030948f7bacc964fb84728c7b4e8bc3d5523561"
+  },
+  {
+    "sample": "ascii_punct",
+    "unit": ".a",
+    "chars": 20000,
+    "utf8_bytes": 20000,
+    "official_local_content_tokens": 10000,
+    "application_estimate_tokens": 5001,
+    "body_sha256": "b034430fdd3ddac323504fd1688225a11c056242b538a53b293f35a4588168b1"
+  },
+  {
+    "sample": "ascii_numeric",
+    "unit": " 7",
+    "chars": 20000,
+    "utf8_bytes": 20000,
+    "official_local_content_tokens": 20000,
+    "application_estimate_tokens": 5001,
+    "body_sha256": "a06105ac4b9d34f482c171de303fb3f801823751129ead61ed0b5f0d036340d6"
+  },
+  {
+    "sample": "json_keys",
+    "unit": "{\"a\":1},",
+    "chars": 80000,
+    "utf8_bytes": 80000,
+    "official_local_content_tokens": 40001,
+    "application_estimate_tokens": 25001,
+    "body_sha256": "c0455dacdea4e8ab6ec829e2dbb7e32360023e7f7a14a4774ca4de54977438e1"
+  },
+  {
+    "sample": "code_ascii",
+    "unit": "x=1;\n",
+    "chars": 50000,
+    "utf8_bytes": 50000,
+    "official_local_content_tokens": 40000,
+    "application_estimate_tokens": 15001,
+    "body_sha256": "4f6444da42cbb8b6cf6fcbcbb62e62886d1a55933b53801d4d79ebbc28b022ea"
+  },
+  {
+    "sample": "chinese",
+    "unit": "信息",
+    "chars": 20000,
+    "utf8_bytes": 60000,
+    "official_local_content_tokens": 10000,
+    "application_estimate_tokens": 40001,
+    "body_sha256": "30080dd9da3036ceb58b857cc107e6b3383b67a5ddeb902852a3d622b3ebc96e"
+  },
+  {
+    "sample": "chinese_rare",
+    "unit": "龘",
+    "chars": 10000,
+    "utf8_bytes": 30000,
+    "official_local_content_tokens": 20000,
+    "application_estimate_tokens": 20001,
+    "body_sha256": "e8a5ce09b09b4198311841b685faa957d67f217f858521dbb182e7538f8b0574"
+  }
+]

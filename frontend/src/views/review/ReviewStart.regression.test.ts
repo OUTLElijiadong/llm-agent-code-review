@@ -1,6 +1,8 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElCheckbox, ElRadio, ElRadioButton } from 'element-plus'
+import { createPinia, setActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
 import { codeFile, deferred, pageOf, project, scanMountOptions } from './scanRegressionTestUtils'
 
 const api = vi.hoisted(() => ({ projects: vi.fn(), files: vi.fn(), start: vi.fn(), discuss: vi.fn(), confirm: vi.fn() }))
@@ -12,12 +14,21 @@ vi.mock('@/api/review', () => ({ startReview: api.start }))
 vi.mock('@/api/discussion', () => ({ startDiscussion: api.discuss }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 vi.mock('vue-router', () => ({ useRouter: () => router }))
+vi.mock('@/router', () => ({ default: router }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 import ReviewStart from './ReviewStart.vue'
 
 let wrapper: VueWrapper
+let pinia: ReturnType<typeof createPinia>
+let user: ReturnType<typeof useUserStore>
 beforeEach(() => {
   vi.resetAllMocks()
+  pinia = createPinia()
+  setActivePinia(pinia)
+  user = useUserStore()
+  user.token = 'review-account-a'
+  user.profile = { id: 11, username: 'review-user', role: 'user' } as any
+  user.permissions = new Set(['project:view', 'file:view', 'review:start'])
   api.projects.mockResolvedValue(pageOf([project(1)]))
   api.files.mockResolvedValue(pageOf([codeFile(1)]))
   api.start.mockResolvedValue({ task_id: 7, status: 'pending' })
@@ -28,7 +39,7 @@ beforeEach(() => {
 afterEach(() => wrapper?.unmount())
 
 async function render() {
-  wrapper = mount(ReviewStart, scanMountOptions)
+  wrapper = mount(ReviewStart, { ...scanMountOptions, global: { ...scanMountOptions.global, plugins: [pinia] } })
   await flushPromises()
   return wrapper.vm as any
 }
@@ -40,6 +51,89 @@ async function chooseProject(vm: any, id = 1) {
 }
 
 describe('审查扫描范围失败回归', () => {
+  it.each([false, undefined])('R3 仅可查看或缺少执行能力的项目不能直接发起审查 %s', async (canExecute) => {
+    api.projects.mockResolvedValue(pageOf([{ ...project(1), can_execute: canExecute }]))
+    const vm = await render()
+    await chooseProject(vm)
+    vm.files = [codeFile(1)]
+    vm.filesProjectId = 1
+    expect(vm.submitDisabled).toBe(true)
+    await vm.onSubmit()
+    expect(api.start).not.toHaveBeenCalled()
+    expect(api.discuss).not.toHaveBeenCalled()
+    expect(api.files).not.toHaveBeenCalled()
+  })
+
+  it('R3 批量模式明确排除只读项目，且不读取其文件或创建任务', async () => {
+    api.projects.mockResolvedValue(pageOf([
+      { ...project(1), can_execute: true },
+      { ...project(2), can_execute: false },
+      { ...project(3), can_execute: undefined },
+    ]))
+    const vm = await render()
+    vm.form.scope = 'all'
+    await flushPromises()
+    expect(wrapper.text()).toContain('已排除 2 个仅可查看或未确认执行权限的项目')
+    await vm.onSubmit()
+    expect(api.start).toHaveBeenCalledTimes(1)
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ project_id: 1 }))
+    expect(api.files.mock.calls.every(([params]) => params.project_id === 1)).toBe(true)
+  })
+
+  it('R3 全局发起权限撤销时，已有合法项目与文件不能继续提交', async () => {
+    api.projects.mockResolvedValue(pageOf([{ ...project(1), can_execute: true }]))
+    const vm = await render()
+    await chooseProject(vm)
+    user.permissions = new Set(['project:view', 'file:view'])
+    await flushPromises()
+    await vm.onSubmit()
+    expect(api.start).not.toHaveBeenCalled()
+    expect(vm.submitDisabled).toBe(true)
+  })
+
+  it('R3 批量确认等待中切换账号不会发出旧账号项目的任务', async () => {
+    api.projects.mockResolvedValue(pageOf([{ ...project(1), can_execute: true }]))
+    const vm = await render()
+    vm.form.scope = 'all'
+    const confirmation = deferred<boolean>()
+    api.confirm.mockReturnValueOnce(confirmation.promise)
+    const request = vm.onSubmit()
+    await flushPromises()
+    user.token = 'review-account-b'
+    user.profile = { id: 12, username: 'other-user', role: 'user' } as any
+    confirmation.resolve(true)
+    await request
+    expect(api.start).not.toHaveBeenCalled()
+    expect(api.files).not.toHaveBeenCalled()
+  })
+
+  it('R3 批量文件读取期间撤销再授予执行权限，不继续旧提交', async () => {
+    const vm = await render()
+    vm.form.scope = 'all'
+    const pending = deferred<ReturnType<typeof pageOf>>()
+    api.files.mockReturnValueOnce(pending.promise)
+    const request = vm.onSubmit()
+    await flushPromises()
+    expect(api.files).toHaveBeenCalledTimes(1)
+    user.permissions.delete('review:start')
+    user.permissions.add('review:start')
+    pending.resolve(pageOf([codeFile(1)]))
+    await request
+    expect(api.start).not.toHaveBeenCalled()
+    expect(vm.submitting).toBe(false)
+  })
+
+  it('R3 合法单文件圆桌仍发送原选定范围，未更改审查方式', async () => {
+    const vm = await render()
+    await chooseProject(vm)
+    vm.form.review_type = 'discuss'
+    vm.form.scope = 'files'
+    vm.form.file_ids = [1]
+    await vm.onSubmit()
+    expect(api.discuss).toHaveBeenCalledExactlyOnceWith({ project_id: 1, file_id: 1, review_type: 'full' })
+    expect(api.start).not.toHaveBeenCalled()
+  })
+
   it('只有全部项目范围显示批量项目摘要', async () => {
     const vm = await render()
     expect(wrapper.text()).not.toContain('将审查全部')
@@ -52,6 +146,7 @@ describe('审查扫描范围失败回归', () => {
   })
 
   it('R1 快速切换时旧响应不能覆盖新项目文件', async () => {
+    api.projects.mockResolvedValue(pageOf([project(1), project(2)]))
     const vm = await render()
     const older = deferred<ReturnType<typeof pageOf>>()
     const newer = deferred<ReturnType<typeof pageOf>>()
@@ -68,6 +163,7 @@ describe('审查扫描范围失败回归', () => {
   })
 
   it('旧请求先结束时不能解除新请求的加载锁', async () => {
+    api.projects.mockResolvedValue(pageOf([project(1), project(2)]))
     const vm = await render()
     const older = deferred<ReturnType<typeof pageOf>>()
     const newer = deferred<ReturnType<typeof pageOf>>()
@@ -269,6 +365,7 @@ describe('审查扫描范围失败回归', () => {
   })
 
   it('旧项目请求失败不会污染新项目的文件或错误状态', async () => {
+    api.projects.mockResolvedValue(pageOf([project(1), project(2)]))
     const vm = await render()
     const older = deferred<ReturnType<typeof pageOf>>()
     api.files.mockReturnValueOnce(older.promise).mockResolvedValueOnce(pageOf([codeFile(2, { project_id: 2 })]))

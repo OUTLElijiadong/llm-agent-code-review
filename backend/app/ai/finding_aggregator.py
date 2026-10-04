@@ -11,7 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-AGGREGATION_VERSION = "finding-aggregation-v1"
+# v2 区分精确源码引用与漏洞核实；历史 v1 记录由原有输出契约原样保留。
+AGGREGATION_VERSION = "finding-aggregation-v2"
 RISK_SCORING_VERSION = "claim-risk-v2"
 
 _SCORES = {"严重": 100.0, "高": 75.0, "中": 50.0, "低": 25.0}
@@ -464,10 +465,13 @@ def _normalize_confidence(value: Any) -> tuple[Any, float]:
 
 
 def _evidence_quality(evidence: str, code: str, raw: Mapping[str, Any]) -> str:
-    normalized_evidence = _normalize_text(evidence)
-    if normalized_evidence and normalized_evidence in _normalize_text(code):
+    # "verified" is the existing wire value for a matched source quote only.
+    # Case and whitespace inside literals can change program meaning, so the
+    # similarity normalization used for clustering must not verify a quote.
+    quote = evidence.strip()
+    if quote and quote in code:
         return "verified"
-    if normalized_evidence:
+    if quote:
         return "direct"
     if _as_non_negative_int(raw.get("line_number", raw.get("line_start"))) or raw.get("source_anchor"):
         return "inferred"
@@ -519,11 +523,23 @@ def _aggregate_cluster(cluster: list[dict[str, Any]], *, file_name: str, chunk_i
     if any(value in {"rejected", "disputed", "reject"} for value in stances):
         conflicts.append("stance_disagreement")
     conflict_status = "unresolved" if conflicts else "none"
-    needs_human = (
-        bool(conflicts)
-        or canonical["confidence"]["calibrated"] < 0.6
-        or canonical["evidence_quality"] in {"unsupported", "inferred"}
-    )
+    review_reasons = []
+    if conflicts:
+        review_reasons.append("claim_conflict")
+    if canonical["confidence"]["calibrated"] < 0.6:
+        review_reasons.append("low_claim_confidence")
+    if any(item["evidence_quality"] != "verified" for item in ordered):
+        review_reasons.append("source_quote_unverified")
+    if any(
+        item["issue_type"].strip().lower() in {"安全漏洞", "security", "security_vulnerability", "vulnerability"}
+        for item in ordered
+    ):
+        # A source substring and agreement between model claims do not prove
+        # vulnerability prerequisites or impact. Use the existing adjudication
+        # workflow until those facts have been checked; do not trust raw model
+        # "confirmed"/"accepted" flags as a verification receipt.
+        review_reasons.append("security_claim_requires_verification")
+    needs_human = bool(review_reasons)
     real_sources: dict[tuple[str, str], dict[str, Any]] = {}
     for item in ordered:
         source_key = (item["agent_code"], item["source"])
@@ -602,6 +618,7 @@ def _aggregate_cluster(cluster: list[dict[str, Any]], *, file_name: str, chunk_i
             "claims": ordered,
             "conflicts": conflicts,
             "decision": "human_review" if needs_human else "accepted",
+            "review_reasons": review_reasons,
         },
     }
 

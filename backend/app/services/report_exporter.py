@@ -485,6 +485,9 @@ def _build_report_context(
         "unresolved_conflicts": 0,
         "insufficient_evidence": 0,
     }
+    human_review_counts = dict.fromkeys(
+        ("pending", "evidence_requested", "accepted", "rejected", "not_required", "unrecorded"), 0,
+    )
     for item in normalized_issues:
         severity = item.get("severity")
         if severity in severity_count:
@@ -508,6 +511,9 @@ def _build_report_context(
             aggregation_summary["unresolved_conflicts"] += 1
         if item.get("evidence_quality") == "unsupported":
             aggregation_summary["insufficient_evidence"] += 1
+        review_status = item.get("human_review_status")
+        review_status_key = review_status if review_status in human_review_counts else "unrecorded"
+        human_review_counts[review_status_key] += 1
 
     compliance_summary = _build_compliance_summary(normalized_issues)
     top_vulnerabilities = _build_top_vulnerabilities(normalized_issues, top_n=10)
@@ -544,6 +550,20 @@ def _build_report_context(
         "score_breakdown": score_breakdown,
         "risk_level": score_breakdown["risk_level"],
         "aggregation_summary": aggregation_summary,
+        # 仅增加解释元数据，保留既有分数、扣分范围和历史字段。来源数与
+        # 引用匹配没有验证漏洞条件/影响，人工裁决也没有提供复测回执。
+        "assessment_basis": {
+            "version": "assessment-disclosure-v1",
+            "score_source": score_breakdown["score_source"],
+            "issue_scope": "all_reported_review_issues",
+            "human_review_counts": human_review_counts,
+            "confidence_semantics": "model_estimate_not_vulnerability_verification",
+            "confirmation_count_semantics": "retained_source_count_not_vulnerability_verification",
+            "evidence_quality_semantics": "source_quote_match_not_condition_or_impact_verification",
+            "manual_status_semantics": "manual_disposition_not_retest_verification",
+            "domestic_database_freshness": "not_verified_by_this_export",
+            "official_rating": "not_provided_by_this_export",
+        },
     }
 
     files = task.get("files", []) if isinstance(task, dict) else getattr(task, "files", [])
@@ -575,6 +595,22 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
             else "未记录，不能据此判定完整覆盖"
         ),
     ]
+    basis = context["statistics"]["assessment_basis"]
+    counts = basis["human_review_counts"]
+    lines.extend([
+        "评分口径：" + (
+            "空问题报告保留历史显式分数，不代表已验证无漏洞。"
+            if basis["score_source"] == "task_explicit_empty_report"
+            else "平台内部问题扣分，按报告问题的严重度计数计算，不是官方漏洞评分。"
+        ),
+        f"复核范围：待核实 {counts['pending'] + counts['evidence_requested']} 项、"
+        f"人工驳回 {counts['rejected']} 项仍纳入现有评分口径；"
+        f"复核状态未记录 {counts['unrecorded']} 项，不能补认定为已验证。",
+        "证据边界：源码引用匹配、模型置信度及 confirmation_count 来源数均不代表漏洞条件或影响已验证；"
+        "人工接受/驳回是复核裁决，已修复标记不等于复测通过。",
+        "漏洞库时效：本导出未核验国内漏洞库的记录版本或更新时间，"
+        "不能据此声明已同步最新库或获得权威认证。",
+    ])
     if task.get("agent_releases"):
         lines.append("审查 Agent 版本：" + json.dumps(task["agent_releases"], ensure_ascii=False, default=str))
     for file in context["files"]:

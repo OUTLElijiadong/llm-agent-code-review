@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.permission_codes import PermissionCode
-from app.models.agent_team import AgentTeam, AgentTeamEvent
+from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamTask
 from app.models.user import User
 from app.services import agent_team_service, rbac_service
 from app.services.ai_usage_context import model_attribution, usage_context
@@ -70,7 +70,8 @@ def _task_message(team: AgentTeam, claimed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _owner_access_error(db: Session, owner_id: int) -> str:
+def _owner_access_error(db: Session, owner_id: int, task_input: dict | None = None, *,
+                        team_id: int | None = None, task_id: int | None = None) -> str:
     """用新事务观察撤权或停用；旧 Worker 的只读快照不能授权执行或回传。"""
 
     with Session(bind=db.get_bind(), autoflush=False) as access_db:
@@ -81,6 +82,18 @@ def _owner_access_error(db: Session, owner_id: int) -> str:
             return "账户已停用或删除，团队任务已阻断"
         if not rbac_service.check_permission(access_db, int(owner.id), PermissionCode.AGENT_CHAT):
             return "账户的 agent:chat 权限已撤销，团队任务已阻断"
+        from app.core.exceptions import AppError
+        from app.services.project_member_service import require_scoped_project_execution
+        try:
+            require_scoped_project_execution(access_db, owner, task_input or {})
+            if task_id is not None:
+                task = access_db.get(AgentTeamTask, task_id, populate_existing=True)
+                team = access_db.get(AgentTeam, team_id, populate_existing=True) if team_id is not None else None
+                if task is None or team is None or task.team_id != team.id or team.user_id != owner.id:
+                    return "团队任务资源范围已失效，任务已阻断"
+                agent_team_service.require_task_project_execution(access_db, owner, task)
+        except AppError:
+            return "项目执行资格已撤销或资源范围已变化，团队任务已阻断"
     return ""
 
 
@@ -99,7 +112,8 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
             db.rollback()
             logger.info("[agent-team-dispatcher] skip inactive team={} task={}: {}", team_id, claimed["task_id"], exc)
             return {"success": False}
-        access_error = _owner_access_error(db, int(team.user_id))
+        access_error = _owner_access_error(db, int(team.user_id), agent_team_service._unjson(_task.input_json, {}),
+                                           team_id=int(team.id), task_id=int(_task.id))
         if access_error:
             try:
                 agent_team_service.complete_task(
@@ -218,7 +232,8 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     _task_message(team, claimed),
                     trusted_team_execution=True,
                 )
-            access_error = _owner_access_error(db, int(team.user_id))
+            access_error = _owner_access_error(db, int(team.user_id), agent_team_service._unjson(_task.input_json, {}),
+                                           team_id=int(team.id), task_id=int(_task.id))
             if access_error:
                 result = {"status": "blocked", "summary": access_error, "retryable": False}
             result_review = agent_supervisor_service.review_task_result(result)

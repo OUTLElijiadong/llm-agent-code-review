@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
 const projectApi = vi.hoisted(() => ({ getProjects: vi.fn(), getProjectDetail: vi.fn() }))
 const confirmation = vi.hoisted(() => vi.fn())
 const environment = {
-  public_id: 'sbx_1', project_id: 7, owner_id: 2, worker_code: 'managed-1', agent_code: 'test_verifier',
+  public_id: 'sbx_1', project_id: 7, owner_id: 2, can_execute: true, can_preview: true, can_stop: true, worker_code: 'managed-1', agent_code: 'test_verifier',
   purpose: 'test', language: 'python', test_mode: 'combined', status: 'succeeded', runtime: 'runsc',
   source_sha256: 'a'.repeat(64), expires_at: '2026-08-05T00:00:00', result: { summary: '测试通过' },
   events: [
@@ -27,7 +27,7 @@ vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: {
 
 import SandboxWorkstation from './SandboxWorkstation.vue'
 
-const user = reactive({ profile: { id: 11 }, token: 'account-a', isSuperAdmin: () => false })
+const user = reactive({ profile: { id: 11 }, token: 'account-a', isSuperAdmin: () => false, hasPermission: (code: string) => ['project:view', 'file:view'].includes(code) })
 
 const mountOptions = {
   global: {
@@ -66,7 +66,7 @@ beforeEach(() => {
   user.token = 'account-a'
   confirmation.mockResolvedValue(true)
   projectApi.getProjects.mockResolvedValue({
-    items: [{ id: 7, project_name: '项目 A', status: 'active', file_count: 1, create_time: '' }],
+    items: [{ id: 7, project_name: '项目 A', status: 'active', can_execute: true, file_count: 1, create_time: '' }],
     total: 1,
   })
   projectApi.getProjectDetail.mockResolvedValue({ source_revisions: [] })
@@ -100,8 +100,8 @@ describe('SandboxWorkstation Agent output ordering', () => {
   it('synchronizes the deployment runtime whenever the selected project changes', async () => {
     projectApi.getProjects.mockResolvedValue({
       items: [
-        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', file_count: 1, create_time: '' },
-        { id: 8, project_name: 'PHP 项目', language: 'php', status: 'active', file_count: 1, create_time: '' },
+        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', can_execute: true, file_count: 1, create_time: '' },
+        { id: 8, project_name: 'PHP 项目', language: 'php', status: 'active', can_execute: true, file_count: 1, create_time: '' },
       ],
       total: 2,
     })
@@ -126,8 +126,8 @@ describe('SandboxWorkstation Agent output ordering', () => {
   it('recomputes the project runtime at submit and sends an exact PHP deployment payload', async () => {
     projectApi.getProjects.mockResolvedValue({
       items: [
-        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', file_count: 1, create_time: '' },
-        { id: 8, project_name: 'PHP 项目', language: 'PHP 8.3', status: 'active', file_count: 1, create_time: '' },
+        { id: 7, project_name: 'Python 项目', language: 'python', status: 'active', can_execute: true, file_count: 1, create_time: '' },
+        { id: 8, project_name: 'PHP 项目', language: 'PHP 8.3', status: 'active', can_execute: true, file_count: 1, create_time: '' },
       ],
       total: 2,
     })
@@ -169,7 +169,7 @@ describe('SandboxWorkstation Agent output ordering', () => {
 
   it('blocks deployment when the project language has no controlled runtime', async () => {
     projectApi.getProjects.mockResolvedValue({
-      items: [{ id: 9, project_name: '未知语言项目', language: 'plaintext', status: 'active', file_count: 1, create_time: '' }],
+      items: [{ id: 9, project_name: '未知语言项目', language: 'plaintext', status: 'active', can_execute: true, file_count: 1, create_time: '' }],
       total: 1,
     })
     const wrapper = shallowMount(SandboxWorkstation, mountOptions)
@@ -284,8 +284,8 @@ describe('SandboxWorkstation Agent output ordering', () => {
   it('项目快速切换后只显示当前项目的修复副本', async () => {
     projectApi.getProjects.mockResolvedValue({
       items: [
-        { id: 7, project_name: '项目 A', language: 'python', status: 'active', file_count: 1, create_time: '' },
-        { id: 8, project_name: '项目 B', language: 'node', status: 'active', file_count: 1, create_time: '' },
+        { id: 7, project_name: '项目 A', language: 'python', status: 'active', can_execute: true, file_count: 1, create_time: '' },
+        { id: 8, project_name: '项目 B', language: 'node', status: 'active', can_execute: true, file_count: 1, create_time: '' },
       ],
       total: 2,
     })
@@ -321,7 +321,7 @@ describe('SandboxWorkstation Agent output ordering', () => {
     const wrapper = shallowMount(SandboxWorkstation, mountOptions)
     await nextTick()
     wrapper.unmount()
-    projects.resolve({ items: [{ id: 7, project_name: '项目 A', status: 'active', language: 'python' }], total: 1 })
+    projects.resolve({ items: [{ id: 7, project_name: '项目 A', status: 'active', can_execute: true, language: 'python' }], total: 1 })
     await flushPromises()
     const callsAfterUnmount = api.listSandboxes.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)

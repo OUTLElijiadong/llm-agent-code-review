@@ -314,9 +314,14 @@ case "${1:-}" in
   run)
     case "$*" in
       *'--entrypoint python'* )
-        cat >/dev/null
-        [[ "${FAKE_CHECKPOINT_PROBE_FAILURE:-0}" != 1 ]] || exit 72
-        printf '%s\n' "${FAKE_CHECKPOINT_CAPABILITY:-unsupported}" ;;
+        probe_body="$(cat)"
+        if [[ "$probe_body" == *'member capability probe deadline'* ]]; then
+          [[ "${FAKE_MEMBER_PROBE_FAILURE:-0}" != 1 ]] || exit 73
+          printf '%s\n' "${FAKE_MEMBER_CAPABILITY:-supported}"
+        else
+          [[ "${FAKE_CHECKPOINT_PROBE_FAILURE:-0}" != 1 ]] || exit 72
+          printf '%s\n' "${FAKE_CHECKPOINT_CAPABILITY:-unsupported}"
+        fi ;;
       *'heads'*)
         [[ "${FAKE_RELEASE_MODE:-}" != invalid_heads ]] || exit 23
         echo "$alembic_revision (head)" ;;
@@ -339,6 +344,7 @@ run_release_binding_case() {
   mkdir -p "$workspace/deploy/lib" "$workspace/bin" "$workspace/releases" "$workspace/backups"
   cp lib/common.sh "$workspace/deploy/lib/common.sh"
   [[ ! -f lib/checkpoint_compatibility.py ]] || cp lib/checkpoint_compatibility.py "$workspace/deploy/lib/"
+  [[ ! -f lib/project_member_compatibility.py ]] || cp lib/project_member_compatibility.py "$workspace/deploy/lib/"
   cp restore.sh rollback.sh ops-check.sh "$workspace/deploy/"
   write_strong_database_test_env "$workspace/deploy/.env"
   cat >> "$workspace/deploy/.env" <<ENV
@@ -498,7 +504,7 @@ PY
       assert_contains "$workspace/releases/current.env" 'APP_VERSION=3.8.2'
       assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
       assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
-    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy)
+    rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure)
       local expected_success=0 state_before
       case "$test_case" in
         rollback_ledger_compatible) export FAKE_CHECKPOINT_SCHEMA=1 FAKE_CHECKPOINT_REFERENCE=1 FAKE_CHECKPOINT_CAPABILITY=supported; expected_success=1 ;;
@@ -510,6 +516,10 @@ PY
         rollback_ledger_db_failure) export FAKE_CHECKPOINT_DB_FAILURE=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
         rollback_ledger_schema_unknown) export FAKE_CHECKPOINT_SCHEMA_UNKNOWN=1 FAKE_CHECKPOINT_CAPABILITY=supported ;;
         rollback_ledger_legacy) expected_success=1 ;;
+        rollback_member_supported) export FAKE_MEMBER_CAPABILITY=supported; expected_success=1 ;;
+        rollback_member_old) export FAKE_MEMBER_CAPABILITY=unsupported ;;
+        rollback_member_unknown) export FAKE_MEMBER_CAPABILITY=unknown ;;
+        rollback_member_probe_failure) export FAKE_MEMBER_PROBE_FAILURE=1 ;;
       esac
       printf 'pending fixture\n' > "$workspace/releases/pending.env"
       state_before="$(file_sha256 "$workspace/releases/current.env")/$(file_sha256 "$workspace/releases/previous.env")/$(file_sha256 "$workspace/releases/pending.env")"
@@ -541,7 +551,7 @@ run_release_binding_tests() {
   local workspace="$1/release-binding"
   local test_case failed=0 passed=0
   mkdir -p "$workspace"
-  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy; do
+  for test_case in write_version legacy_labels legacy_git missing_evidence conflicting_labels wrong_revision invalid_version digest_changed ops_default_drift ops_masked_drift ops_running_drift ops_consistent restore_missing_image restore_missing_evidence restore_invalid_heads restore_pinned_image rollback_version rollback_legacy rollback_missing_evidence rollback_ledger_compatible rollback_ledger_empty_old rollback_ledger_written_old rollback_ledger_reference_without_schema rollback_ledger_invalid_json rollback_ledger_probe_failure rollback_ledger_probe_unknown rollback_ledger_db_failure rollback_ledger_schema_unknown rollback_ledger_legacy rollback_member_supported rollback_member_old rollback_member_unknown rollback_member_probe_failure; do
     if bash "$PWD/tests/test_scripts.sh" --release-case "$test_case" "$workspace/$test_case" > "$workspace/$test_case.log" 2>&1; then
       passed=$((passed + 1)); printf 'PASS %s\n' "$test_case"
     else

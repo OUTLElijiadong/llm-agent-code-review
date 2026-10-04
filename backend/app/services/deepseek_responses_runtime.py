@@ -14,7 +14,6 @@ import copy
 import hashlib
 import inspect
 import json
-import math
 import re
 import uuid
 from dataclasses import dataclass, field, replace
@@ -842,7 +841,10 @@ class DeepSeekResponsesRuntime:
         )
         chunk_budget = min(
             48_000,
-            self._context_window_tokens - source_output_budget - 1200,
+            # Instructions, source IDs, JSON Schema and nested JSON escaping
+            # consume input too. Leave a separate protocol lane; the complete
+            # assembled compactor payload is checked immediately before send.
+            (self._context_window_tokens - source_output_budget - 4096) // 2,
         )
         if chunk_budget < 300:
             raise ContextBudgetError("语义压缩模型自身没有足够输入预算")
@@ -1110,9 +1112,9 @@ class DeepSeekResponsesRuntime:
                 },
                 "max_output_tokens": max_output_tokens,
             }
-            request_tokens = estimate_tokens(
-                {"instructions": instruction, "input": payload["input"]}
-            )
+            request_tokens = estimate_tokens({
+                key: value for key, value in payload.items() if key != "max_output_tokens"
+            }) + 1024
             if request_tokens + max_output_tokens >= self._context_window_tokens:
                 raise ContextBudgetError("压缩请求本身超出模型上下文窗口")
             checkpoint.context_metadata["semantic_compaction_calls"] = call_count + 1
@@ -1269,7 +1271,7 @@ class DeepSeekResponsesRuntime:
                     "tools": checkpoint.tools,
                     "tool_choice": tool_choice,
                 }
-            )
+            ) + 1024  # Provider message framing beyond the JSON projection.
             try:
                 projected_input, context_metadata = compact_transcript(
                     checkpoint.transcript,
@@ -1799,18 +1801,25 @@ class DeepSeekResponsesRuntime:
 
 
 def estimate_tokens(value: Any) -> int:
-    """对 Responses JSON 进行保守、确定性的 token 预估。
+    """Use serialized UTF-8 bytes as the input-token budget upper bound.
 
-    上游当前未提供官方本地 tokenizer。ASCII 按每 4 字符一个 token，
-    非 ASCII 按每字符 2 个 token 计，留出足够安全余量。
+    The active model may come from user or per-Agent configuration, so one
+    model's tokenizer cannot be assumed here. Byte-based tokenizers cannot
+    emit more content tokens than input bytes; ASCII/4 is an average, not an
+    upper bound, and badly undercounts numbers, punctuation and code. JSON
+    serialization also reserves roles, field names and escaped characters.
+    Callers must still reserve instructions/tools, protocol and output space.
+
+    This is a deliberately conservative budget, not a real tokenizer count or
+    provider usage. It is not a mathematical guarantee for an unknown tokenizer
+    without byte-fallback semantics or a provider-specific prompt encoding.
+    Usage accounting must continue to use the upstream usage.
     """
     try:
         text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
     except (TypeError, ValueError):
         text = str(value)
-    ascii_count = sum(1 for char in text if ord(char) < 128)
-    non_ascii_count = len(text) - ascii_count
-    return max(1, math.ceil(ascii_count / 4) + non_ascii_count * 2)
+    return max(1, len(text.encode("utf-8")))
 
 
 def _context_source_role(item: Mapping[str, Any]) -> str:
@@ -1862,6 +1871,7 @@ def compact_transcript(
     effective_threshold = min(compaction_threshold_tokens, transcript_budget)
     base_metadata: Dict[str, Any] = {
         "strategy_version": COMPACTION_STRATEGY_VERSION,
+        "token_estimate_kind": "serialized_utf8_byte_upper_bound",
         "context_window_tokens": context_window_tokens,
         "max_output_tokens": max_output_tokens,
         "overhead_tokens": overhead_tokens,

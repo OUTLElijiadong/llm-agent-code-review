@@ -1,0 +1,244 @@
+{
+  "核验时间UTC": "2026-10-04T16:15:16.585621+00:00",
+  "状态": "独立限定本地复核通过；未发布或生产验收",
+  "授权范围": "根代理指定仅读最终executor测试及契约，运行58一次；仅新增独立证据，未改产品/测试",
+  "知识前置": "同一帮我完整修复长任务共用根ready收据20261004-073456-f74421d917；本轮只读首页/习惯/治理/路由/项目主题；主库闭环由根代理负责",
+  "冻结收据": {
+    "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor夹具修复冻结与边界.json",
+    "字节数": 13664,
+    "SHA256": "76dd3d381c9ea10925cbd078d012a1e1105ed423de87a6827b2a219f7d3e49ac"
+  },
+  "冻结收据校准": {
+    "已核最终源码及4原产品": 5,
+    "已核原证据制品": 14,
+    "结果": "字节数/SHA256全部匹配；原红18/34、首次校准1/51、文件连接52、扩大58及最终324三轮分开保留"
+  },
+  "本人实际运行": {
+    "命令": [
+      ".venv311/bin/python",
+      "-m",
+      "pytest",
+      "--no-cov",
+      "-q",
+      "tests/test_prism_sandbox_executor.py"
+    ],
+    "工作目录": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend",
+    "退出码": 0,
+    "通过": 58,
+    "警告": 1,
+    "pytest秒": 1.72,
+    "进程实际秒": 2.597,
+    "原始日志": {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/独立复核-Executor58项.log",
+      "字节数": 1245,
+      "SHA256": "fdb6d4a51462b5ca75143f5d85b8c59466977a64f5e384d9e005de026c622681"
+    },
+    "警告内容": "passlib引用crypt，Python3.13将移除的既有DeprecationWarning；没有SQLite身份替换SAWarning"
+  },
+  "原测试保真": {
+    "原函数": 42,
+    "最终函数": 43,
+    "原参数化样本": 52,
+    "新增参数化样本": 6,
+    "删除原函数": 0,
+    "原函数断言数全部相同": true,
+    "原函数断言表达式变化仅": [
+      "test_fast_terminal_execute_response_persists_worker_events_before_conclusion",
+      "test_preview_session_token_scope_version_and_expiry"
+    ],
+    "表达式迁移理由": "fast terminal以真实worker_db包装Session统计rollback/close；preview伪getter key断言改为真实User/Worker ORM身份assert。原preview作用域、版本、过期拒绝及返回身份仍在",
+    "制品追加断言完全一致": true,
+    "制品追加断言数": 4,
+    "制品顺序": [
+      "test_report",
+      "browser_screenshot",
+      "browser_evidence"
+    ],
+    "其余追加断言": [
+      "passed为真",
+      "当前调用返回两新制品",
+      "result_json保留browser_blackbox_runs"
+    ],
+    "原XSS转义及下载完整性断言未改": true
+  },
+  "独立连接与授权": [
+    {
+      "场景": "原制品追加单样本",
+      "文件与行": "backend/tests/test_prism_sandbox_executor.py:1842",
+      "核验": "仅该原正向样本使用temporary file SQLite，避免内存engine同线程独立授权Session复用物理连接收尾rollback影响未提交新制品；产品run_browser_blackbox交易逻辑未改",
+      "边界": "SQLite通过不证明生产MySQL事务实测"
+    },
+    {
+      "场景": "新增6撤权对照",
+      "文件与行": "backend/tests/test_prism_sandbox_executor.py:1268",
+      "参数": [
+        "viewer × create/preview/existing_preview",
+        "FILE_VIEW撤销 × create/preview/existing_preview"
+      ],
+      "核验": "明确两个driver_connection不同；第二事务提交后原member仍reviewer，当前执行门fresh查询拒绝40300/40303；环境数量保持1",
+      "零后续": [
+        "build_source_archive未调用",
+        "_call_worker未调用",
+        "Thread未调用"
+      ]
+    },
+    {
+      "场景": "合法夹具",
+      "文件与行": "backend/tests/test_prism_sandbox_executor.py:847",
+      "核验": "User.status=1/User.role=user及一致Role/UserRole；仅现有PROJECT_VIEW与FILE_VIEW的真实Permission/RolePermission；check_permission/require_project_access/require_project_execution无放行mock",
+      "正向边界": "不会据测试赋管理员或扩大viewer执行权"
+    }
+  ],
+  "零外部范围": {
+    "Worker与模型": "服务线程用DormantThread只记录start，无调用target；fast_terminal模型生成/多Agent报告/学习均本地no-op；_call_worker/DNS/命令返回本地桩",
+    "真实容器": 0,
+    "真实网络与外部目标": 0,
+    "CUA或SSH": 0,
+    "本地执行边界": "测试存在两个仅协调良性源码解码的Python线程，不能写成0线程；node --check只本地语法验证。协议状态函数本地执行，不运行真实stage/model/worker",
+    "截图边界": "制品追加输入jpeg-bytes为测试字节，不是浏览器截图或有效JPEG验收"
+  },
+  "同组324三轮": {
+    "归属": "仅校准同行最终原始日志、不是本人运行",
+    "每轮": 324,
+    "警告每轮": 2,
+    "实际pytest秒": [
+      20.26,
+      20.9,
+      21.2
+    ],
+    "最终测试SHA": "3a1cc0d0fc4ecf86afd857da0f01ebf5f87b1eee3279401e994524fd7f74d79e",
+    "基础快照": "旧444a快照少2个真实ORM断言，另名保留；不混用旧SHA或称972个不同场景"
+  },
+  "未验边界": [
+    "根完整后端最终回归：不由58限定通过代替",
+    "生产MySQL事务/生产沙箱/真实Worker/模型/外部目标",
+    "三个quarantine命名样本仍实际active项目和clean活动源码，不证明隐藏quarantined状态放行",
+    "供应商百万token语义完整理解、真实浏览器/真手机"
+  ],
+  "源码只读快照": [
+    {
+      "路径": "backend/tests/test_prism_sandbox_executor.py",
+      "字节数": 73734,
+      "SHA256": "3a1cc0d0fc4ecf86afd857da0f01ebf5f87b1eee3279401e994524fd7f74d79e"
+    },
+    {
+      "路径": "backend/app/services/sandbox_service.py",
+      "字节数": 238320,
+      "SHA256": "890fae2811567e2a0a94fa6fe79149f6a8f99deab1da521b8a896a546e1181a2"
+    },
+    {
+      "路径": "backend/app/agents/security_sentinel_agent.py",
+      "字节数": 174217,
+      "SHA256": "c17f2159e33da856ade5c6a162d5e742fa66590bf15f3cae6dfefa532500ec01"
+    },
+    {
+      "路径": "backend/app/agents/fullchain_audit_agent.py",
+      "字节数": 38250,
+      "SHA256": "49fb7b71353ddd8d5d4e4d80a1a59734734f873000d52a5e1eee701a021e835a"
+    },
+    {
+      "路径": "backend/app/schemas/agent_capability.py",
+      "字节数": 5878,
+      "SHA256": "ee9c851fdca1989b1714b1c941747e36b7ba80c701543e02f6c8a9492cefa64b"
+    },
+    {
+      "路径": "deploy/prism_sandbox_executor.py",
+      "字节数": 87536,
+      "SHA256": "e098a16d9c0609be77cff83cc71b1f4ad5451491f700c77e3bf907eb9b91d869"
+    },
+    {
+      "路径": "backend/app/services/project_member_service.py",
+      "字节数": 20205,
+      "SHA256": "19e7dd775c493a82281765bb79f2308ffc9afbbc399583be1236c9c871495938"
+    },
+    {
+      "路径": "backend/app/services/rbac_service.py",
+      "字节数": 20811,
+      "SHA256": "12ef4d75ec21e1209fc00ef818960e8a0a7511ebb8ba93d092463dff2abd9721"
+    },
+    {
+      "路径": "backend/tests/conftest.py",
+      "字节数": 8349,
+      "SHA256": "f0db14ac765546ad94203b0691d3d75de77c902f6cab8ac2287d04a182f0f14e"
+    }
+  ],
+  "原证据只读校准": [
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor原场景-18失败.log",
+      "字节数": 62207,
+      "SHA256": "dd8cb74f848eca47848937ad89d70026fd047ff7bbf3fb3c3273ae55528b4c55"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor真实授权夹具-首次校准.log",
+      "字节数": 4849,
+      "SHA256": "de55098f78466455b3d4f46fe0ce928af61487a40b3c7a6b69aa61f5c5039536"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor真实独立事务夹具-52绿.log",
+      "字节数": 1245,
+      "SHA256": "bafc5f07522588b0f90771fcf433c222afd05af2c94f0e5f4ff6a4d7ff27cb6b"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor新增撤权对照-58项.log",
+      "字节数": 1245,
+      "SHA256": "3c70fc043012d8d3bdf988c53374fb23f7061cd0df8212cf36daf5770d03caca"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/ExecutorRuff最终.log",
+      "字节数": 19,
+      "SHA256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor测试夹具校准.diff",
+      "字节数": 18288,
+      "SHA256": "fffad668533e36e4c7bc969fd7ae19f3a84ae5a328ddfa762d74796124e758e7"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor三轮基础快照回执.json",
+      "字节数": 2772,
+      "SHA256": "bf14a2a3a70c7375e7854fdae8d132e8ffff4da0b24ee676719864d22ee58dca"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor三轮回执.json",
+      "字节数": 2763,
+      "SHA256": "1e1c5118b2c9cd94ef71f7045aca9d14c35a5f0c5a1523e82abcd4dd7f825954"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第1轮.log",
+      "字节数": 3335,
+      "SHA256": "7c917a79b597eea2e53bf7fc2623525d5eac143233d2d30aa9f845893ced81d4"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第2轮.log",
+      "字节数": 3335,
+      "SHA256": "b2e1b32f43ffb77e29de8770abf9bf85e7d4b1d78fce28f982b0ae7f719652be"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor关联324基础快照-第3轮.log",
+      "字节数": 3335,
+      "SHA256": "dada122b06709abb994c2582121cd4f4dee05f00880a7d37d9af688c0e3534aa"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第1轮.log",
+      "字节数": 3335,
+      "SHA256": "0887438e915aaaaeec0e03ddf91332b8ab20ddc3d1aacc4e0c4278ed44325a49"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第2轮.log",
+      "字节数": 3335,
+      "SHA256": "fcf64dc2f96306b15015b8c9f3677b6cd7f0d392a67e7ce42e93cf244befd8d7"
+    },
+    {
+      "路径": "docs/全系统架构与体验审计20261001/evidence/20261004-R3-只读执行/Executor最终关联324项-第3轮.log",
+      "字节数": 3335,
+      "SHA256": "1fc1ec96e9a8931508d64979145cbc6b2ff06ab3eb000ac30a9460b75df421d1"
+    }
+  ],
+  "原夹具独立校准": {
+    "路径": "/tmp/remaining_permissions-executor-before-20261004.py",
+    "字节数": 68178,
+    "SHA256": "69afec2a75af4dbe5d795b57d085d8a073934a82dbc14dcdca914fc44a214445"
+  },
+  "证据生成边界": "首次独立回执脚本将executor源码误指backend/deploy，FileNotFound，未写出收据；按实际MODULE_PATH修正为deploy后复核，产品及58测试无变。",
+  "阻断结论": "本限定夹具/diff/58复跑未发现新增阻断；不扩大为全系统或生产全通过"
+}

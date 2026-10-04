@@ -31,7 +31,7 @@ from typing import Any, Iterable
 
 import httpx
 import jwt
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
@@ -40,6 +40,7 @@ from app.ai.language_detector import detect_language
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.exceptions import (
+    AppError,
     AuthError,
     ConflictError,
     ForbiddenError,
@@ -69,7 +70,11 @@ from app.services import (
 )
 from app.services.agent_model_service import configure_subagent
 from app.services.ai_usage_context import ATTRIBUTION_FIELDS, current_attribution, model_attribution, usage_context
-from app.services.project_member_service import get_visible_project_ids, require_project_access
+from app.services.project_member_service import (
+    get_visible_project_ids,
+    require_project_access,
+    require_project_execution,
+)
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
 from app.utils.archive_extractor import read_archive_members
 from app.utils.public_http import pin_public_http_url
@@ -461,6 +466,71 @@ def _require_execution_lease(db: Session, environment_id: int, execution_token: 
     """Stop stale workers before they append events or persist a new snapshot."""
     if execution_token is not None and not _execution_lease_valid(db, environment_id, execution_token):
         raise RuntimeError("沙箱执行租约已失效")
+    _require_execution_authorization(db, environment_id)
+
+
+def _require_sandbox_execution(db: Session, actor: User, project_id: int) -> None:
+    """Execution intersects existing global permissions and the current project role."""
+    if actor.status != 1:
+        raise ForbiddenError("当前账号不能执行沙箱任务", code=40300)
+    require_project_execution(db, project_id, actor)
+    for permission in (PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW):
+        if not rbac_service.check_permission(db, actor.id, permission):
+            raise PermissionError(
+                f"无操作权限: 需要 {permission}", detail={"required_permission": permission},
+            )
+
+
+def _require_execution_authorization(db: Session, environment_id: int) -> None:
+    """Recheck queued/running work in an independent authorization transaction.
+
+    Lease identity remains separate so revoked actors can still be cleaned up.
+    """
+    bind = db.get_bind()
+    factory = sessionmaker(bind=getattr(bind, "engine", bind), expire_on_commit=False)
+    with factory() as auth_db:
+        scope = auth_db.query(SandboxEnvironment.project_id, SandboxEnvironment.owner_id).filter(
+            SandboxEnvironment.id == environment_id,
+        ).one_or_none()
+        actor = auth_db.get(User, scope.owner_id) if scope is not None else None
+        if actor is None:
+            raise ForbiddenError("沙箱执行账号或环境已失效", code=40300)
+        _require_sandbox_execution(auth_db, actor, int(scope.project_id))
+
+
+def _require_current_actor_execution(db: Session, actor_id: int, project_id: int) -> None:
+    bind = db.get_bind()
+    factory = sessionmaker(bind=getattr(bind, "engine", bind), expire_on_commit=False)
+    with factory() as auth_db:
+        actor = auth_db.get(User, actor_id)
+        if actor is None:
+            raise ForbiddenError("沙箱执行账号已失效", code=40300)
+        _require_sandbox_execution(auth_db, actor, project_id)
+
+
+def _can_preview_environment(db: Session, actor: User | None, environment: SandboxEnvironment) -> bool:
+    if actor is None:
+        return False
+    try:
+        _require_sandbox_execution(db, actor, environment.project_id)
+    except AppError:
+        return False
+    return True
+
+
+def _can_stop_environment(db: Session, actor: User | None, environment: SandboxEnvironment) -> bool:
+    if actor is None or not _can_manage(db, actor, environment):
+        return False
+    try:
+        require_project_access(db, environment.project_id, actor, need_write=False)
+    except AppError:
+        return False
+    return True
+
+
+def _execution_model_guard(db: Session, environment: SandboxEnvironment):
+    token = str(environment.execution_token or "")
+    return lambda: _require_execution_lease(db, environment.id, token)
 
 
 def _commit_execution(db: Session, environment_id: int, execution_token: str | None) -> None:
@@ -590,6 +660,7 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
     worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
     if worker is None:
         return {"available": False, "reason": "worker 不可用"}
+    _require_execution_lease(db, environment.id, str(environment.execution_token or ""))
     try:
         status_code, _headers, content = _proxy_worker_preview(
             worker,
@@ -956,6 +1027,7 @@ def _run_deploy_auto_tests(
     sha = hashlib.sha256(buf.getvalue()).hexdigest()
     ttl = max(120, int((environment.expires_at - _utcnow()).total_seconds()))
     for mode in modes:
+        _require_execution_lease(db, environment.id, str(environment.execution_token or ""))
         request_id = f"{environment.public_id}-verify-{mode}"
         _register_worker_request(environment, request_id)
         db.commit()
@@ -973,6 +1045,7 @@ def _run_deploy_auto_tests(
             results.append({"mode": mode, "passed": False, "status": environment.status})
             return results
         try:
+            _require_execution_lease(db, environment.id, str(environment.execution_token or ""))
             response = _call_worker(
                 worker,
                 "POST",
@@ -995,6 +1068,7 @@ def _run_deploy_auto_tests(
                 if time.monotonic() >= deadline:
                     raise RuntimeError("自动测试轮询超时")
                 time.sleep(1)
+                _require_execution_lease(db, environment.id, str(environment.execution_token or ""))
                 status_response = _call_worker(
                     worker, "POST", "/status", {"request_id": request_id, "after_sequence": last_seq}
                 )
@@ -1061,6 +1135,8 @@ def _run_deploy_auto_tests(
                 f"部署后自动{mode}测试异常，已确认回收: {str(exc)[:120]}",
             )
             db.commit()
+            if isinstance(exc, AppError):
+                raise
     return results
 
 
@@ -1876,7 +1952,8 @@ def _generate_agent_test_cases(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
+            extra={"trace_id": environment.public_id,
+                   "before_model_call": _execution_model_guard(db, environment)},
         )
         generation_deadline = time.monotonic() + int(
             getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
@@ -1909,6 +1986,7 @@ def _generate_agent_test_cases(
                 ctx=ctx,
                 deadline=generation_deadline,
             )
+            ctx.extra["before_model_call"]()
             files = result.get("files") if isinstance(result, dict) else None
             if not files:
                 result_error = result.get("error") if isinstance(result, dict) else "生成结果不是对象"
@@ -1964,6 +2042,8 @@ def _generate_agent_test_cases(
         )
         db.commit()
         return None
+    except (ForbiddenError, NotFoundError):
+        raise
     except Exception as exc:  # noqa: BLE001 - 生成失败不阻断原测试链
         _append_event(db, environment, "progress", "agent_tests", f"agent 测试用例生成异常: {str(exc)[:120]}")
         db.commit()
@@ -1992,7 +2072,8 @@ def _generate_deployment_patch(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
+            extra={"trace_id": environment.public_id,
+                   "before_model_call": _execution_model_guard(db, environment)},
         )
         db_type = str(
             (_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none"
@@ -2004,6 +2085,7 @@ def _generate_deployment_patch(
             db_type=db_type,
             ctx=ctx,
         )
+        ctx.extra["before_model_call"]()
         if not isinstance(result, dict) or result.get("error"):
             _append_event(
                 db, environment, "progress", "deploy_verify",
@@ -2032,6 +2114,8 @@ def _generate_deployment_patch(
         )
         db.commit()
         return {"launch_script": launch_script, "notes": notes}
+    except (ForbiddenError, NotFoundError):
+        raise
     except Exception as exc:  # noqa: BLE001 - 补全失败不阻断原测试链
         _append_event(db, environment, "progress", "deploy_verify", f"部署核验异常: {str(exc)[:120]}")
         db.commit()
@@ -2539,9 +2623,11 @@ def _run_test_review_report(
             ctx = AgentContext(
                 user_id=environment.owner_id,
                 project_id=environment.project_id,
-                extra={"trace_id": environment.public_id},
+                extra={"trace_id": environment.public_id,
+                   "before_model_call": _execution_model_guard(db, environment)},
             )
             result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
+            ctx.extra["before_model_call"]()
             if result.success:
                 data = result.data if isinstance(result.data, dict) else {}
                 candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
@@ -2585,6 +2671,8 @@ def _run_test_review_report(
         )
         db.commit()
         return summary
+    except (ForbiddenError, NotFoundError):
+        raise
     except Exception as exc:  # noqa: BLE001 - 审查增强失败不阻断测试结论
         _append_event(db, environment, "progress", "multi_agent_review", f"多 Agent 测试审查异常: {str(exc)[:120]}")
         db.commit()
@@ -3029,6 +3117,7 @@ def _proxy_worker_preview(
 
 def create_preview_session(db: Session, actor: User, public_id: str) -> dict[str, Any]:
     environment = _get_visible(db, actor, public_id)
+    _require_sandbox_execution(db, actor, environment.project_id)
     # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
     # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
     if environment.purpose != "deploy" or environment.status != "ready":
@@ -3081,10 +3170,11 @@ def authenticate_preview_session(db: Session, public_id: str, token: str) -> tup
         token_version = int(payload["ver"])
     except Exception as exc:
         raise AuthError("预览会话无效或已过期", code=40101) from exc
-    actor = db.get(User, user_id)
+    actor = db.query(User).populate_existing().filter(User.id == user_id).one_or_none()
     if not actor or actor.status != 1 or int(actor.token_version or 0) != token_version:
         raise AuthError("预览会话已失效", code=40102)
     environment = _get_visible(db, actor, public_id)
+    _require_sandbox_execution(db, actor, environment.project_id)
     # 隔离归档允许部署,但只允许通过受 JWT 保护的 backend→worker 预览代理访问。
     # 它不会获得 host network、宿主端口映射或任何无保护的服务器执行路径。
     if environment.purpose != "deploy" or environment.status != "ready" or environment.expires_at <= _utcnow():
@@ -3223,6 +3313,7 @@ def run_browser_blackbox(
     target_url: str,
 ) -> dict[str, Any]:
     environment = _get_visible(db, actor, public_id)
+    _require_sandbox_execution(db, actor, environment.project_id)
     if not _can_manage(db, actor, environment):
         raise ForbiddenError("只有沙箱创建者或唯一超级管理员可执行浏览器黑盒测试", code=40300)
     if environment.purpose != "test" or environment.test_mode not in {"blackbox", "combined"}:
@@ -3247,6 +3338,7 @@ def run_browser_blackbox(
 
     worker = _select_browser_worker(db)
     request_id = f"bbx-{uuid.uuid4().hex[:24]}"
+    _require_current_actor_execution(db, actor.id, environment.project_id)
     response = _call_worker(
         worker,
         "POST",
@@ -3258,6 +3350,7 @@ def run_browser_blackbox(
         },
     )
     result = response.get("result") if isinstance(response.get("result"), dict) else response
+    _require_current_actor_execution(db, actor.id, environment.project_id)
     if not isinstance(result, dict) or result.get("protocol_version") != "1.0":
         raise RuntimeError("Playwright worker 返回的证据协议无效")
 
@@ -3498,7 +3591,7 @@ def issue_remote_target_authorization(
         raise ForbiddenError("必须明确确认本次远程目标测试授权", code=40340)
     if test_mode not in {"blackbox", "combined"}:
         raise ValidationError("远程目标授权只支持黑盒或组合测试", code=40001)
-    require_project_access(db, int(project_id), actor, need_write=False)
+    _require_sandbox_execution(db, actor, int(project_id))
     target = pin_public_http_url(str(remote_target_url).strip(), require_https=True)
     target_url = str(target.original_url)
     expires_at = _utcnow() + timedelta(minutes=5)
@@ -3625,6 +3718,7 @@ def _create_environment_locked(
     purpose = payload["purpose"]
     agent_team_context = _normalize_agent_team_context(payload.get("agent_team"))
     require_project_access(db, project_id, actor, need_write=purpose == "deploy")
+    _require_sandbox_execution(db, actor, project_id)
     maintenance_file = Path(settings.sandbox_maintenance_file)
     try:
         maintenance_state = maintenance_file.lstat()
@@ -4004,7 +4098,8 @@ def _syntax_repair_round(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id},
+            extra={"trace_id": environment.public_id,
+                   "before_model_call": _execution_model_guard(db, environment)},
         )
         result = agent.repair(
             language=environment.language,
@@ -4012,6 +4107,7 @@ def _syntax_repair_round(
             files=files,
             ctx=ctx,
         )
+        ctx.extra["before_model_call"]()
         repaired = result.get("files") if isinstance(result.get("files"), dict) else {}
         if not repaired:
             _append_event(
@@ -4094,6 +4190,8 @@ def _syntax_repair_round(
             "files": sorted(repaired),
             "repair_revision": revision_metadata,
         }
+    except (ForbiddenError, NotFoundError):
+        raise
     except Exception as exc:  # noqa: BLE001 - 修复失败不阻断原测试链
         _append_event(db, environment, "progress", "syntax_repair", f"语法修复异常: {str(exc)[:120]}")
         db.commit()
@@ -4205,6 +4303,7 @@ def _execute_environment(
             return
         if execution_token is not None and str(environment.execution_token or "") != execution_token:
             return
+        _require_execution_lease(db, environment_id, execution_token)
         usage_scope.enter_context(usage_context(int(environment.owner_id), model_attribution(environment), db=db))
         if source_archive_base64 is None:
             if environment.source_archive_blob is None:
@@ -4380,6 +4479,7 @@ def _execute_environment(
                     **saved_request,
                     "source_archive_base64": effective_source,
                 }
+                _require_execution_lease(db, environment_id, execution_token)
                 execute_response = _call_worker(
                     worker,
                     "POST",
@@ -4413,6 +4513,7 @@ def _execute_environment(
                     if time.monotonic() >= deadline:
                         raise RuntimeError("Sandbox worker 状态轮询超时")
                     time.sleep(1)
+                    _require_execution_lease(db, environment_id, execution_token)
                     status_response = _call_worker(
                         worker,
                         "POST",
@@ -4543,6 +4644,7 @@ def _execute_environment(
             and environment.agent_code == "sandbox_deployer"
         ):
             # 预览冒烟 = 黑盒(从环境外部对运行中的服务发真实 HTTP,单槽下无法另起黑盒容器)。
+            _require_execution_lease(db, environment_id, execution_token)
             auto_smoke = _run_auto_smoke_test(db, environment)
             _append_event(
                 db,
@@ -4659,6 +4761,7 @@ def _execute_environment(
         if environment.remote_target_url:
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
             _commit_execution(db, environment_id, execution_token)
+            _require_execution_lease(db, environment_id, execution_token)
             evidence["remote_blackbox"] = _probe_remote_target(environment.remote_target_url)
             if int(evidence["remote_blackbox"]["status_code"]) >= 500:
                 target_status = "failed"
@@ -4704,6 +4807,7 @@ def _execute_environment(
         # finalizing，调度器不会把尚未完成多 Agent 报告的结果误判为终态。
         _commit_execution(db, environment_id, execution_token)
         # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
+        _require_execution_lease(db, environment_id, execution_token)
         review_report = _run_test_review_report(db, environment, conclusion)
         _require_execution_lease(db, environment_id, execution_token)
         if review_report is not None:
@@ -4872,6 +4976,7 @@ def environment_to_dict(
     row: SandboxEnvironment,
     actor: User | None = None,
 ) -> dict[str, Any]:
+    can_preview = _can_preview_environment(db, actor, row)
     worker = db.get(SandboxWorker, row.worker_id) if row.worker_id else None
     events = db.query(SandboxEvent).filter(SandboxEvent.environment_id == row.id).order_by(SandboxEvent.id).all()
     artifacts = (
@@ -4882,6 +4987,9 @@ def environment_to_dict(
         "public_id": row.public_id,
         "project_id": row.project_id,
         "owner_id": row.owner_id,
+        "can_execute": can_preview and actor is not None and _can_manage(db, actor, row),
+        "can_preview": can_preview,
+        "can_stop": _can_stop_environment(db, actor, row),
         "worker_code": worker.code if worker else None,
         "agent_code": row.agent_code,
         "purpose": row.purpose,
@@ -5022,6 +5130,7 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
 
 def extend_environment(db: Session, actor: User, public_id: str, hours: int) -> dict[str, Any]:
     row = _get_visible(db, actor, public_id)
+    _require_sandbox_execution(db, actor, row.project_id)
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可续期", code=40300)
     if row.status not in ACTIVE_STATES:

@@ -201,8 +201,8 @@ def start(
     if not project:
         raise NotFoundError("项目不存在", code=40400)
     # v2.4: 改用 project_member 关系校验(owner/admin/reviewer 都可启动审查)
-    from app.services.project_member_service import require_project_access
-    require_project_access(db, project.id, user, need_write=False)
+    from app.services.project_member_service import require_project_execution
+    require_project_execution(db, project.id, user)
     if not 1 <= len(payload.file_ids) <= 500 or len(set(payload.file_ids)) != len(payload.file_ids):
         raise ValidationError("file_ids 需为 1-500 个", code=40001)
 
@@ -575,7 +575,7 @@ def _assert_review_execution_authorized(
         from app.services import project_member_service, rbac_service
 
         try:
-            project_member_service.require_project_access(auth_db, int(task.project_id), user)
+            project_member_service.require_project_execution(auth_db, int(task.project_id), user)
         except (ForbiddenError, NotFoundError) as exc:
             raise ReviewAuthorizationRevokedError("项目成员资格已撤销，后续审查执行已阻断") from exc
         if not rbac_service.check_permission(auth_db, int(user.id), PermissionCode.REVIEW_START):
@@ -1999,13 +1999,12 @@ def _prepare_bounded_single_agent_prompts(
             f"input≈{mandatory_bytes} UTF-8 bytes，output={output_budget} tokens"
         )
     active = [(name, value) for name, value in sections.items() if value]
-    # Summaries are budgeted in tokens but the actual chat guard uses bytes.
-    # Four input bytes per estimated token is the conservative ASCII bound;
-    # reserve the available input capacity for compressed optional sections;
-    # the exact byte guard below remains the final acceptance check.
+    # estimate_tokens uses serialized UTF-8 bytes, matching the chat guard's
+    # input accounting. Allocate the available byte budget without converting
+    # it a second time; the exact assembled-message guard below stays final.
     target_total = max(
         512,
-        (window - mandatory_bytes - output_budget - 1_024) // 4,
+        window - mandatory_bytes - output_budget - 1_024,
     )
     # Short fields cost less in full than a sourced summary header. Keep them
     # verbatim and spend compression calls only on the actual long fields.
@@ -2456,6 +2455,8 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
 
     sandbox_stats = load_task_issue_stats(db, sandbox_tasks)
 
+    from app.services.project_member_service import project_resource_capabilities
+    capabilities = project_resource_capabilities(db, user, [row.project_id for row in rows])
     items = []
     for row in rows:
         project = projects.get(row.project_id)
@@ -2471,6 +2472,8 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "project_name": project.project_name if project else "",
             "review_type": row.review_type, "status": row.status,
             "can_view_report": can_view_report,
+            "can_cancel": capabilities.get(row.project_id, {}).get("can_write", False),
+            "can_execute": capabilities.get(row.project_id, {}).get("can_execute", False),
             "total_files": row.total_files,
             "processed_files": row.processed_files,
             "total_issues": None if hide_report_metrics else (
@@ -2505,7 +2508,7 @@ def _require_readable_task(db: Session, user: User, task_id: int) -> ReviewTask:
     raise NotFoundError(
         "审查任务不存在或当前账号无权访问",
         code=40400,
-        next_action="请返回审查记录列表重新选择；如需访问，请联系项目负责人确认权限",
+        next_action="请返回审查任务列表重新选择；如需访问，请联系项目负责人确认权限",
     )
 
 
@@ -2551,12 +2554,16 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     summary = task.summary
     if task.review_type in {"sandbox_test", "pentest"} and not can_view_report:
         summary = None
+    from app.services.project_member_service import project_resource_capabilities
+    capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
     return {
         "id": task.id, "task_name": task.task_name,
         "project_id": task.project_id,
         "project_name": project.project_name if project else "",
         "review_type": task.review_type, "status": task.status,
         "can_view_report": can_view_report,
+        "can_cancel": capabilities.get("can_write", False),
+        "can_execute": capabilities.get("can_execute", False),
         "total_files": task.total_files, "processed_files": task.processed_files,
         "total_issues": None if hide_report_metrics else (
             report_total if report_total is not None else task.total_issues
@@ -2701,7 +2708,7 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
     Raises:
         NotFoundError: 任务不存在或无访问权限
     """
-    _require_readable_task(db, user, task_id)
+    task = _require_readable_task(db, user, task_id)
     q = db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
     if file_id:
         q = q.filter(ReviewIssue.file_id == file_id)
@@ -2719,6 +2726,11 @@ def list_task_issues(db: Session, user: User, task_id: int, file_id: int = None,
     pagination = Pagination(page, page_size, total)
     items = q.order_by(ReviewIssue.severity.desc(), ReviewIssue.id.asc()).offset(
         pagination.offset).limit(pagination.page_size).all()
+    from app.services.project_member_service import project_resource_capabilities
+    caps = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
+    for issue in items:
+        issue.can_handle = caps.get("can_write", False)
+        issue.can_execute = caps.get("can_execute", False)
     return pagination.to_dict(items)
 
 

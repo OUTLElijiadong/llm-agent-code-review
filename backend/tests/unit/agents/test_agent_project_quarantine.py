@@ -10,6 +10,7 @@ from app.agents.security_sentinel_agent import SecuritySentinelAgent
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
@@ -144,6 +145,20 @@ def test_active_and_archived_member_access_remains_allowed(db):
         id_base = index * 10
         project, task, issue, code_file = _seed_graph(db, status, id_base)
         member = db.get(User, 3 + id_base)
+        # Positive execution needs both project membership and the API's existing
+        # global security:scan / issue:view permissions; hidden/foreign tests stay intact.
+        role = db.query(Role).filter_by(code="user").first()
+        if role is None:
+            role = Role(code="user", name="local user", status="active")
+            db.add(role)
+            db.flush()
+            for code in ("security:scan", "issue:view"):
+                permission = Permission(code=code, name=code, module="local")
+                db.add(permission)
+                db.flush()
+                db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        db.add(UserRole(user_id=member.id, role_id=role.id))
+        db.commit()
 
         sentinel = SecuritySentinelAgent()
         sentinel.inject(db, user=member)

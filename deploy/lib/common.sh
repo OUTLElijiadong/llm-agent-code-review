@@ -310,6 +310,23 @@ SQL
   log_info "检查点回退兼容门通过(reader=$capability, ledger_schema=$ledger_schema)"
 }
 
+# 新成员角色写者不受维护目录锁约束，暂空列表不代表可以切回旧权限语义。
+# 在任何容器切换前检验绑定目标镜像的实际行为，不以版本标签或角色计数放行。
+assert_project_member_rollback_compatible() {
+  local capability
+  local probe_file="$(dirname "${BASH_SOURCE[0]}")/project_member_compatibility.py"
+  [[ "${BOUND_BACKEND_IMAGE_ID:-}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+    || fatal "回退成员权限门缺少已绑定 Backend 镜像 ID"
+  [[ -r "$probe_file" ]] || fatal "回退成员权限 probe 不可读，拒绝切换镜像"
+  capability="$(docker run --rm -i --memory 128m --pids-limit 32 \
+    --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --entrypoint python "$BOUND_BACKEND_IMAGE_ID" - < "$probe_file")" \
+    || fatal "目标镜像成员权限能力验证失败，拒绝切换镜像；保留数据并前向修复"
+  [[ "$capability" == supported ]] \
+    || fatal "目标镜像未确认支持只读成员的读、写及执行边界，拒绝回退；即使成员暂空也保留数据并前向修复"
+  log_info "成员权限回退兼容门通过(reader=$capability)"
+}
+
 # 使用 mkdir 原子获取目录锁，防止并发备份或发布。
 # 参数: $1 为锁目录。
 # 返回: 成功时 0；锁已存在时终止脚本。

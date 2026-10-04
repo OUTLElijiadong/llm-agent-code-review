@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUserStore } from '@/stores/user'
 
-const projectApi = vi.hoisted(() => ({ getProjectDetail: vi.fn(), getAuditSourceArchiveResult: vi.fn(), deleteSourceRevision: vi.fn(), downloadProjectSource: vi.fn(), uploadAuditSourceArchive: vi.fn() }))
+const projectApi = vi.hoisted(() => ({ getProjectDetail: vi.fn(), getAuditSourceArchiveResult: vi.fn(), deleteSourceRevision: vi.fn(), deleteProject: vi.fn(), downloadProjectSource: vi.fn(), uploadAuditSourceArchive: vi.fn() }))
 const fileApi = vi.hoisted(() => ({ list: vi.fn(), getDetail: vi.fn(), update: vi.fn(), downloadBinary: vi.fn(), upload: vi.fn(), uploadFolder: vi.fn(), listVersions: vi.fn(), getVersion: vi.fn(), restoreVersion: vi.fn() }))
 const membersApi = vi.hoisted(() => ({ listProjectMembers: vi.fn(), searchProjectMemberCandidates: vi.fn(), addProjectMember: vi.fn(), updateProjectMemberRole: vi.fn(), removeProjectMember: vi.fn() }))
 const router = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn() }))
@@ -23,7 +23,7 @@ import CodeFileList from '../code/CodeFileList.vue'
 
 const fullPermissions = ['project:view', 'file:view', 'file:upload', 'file:edit', 'file:download', 'project:delete', 'project:member:manage']
 const reviewer = { id: 2, user_id: 104, username: 'qa_reviewer', role_in_project: 'reviewer', create_time: '2026-09-07T00:00:00' }
-const project = (write: boolean) => ({ id: 162, project_name: '权限挂载项目', language: 'python', file_count: 1, source_mode: 'files', can_update: write, can_delete: write, recent_tasks: [], source_revisions: [], status: 'active', create_time: '2026-09-07T00:00:00', update_time: '2026-09-07T00:00:00' })
+const project = (write: boolean) => ({ id: 162, project_name: '权限挂载项目', language: 'python', file_count: 1, source_mode: 'files', can_update: write, can_delete: write, can_execute: true, recent_tasks: [], source_revisions: [], status: 'active', create_time: '2026-09-07T00:00:00', update_time: '2026-09-07T00:00:00' })
 const file = { id: 1892, project_id: 162, file_name: 'qa.py', content: 'print(1)', language: 'python', version_no: 1, is_binary: 0, size_bytes: 8, update_time: '2026-09-07T00:00:00' }
 let wrapper: VueWrapper
 let pinia: ReturnType<typeof createPinia>
@@ -40,6 +40,7 @@ function button(label: string) { const found = buttons(label)[0]; if (!found) th
 // 页面和 Element Plus 按钮/表格/对话框真实挂载；只隔离网络与 Monaco/模型模态框。
 function handlers() { return wrapper.vm as unknown as Record<string, (...args: never[]) => Promise<void>> }
 beforeEach(() => {
+  confirm.mockReset().mockResolvedValue(true)
   pinia = createPinia(); setActivePinia(pinia)
   useUserStore().permissions = new Set(fullPermissions)
   projectApi.getProjectDetail.mockResolvedValue(project(true))
@@ -59,6 +60,107 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = '' })
 
 describe('项目详情资源角色与 RBAC 求交', () => {
+  it.each([false, undefined])('R3 可读但不可执行项目隐藏安全审计，直接打开无效 %s', async (canExecute) => {
+    useUserStore().permissions.add('security:scan')
+    projectApi.getProjectDetail.mockResolvedValue({ ...project(false), can_execute: canExecute })
+    render(ProjectDetail); await flushPromises()
+    expect(buttons('🛡 安全审计')).toHaveLength(0)
+    await handlers().openSecurityScan()
+    expect(wrapper.get('.scan-modal').attributes('data-visible')).toBe('false')
+    expect(buttons('下载源码').length).toBeGreaterThan(0)
+  })
+
+  it('R3 添加与更改成员角色提供只读成员并用中文显示', async () => {
+    membersApi.listProjectMembers.mockResolvedValue([{ ...reviewer, role_in_project: 'viewer' }])
+    render(ProjectDetail); await flushPromises()
+    await wrapper.get('#tab-members').trigger('click')
+    expect(wrapper.text()).toContain('只读成员')
+    await button('添加成员').trigger('click'); await flushPromises()
+    const options = wrapper.findAllComponents({ name: 'ElOption' })
+    expect(options.filter(option => option.props('value') === 'viewer')).toHaveLength(2)
+  })
+
+  it('R3 负责人可通过现有成员接口添加和设置 viewer，发送原角色字段', async () => {
+    render(ProjectDetail); await flushPromises()
+    await wrapper.get('#tab-members').trigger('click')
+    await button('添加成员').trigger('click'); await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.searchMemberCandidates('candidate')
+    vm.addForm.user_id = 105
+    vm.addForm.role_in_project = 'viewer'
+    await vm.submitAddMember()
+    expect(membersApi.addProjectMember).toHaveBeenCalledWith(162, { user_id: 105, role_in_project: 'viewer' })
+    await vm.handleChangeRole(104, 'viewer')
+    expect(membersApi.updateProjectMemberRole).toHaveBeenCalledWith(162, 104, { role_in_project: 'viewer' })
+  })
+
+  it('R3 viewer 即使全局 file:edit 存在仍以项目写能力保持编辑器只读', async () => {
+    projectApi.getProjectDetail.mockResolvedValue({ ...project(false), can_execute: false })
+    render(CodeEditor); await flushPromises()
+    expect((wrapper.vm as any).canEdit).toBe(false)
+    expect(wrapper.get('.editor-probe').attributes('readonly')).toBeDefined()
+    await handlers().handleSave()
+    expect(fileApi.update).not.toHaveBeenCalled()
+  })
+
+  it('项目负责人可在详情确认删除，成功后返回项目列表', async () => {
+    const user = useUserStore()
+    user.token = 'owner-session'
+    user.profile = { id: 103, username: 'owner103', roles: [], permissions: fullPermissions, is_first_login: false } as never
+    render(ProjectDetail); await flushPromises()
+    await button('删除项目').trigger('click'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('权限挂载项目'), '删除项目', expect.any(Object))
+    expect(projectApi.deleteProject).toHaveBeenCalledExactlyOnceWith(162)
+    expect(router.push).toHaveBeenCalledWith('/projects')
+  })
+
+  it.each(['取消', '撤权', '换账号'] as const)('删除确认后%s不提交项目删除', async (scenario) => {
+    const user = useUserStore()
+    user.token = 'owner-session'
+    user.profile = { id: 103, username: 'owner103', roles: [], permissions: fullPermissions, is_first_login: false } as never
+    let resolve!: (value: boolean) => void
+    let reject!: (reason: unknown) => void
+    confirm.mockReturnValueOnce(new Promise((ok, no) => { resolve = ok; reject = no }))
+    render(ProjectDetail); await flushPromises()
+    await button('删除项目').trigger('click')
+    if (scenario === '取消') reject('cancel')
+    else {
+      if (scenario === '撤权') user.permissions = new Set(['project:view'])
+      else user.token = 'different-session'
+      resolve(true)
+    }
+    await flushPromises()
+    expect(projectApi.deleteProject).not.toHaveBeenCalled()
+  })
+
+  it('确认内容对应的项目发生变化时不删除另一个目标', async () => {
+    const user = useUserStore()
+    user.token = 'owner-session'
+    user.profile = { id: 103 } as never
+    let resolve!: (value: boolean) => void
+    confirm.mockReturnValueOnce(new Promise(ok => { resolve = ok }))
+    render(ProjectDetail); await flushPromises()
+    await button('删除项目').trigger('click')
+    const state = wrapper.vm as unknown as { project: ReturnType<typeof project> }
+    state.project.id = 999
+    state.project.project_name = '另一个项目'
+    resolve(true); await flushPromises()
+    expect(projectApi.deleteProject).not.toHaveBeenCalled()
+  })
+
+  it('删除完成前换账号，旧成功回执不导航新账号', async () => {
+    const user = useUserStore()
+    user.token = 'owner-session'
+    user.profile = { id: 103 } as never
+    let resolve!: () => void
+    projectApi.deleteProject.mockReturnValueOnce(new Promise<void>(ok => { resolve = ok }))
+    render(ProjectDetail); await flushPromises()
+    await button('删除项目').trigger('click'); await flushPromises()
+    expect(projectApi.deleteProject).toHaveBeenCalledExactlyOnceWith(162)
+    user.token = 'new-account-session'
+    resolve(); await flushPromises()
+    expect(router.push).not.toHaveBeenCalled()
+  })
   it('reviewer 隐藏全部写入口，保留合法下载和 AI 修复手册，直接调用写 handler 无效', async () => {
     projectApi.getProjectDetail.mockResolvedValue(project(false))
     render(ProjectDetail); await flushPromises()

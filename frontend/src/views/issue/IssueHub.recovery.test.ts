@@ -10,7 +10,7 @@ vi.mock('@/stores/user', () => ({ useUserStore: () => user }))
 vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: { confirm: mocks.confirm } }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 
-const row = { id: 1, title: '问题一', task_id: 10, severity: '中', status: 'unfixed', issue_type: '安全漏洞' }
+const row = { id: 1, title: '问题一', task_id: 10, severity: '中', status: 'unfixed', issue_type: '安全漏洞', can_handle: true }
 const user = reactive({ profile: { id: 11 }, token: 'account-a', permissions: [] as string[], hasPermission: (code: string) => user.permissions.includes(code) })
 const Slot = { template: '<div><slot /></div>' }
 function render() {
@@ -46,6 +46,24 @@ beforeEach(() => {
 })
 
 describe('问题追踪失败恢复', () => {
+  it.each([false, undefined])('R3 只读或未确认处理能力的问题不显示操作且直接调用无效 %s', async (canHandle) => {
+    user.permissions.push('issue:handle', 'issue:batch')
+    const readonlyRow = { ...row, can_handle: canHandle }
+    mocks.issues.mockResolvedValueOnce({ items: [readonlyRow], total: 1 })
+    const wrapper = render()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    expect(wrapper.find('.ic-check').exists()).toBe(false)
+    vm.toggleSelect(readonlyRow)
+    await vm.onSetStatus(readonlyRow, 'fixed')
+    vm.selected = [readonlyRow]
+    await vm.onBatchMarkFixed()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(mocks.batch).not.toHaveBeenCalled()
+    expect(mocks.confirm).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('多个关联任务显示名净化已知内部后缀且不改写原任务名', async () => {
     const issueRows = [
       { ...row, task_id: 180, task_name: '项目167 完整代码审查（review_type=full）' },
