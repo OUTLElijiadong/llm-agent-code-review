@@ -46,6 +46,7 @@ export interface ApprovalItem {
   status: string
   decision?: string | null
   decision_reason?: string | null
+  requires_session_resume?: boolean
   decided_by?: number | null
   decided_at?: string | null
   create_time?: string | null

@@ -3750,6 +3750,10 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         capability_instruction = (
             "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
             "再调用 admin_execute_capability；不得猜测能力编码或参数。"
+            "全局 LLM 配置是平台级高危写操作：只有用户明确要求修改平台共享/默认模型配置时，才可调用 llm.config.update。"
+            "用户仅指定当前任务使用某模型，或讨论模型名称、别名、下线状态或计费说明，不是修改全局配置的授权；"
+            "不得因此调用 llm.config.update，也不得生成相关待审批项。"
+            "意图不明确时先用 ask_user 澄清是否要修改平台全局配置；用户明确确认前不得提交该写操作。"
             "普通项目页面能力先调用 user_describe_capabilities 查询真实契约，再按需调用 user_execute_capability；"
             "不得因 surface 不同而将任务转交给另一个主 Agent。"
             "项目代码审查使用 start_review 或适配当前任务的只读审查工具；项目安全审计使用"

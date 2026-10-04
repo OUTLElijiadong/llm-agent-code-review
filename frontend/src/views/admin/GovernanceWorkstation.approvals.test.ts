@@ -1,7 +1,9 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 
-const api = vi.hoisted(() => ({ listApprovals: vi.fn(), listJobs: vi.fn() }))
+const api = vi.hoisted(() => ({
+  listApprovals: vi.fn(), listJobs: vi.fn(), approveItem: vi.fn(), rejectItem: vi.fn(),
+}))
 vi.mock('@/api/adminGovernance', () => api)
 vi.mock('@/stores/user', async () => {
   const { reactive } = await import('vue')
@@ -13,9 +15,11 @@ vi.mock('@/stores/user', async () => {
   return { useUserStore: () => user }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { error: vi.fn() } }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { error: vi.fn(), info: vi.fn() } }))
 vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: { confirm: vi.fn() } }))
 
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import GovernanceWorkstation from './GovernanceWorkstation.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -66,6 +70,10 @@ beforeEach(() => {
   user.token = 'approval-token-a'
   api.listApprovals.mockReset()
   api.listJobs.mockReset()
+  api.approveItem.mockReset()
+  api.rejectItem.mockReset()
+  vi.mocked(ElMessage.info).mockReset()
+  vi.mocked(ElMessageBox.confirm).mockReset()
 })
 
 it('审批接口失败显示错误而不是空待办，原位重试后恢复成功空态', async () => {
@@ -94,6 +102,33 @@ it('审批列表滚动区可聚焦、可命名，并提示小屏横向浏览', a
   expect(region.attributes('aria-label')).toContain('待办审批')
   expect(region.attributes('tabindex')).toBe('0')
   expect(wrapper.text()).toContain('左右滑动可查看状态和操作列')
+  wrapper.unmount()
+})
+
+it('小菱会话审批不能从通用审批中心单独改状态', async () => {
+  api.listApprovals.mockResolvedValueOnce([])
+  const wrapper = render()
+  await flushPromises()
+  const vm = setupState<{
+    isResponseSessionApproval: (row: { requires_session_resume?: boolean }) => boolean
+    onApprove: (row: { id: number; title: string; action: string; requires_session_resume?: boolean }) => Promise<void>
+    onReject: (row: { id: number; title: string; action: string; requires_session_resume?: boolean }) => Promise<void>
+  }>(wrapper)
+  const row = {
+    id: 234,
+    title: '更新全局 LLM 配置',
+    action: 'responses.admin_execute_capability',
+    requires_session_resume: true,
+  }
+
+  expect(vm.isResponseSessionApproval(row)).toBe(true)
+  await vm.onApprove(row)
+  await vm.onReject(row)
+
+  expect(ElMessageBox.confirm).not.toHaveBeenCalled()
+  expect(api.approveItem).not.toHaveBeenCalled()
+  expect(api.rejectItem).not.toHaveBeenCalled()
+  expect(ElMessage.info).toHaveBeenCalledTimes(2)
   wrapper.unmount()
 })
 

@@ -255,6 +255,7 @@ class ApprovalItemOut(BaseModel):
     decision: Optional[str] = None
     decision_reason: Optional[str] = None
     request_json: Optional[Union[dict, list]] = None
+    requires_session_resume: bool = False
     decided_by: Optional[int] = None
     decided_at: Optional[str] = None
     create_time: Optional[str] = None

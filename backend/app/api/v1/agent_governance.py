@@ -352,7 +352,13 @@ def list_approvals(
     """
     excluded = tuple(action.strip() for action in exclude_action.split(",") if action.strip())
     rows = approval_service.list_items(db, status=status, limit=limit, actor=actor, exclude_actions=excluded)
-    return Resp(data=[ApprovalItemOut.model_validate(row) for row in rows])
+    session_resume_required = approval_service.session_resume_required_item_ids(db, rows)
+    return Resp(data=[
+        ApprovalItemOut.model_validate(row).model_copy(
+            update={"requires_session_resume": row.id in session_resume_required},
+        )
+        for row in rows
+    ])
 
 
 @router.post("/approvals/{item_id}/approve", response_model=Resp[ApprovalItemOut])

@@ -470,11 +470,22 @@ async function onSaveToolPermission(): Promise<void> {
 }
 
 /**
+ * Responses 工具审批必须通过原小菱会话续跑，不能由通用审批接口只改状态。
+ */
+function isResponseSessionApproval(row: Pick<ApprovalItem, 'requires_session_resume'>): boolean {
+  return row.requires_session_resume === true
+}
+
+/**
  * 审批通过指定事项。
  * @param row - 审批事项。
  * @returns Promise<void>
  */
 async function onApprove(row: ApprovalItem): Promise<void> {
+  if (isResponseSessionApproval(row)) {
+    ElMessage.info('请返回发起此操作的小菱对话中批准或驳回')
+    return
+  }
   try {
     await ElMessageBox.confirm(`确定要通过审批「${row.title}」吗？`, '审批确认', {
       confirmButtonText: '通过',
@@ -493,6 +504,10 @@ async function onApprove(row: ApprovalItem): Promise<void> {
  * @returns Promise<void>
  */
 async function onReject(row: ApprovalItem): Promise<void> {
+  if (isResponseSessionApproval(row)) {
+    ElMessage.info('请返回发起此操作的小菱对话中批准或驳回')
+    return
+  }
   const ok = await confirmDanger({
     target: `驳回审批「${row.title}」`,
     consequence: '驳回后该事项需要重新发起才能生效。',
@@ -910,8 +925,13 @@ onMounted(loadData)
         <el-table-column label="状态" width="110" fixed="right"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
         <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'pending'" link type="success" @click="onApprove(row)">通过</el-button>
-            <el-button v-if="row.status === 'pending'" link type="danger" @click="onReject(row)">驳回</el-button>
+            <span v-if="row.status === 'pending' && isResponseSessionApproval(row)" class="approval-session-only">
+              返回小菱对话处理
+            </span>
+            <template v-else-if="row.status === 'pending'">
+              <el-button link type="success" @click="onApprove(row)">通过</el-button>
+              <el-button link type="danger" @click="onReject(row)">驳回</el-button>
+            </template>
           </template>
         </el-table-column>
         </el-table>
@@ -1463,6 +1483,13 @@ onMounted(loadData)
 .approval-loading-state {
   margin: 0;
   color: var(--color-text-secondary, #737b8d);
+}
+.approval-session-only {
+  display: inline-block;
+  color: var(--color-text-secondary, #737b8d);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
 }
 .approval-load-error {
   display: flex;

@@ -131,6 +131,40 @@ def _responses_owner_id(item: ApprovalItem) -> Optional[int]:
         return -1
 
 
+def session_resume_required_item_ids(db: Session, items: list[ApprovalItem]) -> set[int]:
+    """Return approval IDs bound to persisted Responses runs with one query."""
+    run_to_item_ids: dict[str, set[int]] = {}
+    for item in items:
+        if not (item.action or "").strip().lower().startswith("responses."):
+            continue
+        payload = _request_payload(item)
+        candidate_run_ids = {str(payload.get("run_id") or "").strip()}
+        if (item.resource or "").startswith("response_run:"):
+            candidate_run_ids.add(item.resource.removeprefix("response_run:").strip())
+        for run_id in candidate_run_ids - {""}:
+            run_to_item_ids.setdefault(run_id, set()).add(item.id)
+    if not run_to_item_ids:
+        return set()
+
+    from app.models.agent_response_run import AgentResponseRun
+
+    persisted_run_ids = {
+        run_id for (run_id,) in db.query(AgentResponseRun.run_id)
+        .filter(AgentResponseRun.run_id.in_(run_to_item_ids))
+        .all()
+    }
+    return {
+        item_id
+        for run_id in persisted_run_ids
+        for item_id in run_to_item_ids[run_id]
+    }
+
+
+def requires_session_resume(db: Session, item: ApprovalItem) -> bool:
+    """Check whether a Responses approval is bound to a persisted chat run."""
+    return item.id in session_resume_required_item_ids(db, [item])
+
+
 def _can_access(db: Session, actor: Optional[User], item: ApprovalItem) -> bool:
     """私人会话归属独立于管理权限，超级管理员也必须是同一账号。"""
     if actor is None:
@@ -316,6 +350,14 @@ def decide_item(
             raise ForbiddenError("Agent 发布审批必须由非申请人管理员处理", code=40300)
     if not _can_access(db, admin, item):
         raise ForbiddenError("无权处理该审批；私人会话仅限本人，服务器操作仅限超级管理员", code=40322)
+    if (
+        (item.action or "").strip().lower().startswith("responses.")
+        and requires_session_resume(db, item)
+    ):
+        raise ValidationError(
+            "这是绑定小菱原会话的工具审批，请回到该会话批准或驳回；通用审批中心不能续跑会话",
+            code=40001,
+        )
     if item.status in ("approved", "rejected", "auto_approved"):
         if item.action == "agent_package.publish" and (
             (approve and item.status == "approved") or (not approve and item.status == "rejected")

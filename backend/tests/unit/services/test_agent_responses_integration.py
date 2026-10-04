@@ -56,6 +56,21 @@ def test_admin_release_health_scope_matches_only_narrow_read_query() -> None:
     assert not match([{"role": "user", "content": "检查版本、健康状态并列出已发布 Agent"}])
 
 
+def test_admin_instructions_separate_task_model_choice_from_global_llm_change() -> None:
+    """模型/计费说明不能被当成修改平台默认 LLM 的授权。"""
+    instructions = service_module._instructions(
+        "admin",
+        SimpleNamespace(username="admin", role="super_admin"),
+        is_super_admin=True,
+    )
+
+    assert "当前任务使用某模型" in instructions
+    assert "模型名称、别名、下线状态或计费说明" in instructions
+    assert "不是修改全局配置的授权" in instructions
+    assert "不得因此调用 llm.config.update" in instructions
+    assert "意图不明确时先用 ask_user 澄清" in instructions
+
+
 @pytest.mark.asyncio
 async def test_admin_release_health_is_one_read_only_tool_with_explicit_scope(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())

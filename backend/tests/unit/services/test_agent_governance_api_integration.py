@@ -1,5 +1,6 @@
 """Agent 治理管理端 API 集成测试。"""
 
+import json
 import re
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from app.core.dependencies import get_current_user, require_admin, require_super
 from app.core.security import create_access_token
 from app.main import app
 from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, ApprovalItem
+from app.models.agent_response_run import AgentResponseRun
 from app.models.rbac import Role, UserRole
 from app.models.user import User
 
@@ -603,3 +605,102 @@ def test_generic_approval_api_can_filter_agent_release_items(admin_api_client):
         client, "get", "/api/admin/approvals", params={"exclude_action": "agent_package.publish"},
     )
     assert [item["id"] for item in listed] == [generic.id]
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+@pytest.mark.parametrize(
+    "payload_run_id,resource_run_id",
+    [
+        ("run_waiting_for_global_config_approval", "run_waiting_for_global_config_approval"),
+        ("", "run_waiting_for_global_config_approval"),
+        ("missing_run_in_payload", "run_waiting_for_global_config_approval"),
+        ("run_waiting_for_global_config_approval", "missing_run_in_resource"),
+    ],
+)
+def test_generic_approval_api_does_not_detach_response_run_from_its_approval(
+    admin_api_client, decision, payload_run_id, resource_run_id,
+):
+    """Responses 写操作必须通过原会话恢复，通用审批不能只改审批行状态。"""
+    client, session = admin_api_client
+    admin = session.get(User, 1)
+    admin.role = "super_admin"
+    super_admin_role = Role(name="超级管理员", code="super_admin", status="active")
+    session.add(super_admin_role)
+    session.commit()
+    session.add(UserRole(user_id=admin.id, role_id=super_admin_role.id))
+    session.commit()
+
+    run = AgentResponseRun(
+        run_id="run_waiting_for_global_config_approval",
+        user_id=admin.id,
+        surface="admin",
+        session_key="admin-session-approval-1",
+        status="waiting_approval",
+        checkpoint_json=json.dumps({
+            "status": "waiting_approval",
+            "pending": {
+                "call": {
+                    "call_id": "call_global_config_update",
+                    "name": "admin_execute_capability",
+                    "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
+                },
+            },
+        }),
+        version=1,
+    )
+    approval = ApprovalItem(
+        title="更新全局 LLM 配置",
+        action="responses.admin_execute_capability",
+        resource=f"response_run:{resource_run_id}",
+        risk_level="critical",
+        status="pending",
+        decision="escalate",
+        request_json=json.dumps({
+            "owner_user_id": admin.id,
+            "run_id": payload_run_id,
+            "call_id": "call_global_config_update",
+            "tool": "admin_execute_capability",
+            "arguments": {"capability": "llm.config.update", "params": {"model": "deepseek-flash"}},
+        }),
+    )
+    session.add_all([run, approval])
+    session.commit()
+
+    listed = _ok(client, "get", "/api/admin/approvals", params={"status": "pending"})
+    listed_item = next(item for item in listed if item["id"] == approval.id)
+    assert listed_item["requires_session_resume"] is True
+
+    response = client.post(f"/api/admin/approvals/{approval.id}/{decision}", json={"note": "确认"})
+
+    session.refresh(approval)
+    session.refresh(run)
+    assert approval.status == "pending"
+    assert run.status == "waiting_approval"
+    assert response.status_code == 400
+
+
+def test_generic_approval_api_keeps_legacy_response_items_without_runs_available(admin_api_client):
+    """旧式/无会话 Responses 审批仍由通用审批流处理。"""
+    client, session = admin_api_client
+    admin = session.get(User, 1)
+    approval = ApprovalItem(
+        title="保存知识条目",
+        action="responses.save_knowledge_note",
+        resource="knowledge_note:legacy-item",
+        risk_level="medium",
+        status="pending",
+        decision="escalate",
+        request_json=json.dumps({"owner_user_id": admin.id, "note": "legacy request"}),
+    )
+    session.add(approval)
+    session.commit()
+
+    listed = _ok(client, "get", "/api/admin/approvals", params={"status": "pending"})
+    listed_item = next(item for item in listed if item["id"] == approval.id)
+    assert listed_item["requires_session_resume"] is False
+
+    response = client.post(f"/api/admin/approvals/{approval.id}/approve", json={"note": "兼容旧事项"})
+
+    session.refresh(approval)
+    assert response.status_code == 200
+    assert approval.status == "approved"
