@@ -19,7 +19,7 @@ dest="/opt/prism-releases/${sha}"
 
 git -C "$base" bundle verify "$bundle"
 git clone --no-hardlinks --no-checkout "$base" "$dest"
-git -C "$dest" fetch --no-tags "$bundle" HEAD
+git -C "$dest" fetch --no-tags "$bundle" refs/heads/codex/prism-v4.0.23-context-mobile
 git -C "$dest" checkout --detach FETCH_HEAD
 [[ "$(git -C "$dest" rev-parse HEAD)" == "$sha" ]]
 [[ "$(tr -d '[:space:]' < "$dest/VERSION")" == 4.0.39 ]]
