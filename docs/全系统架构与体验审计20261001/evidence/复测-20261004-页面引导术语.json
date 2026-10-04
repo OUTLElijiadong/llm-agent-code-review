@@ -1,0 +1,159 @@
+{
+  "checked_at": "2026-10-04T10:45:20.338886+00:00",
+  "task": "真实点击所见页面引导术语残留复现与限定修复",
+  "checkout": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台",
+  "baseline_HEAD": "62a46e318c0b4ee816a2d69117180340a09025cc",
+  "release_boundary": "本补丁为尚未发布的候选变更；不能写作已发布 v4.0.36 的功能。此处不提交、发布或调整版本号。",
+  "read_scope": [
+    "完整前端 router/index.ts 与路由测试",
+    "pageGuideTips 及指南组件和现有测试",
+    "后端页面引导及能力注册表原有路由",
+    "支持中心界面名称与严重度显示映射"
+  ],
+  "changed_source_scope": {
+    "frontend": "仅 /issues hint 显示为中文危急和高严重度问题",
+    "backend_changed_string_values": [
+      {
+        "before": "[审查记录](/reviews)",
+        "after": "[审查任务](/reviews)"
+      },
+      {
+        "before": "审查记录",
+        "after": "审查任务"
+      },
+      {
+        "before": "Agent 中心",
+        "after": "Agent 工作台"
+      },
+      {
+        "before": "统一提交维修工单和意见反馈并跟踪处理",
+        "after": "统一提交支持工单和意见反馈并跟踪处理"
+      },
+      {
+        "before": "治理中心",
+        "after": "Agent 治理中心"
+      },
+      {
+        "before": "运营中心",
+        "after": "运行与审计中心"
+      },
+      {
+        "before": "访问控制中心",
+        "after": "用户与权限中心"
+      }
+    ]
+  },
+  "owned_changed_files": [
+    {
+      "path": "frontend/src/utils/pageGuideTips.ts",
+      "sha256": "28c6c740bc229cfea1dcbe9e06b5c3aed046c03f218cc4b4eb9aa45e3d6b18a0"
+    },
+    {
+      "path": "backend/app/services/page_guide_service.py",
+      "sha256": "59ef6f53bd80d64efd2b8dde48496a6dd3d6cecd2614eb0cb37c5ab1cc13f26d"
+    },
+    {
+      "path": "frontend/src/utils/pageGuideTips.test.ts",
+      "sha256": "b662fd2a9d3e252a53a28ac696f3fd6e3ae08a6aed5da48745df9d25368e7ff5"
+    },
+    {
+      "path": "frontend/src/components/ai/ProactivePageGuide.test.ts",
+      "sha256": "ac073f25a1943fbe1550b08549b4094865abe3f3dbd028bc932836c94bd78792"
+    },
+    {
+      "path": "backend/tests/unit/services/test_page_guide_service.py",
+      "sha256": "35c674ba5e0a8aa6d92eba288e4926fbf04d83cdaf1c8d36e83cf08cc5c9c087"
+    }
+  ],
+  "red": {
+    "frontend": {
+      "files": 2,
+      "failed": 1,
+      "passed": 18,
+      "actual_hint": "按严重度闭环问题,优先处理 high/critical。"
+    },
+    "backend": {
+      "failed": 8,
+      "passed": 4,
+      "warnings": 1,
+      "failures_scope": "五个页面标题、两个导航示例、一个支持工单用途"
+    }
+  },
+  "green": {
+    "frontend": {
+      "files": 5,
+      "passed": 349,
+      "scope": "原指南2文件及路由 index/guards/permissionMatrix；原19指南用例包含其中"
+    },
+    "backend": {
+      "files": 4,
+      "passed": 48,
+      "warnings": 1,
+      "scope": "原页面引导、slim observability、user/admin capability registry；原12页面引导用例包含其中"
+    }
+  },
+  "checks": {
+    "target_eslint_exit": 0,
+    "target_ruff_exit": 0,
+    "vue_tsc_no_emit_exit": 0,
+    "backend_function_AST_unchanged": true,
+    "backend_AST_except_string_values_unchanged": true,
+    "frontend_exact_single_hint_replacement": true,
+    "unchanged_files": [
+      {
+        "path": "frontend/src/router/index.ts",
+        "unchanged_from_HEAD": true,
+        "sha256": "2e743fef896f095e2c17a9d29593ee0055017679c880850db1f2a2859d42cf17"
+      },
+      {
+        "path": "frontend/src/constants/severity.ts",
+        "unchanged_from_HEAD": true,
+        "sha256": "2687f7143221b78dbcefefd7c6bba62a17cad5b5d2ee0fa4b2153f2bd7de2791"
+      },
+      {
+        "path": "frontend/src/components/ai/ProactivePageGuide.vue",
+        "unchanged_from_HEAD": true,
+        "sha256": "9e5735302e1d1d5ea02c655cb8c3630ef392280b0331c5649ffff3cd24e0ac3c"
+      },
+      {
+        "path": "backend/app/services/admin_capability_registry.py",
+        "unchanged_from_HEAD": true,
+        "sha256": "69b0f0fef032050a451649bd35aa812f660f419facad06dabb461af4c8fa48bc"
+      },
+      {
+        "path": "backend/app/services/user_capability_registry.py",
+        "unchanged_from_HEAD": true,
+        "sha256": "ecadb433651f7bae164887974174819b38c391c4ff29a3b486ec8f441700644b"
+      }
+    ]
+  },
+  "logs": {
+    "复现-20261004-页面引导术语-前端.log": {
+      "sha256": "ad8c5a9fc2b7a771b8790f75c698949bbdda5db50d759b35929f57c8c7bb32f8",
+      "bytes": 1618
+    },
+    "复现-20261004-页面引导术语-后端.log": {
+      "sha256": "57cdb16a47b3061e05b23ff159558ffd563154e1f1b1589162403b7ca72faf5b",
+      "bytes": 5608
+    },
+    "复测-20261004-页面引导术语-前端.log": {
+      "sha256": "25b4f4160c421b1a0bc5f9ae5fb10a20a0f3ce0422f7872818c952a153cddc66",
+      "bytes": 732
+    },
+    "复测-20261004-页面引导术语-后端.log": {
+      "sha256": "d8c353f3320e39133c2fdd5a89fc13e71aba0394eb582450c9b5ab2ac7fa1369",
+      "bytes": 946
+    },
+    "复测-20261004-页面引导术语-静态检查.log": {
+      "sha256": "ca4e3d67bdf90f40c51b7f47bfca4fb492cf363e35bbd74b47dafc3121fc726b",
+      "bytes": 441
+    }
+  },
+  "not_tested": [
+    "本补丁尚无生产发布后真实点击复测",
+    "未验证模型供应商实际生成的回复是否逐字遵从新提示词",
+    "不扩展声称全站术语已清理",
+    "未改 API、权限、严重度枚举、导航目标或指令行为"
+  ],
+  "related_out_of_scope": "user_capability_registry.py 的能力说明仍有维修工单等历史措辞；本次遵照父代理授权仅修复页面引导，不编辑能力注册表。"
+}

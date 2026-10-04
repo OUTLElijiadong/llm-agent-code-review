@@ -1,0 +1,128 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/review/ReviewTaskDetail.test.ts src/views/report/ReportDetail.test.ts src/views/issue/IssueHub.recovery.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/issue/IssueHub.recovery.test.ts (18 tests | 1 failed) 152ms
+     × 多个关联任务显示名净化已知内部后缀且不改写原任务名 25ms
+stderr | src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+[Vue warn]: Failed to resolve component: el-alert
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ReportDetail ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+[Vue warn]: Failed to resolve component: el-alert
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ReportDetail ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+[Vue warn]: Failed to resolve component: el-alert
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ReportDetail ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+stderr | src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+[Vue warn]: Failed to resolve component: el-alert
+If this is a native custom element, make sure to exclude it from component resolution via compilerOptions.isCustomElement. 
+  at <ReportDetail ref="VTU_COMPONENT" > 
+  at <VTUROOT>
+
+ ❯ src/views/report/ReportDetail.test.ts (32 tests | 2 failed) 281ms
+     × 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查' 45ms
+     × 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查' 10ms
+ ❯ src/views/review/ReviewTaskDetail.test.ts (66 tests | 2 failed) 762ms
+   × 任务详情只净化已知内部标题后缀：项目167 完整代码审查（review_type=full） 57ms
+   × 任务详情只净化已知内部标题后缀：项目167 完整代码审查 (review_type=full) 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/issue/IssueHub.recovery.test.ts > 问题追踪失败恢复 > 多个关联任务显示名净化已知内部后缀且不改写原任务名
+AssertionError: expected '未知文件项目167 完整代码审查（review_type=full）-' not to contain 'review_type='
+
+Expected: "review_type="
+Received: "未知文件项目167 完整代码审查（review_type=full）-"
+
+ ❯ src/views/issue/IssueHub.recovery.test.ts:60:36
+     58|     const metadata = wrapper.findAll('.ic-line2')
+     59|     expect(metadata[0].text()).toContain('项目167 完整代码审查')
+     60|     expect(metadata[0].text()).not.toContain('review_type=')
+       |                                    ^
+     61|     expect(metadata[1].text()).not.toContain('review_type=')
+     62|     expect(metadata[2].text()).toContain('业务审查（review_type=experimenta…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+AssertionError: expected '项目167 完整代码审查（review_type=full） · —' not to contain 'review_type='
+
+Expected: "review_type="
+Received: "项目167 完整代码审查（review_type=full） · —"
+
+ ❯ src/views/report/ReportDetail.test.ts:112:84
+    110|     await flushPromises()
+    111|     expect(wrapper.get('.cover-task').text()).toContain(expected)
+    112|     if (expected === '项目167 完整代码审查') expect(wrapper.get('.cover-task')…
+       |                                                                                    ^
+    113|     expect(task).toEqual(original)
+    114|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/views/report/ReportDetail.test.ts > ReportDetail 报告口径 > 报告封面复用任务展示名，保留未知业务后缀与原始数据：'项目167 完整代码审查'
+AssertionError: expected '项目167 完整代码审查 (review_type=full) · —' not to contain 'review_type='
+
+Expected: "review_type="
+Received: "项目167 完整代码审查 (review_type=full) · —"
+
+ ❯ src/views/report/ReportDetail.test.ts:112:84
+    110|     await flushPromises()
+    111|     expect(wrapper.get('.cover-task').text()).toContain(expected)
+    112|     if (expected === '项目167 完整代码审查') expect(wrapper.get('.cover-task')…
+       |                                                                                    ^
+    113|     expect(task).toEqual(original)
+    114|     wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/views/review/ReviewTaskDetail.test.ts > 任务详情只净化已知内部标题后缀：项目167 完整代码审查（review_type=full）
+AssertionError: expected '项目167 完整代码审查（review_type=full）' to be '项目167 完整代码审查' // Object.is equality
+
+Expected: "项目167 完整代码审查"
+Received: "项目167 完整代码审查（review_type=full）"
+
+ ❯ src/views/review/ReviewTaskDetail.test.ts:108:36
+    106|   review.getReviewTaskDetail.mockResolvedValue(original)
+    107|   await renderDetail()
+    108|   expect(wrapper.get('h1').text()).toBe(expected)
+       |                                    ^
+    109|   expect(original.task_name).toBe(task_name)
+    110| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/views/review/ReviewTaskDetail.test.ts > 任务详情只净化已知内部标题后缀：项目167 完整代码审查 (review_type=full)
+AssertionError: expected '项目167 完整代码审查 (review_type=full)' to be '项目167 完整代码审查' // Object.is equality
+
+Expected: "项目167 完整代码审查"
+Received: "项目167 完整代码审查 (review_type=full)"
+
+ ❯ src/views/review/ReviewTaskDetail.test.ts:108:36
+    106|   review.getReviewTaskDetail.mockResolvedValue(original)
+    107|   await renderDetail()
+    108|   expect(wrapper.get('h1').text()).toBe(expected)
+       |                                    ^
+    109|   expect(original.task_name).toBe(task_name)
+    110| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  5 failed | 111 passed (116)
+   Start at  18:44:02
+   Duration  1.65s (transform 584ms, setup 52ms, import 1.71s, tests 1.20s, environment 695ms)
+

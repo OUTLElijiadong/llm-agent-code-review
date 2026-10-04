@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import router from '@/router'
+
 import { ADMIN_PAGE_TIPS, USER_PAGE_TIPS, findPageGuideTip } from './pageGuideTips'
 
 describe('页面主动引导目录', () => {
@@ -13,6 +15,14 @@ describe('页面主动引导目录', () => {
     expect(tip?.title).toBe('审查任务')
     expect(tip?.prompt).toContain('审查任务页')
     expect(tip?.title).not.toContain('审查记录')
+  })
+
+  it('目录页面名称与实际路由标题一致', () => {
+    for (const tip of [...USER_PAGE_TIPS, ...ADMIN_PAGE_TIPS]) {
+      const route = router.getRoutes().find((item) => item.path === tip.route)
+      expect(route, tip.route).toBeDefined()
+      expect(tip.title, tip.route).toBe(route?.meta.title)
+    }
   })
 
   it('动态详情页按最长前缀匹配', () => {

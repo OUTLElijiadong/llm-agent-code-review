@@ -239,6 +239,43 @@ async def test_user_discovery_filters_agent_studio_by_actual_rbac_permission(db,
 
 
 @pytest.mark.asyncio
+async def test_user_discovery_unmatched_query_can_retry_without_losing_page_scope(db, monkeypatch) -> None:
+    user = _user(db)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    executor = _executor(db, user, "run_profile_query_recovery")
+    missed = await executor.execute(
+        ToolCall(
+            "call_profile_phrase_query",
+            "user_describe_capabilities",
+            {"page": "/profile", "query": "profile get 当前用户 角色"},
+            "{}",
+        )
+    )
+    assert missed.status == "error"
+    assert "没有找到匹配" in missed.error
+    assert "移除 query" in missed.error
+    recovered = await executor.execute(
+        ToolCall("call_profile_page_retry", "user_describe_capabilities", {"page": "/profile"}, "{}")
+    )
+    assert recovered.status == "success"
+    assert {row["page"] for row in recovered.output["items"]} == {"/profile"}
+    assert "profile.get" in {row["capability"] for row in recovered.output["items"]}
+
+
+@pytest.mark.asyncio
+async def test_user_discovery_denied_matching_rows_does_not_suggest_query_recovery(db, monkeypatch) -> None:
+    user = _user(db)
+    monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(service_module.rbac_service, "check_permission", lambda *_args: False)
+    result = await _executor(db, user, "run_denied_studio_discovery").execute(
+        ToolCall("call_denied_studio_discovery", "user_describe_capabilities", {"page": "/agent-studio"}, "{}")
+    )
+    assert result.status == "error"
+    assert "无权使用" in result.error
+    assert "移除 query" not in result.error
+
+
+@pytest.mark.asyncio
 async def test_fixed_download_tools_return_only_authorized_same_origin_urls(db, monkeypatch) -> None:
     user = _user(db)
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())

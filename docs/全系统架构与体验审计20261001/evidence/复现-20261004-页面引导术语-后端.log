@@ -1,0 +1,65 @@
+....FFFFFFFF                                                             [100%]
+=================================== FAILURES ===================================
+_ test_guide_labels_match_current_page_titles[user-/reviews-\u5ba1\u67e5\u4efb\u52a1] _
+tests/unit/services/test_page_guide_service.py:101: in test_guide_labels_match_current_page_titles
+    assert labels[route][0] == expected_title
+E   AssertionError: assert '审查记录' == '审查任务'
+E     
+E     - 审查任务
+E     + 审查记录
+_ test_guide_labels_match_current_page_titles[user-/agents-Agent \u5de5\u4f5c\u53f0] _
+tests/unit/services/test_page_guide_service.py:101: in test_guide_labels_match_current_page_titles
+    assert labels[route][0] == expected_title
+E   AssertionError: assert 'Agent 中心' == 'Agent 工作台'
+E     
+E     - Agent 工作台
+E     + Agent 中心
+_ test_guide_labels_match_current_page_titles[admin-/admin/governance-Agent \u6cbb\u7406\u4e2d\u5fc3] _
+tests/unit/services/test_page_guide_service.py:101: in test_guide_labels_match_current_page_titles
+    assert labels[route][0] == expected_title
+E   AssertionError: assert '治理中心' == 'Agent 治理中心'
+E     
+E     - Agent 治理中心
+E     + 治理中心
+_ test_guide_labels_match_current_page_titles[admin-/admin/operations-\u8fd0\u884c\u4e0e\u5ba1\u8ba1\u4e2d\u5fc3] _
+tests/unit/services/test_page_guide_service.py:101: in test_guide_labels_match_current_page_titles
+    assert labels[route][0] == expected_title
+E   AssertionError: assert '运营中心' == '运行与审计中心'
+E     
+E     - 运行与审计中心
+E     + 运营中心
+_ test_guide_labels_match_current_page_titles[admin-/admin/access-\u7528\u6237\u4e0e\u6743\u9650\u4e2d\u5fc3] _
+tests/unit/services/test_page_guide_service.py:101: in test_guide_labels_match_current_page_titles
+    assert labels[route][0] == expected_title
+E   AssertionError: assert '访问控制中心' == '用户与权限中心'
+E     
+E     - 用户与权限中心
+E     + 访问控制中心
+_______ test_navigation_example_uses_review_task_term[user_guide_block] ________
+tests/unit/services/test_page_guide_service.py:109: in test_navigation_example_uses_review_task_term
+    assert "[审查任务](/reviews)" in block
+E   assert '[审查任务](/reviews)' in '# 页面引导协议(帮用户"像真人一样使用页面")\n- 平台所有功能都在左侧导航的页面里;你完成查询或操作后,必须告诉用户结果在\n  哪个页面继续查看/操作,并用站内 markdown 链接给出入口,例如 [审查记录](/revie...布论坛帖子\n- /profile/personalization 个性化画像: 查看画像学习与偏好\n- /profile/password 修改密码: 修改登录密码\n- /sandboxes 代码沙箱: 创建测试沙箱与持续部署环境'
+_______ test_navigation_example_uses_review_task_term[admin_guide_block] _______
+tests/unit/services/test_page_guide_service.py:109: in test_navigation_example_uses_review_task_term
+    assert "[审查任务](/reviews)" in block
+E   assert '[审查任务](/reviews)' in '# 页面引导协议(帮用户"像真人一样使用页面")\n- 平台所有功能都在左侧导航的页面里;你完成查询或操作后,必须告诉用户结果在\n  哪个页面继续查看/操作,并用站内 markdown 链接给出入口,例如 [审查记录](/revie... /admin/access 访问控制中心: 用户、角色与权限管理\n- /admin/platform 平台配置中心: 模型、嵌入、内测码、MCP 与运行节点配置\n- /report/templates 报告模板管理: 维护报告模板'
+_________________ test_support_guide_uses_current_ticket_term __________________
+tests/unit/services/test_page_guide_service.py:115: in test_support_guide_uses_current_ticket_term
+    assert "支持工单" in USER_PAGE_LABELS["/support"][1]
+E   AssertionError: assert '支持工单' in '统一提交维修工单和意见反馈并跟踪处理'
+=============================== warnings summary ===============================
+.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_page_guide_service.py::test_guide_labels_match_current_page_titles[user-/reviews-\u5ba1\u67e5\u4efb\u52a1]
+FAILED tests/unit/services/test_page_guide_service.py::test_guide_labels_match_current_page_titles[user-/agents-Agent \u5de5\u4f5c\u53f0]
+FAILED tests/unit/services/test_page_guide_service.py::test_guide_labels_match_current_page_titles[admin-/admin/governance-Agent \u6cbb\u7406\u4e2d\u5fc3]
+FAILED tests/unit/services/test_page_guide_service.py::test_guide_labels_match_current_page_titles[admin-/admin/operations-\u8fd0\u884c\u4e0e\u5ba1\u8ba1\u4e2d\u5fc3]
+FAILED tests/unit/services/test_page_guide_service.py::test_guide_labels_match_current_page_titles[admin-/admin/access-\u7528\u6237\u4e0e\u6743\u9650\u4e2d\u5fc3]
+FAILED tests/unit/services/test_page_guide_service.py::test_navigation_example_uses_review_task_term[user_guide_block]
+FAILED tests/unit/services/test_page_guide_service.py::test_navigation_example_uses_review_task_term[admin_guide_block]
+FAILED tests/unit/services/test_page_guide_service.py::test_support_guide_uses_current_ticket_term
+8 failed, 4 passed, 1 warning in 1.65s

@@ -1,0 +1,16 @@
+COMMAND: ['npm', 'test', '--', 'src/utils/pageGuideTips.test.ts', 'src/components/ai/ProactivePageGuide.test.ts', 'src/router/index.test.ts', 'src/router/guards.test.ts', 'src/router/permissionMatrix.test.ts']
+
+> code-review-platform@1.0.0 test
+> vitest run src/utils/pageGuideTips.test.ts src/components/ai/ProactivePageGuide.test.ts src/router/index.test.ts src/router/guards.test.ts src/router/permissionMatrix.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  5 passed (5)
+      Tests  349 passed (349)
+   Start at  18:42:37
+   Duration  843ms (transform 382ms, setup 111ms, import 1.41s, tests 127ms, environment 1.48s)
+
+
+EXIT_CODE: 0

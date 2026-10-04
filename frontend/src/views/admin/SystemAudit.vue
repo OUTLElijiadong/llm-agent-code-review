@@ -175,6 +175,8 @@ function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info
 }
 
 async function loadLogs(): Promise<void> {
+  // 退出时旧页面尚可能挂载；只有账号与 token 都有效才允许重新查询。
+  if (!userStore.token || !userStore.profile) return
   const scopeCurrent = auditScope.captureAccount()
   const requestVersion = ++auditRequestVersion
   loading.value = true
@@ -244,7 +246,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   filters.action = ''
   filters.keyword = ''
   dateRange.value = null
-  if (userStore.profile) void loadLogs()
+  if (userStore.token && userStore.profile) void loadLogs()
 }, { flush: 'sync' })
 onMounted(loadLogs)
 </script>

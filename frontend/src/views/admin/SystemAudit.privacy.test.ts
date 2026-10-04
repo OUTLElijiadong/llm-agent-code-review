@@ -7,8 +7,14 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/router', () => ({ default: { push: vi.fn() } }))
 import SystemAudit from './SystemAudit.vue'
 import { useUserStore } from '@/stores/user'
+import { setToken } from '@/utils/token'
 const entry = { id: 1, actor_id: 101, actor_name: '账号 A', action: 'agent_team.create', target_type: 'agent_team', target_id: '1', status: 'success', create_time: '2026-09-20T12:50:00' }
-beforeEach(() => { setActivePinia(createPinia()); api.list.mockReset() })
+beforeEach(() => {
+  setToken('local-privacy-fixture')
+  setActivePinia(createPinia())
+  useUserStore().profile = { id: 101, username: 'local-admin', role: 'admin', status: 1 }
+  api.list.mockReset()
+})
 function render() {
   return mount(SystemAudit, { global: { directives: { loading: () => undefined }, stubs: {
     'el-card': { template: '<div><slot /></div>' }, 'el-select': true, 'el-option': true, 'el-input': true,

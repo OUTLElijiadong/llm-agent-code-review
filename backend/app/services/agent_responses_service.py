@@ -2783,6 +2783,10 @@ class PrismToolExecutor:
             from app.main import app
 
             rows = describe_user_capabilities(app.openapi(), page=page, query=query)
+            if not rows:
+                return ToolExecutionResult.failure(
+                    "没有找到匹配的页面能力；请仅指定 page，并移除 query 后重新查询。"
+                )
             is_admin_actor = _is_admin_actor(self._db, self._user)
             available = [
                 row
@@ -2796,7 +2800,7 @@ class PrismToolExecutor:
                 )
             ]
             if not available:
-                return ToolExecutionResult.failure("当前用户没有匹配的可用页面能力")
+                return ToolExecutionResult.failure("当前用户无权使用匹配的页面能力")
             return ToolExecutionResult.success({"count": len(available), "items": available})
 
         return await self._execute_once(call, discover)

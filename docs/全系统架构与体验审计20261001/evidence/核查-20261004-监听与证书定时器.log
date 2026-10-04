@@ -1,0 +1,8 @@
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess
+LISTEN 0      5          127.0.0.1:8621       0.0.0.0:*          
+LISTEN 0      100                *:8888             *:*          
+NextElapseUSecRealtime=Mon 2026-10-05 03:09:14 CST
+ActiveState=active
+SubState=waiting
+Result=success
+ExecMainStatus=0

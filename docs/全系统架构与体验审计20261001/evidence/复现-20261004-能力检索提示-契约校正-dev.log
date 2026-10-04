@@ -1,0 +1,64 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-1.3.0, platformdirs-4.12.1, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 22 items / 20 deselected / 2 selected
+
+tests/unit/services/test_user_capability_registry.py FF                  [100%]
+
+=================================== FAILURES ===================================
+___ test_user_discovery_unmatched_query_can_retry_without_losing_page_scope ____
+
+db = <sqlalchemy.orm.session.Session object at 0x10ef9f410>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f028790>
+
+    @pytest.mark.asyncio
+    async def test_user_discovery_unmatched_query_can_retry_without_losing_page_scope(db, monkeypatch) -> None:
+        user = _user(db)
+        monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+        executor = _executor(db, user, "run_profile_query_recovery")
+        missed = await executor.execute(
+            ToolCall(
+                "call_profile_phrase_query",
+                "user_describe_capabilities",
+                {"page": "/profile", "query": "profile get 当前用户 角色"},
+                "{}",
+            )
+        )
+        assert missed.status == "error"
+>       assert "没有找到匹配" in missed.error
+E       AssertionError: assert '没有找到匹配' in '当前用户没有匹配的可用页面能力'
+E        +  where '当前用户没有匹配的可用页面能力' = ToolExecutionResult(status='error', output=None, error='当前用户没有匹配的可用页面能力', failure_kind='', operation='', impact='', danger=False, approval_id=None, preview=None).error
+
+tests/unit/services/test_user_capability_registry.py:255: AssertionError
+___ test_user_discovery_denied_matching_rows_does_not_suggest_query_recovery ___
+
+db = <sqlalchemy.orm.session.Session object at 0x10f04bf10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f0289d0>
+
+    @pytest.mark.asyncio
+    async def test_user_discovery_denied_matching_rows_does_not_suggest_query_recovery(db, monkeypatch) -> None:
+        user = _user(db)
+        monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+        monkeypatch.setattr(service_module.rbac_service, "check_permission", lambda *_args: False)
+        result = await _executor(db, user, "run_denied_studio_discovery").execute(
+            ToolCall("call_denied_studio_discovery", "user_describe_capabilities", {"page": "/agent-studio"}, "{}")
+        )
+        assert result.status == "error"
+>       assert "无权使用" in result.error
+E       AssertionError: assert '无权使用' in '当前用户没有匹配的可用页面能力'
+E        +  where '当前用户没有匹配的可用页面能力' = ToolExecutionResult(status='error', output=None, error='当前用户没有匹配的可用页面能力', failure_kind='', operation='', impact='', danger=False, approval_id=None, preview=None).error
+
+tests/unit/services/test_user_capability_registry.py:274: AssertionError
+=============================== warnings summary ===============================
+.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_user_capability_registry.py::test_user_discovery_unmatched_query_can_retry_without_losing_page_scope
+FAILED tests/unit/services/test_user_capability_registry.py::test_user_discovery_denied_matching_rows_does_not_suggest_query_recovery
+================= 2 failed, 20 deselected, 1 warning in 3.24s ==================

@@ -7,9 +7,12 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/router', () => ({ default: { push: vi.fn() } }))
 import AiLogList from './AiLogList.vue'
 import { useUserStore } from '@/stores/user'
+import { setToken } from '@/utils/token'
 const entry = { id: 1, model_name: 'fixture', status: 'success', create_time: '2026-09-20T12:50:00', total_tokens: 100 }
 beforeEach(() => {
+  setToken('local-privacy-fixture')
   setActivePinia(createPinia())
+  useUserStore().profile = { id: 101, username: 'local-admin', role: 'admin', status: 1 }
   api.list.mockReset().mockResolvedValue({ items: [entry], total: 1 })
   api.detail.mockReset()
 })

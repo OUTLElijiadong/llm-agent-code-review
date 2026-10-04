@@ -1,0 +1,37 @@
+RELEASE 62a46e318c0b4ee816a2d69117180340a09025cc VERSION 4.0.36
+/cr_backend prism-backend:62a46e318c0b4ee816a2d69117180340a09025cc sha256:5af4a238542d57ce571be63aaa5125099457a0270b1420d70fb722bff5ca88c0 healthy
+/cr_frontend prism-frontend:62a46e318c0b4ee816a2d69117180340a09025cc sha256:af00d83953c1ca342b64b702d95aaae4a1a66bc1fcec7fccd4a636432a4e732d healthy
+ALEMBIC 061_overview_time_indexes
+29cad511ffc6d8ebcdfdc19c4781c9928240f4a9d298ec1a54bbc700a8bfd460  /opt/prism-releases/62a46e318c0b4ee816a2d69117180340a09025cc/backups/code_review_20261004T094432Z_62a46e318c0b.sql.gz
+BACKUP_BYTES 450999291
+{"lock_sha256": "784bdb1f7d8055d3a62f45f3669df80b8ba6ba3b73c7351f5a858e4dcb0f7c43", "locked_application_packages": 60, "pyjwt": "2.15.0", "version_mismatches": []}
+WARNING: The directory '/app/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+No broken requirements found.
+TRANSCRIPT_COUNTS_AND_DIGEST_MISMATCHES
+6	0
+[2026-10-04T09:59:26Z] INFO  检查点回退兼容门通过(reader=supported, ledger_schema=1)
+[2026-10-04T09:59:32Z] ERROR 已迁移新对话账本，目标镜像不支持 v2 引用；即使账本暂空也拒绝回退。保留当前数据并前向修复，不恢复旧备份
+OLD_READER_REJECTED 1 CONTAINERS_UNCHANGED yes
+{
+  "schema_version": 1,
+  "status": "ok",
+  "can_continue": true,
+  "summary": "全部生产关键检查通过",
+  "actions": [],
+  "blocking_checks": [],
+  "checked_at_utc": "2026-10-04T09:59:46Z",
+  "checks": {
+    "release": {"ok": true, "status": "ok", "message": "发布账本、运行镜像和默认环境一致"},
+    "containers": {"ok": true, "status": "ok", "services": {"mysql":"healthy","redis":"healthy","clamav":"healthy","backend":"healthy","frontend":"healthy"}},
+    "disk": {"ok": true, "status": "ok", "used_percent": 76, "max_percent": 85, "critical_percent": 95},
+    "memory": {"ok": true, "status": "ok", "used_percent": 42, "max_percent": 90, "critical_percent": 98},
+    "backup": {"ok": true, "status": "ok", "file": "code_review_20261004T094432Z_62a46e318c0b.sql.gz", "age_hours": 0, "max_age_hours": 30, "gzip_ok": true, "checksum_ok": true},
+    "alembic": {"ok": true, "status": "ok", "current": "061_overview_time_indexes", "head": "061_overview_time_indexes"},
+    "https": {"ok": true, "status": "ok", "mode": "required", "http_redirect_code": "308", "health": "ok"}
+  }
+}
+WorkingDirectory=/opt/prism-releases/62a46e318c0b4ee816a2d69117180340a09025cc/deploy
+ActiveState=active
+SubState=running
+        Used       Avail Use%
+146809741312 46395609088  76%

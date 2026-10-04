@@ -74,6 +74,15 @@ describe('ProactivePageGuide', () => {
     expect(wrapper.get('.guide-title').text()).not.toContain('审查记录')
   })
 
+  it('问题追踪引导使用界面严重度中文名称', async () => {
+    const { wrapper } = await mountGuide('/issues', 'user')
+    const hint = wrapper.get('.guide-hint').text()
+    expect(hint).toContain('危急')
+    expect(hint).toContain('高')
+    expect(hint).not.toMatch(/\b(?:high|critical)\b/)
+    wrapper.unmount()
+  })
+
   it('点击引导派发用户端唤起事件并预填指令', async () => {
     const listener = vi.fn()
     window.addEventListener('prism:open-agent-chat', listener as EventListener)

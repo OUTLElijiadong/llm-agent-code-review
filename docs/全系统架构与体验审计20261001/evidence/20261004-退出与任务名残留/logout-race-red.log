@@ -1,0 +1,123 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/admin/ActivityLogLogout.lifecycle.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/admin/ActivityLogLogout.lifecycle.test.ts (2 tests | 2 failed) 27ms
+   × 'AI 调用日志' 正常退出不能派发匿名后台请求或提示缺少 token 22ms
+   × '操作审计' 正常退出不能派发匿名后台请求或提示缺少 token 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > 'AI 调用日志' 正常退出不能派发匿名后台请求或提示缺少 token
+AssertionError: expected [ { url: '/ai-logs', …(1) }, …(1) ] to deeply equal [ { url: '/ai-logs', …(1) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "authenticated": true,
+      "url": "/ai-logs",
+    },
++   {
++     "authenticated": false,
++     "url": "/ai-logs",
++   },
+  ]
+
+ ❯ src/views/admin/ActivityLogLogout.lifecycle.test.ts:68:22
+     66|
+     67|   expect(getToken()).toBeNull()
+     68|   expect.soft(calls).toEqual([{ url, authenticated: true }])
+       |                      ^
+     69|   expect.soft(ui.error).not.toHaveBeenCalled()
+     70|   expect.soft(ui.replace).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > 'AI 调用日志' 正常退出不能派发匿名后台请求或提示缺少 token
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > '操作审计' 正常退出不能派发匿名后台请求或提示缺少 token
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "缺少token",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/admin/ActivityLogLogout.lifecycle.test.ts:69:29
+     67|   expect(getToken()).toBeNull()
+     68|   expect.soft(calls).toEqual([{ url, authenticated: true }])
+     69|   expect.soft(ui.error).not.toHaveBeenCalled()
+       |                             ^
+     70|   expect.soft(ui.replace).not.toHaveBeenCalled()
+     71|   wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > 'AI 调用日志' 正常退出不能派发匿名后台请求或提示缺少 token
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > '操作审计' 正常退出不能派发匿名后台请求或提示缺少 token
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/login",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/views/admin/ActivityLogLogout.lifecycle.test.ts:70:31
+     68|   expect.soft(calls).toEqual([{ url, authenticated: true }])
+     69|   expect.soft(ui.error).not.toHaveBeenCalled()
+     70|   expect.soft(ui.replace).not.toHaveBeenCalled()
+       |                               ^
+     71|   wrapper.unmount()
+     72| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/views/admin/ActivityLogLogout.lifecycle.test.ts > '操作审计' 正常退出不能派发匿名后台请求或提示缺少 token
+AssertionError: expected [ { url: '/admin/audit', …(1) }, …(1) ] to deeply equal [ { url: '/admin/audit', …(1) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "authenticated": true,
+      "url": "/admin/audit",
+    },
++   {
++     "authenticated": false,
++     "url": "/admin/audit",
++   },
+  ]
+
+ ❯ src/views/admin/ActivityLogLogout.lifecycle.test.ts:68:22
+     66|
+     67|   expect(getToken()).toBeNull()
+     68|   expect.soft(calls).toEqual([{ url, authenticated: true }])
+       |                      ^
+     69|   expect.soft(ui.error).not.toHaveBeenCalled()
+     70|   expect.soft(ui.replace).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  18:40:17
+   Duration  612ms (transform 220ms, setup 20ms, import 291ms, tests 27ms, environment 206ms)
+

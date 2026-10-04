@@ -1,0 +1,144 @@
+{
+  "release": "v4.0.36",
+  "sha": "62a46e318c0b4ee816a2d69117180340a09025cc",
+  "role": "普通用户",
+  "browser": "普通Chrome桌面原有会话，非无痕",
+  "checks": [
+    {
+      "page": "仪表盘",
+      "result": "刷新后v4.0.36及普通用户可见，读取5/5，无可见错误提示"
+    },
+    {
+      "page": "项目管理",
+      "result": "第一页10/12、第二页2/12真实分页，无可见错误；未编辑或删除项目"
+    },
+    {
+      "page": "项目刷新",
+      "result": "URL直接刷新成功，无404；分页恢复默认第1页（未将分页持久化视为既定需求）"
+    },
+    {
+      "page": "代码中心与编辑器",
+      "result": "12项目入口；实际项目代码列表212条；文件深层地址刷新恢复，无404；保存入口可见但未操作"
+    },
+    {
+      "page": "问题追踪",
+      "result": "默认处理中共773条；20条第一页加载；仅查看未流转状态",
+      "observation": "引导气泡仍出现high/critical英文严重度术语，作为低级文案遗留记录"
+    },
+    {
+      "page": "问题详情",
+      "result": "首个问题详情真实展开，首屏4个卡片详情/查看任务列视觉对齐；未修改问题"
+    },
+    {
+      "page": "任务详情",
+      "result": "问题关联既有任务已完成，21个问题；深层URL刷新恢复，无404；历史接口未提供覆盖字段则显示未知，未推算进度"
+    },
+    {
+      "page": "审查任务列表",
+      "result": "50条既有任务可见，成功/历史失败分别显示；未发起、删除或重试任务"
+    },
+    {
+      "page": "审查报告",
+      "result": "列表34条；既有详情及深层URL刷新恢复；最终主评分与文件评分均36；初始1/22为加载计数动画中间帧，未当成计算缺陷；未生成或导出新报告"
+    },
+    {
+      "page": "Agent 工作台",
+      "result": "普通账号仅目录入口可见，显示6个可执行已有Agent；未操作新增、发布、治理或执行。"
+    },
+    {
+      "page": "小菱单条只读查询",
+      "result": "完成最终回复，可见12项目与页面12一致；7个工具步骤6成功/1页面能力未匹配，逐步显示低风险自动通过；未启动任务或团队；过程及工具结果可展开/收起",
+      "observation": "账号/角色明确标注来自本会话身份注入、未工具二次核验；一条/profile能力查找失败被明示而非伪报成功"
+    },
+    {
+      "page": "小菱刷新恢复",
+      "result": "同一会话问题、两条过程回复、执行过程和最终回复均恢复，先后顺序保持；输入恢复可用",
+      "sequence_order_verified": true,
+      "question_text_instances_in_message_nodes": 1
+    },
+    {
+      "page": "已有团队独立详情",
+      "result": "已有失败团队只读打开；首条消息展开/收起入口可用，展开后的AX内容长度增加；3任务明细入口、失败状态和进度显示；未重试或取消",
+      "collapsed_modal_ax_characters": 6489,
+      "expanded_modal_ax_characters": 6807,
+      "limitation": "旧团队记录已含历史TRUNCATED/length失败，不能据这次只读展示宣称新模型审查恢复或旧缺失内容被修复"
+    },
+    {
+      "page": "已有团队第二个全文样本",
+      "result": "另一条实际安全结果可展开，正文含旧记录遗留截断标记不予隐藏；本次未触发模型",
+      "expanded_two_messages_modal_ax_characters": 7156
+    },
+    {
+      "page": "已有团队三任务明细",
+      "result": "只读展开3任务明细，既有1完成/2失败终态可见；随后关闭详情并恢复本轮新会话，再次保持原问答顺序。"
+    }
+  ],
+  "limitations": [
+    "仅当前账号实际可见范围",
+    "未启用开发者工具网络记录，不能据UI推断所有HTTP请求无错误",
+    "未创建审查、团队、沙箱或渗透任务"
+  ],
+  "capability_lookup_observation": {
+    "page": "/profile",
+    "query": "profile get 当前用户 角色",
+    "ledger_id": 3178,
+    "outcome": "no matching capability for whole-query substring",
+    "subsequent_page": "/dashboard",
+    "subsequent_query": null,
+    "subsequent_ledger_id": 3180,
+    "subsequent_outcome": "success",
+    "source": "Parent readonly production tool ledger confirmation",
+    "classification": "lookup no-match; not permission loss",
+    "identity_source": "session injected identity, explicitly not secondarily verified by tool"
+  },
+  "handoff": {
+    "mouse_returned": true,
+    "ordinary_session_left_signed_in": true,
+    "final_page": "/profile",
+    "chat_closed": true,
+    "team_window_closed": true
+  },
+  "readonly_model_messages_sent": 1,
+  "additional_scope_notes": [
+    "Desktop ordinary Chrome native real clicks; no incognito and no saved password.",
+    "Only this ordinary-account session was inspected; no cross-account switching in this subtask.",
+    "No DevTools/network telemetry capture; visible content and navigation success do not prove all HTTP requests succeeded.",
+    "Existing team77 details only; no retry/cancel/create/start review/team/sandbox/penetration operations.",
+    "Old v4.0.33 stored truncation/error text remains historical; expandable UI cannot recover content absent from old stored payload.",
+    "Report score intermediate animation frames 1/22 were sampled; two settled observations were 36, parent confirms useCountUp(score,1500).",
+    "Guide legacy English high/critical was observed; parent confirmed static copy residue, no source edits by this production acceptance subtask.",
+    "One automation undefined.slice error occurred before any UI action and was corrected; it is not a product defect."
+  ],
+  "private_artifacts": {
+    "directory": "frontend/test-results/production-acceptance/20261004-普通账号（Git ignored）",
+    "ignored": true,
+    "ax_count": 40,
+    "note": "Private screenshots and raw AX remain ignored; some explicitly named AX captures are diffs.",
+    "screenshot_count": 32,
+    "actual_screenshot_format": "JPEG (JFIF, ff d8 ff e0); returned native capture bytes retained unchanged",
+    "filename_extension_note": "32 native JPEG screenshots renamed from .png to .jpg after independent file-magic verification; bytes and hashes unchanged."
+  },
+  "visible_http_error_scope": "本轮观察到的深层刷新/导航未出现404页或可见网络错误提示；未采集请求日志，不声明HTTP全部成功。",
+  "observations": [
+    {
+      "finding": "能力检索无命中",
+      "status": "已由主代理生产账本核实参数；并非RBAC权限丢失",
+      "followup": "主代理拟区分无匹配与无权限错误，提示移除检索词再查询。AI对接口不存在的推论不应作为已验证事实。"
+    },
+    {
+      "finding": "引导气泡英文严重度残留",
+      "status": "生产可见且主代理源码复核确认",
+      "followup": "后续文案修复后需重复该页面场景。"
+    }
+  ],
+  "independent_metadata_review": {
+    "agent": "context_integrity",
+    "artifact_hash_size_matches": 72,
+    "screenshots": 32,
+    "ax": 40,
+    "private_git_ignored": true,
+    "public_private_summary_scope_consistent": true,
+    "credential_body_absent": true,
+    "format_correction": "Actual JPEG identified by independent magic/file inspection; extension corrected to .jpg, bytes unchanged."
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "状态": "源码冻结；生产补丁复测待主代理发布后实际点击",
+  "范围": [
+    "正常退出token/profile同步监听竞态：AI调用日志与操作审计",
+    "任务名内部参数残留：任务详情H1、报告封面、问题关联任务名"
+  ],
+  "生产已复现": "主代理 v4.0.36 admin AI日志退出与reviewer /audit退出后有缺少token；审查员任务180详情、报告180及issues任务180/179标题残留。真实截图主代理保存。",
+  "本地退出复现": {
+    "环境": "真实Pinia用户Store、真实两个Vue组件、真实Axios拦截器、无网HTTP adapter",
+    "修复前": "2/2失败：logout后额外匿名GET与缺少token提示、replace(/login)",
+    "修复后": "仅要求token与profile同时有效后可查询；不修改HTTP/store或抑制真实401",
+    "新增样本": 18,
+    "关联目标用例": 69
+  },
+  "本地任务名复现": {
+    "修复前": "5失败/111通过，涵盖3组件已知后缀",
+    "修复后": "复用既有taskDisplayTitle，仅显示格式化，不改原始任务名对象或DB",
+    "新增样本": 8,
+    "关联目标用例": 156
+  },
+  "全前端验证": {
+    "文件": 133,
+    "通过": 1578,
+    "运行": "npm test -- --maxWorkers=1",
+    "秒": 62.05,
+    "lint_exit": 0,
+    "build": {
+      "exit": 0,
+      "vite_seconds": 36.42,
+      "tsc": "通过"
+    },
+    "diff_check_exit": 0
+  },
+  "边界": [
+    "HTTP adapter不访问生产，不替代发布后真实退出场景复测。",
+    "原HTTP匿名401、当前会话401与被顶下线行为原样，已有HTTP测试仍验证。",
+    "未扩展到其他未复现页面，未改变原始任务标识或DB。"
+  ],
+  "文件摘要": [
+    {
+      "路径": "frontend/src/views/admin/AiLogList.vue",
+      "sha256": "376db129307d0d1cc443abb151b688078b73c86ef512a7b20e79750ba5edf24e"
+    },
+    {
+      "路径": "frontend/src/views/admin/SystemAudit.vue",
+      "sha256": "00337d72e17a0eb106dac617e046e13450033bb626db139f774df2d719897f9f"
+    },
+    {
+      "路径": "frontend/src/views/issue/IssueHub.vue",
+      "sha256": "2fa2d32c5356f4a52e923242997a95088c9a5e76eedb834239bf1d82c09e8d6b"
+    },
+    {
+      "路径": "frontend/src/views/report/ReportDetail.vue",
+      "sha256": "f8b07dce9cabdf28814a84d8b8670da6c83ac6bad27150919056cbc5dc8b9dc8"
+    },
+    {
+      "路径": "frontend/src/views/review/ReviewTaskDetail.vue",
+      "sha256": "d7e9ad93ef153dda531491049a1bb12781dcc9b2ca1ca5ca1761c4cbb366bbc2"
+    },
+    {
+      "路径": "frontend/src/views/admin/ActivityLogLogout.lifecycle.test.ts",
+      "sha256": "58efb68bd77507ee59b71d1ae40e60fc369f20d061143f0eeccc43afc48d8f68"
+    },
+    {
+      "路径": "frontend/src/views/admin/AiLogList.privacy.test.ts",
+      "sha256": "02808b1ec44b76d7f0ce96514c8251d04971ed95071b03935d2e5dffdecf85b5"
+    },
+    {
+      "路径": "frontend/src/views/admin/SystemAudit.privacy.test.ts",
+      "sha256": "3d68b093ca93b52a4093d018b905429797c6c2fdfc4fa9fd3a02e30a9256e997"
+    },
+    {
+      "路径": "frontend/src/views/issue/IssueHub.recovery.test.ts",
+      "sha256": "b94b79da9efb8ad07bfe7e1162da60b0e7065b7040f8351421d83da94aa89a35"
+    },
+    {
+      "路径": "frontend/src/views/report/ReportDetail.test.ts",
+      "sha256": "0d5fa70ce09e0d720705983c559ec914b6c3438f423aecc6a3b0b2a3c43d67df"
+    },
+    {
+      "路径": "frontend/src/views/review/ReviewTaskDetail.test.ts",
+      "sha256": "2b9edd04798c92aa03aa486a71fd465f32295a09c8d3966bb10dc040c6f265c1"
+    }
+  ],
+  "日志": [
+    {
+      "文件": "logout-race-red.log",
+      "sha256": "382835ac7103654d81802d5629ea74858668acb24b0d8eeb3bf67d215c30cc20"
+    },
+    {
+      "文件": "logout-race-green-expanded.log",
+      "sha256": "f857e580fde8bbf9554b2dabd0da6897d30c87656da00247971608bfe430084b"
+    },
+    {
+      "文件": "task-title-red.log",
+      "sha256": "09c882d88c7876e7f8c8a178bdc2542c3470adccdafd27d0a7ad6b125dba08cc"
+    },
+    {
+      "文件": "task-title-green-expanded.log",
+      "sha256": "4189f9e97ddeca23a1c7ea67b9ba233c135ba54d7fa8edb0eeb097cb16dddaa1"
+    },
+    {
+      "文件": "v4.0.37-frontend-full-test.log",
+      "sha256": "e8a491d1a9e6ca0a593481c83347ee9a00a0750dbd3b08cceccfcb0d912a6b9f"
+    },
+    {
+      "文件": "v4.0.37-frontend-lint.log",
+      "sha256": "941da6b309b828b7dfb58bb6b19973a175667923c8be81074496eca37d9f71ea"
+    },
+    {
+      "文件": "v4.0.37-frontend-build.log",
+      "sha256": "a73def94c6e042bb0613203f7fc98f17e3c625b324f9c9352af414b466bf456c"
+    }
+  ],
+  "独立复核": {
+    "代理": "context_integrity",
+    "目标文件": 13,
+    "通过用例": 225,
+    "秒": 17.23,
+    "结果": "无新增阻断",
+    "证据": "独立工具结果摘要.json",
+    "证据类型": "真实工具返回摘要，非完整stdout日志",
+    "sha256": "5cb642a1476f089c5216671fd9e48703ef541c210ad8afd03a1442b712831d5e",
+    "覆盖": [
+      "token/profile联合就绪门",
+      "正常退出重复样本",
+      "旧200/401响应不污染",
+      "真正匿名401与当前401仍提示",
+      "换账号刷新",
+      "三处任务名展示复用",
+      "原始对象与未知业务后缀保留"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/review/ReviewTaskDetail.test.ts src/views/report/ReportDetail.test.ts src/views/issue/IssueHub.recovery.test.ts src/utils/taskDisplayTitle.test.ts src/views/review/ReviewTaskList.polling.test.ts src/views/report/ReportList.test.ts src/views/report/ReportDetail.permissionMounted.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  7 passed (7)
+      Tests  156 passed (156)
+   Start at  18:44:30
+   Duration  2.01s (transform 1.45s, setup 119ms, import 4.55s, tests 2.47s, environment 2.09s)
+

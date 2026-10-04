@@ -1,0 +1,15 @@
+frontend-eslint
+COMMAND: ['node_modules/.bin/eslint', 'src/utils/pageGuideTips.ts', 'src/utils/pageGuideTips.test.ts', 'src/components/ai/ProactivePageGuide.test.ts']
+
+EXIT_CODE: 0
+
+backend-ruff
+COMMAND: ['.venv311/bin/ruff', 'check', 'app/services/page_guide_service.py', 'tests/unit/services/test_page_guide_service.py']
+All checks passed!
+
+EXIT_CODE: 0
+
+frontend-typecheck
+COMMAND: ['node_modules/.bin/vue-tsc', '--noEmit']
+
+EXIT_CODE: 0

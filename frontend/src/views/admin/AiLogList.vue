@@ -300,6 +300,8 @@ function formatDuration(ms?: number): string {
 }
 
 async function loadData() {
+  // clearSession 分步清空 token/profile；同步 watcher 不能在两步之间重发匿名请求。
+  if (!userStore.token || !userStore.profile) return
   const isCurrent = logScope.captureAccount()
   const request = ++listRequest
   loading.value = true
@@ -382,7 +384,7 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   total.value = 0
   loading.value = false
   page.value = 1
-  if (userStore.profile) void loadData()
+  if (userStore.token && userStore.profile) void loadData()
 }, { flush: 'sync' })
 
 onMounted(() => {

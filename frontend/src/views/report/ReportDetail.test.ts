@@ -99,6 +99,22 @@ beforeEach(() => {
 
 describe('ReportDetail 报告口径', () => {
   it.each([
+    { task: { task_name: '项目167 完整代码审查（review_type=full）' }, expected: '项目167 完整代码审查' },
+    { task: { name: '项目167 完整代码审查 (review_type=full)' }, expected: '项目167 完整代码审查' },
+    { task: { task_name: '业务审查（review_type=experimental）' }, expected: '业务审查（review_type=experimental）' },
+    { task: {}, expected: '任务 #42' },
+  ])('报告封面复用任务展示名，保留未知业务后缀与原始数据：$expected', async ({ task, expected }) => {
+    const original = { ...task }
+    reportApi.getReportDetail.mockResolvedValueOnce({ task, project: {}, stats: {}, files: [], rules_snapshot: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('.cover-task').text()).toContain(expected)
+    if (expected === '项目167 完整代码审查') expect(wrapper.get('.cover-task').text()).not.toContain('review_type=')
+    expect(task).toEqual(original)
+    wrapper.unmount()
+  })
+
+  it.each([
     { count: 2, total: 6, displayed: '33.3%' },
     { count: 1, total: 3, displayed: '33.3%' },
     { count: 1, total: 1, displayed: '100%' },

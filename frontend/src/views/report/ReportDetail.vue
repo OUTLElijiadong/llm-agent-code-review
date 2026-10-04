@@ -512,6 +512,7 @@ import { goBack } from '@/utils/navigation'
 import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
 import { useCountUp } from '@/composables/useCountUp'
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 
 const route = useRoute()
 const router = useRouter()
@@ -595,7 +596,7 @@ const taskName = computed(() => {
   const task = report.value?.task
   const name = [task?.task_name, task?.name]
     .find((value) => typeof value === 'string' && value.trim())
-  return typeof name === 'string' ? name : `任务 #${taskId}`
+  return taskDisplayTitle(typeof name === 'string' ? name : undefined, `任务 #${taskId}`)
 })
 const reviewType  = computed(() => reviewTypeLabel(report.value?.task?.review_type as string))
 const projectLanguage = computed(() => String(report.value?.project?.language ?? '').trim() || '未标注')

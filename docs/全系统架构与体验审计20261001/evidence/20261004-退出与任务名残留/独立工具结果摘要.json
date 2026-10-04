@@ -1,0 +1,13 @@
+{
+  "kind": "independent_tool_result_summary",
+  "checkout": "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend",
+  "tool_session_id": 10482,
+  "exit_code": 0,
+  "test_files_passed": 13,
+  "tests_passed": 225,
+  "duration_seconds": 17.23,
+  "start_local_time": "18:47:22",
+  "command": "npm test -- src/views/admin/ActivityLogLogout.lifecycle.test.ts src/views/admin/AiLogList.privacy.test.ts src/views/admin/SystemAudit.privacy.test.ts src/api/http.test.ts src/stores/user.test.ts src/components/admin/AdminLayout.logout.test.ts src/views/review/ReviewTaskDetail.test.ts src/views/report/ReportDetail.test.ts src/views/issue/IssueHub.recovery.test.ts src/utils/taskDisplayTitle.test.ts src/views/review/ReviewTaskList.polling.test.ts src/views/report/ReportList.test.ts src/views/report/ReportDetail.permissionMounted.test.ts",
+  "raw_returned_summary": "Test Files  13 passed (13)\nTests  225 passed (225)\nStart at 18:47:22\nDuration 17.23s",
+  "limitation": "该文件是依据独立工具会话实际返回结果保存的摘要；当次执行未重定向完整stdout，不冒充完整原始日志。测试为本地组件/HTTP adapter桩，未访问生产。"
+}

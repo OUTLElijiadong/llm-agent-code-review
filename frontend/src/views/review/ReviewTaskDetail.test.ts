@@ -97,6 +97,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it.each([
+  ['项目167 完整代码审查（review_type=full）', '项目167 完整代码审查'],
+  ['项目167 完整代码审查 (review_type=full)', '项目167 完整代码审查'],
+  ['业务审查（review_type=experimental）', '业务审查（review_type=experimental）'],
+])('任务详情只净化已知内部标题后缀：%s', async (task_name, expected) => {
+  const original = taskResult({ task_name, status: 'success' })
+  review.getReviewTaskDetail.mockResolvedValue(original)
+  await renderDetail()
+  expect(wrapper.get('h1').text()).toBe(expected)
+  expect(original.task_name).toBe(task_name)
+})
+
 describe('审查输入快照预览', () => {
   beforeEach(() => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({ status: 'success', files: [snapshotFile()] }))

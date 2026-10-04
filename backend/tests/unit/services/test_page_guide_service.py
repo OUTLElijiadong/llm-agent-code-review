@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.main import app
 from app.services.admin_capability_registry import ADMIN_PAGE_ROUTES
 from app.services.agent_responses_service import _instructions
@@ -80,3 +82,35 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
 def test_openapi_still_valid_for_all_capabilities() -> None:
     """冒烟:app 加载后能力注册表契约依旧可解析(防止引导改动破坏启动)。"""
     assert app.openapi()["paths"]
+
+
+@pytest.mark.parametrize(
+    ("surface", "route", "expected_title"),
+    [
+        ("user", "/reviews", "审查任务"),
+        ("user", "/agents", "Agent 工作台"),
+        ("admin", "/admin/governance", "Agent 治理中心"),
+        ("admin", "/admin/operations", "运行与审计中心"),
+        ("admin", "/admin/access", "用户与权限中心"),
+    ],
+)
+def test_guide_labels_match_current_page_titles(surface: str, route: str, expected_title: str) -> None:
+    """页面名沿用已核对的前端路由标题，不把旧入口术语送入模型。"""
+    labels = USER_PAGE_LABELS if surface == "user" else ADMIN_PAGE_LABELS
+    block = user_guide_block() if surface == "user" else admin_guide_block()
+    assert labels[route][0] == expected_title
+    assert f"- {route} {expected_title}:" in block
+
+
+@pytest.mark.parametrize("guide_block", [user_guide_block, admin_guide_block])
+def test_navigation_example_uses_review_task_term(guide_block) -> None:
+    """示例只更新可见名称，继续使用原有 /reviews 导航目标。"""
+    block = guide_block()
+    assert "[审查任务](/reviews)" in block
+    assert "审查记录" not in block
+
+
+def test_support_guide_uses_current_ticket_term() -> None:
+    """支持中心的工单名称与当前页面一致，不再暗示设备维修流程。"""
+    assert "支持工单" in USER_PAGE_LABELS["/support"][1]
+    assert "维修工单" not in user_guide_block()

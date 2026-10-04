@@ -118,7 +118,7 @@
                 {{ row.file_name || '未知文件' }}{{ row.line_number ? `:${row.line_number}` : '' }}
               </span>
               <span class="ic-project" :title="row.project_name">{{ row.project_name }}</span>
-              <span :title="`所属任务 #${row.task_id}`">{{ row.task_name || `任务 #${row.task_id}` }}</span>
+              <span :title="`所属任务 #${row.task_id}`">{{ taskDisplayTitle(row.task_name, `任务 #${row.task_id}`) }}</span>
               <span :title="row.create_time">{{ formatDateTime(parseUtcTimestamp(row.create_time), 'YYYY-MM-DD HH:mm') }}</span>
             </div>
             <div v-if="expandedIds.has(row.id)" :id="`issue-description-${row.id}`" class="ic-desc">
@@ -178,6 +178,7 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import { list as listIssues, updateStatus, batchUpdateStatus } from '@/api/issue'
 import { getProjects } from '@/api/project'
 import { formatDateTime, parseUtcTimestamp } from '@/utils/format'
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import type { IssueListItemOut } from '@/types/review'
 import type { ProjectOut } from '@/types/project'
 import { severityClass, severityDisplayLabel } from '@/constants/severity'

@@ -1,0 +1,237 @@
+{
+  "observed_at_utc": "2026-10-04T10:53:35.291218+00:00",
+  "release": "4.0.36",
+  "sha": "62a46e318c0b4ee816a2d69117180340a09025cc",
+  "browser": "普通Safari，非无痕",
+  "checks": [
+    {
+      "role": "管理员",
+      "scope": "运行总览、操作审计、AI调用日志；小菱证书及版本两轮只读问答",
+      "result": "回执143150成功75ms；两轮刷新后保持顺序，折叠/展开可用",
+      "boundary": "仅这两个只读问答，不是全功能或百万token模型验收"
+    },
+    {
+      "role": "审查员",
+      "scope": "退出管理员后正常登录、角色与导航",
+      "result": "显示审查员，有操作审计、创建与测试入口；无管理后台菜单；新对话为欢迎页",
+      "boundary": "未执行新Agent发布、权限修改或高风险动作"
+    },
+    {
+      "role": "审查员",
+      "scope": "历史中搜索本轮管理员版本查询标题",
+      "result": "没有匹配的对话",
+      "boundary": "单次真实账号切换与标题搜索，不代表所有历史记录/接口隔离验收"
+    },
+    {
+      "role": "审查员",
+      "scope": "仪表盘与项目/任务/问题/报告",
+      "result": "1项目1文件；2个完成任务；10问题（6+4）；任务180及关联报告最终64；问题处理中10条；安全态势4仅限安全漏洞，全类型严重度4危急3中3低有明确口径",
+      "boundary": "报告首次26/刷新12为计数动画帧，稳定64；未当成评分缺陷"
+    },
+    {
+      "role": "审查员",
+      "scope": "源码与报告深层URL刷新",
+      "result": "/reports/180 与 /code/167/file/1896 刷新恢复，无可见404，未保存文件"
+    },
+    {
+      "role": "审查员",
+      "scope": "操作审计与Agent工坊",
+      "result": "审计加载2828条，显示系统心跳默认关闭；工坊5既有待审批草稿、鉴权与账号隔离审查员已发布",
+      "boundary": "未修改、批准或执行草稿；不同时间的审计总数不强行视为一致快照"
+    },
+    {
+      "role": "管理员与审查员",
+      "scope": "日志页正常退出",
+      "result": "管理员AI日志页、审查员操作审计页退出后/login均出现缺少token；审查员立即留存AX及截图",
+      "classification": "已确认UX缺陷，候选4.0.37修复后须原场景生产复测"
+    },
+    {
+      "role": "审查员",
+      "scope": "任务关联标题与页面引导",
+      "result": "详情、报告、问题含review_type=full；问题引导含high/critical",
+      "classification": "展示残留，候选4.0.37修复，数据库原名保留"
+    }
+  ],
+  "limitations": [
+    "未采开发者工具网络，不能称所有HTTP/控制台无错误",
+    "仅桌面普通浏览器，不是真实手机",
+    "未创建审查、团队、沙箱或渗透任务",
+    "本轮审查员未发送新模型问答；原有记录只读检查"
+  ],
+  "private_evidence": [
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/01-运行总览.jpg",
+      "bytes": 291723,
+      "sha256": "b1a0892bcab4444ac600b4a7a9ddb27544aa7fc70f1e0e9bd1bd40170000b7d3",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/01-运行总览.txt",
+      "bytes": 15730,
+      "sha256": "f059f53e6f65f0693bcfd3dcbc71dce4b9d787f89943c780b2c3d21a4a1e2a78",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/02-证书实际回执.jpg",
+      "bytes": 430557,
+      "sha256": "2b62929a0cf3684a49ce209fe0fe5c7a124c89a1c578dd94877881221b9b80c8",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/02-证书实际回执.txt",
+      "bytes": 19561,
+      "sha256": "a1295baa1e1d8d31b766f8874f73b05a74a2a7a316f1c9f13387ea2a04c0c417",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/03-同会话第二轮版本核查.jpg",
+      "bytes": 460549,
+      "sha256": "0905100c006265974409f8459c1ef173e39821843345b89304f33903b0c1cc3d",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/03-同会话第二轮版本核查.txt",
+      "bytes": 21257,
+      "sha256": "aa3c6271b72e418e9a9f4ccd63e636f5ac588334709e8e06b8ce26737be87a33",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/04-刷新后历史顺序.jpg",
+      "bytes": 462837,
+      "sha256": "0ce7e132a23c4369277b102412d4819ac2c07ec2275907e292104fbd4af86191",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/04-刷新后历史顺序.txt",
+      "bytes": 21140,
+      "sha256": "fb83a6a2344074788fe7c0588ccd0084ee7526643b2dec1c6dfaa96fa6e757a1",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/05-正常退出缺少token.jpg",
+      "bytes": 282893,
+      "sha256": "d4d440cfe3476d18533234cb6dc5a453e37cba32147bac40fd009dbac6e38226",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-管理员/05-正常退出缺少token.txt",
+      "bytes": 3936,
+      "sha256": "57face1b604c639ee5c9f23c799bfad39d50681bf77de6bf6656cff938310949",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/01-合并角色仪表盘.jpg",
+      "bytes": 390771,
+      "sha256": "eefad78d75ba3713f008c08fa6493b0e10625be3f06c49c3ee850b3353e9bd65",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/01-合并角色仪表盘.txt",
+      "bytes": 8833,
+      "sha256": "5db1c25f51531cfc7168ee4ae66ec7c832d1ae21c44b399910746100d69281fb",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/02-管理员历史搜索隔离.txt",
+      "bytes": 9335,
+      "sha256": "fe927952fb4d6777c8f3750bc70e40948407f1ff36141c11f60c185b66dfcb45",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/03-两项任务列表.jpg",
+      "bytes": 257309,
+      "sha256": "c05462a070c5ede726a8052d714526bfa677e7f2d4c0cee44f2b2f46412ecbc5",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/03-两项任务列表.txt",
+      "bytes": 5071,
+      "sha256": "282ce3b1cec7128782fc991c3c20657223da9900263991a307a81f1a4e19edd1",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/04-关联报告与标题残留.jpg",
+      "bytes": 370892,
+      "sha256": "d63d84159ce869ac2f0e222e71a4d15fcf89fbb77e5fccb35db09ab16e8975a8",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/04-关联报告与标题残留.txt",
+      "bytes": 7585,
+      "sha256": "dc41a15e2da78d9434d83be0f8ee996c489cdd034f6e269bee0974f189aaa114",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/05-报告刷新评分稳定.txt",
+      "bytes": 7374,
+      "sha256": "c151308502d41c8678be2adee06b828d9299ec49ccb9e60a186ca6867c0b146a",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/06-问题独立操作列.jpg",
+      "bytes": 376645,
+      "sha256": "ec308e47136a07b334e0c53bfb65d7b3f05855013baf7f9f8982a9f72c46bfcb",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/07-操作审计默认过滤.jpg",
+      "bytes": 308036,
+      "sha256": "4eb3d0cdede87b44b24737dc763284e78854d6f077419c9b936c6e4bb47813fd",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/07-操作审计默认过滤.txt",
+      "bytes": 9040,
+      "sha256": "a171dac52c2400d8a60489229e514bcbd2a9430a7cf14d405abb7a9570f66c91",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/08-Agent草稿与已发布入口.jpg",
+      "bytes": 352809,
+      "sha256": "f484cb185f5e09e74911b7a0e6f3e017907a53d282efa0c39402de0d7823a436",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/08-Agent草稿与已发布入口.txt",
+      "bytes": 5417,
+      "sha256": "ccc4c704bdabbf4d41618fe351741ada32fd3c58fed34aa0ce5ded413ec65319",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/09-退出后实际状态.jpg",
+      "bytes": 287451,
+      "sha256": "53bc9e0ab4210cfbac6a11cfbda0f419ee1c9b480740e28cfd6cf02becab6776",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/09-退出后实际状态.txt",
+      "bytes": 3963,
+      "sha256": "13e9929a0201eb50b329680a4b72566c07117bd5c9d2457a05511aa662ad82fd",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/10-授权文件编辑器只读查看.jpg",
+      "bytes": 251237,
+      "sha256": "bcee16f5610ba6719a40334b945df047ce66316778276eb649c4654ab659e998",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/10-授权文件编辑器只读查看.txt",
+      "bytes": 3948,
+      "sha256": "11f00117d0c167c60e3220396837f02042d63496c21f58d8be0bf18bfe433f56",
+      "format": "UTF-8 AX text"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/11-文件刷新恢复.jpg",
+      "bytes": 251237,
+      "sha256": "4a866e25a3d75f0ff59bae2833f002dc34bb3ce7ba48c049fedf6a2952aa9684",
+      "format": "JPEG"
+    },
+    {
+      "path": "frontend/test-results/production-acceptance/20261004-审查员/11-文件刷新恢复.txt",
+      "bytes": 3909,
+      "sha256": "579ae8d5fc94426270b9ccee5e231165598f4b02183a9e24f98688b2598237bd",
+      "format": "UTF-8 AX text"
+    }
+  ]
+}

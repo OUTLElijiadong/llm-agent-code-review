@@ -1,0 +1,35 @@
+{
+  "checked_at_utc": "2026-10-04T10:07:26.885421+00:00",
+  "html_http_status": 200,
+  "entry": {
+    "path": "/assets/index-DDNSDYOm.js",
+    "http_status": 200,
+    "sha256": "c4ca26ee34ff7668df66a9fd235901fa9df11e22a7955241c5eadf39e7d04fba"
+  },
+  "build_info": {
+    "path": "/assets/buildInfo-b_aIG2HP.js",
+    "http_status": 200,
+    "sha256": "cb905bf0bbe8f52ba63ebcd2f5571f3f2960af4b9cb68bf3903e883fd125ca74",
+    "has_expected_version": true,
+    "has_expected_source_sha": true
+  },
+  "health": {
+    "http_status": 200,
+    "body": {
+      "status": "ok",
+      "version": "4.0.36",
+      "release": "62a46e318c0b4ee816a2d69117180340a09025cc"
+    }
+  },
+  "ready": {
+    "http_status": 200,
+    "body": {
+      "status": "ready",
+      "version": "4.0.36",
+      "release": "62a46e318c0b4ee816a2d69117180340a09025cc"
+    }
+  },
+  "csp_enforce_header_present": true,
+  "csp_report_only_header_present": false,
+  "server_header": "nginx"
+}

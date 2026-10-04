@@ -1,0 +1,39 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/utils/pageGuideTips.test.ts src/components/ai/ProactivePageGuide.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/components/ai/ProactivePageGuide.test.ts (13 tests | 1 failed) 41ms
+     × 问题追踪引导使用界面严重度中文名称 3ms
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 18 passed (19)
+   Start at  18:38:12
+   Duration  726ms (transform 165ms, setup 45ms, import 478ms, tests 43ms, environment 558ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ai/ProactivePageGuide.test.ts > ProactivePageGuide > 问题追踪引导使用界面严重度中文名称
+AssertionError: expected '按严重度闭环问题,优先处理 high/critical。' to contain '危急'
+
+Expected: "危急"
+Received: "按严重度闭环问题,优先处理 high/critical。"
+
+ ❯ src/components/ai/ProactivePageGuide.test.ts:80:18
+     78|     const { wrapper } = await mountGuide('/issues', 'user')
+     79|     const hint = wrapper.get('.guide-hint').text()
+     80|     expect(hint).toContain('危急')
+       |                  ^
+     81|     expect(hint).toContain('高')
+     82|     expect(hint).not.toMatch(/\b(?:high|critical)\b/)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+npm notice
+npm notice New minor version of npm available! 11.11.0 -> 11.21.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.21.0
+npm notice To update run: npm install -g npm@11.21.0
+npm notice

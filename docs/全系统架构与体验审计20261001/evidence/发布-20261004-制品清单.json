@@ -1,0 +1,11 @@
+{
+  "source_sha": "62a46e318c0b4ee816a2d69117180340a09025cc",
+  "version": "4.0.36",
+  "artifact_bytes": 2829589,
+  "artifact_sha256": "6616cfcb07504152098411702d0db76ca69cbe933c65ab714571dcde4fcc9ed7",
+  "base_sha": "310ea1a8095428d670c0404a05b4dc643ad0027e",
+  "state": "uploaded_hash_verified_and_deployed",
+  "transaction_exit": 0,
+  "production_verification_exit": 0,
+  "deployed_at_utc": "2026-10-04T09:52:46Z"
+}

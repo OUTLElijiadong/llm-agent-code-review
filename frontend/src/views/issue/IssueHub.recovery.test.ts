@@ -46,6 +46,24 @@ beforeEach(() => {
 })
 
 describe('问题追踪失败恢复', () => {
+  it('多个关联任务显示名净化已知内部后缀且不改写原任务名', async () => {
+    const issueRows = [
+      { ...row, task_id: 180, task_name: '项目167 完整代码审查（review_type=full）' },
+      { ...row, id: 2, task_id: 179, task_name: '项目167 完整代码审查 (review_type=full)' },
+      { ...row, id: 3, task_id: 178, task_name: '业务审查（review_type=experimental）' },
+    ]
+    mocks.issues.mockResolvedValueOnce({ items: issueRows, total: issueRows.length })
+    const wrapper = render()
+    await flushPromises()
+    const metadata = wrapper.findAll('.ic-line2')
+    expect(metadata[0].text()).toContain('项目167 完整代码审查')
+    expect(metadata[0].text()).not.toContain('review_type=')
+    expect(metadata[1].text()).not.toContain('review_type=')
+    expect(metadata[2].text()).toContain('业务审查（review_type=experimental）')
+    expect(issueRows[0].task_name).toBe('项目167 完整代码审查（review_type=full）')
+    wrapper.unmount()
+  })
+
   it('筛选器明确显示后端默认的处理中范围，并保留全部状态入口', async () => {
     const wrapper = render()
     await flushPromises()

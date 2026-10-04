@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/admin/ActivityLogLogout.lifecycle.test.ts src/views/admin/AiLogList.privacy.test.ts src/views/admin/SystemAudit.privacy.test.ts src/api/http.test.ts src/stores/user.test.ts src/components/admin/AdminLayout.logout.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  6 passed (6)
+      Tests  69 passed (69)
+   Start at  18:42:59
+   Duration  834ms (transform 648ms, setup 100ms, import 1.66s, tests 283ms, environment 1.69s)
+

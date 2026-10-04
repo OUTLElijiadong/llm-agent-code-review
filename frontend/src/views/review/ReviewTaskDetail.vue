@@ -59,7 +59,7 @@
       </el-button>
 
       <div class="head-title">
-        <h1 class="font-display">{{ task?.task_name || `审查任务 #${taskId}` }}</h1>
+        <h1 class="font-display">{{ taskDisplayTitle(task?.task_name, `审查任务 #${taskId}`) }}</h1>
         <div class="head-meta font-mono">
           <span>{{ reviewTypeLabel(task?.review_type) }}</span>
           <template v-if="!isSandboxReport || task?.model_name"><span class="dot">·</span>
@@ -390,6 +390,7 @@ import { PRISM_SEVERITY_COLORS } from '@/components/chart/prismTheme'
 import { SEVERITY_OPTIONS, severityClass, severityDisplayLabel } from '@/constants/severity'
 import { DIM_META, normalizeDimKey, dimColor as resolveDimColor, dimLabel as resolveDimLabel } from '@/constants/dim'
 import { reviewTypeLabel } from '@/constants/reviewType'
+import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 
 const route = useRoute()
 const router = useRouter()

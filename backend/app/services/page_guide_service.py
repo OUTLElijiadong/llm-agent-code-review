@@ -22,19 +22,19 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/dashboard": ("工作台", "查看个人审查汇总、风险分布与趋势"),
     "/projects": ("项目管理", "新建/导入项目、查看项目列表"),
     "/code": ("代码中心", "浏览项目代码文件并在线编辑"),
-    "/reviews": ("审查记录", "查看与发起审查任务"),
+    "/reviews": ("审查任务", "查看与发起审查任务"),
     "/reviews/start": ("发起审查", "按项目与文件发起新审查"),
     "/issues": ("问题追踪", "跨任务检索并闭环问题"),
     "/reports": ("审查报告", "查看与导出审查报告"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
     "/security": ("安全与审查规则", "查看安全态势、权威规则目录并管理审查规则"),
-    "/agents": ("Agent 中心", "查看 Agent 画像与运行态势"),
+    "/agents": ("Agent 工作台", "查看 Agent 画像与运行态势"),
     "/agent-studio": ("Agent 工坊", "创建自定义 Agent 与 Skill"),
     "/sandboxes": ("代码沙箱", "创建测试沙箱与持续部署环境"),
     "/forum": ("开发者论坛", "发帖交流、回复讨论"),
     "/forum/new": ("发布新帖", "撰写并发布论坛帖子"),
     "/knowledge": ("个人知识库", "沉淀与检索个人知识"),
-    "/support": ("支持中心", "统一提交维修工单和意见反馈并跟踪处理"),
+    "/support": ("支持中心", "统一提交支持工单和意见反馈并跟踪处理"),
     "/profile": ("个人中心", "维护个人资料与画像"),
     "/profile/personalization": ("个性化画像", "查看画像学习与偏好"),
     "/profile/password": ("修改密码", "修改登录密码"),
@@ -42,9 +42,9 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
-    "/admin/governance": ("治理中心", "Agent、审批、发布、知识与能力治理"),
-    "/admin/operations": ("运营中心", "系统总览、策略、任务、监控、审计与运行记录"),
-    "/admin/access": ("访问控制中心", "用户、角色与权限管理"),
+    "/admin/governance": ("Agent 治理中心", "Agent、审批、发布、知识与能力治理"),
+    "/admin/operations": ("运行与审计中心", "系统总览、策略、任务、监控、审计与运行记录"),
+    "/admin/access": ("用户与权限中心", "用户、角色与权限管理"),
     "/admin/platform": ("平台配置中心", "模型、嵌入、内测码、MCP 与运行节点配置"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
 }
@@ -52,7 +52,7 @@ ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
 _GUIDE_PROTOCOL = """\
 # 页面引导协议(帮用户"像真人一样使用页面")
 - 平台所有功能都在左侧导航的页面里;你完成查询或操作后,必须告诉用户结果在
-  哪个页面继续查看/操作,并用站内 markdown 链接给出入口,例如 [审查记录](/reviews)。
+  哪个页面继续查看/操作,并用站内 markdown 链接给出入口,例如 [审查任务](/reviews)。
 - 用户明确说"带我去/打开/跳转到某页",或某操作完成后最合适的下一步是唯一页面时,
   在回复末尾单独一行附加一条导航指令(系统会渲染成"前往"按钮并自动跳转):
   <!--PRISM_NAVIGATE {"action":"navigate","route":"页面路由","label":"按钮文字"}-->
