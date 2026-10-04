@@ -29,9 +29,10 @@ export interface SecurityCenterOverview {
       finished_at: string | null
       completed_sources: number
       failed_sources: number
+      degraded_sources: number
       degraded: boolean
     }
-    sources: Array<{ code: string; label: string; status: 'success' | 'failed' | 'unknown' }>
+    sources: Array<{ code: string; label: string; status: 'success' | 'failed' | 'degraded' | 'unknown' }>
   }
   policy: SecurityMonitorPolicy
   open_alerts_24h: number

@@ -115,6 +115,64 @@ describe('AdminSecurityCenter', () => {
     expect(api.getSecurityCenterEvents).toHaveBeenCalledWith(24, 1, 20)
   })
 
+  it('names failed and degraded data sources in the monitoring overview', async () => {
+    api.getSecurityCenterOverview.mockResolvedValue({
+      ...overview(),
+      monitoring: {
+        ...overview().monitoring,
+        last_run: {
+          ...overview().monitoring.last_run,
+          failed_sources: 1,
+          degraded_sources: 1,
+          degraded: true,
+        },
+        sources: [
+          { code: 'ssh_login_events', label: '读取 SSH 登录日志', status: 'failed' },
+          { code: 'nginx_attack_events', label: '读取 Nginx 请求日志', status: 'degraded' },
+          { code: 'backup_audit', label: '核验备份状态', status: 'success' },
+        ],
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2 个来源失败或降级')
+    expect(wrapper.text()).toContain('读取 SSH 登录日志（失败）、读取 Nginx 请求日志（降级）')
+  })
+
+  it('labels a partially failed monitoring run as an exception and exposes affected sources', async () => {
+    api.getSecurityCenterEvents.mockResolvedValue({
+      ...eventPage(),
+      items: [{
+        ...eventPage().items[0],
+        id: 'run:1',
+        alert_id: undefined,
+        event_type: 'monitor_run',
+        layer: '安全监控任务',
+        severity: 'warning',
+        status: 'warning',
+        actor: '系统调度器',
+        title: '安全监控巡检',
+        summary: '巡检运行摘要，不代表已采取自动防御动作。',
+        evidence_summary: {
+          completed_sources: 5,
+          failed_sources: 1,
+          degraded_sources: 1,
+          failed_source_codes: ['ssh_login_events'],
+          degraded_source_codes: ['nginx_attack_events'],
+        },
+        resolution: undefined,
+      }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('部分异常')
+    expect(wrapper.text()).toContain('失败来源')
+    expect(wrapper.text()).toContain('ssh_login_events')
+    expect(wrapper.text()).toContain('nginx_attack_events')
+  })
+
   it('shows an unknown state and an error when monitoring data cannot be loaded', async () => {
     api.getSecurityCenterOverview.mockRejectedValue(new Error('访问被拒绝'))
     const wrapper = mountPage()

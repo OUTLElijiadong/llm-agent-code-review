@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
@@ -24,10 +29,6 @@ from app.models.audit_log import AuditLog
 from app.models.rbac import Role, UserRole
 from app.models.user import User
 from app.services import security_center_service, security_monitor_service
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
@@ -430,6 +431,57 @@ def test_security_monitor_overview_reports_persisted_schedule(db, monkeypatch):
     assert monitoring["schedule"] == "interval@11m"
     assert monitoring["schedule_label"] == "每 11 分钟"
     assert monitoring["interval_minutes"] == 11
+
+
+def test_security_monitor_overview_distinguishes_failed_and_degraded_sources(db):
+    """来源执行报错或降级时，总览应指出对应来源而非只报异常数量。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    job = AgentJob(
+        job_code="security_monitor_source_status",
+        job_type="security_monitor",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.flush()
+    db.add(
+        AgentJobRun(
+            job_id=job.id,
+            status="success",
+            started_at=now,
+            finished_at=now,
+            result_json=json.dumps(
+                {
+                    "completed_actions": [
+                        "ssh_login_events",
+                        "nginx_attack_events",
+                        "backup_audit",
+                        "db_health",
+                        "status",
+                    ],
+                    "errors": [
+                        {"action": "ssh_login_events", "error": "采集器不可用"},
+                        {"action": "nginx_attack_events", "error": "结果不完整", "degraded": True},
+                    ],
+                }
+            ),
+        )
+    )
+    db.commit()
+
+    monitoring = security_center_service._monitor_snapshot(db)
+    sources = {item["code"]: item["status"] for item in monitoring["sources"]}
+
+    assert sources["ssh_login_events"] == "failed"
+    assert sources["nginx_attack_events"] == "degraded"
+    assert monitoring["last_run"]["failed_sources"] == 1
+    assert monitoring["last_run"]["degraded_sources"] == 1
+    assert monitoring["last_run"]["degraded"] is True
+    events = security_center_service.list_events(db, hours=24, page_size=100)["items"]
+    run_event = next(item for item in events if item["event_type"] == "monitor_run")
+    assert run_event["status"] == "warning"
+    assert run_event["evidence_summary"]["failed_source_codes"] == ["ssh_login_events"]
+    assert run_event["evidence_summary"]["degraded_source_codes"] == ["nginx_attack_events"]
 
 
 def test_security_status_allowed_for_super_admin(db, seed, client_factory, monkeypatch):

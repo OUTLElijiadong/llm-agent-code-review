@@ -70,9 +70,16 @@ const coverageLabel = computed(() => {
   if (monitorRunIsStale()) return '最近采集结果已过期'
   const unknown = sources.filter((source) => source.status === 'unknown').length
   const failed = sources.filter((source) => source.status === 'failed').length
+  const degraded = sources.filter((source) => source.status === 'degraded').length
   if (unknown === sources.length) return '尚未取得数据源回执'
-  return failed ? `${failed} 个数据源异常` : unknown ? `${unknown} 个数据源状态未知` : `${sources.length} 个数据源最近成功`
+  if (failed && degraded) return `${failed + degraded} 个来源失败或降级`
+  if (failed) return `${failed} 个数据源异常`
+  if (degraded) return `${degraded} 个数据源降级`
+  return unknown ? `${unknown} 个数据源状态未知` : `${sources.length} 个数据源最近成功`
 })
+const sourceIssueLabels = computed(() => (overview.value?.monitoring.sources ?? [])
+  .filter((source) => source.status === 'failed' || source.status === 'degraded')
+  .map((source) => `${source.label}（${source.status === 'failed' ? '失败' : '降级'}）`))
 const monitoringTone = computed(() => {
   if (overviewError.value || !overview.value) return 'unknown'
   const { enabled, last_run: run } = overview.value.monitoring
@@ -113,7 +120,7 @@ function formatTime(value?: string | null): string {
 function eventStatusLabel(value: string): string {
   const labels: Record<string, string> = {
     success: '成功', failed: '失败', running: '进行中', open: '待处理', resolved: '已处理',
-    warning: '降级', unknown: '未知',
+    warning: '部分异常', unknown: '未知',
   }
   return labels[value] || value
 }
@@ -122,10 +129,12 @@ function evidenceEntries(event: SecurityCenterEvent): Array<[string, string]> {
   const labels: Record<string, string> = {
     ip: '来源 IP', kind: '类型', failed_count: '失败次数', failure_count: '异常次数',
     scanner_count: '探测次数', threshold: '告警阈值', window_hours: '观察窗口（小时）',
-    source_truncated: '采集是否截断', status_counts: 'HTTP 状态计数', completed_sources: '成功数据源数',
-    failed_sources: '异常数据源数', risk_level: '风险级别', duration_ms: '耗时（毫秒）',
+    source_truncated: '采集是否截断', status_counts: 'HTTP 状态计数',
+    risk_level: '风险级别', duration_ms: '耗时（毫秒）',
     revision: '策略版本', source: '触发来源',
     action_code: '审计动作', target_type: '目标类型', account: '尝试账号',
+    completed_sources: '完成来源数', failed_sources: '失败来源数', degraded_sources: '降级来源数',
+    failed_source_codes: '失败来源', degraded_source_codes: '降级来源',
   }
   return Object.entries(event.evidence_summary || {}).map(([key, value]) => [
     labels[key] || key,
@@ -322,7 +331,8 @@ onUnmounted(() => {
         <div class="metric-content">
           <span class="metric-label">数据源覆盖</span>
           <strong class="metric-value metric-value-small">{{ overviewLoading || !overview ? '读取中…' : coverageLabel }}</strong>
-          <small>{{ overview?.monitoring.sources.length ?? '—' }} 个被动采集来源</small>
+          <small v-if="sourceIssueLabels.length">最近记录异常来源：{{ sourceIssueLabels.join('、') }}</small>
+          <small v-else>{{ overview?.monitoring.sources.length ?? '—' }} 个被动采集来源</small>
         </div>
       </article>
       <article class="metric-card">

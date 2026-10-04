@@ -288,17 +288,32 @@ def _monitor_snapshot(db: Session) -> dict[str, Any]:
     result = _read_json(run.result_json if run else None)
     errors = result.get("errors") if isinstance(result.get("errors"), list) else []
     completed = result.get("completed_actions") if isinstance(result.get("completed_actions"), list) else []
-    failed_actions = [str(item.get("action")) for item in errors if isinstance(item, dict) and item.get("action")]
     all_sources = ["ssh_login_events", "nginx_attack_events", "backup_audit", "db_health", "status"]
     if settings.security_db_monitor_enabled:
         all_sources.append("db_threat_signals")
     if settings.security_flytrap_enabled:
         all_sources.append("flytrap_attack_events")
+    source_set = set(all_sources)
+    source_errors = [
+        item for item in errors
+        if isinstance(item, dict) and str(item.get("action") or "") in source_set
+    ]
+    failed_actions = {
+        str(item["action"]) for item in source_errors if item.get("degraded") is not True
+    }
+    degraded_actions = {
+        str(item["action"]) for item in source_errors if item.get("degraded") is True
+    }
     sources = [
         {
             "code": source,
             "label": _ACTION_LABELS.get(source, source),
-            "status": "success" if source in completed else "failed" if source in failed_actions else "unknown",
+            "status": (
+                "failed" if source in failed_actions else
+                "degraded" if source in degraded_actions else
+                "success" if source in completed else
+                "unknown"
+            ),
         }
         for source in all_sources
     ]
@@ -313,7 +328,8 @@ def _monitor_snapshot(db: Session) -> dict[str, Any]:
             "finished_at": _iso(run.finished_at) if run else None,
             "completed_sources": len(completed),
             "failed_sources": len(failed_actions),
-            "degraded": any(isinstance(item, dict) and item.get("degraded") for item in errors),
+            "degraded_sources": len(degraded_actions),
+            "degraded": bool(errors),
         },
         "sources": sources,
     }
@@ -484,19 +500,41 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         result = _read_json(run.result_json)
         completed = result.get("completed_actions") if isinstance(result.get("completed_actions"), list) else []
         errors = result.get("errors") if isinstance(result.get("errors"), list) else []
-        failed_count = sum(1 for item in errors if isinstance(item, dict))
+        source_set = set(_SECURITY_ACTIONS)
+        source_errors = [
+            item for item in errors
+            if isinstance(item, dict) and str(item.get("action") or "") in source_set
+        ]
+        failed_source_codes = sorted({
+            str(item["action"]) for item in source_errors if item.get("degraded") is not True
+        })
+        degraded_source_codes = sorted({
+            str(item["action"]) for item in source_errors if item.get("degraded") is True
+        })
+        has_errors = bool(errors)
+        display_status = (
+            "failed" if run.status == "failed" or (has_errors and not completed) else
+            "warning" if has_errors else
+            run.status
+        )
         events.append(
             {
                 "id": f"run:{run.id}",
                 "recorded_at": _iso(run.finished_at or run.started_at),
                 "event_type": "monitor_run",
                 "layer": "安全监控任务",
-                "severity": "warning" if run.status != "success" else "info",
-                "status": run.status,
+                "severity": "warning" if display_status != "success" else "info",
+                "status": display_status,
                 "actor": "系统调度器",
                 "title": "安全监控巡检",
                 "summary": "巡检运行摘要，不代表已采取自动防御动作。",
-                "evidence_summary": {"completed_sources": len(completed), "failed_sources": failed_count},
+                "evidence_summary": {
+                    "completed_sources": len(completed),
+                    "failed_sources": len(failed_source_codes),
+                    "degraded_sources": len(degraded_source_codes),
+                    "failed_source_codes": failed_source_codes,
+                    "degraded_source_codes": degraded_source_codes,
+                },
             }
         )
 
