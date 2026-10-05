@@ -57,6 +57,10 @@ function render() {
         'el-button': ButtonStub,
         'el-table': TableStub,
         'el-table-column': true,
+        'el-dialog': {
+          props: ['modelValue'],
+          template: '<div v-if="modelValue" class="approval-dialog"><slot /><slot name="footer" /></div>',
+        },
         EmptyState: EmptyStateStub,
       },
       directives: { loading: {} },
@@ -129,6 +133,66 @@ it('小菱会话审批不能从通用审批中心单独改状态', async () => {
   expect(api.approveItem).not.toHaveBeenCalled()
   expect(api.rejectItem).not.toHaveBeenCalled()
   expect(ElMessage.info).toHaveBeenCalledTimes(2)
+  wrapper.unmount()
+})
+
+it('审批详情展示服务端脱敏参数，并只对已验证会话发出返回事件', async () => {
+  const row = {
+    id: 311,
+    title: '应用全局模型配置',
+    agent_code: 'manager',
+    action: 'responses.admin_execute_capability',
+    resource: 'response_run:run-owned',
+    risk_level: 'critical',
+    status: 'pending',
+    requires_session_resume: true,
+    source_trace_status: 'verified',
+    source_run_id: 'run-owned',
+    source_session_id: 'admin-session-owned',
+    source_tool_name: 'admin_execute_capability',
+    create_time: '2026-10-06T01:02:03Z',
+    request_json: { arguments: { api_key: '[REDACTED]' } },
+  }
+  api.listApprovals.mockResolvedValueOnce([row])
+  const wrapper = render()
+  await flushPromises()
+  const vm = setupState<{
+    approvals: Array<typeof row>
+    selectedApproval: typeof row | null
+    approvalDetailsVisible: boolean
+    openApprovalDetails: (value: typeof row) => void
+    returnToApprovalSession: (value: typeof row) => void
+  }>(wrapper)
+
+  vm.openApprovalDetails(row)
+  await wrapper.vm.$nextTick()
+  expect(wrapper.get('.approval-dialog').text()).toContain('2026-10-06T01:02:03Z')
+  expect(wrapper.get('.approval-dialog').text()).toContain('[REDACTED]')
+  expect(wrapper.get('.approval-dialog').text()).toContain('必须回到同一账号的原会话')
+
+  const opened: CustomEvent<{ sessionId: string }>[] = []
+  const listener = (event: Event) => opened.push(event as CustomEvent<{ sessionId: string }>)
+  window.addEventListener('prism:open-admin-copilot', listener)
+  vm.returnToApprovalSession(row)
+  window.removeEventListener('prism:open-admin-copilot', listener)
+  expect(opened).toHaveLength(1)
+  expect(opened[0].detail).toEqual({ sessionId: 'admin-session-owned' })
+  wrapper.unmount()
+})
+
+it('缺少会话归属证明时拒绝跳转并告知管理员', async () => {
+  api.listApprovals.mockResolvedValueOnce([])
+  const wrapper = render()
+  await flushPromises()
+  const vm = setupState<{
+    returnToApprovalSession: (row: { source_trace_status?: string; source_session_id?: string | null }) => void
+  }>(wrapper)
+  const opened = vi.fn()
+  window.addEventListener('prism:open-admin-copilot', opened)
+  vm.returnToApprovalSession({ source_trace_status: 'unavailable', source_session_id: null })
+  window.removeEventListener('prism:open-admin-copilot', opened)
+  expect(opened).not.toHaveBeenCalled()
+  expect(ElMessage.info).toHaveBeenCalledWith(expect.stringContaining('未能验证原始小菱会话归属'))
   wrapper.unmount()
 })
 

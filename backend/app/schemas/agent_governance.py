@@ -256,6 +256,10 @@ class ApprovalItemOut(BaseModel):
     decision_reason: Optional[str] = None
     request_json: Optional[Union[dict, list]] = None
     requires_session_resume: bool = False
+    source_trace_status: Optional[Literal["verified", "unavailable"]] = None
+    source_run_id: Optional[str] = None
+    source_session_id: Optional[str] = None
+    source_tool_name: Optional[str] = None
     decided_by: Optional[int] = None
     decided_at: Optional[str] = None
     create_time: Optional[str] = None

@@ -364,14 +364,18 @@ def list_approvals(
     excluded = tuple(action.strip() for action in exclude_action.split(",") if action.strip())
     rows = approval_service.list_items(db, status=status, limit=limit, actor=actor, exclude_actions=excluded)
     session_resume_required = approval_service.session_resume_required_item_ids(db, rows)
-    return Resp(
-        data=[
-            ApprovalItemOut.model_validate(row).model_copy(
-                update={"requires_session_resume": row.id in session_resume_required},
-            )
-            for row in rows
-        ]
-    )
+    source_traces = approval_service.source_traces_for_actor(db, actor, rows)
+    from app.services.agent_responses_service import redact_agent_event_value
+
+    data = []
+    for row in rows:
+        item = ApprovalItemOut.model_validate(row)
+        data.append(item.model_copy(update={
+            "requires_session_resume": row.id in session_resume_required,
+            "request_json": redact_agent_event_value(item.request_json),
+            **source_traces.get(row.id, {}),
+        }))
+    return Resp(data=data)
 
 
 @router.post("/approvals/{item_id}/approve", response_model=Resp[ApprovalItemOut])

@@ -1879,11 +1879,14 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
-/** 页面主动引导唤起管理副驾驶并预填指令。 */
-function handleExternalOpen(event: Event): void {
-  const detail = (event as CustomEvent<{ prefill?: string }>).detail
+/** 页面主动引导唤起管理副驾驶，可按服务端验证的当前账号会话定位来源。 */
+async function handleExternalOpen(event: Event): Promise<void> {
+  const detail = (event as CustomEvent<{ prefill?: string; sessionId?: string }>).detail
   if (detail?.prefill) inputText.value = detail.prefill
-  void openPanel()
+  await openPanel()
+  if (typeof detail?.sessionId === 'string' && detail.sessionId.length <= 128) {
+    await switcherRef.value?.refreshFromAgentMesh(detail.sessionId)
+  }
   nextTick(() => chatInputRef.value?.focus())
 }
 

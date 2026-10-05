@@ -221,7 +221,7 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     expect(rows.every(row => row.find('.el-tag').classes().includes('el-tag--danger'))).toBe(true)
   })
 
-  it('审批事项显示具体动作，发起 Agent 独立呈现且不重复堆叠 Responses Agent', async () => {
+  it('审批事项显示具体动作，请求来源独立呈现且不重复堆叠 Responses Agent', async () => {
     api.listApprovals.mockResolvedValue([{
       id: 239,
       title: 'Responses Agent 请求执行 更新并应用全局 LLM 配置',
@@ -239,7 +239,7 @@ describe('admin governance interpolation in real cells and agent cards', () => {
     expect(cells[0]).toBe('更新并应用全局 LLM 配置')
     expect(cells[1]).toBe('小菱·管理权限兼容模块（系统）')
     expect(cells[0]).not.toContain('Responses Agent')
-    expect(wrapper.get('.approval-table-content').text()).toContain('发起 Agent')
+    expect(wrapper.get('.approval-table-content').text()).toContain('请求来源')
     const fixedColumns = wrapper.findAllComponents(ElTableColumn).filter(column => column.props('fixed') === 'right')
     expect(fixedColumns).toHaveLength(2)
   })

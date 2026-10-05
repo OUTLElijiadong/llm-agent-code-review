@@ -88,6 +88,8 @@ function toggleAgentDetails(code: string): void {
   else expandedAgentCodes.value.add(code)
 }
 const approvals = ref<ApprovalItem[]>([])
+const selectedApproval = ref<ApprovalItem | null>(null)
+const approvalDetailsVisible = ref(false)
 const approvalLoadError = ref('')
 let approvalRequestVersion = 0
 let dataRequestVersion = 0
@@ -474,6 +476,31 @@ async function onSaveToolPermission(): Promise<void> {
  */
 function isResponseSessionApproval(row: Pick<ApprovalItem, 'requires_session_resume'>): boolean {
   return row.requires_session_resume === true
+}
+
+function openApprovalDetails(row: ApprovalItem): void {
+  selectedApproval.value = row
+  approvalDetailsVisible.value = true
+}
+
+function approvalRequestDetails(row: ApprovalItem): string {
+  const payload = row.request_json
+  if (!payload || (Array.isArray(payload) && payload.length === 0)) return '未记录请求参数'
+  if (!Array.isArray(payload) && typeof payload === 'object' && Object.keys(payload).length === 0) {
+    return '未记录请求参数'
+  }
+  return JSON.stringify(payload, null, 2) ?? '未记录请求参数'
+}
+
+function returnToApprovalSession(row: ApprovalItem): void {
+  if (row.source_trace_status !== 'verified' || !row.source_session_id) {
+    ElMessage.info('未能验证原始小菱会话归属；为避免打开其他账号的会话，未执行跳转。')
+    return
+  }
+  approvalDetailsVisible.value = false
+  window.dispatchEvent(new CustomEvent('prism:open-admin-copilot', {
+    detail: { sessionId: row.source_session_id },
+  }))
 }
 
 /**
@@ -915,27 +942,68 @@ onMounted(loadData)
         <el-table-column label="审批事项" min-width="220">
           <template #default="{ row }"><span :title="row.title">{{ approvalTitle(row.title) }}</span></template>
         </el-table-column>
-        <el-table-column label="发起 Agent" width="120">
-            <template #default="{ row }"><span :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span></template>
+        <el-table-column label="请求来源" width="150">
+            <template #default="{ row }">
+              <span v-if="row.action.startsWith('responses.') && row.source_trace_status === 'verified'">小菱管理员会话</span>
+              <span v-else-if="row.action.startsWith('responses.')" class="approval-source-unverified">小菱请求（来源未核验）</span>
+              <span v-else :title="row.agent_code">{{ agentCodeText(row.agent_code) }}</span>
+            </template>
           </el-table-column>
         <el-table-column label="动作" min-width="150">
             <template #default="{ row }"><span :title="row.action">{{ policyActionText(row.action) }}</span></template>
           </el-table-column>
         <el-table-column label="风险" width="100"><template #default="{ row }"><el-tag size="small" :type="riskTagType(row.risk_level)">{{ riskText(row.risk_level) }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="110" fixed="right"><template #default="{ row }">{{ statusText(row.status) }}</template></el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <span v-if="row.status === 'pending' && isResponseSessionApproval(row)" class="approval-session-only">
-              返回小菱对话处理
-            </span>
-            <template v-else-if="row.status === 'pending'">
-              <el-button link type="success" @click="onApprove(row)">通过</el-button>
-              <el-button link type="danger" @click="onReject(row)">驳回</el-button>
+            <div class="approval-row-actions">
+              <el-button link type="primary" @click="openApprovalDetails(row)">查看详情</el-button>
+              <template v-if="row.status === 'pending' && isResponseSessionApproval(row)">
+                <span class="approval-session-only">须回原小菱会话处理</span>
+              </template>
+              <template v-else-if="row.status === 'pending'">
+                <el-button link type="success" @click="onApprove(row)">通过</el-button>
+                <el-button link type="danger" @click="onReject(row)">驳回</el-button>
+              </template>
+            </div>
             </template>
-          </template>
         </el-table-column>
         </el-table>
       </div>
+      <el-dialog v-model="approvalDetailsVisible" title="审批请求详情" width="min(680px, calc(100vw - 32px))">
+        <template v-if="selectedApproval">
+          <dl class="approval-detail-grid">
+            <div><dt>审批编号</dt><dd>{{ selectedApproval.id }}</dd></div>
+            <div><dt>创建时间</dt><dd>{{ selectedApproval.create_time || '未记录' }}</dd></div>
+            <div><dt>风险等级</dt><dd>{{ riskText(selectedApproval.risk_level) }}</dd></div>
+            <div><dt>请求动作</dt><dd><code>{{ selectedApproval.action }}</code></dd></div>
+            <div><dt>目标资源</dt><dd><code>{{ selectedApproval.resource }}</code></dd></div>
+            <div v-if="selectedApproval.source_tool_name"><dt>工具来源</dt><dd><code>{{ selectedApproval.source_tool_name }}</code></dd></div>
+            <div v-if="selectedApproval.action.startsWith('responses.') && selectedApproval.agent_code">
+              <dt>治理登记 Agent</dt><dd>{{ agentCodeText(selectedApproval.agent_code) }}（记录身份，不代表账号归属）</dd>
+            </div>
+            <div v-if="selectedApproval.source_run_id"><dt>关联运行</dt><dd><code>{{ selectedApproval.source_run_id }}</code></dd></div>
+          </dl>
+          <p v-if="selectedApproval.requires_session_resume" class="approval-detail-notice">
+            此请求绑定小菱会话；通用审批中心不能批准或驳回，必须回到同一账号的原会话继续处理。
+          </p>
+          <p v-if="selectedApproval.requires_session_resume && selectedApproval.source_trace_status !== 'verified'" class="approval-detail-warning" role="status">
+            服务端没有提供可验证的会话关联。为保护账号隔离，本页不会尝试打开任何会话；请先核对账号与操作记录。
+          </p>
+          <section class="approval-request-context" aria-label="已脱敏的审批请求参数">
+            <h4>请求参数与预览（服务端已脱敏）</h4>
+            <pre>{{ approvalRequestDetails(selectedApproval) }}</pre>
+          </section>
+        </template>
+        <template #footer>
+          <el-button @click="approvalDetailsVisible = false">关闭</el-button>
+          <el-button
+            v-if="selectedApproval?.requires_session_resume && selectedApproval.source_trace_status === 'verified' && selectedApproval.source_session_id"
+            type="primary"
+            @click="returnToApprovalSession(selectedApproval)"
+          >返回发起会话</el-button>
+        </template>
+      </el-dialog>
     </section>
 
     <section v-else-if="mode === 'policies'" class="stack">
@@ -1491,6 +1559,19 @@ onMounted(loadData)
   line-height: 1.4;
   white-space: normal;
 }
+.approval-source-unverified { color: var(--color-text-secondary, #737b8d); }
+.approval-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.approval-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; margin: 0; }
+.approval-detail-grid > div { min-width: 0; }
+.approval-detail-grid dt { color: var(--color-text-secondary, #737b8d); font-size: 12px; }
+.approval-detail-grid dd { margin: 4px 0 0; overflow-wrap: anywhere; line-height: 1.5; }
+.approval-detail-grid code { white-space: normal; overflow-wrap: anywhere; }
+.approval-detail-notice, .approval-detail-warning { margin: 16px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; }
+.approval-detail-notice { color: var(--brand-700, #4e49bd); background: var(--brand-50, #f1efff); }
+.approval-detail-warning { color: var(--color-danger, #d9304f); background: var(--color-danger-light, #fff2f3); }
+.approval-request-context { margin-top: 18px; }
+.approval-request-context h4 { margin: 0 0 8px; font-size: 13px; }
+.approval-request-context pre { max-height: min(45vh, 360px); overflow: auto; padding: 12px; border-radius: 8px; background: var(--color-bg-page, #f5f6fa); overflow-wrap: anywhere; }
 .approval-load-error {
   display: flex;
   flex-wrap: wrap;
@@ -1506,6 +1587,10 @@ onMounted(loadData)
     color: var(--color-text-secondary, #737b8d);
     font-size: 12px;
   }
+}
+
+@media (max-width: 560px) {
+  .approval-detail-grid { grid-template-columns: 1fr; }
 }
 
 .metric {

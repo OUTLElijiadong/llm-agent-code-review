@@ -16,7 +16,7 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn(), cancel: vi.fn() }))
-const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), conversations: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
@@ -29,6 +29,7 @@ vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
   listAgentMeshAgents: meshApi.list,
+  listAgentMeshConversations: meshApi.conversations,
   archiveAgentMeshSession: vi.fn().mockResolvedValue({ session_id: '', status: 'archived' }),
 }))
 vi.mock('@/api/agentTeams', () => ({
@@ -106,6 +107,7 @@ beforeEach(() => {
   meshApi.heartbeat.mockReset().mockResolvedValue({})
   meshApi.inbox.mockReset().mockResolvedValue([])
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
+  meshApi.conversations.mockReset().mockRejectedValue(new Error('会话目录未配置'))
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
   teamApi.events.mockReset().mockResolvedValue({
@@ -344,6 +346,35 @@ describe('安全中心小菱页头入口', () => {
 })
 
 describe('AdminCopilot Responses stream', () => {
+  it('审批详情引导回原始管理员会话时恢复服务端验证的指定会话', async () => {
+    meshApi.conversations.mockResolvedValue({
+      items: [{
+        kind: 'session', session_id: 'admin-approval-session', surface: 'admin',
+        status: 'active', title: '全局模型配置审批', active_run_status: 'waiting_approval',
+      }],
+      total: 1,
+    })
+    sessionApi.get.mockImplementation(async (_surface: string, sessionId: string) => ({
+      surface: 'admin', session_id: sessionId, run: null,
+      messages: [{ role: 'user', content: '核对模型配置申请' }], pending: null,
+    }))
+    const wrapper = mountCopilot()
+    await flushPromises()
+
+    window.dispatchEvent(new CustomEvent('prism:open-admin-copilot', {
+      detail: { sessionId: 'admin-approval-session' },
+    }))
+    await flushSessionRestore()
+
+    expect(sessionApi.get.mock.calls.some(([surface, sessionId]) => (
+      surface === 'admin' && sessionId === 'admin-approval-session'
+    ))).toBe(true)
+    expect(meshApi.conversations).toHaveBeenCalledWith(expect.objectContaining({ surface: 'admin', limit: 100 }))
+    expect(wrapper.text()).toContain('核对模型配置申请')
+    expect(streams.start).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it.each([true, false])('取消晚到completed时按真实助手payload判重（已有最终回复=%s）', async (hasAssistantReply) => {
     const wrapper = mountCopilot()
     await openCopilot(wrapper)

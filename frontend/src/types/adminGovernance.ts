@@ -47,6 +47,11 @@ export interface ApprovalItem {
   decision?: string | null
   decision_reason?: string | null
   requires_session_resume?: boolean
+  source_trace_status?: 'verified' | 'unavailable' | null
+  source_run_id?: string | null
+  source_session_id?: string | null
+  source_tool_name?: string | null
+  request_json?: Record<string, unknown> | unknown[] | null
   decided_by?: number | null
   decided_at?: string | null
   create_time?: string | null

@@ -1,23 +1,31 @@
 """Agent 治理管理端 API 集成测试。"""
 
+import asyncio
+import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user, require_admin, require_super_admin
 from app.core.security import create_access_token
 from app.main import app
 from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun, ApprovalItem
+from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_response_run import AgentResponseRun
 from app.models.rbac import Role, UserRole
 from app.models.user import User
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from app.services import agent_responses_service
+from app.services.agent_responses_service import DatabaseCheckpointStore, PrismToolExecutor
+from app.services.deepseek_responses_runtime import DeepSeekResponsesRuntime, RunCheckpoint, ToolCall
 
 
 @pytest.fixture
@@ -95,6 +103,375 @@ def _ok(client: TestClient, method: str, url: str, **kwargs):
     body = response.json()
     assert body["code"] == 0, body
     return body["data"]
+
+
+def test_response_approval_exposes_only_owned_session_trace_and_redacted_request(admin_api_client, monkeypatch):
+    client, db = admin_api_client
+    owner = db.get(User, 1)
+    other = User(
+        id=2,
+        username="other-admin",
+        password="x",
+        email="other-admin@example.com",
+        nickname="其他管理员",
+        role="admin",
+        status=1,
+    )
+    db.add(other)
+    owned_run = AgentResponseRun(
+        run_id="approval-source-run",
+        user_id=owner.id,
+        surface="admin",
+        session_key="admin-session-owned",
+        status="waiting_approval",
+        checkpoint_json="{}",
+    )
+    db.add(owned_run)
+    db.add(AgentResponseRun(
+        run_id="foreign-surface-run",
+        user_id=owner.id,
+        surface="user",
+        session_key="user-session-must-not-link",
+        status="waiting_approval",
+        checkpoint_json="{}",
+    ))
+    db.add(AgentResponseRun(
+        run_id="foreign-owner-run",
+        user_id=2,
+        surface="admin",
+        session_key="other-admin-session-must-not-link",
+        status="waiting_approval",
+        checkpoint_json="{}",
+    ))
+    call_id = "call-1"
+    request_id = hashlib.sha256(f"responses:approval-source-run:{call_id}".encode()).hexdigest()
+    item = ApprovalItem(
+        title="全局模型配置请求",
+        agent_code="manager",
+        action="responses.admin_execute_capability",
+        resource="response_run:approval-source-run",
+        risk_level="critical",
+        status="pending",
+        request_json=(
+            f'{{"owner_user_id":1,"run_id":"approval-source-run","call_id":"{call_id}",'
+            '"tool":"admin_execute_capability","arguments":{"capability":"governance.agents.list"},'
+            '"preview":{"api_key":"should-never-be-returned"}}'
+        ),
+        copilot_request_id=request_id,
+    )
+    db.add(item)
+    db.flush()
+    owned_run.checkpoint_json = json.dumps({
+        "run_id": "approval-source-run",
+        "status": "waiting_approval",
+        "pending": {
+            "kind": "approval",
+            "approval_id": item.id,
+            "call": {
+                "call_id": call_id,
+                "name": "admin_execute_capability",
+                "arguments": {"capability": "governance.agents.list"},
+            },
+        },
+    })
+
+    def response_approval(*, title, run_id, call_id, tool="admin_execute_capability", action=None,
+                          resource=None, owner_id=1, request_id_override="computed", arguments=None):
+        """Create a persisted Responses approval fixture with the runtime correlation hash."""
+        return ApprovalItem(
+            title=title,
+            action=action or f"responses.{tool}",
+            resource=resource or f"response_run:{run_id}",
+            risk_level="high",
+            status="pending",
+            request_json=json.dumps({
+                "owner_user_id": owner_id,
+                "run_id": run_id,
+                "call_id": call_id,
+                "tool": tool,
+                "arguments": arguments or {"capability": "governance.agents.list"},
+            }),
+            copilot_request_id=(
+                hashlib.sha256(f"responses:{run_id}:{call_id}".encode()).hexdigest()
+                if request_id_override == "computed"
+                else request_id_override
+            ),
+        )
+
+    def bind_pending_approval(
+        *,
+        title,
+        run_id,
+        call_id,
+        request_arguments=None,
+        checkpoint_run_id=None,
+        checkpoint_approval_id=None,
+        checkpoint_arguments=None,
+    ):
+        """Persist an approval and its runtime-shaped waiting checkpoint."""
+        run = AgentResponseRun(
+            run_id=run_id,
+            user_id=owner.id,
+            surface="admin",
+            session_key=f"session-{run_id}",
+            status="waiting_approval",
+            checkpoint_json="{}",
+        )
+        db.add(run)
+        approval = response_approval(
+            title=title,
+            run_id=run_id,
+            call_id=call_id,
+            arguments=request_arguments or {"capability": "governance.agents.list"},
+        )
+        db.add(approval)
+        db.flush()
+        run.checkpoint_json = json.dumps({
+            "run_id": checkpoint_run_id or run_id,
+            "status": "waiting_approval",
+            "pending": {
+                "kind": "approval",
+                "approval_id": (
+                    approval.id if checkpoint_approval_id is None else checkpoint_approval_id
+                ),
+                "call": {
+                    "call_id": call_id,
+                    "name": "admin_execute_capability",
+                    "arguments": checkpoint_arguments or {
+                        "capability": "governance.agents.list",
+                    },
+                },
+            },
+        })
+        return approval
+
+    mismatched_checkpoint_run_id_item = bind_pending_approval(
+        title="检查点运行 ID 不匹配",
+        run_id="checkpoint-run-id-mismatch",
+        call_id="call-run-id-mismatch",
+        checkpoint_run_id="different-checkpoint-run",
+    )
+    mismatched_approval_id_item = bind_pending_approval(
+        title="检查点审批 ID 不匹配",
+        run_id="checkpoint-approval-id-mismatch",
+        call_id="call-approval-id-mismatch",
+        checkpoint_approval_id=-1,
+    )
+    mismatched_arguments_item = bind_pending_approval(
+        title="检查点参数不匹配",
+        run_id="checkpoint-arguments-mismatch",
+        call_id="call-arguments-mismatch",
+        request_arguments={"capability": "governance.agents.list", "page": 2},
+        checkpoint_arguments={"capability": "governance.agents.list", "page": 1},
+    )
+    different_arguments_item = bind_pending_approval(
+        title="独立审批参数应独立核验",
+        run_id="different-approval-arguments",
+        call_id="call-different-arguments",
+        request_arguments={"capability": "governance.agents.list", "page": 2},
+        checkpoint_arguments={"capability": "governance.agents.list", "page": 2},
+    )
+    mismatched_json_scalar_types_item = bind_pending_approval(
+        title="JSON 布尔值与整数不可互换",
+        run_id="checkpoint-json-type-mismatch",
+        call_id="call-json-type-mismatch",
+        request_arguments={"capability": "governance.agents.list", "enabled": True},
+        checkpoint_arguments={"capability": "governance.agents.list", "enabled": 1},
+    )
+
+    mismatched_trace_item = ApprovalItem(
+        title="资源和运行标识不一致",
+        action="responses.admin_execute_capability",
+        resource="response_run:different-run",
+        risk_level="high",
+        status="pending",
+        request_json=(
+            '{"owner_user_id":1,"run_id":"approval-source-run","call_id":"call-2",'
+            '"tool":"admin_execute_capability","arguments":{"capability":"governance.agents.list"}}'
+        ),
+    )
+    db.add(mismatched_trace_item)
+    unbound_trace_item = ApprovalItem(
+        title="缺少唯一调用绑定",
+        action="responses.admin_execute_capability",
+        resource="response_run:approval-source-run",
+        risk_level="high",
+        status="pending",
+        request_json=(
+            '{"owner_user_id":1,"run_id":"approval-source-run","call_id":"call-3",'
+            '"tool":"admin_execute_capability","arguments":{"capability":"governance.agents.list"}}'
+        ),
+    )
+    db.add(unbound_trace_item)
+    mismatched_call_item = response_approval(
+        title="检查点调用 ID 不匹配", run_id="approval-source-run", call_id="call-4"
+    )
+    db.add(mismatched_call_item)
+    mismatched_tool_item = response_approval(
+        title="检查点工具名不匹配", run_id="approval-source-run",
+        call_id="call-5", tool="admin_list_agents"
+    )
+    db.add(mismatched_tool_item)
+    mismatched_action_item = ApprovalItem(
+        title="审批动作与工具名不一致",
+        action="responses.user_execute_capability",
+        resource="response_run:approval-source-run",
+        risk_level="high",
+        status="pending",
+        request_json=(
+            '{"owner_user_id":1,"run_id":"approval-source-run","call_id":"call-5",'
+            '"tool":"admin_execute_capability","arguments":{"capability":"governance.agents.list"}}'
+        ),
+    )
+    db.add(mismatched_action_item)
+    malformed_checkpoint_run = AgentResponseRun(
+        run_id="malformed-checkpoint-run",
+        user_id=owner.id,
+        surface="admin",
+        session_key="malformed-checkpoint-session",
+        status="waiting_approval",
+        checkpoint_json="[]",
+    )
+    db.add(malformed_checkpoint_run)
+    malformed_checkpoint_item = response_approval(
+        title="检查点格式损坏", run_id="malformed-checkpoint-run", call_id="call-7"
+    )
+    db.add(malformed_checkpoint_item)
+    for run_id in ("foreign-surface-run", "foreign-owner-run"):
+        db.add(response_approval(
+            title=f"不得跨账号或跨入口跳转：{run_id}",
+            run_id=run_id,
+            call_id=f"call-{run_id}",
+        ))
+
+    monkeypatch.setattr(
+        agent_responses_service,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: object(),
+    )
+    runtime_run_id = "approval-created-through-runtime"
+    runtime_session_key = "runtime-created-approval-session"
+    db.add(AgentMeshConversation(
+        user_id=owner.id,
+        surface="admin",
+        session_key=runtime_session_key,
+        title="待审批来源集成样本",
+        status="active",
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    checkpoint_store = DatabaseCheckpointStore(
+        db,
+        user_id=owner.id,
+        surface="admin",
+        session_key=runtime_session_key,
+    )
+    initial_checkpoint = RunCheckpoint(
+        run_id=runtime_run_id,
+        model="test-model",
+        transcript=[],
+        tools=[],
+    )
+    assert asyncio.run(checkpoint_store.create(initial_checkpoint)) is True
+    runtime_executor = PrismToolExecutor(
+        db,
+        owner,
+        surface="admin",
+        run_id=runtime_run_id,
+        session_key=runtime_session_key,
+        mcp_provider=object(),
+    )
+    secret_argument = "runtime-only-secret-should-not-persist"
+    runtime_call = ToolCall(
+        "runtime-call-id",
+        "admin_execute_capability",
+        {
+            "capability": "governance.agents.list",
+            "params": {"api_key": secret_argument},
+        },
+        json.dumps({
+            "capability": "governance.agents.list",
+            "params": {"api_key": secret_argument},
+        }),
+    )
+
+    class RuntimeApprovalExecutor:
+        async def execute(self, call, *, approved=False):
+            assert approved is False
+            return runtime_executor._approval(
+                call,
+                danger=True,
+                operation="只读 Agent 列表",
+                impact="等待管理员审批",
+                preview={"message": "等待管理员审批"},
+            )
+
+    runtime = DeepSeekResponsesRuntime(
+        transport=object(),
+        tool_executor=RuntimeApprovalExecutor(),
+        checkpoint_store=checkpoint_store,
+        stream=False,
+    )
+    runtime_result = asyncio.run(runtime._process_calls(
+        RunCheckpoint(
+            run_id=runtime_run_id,
+            model="test-model",
+            transcript=[],
+            tools=[],
+        ),
+        [runtime_call],
+    ))
+    assert runtime_result.status == "waiting_approval"
+    runtime_approval_id = int(runtime_result.pending["approval_id"])
+    db.commit()
+
+    listed = _ok(client, "get", "/api/admin/approvals", params={"status": "pending"})
+    for verified_item, expected_run_id in (
+        (item, "approval-source-run"),
+        (different_arguments_item, "different-approval-arguments"),
+    ):
+        result = next(row for row in listed if row["id"] == verified_item.id)
+        assert result["source_trace_status"] == "verified"
+        assert result["source_run_id"] == expected_run_id
+        assert result["source_session_id"]
+        assert result["source_tool_name"] == "admin_execute_capability"
+        assert result["requires_session_resume"] is True
+    runtime_result_item = next(row for row in listed if row["id"] == runtime_approval_id)
+    assert runtime_result_item["source_trace_status"] == "verified"
+    assert runtime_result_item["source_run_id"] == runtime_run_id
+    assert runtime_result_item["source_session_id"] == runtime_session_key
+    assert secret_argument not in str(runtime_result_item["request_json"])
+    assert "should-never-be-returned" not in str(
+        next(row for row in listed if row["id"] == item.id)["request_json"]
+    )
+    mismatch = next(row for row in listed if row["id"] == mismatched_trace_item.id)
+    assert mismatch["source_trace_status"] == "unavailable"
+    assert mismatch["source_session_id"] is None
+    for unbound in (
+        unbound_trace_item,
+        mismatched_call_item,
+        mismatched_tool_item,
+        mismatched_action_item,
+        malformed_checkpoint_item,
+        mismatched_checkpoint_run_id_item,
+        mismatched_approval_id_item,
+        mismatched_arguments_item,
+        mismatched_json_scalar_types_item,
+    ):
+        result = next(row for row in listed if row["id"] == unbound.id)
+        assert result["source_trace_status"] == "unavailable"
+        assert result["source_session_id"] is None
+    for run_id in ("foreign-surface-run", "foreign-owner-run"):
+        foreign = next(row for row in listed if row["resource"] == f"response_run:{run_id}")
+        assert foreign["source_trace_status"] == "unavailable"
+        assert foreign["source_session_id"] is None
+
+    app.dependency_overrides[require_admin] = lambda: other
+    try:
+        other_items = _ok(client, "get", "/api/admin/approvals", params={"status": "pending"})
+    finally:
+        app.dependency_overrides[require_admin] = lambda: owner
+    assert item.id not in {row["id"] for row in other_items}
 
 
 def test_frontend_admin_governance_api_paths_match_backend_routes():

@@ -349,7 +349,13 @@ async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   const previousActiveId = activeId.value
   try {
-    const page = await listAgentMeshConversations({ surface, status: 'active', limit: 20, offset: 0 })
+    const page = await listAgentMeshConversations({
+      surface,
+      status: 'active',
+      // 经服务端验证的审批来源会话可能不在最近 20 条内，定位时扫描该接口上限。
+      limit: preferredSessionId ? 100 : 20,
+      offset: 0,
+    })
     if (!isCurrent() || requestEpoch !== discoveryEpoch) return
     const discovered = page.items
       .filter((item) => item.surface === surface && item.status !== 'archived' && item.session_id)

@@ -1,5 +1,6 @@
 """Agent 治理审批服务。"""
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Optional
@@ -158,6 +159,111 @@ def session_resume_required_item_ids(db: Session, items: list[ApprovalItem]) -> 
         for run_id in persisted_run_ids
         for item_id in run_to_item_ids[run_id]
     }
+
+
+def source_traces_for_actor(
+    db: Session,
+    actor: User,
+    items: list[ApprovalItem],
+) -> dict[int, dict[str, Optional[str]]]:
+    """Return verified Responses source links with one owner-scoped run query."""
+    candidates: dict[int, tuple[ApprovalItem, str, str, str]] = {}
+    run_ids: set[str] = set()
+    results: dict[int, dict[str, Optional[str]]] = {}
+    for item in items:
+        if not (item.action or "").strip().lower().startswith("responses."):
+            continue
+        payload = _request_payload(item)
+        raw_run_id = payload.get("run_id")
+        raw_call_id = payload.get("call_id")
+        raw_tool_name = payload.get("tool")
+        run_id = raw_run_id.strip() if isinstance(raw_run_id, str) else ""
+        call_id = raw_call_id.strip() if isinstance(raw_call_id, str) else ""
+        tool_name = raw_tool_name.strip() if isinstance(raw_tool_name, str) else ""
+        resource = str(item.resource or "")
+        expected_request_id = hashlib.sha256(f"responses:{run_id}:{call_id}".encode("utf-8")).hexdigest()
+        if (
+            _responses_owner_id(item) != int(actor.id)
+            or not run_id
+            or len(run_id) > 80
+            or not call_id
+            or len(call_id) > 160
+            or not tool_name
+            or len(tool_name) > 120
+            or item.action != f"responses.{tool_name}"
+            or resource != f"response_run:{run_id}"
+            or item.copilot_request_id != expected_request_id
+        ):
+            results[item.id] = {"source_trace_status": "unavailable"}
+            continue
+        candidates[item.id] = (item, run_id, call_id, tool_name)
+        run_ids.add(run_id)
+
+    if not run_ids:
+        return results
+
+    from app.models.agent_response_run import AgentResponseRun
+
+    runs = {
+        str(run.run_id): run
+        for run in db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id.in_(run_ids),
+            AgentResponseRun.user_id == int(actor.id),
+            AgentResponseRun.surface == "admin",
+        ).all()
+    }
+    for item_id, (item, run_id, call_id, tool_name) in candidates.items():
+        payload = _request_payload(item)
+        run = runs.get(run_id)
+        try:
+            checkpoint = json.loads(run.checkpoint_json or "{}") if run is not None else {}
+        except (TypeError, json.JSONDecodeError):
+            checkpoint = {}
+        if not isinstance(checkpoint, dict):
+            checkpoint = {}
+        pending = checkpoint.get("pending")
+        pending = pending if isinstance(pending, dict) else {}
+        call = pending.get("call") if isinstance(pending.get("call"), dict) else {}
+        call_arguments = call.get("arguments")
+        request_arguments = payload.get("arguments")
+        if isinstance(call_arguments, dict) and isinstance(request_arguments, dict):
+            # Reuse the exact persistence normalizer used when _approval stores the
+            # request. Raw checkpoint arguments can contain secrets or values that
+            # are intentionally replaced by an audit fingerprint.
+            from app.services.agent_responses_service import _persisted_tool_arguments
+
+            persisted_arguments = _persisted_tool_arguments(tool_name, call_arguments)
+            try:
+                arguments_match = json.dumps(
+                    request_arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                ) == json.dumps(
+                    persisted_arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                )
+            except (TypeError, ValueError):
+                arguments_match = False
+        else:
+            arguments_match = False
+        if (
+            run is None
+            or not str(run.session_key or "").strip()
+            or run.status != "waiting_approval"
+            or str(checkpoint.get("run_id") or "") != run_id
+            or checkpoint.get("status") != "waiting_approval"
+            or pending.get("kind") != "approval"
+            or str(pending.get("approval_id") or "") != str(item_id)
+            or str(call.get("call_id") or "") != call_id
+            or str(call.get("name") or "") != tool_name
+            or not arguments_match
+        ):
+            results[item_id] = {"source_trace_status": "unavailable"}
+            continue
+        results[item_id] = {
+            "source_trace_status": "verified",
+            "source_run_id": str(run.run_id),
+            "source_session_id": str(run.session_key),
+            "source_tool_name": tool_name,
+        }
+    return results
 
 
 def requires_session_resume(db: Session, item: ApprovalItem) -> bool:
