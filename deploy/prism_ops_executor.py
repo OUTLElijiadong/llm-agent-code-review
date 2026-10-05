@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import ipaddress
+import importlib.util
 import json
 import os
 import pwd
@@ -39,6 +40,7 @@ READ_ONLY_ACTIONS = {
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file",
     "journal_query", "ssh_login_events", "flytrap_attack_events", "nginx_attack_events",
     "backup_audit", "db_threat_signals", "db_health", "ip_attribution",
+    "security_block_status", "security_block_candidates",
 }
 MAX_TEXT_BYTES = 256 * 1024
 MAX_DIRECTORY_ENTRIES = 500
@@ -92,6 +94,12 @@ ACTION_PARAM_KEYS = {
     "db_threat_signals": {"since_hours", "limit"},
     "db_health": set(),
     "ip_attribution": {"ip"},
+    "security_block_status": set(),
+    "security_block_configure": {"enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold", "allowlist_cidrs", "protected_ip"},
+    "security_block_reconcile": set(),
+    "security_block_release": {"ip", "reason"},
+    "security_block_candidates": set(),
+    "security_block_apply_anomalies": {"decisions"},
 }
 
 
@@ -127,6 +135,14 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
     extra_params = set(params) - allowed_params
     if extra_params:
         raise ValueError(f"动作 {action} 包含未允许参数: {sorted(extra_params)}")
+    if action.startswith("security_block_"):
+        # 同目录的 root 专用确定性防御模块；不允许请求决定导入文件路径。
+        spec = importlib.util.spec_from_file_location("prism_security_block", DEPLOY_DIR / "prism_security_block.py")
+        if spec is None or spec.loader is None:
+            raise RuntimeError("安全防御模块不可用")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.execute(action, params)
     if action == "status":
         result = run([str(DEPLOY_DIR / "ops-check.sh")], allow_failure=True)
         try:

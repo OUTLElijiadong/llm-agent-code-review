@@ -95,6 +95,8 @@ cd /path/to/project/deploy
 > 适用于包含 `deploy/prism_ops_executor.py` 新只读安全动作或 `security_monitor` 调度的发布。
 
 - [ ] 发布树中的 `deploy/prism_ops_executor.py` 已同步到生产（如 `/opt/prism-releases/<sha>/deploy/`），且 `prism-ops-executor.service` 的 `WorkingDirectory/ExecStart` 指向该发布树；发布后 `systemctl restart prism-ops-executor.service` 并确认 active。
+- [ ] 自动封禁模块、`prism-security-block.service/timer` 随发布树安装；timer 与执行器均读取当前发布 dotenv，根保护配置覆盖当前管理出口与服务器地址。首次启用前核验依赖及 IPv4/IPv6 能力，不回放历史窗口。
+- [ ] 自动封禁匿名与非最高管理员 API 均拒绝；策略回读有 `verified` 证据，失败/未知结果不能显示已生效。复核内核 TTL、保护地址、重复证据不续期及手动解封审计，分别标注模拟和生产核验范围。
 - [ ] `deploy/.env` 已按需配置 `SECURITY_MONITOR_*`、`SECURITY_SSH_ALLOWLIST_CIDRS`（本人常用 IP 段）、`THREAT_INTEL_BASE_URL`（默认 http://ip-api.com/json，可覆盖）与跨版本持久备份目录 `BACKUP_DIR`；备份审计和备份读取须指向同一目录。
 - [ ] 备份、隔离恢复验证、发布容量门禁和 `ops-check.sh` 均读取同一 `BACKUP_DIR`（进程变量优先，其次当前部署 dotenv，再回退默认目录）；发布后直接运行 `./ops-check.sh` 与 systemd 定时巡检均通过。
 - [ ] Alembic 迁移 027 已执行：`agent_alert` 含 category/source/user_id/read_at/fingerprint 列与索引。

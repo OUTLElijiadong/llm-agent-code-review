@@ -27,7 +27,7 @@ from app.agents.events import AgentEventType, new_trace_id
 from app.core.config import settings
 from app.models.agent_governance import AgentAlert
 from app.models.user import User
-from app.services import observability_service, ops_service, security_center_service
+from app.services import observability_service, ops_service, security_center_service, security_response_service
 
 # 严重度等级映射：数值越大越严重
 SEVERITY_ORDER = {"info": 0, "warning": 1, "high": 2, "critical": 3}
@@ -840,6 +840,26 @@ def run_security_monitor(
         errors.append({"action": "evaluate", "error": str(exc)})
         failed_actions.append("evaluate")
 
+    # 自动防御由 root 重新读取可信日志和核验内核状态；不把告警、HTTP
+    # 状态码或模型意见作为封禁输入。禁用/未确认态不新增防御副作用。
+    blocking = security_response_service.refresh_status(db)
+    if blocking.get("available") and blocking.get("enabled"):
+        blocking = security_response_service.reconcile(db)
+        if not blocking.get("available"):
+            errors.append({
+                "action": "security_block_reconcile",
+                "error": "; ".join(blocking.get("errors") or ["自动防御回执未确认"]),
+            })
+            failed_actions.append("security_block_reconcile")
+    else:
+        blocking = {**blocking, "skipped": True}
+
+    # 唯一主控小菱可主动研判 root 生成的脱敏候选；模型只选择候选编号，
+    # root 仍必须重读真实日志并限制短时单 IP 租约。
+    from app.services import security_anomaly_service
+
+    anomaly_review = security_anomaly_service.run_review(db)
+
     # “部分失败”可以继续下一轮并保留人工复核入口；全部数据源失败则必须
     # 在运行记录中如实标成失败，避免把安全监控盲区伪装成无风险。
     partial_failure = bool(errors) and bool(completed_actions)
@@ -855,6 +875,8 @@ def run_security_monitor(
         "degraded_actions": degraded_actions,
         "human_actions": human_actions,
         "created_alerts": created_alerts,
+        "automatic_blocking": blocking,
+        "xiaoling_anomaly_review": anomaly_review,
         "actions": results,
         "errors": errors,
         **({"error": "安全监控所有数据源均不可用，请人工核验执行器和日志"} if fatal_failure else {}),

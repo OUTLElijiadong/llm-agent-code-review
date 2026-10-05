@@ -17,7 +17,7 @@ from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun
 from app.models.audit_log import AuditLog
 from app.models.system_config import SystemConfig
 from app.models.user import User
-from app.services import audit_service, observability_service
+from app.services import audit_service, observability_service, ops_service, security_response_service
 
 POLICY_KEY = "security_monitor_policy"
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "high": 2, "critical": 3}
@@ -30,6 +30,10 @@ _SECURITY_ACTIONS = (
     "db_threat_signals",
     "status",
     "ip_attribution",
+    "security_block_configure",
+    "security_block_reconcile",
+    "security_block_release",
+    "security_block_apply_anomalies",
 )
 _ACTION_LABELS = {
     "ssh_login_events": "读取 SSH 登录日志",
@@ -40,6 +44,10 @@ _ACTION_LABELS = {
     "db_threat_signals": "读取数据库威胁信号",
     "status": "读取运行环境状态",
     "ip_attribution": "查询来源归属信息",
+    "security_block_configure": "自动封禁策略调整",
+    "security_block_reconcile": "自动封禁规则核验",
+    "security_block_release": "人工解封来源 IP",
+    "security_block_apply_anomalies": "小菱异常候选处置",
 }
 _AUDIT_ACTION_LABELS = {
     "login": "账号登录记录",
@@ -53,6 +61,7 @@ _AUDIT_ACTION_LABELS = {
     "llm_config_update": "全局模型配置变更",
     "llm_model_registry_update": "模型注册表变更",
     "llm_model_assignments_update": "模型分配变更",
+    "security_anomaly_review": "小菱主动异常研判",
 }
 _SAFE_DETAIL_KEYS = {
     "ip",
@@ -176,11 +185,16 @@ def _stored_policy(db: Session) -> tuple[dict[str, Any], dict[str, Any]]:
 
 def get_policy(db: Session) -> dict[str, Any]:
     values, meta = _stored_policy(db)
+    blocking = security_response_service.cached_status(db)
+    blocking_enabled = bool(blocking.get("available") and blocking.get("enabled"))
     return {
         **values,
         **meta,
-        "monitoring_mode": "monitor_only",
-        "automatic_blocking_enabled": False,
+        "monitoring_mode": "monitor_and_block" if blocking_enabled else "monitor_only",
+        "automatic_blocking_enabled": blocking_enabled,
+        "automatic_blocking_available": bool(blocking.get("available")),
+        "automatic_blocking_confirmed_at": blocking.get("confirmed_at"),
+        "automatic_blocking_state_source": "audited_receipt",
         "counterattack_enabled": False,
         "baseline": _default_policy(),
     }
@@ -408,7 +422,9 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
     }
     for row in audit_rows:
         failed_login = row.action == "login" and row.status == "failed"
-        if failed_login:
+        if row.action == "security_anomaly_review":
+            summary = "小菱分析了脱敏候选；研判和执行相互独立，实际封禁以宿主机回执为准。"
+        elif failed_login:
             summary = "认证接口记录一次失败登录尝试；这不代表攻击者已成功进入系统。"
         elif row.action == "login":
             summary = "认证接口记录一次成功登录；仍需结合后续操作审计判断行为。"
@@ -468,6 +484,37 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
                 source_by_request[str(target_id)] = match.group(1)
     for row in ops_rows:
         ok = row.status == "success"
+        if row.action in ops_service.INTERNAL_SECURITY_ACTIONS:
+            snapshot = security_response_service.execution_snapshot(row)
+            verified = snapshot["available"] and snapshot["verified"]
+            if not verified:
+                summary = "防御动作结果未确认，请刷新宿主机状态；当前回执不能证明已封禁或已解封。"
+            elif row.action == "security_block_configure":
+                summary = "固定规则临时封禁已启用。" if snapshot["enabled"] else "自动封禁已关闭，不新增封禁。"
+            elif row.action == "security_block_release":
+                summary = "人工解封已由宿主机核验；操作者与原因保留在执行审计。"
+            else:
+                summary = f"宿主机核验当前 {len(snapshot['active_blocks'])} 个临时封禁；实际状态可在自动封禁面板刷新。"
+            events.append({
+                "id": f"defense:{row.id}",
+                "recorded_at": _iso(row.finished_at or row.started_at),
+                "event_type": "defense_action",
+                "layer": "临时封禁与解封",
+                "severity": "info" if verified else "warning",
+                "status": row.status if verified else "unknown" if row.status == "running" else "failed",
+                "actor": actors.get(row.actor_id, "固定防御规则" if row.actor_id is None else "管理员"),
+                "title": _ACTION_LABELS[row.action],
+                "action_code": row.action,
+                "summary": summary,
+                "evidence_summary": {
+                    "verified": bool(verified), "request_id": row.request_id,
+                    "enabled": snapshot["enabled"] if verified else None,
+                    "active_blocks": len(snapshot["active_blocks"]) if verified else None,
+                    "duration_ms": int(row.duration_ms or 0),
+                    "source": source_by_request.get(str(row.request_id), "未记录"),
+                },
+            })
+            continue
         events.append(
             {
                 "id": f"collector:{row.id}",
@@ -527,7 +574,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
                 "status": display_status,
                 "actor": "系统调度器",
                 "title": "安全监控巡检",
-                "summary": "巡检运行摘要，不代表已采取自动防御动作。",
+                "summary": "巡检运行摘要；防御动作以独立执行回执和实时宿主机核验为准。",
                 "evidence_summary": {
                     "completed_sources": len(completed),
                     "failed_sources": len(failed_source_codes),
@@ -561,7 +608,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
                 "status": row.status,
                 "actor": row.actor_name or "管理员",
                 "title": "安全监控策略调整",
-                "summary": "仅调整检测阈值/告警灵敏度；自动封禁与反击仍关闭。",
+                "summary": "仅调整检测阈值/告警灵敏度；临时封禁由独立防御策略管理。",
                 "evidence_summary": {
                     "before": detail.get("before", {}),
                     "after": detail.get("after", {}),

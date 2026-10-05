@@ -67,8 +67,8 @@ render_service() {
   sed "s|@DEPLOY_DIR@|$(sed_replacement_escape "$deploy_dir")|g" "$template" > "$output"
 }
 
-services=(prism-backup.service prism-verify-backup.service prism-ops-check.service prism-ops-executor.service prism-cert-renew.service)
-timers=(prism-backup.timer prism-verify-backup.timer prism-ops-check.timer prism-cert-renew.timer)
+services=(prism-backup.service prism-verify-backup.service prism-ops-check.service prism-ops-executor.service prism-cert-renew.service prism-security-block.service)
+timers=(prism-backup.timer prism-verify-backup.timer prism-ops-check.timer prism-cert-renew.timer prism-security-block.timer)
 if [[ "$apply" != "1" ]]; then
   printf 'DRY-RUN deploy_dir=%s unit_dir=%s\n' "$deploy_dir" "$unit_dir"
   printf '将安装 service: %s\n' "${services[*]}"
@@ -98,11 +98,27 @@ executor_was_active=0
 if systemctl is-active --quiet prism-ops-executor.service; then
   executor_was_active=1
 fi
+executor_was_enabled=0
+if systemctl is-enabled --quiet prism-ops-executor.service; then
+  executor_was_enabled=1
+fi
+security_block_service_was_active=0
+if systemctl is-active --quiet prism-security-block.service; then
+  security_block_service_was_active=1
+fi
 for unit in "${unit_files[@]}"; do
   if [[ -f "$unit_dir/$unit" ]]; then
     cp -a "$unit_dir/$unit" "$backup_dir/$unit"
   else
     : > "$backup_dir/missing-$unit"
+  fi
+done
+for timer in "${timers[@]}"; do
+  if systemctl is-active --quiet "$timer"; then
+    : > "$backup_dir/active-$timer"
+  fi
+  if systemctl is-enabled --quiet "$timer"; then
+    : > "$backup_dir/enabled-$timer"
   fi
 done
 
@@ -114,6 +130,14 @@ cleanup() {
   if [[ "$rc" != 0 && "$units_changed" == 1 ]]; then
     trap - EXIT
     set +e
+    # 先停新 timer，避免回滚文件时新的封禁作业继续运行。
+    for timer in "${timers[@]}"; do
+      systemctl stop "$timer"
+      if [[ ! -f "$backup_dir/enabled-$timer" ]]; then
+        systemctl disable "$timer"
+      fi
+    done
+    systemctl stop prism-security-block.service
     for unit in "${unit_files[@]}"; do
       if [[ -f "$backup_dir/$unit" ]]; then
         install -m 0644 "$backup_dir/$unit" "$unit_dir/$unit"
@@ -122,6 +146,22 @@ cleanup() {
       fi
     done
     systemctl daemon-reload
+    for timer in "${timers[@]}"; do
+      if [[ -f "$backup_dir/enabled-$timer" ]]; then
+        systemctl enable "$timer"
+      fi
+      if [[ -f "$backup_dir/active-$timer" ]]; then
+        systemctl start "$timer"
+      fi
+    done
+    if [[ "$executor_was_enabled" == 1 ]]; then
+      systemctl enable prism-ops-executor.service
+    else
+      systemctl disable prism-ops-executor.service
+    fi
+    if [[ "$security_block_service_was_active" == 1 ]]; then
+      systemctl start prism-security-block.service
+    fi
     if [[ "$executor_was_active" == 1 ]]; then
       systemctl restart prism-ops-executor.service
     else

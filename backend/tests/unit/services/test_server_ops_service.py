@@ -86,7 +86,9 @@ def _executor(db, admin_user, run_id: str, events=None) -> PrismToolExecutor:
 def test_operation_schema_has_one_strict_variant_per_action() -> None:
     parameters = _operations_tool_schema()["parameters"]
     variants = parameters["oneOf"]
-    assert {item["properties"]["action"]["const"] for item in variants} == set(ops_service.ACTION_RISKS)
+    assert {item["properties"]["action"]["const"] for item in variants} == (
+        set(ops_service.ACTION_RISKS) - ops_service.INTERNAL_SECURITY_ACTIONS
+    )
     assert all(item["additionalProperties"] is False for item in variants)
     assert all(item["properties"]["params"]["additionalProperties"] is False for item in variants)
 

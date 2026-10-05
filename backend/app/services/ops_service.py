@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import time
 import uuid
@@ -53,7 +54,18 @@ ACTION_RISKS = {
     "db_threat_signals": "low",
     "db_health": "low",
     "ip_attribution": "low",
+    "security_block_status": "low",
+    "security_block_configure": "medium",
+    "security_block_reconcile": "medium",
+    "security_block_release": "medium",
+    "security_block_candidates": "low",
+    "security_block_apply_anomalies": "medium",
 }
+# 仅由安全中心/API 与固定防御调度使用；不能进入模型工具枚举。
+INTERNAL_SECURITY_ACTIONS = frozenset({
+    "security_block_status", "security_block_configure", "security_block_reconcile", "security_block_release",
+    "security_block_candidates", "security_block_apply_anomalies",
+})
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
 # 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
 AUTO_ACTIONS = frozenset({"status", "certificate_status"})
@@ -61,6 +73,8 @@ READ_ONLY_ACTIONS = frozenset({
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file", "journal_query",
     "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "db_threat_signals",
     "db_health", "ip_attribution",
+    "security_block_status",
+    "security_block_candidates",
 })
 # 无交互安全监控调度可自动执行的只读安全动作；交互调用仍要求唯一超级管理员。
 SCHEDULER_READ_ACTIONS = frozenset({
@@ -98,6 +112,16 @@ ACTION_PARAM_KEYS = {
     "db_threat_signals": {"since_hours", "limit"},
     "db_health": set(),
     "ip_attribution": {"ip"},
+    "security_block_status": set(),
+    "security_block_configure": {
+        "enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold",
+        "allowlist_cidrs",
+        "protected_ip",
+    },
+    "security_block_reconcile": set(),
+    "security_block_release": {"ip", "reason"},
+    "security_block_candidates": set(),
+    "security_block_apply_anomalies": {"decisions"},
 }
 ACTION_REQUIRED_PARAMS = {
     "restart_service": {"service"},
@@ -114,6 +138,9 @@ ACTION_REQUIRED_PARAMS = {
     "account_action": {"operation", "username"},
     "ssh_authorized_key_action": {"operation", "username"},
     "ip_attribution": {"ip"},
+    "security_block_configure": {"enabled"},
+    "security_block_release": {"ip", "reason"},
+    "security_block_apply_anomalies": {"decisions"},
 }
 ACTION_PARAM_TYPES = {
     "file": str,
@@ -143,6 +170,16 @@ ACTION_PARAM_TYPES = {
     "since_hours": int,
     "failure_threshold": int,
     "focus": str,
+    "enabled": bool,
+    "ai_anomaly_enabled": bool,
+    "duration_seconds": int,
+    "window_seconds": int,
+    "ssh_threshold": int,
+    "web_threshold": int,
+    "allowlist_cidrs": list,
+    "protected_ip": str,
+    "reason": str,
+    "decisions": list,
     "ip": str,
 }
 
@@ -351,12 +388,28 @@ def execute(
     safe_params = validate_action_params(action, params or {})
     if actor is not None and not rbac_service.is_super_admin_user(db, actor.id):
         raise PermissionError("仅超级管理员 admin 可执行运维动作")
+    if action in INTERNAL_SECURITY_ACTIONS:
+        automatic = actor is None and source in {"security_response", "scheduler"} and action in {
+            "security_block_status", "security_block_reconcile", "security_block_candidates",
+            "security_block_apply_anomalies",
+        }
+        interactive = actor is not None and source == "security_center" and action in {
+            "security_block_status", "security_block_configure", "security_block_release",
+        }
+        if not automatic and not interactive:
+            raise PermissionError("自动封禁只能由固定安全巡检或最高管理员安全中心调用")
     if actor is None and action not in AUTO_ACTIONS and not (
         source == "scheduler" and action in SCHEDULER_READ_ACTIONS
     ) and not (
         # 自动备份：仅当最高管理员显式开启 backup_schedule_enabled 时，
         # 无交互调度身份才允许触发 backup_database（中等风险写动作）。
         source == "scheduler" and action == "backup_database" and settings.backup_schedule_enabled
+    ) and not (
+        action in {
+            "security_block_status", "security_block_reconcile", "security_block_candidates",
+            "security_block_apply_anomalies",
+        }
+        and source in {"security_response", "scheduler"}
     ):
         raise PermissionError("无交互调度只允许运维只读动作")
     request_id = request_id or uuid.uuid4().hex
@@ -510,6 +563,56 @@ def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any
         required_key = "public_key" if operation == "add" else "fingerprint"
         if not params.get(required_key):
             raise ValueError(f"动作 ssh_authorized_key_action 缺少必填参数: ['{required_key}']")
+    if action == "security_block_configure":
+        bounds = {
+            "duration_seconds": (60, 900), "window_seconds": (60, 900),
+            "ssh_threshold": (20, 200), "web_threshold": (30, 500),
+        }
+        for key, (lower, upper) in bounds.items():
+            if key in params and not lower <= params[key] <= upper:
+                raise ValueError(f"参数 {key} 必须在 {lower} 到 {upper} 之间")
+        allowlist = params.get("allowlist_cidrs", [])
+        if len(allowlist) > 32:
+            raise ValueError("自动封禁保护网段最多 32 条")
+        for raw in allowlist:
+            if not isinstance(raw, str):
+                raise ValueError("自动封禁保护网段必须是 CIDR 字符串")
+            try:
+                network = ipaddress.ip_network(raw, strict=False)
+            except ValueError as exc:
+                raise ValueError("自动封禁保护网段格式不合法") from exc
+            if network.prefixlen < (24 if network.version == 4 else 64):
+                raise ValueError("IPv4 保护网段不能宽于 /24，IPv6 不能宽于 /64")
+        protected_ip = params.get("protected_ip", "")
+        if params.get("enabled") and not protected_ip:
+            raise ValueError("启用自动封禁必须记录当前管理员可信来源 IP")
+        if protected_ip:
+            try:
+                ipaddress.ip_address(protected_ip)
+            except ValueError as exc:
+                raise ValueError("管理员可信来源 IP 不合法") from exc
+    elif action == "security_block_release":
+        try:
+            ipaddress.ip_address(params["ip"])
+        except ValueError as exc:
+            raise ValueError("解封 IP 不合法") from exc
+        if not 1 <= len(params["reason"].strip()) <= 200:
+            raise ValueError("解封原因长度必须在 1 到 200 之间")
+    elif action == "security_block_apply_anomalies":
+        import re
+
+        decisions = params["decisions"]
+        if not 1 <= len(decisions) <= 3:
+            raise ValueError("异常处置每批只能包含 1 到 3 个候选")
+        ids = set()
+        for row in decisions:
+            if (not isinstance(row, dict) or set(row) != {"candidate_id", "reason"}
+                    or not isinstance(row["candidate_id"], str)
+                    or not re.fullmatch(r"[a-f0-9]{32}", row["candidate_id"])
+                    or row["candidate_id"] in ids
+                    or not isinstance(row["reason"], str) or not 1 <= len(row["reason"].strip()) <= 200):
+                raise ValueError("异常处置必须引用唯一的有效候选编号与 1 到 200 字原因")
+            ids.add(row["candidate_id"])
     return dict(params)
 
 

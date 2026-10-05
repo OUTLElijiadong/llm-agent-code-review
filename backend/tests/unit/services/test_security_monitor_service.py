@@ -19,7 +19,13 @@ import pytest
 from app.agents.events import AgentEventType
 from app.core.config import settings
 from app.models.agent_governance import AgentAlert
-from app.services import observability_service, ops_service, security_center_service, security_monitor_service
+from app.services import (
+    observability_service,
+    ops_service,
+    security_center_service,
+    security_monitor_service,
+    security_response_service,
+)
 
 
 def _fake_execute(payloads, *, ip_attribution=None, fail_actions=()):
@@ -76,6 +82,79 @@ def _ssh_payload(*, accepted=None, failed_by_ip=None):
         "recent": accepted,
         "stdout_capped": False,
     }
+
+
+def test_disabled_automatic_blocking_monitor_has_no_defense_write(db, monkeypatch):
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(_base_payloads()))
+    monkeypatch.setattr(security_response_service, "reconcile", lambda *_args: pytest.fail("禁用状态不能新增防御写入"))
+    result = security_monitor_service.run_security_monitor(db)
+    assert result["success"] is True
+    assert result["automatic_blocking"]["skipped"] is True
+
+
+def test_enabled_monitor_only_invokes_root_reconcile_without_candidate_ips(db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(_base_payloads()))
+    monkeypatch.setattr(
+        security_response_service, "refresh_status", lambda *_args: {"available": True, "enabled": True},
+    )
+    monkeypatch.setattr(security_response_service, "reconcile", lambda *args: (
+        calls.append(args) or {"available": True, "verified": True, "enabled": True, "errors": []}
+    ))
+    result = security_monitor_service.run_security_monitor(db)
+    assert result["success"] is True
+    assert calls == [(db,)]
+
+
+def test_monitor_response_unknown_keeps_source_health_but_records_failure(db, monkeypatch):
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(_base_payloads()))
+    monkeypatch.setattr(
+        security_response_service, "refresh_status", lambda *_args: {"available": True, "enabled": True},
+    )
+    monkeypatch.setattr(security_response_service, "reconcile", lambda *_args: {
+        "available": False, "verified": False, "enabled": False, "errors": ["执行结果未确认"],
+    })
+    result = security_monitor_service.run_security_monitor(db)
+    assert result["success"] is False
+    assert result["partial_failure"] is True
+    assert result["completed_actions"]
+    assert result["errors"] == [{"action": "security_block_reconcile", "error": "执行结果未确认"}]
+
+
+def test_monitor_refresh_recovers_failed_cached_status_without_admin_get(db, monkeypatch):
+    """上一轮执行器故障不能让后续巡检永久依赖失败缓存。"""
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: {
+        "ok": False, "error": "宿主机临时不可用",
+    })
+    previous = security_response_service.refresh_status(db)
+    assert previous["available"] is False
+    assert security_response_service.cached_status(db)["available"] is False
+
+    calls = []
+    root_snapshot = {
+        "available": True, "verified": True, "enabled": True, "backend": "ipset",
+        "policy": {
+            "enabled": True, "ai_anomaly_enabled": False,
+            "duration_seconds": 900, "window_seconds": 300,
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [],
+        },
+        "active_blocks": [], "recent_blocks": [], "errors": [],
+    }
+
+    def recovered_executor(action, _params, _request_id):
+        calls.append(action)
+        payload = root_snapshot if action in ops_service.INTERNAL_SECURITY_ACTIONS else _base_payloads().get(action, {})
+        return {"ok": True, "result": payload}
+
+    monkeypatch.setattr(ops_service, "_call_executor", recovered_executor)
+    result = security_monitor_service.run_security_monitor(db)
+
+    assert result["success"] is True
+    assert result["automatic_blocking"]["verified"] is True
+    assert result["automatic_blocking"]["enabled"] is True
+    assert "security_block_reconcile" in calls
+    assert calls.index("security_block_status") < calls.index("security_block_reconcile")
+    assert security_response_service.cached_status(db)["enabled"] is True
 
 
 @pytest.fixture
@@ -144,7 +223,8 @@ def test_manual_monitor_run_preserves_admin_actor_and_source(db, super_admin_use
     execute = _fake_execute(_base_payloads())
 
     def capture(db_arg, actor, **kwargs):
-        calls.append((actor, kwargs.get("source")))
+        if kwargs.get("action") not in ops_service.INTERNAL_SECURITY_ACTIONS:
+            calls.append((actor, kwargs.get("source")))
         return execute(db_arg, actor, **kwargs)
 
     monkeypatch.setattr(ops_service, "execute", capture)

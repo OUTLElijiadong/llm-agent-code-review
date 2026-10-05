@@ -1,0 +1,1 @@
+kernel harness: 2 scenarios passed in 96.338 seconds; source hashes recorded in 内核源码指纹.txt; test used synthetic, isolated namespace log fixture; external traffic/production firewall unchanged.

@@ -3065,6 +3065,8 @@ class PrismToolExecutor:
         if not self._is_super_admin:
             return ToolExecutionResult.failure("仅超级管理员 admin 可执行运维工具")
         action = str(call.arguments.get("action") or "")
+        if action in ops_service.INTERNAL_SECURITY_ACTIONS:
+            return ToolExecutionResult.failure("自动封禁由固定规则运行；配置与解封请在安全中心操作")
         if action not in ops_service.ACTION_RISKS:
             return ToolExecutionResult.failure(f"不支持的运维动作: {action}")
         if not agent_governance_service.is_runtime_enabled(self._db, "operations"):
@@ -4340,7 +4342,7 @@ def _operations_tool_schema() -> Dict[str, Any]:
                     "required": ["action", "params"],
                     "additionalProperties": False,
                 }
-                for action in sorted(ops_service.ACTION_RISKS)
+                for action in sorted(set(ops_service.ACTION_RISKS) - ops_service.INTERNAL_SECURITY_ACTIONS)
             ],
         },
     }

@@ -6,8 +6,11 @@ export interface SecurityMonitorPolicy {
   nginx_failure_threshold: number
   nginx_window_hours: number
   popup_min_severity: 'info' | 'warning' | 'high' | 'critical'
-  monitoring_mode: 'monitor_only'
-  automatic_blocking_enabled: false
+  monitoring_mode: 'monitor_only' | 'monitor_and_block'
+  automatic_blocking_enabled: boolean
+  automatic_blocking_available?: boolean
+  automatic_blocking_confirmed_at?: string | null
+  automatic_blocking_state_source?: 'audited_receipt'
   counterattack_enabled: false
   source: string
   revision: number
@@ -87,4 +90,60 @@ export function updateSecurityMonitorPolicy(
 
 export function runSecurityMonitor(): Promise<SecurityMonitorRunResult> {
   return post<SecurityMonitorRunResult>('/admin/observability/security/run-monitor')
+}
+
+export interface AutomaticBlockingPolicy {
+  enabled: boolean
+  ai_anomaly_enabled: boolean
+  duration_seconds: number
+  window_seconds: number
+  ssh_threshold: number
+  web_threshold: number
+  allowlist_cidrs: string[]
+  activated_at: string | null
+}
+
+export interface AutomaticBlockEntry {
+  id: string
+  ip: string
+  rule: string
+  evidence_count: number
+  scope: string
+  status: 'active' | 'expired' | 'released' | 'failed' | 'unknown'
+  started_at: string | null
+  expires_at: string | null
+  released_at: string | null
+  reason: string
+  source?: string
+}
+
+export interface AutomaticBlockingSnapshot {
+  available: boolean
+  verified: boolean
+  enabled: boolean
+  policy: AutomaticBlockingPolicy
+  protected_sources: Array<{ cidr: string; reason: string }>
+  active_blocks: AutomaticBlockEntry[]
+  recent_blocks: AutomaticBlockEntry[]
+  last_evaluated_at: string | null
+  errors: Array<string | Record<string, unknown>>
+  backend: 'ipset'
+  family_availability?: unknown
+  family_support?: { ipv4: boolean; ipv6: boolean }
+  request_id?: string
+  outcome_unknown?: boolean
+}
+
+export type AutomaticBlockingPolicyInput = Omit<AutomaticBlockingPolicy, 'activated_at'>
+
+export function getAutomaticBlocking(): Promise<AutomaticBlockingSnapshot> {
+  return get<AutomaticBlockingSnapshot>('/admin/security-center/automatic-blocking')
+}
+
+export function updateAutomaticBlocking(data: AutomaticBlockingPolicyInput): Promise<AutomaticBlockingSnapshot> {
+  return put<AutomaticBlockingSnapshot>('/admin/security-center/automatic-blocking', data)
+}
+
+export function releaseAutomaticBlock(data: { ip: string; reason: string }): Promise<AutomaticBlockingSnapshot> {
+  return post<AutomaticBlockingSnapshot>('/admin/security-center/automatic-blocking/release', data)
 }

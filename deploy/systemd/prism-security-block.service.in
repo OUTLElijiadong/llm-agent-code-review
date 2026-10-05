@@ -1,0 +1,16 @@
+[Unit]
+Description=Prism bounded security response reconciliation
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DEPLOY_DIR@
+EnvironmentFile=@DEPLOY_DIR@/.env
+ExecStart=/usr/bin/python3 @DEPLOY_DIR@/prism_security_block.py --reconcile
+StateDirectory=prism-ops/security-block
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=180

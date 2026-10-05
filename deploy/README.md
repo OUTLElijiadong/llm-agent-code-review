@@ -205,6 +205,16 @@ journalctl -u prism-ops-check.service -n 100 --no-pager
 
 systemd timer 失败必须接入云监控或日志告警；仅写入 journal 不等于已经有人收到告警。
 
+### 临时自动封禁
+
+`prism-security-block.timer` 每分钟运行 root 规则引擎，与应用进程分离。默认关闭，在最高管理员的独立安全中心中启用。依赖宿主 `ipset`、`iptables` 与 Web 发布端口对应的 `DOCKER-USER` 链；IPv6 能力单独预检，不以 IPv4 成功推定 IPv6 已覆盖。
+
+首次开启前在生产 `deploy/.env` 写入 `SECURITY_BLOCK_PROTECTED_CIDRS`（JSON CIDR 数组），至少包括可信管理出口与服务器公网地址。策略另外保护当前最高管理员请求来源、当前 SSH 会话、成功 SSH 来源和非公网地址。保护信息从服务端可信来源取得，不采信浏览器任意传来的 IP。保持管理出口变更与保护配置同步。
+
+规则仅处理启用后的可信日志：默认 300 秒内至少 20 次 SSH Failed password，或至少 30 次 Web 敏感路径探测且出现 3 种不同目标。普通 404/403 不直接封禁，模型不能任意指定封禁 IP。单个公网来源最长限制 900 秒，不永久封禁网段，不延长同一租约。宿主 INPUT 与 Docker Web 原始入站方向分别处理；内核 TTL 到期解封不依赖应用在线。
+
+策略和租约记录落在 `/var/lib/prism-ops/security-block`，先持久化再修改内核，保留失败与手动解封理由。执行器不可用或回执未确认时，界面显示待核验。查看 `systemctl status prism-security-block.timer` 与 `journalctl -u prism-security-block.service` 核对作业；在安全中心关闭策略会停止新增封禁，并解除本模块管理的现有租约；以执行回执和状态回读为准，也可核验后单独手动解封。
+
 ## 9. 受控清理
 
 `cleanup.sh` 默认只预览，不删除数据库卷、备份、证书或发布核心状态：
@@ -243,3 +253,5 @@ git -C .. rev-parse HEAD
 ```
 
 生产发布与回滚应始终按 [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) 记录精确 SHA、备份、恢复验证、迁移 revision、业务冒烟、观察窗口和最终结论。
+
+小菱主动研判可单独启用：只接收经 root 验证且脱敏的候选编号与统计，不向模型发送真实 IP、账号或原始日志。可信 SSH 失败至少 10 次，或 Web 至少 10 次且 3 种敏感目标时，小菱可提前处置单个来源，最多 120 秒。root 再读日志验证有效期、保护规则和重放边界，幻觉候选编号或失效证据拒绝执行。每批最多 3 个、每天最多 24 次模型研判；无新候选不调用模型，模型失败仅观察。一般聊天工具不包含这些执行动作。

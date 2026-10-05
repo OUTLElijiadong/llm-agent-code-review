@@ -9,6 +9,9 @@ const api = vi.hoisted(() => ({
   getSecurityCenterEvents: vi.fn(),
   runSecurityMonitor: vi.fn(),
   updateSecurityMonitorPolicy: vi.fn(),
+  getAutomaticBlocking: vi.fn(),
+  updateAutomaticBlocking: vi.fn(),
+  releaseAutomaticBlock: vi.fn(),
   getSystemStatus: vi.fn(),
   resolveAlert: vi.fn(),
   messageSuccess: vi.fn(),
@@ -28,6 +31,9 @@ vi.mock('@/api/adminSecurityCenter', () => ({
   getSecurityCenterEvents: api.getSecurityCenterEvents,
   runSecurityMonitor: api.runSecurityMonitor,
   updateSecurityMonitorPolicy: api.updateSecurityMonitorPolicy,
+  getAutomaticBlocking: api.getAutomaticBlocking,
+  updateAutomaticBlocking: api.updateAutomaticBlocking,
+  releaseAutomaticBlock: api.releaseAutomaticBlock,
 }))
 vi.mock('@/api/adminOverview', () => ({ getSystemStatus: api.getSystemStatus }))
 vi.mock('@/api/adminGovernance', () => ({ resolveAlert: api.resolveAlert }))
@@ -90,6 +96,11 @@ describe('AdminSecurityCenter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getSecurityCenterOverview.mockResolvedValue(overview())
+    api.getAutomaticBlocking.mockResolvedValue({
+      available: true, verified: true, enabled: false, backend: 'ipset',
+      policy: { enabled: false, ai_anomaly_enabled: false, duration_seconds: 900, window_seconds: 300, ssh_threshold: 20, web_threshold: 30, allowlist_cidrs: [], activated_at: null },
+      protected_sources: [], active_blocks: [], recent_blocks: [], last_evaluated_at: null, errors: [],
+    })
     api.getSecurityCenterEvents.mockResolvedValue(eventPage())
     api.getSystemStatus.mockResolvedValue({
       available: true, collected_at: '2026-10-05T12:00:00Z', process_uptime_seconds: 10,
@@ -103,8 +114,8 @@ describe('AdminSecurityCenter', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('小菱安全中心')
-    expect(wrapper.text()).toContain('仅监控与告警')
-    expect(wrapper.text()).toContain('自动封禁与反击当前未启用')
+    expect(wrapper.text()).toContain('监控与告警')
+    expect(wrapper.text()).toContain('自动封禁：关闭 · 反击操作未启用')
     expect(wrapper.text()).toContain('Nginx 重复 HTTP 异常')
     expect(wrapper.text()).toContain('203.0.113.9')
     expect(wrapper.text()).toContain('不等同于攻击成功或已被拦截')

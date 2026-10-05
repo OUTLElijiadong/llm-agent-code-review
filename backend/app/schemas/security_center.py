@@ -1,6 +1,8 @@
 """管理员安全中心输入契约。"""
 
-from pydantic import Field
+import ipaddress
+
+from pydantic import Field, field_validator
 
 from app.schemas.common import StrictInputModel
 
@@ -12,3 +14,45 @@ class SecurityMonitorPolicyIn(StrictInputModel):
     ssh_window_hours: int = Field(ge=1, le=24)
     nginx_failure_threshold: int = Field(ge=1, le=5000)
     nginx_window_hours: int = Field(ge=1, le=24)
+
+
+class AutomaticBlockingPolicyIn(StrictInputModel):
+    """固定规则、短期单 IP 封禁；不允许正文指定管理来源或任意命令。"""
+
+    enabled: bool = Field(strict=True)
+    ai_anomaly_enabled: bool = Field(default=False, strict=True)
+    duration_seconds: int = Field(default=900, ge=60, le=900, strict=True)
+    window_seconds: int = Field(default=300, ge=60, le=900, strict=True)
+    ssh_threshold: int = Field(default=20, ge=20, le=200, strict=True)
+    web_threshold: int = Field(default=30, ge=30, le=500, strict=True)
+    allowlist_cidrs: list[str] = Field(default_factory=list, max_length=32)
+
+    @field_validator("allowlist_cidrs")
+    @classmethod
+    def narrow_protected_networks(cls, values: list[str]) -> list[str]:
+        normalized = []
+        for raw in values:
+            network = ipaddress.ip_network(raw.strip(), strict=False)
+            if network.prefixlen < (24 if network.version == 4 else 64):
+                raise ValueError("IPv4 保护网段不能宽于 /24，IPv6 不能宽于 /64")
+            if str(network) not in normalized:
+                normalized.append(str(network))
+        return normalized
+
+
+class AutomaticBlockingReleaseIn(StrictInputModel):
+    ip: str = Field(min_length=2, max_length=64)
+    reason: str = Field(min_length=1, max_length=200)
+
+    @field_validator("ip")
+    @classmethod
+    def canonical_ip(cls, value: str) -> str:
+        return str(ipaddress.ip_address(value.strip()))
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("请填写解封原因")
+        return text

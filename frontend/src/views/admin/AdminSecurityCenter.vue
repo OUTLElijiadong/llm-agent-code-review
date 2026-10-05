@@ -12,9 +12,11 @@ import {
   type SecurityCenterEventPage,
   type SecurityCenterOverview,
   type SecurityMonitorPolicy,
+  type AutomaticBlockingSnapshot,
 } from '@/api/adminSecurityCenter'
 import { getSystemStatus, type SystemStatus } from '@/api/adminOverview'
 import { resolveAlert } from '@/api/adminGovernance'
+import AutomaticBlockingPanel from '@/components/security/AutomaticBlockingPanel.vue'
 
 const overview = ref<SecurityCenterOverview | null>(null)
 const eventPage = ref<SecurityCenterEventPage | null>(null)
@@ -31,6 +33,8 @@ const resolvingAlertId = ref<number | null>(null)
 const hours = ref(24)
 const page = ref(1)
 const clock = ref(Date.now())
+const blockingPanel = ref<InstanceType<typeof AutomaticBlockingPanel> | null>(null)
+const blockingStatus = reactive<{ snapshot: AutomaticBlockingSnapshot | null; loading: boolean; error: string }>({ snapshot: null, loading: true, error: '' })
 let eventRequestGeneration = 0
 let clockTimer: ReturnType<typeof setInterval> | undefined
 const policyDraft = reactive({
@@ -105,6 +109,14 @@ const monitoringLabel = computed(() => {
 const popupSeverityLabel = computed(() => ({
   info: '信息及以上', warning: '警告及以上', high: '高风险及以上', critical: '仅危急',
 } as Record<string, string>)[overview.value?.policy.popup_min_severity || 'warning'])
+const blockingLabel = computed(() => {
+  if (blockingStatus.loading || blockingStatus.error || !blockingStatus.snapshot) return '自动封禁：状态待核验'
+  if (!blockingStatus.snapshot.available) return '自动封禁：执行器不可用'
+  if (!blockingStatus.snapshot.verified) return '自动封禁：执行状态待核验'
+  return blockingStatus.snapshot.enabled ? '自动封禁：已启用' : '自动封禁：关闭'
+})
+const securityModeLabel = computed(() => blockingStatus.snapshot?.available && blockingStatus.snapshot.verified && blockingStatus.snapshot.enabled
+  && !blockingStatus.loading && !blockingStatus.error ? '监控与临时自动封禁' : '监控与告警')
 
 function getErrorMessage(error: unknown): string {
   const value = error as { message?: string; response?: { data?: { message?: string } } } | null
@@ -191,8 +203,8 @@ async function loadServer(): Promise<void> {
   }
 }
 
-async function refreshAll(): Promise<void> {
-  await Promise.allSettled([loadOverview(), loadEvents(), loadServer()])
+async function refreshAll(refreshBlocking = true): Promise<void> {
+  await Promise.allSettled([loadOverview(), loadEvents(), loadServer(), ...(refreshBlocking && blockingPanel.value ? [blockingPanel.value.refresh()] : [])])
 }
 
 async function refreshEvents(): Promise<void> {
@@ -258,7 +270,7 @@ async function resolveSecurityAlert(event: SecurityCenterEvent): Promise<void> {
 }
 
 onMounted(() => {
-  void refreshAll()
+  void refreshAll(false)
   clockTimer = setInterval(() => { clock.value = Date.now() }, 30_000)
 })
 
@@ -283,13 +295,13 @@ onUnmounted(() => {
           <h2 id="security-title">小菱安全中心</h2>
           <p>集中查看服务器运行、被动安全监控、告警和策略变更。</p>
           <div class="hero-badges">
-            <span class="mode-badge"><Lock /> 仅监控与告警</span>
-            <span class="mode-note">自动封禁与反击当前未启用</span>
+            <span class="mode-badge"><Lock /> {{ securityModeLabel }}</span>
+            <span class="mode-note">{{ blockingLabel }} · 反击操作未启用</span>
           </div>
         </div>
       </div>
       <div class="hero-actions">
-        <button class="button button-secondary" type="button" :disabled="overviewLoading || eventsLoading || serverLoading" @click="refreshAll">
+        <button class="button button-secondary" type="button" :disabled="overviewLoading || eventsLoading || serverLoading || blockingStatus.loading" @click="refreshAll()">
           <Refresh :class="{ spinning: overviewLoading || eventsLoading || serverLoading }" />刷新状态
         </button>
         <button class="button button-primary" type="button" :disabled="runLoading || overviewLoading" @click="triggerMonitor">
@@ -300,7 +312,7 @@ onUnmounted(() => {
 
     <section class="scope-note" role="note">
       <WarningFilled />
-      <p><strong>证据边界：</strong>报告覆盖的入口不同：一份称公网 Web 层未取得管理员权限，另两份描述经主机运维凭据和容器密钥链进入管理环境。材料未附原始服务器日志供本次独立复核，不能据此确认第三方已入侵生产或 Web RBAC 被绕过。本页展示平台实际记录；事件时间是记录/采集时间，不代表攻击发生时间，也不把探测尝试标记为入侵成功或已拦截。</p>
+      <p><strong>证据边界：</strong>报告覆盖的入口不同：一份称公网 Web 层未取得管理员权限，另两份描述经主机运维凭据和容器密钥链进入管理环境。材料未附原始服务器日志供本次独立复核，不能据此确认第三方已入侵生产或 Web RBAC 被绕过。本页展示平台实际记录；事件时间是记录/采集时间，不代表攻击发生时间。规则命中和入侵成功分别记录，封禁是否生效以自动封禁执行回执为准。</p>
       <p><strong>日志覆盖范围：</strong>目前显示已接入的 SSH/Nginx 规则告警与采集回执、登录审计、角色/权限及高影响配置变更；这不代表完整的 SSH/Nginx 原始日志。没有审计记录的成功只读 API 请求不会出现在此时间线；没有记录不能证明该请求未发生。</p>
     </section>
 
@@ -375,6 +387,12 @@ onUnmounted(() => {
       </div>
       <p class="runtime-footnote">资源值来自后端运行环境采集，不能据此单独推断云主机全盘容量、磁盘增长速度或证书状态。</p>
     </section>
+
+    <AutomaticBlockingPanel
+      ref="blockingPanel"
+      @status="Object.assign(blockingStatus, $event)"
+      @changed="loadEvents()"
+    />
 
     <section class="content-grid">
       <section class="timeline-panel panel">
@@ -459,7 +477,7 @@ onUnmounted(() => {
             </div>
             <Lock class="policy-lock" aria-label="仅最高管理员可调整" />
           </div>
-          <p class="section-subtitle">修改只会加强或保持告警检测，不会关闭来源或执行自动封禁。</p>
+          <p class="section-subtitle">此处只调整告警检测；自动封禁由上方独立策略管理。</p>
           <div v-if="overviewLoading && !overview" class="form-state">正在读取当前策略…</div>
           <form v-else class="policy-form" @submit.prevent="savePolicy">
             <label>
@@ -480,7 +498,7 @@ onUnmounted(() => {
             </label>
             <div class="policy-fixed full-field">
               <span><CircleCheck /> 数据采集：只读</span>
-              <span><Lock /> 自动封禁：关闭</span>
+              <span><Lock /> {{ blockingLabel }}</span>
               <span><Lock /> 反击操作：关闭</span>
               <span><WarningFilled /> 推送门槛：{{ popupSeverityLabel }}</span>
             </div>
@@ -500,7 +518,8 @@ onUnmounted(() => {
             <li><CircleCheck class="capability-on" /><span><strong>日志采集</strong><small>SSH、Nginx、数据库和备份状态</small></span><b>已配置</b></li>
             <li><CircleCheck class="capability-on" /><span><strong>规则告警</strong><small>告警落库；达到通知级别时向管理员弹出提醒</small></span><b>已配置</b></li>
             <li><Aim class="capability-muted" /><span><strong>来源追踪</strong><small>保留日志中的来源信息；归属信息仅作线索</small></span><b>有限</b></li>
-            <li><Lock class="capability-muted" /><span><strong>自动阻断 / 反击</strong><small>当前未实现，不会主动执行</small></span><b>未启用</b></li>
+            <li><Lock class="capability-muted" /><span><strong>临时自动封禁</strong><small>规则最长 15 分钟，小菱研判最多 2 分钟；以回执确认生效</small></span><b>{{ blockingLabel.replace('自动封禁：', '') }}</b></li>
+            <li><Lock class="capability-muted" /><span><strong>反击操作</strong><small>当前未启用</small></span><b>未启用</b></li>
           </ul>
         </section>
       </aside>

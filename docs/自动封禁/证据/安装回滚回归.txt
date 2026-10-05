@@ -1,0 +1,7 @@
+test_failed_timer_enable_restores_old_units_and_timer_state (deploy.tests.test_systemd_install.SystemdInstallTests) ... ok
+test_installs_timer_and_binds_service_to_release (deploy.tests.test_systemd_install.SystemdInstallTests) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.707s
+
+OK

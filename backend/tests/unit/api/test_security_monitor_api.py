@@ -28,7 +28,7 @@ from app.models.agent_governance import AgentAlert, AgentJob, AgentJobRun
 from app.models.audit_log import AuditLog
 from app.models.rbac import Role, UserRole
 from app.models.user import User
-from app.services import security_center_service, security_monitor_service
+from app.services import ops_service, security_center_service, security_monitor_service
 
 
 @pytest.fixture
@@ -712,3 +712,136 @@ def test_resolving_alert_preserves_original_evidence(db, seed, client_factory):
     assert detail["method"] == "publickey"
     assert detail["resolution"]["note"] == "已确认并处理"
     assert detail["resolution"]["resolved_by_name"] == "admin"
+
+
+def _automatic_blocking_snapshot(enabled=False):
+    return {
+        "available": True, "verified": True, "enabled": enabled,
+        "policy": {
+            "enabled": enabled, "duration_seconds": 900, "window_seconds": 300,
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "activated_at": None,
+        },
+        "protected_sources": [], "active_blocks": [], "recent_blocks": [],
+        "last_evaluated_at": None, "errors": [], "backend": "ipset",
+    }
+
+
+@pytest.mark.parametrize("role", ["admin", "reviewer", "user"])
+def test_automatic_blocking_all_endpoints_require_super_admin(db, seed, client_factory, monkeypatch, role):
+    user = seed["admin"]
+    if role != "admin":
+        user = User(id=3, username="regular", password="x", role=role, status=1)
+        db.add(user)
+        db.commit()
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: pytest.fail("无权账号不能调用宿主机"))
+    client = client_factory(user)
+    responses = [
+        client.get("/api/admin/security-center/automatic-blocking"),
+        client.put("/api/admin/security-center/automatic-blocking", json={"enabled": True}),
+        client.post(
+            "/api/admin/security-center/automatic-blocking/release", json={"ip": "8.8.8.8", "reason": "错误封禁"},
+        ),
+    ]
+    assert all(response.status_code == 403 for response in responses)
+    assert db.query(OpsExecution).count() == 0
+
+
+def test_automatic_blocking_all_endpoints_require_authentication(db, seed, client_factory, monkeypatch):
+    client = client_factory(seed["super_admin"])
+    app.dependency_overrides.pop(get_current_user, None)
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: pytest.fail("未登录不能调用宿主机"))
+    responses = [
+        client.get("/api/admin/security-center/automatic-blocking"),
+        client.put("/api/admin/security-center/automatic-blocking", json={"enabled": True}),
+        client.post(
+            "/api/admin/security-center/automatic-blocking/release", json={"ip": "8.8.8.8", "reason": "错误封禁"},
+        ),
+    ]
+    assert all(response.status_code == 401 for response in responses)
+    assert db.query(OpsExecution).count() == 0
+
+
+def test_super_admin_configure_uses_trusted_client_ip_and_retains_audit(db, seed, client_factory, monkeypatch):
+    from app.api.v1 import admin_security_center
+
+    captured = []
+    monkeypatch.setattr(admin_security_center, "client_ip", lambda _request: "8.8.8.8")
+
+    def executor(action, params, request_id):
+        captured.append((action, params, request_id))
+        return {"ok": True, "result": _automatic_blocking_snapshot(params.get("enabled", False))}
+
+    monkeypatch.setattr(ops_service, "_call_executor", executor)
+    client = client_factory(seed["super_admin"])
+    response = client.put("/api/admin/security-center/automatic-blocking", json={"enabled": True})
+    assert response.status_code == 200
+    assert response.json()["data"]["enabled"] is True
+    assert captured[0][0] == "security_block_configure"
+    assert captured[0][1]["protected_ip"] == "8.8.8.8"
+    assert captured[0][1]["duration_seconds"] == 900
+    assert db.query(OpsExecution).one().actor_id == seed["super_admin"].id
+    log = db.query(AuditLog).filter(AuditLog.action == "admin_copilot.ops.security_block_configure").one()
+    assert log.actor_id == seed["super_admin"].id
+    assert "source=security_center" in log.detail
+    policy = security_center_service.get_policy(db)
+    assert policy["automatic_blocking_enabled"] is True
+    assert policy["monitoring_mode"] == "monitor_and_block"
+    assert policy["automatic_blocking_confirmed_at"]
+    events = security_center_service.list_events(db)["items"]
+    defense = next(event for event in events if event["event_type"] == "defense_action")
+    assert defense["evidence_summary"]["verified"] is True
+    assert "固定规则临时封禁已启用" in defense["summary"]
+
+
+@pytest.mark.parametrize("extra", [
+    {"protected_ip": "1.1.1.1"}, {"command": "arbitrary"},
+    {"allowlist_cidrs": ["0.0.0.0/0"]}, {"allowlist_cidrs": ["8.0.0.0/8"]},
+    {"allowlist_cidrs": ["::/0"]}, {"allowlist_cidrs": ["2001:4860::/32"]},
+    {"allowlist_cidrs": ["8.8.8.8/32"] * 33}, {"duration_seconds": 901},
+    {"duration_seconds": True}, {"window_seconds": 59}, {"ssh_threshold": 1}, {"web_threshold": 1},
+])
+def test_automatic_blocking_rejects_unsafe_or_extra_configuration(db, seed, client_factory, monkeypatch, extra):
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: pytest.fail("非法配置不能触及宿主机"))
+    response = client_factory(seed["super_admin"]).put(
+        "/api/admin/security-center/automatic-blocking", json={"enabled": True, **extra},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == 40002
+    assert db.query(OpsExecution).count() == 0
+
+
+def test_automatic_blocking_missing_protected_ip_cannot_enable(db, seed, client_factory, monkeypatch):
+    from app.api.v1 import admin_security_center
+
+    monkeypatch.setattr(admin_security_center, "client_ip", lambda _request: "")
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: pytest.fail("缺管理员来源不得启用"))
+    response = client_factory(seed["super_admin"]).put(
+        "/api/admin/security-center/automatic-blocking", json={"enabled": True},
+    )
+    assert response.status_code == 400
+    assert "可信来源" in response.json()["message"]
+
+
+def test_automatic_blocking_status_failure_is_visible_without_fabricated_success(db, seed, client_factory, monkeypatch):
+    monkeypatch.setattr(ops_service, "_call_executor", lambda *_args: {"ok": False, "error": "ipset不可用"})
+    response = client_factory(seed["super_admin"]).get("/api/admin/security-center/automatic-blocking")
+    assert response.status_code == 200
+    snapshot = response.json()["data"]
+    assert snapshot["available"] is False
+    assert snapshot["enabled"] is False
+    assert snapshot["active_blocks"] == []
+    assert "ipset不可用" in snapshot["errors"][0]
+
+
+def test_automatic_blocking_release_sends_reason_and_returns_verified_state(db, seed, client_factory, monkeypatch):
+    captured = []
+    monkeypatch.setattr(ops_service, "_call_executor", lambda action, params, request_id: (
+        captured.append((action, params)) or {"ok": True, "result": _automatic_blocking_snapshot(True)}
+    ))
+    response = client_factory(seed["super_admin"]).post(
+        "/api/admin/security-center/automatic-blocking/release", json={"ip": "8.8.8.8", "reason": "本人来源恢复"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["verified"] is True
+    assert captured == [("security_block_release", {"ip": "8.8.8.8", "reason": "本人来源恢复"})]
+    assert db.query(OpsExecution).one().action == "security_block_release"
