@@ -48,7 +48,7 @@ async function main() {
   await page.goto(`${BASE}/admin/security-center`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
   await page.waitForTimeout(3000)
   const tabTexts = await page.locator('[role="tab"]').allInnerTexts()
-  record('四个分区页签可见', tabTexts.length >= 4, tabTexts.map((t) => t.trim()))
+  record('五个分区页签可见', tabTexts.length >= 4, tabTexts.map((t) => t.trim()))
 
   // 3) 溯源卡：真实输入并提交
   await page.click('[role="tab"]:has-text("溯源与响应")').catch(async () => {
@@ -75,6 +75,23 @@ async function main() {
     摘要: traceText.replace(/\s+/g, ' ').slice(0, 260),
   })
   await page.screenshot({ path: path.join(OUT_DIR, '真实点击-溯源卡-1440.png'), fullPage: true })
+
+  // 3.5) 诱捕层分区：状态卡 + 幽灵访客表
+  await page.click('[role="tab"]:has-text("诱捕层")').catch(async () => {
+    await page.locator('[role="tab"]').last().click()
+  })
+  await page.waitForTimeout(3000)
+  const decoyPanel = page.locator('#security-panel-decoy')
+  const decoyText = (await decoyPanel.innerText().catch(() => '')) || ''
+  const decoyApiCalls = apiCalls.filter((c) => c.url.includes('/decoy')).length
+  record('诱捕层分区渲染', decoyApiCalls > 0 && /诱捕容器|诱饵命中/.test(decoyText), {
+    诱捕接口调用: decoyApiCalls,
+    含容器状态: /运行中|未运行/.test(decoyText),
+    含链序: /引流链序/.test(decoyText),
+    摘要: decoyText.replace(/\s+/g, ' ').slice(0, 220),
+  })
+  await page.screenshot({ path: path.join(OUT_DIR, '真实点击-诱捕层.png'), fullPage: true })
+  await page.click('[role="tab"]:has-text("溯源与响应")').catch(() => {})
 
   // 4) 防御面卡
   const surfaceVisible = await page.locator('[data-testid="surface-panel"]').count()
