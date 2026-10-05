@@ -18,9 +18,10 @@ from app.models.user import User
 from app.schemas.security_center import AutomaticBlockingPolicyIn
 from app.services import ops_service
 
+# 回执里需要回显的策略键；新增策略字段时必须同步这里，否则写入生效但读取会被默认值覆盖。
 _POLICY_KEYS = (
     "enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold",
-    "allowlist_cidrs",
+    "allowlist_cidrs", "auto_escalate",
 )
 _ENTRY_STATUSES = {"active", "expired", "released", "failed", "unknown"}
 
@@ -106,7 +107,11 @@ def _verified_snapshot(execution: dict[str, Any]) -> dict[str, Any]:
     try:
         policy = AutomaticBlockingPolicyIn.model_validate(
             {
-                key: policy_raw.get(key, False) if key == "ai_anomaly_enabled" else policy_raw[key]
+                # 旧账本可能缺新键：统一取默认值交给 pydantic 校验，避免 KeyError 变成"状态不可用"。
+                key: policy_raw.get(key, False if key in {"ai_anomaly_enabled", "auto_escalate"} else None)
+                if key not in {"duration_seconds", "window_seconds", "ssh_threshold", "web_threshold"}
+                else policy_raw.get(key, {"duration_seconds": 900, "window_seconds": 300,
+                                          "ssh_threshold": 20, "web_threshold": 30}[key])
                 for key in _POLICY_KEYS
             }
         ).model_dump()

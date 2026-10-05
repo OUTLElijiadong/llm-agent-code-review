@@ -153,3 +153,25 @@ def test_status_preserves_verified_kernel_family_and_block_source(db, super_admi
 def test_apply_anomalies_contract_rejects_ips_duplicates_or_unbounded_scope(params):
     with pytest.raises(ValueError):
         ops_service.validate_action_params("security_block_apply_anomalies", params)
+
+
+def test_read_path_reflects_escalation_flag_from_ledger(db, super_admin_user, monkeypatch):
+    """回归：账本写入了 auto_escalate=true，读取路径必须回显 true（曾被默认值覆盖成 false）。"""
+    snapshot = _snapshot(enabled=True)
+    snapshot["policy"]["auto_escalate"] = True
+    snapshot["policy"]["duration_seconds"] = 3600
+    monkeypatch.setattr(ops_service, "execute", lambda *_a, **_k: _success(snapshot))
+    result = security_response_service.get_status(db, super_admin_user)
+    assert result["available"] is True
+    assert result["policy"]["auto_escalate"] is True
+    assert result["policy"]["duration_seconds"] == 3600
+
+
+def test_read_path_tolerates_ledger_without_new_keys(db, super_admin_user, monkeypatch):
+    """旧账本缺 auto_escalate 时读取路径必须降级为保守默认值，而不是整体不可用。"""
+    snapshot = _snapshot(enabled=True)
+    del snapshot["policy"]["auto_escalate"]
+    monkeypatch.setattr(ops_service, "execute", lambda *_a, **_k: _success(snapshot))
+    result = security_response_service.get_status(db, super_admin_user)
+    assert result["available"] is True
+    assert result["policy"]["auto_escalate"] is False
