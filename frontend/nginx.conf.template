@@ -68,6 +68,8 @@ server {
 
     # hash 资源必须实际存在，不允许 SPA 回萺 index.html 伪装成 200。
     location ^~ /assets/ {
+        # 资源缺失也用站点页面兜底，避免暴露 nginx 默认 404 页
+        error_page 404 = /index.html;
         try_files $uri =404;
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options SAMEORIGIN always;
@@ -191,6 +193,8 @@ server {
     }
 
     location /api/ {
+        # 未匹配的接口路径同样回落到站点页面，让"存在/不存在"在响应上不可区分
+        error_page 404 405 = /index.html;
         proxy_pass http://backend:8000/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -206,7 +210,14 @@ server {
         proxy_read_timeout 600s;
     }
 
+    # 统一错误页：4xx/5xx 一律回落到站点自身页面，不暴露 nginx 默认错误页与版本指纹。
+    error_page 400 401 403 404 405 408 429 500 502 503 504 = /index.html;
+
     location / {
+        # 扫描器 UA：返回与正常页面完全一致的 200，不给出"已被识别"的确定性反馈。
+        if ($prism_scanner = "1") {
+            rewrite ^ /index.html last;
+        }
         try_files $uri $uri/ /index.html;
     }
 }
