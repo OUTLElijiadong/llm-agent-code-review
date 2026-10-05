@@ -22,7 +22,7 @@ class AuditLog(Base, IdMixin):
 
     actor_id = Column(BigInteger, comment="操作者用户ID;系统操作可为 NULL")
     actor_name = Column(String(80), comment="操作者用户名快照,便于用户删除后仍可读")
-    action = Column(String(40), nullable=False, comment="操作类型: login/user/rule/ai/project/agent")
+    action = Column(String(63), nullable=False, comment="操作类型，含 namespaced 运维动作")
     target_type = Column(String(40), comment="对象类型: user/project/rule/agent/...")
     target_id = Column(String(80), comment="对象ID或键,支持字符串以适配非自增主键")
     detail = Column(Text, comment="操作说明,自由文本")

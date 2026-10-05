@@ -2,6 +2,12 @@
 
 状态：代码、自动化回归与 Linux 隔离网络验收通过；生产发布和真实浏览器配置验收待执行。
 
+## 生产复现的审计缺陷
+
+v4.0.44 管理员真实点击保存后，root 执行器 ledger 已记录 `security_block_configure` 成功且策略在后续宿主机轮询中核实启用；但后端 `OpsExecution` 停在 `running`，页面历史因此标记“未知”。生产 MySQL `SHOW COLUMNS audit_log LIKE 'action'` 返回 `varchar(40)`；写入 `admin_copilot.ops.security_block_configure` 时抛出 `Data too long for column 'action'`，导致运维执行、工具调用和审计日志的同一事务无法提交。
+
+此缺陷已在生产真实路径复现；v4.0.45 将 `audit_log.action` 扩为 63 字符，覆盖当前最长的 43 字符 namespaced 运维动作，同时在 `utf8mb4` 下保持最大 252 字节，避免跨越 InnoDB `VARCHAR` 255 字节边界。待发布后使用原请求编号走执行器幂等恢复，不重复执行宿主机动作，并核对执行行、审计日志与 root ledger 三方状态。
+
 ## 已核对范围
 
 - 旧生产 v4.0.43 的安全中心只监控，没有临时自动封禁。

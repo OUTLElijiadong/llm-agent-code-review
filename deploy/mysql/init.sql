@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id           BIGINT       NOT NULL AUTO_INCREMENT,
     actor_id     BIGINT       DEFAULT NULL              COMMENT '操作者用户ID; 系统操作可为 NULL',
     actor_name   VARCHAR(80)  DEFAULT NULL              COMMENT '操作者用户名快照',
-    action       VARCHAR(40)  NOT NULL                  COMMENT 'login/user/rule/ai/project/agent 等',
+    action       VARCHAR(63)  NOT NULL                  COMMENT '操作类型，含 namespaced 运维动作',
     target_type  VARCHAR(40)  DEFAULT NULL              COMMENT 'user/project/rule/agent/...',
     target_id    VARCHAR(80)  DEFAULT NULL              COMMENT '对象ID或键',
     detail       TEXT         DEFAULT NULL              COMMENT '操作说明',
