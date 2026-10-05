@@ -39,8 +39,9 @@ export function getPosts(params?: Record<string, unknown>): Promise<Page<ForumPo
 }
 
 /** 帖子详情 + 回复 */
-export async function getPost(id: number): Promise<ForumPostDetail> {
+export async function getPost(id: number, options: { recordView?: boolean } = {}): Promise<ForumPostDetail> {
   const detail = await get<ForumPostDetail>(`/forum/posts/${id}`)
+  if (options.recordView === false) return detail
   try {
     const viewed = await post<ForumPost>(`/forum/posts/${id}/views`)
     return { ...detail, view_count: viewed.view_count }

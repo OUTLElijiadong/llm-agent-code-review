@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import FeedbackCenter from './FeedbackCenter.vue'
 import MaintenanceCenter from './MaintenanceCenter.vue'
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), close: vi.fn(), confirm: vi.fn(), admin: false }))
-vi.mock('@/api/feedback', () => ({ getFeedbackList: api.list, createFeedback: api.create, replyFeedback: api.update }))
+vi.mock('@/api/feedback', () => ({ getFeedbackList: api.list, createFeedback: api.create, replyFeedback: api.update, markFeedbackRead: api.update }))
 vi.mock('@/api/maintenance', () => ({ getTickets: api.list, createTicket: api.create, handleTicket: api.update, closeTicket: api.close }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ isAdmin: () => api.admin }) }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { success: vi.fn(), warning: vi.fn() } }))
@@ -60,10 +60,10 @@ it('关闭工单取消不调用接口，接口失败保留原状态并反馈', a
   wrapper.unmount()
 })
 
-for (const [component, action] of [[FeedbackCenter, '回复'], [MaintenanceCenter, '受理']] as const) {
+for (const [component, action] of [[FeedbackCenter, '回复 / 处理'], [MaintenanceCenter, '受理']] as const) {
   it(`管理员${action}失败在当前弹窗内显示且保留编辑内容`, async () => {
     api.admin = true
-    api.list.mockResolvedValue({ items: [{ id: 8, title: '工单', content: '反馈', feedback_type: 'suggestion', status: 'pending', category: 'bug', priority: 'low' }], total: 1 })
+    api.list.mockResolvedValue({ items: [{ id: 8, title: '工单', content: '反馈', feedback_type: 'suggestion', status: component === FeedbackCenter ? 'new' : 'pending', category: 'bug', priority: 'low' }], total: 1 })
     api.update.mockRejectedValueOnce(new Error('保存失败'))
     const wrapper = render(component); await flushPromises()
     await wrapper.findAll('button').find(b => b.text() === action)!.trigger('click')

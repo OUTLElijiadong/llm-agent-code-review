@@ -39,7 +39,12 @@ export function replyFeedback(id: number, data: {
   return put<Feedback>(`/feedback/${id}/reply`, data)
 }
 
-/** 反馈统计 (管理员) */
+/** 管理员显式确认已读，GET 详情保持只读。 */
+export function markFeedbackRead(id: number): Promise<Feedback> {
+  return post<Feedback>(`/feedback/${id}/read`)
+}
+
+/** 管理员全量统计；其他角色仅统计本人。 */
 export function getFeedbackStats(): Promise<Record<string, number>> {
   return get<Record<string, number>>('/feedback/stats')
 }

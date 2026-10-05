@@ -48,4 +48,16 @@ describe('forum detail API', () => {
 
     await expect(getPost(7)).resolves.toEqual(detail)
   })
+
+  it('编辑或刷新只读取详情，不重复记录浏览', async () => {
+    await expect(getPost(7, { recordView: false })).resolves.toEqual(detail)
+    expect(httpApi.get).toHaveBeenCalledWith('/forum/posts/7')
+    expect(httpApi.post).not.toHaveBeenCalled()
+  })
+
+  it('详情读取失败不记录浏览，错误交给页面重试', async () => {
+    httpApi.get.mockRejectedValueOnce(new Error('detail unavailable'))
+    await expect(getPost(7)).rejects.toThrow('detail unavailable')
+    expect(httpApi.post).not.toHaveBeenCalled()
+  })
 })

@@ -543,6 +543,14 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         permission="super_admin",
     ),
     _cap(
+        "security_center.decoy.get",
+        "/admin/security-center",
+        "读取诱捕层运行与命中汇总（仅最高管理员）",
+        "GET",
+        "/api/admin/security-center/decoy",
+        permission="super_admin",
+    ),
+    _cap(
         "rewards.events.list",
         "/admin/rewards",
         "查询 Agent 奖惩事件",

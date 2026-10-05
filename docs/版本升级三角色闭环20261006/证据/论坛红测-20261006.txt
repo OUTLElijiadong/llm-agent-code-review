@@ -1,0 +1,529 @@
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/api/forum.test.ts (4 tests | 1 failed) 4ms
+     × 编辑或刷新只读取详情，不重复记录浏览 2ms
+stderr | src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 读取失败展示错误和重试，不冒充空列表
+[Vue warn]: Unhandled error during execution of mounted hook
+  at <ForumList ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 详情首次失败可重试恢复，而非只剩返回按钮
+[Vue warn]: Unhandled error during execution of mounted hook
+  at <ForumPostDetail ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 回复提交失败保留草稿并显示重试操作
+[Vue warn]: Unhandled error during execution of native event handler
+  at <Anonymous type="primary" loading=false onClick=fn<submitReply> >
+  at <Anonymous key=1 shadow="never" class="reply-card" >
+  at <ForumPostDetail ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 已成功回复但刷新失败仍确认保存，重试读取不再次提交或计浏览
+[Vue warn]: Unhandled error during execution of native event handler
+  at <Anonymous type="primary" loading=false onClick=fn<submitReply> >
+  at <Anonymous key=1 shadow="never" class="reply-card" >
+  at <ForumPostDetail ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 编辑首次读取失败阻止保存，重试后恢复可编辑表单
+[Vue warn]: Unhandled error during execution of mounted hook
+  at <ForumPostEdit ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 保存失败保留标题正文，重试提交当前草稿且不重新拉取覆盖
+[Vue warn]: Unhandled error during execution of native event handler
+  at <Anonymous type="primary" loading=false onClick=fn<submit> >
+  at <Anonymous>
+  at <Anonymous label-width="70px" >
+  at <Anonymous shadow="never" >
+  at <ForumPostEdit ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+stderr | src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 助手失败清除旧建议并可重试，草稿不丢失
+[Vue warn]: Unhandled error during execution of native event handler
+  at <Anonymous icon= { name: 'MagicStick', __name: 'magic-stick', setup: [Function: setup] } loading=false onClick=fn<runAssist> >
+  at <Anonymous>
+  at <Anonymous label-width="70px" >
+  at <Anonymous shadow="never" >
+  at <ForumPostEdit ref="VTU_COMPONENT" >
+  at <VTUROOT>
+
+ ❯ src/views/forum/ForumViews.test.ts (22 tests | 13 failed) 88ms
+     × 旧列表迟到不会覆盖新搜索结果 27ms
+     × 读取失败展示错误和重试，不冒充空列表 2ms
+     × 更换筛选后失败不混入上次结果，并按当前筛选重试 5ms
+     × 帖子是真实可聚焦链接，原生激活可进入详情 6ms
+     × 搜索无结果与首次空社区显示不同提示，清除关键词重新读取 2ms
+     × admin 可回复，管理按钮与现有服务权限一致 3ms
+     × 详情首次失败可重试恢复，而非只剩返回按钮 1ms
+     × 回复提交失败保留草稿并显示重试操作 3ms
+     × 已成功回复但刷新失败仍确认保存，重试读取不再次提交或计浏览 2ms
+     × 读取编辑内容期间禁止输入和提交，成功后使用原内容且不计浏览 2ms
+     × 编辑首次读取失败阻止保存，重试后恢复可编辑表单 4ms
+     × 保存失败保留标题正文，重试提交当前草稿且不重新拉取覆盖 3ms
+     × 助手失败清除旧建议并可重试，草稿不丢失 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/forum.test.ts > forum detail API > 编辑或刷新只读取详情，不重复记录浏览
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/forum/posts/7/views",
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/api/forum.test.ts:55:30
+     53|     await expect(getPost(7, { recordView: false })).resolves.toEqual(d…
+     54|     expect(httpApi.get).toHaveBeenCalledWith('/forum/posts/7')
+     55|     expect(httpApi.post).not.toHaveBeenCalled()
+       |                              ^
+     56|   })
+     57|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 旧列表迟到不会覆盖新搜索结果
+AssertionError: expected '开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分…' to contain '新筛选结果'
+
+Expected: "新筛选结果"
+Received: "开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分享公告其他搜索问答旧请求迟到结果发帖者·2026-10-06 3 0下一页1"
+
+ ❯ src/views/forum/ForumViews.test.ts:94:28
+     92|     expect(wrapper.text()).toContain('新筛选结果')
+     93|     old.resolve(page('旧请求迟到结果')); await flushPromises()
+     94|     expect(wrapper.text()).toContain('新筛选结果')
+       |                            ^
+     95|     expect(wrapper.text()).not.toContain('旧请求迟到结果')
+     96|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 读取失败展示错误和重试，不冒充空列表
+AssertionError: expected '开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分…' not to contain '还没有帖子'
+
+Expected: "还没有帖子"
+Received: "开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分享公告其他搜索还没有帖子,来发第一帖吧下一页0"
+
+ ❯ src/views/forum/ForumViews.test.ts:111:32
+    109|     api.getPosts.mockRejectedValueOnce({ message: '论坛服务暂不可用' })
+    110|     const { wrapper } = await render(ForumList)
+    111|     expect(wrapper.text()).not.toContain('还没有帖子')
+       |                                ^
+    112|     expect(wrapper.get('[role="alert"]').text()).toContain('论坛服务暂不可用')
+    113|     await button(wrapper, '重试').trigger('click'); await flushPromises()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 更换筛选后失败不混入上次结果，并按当前筛选重试
+AssertionError: expected '开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分…' not to contain '原始标题'
+
+Expected: "原始标题"
+Received: "开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分享公告其他搜索问答原始标题发帖者·2026-10-06 3 0下一页1"
+
+ ❯ src/views/forum/ForumViews.test.ts:123:32
+    121|     await wrapper.get('input').setValue('新词')
+    122|     await button(wrapper, '搜索').trigger('click'); await flushPromises()
+    123|     expect(wrapper.text()).not.toContain('原始标题')
+       |                                ^
+    124|     await button(wrapper, '重试').trigger('click'); await flushPromises()
+    125|     expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContain…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 帖子是真实可聚焦链接，原生激活可进入详情
+Error: Unable to get a.post-item within: <div data-v-a2eea63e="" class="forum-page">
+  <div data-v-a2eea63e="" class="page-header">
+    <div data-v-a2eea63e="">
+      <h2 data-v-a2eea63e="">开发者论坛</h2>
+      <p data-v-a2eea63e="" class="page-sub">提问、分享经验、交流最佳实践 —— 全员可发帖</p>
+    </div><button data-v-a2eea63e="" type="submit">发布新帖</button>
+  </div>
+  <div data-v-a2eea63e="" shadow="never" class="filter-card">
+    <div data-v-a2eea63e="" class="filter-row"><input data-v-a2eea63e="" placeholder="搜索标题" clearable="" style="width: 240px;" value=""><select data-v-a2eea63e="" placeholder="全部分类" clearable="" style="width: 140px;" value="">
+        <option data-v-a2eea63e="" value="qa">问答</option>
+        <option data-v-a2eea63e="" value="tech">技术</option>
+        <option data-v-a2eea63e="" value="share">分享</option>
+        <option data-v-a2eea63e="" value="announce">公告</option>
+        <option data-v-a2eea63e="" value="other">其他</option>
+      </select><button data-v-a2eea63e="">搜索</button></div>
+  </div>
+  <div data-v-a2eea63e="" shadow="never">
+    <div data-v-a2eea63e="" class="post-list">
+      <div data-v-a2eea63e="" class="post-item">
+        <div data-v-a2eea63e="" class="post-main">
+          <div data-v-a2eea63e="" class="post-title">
+            <!--v-if-->
+            <div data-v-a2eea63e="" size="small" type="warning">问答</div><span data-v-a2eea63e="" class="title-text">原始标题</span>
+          </div>
+          <div data-v-a2eea63e="" class="post-meta"><span data-v-a2eea63e="">发帖者</span><span data-v-a2eea63e="">·</span><span data-v-a2eea63e="">2026-10-06</span></div>
+        </div>
+        <div data-v-a2eea63e="" class="post-stats"><span data-v-a2eea63e=""><div data-v-a2eea63e=""><svg data-v-a2eea63e="" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><path fill="currentColor" d="M512 160c320 0 512 352 512 352S832 864 512 864 0 512 0 512s192-352 512-352m0 64c-225.28 0-384.128 208.064-436.8 288 52.608 79.872 211.456 288 436.8 288 225.28 0 384.128-208.064 436.8-288-52.608-79.872-211.456-288-436.8-288m0 64a224 224 0 1 1 0 448 224 224 0 0 1 0-448m0 64a160.19 160.19 0 0 0-160 160c0 88.192 71.744 160 160 160s160-71.808 160-160-71.744-160-160-160"></path></svg></div> 3</span><span data-v-a2eea63e=""><div data-v-a2eea63e=""><svg data-v-a2eea63e="" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><path fill="currentColor" d="m174.72 855.68 135.296-45.12 23.68 11.84C388.096 849.536 448.576 864 512 864c211.84 0 384-166.784 384-352S723.84 160 512 160 128 326.784 128 512c0 69.12 24.96 139.264 70.848 199.232l22.08 28.8-46.272 115.584zm-45.248 82.56A32 32 0 0 1 89.6 896l58.368-145.92C94.72 680.32 64 596.864 64 512 64 299.904 256 96 512 96s448 203.904 448 416-192 416-448 416a461.06 461.06 0 0 1-206.912-48.384l-175.616 58.56z"></path><path fill="currentColor" d="M352 576h320q32 0 32 32t-32 32H352q-32 0-32-32t32-32m32-192h256q32 0 32 32t-32 32H384q-32 0-32-32t32-32"></path></svg></div> 0</span></div>
+      </div>
+      <!--v-if-->
+    </div>
+    <div data-v-a2eea63e="" class="pager">
+      <nav data-v-a2eea63e="" layout="total, prev, pager, next" page-size="10"><button>下一页</button><span>1</span></nav>
+    </div>
+  </div>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:130:26
+    128|   it('帖子是真实可聚焦链接，原生激活可进入详情', async () => {
+    129|     const { wrapper, push } = await render(ForumList)
+    130|     const link = wrapper.get('a.post-item')
+       |                          ^
+    131|     expect(link.attributes('href')).toBe('/forum/7')
+    132|     ;(link.element as HTMLAnchorElement).focus()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 搜索无结果与首次空社区显示不同提示，清除关键词重新读取
+AssertionError: expected '开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分…' to contain '没有找到符合条件的帖子'
+
+Expected: "没有找到符合条件的帖子"
+Received: "开发者论坛提问、分享经验、交流最佳实践 —— 全员可发帖发布新帖问答技术分享公告其他搜索还没有帖子,来发第一帖吧下一页0"
+
+ ❯ src/views/forum/ForumViews.test.ts:144:28
+    142|     await wrapper.get('input').setValue('不存在的标题')
+    143|     await button(wrapper, '搜索').trigger('click'); await flushPromises()
+    144|     expect(wrapper.text()).toContain('没有找到符合条件的帖子')
+       |                            ^
+    145|     await wrapper.get('input').setValue('')
+    146|     wrapper.getComponent(Input).vm.$emit('clear'); await flushPromises…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > admin 可回复，管理按钮与现有服务权限一致
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/views/forum/ForumViews.test.ts:157:35
+    155|     const labels = wrapper.findAll('button').map(item => item.text())
+    156|     expect(labels.includes('发表回复')).toBe(true)
+    157|     expect(labels.includes('编辑')).toBe(role === 'admin')
+       |                                   ^
+    158|     expect(labels.includes('置顶')).toBe(role === 'admin')
+    159|     expect(labels.includes('删除')).toBe(role === 'admin')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 详情首次失败可重试恢复，而非只剩返回按钮
+Error: Unable to get [role="alert"] within: <div data-v-a96476a3="" class="post-detail-page"><button data-v-a96476a3="" link="">← 返回论坛</button>
+  <!--v-if-->
+  <!--v-if-->
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:178:20
+    176|     api.getPost.mockRejectedValueOnce(new Error('帖子读取失败'))
+    177|     const { wrapper } = await render(ForumPostDetail, '/forum/7')
+    178|     expect(wrapper.get('[role="alert"]').text()).toContain('帖子读取失败')
+       |                    ^
+    179|     await button(wrapper, '重试').trigger('click'); await flushPromises()
+    180|     expect(wrapper.text()).toContain('原始标题')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 回复提交失败保留草稿并显示重试操作
+Error: Unable to get [role="alert"] within: <div data-v-a96476a3="" class="post-detail-page"><button data-v-a96476a3="" link="">← 返回论坛</button>
+  <div data-v-a96476a3="" shadow="never" class="main-card">
+    <div data-v-a96476a3="" class="post-head">
+      <div data-v-a96476a3="" class="title-line">
+        <!--v-if-->
+        <div data-v-a96476a3="" size="small">问答</div>
+        <h2 data-v-a96476a3="">原始标题</h2>
+      </div>
+      <div data-v-a96476a3="" class="actions">
+        <!--v-if-->
+        <!--v-if-->
+        <!--v-if-->
+      </div>
+    </div>
+    <div data-v-a96476a3="" class="post-meta"><span data-v-a96476a3="">发帖者</span><span data-v-a96476a3="">·</span><span data-v-a96476a3="">2026-10-06</span><span data-v-a96476a3="">·</span><span data-v-a96476a3="">3 浏览</span></div>
+    <div data-v-a96476a3="" class="post-body md-body">
+      <p>原始正文</p>
+    </div>
+  </div>
+  <div data-v-a96476a3="" shadow="never" class="reply-card">
+    <h3 data-v-a96476a3="" class="block-title">全部回复 (0)</h3>
+    <p data-v-a96476a3="" image-size="80">还没有回复</p>
+    <div data-v-a96476a3="" class="reply-editor"><textarea data-v-a96476a3="" placeholder="写下你的回复…" rows="3" value="不要丢失的回复"></textarea>
+      <div data-v-a96476a3="" class="editor-actions"><button data-v-a96476a3="" type="submit">发表回复</button></div>
+    </div>
+  </div>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:189:20
+    187|     await button(wrapper, '发表回复').trigger('click'); await flushPromise…
+    188|     expect((wrapper.get('textarea').element as HTMLTextAreaElement).va…
+    189|     expect(wrapper.get('[role="alert"]').text()).toContain('回复暂未保存')
+       |                    ^
+    190|     await button(wrapper, '重试回复').trigger('click'); await flushPromise…
+    191|     expect(api.createReply).toHaveBeenLastCalledWith(7, '不要丢失的回复')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 帖子详情权限和失败恢复 > 已成功回复但刷新失败仍确认保存，重试读取不再次提交或计浏览
+AssertionError: expected "vi.fn()" to be called with arguments: [ '回复成功' ]
+
+Number of calls: 0
+
+ ❯ src/views/forum/ForumViews.test.ts:200:25
+    198|     await wrapper.get('textarea').setValue('已提交的回复')
+    199|     await button(wrapper, '发表回复').trigger('click'); await flushPromise…
+    200|     expect(api.success).toHaveBeenCalledWith('回复成功')
+       |                         ^
+    201|     expect(wrapper.get('[role="alert"]').text()).toContain('刷新读取失败')
+    202|     expect((wrapper.get('textarea').element as HTMLTextAreaElement).va…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 读取编辑内容期间禁止输入和提交，成功后使用原内容且不计浏览
+AssertionError: expected undefined to be defined
+ ❯ src/views/forum/ForumViews.test.ts:224:57
+    222|     api.getPost.mockReturnValueOnce(pending.promise)
+    223|     const { wrapper } = await render(ForumPostEdit, '/forum/7/edit')
+    224|     expect(wrapper.get('input').attributes('disabled')).toBeDefined()
+       |                                                         ^
+    225|     expect(wrapper.get('textarea').attributes('disabled')).toBeDefined…
+    226|     expect(button(wrapper, '保存').attributes('disabled')).toBeDefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 编辑首次读取失败阻止保存，重试后恢复可编辑表单
+Error: Unable to get [role="alert"] within: <div data-v-485bd469="" class="post-edit-page">
+  <div data-v-485bd469="" class="page-header">
+    <h2 data-v-485bd469="">编辑帖子</h2><button data-v-485bd469="" link="">返回</button>
+  </div>
+  <div data-v-485bd469="" shadow="never">
+    <div data-v-485bd469="" label-width="70px">
+      <div data-v-485bd469="" label="标题" required=""><input data-v-485bd469="" maxlength="200" placeholder="清晰的标题更容易获得回复" value=""></div>
+      <div data-v-485bd469="" label="分类"><select data-v-485bd469="" style="width: 200px;" value="qa">
+          <option data-v-485bd469="" value="qa">问答</option>
+          <option data-v-485bd469="" value="tech">技术</option>
+          <option data-v-485bd469="" value="share">分享</option>
+          <option data-v-485bd469="" value="announce">公告</option>
+          <option data-v-485bd469="" value="other">其他</option>
+        </select></div>
+      <div data-v-485bd469="" label="内容" required=""><textarea data-v-485bd469="" placeholder="支持纯文本/Markdown 源码。描述清楚你的问题或分享的内容。" rows="12" value=""></textarea></div>
+      <div data-v-485bd469=""><button data-v-485bd469="" icon="[object Object]"> AI 发帖助手(基于我的知识库) </button><button data-v-485bd469="" type="submit">保存</button></div>
+    </div>
+  </div>
+  <!--v-if-->
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:236:20
+    234|     api.getPost.mockRejectedValueOnce(new Error('原帖未读取'))
+    235|     const { wrapper } = await render(ForumPostEdit, '/forum/7/edit')
+    236|     expect(wrapper.get('[role="alert"]').text()).toContain('原帖未读取')
+       |                    ^
+    237|     expect(button(wrapper, '保存').attributes('disabled')).toBeDefined()
+    238|     await button(wrapper, '重试').trigger('click'); await flushPromises()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 保存失败保留标题正文，重试提交当前草稿且不重新拉取覆盖
+Error: Unable to get [role="alert"] within: <div data-v-485bd469="" class="post-edit-page">
+  <div data-v-485bd469="" class="page-header">
+    <h2 data-v-485bd469="">编辑帖子</h2><button data-v-485bd469="" link="">返回</button>
+  </div>
+  <div data-v-485bd469="" shadow="never">
+    <div data-v-485bd469="" label-width="70px">
+      <div data-v-485bd469="" label="标题" required=""><input data-v-485bd469="" maxlength="200" placeholder="清晰的标题更容易获得回复" value="新的标题"></div>
+      <div data-v-485bd469="" label="分类"><select data-v-485bd469="" style="width: 200px;" value="qa">
+          <option data-v-485bd469="" value="qa">问答</option>
+          <option data-v-485bd469="" value="tech">技术</option>
+          <option data-v-485bd469="" value="share">分享</option>
+          <option data-v-485bd469="" value="announce">公告</option>
+          <option data-v-485bd469="" value="other">其他</option>
+        </select></div>
+      <div data-v-485bd469="" label="内容" required=""><textarea data-v-485bd469="" placeholder="支持纯文本/Markdown 源码。描述清楚你的问题或分享的内容。" rows="12" value="新的正文"></textarea></div>
+      <div data-v-485bd469=""><button data-v-485bd469="" icon="[object Object]"> AI 发帖助手(基于我的知识库) </button><button data-v-485bd469="" type="submit">保存</button></div>
+    </div>
+  </div>
+  <!--v-if-->
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:249:20
+    247|     await wrapper.get('textarea').setValue('新的正文')
+    248|     await button(wrapper, '保存').trigger('click'); await flushPromises()
+    249|     expect(wrapper.get('[role="alert"]').text()).toContain('保存暂时失败')
+       |                    ^
+    250|     expect((wrapper.get('input').element as HTMLInputElement).value).t…
+    251|     expect((wrapper.get('textarea').element as HTMLTextAreaElement).va…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 发帖与编辑草稿保护 > 助手失败清除旧建议并可重试，草稿不丢失
+AssertionError: expected '发布新帖返回问答技术分享公告其他 AI 发帖助手(基于我的知识库) 发布改…' not to contain '补充复现步骤'
+
+Expected: "补充复现步骤"
+Received: "发布新帖返回问答技术分享公告其他 AI 发帖助手(基于我的知识库) 发布改进建议补充复现步骤"
+
+ ❯ src/views/forum/ForumViews.test.ts:276:32
+    274|     api.assistDraft.mockRejectedValueOnce(new Error('助手暂不可用'))
+    275|     await button(wrapper, 'AI 发帖助手').trigger('click'); await flushProm…
+    276|     expect(wrapper.text()).not.toContain('补充复现步骤')
+       |                                ^
+    277|     expect(wrapper.get('[role="alert"]').text()).toContain('助手暂不可用')
+    278|     expect((wrapper.get('textarea').element as HTMLTextAreaElement).va…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/14]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 10 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 旧请求错误
+ ❯ src/views/forum/ForumViews.test.ts:103:16
+    101|     const { wrapper } = await render(ForumList)
+    102|     await button(wrapper, '搜索').trigger('click'); await flushPromises()
+    103|     old.reject(new Error('旧请求错误')); await flushPromises()
+       |                ^
+    104|     expect(wrapper.text()).toContain('新结果')
+    105|     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "迟到旧错误不会覆盖新请求状态". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Unknown Error: 论坛服务暂不可用
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "读取失败展示错误和重试，不冒充空列表". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 新筛选读取失败
+ ❯ src/views/forum/ForumViews.test.ts:120:40
+    118|   it('更换筛选后失败不混入上次结果，并按当前筛选重试', async () => {
+    119|     const { wrapper } = await render(ForumList)
+    120|     api.getPosts.mockRejectedValueOnce(new Error('新筛选读取失败'))
+       |                                        ^
+    121|     await wrapper.get('input').setValue('新词')
+    122|     await button(wrapper, '搜索').trigger('click'); await flushPromises()
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "更换筛选后失败不混入上次结果，并按当前筛选重试". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 帖子读取失败
+ ❯ src/views/forum/ForumViews.test.ts:176:39
+    174|
+    175|   it('详情首次失败可重试恢复，而非只剩返回按钮', async () => {
+    176|     api.getPost.mockRejectedValueOnce(new Error('帖子读取失败'))
+       |                                       ^
+    177|     const { wrapper } = await render(ForumPostDetail, '/forum/7')
+    178|     expect(wrapper.get('[role="alert"]').text()).toContain('帖子读取失败')
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+ ❯ runWithCancel ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+ ❯ runWithTimeout ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2956:64
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "详情首次失败可重试恢复，而非只剩返回按钮". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Unknown Error: 回复暂未保存
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "回复提交失败保留草稿并显示重试操作". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 刷新读取失败
+ ❯ src/views/forum/ForumViews.test.ts:197:39
+    195|   it('已成功回复但刷新失败仍确认保存，重试读取不再次提交或计浏览', async () => {
+    196|     const { wrapper } = await render(ForumPostDetail, '/forum/7')
+    197|     api.getPost.mockRejectedValueOnce(new Error('刷新读取失败'))
+       |                                       ^
+    198|     await wrapper.get('textarea').setValue('已提交的回复')
+    199|     await button(wrapper, '发表回复').trigger('click'); await flushPromise…
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "已成功回复但刷新失败仍确认保存，重试读取不再次提交或计浏览". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Unknown Error: cancel
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 原帖未读取
+ ❯ src/views/forum/ForumViews.test.ts:234:39
+    232|
+    233|   it('编辑首次读取失败阻止保存，重试后恢复可编辑表单', async () => {
+    234|     api.getPost.mockRejectedValueOnce(new Error('原帖未读取'))
+       |                                       ^
+    235|     const { wrapper } = await render(ForumPostEdit, '/forum/7/edit')
+    236|     expect(wrapper.get('[role="alert"]').text()).toContain('原帖未读取')
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+ ❯ runWithCancel ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+ ❯ runWithTimeout ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:2956:64
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "编辑首次读取失败阻止保存，重试后恢复可编辑表单". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Unknown Error: 保存暂时失败
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "保存失败保留标题正文，重试提交当前草稿且不重新拉取覆盖". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: 助手暂不可用
+ ❯ src/views/forum/ForumViews.test.ts:274:43
+    272|     await button(wrapper, 'AI 发帖助手').trigger('click'); await flushProm…
+    273|     expect(wrapper.text()).toContain('补充复现步骤')
+    274|     api.assistDraft.mockRejectedValueOnce(new Error('助手暂不可用'))
+       |                                           ^
+    275|     await button(wrapper, 'AI 发帖助手').trigger('click'); await flushProm…
+    276|     expect(wrapper.text()).not.toContain('补充复现步骤')
+ ❯ ../../%E5%9F%BA%E4%BA%8E%E5%A4%A7%E6%A8%A1%E5%9E%8B%E6%99%BA%E8%83%BD%E4%BD%93%E7%9A%84%E4%BB%A3%E7%A0%81%E5%AE%A1%E6%9F%A5%E5%B9%B3%E5%8F%B0/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+This error originated in "src/views/forum/ForumViews.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "助手失败清除旧建议并可重试，草稿不丢失". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  2 failed (2)
+      Tests  14 failed | 12 passed (26)
+     Errors  10 errors
+   Start at  03:11:59
+   Duration  555ms (transform 133ms, setup 44ms, import 165ms, tests 92ms, environment 460ms)

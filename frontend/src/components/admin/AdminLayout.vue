@@ -7,6 +7,7 @@ import {
   DataAnalysis,
   Histogram,
   Lock,
+  ChatLineSquare,
   Setting,
   SwitchButton,
   User,
@@ -22,6 +23,7 @@ interface AdminMenuItem {
   path: string
   title: string
   icon: typeof Histogram
+  group?: 'management' | 'community'
 }
 
 const route = useRoute()
@@ -30,11 +32,13 @@ const userStore = useUserStore()
 const contentRef = ref<HTMLElement | null>(null)
 
 const menuItems: AdminMenuItem[] = [
-  { path: '/admin/governance', title: 'Agent 治理', icon: Cpu },
-  { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis },
-  { path: '/admin/security-center', title: '安全中心', icon: Lock },
-  { path: '/admin/access', title: '用户与权限', icon: User },
-  { path: '/admin/platform', title: '平台配置', icon: Setting },
+  { path: '/admin/governance', title: 'Agent 治理', icon: Cpu, group: 'management' },
+  { path: '/admin/operations', title: '运行与审计', icon: DataAnalysis, group: 'management' },
+  { path: '/admin/security-center', title: '安全中心', icon: Lock, group: 'management' },
+  { path: '/admin/access', title: '用户与权限', icon: User, group: 'management' },
+  { path: '/admin/platform', title: '平台配置', icon: Setting, group: 'management' },
+  { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, group: 'community' },
+  { path: '/support', title: '支持中心与反馈', icon: ChatLineSquare, group: 'community' },
 ]
 
 const visibleMenuItems = computed(() => (
@@ -104,20 +108,25 @@ async function logout(): Promise<void> {
           <div class="admin-sub font-mono">智能体治理</div>
         </div>
       </div>
-      <nav class="admin-nav">
-        <button
-          v-for="item in visibleMenuItems"
-          :key="item.path"
-          type="button"
-          class="admin-nav-item"
-          :class="{ 'is-active': activePath === item.path }"
-          :data-route="item.path"
-          :aria-current="activePath === item.path ? 'page' : undefined"
-          @click="go(item.path)"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.title }}</span>
-        </button>
+      <nav class="admin-nav" aria-label="管理与社区导航">
+        <template v-for="(item, index) in visibleMenuItems" :key="item.path">
+          <div
+            v-if="item.group === 'community' && visibleMenuItems[index - 1]?.group !== 'community'"
+            class="admin-nav-section"
+            aria-hidden="true"
+          >社区与支持</div>
+          <button
+            type="button"
+            class="admin-nav-item"
+            :class="{ 'is-active': activePath === item.path }"
+            :data-route="item.path"
+            :aria-current="activePath === item.path ? 'page' : undefined"
+            @click="go(item.path)"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.title }}</span>
+          </button>
+        </template>
       </nav>
     </aside>
 
@@ -233,7 +242,7 @@ async function logout(): Promise<void> {
 .admin-nav-item {
   position: relative;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   border: 0;
   border-radius: 8px;
   display: flex;
@@ -246,6 +255,14 @@ async function logout(): Promise<void> {
   cursor: pointer;
   text-align: left;
   transition: color var(--transition-fast), background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.admin-nav-section {
+  margin: 18px 12px 4px;
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .admin-nav-item::before {
@@ -416,6 +433,16 @@ async function logout(): Promise<void> {
     width: auto;
     white-space: nowrap;
     margin-bottom: 0;
+  }
+
+  .admin-nav-section {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: 40px;
+    margin: 0 4px 0 10px;
+    padding-left: 10px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
   }
 
   .admin-content {

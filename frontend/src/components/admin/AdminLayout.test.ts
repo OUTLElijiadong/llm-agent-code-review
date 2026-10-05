@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
+import { useUserStore } from '@/stores/user'
 
 import AdminLayout from './AdminLayout.vue'
 import source from './AdminLayout.vue?raw'
@@ -45,6 +46,48 @@ describe('管理员手机端小菱入口', () => {
     const mobile = styles.split('@media (max-width: 520px)')[1]?.split('@media')[0] ?? ''
     expect(mobile).toMatch(/\.admin-copilot-trigger-slot\s*\{[^}]*display:\s*grid;/s)
   })
+})
+
+it('管理员布局保留管理菜单，并单独显示论坛和支持入口', async () => {
+  const paths = [
+    '/admin/governance', '/admin/operations', '/admin/security-center',
+    '/admin/access', '/admin/platform', '/forum', '/support',
+  ]
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      ...paths.map((path) => ({ path, component: { template: '<main />' } })),
+      { path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } },
+    ],
+  })
+  await router.push('/admin/operations')
+  const pinia = createPinia()
+  const userStore = useUserStore(pinia)
+  userStore.token = 'test-token'
+  userStore.profile = { id: 1, username: 'admin', role: 'super_admin', status: 1 }
+  const wrapper = mount(AdminLayout, {
+    global: {
+      plugins: [pinia, router],
+      stubs: {
+        ProactivePageGuide: true,
+        UserAvatar: true,
+        'el-dropdown': { template: '<div><slot /></div>' },
+        'el-dropdown-menu': true,
+        'el-dropdown-item': true,
+        'el-icon': { template: '<span><slot /></span>' },
+      },
+    },
+  })
+
+  try {
+    expect(wrapper.find('[data-route="/admin/governance"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/support"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('社区与支持')
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it('安全中心在页头预留小菱入口，离开该页面恢复其他管理页布局', async () => {

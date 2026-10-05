@@ -45,7 +45,7 @@ function changeSection(value: string | number): void {
         <MaintenanceCenter />
       </el-tab-pane>
       <el-tab-pane name="feedback" label="意见反馈">
-        <FeedbackCenter />
+        <FeedbackCenter :active="activeSection === 'feedback'" />
       </el-tab-pane>
     </el-tabs>
   </div>

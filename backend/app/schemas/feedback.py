@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import StrictInputModel
 from app.utils.input_validation import normalize_plain_text
@@ -46,6 +46,12 @@ class FeedbackReplyIn(StrictInputModel):
         if value is None:
             return None
         return normalize_plain_text(value, field_name="管理员回复", allow_empty=True)
+
+    @model_validator(mode="after")
+    def validate_replied_status(self):
+        if self.status == "replied" and self.admin_reply is not None and not self.admin_reply:
+            raise ValueError("标记为已回复时，请填写回复内容")
+        return self
 
 
 class FeedbackOut(BaseModel):

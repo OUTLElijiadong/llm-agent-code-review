@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
+
 from app.main import app
 from app.services.admin_capability_registry import (
     ADMIN_CAPABILITIES,
@@ -57,6 +58,7 @@ FRONTEND_API_CAPABILITY = {
     "adminSecurityCenter:traceSecurityIp": "security_center.trace",
     "adminSecurityCenter:getDefenseSurface": "security_center.surface",
     "adminSecurityCenter:getTrafficSummary": "security_center.traffic",
+    "adminSecurityCenter:getDecoyStatus": "security_center.decoy.get",
     "adminGovernance:listAlertsPage": "observability.alerts.list",
     "adminGovernance:resolveAlert": "observability.alerts.resolve",
     "adminGovernance:listRewardEvents": "rewards.events.list",
@@ -181,7 +183,7 @@ def _admin_view_api_imports() -> set[str]:
 def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
     expected = set(ADMIN_PAGE_ROUTES)
     assert _frontend_admin_routes() == expected
-    assert _admin_menu_routes() == expected - {"/report/templates"}
+    assert _admin_menu_routes() == (expected - {"/report/templates"}) | {"/forum", "/support"}
 
     mapped_pages = {spec.page for spec in ADMIN_CAPABILITIES}
     assert mapped_pages == expected
@@ -192,7 +194,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 133
+    assert len(ADMIN_CAPABILITIES) == 134
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -204,7 +206,10 @@ def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
 
 def test_every_api_function_imported_by_admin_views_maps_to_a_capability() -> None:
     imported = _admin_view_api_imports()
-    assert imported == set(FRONTEND_API_CAPABILITY)
+    # 引流会修改宿主网络规则，目前刻意不暴露给 Agent capability；需要单独的审批契约。
+    ui_only_high_impact = {"adminSecurityCenter:applyDecoyRedirect"}
+    assert imported == set(FRONTEND_API_CAPABILITY) | ui_only_high_impact
+    assert "security_center.decoy.apply" not in CAPABILITY_BY_CODE
     for api_function, capability in FRONTEND_API_CAPABILITY.items():
         assert capability in CAPABILITY_BY_CODE, api_function
 
@@ -243,6 +248,7 @@ def test_security_center_capabilities_are_explicitly_super_admin_only() -> None:
         "security_center.trace",
         "security_center.surface",
         "security_center.traffic",
+        "security_center.decoy.get",
     }
     assert {row["permission"] for row in rows} == {"super_admin"}
 

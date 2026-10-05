@@ -24,8 +24,8 @@ def create_feedback(payload: FeedbackIn, db: Session = Depends(get_db),
 
 @router.get("", response_model=Resp[PageOut[FeedbackOut]])
 def list_feedback(
-    status: str = Query(""),
-    feedback_type: str = Query(""),
+    status: str = Query("", pattern="^(|new|read|replied|closed)$"),
+    feedback_type: str = Query("", pattern="^(|suggestion|complaint|praise|bug|other)$"),
     scope: str = Query("mine", pattern="^(mine|all)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -39,9 +39,9 @@ def list_feedback(
 
 
 @router.get("/stats", response_model=Resp[dict])
-def feedback_stats(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    """反馈状态统计(管理员)"""
-    return Resp(data=user_feedback_service.stats_for_admin(db, admin))
+def feedback_stats(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """管理员保留全量统计；其他登录用户仅统计本人反馈。"""
+    return Resp(data=user_feedback_service.stats_for_user(db, user))
 
 
 @router.get("/{feedback_id}", response_model=Resp[FeedbackOut])

@@ -6,6 +6,7 @@ const harness = vi.hoisted(() => ({
   permission: true,
   auditPermission: true,
   role: 'user',
+  superAdmin: false,
 }))
 
 vi.mock('vue-router', () => ({
@@ -29,8 +30,8 @@ vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
     get profile() { return { id: 7, role: harness.role } },
     token: 'token',
-    isAdmin: () => false,
-    isSuperAdmin: () => false,
+    isAdmin: () => harness.role === 'admin' || harness.role === 'super_admin',
+    isSuperAdmin: () => harness.superAdmin,
     hasRole: (role: string) => role === harness.role,
     hasPermission: (code: string) => code === 'audit:view' ? harness.auditPermission : harness.permission,
   }),
@@ -46,6 +47,7 @@ describe('AppSidebar ordinary member navigation', () => {
     harness.permission = true
     harness.auditPermission = true
     harness.role = 'user'
+    harness.superAdmin = false
   })
 
   function mountSidebar(mobileOpen = false) {
@@ -101,6 +103,32 @@ describe('AppSidebar ordinary member navigation', () => {
     const wrapper = mountSidebar()
 
     expect(wrapper.find('[data-route="/projects"]').exists()).toBe(true)
+  })
+
+  it('普通用户与审查员均能从侧栏发现渗透测试入口', () => {
+    for (const role of ['user', 'reviewer']) {
+      harness.role = role
+      const wrapper = mountSidebar()
+      expect(wrapper.find('[data-route="/pentests"]').exists()).toBe(true)
+      wrapper.unmount()
+    }
+  })
+
+  it('管理员侧栏保留管理入口并提供论坛与支持中心；安全中心仍限超级管理员', () => {
+    harness.role = 'admin'
+    let wrapper = mountSidebar()
+    expect(wrapper.find('[data-route="/forum"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/support"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="/admin/governance"]').exists()).toBe(true)
+    expect(wrapper.findAll('.nav-group-toggle').some((button) => button.text().includes('社区与支持'))).toBe(true)
+    expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    harness.role = 'super_admin'
+    harness.superAdmin = true
+    wrapper = mountSidebar()
+    expect(wrapper.find('[data-route="/admin/security-center"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('shows the current release and persists the collapsed island state', async () => {

@@ -86,7 +86,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
     assert len({(row["method"], row["path"]) for row in ROUTES}) == 351
     assert len({row["source"] for row in ROUTES}) == 43
     assert len(AUTHENTICATED_ROUTES) == 337
-    assert len(GUARDED_ROUTES) == 270
+    assert len(GUARDED_ROUTES) == 269
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)

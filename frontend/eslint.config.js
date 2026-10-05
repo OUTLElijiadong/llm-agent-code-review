@@ -67,4 +67,15 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: globals.node,
+    },
+    rules: {
+      // CommonJS maintenance scripts deliberately use require().
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 )

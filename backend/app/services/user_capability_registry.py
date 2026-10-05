@@ -538,7 +538,10 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         WRITE,
     ),
     _cap("feedback.list", "/support", "查询我的反馈", "GET", "/api/feedback"),
-    _cap("feedback.stats", "/support", "查询我的反馈统计", "GET", "/api/feedback/stats"),
+    _cap(
+        "feedback.stats", "/support", "查询反馈处理统计：成员仅限本人，管理员可查看全量",
+        "GET", "/api/feedback/stats",
+    ),
     _cap("feedback.get", "/support", "查询反馈详情", "GET", "/api/feedback/{feedback_id}"),
     _cap("feedback.create", "/support", "提交用户反馈", "POST", "/api/feedback", WRITE),
     # 个人资料。密码和 API Key 明文操作不进入模型通用工具参数。

@@ -10,6 +10,11 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy.orm import sessionmaker
+
 from app.api.v1 import agent_responses as api_module
 from app.models.admin_chat import AdminChatMessage, OpsExecution
 from app.models.agent_governance import (
@@ -36,10 +41,6 @@ from app.services.deepseek_responses_runtime import (
     ToolExecutionResult,
     estimate_tokens,
 )
-from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.dialects import mysql, sqlite
-from sqlalchemy.orm import sessionmaker
 
 
 def test_admin_release_health_scope_matches_only_narrow_read_query() -> None:
@@ -2298,15 +2299,13 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
             '{"page":"/admin/security-center"}',
         )
     )
-    # 安全中心现在登记了只读溯源/防御面/流量能力，因此能被枚举出来；
-    # 但执行仍必须被唯一超级管理员门禁拦住（见下面的 security_execution）。
+    # 安全中心可枚举只读能力，但执行仍必须通过唯一超级管理员门禁。
     assert security_discovery.status == "success"
-    # 能力目录只广告非 super_admin 门禁的条目，因此安全中心里可见的是新增的三条只读能力；
-    # 无论是否被广告，执行都会在下一次断言里被"仅唯一超级管理员"拦住。
     assert {row["capability"] for row in security_discovery.output["items"]} == {
         "security_center.surface",
         "security_center.trace",
         "security_center.traffic",
+        "security_center.decoy.get",
     }
 
     security_execution = await executor.execute(

@@ -54,8 +54,8 @@ def test_runner_rejects_unsafe_base_url_before_output_or_network(tmp_path, url):
 def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 332
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 265
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 337
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 269
     blocking_routes = [row for row in plan["routes"] if "automatic-blocking" in row["path"]]
     assert len(blocking_routes) == 3
     assert all(

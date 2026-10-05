@@ -17,6 +17,7 @@ import {
   Tools,
   Operation,
   Monitor,
+  Lock,
   Fold,
   Expand,
   ArrowDown,
@@ -77,15 +78,17 @@ const menuItems: MenuItem[] = [
 const adminItems: MenuItem[] = [
   { path: '/admin/governance', title: 'Agent 治理', icon: Cpu, admin: true },
   { path: '/admin/operations', title: '运行与审计', icon: Operation, admin: true },
+  { path: '/admin/security-center', title: '安全中心', icon: Lock, admin: true, superAdmin: true },
   { path: '/admin/access', title: '用户与权限', icon: User, admin: true },
   { path: '/admin/platform', title: '平台配置', icon: Tools, admin: true },
+  { path: '/forum', title: '开发者论坛', icon: ChatLineSquare, admin: true },
+  { path: '/support', title: '支持中心与反馈', icon: Tools, admin: true },
 ]
 
 const isAdmin = computed(() => userStore.isAdmin())
 
 const visibleMenuItems = computed(() => {
-  // 管理员只做管理内容工作:不显示用户端功能菜单(工作台/代码沙箱/论坛等),
-  // 侧边栏仅保留"管理"菜单;普通用户按 roles 显示。
+  // 管理员使用专属管理菜单；论坛与支持中心仍是全角色共用的业务入口。
   if (isAdmin.value) return []
   // 可见性与路由守卫共用实时 RBAC 判定。不再叠加静态角色白名单,
   // 避免审查员被授予 project:view 后仍看不到项目入口。
@@ -116,7 +119,7 @@ if (typeof window !== 'undefined') {
 
 const userGroupDefinitions = [
   { key: 'workspace', title: '工作区', paths: ['/dashboard', '/projects', '/code'] },
-  { key: 'review', title: '智能审查与审计', paths: ['/reviews', '/issues', '/reports', '/audit'] },
+  { key: 'review', title: '智能审查与审计', paths: ['/reviews', '/pentests', '/issues', '/reports', '/audit'] },
   { key: 'agents', title: 'Agent 与安全', paths: ['/agents', '/sandboxes', '/security'] },
   { key: 'community', title: '社区与支持', paths: ['/forum', '/support'] },
   { key: 'personal', title: '个人空间', paths: ['/knowledge', '/profile/personalization', '/profile'] },
@@ -124,7 +127,19 @@ const userGroupDefinitions = [
 
 const navigationGroups = computed<MenuGroup[]>(() => {
   if (isAdmin.value) {
-    return [{ key: 'admin', title: '系统管理', items: visibleAdminItems.value }]
+    const communityPaths = new Set(['/forum', '/support'])
+    return [
+      {
+        key: 'admin',
+        title: '系统管理',
+        items: visibleAdminItems.value.filter((item) => !communityPaths.has(item.path)),
+      },
+      {
+        key: 'community',
+        title: '社区与支持',
+        items: visibleAdminItems.value.filter((item) => communityPaths.has(item.path)),
+      },
+    ].filter((group) => group.items.length > 0)
   }
   return userGroupDefinitions
     .map((group) => ({

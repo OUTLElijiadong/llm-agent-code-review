@@ -19,7 +19,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 346
+    assert len(plan["routes"]) == 351
     assert len({row["endpoint"] for row in plan["routes"]}) == 43
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
@@ -39,14 +39,43 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/admin/security-center/automatic-blocking"),
         ("PUT", "/api/admin/security-center/automatic-blocking"),
         ("POST", "/api/admin/security-center/automatic-blocking/release"),
+        ("POST", "/api/admin/security-center/trace/ip"),
+        ("GET", "/api/admin/security-center/surface"),
+        ("GET", "/api/admin/security-center/traffic"),
+        ("GET", "/api/admin/security-center/decoy"),
+        ("POST", "/api/admin/security-center/decoy/apply"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 332
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 265
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 337
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 269
+    feedback_stats = [row for row in plan["routes"]
+                      if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
+    assert len(feedback_stats) == 1
+    assert feedback_stats[0]["no_permission"] == "blocked"
+    assert "app.core.dependencies.get_current_user" in feedback_stats[0]["dependency_order"]
+    assert not feedback_stats[0]["unknown_dependencies"]
     blocking_routes = [row for row in plan["routes"] if "automatic-blocking" in row["path"]]
     assert len(blocking_routes) == 3
     assert all(
         row["guard"] == "app.core.dependencies.require_super_admin"
         for row in blocking_routes
+    )
+    new_security_routes = {
+        ("POST", "/api/admin/security-center/trace/ip"),
+        ("GET", "/api/admin/security-center/surface"),
+        ("GET", "/api/admin/security-center/traffic"),
+        ("GET", "/api/admin/security-center/decoy"),
+        ("POST", "/api/admin/security-center/decoy/apply"),
+    }
+    security_rows = [
+        row for row in plan["routes"]
+        if (row["method"], row["path"]) in new_security_routes
+    ]
+    assert len(security_rows) == len(new_security_routes)
+    assert all(
+        row["guard"] == "app.core.dependencies.require_super_admin"
+        and row["anonymous"] == row["no_permission"] == "ready"
+        and not row["unknown_dependencies"]
+        for row in security_rows
     )
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
