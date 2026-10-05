@@ -51,11 +51,13 @@ READ_ONLY_ACTIONS = {
     "backup_audit", "db_threat_signals", "db_health", "ip_attribution",
     "security_block_status", "security_block_candidates",
     "security_ip_trace", "security_surface_audit", "security_traffic_summary",
+    "security_decoy_status",
 }
 MAX_TEXT_BYTES = 256 * 1024
 MAX_DIRECTORY_ENTRIES = 500
 # 与 prism_security_block 同模块处理的只读溯源动作。
-SECURITY_MODULE_ACTIONS = frozenset({"security_ip_trace", "security_surface_audit", "security_traffic_summary"})
+SECURITY_MODULE_ACTIONS = frozenset({"security_ip_trace", "security_surface_audit", "security_traffic_summary",
+                                        "security_decoy_status", "security_decoy_apply"})
 UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
 DENIED_PATH_ROOTS = tuple(Path(value) for value in ("/proc", "/sys", "/dev", "/run"))
@@ -102,6 +104,8 @@ ACTION_PARAM_KEYS = {
     "security_ip_trace": {"ip"},
     "security_surface_audit": set(),
     "security_traffic_summary": {"since_hours"},
+    "security_decoy_status": set(),
+    "security_decoy_apply": {"reason"},
 }
 
 

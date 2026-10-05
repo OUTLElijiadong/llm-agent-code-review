@@ -55,12 +55,15 @@ ACTION_RISKS = {
     "security_ip_trace": "low",
     "security_surface_audit": "low",
     "security_traffic_summary": "low",
+    "security_decoy_status": "low",
+    "security_decoy_apply": "medium",
 }
 # 仅由安全中心/API 与固定防御调度使用；不能进入模型工具枚举。
 INTERNAL_SECURITY_ACTIONS = frozenset({
     "security_block_status", "security_block_configure", "security_block_reconcile", "security_block_release",
     "security_block_candidates", "security_block_apply_anomalies",
     "security_ip_trace", "security_surface_audit", "security_traffic_summary",
+    "security_decoy_status", "security_decoy_apply",
 })
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
 # 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
@@ -74,6 +77,7 @@ READ_ONLY_ACTIONS = frozenset({
     "security_ip_trace",
     "security_surface_audit",
     "security_traffic_summary",
+    "security_decoy_status",
 })
 # 无交互安全监控调度可自动执行的只读安全动作；交互调用仍要求唯一超级管理员。
 SCHEDULER_READ_ACTIONS = frozenset({
@@ -120,6 +124,8 @@ ACTION_PARAM_KEYS = {
     "security_ip_trace": {"ip"},
     "security_surface_audit": set(),
     "security_traffic_summary": {"since_hours"},
+    "security_decoy_status": set(),
+    "security_decoy_apply": {"reason"},
 }
 ACTION_REQUIRED_PARAMS = {
     "restart_service": {"service"},
@@ -356,11 +362,12 @@ def execute(
         automatic = actor is None and source in {"security_response", "scheduler"} and action in {
             "security_block_status", "security_block_reconcile", "security_block_candidates",
             "security_block_apply_anomalies", "security_ip_trace", "security_surface_audit",
-            "security_traffic_summary",
+            "security_traffic_summary", "security_decoy_status", "security_decoy_apply",
         }
         interactive = actor is not None and source == "security_center" and action in {
             "security_block_status", "security_block_configure", "security_block_release",
             "security_ip_trace", "security_surface_audit", "security_traffic_summary",
+            "security_decoy_status", "security_decoy_apply",
         }
         if not automatic and not interactive:
             raise PermissionError("自动封禁只能由固定安全巡检或最高管理员安全中心调用")
@@ -374,7 +381,7 @@ def execute(
         action in {
             "security_block_status", "security_block_reconcile", "security_block_candidates",
             "security_block_apply_anomalies", "security_ip_trace", "security_surface_audit",
-            "security_traffic_summary",
+            "security_traffic_summary", "security_decoy_status", "security_decoy_apply",
         }
         and source in {"security_response", "scheduler"}
     ):

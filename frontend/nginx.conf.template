@@ -207,6 +207,12 @@ server {
     }
 
     location / {
+        # 命中诱捕签名（见 nginx.conf 的 map $request_uri $prism_decoy）时优先转发到诱饵路由：
+        # 请求绝不进入真 backend，也不会命中 SPA 兜底。if 在此只做一次内部跳转、无 else，
+        # 是 nginx 官方允许的安全用法。
+        if ($prism_decoy = "1") {
+            rewrite ^ /__prism_decoy last;
+        }
         try_files $uri $uri/ /index.html;
     }
 }

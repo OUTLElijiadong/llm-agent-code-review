@@ -90,6 +90,12 @@ SENSITIVE_TARGETS = frozenset({"/.env", "/.env.local", "/.env.production", "/.gi
 # 溯源与自我审计的只读边界：不接收命令、路径或端口参数，不写任何宿主配置。
 TRACE_ABSENCE_TTL = 86400
 TRAFFIC_WINDOW_SECONDS = 86400
+# 诱捕层（decoy）：命中署名路径的来源被引流到诱饵容器，而不是简单 DROP。
+DECOY_SET = {4: "prism-decoy-v4", 6: "prism-decoy-v6"}
+DECOY_CHAIN = "PRISM-DECOY-IN"
+DECOY_PORT = 8443
+DECOY_HIT_LOG = "/var/log/prism-decoy/access.log"
+DECOY_SAFE_PORTS = (80, 443)
 FIREWALL_FAMILIES = {"ipv4": "iptables", "ipv6": "ip6tables"}
 HARDENING_APPLICATIONS = (
     ("fail2ban", "登录爆破自动处置"),
@@ -246,6 +252,62 @@ def parse_web_attacker_summary(lines: list[str]) -> dict[str, dict[str, Any]]:
         targets = sorted(item.pop("_targets").items(), key=lambda pair: (-pair[1], pair[0]))[:10]
         item["targets"] = [{"path": path, "count": count} for path, count in targets]
         item["target_count"] = len(item["targets"])
+        item["first_seen"] = _iso(item["first_seen"])
+        item["last_seen"] = _iso(item["last_seen"])
+    return summary
+
+
+def parse_decoy_hits(lines: list[str]) -> list[dict[str, Any]]:
+    """解析诱捕层访问日志（nginx log_format prism_decoy）。
+
+    只提取来源、时间、请求行、状态与 UA；不解析、不保留任何请求正文。
+    """
+    pattern = re.compile(
+        r'^([0-9a-fA-F.:]+) - \[([^\]]+)\] "([A-Z]+) ([^ ]+) HTTP/[^"]*" (\d{3}) (\d+) "([^"]*)"$'
+    )
+    hits: list[dict[str, Any]] = []
+    for raw in lines:
+        match = pattern.match(str(raw).strip())
+        if not match:
+            continue
+        raw_ip, raw_time, method, target, status, size, user_agent = match.groups()
+        try:
+            address = str(_ip(raw_ip))
+            timestamp = _epoch(raw_time)
+        except (ValueError, TypeError):
+            continue
+        hits.append({
+            "ip": address,
+            "occurred_at": timestamp,
+            "method": method,
+            "path": target[:200],
+            "http_status": status,
+            "bytes": int(size),
+            "user_agent": user_agent[:200],
+        })
+    return hits
+
+
+def summarize_decoy_hits(hits: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """按来源汇总诱捕命中：命中路径数、总次数、工具指纹与时间范围。"""
+    summary: dict[str, dict[str, Any]] = {}
+    for hit in hits:
+        item = summary.setdefault(hit["ip"], {
+            "count": 0, "_paths": {}, "user_agents": {}, "first_seen": None, "last_seen": None,
+        })
+        item["count"] += 1
+        item["_paths"][hit["path"]] = item["_paths"].get(hit["path"], 0) + 1
+        if hit["user_agent"]:
+            item["user_agents"][hit["user_agent"]] = item["user_agents"].get(hit["user_agent"], 0) + 1
+        stamp = hit["occurred_at"]
+        item["first_seen"] = stamp if item["first_seen"] is None else min(item["first_seen"], stamp)
+        item["last_seen"] = stamp if item["last_seen"] is None else max(item["last_seen"], stamp)
+    for item in summary.values():
+        paths = sorted(item.pop("_paths").items(), key=lambda pair: (-pair[1], pair[0]))[:10]
+        item["paths"] = [{"path": path, "count": count} for path, count in paths]
+        item["path_count"] = len(item["paths"])
+        agents = sorted(item["user_agents"].items(), key=lambda pair: (-pair[1], pair[0]))[:5]
+        item["user_agents"] = [{"user_agent": ua, "count": count} for ua, count in agents]
         item["first_seen"] = _iso(item["first_seen"])
         item["last_seen"] = _iso(item["last_seen"])
     return summary
@@ -945,6 +1007,154 @@ class SecurityBlockController:
             "as": as_value if as_value.upper().startswith("AS") else (f"AS{as_value}" if as_value else ""),
         }}
 
+    def _decoy_log_hits(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """只读诱捕层访问日志；文件不存在属正常（诱捕层未启用）。"""
+        path = Path(DECOY_HIT_LOG)
+        if not path.exists():
+            return [], []
+        if path.is_symlink() or not path.is_file():
+            return [], ["诱捕日志路径不安全，拒绝读取"]
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as exc:
+            return [], [f"诱捕日志读取失败：{str(exc)[:200]}"]
+        if len(lines) > LOG_LIMIT:
+            lines = lines[-LOG_LIMIT:]
+        return parse_decoy_hits(lines), []
+
+    def _decoy_chain_order_ok(self) -> tuple[bool, str]:
+        """引流链必须排在 DROP 链之前，否则流量到不了诱捕层（fail-closed 校验）。"""
+        for table, chain in (("iptables", "INPUT"), ("iptables", "DOCKER-USER")):
+            result = self._run([table, "-S", chain], required=False)
+            if result.get("exit_code") != 0:
+                return False, f"{chain} 链不可读"
+            rules = [line for line in str(result.get("stdout") or "").splitlines()]
+            decoy_at = next((i for i, line in enumerate(rules) if DECOY_CHAIN in line), None)
+            drop_at = next((i for i, line in enumerate(rules) if "PRISM-SEC-IN" in line or "PRISM-SEC-DK" in line), None)
+            if decoy_at is None:
+                continue
+            if drop_at is not None and decoy_at > drop_at:
+                return False, f"{chain} 中 {DECOY_CHAIN} 排在 DROP 链之后，拒绝启用引流"
+        return True, ""
+
+    def decoy_status(self) -> dict[str, Any]:
+        """诱捕层状态：容器存活、命中汇总、引流集合与链序可读性（全部只读）。"""
+        with self._locked():
+            errors: list[str] = []
+            hits, log_errors = self._decoy_log_hits()
+            errors.extend(log_errors)
+            summary = summarize_decoy_hits(hits)
+            ranked = sorted(summary.items(), key=lambda pair: pair[1]["count"], reverse=True)[:50]
+            running = self._run(["docker", "inspect", "-f", "{{.State.Running}}", "cr_decoy"], required=False)
+            container_running = running.get("exit_code") == 0 and "true" in str(running.get("stdout") or "").lower()
+            members: dict[str, Any] = {}
+            for family in (4, 6):
+                saved = self._run(["ipset", "save", DECOY_SET[family]], required=False)
+                members[str(family)] = sorted(
+                    line.split()[2] for line in str(saved.get("stdout") or "").splitlines()
+                    if line.startswith("add ")
+                )
+            order_ok, order_error = self._decoy_chain_order_ok()
+            if order_error:
+                errors.append(order_error)
+            return {
+                "generated_at": _iso(self.clock()),
+                "container_running": container_running,
+                "hit_total": len(hits),
+                "sources": [
+                    {"ip": ip, **{key: value for key, value in item.items() if key != "count"}, "count": item["count"]}
+                    for ip, item in ranked
+                ],
+                "source_total": len(summary),
+                "redirect_members": members,
+                "redirect_total": sum(len(value) for value in members.values()),
+                "chain_order_ok": order_ok,
+                "redirect_chain": DECOY_CHAIN,
+                "redirect_port": DECOY_PORT,
+                "log_path": DECOY_HIT_LOG,
+                "errors": errors[-10:],
+            }
+
+    def decoy_apply(self, params: dict[str, Any]) -> dict[str, Any]:
+        """把命中诱饵的来源加入引流集合，并确保引流链存在且顺序正确。
+
+        安全边界：只加入公网地址；保护来源、非公网、已在引流集合中的地址一律跳过；
+        链序不合法时**拒绝写入任何规则**（fail-closed）。
+        """
+        hits, log_errors = self._decoy_log_hits()
+        summary = summarize_decoy_hits(hits)
+        with self._locked():
+            state = self._read()
+            errors = list(log_errors)
+            try:
+                protected = [row["cidr"] for row in self._protected_sources(state["policy"])]
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+                protected = []
+                errors.append(f"保护来源读取失败：{str(exc)[:200]}")
+            networks = []
+            for cidr in protected:
+                try:
+                    networks.append(ipaddress.ip_network(cidr))
+                except ValueError:
+                    continue
+            order_ok, order_error = self._decoy_chain_order_ok()
+            if not order_ok and order_error:
+                raise RuntimeError(f"{order_error}；拒绝写入引流规则")
+            supported, cap_errors = self._capabilities()
+            errors.extend(cap_errors)
+            applied: list[dict[str, Any]] = []
+            skipped: list[dict[str, str]] = []
+            for ip, item in sorted(summary.items(), key=lambda pair: pair[1]["count"], reverse=True):
+                if len(applied) >= 64:
+                    errors.append("引流单批上限 64 条，其余来源下轮处理")
+                    break
+                try:
+                    address = _ip(ip)
+                except ValueError:
+                    skipped.append({"ip": str(ip)[:64], "reason": "地址不合法"})
+                    continue
+                if not _public_scope(address) or address.is_loopback:
+                    skipped.append({"ip": str(address), "reason": "非公网来源"})
+                    continue
+                if any(address in network for network in networks if network.version == address.version):
+                    skipped.append({"ip": str(address), "reason": "受保护来源"})
+                    continue
+                if not supported[address.version]:
+                    skipped.append({"ip": str(address), "reason": f"IPv{address.version} 内核链路不可用"})
+                    continue
+                family = address.version
+                self._run(["ipset", "add", DECOY_SET[family], str(address), "timeout",
+                           str(ESCALATION_MAX_SECONDS)], required=False)
+                members = self._members_for(DECOY_SET[family])
+                if members is None or str(address) not in members:
+                    skipped.append({"ip": str(address), "reason": "内核集合未确认写入"})
+                    continue
+                applied.append({"ip": str(address), "hits": item["count"], "paths": item["path_count"],
+                                "lease_seconds": ESCALATION_MAX_SECONDS})
+            return {
+                "generated_at": _iso(self.clock()),
+                "applied": applied,
+                "skipped": skipped[:50],
+                "hit_sources": len(summary),
+                "chain_order_ok": True,
+                "errors": errors[-10:],
+            }
+
+    def _members_for(self, name: str) -> dict[str, int] | None:
+        """读取任意 ipset 集合成员；供引流集合复用。"""
+        result = self._run(["ipset", "save", name], required=False)
+        if result.get("exit_code") != 0:
+            return None
+        members: dict[str, int] = {}
+        for line in str(result.get("stdout") or "").splitlines():
+            if not line.startswith("add "):
+                continue
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            members[parts[2]] = 0
+        return members
+
     def ip_trace(self, params: dict[str, Any]) -> dict[str, Any]:
         """单来源取证：可信日志统计 + 被动归因 + 处置记录 + 确定性风险评分。
 
@@ -1180,6 +1390,14 @@ def execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
         return controller.candidates()
     if action == "security_block_apply_anomalies":
         return controller.apply_anomalies(params)
+    if action == "security_decoy_status":
+        if params:
+            raise ValueError("诱捕层状态不接收参数")
+        return controller.decoy_status()
+    if action == "security_decoy_apply":
+        if set(params) - {"reason"}:
+            raise ValueError("诱捕层引流只接受 reason 参数")
+        return controller.decoy_apply(params)
     if action == "security_ip_trace":
         if set(params) != {"ip"}:
             raise ValueError("来源溯源只接受单个 ip 参数")
