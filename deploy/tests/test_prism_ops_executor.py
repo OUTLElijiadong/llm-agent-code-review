@@ -169,6 +169,28 @@ def test_directory_listing_allows_only_the_configured_backup_directory(tmp_path:
         executor._list_directory({"path": str(sibling)})
 
 
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_backup_directory_dotenv_fallback_unquotes_value(
+    tmp_path: Path, monkeypatch, quote: str,
+) -> None:
+    backup_dir = tmp_path / "persistent backups"
+    backup_dir.mkdir()
+    (tmp_path / ".env").write_text(f"BACKUP_DIR={quote}{backup_dir}{quote}\n", encoding="utf-8")
+    monkeypatch.setattr(executor, "DEPLOY_DIR", tmp_path)
+    monkeypatch.delenv("BACKUP_DIR", raising=False)
+
+    assert executor._configured_backup_dir() == backup_dir.resolve()
+
+
+def test_backup_directory_dotenv_fallback_rejects_unmatched_quotes(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / ".env").write_text('BACKUP_DIR="/tmp/backups\n', encoding="utf-8")
+    monkeypatch.setattr(executor, "DEPLOY_DIR", tmp_path)
+    monkeypatch.delenv("BACKUP_DIR", raising=False)
+
+    with pytest.raises(ValueError, match="引号格式不匹配"):
+        executor._configured_backup_dir()
+
+
 def test_journal_queries_reject_unapproved_units_before_command(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(executor, "run", lambda args, **_kwargs: calls.append(args))

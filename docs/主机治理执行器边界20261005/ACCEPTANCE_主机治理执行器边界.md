@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-候选版本 `4.0.46` 已完成本机测试，等待精确 SHA 生产发布及发布后复核。生产基线来自 2026-10-05 直接只读检查；未运行利用脚本或触发破坏性主机动作。
+候选版本 `4.0.47` 已完成本机测试，等待精确 SHA 生产发布及发布后复核。生产基线来自 2026-10-05 直接只读检查；未运行利用脚本或触发破坏性主机动作。
 
 ## 修复范围
 
@@ -22,7 +22,7 @@
 | 后端 lint | `ruff check app` 通过；改动后 123 项相关权限/Agent/运维测试通过 |
 | 后端编译与 Alembic | `compileall app tests` 通过；唯一 head 为 `062_audit_log_action_length` |
 | 前端 | ESLint 通过；139 个测试文件、1,741 项通过；Vue 类型检查及 Vite 生产构建通过 |
-| 部署执行器/安装回滚 | 104 passed、2 skipped |
+| 部署执行器/安装回滚 | 107 passed、2 skipped |
 | 发布 Shell 门禁 | release binding 33/33；发布失败与回滚模拟通过 |
 | Docker Compose | 配置解析通过；渲染结果为 `10001:991`、drop ALL、no-new-privileges、空执行器令牌 |
 | 依赖审计 | npm 全依赖和生产依赖均为 0 条已知漏洞；Python 生产锁无已知漏洞 |
@@ -30,11 +30,10 @@
 
 ## 生产基线
 
-- 当前正式运行 release 是 `/opt/prism-releases/70dfb9b08f8a950a40d8682a791ca882037b80b4`，版本 `4.0.45`；生产健康检查三次结果为 `ok/ready`。
+- 本次迭代的首个候选 `4.0.46` 已按完整发布流程上线并通过生产执行器正反身份验收；最终候选 `4.0.47` 补齐了 dotenv 引号兼容性，生产配置当前未加引号，但共享部署规范支持单双引号，因此仍纳入修复。
 - `/opt/code-review` 当前源码目录显示 `4.0.31`，不是正在运行的 release；发布来源必须以运行中的 release SHA 为父提交，不从该旧目录构建。
 - Prism 前端、后端、MySQL、Redis、ClamAV、Embedding、隔离测试数据库均运行；`auto-surface-mm-local`、`lijiadong-portfolio`、`momentum-radar`、`site_total`、`postfix` 和 `bt` 单元 inactive。
-- 根分区使用率 `78%`，可用约 `42,019,264 KiB`。无需删除数据或清理备份。
-- 发布前 `/run/prism-ops` 为 `root:991 0770`，后端容器没有 CapDrop/no-new-privileges，ops executor unit 仍加载 `.env`。这些为本次拟修复项，不是修复后状态。
+- `/run/prism-ops` 已验证为 `root:prism-ops 0710`，socket 为 `root:prism-ops 0660`；后端容器为 UID/GID `10001:991`、capabilities 全部丢弃且 `no-new-privileges` 生效；Root 执行器 EnvironmentFiles 为空并启用 ProtectHome/ProtectSystem。
 - 当前 active release `.env` 为 root 所有、模式 `0600`；需要的保护网段键存在且语法有效，SSH 端口与状态目录使用默认值。令牌旧键仍保留以兼容应用回滚，但新 Compose 明确覆盖为空；不输出、移除或轮换该值。
 - 当前生产 `BACKUP_DIR` 指向可用的持久备份目录，与旧代码路径硬编码值不同；新执行器从当前发布配置读取该根目录，并拒绝读取其相邻目录。
 - 正式 release 树有一个未跟踪备份文件 `.env.before-70dfb9b08-20261005T044155Z`。保留它；发布通过 Git bundle 克隆精确提交，不把此文件并入新 release。

@@ -1150,10 +1150,19 @@ def _configured_backup_dir() -> Path:
 
 
 def _read_env(key: str) -> str:
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*=\s*(.*?)\s*$")
+    value: str | None = None
     for line in (DEPLOY_DIR / ".env").read_text(encoding="utf-8").splitlines():
-        if line.startswith(f"{key}="):
-            return line.split("=", 1)[1].strip()
-    raise RuntimeError(f"缺少配置 {key}")
+        match = pattern.match(line)
+        if match:
+            value = match.group(1)
+    if not value:
+        raise RuntimeError(f"缺少配置 {key}")
+    if value[0] in {"\"", "'"}:
+        if len(value) < 2 or value[-1] != value[0]:
+            raise ValueError(f"配置 {key} 的引号格式不匹配")
+        value = value[1:-1]
+    return value
 
 
 def _configured_certbot_conf_dir() -> Path:
