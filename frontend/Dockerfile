@@ -29,6 +29,10 @@ COPY --chmod=0755 docker-entrypoint.d/30-retain-versioned-assets.sh /docker-entr
 # nginx.conf + nginx.conf.template 随镜像发布并由官方 entrypoint 渲染。
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx.decoy.conf /etc/nginx/prism-decoy.conf
+# 诱捕命中日志目录：镜像内预建并交给 nginx 用户，配合宿主 bind mount 使用。
+# 若目录不存在，nginx 会因无法打开 access_log 直接启动失败（v4.0.58 预备阶段已实测）。
+RUN mkdir -p /var/log/prism-decoy && chown nginx:nginx /var/log/prism-decoy
+VOLUME ["/var/log/prism-decoy"]
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 EXPOSE 80 443
 CMD ["nginx", "-g", "daemon off;"]

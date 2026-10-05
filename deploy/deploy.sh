@@ -232,6 +232,10 @@ log_info "发布预检通过(target=$target, version=$APP_VERSION, sha=$target_s
 
 backup_file="none"
 if [[ "$target" == "all" || "$target" == "backend" ]]; then
+  # 诱捕命中日志目录：必须在启动前端容器前存在，且对容器内 nginx 用户可写，
+  # 否则 nginx 会因 access_log 打不开而启动失败（v4.0.58 预备校验已实测）。
+  mkdir -p "${DECOY_LOG_DIR:-./decoy-log}"
+  chmod 777 "${DECOY_LOG_DIR:-./decoy-log}" 2>/dev/null || true
   deploy_stage="dependencies"
   compose up -d mysql clamav
   wait_for_service_health mysql "${MYSQL_HEALTH_TIMEOUT:-180}" || fatal "MySQL 未就绪"
