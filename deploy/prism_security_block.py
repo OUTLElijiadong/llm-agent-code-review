@@ -1039,10 +1039,11 @@ class SecurityBlockController:
 
     def _decoy_dnat_args(self, operation: str) -> list[list[str]]:
         """返回引流链的建/删命令序列；DNAT 目标固定为宿主回环上的诱捕端口。"""
-        target = f"127.0.0.1:{DECOY_PORT}"
         commands: list[list[str]] = []
-        for tool in ("iptables", "ip6tables"):
-            set_name = DECOY_SET[4] if tool == "iptables" else DECOY_SET[6]
+        for family, tool in ((4, "iptables"), (6, "ip6tables")):
+            set_name = DECOY_SET[family]
+            # IPv6 的 DNAT 目标必须写成 [::1]:8443，否则 ip6tables 报 Bad IP address
+            target = f"127.0.0.1:{DECOY_PORT}" if family == 4 else f"[::1]:{DECOY_PORT}"
             if operation == "create":
                 commands.append([tool, "-w", "-N", DECOY_CHAIN])
                 # 必须是第一条：先引流，后才是既有 DROP 链（链序 fail-closed 的另一半）
