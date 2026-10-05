@@ -104,3 +104,57 @@ ipset_remaining=0                                 ← 解封后集合清空
 - 未抓包、未 MITM、未存储流量载荷。
 - 未对任何外部目标做端口扫描、漏洞利用或"反击"。
 - 未提交防御策略变更、未封禁或解封任何真实来源。
+
+---
+
+## 7. 加固应用安装（2026-10-05 21:19—21:23 CST，管理员授权"装"后执行）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 系统识别 | `cat /etc/os-release` | OpenCloudOS 9.4，`dnf` 可用，仓库 BaseOS / AppStream / EPOL / extras |
+| whois 可用性 | `dnf list --available whois` | whois.x86_64 5.5.20-3.oc9（AppStream） |
+| nmap 可用性 | `dnf list --available nmap` | nmap.x86_64 7.93-4.oc9（AppStream） |
+| **安装** | `dnf install -y whois nmap` | Installed: libssh2、nmap、nmap-ncat、whois、whois-nls；Complete |
+| whois 验证 | `whois 8.8.8.8 \| grep -iE "^(orgname\|netname\|country)"` | `NetName: GOGL / OrgName: Google LLC / Country: US` |
+| nmap 验证 | `nmap -sT -Pn --top-ports 20 127.0.0.1` | 本机 443/tcp open，mysql/rdp/vnc/proxy 等均 closed；0.05s 完成 |
+
+**fail2ban 未安装，且不是"漏装"**：OpenCloudOS 9 官方四个仓库均无 fail2ban；
+改用 EPEL 9 时，`fail2ban-server-1.1.0-6.el9` 依赖 `python(abi) = 3.9`，
+而本机是 Python 3.11（`python3 --version` → 3.11），安装会把系统 Python 降级/并存，
+风险远大于收益（平台已有秒级以内到分钟的 ipset 租约处置链路）。已在验证后**移除临时
+添加的 `epel.repo`**，仓库状态恢复原样：
+
+```
+rm -f /etc/yum.repos.d/epel.repo   →  epel repo removed
+```
+
+**威胁情报端点复核**：早先 `ip-api.com` 曾 12 秒超时，本轮复测 `http://ip-api.com/json/8.8.8.8` → **http=200 / 1.40s**，
+`https://ipinfo.io/8.8.8.8/json` → **http=200 / 1.30s**。默认端点可用，建议生产 `.env` 显式配置
+`THREAT_INTEL_BASE_URL` 以便将来切换到 HTTPS 端点。
+
+## 8. 安装后的溯源实测（whois 富化生效）
+
+服务器自身公网地址 `81.70.251.90` 的溯源结果：
+
+```
+protected=False score=0
+attribution: China / Beijing / EuroNet Internet / Shenzhen Tencent（该出口段归因与外网 whois 不一致，属情报源差异，不参与评分）
+whois_ok=True  summary=netname=NON-RIPE-NCC-MANAGED-ADDRESS-BLOCK; country=EU
+```
+
+对比 `8.8.8.8`：`whois_ok=True` 且返回 `NetName=GOGL; OrgName=Google LLC; Country=US`，
+反向 DNS `dns.google` 解析成功——**溯源链路的 whois 与 DNS 富化在安装后确实生效**。
+
+## 9. 保护来源兜底补丁（v4.0.51 内）
+
+生产实测发现本机公网地址 `81.70.251.90` **不在任何网卡上**（云厂商 NAT/弹性地址），
+原逻辑因此拿不到"服务器自身公网地址"这条保护。补丁后生产实测保护清单包含：
+
+```
+127.0.0.1/32、::1/128、10.2.0.16/32、172.17/18/19/20.0.1/32、多个 fe80:: 本机地址  → 服务器本机地址
+117.141.246.34/32                                                                    → 当前 SSH 管理连接
+117.141.246.34/32                                                                    → 最近一小时 SSH 成功登录来源
+```
+
+新增规则：非 SSH 端口的**已建立连接公网对端**同样纳入保护（新增 `_public_scope` 区分内网与
+保留段外部对端），并补两个回归用例。执行器套件：**119 passed / 2 skipped**。
