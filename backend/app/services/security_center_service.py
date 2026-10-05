@@ -198,7 +198,11 @@ def get_policy(db: Session) -> dict[str, Any]:
         "automatic_blocking_available": bool(blocking.get("available")),
         "automatic_blocking_confirmed_at": blocking.get("confirmed_at"),
         "automatic_blocking_state_source": "audited_receipt",
+        # 溯源/防御面/流量元数据是只读能力：与宿主机回执一致时才标记可用，
+        # 不把只读能力伪装成"已开启的主动反击"。真正的处置只有短期单 IP 封禁租约。
         "counterattack_enabled": False,
+        "trace_capability_available": bool(blocking.get("available")),
+        "trace_capability_label": "被动溯源与只读取证",
         "baseline": _default_policy(),
     }
 

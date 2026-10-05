@@ -884,11 +884,11 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
         elif code == "reporter":
             item["team_input_contract"] = {"depends_on": "all_work_nodes", "role": "summarizer"}
         if code == "operations":
-            from app.services.ops_service import READ_ONLY_ACTIONS
+            from app.services.ops_service import TEAM_READ_ONLY_ACTIONS
 
             item["team_dispatch_state"] = "read_only"
             item["team_input_contract"] = {
-                "action": sorted(READ_ONLY_ACTIONS),
+                "action": sorted(TEAM_READ_ONLY_ACTIONS),
                 "params": "object",
                 "write_actions": "main_xiaoling_approval_only",
             }

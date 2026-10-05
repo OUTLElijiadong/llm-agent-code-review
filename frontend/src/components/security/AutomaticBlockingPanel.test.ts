@@ -28,8 +28,17 @@ function snapshot() {
   }
 }
 
+// 夹具时间相对"当前"生成：租约判定依赖 Date.now()，写死绝对时间会让用例
+// 在到期后变成必然失败的时间炸弹。使用假定时器的用例共用 BASE 作为原点。
+const BASE = Date.now()
+
+/** 相对测试基准时刻生成 ISO 时间戳，供租约夹具与假定时器共用。 */
+function stamp(offsetMs = 0): string {
+  return new Date(BASE + offsetMs).toISOString()
+}
+
 function entry(status = 'active', ip = '203.0.113.9') {
-  return { id: `block-${ip}`, ip, rule: 'ssh_failed_password', evidence_count: 20, scope: 'INPUT+DOCKER-USER', status, started_at: '2026-10-05T10:00:00Z', expires_at: '2026-10-05T10:15:00Z', released_at: null, reason: '短窗口重复认证失败' }
+  return { id: `block-${ip}`, ip, rule: 'ssh_failed_password', evidence_count: 20, scope: 'INPUT+DOCKER-USER', status, started_at: stamp(-60_000), expires_at: stamp(15 * 60_000), released_at: null, reason: '短窗口重复认证失败' }
 }
 
 const mounted: ReturnType<typeof mount>[] = []
@@ -235,8 +244,8 @@ describe('AutomaticBlockingPanel', () => {
 
   it('rechecks an expiring lease once without claiming the local clock proves release', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-10-05T10:00:00Z'))
-    const expiresSoon = { ...entry(), expires_at: '2026-10-05T10:01:00Z' }
+    vi.setSystemTime(new Date(BASE))
+    const expiresSoon = { ...entry(), expires_at: stamp(60_000) }
     api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), active_blocks: [expiresSoon] })
     const wrapper = mountPanel()
     await flushPromises()
@@ -253,8 +262,8 @@ describe('AutomaticBlockingPanel', () => {
 
   it('preserves unsaved policy changes during an automatic expiry reread', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-10-05T10:00:00Z'))
-    api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), active_blocks: [{ ...entry(), expires_at: '2026-10-05T10:01:00Z' }] })
+    vi.setSystemTime(new Date(BASE))
+    api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), active_blocks: [{ ...entry(), expires_at: stamp(60_000) }] })
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.get('#blocking-enabled').setValue(true)

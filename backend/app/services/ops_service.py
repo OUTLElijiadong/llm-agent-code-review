@@ -52,11 +52,15 @@ ACTION_RISKS = {
     "security_block_release": "medium",
     "security_block_candidates": "low",
     "security_block_apply_anomalies": "medium",
+    "security_ip_trace": "low",
+    "security_surface_audit": "low",
+    "security_traffic_summary": "low",
 }
 # 仅由安全中心/API 与固定防御调度使用；不能进入模型工具枚举。
 INTERNAL_SECURITY_ACTIONS = frozenset({
     "security_block_status", "security_block_configure", "security_block_reconcile", "security_block_release",
     "security_block_candidates", "security_block_apply_anomalies",
+    "security_ip_trace", "security_surface_audit", "security_traffic_summary",
 })
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
 # 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
@@ -67,12 +71,18 @@ READ_ONLY_ACTIONS = frozenset({
     "db_health", "ip_attribution",
     "security_block_status",
     "security_block_candidates",
+    "security_ip_trace",
+    "security_surface_audit",
+    "security_traffic_summary",
 })
 # 无交互安全监控调度可自动执行的只读安全动作；交互调用仍要求唯一超级管理员。
 SCHEDULER_READ_ACTIONS = frozenset({
     "ssh_login_events", "flytrap_attack_events", "nginx_attack_events", "backup_audit", "db_threat_signals",
     "db_health", "ip_attribution",
 })
+# 可交给子 Agent 团队与 Agent Mesh 的运维只读动作。溯源/防御面/流量元数据
+# 属于安全中心内部动作，含主机拓扑与监听面信息，不进入团队或网格分发面。
+TEAM_READ_ONLY_ACTIONS = frozenset(READ_ONLY_ACTIONS - INTERNAL_SECURITY_ACTIONS)
 ACTION_PARAM_KEYS = {
     "status": set(),
     "certificate_status": set(),
@@ -107,6 +117,9 @@ ACTION_PARAM_KEYS = {
     "security_block_release": {"ip", "reason"},
     "security_block_candidates": set(),
     "security_block_apply_anomalies": {"decisions"},
+    "security_ip_trace": {"ip"},
+    "security_surface_audit": set(),
+    "security_traffic_summary": {"since_hours"},
 }
 ACTION_REQUIRED_PARAMS = {
     "restart_service": {"service"},
@@ -119,6 +132,7 @@ ACTION_REQUIRED_PARAMS = {
     "security_block_configure": {"enabled"},
     "security_block_release": {"ip", "reason"},
     "security_block_apply_anomalies": {"decisions"},
+    "security_ip_trace": {"ip"},
 }
 ACTION_PARAM_TYPES = {
     "file": str,
@@ -336,12 +350,16 @@ def execute(
     if actor is not None and not rbac_service.is_super_admin_user(db, actor.id):
         raise PermissionError("仅超级管理员 admin 可执行运维动作")
     if action in INTERNAL_SECURITY_ACTIONS:
+        # 溯源与自我审计是只读动作，但仍只由固定调度或最高管理员安全中心发起，
+        # 避免任意登录会话把它们当作通用主机信息读取入口。
         automatic = actor is None and source in {"security_response", "scheduler"} and action in {
             "security_block_status", "security_block_reconcile", "security_block_candidates",
-            "security_block_apply_anomalies",
+            "security_block_apply_anomalies", "security_ip_trace", "security_surface_audit",
+            "security_traffic_summary",
         }
         interactive = actor is not None and source == "security_center" and action in {
             "security_block_status", "security_block_configure", "security_block_release",
+            "security_ip_trace", "security_surface_audit", "security_traffic_summary",
         }
         if not automatic and not interactive:
             raise PermissionError("自动封禁只能由固定安全巡检或最高管理员安全中心调用")
@@ -354,7 +372,8 @@ def execute(
     ) and not (
         action in {
             "security_block_status", "security_block_reconcile", "security_block_candidates",
-            "security_block_apply_anomalies",
+            "security_block_apply_anomalies", "security_ip_trace", "security_surface_audit",
+            "security_traffic_summary",
         }
         and source in {"security_response", "scheduler"}
     ):
@@ -538,6 +557,14 @@ def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any
             raise ValueError("解封 IP 不合法") from exc
         if not 1 <= len(params["reason"].strip()) <= 200:
             raise ValueError("解封原因长度必须在 1 到 200 之间")
+    elif action == "security_ip_trace":
+        # 溯源只接受单个 IP：不接受网段、命令、端口或路径；非法输入在执行前拒绝。
+        from app.schemas.security_center import SecurityTraceIn
+
+        params["ip"] = SecurityTraceIn(ip=params["ip"]).ip
+    elif action == "security_traffic_summary":
+        if not 1 <= int(params["since_hours"]) <= 72:
+            raise ValueError("流量元数据窗口必须在 1 到 72 小时之间")
     elif action == "security_block_apply_anomalies":
         import re
 

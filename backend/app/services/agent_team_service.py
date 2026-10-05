@@ -753,7 +753,7 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     if code == "operations":
         from app.services import ops_service, rbac_service
 
-        if raw.get("action") not in ops_service.READ_ONLY_ACTIONS:
+        if raw.get("action") not in ops_service.TEAM_READ_ONLY_ACTIONS:
             raise AgentTeamValidationError("子 Agent 团队只能执行运维只读动作，写操作必须回到主小菱审批")
         if not rbac_service.is_super_admin_user(db, int(user.id)):
             raise AgentTeamAccessError("仅唯一超级管理员 admin 可创建运维子 Agent 任务")

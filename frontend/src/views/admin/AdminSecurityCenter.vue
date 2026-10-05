@@ -2,17 +2,24 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { Aim, CircleCheck, Clock, DataAnalysis, Lock, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { Aim, CircleCheck, Clock, DataAnalysis, Lock, Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
 import {
+  getDefenseSurface,
   getSecurityCenterEvents,
   getSecurityCenterOverview,
+  getTrafficSummary,
   runSecurityMonitor,
+  traceSecurityIp,
   updateSecurityMonitorPolicy,
   type SecurityCenterEvent,
   type SecurityCenterEventPage,
   type SecurityCenterEventGroup,
   type SecurityCenterOverview,
   type SecurityMonitorPolicy,
+  type SecurityIpTrace,
+  type SecuritySurfaceAudit,
+  type SecurityTrafficPeer,
+  type SecurityTrafficSummary,
   type AutomaticBlockingSnapshot,
 } from '@/api/adminSecurityCenter'
 import { getSystemStatus, type SystemStatus } from '@/api/adminOverview'
@@ -29,6 +36,7 @@ const sections = [
   { id: 'overview', label: '安全概览' },
   { id: 'events', label: '事件记录' },
   { id: 'strategies', label: '防御策略' },
+  { id: 'trace', label: '溯源与响应' },
 ] as const
 type SecuritySection = typeof sections[number]['id']
 const activeSection = ref<SecuritySection>('overview')
@@ -50,10 +58,28 @@ const page = ref(1)
 const clock = ref(Date.now())
 const blockingPanel = ref<InstanceType<typeof AutomaticBlockingPanel> | null>(null)
 const blockingStatus = reactive<{ snapshot: AutomaticBlockingSnapshot | null; loading: boolean; error: string }>({ snapshot: null, loading: true, error: '' })
+const traceInitialized = ref(false)
+const traceIp = ref('')
+const traceQueriedIp = ref('')
+const traceInlineError = ref('')
+const traceLoading = ref(false)
+const traceError = ref('')
+const traceResult = ref<SecurityIpTrace | null>(null)
+const surface = ref<SecuritySurfaceAudit | null>(null)
+const surfaceLoading = ref(false)
+const surfaceError = ref('')
+const publicListenersOnly = ref(false)
+const trafficHours = ref(24)
+const traffic = ref<SecurityTrafficSummary | null>(null)
+const trafficLoading = ref(false)
+const trafficError = ref('')
 let eventRequestGeneration = 0
 let recentRequestGeneration = 0
 let overviewRequestGeneration = 0
 let serverRequestGeneration = 0
+let traceRequestGeneration = 0
+let surfaceRequestGeneration = 0
+let trafficRequestGeneration = 0
 let clockTimer: ReturnType<typeof setInterval> | undefined
 const policyDraft = reactive({
   ssh_failed_threshold: 20,
@@ -75,6 +101,7 @@ const resourceMetrics = [
 function selectSection(section: SecuritySection): void {
   activeSection.value = section
   if (section === 'events' && !eventsInitialized.value) void loadEvents()
+  if (section === 'trace') initializeTracePanel()
 }
 
 function handleTabKey(event: KeyboardEvent, index: number): void {
@@ -236,6 +263,7 @@ function eventStatusLabel(value: string): string {
   const labels: Record<string, string> = {
     success: '成功', failed: '失败', running: '进行中', open: '待处理', resolved: '已处理',
     warning: '部分异常', unknown: '状态未知', blocked: '已封禁', expired: '已到期', released: '已解封',
+    active: '生效中',
   }
   return labels[value] || value
 }
@@ -357,10 +385,176 @@ async function loadServer(): Promise<void> {
   }
 }
 
+/* ---------- 溯源与响应：全部只读，不向目标发包 ---------- */
+
+const firewallFamilies = [{ key: 'ipv4', label: 'IPv4' }, { key: 'ipv6', label: 'IPv6' }] as const
+const riskLevelLabels: Record<string, string> = { low: '低风险', medium: '中风险', high: '高风险', critical: '危急风险' }
+
+function riskLevelLabel(level: string): string {
+  return riskLevelLabels[level] || (level ? `风险等级 ${level}` : '风险等级未知')
+}
+
+function riskLevelTone(level: string): string {
+  return ({ low: 'low', medium: 'warning', high: 'high', critical: 'critical' } as Record<string, string>)[level] || 'unknown'
+}
+
+/** 取回执中的首条有效说明，用于不可用时的错误条。 */
+function firstIssue(errors: string[] | undefined): string {
+  return (errors || []).find((item) => typeof item === 'string' && item.trim())?.trim() || ''
+}
+
+function isPublicListener(listener: { address: string }): boolean {
+  return ['0.0.0.0', '::', '*'].includes(listener.address.trim())
+}
+
+function isIpv4Address(value: string): boolean {
+  const parts = value.split('.')
+  return parts.length === 4
+    && parts.every((part) => /^\d{1,3}$/.test(part) && (part === '0' || !part.startsWith('0')) && Number(part) <= 255)
+}
+
+function isIpv6Address(value: string): boolean {
+  if (!value.includes(':') || !/^[0-9a-fA-F:.]+$/.test(value)) return false
+  const blocks = value.split('::')
+  if (blocks.length > 2) return false
+  const head = blocks[0] ? blocks[0].split(':') : []
+  const tail = blocks.length === 2 && blocks[1] ? blocks[1].split(':') : []
+  const groups = [...head, ...tail]
+  if (!groups.length) return value.includes('::')
+  const literalGroups = groups.filter((group) => group.includes('.'))
+  if (literalGroups.length > 1) return false
+  if (literalGroups.length === 1 && !isIpv4Address(groups[groups.length - 1])) return false
+  if (groups.some((group) => !group.includes('.') && !/^[0-9a-fA-F]{1,4}$/.test(group))) return false
+  const groupCount = groups.reduce((total, group) => total + (group.includes('.') ? 2 : 1), 0)
+  return value.includes('::') ? groupCount <= 7 : groupCount === 8
+}
+
+/** 校验单个 IP；返回空串表示可提交，否则返回行内提示。 */
+function traceIpValidation(value: string): string {
+  if (!value) return '请输入要溯源的来源 IP。'
+  if (value.includes('/')) return '只接受单个 IP，请输入具体地址而不是网段。'
+  if (isIpv4Address(value) || isIpv6Address(value)) return ''
+  return 'IP 格式不正确，请输入单个 IPv4 或 IPv6 地址。'
+}
+
+function countEntries(counts: Record<string, number> | undefined, limit: number): Array<[string, number]> {
+  return Object.entries(counts || {})
+    .filter(([, count]) => typeof count === 'number')
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, limit)
+}
+
+function peerEndpointSummary(peer: SecurityTrafficPeer): string {
+  const ports = countEntries(peer.peer_ports, 3).map(([port, count]) => `${port} × ${count}`)
+  const protocols = countEntries(peer.protocols, 2).map(([name, count]) => `${name} × ${count}`)
+  return [...(ports.length ? [`端口 ${ports.join('、')}`] : []), ...(protocols.length ? [`协议 ${protocols.join('、')}`] : [])].join(' · ') || '未记录'
+}
+
+function peerProcessSummary(peer: SecurityTrafficPeer): string {
+  const states = countEntries(peer.states, 3).map(([state, count]) => `${state} × ${count}`)
+  return [...(peer.processes || []), ...(states.length ? [`状态 ${states.join('、')}`] : [])].join(' · ')
+}
+
+const visibleListeners = computed(() => {
+  const listeners = surface.value?.listeners || []
+  return publicListenersOnly.value ? listeners.filter(isPublicListener) : listeners
+})
+
+function initializeTracePanel(): void {
+  if (traceInitialized.value) return
+  traceInitialized.value = true
+  void Promise.allSettled([loadSurface(), loadTraffic()])
+}
+
+async function submitTrace(): Promise<void> {
+  if (traceLoading.value) return
+  const target = traceIp.value.trim()
+  const invalid = traceIpValidation(target)
+  if (invalid) {
+    traceInlineError.value = invalid
+    return
+  }
+  traceInlineError.value = ''
+  traceQueriedIp.value = target
+  const requestGeneration = ++traceRequestGeneration
+  traceLoading.value = true
+  traceError.value = ''
+  traceResult.value = null
+  try {
+    const result = await traceSecurityIp(target)
+    if (requestGeneration !== traceRequestGeneration) return
+    if (result.available !== true || result.verified !== true) {
+      traceError.value = `溯源不可用：${firstIssue(result.errors) || '宿主机未返回可用回执，请稍后重试。'}`
+      return
+    }
+    traceResult.value = result
+  } catch (error) {
+    if (requestGeneration === traceRequestGeneration) traceError.value = `溯源读取失败：${getErrorMessage(error)}`
+  } finally {
+    if (requestGeneration === traceRequestGeneration) traceLoading.value = false
+  }
+}
+
+async function retryTrace(): Promise<void> {
+  if (traceLoading.value) return
+  const target = traceQueriedIp.value || traceIp.value.trim()
+  if (traceIpValidation(target)) return
+  traceIp.value = target
+  await submitTrace()
+}
+
+async function loadSurface(): Promise<void> {
+  const requestGeneration = ++surfaceRequestGeneration
+  surfaceLoading.value = true
+  surfaceError.value = ''
+  try {
+    const result = await getDefenseSurface()
+    if (requestGeneration !== surfaceRequestGeneration) return
+    if (result.available !== true || result.verified !== true) {
+      surface.value = null
+      surfaceError.value = `防御面不可用：${firstIssue(result.errors) || '宿主机未返回可用回执，请稍后重试。'}`
+      return
+    }
+    surface.value = result
+  } catch (error) {
+    if (requestGeneration === surfaceRequestGeneration) {
+      surface.value = null
+      surfaceError.value = `防御面读取失败：${getErrorMessage(error)}`
+    }
+  } finally {
+    if (requestGeneration === surfaceRequestGeneration) surfaceLoading.value = false
+  }
+}
+
+async function loadTraffic(): Promise<void> {
+  const requestGeneration = ++trafficRequestGeneration
+  const requestedHours = trafficHours.value
+  trafficLoading.value = true
+  trafficError.value = ''
+  try {
+    const result = await getTrafficSummary(requestedHours)
+    if (requestGeneration !== trafficRequestGeneration) return
+    if (result.available !== true || result.verified !== true) {
+      traffic.value = null
+      trafficError.value = `流量元数据不可用：${firstIssue(result.errors) || '宿主机未返回可用回执，请稍后重试。'}`
+      return
+    }
+    traffic.value = result
+  } catch (error) {
+    if (requestGeneration === trafficRequestGeneration) {
+      traffic.value = null
+      trafficError.value = `流量元数据读取失败：${getErrorMessage(error)}`
+    }
+  } finally {
+    if (requestGeneration === trafficRequestGeneration) trafficLoading.value = false
+  }
+}
+
 async function refreshAll(refreshBlocking = true): Promise<void> {
   await Promise.allSettled([
     loadOverview(), loadRecentEvents(), loadServer(),
     ...(eventsInitialized.value ? [loadEvents()] : []),
+    ...(traceInitialized.value ? [loadSurface(), loadTraffic()] : []),
     ...(refreshBlocking && blockingPanel.value ? [blockingPanel.value.refresh()] : []),
   ])
 }
@@ -452,6 +646,9 @@ onUnmounted(() => {
   ++recentRequestGeneration
   ++overviewRequestGeneration
   ++serverRequestGeneration
+  ++traceRequestGeneration
+  ++surfaceRequestGeneration
+  ++trafficRequestGeneration
 })
 </script>
 
@@ -617,6 +814,237 @@ onUnmounted(() => {
         </aside>
       </div>
     </section>
+
+    <section id="security-panel-trace" v-show="activeSection === 'trace'" class="section-content" role="tabpanel" aria-labelledby="security-tab-trace" tabindex="0">
+      <section class="trace-query-panel panel" aria-labelledby="trace-query-title">
+        <div class="section-heading">
+          <div><h3 id="trace-query-title">来源溯源</h3><p class="section-subtitle">输入单个来源 IP，被动读取本机可信日志、处置回执与外部情报。</p></div>
+          <span class="permission-note"><Lock aria-hidden="true" />仅超级管理员</span>
+        </div>
+        <form class="trace-form" @submit.prevent="submitTrace">
+          <label class="filter-field trace-ip-field" for="trace-ip-input"><span>来源 IP</span>
+            <input id="trace-ip-input" v-model="traceIp" data-testid="trace-ip-input" name="trace_ip" type="text" autocomplete="off" spellcheck="false" placeholder="例如 203.0.113.9" :disabled="traceLoading" :aria-invalid="traceInlineError ? 'true' : undefined" aria-describedby="trace-ip-help" @input="traceInlineError = ''">
+          </label>
+          <button class="button button-primary" data-testid="trace-ip-submit" type="submit" :disabled="traceLoading"><Search aria-hidden="true" /><span>{{ traceLoading ? '溯源中…' : '开始溯源' }}</span></button>
+        </form>
+        <p id="trace-ip-help" class="trace-help">只接受单个 IPv4 或 IPv6 地址，不接受网段、路径或命令。</p>
+        <p v-if="traceInlineError" class="trace-inline-error" data-testid="trace-ip-error" role="alert">{{ traceInlineError }}</p>
+        <p class="trace-readonly" data-testid="trace-readonly"><Lock aria-hidden="true" /><span>本溯源全程只读，不向目标发送任何扫描或探测请求。</span></p>
+
+        <div v-if="traceError" class="state-banner error-banner" role="alert">
+          <span>{{ traceError }}</span>
+          <button class="button button-secondary" data-testid="retry-trace" type="button" :disabled="traceLoading" @click="retryTrace">重试</button>
+        </div>
+        <div v-else-if="traceLoading" class="empty-state" role="status">正在读取本机可信日志与处置回执…</div>
+        <article v-else-if="traceResult" class="trace-result" data-testid="trace-result">
+          <header class="trace-result-head">
+            <div class="trace-result-identity">
+              <code class="trace-ip">{{ traceResult.ip }}</code>
+              <span class="state-pill" :class="traceResult.is_public ? 'tone-warning' : 'tone-unknown'">{{ traceResult.is_public ? '公网来源' : '非公网地址' }}</span>
+            </div>
+            <div class="trace-risk">
+              <span class="state-pill" :class="`risk-${riskLevelTone(traceResult.risk.level)}`">{{ riskLevelLabel(traceResult.risk.level) }}</span>
+              <strong class="trace-risk-score">{{ traceResult.risk.score }}</strong><small>风险分</small>
+              <progress :value="Math.min(Math.max(traceResult.risk.score, 0), 100)" max="100" aria-label="风险分">{{ traceResult.risk.score }}</progress>
+            </div>
+          </header>
+          <p class="trace-meta">生成时间 {{ formatTime(traceResult.generated_at) }} · 观察窗口 {{ traceResult.window_hours }} 小时{{ traceResult.request_id ? ` · 执行记录 ${traceResult.request_id}` : '' }}</p>
+          <p v-if="traceResult.is_protected" class="trace-protected" data-testid="trace-protected" role="status"><Lock aria-hidden="true" /><span>受保护来源，不参与自动处置</span></p>
+
+          <div class="trace-columns">
+            <section class="trace-block" aria-labelledby="trace-risk-title">
+              <h4 id="trace-risk-title">风险理由</h4>
+              <ul v-if="traceResult.risk.reasons.length" class="trace-reason-list"><li v-for="reason in traceResult.risk.reasons" :key="reason">{{ reason }}</li></ul>
+              <p v-else class="trace-muted">本机日志未记录可解释的风险理由。</p>
+              <p class="trace-basis" data-testid="trace-risk-basis"><strong>评分依据</strong>{{ traceResult.risk.basis || '未提供评分依据' }}。评分只使用本机可信日志，外部被动归因不参与评分。</p>
+            </section>
+            <section class="trace-block" aria-labelledby="trace-attribution-title">
+              <h4 id="trace-attribution-title">归属与情报</h4>
+              <p class="trace-attribution-note" data-testid="trace-attribution-note">外部被动归因，不参与评分</p>
+              <dl v-if="traceResult.attribution.ok" class="trace-facts">
+                <div v-if="traceResult.attribution.country"><dt>国家/地区</dt><dd>{{ traceResult.attribution.country }}</dd></div>
+                <div v-if="traceResult.attribution.region"><dt>区域</dt><dd>{{ traceResult.attribution.region }}</dd></div>
+                <div v-if="traceResult.attribution.city"><dt>城市</dt><dd>{{ traceResult.attribution.city }}</dd></div>
+                <div v-if="traceResult.attribution.isp"><dt>ISP</dt><dd>{{ traceResult.attribution.isp }}</dd></div>
+                <div v-if="traceResult.attribution.org"><dt>Org</dt><dd>{{ traceResult.attribution.org }}</dd></div>
+                <div v-if="traceResult.attribution.as"><dt>AS</dt><dd>{{ traceResult.attribution.as }}</dd></div>
+              </dl>
+              <p v-else class="trace-muted">{{ traceResult.attribution.note || '未取得外部归因结果。' }}</p>
+              <dl class="trace-facts trace-intel">
+                <div><dt>反向解析</dt><dd>{{ traceResult.reverse_dns.ok ? (traceResult.reverse_dns.output || '已解析，无输出') : (traceResult.reverse_dns.note || '未取得反向解析') }}</dd></div>
+                <div><dt>Whois</dt><dd>{{ traceResult.whois.ok ? (traceResult.whois.summary || '已查询，无摘要') : (traceResult.whois.note || '未取得 Whois 结果') }}</dd></div>
+              </dl>
+            </section>
+          </div>
+
+          <div class="trace-columns">
+            <section class="trace-block" data-testid="trace-ssh" aria-labelledby="trace-ssh-title">
+              <h4 id="trace-ssh-title">SSH 证据</h4>
+              <p class="trace-metric-line"><strong>{{ traceResult.ssh.count }}</strong><span>次认证失败</span></p>
+              <p class="trace-muted">首次 {{ formatTime(traceResult.ssh.first_seen) }} · 最近 {{ formatTime(traceResult.ssh.last_seen) }}</p>
+              <ul v-if="traceResult.ssh.accounts_tried.length" class="trace-tag-list"><li v-for="item in traceResult.ssh.accounts_tried" :key="item.account"><code>{{ item.account }}</code><span>{{ item.count }} 次</span></li></ul>
+              <p v-else class="trace-muted">未记录被尝试的账号。</p>
+            </section>
+            <section class="trace-block" data-testid="trace-web" aria-labelledby="trace-web-title">
+              <h4 id="trace-web-title">Web 证据</h4>
+              <p class="trace-metric-line"><strong>{{ traceResult.web.count }}</strong><span>次异常请求 · {{ traceResult.web.target_count }} 个不同目标</span></p>
+              <p class="trace-muted">首次 {{ formatTime(traceResult.web.first_seen) }} · 最近 {{ formatTime(traceResult.web.last_seen) }}</p>
+              <ul v-if="traceResult.web.targets.length" class="trace-tag-list"><li v-for="item in traceResult.web.targets" :key="item.path"><code>{{ item.path }}</code><span>{{ item.count }} 次</span></li></ul>
+              <p v-else class="trace-muted">未记录探测目标路径。</p>
+              <dl class="trace-facts trace-intel">
+                <div><dt>方法分布</dt><dd>{{ countEntries(traceResult.web.methods, 8).map(([method, count]) => `${method} × ${count}`).join('、') || '未记录' }}</dd></div>
+                <div><dt>状态码分布</dt><dd>{{ countEntries(traceResult.web.status_codes, 8).map(([code, count]) => `${code} × ${count}`).join('、') || '未记录' }}</dd></div>
+              </dl>
+            </section>
+          </div>
+
+          <section class="trace-block trace-records" aria-labelledby="trace-records-title">
+            <h4 id="trace-records-title">处置记录</h4>
+            <p v-if="!traceResult.defense_records.length" class="trace-muted">本机处置回执中没有该来源的封禁或解封记录。</p>
+            <div v-else class="trace-table-wrap">
+              <table class="trace-table">
+                <caption class="visually-hidden">该来源的防火墙与封禁处置记录</caption>
+                <thead><tr><th scope="col">规则</th><th scope="col">来源</th><th scope="col">状态</th><th scope="col">开始时间</th><th scope="col">到期时间</th><th scope="col">解封时间</th><th scope="col">证据数</th><th scope="col">原因</th></tr></thead>
+                <tbody><tr v-for="record in traceResult.defense_records" :key="record.id">
+                  <td>{{ record.rule }}</td><td>{{ record.source }}</td>
+                  <td><span class="state-pill" :class="`status-${record.status}`">{{ eventStatusLabel(record.status) }}</span></td>
+                  <td>{{ formatTime(record.started_at) }}</td><td>{{ formatTime(record.expires_at) }}</td><td>{{ formatTime(record.released_at) }}</td>
+                  <td>{{ record.evidence_count }}</td><td class="trace-reason-cell">{{ record.reason || '未记录原因' }}</td>
+                </tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <details v-if="traceResult.evidence_sources.length || traceResult.errors.length" class="trace-diagnostics">
+            <summary>证据来源与诊断</summary>
+            <p v-if="traceResult.evidence_sources.length" class="trace-muted">证据来源：{{ traceResult.evidence_sources.join('、') }}</p>
+            <ul v-if="traceResult.errors.length" class="trace-diagnostic-list"><li v-for="(item, index) in traceResult.errors" :key="index">{{ item }}</li></ul>
+          </details>
+        </article>
+        <p v-else class="empty-state"><Search aria-hidden="true" /><strong>尚未提交溯源请求</strong><span>溯源结果完全来自本机日志与回执，不含任何主动探测数据。</span></p>
+      </section>
+
+      <section class="trace-surface-panel panel" data-testid="surface-panel" aria-labelledby="surface-title" :aria-busy="surfaceLoading">
+        <div class="section-heading">
+          <div><h3 id="surface-title">本机防御面</h3><p class="section-subtitle">只读读取监听端口、防火墙链、加固应用与拦截现状。</p></div>
+          <button class="button button-secondary" data-testid="refresh-surface" type="button" :disabled="surfaceLoading" @click="loadSurface"><Refresh :class="{ spinning: surfaceLoading }" aria-hidden="true" /><span>{{ surfaceLoading ? '读取中…' : '刷新防御面' }}</span></button>
+        </div>
+        <div v-if="surfaceError" class="state-banner error-banner" role="alert">
+          <span>{{ surfaceError }}</span>
+          <button class="button button-secondary" data-testid="retry-surface" type="button" :disabled="surfaceLoading" @click="loadSurface">重试</button>
+        </div>
+        <div v-else-if="surfaceLoading && !surface" class="empty-state" role="status">正在读取本机防御面…</div>
+        <template v-else-if="surface">
+          <dl class="surface-facts">
+            <div><dt>对外监听端口</dt><dd data-testid="surface-public-listeners">{{ surface.public_listener_count }} 个</dd></div>
+            <div><dt>自动封禁</dt><dd>{{ surface.blocking.enabled ? '已启用' : '未启用' }} · 后端 {{ surface.blocking.backend || '未识别' }} · 实际租约 {{ surface.blocking.active_leases }} 条</dd></div>
+            <div><dt>SSH 端口</dt><dd>{{ surface.ssh_ports || '未读取到' }}</dd></div>
+            <div><dt>ipset</dt><dd>{{ surface.ipset.present ? `已就绪 · ${surface.ipset.sets.length ? surface.ipset.sets.join('、') : '暂无集合'}` : '未安装' }}</dd></div>
+          </dl>
+
+          <section class="surface-section" aria-labelledby="surface-listeners-title">
+            <div class="surface-subheading">
+              <h4 id="surface-listeners-title">监听端口</h4>
+              <label class="surface-filter"><input v-model="publicListenersOnly" data-testid="surface-public-only" type="checkbox"><span>只看对外监听</span></label>
+            </div>
+            <p v-if="!visibleListeners.length" class="trace-muted">{{ surface.listeners.length ? '当前筛选下没有对外监听端口。' : '回执未返回监听端口，请核验采集权限。' }}</p>
+            <div v-else class="trace-table-wrap">
+              <table class="trace-table">
+                <thead><tr><th scope="col">协议</th><th scope="col">地址</th><th scope="col">端口</th><th scope="col">进程</th><th scope="col">暴露面</th></tr></thead>
+                <tbody><tr v-for="listener in visibleListeners" :key="`${listener.protocol}-${listener.address}-${listener.port}`" :class="{ 'is-public': isPublicListener(listener) }">
+                  <td>{{ listener.protocol || '未知' }}</td><td>{{ listener.address }}</td><td>{{ listener.port }}</td><td>{{ listener.process || '未知' }}</td>
+                  <td><span class="state-pill" :class="isPublicListener(listener) ? 'status-open' : 'tone-healthy'">{{ isPublicListener(listener) ? '对外监听' : '仅本机/内网' }}</span></td>
+                </tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="surface-section" aria-labelledby="surface-apps-title">
+            <h4 id="surface-apps-title">加固应用</h4>
+            <p v-if="!surface.applications.length" class="trace-muted">回执未返回加固应用清单。</p>
+            <ul v-else class="surface-app-list">
+              <li v-for="application in surface.applications" :key="application.name" :class="{ installed: application.installed }">
+                <span class="app-name">{{ application.name }}</span><span class="app-purpose">{{ application.purpose }}</span>
+                <span class="state-pill" :class="application.installed ? 'tone-healthy' : 'tone-unknown'">{{ application.installed ? '已安装' : '未安装' }}</span>
+              </li>
+            </ul>
+          </section>
+
+          <section class="surface-section" aria-labelledby="surface-firewall-title">
+            <h4 id="surface-firewall-title">防火墙链</h4>
+            <div v-for="family in firewallFamilies" :key="family.key" class="firewall-family">
+              <p class="firewall-head"><strong>{{ family.label }}</strong><span>{{ surface.firewall[family.key].tool || '工具未识别' }}</span><span>{{ surface.firewall[family.key].tools_present.length ? `已检测 ${surface.firewall[family.key].tools_present.join('、')}` : '未检测到工具' }}</span></p>
+              <p v-if="!surface.firewall[family.key].chains.length" class="trace-muted">未读取到链信息。</p>
+              <ul v-else class="firewall-chains">
+                <li v-for="chain in surface.firewall[family.key].chains" :key="`${family.key}-${chain.chain}`">
+                  <span class="state-pill" :class="chain.ok ? 'tone-healthy' : 'status-failed'">{{ chain.ok ? '可读' : '不可读' }}</span>
+                  <code>{{ chain.chain }}</code><span>策略 {{ chain.policy || '未知' }}</span><span>{{ chain.rules.length }} 条规则</span>
+                  <span v-if="chain.note" class="chain-note">{{ chain.note }}</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <details v-if="surface.errors.length" class="trace-diagnostics">
+            <summary>防御面诊断（{{ surface.errors.length }} 项）</summary>
+            <ul class="trace-diagnostic-list"><li v-for="(item, index) in surface.errors" :key="index">{{ item }}</li></ul>
+          </details>
+          <p class="panel-footnote">防御面读取于 {{ formatTime(surface.generated_at) }}，仅展示回执原文，不推断未返回的数据。</p>
+        </template>
+        <p v-else class="empty-state">尚未读取防御面。</p>
+      </section>
+
+      <section class="trace-traffic-panel panel" data-testid="traffic-panel" aria-labelledby="traffic-title" :aria-busy="trafficLoading">
+        <div class="section-heading">
+          <div><h3 id="traffic-title">流量元数据</h3><p class="section-subtitle">对端连接、端口协议与日志计数的汇总视图。</p></div>
+          <div class="traffic-controls">
+            <label class="filter-field" for="traffic-range"><span>时间范围</span>
+              <select id="traffic-range" v-model.number="trafficHours" data-testid="traffic-range" :disabled="trafficLoading" @change="loadTraffic"><option :value="24">近 24 小时</option><option :value="48">近 48 小时</option><option :value="72">近 72 小时</option></select>
+            </label>
+            <button class="button button-secondary" data-testid="refresh-traffic" type="button" :disabled="trafficLoading" @click="loadTraffic"><Refresh :class="{ spinning: trafficLoading }" aria-hidden="true" /><span>{{ trafficLoading ? '读取中…' : '刷新流量' }}</span></button>
+          </div>
+        </div>
+        <p class="traffic-payload-note" :class="{ 'payload-alert': Boolean(traffic && traffic.payload_captured !== false) }" data-testid="traffic-payload-note">
+          <Lock aria-hidden="true" />
+          <span v-if="traffic && traffic.payload_captured === false">只采集连接元数据与日志计数，不捕获、不存储流量载荷。</span>
+          <span v-else-if="traffic">回执显示存在流量载荷采集，请立即核验采集配置。</span>
+          <span v-else>本面板只读取连接元数据与日志计数，载荷采集状态待核验。</span>
+        </p>
+        <div v-if="trafficError" class="state-banner error-banner" role="alert">
+          <span>{{ trafficError }}</span>
+          <button class="button button-secondary" data-testid="retry-traffic" type="button" :disabled="trafficLoading" @click="loadTraffic">重试</button>
+        </div>
+        <div v-else-if="trafficLoading && !traffic" class="empty-state" role="status">正在读取连接元数据…</div>
+        <template v-else-if="traffic">
+          <dl class="traffic-facts">
+            <div><dt>对端总数</dt><dd data-testid="traffic-peer-total">{{ traffic.peer_total }}</dd></div>
+            <div><dt>当前连接数</dt><dd>{{ traffic.current_connections }}</dd></div>
+            <div><dt>近期 SSH 失败来源</dt><dd>{{ traffic.recent_ssh_failed_sources }}</dd></div>
+            <div><dt>近期敏感探测来源</dt><dd>{{ traffic.recent_probe_sources }}</dd></div>
+            <div><dt>观察窗口</dt><dd>{{ traffic.window_hours }} 小时</dd></div>
+          </dl>
+          <p v-if="traffic.note" class="panel-footnote">{{ traffic.note }}</p>
+          <p v-if="!traffic.peers.length" class="empty-state">当前窗口内没有对端连接记录。</p>
+          <div v-else class="trace-table-wrap">
+            <table class="trace-table">
+              <thead><tr><th scope="col">对端 IP</th><th scope="col">当前连接数</th><th scope="col">SSH 失败</th><th scope="col">敏感探测</th><th scope="col">不同目标数</th><th scope="col">端口 / 协议</th><th scope="col">最近时间</th></tr></thead>
+              <tbody><tr v-for="peer in traffic.peers" :key="peer.ip">
+                <td><code>{{ peer.ip }}</code></td>
+                <td>{{ peer.connections }}</td><td>{{ peer.ssh_failed_count }}</td><td>{{ peer.sensitive_probe_count }}</td><td>{{ peer.target_count }}</td>
+                <td class="trace-endpoint-cell">{{ peerEndpointSummary(peer) }}<small v-if="peerProcessSummary(peer)">{{ peerProcessSummary(peer) }}</small></td>
+                <td>{{ formatTime(peer.last_seen) }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+          <details v-if="traffic.errors.length" class="trace-diagnostics">
+            <summary>采集诊断（{{ traffic.errors.length }} 项）</summary>
+            <ul class="trace-diagnostic-list"><li v-for="(item, index) in traffic.errors" :key="index">{{ item }}</li></ul>
+          </details>
+          <p class="panel-footnote">数据读取于 {{ formatTime(traffic.generated_at) }}，仅统计元数据与日志计数。</p>
+        </template>
+        <p v-else class="empty-state">尚未读取流量元数据。</p>
+      </section>
+    </section>
   </main>
 </template>
 
@@ -775,6 +1203,100 @@ progress::-moz-progress-bar { background: var(--brand-500); border-radius: 99px;
 .policy-updated { margin-top: var(--sp-5) !important; color: var(--gray-500); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .policy-explanation { margin-top: var(--sp-4); padding-top: var(--sp-2); border-top: 1px solid var(--gray-100); }
 .policy-explanation p { margin-top: var(--sp-2); color: var(--gray-600); font-size: var(--fs-xs); }
+
+/* ---------- 溯源与响应（全部只读） ---------- */
+.trace-form { display: flex; min-width: 0; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-3); }
+.trace-ip-field { flex: 1 1 240px; }
+.trace-ip-field input { width: 100%; min-height: 44px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--gray-200); border-radius: var(--r-md); color: var(--gray-800); background: var(--color-white); font: var(--fs-base)/1.5 var(--font-sans); }
+.trace-ip-field input[aria-invalid='true'] { border-color: var(--sev-severe); }
+.trace-ip-field input:disabled { color: var(--gray-500); background: var(--gray-50); }
+.trace-form .button { flex: 0 0 auto; }
+.trace-help, .trace-muted { margin-top: var(--sp-2) !important; color: var(--gray-500); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.trace-inline-error { margin-top: var(--sp-3) !important; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); color: var(--sev-severe); background: var(--sev-severe-bg); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.trace-readonly { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-3) !important; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); color: var(--brand-700); background: var(--brand-50); font-size: var(--fs-xs); }
+.trace-readonly svg { width: 14px; height: 14px; margin-top: 3px; }
+.trace-readonly > span { min-width: 0; overflow-wrap: anywhere; }
+.trace-query-panel .state-banner, .trace-surface-panel .state-banner, .trace-traffic-panel .state-banner { margin-top: var(--sp-4); }
+.trace-result { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--gray-100); }
+.trace-result-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); }
+.trace-result-identity { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.trace-ip { color: var(--gray-900); font: 600 var(--fs-md)/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.trace-risk { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.trace-risk-score { color: var(--gray-900); font-size: var(--fs-xl); font-weight: 700; line-height: 1.3; }
+.trace-risk small { color: var(--gray-500); font-size: var(--fs-xs); }
+.trace-risk progress { width: 96px; }
+.trace-meta { margin-top: var(--sp-3) !important; color: var(--gray-600); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.trace-protected { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3) !important; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--sev-high); border-radius: var(--r-md); color: var(--sev-high); background: var(--sev-high-bg); font-size: var(--fs-base); font-weight: 600; }
+.trace-protected svg { width: 16px; height: 16px; }
+.trace-columns { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); margin-top: var(--sp-5); }
+.trace-block { min-width: 0; }
+.trace-block h4 { margin-bottom: var(--sp-2); color: var(--gray-900); font-size: var(--fs-base); font-weight: 600; }
+.trace-reason-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding-left: var(--sp-4); color: var(--gray-700); font-size: var(--fs-base); }
+.trace-reason-list li { overflow-wrap: anywhere; }
+.trace-basis { margin-top: var(--sp-3) !important; padding: var(--sp-3); border-radius: var(--r-md); color: var(--gray-700); background: var(--gray-50); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.trace-basis strong { display: block; margin-bottom: var(--sp-1); color: var(--gray-800); }
+.trace-attribution-note { display: inline-flex; align-items: center; padding: var(--sp-1) var(--sp-2); border-radius: 99px; color: var(--gray-600); background: var(--gray-100); font-size: var(--fs-xs); }
+.trace-facts { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0 0; }
+.trace-facts > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: var(--sp-3); align-items: baseline; }
+.trace-facts dt { color: var(--gray-500); font-size: var(--fs-xs); }
+.trace-facts dd { margin: 0; color: var(--gray-800); font-size: var(--fs-base); overflow-wrap: anywhere; }
+.trace-metric-line { display: flex; align-items: baseline; gap: var(--sp-2); }
+.trace-metric-line strong { color: var(--gray-900); font-size: var(--fs-2xl); font-weight: 700; line-height: 1.2; }
+.trace-metric-line span { min-width: 0; color: var(--gray-600); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.trace-tag-list { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+.trace-tag-list li { display: inline-flex; min-width: 0; align-items: baseline; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--gray-200); border-radius: var(--r-md); background: var(--gray-50); font-size: var(--fs-xs); }
+.trace-tag-list code { overflow-wrap: anywhere; }
+.trace-tag-list span { color: var(--gray-500); }
+.trace-records { margin-top: var(--sp-5); }
+.trace-table-wrap { max-width: 100%; overflow-x: auto; margin-top: var(--sp-3); }
+.trace-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: var(--fs-xs); }
+.trace-table th, .trace-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--gray-100); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.trace-table th { color: var(--gray-500); font-weight: 600; white-space: nowrap; }
+.trace-table td { color: var(--gray-700); }
+.trace-table tr.is-public td { background: var(--sev-high-bg); }
+.trace-table tr:last-child td { border-bottom: 0; }
+.trace-reason-cell { min-width: 160px; }
+.trace-endpoint-cell small { display: block; margin-top: var(--sp-1); color: var(--gray-500); }
+.trace-diagnostics { margin-top: var(--sp-4); }
+.trace-diagnostics summary { width: fit-content; min-height: 44px; padding: var(--sp-2) 0; color: var(--brand-600); cursor: pointer; }
+.trace-diagnostic-list { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; padding-left: var(--sp-4); color: var(--gray-600); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.state-pill.risk-low { color: var(--accent-600); background: var(--accent-50); }
+.state-pill.risk-warning { color: var(--sev-medium); background: var(--sev-medium-bg); }
+.state-pill.risk-high { color: var(--sev-high); background: var(--sev-high-bg); }
+.state-pill.risk-critical { color: var(--sev-severe); background: var(--sev-severe-bg); }
+.state-pill.risk-unknown { color: var(--gray-600); background: var(--gray-100); }
+.state-pill.status-active { color: var(--accent-600); background: var(--accent-50); }
+.state-pill.status-expired, .state-pill.status-released { color: var(--gray-600); background: var(--gray-100); }
+.surface-facts, .traffic-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); margin: 0; }
+.traffic-facts { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: var(--sp-4); }
+.surface-facts > div, .traffic-facts > div { min-width: 0; padding: var(--sp-3); border: 1px solid var(--gray-100); border-radius: var(--r-md); background: var(--gray-50); }
+.surface-facts dt, .traffic-facts dt { color: var(--gray-500); font-size: var(--fs-xs); }
+.surface-facts dd, .traffic-facts dd { margin: var(--sp-1) 0 0; color: var(--gray-900); font-size: var(--fs-base); font-weight: 600; overflow-wrap: anywhere; }
+.surface-section { margin-top: var(--sp-5); }
+.surface-section h4 { color: var(--gray-900); font-size: var(--fs-base); font-weight: 600; }
+.surface-subheading { display: flex; min-width: 0; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.surface-filter { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 44px; color: var(--gray-600); font-size: var(--fs-xs); }
+.surface-filter input { width: 18px; height: 18px; accent-color: var(--brand-500); }
+.surface-app-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+.surface-app-list li { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-3); border: 1px solid var(--gray-100); border-radius: var(--r-md); }
+.surface-app-list li.installed { border-color: var(--brand-100); background: var(--brand-50); }
+.app-name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.app-purpose { grid-column: 1; min-width: 0; color: var(--gray-500); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.surface-app-list .state-pill { grid-row: 1 / span 2; grid-column: 2; }
+.firewall-family { margin-top: var(--sp-3); }
+.firewall-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); color: var(--gray-600); font-size: var(--fs-xs); }
+.firewall-head strong { color: var(--gray-800); font-size: var(--fs-base); }
+.firewall-chains { display: flex; flex-direction: column; gap: var(--sp-2); margin: var(--sp-2) 0 0; padding: 0; list-style: none; }
+.firewall-chains li { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--gray-100); border-radius: var(--r-md); font-size: var(--fs-xs); }
+.firewall-chains code { overflow-wrap: anywhere; }
+.chain-note { min-width: 0; color: var(--gray-500); overflow-wrap: anywhere; }
+.traffic-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-3); }
+.traffic-payload-note { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-4) !important; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--brand-100); border-radius: var(--r-md); color: var(--brand-700); background: var(--brand-50); font-size: var(--fs-xs); }
+.traffic-payload-note svg { width: 14px; height: 14px; margin-top: 3px; }
+.traffic-payload-note > span { min-width: 0; overflow-wrap: anywhere; }
+.traffic-payload-note.payload-alert { color: var(--sev-severe); border-color: var(--sev-severe); background: var(--sev-severe-bg); }
+.traffic-payload-note + .state-banner, .traffic-payload-note + .empty-state { margin-top: var(--sp-4); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .spinning { animation: security-spin 1s linear infinite; }
 @keyframes security-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
@@ -833,5 +1355,32 @@ progress::-moz-progress-bar { background: var(--brand-500); border-radius: 99px;
   .policy-form { grid-template-columns: 1fr; }
   .recent-list li { grid-template-columns: 3px minmax(0, 1fr) 72px; }
   .state-banner { flex-direction: column; }
+}
+@media (max-width: 1100px) {
+  .surface-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .traffic-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 920px) {
+  .trace-columns { grid-template-columns: 1fr; }
+  .traffic-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .trace-form { align-items: stretch; }
+  .trace-ip-field { flex: 1 1 100%; }
+  .trace-form .button { width: 100%; }
+  .surface-facts, .traffic-facts { grid-template-columns: 1fr; }
+  .trace-result { padding-top: var(--sp-3); }
+  .trace-table { min-width: 520px; }
+  .traffic-controls { width: 100%; }
+  .traffic-controls .filter-field { flex: 1 1 140px; }
+  .traffic-controls .button { flex: 1 1 100%; }
+  .trace-query-panel .state-banner, .trace-surface-panel .state-banner, .trace-traffic-panel .state-banner { align-items: flex-start; }
+}
+@media (max-width: 360px) {
+  .trace-table { min-width: 460px; }
+  .trace-risk { width: 100%; }
+  .trace-risk progress { width: 100%; }
+  .surface-app-list li { grid-template-columns: minmax(0, 1fr); }
+  .surface-app-list .state-pill { grid-row: auto; grid-column: 1; justify-self: start; }
 }
 </style>

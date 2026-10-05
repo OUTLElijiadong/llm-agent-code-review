@@ -6,6 +6,7 @@ import AdminSecurityCenter from './AdminSecurityCenter.vue'
 const api = vi.hoisted(() => ({
   getSecurityCenterOverview: vi.fn(), getSecurityCenterEvents: vi.fn(), runSecurityMonitor: vi.fn(),
   updateSecurityMonitorPolicy: vi.fn(), getSystemStatus: vi.fn(), resolveAlert: vi.fn(),
+  traceSecurityIp: vi.fn(), getDefenseSurface: vi.fn(), getTrafficSummary: vi.fn(),
   messageSuccess: vi.fn(), messageWarning: vi.fn(), messageError: vi.fn(), prompt: vi.fn(),
   blockingMount: vi.fn(), blockingRefresh: vi.fn(),
   blockingState: vi.fn(),
@@ -31,6 +32,7 @@ function mountPage() {
 vi.mock('@/api/adminSecurityCenter', () => ({
   getSecurityCenterOverview: api.getSecurityCenterOverview, getSecurityCenterEvents: api.getSecurityCenterEvents,
   runSecurityMonitor: api.runSecurityMonitor, updateSecurityMonitorPolicy: api.updateSecurityMonitorPolicy,
+  traceSecurityIp: api.traceSecurityIp, getDefenseSurface: api.getDefenseSurface, getTrafficSummary: api.getTrafficSummary,
 }))
 vi.mock('@/api/adminOverview', () => ({ getSystemStatus: api.getSystemStatus }))
 vi.mock('@/api/adminGovernance', () => ({ resolveAlert: api.resolveAlert }))
@@ -67,6 +69,66 @@ async function openEvents(wrapper: ReturnType<typeof mountPage>) {
   await wrapper.get('#security-tab-events').trigger('click')
   await flushPromises()
 }
+async function openTrace(wrapper: ReturnType<typeof mountPage>) {
+  await wrapper.get('#security-tab-trace').trigger('click')
+  await flushPromises()
+}
+function traceSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    available: true, verified: true, kind: 'ip_trace', request_id: 'req-trace-1', ip: '203.0.113.9',
+    generated_at: '2026-10-05T11:59:00Z', window_hours: 24, is_public: true, is_protected: false,
+    risk: { score: 86, level: 'high', reasons: ['SSH 认证失败 42 次', '命中 3 个敏感路径'], basis: '本机 SSH 认证日志与 Nginx 访问日志' },
+    ssh: { count: 42, accounts_tried: [{ account: 'root', count: 30 }, { account: 'admin', count: 12 }], first_seen: '2026-10-05T09:00:00Z', last_seen: '2026-10-05T11:30:00Z' },
+    web: { count: 7, target_count: 3, targets: [{ path: '/.env', count: 4 }, { path: '/wp-login.php', count: 3 }], methods: { GET: 6, POST: 1 }, status_codes: { 403: 5, 404: 2 }, first_seen: '2026-10-05T09:10:00Z', last_seen: '2026-10-05T11:20:00Z' },
+    defense_records: [{ id: 'blk-1', ip: '203.0.113.9', rule: 'ssh_failed_password', source: 'automatic_blocking', status: 'expired', started_at: '2026-10-05T09:30:00Z', expires_at: '2026-10-05T09:45:00Z', released_at: null, evidence_count: 21, reason: '短窗口重复认证失败' }],
+    attribution: { ok: true, country: '德国', region: '黑森州', city: '法兰克福', isp: 'Example ISP', org: 'Example Org', as: 'AS64500' },
+    reverse_dns: { ok: false, output: '', note: '未配置反向解析' },
+    whois: { ok: true, summary: 'Example Org · DE', note: '' },
+    evidence_sources: ['ssh 认证失败日志', 'nginx 访问日志'], errors: [],
+    ...overrides,
+  }
+}
+function surfaceSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    available: true, verified: true, kind: 'surface_audit', request_id: 'req-surface-1', generated_at: '2026-10-05T11:58:00Z',
+    listeners: [
+      { protocol: 'tcp', address: '0.0.0.0', port: 443, process: 'nginx' },
+      { protocol: 'tcp', address: '127.0.0.1', port: 8000, process: 'python' },
+    ],
+    public_listener_count: 1,
+    firewall: {
+      ipv4: {
+        tool: 'iptables',
+        chains: [
+          { chain: 'INPUT', ok: true, policy: 'DROP', rules: ['-A INPUT -p tcp --dport 443 -j ACCEPT'], note: '' },
+          { chain: 'DOCKER-USER', ok: false, policy: '未知', rules: [], note: '需要 root 权限' },
+        ],
+        tools_present: ['iptables', 'ipset'],
+      },
+      ipv6: { tool: 'ip6tables', chains: [{ chain: 'INPUT', ok: true, policy: 'DROP', rules: [], note: '' }], tools_present: ['ip6tables'] },
+    },
+    applications: [
+      { name: 'fail2ban', purpose: '登录失败自动封禁', installed: true },
+      { name: 'auditd', purpose: '系统调用审计', installed: false },
+    ],
+    ipset: { present: true, sets: ['prism_block_v4'] },
+    blocking: { enabled: true, backend: 'ipset', active_leases: 2 },
+    ssh_ports: '2222', errors: [],
+    ...overrides,
+  }
+}
+function trafficSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    available: true, verified: true, kind: 'traffic_summary', request_id: 'req-traffic-1', generated_at: '2026-10-05T11:57:00Z', window_hours: 24,
+    peers: [{
+      ip: '203.0.113.9', connections: 3, protocols: { tcp: 3 }, peer_ports: { 443: 2, 22: 1 }, processes: ['nginx'],
+      states: { ESTABLISHED: 2, SYN_SENT: 1 }, ssh_failed_count: 42, sensitive_probe_count: 7, target_count: 3, last_seen: '2026-10-05T11:30:00Z',
+    }],
+    peer_total: 5, current_connections: 9, recent_ssh_failed_sources: 2, recent_probe_sources: 1,
+    payload_captured: false, note: '数据来自连接元数据与日志计数。', errors: [],
+    ...overrides,
+  }
+}
 async function openStrategies(wrapper: ReturnType<typeof mountPage>) {
   await wrapper.get('#security-tab-strategies').trigger('click')
   await flushPromises()
@@ -88,6 +150,9 @@ describe('管理员安全中心', () => {
     api.getSecurityCenterEvents.mockResolvedValue(eventPage())
     api.blockingRefresh.mockResolvedValue(true)
     api.blockingState.mockReturnValue({ available: true, verified: true, enabled: false })
+    api.traceSecurityIp.mockResolvedValue(traceSnapshot())
+    api.getDefenseSurface.mockResolvedValue(surfaceSnapshot())
+    api.getTrafficSummary.mockResolvedValue(trafficSnapshot())
     api.getSystemStatus.mockResolvedValue({ available: true, collected_at: '2026-10-05T12:00:00Z', process_uptime_seconds: 10, cpu_percent: 4, memory_percent: 35, disk_percent: 48, disk_used_gb: 48, disk_total_gb: 100, uptime_seconds: 86400 })
   })
 
@@ -112,10 +177,11 @@ describe('管理员安全中心', () => {
     await wrapper.get('#security-tab-overview').trigger('keydown', { key: 'ArrowRight' }); await flushPromises()
     expect(wrapper.get('#security-tab-events').attributes('aria-selected')).toBe('true')
     expect(document.activeElement?.id).toBe('security-tab-events')
-    await wrapper.get('#security-tab-events').trigger('keydown', { key: 'End' })
-    expect(wrapper.get('#security-tab-strategies').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('#security-tab-strategies').attributes('aria-controls')).toBe('security-panel-strategies')
-    await wrapper.get('#security-tab-strategies').trigger('keydown', { key: 'Home' })
+    await wrapper.get('#security-tab-events').trigger('keydown', { key: 'End' }); await flushPromises()
+    expect(wrapper.get('#security-tab-trace').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#security-tab-trace').attributes('aria-controls')).toBe('security-panel-trace')
+    expect(document.activeElement?.id).toBe('security-tab-trace')
+    await wrapper.get('#security-tab-trace').trigger('keydown', { key: 'Home' })
     expect(wrapper.get('#security-panel-overview').attributes('aria-labelledby')).toBe('security-tab-overview')
     expect(document.activeElement?.id).toBe('security-tab-overview')
   })
@@ -323,5 +389,163 @@ describe('管理员安全中心', () => {
     expect(api.runSecurityMonitor).toHaveBeenCalledOnce()
     expect(api.getSecurityCenterOverview).toHaveBeenCalledTimes(2)
     expect(api.messageWarning).toHaveBeenCalledWith(expect.stringContaining('1 项'))
+  })
+
+  it('合法 IP 溯源成功渲染风险、证据、处置记录与外部归因标注', async () => {
+    const wrapper = mountPage(); await flushPromises()
+    expect(wrapper.get('#security-panel-trace').isVisible()).toBe(false)
+    await openTrace(wrapper)
+    expect(wrapper.get('#security-panel-trace').isVisible()).toBe(true)
+    await wrapper.get('[data-testid="trace-ip-input"]').setValue('203.0.113.9')
+    await wrapper.get('[data-testid="trace-ip-submit"]').trigger('click'); await flushPromises()
+    expect(api.traceSecurityIp).toHaveBeenCalledExactlyOnceWith('203.0.113.9')
+    const result = wrapper.get('[data-testid="trace-result"]')
+    expect(result.text()).toContain('203.0.113.9')
+    expect(result.text()).toContain('高风险')
+    expect(result.get('.trace-risk-score').text()).toBe('86')
+    expect(result.text()).toContain('观察窗口 24 小时')
+    expect(result.text()).toContain('SSH 认证失败 42 次')
+    expect(result.text()).toContain('root')
+    expect(result.text()).toContain('/.env')
+    expect(result.text()).toContain('3 个不同目标')
+    expect(result.text()).toContain('GET × 6')
+    expect(result.get('[data-testid="trace-risk-basis"]').text()).toContain('本机 SSH 认证日志与 Nginx 访问日志')
+    expect(result.get('[data-testid="trace-risk-basis"]').text()).toContain('评分只使用本机可信日志')
+    expect(result.get('[data-testid="trace-attribution-note"]').text()).toBe('外部被动归因，不参与评分')
+    expect(result.text()).toContain('德国')
+    expect(result.text()).toContain('法兰克福')
+    expect(result.text()).toContain('Example ISP')
+    expect(result.text()).toContain('AS64500')
+    expect(result.text()).toContain('ssh_failed_password')
+    expect(result.text()).toContain('已到期')
+    expect(result.text()).toContain('短窗口重复认证失败')
+    expect(result.text()).not.toContain('受保护来源，不参与自动处置')
+    expect(wrapper.get('[data-testid="trace-readonly"]').text()).toContain('不向目标发送任何扫描或探测请求')
+  })
+
+  it('非法 IP 与网段只给行内提示，不发起溯源请求', async () => {
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    await wrapper.get('[data-testid="trace-ip-input"]').setValue('203.0.113.0/24')
+    await wrapper.get('.trace-form').trigger('submit'); await flushPromises()
+    expect(wrapper.get('[data-testid="trace-ip-error"]').text()).toContain('网段')
+    await wrapper.get('[data-testid="trace-ip-input"]').setValue('not-an-ip')
+    await wrapper.get('.trace-form').trigger('submit'); await flushPromises()
+    expect(wrapper.get('[data-testid="trace-ip-error"]').text()).toContain('IP 格式不正确')
+    expect(api.traceSecurityIp).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="trace-result"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="retry-trace"]').exists()).toBe(false)
+  })
+
+  it('溯源回执不可用或请求失败时显示错误条与重试，不展示任何数值', async () => {
+    api.traceSecurityIp.mockResolvedValueOnce({ available: false, verified: false, kind: 'ip_trace', errors: ['宿主机溯源执行失败'] })
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    await wrapper.get('[data-testid="trace-ip-input"]').setValue('203.0.113.9')
+    await wrapper.get('.trace-form').trigger('submit'); await flushPromises()
+    expect(wrapper.get('#security-panel-trace').text()).toContain('溯源不可用：宿主机溯源执行失败')
+    expect(wrapper.find('[data-testid="trace-result"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="retry-trace"]').trigger('click'); await flushPromises()
+    expect(api.traceSecurityIp).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="trace-result"]').text()).toContain('高风险')
+    api.traceSecurityIp.mockRejectedValueOnce(new Error('网络超时'))
+    await wrapper.get('.trace-form').trigger('submit'); await flushPromises()
+    expect(wrapper.get('#security-panel-trace').text()).toContain('溯源读取失败：网络超时')
+    expect(wrapper.find('[data-testid="trace-result"]').exists()).toBe(false)
+  })
+
+  it('受保护来源醒目提示，归因失败只显示原因不伪造外部信息', async () => {
+    api.traceSecurityIp.mockResolvedValue(traceSnapshot({ is_protected: true, attribution: { ok: false, note: '外部归因服务未配置' } }))
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    await wrapper.get('[data-testid="trace-ip-input"]').setValue('203.0.113.9')
+    await wrapper.get('.trace-form').trigger('submit'); await flushPromises()
+    const result = wrapper.get('[data-testid="trace-result"]')
+    expect(result.get('[data-testid="trace-protected"]').text()).toContain('受保护来源，不参与自动处置')
+    expect(result.get('[data-testid="trace-attribution-note"]').text()).toBe('外部被动归因，不参与评分')
+    expect(result.text()).toContain('外部归因服务未配置')
+    expect(result.text()).not.toContain('德国')
+    expect(result.text()).not.toContain('AS64500')
+  })
+
+  it('进入溯源分区自动加载一次防御面与流量元数据，重复进入不重复请求', async () => {
+    const wrapper = mountPage(); await flushPromises()
+    expect(api.getDefenseSurface).not.toHaveBeenCalled()
+    expect(api.getTrafficSummary).not.toHaveBeenCalled()
+    await openTrace(wrapper)
+    expect(api.getDefenseSurface).toHaveBeenCalledTimes(1)
+    expect(api.getTrafficSummary).toHaveBeenCalledExactlyOnceWith(24)
+    await wrapper.get('#security-tab-overview').trigger('click'); await flushPromises()
+    await openTrace(wrapper)
+    expect(api.getDefenseSurface).toHaveBeenCalledTimes(1)
+    expect(api.getTrafficSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('防御面卡展示监听面、加固应用两态、ipset、封禁租约与防火墙链可读性', async () => {
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    const panel = wrapper.get('[data-testid="surface-panel"]')
+    expect(panel.get('[data-testid="surface-public-listeners"]').text()).toBe('1 个')
+    expect(panel.text()).toContain('nginx')
+    expect(panel.text()).toContain('对外监听')
+    expect(panel.text()).toContain('已安装')
+    expect(panel.text()).toContain('未安装')
+    expect(panel.text()).toContain('prism_block_v4')
+    expect(panel.text()).toContain('实际租约 2 条')
+    expect(panel.text()).toContain('2222')
+    expect(panel.text()).toContain('可读')
+    expect(panel.text()).toContain('不可读')
+    expect(panel.text()).toContain('ip6tables')
+    await panel.get('[data-testid="surface-public-only"]').setValue(true)
+    const rows = panel.findAll('tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('0.0.0.0')
+  })
+
+  it('防御面与流量回执不可用时显示错误条，重试后可恢复', async () => {
+    api.getDefenseSurface.mockResolvedValueOnce({ available: false, verified: false, kind: 'surface_audit', errors: ['需要 root 权限'] })
+    api.getTrafficSummary.mockResolvedValueOnce({ available: false, verified: false, kind: 'traffic_summary', errors: ['连接元数据不可用'] })
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    const surfacePanel = wrapper.get('[data-testid="surface-panel"]')
+    expect(surfacePanel.text()).toContain('防御面不可用：需要 root 权限')
+    expect(surfacePanel.find('[data-testid="surface-public-listeners"]').exists()).toBe(false)
+    const trafficPanel = wrapper.get('[data-testid="traffic-panel"]')
+    expect(trafficPanel.text()).toContain('流量元数据不可用：连接元数据不可用')
+    expect(trafficPanel.find('tbody').exists()).toBe(false)
+    await surfacePanel.get('[data-testid="retry-surface"]').trigger('click'); await flushPromises()
+    await trafficPanel.get('[data-testid="retry-traffic"]').trigger('click'); await flushPromises()
+    expect(surfacePanel.get('[data-testid="surface-public-listeners"]').text()).toBe('1 个')
+    expect(trafficPanel.get('[data-testid="traffic-peer-total"]').text()).toBe('5')
+  })
+
+  it('流量面板显式声明不采集载荷，payload_captured 为 false 时不显示为已捕获', async () => {
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    const panel = wrapper.get('[data-testid="traffic-panel"]')
+    const note = panel.get('[data-testid="traffic-payload-note"]')
+    expect(note.text()).toContain('只采集连接元数据与日志计数，不捕获、不存储流量载荷')
+    expect(note.text()).not.toContain('回执显示存在流量载荷采集')
+    expect(panel.get('[data-testid="traffic-peer-total"]').text()).toBe('5')
+    expect(panel.text()).toContain('当前连接数')
+    expect(panel.text()).toContain('近期 SSH 失败来源')
+    expect(panel.text()).toContain('203.0.113.9')
+    expect(panel.text()).toContain('端口 443 × 2')
+    const headers = panel.findAll('thead th').map((item) => item.text())
+    expect(headers).toEqual(['对端 IP', '当前连接数', 'SSH 失败', '敏感探测', '不同目标数', '端口 / 协议', '最近时间'])
+    expect(panel.findAll('tbody tr')).toHaveLength(1)
+    expect(panel.get('tbody tr').text()).toContain('42')
+  })
+
+  it('载荷回执异常时改提示核验，不再宣称未采集', async () => {
+    api.getTrafficSummary.mockResolvedValue({ ...trafficSnapshot(), payload_captured: true })
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    const note = wrapper.get('[data-testid="traffic-payload-note"]')
+    expect(note.text()).toContain('回执显示存在流量载荷采集，请立即核验采集配置')
+    expect(note.text()).not.toContain('不捕获、不存储流量载荷')
+  })
+
+  it('切换流量时间范围按小时重新查询并更新展示', async () => {
+    api.getTrafficSummary.mockImplementation((hours: number) => Promise.resolve(trafficSnapshot({ window_hours: hours, peer_total: hours })))
+    const wrapper = mountPage(); await flushPromises(); await openTrace(wrapper)
+    await wrapper.get('[data-testid="traffic-range"]').setValue('72'); await flushPromises()
+    expect(api.getTrafficSummary).toHaveBeenLastCalledWith(72)
+    const panel = wrapper.get('[data-testid="traffic-panel"]')
+    expect(panel.get('[data-testid="traffic-peer-total"]').text()).toBe('72')
+    expect(panel.text()).toContain('72 小时')
   })
 })

@@ -1,0 +1,106 @@
+# 生产宿主只读实测记录（v4.0.51 溯源与防御面）
+
+采集时间：2026-10-05 21:08—21:11 CST（服务器本地时间），宿主 `VM-0-16-opencloudos`（81.70.251.90）。
+采集方式：把待发布的 `deploy/prism_security_block.py` 以临时文件形式放到宿主 `/tmp`，
+用 `python3` 以 root 直接调用**只读**动作 `surface_audit` / `traffic_summary` / `ip_trace`，
+以及一次**自指向**的封禁链路自检。全程通过 SSH，无浏览器、无模型参与。
+
+> 采集结束后已 `shred` 删除临时模块，并把 `/var/lib/prism-ops/security-block` 从
+> `/root/prism-sec-state-backup-20261005T131020Z` 完整还原（entries=0、enabled=True）。
+
+## 1. 防御面实测（surface_audit）
+
+```
+total_listeners= 11 public= 6
+   tcp 0.0.0.0 22  sshd
+   tcp 0.0.0.0 80  docker-proxy
+   tcp 0.0.0.0 443 docker-proxy
+   tcp ::      22  sshd
+   tcp ::      80  docker-proxy
+   tcp ::      443 docker-proxy
+防火墙链：
+   ipv4 iptables  INPUT=True DOCKER-USER=True   tools=['ipset']
+   ipv6 ip6tables INPUT=True DOCKER-USER=True   tools=['ipset']
+加固应用：
+   fail2ban False / clamav False / nmap False / suricata False / zeek False / ipset True
+封禁状态：{'enabled': True, 'backend': 'ipset', 'active_leases': 0}
+ipset 集合：prism-sec-v4、prism-sec-v6 均存在
+ssh_ports= 22    errors= []
+```
+
+对照独立 `nc` 探测（本机→公网）：22 / 80 / 443 OPEN；3306 / 6379 / 8888 closed。
+MySQL 只监听 `127.0.0.1:3307`，Redis/ClamAV 只在容器网络内，与监听面结论一致。
+
+## 2. 未安装的加固应用（事实，未安装任何软件）
+
+| 应用 | 用途 | 宿主状态 |
+| --- | --- | --- |
+| fail2ban | 登录爆破自动处置 | 未安装 |
+| nmap | 端口与服务扫描 | 未安装 |
+| suricata | 流量入侵检测 | 未安装 |
+| zeek | 流量元数据审计 | 未安装 |
+| whois | 归属信息查询 | 未安装（`dig`、`curl`、`getent` 已具备） |
+| ipset | 短时 IP 租约集合 | **已安装并生效** |
+| clamav（容器 cr_clamav） | 恶意文件扫描 | 运行中（5 周），宿主未装 CLI |
+
+安装命令（**本轮未执行**，需管理员显式授权后再在生产执行）：
+
+```bash
+# OpenCloudOS / RHEL 系
+sudo dnf install -y epel-release && sudo dnf install -y fail2ban nmap whois suricata
+# 只读审计建议先只开 fail2ban 的 sshd jail，再评估 suricata/zeek 的资源占用
+```
+
+## 3. 流量元数据实测（traffic_summary, 24h）
+
+```
+peer_total=4  current_connections=5  recent_ssh_failed_sources=0  recent_probe_sources=0  payload_captured=False
+   169.254.0.55   conn=2
+   10.2.0.1       conn=1
+   169.254.0.138  conn=1
+   117.141.246.34 conn=1     ← 管理员当前来源（SSH）
+errors= []
+```
+
+只输出对端 IP、连接数、协议/端口/状态计数与进程名；`payload_captured=False` 是代码固定值，
+本轮未抓取也未存储任何流量载荷。
+
+## 4. 来源溯源实测（ip_trace）
+
+| 输入 | is_public | is_protected | score/level | 外部归因 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 117.141.246.34（管理员来源） | True | **True** | 20 / low | ok：China / Guangdong / Guangzhou / China Mobile | 被正确识别为受保护来源，标注"不参与自动处置" |
+| 192.0.2.10（文档保留网段） | False | False | 0 / low | 拒绝出网："非公网地址，不做外部归因" | 非公网不发外部请求 |
+| 8.8.8.8 | True | False | 0 / low | 超时（curl exit 28，`ip-api.com` 12s 无响应） | 外部归因失败**不影响**本机证据与评分；反向 DNS 成功 |
+
+近 24 小时宿主可信日志中不存在上述来源的攻击证据，因此 SSH/Web 计数均为 0，
+分值只来自"受保护地址"这一条本地判定；这证明评分只吃本机证据，不吃外部归因。
+
+## 5. 封禁链路自检（唯一一次真实内核写操作，目标为回环地址）
+
+目的：验证 v4.0.51 依赖的既有内核链路在生产仍然有效（新增动作只读，不改链路）。
+
+```
+ipset add prism-sec-v4 127.0.0.9 timeout 120
+ipset save prism-sec-v4
+    create prism-sec-v4 hash:ip family inet ... timeout 900 maxelem 64
+    add prism-sec-v4 127.0.0.9 timeout 119        ← 内核 TTL 生效
+iptables -S PRISM-SEC-IN
+    -A PRISM-SEC-IN -m set --match-set prism-sec-v4 src -j DROP
+iptables -S PRISM-SEC-DK
+    -A PRISM-SEC-DK -p tcp -m conntrack --ctorigdstport 80  --ctdir ORIGINAL -m set --match-set prism-sec-v4 src -j DROP
+    -A PRISM-SEC-DK -p tcp -m conntrack --ctorigdstport 443 --ctdir ORIGINAL -m set --match-set prism-sec-v4 src -j DROP
+ipset del prism-sec-v4 127.0.0.9
+ipset_remaining=0                                 ← 解封后集合清空
+```
+
+选 127.0.0.9 的理由：回环地址不会命中任何真实业务来源，也不影响 SSH 会话；
+本次自检**没有**对任何第三方地址下发封禁。
+
+## 6. 本轮未做（明确不声称）
+
+- 未在生产发布 v4.0.51（生产仍为 v4.0.50 / `2ac870e`）；新动作只在宿主临时文件与本机测试中验证。
+- 未安装 fail2ban / nmap / suricata / zeek / whois。
+- 未抓包、未 MITM、未存储流量载荷。
+- 未对任何外部目标做端口扫描、漏洞利用或"反击"。
+- 未提交防御策略变更、未封禁或解封任何真实来源。

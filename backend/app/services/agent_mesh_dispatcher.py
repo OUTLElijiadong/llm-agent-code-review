@@ -515,7 +515,7 @@ def _runtime_handler(
 
         action = str(data.get("action") or "")
         params = data.get("params", {})
-        if action not in ops_service.READ_ONLY_ACTIONS:
+        if action not in ops_service.TEAM_READ_ONLY_ACTIONS:
             return _result(
                 "approval_required",
                 "运维写操作必须回到主小菱通过现有审批链执行",

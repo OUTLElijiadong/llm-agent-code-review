@@ -56,3 +56,17 @@ class AutomaticBlockingReleaseIn(StrictInputModel):
         if not text:
             raise ValueError("请填写解封原因")
         return text
+
+
+class SecurityTraceIn(StrictInputModel):
+    """被动来源溯源：只接受单个 IP，不接受命令、路径或端口参数。"""
+
+    ip: str = Field(min_length=2, max_length=64)
+
+    @field_validator("ip")
+    @classmethod
+    def single_address(cls, value: str) -> str:
+        raw = value.strip()
+        if "/" in raw:
+            raise ValueError("溯源只接受单个 IP，不接受网段")
+        return str(ipaddress.ip_address(raw))

@@ -150,3 +150,136 @@ export function updateAutomaticBlocking(data: AutomaticBlockingPolicyInput): Pro
 export function releaseAutomaticBlock(data: { ip: string; reason: string }): Promise<AutomaticBlockingSnapshot> {
   return post<AutomaticBlockingSnapshot>('/admin/security-center/automatic-blocking/release', data)
 }
+
+export interface SecurityIpTraceAttribution {
+  ok: boolean
+  note?: string
+  country?: string
+  region?: string
+  city?: string
+  isp?: string
+  org?: string
+  as?: string
+}
+
+export interface SecurityIpTraceDefenseRecord {
+  id: string
+  ip: string
+  rule: string
+  source: string
+  status: string
+  started_at: string | null
+  expires_at: string | null
+  released_at: string | null
+  evidence_count: number
+  reason: string
+}
+
+/** 单来源被动溯源快照；risk.basis 说明评分只用本机可信日志。 */
+export interface SecurityIpTrace {
+  available: boolean
+  verified: boolean
+  kind: string
+  request_id: string | null
+  ip: string
+  generated_at: string | null
+  window_hours: number
+  is_public: boolean
+  is_protected: boolean
+  risk: { score: number; level: 'low' | 'medium' | 'high' | 'critical' | string; reasons: string[]; basis: string }
+  ssh: {
+    count: number
+    accounts_tried: Array<{ account: string; count: number }>
+    first_seen: string | null
+    last_seen: string | null
+  }
+  web: {
+    count: number
+    target_count: number
+    targets: Array<{ path: string; count: number }>
+    methods: Record<string, number>
+    status_codes: Record<string, number>
+    first_seen: string | null
+    last_seen: string | null
+  }
+  defense_records: SecurityIpTraceDefenseRecord[]
+  attribution: SecurityIpTraceAttribution
+  reverse_dns: { ok: boolean; output: string; note: string }
+  whois: { ok: boolean; summary: string; note: string }
+  evidence_sources: string[]
+  errors: string[]
+}
+
+export interface SecuritySurfaceFirewallChain {
+  chain: string
+  ok: boolean
+  policy: string
+  rules: string[]
+  note: string
+}
+
+export interface SecuritySurfaceFirewallFamily {
+  tool: string
+  chains: SecuritySurfaceFirewallChain[]
+  tools_present: string[]
+}
+
+/** 本机防御面只读审计快照：监听端口、防火墙链、加固应用与拦截现状。 */
+export interface SecuritySurfaceAudit {
+  available: boolean
+  verified: boolean
+  kind: string
+  request_id: string | null
+  generated_at: string | null
+  listeners: Array<{ protocol: string; address: string; port: number; process: string }>
+  public_listener_count: number
+  firewall: Record<'ipv4' | 'ipv6', SecuritySurfaceFirewallFamily>
+  applications: Array<{ name: string; purpose: string; installed: boolean }>
+  ipset: { present: boolean; sets: string[] }
+  blocking: { enabled: boolean; backend: string; active_leases: number }
+  ssh_ports: string
+  errors: string[]
+}
+
+export interface SecurityTrafficPeer {
+  ip: string
+  connections: number
+  protocols: Record<string, number>
+  peer_ports: Record<string, number>
+  processes: string[]
+  states: Record<string, number>
+  ssh_failed_count: number
+  sensitive_probe_count: number
+  target_count: number
+  last_seen: string | null
+}
+
+/** 流量元数据摘要；payload_captured 恒为 false：不捕获、不存储载荷。 */
+export interface SecurityTrafficSummary {
+  available: boolean
+  verified: boolean
+  kind: string
+  request_id: string | null
+  generated_at: string | null
+  window_hours: number
+  peers: SecurityTrafficPeer[]
+  peer_total: number
+  current_connections: number
+  recent_ssh_failed_sources: number
+  recent_probe_sources: number
+  payload_captured: false
+  note: string
+  errors: string[]
+}
+
+export function traceSecurityIp(ip: string): Promise<SecurityIpTrace> {
+  return post<SecurityIpTrace>('/admin/security-center/trace/ip', { ip })
+}
+
+export function getDefenseSurface(): Promise<SecuritySurfaceAudit> {
+  return get<SecuritySurfaceAudit>('/admin/security-center/surface')
+}
+
+export function getTrafficSummary(sinceHours = 24): Promise<SecurityTrafficSummary> {
+  return get<SecurityTrafficSummary>('/admin/security-center/traffic', { since_hours: sinceHours })
+}

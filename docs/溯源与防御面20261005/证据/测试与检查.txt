@@ -1,0 +1,49 @@
+== 执行器：新增溯源测试 ==
+..........                                                               [100%]
+10 passed in 0.04s
+
+== 执行器：完整套件 ==
+...........................................ss..                          [100%]
+117 passed, 2 skipped in 3.03s
+
+== 后端：溯源服务 ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 11 passed, 1 warning in 0.47s =========================
+
+== 后端：权限矩阵（路由基线 346→349） ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 1096 passed, 2 warnings in 4.23s =======================
+
+== 后端：运维/封禁/监控回归 ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 143 passed, 2 warnings in 4.50s ========================
+
+== 后端：Agent 团队/网格回归 ==
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 101 passed, 1 warning in 3.29s ========================
+
+== 前端：安全中心专项（含被封禁面板时间炸弹修复） ==
+
+ Test Files  2 passed (2)
+      Tests  52 passed (52)
+   Start at  21:12:22
+   Duration  898ms (transform 329ms, setup 28ms, import 473ms, tests 520ms, environment 403ms)
+
+
+== 前端：完整套件 ==
+ Test Files  139 passed (139)
+      Tests  1773 passed (1773)
+   Start at  21:12:23
+   Duration  13.20s (transform 7.34s, setup 1.24s, import 34.36s, tests 35.37s, environment 32.35s)
+
+
+== 前端：ESLint ==
+0 problems (exit 0)
+
+== 前端：类型检查 ==
+0 诊断 (exit 0)
+
+== 前端：生产构建 ==
+dist/assets/AdminOverview-D3dXp3-Z.js           1,027.37 kB │ gzip: 288.63 kB
+dist/assets/MonacoEditor-IGrI2wSW.js            3,100.37 kB │ gzip: 800.08 kB
+✓ built in 11.39s

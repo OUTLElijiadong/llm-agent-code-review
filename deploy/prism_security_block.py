@@ -83,6 +83,18 @@ DEFAULT_POLICY = {"enabled": False, "ai_anomaly_enabled": False, "duration_secon
 SENSITIVE_TARGETS = frozenset({"/.env", "/.env.local", "/.env.production", "/.git/config", "/.git/head",
                              "/.git/index", "/.svn/entries", "/.aws/credentials", "/.ssh/authorized_keys",
                              "/.ssh/id_rsa", "/.ssh/id_ed25519"})
+# 溯源与自我审计的只读边界：不接收命令、路径或端口参数，不写任何宿主配置。
+TRACE_ABSENCE_TTL = 86400
+TRAFFIC_WINDOW_SECONDS = 86400
+FIREWALL_FAMILIES = {"ipv4": "iptables", "ipv6": "ip6tables"}
+HARDENING_APPLICATIONS = (
+    ("fail2ban", "登录爆破自动处置"),
+    ("clamav", "恶意文件扫描"),
+    ("nmap", "端口与服务扫描（需管理员显式安装）"),
+    ("suricata", "流量入侵检测（需管理员显式安装）"),
+    ("zeek", "流量元数据审计（需管理员显式安装）"),
+    ("ipset", "短时 IP 租约集合"),
+)
 
 
 def _iso(value: float | None) -> str | None:
@@ -154,6 +166,73 @@ def parse_web_evidence(lines: list[str]) -> list[dict[str, Any]]:
         result.append({"ip": address, "rule": "web_sensitive_probe", "occurred_at": timestamp,
                        "key": _event_key("web", timestamp, line), "target": path, "http_status": status})
     return result
+
+
+def parse_ssh_attacker_summary(lines: list[str]) -> dict[str, dict[str, Any]]:
+    """按来源 IP 汇总 SSH 爆破细节：次数、尝试账号与时间范围。
+
+    与 ``parse_ssh_evidence`` 的差异：本函数供只读溯源使用，只输出来源、计数与
+    账号名，不输出日志正文，也不进入封禁决策。
+    """
+    summary: dict[str, dict[str, Any]] = {}
+    pattern = re.compile(r"Failed password for (?:invalid user )?(\S+) from (\S+) port \d+")
+    for line in lines:
+        try:
+            row = json.loads(line)
+            match = pattern.search(str(row.get("MESSAGE") or ""))
+            if not match:
+                continue
+            address = str(_ip(match.group(2)))
+            timestamp = int(row["__REALTIME_TIMESTAMP"]) / 1_000_000
+        except (ValueError, KeyError, TypeError):
+            continue
+        item = summary.setdefault(address, {"count": 0, "_users": {}, "first_seen": None, "last_seen": None})
+        item["count"] += 1
+        user = str(match.group(1))[:64]
+        item["_users"][user] = item["_users"].get(user, 0) + 1
+        item["first_seen"] = timestamp if item["first_seen"] is None else min(item["first_seen"], timestamp)
+        item["last_seen"] = timestamp if item["last_seen"] is None else max(item["last_seen"], timestamp)
+    for item in summary.values():
+        accounts = sorted(item.pop("_users").items(), key=lambda pair: (-pair[1], pair[0]))[:10]
+        item["accounts_tried"] = [{"account": name, "count": count} for name, count in accounts]
+        item["first_seen"] = _iso(item["first_seen"])
+        item["last_seen"] = _iso(item["last_seen"])
+    return summary
+
+
+def parse_web_attacker_summary(lines: list[str]) -> dict[str, dict[str, Any]]:
+    """按来源 IP 汇总敏感目标探测：次数、请求方法与路径清单（截断）。"""
+    summary: dict[str, dict[str, Any]] = {}
+    pattern = re.compile(r'^([0-9a-fA-F.:]+) ([^ ]+) - \[([^\]]+)\] "([A-Z]+) ([^ ]+) HTTP/[^"]+" (\d{3})')
+    for line in lines:
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        raw_ip, _remote_user, raw_time, method, target, status = match.groups()
+        try:
+            address = str(_ip(raw_ip))
+            timestamp = _epoch(raw_time)
+            path = urlsplit(target).path[:160]
+        except (ValueError, IndexError, TypeError):
+            continue
+        if path.lower() not in SENSITIVE_TARGETS:
+            continue
+        item = summary.setdefault(address, {
+            "count": 0, "_targets": {}, "methods": {}, "status_codes": {}, "first_seen": None, "last_seen": None,
+        })
+        item["count"] += 1
+        item["_targets"][path] = item["_targets"].get(path, 0) + 1
+        item["methods"][method] = item["methods"].get(method, 0) + 1
+        item["status_codes"][status] = item["status_codes"].get(status, 0) + 1
+        item["first_seen"] = timestamp if item["first_seen"] is None else min(item["first_seen"], timestamp)
+        item["last_seen"] = timestamp if item["last_seen"] is None else max(item["last_seen"], timestamp)
+    for item in summary.values():
+        targets = sorted(item.pop("_targets").items(), key=lambda pair: (-pair[1], pair[0]))[:10]
+        item["targets"] = [{"path": path, "count": count} for path, count in targets]
+        item["target_count"] = len(item["targets"])
+        item["first_seen"] = _iso(item["first_seen"])
+        item["last_seen"] = _iso(item["last_seen"])
+    return summary
 
 
 def run_command(args: list[str], *, timeout: int = 30) -> dict[str, Any]:
@@ -729,9 +808,310 @@ class SecurityBlockController:
             return self._snapshot(state)
 
 
+    def _defense_record(self, address: str) -> list[dict[str, Any]]:
+        """从租约账本提取与该来源相关的处置记录，不含保护来源与本机地址。"""
+        records = []
+        for entry in self._read()["entries"]:
+            if entry.get("ip") != address:
+                continue
+            records.append({
+                "id": str(entry.get("id") or "")[:120],
+                "rule": str(entry.get("rule") or "")[:80],
+                "source": str(entry.get("source") or "deterministic_rule")[:40],
+                "status": str(entry.get("status") or "unknown"),
+                "started_at": entry.get("started_at"),
+                "expires_at": entry.get("expires_at"),
+                "released_at": entry.get("released_at"),
+                "evidence_count": int(entry.get("evidence_count") or 0),
+                "reason": str(entry.get("reason") or "")[:200],
+            })
+        return sorted(records, key=lambda row: str(row.get("started_at") or ""), reverse=True)[:20]
+
+    def _log_lines(self, kind: str, since: float) -> tuple[list[str], list[str]]:
+        """只读采集可信日志；单源失败降级为错误说明，不影响其余来源。"""
+        errors: list[str] = []
+        if kind == "ssh":
+            command = ["journalctl", "-u", "sshd", "--since", f"@{int(since)}", "--no-pager", "--output=json", "-n", str(LOG_LIMIT)]
+        else:
+            command = ["docker", "logs", "--timestamps", "--since", str(_iso(since)), "--tail", str(LOG_LIMIT), "cr_frontend"]
+        try:
+            result = self._run(command)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            return [], [f"{kind} 证据采集失败：{exc}"]
+        lines = str(result.get("stdout") or "").splitlines()
+        if len(lines) >= LOG_LIMIT:
+            errors.append(f"{kind} 日志达到 {LOG_LIMIT} 行采样上限，统计为下界")
+        return lines, errors
+
+    def _optional_command(self, name: str, args: list[str], *, timeout: int = 20) -> dict[str, Any]:
+        """可选只读外部查询：缺工具或失败都显式记录，不伪装成成功。"""
+        executable = shutil.which(args[0])
+        if not executable:
+            return {"source": name, "ok": False, "note": f"未安装 {args[0]}"}
+        try:
+            result = self.runner(args, timeout=timeout)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"source": name, "ok": False, "note": f"查询失败：{str(exc)[:200]}"}
+        text = str(result.get("stdout") or "").strip()
+        if result.get("exit_code") != 0:
+            return {"source": name, "ok": False, "note": f"退出码 {result.get('exit_code')}：{str(result.get('stderr') or '')[:200]}"}
+        return {"source": name, "ok": True, "output": text[:4000]}
+
+    def _outbound_attribution(self, address: str) -> dict[str, Any]:
+        """出网威胁情报：只发送攻击来源 IP，不携带本机信息与日志正文。"""
+        base = os.environ.get("THREAT_INTEL_BASE_URL") or ""
+        if not base:
+            path = DEPLOY_DIR / ".env"
+            if path.is_file() and not path.is_symlink():
+                for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    name, _, value = line.strip().partition("=")
+                    if name.strip() == "THREAT_INTEL_BASE_URL":
+                        base = value.strip().strip("'\"")
+                        break
+        base = base or "http://ip-api.com/json"
+        if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)*", base):
+            return {"ok": False, "note": "THREAT_INTEL_BASE_URL 不合法"}
+        url = f"{base.rstrip('/')}/{address}?fields=status,message,country,regionName,city,isp,org,as,query"
+        result = self._optional_command("threat_intel", ["curl", "-fsS", "--max-time", "12", url], timeout=18)
+        if not result.get("ok"):
+            return {"ok": False, "note": result.get("note")}
+        try:
+            data = json.loads(result["output"])
+        except json.JSONDecodeError:
+            return {"ok": False, "note": "无法解析情报响应"}
+        if not isinstance(data, dict) or data.get("status") == "fail":
+            return {"ok": False, "note": "情报源未返回可用归因"}
+        return {"ok": True, "attribution": {
+            "country": str(data.get("country") or "")[:64],
+            "region": str(data.get("regionName") or "")[:64],
+            "city": str(data.get("city") or "")[:64],
+            "isp": str(data.get("isp") or "")[:96],
+            "org": str(data.get("org") or "")[:96],
+            "as": str(data.get("as") or "")[:96],
+        }}
+
+    def ip_trace(self, params: dict[str, Any]) -> dict[str, Any]:
+        """单来源取证：可信日志统计 + 被动归因 + 处置记录 + 确定性风险评分。
+
+        只接受一个 IP。溯源是只读动作：不向目标发包、不连接目标端口、不写入任何
+        防火墙规则；出网仅访问独立配置的被动情报源。评分只用本机可信日志证据。
+        """
+        address = str(_ip(params["ip"]))
+        since = self.clock() - TRACE_ABSENCE_TTL
+        with self._locked():
+            state = self._read()
+            ssh_lines, ssh_errors = self._log_lines("ssh", since)
+            web_lines, web_errors = self._log_lines("web", since)
+            errors = [*ssh_errors, *web_errors]
+            ssh = parse_ssh_attacker_summary(ssh_lines).get(address, {})
+            web = parse_web_attacker_summary(web_lines).get(address, {})
+            try:
+                protected = [row["cidr"] for row in self._protected_sources(state["policy"])]
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+                protected = []
+                errors.append(f"保护来源读取失败：{exc}")
+            networks = []
+            for cidr in protected:
+                try:
+                    networks.append(ipaddress.ip_network(cidr))
+                except ValueError:
+                    continue
+            parsed = _ip(address)
+            is_protected = any(parsed in network for network in networks if network.version == parsed.version)
+            severity = 0
+            reasons: list[str] = []
+            if ssh:
+                severity += 3
+                reasons.append(f"SSH 密码失败 {ssh['count']} 次（尝试账号 {len(ssh.get('accounts_tried') or [])} 个）")
+            if web:
+                severity += 3
+                reasons.append(f"敏感目标探测 {web['count']} 次、不同目标 {web.get('target_count') or 0} 个")
+            if ssh and web:
+                severity += 2
+                reasons.append("同一来源同时命中 SSH 与 Web 两类证据")
+            if (web.get("target_count") or 0) >= 3:
+                severity += 1
+                reasons.append("覆盖 3 个以上敏感目标，符合自动化扫描特征")
+            if is_protected:
+                severity += 2
+                reasons.append("该来源属于受保护地址（管理员连接/服务器地址/白名单），不参与自动处置")
+            blocked = [row for row in self._defense_record(address) if row["status"] == "active"]
+            if blocked:
+                severity += 1
+                reasons.append(f"当前存在 {len(blocked)} 条生效中的临时封禁租约")
+            score = min(100, severity * 10)
+            level = "critical" if score >= 70 else "high" if score >= 50 else "medium" if score >= 30 else "low"
+            if not ssh and not web:
+                reasons.append("近 24 小时可信日志中没有该来源的攻击证据")
+            public = _ip(address).is_global
+            attribution = self._outbound_attribution(address) if public else {"ok": False, "note": "非公网地址，不做外部归因"}
+            dns = self._optional_command("reverse_dns", ["getent", "hosts", address], timeout=15) if public else {"source": "reverse_dns", "ok": False, "note": "非公网地址"}
+            whois = self._optional_command("whois", ["whois", address], timeout=25) if public and shutil.which("whois") else {
+                "source": "whois", "ok": False, "note": "未安装 whois 或非公网地址",
+            }
+            whois_summary = ""
+            if whois.get("ok"):
+                keys = ("orgname", "org-name", "netname", "country", "descr", "origin", "route")
+                picked = []
+                for line in str(whois.get("output") or "").splitlines():
+                    name, _, value = line.partition(":")
+                    if name.strip().lower() in keys and value.strip():
+                        picked.append(f"{name.strip()}={value.strip()[:80]}")
+                    if len(picked) >= 8:
+                        break
+                whois_summary = "; ".join(picked)
+            return {
+                "ip": address,
+                "generated_at": _iso(self.clock()),
+                "window_hours": TRACE_ABSENCE_TTL // 3600,
+                "is_public": public,
+                "is_protected": is_protected,
+                "risk": {"score": score, "level": level, "reasons": reasons,
+                         "basis": "本机可信日志证据，不含模型推断；外部归因不参与评分"},
+                "ssh": {"count": int(ssh.get("count") or 0), "accounts_tried": ssh.get("accounts_tried") or [],
+                        "first_seen": ssh.get("first_seen"), "last_seen": ssh.get("last_seen")},
+                "web": {"count": int(web.get("count") or 0), "target_count": int(web.get("target_count") or 0),
+                        "targets": web.get("targets") or [], "methods": web.get("methods") or {},
+                        "status_codes": web.get("status_codes") or {},
+                        "first_seen": web.get("first_seen"), "last_seen": web.get("last_seen")},
+                "defense_records": self._defense_record(address),
+                "attribution": attribution,
+                "reverse_dns": dns,
+                "whois": {"ok": bool(whois.get("ok")), "summary": whois_summary,
+                          "note": str(whois.get("note") or "")[:200]},
+                "evidence_sources": ["journalctl -u sshd", "docker logs cr_frontend"],
+                "errors": errors[-10:],
+            }
+
+    def surface_audit(self) -> dict[str, Any]:
+        """本机防御面自我审计：只读快照，不安装软件、不修改防火墙与端口。"""
+        with self._locked():
+            errors: list[str] = []
+            listeners: list[dict[str, Any]] = []
+            listening = self._run(["ss", "-H", "-lntup"], required=False)
+            if listening.get("exit_code") != 0:
+                errors.append("监听端口读取失败")
+            for line in str(listening.get("stdout") or "").splitlines():
+                columns = line.split()
+                if len(columns) < 5:
+                    continue
+                protocol = columns[0]
+                local = columns[4] if columns[0].startswith(("tcp", "udp")) else columns[3]
+                address, _, port = local.rpartition(":")
+                process = ""
+                if "users:" in line:
+                    process = line.split("users:", 1)[1].strip()[:120]
+                listeners.append({"protocol": protocol, "address": address.strip("[]") or "*",
+                                  "port": port, "process": process})
+            public_listeners = [row for row in listeners
+                                if row["address"] in {"0.0.0.0", "*", "::", "[::]"}]
+            firewall: dict[str, Any] = {}
+            for family, tool in FIREWALL_FAMILIES.items():
+                chain_rows: list[dict[str, Any]] = []
+                for chain in ("INPUT", "DOCKER-USER"):
+                    result = self._run([tool, "-S", chain], required=False)
+                    if result.get("exit_code") != 0:
+                        chain_rows.append({"chain": chain, "ok": False, "note": "读取失败或链路不存在"})
+                        continue
+                    lines = [line for line in str(result.get("stdout") or "").splitlines()][:400]
+                    chain_rows.append({"chain": chain, "ok": True, "policy": next(
+                        (line for line in lines if line.startswith(f"-P {chain}")), f"-P {chain} -"), "rules": lines})
+                tools = [name for name, _ in HARDENING_APPLICATIONS if shutil.which(name)]
+                firewall[family] = {"tool": tool, "chains": chain_rows, "tools_present": tools}
+            applications = [
+                {"name": name, "purpose": purpose, "installed": bool(shutil.which(name))}
+                for name, purpose in HARDENING_APPLICATIONS
+            ]
+            state = self._read()
+            return {
+                "generated_at": _iso(self.clock()),
+                "listeners": listeners[:200],
+                "public_listeners": public_listeners[:100],
+                "firewall": firewall,
+                "applications": applications,
+                "ipset": {"sets": [SETS[4], SETS[6]], "present": bool(shutil.which("ipset"))},
+                "blocking": {"enabled": bool(state["policy"]["enabled"]), "backend": "ipset",
+                             "active_leases": len([row for row in state["entries"] if row["status"] == "active"])},
+                "ssh_ports": str(_deployment_setting("SECURITY_BLOCK_SSH_PORTS", "22"))[:64],
+                "errors": errors,
+            }
+
+    def traffic_summary(self, params: dict[str, Any]) -> dict[str, Any]:
+        """流量元数据取证：只输出对端 IP、端口、协议、状态与字节计数，不含载荷。"""
+        hours = params.get("since_hours", 24)
+        since = self.clock() - hours * 3600
+        with self._locked():
+            errors: list[str] = []
+            connections: list[dict[str, Any]] = []
+            collected = self._run(["ss", "-H", "-tunap"], required=False)
+            if collected.get("exit_code") != 0:
+                errors.append("连接表读取失败")
+            for line in str(collected.get("stdout") or "").splitlines()[:4000]:
+                columns = line.split()
+                if len(columns) < 5:
+                    continue
+                protocol = columns[0]
+                local, peer = columns[4], columns[5]
+                address, _, port = peer.rpartition(":")
+                try:
+                    peer_ip = None if address.strip("[]") in {"*", "0.0.0.0", "::"} else str(_ip(address.strip("[]")))
+                except ValueError:
+                    continue
+                if peer_ip is None:
+                    continue
+                process = line.split("users:", 1)[1].strip()[:120] if "users:" in line else ""
+                connections.append({"protocol": protocol, "peer_ip": peer_ip, "peer_port": port,
+                                    "local": local, "process": process, "state": columns[1] if len(columns) > 1 else ""})
+            ssh_lines, ssh_errors = self._log_lines("ssh", since)
+            web_lines, web_errors = self._log_lines("web", since)
+            errors.extend([*ssh_errors, *web_errors])
+            ssh_by_ip = parse_ssh_attacker_summary(ssh_lines)
+            web_by_ip = parse_web_attacker_summary(web_lines)
+            peers: dict[str, dict[str, Any]] = {}
+            for row in connections:
+                item = peers.setdefault(row["peer_ip"], {"ip": row["peer_ip"], "connections": 0, "protocols": {},
+                                                         "peer_ports": {}, "processes": set(), "states": {}})
+                item["connections"] += 1
+                item["protocols"][row["protocol"]] = item["protocols"].get(row["protocol"], 0) + 1
+                item["peer_ports"][row["peer_port"]] = item["peer_ports"].get(row["peer_port"], 0) + 1
+                item["states"][row["state"]] = item["states"].get(row["state"], 0) + 1
+                if row["process"]:
+                    item["processes"].add(row["process"])
+            for ip, summary in ssh_by_ip.items():
+                item = peers.setdefault(ip, {"ip": ip, "connections": 0, "protocols": {}, "peer_ports": {},
+                                             "processes": set(), "states": {}})
+                item["ssh_failed_count"] = summary["count"]
+                item["last_seen"] = summary["last_seen"]
+            for ip, summary in web_by_ip.items():
+                item = peers.setdefault(ip, {"ip": ip, "connections": 0, "protocols": {}, "peer_ports": {},
+                                             "processes": set(), "states": {}})
+                item["sensitive_probe_count"] = summary["count"]
+                item["target_count"] = summary["target_count"]
+                item["last_seen"] = summary["last_seen"]
+            rows = []
+            for item in peers.values():
+                item["processes"] = sorted(item["processes"])[:5]
+                rows.append(item)
+            rows.sort(key=lambda row: (row.get("ssh_failed_count", 0) + row.get("sensitive_probe_count", 0),
+                                       row.get("connections", 0)), reverse=True)
+            return {
+                "generated_at": _iso(self.clock()),
+                "window_hours": hours,
+                "peers": rows[:200],
+                "peer_total": len(rows),
+                "current_connections": len(connections),
+                "recent_ssh_failed_sources": len(ssh_by_ip),
+                "recent_probe_sources": len(web_by_ip),
+                "payload_captured": False,
+                "note": "只采集连接元数据与可信日志计数，不捕获也不存储流量载荷。",
+                "errors": errors[-10:],
+            }
+
+
 def execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
     controller = SecurityBlockController()
-    if action in {"security_block_status", "security_block_reconcile", "security_block_candidates"} and params:
+    if action in {"security_block_status", "security_block_reconcile", "security_block_candidates",
+                  "security_surface_audit"} and params:
         raise ValueError("安全状态和内部巡检不接收参数")
     if action == "security_block_status":
         return controller.status()
@@ -745,6 +1125,16 @@ def execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
         return controller.candidates()
     if action == "security_block_apply_anomalies":
         return controller.apply_anomalies(params)
+    if action == "security_ip_trace":
+        if set(params) != {"ip"}:
+            raise ValueError("来源溯源只接受单个 ip 参数")
+        return controller.ip_trace(params)
+    if action == "security_surface_audit":
+        return controller.surface_audit()
+    if action == "security_traffic_summary":
+        if set(params) - {"since_hours"}:
+            raise ValueError("流量元数据摘要只接受 since_hours 参数")
+        return controller.traffic_summary(params)
     raise ValueError("未知安全防御动作")
 
 

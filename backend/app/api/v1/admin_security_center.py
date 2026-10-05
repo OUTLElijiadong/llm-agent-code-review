@@ -11,8 +11,13 @@ from app.core.exceptions import ValidationError
 from app.core.rate_limit import client_ip
 from app.models.user import User
 from app.schemas.common import Resp
-from app.schemas.security_center import AutomaticBlockingPolicyIn, AutomaticBlockingReleaseIn, SecurityMonitorPolicyIn
-from app.services import security_center_service, security_response_service
+from app.schemas.security_center import (
+    AutomaticBlockingPolicyIn,
+    AutomaticBlockingReleaseIn,
+    SecurityMonitorPolicyIn,
+    SecurityTraceIn,
+)
+from app.services import security_center_service, security_response_service, security_trace_service
 
 router = APIRouter()
 
@@ -96,3 +101,32 @@ def release_automatic_block(
 ):
     """人工解封一条实际规则并保留操作者与原因。"""
     return Resp(data=security_response_service.release(db, actor, ip=payload.ip, reason=payload.reason))
+
+
+@router.post("/trace/ip", response_model=Resp[dict])
+def trace_attacker_ip(
+    payload: SecurityTraceIn,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """被动溯源单个攻击来源：只读可信日志与情报归因，不向目标发包。"""
+    return Resp(data=security_trace_service.trace_ip(db, actor, ip=payload.ip))
+
+
+@router.get("/surface", response_model=Resp[dict])
+def get_defense_surface(
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """读取本机防御面：监听端口、防火墙链与已安装加固应用（只读）。"""
+    return Resp(data=security_trace_service.surface_audit(db, actor))
+
+
+@router.get("/traffic", response_model=Resp[dict])
+def get_traffic_summary(
+    since_hours: int = Query(24, ge=1, le=72),
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """读取连接元数据与可信日志计数；不返回任何流量载荷。"""
+    return Resp(data=security_trace_service.traffic_summary(db, actor, since_hours=since_hours))
