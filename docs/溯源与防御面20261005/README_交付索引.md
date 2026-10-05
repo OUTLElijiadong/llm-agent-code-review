@@ -28,15 +28,16 @@
 - Docker 构建缓存清理：回收 **25.65GB**，根分区由 148G 用到 **123G（69%，58G 可用）**，
   为发布腾出安全余量。
 
-## 下一步（待管理员确认窗口）
+## 已发布（2026-10-05 21:48 CST）
 
-1. **发布 v4.0.51 到生产**：代码已提交，发布包已上传并校验。
-   发布包路径：`/tmp/prism-4.0.51.bundle`（服务器 `/tmp` 同名）。
-   发布前用 `git bundle list-heads` 读出**当时**的 SHA，再以该 SHA 发布，避免文档与包漂移：
+生产 v4.0.51 / `ca435540d2d604157263aae824959687189f5e5d`：`healthz` 与 `readyz` 均返回
+`version=4.0.51`；backend/frontend/mysql/clamav/redis 全 healthy；Alembic `062_audit_log_action_length`
+（无新增迁移）；运维执行器已绑定当前发布树；发布前备份 + 独立恢复验证（104 表）通过。
+三接口线上实测见「证据/发布回执.txt」；上一版 4.0.50（`2ac870e`）在发布账本中保留为回退点。
 
-   ```bash
-   ssh root@81.70.251.90 'cd /opt/code-review && git fetch /tmp/prism-4.0.51.bundle "refs/heads/codex/security-center-ux:refs/heads/codex/security-center-ux" && git checkout -q codex/security-center-ux && cd deploy && ./deploy.sh --revision "$(git rev-parse HEAD)"'
-   ```
-2. 在生产 `.env` 显式配置 `THREAT_INTEL_BASE_URL`（当前默认端点可用，但换 HTTPS 更稳）。
-3. 审计员账号 `18878489000`：注册接口要求密码 **15–64 位**，给定的 `lijd1107` 为 8 位会被直接拒绝，
+## 下一步（待确认）
+
+1. ~~发布 v4.0.51 到生产~~ **已完成**；发布包留档 `/tmp/prism-4.0.51.bundle`（服务器同名）。
+2. 在生产 `.env` 显式配置 `THREAT_INTEL_BASE_URL` —— 已配置为 `https://ipinfo.io`（本轮实测生效）。
+3. 审计员账号 `18878489000`：注册接口要求密码 **15–64 位**，给定密码 8 位会被直接拒绝，
    需先确定合规密码，再走「注册页注册 → 管理员 UserManage 指派审查员角色」两步。

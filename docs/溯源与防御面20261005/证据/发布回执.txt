@@ -1,0 +1,13 @@
+
+== 生产发布 v4.0.51 ==
+发布时间：2026-10-05 21:26—21:34 CST（第一次，sha 2035741f）/ 21:41—21:48 CST（第二次含归因修复，sha ca435540）
+发布命令：cd /opt/code-review/deploy && ./deploy.sh --revision $(git -C /opt/code-review rev-parse HEAD)
+发布账本：RELEASE_SHA=ca435540d2d604157263aae824959687189f5e5d / APP_VERSION=4.0.51 / ALEMBIC=062_audit_log_action_length
+
+-- 第一次（2035741f）阶段回执 --
+容量检查 69% / 预检通过 / MySQL+ClamAV healthy / 隔离恢复验证 104 表 / 备份完成
+backend healthy + 冒烟 version=4.0.51 release=2035741f / frontend healthy / HTTPS 冒烟通过 / 执行器已绑定当前发布树 / 发布完成
+
+-- 第二次（ca435540，含情报端点改 https://ipinfo.io） --
+容量检查 63%（清理 25.65GB 构建缓存后）/ 预检通过 / 隔离恢复验证 / 备份完成
+backend healthy + 冒烟 version=4.0.51 release=ca435540 / frontend healthy / HTTPS 冒烟通过 / 发布完成 EXIT=0

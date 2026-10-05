@@ -1,0 +1,54 @@
+# 生产 v4.0.51 三接口线上实测（2026-10-05 21:50 CST）
+
+身份：管理员 `admin` 经 `POST https://lijiadong.cn/api/auth/login` 取得 Bearer 令牌（令牌本身不入档）。
+运行版本：`{"status":"ok","version":"4.0.51","release":"ca435540d2d604157263aae824959687189f5e5d"}`
+
+## 1. 溯源 `POST /api/admin/security-center/trace/ip`（管理员自身来源）
+
+```
+available=True verified=True ip=117.141.246.34
+is_protected=True risk=20 low
+reasons: 该来源属于受保护地址（管理员连接/服务器地址/白名单），不参与自动处置
+attribution ok=True | CN Guangxi Nanning | AS9808 China Mobile Communications Group Co., Ltd. | as 为空
+whois ok=True | netname=CMNET; descr=China Mobile Communications Corporation
+reverse_dns ok=False（无 PTR 记录属正常）
+errors=[]
+```
+
+**归因修复生效**：改用 `https://ipinfo.io` 后，同一地址不再出现 `curl exit 28（12s 超时）`，
+返回完整国家/地区/城市/组织；`whois`（本轮新装）同时给出 `netname/descr` 摘要。
+注意 `as` 字段为空是因为 ipinfo 免费层返回 `org` 内的 "AS9808 ..." 已并入 org，不单独给 asn；
+后端归一化按白名单字段取值，不会显示未知字段。
+
+## 2. 防御面 `GET /api/admin/security-center/surface`
+
+```
+available=True public=6 ssh_ports=22
+apps={'fail2ban': False, 'clamav': False, 'nmap': True, 'suricata': False, 'zeek': False, 'ipset': True}
+blocking={'enabled': True, 'backend': 'ipset', 'active_leases': 0}
+firewall={'ipv4': [('INPUT', True), ('DOCKER-USER', True)], 'ipv6': [('INPUT', True), ('DOCKER-USER', True)]}
+```
+
+## 3. 流量元数据 `GET /api/admin/security-center/traffic?since_hours=24`
+
+```
+available=True peers=6 conn=14 payload_captured=False
+note: 只采集连接元数据与可信日志计数，不捕获也不存储流量载荷。
+```
+
+## 4. 未授权访问
+
+```
+匿名 GET  /api/admin/security-center/surface    -> HTTP 401
+匿名 POST /api/admin/security-center/trace/ip   -> HTTP 401
+```
+
+（审查员/普通用户的 403 结论沿用 4.0.50 的三角色权限复测；本轮新增的三条路由已进入
+`test_complete_permission_matrix` 路由基线，逐条断言 `require_super_admin`。）
+
+## 5. 本轮未做
+
+- 未对任何第三方地址发起扫描、探测或封禁；`nmap` 仅用于 `127.0.0.1` 自检。
+- 未抓包、未存储载荷。
+- 未提交防御策略变更，未封禁/解封任何真实来源（`active_leases=0`）。
+- 未创建审计员账号：注册接口要求密码 15–64 位，给定密码 8 位会被平台直接拒绝。
