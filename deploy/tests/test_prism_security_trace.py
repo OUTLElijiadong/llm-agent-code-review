@@ -341,3 +341,44 @@ def test_policy_accepts_lease_up_to_six_hours(tmp_path, monkeypatch):
                               "allowlist_cidrs": [], "auto_escalate": True, "protected_ip": "1.1.1.1"})
     assert snapshot["policy"]["duration_seconds"] == 3600
     assert snapshot["policy"]["auto_escalate"] is True
+
+
+def test_legacy_state_without_new_policy_key_is_backfilled_not_rejected(tmp_path, monkeypatch):
+    """老账本缺少后来新增的策略键时，必须按保守默认值补齐并记录审计，而不是整本判损坏。"""
+    import json as _json
+
+    host = Host()
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+    state_dir = tmp_path / "security-block"
+    state_dir.mkdir(mode=0o700)
+    legacy = {
+        "policy": {
+            "enabled": True, "ai_anomaly_enabled": True, "duration_seconds": 900, "window_seconds": 300,
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "protected_ip": "117.141.246.34",
+            "activated_at": "2026-10-05T04:01:29.395136+00:00",
+        },
+        "entries": [],
+        "last_evaluated_at": None,
+        "errors": [],
+    }
+    (state_dir / "state.json").write_text(_json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+    ctl = security.SecurityBlockController(state_dir, runner=host.run, clock=lambda: host.now)
+
+    with ctl._locked():
+        state = ctl._read()
+    assert state["policy"]["auto_escalate"] is False
+    assert state["policy"]["duration_seconds"] == 900
+    assert state["policy"]["enabled"] is True
+    # 回写后再次读取不应重复补键，也不应触发重复审计
+    with ctl._locked():
+        again = ctl._read()
+    assert again["policy"]["auto_escalate"] is False
+    # status() 的 available/verified 取决于当前宿主内核能力；本用例只断言策略本身已被补齐
+    snapshot = ctl.status()
+    assert snapshot["policy"]["auto_escalate"] is False
+    assert "防御账本损坏" not in " ".join(snapshot["errors"])
+    written = _json.loads((state_dir / "state.json").read_text(encoding="utf-8"))
+    assert written["policy"]["auto_escalate"] is False
+    audit = (state_dir / "audit.jsonl").read_text(encoding="utf-8")
+    assert "policy_backfilled" in audit

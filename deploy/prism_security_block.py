@@ -288,6 +288,14 @@ class SecurityBlockController:
             state = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(state, dict) or not isinstance(state["policy"], dict) or not isinstance(state["entries"], list):
                 raise ValueError("invalid state")
+            # 向前兼容：老账本缺少后来新增的策略键时按默认值补齐并回写，而不是整本判损坏。
+            # 默认值始终是保守值（例如 auto_escalate=False），不会因为补键而放大防御动作。
+            missing = [key for key in CONFIG_KEYS if key not in state["policy"]]
+            if missing:
+                for key in missing:
+                    state["policy"][key] = DEFAULT_POLICY[key]
+                self._write(state)
+                self._audit("policy_backfilled", {"keys": sorted(missing)})
             self._validate_policy({key: state["policy"].get(key) for key in CONFIG_KEYS}, require_protection=False)
             return state
         except (ValueError, KeyError, TypeError) as exc:
