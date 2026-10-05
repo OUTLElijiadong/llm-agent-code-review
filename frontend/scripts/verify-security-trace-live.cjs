@@ -7,7 +7,7 @@ const path = require('path')
 const { chromium } = require('playwright')
 
 const BASE = process.env.PRISM_BASE || 'https://lijiadong.cn'
-const OUT_DIR = process.env.PRISM_OUT || path.join(__dirname, '..', 'docs', '溯源与防御面20261005', '证据')
+const OUT_DIR = process.env.PRISM_OUT || path.join(__dirname, '..', 'docs', '主动欺骗与网络隔离设计20261005', '证据')
 const ADMIN_USER = 'admin'
 const ADMIN_PW = process.env.PRISM_ADMIN_PW || 'lijd1107'
 const TRACE_IP = process.env.PRISM_TRACE_IP || '117.141.246.34'
