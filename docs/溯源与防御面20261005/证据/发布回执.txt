@@ -20,3 +20,19 @@ backup: /opt/prism-backups/code_review_20261005T1355*.sql.gz（发布前备份 +
      → 前端 assets 同步 → frontend healthy → HTTPS 冒烟 → 执行器绑定当前发布树 → 发布完成 EXIT=0
 发布后实测：healthz / readyz 均 version=4.0.52 release=220d5feb；三接口 available=true；
           审查员 18878489000 登录成功且 role=reviewer；真实点击验收 9/9。
+
+-- 第四~六次（v4.0.53 / v4.0.54）--
+v4.0.53（e6faf7d6）：21:19—21:26 CST 发布完成 EXIT=0，APP_VERSION=4.0.53；
+  上线后立即发现安全中心报 available=false / errors=["防御账本损坏，已禁止执行"]：
+  旧账本缺 auto_escalate 键，_read 组装出 None 被完整性校验判为损坏 → 自动封禁停摆（active=0，无误封）。
+  生产即时修复：备份 state.json → 补 auto_escalate=false 回写 → 巡检确认
+  verified=true / available=true / enabled=true / errors=[]。
+v4.0.54（18b884cfe）：22:30—22:34 CST 发布完成 EXIT=0，APP_VERSION=4.0.54；
+  代码层向前兼容修复（_read 对缺失策略键按保守默认值补齐并回写 + policy_backfilled 审计）。
+发布后核验：
+  healthz / readyz → version=4.0.54 release=18b884cfea7b9884b796a345407ccdc2791ea497
+  自动封禁读取 → available=true verified=true enabled=true，policy 含 auto_escalate=false，duration=900，
+    thresholds 20/30，protected_sources 含"当前最高管理员连接"与"服务器本机地址"，active=0，errors=[]
+  非法配置 → duration=3601 与非布尔 auto_escalate 均被 400 拒绝（未触及宿主机）
+  部署代码隔离核验（临时账本，不碰生产集合）→ CONFIG_KEYS 含 auto_escalate、默认 false、
+    ESCALATION_MAX_SECONDS=3600、FACTOR=4、3600 秒可启用、3601 秒被拒
