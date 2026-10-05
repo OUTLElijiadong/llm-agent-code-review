@@ -282,6 +282,11 @@ if [[ "$target" == "all" || "$target" == "frontend" ]]; then
   deploy_stage="frontend_assets"
   ./sync-frontend-assets.sh "$desired_frontend" || deploy_fatal "前端 assets 卷同步失败"
   deployment_mutated=1
+  # 诱捕层容器与前端同发布：镜像已在 frontend 构建阶段之外的独立服务，需要显式拉起。
+  # 失败不阻断发布（诱捕层是增强项），但会在日志中显式记录。
+  if ! compose up -d --no-build --pull never decoy; then
+    log_warn "诱捕层容器未能启动，本次发布继续（诱捕为增强项）"
+  fi
   deploy_stage="frontend_switch"
   compose up -d --no-deps --no-build --pull never frontend
   deploy_stage="frontend_health"
