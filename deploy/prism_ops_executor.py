@@ -1,20 +1,18 @@
-#!/usr/bin/env python3
 """Root-side allowlisted operations executor exposed only through a Unix socket."""
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
-import ipaddress
 import importlib.util
+import ipaddress
 import json
 import os
-import pwd
 import re
-import shutil
+import socket
 import socketserver
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -23,19 +21,30 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 DEPLOY_DIR = Path(__file__).resolve().parent
 BACKUP_DIR = (DEPLOY_DIR.parent / "backups").resolve()
 SOCKET_PATH = Path(os.environ.get("OPS_EXECUTOR_SOCKET", "/run/prism-ops/agent.sock"))
-TOKEN = os.environ.get("OPS_EXECUTOR_TOKEN", "")
 NGINX_LOG_LINE_LIMIT = 30_000
 AUDIT_LOG = Path(os.environ.get("OPS_EXECUTOR_AUDIT_LOG", "/var/log/prism-ops/executions.jsonl"))
-FILE_BACKUP_DIR = Path(os.environ.get("OPS_FILE_BACKUP_DIR", "/var/lib/prism-ops/file-backups"))
 LEDGER_DIR = Path(os.environ.get("OPS_EXECUTOR_LEDGER_DIR", "/var/lib/prism-ops/execution-ledger"))
 LEDGER_LOCK = threading.RLock()
 MUTATION_LOCK = threading.Lock()
 SERVICES = {"backend", "frontend", "mysql", "redis", "clamav"}
+ALLOWED_PEER_UID = 10001
+ALLOWED_PEER_GID = 991
+SOCKET_DIRECTORY_UID = 0
+SOCKET_DIRECTORY_GID = 991
+SOCKET_DIRECTORY_MODE = 0o710
+READABLE_TEXT_ROOTS = (Path("/var/log"),)
+LISTABLE_DIRECTORY_ROOTS = (Path("/var/log"),)
+JOURNAL_UNIT_ALLOWLIST = frozenset({
+    "sshd.service", "docker.service", "containerd.service", "systemd-journald.service",
+    "prism-ops-executor.service", "prism-sandbox-executor.service", "prism-security-block.service",
+    "prism-ops-check.service", "prism-backup.service", "prism-verify-backup.service",
+    "prism-cert-renew.service",
+})
 READ_ONLY_ACTIONS = {
     "status", "certificate_status", "host_inventory", "list_directory", "read_text_file",
     "journal_query", "ssh_login_events", "flytrap_attack_events", "nginx_attack_events",
@@ -45,23 +54,11 @@ READ_ONLY_ACTIONS = {
 MAX_TEXT_BYTES = 256 * 1024
 MAX_DIRECTORY_ENTRIES = 500
 UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@:-]{1,128}$")
-CONTAINER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-PACKAGE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.:@-]{0,127}$")
-USERNAME = re.compile(r"^[a-z_][a-z0-9_-]{0,30}\$?$")
-ZONE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
-SSH_KEY_TYPES = {
-    "ssh-ed25519",
-    "ssh-rsa",
-    "ecdsa-sha2-nistp256",
-    "ecdsa-sha2-nistp384",
-    "ecdsa-sha2-nistp521",
-}
 DENIED_PATH_ROOTS = tuple(Path(value) for value in ("/proc", "/sys", "/dev", "/run"))
 SENSITIVE_EXACT_PATHS = {Path("/etc/shadow"), Path("/etc/gshadow")}
 SENSITIVE_NAMES = {".env", "authorized_keys", "credentials", "credentials.json"}
 SENSITIVE_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".jks"}
-PROTECTED_ACCOUNTS = {"root", "bin", "daemon", "mysql", "redis", "docker", "sshd"}
 CONFIG_RULES = {
     "LOG_LEVEL": re.compile(r"^(DEBUG|INFO|WARNING|ERROR)$"),
     "REVIEW_MAX_CONCURRENCY": re.compile(r"^[1-8]$"),
@@ -80,13 +77,6 @@ ACTION_PARAM_KEYS = {
     "rollback_application": {"target"}, "restore_database": {"file"}, "cleanup": set(),
     "host_inventory": set(), "list_directory": {"path", "limit"},
     "read_text_file": {"path", "max_bytes"}, "journal_query": {"unit", "since", "lines"},
-    "systemd_unit_action": {"unit", "operation"},
-    "docker_container_action": {"container", "operation"},
-    "write_text_file": {"path", "content", "expected_sha256", "mode"},
-    "package_action": {"operation", "packages"},
-    "firewall_action": {"operation", "target_type", "value", "zone"},
-    "account_action": {"operation", "username", "shell", "remove_home"},
-    "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
     "ssh_login_events": {"since_hours", "limit", "focus"},
     "flytrap_attack_events": {"since_hours", "limit"},
     "nginx_attack_events": {"since_hours", "limit", "failure_threshold"},
@@ -95,7 +85,10 @@ ACTION_PARAM_KEYS = {
     "db_health": set(),
     "ip_attribution": {"ip"},
     "security_block_status": set(),
-    "security_block_configure": {"enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold", "allowlist_cidrs", "protected_ip"},
+    "security_block_configure": {
+        "enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds",
+        "ssh_threshold", "web_threshold", "allowlist_cidrs", "protected_ip",
+    },
     "security_block_reconcile": set(),
     "security_block_release": {"ip", "reason"},
     "security_block_candidates": set(),
@@ -108,7 +101,7 @@ def run(
     *,
     timeout: int = 900,
     allow_failure: bool = False,
-    stdout_tail_limit: Optional[int] = 100_000,
+    stdout_tail_limit: int | None = 100_000,
 ) -> dict[str, Any]:
     completed = subprocess.run(
         args,
@@ -202,8 +195,10 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
     if action == "database_maintenance":
         return run([
             "docker", "exec", "cr_mysql", "sh", "-ec",
-            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqlcheck '
-            '--protocol=TCP -h 127.0.0.1 -uroot --analyze "$MYSQL_DATABASE"',
+            (
+                'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqlcheck '
+                '--protocol=TCP -h 127.0.0.1 -uroot --analyze "$MYSQL_DATABASE"'
+            ),
         ], timeout=900)
     if action == "update_config":
         key = str(params.get("key") or "")
@@ -223,20 +218,6 @@ def execute(action: str, params: dict[str, Any], request_id: str = "") -> dict[s
         return run([str(DEPLOY_DIR / "restore.sh"), str(backup), "--confirm", "RESTORE_PRODUCTION"], timeout=1800)
     if action == "cleanup":
         return run([str(DEPLOY_DIR / "cleanup.sh"), "--apply"], timeout=900)
-    if action == "systemd_unit_action":
-        return _systemd_unit_action(params)
-    if action == "docker_container_action":
-        return _docker_container_action(params)
-    if action == "write_text_file":
-        return _write_text_file(params, request_id=request_id)
-    if action == "package_action":
-        return _package_action(params)
-    if action == "firewall_action":
-        return _firewall_action(params)
-    if action == "account_action":
-        return _account_action(params)
-    if action == "ssh_authorized_key_action":
-        return _ssh_authorized_key_action(params, request_id=request_id)
     if action == "ssh_login_events":
         return _ssh_login_events(params)
     if action == "flytrap_attack_events":
@@ -291,6 +272,10 @@ def _absolute_path(raw: Any) -> Path:
     return resolved
 
 
+def _under_allowed_roots(path: Path, roots: tuple[Path, ...]) -> bool:
+    return any(path == root or root in path.parents for root in roots)
+
+
 def _reject_symlink_components(path: Path) -> None:
     current = Path(path.anchor)
     for component in path.parts[1:]:
@@ -314,6 +299,8 @@ def _is_sensitive_path(path: Path) -> bool:
 
 def _safe_text_path(raw: Any, *, must_exist: bool) -> Path:
     path = _absolute_path(raw)
+    if not _under_allowed_roots(path, READABLE_TEXT_ROOTS):
+        raise ValueError("文本文件路径超出允许范围")
     if _is_sensitive_path(path):
         raise ValueError("拒绝访问凭据或私钥路径")
     if must_exist and not path.exists():
@@ -327,6 +314,9 @@ def _safe_text_path(raw: Any, *, must_exist: bool) -> Path:
 
 def _list_directory(params: dict[str, Any]) -> dict[str, Any]:
     path = _absolute_path(params.get("path"))
+    allowed_roots = (*LISTABLE_DIRECTORY_ROOTS, _configured_backup_dir())
+    if not _under_allowed_roots(path, allowed_roots):
+        raise ValueError("目录路径超出允许范围")
     if not path.is_dir() or path.is_symlink():
         raise ValueError("目标不是可读取的普通目录")
     requested_limit = int(params.get("limit") or 200)
@@ -372,6 +362,8 @@ def _journal_query(params: dict[str, Any]) -> dict[str, Any]:
     unit = str(params.get("unit") or "")
     if not UNIT_NAME.fullmatch(unit):
         raise ValueError("unit 名称不合法")
+    if unit not in JOURNAL_UNIT_ALLOWLIST:
+        raise ValueError("unit 不在只读查询白名单")
     since = str(params.get("since") or "1 hour ago")
     if not re.fullmatch(r"[A-Za-z0-9 :+_.-]{1,64}", since):
         raise ValueError("since 格式不合法")
@@ -901,8 +893,10 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     )
     result = run([
         "docker", "exec", "cr_mysql", "sh", "-ec",
-        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=TCP -h 127.0.0.1 '
-        '-uroot --batch --skip-column-names --raw -e "$1"',
+        (
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=TCP -h 127.0.0.1 '
+            '-uroot --batch --skip-column-names --raw -e "$1"'
+        ),
         "sh", sql,
     ], timeout=90, allow_failure=True)
     if result["exit_code"] != 0:
@@ -1017,318 +1011,6 @@ def _ip_attribution(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _systemd_unit_action(params: dict[str, Any]) -> dict[str, Any]:
-    operation = str(params.get("operation") or "")
-    if operation == "daemon_reload":
-        return run(["systemctl", "daemon-reload"], timeout=60)
-    if operation not in {"start", "stop", "restart", "reload", "enable", "disable"}:
-        raise ValueError("systemd operation 不合法")
-    unit = str(params.get("unit") or "")
-    if not UNIT_NAME.fullmatch(unit):
-        raise ValueError("unit 名称不合法")
-    load_state = run(["systemctl", "show", unit, "--property=LoadState", "--value"], timeout=30)["stdout"].strip()
-    if load_state == "not-found":
-        raise ValueError("systemd unit 不存在")
-    result = run(["systemctl", operation, unit], timeout=180)
-    state = run([
-        "systemctl", "show", unit, "--property=LoadState,ActiveState,SubState,UnitFileState", "--no-pager",
-    ], timeout=30, allow_failure=True)
-    return {"operation": result, "state": state}
-
-
-def _docker_container_action(params: dict[str, Any]) -> dict[str, Any]:
-    operation = str(params.get("operation") or "")
-    if operation not in {"start", "stop", "restart", "pause", "unpause"}:
-        raise ValueError("Docker operation 不合法")
-    container = str(params.get("container") or "")
-    if not CONTAINER_NAME.fullmatch(container):
-        raise ValueError("container 名称不合法")
-    run(["docker", "inspect", container], timeout=30)
-    args = ["docker", operation]
-    if operation in {"stop", "restart"}:
-        args.extend(["--time", "30"])
-    args.append(container)
-    result = run(args, timeout=180)
-    state = run([
-        "docker", "inspect", "--format",
-        "{{json .State}}", container,
-    ], timeout=30)
-    return {"operation": result, "state": state}
-
-
-def _write_text_file(params: dict[str, Any], *, request_id: str) -> dict[str, Any]:
-    if not REQUEST_ID.fullmatch(request_id):
-        raise ValueError("request_id 不合法")
-    path = _safe_text_path(params.get("path"), must_exist=False)
-    content = params.get("content")
-    if not isinstance(content, str):
-        raise ValueError("content 必须是 UTF-8 文本")
-    payload = content.encode("utf-8")
-    if len(payload) > MAX_TEXT_BYTES:
-        raise ValueError(f"content 不能超过 {MAX_TEXT_BYTES} 字节")
-    parent = path.parent
-    if not parent.is_dir() or parent.is_symlink():
-        raise ValueError("目标父目录不存在或不安全")
-    expected = str(params.get("expected_sha256") or "")
-    existed = path.exists()
-    current_sha = _sha256_file(path) if existed else ""
-    if expected and expected != current_sha:
-        raise ValueError("文件已变化，expected_sha256 不匹配")
-    requested_mode = str(params.get("mode") or "")
-    if requested_mode:
-        if not re.fullmatch(r"0?[0-7]{3}", requested_mode):
-            raise ValueError("mode 必须是三位或四位八进制权限")
-        file_mode = int(requested_mode, 8)
-    else:
-        file_mode = stat.S_IMODE(path.stat().st_mode) if existed else 0o644
-    backup = ""
-    if existed:
-        backup_dir = FILE_BACKUP_DIR / request_id
-        backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(backup_dir, 0o700)
-        backup_path = backup_dir / f"{hashlib.sha256(str(path).encode()).hexdigest()}.bak"
-        shutil.copy2(path, backup_path, follow_symlinks=False)
-        os.chmod(backup_path, 0o600)
-        backup = str(backup_path)
-    descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.prism-", dir=str(parent))
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp_name, file_mode)
-        os.replace(temp_name, path)
-        directory_fd = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
-    return {
-        "path": str(path),
-        "created": not existed,
-        "previous_sha256": current_sha,
-        "sha256": _sha256_file(path),
-        "bytes": len(payload),
-        "mode": format(file_mode, "04o"),
-        "rollback_backup": backup,
-    }
-
-
-def _package_action(params: dict[str, Any]) -> dict[str, Any]:
-    operation = str(params.get("operation") or "")
-    if operation not in {"install", "upgrade", "remove"}:
-        raise ValueError("package operation 不合法")
-    packages = params.get("packages")
-    if not isinstance(packages, list) or not 1 <= len(packages) <= 20:
-        raise ValueError("packages 数量必须在 1 到 20 之间")
-    normalized = [str(item) for item in packages]
-    if any(not PACKAGE_NAME.fullmatch(item) for item in normalized):
-        raise ValueError("软件包名称不合法")
-    manager = shutil.which("dnf")
-    if not manager:
-        raise RuntimeError("服务器未安装 dnf")
-    return run([manager, "-y", operation, *normalized], timeout=1800)
-
-
-def _firewall_action(params: dict[str, Any]) -> dict[str, Any]:
-    operation = str(params.get("operation") or "")
-    if operation not in {"add", "remove"}:
-        raise ValueError("firewall operation 不合法")
-    target_type = str(params.get("target_type") or "")
-    if target_type not in {"port", "service"}:
-        raise ValueError("target_type 必须是 port 或 service")
-    value = str(params.get("value") or "").strip().lower()
-    if target_type == "port":
-        # 兼容纯端口号(如 8080,默认 tcp)与带协议端口(如 8080/tcp、8080/udp)
-        match = re.fullmatch(r"([0-9]{1,5})(?:/(tcp|udp))?", value)
-        if not match or not 1 <= int(match.group(1)) <= 65535:
-            raise ValueError("端口必须是 1-65535 或 1-65535/tcp|udp")
-        proto = match.group(2) or "tcp"
-        value = f"{match.group(1)}/{proto}"
-    elif not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
-        raise ValueError("firewalld service 名称不合法")
-    zone = str(params.get("zone") or "public")
-    if not ZONE_NAME.fullmatch(zone):
-        raise ValueError("firewalld zone 名称不合法")
-
-    firewall = shutil.which("firewall-cmd")
-    if firewall:
-        state = run([firewall, "--state"], timeout=30, allow_failure=True)
-        if state.get("exit_code") == 0 and "running" in (state.get("stdout") or ""):
-            option = f"--{operation}-{target_type}={value}"
-            change = run([firewall, "--permanent", f"--zone={zone}", option], timeout=120)
-            reload_result = run([firewall, "--reload"], timeout=120)
-            return {"change": change, "reload": reload_result}
-
-    # firewalld 未运行/未安装时回退到 iptables(OpenCloudOS/CentOS 常见)。
-    # 仅端口操作支持 iptables,服务名操作无法映射时给出明确提示。
-    iptables = shutil.which("iptables") or shutil.which("/usr/sbin/iptables")
-    if not iptables:
-        raise RuntimeError("服务器未安装 firewall-cmd/firewalld 且无 iptables")
-    if target_type == "service":
-        raise RuntimeError(
-            "当前防火墙为 iptables 模式,不支持按服务名开放;请使用端口操作(target_type=port)"
-        )
-    proto = value.split("/", 1)[1] if "/" in value else "tcp"
-    port = value.split("/", 1)[0]
-    if operation == "add":
-        rule = ["-I", "INPUT", "-p", proto, "--dport", port, "-j", "ACCEPT"]
-    else:
-        rule = ["-D", "INPUT", "-p", proto, "--dport", port, "-j", "ACCEPT"]
-    change = run([iptables, *rule], timeout=60)
-    persist = None
-    for save_path in ("/etc/sysconfig/iptables", "/etc/iptables/rules.v4"):
-        if os.path.exists(save_path) and os.access(save_path, os.W_OK):
-            persist = run(["iptables-save"], timeout=60)
-            if persist.get("exit_code") == 0:
-                with open(save_path, "w", encoding="utf-8") as fh:
-                    fh.write(persist.get("stdout", ""))
-            break
-    return {
-        "change": change,
-        "persist": persist or {"ok": False, "note": "未找到可写 iptables 持久化文件,规则仅临时生效"},
-    }
-
-
-def _account_action(params: dict[str, Any]) -> dict[str, Any]:
-    operation = str(params.get("operation") or "")
-    if operation not in {"create_system", "lock", "unlock", "delete"}:
-        raise ValueError("account operation 不合法")
-    username = str(params.get("username") or "")
-    if not USERNAME.fullmatch(username):
-        raise ValueError("用户名不合法")
-    if username in PROTECTED_ACCOUNTS:
-        raise ValueError("该系统账户受保护，不能由 Agent 修改")
-    exists = _account_exists(username)
-    if operation == "create_system":
-        if exists:
-            raise ValueError("账户已存在")
-        shell = str(params.get("shell") or "/sbin/nologin")
-        if shell not in {"/sbin/nologin", "/usr/sbin/nologin", "/bin/bash"}:
-            raise ValueError("shell 不在允许范围")
-        result = run(["useradd", "--system", "--create-home", "--shell", shell, username], timeout=120)
-    else:
-        if not exists:
-            raise ValueError("账户不存在")
-        if operation == "lock":
-            result = run(["usermod", "--lock", username], timeout=60)
-        elif operation == "unlock":
-            result = run(["usermod", "--unlock", username], timeout=60)
-        else:
-            args = ["userdel"]
-            if bool(params.get("remove_home")):
-                args.append("--remove")
-            result = run([*args, username], timeout=120)
-    return {"operation": result, "account": _account_summary(username)}
-
-
-def _ssh_authorized_key_action(params: dict[str, Any], *, request_id: str) -> dict[str, Any]:
-    if not REQUEST_ID.fullmatch(request_id):
-        raise ValueError("request_id 不合法")
-    operation = str(params.get("operation") or "")
-    if operation not in {"add", "remove"}:
-        raise ValueError("SSH key operation 不合法")
-    username = str(params.get("username") or "")
-    if not USERNAME.fullmatch(username) or not _account_exists(username):
-        raise ValueError("账户不存在或用户名不合法")
-    account = pwd.getpwnam(username)
-    home = _absolute_path(account.pw_dir)
-    if not home.is_absolute() or home == Path("/"):
-        raise ValueError("账户 home 目录不安全")
-    ssh_dir = home / ".ssh"
-    auth_file = ssh_dir / "authorized_keys"
-    _reject_symlink_components(ssh_dir)
-    _reject_symlink_components(auth_file)
-    ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(ssh_dir, 0o700)
-    existing = auth_file.read_text(encoding="utf-8").splitlines() if auth_file.exists() else []
-    backup = ""
-    if auth_file.exists():
-        backup_dir = FILE_BACKUP_DIR / request_id
-        backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        backup_path = backup_dir / f"authorized_keys_{username}.bak"
-        shutil.copy2(auth_file, backup_path, follow_symlinks=False)
-        os.chmod(backup_path, 0o600)
-        backup = str(backup_path)
-    if operation == "add":
-        key = str(params.get("public_key") or "").strip()
-        fingerprint = _ssh_key_fingerprint(key)
-        if any(
-            _line_fingerprint(line) == fingerprint
-            for line in existing
-            if line.strip() and not line.lstrip().startswith("#")
-        ):
-            raise ValueError("该 SSH 公钥已存在")
-        output = [*existing, key]
-    else:
-        fingerprint = str(params.get("fingerprint") or "")
-        if not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{20,64}", fingerprint):
-            raise ValueError("SSH 公钥指纹不合法")
-        output = [line for line in existing if _line_fingerprint(line) != fingerprint]
-        if len(output) == len(existing):
-            raise ValueError("未找到对应 SSH 公钥")
-    payload = "\n".join(output).rstrip() + "\n"
-    descriptor, temp_name = tempfile.mkstemp(prefix=".authorized_keys.prism-", dir=str(ssh_dir))
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temp_name, 0o600)
-        os.chown(temp_name, account.pw_uid, account.pw_gid)
-        os.replace(temp_name, auth_file)
-    finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
-    os.chown(ssh_dir, account.pw_uid, account.pw_gid)
-    return {"username": username, "operation": operation, "fingerprint": fingerprint, "rollback_backup": backup}
-
-
-def _account_exists(username: str) -> bool:
-    try:
-        pwd.getpwnam(username)
-        return True
-    except KeyError:
-        return False
-
-
-def _account_summary(username: str) -> dict[str, Any]:
-    if not _account_exists(username):
-        return {"username": username, "exists": False}
-    account = pwd.getpwnam(username)
-    return {
-        "username": username,
-        "exists": True,
-        "uid": account.pw_uid,
-        "gid": account.pw_gid,
-        "home": account.pw_dir,
-        "shell": account.pw_shell,
-    }
-
-
-def _ssh_key_fingerprint(value: str) -> str:
-    parts = value.split()
-    if len(parts) < 2 or parts[0] not in SSH_KEY_TYPES:
-        raise ValueError("只接受合法 OpenSSH 公钥")
-    try:
-        decoded = base64.b64decode(parts[1], validate=True)
-    except (ValueError, TypeError) as exc:
-        raise ValueError("SSH 公钥 Base64 不合法") from exc
-    if len(decoded) < 32 or len(decoded) > 16 * 1024:
-        raise ValueError("SSH 公钥长度不合法")
-    digest = base64.b64encode(hashlib.sha256(decoded).digest()).decode("ascii").rstrip("=")
-    return f"SHA256:{digest}"
-
-
-def _line_fingerprint(value: str) -> str:
-    try:
-        return _ssh_key_fingerprint(value.strip())
-    except ValueError:
-        return ""
-
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -1348,16 +1030,22 @@ def _redact_text(value: str) -> str:
 
 
 def _audit_params(action: str, params: dict[str, Any]) -> dict[str, Any]:
-    sanitized = dict(params)
-    if action == "write_text_file":
-        content = str(sanitized.pop("content", ""))
-        sanitized["content_bytes"] = len(content.encode("utf-8"))
-        sanitized["content_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    if action == "ssh_authorized_key_action":
-        public_key = str(sanitized.pop("public_key", ""))
-        if public_key:
-            sanitized["fingerprint"] = _ssh_key_fingerprint(public_key)
-    return sanitized
+    sensitive = re.compile(
+        r"(?i)^(?:content|public[_-]?key|private[_-]?key|password|passwd|token|secret|api[_-]?key|authorization)$"
+    )
+
+    def sanitize(value: Any, key: str = "") -> Any:
+        if sensitive.fullmatch(key):
+            return "[REDACTED]"
+        if isinstance(value, dict):
+            return {str(child_key): sanitize(child, str(child_key)) for child_key, child in value.items()}
+        if isinstance(value, list):
+            return [sanitize(child) for child in value]
+        if isinstance(value, str):
+            return _redact_text(value)
+        return value
+
+    return sanitize(params)
 
 
 def _write_host_audit(
@@ -1408,7 +1096,7 @@ def _read_ledger(request_id: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("执行幂等账本损坏，已禁止重试") from exc
     if not isinstance(payload, dict):
-        raise RuntimeError("执行幂等账本格式错误，已禁止重试")
+        raise TypeError("执行幂等账本格式错误，已禁止重试")
     return payload
 
 
@@ -1449,6 +1137,11 @@ def _configured_backup_dir() -> Path:
     """读取跨版本持久备份目录；未配置时沿用原默认路径。"""
     raw = os.environ.get("BACKUP_DIR", "").strip()
     if not raw:
+        try:
+            raw = _read_env("BACKUP_DIR").strip()
+        except (OSError, RuntimeError):
+            raw = ""
+    if not raw:
         return BACKUP_DIR
     path = Path(raw)
     if not path.is_absolute():
@@ -1464,7 +1157,7 @@ def _read_env(key: str) -> str:
 
 
 def _configured_certbot_conf_dir() -> Path:
-    """与 systemd EnvironmentFile/Compose bind mount 使用同一证书配置目录。"""
+    """读取与 Compose bind mount 相同的证书目录，不向 root 进程注入 dotenv。"""
     configured = os.environ.get("CERTBOT_CONF_DIR")
     if configured is None:
         try:
@@ -1529,15 +1222,52 @@ def _execute_with_concurrency_policy(
         return execute(action, params, request_id=request_id)
 
 
+def _authorized_peer(connection: Any) -> bool:
+    """只接受 Linux Unix-socket peer credentials 中的固定后端身份；不回退共享令牌。"""
+    peer_option = getattr(socket, "SO_PEERCRED", None)
+    if peer_option is None:
+        return False
+    try:
+        raw = connection.getsockopt(socket.SOL_SOCKET, peer_option, struct.calcsize("3i"))
+        pid, uid, gid = struct.unpack("3i", raw)
+    except (AttributeError, OSError, struct.error, TypeError):
+        return False
+    return pid > 0 and uid == ALLOWED_PEER_UID and gid == ALLOWED_PEER_GID
+
+
+def _prepare_socket_directory() -> None:
+    parent = SOCKET_PATH.parent
+    if parent.is_symlink():
+        raise RuntimeError("运维 socket 目录不能是符号链接")
+    parent.mkdir(parents=True, exist_ok=True, mode=SOCKET_DIRECTORY_MODE)
+    metadata = parent.lstat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise RuntimeError("运维 socket 父路径不是目录")
+    if metadata.st_uid != SOCKET_DIRECTORY_UID or metadata.st_gid != SOCKET_DIRECTORY_GID:
+        raise RuntimeError("运维 socket 父目录属主必须为 root:prism-ops")
+    os.chmod(parent, SOCKET_DIRECTORY_MODE)
+    if parent.lstat().st_mode & 0o7777 != SOCKET_DIRECTORY_MODE:
+        raise RuntimeError("运维 socket 父目录权限设置失败")
+
+
+def _remove_stale_socket() -> None:
+    if SOCKET_PATH.is_symlink():
+        raise RuntimeError("拒绝覆盖符号链接运维 socket")
+    if not SOCKET_PATH.exists():
+        return
+    if not stat.S_ISSOCK(SOCKET_PATH.lstat().st_mode):
+        raise RuntimeError("拒绝覆盖非 socket 运维路径")
+    SOCKET_PATH.unlink()
+
+
 class Handler(BaseHTTPRequestHandler):
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         try:
+            if not _authorized_peer(self.connection):
+                self._json(403, {"ok": False, "error": "unix socket peer 不在允许范围"})
+                return
             if self.path != "/execute":
                 self._json(404, {"ok": False, "error": "not found"})
-                return
-            expected = f"Bearer {TOKEN}"
-            if not TOKEN or not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
-                self._json(401, {"ok": False, "error": "unauthorized"})
                 return
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 64 * 1024:
@@ -1625,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
                     status_value="success",
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - 宿主机失败必须进入幂等账本和执行审计
                 error = _redact_text(str(exc))[:4000]
                 _write_ledger(
                     request_id,
@@ -1671,18 +1401,23 @@ class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer)
 
 
 def main() -> None:
-    if len(TOKEN) < 32:
-        raise SystemExit("OPS_EXECUTOR_TOKEN must contain at least 32 characters")
-    SOCKET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if SOCKET_PATH.exists():
-        SOCKET_PATH.unlink()
+    _prepare_socket_directory()
+    _remove_stale_socket()
     server = UnixHTTPServer(str(SOCKET_PATH), Handler)
+    metadata = SOCKET_PATH.lstat()
+    if not stat.S_ISSOCK(metadata.st_mode):
+        server.server_close()
+        raise RuntimeError("运维 socket 路径不是 socket")
+    if metadata.st_uid != SOCKET_DIRECTORY_UID or metadata.st_gid != SOCKET_DIRECTORY_GID:
+        server.server_close()
+        SOCKET_PATH.unlink()
+        raise RuntimeError("运维 socket 属主必须为 root:prism-ops")
     os.chmod(SOCKET_PATH, 0o660)
     try:
         server.serve_forever()
     finally:
         server.server_close()
-        if SOCKET_PATH.exists():
+        if SOCKET_PATH.exists() and stat.S_ISSOCK(SOCKET_PATH.lstat().st_mode):
             SOCKET_PATH.unlink()
 
 

@@ -24,7 +24,10 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import rbac_service
 from app.services.project_member_service import (
-    get_visible_project_ids, require_project_access, require_project_execution, project_resource_capabilities,
+    get_visible_project_ids,
+    project_resource_capabilities,
+    require_project_access,
+    require_project_execution,
 )
 from app.services.report_exporter import build_report_score_facts
 

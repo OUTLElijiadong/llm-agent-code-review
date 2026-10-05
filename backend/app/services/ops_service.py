@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import time
@@ -40,13 +39,6 @@ ACTION_RISKS = {
     "list_directory": "low",
     "read_text_file": "low",
     "journal_query": "low",
-    "systemd_unit_action": "critical",
-    "docker_container_action": "critical",
-    "write_text_file": "critical",
-    "package_action": "critical",
-    "firewall_action": "critical",
-    "account_action": "critical",
-    "ssh_authorized_key_action": "critical",
     "ssh_login_events": "low",
     "flytrap_attack_events": "low",
     "nginx_attack_events": "low",
@@ -98,13 +90,6 @@ ACTION_PARAM_KEYS = {
     "list_directory": {"path", "limit"},
     "read_text_file": {"path", "max_bytes"},
     "journal_query": {"unit", "since", "lines"},
-    "systemd_unit_action": {"unit", "operation"},
-    "docker_container_action": {"container", "operation"},
-    "write_text_file": {"path", "content", "expected_sha256", "mode"},
-    "package_action": {"operation", "packages"},
-    "firewall_action": {"operation", "target_type", "value", "zone"},
-    "account_action": {"operation", "username", "shell", "remove_home"},
-    "ssh_authorized_key_action": {"operation", "username", "public_key", "fingerprint"},
     "ssh_login_events": {"since_hours", "limit", "focus"},
     "flytrap_attack_events": {"since_hours", "limit"},
     "nginx_attack_events": {"since_hours", "limit", "failure_threshold"},
@@ -130,13 +115,6 @@ ACTION_REQUIRED_PARAMS = {
     "list_directory": {"path"},
     "read_text_file": {"path"},
     "journal_query": {"unit"},
-    "systemd_unit_action": {"operation"},
-    "docker_container_action": {"container", "operation"},
-    "write_text_file": {"path", "content"},
-    "package_action": {"operation", "packages"},
-    "firewall_action": {"operation", "target_type", "value"},
-    "account_action": {"operation", "username"},
-    "ssh_authorized_key_action": {"operation", "username"},
     "ip_attribution": {"ip"},
     "security_block_configure": {"enabled"},
     "security_block_release": {"ip", "reason"},
@@ -154,19 +132,6 @@ ACTION_PARAM_TYPES = {
     "unit": str,
     "since": str,
     "lines": int,
-    "operation": str,
-    "container": str,
-    "content": str,
-    "expected_sha256": str,
-    "mode": str,
-    "packages": list,
-    "target_type": str,
-    "zone": str,
-    "username": str,
-    "shell": str,
-    "remove_home": bool,
-    "public_key": str,
-    "fingerprint": str,
     "since_hours": int,
     "failure_threshold": int,
     "focus": str,
@@ -193,7 +158,6 @@ def _object_schema(properties: dict[str, Any], required: set[str] | None = None)
     }
 
 
-_STRING = {"type": "string", "maxLength": 262_144}
 ACTION_PARAM_SCHEMAS = {
     "status": _object_schema({}),
     "certificate_status": _object_schema({}),
@@ -211,13 +175,6 @@ ACTION_PARAM_SCHEMAS = {
     "list_directory": _object_schema({"path": {"type": "string", "maxLength": 4096}, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}, {"path"}),  # noqa: E501
     "read_text_file": _object_schema({"path": {"type": "string", "maxLength": 4096}, "max_bytes": {"type": "integer", "minimum": 1, "maximum": 262_144}}, {"path"}),  # noqa: E501
     "journal_query": _object_schema({"unit": {"type": "string", "maxLength": 128}, "since": {"type": "string", "maxLength": 64}, "lines": {"type": "integer", "minimum": 1, "maximum": 500}}, {"unit"}),  # noqa: E501
-    "systemd_unit_action": _object_schema({"unit": {"type": "string", "maxLength": 128}, "operation": {"type": "string", "enum": ["start", "stop", "restart", "reload", "enable", "disable", "daemon_reload"]}}, {"operation"}),  # noqa: E501
-    "docker_container_action": _object_schema({"container": {"type": "string", "maxLength": 128}, "operation": {"type": "string", "enum": ["start", "stop", "restart", "pause", "unpause"]}}, {"container", "operation"}),  # noqa: E501
-    "write_text_file": _object_schema({"path": {"type": "string", "maxLength": 4096}, "content": _STRING, "expected_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "mode": {"type": "string", "pattern": "^0?[0-7]{3}$"}}, {"path", "content"}),  # noqa: E501
-    "package_action": _object_schema({"operation": {"type": "string", "enum": ["install", "upgrade", "remove"]}, "packages": {"type": "array", "items": {"type": "string", "maxLength": 128}, "minItems": 1, "maxItems": 20, "uniqueItems": True}}, {"operation", "packages"}),  # noqa: E501
-    "firewall_action": _object_schema({"operation": {"type": "string", "enum": ["add", "remove"]}, "target_type": {"type": "string", "enum": ["port", "service"]}, "value": {"type": "string", "maxLength": 64}, "zone": {"type": "string", "maxLength": 32}}, {"operation", "target_type", "value"}),  # noqa: E501
-    "account_action": _object_schema({"operation": {"type": "string", "enum": ["create_system", "lock", "unlock", "delete"]}, "username": {"type": "string", "maxLength": 32}, "shell": {"type": "string", "enum": ["/sbin/nologin", "/usr/sbin/nologin", "/bin/bash"]}, "remove_home": {"type": "boolean"}}, {"operation", "username"}),  # noqa: E501
-    "ssh_authorized_key_action": _object_schema({"operation": {"type": "string", "enum": ["add", "remove"]}, "username": {"type": "string", "maxLength": 32}, "public_key": {"type": "string", "maxLength": 16_384}, "fingerprint": {"type": "string", "maxLength": 80}}, {"operation", "username"}),  # noqa: E501
     "ssh_login_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}, "focus": {"type": "string", "enum": ["all", "accepted", "failed"]}}),  # noqa: E501
     "flytrap_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
     "nginx_attack_events": _object_schema({"since_hours": {"type": "integer", "minimum": 1, "maximum": 720}, "limit": {"type": "integer", "minimum": 1, "maximum": 5000}, "failure_threshold": {"type": "integer", "minimum": 1, "maximum": 5000}}),  # noqa: E501
@@ -246,16 +203,6 @@ ACTION_DESCRIPTIONS = {
     "list_directory": "列出服务器指定目录内容(path=绝对路径,可选 limit)",
     "read_text_file": "读取服务器指定文本文件内容(path=绝对路径,可选 max_bytes)",
     "journal_query": "查询 systemd 服务日志(unit=服务名,可选 since/lines),用于实时查看运行日志",
-    "systemd_unit_action": "对 systemd 单元执行 start/stop/restart/reload/enable/disable(unit=单元名)",
-    "docker_container_action": "对 Docker 容器执行 start/stop/restart/pause/unpause(container=容器名)",
-    "write_text_file": "写入或覆盖服务器文本文件(path=绝对路径,content=内容,可选 mode/expected_sha256)",
-    "package_action": "安装/升级/移除系统软件包(operation=install/upgrade/remove,packages=包名列表)",
-    "firewall_action": (
-        "开放或关闭防火墙端口/服务(operation=add/remove,target_type=port/service,"
-        "value=端口号或服务名,可选 zone)。用户说开放某端口时使用 add+port+端口号,关闭时用 remove"
-    ),
-    "account_action": "管理系统账号(operation=create_system/lock/unlock/delete,username=用户名)",
-    "ssh_authorized_key_action": "添加或移除用户 SSH 授权公钥(operation=add/remove,username,public_key)",
     "ssh_login_events": "查询 SSH 登录事件(since_hours/limit/focus=all/accepted/failed)",
     "flytrap_attack_events": "查询蜜罐攻击事件",
     "nginx_attack_events": "查询 Nginx 攻击事件",
@@ -556,13 +503,6 @@ def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any
             raise ValueError(f"参数 {key} 必须是整数")
         if expected is not int and not isinstance(value, expected):
             raise ValueError(f"参数 {key} 类型不正确")
-    operation = str(params.get("operation") or "")
-    if action == "systemd_unit_action" and operation != "daemon_reload" and not params.get("unit"):
-        raise ValueError("动作 systemd_unit_action 缺少必填参数: ['unit']")
-    if action == "ssh_authorized_key_action":
-        required_key = "public_key" if operation == "add" else "fingerprint"
-        if not params.get(required_key):
-            raise ValueError(f"动作 ssh_authorized_key_action 缺少必填参数: ['{required_key}']")
     if action == "security_block_configure":
         bounds = {
             "duration_seconds": (60, 900), "window_seconds": (60, 900),
@@ -617,15 +557,7 @@ def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any
 
 
 def audit_action_params(action: str, params: dict[str, Any]) -> dict[str, Any]:
-    sanitized = dict(params)
-    if action == "write_text_file" and "content" in sanitized:
-        content = str(sanitized.pop("content"))
-        sanitized["content_bytes"] = len(content.encode("utf-8"))
-        sanitized["content_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    if action == "ssh_authorized_key_action" and "public_key" in sanitized:
-        public_key = str(sanitized.pop("public_key"))
-        sanitized["public_key_fingerprint"] = hashlib.sha256(public_key.encode("utf-8")).hexdigest()
-    return sanitized
+    return dict(params)
 
 
 def _audit_params(action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -650,13 +582,10 @@ def _redact_value(value: Any) -> Any:
 
 
 def _call_executor(action: str, params: dict[str, Any], request_id: str) -> dict[str, Any]:
-    if not settings.ops_executor_token:
-        raise RuntimeError("运维执行器令牌未配置")
     transport = httpx.HTTPTransport(uds=settings.ops_executor_socket)
     with httpx.Client(transport=transport, base_url="http://prism-ops", timeout=900, trust_env=False) as client:
         response = client.post(
             "/execute",
-            headers={"Authorization": f"Bearer {settings.ops_executor_token}"},
             json={"action": action, "params": params, "request_id": request_id},
         )
     try:

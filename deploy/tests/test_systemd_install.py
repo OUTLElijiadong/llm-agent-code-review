@@ -1,10 +1,10 @@
 """Exercise real installer rollback with isolated unit files and fake systemctl."""
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / "systemd"
 
@@ -48,7 +48,7 @@ if args[0] in {"is-active", "is-enabled"}:
 if args[0] == "show":
     prop = next(a for a in args if a.startswith("--property=")).split("=", 1)[1]
     deploy = os.environ["TEST_DEPLOY"]
-    print({"WorkingDirectory": deploy, "EnvironmentFiles": deploy + "/.env",
+    print({"WorkingDirectory": deploy, "EnvironmentFiles": "",
            "ExecStart": deploy + "/prism_ops_executor.py", "MainPID": "123"}[prop])
 if args[:2] == ["enable", "--now"] and (root / "fail-enable").exists():
     (root / "fail-enable").unlink()
@@ -63,15 +63,18 @@ if args[:2] == ["enable", "--now"] and (root / "fail-enable").exists():
     def run_installer(self):
         return subprocess.run(["bash", str(self.deploy / "systemd" / "install.sh"),
             "--apply", "--deploy-dir", str(self.deploy), "--unit-dir", str(self.units)],
-            env=self.env, capture_output=True, text=True)
+            env=self.env, capture_output=True, text=True, check=False)
 
     def test_installs_timer_and_binds_service_to_release(self):
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stderr)
         text = (self.units / "prism-security-block.service").read_text()
         self.assertIn(str(self.deploy) + "/prism_security_block.py --reconcile", text)
-        self.assertIn("EnvironmentFile=" + str(self.deploy) + "/.env", text)
+        self.assertNotIn("EnvironmentFile=", text)
         self.assertNotIn("@DEPLOY_DIR@", text)
+        executor = (self.units / "prism-ops-executor.service").read_text()
+        self.assertNotIn("EnvironmentFile=", executor)
+        self.assertIn("RuntimeDirectoryMode=0710", executor)
         commands = (self.root / "commands.log").read_text()
         self.assertIn("prism-security-block.timer", commands)
         self.assertIn("enable --now", commands)

@@ -17,7 +17,6 @@ from app.core.rbac_dependency import require_permission
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services.project_member_service import require_project_access, require_project_execution
 from app.schemas.ai_prompt import (
     AiPromptBundleOut,
     AiPromptIssueIn,
@@ -26,6 +25,7 @@ from app.schemas.ai_prompt import (
     AiPromptToolOut,
 )
 from app.schemas.common import Resp
+from app.services.project_member_service import require_project_access, require_project_execution
 
 router = APIRouter()
 

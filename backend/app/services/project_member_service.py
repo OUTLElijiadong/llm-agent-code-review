@@ -199,10 +199,10 @@ def require_scoped_project_execution(db: Session, user: User, payload: dict) -> 
     A task without project resources keeps its original global/tool gates. Caller context's
     agent_team_task_id is deliberately not treated as a formal review task ID.
     """
-    from app.models.code_file import CodeFile
-    from app.models.review_task import ReviewTask
-    from app.models.project_source_revision import ProjectSourceRevision
     from app.models.agent_capability import SandboxEnvironment
+    from app.models.code_file import CodeFile
+    from app.models.project_source_revision import ProjectSourceRevision
+    from app.models.review_task import ReviewTask
 
     def identifier(value):
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:

@@ -148,8 +148,8 @@ def start_discussion(
     if not project or project.status == "deleted":
         raise NotFoundError("项目不存在", code=40400)
     require_project_execution(db, project_id, user)
-    from app.core.permission_codes import PermissionCode
     from app.core.exceptions import ForbiddenError
+    from app.core.permission_codes import PermissionCode
     from app.services.rbac_service import check_permission
     if not check_permission(db, int(user.id), PermissionCode.REVIEW_START):
         raise ForbiddenError("当前账户没有发起审查的权限", code=40300)

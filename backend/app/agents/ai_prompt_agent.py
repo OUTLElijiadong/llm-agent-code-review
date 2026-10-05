@@ -17,14 +17,14 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.agents.contracts import compose_system_prompt
 from app.core.exceptions import AppError
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services.project_member_service import require_project_access, require_project_execution
-from app.core.permission_codes import PermissionCode
 from app.services import rbac_service
+from app.services.project_member_service import require_project_access, require_project_execution
 from app.utils.encoding_utils import BASE64_PREFIX
 
 SUPPORTED_TOOLS: Tuple[str, ...] = (
@@ -156,7 +156,12 @@ class AiPromptAgent(BaseAgent):
         task = self._db.get(ReviewTask, issue.task_id)
         if task is None:
             return AgentResult(success=False, error="无权访问该问题")
-        if (err := self._authz_project(task.project_id, "无权访问该问题", use_llm=use_llm, permission=PermissionCode.ISSUE_VIEW)) is not None:
+        if (
+            err := self._authz_project(
+                task.project_id, "无权访问该问题", use_llm=use_llm,
+                permission=PermissionCode.ISSUE_VIEW,
+            )
+        ) is not None:
             return err
         return None
 
@@ -439,7 +444,12 @@ class AiPromptAgent(BaseAgent):
         task = self._db.get(ReviewTask, task_id)
         if task is None:
             return AgentResult(success=False, error="审查任务不存在")
-        if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
+        if (
+            err := self._authz_project(
+                task.project_id, "无权访问该任务", use_llm=use_llm,
+                permission=PermissionCode.REVIEW_VIEW,
+            )
+        ) is not None:
             return err
         q = self._db.query(ReviewIssue).filter(ReviewIssue.task_id == task_id)
         if severity_filter:
@@ -453,10 +463,20 @@ class AiPromptAgent(BaseAgent):
             )
         prompts = []
         for issue in issues:
-            if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
+            if (
+                err := self._authz_project(
+                    task.project_id, "无权访问该任务", use_llm=use_llm,
+                    permission=PermissionCode.REVIEW_VIEW,
+                )
+            ) is not None:
                 return err
             prompts.append(self._build_for_issue(issue, target_tool, use_llm))
-        if (err := self._authz_project(task.project_id, "无权访问该任务", use_llm=use_llm, permission=PermissionCode.REVIEW_VIEW)) is not None:
+        if (
+            err := self._authz_project(
+                task.project_id, "无权访问该任务", use_llm=use_llm,
+                permission=PermissionCode.REVIEW_VIEW,
+            )
+        ) is not None:
             return err
         # 一键修复全部:把整批问题合成一条完整提示词(≥2 个问题时才有意义)
         aggregates: list[dict] = []

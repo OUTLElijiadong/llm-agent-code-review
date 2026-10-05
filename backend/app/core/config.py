@@ -231,7 +231,6 @@ class Settings(BaseSettings):
 
     # 宿主机运维白名单执行器；仅 Unix Socket，不开放 TCP。
     ops_executor_socket: str = "/run/prism-ops/agent.sock"
-    ops_executor_token: str = ""
     ops_automation_enabled: bool = True
     # 成本保护:定时健康检查只采集状态和生成告警,默认不调用 LLM 诊断。
     ops_health_diagnosis_enabled: bool = False
@@ -379,8 +378,6 @@ class Settings(BaseSettings):
             problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须是至少 32 字符的随机密钥")
         elif encryption_keys[0] == self.jwt_secret:
             problems.append("API_KEY_ENCRYPTION_KEYS 第一项必须与 JWT_SECRET 不同")
-        if self.ops_automation_enabled and len(self.ops_executor_token.strip()) < 32:
-            problems.append("OPS_EXECUTOR_TOKEN 必须配置至少 32 字符的独立随机令牌")
         if not self.malware_scan_fail_closed:
             problems.append("MALWARE_SCAN_FAIL_CLOSED 在非 dev 环境必须为 true")
         if self.sandbox_enabled and len(self.sandbox_executor_token.strip()) < 32:

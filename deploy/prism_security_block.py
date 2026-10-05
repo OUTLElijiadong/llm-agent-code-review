@@ -23,7 +23,52 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
-STATE_DIR = Path(os.environ.get("SECURITY_BLOCK_STATE_DIR", "/var/lib/prism-ops/security-block"))
+DEPLOY_DIR = Path(__file__).resolve().parent
+DEPLOYMENT_CONFIG_KEYS = frozenset({
+    "SECURITY_BLOCK_STATE_DIR",
+    "SECURITY_BLOCK_PROTECTED_CIDRS",
+    "SECURITY_BLOCK_SSH_PORTS",
+})
+
+
+def _deployment_setting(key: str, default: str = "") -> str:
+    """读取单个显式允许的部署值，不把其余 dotenv 内容放入进程环境。"""
+    if key not in DEPLOYMENT_CONFIG_KEYS:
+        raise ValueError("部署配置键不在允许范围")
+    if key in os.environ:
+        return os.environ[key]
+
+    path = DEPLOY_DIR / ".env"
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return default
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("部署环境文件必须是普通文件")
+    if metadata.st_mode & 0o077:
+        raise RuntimeError("部署环境文件不能对组或其他用户开放")
+
+    found: str | None = None
+    with path.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, value = stripped.split("=", 1)
+            if name.strip() != key:
+                continue
+            if found is not None:
+                raise RuntimeError(f"部署环境文件中的 {key} 重复")
+            value = value.strip()
+            if value[:1] in {"'", '"'}:
+                if len(value) < 2 or value[-1] != value[0]:
+                    raise RuntimeError(f"部署环境文件中的 {key} 引号不匹配")
+                value = value[1:-1]
+            found = value
+    return default if found is None else found
+
+
+STATE_DIR = Path(_deployment_setting("SECURITY_BLOCK_STATE_DIR") or "/var/lib/prism-ops/security-block")
 SETS = {4: "prism-sec-v4", 6: "prism-sec-v6"}
 CHAINS = {"INPUT": "PRISM-SEC-IN", "DOCKER-USER": "PRISM-SEC-DK"}
 MAX_ACTIVE = 64
@@ -238,7 +283,7 @@ class SecurityBlockController:
 
     def _protected_sources(self, policy: dict[str, Any]) -> list[dict[str, str]]:
         sources = [{"cidr": network, "reason": "管理员配置白名单"} for network in policy["allowlist_cidrs"]]
-        root_value = os.environ.get("SECURITY_BLOCK_PROTECTED_CIDRS", "").strip()
+        root_value = _deployment_setting("SECURITY_BLOCK_PROTECTED_CIDRS").strip()
         root_networks = json.loads(root_value) if root_value.startswith("[") else re.split(r"[,\s]+", root_value)
         if not isinstance(root_networks, list) or any(not isinstance(value, str) for value in root_networks):
             raise ValueError("root 保护配置必须是 CIDR 字符串列表")
@@ -253,7 +298,7 @@ class SecurityBlockController:
             for info in interface.get("addr_info", []):
                 address = _ip(info["local"])
                 sources.append({"cidr": f"{address}/{address.max_prefixlen}", "reason": "服务器本机地址"})
-        raw_ports = os.environ.get("SECURITY_BLOCK_SSH_PORTS", "22")
+        raw_ports = _deployment_setting("SECURITY_BLOCK_SSH_PORTS", "22")
         ports = {int(item) for item in re.split(r"[,\s]+", raw_ports.strip()) if item}
         if not ports or any(not 1 <= port <= 65535 for port in ports):
             raise RuntimeError("root SSH 保护端口配置不合法")

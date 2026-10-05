@@ -105,3 +105,14 @@ cd /path/to/project/deploy
 - [ ] 超级管理员前端右上角弹出安全告警；离线期间告警在下次登录自动弹出并标记已读；普通管理员不可调用 run-monitor/status。
 - [ ] `ip_attribution` 被动溯源返回归属/ASN；失败时不中断告警流程。
 - [ ] 备份审计动作返回最新备份年龄/校验/体积；超阈值告警含清理建议；清理动作仍走 critical 审批。
+
+## 9. Root 运维执行器边界
+
+- [ ] `prism-ops-executor.service` 不加载应用 `.env`；其 EnvironmentFiles 为空，受限 systemd 沙箱属性已生效。
+- [ ] `/run/prism-ops` 为 `root:prism-ops 0710`，socket 为 `root:prism-ops 0660`；后端仅以固定 UID 10001/GID 991 通过 Linux `SO_PEERCRED` 认证。
+- [ ] Backend 容器以 `10001:991` 运行，`CapDrop=ALL` 且启用 `no-new-privileges`；确认运行时 capability 与挂载状态符合预期。
+- [ ] 后端环境中 `OPS_EXECUTOR_TOKEN` 为空；Root 执行器只运行显式注册的固定动作。
+- [ ] `prism-security-block.service` 不加载整份 `.env`；脚本只按白名单读取安全封禁状态目录、保护网段与 SSH 端口配置。
+- [ ] 任意文件写入、通用 systemd、Docker 容器、软件包、防火墙、系统账号和 SSH 公钥动作在模型工具 schema 与 root 动作白名单中均不存在。
+- [ ] 通过后端容器完成一次只读 `status` 请求；错误 peer UID/GID、缺失 `SO_PEERCRED` 与未注册动作均 fail closed。
+- [ ] 以上边界通过本机单元回归与生产只读复核后再记录结果；不以外部审计报告中的攻击证据作为本次攻击实测。

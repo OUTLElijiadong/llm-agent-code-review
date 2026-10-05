@@ -193,14 +193,19 @@ systemctl is-active --quiet prism-ops-executor.service || {
 }
 working_directory="$(systemctl show prism-ops-executor.service --property=WorkingDirectory --value)"
 environment_files="$(systemctl show prism-ops-executor.service --property=EnvironmentFiles --value)"
+block_environment_files="$(systemctl show prism-security-block.service --property=EnvironmentFiles --value)"
 exec_start="$(systemctl show prism-ops-executor.service --property=ExecStart --value)"
 main_pid="$(systemctl show prism-ops-executor.service --property=MainPID --value)"
 [[ "$working_directory" == "$deploy_dir" ]] || {
   printf '执行器 WorkingDirectory 不匹配：%s\n' "$working_directory" >&2
   exit 1
 }
-[[ "$environment_files" == *"$deploy_dir/.env"* ]] || {
-  printf '执行器 EnvironmentFile 未指向当前发布目录：%s\n' "$environment_files" >&2
+[[ -z "$environment_files" ]] || {
+  printf '执行器不得加载含应用凭据的 EnvironmentFile：%s\n' "$environment_files" >&2
+  exit 1
+}
+[[ -z "$block_environment_files" ]] || {
+  printf '安全封禁 oneshot 不得加载含应用凭据的 EnvironmentFile：%s\n' "$block_environment_files" >&2
   exit 1
 }
 [[ "$exec_start" == *"$deploy_dir/prism_ops_executor.py"* ]] || {

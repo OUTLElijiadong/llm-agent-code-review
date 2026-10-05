@@ -87,19 +87,21 @@ async def test_save_knowledge_note_requires_approval_and_persists(db, super_admi
     assert result.output["owner_type"] == "user"
 
 
-def test_operations_schema_includes_firewall_description() -> None:
+def test_operations_schema_excludes_unbounded_host_mutations() -> None:
     parameters = _operations_tool_schema()["parameters"]
     variants = {item["properties"]["action"]["const"]: item for item in parameters["oneOf"]}
-    firewall = variants["firewall_action"]
-    assert "开放或关闭防火墙" in firewall["description"]
-    assert "8080" in firewall["description"] or "端口号" in firewall["description"]
+    removed = {
+        "systemd_unit_action", "docker_container_action", "write_text_file", "package_action",
+        "firewall_action", "account_action", "ssh_authorized_key_action",
+    }
+    assert removed.isdisjoint(variants)
 
 
 def test_admin_instructions_teach_server_ops_and_notebook() -> None:
     text = _instructions("admin")
     assert "admin_execute_operation" in text
-    assert "firewall_action" in text
-    assert "开放" in text
+    assert "任意文件写入" in text
+    assert "防火墙" in text
     assert "recall_knowledge" in text
     assert "save_knowledge_note" in text
 

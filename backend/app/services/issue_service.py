@@ -19,8 +19,8 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services.project_member_service import (
     get_visible_project_ids,
-    require_project_access,
     project_resource_capabilities,
+    require_project_access,
 )
 
 

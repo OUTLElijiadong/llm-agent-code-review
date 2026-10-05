@@ -117,6 +117,10 @@ services:
     user: "10001:991"
     group_add:
       - "992"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     mem_limit: ${BACKEND_MEM_LIMIT:-768m}
     cpus: ${BACKEND_CPUS:-1.5}
@@ -147,6 +151,8 @@ services:
       SOURCE_ARCHIVE_YARA_TOTAL_TIMEOUT: ${SOURCE_ARCHIVE_YARA_TOTAL_TIMEOUT:-300}
       REDIS_URL: redis://redis:6379/0
       OPS_EXECUTOR_SOCKET: /run/prism-ops/agent.sock
+      # 执行器用 Linux SO_PEERCRED 核验后端 UID/GID；历史共享令牌不进入后端环境。
+      OPS_EXECUTOR_TOKEN: ""
       SANDBOX_EXECUTOR_SOCKET: /var/lib/prism-sandbox/agent.sock
       # GeoLite2 是宿主机维护的只读生产数据源，不能随 release 工作区丢失。
       GEOLITE_DB_PATH: /app/GeoLite2-City.mmdb

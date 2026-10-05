@@ -3789,10 +3789,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "服务器运维(仅超级管理员可用)：实时获取服务器信息(状态/磁盘/进程/日志/证书)时，"
             "直接用 admin_execute_operation 的只读动作现查"
             "(status/host_inventory/journal_query/read_text_file/certificate_status)，不得编造；"
-            "用户要求开放/关闭端口或服务时，用 admin_execute_operation 的 firewall_action"
-            "(开放端口=operation add + target_type port + value 端口号，关闭用 remove)；"
-            "重启服务用 restart_service，装/卸软件包用 package_action，"
-            "改防火墙/服务/账号等写操作都会自动等待用户批准，批准后系统会把结果交还给你。"
+            "可用的主机写操作只限运维工具白名单内的 Prism 服务维护，并由审批流程控制；"
+            "执行器不提供任意文件写入、通用 systemd、Docker 容器、软件包、防火墙、系统账号或 SSH 公钥变更能力。"
+            "用户提出上述主机级变更时，说明该能力未开放，转交受控的人工主机运维流程，不得猜测或拼装替代动作。"
             "管理员需要导入 GitHub 公开仓库时可以用 queue_remote_project_import 创建导入任务"
             "(queued/running 只报告真实 task_id 和进度,后续查询使用 get_remote_project_import)。"
         )

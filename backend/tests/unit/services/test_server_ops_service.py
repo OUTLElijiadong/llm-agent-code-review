@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -98,10 +97,42 @@ def test_backend_rejects_extra_wrong_type_and_conditional_missing_params() -> No
         ops_service.validate_action_params("status", {"command": "id"})
     with pytest.raises(ValueError, match="必须是整数"):
         ops_service.validate_action_params("list_directory", {"path": "/tmp", "limit": "20"})
-    with pytest.raises(ValueError, match="public_key"):
+    with pytest.raises(ValueError, match="不支持的运维动作"):
         ops_service.validate_action_params(
             "ssh_authorized_key_action", {"operation": "add", "username": "deploy"},
         )
+
+
+def test_executor_client_uses_socket_identity_without_bearer_token(monkeypatch) -> None:
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls.append({"init": kwargs})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, path, **kwargs):
+            calls.append({"path": path, **kwargs})
+            return FakeResponse()
+
+    monkeypatch.setattr(ops_service.httpx, "HTTPTransport", lambda **kwargs: kwargs)
+    monkeypatch.setattr(ops_service.httpx, "Client", FakeClient)
+
+    assert ops_service._call_executor("status", {}, "request-peercred-01") == {"ok": True}
+    request = next(call for call in calls if call.get("path") == "/execute")
+    assert "Authorization" not in request.get("headers", {})
 
 
 def test_scheduler_cannot_execute_a_write_action(db, monkeypatch) -> None:
@@ -430,39 +461,39 @@ async def test_expired_agent_session_is_rejected_before_any_tool(db, super_admin
         )
 
 
+@pytest.mark.parametrize(
+    ("action", "params"),
+    [
+        ("write_text_file", {"path": "/tmp/prism-test.conf", "content": "MARKER"}),
+        ("systemd_unit_action", {"unit": "prism-probe.service", "operation": "daemon_reload"}),
+        ("package_action", {"operation": "install", "packages": ["probe"]}),
+        ("firewall_action", {"operation": "add", "target_type": "port", "value": "8621"}),
+        ("account_action", {"operation": "create_system", "username": "prism_probe"}),
+        ("ssh_authorized_key_action", {"operation": "add", "username": "root", "public_key": "ssh-ed25519 AAAA"}),
+        ("docker_container_action", {"operation": "start", "container": "auto-surface-mm-local"}),
+    ],
+)
 @pytest.mark.asyncio
-async def test_critical_operation_approval_and_execution_store_only_digests(db, super_admin_user, monkeypatch) -> None:
-    events = []
+async def test_removed_host_escalation_actions_cannot_be_called(
+    db, super_admin_user, monkeypatch, action, params,
+) -> None:
     monkeypatch.setattr(responses_module.agent_governance_service, "is_runtime_enabled", lambda *_args: True)
     monkeypatch.setattr(
         responses_module.tool_gateway,
         "authorize",
         lambda *_args, **_kwargs: SimpleNamespace(decision=policy_engine.ALLOW, reason="test"),
     )
-    monkeypatch.setattr(
-        ops_service,
-        "execute",
-        lambda *_args, **_kwargs: {"status": "success", "request_id": "request", "result": {"ok": True}},
-    )
-    executor = _executor(db, super_admin_user, "run-write-ops", events)
-    secret_content = "TOKEN=must-not-be-persisted"
+    executor = _executor(db, super_admin_user, f"run-blocked-{action}")
     call = ToolCall(
-        "call-write",
+        f"call-blocked-{action}",
         "admin_execute_operation",
-        {"action": "write_text_file", "params": {"path": "/tmp/prism-test.conf", "content": secret_content}},
+        {"action": action, "params": params},
         "",
     )
 
-    paused = await executor.execute(call)
-    assert paused.status == "approval_required"
-    assert paused.danger is True
-    approval = db.query(ApprovalItem).one()
-    assert secret_content not in approval.request_json
-    assert "content_sha256" in approval.request_json
+    result = await executor.execute(call)
 
-    completed = await executor.execute(call, approved=True)
-    assert completed.status == "success"
-    execution = db.query(AgentToolExecution).one()
-    assert secret_content not in execution.arguments_json
-    assert "content_sha256" in execution.arguments_json
-    assert secret_content not in json.dumps(events, ensure_ascii=False)
+    assert result.status == "error"
+    assert "不支持的运维动作" in result.error
+    assert db.query(ApprovalItem).count() == 0
+    assert db.query(AgentToolExecution).count() == 0

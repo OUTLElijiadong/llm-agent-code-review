@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -22,7 +23,101 @@ def test_rejects_unknown_parameters_before_any_operation() -> None:
         executor.execute("status", {"command": "id"}, request_id="request-unknown-01")
 
 
-def test_text_paths_reject_sensitive_files_and_symlink_components(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("action", "params"),
+    [
+        ("write_text_file", {"path": "/etc/systemd/system/prism-probe.service", "content": "[Service]"}),
+        ("systemd_unit_action", {"unit": "prism-probe.service", "operation": "daemon_reload"}),
+        ("package_action", {"operation": "install", "packages": ["attacker-package"]}),
+        ("firewall_action", {"operation": "add", "target_type": "port", "value": "8621"}),
+        ("account_action", {"operation": "create_system", "username": "prism_probe", "shell": "/bin/bash"}),
+        ("ssh_authorized_key_action", {"operation": "add", "username": "root", "public_key": "ssh-ed25519 AAAA"}),
+        ("docker_container_action", {"operation": "start", "container": "auto-surface-mm-local"}),
+    ],
+)
+def test_unbounded_host_mutations_are_rejected_before_side_effects(action, params, monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(executor, "run", lambda args, **_kwargs: calls.append(args))
+
+    with pytest.raises(ValueError, match="动作不在白名单"):
+        executor.execute(action, params, request_id="request-blocked-01")
+
+    assert calls == []
+
+
+def test_peer_credentials_require_exact_backend_uid_and_primary_gid(monkeypatch) -> None:
+    monkeypatch.setattr(executor.socket, "SO_PEERCRED", 17, raising=False)
+    class PeerSocket:
+        def __init__(self, uid: int, gid: int):
+            self.uid = uid
+            self.gid = gid
+
+        def getsockopt(self, _level: int, _option: int, _size: int) -> bytes:
+            import struct
+
+            return struct.pack("3i", 1234, self.uid, self.gid)
+
+    assert executor._authorized_peer(PeerSocket(10001, 991)) is True
+    assert executor._authorized_peer(PeerSocket(10001, 992)) is False
+    assert executor._authorized_peer(PeerSocket(0, 991)) is False
+    assert executor._authorized_peer(object()) is False
+
+
+def test_peer_credentials_fail_closed_when_platform_support_is_missing(monkeypatch) -> None:
+    monkeypatch.delattr(executor.socket, "SO_PEERCRED", raising=False)
+
+    assert executor._authorized_peer(object()) is False
+
+
+def test_socket_directory_is_traversable_but_not_writable_by_backend(tmp_path: Path, monkeypatch) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    directory = runtime / "prism-ops"
+    monkeypatch.setattr(executor, "SOCKET_PATH", directory / "agent.sock")
+    monkeypatch.setattr(executor, "SOCKET_DIRECTORY_UID", os.getuid())
+    monkeypatch.setattr(executor, "SOCKET_DIRECTORY_GID", os.stat(runtime).st_gid)
+
+    executor._prepare_socket_directory()
+
+    assert directory.stat().st_mode & 0o7777 == 0o710
+    assert directory.stat().st_uid == os.getuid()
+    assert directory.stat().st_gid == os.stat(runtime).st_gid
+
+
+@pytest.mark.parametrize("wrong_owner", ["uid", "gid"])
+def test_socket_directory_rejects_unexpected_owner_or_group(tmp_path: Path, monkeypatch, wrong_owner: str) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    directory = runtime / "prism-ops"
+    monkeypatch.setattr(executor, "SOCKET_PATH", directory / "agent.sock")
+    actual = os.stat(runtime)
+    monkeypatch.setattr(executor, "SOCKET_DIRECTORY_UID", actual.st_uid + (wrong_owner == "uid"))
+    monkeypatch.setattr(executor, "SOCKET_DIRECTORY_GID", actual.st_gid + (wrong_owner == "gid"))
+
+    with pytest.raises(RuntimeError, match="属主"):
+        executor._prepare_socket_directory()
+
+
+def test_stale_socket_cleanup_refuses_regular_files_and_symlinks(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "agent.sock"
+    path.write_text("preserve me", encoding="utf-8")
+    monkeypatch.setattr(executor, "SOCKET_PATH", path)
+
+    with pytest.raises(RuntimeError, match="非 socket"):
+        executor._remove_stale_socket()
+
+    assert path.read_text(encoding="utf-8") == "preserve me"
+
+    linked = tmp_path / "linked.sock"
+    linked.symlink_to(path)
+    monkeypatch.setattr(executor, "SOCKET_PATH", linked)
+    with pytest.raises(RuntimeError, match="符号链接"):
+        executor._remove_stale_socket()
+    assert path.exists()
+
+
+def test_text_paths_reject_sensitive_files_and_symlink_components(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(executor, "READABLE_TEXT_ROOTS", (tmp_path,))
     sensitive = tmp_path / ".env"
     sensitive.write_text("TOKEN=should-not-leak\n", encoding="utf-8")
     with pytest.raises(ValueError, match="凭据或私钥"):
@@ -38,28 +133,50 @@ def test_text_paths_reject_sensitive_files_and_symlink_components(tmp_path: Path
         executor._safe_text_path(str(linked_dir / "config.txt"), must_exist=True)
 
 
-def test_write_text_file_is_atomic_and_creates_rollback_backup(tmp_path: Path, monkeypatch) -> None:
-    backup_dir = tmp_path / "backups"
-    monkeypatch.setattr(executor, "FILE_BACKUP_DIR", backup_dir)
-    target = tmp_path / "service.conf"
-    target.write_text("before\n", encoding="utf-8")
-    old_sha = executor._sha256_file(target)
+def test_text_file_and_directory_reads_are_limited_to_operational_roots(tmp_path: Path, monkeypatch) -> None:
+    allowed = tmp_path / "logs"
+    denied = tmp_path / "secrets"
+    allowed.mkdir()
+    denied.mkdir()
+    allowed_file = allowed / "secure.log"
+    denied_file = denied / "service.conf"
+    allowed_file.write_text("authorized\n", encoding="utf-8")
+    denied_file.write_text("private\n", encoding="utf-8")
+    monkeypatch.setattr(executor, "READABLE_TEXT_ROOTS", (allowed,))
+    monkeypatch.setattr(executor, "LISTABLE_DIRECTORY_ROOTS", (allowed,))
 
-    result = executor._write_text_file(
-        {"path": str(target), "content": "after\n", "expected_sha256": old_sha, "mode": "0640"},
-        request_id="request-write-01",
-    )
+    assert executor._read_text_file({"path": str(allowed_file)})["content"] == "authorized\n"
+    with pytest.raises(ValueError, match="允许范围"):
+        executor._read_text_file({"path": str(denied_file)})
+    with pytest.raises(ValueError, match="允许范围"):
+        executor._list_directory({"path": str(denied)})
 
-    assert target.read_text(encoding="utf-8") == "after\n"
-    assert target.stat().st_mode & 0o777 == 0o640
-    rollback = Path(result["rollback_backup"])
-    assert rollback.read_text(encoding="utf-8") == "before\n"
-    assert rollback.stat().st_mode & 0o777 == 0o600
-    with pytest.raises(ValueError, match="expected_sha256"):
-        executor._write_text_file(
-            {"path": str(target), "content": "stale\n", "expected_sha256": old_sha},
-            request_id="request-write-02",
-        )
+
+def test_directory_listing_allows_only_the_configured_backup_directory(tmp_path: Path, monkeypatch) -> None:
+    backup_dir = tmp_path / "persistent-backups"
+    sibling = tmp_path / "other-data"
+    backup_dir.mkdir()
+    sibling.mkdir()
+    (backup_dir / "backup.sql.gz").write_bytes(b"backup")
+    (sibling / "private.txt").write_text("private", encoding="utf-8")
+    monkeypatch.setenv("BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(executor, "LISTABLE_DIRECTORY_ROOTS", (Path("/var/log"),))
+
+    listing = executor._list_directory({"path": str(backup_dir)})
+
+    assert [entry["name"] for entry in listing["entries"]] == ["backup.sql.gz"]
+    with pytest.raises(ValueError, match="允许范围"):
+        executor._list_directory({"path": str(sibling)})
+
+
+def test_journal_queries_reject_unapproved_units_before_command(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(executor, "run", lambda args, **_kwargs: calls.append(args))
+
+    with pytest.raises(ValueError, match="unit 不在只读查询白名单"):
+        executor._journal_query({"unit": "attacker.service"})
+
+    assert calls == []
 
 
 def test_backup_audit_and_restore_lookup_use_configured_backup_dir(tmp_path: Path, monkeypatch) -> None:
@@ -91,20 +208,29 @@ def test_ledger_is_atomic_and_request_digest_binds_arguments(tmp_path: Path, mon
     assert (tmp_path / "ledger" / "request-ledger-01.json").stat().st_mode & 0o777 == 0o600
 
 
-def test_audit_never_persists_file_content_or_public_key() -> None:
-    write_params = executor._audit_params("write_text_file", {"path": "/tmp/a", "content": "secret"})
-    assert "content" not in write_params
-    assert write_params["content_bytes"] == 6
-    assert len(write_params["content_sha256"]) == 64
-
-    public_key = "ssh-ed25519 " + ("QUFB" * 12)
-    key_params = executor._audit_params(
-        "ssh_authorized_key_action",
-        {"operation": "add", "username": "deploy", "public_key": public_key},
+def test_audit_never_persists_legacy_host_mutation_payloads() -> None:
+    params = executor._audit_params(
+        "write_text_file",
+        {
+            "path": "/etc/systemd/system/example.service",
+            "content": "private payload",
+            "nested": {"token": "secret-token"},
+        },
     )
-    serialized = json.dumps(key_params)
-    assert public_key not in serialized
-    assert key_params["fingerprint"].startswith("SHA256:")
+
+    serialized = json.dumps(params)
+    assert "private payload" not in serialized
+    assert "secret-token" not in serialized
+    assert params["content"] == "[REDACTED]"
+    assert params["nested"]["token"] == "[REDACTED]"
+
+
+def test_removed_mutation_actions_are_not_listed() -> None:
+    removed = {
+        "systemd_unit_action", "docker_container_action", "write_text_file", "package_action",
+        "firewall_action", "account_action", "ssh_authorized_key_action",
+    }
+    assert removed.isdisjoint(executor.ACTION_PARAM_KEYS)
 
 
 def test_status_preserves_degraded_semantics(monkeypatch) -> None:

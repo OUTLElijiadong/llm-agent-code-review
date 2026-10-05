@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,42 @@ def config(**extra):
     return {"enabled": True, "ai_anomaly_enabled": False, "duration_seconds": 300, "window_seconds": 300,
             "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [],
             "protected_ip": "1.1.1.1", **extra}
+
+
+def test_deployment_config_reads_only_allowlisted_values_without_exporting_secrets(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'API_KEY=do-not-load\n'
+        'SECURITY_BLOCK_PROTECTED_CIDRS=\'["192.0.2.0/24"]\'\n'
+        "SECURITY_BLOCK_SSH_PORTS='22,2222'\n",
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+    monkeypatch.setattr(security, "DEPLOY_DIR", tmp_path)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+    monkeypatch.delenv("SECURITY_BLOCK_SSH_PORTS", raising=False)
+    monkeypatch.delenv("SECURITY_BLOCK_STATE_DIR", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
+
+    assert security._deployment_setting("SECURITY_BLOCK_SSH_PORTS", "22") == "22,2222"
+    assert security._deployment_setting("SECURITY_BLOCK_PROTECTED_CIDRS") == '["192.0.2.0/24"]'
+    assert "API_KEY" not in os.environ
+    assert security._deployment_setting("SECURITY_BLOCK_STATE_DIR", "/default") == "/default"
+
+
+def test_deployment_config_rejects_duplicate_or_insecure_file(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(security, "DEPLOY_DIR", tmp_path)
+    monkeypatch.delenv("SECURITY_BLOCK_SSH_PORTS", raising=False)
+    env_file.write_text("SECURITY_BLOCK_SSH_PORTS=22\nSECURITY_BLOCK_SSH_PORTS=2222\n")
+    env_file.chmod(0o600)
+    with pytest.raises(RuntimeError, match="重复"):
+        security._deployment_setting("SECURITY_BLOCK_SSH_PORTS")
+
+    env_file.write_text("SECURITY_BLOCK_SSH_PORTS=22\n")
+    env_file.chmod(0o644)
+    with pytest.raises(RuntimeError, match="不能对组或其他用户开放"):
+        security._deployment_setting("SECURITY_BLOCK_SSH_PORTS")
 
 
 def evidence(ip="8.8.8.8", rule="ssh_failed_password", count=20, start=1_800_000_001):

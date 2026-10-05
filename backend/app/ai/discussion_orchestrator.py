@@ -1647,13 +1647,13 @@ class DiscussionOrchestrator:
 # ════════════════ 报告沉淀(同步,运行在线程池) ════════════════
 
 def _require_discussion_actor(db, user_id: int, project_id: int) -> None:
-    from app.models.user import User
+    from sqlalchemy.orm import Session
+
     from app.core.exceptions import ForbiddenError
     from app.core.permission_codes import PermissionCode
+    from app.models.user import User
     from app.services.project_member_service import require_project_execution
     from app.services.rbac_service import check_permission
-
-    from sqlalchemy.orm import Session
     # Caller may hold a report transaction; identity refresh alone does not end MySQL's old snapshot.
     with Session(bind=db.get_bind(), autoflush=False) as auth_db:
         user = auth_db.get(User, int(user_id), populate_existing=True)

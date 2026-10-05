@@ -77,11 +77,23 @@ def test_production_accepts_independent_api_key_encryption_key():
         jwt_secret="production-jwt-secret-123456789012345",
         deepseek_api_key="sk-production-key",
         api_key_encryption_keys=["production-api-key-secret-123456789012345"],
-        ops_executor_token="production-ops-token-12345678901234567890",
         malware_scan_fail_closed=True,
     )
 
     assert configured.api_key_encryption_keys == ["production-api-key-secret-123456789012345"]
+
+
+def test_production_host_executor_does_not_require_shared_bearer_token():
+    configured = Settings(
+        _env_file=None,
+        app_env="prod",
+        jwt_secret="production-jwt-secret-123456789012345",
+        deepseek_api_key="sk-production-key",
+        api_key_encryption_keys=["production-api-key-secret-123456789012345"],
+        malware_scan_fail_closed=True,
+    )
+
+    assert configured.ops_executor_socket == "/run/prism-ops/agent.sock"
 
 
 def test_production_rejects_api_key_encryption_key_equal_to_jwt():
@@ -122,7 +134,6 @@ def test_production_accepts_independent_beta_pepper():
         api_key_encryption_keys=["production-api-key-secret-123456789012345"],
         beta_registration_enabled=True,
         beta_code_pepper="production-beta-pepper-123456789012345",
-        ops_executor_token="production-ops-token-12345678901234567890",
         malware_scan_fail_closed=True,
     )
 

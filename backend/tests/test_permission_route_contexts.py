@@ -19,7 +19,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 343
+    assert len(plan["routes"]) == 346
     assert len({row["endpoint"] for row in plan["routes"]}) == 43
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
@@ -36,9 +36,18 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("POST", "/api/me/profile/preference-prompted"),
         ("POST", "/api/sandboxes/remote-target-authorization"),
         ("GET", "/api/admin/observability/alerts/page"),
+        ("GET", "/api/admin/security-center/automatic-blocking"),
+        ("PUT", "/api/admin/security-center/automatic-blocking"),
+        ("POST", "/api/admin/security-center/automatic-blocking/release"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 329
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 262
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 332
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 265
+    blocking_routes = [row for row in plan["routes"] if "automatic-blocking" in row["path"]]
+    assert len(blocking_routes) == 3
+    assert all(
+        row["guard"] == "app.core.dependencies.require_super_admin"
+        for row in blocking_routes
+    )
     private_assets = {
         "/api/agent-responses/runs/{run_id}/assets",
         "/api/agent-responses/assets/{asset_id}/image",
@@ -216,8 +225,9 @@ def test_unknown_inherited_dependency_blocks_both_roles_without_execution(monkey
 
 @pytest.mark.parametrize("spoof_doc_name", [False, True])
 def test_business_starlette_http_route_cannot_disappear_from_complete_plan(monkeypatch, spoof_doc_name):
-    import app.main as main_module
     from starlette.routing import Route
+
+    import app.main as main_module
 
     async def business(request):
         pytest.fail("discovery executed business endpoint")
