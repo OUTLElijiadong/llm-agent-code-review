@@ -212,6 +212,56 @@ def test_traffic_summary_exposes_metadata_without_payload(controller):
     assert result["recent_probe_sources"] == 1
 
 
+def test_protected_sources_include_established_public_peer_when_public_ip_is_not_on_nic(tmp_path, monkeypatch):
+    """云主机公网地址不绑网卡时，非 SSH 端口的公网对端也必须受保护。"""
+    host = Host()
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+
+    def run(args, **kwargs):
+        # 模拟：SSH 日志里没有 Accepted 记录，但有一条 HTTPS 管理会话在连着。
+        if args[0] == "journalctl":
+            host.commands.append(list(args))
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+        if args[0] == "ip":
+            return {"exit_code": 0, "stdout": json.dumps([{"addr_info": [{"local": "10.0.0.5"}]}]), "stderr": ""}
+        if args[0] == "ss" and "established" in args:
+            host.commands.append(list(args))
+            return {"exit_code": 0, "stdout": "0 0 10.0.0.5:443 1.1.1.1:52000\n", "stderr": ""}
+        return host.run(args, **kwargs)
+
+    ctl = security.SecurityBlockController(tmp_path, runner=run, clock=lambda: host.now)
+    sources = ctl._protected_sources({"allowlist_cidrs": [], "protected_ip": ""})
+    reasons = {row["cidr"]: row["reason"] for row in sources}
+    assert reasons.get("1.1.1.1/32") == "与本机已建立连接的公网对端"
+    assert reasons.get("10.0.0.5/32") == "服务器本机地址"
+
+
+def test_protected_sources_keep_ssh_peer_but_skip_private_web_peer(tmp_path, monkeypatch):
+    """SSH 管理端口对端一律保护；非 SSH 端口的内网对端不进保护清单。"""
+    host = Host()
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+
+    def run(args, **kwargs):
+        if args[0] == "journalctl":
+            return {"exit_code": 0, "stdout": "", "stderr": ""}
+        if args[0] == "ip":
+            return {"exit_code": 0, "stdout": json.dumps([{"addr_info": [{"local": "10.0.0.5"}]}]), "stderr": ""}
+        if args[0] == "ss" and "established" in args:
+            return {"exit_code": 0, "stdout": (
+                "0 0 10.0.0.5:22 10.0.0.9:52000\n"
+                "0 0 10.0.0.5:443 10.0.0.11:52100\n"
+            ), "stderr": ""}
+        return host.run(args, **kwargs)
+
+    ctl = security.SecurityBlockController(tmp_path, runner=run, clock=lambda: host.now)
+    sources = ctl._protected_sources({"allowlist_cidrs": [], "protected_ip": ""})
+    reasons = {row["cidr"]: row["reason"] for row in sources}
+    assert reasons.get("10.0.0.9/32") == "当前 SSH 管理连接"
+    assert "10.0.0.11/32" not in reasons
+
+
 def test_execute_rejects_extra_parameters_and_unknown_actions(tmp_path, monkeypatch):
     monkeypatch.setattr(security, "STATE_DIR", tmp_path)
     with pytest.raises(ValueError, match="只接受单个 ip"):

@@ -121,6 +121,18 @@ def _event_key(kind: str, timestamp: float, message: str) -> str:
     return hashlib.sha256(f"{kind}\0{timestamp}\0{message}".encode()).hexdigest()
 
 
+def _public_scope(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """判断地址是否属于"非内网"范围（含 IPv4 保留段，例如云厂商使用的 100.64/10）。
+
+    ``is_global`` 对文档段、共享地址段等保留范围返回 False，但这些地址在云主机
+    连接表里确实代表外部对端；内网判定只认私有、回环、链路本地与组播。
+    """
+    return not (
+        address.is_private or address.is_loopback or address.is_link_local
+        or address.is_multicast or address.is_unspecified
+    )
+
+
 def parse_ssh_evidence(lines: list[str]) -> list[dict[str, Any]]:
     """一次 Failed password 为一个证据，不重复统计 Invalid user。"""
     result = []
@@ -381,6 +393,9 @@ class SecurityBlockController:
         ports = {int(item) for item in re.split(r"[,\s]+", raw_ports.strip()) if item}
         if not ports or any(not 1 <= port <= 65535 for port in ports):
             raise RuntimeError("root SSH 保护端口配置不合法")
+        # 云主机常见"公网地址不绑定在网卡上"（NAT/弹性地址），此时网卡枚举拿不到
+        # 自身公网地址。因此对已建立连接：SSH 管理端口的对端一律保护；其他端口的
+        # 公网对端也一并保护，避免管理入口或平台自身的公网访问被误处置。
         connections = self._run(["ss", "-H", "-tn", "state", "established"])["stdout"]
         for line in connections.splitlines():
             columns = line.split()
@@ -394,6 +409,12 @@ class SecurityBlockController:
                 continue
             if local_port in ports:
                 sources.append({"cidr": f"{address}/{address.max_prefixlen}", "reason": "当前 SSH 管理连接"})
+            elif address.is_global:
+                sources.append({"cidr": f"{address}/{address.max_prefixlen}", "reason": "与本机已建立连接的公网对端"})
+            elif _public_scope(address):
+                # 云主机自身公网地址可能落在保留段/运营商段内，连接表里的对端也可能是
+                # 这类地址；它们同样不是内网对端，需要与公网对端一样受保护。
+                sources.append({"cidr": f"{address}/{address.max_prefixlen}", "reason": "与本机已建立连接的公网对端"})
         accepted_log = self._run(["journalctl", "-u", "sshd", "--since", f"@{int(self.clock() - 3600)}", "--no-pager", "--output=json", "-n", str(LOG_LIMIT)])["stdout"]
         accepted_lines = accepted_log.splitlines()
         if len(accepted_lines) >= LOG_LIMIT:
