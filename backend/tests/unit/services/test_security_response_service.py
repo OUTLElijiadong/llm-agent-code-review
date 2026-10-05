@@ -18,7 +18,7 @@ def _snapshot(*, enabled=False, verified=True, active=None):
         "enabled": enabled,
         "policy": {
             "enabled": enabled, "ai_anomaly_enabled": False, "duration_seconds": 900, "window_seconds": 300,
-            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [],
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": False,
             "activated_at": "2026-10-05T00:00:00+00:00" if enabled else None,
         },
         "protected_sources": [{"cidr": "8.8.8.8/32", "reason": "administrator"}],

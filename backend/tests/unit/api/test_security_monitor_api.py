@@ -753,8 +753,9 @@ def _automatic_blocking_snapshot(enabled=False):
     return {
         "available": True, "verified": True, "enabled": enabled,
         "policy": {
-            "enabled": enabled, "duration_seconds": 900, "window_seconds": 300,
-            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "activated_at": None,
+            "enabled": enabled, "ai_anomaly_enabled": False, "duration_seconds": 900, "window_seconds": 300,
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": False,
+            "activated_at": None,
         },
         "protected_sources": [], "active_blocks": [], "recent_blocks": [],
         "last_evaluated_at": None, "errors": [], "backend": "ipset",
@@ -832,7 +833,8 @@ def test_super_admin_configure_uses_trusted_client_ip_and_retains_audit(db, seed
     {"protected_ip": "1.1.1.1"}, {"command": "arbitrary"},
     {"allowlist_cidrs": ["0.0.0.0/0"]}, {"allowlist_cidrs": ["8.0.0.0/8"]},
     {"allowlist_cidrs": ["::/0"]}, {"allowlist_cidrs": ["2001:4860::/32"]},
-    {"allowlist_cidrs": ["8.8.8.8/32"] * 33}, {"duration_seconds": 901},
+    {"allowlist_cidrs": ["8.8.8.8/32"] * 33}, {"duration_seconds": 3601},
+    {"duration_seconds": 900, "auto_escalate": "yes"},
     {"duration_seconds": True}, {"window_seconds": 59}, {"ssh_threshold": 1}, {"web_threshold": 1},
 ])
 def test_automatic_blocking_rejects_unsafe_or_extra_configuration(db, seed, client_factory, monkeypatch, extra):

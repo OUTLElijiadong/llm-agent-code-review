@@ -29,60 +29,7 @@ def web_line(ip: str, path: str, status: str = "404", stamp: str = "2026-10-05T1
     return f'{ip} - - [{stamp}] "GET {path} HTTP/1.1" {status} 153 "-" "curl/8.0"'
 
 
-class Host:
-    """记录命令并返回可控输出的模拟器（不执行任何真实系统命令）。"""
-
-    def __init__(self, *, ssh_lines: list[str] | None = None, web_lines: list[str] | None = None) -> None:
-        self.commands: list[list[str]] = []
-        self.ssh_lines = ssh_lines if ssh_lines is not None else [ssh_line("45.155.205.7"), ssh_line("45.155.205.7", "admin")]
-        self.web_lines = web_lines if web_lines is not None else [
-            web_line("45.155.205.7", "/.env"), web_line("45.155.205.7", "/.git/config"),
-            web_line("45.155.205.7", "/.ssh/id_rsa"),
-        ]
-        self.now = 1_800_000_000.0
-        self.which: set[str] = {
-            "ipset", "iptables", "ip6tables", "ip", "ss", "docker", "journalctl", "getent", "curl", "whois",
-            "fail2ban", "clamav", "nmap", "suricata", "zeek",
-        }
-
-    def run(self, args, **_kwargs):
-        self.commands.append(list(args))
-        ok = {"exit_code": 0, "stdout": "", "stderr": ""}
-        if args[0] == "journalctl":
-            return {**ok, "stdout": "\n".join(self.ssh_lines)}
-        if args[0] == "docker":
-            return {**ok, "stdout": "\n".join(self.web_lines)}
-        if args[0] == "ip":
-            return {**ok, "stdout": json.dumps([{"addr_info": [{"local": "9.9.9.9"}]}])}
-        if args[0] == "ss":
-            if "-lntup" in args:
-                return {**ok, "stdout": (
-                    'tcp LISTEN 0 128 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=6))\n'
-                    'tcp LISTEN 0 128 127.0.0.1:8000 0.0.0.0:* users:(("uvicorn",pid=2,fd=9))\n'
-                    'tcp LISTEN 0 128 [::]:22 [::]:* users:(("sshd",pid=3,fd=3))\n'
-                )}
-            if "-tunap" in args:
-                return {**ok, "stdout": (
-                    'tcp ESTAB 0 0 10.0.0.5:443 45.155.205.7:51022 users:(("nginx",pid=1,fd=6))\n'
-                    'tcp ESTAB 0 0 10.0.0.5:8000 127.0.0.1:40122 users:(("uvicorn",pid=2,fd=9))\n'
-                    'tcp LISTEN 0 128 *:8080 *:*\n'
-                )}
-            return {**ok, "stdout": f"0 0 9.9.9.9:22 1.1.1.1:52000\n"}
-        if args[0] in {"iptables", "ip6tables"}:
-            chain = args[args.index("-S") + 1]
-            return {**ok, "stdout": f"-P {chain} ACCEPT\n-A {chain} -j PRISM-SEC-IN\n"}
-        if args[0] == "getent":
-            return {**ok, "stdout": "45.155.205.7 vps.example.net"}
-        if args[0] == "curl":
-            body = {"status": "success", "country": "Netherlands", "regionName": "North Holland",
-                    "city": "Amsterdam", "isp": "Example Hosting BV", "org": "Example Hosting",
-                    "as": "AS64500 Example Hosting BV", "query": "45.155.205.7"}
-            return {**ok, "stdout": json.dumps(body), "exit_code": 0}
-        if args[0] == "whois":
-            return {**ok, "stdout": "netname: EXAMPLE-NET\ncountry: NL\norgname: Example Hosting BV\nroute: 45.155.205.0/24\n"}
-        return ok
-
-
+from tests.security_host import Host
 @pytest.fixture
 def controller(tmp_path, monkeypatch):
     host = Host()
@@ -305,3 +252,92 @@ def test_execute_rejects_extra_parameters_and_unknown_actions(tmp_path, monkeypa
         security.execute("security_traffic_summary", {"since_hours": 24, "capture": True})
     with pytest.raises(ValueError, match="未知安全防御动作"):
         security.execute("security_nuke", {})
+
+
+def test_auto_escalate_extends_lease_only_when_enabled(tmp_path, monkeypatch):
+    """自动升级只在管理员开启后生效，且始终受 6 小时硬上限约束。
+
+    时间线：先在 T0 关闭状态写入策略 → 在 T0 启用（activated_at=T0）→ 时钟推进到
+    T0+10，证据时间戳落在 (since, now) 内；每轮巡检前换一批新证据（不同 cursor），
+    避免被既有封禁的上次证据去重吃掉。
+    """
+    host = Host(ssh_lines=[])
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+    ctl = security.SecurityBlockController(tmp_path, runner=host.run, clock=lambda: host.now)
+    round_index = {"value": 0}
+
+    def fresh_ssh_lines() -> list[str]:
+        index = round_index["value"]
+        round_index["value"] += 1
+        # 每轮把证据打在上一次启用时刻那一秒内（<= 当前时钟、>= since）
+        # 证据秒级递增，全部落在 since 之后、now 之前，且每轮 cursor 不同
+        # 每行间隔一整秒：同一微秒内的重复行会被证据去重合并成 1 条
+        # 窗口上界是当前时钟、下界是 activated_at，因此 20 条证据必须挤在当前秒内且微秒互不相同
+        # （真实的 SSH 爆破也是一两秒内连打多次，而不是每秒一次）
+        return [ssh_line("45.155.205.7", f"r{index}u{i}", int(host.now - 4) * 1_000_000 + (i + 1) * 1000) for i in range(20)]
+
+    def policy(escalate, duration=300):
+        return {"enabled": True, "ai_anomaly_enabled": False, "duration_seconds": duration, "window_seconds": 300,
+                "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": escalate,
+                "protected_ip": "1.1.1.1"}
+
+    def reconcile_with_fresh_evidence():
+        host.ssh_lines = fresh_ssh_lines()
+        return ctl.reconcile()
+
+    # 启用时刻即 T0：之后每次巡检都先把时钟推到 T0+5，证据打在同一秒内的不同微秒
+    host.now = 1_800_000_000.0
+    ctl.configure({**policy(False), "enabled": False})
+    ctl.configure(policy(escalate=False))
+    host.now = 1_800_000_005.0
+    ctl.configure(policy(escalate=False))
+
+    first = reconcile_with_fresh_evidence()
+    first_entry = next(e for e in first["recent_blocks"] if e["ip"] == "45.155.205.7")
+    assert first_entry["escalated"] is False
+    assert first_entry["duration_seconds"] == 300
+    assert first_entry["previous_blocks_24h"] == 0
+
+    # 释放租约、推进时钟、换一批新证据：未开启升级时仍按原时长
+    ctl.release({"ip": "45.155.205.7", "reason": "测试释放"})
+    host.now += 5
+    second = reconcile_with_fresh_evidence()
+    second_entry = next(e for e in second["recent_blocks"] if e["ip"] == "45.155.205.7")
+    assert second_entry["escalated"] is False
+    assert second_entry["duration_seconds"] == 300
+    assert second_entry["previous_blocks_24h"] >= 1
+
+    # 开启升级：同一来源在 24 小时内再次触发时按倍数递增，并在 3600 秒硬上限封顶
+    ctl.configure(policy(escalate=True, duration=900))
+    ctl.release({"ip": "45.155.205.7", "reason": "测试释放"})
+    host.now += 5
+    third = reconcile_with_fresh_evidence()
+    third_entry = next(e for e in third["recent_blocks"] if e["ip"] == "45.155.205.7")
+    assert third_entry["escalated"] is True
+    assert third_entry["previous_blocks_24h"] >= 2
+    assert third_entry["duration_seconds"] == security.ESCALATION_MAX_SECONDS
+
+
+def test_auto_escalate_rejects_non_boolean(tmp_path, monkeypatch):
+    host = Host()
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+    ctl = security.SecurityBlockController(tmp_path, runner=host.run, clock=lambda: host.now)
+    params = {"enabled": True, "ai_anomaly_enabled": False, "duration_seconds": 300, "window_seconds": 300,
+              "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": "yes",
+              "protected_ip": "1.1.1.1"}
+    with pytest.raises(ValueError, match="auto_escalate"):
+        ctl.configure(params)
+
+
+def test_policy_accepts_lease_up_to_six_hours(tmp_path, monkeypatch):
+    host = Host()
+    monkeypatch.setattr(security.shutil, "which", lambda name: name if name in host.which else None)
+    monkeypatch.delenv("SECURITY_BLOCK_PROTECTED_CIDRS", raising=False)
+    ctl = security.SecurityBlockController(tmp_path, runner=host.run, clock=lambda: host.now)
+    snapshot = ctl.configure({"enabled": True, "ai_anomaly_enabled": False, "duration_seconds": 3600,
+                              "window_seconds": 900, "ssh_threshold": 20, "web_threshold": 30,
+                              "allowlist_cidrs": [], "auto_escalate": True, "protected_ip": "1.1.1.1"})
+    assert snapshot["policy"]["duration_seconds"] == 3600
+    assert snapshot["policy"]["auto_escalate"] is True

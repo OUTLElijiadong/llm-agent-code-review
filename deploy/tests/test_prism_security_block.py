@@ -15,64 +15,8 @@ security = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(security)
 
 
-class Host:
-    def __init__(self):
-        self.commands = []
-        self.sets = {}
-        self.rules = set()
-        self.chains = {("iptables", "INPUT"), ("iptables", "DOCKER-USER"),
-                       ("ip6tables", "INPUT"), ("ip6tables", "DOCKER-USER")}
-        self.now = 1_800_000_000.0
-        self.fail_add = False
-        self.ssh_peer = "8.8.4.4"
+from tests.security_host import Host
 
-    def run(self, args, **_kwargs):
-        self.commands.append(args)
-        ok = {"exit_code": 0, "stdout": "", "stderr": ""}
-        if args[0] == "ip":
-            return {**ok, "stdout": json.dumps([{"addr_info": [{"local": "9.9.9.9"}]}])}
-        if args[0] == "ss":
-            return {**ok, "stdout": f"0 0 9.9.9.9:22 {self.ssh_peer}:10200\n"}
-        if args[0] in {"iptables", "ip6tables"}:
-            operation = args[args.index("-w") + 2]
-            tail = args[args.index(operation) + 1:]
-            if operation == "-S":
-                return ok if (args[0], tail[0]) in self.chains else {**ok, "exit_code": 1}
-            if operation == "-N":
-                self.chains.add((args[0], tail[0]))
-            if operation == "-C":
-                return ok if (args[0], tuple(tail)) in self.rules else {**ok, "exit_code": 1}
-            if operation in {"-I", "-A"}:
-                if operation == "-I" and len(tail) > 1 and tail[1] == "1":
-                    tail = [tail[0], *tail[2:]]
-                self.rules.add((args[0], tuple(tail)))
-            return ok
-        if args[0] == "ipset":
-            operation = args[1]
-            name = args[2]
-            if operation == "create":
-                self.sets.setdefault(name, {"family": args[args.index("family") + 1], "entries": {}})
-            elif operation == "save":
-                if name not in self.sets:
-                    return {**ok, "exit_code": 1}
-                item = self.sets[name]
-                lines = [f"create {name} hash:ip family {item['family']} timeout 900 maxelem 64"]
-                for ip, expiry in list(item["entries"].items()):
-                    if expiry <= self.now:
-                        del item["entries"][ip]
-                    else:
-                        lines.append(f"add {name} {ip} timeout {int(expiry - self.now)}")
-                return {**ok, "stdout": "\n".join(lines)}
-            elif operation == "add":
-                if self.fail_add:
-                    return {**ok, "exit_code": 1, "stderr": "simulated add failure"}
-                self.sets[name]["entries"][args[3]] = self.now + int(args[args.index("timeout") + 1])
-            elif operation == "del":
-                self.sets[name]["entries"].pop(args[3], None)
-            elif operation == "flush":
-                self.sets[name]["entries"].clear()
-            return ok
-        return ok
 
 
 @pytest.fixture
@@ -86,7 +30,7 @@ def controller(tmp_path, monkeypatch):
 
 def config(**extra):
     return {"enabled": True, "ai_anomaly_enabled": False, "duration_seconds": 300, "window_seconds": 300,
-            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [],
+            "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": False,
             "protected_ip": "1.1.1.1", **extra}
 
 
@@ -132,7 +76,7 @@ def evidence(ip="8.8.8.8", rule="ssh_failed_password", count=20, start=1_800_000
             for i in range(count)]
 
 
-@pytest.mark.parametrize("params", [config(duration_seconds=0), config(duration_seconds=901),
+@pytest.mark.parametrize("params", [config(duration_seconds=0), config(duration_seconds=3601),
     config(enabled=1), config(ssh_threshold=19), config(web_threshold=29),
     config(protected_ip=""), config(allowlist_cidrs=["0.0.0.0/0"]),
     config(allowlist_cidrs=["2001:4860::/32"]), config(allowlist_cidrs=["8.8.8.0/24"] * 33)])

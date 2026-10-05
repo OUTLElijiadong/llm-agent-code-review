@@ -21,8 +21,10 @@ class AutomaticBlockingPolicyIn(StrictInputModel):
 
     enabled: bool = Field(strict=True)
     ai_anomaly_enabled: bool = Field(default=False, strict=True)
-    duration_seconds: int = Field(default=900, ge=60, le=900, strict=True)
+    # 租约上限 3600 秒：宿主机侧同值硬约束，定期租约仍由内核 ipset TTL 自动到期。
+    duration_seconds: int = Field(default=900, ge=60, le=3600, strict=True)
     window_seconds: int = Field(default=300, ge=60, le=900, strict=True)
+    auto_escalate: bool = Field(default=False, strict=True)
     ssh_threshold: int = Field(default=20, ge=20, le=200, strict=True)
     web_threshold: int = Field(default=30, ge=30, le=500, strict=True)
     allowlist_cidrs: list[str] = Field(default_factory=list, max_length=32)

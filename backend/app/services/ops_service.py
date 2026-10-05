@@ -110,7 +110,7 @@ ACTION_PARAM_KEYS = {
     "security_block_status": set(),
     "security_block_configure": {
         "enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold",
-        "allowlist_cidrs",
+        "allowlist_cidrs", "auto_escalate",
         "protected_ip",
     },
     "security_block_reconcile": set(),
@@ -151,6 +151,7 @@ ACTION_PARAM_TYPES = {
     "focus": str,
     "enabled": bool,
     "ai_anomaly_enabled": bool,
+    "auto_escalate": bool,
     "duration_seconds": int,
     "window_seconds": int,
     "ssh_threshold": int,
@@ -524,9 +525,11 @@ def validate_action_params(action: str, params: dict[str, Any]) -> dict[str, Any
             raise ValueError(f"参数 {key} 类型不正确")
     if action == "security_block_configure":
         bounds = {
-            "duration_seconds": (60, 900), "window_seconds": (60, 900),
+            "duration_seconds": (60, 3600), "window_seconds": (60, 900),
             "ssh_threshold": (20, 200), "web_threshold": (30, 500),
         }
+        if "auto_escalate" in params and not isinstance(params["auto_escalate"], bool):
+            raise ValueError("自动升级开关必须是布尔值")
         for key, (lower, upper) in bounds.items():
             if key in params and not lower <= params[key] <= upper:
                 raise ValueError(f"参数 {key} 必须在 {lower} 到 {upper} 之间")

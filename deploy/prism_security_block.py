@@ -76,9 +76,13 @@ MAX_DAILY = 200
 MAX_HISTORY = 2000
 LOG_LIMIT = 20000
 SCOPE = "host_ingress_and_docker_web"
-CONFIG_KEYS = {"enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold", "web_threshold", "allowlist_cidrs", "protected_ip"}
+CONFIG_KEYS = {"enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds", "ssh_threshold",
+              "web_threshold", "allowlist_cidrs", "protected_ip", "auto_escalate"}
+# 自动升级：同一来源 24 小时内被处置过再次触发时，租约按倍数递增，硬上限 6 小时。
+ESCALATION_MAX_SECONDS = 3600
+ESCALATION_FACTOR = 4
 DEFAULT_POLICY = {"enabled": False, "ai_anomaly_enabled": False, "duration_seconds": 900, "window_seconds": 300,
-                  "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [],
+                  "ssh_threshold": 20, "web_threshold": 30, "allowlist_cidrs": [], "auto_escalate": False,
                   "protected_ip": "", "activated_at": None}
 SENSITIVE_TARGETS = frozenset({"/.env", "/.env.local", "/.env.production", "/.git/config", "/.git/head",
                              "/.git/index", "/.svn/entries", "/.aws/credentials", "/.ssh/authorized_keys",
@@ -321,7 +325,9 @@ class SecurityBlockController:
     def _validate_policy(params: dict[str, Any], *, require_protection: bool = True) -> dict[str, Any]:
         if set(params) != CONFIG_KEYS or not isinstance(params.get("enabled"), bool) or not isinstance(params.get("ai_anomaly_enabled"), bool):
             raise ValueError("防御策略字段不完整或 enabled 不是布尔值")
-        ranges = {"duration_seconds": (60, 900), "window_seconds": (60, 900),
+        if not isinstance(params.get("auto_escalate"), bool):
+            raise ValueError("auto_escalate 必须是布尔值")
+        ranges = {"duration_seconds": (60, ESCALATION_MAX_SECONDS), "window_seconds": (60, 900),
                   "ssh_threshold": (20, 200), "web_threshold": (30, 500)}
         for key, (minimum, maximum) in ranges.items():
             value = params.get(key)
@@ -647,8 +653,16 @@ class SecurityBlockController:
                 continue
         return grouped
 
+    def _recent_handled(self, state: dict[str, Any], address: str, now: float) -> int:
+        """统计该来源近 24 小时已被处置过的次数（含已到期/已解封），用于自动升级判定。"""
+        return sum(
+            entry.get("ip") == address and _epoch(entry.get("started_at")) >= now - 86400
+            for entry in state["entries"]
+        )
+
     def _create_block(self, state: dict[str, Any], address: str, rule: str, items: dict[str, dict[str, Any]],
-                      since: float, duration: int, errors: list[str], *, source: str = "deterministic_rule", reason: str = "") -> None:
+                      since: float, duration: int, errors: list[str], *, source: str = "deterministic_rule",
+                      reason: str = "") -> None:
         now = self.clock()
         active = [entry for entry in state["entries"] if entry["status"] in {"active", "unknown"}]
         daily = sum(_epoch(entry["started_at"]) >= now - 86400 for entry in state["entries"])
@@ -657,9 +671,15 @@ class SecurityBlockController:
             return
         if any(entry["ip"] == address for entry in active):
             return
+        # 自动升级：只有管理员显式开启 auto_escalate 才生效；始终受 ESCALATION_MAX_SECONDS 硬上限约束。
+        previous = self._recent_handled(state, address, now)
+        escalated = bool(state["policy"].get("auto_escalate")) and previous > 0
+        if escalated:
+            duration = min(duration * (ESCALATION_FACTOR ** previous), ESCALATION_MAX_SECONDS)
         identity = hashlib.sha256(f"{address}:{rule}:{now}:{','.join(sorted(items))}".encode()).hexdigest()[:24]
         entry = {"id": identity, "ip": address, "rule": rule, "evidence_count": len(items), "scope": SCOPE,
                  "status": "unknown", "started_at": _iso(now), "expires_at": _iso(now + duration),
+                 "escalated": escalated, "previous_blocks_24h": previous, "duration_seconds": duration,
                  "released_at": None, "reason": reason or "可信日志短窗口达到确定性防御阈值", "source": source,
                  "_evidence_keys": sorted(items), "evidence_window_start": _iso(since),
                  "evidence_window_end": _iso(now), "evidence_is_lower_bound": bool(errors),

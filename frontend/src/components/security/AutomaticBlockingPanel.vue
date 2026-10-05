@@ -28,7 +28,7 @@ const clock = ref(Date.now())
 const readAt = ref<string | null>(null)
 const allowlistText = ref('')
 const draft = reactive<AutomaticBlockingPolicyInput>({
-  enabled: false, ai_anomaly_enabled: false, duration_seconds: 900, window_seconds: 300, ssh_threshold: 20, web_threshold: 30, allowlist_cidrs: [],
+  enabled: false, ai_anomaly_enabled: false, duration_seconds: 900, window_seconds: 300, ssh_threshold: 20, web_threshold: 30, allowlist_cidrs: [], auto_escalate: false,
 })
 let generation = 0
 let expiryTimer: ReturnType<typeof setTimeout> | undefined
@@ -84,6 +84,7 @@ function policiesMatch(left: AutomaticBlockingPolicyInput, right: AutomaticBlock
   return left.enabled === right.enabled && left.ai_anomaly_enabled === right.ai_anomaly_enabled
     && left.duration_seconds === right.duration_seconds && left.window_seconds === right.window_seconds
     && left.ssh_threshold === right.ssh_threshold && left.web_threshold === right.web_threshold
+    && left.auto_escalate === right.auto_escalate
     && [...left.allowlist_cidrs].sort().join(',') === [...right.allowlist_cidrs].sort().join(',')
 }
 
@@ -102,6 +103,7 @@ function syncDraft(): void {
   Object.assign(draft, {
     enabled: policy.enabled, ai_anomaly_enabled: policy.ai_anomaly_enabled, duration_seconds: policy.duration_seconds, window_seconds: policy.window_seconds,
     ssh_threshold: policy.ssh_threshold, web_threshold: policy.web_threshold, allowlist_cidrs: [...policy.allowlist_cidrs],
+    auto_escalate: policy.auto_escalate,
   })
   allowlistText.value = policy.allowlist_cidrs.join('\n')
 }
@@ -197,6 +199,7 @@ async function save(): Promise<void> {
     const matches = actual && requested.enabled === actual.enabled && requested.ai_anomaly_enabled === actual.ai_anomaly_enabled
       && requested.duration_seconds === actual.duration_seconds && requested.window_seconds === actual.window_seconds
       && requested.ssh_threshold === actual.ssh_threshold && requested.web_threshold === actual.web_threshold
+      && requested.auto_escalate === actual.auto_escalate
       && [...(submitted.policy?.allowlist_cidrs ?? requested.allowlist_cidrs)].sort().join(',') === [...actual.allowlist_cidrs].sort().join(',')
     if (!verified.value || !submitted.available || !submitted.verified || submitted.outcome_unknown) {
       saveNote.value = '策略已回读，执行结果尚未确认。请刷新核验。'
@@ -333,7 +336,11 @@ defineExpose({ refresh: () => busy.value ? Promise.resolve(false) : refresh() })
       </div>
 
       <div class="policy-fields">
-        <label class="number-field" for="blocking-duration"><span>封禁时长</span><div><input id="blocking-duration" v-model.number="draft.duration_seconds" type="number" min="60" max="900" step="1" required :disabled="controlDisabled" aria-describedby="blocking-duration-help"><em>秒</em></div><small id="blocking-duration-help">60 – 900 秒</small></label>
+        <label class="number-field" for="blocking-duration"><span>封禁时长</span><div><input id="blocking-duration" v-model.number="draft.duration_seconds" type="number" min="60" max="3600" step="1" required :disabled="controlDisabled" aria-describedby="blocking-duration-help"><em>秒</em></div><small id="blocking-duration-help">60 – 3600 秒</small></label>
+        <label class="toggle-field" for="blocking-escalate"><span>重复攻击自动延长</span><div>
+          <input id="blocking-escalate" v-model="draft.auto_escalate" type="checkbox" :disabled="controlDisabled" aria-describedby="blocking-escalate-help">
+          <em>{{ draft.auto_escalate ? '已开启' : '已关闭' }}</em>
+        </div><small id="blocking-escalate-help">同一来源 24 小时内再次触发时，租约按 4 倍递增，最长 6 小时；关闭时每次都用上面的固定时长。</small></label>
         <label class="number-field" for="blocking-window"><span>规则观察窗口</span><div><input id="blocking-window" v-model.number="draft.window_seconds" type="number" min="60" max="900" step="1" required :disabled="controlDisabled" aria-describedby="blocking-window-help"><em>秒</em></div><small id="blocking-window-help">60 – 900 秒</small></label>
         <label class="number-field" for="blocking-ssh"><span>SSH 失败阈值</span><div><input id="blocking-ssh" v-model.number="draft.ssh_threshold" type="number" min="20" max="200" step="1" required :disabled="controlDisabled" aria-describedby="blocking-ssh-help"><em>次</em></div><small id="blocking-ssh-help">20 – 200 次</small></label>
         <label class="number-field" for="blocking-web"><span>Web 探测阈值</span><div><input id="blocking-web" v-model.number="draft.web_threshold" type="number" min="30" max="500" step="1" required :disabled="controlDisabled" aria-describedby="blocking-web-help"><em>次</em></div><small id="blocking-web-help">30 – 500 次</small></label>

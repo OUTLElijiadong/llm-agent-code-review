@@ -103,6 +103,8 @@ export interface AutomaticBlockingPolicy {
   ssh_threshold: number
   web_threshold: number
   allowlist_cidrs: string[]
+  /** 同一来源 24 小时内重复触发时自动延长租约（倍数递增，硬上限 3600 秒）。 */
+  auto_escalate: boolean
   activated_at: string | null
 }
 
