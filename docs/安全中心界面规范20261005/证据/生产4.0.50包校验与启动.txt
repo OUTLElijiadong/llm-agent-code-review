@@ -1,0 +1,13 @@
+{"server_bundle_bytes": 2698511, "server_bundle_sha256": "c57f839a4962be5d3cbddf2cf4037eac16a78eb9c0e81e055de360fe0bd28e63"}
+Cloning into '/opt/prism-releases/2ac870e02e0add7972aeef2a01b36c04a6b06b07'...
+done.
+The bundle contains this ref:
+2ac870e02e0add7972aeef2a01b36c04a6b06b07 HEAD
+The bundle requires this ref:
+a95cdb71081e2b584995dead8e2449cdb8a6671b 
+The bundle uses this hash algorithm: sha1
+/tmp/prism-4.0.50.bundle is okay
+From /tmp/prism-4.0.50.bundle
+ * branch              HEAD       -> FETCH_HEAD
+HEAD is now at 2ac870e0 fix(security-center): keep copilot entry clear of event content
+release_script_completed=2ac870e02e0add7972aeef2a01b36c04a6b06b07

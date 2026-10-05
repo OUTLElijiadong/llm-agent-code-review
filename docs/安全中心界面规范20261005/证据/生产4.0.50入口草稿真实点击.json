@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-10-05T10:20:59.021Z",
+  "url": "https://lijiadong.cn/admin/security-center",
+  "samples": [
+    {
+      "width": 1280,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 1280,
+      "repeat": 2,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 1280,
+      "repeat": 3,
+      "opened": true,
+      "closed": true
+    }
+  ],
+  "draft": {
+    "width": 1280,
+    "draft_entered": true,
+    "cross_route_retained": true,
+    "message_sent": false,
+    "cleared": true,
+    "parent_row_check": false,
+    "repeat_cross_route_retained": true,
+    "observation_note": "草稿值显示在文本输入区子文本节点；父节点 Value 是控件说明，不能作为草稿值。",
+    "repeat_cleared": true
+  }
+}

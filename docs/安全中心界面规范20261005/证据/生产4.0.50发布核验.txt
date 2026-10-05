@@ -1,0 +1,35 @@
+APP_RELEASE=2ac870e02e0add7972aeef2a01b36c04a6b06b07
+APP_VERSION=4.0.50
+BACKEND_RELEASE=2ac870e02e0add7972aeef2a01b36c04a6b06b07
+FRONTEND_RELEASE=2ac870e02e0add7972aeef2a01b36c04a6b06b07
+062_audit_log_action_length
+/cr_backend prism-backend:2ac870e02e0add7972aeef2a01b36c04a6b06b07 sha256:6e8d5c3717f97bda5e92cff09a51e0b36f6a304015f9f7901aac5894818df912 healthy
+/cr_frontend prism-frontend:2ac870e02e0add7972aeef2a01b36c04a6b06b07 sha256:bf3857315c8759dd2e0acb831f2f4e542b1c10aab90ccab855f290413e86a806 healthy
+APP_RELEASE=2ac870e02e0add7972aeef2a01b36c04a6b06b07
+APP_VERSION=4.0.50
+cr_frontend: runtime APP metadata not declared; verify served build metadata below
+WorkingDirectory=/opt/prism-releases/2ac870e02e0add7972aeef2a01b36c04a6b06b07/deploy
+
+WorkingDirectory=/opt/code-review/deploy
+{"ops_exit": 0, "status": "ok", "checks": {"release": {"ok": true, "status": "ok", "message": "发布账本、运行镜像和默认环境一致"}, "containers": {"ok": true, "status": "ok", "message": null}, "disk": {"ok": true, "status": "ok", "message": null}, "memory": {"ok": true, "status": "ok", "message": null}, "backup": {"ok": true, "status": "ok", "message": null}, "alembic": {"ok": true, "status": "ok", "message": null}, "https": {"ok": true, "status": "ok", "message": null}}}
+/healthz {"status":"ok","version":"4.0.50","release":"2ac870e02e0add7972aeef2a01b36c04a6b06b07"}
+/readyz {"status":"ready","version":"4.0.50","release":"2ac870e02e0add7972aeef2a01b36c04a6b06b07"}
+served_index=/assets/index-wcCs3TV-.js
+served_build_info=/assets/buildInfo-BeVP8u9u.js
+const e="4.0.50".trim().replace(/^v/i,""),a="2026-10-05T10:05:08Z".trim(),c="2ac870e02e0add7972aeef2a01b36c04a6b06b07".trim(),r=`v${e.replace(/\.0$/,"")}`,s=a?a.replace("T"," ").replace(/Z$/," UTC"):"构建时间未知";export{s as A,r as a,c as b};
+
+[2026-10-05T10:05:08Z] INFO  发布容量检查通过(repository: used=82%, available_kib=35543668, min_free_gib=12)
+[2026-10-05T10:05:08Z] INFO  发布容量检查通过(backup: used=82%, available_kib=35543636, min_free_gib=12)
+[2026-10-05T10:05:08Z] INFO  发布容量检查通过(docker: used=82%, available_kib=35543636, min_free_gib=12)
+[2026-10-05T10:05:09Z] INFO  发布预检通过(target=all, version=4.0.50, sha=2ac870e02e0add7972aeef2a01b36c04a6b06b07)
+[2026-10-05T10:05:24Z] INFO  服务 mysql 已就绪(status=healthy)
+[2026-10-05T10:05:24Z] INFO  服务 clamav 已就绪(status=healthy)
+[2026-10-05T10:07:22Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20261005100722_19146
+[2026-10-05T10:09:08Z] INFO  独立恢复验证通过(container=cr_testdb, tables=104, alembic=062_audit_log_action_length)
+INFO  [alembic.runtime.migration] Context impl MySQLImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+[2026-10-05T10:09:18Z] INFO  Alembic 已位于 head=062_audit_log_action_length
+[2026-10-05T10:09:42Z] INFO  服务 backend 已就绪(status=healthy)
+[2026-10-05T10:11:54Z] INFO  服务 frontend 已就绪(status=healthy)
+[2026-10-05T10:12:11Z] INFO  运维执行器已绑定当前发布树，巡检发布账本通过
+[2026-10-05T10:12:11Z] INFO  发布完成(target=all, sha=2ac870e02e0add7972aeef2a01b36c04a6b06b07, alembic=062_audit_log_action_length)

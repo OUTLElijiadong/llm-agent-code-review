@@ -1,0 +1,92 @@
+{
+  "captured_at": "2026-10-05T10:28:47.861Z",
+  "url": "https://lijiadong.cn/admin/security-center",
+  "role": "admin",
+  "browser": "普通Safari响应式模式",
+  "viewport_samples": [
+    {
+      "width": 1280,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 1280,
+      "repeat": 2,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 1280,
+      "repeat": 3,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 1440,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 768,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 375,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    },
+    {
+      "width": 320,
+      "repeat": 1,
+      "opened": true,
+      "closed": true
+    }
+  ],
+  "draft": {
+    "width": 1280,
+    "draft_entered": true,
+    "cross_route_retained": true,
+    "message_sent": false,
+    "cleared": true,
+    "parent_row_check": false,
+    "repeat_cross_route_retained": true,
+    "observation_note": "草稿值显示在文本输入区子文本节点；父节点 Value 是控件说明，不能作为草稿值。",
+    "repeat_cleared": true
+  },
+  "event": {
+    "details_expanded": true,
+    "page2": true,
+    "thirty_days_selected": true,
+    "thirty_days_loaded": true,
+    "thirty_days_count_label": "至少 717 条记录",
+    "truncation_visible": true,
+    "page_label": "2 / 8",
+    "pagination_ax_excerpt": [
+      "\t\t\t\t\t\t\t\t53 文本 共 159 条记录",
+      "\t\t\t\t\t\t\t\t196 文本 共 159 条记录，每页 20 条",
+      "\t\t\t\t\t\t\t\t\t198 按钮 上一页",
+      "\t\t\t\t\t\t\t\t\t199 文本 2 / 8",
+      "\t\t\t\t\t\t\t\t\t200 按钮 下一页"
+    ]
+  },
+  "policy_draft": {
+    "width": 320,
+    "original": 900,
+    "edited": 600,
+    "dirty": true,
+    "refresh_retained": true,
+    "tab_retained": true,
+    "reset_matches_original": true,
+    "save_disabled": true,
+    "policy_submitted": false,
+    "save_disabled_after_reset": true
+  },
+  "real_phone": false,
+  "model_messages_sent": 0,
+  "policy_submitted": false
+}
