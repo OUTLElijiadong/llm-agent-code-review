@@ -32,6 +32,7 @@
 
 - 从原 active `4.0.45`（`70dfb9b08f8a950a40d8682a791ca882037b80b4`）发布 `4.0.46`，再从 `4.0.46` 发布最终 `4.0.47`。生产源码树均由已验证 Git bundle 精确克隆，未把旧 release 中未跟踪的 `.env` 备份并入新树。
 - 最终 release 路径为 `/opt/prism-releases/efd620d3b1cd1e989996385085b197fa888a84fb`，后端与前端镜像标签均为同一完整 SHA。
+- 运行镜像 digest：Backend `sha256:fe468362f7d9a0408356551686b0dcb5de69dc9ac3b9caabf813a10f3386e0d7`；Frontend `sha256:96e6e8b4de08a12cdfb9b43c838b49aaa4cdf075dafe26ee7f266b1de3b105b6`。
 - 两次发布前都新建备份，并在独立 `cr_testdb` 中通过 gzip/SHA 与完整恢复校验；每次恢复均核对 104 张表和 Alembic revision `062_audit_log_action_length`。第二次生产备份为 `/opt/prism-backups/code_review_20261005T071358Z_efd620d3b1cd.sql.gz`，保留未删除。
 - `deploy.sh all` 两次均完成 backend/frontend 健康、HTTPS 同源 health/ready、静态资源同步、发布账本和运维巡检门禁；Alembic 无待迁移变更。
 
@@ -42,6 +43,7 @@
 - socket 目录实测 `root:prism-ops 0710`，socket `root:prism-ops 0660`。后端身份 `10001:991`、`CapEff=0`、`OPS_EXECUTOR_TOKEN` 为空。
 - 后端容器发起真实只读 `status` 请求得到 HTTP 200 且 `ok=true`；同一 socket 上使用错误 UID `10002` 得到 HTTP 403。成功探针产生的只读运维审计记录保留。
 - 最终部署的 Python dotenv 解析结果与共享 Shell 解析器一致，且目标备份目录存在。与此前的合成配置测试合并，覆盖当前无引号配置及单双引号配置。
+- 后端通过 UDS 实际列出已配置备份目录的 1 个条目（HTTP 200）；越出允许根的 `/etc` 列目录请求被拒绝（HTTP 400）。审计记录保留。
 - Prism 后端、前端、MySQL、Redis、ClamAV、Embedding、隔离恢复数据库均运行；`auto-surface-mm-local`、`lijiadong-portfolio`、`momentum-radar`、`site_total`、`postfix` 和 `bt` systemd 单元均 inactive。
 - TCP 监听中公网地址为 SSH `22` 与 Prism `80/443`；后端 `8000`、MySQL `3307`、containerd `35913` 均为 `127.0.0.1` 回环监听。未发现本机 `8888` 监听；腾讯云安全组保持未改。
 - 根分区使用率 `80%`，可用 `39,016,404 KiB`（约 37 GiB）。两个发布备份均保留，无清理或删除动作。
