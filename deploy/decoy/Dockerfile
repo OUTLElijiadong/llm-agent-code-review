@@ -9,6 +9,7 @@ FROM nginx:alpine
 # 运行期镜像里只有 nginx + 静态文件。
 COPY decoy_service.py /tmp/decoy_service.py
 RUN apk add --no-cache python3 >/dev/null \
+    && rm -rf /usr/share/nginx/html \
     && mkdir -p /usr/share/nginx/html \
     && python3 /tmp/decoy_service.py --generate /usr/share/nginx/html \
     && rm -f /tmp/decoy_service.py \
