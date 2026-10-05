@@ -57,13 +57,14 @@ ACTION_RISKS = {
     "security_traffic_summary": "low",
     "security_decoy_status": "low",
     "security_decoy_apply": "medium",
+    "security_decoy_install": "medium",
 }
 # 仅由安全中心/API 与固定防御调度使用；不能进入模型工具枚举。
 INTERNAL_SECURITY_ACTIONS = frozenset({
     "security_block_status", "security_block_configure", "security_block_reconcile", "security_block_release",
     "security_block_candidates", "security_block_apply_anomalies",
     "security_ip_trace", "security_surface_audit", "security_traffic_summary",
-    "security_decoy_status", "security_decoy_apply",
+    "security_decoy_status", "security_decoy_apply", "security_decoy_install",
 })
 # 无交互系统身份只服务于固定健康巡检。其他只读动作同样可能泄露
 # 目录、日志或主机拓扑，必须由唯一超级管理员在交互会话中发起。
@@ -125,6 +126,7 @@ ACTION_PARAM_KEYS = {
     "security_surface_audit": set(),
     "security_traffic_summary": {"since_hours"},
     "security_decoy_status": set(),
+    "security_decoy_install": set(),
     "security_decoy_apply": {"reason"},
 }
 ACTION_REQUIRED_PARAMS = {
@@ -363,6 +365,7 @@ def execute(
             "security_block_status", "security_block_reconcile", "security_block_candidates",
             "security_block_apply_anomalies", "security_ip_trace", "security_surface_audit",
             "security_traffic_summary", "security_decoy_status", "security_decoy_apply",
+            "security_decoy_install",
         }
         interactive = actor is not None and source == "security_center" and action in {
             "security_block_status", "security_block_configure", "security_block_release",

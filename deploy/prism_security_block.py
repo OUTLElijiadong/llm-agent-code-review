@@ -1037,6 +1037,78 @@ class SecurityBlockController:
                 return False, f"{chain} 中 {DECOY_CHAIN} 排在 DROP 链之后，拒绝启用引流"
         return True, ""
 
+    def _decoy_dnat_args(self, operation: str) -> list[list[str]]:
+        """返回引流链的建/删命令序列；DNAT 目标固定为宿主回环上的诱捕端口。"""
+        target = f"127.0.0.1:{DECOY_PORT}"
+        commands: list[list[str]] = []
+        for tool in ("iptables", "ip6tables"):
+            set_name = DECOY_SET[4] if tool == "iptables" else DECOY_SET[6]
+            if operation == "create":
+                commands.append([tool, "-w", "-N", DECOY_CHAIN])
+                # 必须是第一条：先引流，后才是既有 DROP 链（链序 fail-closed 的另一半）
+                for parent in ("INPUT", "DOCKER-USER"):
+                    commands.append([tool, "-w", "-I", parent, "-j", DECOY_CHAIN])
+                commands.append([tool, "-w", "-t", "nat", "-F", "PREROUTING"])
+            action = "-A" if operation == "create" else "-D"
+            for port in DECOY_SAFE_PORTS:
+                commands.append([tool, "-w", "-t", "nat", action, "PREROUTING",
+                                 "-p", "tcp", "--dport", str(port),
+                                 "-m", "set", "--match-set", set_name, "src",
+                                 "-j", "DNAT", "--to-destination", target])
+
+        return commands
+
+    def decoy_install(self) -> dict[str, Any]:
+        """安装/校验引流链路：ipset 集合 + PRISM-DECOY-IN 链 + PREROUTING DNAT 规则。
+
+        安全约束：
+        * 只处理 80/443，其它端口不引流；
+        * 链必须插在既有 DROP 链之前（fail-closed 校验）；
+        * DNAT 目标固定为宿主回环上的诱捕端口，不接受任何外部参数。
+        """
+        with self._locked():
+            errors: list[str] = []
+            supported, cap_errors = self._capabilities()
+            errors.extend(cap_errors)
+            if not supported[4]:
+                raise RuntimeError("内核链路不可用，拒绝安装引流规则")
+            self._ensure_family_paths(4)
+            for family in (4, 6):
+                result = self._run(["ipset", "create", DECOY_SET[family], "hash:ip", "family",
+                                    "inet" if family == 4 else "inet6",
+                                    "timeout", str(ESCALATION_MAX_SECONDS),
+                                    "maxelem", "1024", "-exist"], required=False)
+                if result.get("exit_code") != 0:
+                    errors.append(f"IPv{family} 引流集合创建失败：{str(result.get('stderr'))[:160]}")
+            # DNAT 到 127.0.0.1 需要 route_localnet，否则内核按 martian 丢弃改写后的包
+            sysctl = self._run(["sysctl", "-w", "net.ipv4.conf.all.route_localnet=1"], required=False)
+            if sysctl.get("exit_code") != 0:
+                errors.append(f"route_localnet 未能开启：{str(sysctl.get('stderr'))[:160]}")
+            existing = self._run(["iptables", "-w", "-S", DECOY_CHAIN], required=False)
+            if existing.get("exit_code") != 0:
+                for command in self._decoy_dnat_args("create"):
+                    result = self._run(command, required=False)
+                    if result.get("exit_code") != 0:
+                        errors.append(f"引流规则安装失败：{' '.join(command[1:4])}：{str(result.get('stderr'))[:160]}")
+            order_ok, order_error = self._decoy_chain_order_ok()
+            if not order_ok:
+                errors.append(order_error)
+            chains = {}
+            for tool in ("iptables", "ip6tables"):
+                listed = self._run([tool, "-w", "-S", DECOY_CHAIN], required=False)
+                chains[tool] = [line for line in str(listed.get("stdout") or "").splitlines() if line][:10]
+            nat_rules = self._run(["iptables", "-w", "-t", "nat", "-S", "PREROUTING"], required=False)
+            return {
+                "generated_at": _iso(self.clock()),
+                "chain_order_ok": order_ok,
+                "chains": chains,
+                "nat_prerouting": [line for line in str(nat_rules.get("stdout") or "").splitlines()
+                                   if "DNAT" in line][:10],
+                "sets": {str(family): DECOY_SET[family] for family in (4, 6)},
+                "decoy_port": DECOY_PORT,
+                "errors": errors[-10:],
+            }
+
     def decoy_status(self) -> dict[str, Any]:
         """诱捕层状态：容器存活、命中汇总、引流集合与链序可读性（全部只读）。"""
         with self._locked():
@@ -1390,6 +1462,10 @@ def execute(action: str, params: dict[str, Any]) -> dict[str, Any]:
         return controller.candidates()
     if action == "security_block_apply_anomalies":
         return controller.apply_anomalies(params)
+    if action == "security_decoy_install":
+        if params:
+            raise ValueError("诱捕层引流安装不接收参数")
+        return controller.decoy_install()
     if action == "security_decoy_status":
         if params:
             raise ValueError("诱捕层状态不接收参数")

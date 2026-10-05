@@ -232,17 +232,18 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs:
-      - /tmp:size=8m,mode=1777
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=8m
+      - /var/run:size=1m
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
     mem_limit: ${DECOY_MEM_LIMIT:-128m}
     cpus: ${DECOY_CPUS:-0.25}
-    environment:
-      DECOY_PORT: "8080"
-      DECOY_MIN_DELAY_MS: ${DECOY_MIN_DELAY_MS:-80}
-      DECOY_MAX_DELAY_MS: ${DECOY_MAX_DELAY_MS:-400}
+    # 只绑定宿主回环：公网无法直连诱捕层，只有内核 DNAT 改写的流量能到达。
+    ports:
+      - "127.0.0.1:${DECOY_PORT:-8443}:8443"
+    volumes:
+      - ${CERTBOT_CONF_DIR:-./certbot/conf}:/etc/letsencrypt:ro
     logging: *default-logging
     networks:
       - code_review_net

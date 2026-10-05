@@ -38,6 +38,7 @@ class DecoyHost(Host):
                                                    decoy_line("9.9.9.9", "/.git/config")]
         self.chain_order = chain_order
         self.container_running = container_running
+        self.decoy_chain_exists = False
         self.decoy_sets: dict[str, set[str]] = {"prism-decoy-v4": set(), "prism-decoy-v6": set()}
 
     def run(self, args, **kwargs):
@@ -49,6 +50,8 @@ class DecoyHost(Host):
             return ok
         if args[0] in {"iptables", "ip6tables"} and "-S" in args:
             chain = args[args.index("-S") + 1]
+            if chain == "PRISM-DECOY-IN":
+                return {**ok, "stdout": "-N PRISM-DECOY-IN\n"} if self.decoy_chain_exists else {**ok, "exit_code": 1}
             if chain in {"INPUT", "DOCKER-USER"}:
                 if self.chain_order == "decoy_first":
                     return {**ok, "stdout": f"-P {chain} ACCEPT\n-A {chain} -j PRISM-DECOY-IN\n-A {chain} -j PRISM-SEC-IN\n"}
@@ -192,3 +195,45 @@ def test_execute_rejects_unknown_params_for_decoy_actions(tmp_path, monkeypatch)
         security.execute("security_decoy_status", {"enabled": True})
     with pytest.raises(ValueError, match="只接受 reason"):
         security.execute("security_decoy_apply", {"reason": "x", "ips": ["1.1.1.1"]})
+
+
+def test_decoy_install_creates_chain_before_drop_chain(decoy_env):
+    """引流链必须先插到 INPUT/DOCKER-USER 的第一条，否则会在 DROP 处终止。"""
+    ctl, host = decoy_env
+    result = ctl.decoy_install()
+    assert result["chain_order_ok"] is True
+    assert result["decoy_port"] == 8443
+    inserted = [cmd for cmd in host.commands if "-I" in cmd and "PRISM-DECOY-IN" in cmd]
+    parents = {cmd[cmd.index("-I") + 1] for cmd in inserted}
+    assert parents == {"INPUT", "DOCKER-USER"}
+    dnat = [cmd for cmd in host.commands if "DNAT" in cmd]
+    assert dnat, "必须写出 DNAT 引流规则"
+    for cmd in dnat:
+        assert "--to-destination" in cmd
+        assert cmd[cmd.index("--to-destination") + 1] == "127.0.0.1:8443"
+
+
+def test_decoy_install_only_targets_web_ports(decoy_env):
+    """只引流 80/443；其它端口（例如 SSH）绝不改写到诱捕层。"""
+    ctl, host = decoy_env
+    ctl.decoy_install()
+    dnat_ports = {cmd[cmd.index("--dport") + 1] for cmd in host.commands if "DNAT" in cmd}
+    assert dnat_ports == {"80", "443"}
+    assert "22" not in dnat_ports
+
+
+def test_decoy_install_is_idempotent_when_chain_exists(decoy_env):
+    """链已存在时不重建，只校验链序（避免重复插入导致规则膨胀）。"""
+    ctl, host = decoy_env
+    host.decoy_chain_exists = True
+    result = ctl.decoy_install()
+    assert result["chain_order_ok"] is True
+    assert not [cmd for cmd in host.commands if "-N" in cmd and "PRISM-DECOY-IN" in cmd]
+
+
+def test_decoy_install_rejects_when_chain_order_is_wrong(decoy_env):
+    ctl, host = decoy_env
+    host.chain_order = "drop_first"
+    result = ctl.decoy_install()
+    assert result["chain_order_ok"] is False
+    assert any("排在 DROP 链之后" in item for item in result["errors"])

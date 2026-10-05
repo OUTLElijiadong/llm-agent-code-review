@@ -1,21 +1,23 @@
-# 诱捕层镜像：只跑一个标准库 HTTP 服务，无出网、无写盘、非 root。
-FROM python:3.11-alpine
+# 诱捕层镜像：nginx:alpine 直接以真实证书听 8443，内容由 decoy_service.py 生成。
+#
+# 为什么用 nginx 而不是 Python 自带 TLS：私钥是 root:600，只有 root 能读；
+# 用 nginx 可以让 master 进程持有私钥，与生产前端容器同款做法（前端 master 同样是 root），
+# 避免为了诱捕层把私钥权限放宽。
+FROM nginx:alpine
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    DECOY_PORT=8080
+# 用生成器把诱饵内容写成静态树（33 个文件，全部虚构），再删除生成器，
+# 运行期镜像里只有 nginx + 静态文件。
+COPY decoy_service.py /tmp/decoy_service.py
+RUN apk add --no-cache python3 >/dev/null \
+    && mkdir -p /usr/share/nginx/html \
+    && python3 /tmp/decoy_service.py --generate /usr/share/nginx/html \
+    && rm -f /tmp/decoy_service.py \
+    && mkdir -p /tmp/client_body /tmp/proxy /tmp/fastcgi /tmp/uwsgi /tmp/scgi
 
-WORKDIR /app
-COPY decoy_service.py /app/decoy_service.py
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# 固定非 root 用户；镜像内不留 shell 入口给外部使用（容器不暴露端口到宿主）。
-RUN adduser -D -u 10001 -s /sbin/nologin decoy \
-    && chown -R decoy:decoy /app
-
-USER decoy
-EXPOSE 8080
-
+EXPOSE 8443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/.env', timeout=3).status == 200 else 1)"
+    CMD wget --no-check-certificate -q --spider https://127.0.0.1:8443/ || exit 1
 
-CMD ["python3", "/app/decoy_service.py"]
+CMD ["nginx", "-g", "daemon off;"]

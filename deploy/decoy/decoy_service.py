@@ -19,8 +19,10 @@ import hashlib
 import json
 import os
 import random
+import sys
 import time
 from http import HTTPStatus
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LISTEN_HOST = os.environ.get("DECOY_HOST", "0.0.0.0")
@@ -226,6 +228,73 @@ ROUTES: list[tuple[str, str, str]] = [
     ("/api/v1/internal/", "internal", "application/json"),
 ]
 
+def _content_type_for(path: str) -> str:
+    for prefix, _kind, content_type in ROUTES:
+        if path.lower().startswith(prefix):
+            return content_type
+    return "text/html; charset=utf-8"
+
+
+def generate_tree() -> dict[str, bytes]:
+    """生成全部诱饵路径的内容清单（路径 → 字节），供静态服务与单测共用。"""
+    tree: dict[str, bytes] = {}
+    for _prefix, kind, _content_type in ROUTES:
+        pass
+    # 按"路径 → 类型"的固定清单枚举，保证文件名与内容一一对应
+    for path, kind in DECOY_PATHS:
+        if kind == "env":
+            tree[path] = _fake_env(path).encode()
+        elif kind == "gitcfg":
+            tree[path] = _fake_git_config().encode()
+        elif kind == "githead":
+            tree[path] = _fake_git_head().encode()
+        elif kind == "aws":
+            tree[path] = _fake_aws(path).encode()
+        elif kind == "kube":
+            tree[path] = _fake_kubeconfig(path).encode()
+        elif kind == "creds":
+            tree[path] = _fake_credentials_json(path).encode()
+        elif kind == "wp":
+            tree[path] = _fake_wp_login().encode()
+        elif kind == "pma":
+            tree[path] = _fake_phpmyadmin(path).encode()
+        elif kind == "tomcat":
+            tree[path] = _fake_tomcat_manager().encode()
+        elif kind == "actuator":
+            tree[path] = _fake_actuator(path).encode()
+        elif kind == "internal":
+            tree[path] = _fake_internal_api(path).encode()
+        elif kind == "archive":
+            tree[path] = _fake_archive(path)
+        elif kind == "xmlrpc":
+            tree[path] = XMLRPC.encode()
+        elif kind == "apijson":
+            tree[path] = json.dumps({"data": [], "meta": {"total": 0, "page": 1}}).encode()
+        else:
+            tree[path] = HTML_INDEX.encode()
+    tree["/"] = HTML_INDEX.encode()
+    return tree
+
+
+# 显式枚举：每个诱饵路径用一个固定文件名，避免 nginx 端写正则。
+DECOY_PATHS: list[tuple[str, str]] = [
+    ("/.env", "env"), ("/.env.local", "env"), ("/.env.production", "env"),
+    ("/.git/config", "gitcfg"), ("/.git/HEAD", "githead"), ("/.svn/entries", "githead"),
+    ("/.aws/credentials", "aws"), ("/.kube/config", "kube"),
+    ("/credentials.json", "creds"), ("/service-account.json", "creds"),
+    ("/wp-login.php", "wp"), ("/wp-admin/", "wp"), ("/wp-admin/index.php", "wp"),
+    ("/wp-json/wp/v2/users", "apijson"), ("/xmlrpc.php", "xmlrpc"),
+    ("/phpmyadmin/", "pma"), ("/phpmyadmin/index.php", "pma"), ("/pma/", "pma"),
+    ("/adminer.php", "pma"), ("/manager/html", "tomcat"),
+    ("/actuator/env", "actuator"), ("/actuator/heapdump", "archive"),
+    ("/solr/admin/info/system", "apijson"), ("/server-status", "html"),
+    ("/backup.zip", "archive"), ("/backup.tar.gz", "archive"),
+    ("/backup.sql", "archive"), ("/dump.sql", "archive"), ("/db.sql", "archive"),
+    ("/config.php.bak", "env"), ("/api/v1/internal/debug", "internal"),
+    ("/api/v1/internal/export", "internal"),
+]
+
+
 HTML_INDEX = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Site</title></head>
 <body><h1>It works!</h1><p>Internal service.</p></body></html>
@@ -309,11 +378,34 @@ class DecoyHandler(BaseHTTPRequestHandler):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
 
-def main() -> None:
+def generate_static_tree(target: str) -> int:
+    """把诱饵内容写成静态文件树（供 nginx 直接服务）；返回写出文件数。"""
+    root = Path(target)
+    written = 0
+    for path, body in generate_tree().items():
+        relative = path.lstrip("/") or "index.html"
+        destination = root / relative
+        if path.endswith("/") or path == "/":
+            destination = destination / "index.html"
+        elif destination.is_dir():
+            # 同名目录已存在（例如 /wp-admin/ 先建了目录），放到该目录下的 index.php
+            destination = destination / "index.php"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(body)
+        written += 1
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) == 2 and args[0] == "--generate":
+        print("generated %d decoy files into %s" % (generate_static_tree(args[1]), args[1]), flush=True)
+        return 0
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), DecoyHandler)
     print("prism decoy listening on %s:%d" % (LISTEN_HOST, LISTEN_PORT), flush=True)
     server.serve_forever()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
