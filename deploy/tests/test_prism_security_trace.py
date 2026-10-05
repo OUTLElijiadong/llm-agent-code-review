@@ -149,7 +149,40 @@ def test_ip_trace_is_read_only_and_never_sends_probe_packets(controller):
     # 只允许一次出网（威胁情报），且 URL 中只出现被溯源 IP。
     curl_commands = [command for command in host.commands if command[0] == "curl"]
     assert len(curl_commands) == 1
-    assert curl_commands[0][-1].endswith("/45.155.205.7?fields=status,message,country,regionName,city,isp,org,as,query")
+    # 默认情报端点为 ipinfo（HTTPS，生产实测可用性优于 ip-api 的 80 端口）
+    assert curl_commands[0][-1] == "https://ipinfo.io/45.155.205.7/json"
+
+
+def test_attribution_accepts_ipinfo_response_shape(controller):
+    """ipinfo/ipwho.is 的 region/org/asn 字段也要能归一化，避免换端点后归因为空。"""
+    ctl, host = controller
+
+    def run(args, **kwargs):
+        if args[0] == "curl":
+            host.commands.append(list(args))
+            return {"exit_code": 0, "stdout": json.dumps({
+                "ip": "45.155.205.7", "city": "Amsterdam", "region": "North Holland",
+                "country": "NL", "org": "AS64500 Example Hosting BV", "asn": "64500",
+            }), "stderr": ""}
+        return host.run(args, **kwargs)
+
+    ctl.runner = run
+    monkeypatch_base = security.os.environ.get("THREAT_INTEL_BASE_URL")
+    security.os.environ["THREAT_INTEL_BASE_URL"] = "https://ipinfo.io"
+    try:
+        result = ctl._outbound_attribution("45.155.205.7")
+    finally:
+        if monkeypatch_base is None:
+            security.os.environ.pop("THREAT_INTEL_BASE_URL", None)
+        else:
+            security.os.environ["THREAT_INTEL_BASE_URL"] = monkeypatch_base
+    assert result["ok"] is True
+    assert result["source"] == "ipinfo.io"
+    assert result["attribution"]["region"] == "North Holland"
+    assert result["attribution"]["org"] == "AS64500 Example Hosting BV"
+    assert result["attribution"]["as"] == "AS64500"
+    assert host.commands[-1][-1] == "https://ipinfo.io/45.155.205.7/json"
+
 
 
 def test_ip_trace_rejects_networks_and_non_global_without_outbound(controller):

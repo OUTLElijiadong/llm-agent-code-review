@@ -889,10 +889,13 @@ class SecurityBlockController:
                     if name.strip() == "THREAT_INTEL_BASE_URL":
                         base = value.strip().strip("'\"")
                         break
-        base = base or "http://ip-api.com/json"
+        base = base or "https://ipinfo.io"
         if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(/[A-Za-z0-9._~/-]*)*", base):
             return {"ok": False, "note": "THREAT_INTEL_BASE_URL 不合法"}
-        url = f"{base.rstrip('/')}/{address}?fields=status,message,country,regionName,city,isp,org,as,query"
+        root = base.rstrip("/")
+        url = f"{root}/{address}/json" if root.endswith(("ipinfo.io", "ipwho.is")) else (
+            f"{root}/{address}?fields=status,message,country,regionName,city,isp,org,as,query"
+        )
         result = self._optional_command("threat_intel", ["curl", "-fsS", "--max-time", "12", url], timeout=18)
         if not result.get("ok"):
             return {"ok": False, "note": result.get("note")}
@@ -900,15 +903,18 @@ class SecurityBlockController:
             data = json.loads(result["output"])
         except json.JSONDecodeError:
             return {"ok": False, "note": "无法解析情报响应"}
-        if not isinstance(data, dict) or data.get("status") == "fail":
+        if not isinstance(data, dict) or data.get("status") == "fail" or data.get("success") is False:
             return {"ok": False, "note": "情报源未返回可用归因"}
-        return {"ok": True, "attribution": {
+        # 兼容两类响应形状：ip-api 用 regionName/isp/as，ipinfo 与 ipwho.is 用 region/org/asn（或 as）。
+        org = str(data.get("org") or data.get("isp") or "")[:96]
+        as_value = str(data.get("as") or data.get("asn") or "")[:96]
+        return {"ok": True, "source": url.split("/", 3)[2], "attribution": {
             "country": str(data.get("country") or "")[:64],
-            "region": str(data.get("regionName") or "")[:64],
+            "region": str(data.get("regionName") or data.get("region") or "")[:64],
             "city": str(data.get("city") or "")[:64],
-            "isp": str(data.get("isp") or "")[:96],
-            "org": str(data.get("org") or "")[:96],
-            "as": str(data.get("as") or "")[:96],
+            "isp": str(data.get("isp") or org)[:96],
+            "org": org,
+            "as": as_value if as_value.upper().startswith("AS") else (f"AS{as_value}" if as_value else ""),
         }}
 
     def ip_trace(self, params: dict[str, Any]) -> dict[str, Any]:
