@@ -1,5 +1,7 @@
 """管理员安全中心 API；所有数据均限制为唯一超级管理员。"""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
@@ -29,11 +31,15 @@ def get_security_center_events(
     hours: int = Query(24, ge=1, le=720),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    event_group: Literal["all", "activity", "inspection"] = Query("all"),
     db: Session = Depends(get_db),
     _: User = Depends(require_super_admin),
 ):
     """按记录时间分页读取脱敏的告警、采集、巡检和策略变更摘要。"""
-    return Resp(data=security_center_service.list_events(db, hours=hours, page=page, page_size=page_size))
+    data = security_center_service.list_events(
+        db, hours=hours, page=page, page_size=page_size, event_group=event_group,
+    )
+    return Resp(data=data)
 
 
 @router.get("/policy", response_model=Resp[dict])

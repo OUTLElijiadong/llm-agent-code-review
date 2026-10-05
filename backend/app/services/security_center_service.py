@@ -6,9 +6,10 @@ import json
 import math
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable, Literal, TypeVar
 
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Query, Session
 
 from app.core.config import settings
 from app.core.exceptions import ValidationError
@@ -84,6 +85,8 @@ _SAFE_DETAIL_KEYS = {
     "age_hours",
 }
 _MAX_ROWS_PER_SOURCE = 500
+SecurityEventGroup = Literal["all", "activity", "inspection"]
+_EventRecord = TypeVar("_EventRecord", AgentJobRun, OpsExecution)
 
 
 def _describe_schedule(schedule: str | None) -> tuple[int | None, str]:
@@ -371,7 +374,104 @@ def get_overview(db: Session) -> dict[str, Any]:
     }
 
 
-def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+def _matches_event_group(
+    event_type: str, status: str, event_group: SecurityEventGroup, *, routine_check: bool = False,
+) -> bool:
+    """成功采集/巡检属于例行记录，其余告警、审计、防御和异常属于安全事件。"""
+    if event_group == "all":
+        return True
+    inspection = status == "success" and (
+        event_type in {"collector", "monitor_run"} or (event_type == "defense_action" and routine_check)
+    )
+    return inspection if event_group == "inspection" else not inspection
+
+
+def _monitor_run_result(run: AgentJobRun) -> tuple[list[Any], list[Any], str]:
+    """复用巡检展示状态，避免把调度成功但有错误的运行当作成功心跳。"""
+    result = _read_json(run.result_json)
+    completed = result.get("completed_actions") if isinstance(result.get("completed_actions"), list) else []
+    errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+    display_status = (
+        "failed" if run.status == "failed" or (errors and not completed) else
+        "warning" if errors else
+        run.status
+    )
+    return completed, errors, display_status
+
+
+def _routine_defense_check(row: OpsExecution, snapshot: dict[str, Any]) -> bool:
+    """仅把明确已核验、没有封禁记录或异常的规则核验归入例行巡检。"""
+    if row.action != "security_block_reconcile" or row.status != "success":
+        return False
+    if not snapshot.get("available") or not snapshot.get("verified"):
+        return False
+    payload = _read_json(row.result_json).get("result")
+    # 不用清洗后的默认空数组判断：字段缺失或无效记录不能被误当作无变化。
+    return (
+        isinstance(payload, dict) and payload.get("outcome_unknown") is not True
+        and all(payload.get(key) == [] for key in ("active_blocks", "recent_blocks", "errors"))
+    )
+
+
+def _defense_event_state(row: OpsExecution, snapshot: dict[str, Any]) -> tuple[bool, str]:
+    """时间线读模型保留原始回执的未知/异常信号，不改变执行快照契约。"""
+    payload = _read_json(row.result_json).get("result")
+    outcome_unknown = snapshot.get("outcome_unknown") is True or (
+        isinstance(payload, dict) and payload.get("outcome_unknown") is True
+    )
+    verified = bool(snapshot.get("available") and snapshot.get("verified") and not outcome_unknown)
+    has_errors = bool(snapshot.get("errors")) or (isinstance(payload, dict) and bool(payload.get("errors")))
+    status = (
+        "unknown" if outcome_unknown or (row.status == "running" and not verified) else
+        "failed" if not verified else
+        "warning" if has_errors else row.status
+    )
+    return verified, status
+
+
+def _ops_matches_event_group(row: OpsExecution, event_group: SecurityEventGroup) -> bool:
+    if row.action not in ops_service.INTERNAL_SECURITY_ACTIONS:
+        return _matches_event_group("collector", row.status, event_group)
+    snapshot = security_response_service.execution_snapshot(row)
+    _, display_status = _defense_event_state(row, snapshot)
+    return _matches_event_group(
+        "defense_action", display_status, event_group, routine_check=_routine_defense_check(row, snapshot),
+    )
+
+
+def _limited_group_rows(
+    query: Query[_EventRecord], model: type[_EventRecord], event_group: SecurityEventGroup,
+    matches: Callable[[_EventRecord], bool],
+) -> list[_EventRecord]:
+    """按固定时间/ID倒序分批物化，匹配记录才占单源上限，不遗留流式游标。"""
+    if event_group == "all":
+        return query.limit(_MAX_ROWS_PER_SOURCE).all()
+    rows: list[_EventRecord] = []
+    cursor: tuple[datetime, int] | None = None
+    while len(rows) < _MAX_ROWS_PER_SOURCE:
+        batch_query = query
+        if cursor is not None:
+            batch_query = batch_query.filter(or_(
+                model.started_at < cursor[0],
+                and_(model.started_at == cursor[0], model.id < cursor[1]),
+            ))
+        batch = batch_query.limit(_MAX_ROWS_PER_SOURCE).all()
+        if not batch:
+            break
+        for row in batch:
+            if matches(row):
+                rows.append(row)
+                if len(rows) >= _MAX_ROWS_PER_SOURCE:
+                    break
+        if len(batch) < _MAX_ROWS_PER_SOURCE:
+            break
+        cursor = batch[-1].started_at, batch[-1].id
+    return rows
+
+
+def list_events(
+    db: Session, *, hours: int = 24, page: int = 1, page_size: int = 20, event_group: SecurityEventGroup = "all",
+) -> dict[str, Any]:
     cutoff = _now_utc() - timedelta(hours=hours)
     events: list[dict[str, Any]] = []
 
@@ -383,7 +483,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         )
         .order_by(AgentAlert.create_time.desc(), AgentAlert.id.desc())
         .limit(_MAX_ROWS_PER_SOURCE)
-        .all()
+        .all() if event_group != "inspection" else []
     )
     for row in alerts:
         detail = _safe_alert_detail(row.detail_json)
@@ -405,7 +505,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
             }
         )
 
-    audit_rows = (
+    audit_source_rows = (
         db.query(AuditLog)
         .filter(
             AuditLog.action.in_(_AUDIT_ACTION_LABELS),
@@ -413,14 +513,14 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         )
         .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
         .limit(_MAX_ROWS_PER_SOURCE)
-        .all()
+        .all() if event_group != "inspection" else []
     )
     sensitive_audit_actions = {
         "rbac.user_roles_assign",
         "rbac.role_permissions_assign",
         "llm_config_update",
     }
-    for row in audit_rows:
+    for row in audit_source_rows:
         failed_login = row.action == "login" and row.status == "failed"
         if row.action == "security_anomaly_review":
             summary = "小菱分析了脱敏候选；研判和执行相互独立，实际封禁以宿主机回执为准。"
@@ -455,12 +555,22 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
             }
         )
 
-    ops_rows = (
+    ops_query = (
         db.query(OpsExecution)
         .filter(OpsExecution.action.in_(_SECURITY_ACTIONS), OpsExecution.started_at >= cutoff)
         .order_by(OpsExecution.started_at.desc(), OpsExecution.id.desc())
-        .limit(_MAX_ROWS_PER_SOURCE)
-        .all()
+    )
+    if event_group == "activity":
+        ops_query = ops_query.filter(or_(
+            OpsExecution.action.in_(ops_service.INTERNAL_SECURITY_ACTIONS), OpsExecution.status != "success",
+        ))
+    elif event_group == "inspection":
+        ops_query = ops_query.filter(or_(
+            and_(OpsExecution.action.notin_(ops_service.INTERNAL_SECURITY_ACTIONS), OpsExecution.status == "success"),
+            OpsExecution.action == "security_block_reconcile",
+        ))
+    ops_rows = _limited_group_rows(
+        ops_query, OpsExecution, event_group, lambda row: _ops_matches_event_group(row, event_group),
     )
     actor_ids = {int(row.actor_id) for row in ops_rows if row.actor_id is not None}
     actors = (
@@ -469,7 +579,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
     request_ids = {str(row.request_id) for row in ops_rows if row.request_id}
     source_by_request: dict[str, str] = {}
     if request_ids:
-        audit_rows = (
+        source_audit_rows = (
             db.query(AuditLog.target_id, AuditLog.detail)
             .filter(
                 AuditLog.target_type == "production_ops",
@@ -478,7 +588,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
             )
             .all()
         )
-        for target_id, detail in audit_rows:
+        for target_id, detail in source_audit_rows:
             match = re.search(r"source=([A-Za-z0-9_.-]{1,80})", str(detail or ""))
             if target_id and match:
                 source_by_request[str(target_id)] = match.group(1)
@@ -486,9 +596,14 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         ok = row.status == "success"
         if row.action in ops_service.INTERNAL_SECURITY_ACTIONS:
             snapshot = security_response_service.execution_snapshot(row)
-            verified = snapshot["available"] and snapshot["verified"]
+            verified, display_status = _defense_event_state(row, snapshot)
+            routine_check = _routine_defense_check(row, snapshot)
             if not verified:
                 summary = "防御动作结果未确认，请刷新宿主机状态；当前回执不能证明已封禁或已解封。"
+            elif display_status == "warning":
+                summary = "防御动作回执包含异常，请刷新宿主机状态核验；本条记录不表示执行完全成功。"
+            elif routine_check:
+                summary = "自动封禁例行核验完成，本次回执没有封禁或解封记录。"
             elif row.action == "security_block_configure":
                 summary = "固定规则临时封禁已启用。" if snapshot["enabled"] else "自动封禁已关闭，不新增封禁。"
             elif row.action == "security_block_release":
@@ -500,8 +615,8 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
                 "recorded_at": _iso(row.finished_at or row.started_at),
                 "event_type": "defense_action",
                 "layer": "临时封禁与解封",
-                "severity": "info" if verified else "warning",
-                "status": row.status if verified else "unknown" if row.status == "running" else "failed",
+                "severity": "info" if verified and display_status == "success" else "warning",
+                "status": display_status,
                 "actor": actors.get(row.actor_id, "固定防御规则" if row.actor_id is None else "管理员"),
                 "title": _ACTION_LABELS[row.action],
                 "action_code": row.action,
@@ -510,6 +625,8 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
                     "verified": bool(verified), "request_id": row.request_id,
                     "enabled": snapshot["enabled"] if verified else None,
                     "active_blocks": len(snapshot["active_blocks"]) if verified else None,
+                    "recent_blocks": len(snapshot["recent_blocks"]) if verified else None,
+                    "routine_check": routine_check,
                     "duration_ms": int(row.duration_ms or 0),
                     "source": source_by_request.get(str(row.request_id), "未记录"),
                 },
@@ -535,18 +652,19 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
             }
         )
 
-    job_runs = (
+    run_query = (
         db.query(AgentJobRun)
         .join(AgentJob, AgentJob.id == AgentJobRun.job_id)
         .filter(AgentJob.job_type == "security_monitor", AgentJobRun.started_at >= cutoff)
         .order_by(AgentJobRun.started_at.desc(), AgentJobRun.id.desc())
-        .limit(_MAX_ROWS_PER_SOURCE)
-        .all()
+    )
+    # 派生状态保持与展示相同，不依赖 SQLite/MySQL 不同的 JSON SQL 行为。
+    job_runs = _limited_group_rows(
+        run_query, AgentJobRun, event_group,
+        lambda run: _matches_event_group("monitor_run", _monitor_run_result(run)[2], event_group),
     )
     for run in job_runs:
-        result = _read_json(run.result_json)
-        completed = result.get("completed_actions") if isinstance(result.get("completed_actions"), list) else []
-        errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+        completed, errors, display_status = _monitor_run_result(run)
         source_set = set(_SECURITY_ACTIONS)
         source_errors = [
             item for item in errors
@@ -558,12 +676,6 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         degraded_source_codes = sorted({
             str(item["action"]) for item in source_errors if item.get("degraded") is True
         })
-        has_errors = bool(errors)
-        display_status = (
-            "failed" if run.status == "failed" or (has_errors and not completed) else
-            "warning" if has_errors else
-            run.status
-        )
         events.append(
             {
                 "id": f"run:{run.id}",
@@ -594,7 +706,7 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         )
         .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
         .limit(_MAX_ROWS_PER_SOURCE)
-        .all()
+        .all() if event_group != "inspection" else []
     )
     for row in policy_logs:
         detail = _read_json(row.detail)
@@ -617,6 +729,10 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
             }
         )
 
+    events = [item for item in events if _matches_event_group(
+        item["event_type"], item["status"], event_group,
+        routine_check=item["evidence_summary"].get("routine_check") is True,
+    )]
     events.sort(key=lambda item: (item["recorded_at"] or "", item["id"]), reverse=True)
     total = len(events)
     offset = (page - 1) * page_size
@@ -627,7 +743,8 @@ def list_events(db: Session, *, hours: int = 24, page: int = 1, page_size: int =
         "page_size": page_size,
         "pages": (total + page_size - 1) // page_size if total else 0,
         "truncated": any(
-            len(rows) >= _MAX_ROWS_PER_SOURCE for rows in (alerts, audit_rows, ops_rows, job_runs, policy_logs)
+            len(rows) >= _MAX_ROWS_PER_SOURCE for rows in (alerts, audit_source_rows, ops_rows, job_runs, policy_logs)
         ),
         "hours": hours,
+        "event_group": event_group,
     }

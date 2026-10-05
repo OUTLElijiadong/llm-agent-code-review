@@ -58,6 +58,8 @@ export interface SecurityCenterEvent {
   resolution?: { note: string; resolved_by_name?: string | null; resolved_at?: string | null } | null
 }
 
+export type SecurityCenterEventGroup = 'all' | 'activity' | 'inspection'
+
 export interface SecurityCenterEventPage {
   items: SecurityCenterEvent[]
   total: number
@@ -66,6 +68,7 @@ export interface SecurityCenterEventPage {
   pages: number
   truncated: boolean
   hours: number
+  event_group?: SecurityCenterEventGroup
 }
 
 export interface SecurityMonitorRunResult {
@@ -78,8 +81,8 @@ export function getSecurityCenterOverview(): Promise<SecurityCenterOverview> {
   return get<SecurityCenterOverview>('/admin/security-center/overview')
 }
 
-export function getSecurityCenterEvents(hours = 24, page = 1, pageSize = 20): Promise<SecurityCenterEventPage> {
-  return get<SecurityCenterEventPage>('/admin/security-center/events', { hours, page, page_size: pageSize })
+export function getSecurityCenterEvents(hours = 24, page = 1, pageSize = 20, eventGroup: SecurityCenterEventGroup = 'all'): Promise<SecurityCenterEventPage> {
+  return get<SecurityCenterEventPage>('/admin/security-center/events', { hours, page, page_size: pageSize, event_group: eventGroup })
 }
 
 export function updateSecurityMonitorPolicy(

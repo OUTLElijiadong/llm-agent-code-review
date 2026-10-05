@@ -41,6 +41,13 @@ function mountPanel() {
 function button(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll('button').find((item) => item.text() === text)!
 }
+async function expandDetails(wrapper: ReturnType<typeof mount>, selector: string) {
+  const details = wrapper.get(selector).element as HTMLDetailsElement
+  expect(details.open).toBe(false)
+  ;(wrapper.get(`${selector} summary`).element as HTMLElement).click()
+  await flushPromises()
+  expect(details.open).toBe(true)
+}
 
 describe('AutomaticBlockingPanel', () => {
   beforeEach(() => {
@@ -52,12 +59,15 @@ describe('AutomaticBlockingPanel', () => {
   afterEach(() => {
     mounted.splice(0).forEach((wrapper) => wrapper.unmount())
     vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('shows confirmed policy and protected sources with explicit rule boundaries', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.text()).toContain('自动封禁已关闭')
+    await expandDetails(wrapper, '.rules-details')
+    await expandDetails(wrapper, '.protected-details')
     expect(wrapper.text()).toContain('最长 15 分钟')
     expect(wrapper.text()).toContain('普通 403')
     expect(wrapper.text()).toContain('127.0.0.0/8')
@@ -81,6 +91,7 @@ describe('AutomaticBlockingPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.text()).toContain('执行器不可用')
+    await expandDetails(wrapper, '.executor-diagnostics')
     expect(wrapper.text()).toContain('ipset 不可用')
     await wrapper.get('input[type="checkbox"]').setValue(false)
     api.getAutomaticBlocking.mockResolvedValue(snapshot())
@@ -115,6 +126,39 @@ describe('AutomaticBlockingPanel', () => {
     expect(wrapper.text()).toContain('策略未写入')
     expect((wrapper.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     expect(api.success).not.toHaveBeenCalled()
+  })
+
+  it('keeps every unsaved policy field when a manual refresh reads a newer server policy', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('input[type="number"]')[0].setValue(600)
+    await wrapper.get('textarea').setValue('2001:db8::/64')
+    api.getAutomaticBlocking.mockResolvedValueOnce({ ...snapshot(), policy: { ...snapshot().policy, window_seconds: 600 } })
+    await button(wrapper, '刷新封禁状态').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.findAll('input[type="number"]')[0].element as HTMLInputElement).value).toBe('600')
+    expect((wrapper.findAll('input[type="number"]')[1].element as HTMLInputElement).value).toBe('300')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('2001:db8::/64')
+    expect(wrapper.text()).toContain('未保存的修改')
+    expect(api.updateAutomaticBlocking).not.toHaveBeenCalled()
+  })
+
+  it('does not mutate a policy without changes and can reset a draft to the latest reread policy', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(button(wrapper, '保存自动封禁策略').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    expect(api.updateAutomaticBlocking).not.toHaveBeenCalled()
+    await wrapper.findAll('input[type="number"]')[0].setValue(600)
+    api.getAutomaticBlocking.mockResolvedValueOnce({ ...snapshot(), policy: { ...snapshot().policy, duration_seconds: 300 } })
+    await button(wrapper, '刷新封禁状态').trigger('click')
+    await flushPromises()
+    await button(wrapper, '重置修改').trigger('click')
+    expect((wrapper.findAll('input[type="number"]')[0].element as HTMLInputElement).value).toBe('300')
+    expect(wrapper.text()).not.toContain('未保存的修改')
+    expect(button(wrapper, '保存自动封禁策略').attributes('disabled')).toBeDefined()
   })
 
   it('rereads server policy after saving and reports unconfirmed reads accurately', async () => {
@@ -154,6 +198,7 @@ describe('AutomaticBlockingPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.get('.ai-field input').attributes('disabled')).toBeDefined()
+    await expandDetails(wrapper, '.rules-details')
     expect(wrapper.text()).toContain('每天最多 24 次模型研判')
     expect(wrapper.text()).toContain('最多 2 分钟')
     expect(wrapper.text()).toContain('SSH 认证失败至少 10 次')
@@ -180,6 +225,7 @@ describe('AutomaticBlockingPanel', () => {
     api.updateAutomaticBlocking.mockResolvedValue({ ...snapshot(), verified: false, available: false, outcome_unknown: true })
     const wrapper = mountPanel()
     await flushPromises()
+    await wrapper.findAll('input[type="number"]')[0].setValue(600)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(api.getAutomaticBlocking).toHaveBeenCalledTimes(2)
@@ -203,6 +249,66 @@ describe('AutomaticBlockingPanel', () => {
     expect(wrapper.text()).not.toContain('已生效（临时）')
     await vi.advanceTimersByTimeAsync(5 * 60_000)
     expect(api.getAutomaticBlocking).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves unsaved policy changes during an automatic expiry reread', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-05T10:00:00Z'))
+    api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), active_blocks: [{ ...entry(), expires_at: '2026-10-05T10:01:00Z' }] })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('#blocking-enabled').setValue(true)
+    await wrapper.get('#blocking-duration').setValue(600)
+    await wrapper.get('#blocking-allowlist').setValue('2001:db8::/64')
+    await vi.advanceTimersByTimeAsync(60_200)
+    await flushPromises()
+    expect(api.getAutomaticBlocking).toHaveBeenCalledTimes(2)
+    expect((wrapper.get('#blocking-enabled').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('#blocking-duration').element as HTMLInputElement).value).toBe('600')
+    expect((wrapper.get('#blocking-allowlist').element as HTMLTextAreaElement).value).toBe('2001:db8::/64')
+    expect(wrapper.text()).toContain('未保存的修改')
+    expect(api.updateAutomaticBlocking).not.toHaveBeenCalled()
+  })
+
+  it('groups identical protected CIDRs and keeps every distinct protection reason and complete address', async () => {
+    const cidr = '2001:db8:abcd:abcd:abcd:abcd:abcd:abcd/128'
+    api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), protected_sources: [
+      { cidr, reason: '管理入口来源' }, { cidr, reason: '服务器固定来源' }, { cidr, reason: '管理入口来源' },
+      { cidr: '127.0.0.0/8', reason: '本机来源' },
+    ] })
+    const copy = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText: copy } })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('.protected-details summary').text()).toContain('2 个来源')
+    await expandDetails(wrapper, '.protected-details')
+    expect(wrapper.findAll('.protected-list > li')).toHaveLength(2)
+    const source = wrapper.get('.protected-list > li')
+    expect(source.get('code').text()).toBe(cidr)
+    expect(source.findAll('.protected-reasons > li').map((reason) => reason.text())).toEqual(['管理入口来源', '服务器固定来源'])
+    await source.get('button').trigger('click')
+    expect(copy).toHaveBeenCalledWith(cidr)
+  })
+
+  it('treats an unknown executor outcome as unverified even when other receipt flags are positive', async () => {
+    api.getAutomaticBlocking.mockResolvedValue({ ...snapshot(), outcome_unknown: true, active_blocks: [entry()] })
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.text()).toContain('执行结果尚未确认')
+    expect(wrapper.text()).toContain('状态待核验')
+    expect(wrapper.text()).not.toContain('已生效（临时）')
+    expect(wrapper.get('#blocking-enabled').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, '手动解封').attributes('disabled')).toBeDefined()
+  })
+
+  it('normalizes duplicate and reordered allowlist lines when deciding whether a draft changed', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('textarea').setValue('198.51.100.0/24\n198.51.100.0/24')
+    expect(wrapper.text()).not.toContain('未保存的修改')
+    expect(button(wrapper, '保存自动封禁策略').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    expect(api.updateAutomaticBlocking).not.toHaveBeenCalled()
   })
 
   it('rejects excessive allowlist input before issuing a policy mutation', async () => {

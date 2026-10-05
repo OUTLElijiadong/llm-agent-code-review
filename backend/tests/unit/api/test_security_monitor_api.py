@@ -845,3 +845,296 @@ def test_automatic_blocking_release_sends_reason_and_returns_verified_state(db, 
     assert response.json()["data"]["verified"] is True
     assert captured == [("security_block_release", {"ip": "8.8.8.8", "reason": "本人来源恢复"})]
     assert db.query(OpsExecution).one().action == "security_block_release"
+
+
+def _seed_security_event_groups(db, seed):
+    """建立真实聚合来源，覆盖成功心跳、异常巡检和审计/防御事件。"""
+    now = datetime.now(timezone.utc)
+    job = AgentJob(job_code="security_event_groups", job_type="security_monitor", schedule="interval@5m")
+    db.add(job)
+    db.flush()
+    activity = []
+    inspection = []
+    for status in ("open", "resolved"):
+        row = AgentAlert(
+            alert_type="security.login", source="security_monitor", title=f"规则告警 {status}",
+            status=status, severity="warning", create_time=now,
+        )
+        db.add(row)
+        db.flush()
+        activity.append(f"alert:{row.id}")
+    for status in ("success", "failed"):
+        row = AuditLog(action="login", status=status, actor_name="admin", create_time=now)
+        db.add(row)
+        db.flush()
+        activity.append(f"audit:{row.id}")
+    policy_log = AuditLog(
+        action="security_policy_update", target_type="security_monitor_policy", status="success",
+        detail='{"revision":1}', create_time=now,
+    )
+    db.add(policy_log)
+    db.flush()
+    activity.append(f"policy:{policy_log.id}")
+    for status in ("success", "failed", "running"):
+        row = OpsExecution(
+            request_id=f"group-collector-{status}", actor_id=seed["super_admin"].id,
+            action="ssh_login_events", risk_level="low", status=status, started_at=now,
+        )
+        db.add(row)
+        db.flush()
+        (inspection if status == "success" else activity).append(f"collector:{row.id}")
+    defense = OpsExecution(
+        request_id="group-defense", actor_id=seed["super_admin"].id,
+        action="security_block_configure", risk_level="critical", status="success", started_at=now,
+        result_json=json.dumps({"ok": True, "result": _automatic_blocking_snapshot(True)}),
+    )
+    db.add(defense)
+    db.flush()
+    activity.append(f"defense:{defense.id}")
+    routine = OpsExecution(
+        request_id="group-defense-routine", action="security_block_reconcile", risk_level="critical",
+        status="success", started_at=now,
+        result_json=json.dumps({"ok": True, "result": _automatic_blocking_snapshot(True)}),
+    )
+    db.add(routine)
+    db.flush()
+    inspection.append(f"defense:{routine.id}")
+    for status, errors in (("success", []), ("success", [{"action": "ssh_login_events", "degraded": True}]),
+                           ("failed", [{"action": "ssh_login_events"}]), ("running", [])):
+        run = AgentJobRun(
+            job_id=job.id, status=status, started_at=now,
+            result_json=json.dumps({"completed_actions": ["ssh_login_events"] if status == "success" else [],
+                                    "errors": errors}),
+        )
+        db.add(run)
+        db.flush()
+        (inspection if status == "success" and not errors else activity).append(f"run:{run.id}")
+    db.commit()
+    return {"activity": set(activity), "inspection": set(inspection), "all": set(activity + inspection)}
+
+
+@pytest.mark.parametrize("event_group", ["all", "activity", "inspection"])
+def test_security_event_groups_filter_before_counting_and_pagination(db, seed, client_factory, event_group):
+    expected = _seed_security_event_groups(db, seed)[event_group]
+    client = client_factory(seed["super_admin"])
+    pages = []
+    for page in range(1, (len(expected) + 2) // 3 + 1):
+        response = client.get(
+            "/api/admin/security-center/events", params={"event_group": event_group, "page": page, "page_size": 3},
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["event_group"] == event_group
+        assert data["total"] == len(expected)
+        assert data["pages"] == (len(expected) + 2) // 3
+        assert data["truncated"] is False
+        pages.extend(data["items"])
+    assert len(pages) == len(expected)
+    assert {item["id"] for item in pages} == expected
+    if event_group == "activity":
+        assert any(item["event_type"] == "monitor_run" and item["status"] == "warning" for item in pages)
+        assert any(item["event_type"] == "defense_action" and item["status"] == "success" for item in pages)
+    if event_group == "inspection":
+        assert all(item["status"] == "success" for item in pages)
+        assert all(
+            item["event_type"] in {"collector", "monitor_run"}
+            or (item["event_type"] == "defense_action" and item["evidence_summary"]["routine_check"] is True)
+            for item in pages
+        )
+
+
+def test_security_event_group_defaults_to_all_for_existing_callers(db, seed, client_factory):
+    expected = _seed_security_event_groups(db, seed)["all"]
+    response = client_factory(seed["super_admin"]).get("/api/admin/security-center/events")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["event_group"] == "all"
+    assert data["total"] == len(expected)
+    assert {item["id"] for item in data["items"]} == expected
+
+
+def test_security_activity_sources_do_not_lose_older_exceptions_behind_successful_heartbeats(
+    db, seed, client_factory, monkeypatch,
+):
+    from datetime import timedelta
+
+    monkeypatch.setattr(security_center_service, "_MAX_ROWS_PER_SOURCE", 5)
+    now = datetime.now(timezone.utc)
+    older = now - timedelta(hours=1)
+    job = AgentJob(job_code="security_heartbeat_limit", job_type="security_monitor", schedule="interval@5m")
+    db.add(job)
+    db.flush()
+    failed_collector = OpsExecution(
+        request_id="older-failed-collector", action="ssh_login_events", status="failed", risk_level="low",
+        started_at=older,
+    )
+    degraded_run = AgentJobRun(
+        job_id=job.id, status="success", started_at=older,
+        result_json='{"completed_actions":["ssh_login_events"],"errors":[{"action":"ssh_login_events","degraded":true}]}',
+    )
+    db.add_all([failed_collector, degraded_run])
+    for index in range(10):
+        db.add(OpsExecution(
+            request_id=f"heartbeat-{index}", action="ssh_login_events", status="success", risk_level="low",
+            started_at=now,
+        ))
+        db.add(AgentJobRun(
+            job_id=job.id, status="success", started_at=now,
+            result_json='{"completed_actions":["ssh_login_events"],"errors":[]}',
+        ))
+    db.commit()
+    data = client_factory(seed["super_admin"]).get(
+        "/api/admin/security-center/events?event_group=activity",
+    ).json()["data"]
+    assert data["total"] == 2
+    assert {item["id"] for item in data["items"]} == {f"collector:{failed_collector.id}", f"run:{degraded_run.id}"}
+    assert data["truncated"] is False
+
+
+def test_security_timeline_preserves_audit_source_500_row_truncation_after_source_lookup(db, seed, client_factory):
+    now = datetime.now(timezone.utc)
+    db.add_all([AuditLog(action="login", status="failed", create_time=now) for _ in range(500)])
+    db.add(OpsExecution(
+        request_id="audit-cap-collector", action="ssh_login_events", status="success", risk_level="low", started_at=now,
+    ))
+    db.add(AuditLog(
+        action="admin_copilot.ops.ssh_login_events", target_type="production_ops", target_id="audit-cap-collector",
+        detail="source=admin_security_center", status="success", create_time=now,
+    ))
+    db.commit()
+    response = client_factory(seed["super_admin"]).get("/api/admin/security-center/events?event_group=all")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 501
+    assert data["truncated"] is True
+
+
+@pytest.mark.parametrize("event_group", ["unknown", "", "Activity"])
+def test_security_event_group_rejects_invalid_values(db, seed, client_factory, event_group):
+    response = client_factory(seed["super_admin"]).get(
+        "/api/admin/security-center/events", params={"event_group": event_group},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == 40002
+
+
+@pytest.mark.parametrize("event_group", ["all", "activity", "inspection"])
+@pytest.mark.parametrize("role", ["admin", "reviewer", "user", "anonymous"])
+def test_security_event_groups_retain_super_admin_boundary(db, seed, client_factory, event_group, role, monkeypatch):
+    user = seed["admin"]
+    if role in {"reviewer", "user"}:
+        user = User(id=3, username="regular", password="x", role=role, status=1)
+        db.add(user)
+        db.commit()
+    client = client_factory(user)
+    if role == "anonymous":
+        app.dependency_overrides.pop(get_current_user, None)
+    monkeypatch.setattr(security_center_service, "list_events", lambda *_args, **_kwargs: pytest.fail("无权账号不能聚合事件"))
+    response = client.get("/api/admin/security-center/events", params={"event_group": event_group})
+    assert response.status_code == (401 if role == "anonymous" else 403)
+
+
+@pytest.mark.parametrize("case, expected_group", [
+    ("empty_reconcile", "inspection"),
+    ("missing_active_blocks", "activity"),
+    ("missing_recent_blocks", "activity"),
+    ("missing_errors", "activity"),
+    ("malformed_active_blocks", "activity"),
+    ("unverified", "activity"),
+    ("unavailable", "activity"),
+    ("outcome_unknown", "activity"),
+    ("executor_warning", "activity"),
+    ("active_block", "activity"),
+    ("recent_release", "activity"),
+    ("running", "activity"),
+    ("failed", "activity"),
+    ("configure", "activity"),
+    ("release", "activity"),
+    ("apply_anomalies", "activity"),
+])
+def test_security_defense_reconcile_is_routine_only_with_explicit_verified_empty_receipt(
+    db, seed, client_factory, case, expected_group,
+):
+    payload = _automatic_blocking_snapshot(True)
+    action = "security_block_reconcile"
+    status = "success"
+    entry = {
+        "id": "defense-rule", "ip": "8.8.8.8", "rule": "ssh_failed_password", "evidence_count": 20,
+        "scope": "host_ingress_and_docker_web", "status": "active",
+    }
+    if case.startswith("missing_"):
+        payload.pop(case.removeprefix("missing_"))
+    elif case == "malformed_active_blocks":
+        payload["active_blocks"] = [{"ip": "not-an-ip"}]
+    elif case == "unverified":
+        payload["verified"] = False
+    elif case == "unavailable":
+        payload["available"] = False
+    elif case == "outcome_unknown":
+        payload["outcome_unknown"] = True
+    elif case == "executor_warning":
+        payload["errors"] = ["IPv6 核验异常"]
+    elif case == "active_block":
+        payload["active_blocks"] = [entry]
+    elif case == "recent_release":
+        payload["recent_blocks"] = [{**entry, "status": "released"}]
+    elif case in {"running", "failed"}:
+        status = case
+    elif case != "empty_reconcile":
+        action = f"security_block_{case}"
+    row = OpsExecution(
+        request_id=f"routine-{case}", action=action, status=status, risk_level="critical",
+        started_at=datetime.now(timezone.utc), result_json=json.dumps({"ok": True, "result": payload}),
+    )
+    db.add(row)
+    db.commit()
+    client = client_factory(seed["super_admin"])
+    selected = client.get("/api/admin/security-center/events", params={"event_group": expected_group}).json()["data"]
+    assert selected["total"] == 1
+    event = selected["items"][0]
+    assert event["id"] == f"defense:{row.id}"
+    assert event["event_type"] == "defense_action"
+    assert event["evidence_summary"]["routine_check"] is (expected_group == "inspection")
+    if case == "outcome_unknown":
+        assert event["status"] == "unknown"
+        assert event["severity"] == "warning"
+        assert event["evidence_summary"]["verified"] is False
+        assert event["evidence_summary"]["active_blocks"] is None
+        assert "结果未确认" in event["summary"]
+    elif case == "executor_warning":
+        assert event["status"] == "warning"
+        assert event["severity"] == "warning"
+        assert "包含异常" in event["summary"]
+    other_group = "activity" if expected_group == "inspection" else "inspection"
+    other = client.get("/api/admin/security-center/events", params={"event_group": other_group}).json()["data"]
+    assert other["total"] == 0
+    assert other["items"] == []
+
+
+def test_security_activity_finds_real_defense_behind_500_empty_reconcile_receipts(db, seed, client_factory):
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    receipt = json.dumps({"ok": True, "result": _automatic_blocking_snapshot(True)})
+    db.add_all([
+        OpsExecution(
+            request_id=f"empty-reconcile-{index}", action="security_block_reconcile", status="success",
+            risk_level="critical", started_at=now, result_json=receipt,
+        )
+        for index in range(500)
+    ])
+    changed = OpsExecution(
+        request_id="older-defense-change", action="security_block_configure", status="success", risk_level="critical",
+        started_at=now - timedelta(hours=1), result_json=receipt,
+    )
+    db.add(changed)
+    db.commit()
+    client = client_factory(seed["super_admin"])
+    activity = client.get("/api/admin/security-center/events?event_group=activity").json()["data"]
+    assert activity["total"] == 1
+    assert activity["items"][0]["id"] == f"defense:{changed.id}"
+    assert activity["truncated"] is False
+    inspection = client.get("/api/admin/security-center/events?event_group=inspection").json()["data"]
+    assert inspection["total"] == 500
+    assert inspection["truncated"] is True
+    assert all(item["evidence_summary"]["routine_check"] is True for item in inspection["items"])
