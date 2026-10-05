@@ -1,0 +1,9 @@
+before_release=a95cdb71081e2b584995dead8e2449cdb8a6671b
+before_version=4.0.49
+062_audit_log_action_length
+/cr_backend prism-backend:a95cdb71081e2b584995dead8e2449cdb8a6671b healthy
+/cr_frontend prism-frontend:a95cdb71081e2b584995dead8e2449cdb8a6671b healthy
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda1       180G  146G   35G  81% /
+/dev/vda1       180G  146G   35G  81% /
+{"status":"ok","version":"4.0.49","release":"a95cdb71081e2b584995dead8e2449cdb8a6671b"}{"status":"ready","version":"4.0.49","release":"a95cdb71081e2b584995dead8e2449cdb8a6671b"}

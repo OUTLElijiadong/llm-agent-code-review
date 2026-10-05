@@ -1,0 +1,152 @@
+Window: "安全中心 - 棱镜 Prism", App: Safari浏览器.
+0 标准窗口 安全中心 - 棱镜 Prism, ID: SafariWindow?IsSecure=true&UUID=A174CD35-0841-47CC-AB0D-527607B48E77, Secondary Actions: Raise
+	1 分离组
+		2 分离器 (disabled, settable, float) -1
+		3 标签页组
+			4 弹出式按钮 Description: 视口大小, Value: 自定义大小, ID: ViewportPresetButton
+			5 开关按钮 Description: 向左旋转, Help: 旋转视口, Value: off
+			6 文本栏 (settable) Description: 宽度, Value: 1280
+			7 文本 ×
+			8 文本栏 (settable) Description: 高度, Value: 900
+			9 文本 Description: 缩放比例, Value: ( 66% )
+			10 弹出式按钮 Description: 像素比, Value: 2倍
+			11 菜单按钮 通过模拟器打开, ID: OpenWithSimulatorButton
+			12 滚动区
+				13 HTML内容 Description: 安全中心 - 棱镜 Prism, URL: lijiadong.cn/admin/security-center
+					14 container
+						15 text Prism 管理后台 智能体治理
+						16 按钮 Agent 治理
+						17 按钮 运行与审计
+						18 按钮 安全中心
+						19 按钮 用户与权限
+						20 按钮 平台配置
+					21 container
+						22 文本 管理控制台
+						23 标题 安全中心, Value: 1
+							24 文本 安全中心
+						25 弹出式按钮 打开账号菜单
+					26 container 小菱安全中心
+						27 container
+							28 文本 PRISM · SECURITY
+							29 标题 小菱安全中心, Value: 2
+								30 文本 小菱安全中心
+							31 text 掌握运行状态，查看安全事件，管理防御策略。 监控与临时自动封禁 自动封禁：已启用
+							32 按钮 刷新状态
+							33 按钮 立即巡检
+						34 标签页组 (selectable) 安全中心视图
+							35 标签 (selected) 安全概览
+							36 标签 (selectable) 事件记录
+							37 标签 (selectable) 防御策略
+						38 container 安全概览
+							39 container 安全状态概览
+								40 container
+									41 text 监控状态 近期巡检正常 每 5 分钟巡检
+								42 container
+									43 text 24 小时待处理告警 2 全部待处理 112 条
+								44 container
+									45 text 数据源状态 6 个数据源最近成功 6 个采集来源
+								46 container
+									47 text 最近巡检 最近巡检完成 2026/10/5 17:39:39
+							48 container 运行环境资源
+								49 标题 运行环境资源, Value: 3
+									50 文本 运行环境资源
+								51 文本 当前运行环境的资源快照
+								52 container
+									53 text CPU 使用率 69.2%
+									54 进度指示条 (settable, float) CPU 使用率, Value: 69.2
+								55 container
+									56 text 内存使用率 45.6%
+									57 进度指示条 (settable, float) 内存使用率, Value: 45.6
+								58 container
+									59 text 磁盘使用率 80.9%
+									60 进度指示条 (settable, float) 磁盘使用率, Value: 80.9
+									61 文本 145.5 / 179.94 GB
+								62 container
+									63 text 服务器运行时长 54 天 2 小时 当前采集进程视角
+								64 文本 采集于 2026/10/5 17:41:41
+							65 container 数据源状态
+								66 标题 数据源状态, Value: 3
+									67 文本 数据源状态
+								68 文本 6 个数据源最近成功
+								69 container
+									70 text 读取 SSH 登录日志 采集成功 读取 Nginx 请求日志 采集成功 核验备份状态 采集成功 读取数据库健康状态 采集成功 读取运行环境状态 采集成功 读取数据库威胁信号 采集成功
+								71 按钮 查看巡检与采集记录
+							72 container 最近活动
+								73 标题 最近活动, Value: 3
+									74 文本 最近活动
+								75 文本 近 24 小时的最新 5 条安全活动
+								76 按钮 查看全部记录
+								77 container
+									78 标题 账号登录记录, Value: 4
+										79 文本 账号登录记录
+									80 文本 认证与权限审计 · admin
+									81 文本 2026/10/5 17:19:22
+									82 文本 成功
+									83 标题 账号退出记录, Value: 4
+										84 文本 账号退出记录
+									85 文本 认证与权限审计 · admin
+									86 文本 2026/10/5 17:18:31
+									87 文本 成功
+									88 标题 账号登录记录, Value: 4
+										89 文本 账号登录记录
+									90 文本 认证与权限审计 · admin
+									91 文本 2026/10/5 17:18:20
+									92 文本 成功
+									93 标题 账号退出记录, Value: 4
+										94 文本 账号退出记录
+									95 文本 认证与权限审计 · lijiadong
+									96 文本 2026/10/5 17:17:31
+									97 文本 成功
+									98 标题 账号登录记录, Value: 4
+										99 文本 账号登录记录
+									100 文本 认证与权限审计 · lijiadong
+									101 文本 2026/10/5 17:17:30
+									102 文本 成功
+						103 菜单 Secondary Actions: Cancel
+						104 菜单 Secondary Actions: Cancel
+					105 按钮 打开小菱 · 管理员工作台, Help: 小菱 · 管理员工作台
+	106 工具栏
+		107 container Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+			108 按钮 Description: 显示边栏, ID: SidebarButton
+			109 菜单按钮 Description: 标签页组选择器, ID: TabGroupPickerButton?TabGroup=
+		110 container BackForwardSegmentedControl
+			111 按钮 Description: 返回, Help: 显示上一页, ID: BackButton
+			112 按钮 (disabled) Description: 前进, Help: 显示下一页, ID: ForwardButton
+		113 container Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+			114 按钮 页面菜单, ID: AssistantButton
+			115 按钮 将页面添加到阅读列表, ID: OneStepBookmarkingButton
+			116 文本栏 (settable) Description: 智能搜索栏, Value: https://lijiadong.cn/admin/security-center, ID: WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD
+			117 按钮 翻译可用, ID: TranslationButton
+			118 按钮 重新加载此页面, ID: ReloadButton
+		119 按钮 Description: 共享, ID: ShareButton, Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+		120 按钮 Description: 新建标签页, ID: NewTabButton, Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+		121 按钮 Description: 标签页概览, ID: TabOverviewButton, Secondary Actions: 移到上一项, 从工具栏移除
+	122 标签页组 Description: 标签页栏，4个标签页, ID: TabBar?isSeparate=false
+		123 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			124 图像 FaviconImageView
+			125 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		126 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			127 图像 FaviconImageView
+			128 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		129 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			130 图像 FaviconImageView
+			131 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		132 标签 安全中心 - 棱镜 Prism, Help: 若要与此按钮中的项目交互，请按下Control-Option-Shift-下箭头键。, Value: on, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=true
+			133 按钮 Description: 关闭标签页, ID: CloseTabBarItemButton
+			134 图像 FaviconImageView
+			135 文本 Value: 安全中心 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+	136 关闭按钮
+	137 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	138 最小化按钮
+139 menu bar
+	140 Safari浏览器
+	141 文件
+	142 编辑
+	143 显示, ID: SafariViewMenu
+	144 历史记录
+	145 书签, ID: SafariBookmarksMenu
+	146 开发
+	147 窗口, ID: SafariWindowMenu
+	148 帮助, ID: SafariHelpMenu
+
+The focused UI element is 13 HTML内容 Description: 安全中心 - 棱镜 Prism, URL: lijiadong.cn/admin/security-center

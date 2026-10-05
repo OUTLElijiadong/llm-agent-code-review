@@ -1,0 +1,251 @@
+Window: "安全中心 - 棱镜 Prism", App: Safari浏览器.
+0 标准窗口 安全中心 - 棱镜 Prism, ID: SafariWindow?IsSecure=true&UUID=A174CD35-0841-47CC-AB0D-527607B48E77, Secondary Actions: Raise
+	1 分离组
+		2 分离器 (disabled, settable, float) -1
+		3 标签页组
+			4 弹出式按钮 Description: 视口大小, Value: 自定义大小, ID: ViewportPresetButton
+			5 开关按钮 Description: 向左旋转, Help: 旋转视口, Value: off
+			6 文本栏 (settable) Description: 宽度, Value: 390
+			7 文本 ×
+			8 文本栏 (settable) Description: 高度, Value: 844
+			9 文本 Description: 缩放比例, Value: ( 70% )
+			10 弹出式按钮 Description: 像素比, Value: 2倍
+			11 菜单按钮 通过模拟器打开, ID: OpenWithSimulatorButton
+			12 滚动区
+				13 HTML内容 Description: 安全中心 - 棱镜 Prism, URL: lijiadong.cn/admin/security-center
+					14 container
+						15 text Prism 管理后台 智能体治理
+						16 按钮 Agent 治理
+						17 按钮 运行与审计
+						18 按钮 安全中心
+						19 按钮 用户与权限
+						20 按钮 平台配置
+					21 container
+						22 文本 管理控制台
+						23 标题 安全中心, Value: 1
+							24 文本 安全中心
+						25 弹出式按钮 打开账号菜单
+						26 container 小菱入口
+							27 按钮 打开小菱 · 管理员工作台, Help: 小菱 · 管理员工作台
+					28 container 小菱安全中心
+						29 container
+							30 文本 PRISM · SECURITY
+							31 标题 小菱安全中心, Value: 2
+								32 文本 小菱安全中心
+							33 text 掌握运行状态，查看安全事件，管理防御策略。 监控与临时自动封禁 自动封禁：已启用
+							34 按钮 刷新状态
+							35 按钮 立即巡检
+						36 标签页组 (selectable) 安全中心视图
+							37 标签 (selectable) 安全概览
+							38 标签 (selected) 事件记录
+							39 标签 (selectable) 防御策略
+						40 container 事件记录
+							41 container 事件记录
+								42 标题 事件记录, Value: 3
+									43 文本 事件记录
+								44 文本 按记录时间排序，展开查看详情与处理记录。
+								45 container
+									46 文本 记录类型
+									47 弹出式按钮 (collapsed) 记录类型, Value: 全部记录, Secondary Actions: Expand
+										48 菜单 Secondary Actions: Cancel
+								49 container
+									50 文本 时间范围
+									51 弹出式按钮 (collapsed) 时间范围, Value: 近 30 天, Secondary Actions: Expand
+										52 菜单 Secondary Actions: Cancel
+								53 文本 至少 1571 条记录
+								54 container
+									55 文本 临时封禁与解封
+									56 标题 自动封禁规则核验, Value: 4
+										57 文本 自动封禁规则核验
+									58 文本 2026/10/5 17:39:10
+									59 文本 自动封禁例行核验完成，本次回执没有封禁或解封记录。
+									60 摘要 查看详情, Value: off
+										61 文本 查看详情
+									62 text 成功 无需处理 只读采集
+									63 标题 读取运行环境状态, Value: 4
+										64 文本 读取运行环境状态
+									65 文本 2026/10/5 17:38:54
+									66 文本 只读采集器执行回执；未执行封禁或反制。
+									67 摘要 查看详情, Value: off
+										68 文本 查看详情
+									69 text 成功 无需处理 只读采集
+									70 标题 读取数据库威胁信号, Value: 4
+										71 文本 读取数据库威胁信号
+									72 文本 2026/10/5 17:38:40
+									73 文本 只读采集器执行回执；未执行封禁或反制。
+									74 摘要 查看详情, Value: off
+										75 文本 查看详情
+									76 text 成功 无需处理 只读采集
+									77 标题 读取运行环境状态, Value: 4
+										78 文本 读取运行环境状态
+									79 文本 2026/10/5 17:38:32
+									80 文本 只读采集器执行回执；未执行封禁或反制。
+									81 摘要 查看详情, Value: off
+										82 文本 查看详情
+									83 text 成功 无需处理 只读采集
+									84 标题 读取数据库健康状态, Value: 4
+										85 文本 读取数据库健康状态
+									86 文本 2026/10/5 17:38:22
+									87 文本 只读采集器执行回执；未执行封禁或反制。
+									88 摘要 查看详情, Value: off
+										89 文本 查看详情
+									90 text 成功 无需处理 只读采集
+									91 标题 核验备份状态, Value: 4
+										92 文本 核验备份状态
+									93 文本 2026/10/5 17:38:21
+									94 文本 只读采集器执行回执；未执行封禁或反制。
+									95 摘要 查看详情, Value: off
+										96 文本 查看详情
+									97 text 成功 无需处理 只读采集
+									98 标题 读取 Nginx 请求日志, Value: 4
+										99 文本 读取 Nginx 请求日志
+									100 文本 2026/10/5 17:38:21
+									101 文本 只读采集器执行回执；未执行封禁或反制。
+									102 摘要 查看详情, Value: off
+										103 文本 查看详情
+									104 text 成功 无需处理 只读采集
+									105 标题 读取 SSH 登录日志, Value: 4
+										106 文本 读取 SSH 登录日志
+									107 文本 2026/10/5 17:38:21
+									108 文本 只读采集器执行回执；未执行封禁或反制。
+									109 摘要 查看详情, Value: off
+										110 文本 查看详情
+									111 text 成功 无需处理 安全监控任务
+									112 标题 安全监控巡检, Value: 4
+										113 文本 安全监控巡检
+									114 文本 2026/10/5 17:38:16
+									115 文本 巡检运行摘要；防御动作以独立执行回执和实时宿主机核验为准。
+									116 摘要 查看详情, Value: off
+										117 文本 查看详情
+									118 text 进行中 无需处理 安全监控任务
+									119 标题 安全监控巡检, Value: 4
+										120 文本 安全监控巡检
+									121 文本 2026/10/5 17:34:41
+									122 文本 巡检运行摘要；防御动作以独立执行回执和实时宿主机核验为准。
+									123 摘要 查看详情, Value: off
+										124 文本 查看详情
+									125 text 成功 无需处理 临时封禁与解封
+									126 标题 自动封禁规则核验, Value: 4
+										127 文本 自动封禁规则核验
+									128 文本 2026/10/5 17:34:25
+									129 文本 自动封禁例行核验完成，本次回执没有封禁或解封记录。
+									130 摘要 查看详情, Value: off
+										131 文本 查看详情
+									132 text 成功 无需处理 只读采集
+									133 标题 读取运行环境状态, Value: 4
+										134 文本 读取运行环境状态
+									135 文本 2026/10/5 17:33:56
+									136 文本 只读采集器执行回执；未执行封禁或反制。
+									137 摘要 查看详情, Value: off
+										138 文本 查看详情
+									139 text 成功 无需处理 只读采集
+									140 标题 读取数据库威胁信号, Value: 4
+										141 文本 读取数据库威胁信号
+									142 文本 2026/10/5 17:33:41
+									143 文本 只读采集器执行回执；未执行封禁或反制。
+									144 摘要 查看详情, Value: off
+										145 文本 查看详情
+									146 text 成功 无需处理 只读采集
+									147 标题 读取运行环境状态, Value: 4
+										148 文本 读取运行环境状态
+									149 文本 2026/10/5 17:33:32
+									150 文本 只读采集器执行回执；未执行封禁或反制。
+									151 摘要 查看详情, Value: off
+										152 文本 查看详情
+									153 text 成功 无需处理 只读采集
+									154 标题 读取数据库健康状态, Value: 4
+										155 文本 读取数据库健康状态
+									156 文本 2026/10/5 17:33:22
+									157 文本 只读采集器执行回执；未执行封禁或反制。
+									158 摘要 查看详情, Value: off
+										159 文本 查看详情
+									160 text 成功 无需处理 只读采集
+									161 标题 核验备份状态, Value: 4
+										162 文本 核验备份状态
+									163 文本 2026/10/5 17:33:20
+									164 文本 只读采集器执行回执；未执行封禁或反制。
+									165 摘要 查看详情, Value: off
+										166 文本 查看详情
+									167 text 成功 无需处理 只读采集
+									168 标题 读取 Nginx 请求日志, Value: 4
+										169 文本 读取 Nginx 请求日志
+									170 文本 2026/10/5 17:33:20
+									171 文本 只读采集器执行回执；未执行封禁或反制。
+									172 摘要 查看详情, Value: off
+										173 文本 查看详情
+									174 text 成功 无需处理 只读采集
+									175 标题 读取 SSH 登录日志, Value: 4
+										176 文本 读取 SSH 登录日志
+									177 文本 2026/10/5 17:33:20
+									178 文本 只读采集器执行回执；未执行封禁或反制。
+									179 摘要 查看详情, Value: off
+										180 文本 查看详情
+									181 text 成功 无需处理 安全监控任务
+									182 标题 安全监控巡检, Value: 4
+										183 文本 安全监控巡检
+									184 文本 2026/10/5 17:29:35
+									185 文本 巡检运行摘要；防御动作以独立执行回执和实时宿主机核验为准。
+									186 摘要 查看详情, Value: off
+										187 文本 查看详情
+									188 text 成功 无需处理 临时封禁与解封
+									189 标题 自动封禁规则核验, Value: 4
+										190 文本 自动封禁规则核验
+									191 文本 2026/10/5 17:29:19
+									192 文本 自动封禁例行核验完成，本次回执没有封禁或解封记录。
+									193 摘要 查看详情, Value: off
+										194 文本 查看详情
+									195 text 成功 无需处理
+								196 文本 记录达到读取上限，可缩小时间范围。
+								197 container 事件分页
+									198 按钮 (disabled) 上一页
+									199 文本 1 / 79
+									200 按钮 下一页
+	201 工具栏
+		202 container Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+			203 按钮 Description: 显示边栏, ID: SidebarButton
+			204 菜单按钮 Description: 标签页组选择器, ID: TabGroupPickerButton?TabGroup=
+		205 container BackForwardSegmentedControl
+			206 按钮 Description: 返回, Help: 显示上一页, ID: BackButton
+			207 按钮 (disabled) Description: 前进, Help: 显示下一页, ID: ForwardButton
+		208 container Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+			209 按钮 页面菜单, ID: AssistantButton
+			210 按钮 将页面添加到阅读列表, ID: OneStepBookmarkingButton
+			211 文本栏 (settable) Description: 智能搜索栏, Value: https://lijiadong.cn/admin/security-center, ID: WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD
+			212 按钮 翻译可用, ID: TranslationButton
+			213 按钮 重新加载此页面, ID: ReloadButton
+		214 按钮 Description: 共享, ID: ShareButton, Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+		215 按钮 Description: 新建标签页, ID: NewTabButton, Secondary Actions: 移到上一项, 移到下一项, 从工具栏移除
+		216 按钮 Description: 标签页概览, ID: TabOverviewButton, Secondary Actions: 移到上一项, 从工具栏移除
+	217 标签页组 Description: 标签页栏，4个标签页, ID: TabBar?isSeparate=false
+		218 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			219 图像 FaviconImageView
+			220 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		221 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			222 图像 FaviconImageView
+			223 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		224 标签 登录 - 棱镜 Prism, Value: off, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=false
+			225 图像 FaviconImageView
+			226 文本 Value: 登录 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+		227 标签 安全中心 - 棱镜 Prism, Help: 若要与此按钮中的项目交互，请按下Control-Option-Shift-下箭头键。, Value: on, Secondary Actions: 关闭标签页, ID: TabBarTab?isNarrow=false&isExpanded=false&tabCount=&isPinned=false&isCluster=false&clusterID=&isActive=true
+			228 按钮 Description: 关闭标签页, ID: CloseTabBarItemButton
+			229 图像 FaviconImageView
+			230 文本 Value: 安全中心 - 棱镜 Prism, ID: UnifiedTabBarButton._titleTextField
+	231 关闭按钮
+	232 全屏幕按钮 Help: 此按钮也可以执行缩放窗口的操作, Secondary Actions: 缩放窗口
+	233 最小化按钮
+234 menu bar
+	235 Safari浏览器
+	236 文件
+	237 编辑
+	238 显示, ID: SafariViewMenu
+	239 历史记录
+	240 书签, ID: SafariBookmarksMenu
+	241 开发
+	242 窗口, ID: SafariWindowMenu
+	243 帮助, ID: SafariHelpMenu
+
+Selected text: ```
+390
+```
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).

@@ -147,7 +147,12 @@ async function logout(): Promise<void> {
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <div id="admin-copilot-trigger-slot" class="admin-copilot-trigger-slot" aria-label="小菱入口"></div>
+          <div
+            id="admin-copilot-trigger-slot"
+            class="admin-copilot-trigger-slot"
+            :class="{ 'is-page-header-trigger': route.path === '/admin/security-center' }"
+            aria-label="小菱入口"
+          ></div>
         </div>
       </header>
 
@@ -341,7 +346,15 @@ async function logout(): Promise<void> {
 .admin-user-role { color: var(--gray-500); font-size: 11px; }
 .admin-logout { display: inline-flex; align-items: center; gap: 7px; }
 
-.admin-copilot-trigger-slot { display: none; }
+.admin-copilot-trigger-slot {
+  display: none;
+  place-items: center;
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.admin-copilot-trigger-slot.is-page-header-trigger { display: grid; }
 
 .admin-content {
   // 60px 副驾入口 + 24px 底距 + 16px 间隔，让页尾操作可滚动至入口上方。
@@ -433,10 +446,6 @@ async function logout(): Promise<void> {
 @media (max-width: 520px) {
   .admin-copilot-trigger-slot {
     display: grid;
-    place-items: center;
-    flex: 0 0 44px;
-    min-width: 44px;
-    min-height: 44px;
   }
 }
 

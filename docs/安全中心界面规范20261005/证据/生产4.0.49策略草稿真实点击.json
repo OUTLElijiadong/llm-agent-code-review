@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-10-05T09:26:35.214Z",
+  "method": "普通 Safari 实际点击，生产未保存策略",
+  "checks": [
+    {
+      "repeat": 1,
+      "edited_value": 600,
+      "after_edit": true,
+      "after_refresh": true,
+      "after_tab_switch": true,
+      "reset_value": 900,
+      "save_disabled": true,
+      "reset_matches_original": true
+    },
+    {
+      "repeat": 2,
+      "edited_value": 300,
+      "after_edit": true,
+      "after_refresh": true,
+      "after_tab_switch": true,
+      "reset_value": 900,
+      "save_disabled": true,
+      "reset_matches_original": true
+    },
+    {
+      "repeat": 3,
+      "edited_value": 720,
+      "after_edit": true,
+      "after_refresh": true,
+      "after_tab_switch": true,
+      "reset_value": 900,
+      "save_disabled": true,
+      "reset_matches_original": true
+    }
+  ]
+}

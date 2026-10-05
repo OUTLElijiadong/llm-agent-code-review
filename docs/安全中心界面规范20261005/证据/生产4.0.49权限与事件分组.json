@@ -1,0 +1,415 @@
+{
+  "captured_at": "2026-10-05T09:16:49.240820+00:00",
+  "checks": [
+    {
+      "name": "匿名拒绝 /admin/security-center/overview",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.421
+    },
+    {
+      "name": "匿名拒绝 /admin/security-center/policy",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.269
+    },
+    {
+      "name": "匿名拒绝 /admin/security-center/automatic-blocking",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.249
+    },
+    {
+      "name": "匿名拒绝 /admin/security-center/events?event_group=activity",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.328
+    },
+    {
+      "name": "匿名拒绝 /admin/security-center/events?event_group=inspection",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.248
+    },
+    {
+      "name": "匿名拒绝 /admin/security-center/events?event_group=all",
+      "passed": true,
+      "http_status": 401,
+      "elapsed_seconds": 0.252
+    },
+    {
+      "name": "admin 登录",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.494,
+      "token_present": true
+    },
+    {
+      "name": "admin /admin/security-center/overview",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.641
+    },
+    {
+      "name": "admin /admin/security-center/policy",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.246
+    },
+    {
+      "name": "admin /admin/security-center/automatic-blocking",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 5.72
+    },
+    {
+      "name": "admin activity 第1轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 3.968,
+      "event_group": "activity",
+      "total": 140,
+      "truncated": false,
+      "page": 1,
+      "pages": 28,
+      "item_count": 5
+    },
+    {
+      "name": "activity 分类及倒序 第1轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "audit:148474",
+        "audit:148469",
+        "audit:148445"
+      ]
+    },
+    {
+      "name": "activity 第二页",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.119,
+      "overlap_count": 0,
+      "item_count": 5
+    },
+    {
+      "name": "admin activity 第2轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.908,
+      "event_group": "activity",
+      "total": 140,
+      "truncated": false,
+      "page": 1,
+      "pages": 28,
+      "item_count": 5
+    },
+    {
+      "name": "activity 分类及倒序 第2轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "audit:148474",
+        "audit:148469",
+        "audit:148445"
+      ]
+    },
+    {
+      "name": "admin activity 第3轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.839,
+      "event_group": "activity",
+      "total": 140,
+      "truncated": false,
+      "page": 1,
+      "pages": 28,
+      "item_count": 5
+    },
+    {
+      "name": "activity 分类及倒序 第3轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "audit:148474",
+        "audit:148469",
+        "audit:148445"
+      ]
+    },
+    {
+      "name": "admin inspection 第1轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 2.07,
+      "event_group": "inspection",
+      "total": 759,
+      "truncated": true,
+      "page": 1,
+      "pages": 152,
+      "item_count": 5
+    },
+    {
+      "name": "inspection 分类及倒序 第1轮",
+      "passed": true,
+      "event_ids": [
+        "run:150590",
+        "defense:145538",
+        "collector:145536",
+        "collector:145534",
+        "collector:145529"
+      ]
+    },
+    {
+      "name": "inspection 第二页",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.5,
+      "overlap_count": 0,
+      "item_count": 5
+    },
+    {
+      "name": "admin inspection 第2轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.332,
+      "event_group": "inspection",
+      "total": 759,
+      "truncated": true,
+      "page": 1,
+      "pages": 152,
+      "item_count": 5
+    },
+    {
+      "name": "inspection 分类及倒序 第2轮",
+      "passed": true,
+      "event_ids": [
+        "run:150590",
+        "defense:145538",
+        "collector:145536",
+        "collector:145534",
+        "collector:145529"
+      ]
+    },
+    {
+      "name": "admin inspection 第3轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.389,
+      "event_group": "inspection",
+      "total": 759,
+      "truncated": true,
+      "page": 1,
+      "pages": 152,
+      "item_count": 5
+    },
+    {
+      "name": "inspection 分类及倒序 第3轮",
+      "passed": true,
+      "event_ids": [
+        "run:150590",
+        "defense:145538",
+        "collector:145536",
+        "collector:145534",
+        "collector:145529"
+      ]
+    },
+    {
+      "name": "admin all 第1轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 9.685,
+      "event_group": "all",
+      "total": 877,
+      "truncated": true,
+      "page": 1,
+      "pages": 176,
+      "item_count": 5
+    },
+    {
+      "name": "all 分类及倒序 第1轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "run:150590",
+        "defense:145538",
+        "collector:145536"
+      ]
+    },
+    {
+      "name": "all 第二页",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.943,
+      "overlap_count": 0,
+      "item_count": 5
+    },
+    {
+      "name": "admin all 第2轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 1.127,
+      "event_group": "all",
+      "total": 876,
+      "truncated": true,
+      "page": 1,
+      "pages": 176,
+      "item_count": 5
+    },
+    {
+      "name": "all 分类及倒序 第2轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "run:150590",
+        "defense:145538",
+        "collector:145536"
+      ]
+    },
+    {
+      "name": "admin all 第3轮",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.948,
+      "event_group": "all",
+      "total": 876,
+      "truncated": true,
+      "page": 1,
+      "pages": 176,
+      "item_count": 5
+    },
+    {
+      "name": "all 分类及倒序 第3轮",
+      "passed": true,
+      "event_ids": [
+        "audit:148495",
+        "audit:148493",
+        "run:150590",
+        "defense:145538",
+        "collector:145536"
+      ]
+    },
+    {
+      "name": "非法分组拒绝",
+      "passed": true,
+      "http_status": 400,
+      "elapsed_seconds": 0.291
+    },
+    {
+      "name": "admin API验收会话退出",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.314
+    },
+    {
+      "name": "18878489000 登录",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.571,
+      "token_present": true
+    },
+    {
+      "name": "18878489000 /admin/security-center/overview",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.28
+    },
+    {
+      "name": "18878489000 /admin/security-center/policy",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.259
+    },
+    {
+      "name": "18878489000 /admin/security-center/automatic-blocking",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.27
+    },
+    {
+      "name": "18878489000 activity 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.277
+    },
+    {
+      "name": "18878489000 inspection 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.258
+    },
+    {
+      "name": "18878489000 all 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.28
+    },
+    {
+      "name": "18878489000 API验收会话退出",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.281
+    },
+    {
+      "name": "lijiadong 登录",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.58,
+      "token_present": true
+    },
+    {
+      "name": "lijiadong /admin/security-center/overview",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.251
+    },
+    {
+      "name": "lijiadong /admin/security-center/policy",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.257
+    },
+    {
+      "name": "lijiadong /admin/security-center/automatic-blocking",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.319
+    },
+    {
+      "name": "lijiadong activity 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.246
+    },
+    {
+      "name": "lijiadong inspection 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.257
+    },
+    {
+      "name": "lijiadong all 第1轮",
+      "passed": true,
+      "http_status": 403,
+      "elapsed_seconds": 0.257
+    },
+    {
+      "name": "lijiadong API验收会话退出",
+      "passed": true,
+      "http_status": 200,
+      "elapsed_seconds": 0.292
+    }
+  ],
+  "blocking_readback": {
+    "available": true,
+    "verified": true,
+    "outcome_unknown": false,
+    "enabled": true,
+    "active_count": 0
+  },
+  "passed": true
+}

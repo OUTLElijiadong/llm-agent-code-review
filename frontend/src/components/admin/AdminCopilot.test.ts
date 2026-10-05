@@ -42,6 +42,7 @@ vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages
 import { createPinia, setActivePinia } from 'pinia'
 
 import AdminCopilot from './AdminCopilot.vue'
+import AdminLayout from './AdminLayout.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
 
@@ -167,7 +168,10 @@ it('管理端按游标加载更早消息，不把当前页误当全部历史', a
   wrapper.unmount()
 })
 
-it('手机端从非管理页切入管理页时先保留浮动入口，页头槽位挂载后自动迁移', async () => {
+it.each([
+  { width: 390, path: '/admin/overview' },
+  { width: 1280, path: '/admin/security-center' },
+])('$width px从非管理页切入管理页时先保留浮动入口，页头槽位挂载后自动迁移', async ({ width, path }) => {
   const originalWidth = window.innerWidth
   const router = createRouter({
     history: createMemoryHistory(),
@@ -186,7 +190,7 @@ it('手机端从非管理页切入管理页时先保留浮动入口，页头槽�
 
   try {
     await router.push('/projects')
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
     wrapper = mount(AdminCopilot, {
       attachTo: document.body,
       global: {
@@ -204,7 +208,7 @@ it('手机端从非管理页切入管理页时先保留浮动入口，页头槽�
     await flushPromises()
     expect(document.body.querySelector('.copilot-trigger')?.classList.contains('is-floating-trigger')).toBe(true)
 
-    await router.push('/admin/overview')
+    await router.push(path)
     await flushPromises()
     expect(document.body.querySelector('.copilot-trigger')?.classList.contains('is-floating-trigger')).toBe(true)
 
@@ -223,6 +227,120 @@ it('手机端从非管理页切入管理页时先保留浮动入口，页头槽�
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
     warn.mockRestore()
   }
+})
+
+describe('安全中心小菱页头入口', () => {
+  async function mountSecurityCenter(width: number) {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    const pinia = createPinia()
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } }],
+    })
+    await router.push('/admin/security-center')
+    const layout = mount(AdminLayout, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          ProactivePageGuide: true,
+          UserAvatar: true,
+          'el-dropdown': { template: '<div><slot /></div>' },
+          'el-dropdown-menu': true,
+          'el-dropdown-item': true,
+          'el-icon': { template: '<span><slot /></span>' },
+        },
+      },
+    })
+    layout.get<HTMLElement>('.admin-content').element.scrollTo = vi.fn()
+    const copilot = mount(AdminCopilot, {
+      attachTo: document.body,
+      global: { plugins: [pinia, router], stubs: { 'el-icon': { template: '<span><slot /></span>' } } },
+    })
+    await flushPromises()
+    return {
+      layout,
+      copilot,
+      router,
+      cleanup() {
+        copilot.unmount()
+        layout.unmount()
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+      },
+    }
+  }
+
+  it.each([1280, 1440, 768, 375, 320])('%dpx安全中心入口挂在页头，可打开聊天并继续使用快捷键', async (width) => {
+    const fixture = await mountSecurityCenter(width)
+    try {
+      const slot = fixture.layout.get('#admin-copilot-trigger-slot')
+      const trigger = slot.element.querySelector<HTMLButtonElement>('.copilot-trigger')
+      expect(trigger).not.toBeNull()
+      expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
+      expect(trigger!.classList.contains('is-header-trigger')).toBe(true)
+      expect(trigger!.type).toBe('button')
+      expect(trigger!.getAttribute('aria-label')).toBe('打开小菱 · 管理员工作台')
+      trigger!.focus()
+      expect(document.activeElement).toBe(trigger)
+      trigger!.click()
+      await flushSessionRestore()
+      expect(fixture.copilot.find('[role="dialog"]').exists()).toBe(true)
+      await fixture.copilot.get('textarea').setValue('只保留草稿，不发送')
+
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true }))
+      expect(document.activeElement).toBe(fixture.copilot.get('textarea').element)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await flushPromises()
+      expect(fixture.copilot.find('[role="dialog"]').exists()).toBe(false)
+      expect(slot.element.querySelector('.copilot-trigger')).not.toBeNull()
+
+      await openCopilot(fixture.copilot)
+      await flushSessionRestore()
+      expect(fixture.copilot.get<HTMLTextAreaElement>('textarea').element.value).toBe('只保留草稿，不发送')
+      expect(streams.start).not.toHaveBeenCalled()
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  it('桌面在安全中心与其他管理页间切换只迁移入口，保留运行状态和未读回复', async () => {
+    const fixture = await mountSecurityCenter(1280)
+    try {
+      await openCopilot(fixture.copilot)
+      await flushSessionRestore()
+      await fixture.copilot.get('textarea').setValue('查看当前状态')
+      void fixture.copilot.get('.send-button').trigger('click')
+      await flushPromises()
+      emit(0, { type: 'response.created', response: { id: 'header-route-run' } })
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await flushPromises()
+      emit(0, { type: 'response.output_text.delta', delta: '后台运行回复仍保留' })
+      await flushPromises()
+
+      const slot = fixture.layout.get('#admin-copilot-trigger-slot')
+      expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
+      await fixture.router.push('/admin/operations')
+      await flushPromises()
+      const floating = document.body.querySelector(':scope > .copilot-trigger')
+      expect(floating?.classList.contains('is-floating-trigger')).toBe(true)
+      expect(floating?.querySelector('.unread-dot')).not.toBeNull()
+      expect(slot.find('.copilot-trigger').exists()).toBe(false)
+      expect(streams.records[0].aborted).toBe(false)
+
+      await fixture.router.push('/admin/security-center')
+      await flushPromises()
+      expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
+      expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
+      await openCopilot(fixture.copilot)
+      expect(fixture.copilot.text()).toContain('后台运行回复仍保留')
+      expect(slot.find('.unread-dot').exists()).toBe(false)
+      emit(0, { type: 'response.completed', response: { id: 'header-route-run' } })
+      await finish(0)
+    } finally {
+      fixture.cleanup()
+    }
+  })
 })
 
 describe('AdminCopilot Responses stream', () => {

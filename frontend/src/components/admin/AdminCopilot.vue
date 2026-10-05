@@ -179,11 +179,13 @@ const visible = ref(false)
 const mobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 520)
 const adminHeaderTriggerSlotPresent = ref(false)
 let adminHeaderTriggerObserver: MutationObserver | undefined
-const isAdminRoute = computed(() => (
-  (router?.currentRoute?.value?.path || window.location.pathname).startsWith('/admin')
+const currentPath = computed(() => router?.currentRoute?.value?.path || window.location.pathname)
+const shouldUseAdminHeaderTrigger = computed(() => (
+  currentPath.value.startsWith('/admin')
+  && (mobileViewport.value || currentPath.value === '/admin/security-center')
 ))
 const useAdminHeaderTrigger = computed(() => (
-  mobileViewport.value && isAdminRoute.value && adminHeaderTriggerSlotPresent.value
+  shouldUseAdminHeaderTrigger.value && adminHeaderTriggerSlotPresent.value
 ))
 const triggerTeleportTarget = computed(() => useAdminHeaderTrigger.value ? '#admin-copilot-trigger-slot' : 'body')
 const loading = ref(false)
@@ -260,11 +262,11 @@ function handlePanelViewportResize(): void {
 }
 
 /**
- * 管理页使用移动端页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
+ * 手机管理页和安全中心复用页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
  * MutationObserver 在 AdminLayout 挂载后再迁移 Teleport,避免 Vue 对缺失目标只告警一次后不重试。
  */
 function syncAdminHeaderTriggerSlotPresence(): void {
-  const shouldUseHeader = mobileViewport.value && isAdminRoute.value
+  const shouldUseHeader = shouldUseAdminHeaderTrigger.value
   const targetExists = shouldUseHeader && Boolean(document.getElementById('admin-copilot-trigger-slot'))
   adminHeaderTriggerSlotPresent.value = targetExists
   if (!shouldUseHeader || targetExists) {
@@ -278,7 +280,7 @@ function syncAdminHeaderTriggerSlotPresence(): void {
   }
 }
 
-watch([mobileViewport, isAdminRoute], syncAdminHeaderTriggerSlotPresence, { flush: 'post' })
+watch(shouldUseAdminHeaderTrigger, syncAdminHeaderTriggerSlotPresence, { flush: 'post' })
 
 const messages = ref<ChatEntry[]>([])
 const historyWindow = new AgentSessionHistoryWindow()
