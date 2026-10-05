@@ -91,6 +91,9 @@ ACTION_PARAM_KEYS = {
     "security_block_configure": {
         "enabled", "ai_anomaly_enabled", "duration_seconds", "window_seconds",
         "ssh_threshold", "web_threshold", "allowlist_cidrs", "protected_ip",
+        # 与 backend/app/services/ops_service.ACTION_PARAM_KEYS 必须逐字一致；
+        # 两处白名单由不同进程各自加载，漏改一处就会出现"后端通过、执行器拒绝"。
+        "auto_escalate",
     },
     "security_block_reconcile": set(),
     "security_block_release": {"ip", "reason"},

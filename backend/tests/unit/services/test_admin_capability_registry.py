@@ -54,6 +54,9 @@ FRONTEND_API_CAPABILITY = {
     "adminSecurityCenter:getSecurityCenterEvents": "security_center.events",
     "adminSecurityCenter:updateSecurityMonitorPolicy": "security_center.policy.update",
     "adminSecurityCenter:runSecurityMonitor": "observability.security.run_monitor",
+    "adminSecurityCenter:traceSecurityIp": "security_center.trace",
+    "adminSecurityCenter:getDefenseSurface": "security_center.surface",
+    "adminSecurityCenter:getTrafficSummary": "security_center.traffic",
     "adminGovernance:listAlertsPage": "observability.alerts.list",
     "adminGovernance:resolveAlert": "observability.alerts.resolve",
     "adminGovernance:listRewardEvents": "rewards.events.list",
@@ -189,7 +192,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 130
+    assert len(ADMIN_CAPABILITIES) == 133
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)
@@ -236,6 +239,10 @@ def test_security_center_capabilities_are_explicitly_super_admin_only() -> None:
         "security_center.events",
         "security_center.policy.get",
         "security_center.policy.update",
+        # 溯源/防御面/流量元数据三条只读能力同样只对唯一超级管理员开放
+        "security_center.trace",
+        "security_center.surface",
+        "security_center.traffic",
     }
     assert {row["permission"] for row in rows} == {"super_admin"}
 

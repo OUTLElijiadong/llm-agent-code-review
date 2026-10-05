@@ -2298,8 +2298,16 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
             '{"page":"/admin/security-center"}',
         )
     )
-    assert security_discovery.status == "error"
-    assert "没有找到匹配" in security_discovery.error
+    # 安全中心现在登记了只读溯源/防御面/流量能力，因此能被枚举出来；
+    # 但执行仍必须被唯一超级管理员门禁拦住（见下面的 security_execution）。
+    assert security_discovery.status == "success"
+    # 能力目录只广告非 super_admin 门禁的条目，因此安全中心里可见的是新增的三条只读能力；
+    # 无论是否被广告，执行都会在下一次断言里被"仅唯一超级管理员"拦住。
+    assert {row["capability"] for row in security_discovery.output["items"]} == {
+        "security_center.surface",
+        "security_center.trace",
+        "security_center.traffic",
+    }
 
     security_execution = await executor.execute(
         ToolCall(
