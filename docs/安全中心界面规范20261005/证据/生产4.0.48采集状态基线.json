@@ -1,0 +1,123 @@
+{
+  "captured_at": "2026-10-05T09:04:21.294275+00:00",
+  "fixed_expected": false,
+  "rounds": [
+    {
+      "repeat": 1,
+      "passed": true,
+      "running_count": 1,
+      "mismatched_running_ids": [
+        "collector:145272"
+      ],
+      "samples": [
+        {
+          "id": "collector:145272",
+          "recorded_at": "2026-10-05T07:17:39+00:00",
+          "title": "读取运行环境状态",
+          "status": "running",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144345",
+          "recorded_at": "2026-10-04T22:38:52+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144339",
+          "recorded_at": "2026-10-04T22:38:29+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144338",
+          "recorded_at": "2026-10-04T22:33:47+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144332",
+          "recorded_at": "2026-10-04T22:33:28+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144331",
+          "recorded_at": "2026-10-04T22:28:47+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144325",
+          "recorded_at": "2026-10-04T22:28:28+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144324",
+          "recorded_at": "2026-10-04T22:23:47+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144318",
+          "recorded_at": "2026-10-04T22:23:28+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144317",
+          "recorded_at": "2026-10-04T22:18:46+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144311",
+          "recorded_at": "2026-10-04T22:18:28+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144310",
+          "recorded_at": "2026-10-04T22:13:52+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        },
+        {
+          "id": "collector:144304",
+          "recorded_at": "2026-10-04T22:13:29+00:00",
+          "title": "读取运行环境状态",
+          "status": "failed",
+          "summary": "采集失败，相关数据源当前存在监控盲区。",
+          "severity": "warning"
+        }
+      ]
+    }
+  ],
+  "baseline_running_ids": [],
+  "same_records_rechecked": [],
+  "passed": true
+}

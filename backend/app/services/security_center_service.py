@@ -593,7 +593,6 @@ def list_events(
             if target_id and match:
                 source_by_request[str(target_id)] = match.group(1)
     for row in ops_rows:
-        ok = row.status == "success"
         if row.action in ops_service.INTERNAL_SECURITY_ACTIONS:
             snapshot = security_response_service.execution_snapshot(row)
             verified, display_status = _defense_event_state(row, snapshot)
@@ -632,18 +631,26 @@ def list_events(
                 },
             })
             continue
+        if row.status == "success":
+            summary = "只读采集器执行回执；未执行封禁或反制。"
+        elif row.status == "running":
+            summary = "采集进行中，结果尚未返回。"
+        elif row.status == "failed":
+            summary = "采集失败，相关数据源当前存在监控盲区。"
+        else:
+            summary = "采集状态待核验，当前回执尚未确认。"
         events.append(
             {
                 "id": f"collector:{row.id}",
                 "recorded_at": _iso(row.finished_at or row.started_at),
                 "event_type": "collector",
                 "layer": "只读采集",
-                "severity": "info" if ok else "warning",
+                "severity": "info" if row.status in {"success", "running"} else "warning",
                 "status": row.status,
                 "actor": actors.get(row.actor_id, "定时巡检" if row.actor_id is None else "管理员"),
                 "title": _ACTION_LABELS.get(row.action, "安全数据采集"),
                 "action_code": row.action,
-                "summary": "只读采集器执行回执；未执行封禁或反制。" if ok else "采集失败，相关数据源当前存在监控盲区。",
+                "summary": summary,
                 "evidence_summary": {
                     "risk_level": row.risk_level,
                     "duration_ms": int(row.duration_ms or 0),

@@ -567,6 +567,41 @@ def test_security_center_policy_can_only_increase_monitoring_sensitivity(db, see
     assert db.query(AuditLog).filter(AuditLog.action == "security_policy_update").count() == 1
 
 
+@pytest.mark.parametrize("action", ["ssh_login_events", "status"])
+@pytest.mark.parametrize("status, severity, summary", [
+    ("running", "info", "采集进行中，结果尚未返回。"),
+    ("success", "info", "只读采集器执行回执；未执行封禁或反制。"),
+    ("failed", "warning", "采集失败，相关数据源当前存在监控盲区。"),
+    ("unknown", "warning", "采集状态待核验，当前回执尚未确认。"),
+    ("queued", "warning", "采集状态待核验，当前回执尚未确认。"),
+])
+def test_security_collector_summary_matches_recorded_state(db, seed, client_factory, action, status, severity, summary):
+    """正在采集不能被读模型误称失败，未知状态也不能假定执行结果。"""
+    row = OpsExecution(
+        request_id=f"collector-state-{action}-{status}", actor_id=seed["super_admin"].id,
+        action=action, risk_level="low", status=status, started_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    db.commit()
+    client = client_factory(seed["super_admin"])
+    group = "inspection" if status == "success" else "activity"
+    response = client.get("/api/admin/security-center/events", params={"event_group": group})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["total"] == 1
+    event = data["items"][0]
+    assert event["id"] == f"collector:{row.id}"
+    assert event["event_type"] == "collector"
+    assert event["status"] == status
+    assert event["summary"] == summary
+    assert event["severity"] == severity
+    if status != "failed":
+        assert "采集失败" not in event["summary"]
+        assert "监控盲区" not in event["summary"]
+    db.refresh(row)
+    assert row.status == status
+
+
 def test_security_center_timeline_redacts_collector_payloads(db, seed, client_factory):
     """时间线只回传白名单证据字段，不泄露原始参数/执行器输出。"""
     now = datetime.now(timezone.utc)

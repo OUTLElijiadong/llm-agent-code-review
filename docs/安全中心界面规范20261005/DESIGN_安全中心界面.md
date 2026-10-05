@@ -17,7 +17,7 @@ flowchart TD
 
 ## 接口契约
 
-事件 API 新增可选 `event_group=all|activity|inspection`，默认 `all` 保留原行为。`activity` 包含告警、权限审计、策略变更、防御动作及异常采集/巡检；`inspection` 包含成功的只读采集与正常巡检。结果先归一化再计数分页，单来源读取上限保留明确提示。
+事件 API 新增可选 `event_group=all|activity|inspection`，默认 `all` 保留原行为。`activity` 包含告警、权限审计、策略变更、有实际记录的防御动作及异常采集/巡检；`inspection` 包含成功的只读采集、正常巡检，以及明确成功、已核验且原始回执中 active_blocks/recent_blocks/errors 均为空数组的规则核验。未知回执、字段缺失或任何封禁/异常记录保留在活动中。结果先归一化再计数分页，单来源读取上限保留明确提示。
 
 ## 交互与视觉规范
 
