@@ -11,3 +11,12 @@ backend healthy + 冒烟 version=4.0.51 release=2035741f / frontend healthy / HT
 -- 第二次（ca435540，含情报端点改 https://ipinfo.io） --
 容量检查 63%（清理 25.65GB 构建缓存后）/ 预检通过 / 隔离恢复验证 / 备份完成
 backend healthy + 冒烟 version=4.0.51 release=ca435540 / frontend healthy / HTTPS 冒烟通过 / 发布完成 EXIT=0
+
+-- 第三次（220d5feb，v4.0.52：验收脚本 + 文档，产品代码未变）--
+时间：2026-10-05 21:55—21:59 CST
+发布账本：RELEASE_SHA=220d5feb12450ad3727bf734e7db9f50f3235d50 / APP_VERSION=4.0.52 / ALEMBIC=062_audit_log_action_length（无迁移）
+backup: /opt/prism-backups/code_review_20261005T1355*.sql.gz（发布前备份 + 独立恢复验证）
+阶段：容量检查 63% → 预检通过 → 备份+恢复验证 → backend 构建 → Alembic 062 → backend healthy + 冒烟 version=4.0.52
+     → 前端 assets 同步 → frontend healthy → HTTPS 冒烟 → 执行器绑定当前发布树 → 发布完成 EXIT=0
+发布后实测：healthz / readyz 均 version=4.0.52 release=220d5feb；三接口 available=true；
+          审查员 18878489000 登录成功且 role=reviewer；真实点击验收 9/9。
