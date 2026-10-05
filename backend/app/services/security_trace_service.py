@@ -317,6 +317,105 @@ def traffic_summary(db: Session, actor: User, *, since_hours: int = 24) -> dict[
     }
 
 
+def decoy_status(db: Session, actor: User) -> dict[str, Any]:
+    """诱捕层状态与命中来源（只读）：容器存活、命中汇总、引流集合与链序。"""
+    payload = _execute(db, actor, "security_decoy_status", {}, kind="decoy_status", source="security_center")
+    if not payload.get("verified"):
+        return payload
+    sources: list[dict[str, Any]] = []
+    for row in (payload.get("sources") or [])[:100]:
+        if not isinstance(row, dict):
+            continue
+        ip = _ip_or_none(row.get("ip"))
+        if ip is None:
+            continue
+        paths = []
+        for item in (row.get("paths") or [])[:10]:
+            if not isinstance(item, dict):
+                continue
+            paths.append({"path": _text(item.get("path"), 160), "count": _int(item.get("count"), upper=100_000)})
+        agents = []
+        for item in (row.get("user_agents") or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            agents.append({"user_agent": _text(item.get("user_agent"), 200),
+                           "count": _int(item.get("count"), upper=100_000)})
+        sources.append({
+            "ip": ip,
+            "count": _int(row.get("count"), upper=1_000_000),
+            "path_count": _int(row.get("path_count"), upper=1_000),
+            "paths": paths,
+            "user_agents": agents,
+            "first_seen": _text(row.get("first_seen"), 64) or None,
+            "last_seen": _text(row.get("last_seen"), 64) or None,
+        })
+    members: dict[str, list[str]] = {}
+    raw_members = payload.get("redirect_members") if isinstance(payload.get("redirect_members"), dict) else {}
+    for family in ("4", "6"):
+        rows = []
+        for value in (raw_members.get(family) or [])[:500]:
+            address = _ip_or_none(value)
+            if address is not None:
+                rows.append(address)
+        members[family] = rows
+    return {
+        "available": True,
+        "verified": True,
+        "kind": "decoy_status",
+        "request_id": payload.get("request_id"),
+        "generated_at": _text(payload.get("generated_at"), 64) or None,
+        "container_running": bool(payload.get("container_running")),
+        "hit_total": _int(payload.get("hit_total"), upper=1_000_000),
+        "source_total": _int(payload.get("source_total"), upper=100_000),
+        "sources": sources,
+        "redirect_total": _int(payload.get("redirect_total"), upper=10_000),
+        "redirect_members": members,
+        "chain_order_ok": bool(payload.get("chain_order_ok")),
+        "redirect_chain": _text(payload.get("redirect_chain"), 64),
+        "redirect_port": _int(payload.get("redirect_port"), upper=65_535),
+        "log_path": _text(payload.get("log_path"), 160),
+        "errors": _error_entries(payload.get("errors")),
+    }
+
+
+def decoy_apply(db: Session, actor: User, *, reason: str) -> dict[str, Any]:
+    """把命中诱饵的来源加入引流集合；原因必填并进入操作审计。"""
+    params = ops_service.validate_action_params("security_decoy_apply", {"reason": reason})
+    payload = _execute(db, actor, "security_decoy_apply", params, kind="decoy_apply", source="security_center")
+    if not payload.get("verified"):
+        return payload
+    applied = []
+    for row in (payload.get("applied") or [])[:200]:
+        if not isinstance(row, dict):
+            continue
+        ip = _ip_or_none(row.get("ip"))
+        if ip is None:
+            continue
+        applied.append({
+            "ip": ip,
+            "hits": _int(row.get("hits"), upper=1_000_000),
+            "paths": _int(row.get("paths"), upper=1_000),
+            "lease_seconds": _int(row.get("lease_seconds"), upper=86_400),
+        })
+    skipped = []
+    for row in (payload.get("skipped") or [])[:200]:
+        if not isinstance(row, dict):
+            continue
+        skipped.append({"ip": _text(row.get("ip"), 64), "reason": _text(row.get("reason"), 120)})
+    return {
+        "available": True,
+        "verified": True,
+        "kind": "decoy_apply",
+        "request_id": payload.get("request_id"),
+        "generated_at": _text(payload.get("generated_at"), 64) or None,
+        "applied": applied,
+        "skipped": skipped,
+        "hit_sources": _int(payload.get("hit_sources"), upper=100_000),
+        "chain_order_ok": bool(payload.get("chain_order_ok")),
+        "errors": _error_entries(payload.get("errors")),
+    }
+
+
 def cached_blocking(db: Session) -> dict[str, Any]:
     """复用自动封禁的已审计回执，供溯源面板显示处置闭环状态。"""
     return security_response_service.cached_status(db)

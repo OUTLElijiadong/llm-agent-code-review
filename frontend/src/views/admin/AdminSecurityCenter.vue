@@ -1,27 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { Aim, CircleCheck, Clock, DataAnalysis, Lock, Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
-import {
-  getDefenseSurface,
-  getSecurityCenterEvents,
-  getSecurityCenterOverview,
-  getTrafficSummary,
-  runSecurityMonitor,
-  traceSecurityIp,
-  updateSecurityMonitorPolicy,
-  type SecurityCenterEvent,
-  type SecurityCenterEventPage,
-  type SecurityCenterEventGroup,
-  type SecurityCenterOverview,
-  type SecurityMonitorPolicy,
-  type SecurityIpTrace,
-  type SecuritySurfaceAudit,
-  type SecurityTrafficPeer,
-  type SecurityTrafficSummary,
-  type AutomaticBlockingSnapshot,
-} from '@/api/adminSecurityCenter'
+import { type SecurityDecoyStatus, applyDecoyRedirect, getDecoyStatus, getDefenseSurface, getSecurityCenterEvents, getSecurityCenterOverview, getTrafficSummary, runSecurityMonitor, traceSecurityIp, type AutomaticBlockingSnapshot, type SecurityCenterEvent, type SecurityCenterEventGroup, type SecurityCenterEventPage, type SecurityCenterOverview, type SecurityIpTrace, type SecurityMonitorPolicy, type SecuritySurfaceAudit, type SecurityTrafficPeer, type SecurityTrafficSummary, updateSecurityMonitorPolicy } from '@/api/adminSecurityCenter'
 import { getSystemStatus, type SystemStatus } from '@/api/adminOverview'
 import { resolveAlert } from '@/api/adminGovernance'
 import AutomaticBlockingPanel from '@/components/security/AutomaticBlockingPanel.vue'
@@ -37,6 +19,7 @@ const sections = [
   { id: 'events', label: '事件记录' },
   { id: 'strategies', label: '防御策略' },
   { id: 'trace', label: '溯源与响应' },
+  { id: 'decoy', label: '诱捕层' },
 ] as const
 type SecuritySection = typeof sections[number]['id']
 const activeSection = ref<SecuritySection>('overview')
@@ -640,6 +623,75 @@ onMounted(() => {
   clockTimer = setInterval(() => { clock.value = Date.now() }, 30_000)
 })
 
+// ── 诱捕层：幽灵访客与引流集合（只读读取 + 显式引流） ──
+const decoy = ref<SecurityDecoyStatus | null>(null)
+const decoyLoading = ref(false)
+const decoyError = ref('')
+const decoyApplying = ref(false)
+const decoyReason = ref('诱捕命中累计，执行引流')
+const decoyNotice = ref('')
+let decoyGeneration = 0
+
+async function loadDecoy(): Promise<void> {
+  const generation = ++decoyGeneration
+  decoyLoading.value = true
+  decoyError.value = ''
+  try {
+    const data = await getDecoyStatus()
+    if (generation !== decoyGeneration) return
+    if (data.available !== true || data.verified !== true) {
+      decoy.value = null
+      const detail = (data.errors || []).join('；')
+      decoyError.value = detail || '诱捕层状态尚未核验，请稍后重试'
+      return
+    }
+    decoy.value = data
+  } catch (error) {
+    if (generation !== decoyGeneration) return
+    decoy.value = null
+    decoyError.value = getErrorMessage(error)
+  } finally {
+    if (generation === decoyGeneration) decoyLoading.value = false
+  }
+}
+
+async function submitDecoyApply(): Promise<void> {
+  const reason = decoyReason.value.trim()
+  if (!reason) {
+    decoyNotice.value = '请填写引流原因后再提交'
+    return
+  }
+  decoyApplying.value = true
+  decoyNotice.value = ''
+  try {
+    const result = await applyDecoyRedirect(reason)
+    if (result.available !== true) {
+      decoyNotice.value = (result.errors || []).join('；') || '引流未执行，请重试'
+      return
+    }
+    const applied = result.applied.length
+    const skipped = result.skipped.length
+    decoyNotice.value = applied > 0
+      ? `已引流 ${applied} 个来源${skipped ? `，跳过 ${skipped} 个（保护来源或非公网）` : ''}`
+      : `没有可引流来源${skipped ? `，跳过 ${skipped} 个（保护来源或非公网）` : ''}`
+  } catch (error) {
+    decoyNotice.value = getErrorMessage(error)
+  } finally {
+    decoyApplying.value = false
+    await loadDecoy()
+  }
+}
+
+async function traceFromDecoy(ip: string): Promise<void> {
+  activeSection.value = 'trace'
+  traceIp.value = ip
+  await submitTrace()
+}
+
+watch(activeSection, (section) => {
+  if (section === 'decoy' && decoy.value === null && !decoyLoading.value) void loadDecoy()
+})
+
 onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
   ++eventRequestGeneration
@@ -1045,6 +1097,84 @@ onUnmounted(() => {
         <p v-else class="empty-state">尚未读取流量元数据。</p>
       </section>
     </section>
+
+    <section id="security-panel-decoy" v-show="activeSection === 'decoy'" class="section-content" role="tabpanel" aria-labelledby="security-tab-decoy" tabindex="0">
+      <section class="timeline-panel panel" aria-labelledby="decoy-title" :aria-busy="decoyLoading">
+        <div class="section-heading">
+          <div>
+            <h3 id="decoy-title">诱捕层</h3>
+            <p class="section-subtitle">命中诱饵的来源留在虚构环境里；真业务对这些来源不生效。</p>
+          </div>
+          <button class="button button-secondary" data-testid="refresh-decoy" type="button" :disabled="decoyLoading" @click="loadDecoy">
+            <Refresh :class="{ spinning: decoyLoading }" aria-hidden="true" /><span>刷新诱捕层</span>
+          </button>
+        </div>
+        <div v-if="decoyError" class="state-banner error-banner" role="alert">
+          <span>诱捕层状态读取失败：{{ decoyError }}</span>
+          <button class="button button-secondary" data-testid="retry-decoy" type="button" :disabled="decoyLoading" @click="loadDecoy">重试</button>
+        </div>
+        <template v-else-if="decoy">
+          <dl class="runtime-metrics decoy-metrics">
+            <div class="runtime-metric" data-testid="decoy-container">
+              <span>诱捕容器</span><strong>{{ decoy.container_running ? '运行中' : '未运行' }}</strong>
+              <small>{{ decoy.container_running ? '受内核改写的流量会落到这里' : '容器未启动时引流不生效' }}</small>
+            </div>
+            <div class="runtime-metric" data-testid="decoy-hits">
+              <span>诱饵命中总次数</span><strong>{{ decoy.hit_total }}</strong><small>来源 {{ decoy.source_total }} 个</small>
+            </div>
+            <div class="runtime-metric" data-testid="decoy-redirect">
+              <span>已引流来源</span><strong>{{ decoy.redirect_total }}</strong>
+              <small>集合 {{ decoy.redirect_chain }} · 端口 {{ decoy.redirect_port }}</small>
+            </div>
+            <div class="runtime-metric" data-testid="decoy-chain">
+              <span>引流链序</span><strong>{{ decoy.chain_order_ok ? '正确' : '异常' }}</strong>
+              <small>{{ decoy.chain_order_ok ? '排在 DROP 链之前' : '必须排在 DROP 链之前，否则会被丢弃' }}</small>
+            </div>
+          </dl>
+          <p class="panel-footnote">日志：{{ decoy.log_path }} · 读取于 {{ formatTime(decoy.generated_at) }}</p>
+          <div class="decoy-apply">
+            <label class="filter-field" for="decoy-reason">
+              <span>引流原因</span>
+              <input id="decoy-reason" v-model="decoyReason" data-testid="decoy-reason" type="text" maxlength="200" :disabled="decoyApplying" />
+            </label>
+            <button class="button button-primary" data-testid="decoy-apply" type="button" :disabled="decoyApplying || decoyLoading" @click="submitDecoyApply">
+              {{ decoyApplying ? '执行中…' : '把命中来源加入引流' }}
+            </button>
+            <p v-if="decoyNotice" class="policy-draft-state" role="status" data-testid="decoy-notice">{{ decoyNotice }}</p>
+          </div>
+          <p class="panel-footnote">
+            引流只针对命中诱饵的公网来源；当前管理员连接、服务器本机地址、白名单与已建立连接的公网对端一律跳过。
+            租约由内核 TTL 自动到期，无需人工解封。
+          </p>
+          <h4 class="decoy-subtitle">幽灵访客</h4>
+          <p v-if="!decoy.sources.length" class="empty-state" data-testid="decoy-empty">近 24 小时没有诱饵命中。</p>
+          <div v-else class="table-scroll">
+            <table class="decoy-table" data-testid="decoy-sources">
+              <thead>
+                <tr><th>来源 IP</th><th>命中次数</th><th>不同路径</th><th>工具指纹</th><th>最近命中</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in decoy.sources" :key="row.ip" :data-testid="`decoy-source-${row.ip}`">
+                  <td class="font-mono">{{ row.ip }}</td>
+                  <td>{{ row.count }}</td>
+                  <td>{{ row.path_count }}</td>
+                  <td>{{ (row.user_agents[0] && row.user_agents[0].user_agent) || '—' }}</td>
+                  <td>{{ formatTime(row.last_seen) }}</td>
+                  <td><button class="button button-text" type="button" @click="traceFromDecoy(row.ip)">溯源</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <details v-if="decoy.redirect_total" class="decoy-members">
+            <summary>查看已引流来源明细</summary>
+            <p class="panel-footnote">IPv4：{{ decoy.redirect_members['4'].join(', ') || '无' }}</p>
+            <p class="panel-footnote">IPv6：{{ decoy.redirect_members['6'].join(', ') || '无' }}</p>
+          </details>
+          <p v-if="decoy.errors.length" class="panel-footnote">采集提示：{{ decoy.errors.join('；') }}</p>
+        </template>
+        <p v-else class="empty-state">尚未读取诱捕层状态。</p>
+      </section>
+    </section>
   </main>
 </template>
 
@@ -1077,6 +1207,16 @@ onUnmounted(() => {
 .button-text { padding: var(--sp-2); color: var(--brand-600); background: transparent; }
 .button-text:hover { background: var(--brand-50); }
 button:disabled { cursor: not-allowed; opacity: .55; }
+.decoy-metrics { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.decoy-apply { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: flex-end; margin-top: var(--sp-4); }
+.decoy-apply .filter-field { min-width: 260px; flex: 1 1 260px; }
+.decoy-subtitle { margin: var(--sp-5) 0 var(--sp-2); font-size: var(--fs-md); }
+.table-scroll { overflow-x: auto; }
+.decoy-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.decoy-table th, .decoy-table td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--gray-200); text-align: left; white-space: nowrap; }
+.decoy-table th { color: var(--gray-500); font-weight: 600; }
+.decoy-members { margin-top: var(--sp-4); }
+.decoy-members summary { cursor: pointer; color: var(--brand-600); }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, [role=tabpanel]:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 3px; box-shadow: var(--focus-ring); }
 .security-tabs { display: flex; align-items: stretch; gap: var(--sp-2); border-bottom: 1px solid var(--gray-200); }
 .security-tab { position: relative; min-width: 0; min-height: 48px; padding: var(--sp-2) var(--sp-5); border: 0; border-radius: var(--r-md) var(--r-md) 0 0; color: var(--gray-600); background: transparent; font: 600 var(--fs-base)/1.5 var(--font-sans); cursor: pointer; }

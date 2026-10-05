@@ -72,3 +72,17 @@ class SecurityTraceIn(StrictInputModel):
         if "/" in raw:
             raise ValueError("溯源只接受单个 IP，不接受网段")
         return str(ipaddress.ip_address(raw))
+
+
+class DecoyApplyIn(StrictInputModel):
+    """诱捕层引流：只接受一个有意义的操作原因，目标由宿主机规则判定。"""
+
+    reason: str = Field(min_length=1, max_length=200)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("请填写引流原因")
+        return text

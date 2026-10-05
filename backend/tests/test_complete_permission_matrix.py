@@ -72,7 +72,7 @@ def route_inventory():
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
     # 本轮新增3个临时自动封禁API与 3 个溯源/防御面只读 API，均逐项核验唯一超级管理员守卫。
-    assert len(rows) == 349, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 351, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -82,11 +82,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 349
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 349
+    assert len(ROUTES) == 351
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 351
     assert len({row["source"] for row in ROUTES}) == 43
-    assert len(AUTHENTICATED_ROUTES) == 335
-    assert len(GUARDED_ROUTES) == 268
+    assert len(AUTHENTICATED_ROUTES) == 337
+    assert len(GUARDED_ROUTES) == 270
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -131,6 +131,9 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/admin/security-center/trace/ip"): ["require_super_admin"],
         ("GET", "/api/admin/security-center/surface"): ["require_super_admin"],
         ("GET", "/api/admin/security-center/traffic"): ["require_super_admin"],
+        # 诱捕层：状态只读 + 引流（唯一超级管理员）
+        ("GET", "/api/admin/security-center/decoy"): ["require_super_admin"],
+        ("POST", "/api/admin/security-center/decoy/apply"): ["require_super_admin"],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]

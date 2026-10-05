@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   getSecurityCenterOverview: vi.fn(), getSecurityCenterEvents: vi.fn(), runSecurityMonitor: vi.fn(),
   updateSecurityMonitorPolicy: vi.fn(), getSystemStatus: vi.fn(), resolveAlert: vi.fn(),
   traceSecurityIp: vi.fn(), getDefenseSurface: vi.fn(), getTrafficSummary: vi.fn(),
+  getDecoyStatus: vi.fn(), applyDecoyRedirect: vi.fn(),
   messageSuccess: vi.fn(), messageWarning: vi.fn(), messageError: vi.fn(), prompt: vi.fn(),
   blockingMount: vi.fn(), blockingRefresh: vi.fn(),
   blockingState: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('@/api/adminSecurityCenter', () => ({
   getSecurityCenterOverview: api.getSecurityCenterOverview, getSecurityCenterEvents: api.getSecurityCenterEvents,
   runSecurityMonitor: api.runSecurityMonitor, updateSecurityMonitorPolicy: api.updateSecurityMonitorPolicy,
   traceSecurityIp: api.traceSecurityIp, getDefenseSurface: api.getDefenseSurface, getTrafficSummary: api.getTrafficSummary,
+  getDecoyStatus: api.getDecoyStatus, applyDecoyRedirect: api.applyDecoyRedirect,
 }))
 vi.mock('@/api/adminOverview', () => ({ getSystemStatus: api.getSystemStatus }))
 vi.mock('@/api/adminGovernance', () => ({ resolveAlert: api.resolveAlert }))
@@ -178,10 +180,10 @@ describe('管理员安全中心', () => {
     expect(wrapper.get('#security-tab-events').attributes('aria-selected')).toBe('true')
     expect(document.activeElement?.id).toBe('security-tab-events')
     await wrapper.get('#security-tab-events').trigger('keydown', { key: 'End' }); await flushPromises()
-    expect(wrapper.get('#security-tab-trace').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('#security-tab-trace').attributes('aria-controls')).toBe('security-panel-trace')
-    expect(document.activeElement?.id).toBe('security-tab-trace')
-    await wrapper.get('#security-tab-trace').trigger('keydown', { key: 'Home' })
+    expect(wrapper.get('#security-tab-decoy').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#security-tab-decoy').attributes('aria-controls')).toBe('security-panel-decoy')
+    expect(document.activeElement?.id).toBe('security-tab-decoy')
+    await wrapper.get('#security-tab-decoy').trigger('keydown', { key: 'Home' })
     expect(wrapper.get('#security-panel-overview').attributes('aria-labelledby')).toBe('security-tab-overview')
     expect(document.activeElement?.id).toBe('security-tab-overview')
   })
@@ -547,5 +549,76 @@ describe('管理员安全中心', () => {
     const panel = wrapper.get('[data-testid="traffic-panel"]')
     expect(panel.get('[data-testid="traffic-peer-total"]').text()).toBe('72')
     expect(panel.text()).toContain('72 小时')
+  })
+})
+
+function decoyStatus() {
+  return {
+    available: true, verified: true, kind: 'decoy_status', request_id: 'r1',
+    generated_at: '2026-10-05T18:00:00Z', container_running: true, hit_total: 42, source_total: 1,
+    sources: [{
+      ip: '8.8.4.4', count: 30, path_count: 3,
+      paths: [{ path: '/.env', count: 20 }], user_agents: [{ user_agent: 'sqlmap/1.7', count: 30 }],
+      first_seen: '2026-10-05T17:00:00Z', last_seen: '2026-10-05T17:30:00Z',
+    }],
+    redirect_total: 1, redirect_members: { '4': ['9.9.9.9'], '6': [] },
+    chain_order_ok: true, redirect_chain: 'PRISM-DECOY-IN', redirect_port: 8443,
+    log_path: '/var/log/prism-decoy/access.log', errors: [],
+  }
+}
+
+describe('诱捕层分区', () => {
+  it('渲染幽灵访客、引流状态与链序', async () => {
+    api.getDecoyStatus.mockResolvedValue(decoyStatus())
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').at(4)!.trigger('click')
+    await flushPromises()
+    expect(api.getDecoyStatus).toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="decoy-container"]').text()).toContain('运行中')
+    expect(wrapper.get('[data-testid="decoy-hits"]').text()).toContain('42')
+    expect(wrapper.get('[data-testid="decoy-chain"]').text()).toContain('正确')
+    const sources = wrapper.get('[data-testid="decoy-sources"]').text()
+    expect(sources).toContain('8.8.4.4')
+    expect(sources).toContain('sqlmap/1.7')
+  })
+
+  it('状态不可用时不显示任何数值并给出重试', async () => {
+    api.getDecoyStatus.mockResolvedValue({
+      available: false, verified: false, kind: 'decoy_status', request_id: null, generated_at: null,
+      container_running: false, hit_total: 0, source_total: 0, sources: [], redirect_total: 0,
+      redirect_members: { '4': [], '6': [] }, chain_order_ok: false, redirect_chain: 'PRISM-DECOY-IN',
+      redirect_port: 8443, log_path: '', errors: ['引流链序异常，拒绝启用'],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').at(4)!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="decoy-sources"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="retry-decoy"]').text()).toContain('重试')
+    expect(wrapper.text()).toContain('引流链序异常')
+  })
+
+  it('引流需要填写原因，成功与跳过都如实提示', async () => {
+    api.getDecoyStatus.mockResolvedValue(decoyStatus())
+    api.applyDecoyRedirect.mockResolvedValue({
+      available: true, verified: true, kind: 'decoy_apply', request_id: 'r2', generated_at: '2026-10-05T18:01:00Z',
+      applied: [{ ip: '8.8.4.4', hits: 30, paths: 3, lease_seconds: 3600 }],
+      skipped: [{ ip: '117.141.246.34', reason: '受保护来源' }],
+      hit_sources: 1, chain_order_ok: true, errors: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]').at(4)!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="decoy-reason"]').setValue('')
+    await wrapper.get('[data-testid="decoy-apply"]').trigger('click')
+    await flushPromises()
+    expect(api.applyDecoyRedirect).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="decoy-reason"]').setValue('诱捕命中累计')
+    await wrapper.get('[data-testid="decoy-apply"]').trigger('click')
+    await flushPromises()
+    expect(api.applyDecoyRedirect).toHaveBeenCalledWith('诱捕命中累计')
+    expect(wrapper.get('[data-testid="decoy-notice"]').text()).toContain('已引流 1 个来源')
   })
 })

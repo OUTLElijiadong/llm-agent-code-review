@@ -14,6 +14,7 @@ from app.schemas.common import Resp
 from app.schemas.security_center import (
     AutomaticBlockingPolicyIn,
     AutomaticBlockingReleaseIn,
+    DecoyApplyIn,
     SecurityMonitorPolicyIn,
     SecurityTraceIn,
 )
@@ -130,3 +131,22 @@ def get_traffic_summary(
 ):
     """读取连接元数据与可信日志计数；不返回任何流量载荷。"""
     return Resp(data=security_trace_service.traffic_summary(db, actor, since_hours=since_hours))
+
+
+@router.get("/decoy", response_model=Resp[dict])
+def get_decoy_status(
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """读取诱捕层：容器存活、命中来源汇总、引流集合与链序（只读）。"""
+    return Resp(data=security_trace_service.decoy_status(db, actor))
+
+
+@router.post("/decoy/apply", response_model=Resp[dict])
+def apply_decoy_redirect(
+    payload: DecoyApplyIn,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """把命中诱饵的来源加入引流集合；保护来源由宿主机重新读取后排除。"""
+    return Resp(data=security_trace_service.decoy_apply(db, actor, reason=payload.reason))

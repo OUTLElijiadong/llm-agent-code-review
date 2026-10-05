@@ -285,3 +285,53 @@ export function getDefenseSurface(): Promise<SecuritySurfaceAudit> {
 export function getTrafficSummary(sinceHours = 24): Promise<SecurityTrafficSummary> {
   return get<SecurityTrafficSummary>('/admin/security-center/traffic', { since_hours: sinceHours })
 }
+
+export interface SecurityDecoySource {
+  ip: string
+  count: number
+  path_count: number
+  paths: Array<{ path: string; count: number }>
+  user_agents: Array<{ user_agent: string; count: number }>
+  first_seen: string | null
+  last_seen: string | null
+}
+
+export interface SecurityDecoyStatus {
+  available: boolean
+  verified: boolean
+  kind: string
+  request_id: string | null
+  generated_at: string | null
+  container_running: boolean
+  hit_total: number
+  source_total: number
+  sources: SecurityDecoySource[]
+  redirect_total: number
+  redirect_members: Record<'4' | '6', string[]>
+  chain_order_ok: boolean
+  redirect_chain: string
+  redirect_port: number
+  log_path: string
+  errors: string[]
+}
+
+export interface SecurityDecoyApplyResult {
+  available: boolean
+  verified: boolean
+  kind: string
+  request_id: string | null
+  generated_at: string | null
+  applied: Array<{ ip: string; hits: number; paths: number; lease_seconds: number }>
+  skipped: Array<{ ip: string; reason: string }>
+  hit_sources: number
+  chain_order_ok: boolean
+  errors: string[]
+}
+
+export function getDecoyStatus(): Promise<SecurityDecoyStatus> {
+  return get<SecurityDecoyStatus>('/admin/security-center/decoy')
+}
+
+export function applyDecoyRedirect(reason: string): Promise<SecurityDecoyApplyResult> {
+  return post<SecurityDecoyApplyResult>('/admin/security-center/decoy/apply', { reason })
+}
