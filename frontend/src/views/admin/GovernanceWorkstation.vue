@@ -472,7 +472,7 @@ async function onSaveToolPermission(): Promise<void> {
 }
 
 /**
- * Responses 工具审批必须通过原小菱会话续跑，不能由通用审批接口只改状态。
+ * Responses 工具审批不能由通用审批接口只改状态；仅来源已核验的请求允许返回原会话。
  */
 function isResponseSessionApproval(row: Pick<ApprovalItem, 'requires_session_resume'>): boolean {
   return row.requires_session_resume === true
@@ -959,7 +959,7 @@ onMounted(loadData)
             <div class="approval-row-actions">
               <el-button link type="primary" @click="openApprovalDetails(row)">查看详情</el-button>
               <template v-if="row.status === 'pending' && isResponseSessionApproval(row)">
-                <span class="approval-session-only">须回原小菱会话处理</span>
+                <span v-if="row.source_trace_status === 'verified'" class="approval-session-only">须在原小菱会话处理</span>
               </template>
               <template v-else-if="row.status === 'pending'">
                 <el-button link type="success" @click="onApprove(row)">通过</el-button>
@@ -984,11 +984,11 @@ onMounted(loadData)
             </div>
             <div v-if="selectedApproval.source_run_id"><dt>关联运行</dt><dd><code>{{ selectedApproval.source_run_id }}</code></dd></div>
           </dl>
-          <p v-if="selectedApproval.requires_session_resume" class="approval-detail-notice">
-            此请求绑定小菱会话；通用审批中心不能批准或驳回，必须回到同一账号的原会话继续处理。
+          <p v-if="selectedApproval.requires_session_resume && selectedApproval.source_trace_status === 'verified'" class="approval-detail-notice">
+            服务端已核验此请求与当前管理员账号下的小菱会话关联。通用审批中心不能批准或驳回，请从本页返回已核验的原会话继续处理。
           </p>
           <p v-if="selectedApproval.requires_session_resume && selectedApproval.source_trace_status !== 'verified'" class="approval-detail-warning" role="status">
-            服务端没有提供可验证的会话关联。为保护账号隔离，本页不会尝试打开任何会话；请先核对账号与操作记录。
+            当前记录没有可验证的有效运行检查点与来源会话关联，无法确认发起此请求的小菱会话。为避免跨账号跳转或误操作，本页不会尝试打开会话；请结合脱敏参数与审计记录核对。
           </p>
           <section class="approval-request-context" aria-label="已脱敏的审批请求参数">
             <h4>请求参数与预览（服务端已脱敏）</h4>

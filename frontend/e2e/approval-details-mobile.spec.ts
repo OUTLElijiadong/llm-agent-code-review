@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-async function mockUnverifiedApproval(page: Page) {
+async function mockApproval(page: Page, sourceTraceStatus: 'verified' | 'unavailable' = 'unavailable') {
   await page.addInitScript(() => {
     localStorage.setItem('review_token', 'approval-details-mobile')
     localStorage.setItem('prism-page-guide-dismissed:admin:user-7', '1')
@@ -22,7 +22,8 @@ async function mockUnverifiedApproval(page: Page) {
       risk_level: 'critical',
       status: 'pending',
       requires_session_resume: true,
-      source_trace_status: 'unavailable',
+      source_trace_status: sourceTraceStatus,
+      source_session_id: sourceTraceStatus === 'verified' ? 'verified-admin-session' : null,
       request_json: { arguments: { api_key: '[REDACTED]', capability: 'governance.llm.update' } },
     }]
     await route.fulfill({ json: { code: 0, message: 'ok', data } })
@@ -32,16 +33,19 @@ async function mockUnverifiedApproval(page: Page) {
 for (const width of [390, 320]) {
   test(`未核验审批详情在 ${width}px 视口内可读且不提供会话跳转`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
-    await mockUnverifiedApproval(page)
+    await mockApproval(page)
     await page.goto('/admin/governance?section=approvals&approvalType=execution')
 
     await expect(page.getByText('小菱请求（来源未核验）')).toBeVisible()
     await page.getByRole('button', { name: '查看详情' }).click()
     const dialog = page.getByRole('dialog', { name: '审批请求详情' })
     await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('没有提供可验证的会话关联')
+    await expect(dialog).toContainText('无法确认发起此请求的小菱会话')
     await expect(dialog).toContainText('[REDACTED]')
+    await expect(dialog).not.toContainText('此请求绑定小菱会话')
+    await expect(dialog).not.toContainText('必须回到同一账号的原会话')
     await expect(dialog.getByRole('button', { name: '返回发起会话' })).toHaveCount(0)
+    await expect(page.locator('.approval-session-only')).toHaveCount(0)
 
     const layout = await dialog.evaluate((element) => {
       const bounds = element.getBoundingClientRect()
@@ -63,3 +67,15 @@ for (const width of [390, 320]) {
     expect(layout.columns.trim().split(/\s+/)).toHaveLength(1)
   })
 }
+
+test('已核验来源明确说明关联账号并提供返回原会话入口', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApproval(page, 'verified')
+  await page.goto('/admin/governance?section=approvals&approvalType=execution')
+
+  await expect(page.locator('.approval-session-only')).toHaveText('须在原小菱会话处理')
+  await page.getByRole('button', { name: '查看详情' }).click()
+  const dialog = page.getByRole('dialog', { name: '审批请求详情' })
+  await expect(dialog).toContainText('服务端已核验此请求与当前管理员账号下的小菱会话关联')
+  await expect(dialog.getByRole('button', { name: '返回发起会话' })).toBeVisible()
+})

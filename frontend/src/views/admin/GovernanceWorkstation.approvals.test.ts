@@ -168,7 +168,7 @@ it('审批详情展示服务端脱敏参数，并只对已验证会话发出返�
   await wrapper.vm.$nextTick()
   expect(wrapper.get('.approval-dialog').text()).toContain('2026-10-06T01:02:03Z')
   expect(wrapper.get('.approval-dialog').text()).toContain('[REDACTED]')
-  expect(wrapper.get('.approval-dialog').text()).toContain('必须回到同一账号的原会话')
+  expect(wrapper.get('.approval-dialog').text()).toContain('服务端已核验此请求与当前管理员账号下的小菱会话关联')
 
   const opened: CustomEvent<{ sessionId: string }>[] = []
   const listener = (event: Event) => opened.push(event as CustomEvent<{ sessionId: string }>)
@@ -177,6 +177,37 @@ it('审批详情展示服务端脱敏参数，并只对已验证会话发出返�
   window.removeEventListener('prism:open-admin-copilot', listener)
   expect(opened).toHaveLength(1)
   expect(opened[0].detail).toEqual({ sessionId: 'admin-session-owned' })
+  wrapper.unmount()
+})
+
+it('来源未核验的历史审批明确显示无法确认会话，不暗示已绑定或要求返回原会话', async () => {
+  const row = {
+    id: 234,
+    title: '更新并应用全局 LLM 配置',
+    agent_code: 'manager',
+    action: 'responses.admin_execute_capability',
+    resource: 'response_run:cancelled-run',
+    risk_level: 'critical',
+    status: 'pending',
+    requires_session_resume: true,
+    source_trace_status: 'unavailable',
+    source_run_id: 'cancelled-run',
+    source_session_id: null,
+    source_tool_name: 'admin_execute_capability',
+    request_json: { arguments: { api_key: '[REDACTED]' } },
+  }
+  api.listApprovals.mockResolvedValueOnce([row])
+  const wrapper = render()
+  await flushPromises()
+  const vm = setupState<{ openApprovalDetails: (value: typeof row) => void }>(wrapper)
+
+  vm.openApprovalDetails(row)
+  await wrapper.vm.$nextTick()
+  const details = wrapper.get('.approval-dialog').text()
+  expect(details).toContain('无法确认发起此请求的小菱会话')
+  expect(details).not.toContain('此请求绑定小菱会话')
+  expect(details).not.toContain('必须回到同一账号的原会话')
+  expect(wrapper.findAll('.approval-dialog button').map((button) => button.text())).not.toContain('返回发起会话')
   wrapper.unmount()
 })
 
