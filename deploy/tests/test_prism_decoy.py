@@ -208,9 +208,12 @@ def test_decoy_install_creates_chain_before_drop_chain(decoy_env):
     assert parents == {"INPUT", "DOCKER-USER"}
     dnat = [cmd for cmd in host.commands if "DNAT" in cmd]
     assert dnat, "必须写出 DNAT 引流规则"
+    targets = set()
     for cmd in dnat:
         assert "--to-destination" in cmd
-        assert cmd[cmd.index("--to-destination") + 1] == "127.0.0.1:8443"
+        targets.add(cmd[cmd.index("--to-destination") + 1])
+    # 按地址族分别使用回环目标：IPv4 127.0.0.1，IPv6 [::1]（ip6tables 不接受 127.0.0.1）
+    assert targets == {"127.0.0.1:8443", "[::1]:8443"}, targets
 
 
 def test_decoy_install_only_targets_web_ports(decoy_env):
