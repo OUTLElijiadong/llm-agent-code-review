@@ -1,0 +1,13 @@
+......                                                                   [100%]
+6 passed in 0.78s
+RUN_ID=40cdb755600e4f4f9317b2b99e7a5a5b
+REDIS_VERSION=7.4.11
+REDIS_SERVER_SHA256=6c2239e0542b75b721594fab53a2dd7f931844f515b8c4808a056682eca78e18
+ISOLATION_ROOT_MODE=0o700
+REDIS_TCP_PORT=0
+REDIS_TLS_PORT=0
+REDIS_UNIX_SOCKET=/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-login-redis-0ceu4zix/redis.sock
+REDIS_SOCKET_MODE=0o700
+REDIS_PROCESS_EXIT_CODE=0
+REDIS_SOCKET_REMOVED=true
+TEMP_ROOT_REMOVED=True

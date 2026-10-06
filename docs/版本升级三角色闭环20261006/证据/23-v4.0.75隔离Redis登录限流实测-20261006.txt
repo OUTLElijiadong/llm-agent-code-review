@@ -1,0 +1,20 @@
+......                                                                   [100%]
+6 passed in 0.76s
+RUN_ID=346f10e819de494dbb536bc1c395f8d4
+REDIS_VERSION=7.4.11
+REDIS_SERVER_SHA256=6c2239e0542b75b721594fab53a2dd7f931844f515b8c4808a056682eca78e18
+ISOLATION_ROOT_MODE=0o700
+REDIS_TCP_PORT=0
+REDIS_TLS_PORT=0
+REDIS_UNIX_SOCKET=/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/prism-login-redis-iheertnm/redis.sock
+REDIS_SOCKET_MODE=0o700
+REDIS_PROCESS_EXIT_CODE=0
+REDIS_SOCKET_REMOVED=true
+TEMP_ROOT_REMOVED=True
+Traceback (most recent call last):
+  File "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/scripts/run_login_rate_limit_real_redis_tests.py", line 187, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/scripts/run_login_rate_limit_real_redis_tests.py", line 182, in main
+    raise RuntimeError("临时 Redis 目录清理失败")
+RuntimeError: 临时 Redis 目录清理失败
