@@ -1,0 +1,4 @@
+
+> code-review-platform@1.0.0 lint
+> eslint .
+
