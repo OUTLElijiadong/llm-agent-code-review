@@ -13,7 +13,7 @@
 - 完整后端：6,373 通过、6 跳过、6 warning，覆盖率 83%；6 个跳过项要求隔离 Redis 容器或 Unix socket。
 - 仓库根目录全量：6,510 通过、8 跳过、6 warning。其中 6 个跳过项需要隔离 Redis；另 2 个来自 opt-in Linux 内核验收测试，启用还需要 PRISM_KERNEL_TEST=1、Linux root 和 ip/ipset/iptables/python3。根测试日志未记录这 2 项具体满足了哪个跳过条件。
 - 黑盒/combined executor 定向 12 项通过；部署发布绑定 33 项和故障注入通过。
-- 前端源码未改；既有前端 1,850 项测试、ESLint 和 Vite 构建通过。
+- 本轮前端源码未改；既有前端 1,850 项测试、ESLint 通过。远端候选提交 SHA 4300a7d21958ed14d922d2028eec75fb1e6c91d3 的 Vite 生产构建成功，版本、完整 SHA 和构建时间已核验。
 - Ruff、runner shell 语法及 git diff 空白检查通过。
 
 ## 发布状态与边界
