@@ -88,7 +88,7 @@ def test_file_agent_compacts_every_long_source_chunk(monkeypatch):
     ]
 
 
-def test_file_agent_reports_oversized_source_as_failure(monkeypatch):
+def test_file_agent_compacts_source_over_32_chunks_without_losing_coverage(monkeypatch):
     content = "x" * 400_000
     monkeypatch.setattr(
         code_file_service, "get_file",
@@ -97,14 +97,30 @@ def test_file_agent_reports_oversized_source_as_failure(monkeypatch):
             content=content, line_count=1, is_binary=0,
         ),
     )
+    observed = {}
+
+    def compact(agent, source, *, ctx):
+        observed["chunks"] = source["source_chunks"]
+        return {
+            "covered_source_ids": [chunk["source_id"] for chunk in source["source_chunks"]],
+        }
+
+    monkeypatch.setattr(file_agent, "compact_source_context", compact)
     agent = CodeFileManagerAgent()
     agent.inject(object(), user=object())
 
     result = agent.get_file(785)
 
-    assert result.success is False
-    assert result.failure_kind == "source_coverage_incomplete"
-    assert "超过单轮压缩上限" in result.error
+    assert result.success is True
+    assert result.data["content_mode"] == "compacted"
+    assert result.data["content"] is None
+    assert result.data["source_sha256"] == hashlib.sha256(content.encode()).hexdigest()
+    chunks = observed["chunks"]
+    assert len(chunks) == 34
+    assert "".join(chunk["text"] for chunk in chunks) == content
+    assert result.data["content_context"]["covered_source_ids"] == [
+        chunk["source_id"] for chunk in chunks
+    ]
 
 
 def test_file_agent_does_not_claim_success_when_compaction_fails(monkeypatch):

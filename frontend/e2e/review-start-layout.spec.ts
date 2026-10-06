@@ -12,7 +12,7 @@ async function mockReviewStart(page: Page) {
     else if (pathname.endsWith('/permissions')) data = ['project:view', 'file:view', 'review:view', 'review:start']
     else if (pathname.endsWith('/menus')) data = []
     else if (pathname === '/api/projects') data = {
-      items: [{ id: 15, project_name: '手工作坊管理系统', status: 'active', file_count: 1 }],
+      items: [{ id: 15, project_name: '手工作坊管理系统', status: 'active', file_count: 1, can_execute: true }],
       total: 1, page: 1,
     }
     else if (pathname === '/api/code-files') data = {

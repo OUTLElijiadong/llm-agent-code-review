@@ -33,7 +33,10 @@ async function mockSession(page: Page, canHandle = false, canCancelReview = fals
     ]
     else if (pathname.endsWith('/menus')) data = []
     else if (pathname === '/api/projects') data = { items: projects, total: projects.length }
-    else if (pathname === '/api/issues') data = { items: issues, total: issues.length }
+    else if (pathname === '/api/issues') data = {
+      items: issues.map((issue) => ({ ...issue, can_handle: canHandle })),
+      total: issues.length,
+    }
     else if (pathname === '/api/review/tasks') data = { items: reviewTasks, total: reviewTasks.length }
     await route.fulfill({ json: { code: 0, message: 'ok', data } })
   })
