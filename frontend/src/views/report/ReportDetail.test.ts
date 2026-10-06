@@ -295,20 +295,28 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
-  it('风险文案和颜色按最终分数计算，不受动画中间值影响', async () => {
+  it('首次分数落地且后续风险文案和颜色不受动画中间值影响', async () => {
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
-    reportApi.getReportDetail.mockResolvedValueOnce({
+    const result = (score: number) => ({
       project: { project_name: '测试项目', language: 'typescript' },
       task: { name: '风险口径验证', review_type: 'security', total_files: 1 },
-      stats: { score: 60, total_issues: 0 },
+      stats: { score, total_issues: 0 },
       files: [],
       rules_snapshot: [],
     })
+    reportApi.getReportDetail.mockReset()
+      .mockResolvedValueOnce(result(80))
+      .mockResolvedValueOnce(result(60))
     const wrapper = mountPage()
     await flushPromises()
 
+    expect(setupState(wrapper).animatedScore).toBe(80)
+    await setupState(wrapper).loadReport()
+    await flushPromises()
+
     const risk = wrapper.find('[data-testid="report-risk-level"]')
-    expect(setupState(wrapper).animatedScore).toBe(0)
+    expect(setupState(wrapper).score).toBe(60)
+    expect(setupState(wrapper).animatedScore).toBe(80)
     expect(risk.text()).toBe('中风险')
     expect(risk.attributes('style')).toContain('rgb(217, 168, 87)')
     wrapper.unmount()

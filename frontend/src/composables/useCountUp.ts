@@ -1,6 +1,6 @@
 /**
  * useCountUp · 数字滚动 composable
- * 数字变化时从旧值平滑滚动到新值(cubic-out 缓动),
+ * 首次异步加载直接显示最终值，后续变化从旧值平滑滚动到新值(cubic-out 缓动),
  * prefers-reduced-motion 时直接落地不滚动。
  */
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
@@ -11,6 +11,7 @@ export function useCountUp(
 ): Ref<number> {
   const display = ref(source.value)
   let rafId: number | null = null
+  let hasReceivedFirstUpdate = false
 
   const reduceMotion = (): boolean =>
     typeof window !== 'undefined' &&
@@ -24,6 +25,11 @@ export function useCountUp(
 
   watch(source, (to, from) => {
     cancelPendingFrame()
+    if (!hasReceivedFirstUpdate) {
+      hasReceivedFirstUpdate = true
+      display.value = to
+      return
+    }
     if (reduceMotion() || !Number.isFinite(to) || !Number.isFinite(from)) {
       display.value = to
       return
