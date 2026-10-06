@@ -477,7 +477,8 @@ def _require_sandbox_execution(db: Session, actor: User, project_id: int) -> Non
     for permission in (PermissionCode.PROJECT_VIEW, PermissionCode.FILE_VIEW):
         if not rbac_service.check_permission(db, actor.id, permission):
             raise PermissionError(
-                f"无操作权限: 需要 {permission}", detail={"required_permission": permission},
+                f"无操作权限: 需要 {permission}",
+                detail={"required_permission": permission},
             )
 
 
@@ -489,9 +490,13 @@ def _require_execution_authorization(db: Session, environment_id: int) -> None:
     bind = db.get_bind()
     factory = sessionmaker(bind=getattr(bind, "engine", bind), expire_on_commit=False)
     with factory() as auth_db:
-        scope = auth_db.query(SandboxEnvironment.project_id, SandboxEnvironment.owner_id).filter(
-            SandboxEnvironment.id == environment_id,
-        ).one_or_none()
+        scope = (
+            auth_db.query(SandboxEnvironment.project_id, SandboxEnvironment.owner_id)
+            .filter(
+                SandboxEnvironment.id == environment_id,
+            )
+            .one_or_none()
+        )
         actor = auth_db.get(User, scope.owner_id) if scope is not None else None
         if actor is None:
             raise ForbiddenError("沙箱执行账号或环境已失效", code=40300)
@@ -1172,8 +1177,12 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
 
     def incomplete(reason: str) -> dict[str, Any]:
         return {
-            "language": language, "files": [], "entries": [], "source_chunks": [],
-            "coverage_complete": False, "coverage_error": reason,
+            "language": language,
+            "files": [],
+            "entries": [],
+            "source_chunks": [],
+            "coverage_complete": False,
+            "coverage_error": reason,
         }
 
     try:
@@ -1189,9 +1198,28 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
     source_binary_file_count = 0
     source_text_bytes = 0
     binary_suffixes = (
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip",
-        ".jar", ".class", ".pyc", ".so", ".dylib", ".exe", ".woff",
-        ".woff2", ".ttf", ".otf", ".mp3", ".mp4", ".sqlite", ".db",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".ico",
+        ".pdf",
+        ".zip",
+        ".jar",
+        ".class",
+        ".pyc",
+        ".so",
+        ".dylib",
+        ".exe",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".otf",
+        ".mp3",
+        ".mp4",
+        ".sqlite",
+        ".db",
     )
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
@@ -1223,12 +1251,16 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
                     break
                 digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
                 source_id = f"manifest-{part_number:03d}-{digest[:12]}"
-                chunks.append({
-                    "source_id": source_id, "path": "<archive-manifest>",
-                    "text": text, "sha256": digest,
-                })
+                chunks.append(
+                    {
+                        "source_id": source_id,
+                        "path": "<archive-manifest>",
+                        "text": text,
+                        "sha256": digest,
+                    }
+                )
             if len(chunks) > MAX_SOURCE_CHUNKS:
-                coverage_error = f"文件清单超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+                coverage_error = f"文件清单超过资源保护上限 {MAX_SOURCE_CHUNKS} 个完整源码分片"
             packed_files: list[dict[str, str]] = []
 
             def flush_packed_files() -> None:
@@ -1236,10 +1268,14 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
                     return
                 text = json.dumps(packed_files, ensure_ascii=False, separators=(",", ":"))
                 digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-                chunks.append({
-                    "source_id": f"files-{len(chunks) + 1:03d}-{digest[:12]}",
-                    "path": "<multiple-files>", "text": text, "sha256": digest,
-                })
+                chunks.append(
+                    {
+                        "source_id": f"files-{len(chunks) + 1:03d}-{digest[:12]}",
+                        "path": "<multiple-files>",
+                        "text": text,
+                        "sha256": digest,
+                    }
+                )
                 packed_files.clear()
 
             for info in zf.infolist():
@@ -1276,20 +1312,25 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
                     if len(json.dumps([record], ensure_ascii=False)) <= 5_000:
                         packed_files.append(record)
                         if len(chunks) > MAX_SOURCE_CHUNKS:
-                            coverage_error = f"源码超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+                            coverage_error = f"源码超过资源保护上限 {MAX_SOURCE_CHUNKS} 个完整源码分片"
                             break
                         continue
                 flush_packed_files()
                 for offset in range(0, len(decoded), 5_000):
-                    text = decoded[offset:offset + 5_000]
+                    text = decoded[offset : offset + 5_000]
                     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
                     source_id = f"file-{len(chunks) + 1:03d}-{digest[:12]}"
-                    chunks.append({
-                        "source_id": source_id, "path": name, "offset": offset,
-                        "text": text, "sha256": digest,
-                    })
+                    chunks.append(
+                        {
+                            "source_id": source_id,
+                            "path": name,
+                            "offset": offset,
+                            "text": text,
+                            "sha256": digest,
+                        }
+                    )
                     if len(chunks) > MAX_SOURCE_CHUNKS:
-                        coverage_error = f"源码超过 {MAX_SOURCE_CHUNKS} 个完整分片的单轮压缩上限"
+                        coverage_error = f"源码超过资源保护上限 {MAX_SOURCE_CHUNKS} 个完整源码分片"
                         break
                 if coverage_error:
                     break
@@ -1846,7 +1887,11 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 (
                     value
                     if kind in {"literal", "raw"}
-                    else "__PORT__" if kind == "port" else "__ENCODED__" if kind == "encoded" else "__UNKNOWN__"
+                    else "__PORT__"
+                    if kind == "port"
+                    else "__ENCODED__"
+                    if kind == "encoded"
+                    else "__UNKNOWN__"
                 )
                 for kind, value in segments
             )
@@ -1904,6 +1949,8 @@ def _generate_agent_test_cases(
     source_archive_base64: str,
     language: str,
     test_mode: str,
+    *,
+    deadline: float | None = None,
 ) -> list[dict[str, str]] | None:
     """测试执行前调用 LLM 生成白盒/黑盒自包含断言测试文件。
 
@@ -1935,7 +1982,10 @@ def _generate_agent_test_cases(
         summary = _source_summary_for_agent_tests(source_archive_base64, language)
         if not summary.get("coverage_complete"):
             _append_event(
-                db, environment, "progress", "agent_tests",
+                db,
+                environment,
+                "progress",
+                "agent_tests",
                 f"动态测试未执行：源码上下文不完整 ({str(summary.get('coverage_error') or '未知原因')[:140]})",
                 {"source_file_count": summary.get("source_file_count")},
             )
@@ -1952,12 +2002,12 @@ def _generate_agent_test_cases(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id,
-                   "before_model_call": _execution_model_guard(db, environment)},
+            extra={"trace_id": environment.public_id, "before_model_call": _execution_model_guard(db, environment)},
         )
-        generation_deadline = time.monotonic() + int(
+        configured_deadline = time.monotonic() + int(
             getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
         )
+        generation_deadline = min(deadline, configured_deadline) if deadline is not None else configured_deadline
         _append_event(
             db,
             environment,
@@ -2055,6 +2105,8 @@ def _generate_deployment_patch(
     environment: "SandboxEnvironment",
     source_archive_base64: str,
     language: str,
+    *,
+    deadline: float | None = None,
 ) -> dict[str, str] | None:
     """完整部署核验:LLM 判断入口/依赖是否完整,生成受控补全启动脚本。
 
@@ -2072,8 +2124,7 @@ def _generate_deployment_patch(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id,
-                   "before_model_call": _execution_model_guard(db, environment)},
+            extra={"trace_id": environment.public_id, "before_model_call": _execution_model_guard(db, environment)},
         )
         db_type = str(
             (_loads(getattr(environment, "agent_config_json", None) or "{}", {}) or {}).get("db_type") or "none"
@@ -2084,11 +2135,15 @@ def _generate_deployment_patch(
             source_summary=summary,
             db_type=db_type,
             ctx=ctx,
+            deadline=deadline,
         )
         ctx.extra["before_model_call"]()
         if not isinstance(result, dict) or result.get("error"):
             _append_event(
-                db, environment, "progress", "deploy_verify",
+                db,
+                environment,
+                "progress",
+                "deploy_verify",
                 f"部署核验未形成完整计划: {str(result.get('error') if isinstance(result, dict) else '结果格式无效')[:160]}",
             )
             db.commit()
@@ -2212,9 +2267,7 @@ def _extract_agent_tests_result(log_text: str) -> dict[str, Any] | None:
             continue
         raw_file_results = record.get("file_results")
         raw_file_results = (
-            raw_file_results
-            if record_protocol_version == 2 and isinstance(raw_file_results, dict)
-            else {}
+            raw_file_results if record_protocol_version == 2 and isinstance(raw_file_results, dict) else {}
         )
         for file_name, status in record_files.items():
             normalized = str(status or "").strip().lower()
@@ -2373,10 +2426,7 @@ def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
         input_artifact_sha256s = [str(item) for item in raw_input_artifact_sha256s]
         if any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in input_artifact_sha256s):
             return None
-    if status == "succeeded" and (
-        not input_sha256
-        or len(input_artifact_sha256s) != candidate_count
-    ):
+    if status == "succeeded" and (not input_sha256 or len(input_artifact_sha256s) != candidate_count):
         return None
     try:
         output_size_bytes = int(result.get("output_size_bytes") or 0)
@@ -2440,9 +2490,7 @@ def _reconcile_agent_tests_result(
     missing = sorted(expected_files - actual_files)
     unexpected = sorted(actual_files - expected_files)
     details = dict(reconciled.get("details") or {}) if isinstance(reconciled.get("details"), dict) else {}
-    raw_file_results = (
-        reconciled.get("file_results") if isinstance(reconciled.get("file_results"), dict) else {}
-    )
+    raw_file_results = reconciled.get("file_results") if isinstance(reconciled.get("file_results"), dict) else {}
     raw_protocol_version = reconciled.get("protocol_version")
     protocol_version = raw_protocol_version if type(raw_protocol_version) is int else 0
     file_results: dict[str, dict[str, Any]] = {}
@@ -2560,9 +2608,7 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         if decompilation.get("input_sha256"):
             details.append(f"输入清单 SHA-256：`{decompilation['input_sha256']}`")
         if decompilation.get("input_artifact_sha256s"):
-            artifacts = "、".join(
-                f"`{digest}`" for digest in decompilation["input_artifact_sha256s"]
-            )
+            artifacts = "、".join(f"`{digest}`" for digest in decompilation["input_artifact_sha256s"])
             details.append(f"原始制品 SHA-256：{artifacts}")
         if decompilation.get("output_sha256"):
             details.append(f"派生源码 SHA-256：`{decompilation['output_sha256']}`")
@@ -2623,8 +2669,7 @@ def _run_test_review_report(
             ctx = AgentContext(
                 user_id=environment.owner_id,
                 project_id=environment.project_id,
-                extra={"trace_id": environment.public_id,
-                   "before_model_call": _execution_model_guard(db, environment)},
+                extra={"trace_id": environment.public_id, "before_model_call": _execution_model_guard(db, environment)},
             )
             result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
             ctx.extra["before_model_call"]()
@@ -2991,6 +3036,31 @@ def list_workers(db: Session) -> list[dict[str, Any]]:
     return [worker_to_dict(row) for row in rows]
 
 
+def _worker_http_error(response: httpx.Response, path: str) -> RuntimeError:
+    """Return a bounded, redacted worker error suitable for persisted task diagnostics."""
+    detail = ""
+    try:
+        body = response.json()
+    except (ValueError, UnicodeDecodeError):
+        body = None
+    if isinstance(body, dict):
+        for key in ("error", "detail", "message", "code"):
+            value = body.get(key)
+            if isinstance(value, str) and value.strip():
+                detail = value.strip()
+                break
+    if detail:
+        try:
+            from app.services.agent_responses_service import redact_agent_output_text
+
+            detail = redact_agent_output_text(detail)
+        except Exception:  # noqa: BLE001 - diagnostics must not mask the HTTP failure
+            detail = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/-]{8,}", r"\1[REDACTED]", detail)
+        detail = " ".join(detail.split())[:240]
+    suffix = f": {detail}" if detail else ""
+    return RuntimeError(f"Sandbox worker {path} 返回 HTTP {response.status_code}{suffix}")
+
+
 def _call_worker(
     worker: SandboxWorker,
     method: str,
@@ -3014,7 +3084,8 @@ def _call_worker(
                 json=payload,
                 extensions=target.request_extensions,
             )
-    response.raise_for_status()
+    if response.is_error:
+        raise _worker_http_error(response, path)
     body = response.json()
     if not isinstance(body, dict):
         raise RuntimeError("Sandbox worker 响应不是对象")
@@ -3034,8 +3105,20 @@ def _stop_worker_requests(
             response = _call_worker(worker, "POST", "/stop", {"request_id": request_id})
             state = response.get("result") if isinstance(response.get("result"), dict) else response
             status = str(state.get("status") or "")
+            response_id = state.get("request_id")
+            if response_id != request_id:
+                errors.append(f"{request_id}=request_id_mismatch")
+                continue
             if status not in TERMINAL_STATES:
                 errors.append(f"{request_id}={status or 'unknown'}")
+                continue
+            result = state.get("result")
+            if (
+                not isinstance(result, dict)
+                or result.get("cleanup_confirmed") is not True
+                or result.get("cleanup_error")
+            ):
+                errors.append(f"{request_id}=cleanup_unconfirmed")
                 continue
             states[request_id] = state
         except Exception as exc:  # noqa: BLE001 - continue reclaiming sibling requests
@@ -3879,8 +3962,12 @@ def _create_environment_locked(
                 "source_revision_id": int(source_revision_id) if source_revision_id else None,
                 "remote_target_approval_id": remote_target_approval_id,
                 "source_revision_no": source_revision_snapshot["revision_no"] if source_revision_snapshot else None,
-                "source_revision_sha256": source_revision_snapshot["source_sha256"] if source_revision_snapshot else None,
-                "source_revision_parent_sha256": source_revision_snapshot["parent_sha256"] if source_revision_snapshot else None,
+                "source_revision_sha256": source_revision_snapshot["source_sha256"]
+                if source_revision_snapshot
+                else None,
+                "source_revision_parent_sha256": source_revision_snapshot["parent_sha256"]
+                if source_revision_snapshot
+                else None,
                 "syntax_repair_revisions": [],
                 "source_archive_filename": worker_archive_filename,
                 "original_source_sha256": original_source_sha256,
@@ -3901,7 +3988,9 @@ def _create_environment_locked(
             }
         ),
         remote_target_url=remote_url or None,
-        remote_target_authorized_at=_utcnow() if remote_url and (remote_target_approval_id or payload.get("remote_target_authorized")) else None,
+        remote_target_authorized_at=_utcnow()
+        if remote_url and (remote_target_approval_id or payload.get("remote_target_authorized"))
+        else None,
         expires_at=_utcnow() + timedelta(hours=ttl_hours),
     )
     db.add(environment)
@@ -4098,8 +4187,7 @@ def _syntax_repair_round(
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
-            extra={"trace_id": environment.public_id,
-                   "before_model_call": _execution_model_guard(db, environment)},
+            extra={"trace_id": environment.public_id, "before_model_call": _execution_model_guard(db, environment)},
         )
         result = agent.repair(
             language=environment.language,
@@ -4144,9 +4232,8 @@ def _syntax_repair_round(
             repaired_bytes = base64.b64decode(new_source, validate=True)
             revision_archive = project_source_revision_service._strip_internal_members(repaired_bytes)
             revision_sha256 = hashlib.sha256(revision_archive).hexdigest()
-            if (
-                not hmac.compare_digest(revision_sha256, str(saved.source_sha256 or ""))
-                or not hmac.compare_digest(hashlib.sha256(bytes(saved.archive_blob)).hexdigest(), revision_sha256)
+            if not hmac.compare_digest(revision_sha256, str(saved.source_sha256 or "")) or not hmac.compare_digest(
+                hashlib.sha256(bytes(saved.archive_blob)).hexdigest(), revision_sha256
             ):
                 raise RuntimeError("修复副本与待重跑源码内容不一致")
             execution_sha256 = hashlib.sha256(repaired_bytes).hexdigest()
@@ -4199,18 +4286,24 @@ def _syntax_repair_round(
 
 
 def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
-    """长任务心跳与卡死回收：由后台调度器周期调用。
-
-    心跳只追加 sandbox_event，不刷新 environment.update_time，因此真实执行线程
-    一旦死亡，update_time 不再前进，watchdog 才能准确判定卡死并回收。
-    """
-    active = (
+    """长任务心跳与卡死回收：只有 Worker 确认终止后才将任务置为终态。"""
+    active = db.query(SandboxEnvironment).filter(SandboxEnvironment.status.in_(ACTIVE_STATES)).all()
+    # Previous watchdog releases could write ``failed`` before Worker confirmed
+    # cleanup. Retry only those legacy rows that explicitly retained the failed
+    # cleanup receipt; unrelated failed jobs remain terminal and untouched.
+    legacy_cleanup_pending = (
         db.query(SandboxEnvironment)
-        .filter(SandboxEnvironment.status.in_(ACTIVE_STATES))
+        .filter(
+            SandboxEnvironment.status == "failed",
+            SandboxEnvironment.result_json.like("%cleanup_error%"),
+        )
         .all()
     )
+    environments_by_id = {environment.id: environment for environment in (*active, *legacy_cleanup_pending)}
+    active = list(environments_by_id.values())
     heartbeat_count = 0
     recovered_count = 0
+    cleanup_pending_count = 0
     now = _utcnow()
     for environment in active:
         last_event = (
@@ -4220,10 +4313,7 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
             .first()
         )
         last_at = last_event[0] if last_event else environment.create_time
-        if last_at is not None:
-            elapsed = max(0, int((now - last_at).total_seconds()))
-        else:
-            elapsed = 0
+        elapsed = max(0, int((now - last_at).total_seconds())) if last_at else 0
         if elapsed >= int(settings.sandbox_heartbeat_seconds):
             _append_event(
                 db,
@@ -4236,58 +4326,87 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
             heartbeat_count += 1
             observe_event("sandbox_heartbeat", labels={"status": environment.status})
         started = environment.started_at or environment.create_time
-        if started is not None and (now - started).total_seconds() >= int(
-            settings.sandbox_stuck_after_seconds
-        ):
-            try:
-                worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
-                if worker is not None:
-                    _stop_registered_worker_requests(worker, environment)
-            except Exception:  # noqa: BLE001 - 回收失败不阻断其余环境
-                pass
-            environment.status = "failed"
-            environment.error = "沙箱心跳超时，已自动判定卡死并回收"
-            environment.stopped_at = now
-            stuck_reason = "沙箱心跳超时，已自动判定卡死并回收"
-            project = db.get(Project, environment.project_id)
-            project_label = (
-                f"{project.project_name}#{environment.project_id}"
-                if project is not None
-                else f"project#{environment.project_id}"
-            )
-            db.add(
-                AgentAlert(
-                    alert_type="sandbox_stuck",
-                    category="sandbox_stuck",
-                    source="sandbox_watchdog",
-                    severity="high",
-                    title=(
-                        f"沙箱 {environment.public_id} 卡死已回收（项目 {project_label}）：{stuck_reason}"
-                    )[:200],
-                    detail_json=_json(
-                        {
-                            "public_id": environment.public_id,
-                            "project_id": environment.project_id,
-                            "project_name": project.project_name if project is not None else None,
-                            "reason": stuck_reason,
-                            "elapsed_seconds": int((now - started).total_seconds()),
-                        }
-                    ),
-                    user_id=environment.owner_id,
-                    fingerprint=environment.public_id,
-                )
-            )
+        if started is None or (now - started).total_seconds() < int(settings.sandbox_stuck_after_seconds):
+            continue
+
+        project = db.get(Project, environment.project_id)
+        project_name = project.project_name if project is not None else None
+        project_label = (
+            f"{project_name}#{environment.project_id}" if project_name else f"project#{environment.project_id}"
+        )
+        cleanup_error = None
+        try:
+            worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
+            if worker is None:
+                raise RuntimeError("沙箱关联的 Worker 不存在，无法确认资源终止")
+            _stop_registered_worker_requests(worker, environment)
+        except Exception as exc:  # noqa: BLE001 - preserve retryable state and continue other sandboxes
+            cleanup_error = " ".join(str(exc).split())[:300] or type(exc).__name__
+
+        elapsed_seconds = int((now - started).total_seconds())
+        if cleanup_error:
+            environment.status = "stopping"
+            environment.error = "沙箱心跳超时，Worker 未确认资源终止，等待回收重试"
+            environment.stopped_at = None
+            title = f"沙箱 {environment.public_id} 资源回收待重试（项目 {project_label}）"
+            reason = "Worker 未确认资源终止；任务保留 stopping 并由后续 watchdog 周期重试"
             _append_event(
                 db,
                 environment,
-                "failed",
-                "watchdog",
-                "沙箱心跳超时，已自动判定卡死并回收",
+                "progress",
+                "cleanup",
+                "Worker 未确认沙箱资源终止，保留 stopping 并等待重试",
+                {"cleanup_error": cleanup_error, "elapsed_seconds": elapsed_seconds},
             )
+            cleanup_pending_count += 1
+        else:
+            environment.status = "failed"
+            environment.error = "沙箱心跳超时，Worker 已确认资源终止"
+            environment.stopped_at = now
+            prior_result = _loads(environment.result_json, {})
+            if isinstance(prior_result, dict) and prior_result.get("cleanup_error"):
+                prior_result.pop("cleanup_error", None)
+                prior_result["cleanup_confirmed"] = True
+                environment.result_json = _json(prior_result)
+            title = f"沙箱 {environment.public_id} 心跳超时，Worker 已确认回收（项目 {project_label}）"
+            reason = "沙箱心跳超时，Worker 已确认全部请求资源终止"
+            _append_event(db, environment, "failed", "watchdog", reason)
             recovered_count += 1
             observe_event("sandbox_stuck_recovered", labels={"status": environment.status})
+
+        alert = (
+            db.query(AgentAlert)
+            .filter_by(alert_type="sandbox_stuck", fingerprint=environment.public_id, status="open")
+            .order_by(AgentAlert.id.desc())
+            .first()
+        )
+        alert_detail = {
+            "public_id": environment.public_id,
+            "project_id": environment.project_id,
+            "project_name": project_name,
+            "reason": reason,
+            "elapsed_seconds": elapsed_seconds,
+            "cleanup_confirmed": cleanup_error is None,
+            "cleanup_error": cleanup_error,
+        }
+        if alert is None:
+            alert = AgentAlert(
+                alert_type="sandbox_stuck",
+                category="sandbox_stuck",
+                source="sandbox_watchdog",
+                severity="high",
+                user_id=environment.owner_id,
+                fingerprint=environment.public_id,
+            )
+            db.add(alert)
+        alert.title = title[:200]
+        alert.detail_json = _json(alert_detail)
     db.commit()
-    return {"heartbeat": heartbeat_count, "recovered": recovered_count}
+    return {
+        "heartbeat": heartbeat_count,
+        "recovered": recovered_count,
+        "cleanup_pending": cleanup_pending_count,
+    }
 
 
 def _execute_environment(
@@ -4364,12 +4483,17 @@ def _execute_environment(
             repair_round = int(getattr(environment, "execution_round", 0) or 0)
             expected_agent_tests = _agent_test_paths(effective_source)
         elif worker and environment.purpose == "test":
+            # 压缩、部署规划与动态用例共享一个时间预算，禁止各阶段分别重置超时。
+            agent_context_deadline = time.monotonic() + int(
+                getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
+            )
             # 1) 完整部署核验:LLM 判断入口/依赖,生成补全启动脚本 _prism_launch.sh
             deploy_patch = _generate_deployment_patch(
                 db,
                 environment,
                 source_archive_base64,
                 environment.language,
+                deadline=agent_context_deadline,
             )
             if deploy_patch and deploy_patch.get("launch_script"):
                 effective_source = _inject_deployment_patch(effective_source, deploy_patch["launch_script"])
@@ -4380,6 +4504,7 @@ def _execute_environment(
                 effective_source,
                 environment.language,
                 worker_mode,
+                deadline=agent_context_deadline,
             )
             if agent_test_files:
                 expected_agent_tests = {
@@ -4584,9 +4709,7 @@ def _execute_environment(
                                 "purpose": environment.purpose,
                                 "language": environment.language,
                                 "test_mode": (
-                                    worker_mode
-                                    if worker_mode in {"whitebox", "blackbox", "combined"}
-                                    else "whitebox"
+                                    worker_mode if worker_mode in {"whitebox", "blackbox", "combined"} else "whitebox"
                                 ),
                                 "db_type": sandbox_db_type,
                                 "source_sha256": effective_sha,
@@ -4736,7 +4859,9 @@ def _execute_environment(
                     environment,
                     "complete" if decompilation_result.get("status") == "succeeded" else "failed",
                     "decompilation",
-                    "Android 制品反编译完成" if decompilation_result.get("status") == "succeeded" else "Android 制品反编译失败",
+                    "Android 制品反编译完成"
+                    if decompilation_result.get("status") == "succeeded"
+                    else "Android 制品反编译失败",
                     decompilation_result,
                 )
                 _commit_execution(db, environment_id, execution_token)

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.models.agent_capability import SandboxEnvironment, SandboxEvent
+from app.models.agent_capability import SandboxEnvironment, SandboxEvent, SandboxWorker
 from app.models.agent_governance import AgentAlert
 from app.models.project import Project
 from app.models.user import User
@@ -54,8 +54,13 @@ def _cache_environment(db) -> SandboxEnvironment:
         agent_code="test_verifier",
         source_sha256="legacy-field-value",
         agent_config_json='{"db_type":"none"}',
-        execution_token="cache-local-lease", purpose="test", language="python", test_mode="whitebox",
-        runtime="runsc", image_ref="unused", resource_policy_json="{}",
+        execution_token="cache-local-lease",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        runtime="runsc",
+        image_ref="unused",
+        resource_policy_json="{}",
         expires_at=datetime.utcnow() + timedelta(hours=1),
     )
     db.add(environment)
@@ -174,11 +179,27 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
     )
     db.add(project)
     db.flush()
+    worker = SandboxWorker(
+        code="watchdog-worker",
+        name="watchdog worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/tmp/watchdog.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=10,
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.flush()
     environment = SandboxEnvironment(
         public_id="sbx_stuck_1",
         project_id=project.id,
         owner_id=42,
-        worker_id=None,
+        worker_id=worker.id,
         agent_code="sandbox_deployer",
         purpose="test",
         language="python",
@@ -196,6 +217,11 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
     )
     db.add(environment)
     db.commit()
+    monkeypatch.setattr(
+        sandbox_service,
+        "_stop_registered_worker_requests",
+        lambda _worker, _environment: {"sbx_stuck_1": {"request_id": "sbx_stuck_1", "status": "stopped"}},
+    )
 
     result = heartbeat_and_recover_sandboxes(db)
 
@@ -231,3 +257,278 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
         .one()
     )
     assert failed_event.stage == "watchdog"
+
+
+def test_heartbeat_recovery_keeps_environment_stopping_when_worker_cleanup_fails(db, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox_service.settings, "sandbox_stuck_after_seconds", 1)
+    now = datetime.utcnow()
+    project = Project(user_id=1, project_name="回收失败项目", description="", language="python", status="active")
+    db.add(project)
+    db.flush()
+    worker = SandboxWorker(
+        code="watchdog-failing-worker",
+        name="watchdog failing worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/tmp/watchdog-failing.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=10,
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_stuck_cleanup_failure",
+        project_id=project.id,
+        owner_id=42,
+        worker_id=worker.id,
+        agent_code="sandbox_deployer",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="stopping",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.11",
+        source_sha256="b" * 64,
+        resource_policy_json="{}",
+        agent_config_json='{"active_worker_request_id":"sbx_stuck_cleanup_failure"}',
+        execution_token="lease",
+        expires_at=now + timedelta(hours=1),
+        started_at=now - timedelta(seconds=1200),
+        create_time=now - timedelta(seconds=1200),
+        update_time=now - timedelta(seconds=1200),
+    )
+    db.add(environment)
+    db.commit()
+    calls = []
+
+    def fail_cleanup(_worker, _environment):
+        calls.append(_environment.public_id)
+        raise RuntimeError("worker returned 404")
+
+    monkeypatch.setattr(sandbox_service, "_stop_registered_worker_requests", fail_cleanup)
+
+    first = heartbeat_and_recover_sandboxes(db)
+    second = heartbeat_and_recover_sandboxes(db)
+
+    assert first["recovered"] == 0
+    assert first["cleanup_pending"] == 1
+    assert second["recovered"] == 0
+    assert second["cleanup_pending"] == 1
+    assert calls == [environment.public_id, environment.public_id]
+    assert environment.status == "stopping"
+    assert environment.stopped_at is None
+    assert "未确认" in (environment.error or "")
+    assert db.query(SandboxEvent).filter_by(environment_id=environment.id, event_type="failed").count() == 0
+    alert = db.query(AgentAlert).filter_by(fingerprint=environment.public_id).one()
+    assert "待重试" in alert.title
+    assert "404" in alert.detail_json
+
+
+def test_worker_http_error_keeps_bounded_redacted_json_detail() -> None:
+    import httpx
+
+    response = httpx.Response(
+        400,
+        json={
+            "ok": False,
+            "error": "invalid source archive; api_key=sk-test-secret Authorization: Bearer abcdefghijklmnop",
+        },
+    )
+
+    error = sandbox_service._worker_http_error(response, "/execute")
+
+    assert "HTTP 400" in str(error)
+    assert "invalid source archive" in str(error)
+    assert "sk-test-secret" not in str(error)
+    assert "abcdefghijklmnop" not in str(error)
+    assert len(str(error)) < 400
+
+
+def test_worker_http_error_omits_non_json_response_body() -> None:
+    import httpx
+
+    response = httpx.Response(404, text="proxy route does not exist; bearer abcdefghijklmnop")
+
+    error = sandbox_service._worker_http_error(response, "/stop")
+
+    assert str(error) == "Sandbox worker /stop 返回 HTTP 404"
+
+
+def test_worker_stop_requires_matching_request_id_and_terminal_status(monkeypatch) -> None:
+    worker = object()
+    request_id = "sbx_request_12345678"
+    monkeypatch.setattr(
+        sandbox_service,
+        "_call_worker",
+        lambda *_args, **_kwargs: {
+            "result": {
+                "request_id": "sbx_other_12345678",
+                "status": "stopped",
+                "result": {"cleanup_confirmed": True},
+            }
+        },
+    )
+    with pytest.raises(RuntimeError, match="request_id_mismatch"):
+        sandbox_service._stop_worker_requests(worker, [request_id])
+
+    monkeypatch.setattr(
+        sandbox_service,
+        "_call_worker",
+        lambda *_args, **_kwargs: {
+            "result": {
+                "request_id": request_id,
+                "status": "stopped",
+                "result": {"cleanup_confirmed": True},
+            }
+        },
+    )
+    assert sandbox_service._stop_worker_requests(worker, [request_id])[request_id]["status"] == "stopped"
+
+    monkeypatch.setattr(
+        sandbox_service,
+        "_call_worker",
+        lambda *_args, **_kwargs: {
+            "result": {
+                "request_id": request_id,
+                "status": "failed",
+                "result": {"cleanup_error": "Docker daemon unavailable"},
+            }
+        },
+    )
+    with pytest.raises(RuntimeError, match="cleanup_unconfirmed"):
+        sandbox_service._stop_worker_requests(worker, [request_id])
+
+
+def test_watchdog_retries_legacy_failed_row_that_lacks_worker_cleanup_receipt(db, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox_service.settings, "sandbox_stuck_after_seconds", 1)
+    now = datetime.utcnow()
+    project = Project(user_id=1, project_name="旧回收状态", description="", language="python", status="active")
+    db.add(project)
+    db.flush()
+    worker = SandboxWorker(
+        code="legacy-cleanup-worker",
+        name="legacy cleanup worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/tmp/legacy-cleanup.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=10,
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_legacy_cleanup_pending",
+        project_id=project.id,
+        owner_id=42,
+        worker_id=worker.id,
+        agent_code="sandbox_deployer",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="failed",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.11",
+        source_sha256="c" * 64,
+        resource_policy_json="{}",
+        agent_config_json='{"active_worker_request_id":"sbx_legacy_cleanup_pending"}',
+        execution_token="lease",
+        expires_at=now + timedelta(hours=1),
+        started_at=now - timedelta(seconds=1200),
+        stopped_at=now - timedelta(seconds=60),
+        result_json='{"cleanup_error":"HTTP 404"}',
+        error="沙箱心跳超时，已自动判定卡死并回收",
+        create_time=now - timedelta(seconds=1200),
+        update_time=now - timedelta(seconds=60),
+    )
+    db.add(environment)
+    db.commit()
+    calls = []
+
+    def fail_cleanup(_worker, row):
+        calls.append(row.public_id)
+        raise RuntimeError("HTTP 404")
+
+    monkeypatch.setattr(sandbox_service, "_stop_registered_worker_requests", fail_cleanup)
+
+    result = heartbeat_and_recover_sandboxes(db)
+
+    assert calls == [environment.public_id]
+    assert result["cleanup_pending"] == 1
+    assert result["recovered"] == 0
+    assert environment.status == "stopping"
+    assert environment.stopped_at is None
+    assert "未确认" in (environment.error or "")
+
+
+def test_watchdog_confirms_cleanup_for_legacy_failed_row_and_clears_stale_error(db, monkeypatch) -> None:
+    monkeypatch.setattr(sandbox_service.settings, "sandbox_stuck_after_seconds", 1)
+    now = datetime.utcnow()
+    project = Project(user_id=1, project_name="旧回收确认", description="", language="python", status="active")
+    db.add(project)
+    db.flush()
+    worker = SandboxWorker(
+        code="legacy-cleanup-confirm-worker",
+        name="legacy cleanup confirm worker",
+        worker_type="local",
+        transport="unix",
+        endpoint="/tmp/legacy-cleanup-confirm.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox"]',
+        runtime="runsc",
+        max_concurrency=1,
+        priority=10,
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_legacy_cleanup_confirm",
+        project_id=project.id,
+        owner_id=42,
+        worker_id=worker.id,
+        agent_code="sandbox_deployer",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="failed",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:3.11",
+        source_sha256="d" * 64,
+        resource_policy_json="{}",
+        agent_config_json='{"active_worker_request_id":"sbx_legacy_cleanup_confirm"}',
+        execution_token="lease",
+        expires_at=now + timedelta(hours=1),
+        started_at=now - timedelta(seconds=1200),
+        stopped_at=now - timedelta(seconds=60),
+        result_json='{"cleanup_error":"HTTP 404"}',
+        error="沙箱心跳超时，已自动判定卡死并回收",
+        create_time=now - timedelta(seconds=1200),
+        update_time=now - timedelta(seconds=60),
+    )
+    db.add(environment)
+    db.commit()
+    monkeypatch.setattr(
+        sandbox_service,
+        "_stop_registered_worker_requests",
+        lambda _worker, row: {row.public_id: {"request_id": row.public_id, "status": "stopped"}},
+    )
+
+    result = heartbeat_and_recover_sandboxes(db)
+
+    assert result["recovered"] == 1
+    assert result["cleanup_pending"] == 0
+    assert environment.status == "failed"
+    assert environment.stopped_at is not None
+    assert json.loads(environment.result_json) == {"cleanup_confirmed": True}
+    assert "Worker 已确认" in (environment.error or "")

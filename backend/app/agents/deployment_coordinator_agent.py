@@ -4,6 +4,7 @@
 如发现入口缺失/依赖不完整,生成受控补全启动脚本 `_prism_launch.sh`(由镜像内置
 runner 调用,不执行任意命令),并给出依赖补全说明。所有生成内容仅在隔离沙箱内运行。
 """
+
 from __future__ import annotations
 
 import json
@@ -46,10 +47,15 @@ class DeploymentCoordinatorAgent(BaseAgent):
         source_summary: dict[str, Any],
         db_type: str = "none",
         ctx: Optional[AgentContext] = None,
+        deadline: Optional[float] = None,
     ) -> dict[str, Any]:
+        deadline = deadline if deadline is not None else time.monotonic() + 120
         try:
             compacted = compact_source_context(
-                self, source_summary, ctx=ctx, deadline=time.monotonic() + 120,
+                self,
+                source_summary,
+                ctx=ctx,
+                deadline=deadline,
                 max_chars=9_000,
             )
         except SourceContextError as exc:
@@ -73,12 +79,11 @@ class DeploymentCoordinatorAgent(BaseAgent):
             "1. 判断是否有可启动入口(main/app/index/server 等);若没有,生成一个最小可启动补全脚本。\n"
             "2. 脚本为 POSIX sh,监听 127.0.0.1 的 ${PRISM_PREVIEW_PORT}(默认8080),禁止外联、禁止读环境密钥。\n"
             "3. 若依赖可能缺失,在 notes 中说明(离线沙箱只能用镜像内置或 vendor 依赖)。\n"
-            "4. 输出 JSON: {\'launch_script\':\'...\',\'notes\':\'...\'};\n"
-            "   入口已存在且完整时 launch_script 为空字符串。\n"
-            + db_instruction
+            "4. 输出 JSON: {'launch_script':'...','notes':'...'};\n"
+            "   入口已存在且完整时 launch_script 为空字符串。\n" + db_instruction
         )
         try:
-            agent_result = self.call_json(user_message, ctx=ctx)
+            agent_result = self.call_json(user_message, ctx=ctx, deadline_monotonic=deadline)
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)[:300]}
         if not getattr(agent_result, "success", False):

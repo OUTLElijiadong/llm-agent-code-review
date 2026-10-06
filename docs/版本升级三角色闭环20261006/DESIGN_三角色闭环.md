@@ -49,3 +49,23 @@ flowchart TD
 ### v4.0.75 首次异步值
 
 `useCountUp` 首次观察到 source 更新时立即把 display 设为该值；后续有限数值变化沿用原 cubic-out 与 reduced-motion 逻辑。组件调用者、API 和业务口径不变。
+
+## v4.0.75 沙箱压缩与清理设计
+
+```mermaid
+flowchart TD
+ A[不可变源码快照与归档 SHA] --> B[按文件/字节预算切成带 ID 与哈希的完整片段]
+ B --> C[有界分批逐片压缩]
+ C --> D[核验每片引用、顺序、受保护约束与覆盖 ID]
+ D --> E{摘要总预算是否满足}
+ E -->|否| F[多层归并并保留覆盖集合/子节点回链]
+ F --> E
+ E -->|是| G[动态测试/部署 Agent 消费结构化摘要]
+ C -->|来源缺失/截断/超时/资源预算耗尽| H[显式失败，不提交不完整摘要]
+ I[Worker 请求状态账本] --> J[execute 接收回执/拒绝回执]
+ J --> K[stop 幂等请求与终态确认]
+ K -->|confirmed terminal| L[保存 stopped/failed 终态与回收证据]
+ K -->|404/协议错误/超时| M[保持 stopping、保留错误与重试/人工诊断]
+```
+
+复用 `source_context` 的哈希、引用校验和不可信证据标记，并复用项目已有分层压缩模式；实现前核对 `deepseek_responses_service`、`deepseek_responses_runtime` 与 `declarative_agent_runtime` 的预算/覆盖模式，避免第二套不一致协议。新增状态以现有 SandboxEnvironment 及 worker_request_ids 账本为基础；必要时仅扩展结构化回执字段。限制输入归档大小、片段数、模型调用数和墙钟时间；限制用于资源保护，超过时返回可重试/明确预算错误，绝不静默截断。

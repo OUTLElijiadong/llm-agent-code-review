@@ -110,6 +110,9 @@ STATE_LOCK = threading.RLock()
 STATE_CONDITION = threading.Condition(STATE_LOCK)
 MONITOR_THREADS: dict[str, threading.Thread] = {}
 PENDING_SUBMISSIONS: dict[str, str] = {}
+SUBMISSIONS_INFLIGHT: set[str] = set()
+STOPPING_REQUESTS: set[str] = set()
+STOP_WAIT_SECONDS = 180
 JANITOR_STOP = threading.Event()
 BROWSER_LOCK = threading.Lock()
 
@@ -861,6 +864,8 @@ def _extract_archive(archive: bytes, request_id: str) -> Path:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
 def _remove_job_data(request_id: str) -> None:
+    if JOB_DIR.is_symlink() or (JOB_DIR.exists() and not JOB_DIR.is_dir()):
+        raise RuntimeError("拒绝访问不安全的沙箱源码根目录")
     root = _job_path(request_id)
     if root.parent != JOB_DIR or not root.name.startswith("job-"):
         raise RuntimeError("拒绝清理不安全的沙箱目录")
@@ -999,7 +1004,7 @@ def _build_docker_create_args(
         testdb_ip = _resolve_testdb_ip()
         args.extend([
             "--add-host", f"{SANDBOX_TEST_DB_HOST}:{testdb_ip}",
-            "--env", f"PRISM_DB_TYPE=mysql",
+            "--env", "PRISM_DB_TYPE=mysql",
             "--env", f"PRISM_DB_HOST={SANDBOX_TEST_DB_HOST}",
             "--env", f"PRISM_DB_PORT={SANDBOX_TEST_DB_PORT}",
             "--env", f"PRISM_DB_USER={SANDBOX_TEST_DB_USER}",
@@ -1141,6 +1146,8 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     digest = _request_digest(normalized)
     with STATE_CONDITION:
         while True:
+            if request_id in STOPPING_REQUESTS:
+                raise ConflictError("request_id 正在停止，不能重新提交")
             try:
                 existing = _read_state(request_id)
             except NotFoundError:
@@ -1169,6 +1176,7 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             _add_event(state, "lifecycle", "validating", "已接收固定 profile 沙箱请求")
             _write_state(state)
             PENDING_SUBMISSIONS.pop(request_id, None)
+            SUBMISSIONS_INFLIGHT.add(request_id)
             STATE_CONDITION.notify_all()
     except Exception:
         with STATE_CONDITION:
@@ -1230,6 +1238,10 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         _finish_submission_error(request_id, "blocked", "blocked", str(exc))
     except Exception as exc:  # noqa: BLE001 - persist a terminal result for every accepted request
         _finish_submission_error(request_id, "failed", "failed", str(exc))
+    finally:
+        with STATE_CONDITION:
+            SUBMISSIONS_INFLIGHT.discard(request_id)
+            STATE_CONDITION.notify_all()
     with STATE_LOCK:
         return _public_state(_read_state(request_id)), False
 
@@ -1315,6 +1327,8 @@ def _retry_pending_cleanup(request_id: str) -> bool:
 
         result_value = dict(pending.get("result") or {})
         result_value.pop("cleanup_error", None)
+        result_value["cleanup_confirmed"] = True
+        result_value["cleanup_scope"] = "container and job directory removal were confirmed"
         state["result"] = result_value
         state["error"] = str(pending.get("error") or "")[:3500]
         state["finished_at"] = _iso()
@@ -1452,6 +1466,34 @@ def _remove_container(container: str) -> None:
     remaining = _run_command(["docker", "inspect", container], timeout=20, allow_failure=True)
     if remaining["exit_code"] == 0:
         raise RuntimeError("Docker 容器清理后仍存在")
+    if not _docker_reports_missing_object(str(remaining.get("stderr") or "")):
+        raise RuntimeError("Docker 未能确认容器已不存在")
+
+
+def _docker_reports_missing_object(stderr: str) -> bool:
+    return bool(re.search(r"(?i)(no such object|no such container)", str(stderr or "")))
+
+
+def _remove_untracked_container(request_id: str) -> None:
+    """For a request without persisted state, remove only a container carrying its request label."""
+    request_id = _validate_request_id(request_id)
+    container = _container_name(request_id)
+    inspected = _run_command(
+        ["docker", "inspect", "--format", "{{json .Config.Labels}}", container],
+        timeout=20,
+        allow_failure=True,
+    )
+    if inspected["exit_code"] != 0:
+        if _docker_reports_missing_object(str(inspected.get("stderr") or "")):
+            return
+        raise RuntimeError("Docker 未能确认无状态请求对应容器是否存在")
+    try:
+        labels = json.loads(str(inspected.get("stdout") or "{}"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Docker 容器标签格式无效，拒绝清理") from exc
+    if not isinstance(labels, dict) or labels.get("prism.sandbox.request_id") != request_id:
+        raise RuntimeError("同名容器的沙箱请求标签不匹配，拒绝清理")
+    _remove_container(container)
 
 
 def _monitor_test(request_id: str, profile: Profile) -> None:
@@ -1634,31 +1676,138 @@ def status_job(payload: dict[str, Any]) -> dict[str, Any]:
         return _public_state(_read_state(request_id), after_sequence=after_sequence)
 
 
+def _stopped_tombstone(request_id: str) -> dict[str, Any]:
+    now = _iso()
+    state: dict[str, Any] = {
+        "request_id": request_id,
+        "request_digest": "stopped-before-acceptance",
+        "purpose": "test",
+        "language": "python",
+        "test_mode": "whitebox",
+        "source_sha256": "0" * 64,
+        "status": "stopped",
+        "stage": "stopped",
+        "runtime": "",
+        "image_ref": "",
+        "image_digest": "",
+        "profile_fingerprint": "",
+        "resource_policy": {},
+        "created_at": now,
+        "updated_at": now,
+        "started_at": None,
+        "finished_at": now,
+        "expires_at": now,
+        "events": [],
+        "result": {
+            "outcome": "stopped",
+            "exit_code": None,
+            "timed_out": False,
+            "cleanup_confirmed": True,
+            "cleanup_scope": "deterministic container and job directory were verified absent",
+        },
+        "error": "Worker 未接收执行请求；已确认不存在对应容器和源码目录",
+        "stop_requested": True,
+    }
+    _add_event(
+        state,
+        "result",
+        "stopped",
+        "执行器未发现已接收任务，且确认对应容器与源码目录不存在",
+        {"cleanup_confirmed": True},
+    )
+    return state
+
+
 def stop_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     if not isinstance(payload, dict):
         raise ValueError("请求体必须是 JSON 对象")
     _check_exact_keys(payload, STOP_KEYS)
     request_id = _validate_request_id(payload.get("request_id"))
-    with STATE_LOCK:
-        state = _read_state(request_id)
-        if state.get("status") in TERMINAL_STATUSES:
-            return _public_state(state), True
-        if state.get("status") == "stopping" and isinstance(state.get("pending_terminal"), dict):
-            pending = True
+    deadline = time.monotonic() + STOP_WAIT_SECONDS
+    missing_state = False
+    with STATE_CONDITION:
+        while True:
+            if request_id in PENDING_SUBMISSIONS or request_id in SUBMISSIONS_INFLIGHT or request_id in STOPPING_REQUESTS:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConflictError("沙箱提交仍在进行，停止请求超时；请安全重试")
+                STATE_CONDITION.wait(timeout=remaining)
+                continue
+            try:
+                state = _read_state(request_id)
+            except NotFoundError:
+                STOPPING_REQUESTS.add(request_id)
+                missing_state = True
+                break
+            if state.get("status") in TERMINAL_STATUSES:
+                previous_result = state.get("result")
+                if (
+                    isinstance(previous_result, dict)
+                    and previous_result.get("cleanup_confirmed") is True
+                    and not previous_result.get("cleanup_error")
+                ):
+                    return _public_state(state), True
+                STOPPING_REQUESTS.add(request_id)
+                result = dict(previous_result) if isinstance(previous_result, dict) else {}
+                result.pop("cleanup_error", None)
+                error = str(state.get("error") or "")
+                error = re.sub(
+                    r"(?:[;；，,]\s*)?(?:资源回收待重试|cleanup(?: resource)? pending)"
+                    r"(?:\s*[:：]\s*.*)?$",
+                    "",
+                    error,
+                    flags=re.I,
+                )
+                state["pending_terminal"] = {
+                    "status": str(state.get("status") or "failed"),
+                    "stage": str(state.get("stage") or state.get("status") or "failed"),
+                    "message": "历史终态资源已重新核验并回收",
+                    "error": error.strip(" ;"),
+                    "result": result,
+                }
+                state["stop_requested"] = True
+                _transition(
+                    state,
+                    "stopping",
+                    "cleanup",
+                    "历史终态缺少有效回收回执，正在重新核验 Worker 资源",
+                )
+                pending = True
+                break
+            pending = state.get("status") == "stopping" and isinstance(state.get("pending_terminal"), dict)
+            break
+
+    if missing_state:
+        try:
+            # Reserve the ID before inspecting/cleaning, so a concurrent execute cannot
+            # recreate resources after absence has been confirmed.
+            _remove_untracked_container(request_id)
+            _remove_job_data(request_id)
+            state = _stopped_tombstone(request_id)
+            with STATE_CONDITION:
+                _write_state(state)
+                return _public_state(state), False
+        finally:
+            with STATE_CONDITION:
+                STOPPING_REQUESTS.discard(request_id)
+                STATE_CONDITION.notify_all()
+    try:
+        if pending:
+            _retry_pending_cleanup(request_id)
         else:
-            pending = False
-    if pending:
-        _retry_pending_cleanup(request_id)
-    else:
-        logs = _collect_logs_safe(_container_name(request_id))
-        _queue_terminal_cleanup(
-            request_id,
-            status_value="stopped",
-            stage="stopped",
-            message="沙箱已关闭并清理",
-            error="",
-            result={"outcome": "stopped", "exit_code": None, "timed_out": False, "logs": logs, "artifacts": []},
-        )
+            logs = _collect_logs_safe(_container_name(request_id))
+            _queue_terminal_cleanup(
+                request_id,
+                status_value="stopped",
+                stage="stopped",
+                message="沙箱已关闭并清理",
+                error="",
+                result={"outcome": "stopped", "exit_code": None, "timed_out": False, "logs": logs, "artifacts": []},
+            )
+    finally:
+        with STATE_CONDITION:
+            STOPPING_REQUESTS.discard(request_id)
+            STATE_CONDITION.notify_all()
     with STATE_LOCK:
         return _public_state(_read_state(request_id)), False
 

@@ -53,12 +53,14 @@ def test_source_summary_preserves_end_of_long_file_as_later_chunk() -> None:
     assert "TAIL_SECURITY_GATE" in chunks[-1]["text"]
 
 
-def test_source_summary_marks_uncovered_large_archive() -> None:
-    archive = _zip_with({f"module_{index}.py": "x = 1\n" * 800 for index in range(40)})
+def test_source_summary_covers_archives_over_previous_32_chunk_ceiling() -> None:
+    files = {f"module_{index}.py": f"MODULE_{index} = True\n" * 800 for index in range(40)}
+    archive = _zip_with(files)
     summary = _source_summary_for_agent_tests(archive, "python")
-    assert summary["coverage_complete"] is False
-    assert "上限" in summary["coverage_error"]
+    assert summary["coverage_complete"] is True
     assert len(summary["files"]) == 40
+    assert summary["source_chunk_count"] > 32
+    assert "module_39.py" in str(summary["source_chunks"][-1])
 
 
 def test_source_summary_rejects_ambiguous_duplicate_zip_members() -> None:
@@ -112,13 +114,20 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
     from app.services import sandbox_service
 
     source = "<?php\n" + "// keep\n" * 6_000 + "echo broken;\n"
-    archive = _zip_with({
-        "main.php": source,
-        "untouched.php": "<?php echo 'keep';\n",
-        "_agent_tests/test_generated.php": "<?php echo 'runner-only';\n",
-    })
-    environment = authorized_sandbox_environment(db,
-        public_id="sbx_repair", owner_id=7, project_id=9, language="php", source_sha256="parent-sha",
+    archive = _zip_with(
+        {
+            "main.php": source,
+            "untouched.php": "<?php echo 'keep';\n",
+            "_agent_tests/test_generated.php": "<?php echo 'runner-only';\n",
+        }
+    )
+    environment = authorized_sandbox_environment(
+        db,
+        public_id="sbx_repair",
+        owner_id=7,
+        project_id=9,
+        language="php",
+        source_sha256="parent-sha",
     )
 
     class FakeRepair:
@@ -131,7 +140,9 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
     monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, _user_id: agent)
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *_args, **_kwargs: None)
     result = sandbox_service._syntax_repair_round(
-        db, environment, archive,
+        db,
+        environment,
+        archive,
         [{"file": "main.php", "line": 6002, "message": "unexpected identifier"}],
     )
     assert result is not None
@@ -170,9 +181,7 @@ def test_syntax_repair_revision_config_binds_repair_to_next_worker_request() -> 
         )
     )
     assert config["source_revision_id"] == 12
-    assert config["syntax_repair_revisions"] == [
-        {**revision, "repair_round": 1, "worker_request_id": "sbx_repair-r1"}
-    ]
+    assert config["syntax_repair_revisions"] == [{**revision, "repair_round": 1, "worker_request_id": "sbx_repair-r1"}]
 
 
 def test_worker_receipt_requires_exact_request_and_archive_digest() -> None:
@@ -208,10 +217,14 @@ def test_large_source_does_not_call_dynamic_test_agent_with_partial_context(db, 
 
     archive = _zip_with({f"module_{index}.py": "x = 1\n" * 800 for index in range(40)})
     environment = SimpleNamespace(
-        public_id="sbx_large", owner_id=7, project_id=9, agent_config_json="{}",
+        public_id="sbx_large",
+        owner_id=7,
+        project_id=9,
+        agent_config_json="{}",
     )
     monkeypatch.setattr(
-        "app.agents.test_case_generator_agent.TestCaseGeneratorAgent", FakeGenerator,
+        "app.agents.test_case_generator_agent.TestCaseGeneratorAgent",
+        FakeGenerator,
     )
     monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, _user_id: agent)
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *_args, **_kwargs: None)
@@ -224,9 +237,14 @@ def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
 
     from app.services.sandbox_service import _generate_deployment_patch
 
-    environment = authorized_sandbox_environment(db,
-        id=1, public_id="sbx_deploy_patch", project_id=1, owner_id=1,
-        test_mode="blackbox", language="python",
+    environment = authorized_sandbox_environment(
+        db,
+        id=1,
+        public_id="sbx_deploy_patch",
+        project_id=1,
+        owner_id=1,
+        test_mode="blackbox",
+        language="python",
     )
     captured: dict = {}
     monkeypatch.setattr("app.services.sandbox_service.configure_subagent", lambda _db, agent, user_id: agent)
@@ -246,3 +264,40 @@ def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
     assert result is not None
     assert "launch_script" in result
     assert captured["language"] == "python"
+
+
+def test_deployment_coordinator_shares_deadline_with_final_model_call(monkeypatch) -> None:
+    import time
+    from types import SimpleNamespace
+
+    from app.agents import deployment_coordinator_agent as module
+    from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+
+    deadline = time.monotonic() + 60
+    captured = {}
+    monkeypatch.setattr(
+        module,
+        "compact_source_context",
+        lambda *_args, **_kwargs: {
+            "covered_source_ids": ["source-a"],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "入口已检查。"}],
+        },
+    )
+
+    class Agent(DeploymentCoordinatorAgent):
+        def __init__(self):
+            self._api_key = "configured"
+
+        def call_json(self, _message, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(success=True, data={"launch_script": "", "notes": ""})
+
+    result = Agent().plan(
+        language="python",
+        test_mode="whitebox",
+        source_summary={"coverage_complete": True, "source_chunks": []},
+        deadline=deadline,
+    )
+
+    assert result["launch_script"] == ""
+    assert captured["deadline_monotonic"] == deadline

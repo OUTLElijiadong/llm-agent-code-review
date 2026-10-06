@@ -86,10 +86,14 @@ def isolated_paths(tmp_path: Path, monkeypatch):
     executor.MONITOR_THREADS.clear()
     with executor.STATE_CONDITION:
         executor.PENDING_SUBMISSIONS.clear()
+        executor.SUBMISSIONS_INFLIGHT.clear()
+        executor.STOPPING_REQUESTS.clear()
     yield tmp_path
     executor.MONITOR_THREADS.clear()
     with executor.STATE_CONDITION:
         executor.PENDING_SUBMISSIONS.clear()
+        executor.SUBMISSIONS_INFLIGHT.clear()
+        executor.STOPPING_REQUESTS.clear()
 
 
 def test_execute_rejects_arbitrary_command_image_mount_and_environment() -> None:
@@ -218,12 +222,15 @@ def test_browser_blackbox_uses_private_proxy_network_and_fixed_images(monkeypatc
         if args[:4] == ["docker", "start", "--attach", executor._browser_names("browser-request-01")[0]]:
             return {
                 "exit_code": 0,
-                "stdout": json.dumps({
-                    "protocol_version": "1.0",
-                    "passed": True,
-                    "status_code": 200,
-                    "screenshot_base64": "",
-                }) + "\n",
+                "stdout": json.dumps(
+                    {
+                        "protocol_version": "1.0",
+                        "passed": True,
+                        "status_code": 200,
+                        "screenshot_base64": "",
+                    }
+                )
+                + "\n",
                 "stderr": "",
                 "output_bytes": 100,
                 "output_truncated": False,
@@ -237,11 +244,13 @@ def test_browser_blackbox_uses_private_proxy_network_and_fixed_images(monkeypatc
     monkeypatch.setattr(executor, "_run_command", fake_run)
     monkeypatch.setattr(executor.time, "sleep", lambda *_args: None)
 
-    result = executor.run_browser_blackbox({
-        "request_id": "browser-request-01",
-        "target_url": "https://example.com/a",
-        "target_ip": "93.184.216.34",
-    })
+    result = executor.run_browser_blackbox(
+        {
+            "request_id": "browser-request-01",
+            "target_url": "https://example.com/a",
+            "target_ip": "93.184.216.34",
+        }
+    )
 
     assert result["passed"] is True and result["resolved_ip"] == "93.184.216.34"
     flattened = [" ".join(call) for call in calls]
@@ -273,18 +282,23 @@ def test_browser_self_test_script_is_valid_javascript() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.parametrize("target_url,target_ip", [
-    ("http://example.com/", "93.184.216.34"),
-    ("https://example.com/", "127.0.0.1"),
-    ("https://example.com/#fragment", "93.184.216.34"),
-])
+@pytest.mark.parametrize(
+    "target_url,target_ip",
+    [
+        ("http://example.com/", "93.184.216.34"),
+        ("https://example.com/", "127.0.0.1"),
+        ("https://example.com/#fragment", "93.184.216.34"),
+    ],
+)
 def test_browser_blackbox_rejects_unapproved_protocol_or_non_public_ip(target_url: str, target_ip: str) -> None:
     with pytest.raises(ValueError):
-        executor.run_browser_blackbox({
-            "request_id": "browser-request-02",
-            "target_url": target_url,
-            "target_ip": target_ip,
-        })
+        executor.run_browser_blackbox(
+            {
+                "request_id": "browser-request-02",
+                "target_url": target_url,
+                "target_ip": target_ip,
+            }
+        )
 
 
 def test_zip_extraction_rejects_traversal_symlink_and_duplicate_case(
@@ -340,9 +354,7 @@ def _submit_policy_blocked_archive(
     monkeypatch.setattr(
         executor,
         "_run_command",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("归档策略违规后不得创建容器")
-        ),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("归档策略违规后不得创建容器")),
     )
 
     result, duplicate = executor.submit_job(_payload(archive, request_id=request_id))
@@ -563,9 +575,7 @@ def test_extend_only_active_deployment_and_never_exceeds_absolute_ttl(
 
 
 def test_preview_target_is_fixed_loopback_and_rejects_traversal() -> None:
-    assert executor._normalize_preview_target("/api/items", "page=1") == (
-        "http://127.0.0.1:8080/api/items?page=1"
-    )
+    assert executor._normalize_preview_target("/api/items", "page=1") == ("http://127.0.0.1:8080/api/items?page=1")
     assert executor._normalize_preview_target("/search", "q=hello world") == (
         "http://127.0.0.1:8080/search?q=hello%20world"
     )
@@ -780,15 +790,12 @@ def test_preview_proxy_decodes_chunked_response(
     class Completed:
         returncode = 0
         stdout = (
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
-            b"Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
         )
         stderr = b""
 
     monkeypatch.setattr(executor.subprocess, "run", lambda *_args, **_kwargs: Completed())
-    code, headers, body = executor._proxy_preview(
-        "sandbox-request-01", "/hello", "", "GET", {}, b""
-    )
+    code, headers, body = executor._proxy_preview("sandbox-request-01", "/hello", "", "GET", {}, b"")
     assert code == 200 and body == b"hello"
     assert headers["Content-Length"] == "5"
 
@@ -875,9 +882,17 @@ def _persist_execution_owner(db) -> User:
 
 def _persist_execution_worker(db) -> SandboxWorker:
     worker = SandboxWorker(
-        id=8, code="gvisor-01", name="本地桩执行器", worker_type="local", transport="unix",
-        endpoint="/run/prism-sandbox/never-used.sock", supported_languages_json='["python"]',
-        supported_modes_json='["whitebox","deploy"]', runtime="runsc", status="healthy", enabled=1,
+        id=8,
+        code="gvisor-01",
+        name="本地桩执行器",
+        worker_type="local",
+        transport="unix",
+        endpoint="/run/prism-sandbox/never-used.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox","deploy"]',
+        runtime="runsc",
+        status="healthy",
+        enabled=1,
     )
     db.add(worker)
     db.commit()
@@ -910,7 +925,9 @@ def test_create_environment_maps_decompilation_input_error_to_validation(db, mon
     monkeypatch.setattr(
         sandbox_service.decompilation_service,
         "plan_decompilation_archive",
-        MagicMock(side_effect=sandbox_service.decompilation_service.DecompilationError("源码归档无法读取反编译候选成员")),
+        MagicMock(
+            side_effect=sandbox_service.decompilation_service.DecompilationError("源码归档无法读取反编译候选成员")
+        ),
     )
 
     with pytest.raises(sandbox_service.ValidationError) as exc_info:
@@ -1219,9 +1236,10 @@ def test_preview_session_token_scope_version_and_expiry(db, monkeypatch) -> None
     assert claims["typ"] == "sandbox_preview"
     assert claims["sbx"] == environment.public_id
     assert session["path"] == f"/api/sandboxes/{environment.public_id}/preview/"
-    assert sandbox_service.authenticate_preview_session(
-        db, environment.public_id, session["token"]
-    ) == (environment, worker)
+    assert sandbox_service.authenticate_preview_session(db, environment.public_id, session["token"]) == (
+        environment,
+        worker,
+    )
 
     now = datetime.now(timezone.utc)
 
@@ -1242,15 +1260,11 @@ def test_preview_session_token_scope_version_and_expiry(db, monkeypatch) -> None
         )
 
     with pytest.raises(sandbox_service.AuthError) as scope_error:
-        sandbox_service.authenticate_preview_session(
-            db, environment.public_id, encode(sbx="sbx_preview_b")
-        )
+        sandbox_service.authenticate_preview_session(db, environment.public_id, encode(sbx="sbx_preview_b"))
     assert scope_error.value.code == 40101
 
     with pytest.raises(sandbox_service.AuthError) as version_error:
-        sandbox_service.authenticate_preview_session(
-            db, environment.public_id, encode(ver=actor.token_version - 1)
-        )
+        sandbox_service.authenticate_preview_session(db, environment.public_id, encode(ver=actor.token_version - 1))
     assert version_error.value.code == 40102
 
     with pytest.raises(sandbox_service.AuthError) as expiry_error:
@@ -1268,7 +1282,10 @@ def test_preview_session_token_scope_version_and_expiry(db, monkeypatch) -> None
 @pytest.mark.parametrize("revocation", ["viewer", "global_permission"])
 @pytest.mark.parametrize("entry", ["create", "preview", "existing_preview"])
 def test_executor_entry_rechecks_committed_execution_revocation(
-    independent_transaction_db, monkeypatch, revocation: str, entry: str,
+    independent_transaction_db,
+    monkeypatch,
+    revocation: str,
+    entry: str,
 ) -> None:
     """真实已授权会话撤权后，创建与旧预览令牌均不得恢复执行能力。"""
     db = independent_transaction_db
@@ -1280,10 +1297,21 @@ def test_executor_entry_rechecks_committed_execution_revocation(
     _grant_sandbox_globals(db, actor)
     member = ProjectMember(project_id=91, user_id=actor.id, role_in_project="reviewer")
     environment = SandboxEnvironment(
-        public_id="sbx_revoked_preview", project_id=91, owner_id=actor.id, worker_id=worker.id,
-        agent_code="sandbox_deployer", purpose="deploy", language="python", test_mode="deploy",
-        status="ready", runtime="runsc", image_ref="local-unused", source_sha256="0" * 64,
-        execution_token="local-revoked-lease", resource_policy_json="{}", agent_config_json="{}",
+        public_id="sbx_revoked_preview",
+        project_id=91,
+        owner_id=actor.id,
+        worker_id=worker.id,
+        agent_code="sandbox_deployer",
+        purpose="deploy",
+        language="python",
+        test_mode="deploy",
+        status="ready",
+        runtime="runsc",
+        image_ref="local-unused",
+        source_sha256="0" * 64,
+        execution_token="local-revoked-lease",
+        resource_policy_json="{}",
+        agent_config_json="{}",
         expires_at=datetime.utcnow() + timedelta(hours=1),
     )
     db.add_all([member, environment])
@@ -1307,7 +1335,9 @@ def test_executor_entry_rechecks_committed_execution_revocation(
     with pytest.raises(sandbox_service.ForbiddenError) as error:
         if entry == "create":
             sandbox_service.create_environment(
-                db, actor, {"project_id": 91, "purpose": "test", "language": "python", "test_mode": "whitebox"},
+                db,
+                actor,
+                {"project_id": 91, "purpose": "test", "language": "python", "test_mode": "whitebox"},
             )
         elif entry == "preview":
             sandbox_service.create_preview_session(db, actor, environment.public_id)
@@ -1385,10 +1415,12 @@ def test_quarantined_project_allowed_deploy_in_sandbox(db, monkeypatch) -> None:
     _persist_source_archive(db, project, owner)
     real_build = sandbox_service.project_source_service.build_source_archive
     captured = {}
+
     def _build(db, user, project_id):
         data = real_build(db, user, project_id)
         captured["archive"] = data
         return data
+
     monkeypatch.setattr(sandbox_service.project_source_service, "build_source_archive", _build)
     monkeypatch.setattr(sandbox_service.threading, "Thread", _DormantThread)
     monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
@@ -1563,23 +1595,29 @@ def test_sandbox_terminal_transition_requires_current_execution_token(db) -> Non
     db.add(environment)
     db.commit()
 
-    assert sandbox_service._complete_finalizing_transition(
-        db,
-        environment,
-        final_status="succeeded",
-        result_json='{"passed":true}',
-        execution_token="stale-token",
-    ) is False
+    assert (
+        sandbox_service._complete_finalizing_transition(
+            db,
+            environment,
+            final_status="succeeded",
+            result_json='{"passed":true}',
+            execution_token="stale-token",
+        )
+        is False
+    )
     db.refresh(environment)
     assert environment.status == "finalizing"
 
-    assert sandbox_service._complete_finalizing_transition(
-        db,
-        environment,
-        final_status="succeeded",
-        result_json='{"passed":true}',
-        execution_token="current-token",
-    ) is True
+    assert (
+        sandbox_service._complete_finalizing_transition(
+            db,
+            environment,
+            final_status="succeeded",
+            result_json='{"passed":true}',
+            execution_token="current-token",
+        )
+        is True
+    )
 
 
 @pytest.mark.parametrize(
@@ -1593,7 +1631,10 @@ def test_sandbox_terminal_transition_requires_current_execution_token(db) -> Non
     ],
 )
 def test_late_browser_worker_result_respects_current_sandbox_state(
-    db, monkeypatch, late_status: str, expired: bool,
+    db,
+    monkeypatch,
+    late_status: str,
+    expired: bool,
 ) -> None:
     owner = User(username="sandbox_late_browser_owner", password="x", role="user", status=1)
     db.add(owner)
@@ -1625,11 +1666,13 @@ def test_late_browser_worker_result_respects_current_sandbox_state(
     db.commit()
 
     monkeypatch.setattr(
-        sandbox_service, "_normalize_browser_target",
+        sandbox_service,
+        "_normalize_browser_target",
         lambda _url: ("https://example.com/", SimpleNamespace(ip_address="93.184.216.34")),
     )
     monkeypatch.setattr(
-        sandbox_service, "_select_browser_worker",
+        sandbox_service,
+        "_select_browser_worker",
         lambda _db: SimpleNamespace(code="isolated-browser"),
     )
 
@@ -1638,7 +1681,8 @@ def test_late_browser_worker_result_respects_current_sandbox_state(
         if expired:
             values[SandboxEnvironment.expires_at] = datetime.utcnow() - timedelta(seconds=1)
         db.query(SandboxEnvironment).filter_by(id=environment.id).update(
-            values, synchronize_session=False,
+            values,
+            synchronize_session=False,
         )
         db.commit()
         return {"result": {"protocol_version": "1.0", "passed": True}}
@@ -1646,14 +1690,20 @@ def test_late_browser_worker_result_respects_current_sandbox_state(
     monkeypatch.setattr(sandbox_service, "_call_worker", return_after_status_change)
     if late_status == "succeeded" and not expired:
         result = sandbox_service.run_browser_blackbox(
-            db, owner, environment.public_id, "https://example.com/",
+            db,
+            owner,
+            environment.public_id,
+            "https://example.com/",
         )
         assert result["passed"] is True
         assert len(result["artifacts"]) == 1
     else:
         with pytest.raises(sandbox_service.ConflictError, match="已关闭|状态"):
             sandbox_service.run_browser_blackbox(
-                db, owner, environment.public_id, "https://example.com/",
+                db,
+                owner,
+                environment.public_id,
+                "https://example.com/",
             )
     db.refresh(environment)
     assert environment.status == late_status
@@ -1702,53 +1752,65 @@ def test_sandbox_snapshot_and_finalizing_require_current_execution_token(db) -> 
         "ttl_seconds": 3600,
         "image_digest": "sha256:" + "c" * 64,
     }
-    assert sandbox_service._persist_worker_execution_snapshot(
-        db,
-        environment,
-        execution_bytes=b"archive",
-        source_sha256="b" * 64,
-        repair_round=0,
-        request_envelope=request_envelope,
-        request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
-        execution_token="stale-token",
-    ) is False
+    assert (
+        sandbox_service._persist_worker_execution_snapshot(
+            db,
+            environment,
+            execution_bytes=b"archive",
+            source_sha256="b" * 64,
+            repair_round=0,
+            request_envelope=request_envelope,
+            request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
+            execution_token="stale-token",
+        )
+        is False
+    )
     db.refresh(environment)
     assert environment.execution_archive_blob is None
     assert environment.worker_request_json is None
 
-    assert sandbox_service._persist_worker_execution_snapshot(
-        db,
-        environment,
-        execution_bytes=b"archive",
-        source_sha256="b" * 64,
-        repair_round=0,
-        request_envelope=request_envelope,
-        request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
-        execution_token="current-token",
-    ) is True
+    assert (
+        sandbox_service._persist_worker_execution_snapshot(
+            db,
+            environment,
+            execution_bytes=b"archive",
+            source_sha256="b" * 64,
+            repair_round=0,
+            request_envelope=request_envelope,
+            request_config_json='{"active_worker_request_id":"sbx_snapshot_lease_01"}',
+            execution_token="current-token",
+        )
+        is True
+    )
     db.commit()
     db.refresh(environment)
     persisted = json.loads(environment.worker_request_json)
     assert persisted["ttl_seconds"] == 3600
     assert persisted["image_digest"] == "sha256:" + "c" * 64
 
-    assert sandbox_service._enter_finalizing(
-        db,
-        environment,
-        result={"request_id": environment.public_id, "runtime": "runsc"},
-        target_status="succeeded",
-        execution_token="stale-token",
-    ) is False
+    assert (
+        sandbox_service._enter_finalizing(
+            db,
+            environment,
+            result={"request_id": environment.public_id, "runtime": "runsc"},
+            target_status="succeeded",
+            execution_token="stale-token",
+        )
+        is False
+    )
     db.refresh(environment)
     assert environment.status == "dispatching"
 
-    assert sandbox_service._enter_finalizing(
-        db,
-        environment,
-        result={"request_id": environment.public_id, "runtime": "runsc"},
-        target_status="succeeded",
-        execution_token="current-token",
-    ) is True
+    assert (
+        sandbox_service._enter_finalizing(
+            db,
+            environment,
+            result={"request_id": environment.public_id, "runtime": "runsc"},
+            target_status="succeeded",
+            execution_token="current-token",
+        )
+        is True
+    )
     db.commit()
     db.refresh(environment)
     assert environment.status == "finalizing"
@@ -1840,7 +1902,8 @@ def test_browser_blackbox_rejects_target_drift_before_worker_call(db, monkeypatc
 
 
 def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(
-    independent_transaction_db, monkeypatch,
+    independent_transaction_db,
+    monkeypatch,
 ) -> None:
     db = independent_transaction_db
     owner = User(username="browser_owner_artifact", password="x", role="user", status=1)
@@ -1902,3 +1965,148 @@ def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(
     assert result["passed"] is True
     assert len(result["artifacts"]) == 2
     assert "browser_blackbox_runs" in json.loads(environment.result_json)
+
+
+def test_stop_unknown_request_confirms_absence_and_persists_idempotent_tombstone(
+    isolated_paths: Path,
+    monkeypatch,
+) -> None:
+    request_id = "sandbox-unaccepted-01"
+    calls = []
+    monkeypatch.setattr(executor, "_remove_untracked_container", lambda value: calls.append(("container", value)))
+    monkeypatch.setattr(executor, "_remove_job_data", lambda value: calls.append(("job", value)))
+
+    result, duplicate = executor.stop_job({"request_id": request_id})
+    repeated, repeated_duplicate = executor.stop_job({"request_id": request_id})
+
+    assert duplicate is False
+    assert result["request_id"] == request_id
+    assert result["status"] == "stopped"
+    assert result["result"]["cleanup_confirmed"] is True
+    assert calls == [("container", request_id), ("job", request_id)]
+    assert repeated_duplicate is True
+    assert repeated["status"] == "stopped"
+
+
+def test_stop_waits_for_submission_startup_before_confirming_unknown_resources(
+    isolated_paths: Path,
+    monkeypatch,
+) -> None:
+    request_id = "sandbox-starting-01"
+    cleanup_calls = []
+    monkeypatch.setattr(executor, "_remove_untracked_container", lambda value: cleanup_calls.append(value))
+    monkeypatch.setattr(executor, "_remove_job_data", lambda _value: None)
+    with executor.STATE_CONDITION:
+        executor.SUBMISSIONS_INFLIGHT.add(request_id)
+    result = []
+    errors = []
+
+    def stop() -> None:
+        try:
+            result.append(executor.stop_job({"request_id": request_id}))
+        except Exception as exc:  # pragma: no cover - surfaced below
+            errors.append(exc)
+
+    thread = threading.Thread(target=stop)
+    thread.start()
+    time.sleep(0.05)
+    assert thread.is_alive()
+    assert cleanup_calls == []
+    with executor.STATE_CONDITION:
+        executor.SUBMISSIONS_INFLIGHT.discard(request_id)
+        executor.STATE_CONDITION.notify_all()
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert cleanup_calls == [request_id]
+    assert result[0][0]["status"] == "stopped"
+
+
+def test_submit_is_rejected_while_unknown_request_id_cleanup_is_reserved(
+    isolated_paths: Path,
+    monkeypatch,
+) -> None:
+    request_id = "sandbox-stop-reserved-01"
+    inspect_started = threading.Event()
+    allow_inspect_to_finish = threading.Event()
+
+    def block_cleanup(_request_id: str) -> None:
+        inspect_started.set()
+        assert allow_inspect_to_finish.wait(timeout=2)
+
+    monkeypatch.setattr(executor, "_remove_untracked_container", block_cleanup)
+    monkeypatch.setattr(executor, "_remove_job_data", lambda _request_id: None)
+    stop_result = []
+    stop_errors = []
+
+    def stop() -> None:
+        try:
+            stop_result.append(executor.stop_job({"request_id": request_id}))
+        except Exception as exc:  # pragma: no cover - surfaced below
+            stop_errors.append(exc)
+
+    thread = threading.Thread(target=stop)
+    thread.start()
+    assert inspect_started.wait(timeout=2)
+    source = _archive({"main.py": "print('must not start')\n"})
+
+    with pytest.raises(executor.ConflictError, match="正在停止"):
+        executor.submit_job(_payload(source, request_id=request_id))
+
+    allow_inspect_to_finish.set()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert stop_errors == []
+    assert stop_result[0][0]["status"] == "stopped"
+    assert executor._read_state(request_id)["result"]["cleanup_confirmed"] is True
+
+
+def test_stop_retries_cleanup_for_legacy_terminal_failure_with_cleanup_error(
+    isolated_paths: Path,
+    monkeypatch,
+) -> None:
+    request_id = "sandbox-legacy-cleanup-01"
+    executor._write_state(
+        {
+            "request_id": request_id,
+            "request_digest": "legacy-request-digest",
+            "purpose": "test",
+            "language": "python",
+            "test_mode": "whitebox",
+            "source_sha256": "0" * 64,
+            "status": "failed",
+            "stage": "failed",
+            "runtime": "runsc",
+            "image_ref": "prism-sandbox-python:3.11",
+            "events": [],
+            "result": {"outcome": "failed", "cleanup_error": "HTTP 404"},
+            "error": "执行失败，资源回收待重试",
+        }
+    )
+    removed = []
+    monkeypatch.setattr(executor, "_remove_container", lambda name: removed.append(("container", name)))
+    monkeypatch.setattr(executor, "_remove_job_data", lambda value: removed.append(("source", value)))
+
+    result, duplicate = executor.stop_job({"request_id": request_id})
+
+    assert duplicate is False
+    assert result["status"] == "failed"
+    assert result["result"]["cleanup_confirmed"] is True
+    assert "cleanup_error" not in result["result"]
+    assert "资源回收待重试" not in result["error"]
+    assert result["stage"] == "failed"
+    assert [item[0] for item in removed] == ["container", "source"]
+
+
+def test_remove_container_requires_docker_absence_proof(monkeypatch) -> None:
+    calls = iter(
+        [
+            {"exit_code": 1, "stdout": "", "stderr": "cannot connect to Docker daemon"},
+            {"exit_code": 1, "stdout": "", "stderr": "Cannot connect to the Docker daemon"},
+        ]
+    )
+    monkeypatch.setattr(executor, "_run_command", lambda *_args, **_kwargs: next(calls))
+
+    with pytest.raises(RuntimeError, match="未能确认"):
+        executor._remove_container("prism-sandbox-unknown")
