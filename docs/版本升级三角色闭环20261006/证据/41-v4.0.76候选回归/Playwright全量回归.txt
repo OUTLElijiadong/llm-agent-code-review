@@ -1,0 +1,83 @@
+
+> code-review-platform@1.0.0 test:e2e
+> playwright test
+
+[WebServer] (node:40047) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 68 tests using 1 worker
+
+(node:40049) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 e2e/approval-details-mobile.spec.ts:34:3 › 未核验审批详情在 390px 视口内可读且不提供会话跳转 (3.3s)
+  ✓   2 e2e/approval-details-mobile.spec.ts:34:3 › 未核验审批详情在 320px 视口内可读且不提供会话跳转 (2.6s)
+  ✓   3 e2e/approval-details-mobile.spec.ts:71:1 › 已核验来源明确说明关联账号并提供返回原会话入口 (2.9s)
+APPROVAL_DESKTOP_1280 {"viewportWidth":1280,"documentWidth":1280,"clientWidth":928,"scrollWidth":928,"scrollLeft":0,"statusLeft":895,"statusRight":1005,"operationLeft":1005,"operationRight":1225,"actionButtonLeft":1017,"actionButtonRight":1079,"regionLeft":297,"regionRight":1225}
+  ✓   4 e2e/approval-table-desktop.spec.ts:3:1 › 审批列表在 1280px 桌面宽度下无横向滚动且状态和操作直接可见 (2.5s)
+  ✓   5 e2e/approval-table-mobile.spec.ts:30:3 › 审批列表在 390px 真正横向滚动，键盘可到达操作列 (2.5s)
+  ✓   6 e2e/approval-table-mobile.spec.ts:30:3 › 审批列表在 320px 真正横向滚动，键盘可到达操作列 (3.9s)
+  ✓   7 e2e/approval-table-mobile.spec.ts:86:1 › 审批列表在 375px 触屏手势下可横向滚动到操作列 (2.8s)
+  ✓   8 e2e/code-file-list-mobile.spec.ts:43:3 › 手机 320px 展示完整文件名、元数据与有权限的操作 (2.6s)
+  ✓   9 e2e/code-file-list-mobile.spec.ts:43:3 › 手机 390px 展示完整文件名、元数据与有权限的操作 (2.9s)
+  ✓  10 e2e/code-file-list-mobile.spec.ts:82:1 › 桌面仍使用完整表格；手机空态、错误重试和分页可用 (6.0s)
+  ✓  11 e2e/code-file-list-mobile.spec.ts:113:1 › 总数从多页缩至单页时只存在一个分页实例，自动纠正最多读取一次 (2.9s)
+  ✓  12 e2e/code-file-list-mobile.spec.ts:127:1 › 手机文件卡片的文本查看、二进制元信息和下载操作均可点击 (6.1s)
+  -  13 e2e/jarvis-brief.spec.ts:19:1 › 管理端:登录打开小菱保持新对话且不自动启动 JARVIS 模型
+  ✓  14 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：1440px (6.9s)
+  ✓  15 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：768px (2.5s)
+  ✓  16 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：430px (2.3s)
+  ✓  17 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：390px (3.3s)
+  ✓  18 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：360px (1.9s)
+  ✓  19 e2e/layout-alignment.spec.ts:46:3 › 问题卡片操作列相对色带固定，权限差异不改变锚点：320px (1.5s)
+  ✓  20 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：1440px (3.9s)
+  ✓  21 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：768px (3.0s)
+  ✓  22 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：430px (5.9s)
+  ✓  23 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：390px (3.9s)
+  ✓  24 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：360px (3.9s)
+  ✓  25 e2e/layout-alignment.spec.ts:79:3 › 审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：320px (2.7s)
+  ✓  26 e2e/layout-alignment.spec.ts:126:1 › 侧栏收起、展开和刷新后按钮完整可点击，且不盖住品牌图标 (6.0s)
+  ✓  27 e2e/layout-alignment.spec.ts:145:1 › 代码中心顶部仅保留主布局间距，搜索框与标题说明区底边对齐 (3.4s)
+  ✓  28 e2e/layout-alignment.spec.ts:164:1 › 代码中心项目卡明确提示可浏览代码文件且键盘可达 (3.3s)
+  ✓  29 e2e/layout-alignment.spec.ts:175:1 › 代码中心失败原因与重试按钮同时可见，重试后恢复项目卡片 (5.8s)
+  ✓  30 e2e/layout-alignment.spec.ts:191:3 › 移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：320px (4.8s)
+  ✓  31 e2e/layout-alignment.spec.ts:191:3 › 移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：360px (5.1s)
+  ✓  32 e2e/layout-alignment.spec.ts:191:3 › 移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：375px (5.4s)
+  ✓  33 e2e/layout-alignment.spec.ts:191:3 › 移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：390px (4.5s)
+  ✓  34 e2e/layout-alignment.spec.ts:191:3 › 移动端沿用桌面收起状态时仍能打开完整导航并跳转关闭：430px (2.8s)
+  ✓  35 e2e/layout-alignment.spec.ts:216:1 › 问题追踪请求失败有明确反馈，两类请求可独立点击重试 (3.3s)
+  ✓  36 e2e/layout-alignment.spec.ts:239:1 › 全局圆桌入口放在顶栏且不覆盖不同视口的问题卡片内容 (7.6s)
+  ✓  37 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：1440px，只读权限 (3.6s)
+  ✓  38 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：1024px，只读权限 (4.8s)
+  ✓  39 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：768px，只读权限 (3.0s)
+  ✓  40 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：430px，只读权限 (3.2s)
+  ✓  41 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：390px，只读权限 (3.7s)
+  ✓  42 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：360px，只读权限 (3.8s)
+  ✓  43 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：320px，只读权限 (6.2s)
+  ✓  44 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：1440px，可处理权限 (5.7s)
+  ✓  45 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：1024px，可处理权限 (3.2s)
+  ✓  46 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：768px，可处理权限 (11.0s)
+  ✓  47 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：430px，可处理权限 (3.9s)
+  ✓  48 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：390px，可处理权限 (4.1s)
+  ✓  49 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：360px，可处理权限 (5.3s)
+  ✓  50 e2e/layout-alignment.spec.ts:283:5 › 问题操作列保持对齐且窄屏无溢出：320px，可处理权限 (3.2s)
+  -  51 e2e/proactive-guide.spec.ts:21:1 › 用户端:进入页面主动弹出引导,一键唤起小菱并预填
+  -  52 e2e/proactive-guide.spec.ts:31:1 › 用户端:审查任务页引导显示统一术语
+  -  53 e2e/proactive-guide.spec.ts:39:1 › 管理端:进入管理页面主动弹出引导,一键唤起管理副驾驶并预填
+  ✓  54 e2e/report-detail-mobile.spec.ts:44:3 › 报告 Top10 在 320px 打印预览不超出 A4 内容列，屏幕仍可横滚 (6.6s)
+  ✓  55 e2e/report-detail-mobile.spec.ts:44:3 › 报告 Top10 在 390px 打印预览不超出 A4 内容列，屏幕仍可横滚 (3.1s)
+  ✓  56 e2e/report-detail-mobile.spec.ts:106:3 › 报告封面、操作按钮和文件表在 320px 内可用 (3.1s)
+  ✓  57 e2e/report-detail-mobile.spec.ts:106:3 › 报告封面、操作按钮和文件表在 390px 内可用 (3.6s)
+  ✓  58 e2e/report-detail-mobile.spec.ts:106:3 › 报告封面、操作按钮和文件表在 768px 内可用 (3.1s)
+  ✓  59 e2e/review-start-layout.spec.ts:31:3 › 发起审查名称、文件与类型在 320px 视口内完整显示 (3.5s)
+  ✓  60 e2e/review-start-layout.spec.ts:31:3 › 发起审查名称、文件与类型在 390px 视口内完整显示 (3.7s)
+  ✓  61 e2e/review-start-layout.spec.ts:31:3 › 发起审查名称、文件与类型在 768px 视口内完整显示 (3.7s)
+  ✓  62 e2e/review-start-layout.spec.ts:31:3 › 发起审查名称、文件与类型在 1024px 视口内完整显示 (3.2s)
+  -  63 e2e/roundtable-followup.spec.ts:24:1 › 管理端圆桌讨论：启动后可继续对话、结束后结论自动回投汇报
+  -  64 e2e/team-followup.spec.ts:24:1 › 子Agent团队：派发后可继续对话、完成后自动汇报、可追问成员修正
+  -  65 e2e/xiaoling.spec.ts:35:1 › 用户端：打开小菱是新对话且完成一次查询
+  -  66 e2e/xiaoling.spec.ts:52:1 › 管理端：打开管理副驾驶是新对话且无控制台报错
+  -  67 e2e/xiaoling.spec.ts:65:1 › 用户端：页面操作显示虚拟鼠标彩框与操作提示
+  -  68 e2e/xiaoling.spec.ts:77:1 › 用户端：取消确认弹层、原因沉淀与会话搜索/置顶/删除确认
+
+  10 skipped
+  58 passed (3.9m)

@@ -2,7 +2,7 @@
 
 > 基线日期：2026-07-10。生产拓扑为 Docker Compose 管理的 **MySQL + FastAPI Backend + Nginx Frontend + ClamAV** 四个容器。完整发布步骤与人工确认项见 [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md)。
 
-> **当前发布状态**：本地生产级全量门禁已通过，包括 Backend 双阶段镜像、Alembic `001 → 009`、真实 MySQL 备份恢复、ClamAV/YARA/fail-closed、Nginx HTTPS 与暴露面检查；但当前工作区不干净，尚无承载全部改动的精确审查 SHA，生产发布未获授权。
+> **2026-10-06 发布状态**：用户已授权继续发布。v4.0.76 候选精确提交为 `069babf61ce8f5b93a3dfc2356ec81fd665b221c`，版本注入及本地后端/前端/Playwright/部署脚本门禁已完成；其中 10 项 Playwright 因真实登录/API 门禁跳过。当前没有该候选的远端 CI 运行（GitHub 仅配置 CodeQL 工作流），生产仍运行 v4.0.75 / `0bbe8c84038c8f59da3c91e08ce21d2e37493347`。本机 Docker daemon 不可用，生产 SSH 公钥认证被拒绝，因此本候选尚未部署。不要将本地测试或健康检查表述为发布完成；部署仍须满足精确 SHA、备份恢复、迁移和发布后健康门禁。
 
 ## 1. 安全边界与发布原则
 

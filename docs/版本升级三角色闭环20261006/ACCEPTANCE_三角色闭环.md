@@ -197,3 +197,10 @@
 - 定向回归执行 `backend/tests/unit/agents/test_source_context_provenance.py`、`backend/tests/unit/services/test_agent_test_cases.py`、`backend/tests/unit/services/test_sandbox_optimizations.py`、`backend/tests/unit/services/test_viewer_execution_boundaries.py`、`backend/tests/test_prism_sandbox_executor.py`：**133 passed、2 warnings**。随后全量后端 **6,220 passed、6 skipped、5 warnings**；前端 **142 个测试文件、1,846 项通过**；完整本地 Playwright **58 passed、10 skipped、0 failed**；ESLint/Vite 构建及部署脚本测试通过。E2E 首轮的 11 个失败经复现确认为测试夹具缺少 `can_handle` / `can_execute` 字段，夹具修正后 41 个相关场景及全量 E2E 均通过。10 项跳过依赖真实登录/API，所以生产登录、真实模型和 Worker 仍未被这些本地测试覆盖。聊天上下文存在离线 tokenizer 样本与百万级估算 token 假传输回归，沙箱源码则验证 100 万空格分词单元；均未进行真实 provider 调用或证明模型语义完整理解。精确范围见[证据 39](证据/39-v4.0.75沙箱候选修复与发布阻塞-20261006.md)。
 - 本机 Docker daemon 未运行。对生产 IP `81.70.251.90` 的普通 SSH 连接被 publickey 拒绝；配置别名 `jizhan` 连接超时。未运行生产 `deploy.sh` 或需要 root 的沙箱 Worker 安装流程。生产版本仍为 v4.0.75 / SHA `0bbe8c84038c8f59da3c91e08ce21d2e37493347`，候选改动没有发布。生产备份恢复、迁移、Worker 更新与原白盒任务复测都未通过本轮发布门禁。
 - 完整原始观察、测试命令与范围限制见[证据 39](证据/39-v4.0.75沙箱候选修复与发布阻塞-20261006.md)。全量验收保持**部分完成**；仍需可用部署通道，随后先备份/恢复与运行门禁，再复测原生产白盒、资源终止确认和隔离黑盒。不得将候选回归称作生产已修复，也不得把空队列推断为审查员可以访问普通用户沙箱。
+
+## v4.0.76 候选版本本地回归与生产状态复核
+
+- 根目录 `VERSION=4.0.76` 已提交到 `069babf61ce8f5b93a3dfc2356ec81fd665b221c`。本轮在该版本提交后的候选代码上重跑 Backend 6,220 passed/6 skipped、Frontend 1,846 passed、Playwright 58 passed/10 skipped/0 failures、ESLint、Vite `vue-tsc`/production build 与 33 项发布脚本门禁；buildInfo 对应候选版本、SHA 与构建时间。
+- 独立复核者重新打开六份测试日志并核算文件哈希与测试计数。Playwright 跳过项包括小菱、圆桌和子 Agent 团队等真实登录/API场景；本地结果不能代表这些流程已通过。真实 provider 的百万 token 语义、生产 Worker、原白盒失败任务回收、隔离黑盒仍未验证。
+- 2026-10-06 13:22:11 UTC 只读生产健康与就绪检查仍返回 v4.0.75 / `0bbe8c84038c8f59da3c91e08ce21d2e37493347`；普通 Safari 的 `18878489000` 个人中心显示审查员且账号正常。本轮没有生产业务写入。
+- 未执行生产发布。Docker daemon 不可用，SSH 公钥认证被拒绝，远端只有 CodeQL 工作流而无该候选的 CI 运行，候选分支未推送。发布、原场景白盒复测及随后黑盒仍是开放项。原始日志哈希、身份绑定方法与未覆盖边界见[证据 41](证据/41-v4.0.76候选回归-20261006.md)。总体状态继续为**部分完成**。
