@@ -155,7 +155,8 @@
               </span>
             </td>
             <td>
-              <div v-if="hasRealScore(row)" class="mini-gauge" :title="`评分 ${displayScore(row)}`">
+              <div v-if="hasRealScore(row)" class="project-score-cell">
+                <div class="mini-gauge" :title="projectScoreTitle(row)">
                 <svg viewBox="0 0 36 36" class="gauge-svg">
                   <circle cx="18" cy="18" r="14" fill="none" stroke="var(--gray-100)" stroke-width="3"/>
                   <circle
@@ -169,6 +170,10 @@
                 <span class="gauge-text font-mono" :style="{ color: scoreColor(displayScore(row)) }">
                   {{ displayScore(row) }}
                 </span>
+                </div>
+                <el-tag v-if="projectCoverageLabel(row)" size="small" type="warning" effect="plain">
+                  {{ projectCoverageLabel(row) }}
+                </el-tag>
               </div>
               <span v-else class="muted font-mono" title="尚未审查或后端未返回评分">未评分</span>
             </td>
@@ -264,7 +269,8 @@
               />
             </el-tooltip>
           </div>
-          <div v-if="hasRealScore(row)" class="mini-gauge sm" :title="`评分 ${displayScore(row)}`">
+          <div v-if="hasRealScore(row)" class="project-score-cell project-score-cell--compact">
+            <div class="mini-gauge sm" :title="projectScoreTitle(row)">
             <svg viewBox="0 0 36 36" class="gauge-svg">
               <circle cx="18" cy="18" r="14" fill="none" stroke="var(--gray-100)" stroke-width="3"/>
               <circle
@@ -278,6 +284,10 @@
             <span class="gauge-text font-mono" :style="{ color: scoreColor(displayScore(row)) }">
               {{ displayScore(row) }}
             </span>
+            </div>
+            <el-tag v-if="projectCoverageLabel(row)" size="small" type="warning" effect="plain">
+              {{ projectCoverageLabel(row) }}
+            </el-tag>
           </div>
           <span v-else class="muted font-mono score-unrated">未评分</span>
         </footer>
@@ -497,6 +507,19 @@ function displayScore(row: ProjectOut): number {
 
 function hasRealScore(row: ProjectOut): boolean {
   return typeof row.score === 'number'
+}
+
+function projectCoverageLabel(row: ProjectOut): string {
+  const status = row.coverage?.verification_status
+  if (status === 'partial') return '部分验证'
+  if (status === 'failed') return '验证未通过'
+  if (status === 'unknown') return '范围未知'
+  return ''
+}
+
+function projectScoreTitle(row: ProjectOut): string {
+  const label = projectCoverageLabel(row)
+  return label ? `记录评分 ${displayScore(row)}；${label}` : `评分 ${displayScore(row)}`
 }
 
 function scoreColor(score: number): string {
@@ -1355,6 +1378,13 @@ onBeforeUnmount(() => {
     .gauge-svg, .gauge-text { width: 32px; height: 32px; font-size: 10px; }
   }
 }
+
+.project-score-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.project-score-cell--compact { justify-content: flex-end; }
 
 .file-count { color: var(--gray-700); }
 .muted { color: var(--color-text-placeholder); }

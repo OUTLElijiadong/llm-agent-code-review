@@ -11,7 +11,7 @@ export type ReportTemplateType = 'simple' | 'detailed' | 'compliance' | 'custom'
 /** 报告导出格式(json/html/pdf/word) */
 export type ReportFormat = 'json' | 'html' | 'pdf' | 'word'
 
-import type { TaskDetailOut } from './review'
+import type { TaskCoverageOut, TaskDetailOut } from './review'
 
 export interface ReportSource {
   type?: string
@@ -85,9 +85,10 @@ export interface ReportListItem {
   task_name?: string
   project_name: string
   total_issues: number
-  score: number
+  score: number | null
   status: 'success' | 'failed'
   create_time: string
+  coverage?: TaskCoverageOut | null
   source?: ReportSource
 }
 

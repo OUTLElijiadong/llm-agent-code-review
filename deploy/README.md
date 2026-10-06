@@ -2,7 +2,7 @@
 
 > 基线日期：2026-07-10。生产拓扑为 Docker Compose 管理的 **MySQL + FastAPI Backend + Nginx Frontend + ClamAV** 四个容器。完整发布步骤与人工确认项见 [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md)。
 
-> **2026-10-06 发布状态**：用户已授权继续发布。v4.0.76 候选精确提交为 `069babf61ce8f5b93a3dfc2356ec81fd665b221c`，版本注入及本地后端/前端/Playwright/部署脚本门禁已完成；其中 10 项 Playwright 因真实登录/API 门禁跳过。真实 provider 的百万 token 语义、生产 Worker、原白盒失败任务清理回执及隔离黑盒尚未验收。当前没有该候选的远端 CI 运行（GitHub 仅配置 CodeQL 工作流），生产仍运行 v4.0.75 / `0bbe8c84038c8f59da3c91e08ce21d2e37493347`。本机 Docker daemon 不可用，生产 SSH 公钥认证被拒绝，因此本候选尚未部署。不要将本地测试或健康检查表述为发布完成；部署仍须满足精确 SHA、备份恢复、迁移和发布后健康门禁。
+> **2026-10-07 发布状态**：生产只读 `/healthz`、`/readyz` 与普通 Safari 页面均确认 v4.0.77 / `083c64a9af018c00339d7288b196dee4650b17c4`。v4.0.78 黑白盒用例生成与契约修复候选正在本地验收；生产 SSH `li@81.70.251.90:22` 返回 `Permission denied (publickey,...)`，因此本候选未上传、未部署，生产缺陷尚未复测为已修复。禁止把候选自动化结果写成生产通过；重新授权部署通道后，仍须执行精确 SHA、备份恢复、迁移和发布后真实业务验收。
 
 ## 1. 安全边界与发布原则
 

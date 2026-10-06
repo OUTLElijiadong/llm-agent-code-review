@@ -145,6 +145,7 @@ class ProjectOut(BaseModel):
     can_execute: bool = False
     last_review_at: Optional[datetime] = None
     score: Optional[int] = None
+    coverage: Optional[dict] = None
     agent_run_count: int = 0
     last_agent_run_at: Optional[datetime] = None
     create_time: datetime
@@ -160,6 +161,7 @@ class RecentTaskOut(BaseModel):
     review_type: str = ""
     score: Optional[int] = None
     total_issues: Optional[int] = None
+    coverage: Optional[dict] = None
     status: str
     create_time: datetime
 

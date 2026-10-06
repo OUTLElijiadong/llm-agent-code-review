@@ -6,12 +6,11 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.security_host import Host
+from deploy.tests.security_host import Host
 
 MODULE = Path(__file__).resolve().parents[1] / "prism_security_block.py"
 SPEC = importlib.util.spec_from_file_location("prism_security_block", MODULE)
@@ -120,7 +119,7 @@ def test_summarize_decoy_hits_groups_by_source_and_paths():
 
 
 def test_decoy_status_reports_container_hits_and_members(decoy_env):
-    ctl, host = decoy_env
+    ctl, _host = decoy_env
     snapshot = ctl.decoy_status()
     assert snapshot["container_running"] is True
     assert snapshot["hit_total"] == 3
@@ -162,7 +161,7 @@ def test_decoy_apply_adds_public_sources_and_skips_protected(decoy_env, monkeypa
 
 
 def test_decoy_apply_skips_non_public_and_loopback(decoy_env, monkeypatch):
-    ctl, host = decoy_env
+    ctl, _host = decoy_env
     log = Path(security.DECOY_HIT_LOG)
     log.write_text("\n".join([
         decoy_line("10.0.0.9", "/.env"),

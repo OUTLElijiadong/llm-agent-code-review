@@ -192,6 +192,35 @@ def _worker_request_config_json(environment: SandboxEnvironment, request_id: str
     return _json(config)
 
 
+_WORKER_EXECUTE_FIELDS = frozenset(
+    {
+        "request_id",
+        "purpose",
+        "language",
+        "test_mode",
+        "db_type",
+        "source_sha256",
+        "ttl_seconds",
+        "image_digest",
+    }
+)
+
+
+def _worker_execute_payload(request_envelope: dict[str, Any], source_archive_base64: str) -> dict[str, Any]:
+    """Project backend provenance onto the strict, versioned Worker execute contract.
+
+    Revision and repair metadata stay in the durable backend execution ledger. The
+    Worker only receives fields it uses to validate and run the immutable archive.
+    """
+    payload = {key: request_envelope[key] for key in _WORKER_EXECUTE_FIELDS if key in request_envelope}
+    payload["source_archive_base64"] = source_archive_base64
+    required = _WORKER_EXECUTE_FIELDS | {"source_archive_base64"}
+    missing = sorted(required.difference(payload))
+    if missing:
+        raise RuntimeError(f"Sandbox Worker execute 请求缺少字段: {', '.join(missing)}")
+    return payload
+
+
 def _validate_worker_execution_receipt(
     response: dict[str, Any],
     *,
@@ -206,6 +235,83 @@ def _validate_worker_execution_receipt(
     if not returned_sha256 or not hmac.compare_digest(returned_sha256, source_sha256):
         raise RuntimeError("Sandbox Worker 回执源码 SHA-256 与当前执行快照不一致")
     return {"request_id": returned_request_id, "source_sha256": returned_sha256}
+
+
+def _worker_execution_passed(
+    *,
+    purpose: str,
+    state: str,
+    target_status: str,
+    conclusion: dict[str, Any],
+) -> bool:
+    """Only a terminal test result with an explicit zero exit code is a test pass.
+
+    Deploy workers are intentionally long-lived; their running state means the preview
+    process is serving, while test workers must reach a terminal result.
+    """
+    if purpose == "deploy" and state == "running" and target_status == "ready":
+        return True
+    if target_status != "succeeded":
+        return False
+    exit_code = conclusion.get("exit_code")
+    return (
+        state in {"completed", "succeeded"}
+        and type(exit_code) is int
+        and exit_code == 0
+    )
+
+
+def _worker_status_is_terminal(purpose: str, state: str) -> bool:
+    """Test jobs must terminate; only deploy previews treat a live process as ready."""
+    if purpose == "deploy" and state == "running":
+        return True
+    return state in {"completed", "succeeded", "failed", "blocked", "stopped", "expired"}
+
+
+def _remote_blackbox_passed(execution: dict[str, Any]) -> bool:
+    """Only a final 2xx response is a successful functional black-box check."""
+    return execution.get("status") == "passed" and execution.get("route_passed") is True
+
+
+def _execution_result_passed(
+    *,
+    purpose: str,
+    state: str,
+    target_status: str,
+    conclusion: dict[str, Any],
+    test_mode: str,
+    evidence: dict[str, Any],
+    agent_tests_result: dict[str, Any] | None = None,
+    agent_test_generation: dict[str, Any] | None = None,
+    remote_target_url: str | None = None,
+) -> bool:
+    """Combine every required execution receipt before publishing a passing result."""
+    if not _worker_execution_passed(
+        purpose=purpose,
+        state=state,
+        target_status=target_status,
+        conclusion=conclusion,
+    ):
+        return False
+    if agent_tests_result is not None and not _agent_tests_succeeded(agent_tests_result):
+        return False
+    if agent_test_generation and agent_test_generation.get("status") == "generated" and agent_tests_result is None:
+        return False
+    if purpose == "test" and test_mode in {"blackbox", "combined"}:
+        blackbox = evidence.get("blackbox_execution")
+        if not isinstance(blackbox, dict) and remote_target_url:
+            blackbox = evidence.get("remote_blackbox_execution")
+        if (
+            not isinstance(blackbox, dict)
+            or blackbox.get("status") != "passed"
+            or blackbox.get("route_passed") is not True
+        ):
+            return False
+    if remote_target_url:
+        remote_execution = evidence.get("remote_blackbox_execution")
+        if not isinstance(remote_execution, dict) or not _remote_blackbox_passed(remote_execution):
+            return False
+    return True
 
 
 def _source_provenance(environment: SandboxEnvironment, worker_receipt: dict[str, str] | None = None) -> dict[str, Any]:
@@ -656,10 +762,11 @@ def _persist_browser_artifact(
 
 
 def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[str, Any]:
-    """部署就绪后自动调用 test_verifier Agent 做带外 HTTP 冒烟测试。
+    """部署就绪后通过 Worker 预览通道做一次带外 HTTP 根路径冒烟测试。
 
     经 worker 预览通道从环境外部发起 GET,与人工预览访问同一路径,
-    不触碰容器内源码,也不影响部署保活。任何失败只记录、不阻断部署。
+    不调用 Agent、不触碰容器内源码,也不影响部署保活。该证据只说明根路径可达；
+    任何失败只记录、不阻断预览部署，也不能替代业务用例和授权黑盒测试。
     """
     started = datetime.now(timezone.utc)
     worker = db.get(SandboxWorker, environment.worker_id) if environment.worker_id else None
@@ -691,7 +798,7 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
     )
     return {
         "available": True,
-        "agent_code": "test_verifier",
+        "scope": "http_root_smoke",
         "method": "GET",
         "path": "/",
         "status_code": status_code,
@@ -703,9 +810,10 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
     }
 
 
-# deploy 后自动白盒/黑盒所用的内嵌 runner:作为 `_prism_verify.sh` 随源码注入,
+# deploy 后自动核验所用的内嵌 runner:作为 `_prism_verify.sh` 随源码注入,
 # 用 deploy 镜像自带的解释器运行,不依赖项目镜像 runner.sh 的 test 分支(deploy 镜像通常不含)。
-# 白盒做编译/静态检查与单测发现；黑盒在隔离网内做 HTTP smoke 和 Agent 动态断言，不能替代授权渗透。
+# 白盒执行可用的静态/编译/既有单测；黑盒仅探测源码候选路由的 HTTP 可达性，不生成或执行 AI 动态断言。
+# 冒烟结果不得作为业务路径或授权渗透已经覆盖的证据。
 _DEPLOY_VERIFY_RUNNER = r"""#!/bin/sh
 set -u
 # runner.sh 已把源码(含本脚本)拷到 /workspace 并 cd 进去,这里就地运行。
@@ -905,9 +1013,39 @@ php_doc_root() {
 start_app() {
   : > /tmp/prism-app.log
   APP_PID=""
+  is_asgi_application() {
+    [ -f "$1" ] || return 1
+    python -c 'import ast,sys
+tree=ast.parse(open(sys.argv[1], encoding="utf-8").read())
+raise SystemExit(0 if any(
+  isinstance(node, ast.Call)
+  and (getattr(node.func, "id", "") if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")) in {"FastAPI", "Starlette"}
+  for node in ast.walk(tree)
+) else 1)' "$1"
+  }
   case "$LANG_" in
     python)
-      if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then
+      if [ -f manage.py ] && python -c 'import django' >/dev/null 2>&1; then
+        python manage.py runserver "127.0.0.1:$PORT" --noreload >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f asgi.py ] && python -c 'import uvicorn' >/dev/null 2>&1; then
+        python -m uvicorn asgi:application --host 127.0.0.1 --port "$PORT" >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f main.py ] && python -c 'import uvicorn' >/dev/null 2>&1 && is_asgi_application main.py; then
+        python -m uvicorn main:app --host 127.0.0.1 --port "$PORT" >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f app.py ] && python -c 'import uvicorn' >/dev/null 2>&1 && is_asgi_application app.py; then
+        python -m uvicorn app:app --host 127.0.0.1 --port "$PORT" >/tmp/prism-app.log 2>&1 & APP_PID=$!
+      elif [ -f wsgi.py ]; then
+        python - "$PORT" <<'PYWSGI' >/tmp/prism-app.log 2>&1 &
+import sys
+from wsgiref.simple_server import make_server
+namespace = {}
+exec(compile(open("wsgi.py", encoding="utf-8").read(), "wsgi.py", "exec"), namespace)
+application = namespace.get("application") or namespace.get("app")
+if not callable(application):
+    raise SystemExit("wsgi.py must define callable application or app")
+make_server("127.0.0.1", int(sys.argv[1]), application).serve_forever()
+PYWSGI
+        APP_PID=$!
+      elif [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then
         python -m flask --app app run --host 127.0.0.1 --port "$PORT" >/tmp/prism-app.log 2>&1 & APP_PID=$!
       elif [ -f main.py ]; then
         python main.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
@@ -915,7 +1053,25 @@ start_app() {
         python app.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
       else return 1; fi
       ;;
-    node)   [ -f package.json ] || return 1; npm start --if-present >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    node)
+      node_entry=""
+      if [ -f package.json ]; then
+        if node -e 'process.exit(require("./package.json").scripts?.start ? 0 : 1)' 2>/dev/null; then
+          npm start >/tmp/prism-app.log 2>&1 & APP_PID=$!
+          return 0
+        fi
+        node_entry="$(node -e 'try { process.stdout.write(require("./package.json").main || "") } catch (_) {}' 2>/dev/null || true)"
+      fi
+      for entry in "$node_entry" server.js server.mjs index.js index.mjs app.js main.js; do
+        [ -n "$entry" ] || continue
+        case "$entry" in /*|../*|*/../*) continue ;; esac
+        if [ -f "$entry" ]; then
+          node "$entry" >/tmp/prism-app.log 2>&1 & APP_PID=$!
+          break
+        fi
+      done
+      [ -n "$APP_PID" ] || return 1
+      ;;
     java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
     go)     go run . >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
     php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
@@ -937,6 +1093,23 @@ except Exception as e:
   fi
 }
 
+discover_probe_routes() {
+  route_prefix='(route|get|post|put|delete|patch|path|HandleFunc|Path|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)[[:space:]]*\([[:space:]]*'
+  double_pattern="${route_prefix}\"[^\"]+\""
+  single_pattern="${route_prefix}'[^']+'"
+  {
+    find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' -not -path './_agent_tests/*' -print0 \
+      | xargs -0 grep -hiEo "$double_pattern" 2>/dev/null \
+      | sed -nE "s/.*\([[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" || true
+    find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' -not -path './_agent_tests/*' -print0 \
+      | xargs -0 grep -hiEo "$single_pattern" 2>/dev/null \
+      | sed -nE "s/.*\([[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" || true
+    printf '%s\n' / /health /healthz /api/health /api/healthz /api /openapi.json /docs /login
+  } | awk '{if (substr($0, 1, 1) != "/") $0 = "/" $0; if (!seen[$0]++) print $0}' | head -n 80
+}
+
 run_blackbox() {
   start_app || { echo "blackbox: 无法启动应用"; return 1; }
   trap 'kill "$APP_PID" 2>/dev/null || true' EXIT INT TERM
@@ -949,39 +1122,41 @@ run_blackbox() {
     i=$((i+1)); sleep 1
   done
   if [ "$READY" != "1" ]; then echo "blackbox: 应用未在回环端口就绪"; return 1; fi
-  # 首页内容断言:首页非空则判通过
-  if command -v python >/dev/null 2>&1; then
-    BYTES=$(python -c "import urllib.request,urllib.error
-try:
-  print(len(urllib.request.urlopen('http://127.0.0.1:$PORT/',timeout=3).read()))
-except urllib.error.HTTPError as e:
-  print(len(e.read()))" 2>/dev/null || echo 0)  # 5xx 响应体也计入(服务已起来)
-  else
-    cat > /tmp/_bytes.php <<'PHPB'
-<?php
-echo strlen((string)@file_get_contents("http://127.0.0.1:PORT/"));
-PHPB
-    sed -i "s/PORT/$PORT/" /tmp/_bytes.php
-    BYTES=$(php /tmp/_bytes.php 2>/dev/null || echo 0)
+  blackbox_route=""
+  blackbox_status="0"
+  route_passed=false
+  failure_route="/"
+  failure_status="0"
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    printf '%s\n' "$p" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || continue
+    probe_status="$(http_probe "$p")"
+    printf 'blackbox probe %s -> %s\n' "$p" "$probe_status"
+    case "$probe_status" in
+      2*) blackbox_route="$p"; blackbox_status="$probe_status"; route_passed=true; break ;;
+      3*) if [ "$failure_status" -eq 0 ]; then failure_route="$p"; failure_status="$probe_status"; fi ;;
+      5*) failure_route="$p"; failure_status="$probe_status" ;;
+      4*) if [ "$failure_status" -eq 0 ]; then failure_route="$p"; failure_status="$probe_status"; fi ;;
+    esac
+  done <<EOFROUTES
+$(discover_probe_routes)
+EOFROUTES
+  if [ -z "$blackbox_route" ]; then
+    echo 'blackbox: no discovered application route returned HTTP 2xx'
+    blackbox_route="$failure_route"
+    blackbox_status="$failure_status"
   fi
-  # 常见路径探活
-  for p in / /index /health /api /login; do
-    printf 'blackbox probe %s -> %s\n' "$p" "$(http_probe "$p")"
-  done
-  ROOT_STATUS=$(http_probe "/")
   kill "$APP_PID" 2>/dev/null || true
   wait "$APP_PID" 2>/dev/null
   APP_PID=""
   trap - EXIT INT TERM
-  case "$ROOT_STATUS" in
-    2*|3*) ;;
-    *) echo "blackbox: 首页返回 HTTP ${ROOT_STATUS:-0}"; return 1 ;;
-  esac
-  if [ "$ROOT_STATUS" != "204" ] && [ "${BYTES:-0}" -le 0 ]; then
-    echo "blackbox: 首页响应为空"
+  if [ "$route_passed" = true ]; then
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke","route_passed":true,"route":"%s","status_code":%s}\n' "$blackbox_route" "$blackbox_status"
+  else
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","route_passed":false,"route":"%s","status_code":%s}\n' "$failure_route" "$failure_status"
     return 1
   fi
-  echo "blackbox: 首页 $BYTES 字节, 探活完成"
+  echo "blackbox: route $blackbox_route returned HTTP $blackbox_status"
   return 0
 }
 
@@ -1017,10 +1192,11 @@ def _run_deploy_auto_tests(
     source_archive_base64: str,
     modes: tuple = ("whitebox", "blackbox"),
 ) -> list[dict[str, Any]]:
-    """部署就绪后自动执行 白盒→黑盒 测试链(test_verifier Agent)。
+    """部署就绪后自动执行白盒检查与黑盒路由冒烟。
 
     复用同一 worker 与不可变源码快照,注入内嵌 `_prism_verify.sh` 作为 deploy 专用
-    runner,每次起一次性测试容器跑完即回收,与常驻 deploy 预览互不影响。失败只记录。
+    runner,每次起一次性测试容器跑完即回收,与常驻 deploy 预览互不影响。
+    黑盒部分只探测候选路由可达性，不等同于 AI 动态业务断言；失败只记录。
     """
     language = environment.language
     results: list[dict[str, Any]] = []
@@ -1067,9 +1243,14 @@ def _run_deploy_auto_tests(
                 },
             )
             result = response.get("result") if isinstance(response.get("result"), dict) else response
+            _validate_worker_execution_receipt(
+                result,
+                request_id=request_id,
+                source_sha256=sha,
+            )
             last_seq = 0
             deadline = time.monotonic() + 300
-            while str(result.get("status") or "") not in {"succeeded", "failed", "blocked", "stopped", "expired"}:
+            while not _worker_status_is_terminal("test", str(result.get("status") or "")):
                 if time.monotonic() >= deadline:
                     raise RuntimeError("自动测试轮询超时")
                 time.sleep(1)
@@ -1082,12 +1263,21 @@ def _run_deploy_auto_tests(
                     if isinstance(status_response.get("result"), dict)
                     else status_response
                 )
+                _validate_worker_execution_receipt(
+                    result,
+                    request_id=request_id,
+                    source_sha256=sha,
+                )
                 last_seq = int(result.get("last_sequence") or last_seq)
             conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
-            exit_code = int(conclusion.get("exit_code") or 0) if isinstance(conclusion, dict) else 0
+            exit_code = conclusion.get("exit_code") if isinstance(conclusion, dict) else None
             logs = conclusion.get("logs") if isinstance(conclusion, dict) else {}
             log_text = str((logs or {}).get("text") or "")
-            passed = str(result.get("status")) == "succeeded" and exit_code == 0
+            passed = (
+                str(result.get("status")) in {"succeeded", "completed"}
+                and type(exit_code) is int
+                and exit_code == 0
+            )
             results.append({"mode": mode, "passed": passed, "exit_code": exit_code, "log": log_text[-1500:]})
             # 提取 Recon 结构化事实(PRISM_FACTS_BEGIN/END 包裹),供多Agent审查使用
             facts = _extract_prism_facts(log_text)
@@ -1111,7 +1301,8 @@ def _run_deploy_auto_tests(
                     if mode == "whitebox"
                     else f"部署后自动黑盒测试{'通过' if passed else '未通过'}"
                 ),
-                {"mode": mode, "passed": passed, "exit_code": exit_code},
+                {"mode": mode, "passed": passed, "exit_code": exit_code,
+                 "scope": "route_smoke" if mode == "blackbox" else "static_and_existing_tests"},
             )
             _persist_browser_artifact(
                 db,
@@ -1402,15 +1593,18 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 issues.append(f"{path or '未命名文件'} Python 语法无效: 第 {exc.lineno or 0} 行")
                 tree = None
 
-        def call_name(node: ast.Call) -> str:
+        def dotted_name(node: ast.AST) -> str:
             parts: list[str] = []
-            current: ast.AST = node.func
+            current: ast.AST = node
             while isinstance(current, ast.Attribute):
                 parts.append(current.attr)
                 current = current.value
             if isinstance(current, ast.Name):
                 parts.append(current.id)
             return ".".join(reversed(parts))
+
+        def call_name(node: ast.Call) -> str:
+            return dotted_name(node.func)
 
         module_scope = tree
         parents: dict[ast.AST, ast.AST] = {}
@@ -1434,6 +1628,12 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
         trusted_encoder_calls: set[str] = set()
         trusted_request_calls: set[str] = set()
         trusted_urlopen_calls: set[str] = set()
+        trusted_port_calls: set[str] = set()
+        trusted_environ_names: set[str] = set()
+        trusted_os_module_names: set[str] = set()
+        trusted_setitem_calls: set[str] = set()
+        trusted_delitem_calls: set[str] = set()
+        trusted_methodcaller_calls: set[str] = set()
 
         def bind_name(name: str, statement: ast.AST, value: ast.AST) -> None:
             scope = enclosing_scope(statement)
@@ -1469,6 +1669,15 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                             )
                             trusted_request_calls.add(f"{prefix}.request.Request")
                             trusted_urlopen_calls.add(f"{prefix}.request.urlopen")
+                        elif alias.name == "os":
+                            prefix = bound
+                            trusted_os_module_names.add(prefix)
+                            trusted_port_calls.update({f"{prefix}.getenv", f"{prefix}.environ.get"})
+                            trusted_environ_names.add(f"{prefix}.environ")
+                        elif alias.name in {"operator", "_operator"}:
+                            trusted_setitem_calls.add(f"{bound}.setitem")
+                            trusted_delitem_calls.add(f"{bound}.delitem")
+                            trusted_methodcaller_calls.add(f"{bound}.methodcaller")
                 elif import_node.module == "urllib.parse":
                     for alias in import_node.names:
                         if alias.name in {"urlencode", "quote", "quote_plus"}:
@@ -1491,6 +1700,22 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                             prefix = alias.asname or alias.name
                             trusted_request_calls.add(f"{prefix}.Request")
                             trusted_urlopen_calls.add(f"{prefix}.urlopen")
+                elif import_node.module == "os":
+                    for alias in import_node.names:
+                        bound = alias.asname or alias.name
+                        if alias.name == "getenv":
+                            trusted_port_calls.add(bound)
+                        elif alias.name == "environ":
+                            trusted_environ_names.add(bound)
+                            trusted_port_calls.add(f"{bound}.get")
+                elif import_node.module == "operator":
+                    for alias in import_node.names:
+                        if alias.name == "setitem":
+                            trusted_setitem_calls.add(alias.asname or alias.name)
+                        elif alias.name == "delitem":
+                            trusted_delitem_calls.add(alias.asname or alias.name)
+                        elif alias.name == "methodcaller":
+                            trusted_methodcaller_calls.add(alias.asname or alias.name)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
@@ -1542,6 +1767,315 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
             for bindings in assignment_bindings.values():
                 bindings.sort(key=lambda binding: (binding[0], binding[1]))
 
+        def target_path(target: ast.AST) -> str:
+            if isinstance(target, ast.Subscript):
+                return dotted_name(target.value)
+            return dotted_name(target)
+
+        environ_aliases = set(trusted_environ_names)
+        if tree is not None:
+            # Track simple references to os.environ so writes through a local alias
+            # cannot make a hard-coded port look like a trusted runtime value.
+            alias_dependents: dict[str, set[str]] = {}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    values = [node.value]
+                    targets = node.targets
+                elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+                    values = [node.value]
+                    targets = [node.target]
+                else:
+                    continue
+                value_paths = {dotted_name(value) for value in values}
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        for source in value_paths:
+                            alias_dependents.setdefault(source, set()).add(target.id)
+            # Track module aliases too (``os_alias = os``), otherwise writes through
+            # an ordinary assignment would evade the trusted-getenv/environ checks.
+            pending_modules = list(trusted_os_module_names)
+            while pending_modules:
+                source = pending_modules.pop()
+                for alias in alias_dependents.get(source, set()) - trusted_os_module_names:
+                    trusted_os_module_names.add(alias)
+                    trusted_port_calls.update({f"{alias}.getenv", f"{alias}.environ.get"})
+                    trusted_environ_names.add(f"{alias}.environ")
+                    pending_modules.append(alias)
+
+            environ_aliases.update(trusted_environ_names)
+            pending_aliases = list(environ_aliases)
+            while pending_aliases:
+                source = pending_aliases.pop()
+                aliases = {
+                    alias
+                    for value_path, dependents in alias_dependents.items()
+                    if value_path == source or value_path.startswith(f"{source}.")
+                    for alias in dependents
+                }
+                for alias in aliases - environ_aliases:
+                    environ_aliases.add(alias)
+                    pending_aliases.append(alias)
+
+        os_module_dict_names = {f"{module_name}.__dict__" for module_name in trusted_os_module_names}
+        os_module_dict_aliases = set(os_module_dict_names)
+        if tree is not None:
+            pending_dict_aliases = list(os_module_dict_aliases)
+            while pending_dict_aliases:
+                source = pending_dict_aliases.pop()
+                for alias in alias_dependents.get(source, set()) - os_module_dict_aliases:
+                    os_module_dict_aliases.add(alias)
+                    pending_dict_aliases.append(alias)
+
+        def module_dict_reference(node: ast.AST) -> bool:
+            if dotted_name(node) in os_module_dict_aliases:
+                return True
+            if isinstance(node, ast.Call) and call_name(node) == "vars" and node.args:
+                return dotted_name(node.args[0]) in trusted_os_module_names
+            if (
+                isinstance(node, ast.Call)
+                and call_name(node) == "getattr"
+                and len(node.args) >= 2
+                and dotted_name(node.args[0]) in trusted_os_module_names
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value == "__dict__"
+            ):
+                return True
+            return False
+
+        def module_dict_mutation(target: ast.AST, key: ast.AST | None = None) -> None:
+            """Poison trusted os getters/environment when code writes via module __dict__."""
+            if not isinstance(target, ast.Subscript):
+                return
+            if not module_dict_reference(target.value):
+                return
+            key_node = key if key is not None else target.slice
+            key_value = key_node.value if isinstance(key_node, ast.Constant) else None
+            affected = trusted_os_module_names
+            if key_value == "getenv":
+                mutated_port_sources.update(f"{module_name}.getenv" for module_name in affected)
+            elif key_value == "environ":
+                mutated_port_sources.update(f"{module_name}.environ" for module_name in affected)
+            else:
+                # Unknown/dynamic keys are conservatively treated as mutating either
+                # trusted source; this prevents reflection from bypassing the guard.
+                mutated_port_sources.update(
+                    name for module_name in affected for name in (f"{module_name}.getenv", f"{module_name}.environ")
+                )
+
+        def is_environ_reference(name: str) -> bool:
+            return any(name == alias or name.startswith(f"{alias}.") for alias in environ_aliases)
+
+        def contains_environ_reference(node: ast.AST) -> bool:
+            return any(
+                is_environ_reference(dotted_name(child))
+                for child in ast.walk(node)
+                if isinstance(child, (ast.Name, ast.Attribute))
+            )
+
+        def contains_os_module_reference(node: ast.AST) -> bool:
+            return any(
+                dotted_name(child) in trusted_os_module_names
+                for child in ast.walk(node)
+                if isinstance(child, (ast.Name, ast.Attribute))
+            )
+
+        def poison_os_mapping_trust() -> None:
+            mutated_port_sources.update(
+                name
+                for module_name in trusted_os_module_names
+                for name in (f"{module_name}.getenv", f"{module_name}.environ")
+            )
+            mutated_port_sources.update(trusted_port_calls)
+
+        def poison_environ_trust() -> None:
+            mutated_port_sources.update(environ_aliases)
+            # getenv and imported getenv aliases read this same environment mapping.
+            mutated_port_sources.update(trusted_port_calls)
+
+        methodcaller_mutator_names: set[str] = set()
+        if tree is not None:
+            mutation_methods = {
+                "__setitem__",
+                "__delitem__",
+                "update",
+                "clear",
+                "pop",
+                "popitem",
+                "setdefault",
+            }
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                    value = node.value
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    targets = [node.target]
+                    value = node.value
+                else:
+                    continue
+                if not isinstance(value, ast.Call) or call_name(value) not in trusted_methodcaller_calls:
+                    continue
+                method = value.args[0].value if value.args and isinstance(value.args[0], ast.Constant) else None
+                if method not in mutation_methods:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        methodcaller_mutator_names.add(target.id)
+            # Simple local aliases of a mutating methodcaller are equally capable
+            # of changing the environment mapping.
+            changed = True
+            while changed:
+                changed = False
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
+                        if node.value.id not in methodcaller_mutator_names:
+                            continue
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id not in methodcaller_mutator_names:
+                                methodcaller_mutator_names.add(target.id)
+                                changed = True
+
+        mutated_port_sources: set[str] = set()
+        if tree is not None:
+            for node in ast.walk(tree):
+                targets: list[ast.AST] = []
+                if isinstance(node, ast.Assign):
+                    targets = list(node.targets)
+                elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+                    targets = [node.target]
+                elif isinstance(node, ast.Delete):
+                    targets = list(node.targets)
+                for target in targets:
+                    binding_value = (
+                        node.value
+                        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+                        else None
+                    )
+                    alias_initialization = (
+                        isinstance(target, ast.Name)
+                        and target.id in environ_aliases
+                        and binding_value is not None
+                        and is_environ_reference(dotted_name(binding_value))
+                    )
+                    if isinstance(target, (ast.Tuple, ast.List)):
+                        target_paths = [target_path(child) for child in target.elts]
+                    else:
+                        target_paths = [target_path(target)]
+                    for target_name in target_paths:
+                        if target_name in trusted_environ_names or target_name in trusted_port_calls:
+                            mutated_port_sources.add(target_name)
+                        if is_environ_reference(target_name) and not alias_initialization:
+                            poison_environ_trust()
+                    for target in (target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target]):
+                        module_dict_mutation(target)
+
+                if not isinstance(node, ast.Call):
+                    continue
+                if call_name(node) in trusted_delitem_calls and node.args:
+                    if contains_environ_reference(node.args[0]):
+                        poison_environ_trust()
+                if (
+                    isinstance(node.func, ast.Call)
+                    and call_name(node.func.func) in trusted_methodcaller_calls
+                    and any(contains_environ_reference(argument) for argument in node.args)
+                ):
+                    poison_environ_trust()
+                if call_name(node) in methodcaller_mutator_names and any(
+                    contains_environ_reference(argument) for argument in node.args
+                ):
+                    poison_environ_trust()
+                if isinstance(node.func, ast.Attribute):
+                    receiver = dotted_name(node.func.value)
+                    if is_environ_reference(receiver) and node.func.attr in {
+                        "clear",
+                        "pop",
+                        "popitem",
+                        "setdefault",
+                        "update",
+                        "__delitem__",
+                        "__setitem__",
+                    }:
+                        poison_environ_trust()
+                    if module_dict_reference(node.func.value) and node.func.attr in {
+                        "clear",
+                        "pop",
+                        "popitem",
+                        "setdefault",
+                        "update",
+                        "__delitem__",
+                        "__setitem__",
+                    }:
+                        # Mutation methods on the os module namespace may replace
+                        # getenv/environ; without proving the changed keys, fail closed.
+                        mutated_port_sources.update(
+                            name
+                            for module_name in trusted_os_module_names
+                            for name in (f"{module_name}.getenv", f"{module_name}.environ")
+                        )
+                    if node.func.attr in {
+                        "setitem",
+                        "__setitem__",
+                        "__delitem__",
+                        "__setattr__",
+                        "__delattr__",
+                        "update",
+                        "clear",
+                        "pop",
+                        "popitem",
+                        "setdefault",
+                    }:
+                        if contains_environ_reference(node.func.value) or any(
+                            contains_environ_reference(argument) for argument in node.args
+                        ):
+                            poison_environ_trust()
+                        if (
+                            module_dict_reference(node.func.value)
+                            or any(module_dict_reference(argument) for argument in node.args)
+                            or (
+                                node.func.attr in {"__setattr__", "__delattr__"}
+                                and any(contains_os_module_reference(argument) for argument in node.args)
+                            )
+                        ):
+                            poison_os_mapping_trust()
+                if call_name(node) in {"dict.__setitem__", "dict.__delitem__", "dict.pop", "dict.update"} and node.args:
+                    target = node.args[0]
+                    target_name = dotted_name(target)
+                    if is_environ_reference(target_name):
+                        poison_environ_trust()
+                    if module_dict_reference(target):
+                        key = node.args[1] if len(node.args) > 1 else None
+                        if call_name(node) in {"dict.__setitem__", "dict.__delitem__", "dict.pop"}:
+                            module_dict_mutation(ast.Subscript(value=target, slice=key or ast.Constant(None), ctx=ast.Store()))
+                        else:
+                            # dict.update accepts an arbitrary mapping/kwargs.
+                            poison_os_mapping_trust()
+                if call_name(node) == "setitem" and len(node.args) >= 3:
+                    target_name = dotted_name(node.args[0])
+                    if is_environ_reference(target_name):
+                        poison_environ_trust()
+                    if module_dict_reference(node.args[0]):
+                        module_dict_mutation(
+                            ast.Subscript(value=node.args[0], slice=node.args[1], ctx=ast.Store())
+                        )
+                if call_name(node) in trusted_setitem_calls and len(node.args) >= 3:
+                    target = node.args[0]
+                    if contains_environ_reference(target):
+                        poison_environ_trust()
+                    if module_dict_reference(target):
+                        module_dict_mutation(ast.Subscript(value=target, slice=node.args[1], ctx=ast.Store()))
+                if (
+                    call_name(node) in {"setattr", "delattr", "getattr", "vars", "object.__getattribute__"}
+                    and node.args
+                    and dotted_name(node.args[0]) in trusted_os_module_names
+                ):
+                    # Reflection over os can replace, hide, or recover trusted
+                    # attributes; fail closed instead of trying to evaluate it.
+                    poison_os_mapping_trust()
+
+        # Add simple local aliases after scanning their defining assignments, so the
+        # alias initialization itself is not mistaken for a mutation.
+        trusted_environ_names.update(environ_aliases)
+        trusted_port_calls.update(f"{alias}.get" for alias in environ_aliases)
+
         def preceding_bindings(scope: ast.AST, name: str, position: tuple[int, int]) -> list[ast.AST]:
             return [
                 value for line, column, value in assignment_bindings.get((scope, name), []) if (line, column) < position
@@ -1583,9 +2117,10 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
             module_values = preceding_bindings(module_scope, name, (1 << 30, 1 << 30))
             return [module_values[-1]] if module_values else []
 
-        def trusted_call(node: ast.Call, trusted_names: set[str]) -> bool:
-            name = call_name(node)
+        def trusted_reference(name: str, node: ast.AST, trusted_names: set[str]) -> bool:
             if name not in trusted_names:
+                return False
+            if any(name == mutated or name.startswith(f"{mutated}.") for mutated in mutated_port_sources):
                 return False
             root = name.split(".", 1)[0]
             scope = enclosing_scope(node)
@@ -1593,27 +2128,76 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 int(getattr(node, "lineno", 1 << 30) or (1 << 30)),
                 int(getattr(node, "col_offset", 1 << 30) or (1 << 30)),
             )
-            if scope is not None and scope is not module_scope and root in local_names.get(scope, set()):
-                return False
-            if scope is not None and preceding_bindings(scope, root, position):
-                return False
-            if module_scope is not None and scope is not module_scope:
-                call_sites = function_calls.get(scope, [])
-                if any(
-                    preceding_bindings(
-                        module_scope,
-                        root,
-                        (
+
+            trusted_alias_roots = trusted_os_module_names | environ_aliases
+
+            def alias_is_trusted(
+                alias: str,
+                alias_scope: ast.AST | None,
+                alias_position: tuple[int, int],
+                seen: set[str] | None = None,
+            ) -> bool:
+                seen = set(seen or ())
+                if alias in seen or alias not in trusted_alias_roots:
+                    return False
+                seen.add(alias)
+                bindings = preceding_bindings(alias_scope, alias, alias_position) if alias_scope is not None else []
+                if bindings:
+                    value = bindings[-1]
+                    if isinstance(value, ast.Name):
+                        return alias_is_trusted(value.id, alias_scope, alias_position, seen)
+                    if isinstance(value, ast.Attribute):
+                        value_path = dotted_name(value)
+                        if value_path in trusted_alias_roots:
+                            return alias_is_trusted(
+                                value_path.split(".", 1)[0], alias_scope, alias_position, seen
+                            )
+                    return False
+                if alias_scope is not None and alias_scope is not module_scope and alias in local_names.get(alias_scope, set()):
+                    return False
+                if alias_scope is not None and alias_scope is not module_scope:
+                    for call in function_calls.get(alias_scope, []):
+                        call_position = (
                             int(getattr(call, "lineno", 1 << 30) or (1 << 30)),
                             int(getattr(call, "col_offset", 1 << 30) or (1 << 30)),
-                        ),
-                    )
-                    for call in call_sites
-                ):
+                        )
+                        module_bindings = preceding_bindings(module_scope, alias, call_position) if module_scope else []
+                        if module_bindings:
+                            value = module_bindings[-1]
+                            if not isinstance(value, ast.Name) or not alias_is_trusted(
+                                value.id, module_scope, call_position, seen
+                            ):
+                                return False
+                return True
+
+            if root in trusted_alias_roots:
+                if not alias_is_trusted(root, scope, position):
                     return False
-            elif module_scope is not None and preceding_bindings(module_scope, root, position):
-                return False
+            else:
+                if scope is not None and scope is not module_scope and root in local_names.get(scope, set()):
+                    return False
+                if scope is not None and preceding_bindings(scope, root, position):
+                    return False
+                if module_scope is not None and scope is not module_scope:
+                    call_sites = function_calls.get(scope, [])
+                    if any(
+                        preceding_bindings(
+                            module_scope,
+                            root,
+                            (
+                                int(getattr(call, "lineno", 1 << 30) or (1 << 30)),
+                                int(getattr(call, "col_offset", 1 << 30) or (1 << 30)),
+                            ),
+                        )
+                        for call in call_sites
+                    ):
+                        return False
+                elif module_scope is not None and preceding_bindings(module_scope, root, position):
+                    return False
             return True
+
+        def trusted_call(node: ast.Call, trusted_names: set[str]) -> bool:
+            return trusted_reference(call_name(node), node, trusted_names)
 
         def constant_numeric_guess(node: ast.AST, seen: set[str] | None = None) -> bool:
             seen = set(seen or ())
@@ -1806,8 +2390,7 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 if (
                     isinstance(key, ast.Constant)
                     and key.value == "PRISM_PREVIEW_PORT"
-                    and isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "environ"
+                    and trusted_reference(dotted_name(node.value), node.value, trusted_environ_names)
                 ):
                     return [("port", "")]
                 segments = expression_segments(node.value, seen)
@@ -1816,7 +2399,7 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 return [("unknown", node.attr)]
             if isinstance(node, ast.Call):
                 name = call_name(node)
-                if name in {"os.getenv", "os.environ.get"} and node.args:
+                if trusted_call(node, trusted_port_calls) and node.args:
                     first = node.args[0]
                     if isinstance(first, ast.Constant) and first.value == "PRISM_PREVIEW_PORT":
                         return [("port", "")]
@@ -2008,6 +2591,55 @@ def _generate_agent_test_cases(
             getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
         )
         generation_deadline = min(deadline, configured_deadline) if deadline is not None else configured_deadline
+        failure_labels = {
+            "source_context": "源码上下文未通过核验",
+            "input_budget": "输入超出预算",
+            "output_truncated": "模型输出被截断",
+            "generation_timeout": "用例生成超时",
+            "model_call_failed": "模型调用失败",
+            "grounding_rejected": "用例引用未证实的源码符号",
+            "schema_invalid": "用例输出结构无效",
+            "configuration_invalid": "测试配置不受支持",
+            "contract_rejected": "用例未通过执行前契约校验",
+            "empty_generation": "模型未生成用例",
+            "generation_failed": "用例生成未完成",
+        }
+        failure_stages: list[str] = []
+        from app.agents.source_context import SourceContextError, compact_source_context
+
+        try:
+            summary["_compacted_source_context"] = compact_source_context(
+                agent,
+                summary,
+                ctx=ctx,
+                deadline=generation_deadline,
+                max_chars=40_000,
+            )
+        except SourceContextError as exc:
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "agent_tests",
+                f"动态测试未执行：源码上下文压缩未能完整核验 ({str(exc)[:140]})",
+                {"source_file_count": summary.get("source_file_count"), "source_chunk_count": summary.get("source_chunk_count")},
+            )
+            db.commit()
+            return None
+        compacted = summary["_compacted_source_context"]
+        _append_event(
+            db,
+            environment,
+            "progress",
+            "source_compaction",
+            "源码上下文已压缩并完成来源覆盖核验",
+            {
+                "source_chunk_count": len(compacted.get("covered_source_ids") or []),
+                "protected_fact_count": len(compacted.get("protected_facts") or []),
+                "compression_calls": (compacted.get("compression") or {}).get("model_calls"),
+            },
+        )
+        db.commit()
         _append_event(
             db,
             environment,
@@ -2040,6 +2672,10 @@ def _generate_agent_test_cases(
             files = result.get("files") if isinstance(result, dict) else None
             if not files:
                 result_error = result.get("error") if isinstance(result, dict) else "生成结果不是对象"
+                failure_kind = result.get("failure_kind") if isinstance(result, dict) else None
+                if failure_kind not in failure_labels:
+                    failure_kind = "empty_generation" if not result_error else "generation_failed"
+                failure_stages.append(failure_kind)
                 feedback = str(result_error or "生成结果为空")[:2000]
                 summary["previous_generation_feedback"] = feedback
                 _append_event(
@@ -2047,8 +2683,12 @@ def _generate_agent_test_cases(
                     environment,
                     "progress",
                     "agent_tests",
-                    f"第 {generation_round} 轮 agent 测试用例结构无效,已反馈重新生成: {feedback[:120]}",
-                    {"generation_round": generation_round, "issues": [feedback]},
+                    f"第 {generation_round} 轮动态用例未形成可注入文件（{failure_labels[failure_kind]}）,已反馈重试: {feedback[:120]}",
+                    {
+                        "generation_round": generation_round,
+                        "failure_kind": failure_kind,
+                        "issues": [feedback],
+                    },
                 )
                 db.commit()
                 continue
@@ -2071,6 +2711,7 @@ def _generate_agent_test_cases(
                 )
                 db.commit()
                 return _store_agent_test_files(cache_key, files)
+            failure_stages.append("contract_rejected")
             feedback = "；".join(issues)[:2000]
             summary["previous_generation_feedback"] = feedback
             _append_event(
@@ -2087,8 +2728,13 @@ def _generate_agent_test_cases(
             environment,
             "progress",
             "agent_tests",
-            "动态用例连续 3 轮未通过执行前契约校验,本轮回退到可确定性黑白盒测试",
-            {"issues": [str(summary.get("previous_generation_feedback") or "生成失败")]},
+            "动态用例连续 3 轮后仍未形成可执行文件（最后原因："
+            + failure_labels[failure_stages[-1] if failure_stages else "generation_failed"]
+            + "）,本轮回退到确定性测试",
+            {
+                "failure_kinds": failure_stages,
+                "issues": [str(summary.get("previous_generation_feedback") or "生成失败")],
+            },
         )
         db.commit()
         return None
@@ -2457,6 +3103,191 @@ def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
     }
 
 
+def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
+    """Read the runner's isolated smoke-test receipt; duplicate or malformed receipts are invalid."""
+    records: list[dict[str, Any]] = []
+    for match in re.finditer(r"PRISM_BLACKBOX_DONE\s*(\{[^\n]*\})", str(log_text or "")):
+        try:
+            value = json.loads(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            records.append(value)
+    if len(records) != 1:
+        return None
+    result = records[0]
+    route = str(result.get("route") or "")
+    status_code = result.get("status_code")
+    route_passed = result.get("route_passed")
+    agent_assertions_passed = result.get("agent_assertions_passed")
+    basis = str(result.get("basis") or "route_and_agent_assertions")
+    failure_kind = result.get("failure_kind")
+    failure_reason = result.get("failure_reason")
+    route_status_passed = type(status_code) is int and 200 <= status_code < 300
+    startup_failure = failure_kind == "application_startup"
+    if (
+        result.get("executed") is not True
+        or type(result.get("passed")) is not bool
+        or type(route_passed) is not bool
+        or (agent_assertions_passed is not None and type(agent_assertions_passed) is not bool)
+        or basis not in {"route_smoke", "route_and_agent_assertions"}
+        or (basis == "route_and_agent_assertions" and agent_assertions_passed is None)
+        or not re.fullmatch(r"/[A-Za-z0-9._~!$&+,;=@%/?-]*", route)
+        or type(status_code) is not int
+        or not 0 <= status_code <= 599
+        or route_passed != route_status_passed
+        or (result["passed"] and not route_passed)
+        or (result["passed"] and agent_assertions_passed is False)
+        or (basis == "route_smoke" and agent_assertions_passed is not None)
+        or (failure_kind is not None and not startup_failure)
+        or (
+            startup_failure
+            and (
+                result["passed"]
+                or route_passed
+                or status_code != 0
+                or agent_assertions_passed is not None
+                or failure_reason not in {"application_exited_before_ready", "application_readiness_timeout"}
+            )
+        )
+        or (failure_reason is not None and not startup_failure)
+    ):
+        return None
+    failure_kind = None
+    if not result["passed"]:
+        failure_kind = (
+            "application_startup"
+            if startup_failure
+            else (
+                "dynamic_assertion"
+                if route_passed and agent_assertions_passed is False
+                else "route_or_dynamic_assertion"
+            )
+        )
+    if result["passed"]:
+        status = "passed"
+    elif (
+        type(status_code) is int
+        and (300 <= status_code < 400 or status_code in {401, 403})
+        and agent_assertions_passed is not False
+    ):
+        status = "partial"
+    else:
+        status = "failed"
+    receipt = {
+        "status": status,
+        "route_passed": route_passed,
+        "route": route,
+        "status_code": status_code,
+        "basis": basis,
+        "agent_assertions_passed": agent_assertions_passed,
+        "failure_kind": failure_kind,
+    }
+    if startup_failure:
+        receipt["failure_reason"] = failure_reason
+    return receipt
+
+
+def _remote_blackbox_execution(remote_probe: dict[str, Any]) -> dict[str, Any]:
+    """A remote redirect or 4xx proves reachability, not a successful final route check."""
+    status_code = remote_probe.get("status_code")
+    if type(status_code) is not int or not 100 <= status_code <= 599:
+        raise RuntimeError("远程黑盒探测没有返回有效 HTTP 状态码")
+    route_passed = 200 <= status_code < 300
+    status = "passed" if route_passed else ("partial" if status_code < 500 else "failed")
+    target = str(remote_probe.get("target_origin") or "")
+    try:
+        route = urllib.parse.urlsplit(target).path or "/"
+    except ValueError:
+        route = "/"
+    if not re.fullmatch(r"/[A-Za-z0-9._~!$&+,;=@%/?-]*", route):
+        route = "/"
+    return {
+        "status": status,
+        "route_passed": route_passed,
+        "route": route,
+        "status_code": status_code,
+        "basis": "authorized_remote_http_probe",
+    }
+
+
+def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]:
+    """Summarize independently recorded deterministic and AI-generated verification scope."""
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    deterministic = evidence.get("deterministic_test_execution")
+    deterministic = deterministic if isinstance(deterministic, dict) else {}
+    generation = evidence.get("agent_test_generation")
+    generation = generation if isinstance(generation, dict) else {}
+    dynamic = evidence.get("agent_tests")
+    dynamic = dynamic if isinstance(dynamic, dict) else {}
+    mode = str(deterministic.get("requested_mode") or generation.get("mode") or "")
+    passed = bool(conclusion.get("passed"))
+    dynamic_state = str(generation.get("status") or "unknown")
+    if dynamic_state == "generated":
+        if dynamic:
+            dynamic_state = "passed" if _agent_tests_succeeded(dynamic) else "failed"
+        else:
+            dynamic_state = "receipt_missing"
+    elif dynamic_state == "skipped":
+        dynamic_state = "skipped"
+    else:
+        dynamic_state = "unknown"
+    blackbox = evidence.get("blackbox_execution")
+    blackbox = blackbox if isinstance(blackbox, dict) else {}
+    blackbox_state = str(blackbox.get("status") or "not_required")
+    if mode in {"blackbox", "combined"} and blackbox_state == "not_required":
+        blackbox_state = "unknown"
+    remote = evidence.get("remote_blackbox")
+    remote = remote if isinstance(remote, dict) else {}
+    remote_status_code = remote.get("status_code")
+    if type(remote_status_code) is int and 200 <= remote_status_code < 300:
+        remote_state = "passed"
+    elif type(remote_status_code) is int and 300 <= remote_status_code < 500:
+        remote_state = "partial"
+    elif type(remote_status_code) is int and 500 <= remote_status_code <= 599:
+        remote_state = "failed"
+    else:
+        remote_state = "unknown" if remote else "not_required"
+    verification_status = "complete"
+    explicit_failure = (
+        deterministic.get("status") == "failed"
+        or dynamic_state in {"failed", "receipt_missing"}
+        or blackbox_state == "failed"
+        or remote_state == "failed"
+    )
+    if explicit_failure:
+        verification_status = "failed"
+    elif remote_state == "partial" or blackbox_state == "partial":
+        # 重定向或客户端响应只能证明入口有响应，不能证明最终业务路由已通过验证。
+        verification_status = "partial"
+    elif not passed:
+        verification_status = "failed"
+    elif (
+        deterministic.get("status") != "passed"
+        or dynamic_state in {"skipped", "unknown"}
+        or (mode in {"blackbox", "combined"} and blackbox_state != "passed")
+        or remote_state in {"partial", "unknown"}
+    ):
+        verification_status = "partial"
+    elif mode in {"blackbox", "combined"} and blackbox_state != "passed":
+        verification_status = "failed" if blackbox_state == "failed" else "partial"
+    return {
+        "verification_status": verification_status,
+        "requested_mode": mode or None,
+        "deterministic_status": str(deterministic.get("status") or "unknown"),
+        "ai_dynamic_status": dynamic_state,
+        "blackbox_status": blackbox_state,
+        "remote_blackbox_status": remote_state,
+        "reason": (
+            "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围"
+            if verification_status == "partial" and dynamic_state == "skipped"
+            else "黑盒目标返回 3xx/4xx；入口有响应，但最终业务路由未完成验证"
+            if verification_status == "partial" and (remote_state == "partial" or blackbox_state == "partial")
+            else None
+        ),
+    }
+
+
 def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
     """没有动态用例时沿用基础测试；生成后必须全部通过。"""
     if not isinstance(result, dict):
@@ -2469,6 +3300,78 @@ def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
     passed_count = int(result.get("passed_count") or result.get("passed") or 0)
     failed_count = int(result.get("failed") or 0)
     return failed_count == 0 and passed_count == generated
+
+
+def _reconcile_blackbox_agent_assertions(
+    result: dict[str, Any] | None,
+    *,
+    generation: dict[str, Any] | None,
+    expected_files: set[str],
+    agent_tests_result: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """只根据后端注入契约和逐文件可信回执认定 AI 黑盒断言状态。"""
+    if not isinstance(result, dict):
+        return None
+    reconciled = dict(result)
+    generation = generation if isinstance(generation, dict) else {}
+    generated_blackbox_files = {name for name in expected_files if name.rsplit("/", 1)[-1].startswith("blackbox.")}
+    assertions: bool | None = None
+    startup_failure = result.get("failure_kind") == "application_startup"
+    blackbox_contract_invalid = (
+        not startup_failure
+        and generation.get("status") == "generated"
+        and generation.get("mode") in {"blackbox", "combined"}
+        and len(generated_blackbox_files) != 1
+    )
+    if not startup_failure and result.get("agent_assertions_passed") is False:
+        # A valid runner receipt can prove an assertion failed even when the
+        # generation record is stale or says "skipped". Never erase that failure.
+        assertions = False
+    elif (
+        not startup_failure
+        and not blackbox_contract_invalid
+        and generation.get("status") == "generated"
+        and len(generated_blackbox_files) == 1
+    ):
+        blackbox_file = next(iter(generated_blackbox_files))
+        files = agent_tests_result.get("files") if isinstance(agent_tests_result, dict) else None
+        assertions = isinstance(files, dict) and files.get(blackbox_file) == "pass"
+
+    status_code = result.get("status_code")
+    route_passed = type(status_code) is int and 200 <= status_code < 300
+    if startup_failure:
+        status = "failed"
+        failure_kind = "application_startup"
+    elif blackbox_contract_invalid:
+        # A generated blackbox run without exactly one injected blackbox file
+        # is a broken test contract, not a successful route-only verification.
+        status = "failed"
+        failure_kind = "agent_assertion_contract"
+    elif assertions is False:
+        status = "failed"
+        failure_kind = "dynamic_assertion" if route_passed else "route_or_dynamic_assertion"
+    elif route_passed:
+        status = "passed"
+        failure_kind = None
+    elif type(status_code) is int and (300 <= status_code < 400 or status_code in {401, 403}):
+        status = "partial"
+        failure_kind = None
+    else:
+        status = "failed"
+        failure_kind = "route_or_dynamic_assertion"
+
+    reconciled.update(
+        {
+            "status": status,
+            "passed": status == "passed",
+            "basis": "route_and_agent_assertions" if assertions is not None else "route_smoke",
+            "agent_assertions_passed": assertions,
+            "failure_kind": failure_kind,
+        }
+    )
+    if not startup_failure:
+        reconciled.pop("failure_reason", None)
+    return reconciled
 
 
 def _reconcile_agent_tests_result(
@@ -2583,12 +3486,27 @@ def _extract_agent_test_failures(log_text: str) -> dict[str, str]:
 def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
     """以确定性执行事实覆盖模型可能写错的总体结论。"""
     passed = bool(conclusion.get("passed"))
+    coverage = _sandbox_verification_coverage(conclusion)
     agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
     generated = int(agent_tests.get("generated") or 0)
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
     failed_count = int(agent_tests.get("failed") or 0)
-    gate = "通过" if passed else "未通过"
-    facts = [f"**系统事实门禁：{gate}。**", f"沙箱结论：{str(conclusion.get('summary') or gate)}。"]
+    if coverage["verification_status"] == "complete":
+        gate = "通过"
+        gate_label = "系统验证门禁"
+    elif coverage["verification_status"] == "partial":
+        gate = "部分通过（验证范围不完整）"
+        gate_label = "系统验证门禁"
+    else:
+        gate = "未通过"
+        gate_label = "系统验证门禁"
+    facts = [f"**{gate_label}：{gate}。**", f"确定性执行结论：{str(conclusion.get('summary') or ('通过' if passed else '未通过'))}。"]
+    facts.append(
+        f"覆盖状态：确定性检查={coverage['deterministic_status']}，"
+        f"AI 动态用例={coverage['ai_dynamic_status']}，黑盒路由={coverage['blackbox_status']}。"
+    )
+    if coverage.get("reason"):
+        facts.append(f"范围说明：{coverage['reason']}。")
     if generated:
         facts.append(f"动态用例 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。")
     facts.append("后续分析若与本段结构化事实冲突，以本段为准。")
@@ -2633,12 +3551,15 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     generated = int(agent_tests.get("generated") or 0)
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
     failed_count = int(agent_tests.get("failed") or 0)
+    coverage = _sandbox_verification_coverage(conclusion)
     report = (
         "## 总体结论\n\n"
-        f"系统事实门禁：{'通过' if passed else '未通过'}。\n\n"
+        f"系统验证门禁：{coverage['verification_status']}。\n\n"
         "## 执行摘要\n\n"
         f"Worker 结论：{str(conclusion.get('summary') or ('测试通过' if passed else '测试未通过'))}。\n"
-        f"动态用例：生成 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。\n\n"
+        f"动态用例：生成 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。\n"
+        f"确定性执行：{coverage['deterministic_status']}；AI 动态用例：{coverage['ai_dynamic_status']}；"
+        f"黑盒路由：{coverage['blackbox_status']}。\n\n"
         "## 问题清单\n\n"
         + ("- 反编译或白盒执行未通过，详见执行日志与结构化证据。\n" if not passed else "- 未发现确定性执行失败。\n")
     )
@@ -2750,6 +3671,8 @@ def _publish_sandbox_report(
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
         report_issue_summary = summarize_sandbox_report(report_md)
+        verification = _sandbox_verification_coverage(conclusion)
+        verification_status = verification["verification_status"]
         # 旧列不可为空；未知与报告来源另存结构化摘要，详情不把该占位零当真实结论。
         issue_count = report_issue_summary["total"] or 0
         severity_counts = report_issue_summary["severity_counts"]
@@ -2796,6 +3719,10 @@ def _publish_sandbox_report(
                 start_time=started_at,
                 end_time=stopped_at,
                 duration_ms=duration_ms,
+                coverage={
+                    "stage": "complete" if verification_status == "complete" else verification_status,
+                    **verification,
+                },
             )
             db.add(task)
         else:
@@ -2811,6 +3738,10 @@ def _publish_sandbox_report(
             task.start_time = started_at
             task.end_time = stopped_at
             task.duration_ms = duration_ms
+            task.coverage = {
+                "stage": "complete" if verification_status == "complete" else verification_status,
+                **verification,
+            }
             origin = model_attribution(environment)
             for field in ATTRIBUTION_FIELDS:
                 setattr(task, field, origin.get(field))
@@ -4470,6 +5401,14 @@ def _execute_environment(
         repair_round = 0
         worker_receipt: dict[str, str] | None = None
         expected_agent_tests: set[str] = set()
+        agent_test_generation: dict[str, Any] | None = None
+        if environment.purpose == "test" and config.get("remote_only"):
+            agent_test_generation = {
+                "status": "skipped",
+                "mode": worker_mode,
+                "count": 0,
+                "reason": "远程只读 HTTP 探测不注入 AI 动态测试用例",
+            }
         if getattr(environment, "execution_archive_blob", None) is not None:
             execution_bytes = bytes(environment.execution_archive_blob)
             execution_sha = hashlib.sha256(execution_bytes).hexdigest()
@@ -4482,6 +5421,13 @@ def _execute_environment(
             effective_sha = execution_sha
             repair_round = int(getattr(environment, "execution_round", 0) or 0)
             expected_agent_tests = _agent_test_paths(effective_source)
+            if expected_agent_tests:
+                agent_test_generation = {
+                    "status": "generated",
+                    "mode": worker_mode,
+                    "count": len(expected_agent_tests),
+                    "source": "persisted_execution_snapshot",
+                }
         elif worker and environment.purpose == "test":
             # 压缩、部署规划与动态用例共享一个时间预算，禁止各阶段分别重置超时。
             agent_context_deadline = time.monotonic() + int(
@@ -4513,6 +5459,21 @@ def _execute_environment(
                     if str(item.get("path") or "").strip()
                 }
                 effective_source = _inject_agent_test_files(effective_source, agent_test_files)
+                agent_test_generation = {
+                    "status": "generated",
+                    "mode": worker_mode,
+                    "count": len(expected_agent_tests),
+                    "source": "current_execution",
+                }
+            else:
+                # 该结果说明确定性 runner 没有收到 AI 动态补充用例。
+                # 不能把动态测试缺失伪装成通过；基础 runner 的结果仍独立保留。
+                agent_test_generation = {
+                    "status": "skipped",
+                    "mode": worker_mode,
+                    "count": 0,
+                    "reason": "未生成可执行的 AI 动态测试用例；结果只覆盖确定性 runner 实际执行的检查。详情见 agent_tests/source_compaction 事件。",
+                }
             if effective_source != source_archive_base64:
                 effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
         if worker:
@@ -4600,10 +5561,7 @@ def _execute_environment(
                         environment.error = f"停止 worker 失败：{str(exc)[:1000]}"
                     _commit_execution(db, environment_id, execution_token)
                     return
-                execute_payload = {
-                    **saved_request,
-                    "source_archive_base64": effective_source,
-                }
+                execute_payload = _worker_execute_payload(saved_request, effective_source)
                 _require_execution_lease(db, environment_id, execution_token)
                 execute_response = _call_worker(
                     worker,
@@ -4627,14 +5585,10 @@ def _execute_environment(
                 deadline = time.monotonic() + int(configured_policy.get("timeout_seconds") or 600) + 180
                 persist_worker_events(result)
                 _commit_execution(db, environment_id, execution_token)
-                while str(result.get("status") or "") not in {
-                    "succeeded",
-                    "failed",
-                    "blocked",
-                    "stopped",
-                    "expired",
-                    "running",
-                }:
+                while not _worker_status_is_terminal(
+                    environment.purpose,
+                    str(result.get("status") or ""),
+                ):
                     if time.monotonic() >= deadline:
                         raise RuntimeError("Sandbox worker 状态轮询超时")
                     time.sleep(1)
@@ -4794,16 +5748,31 @@ def _execute_environment(
             if auto_smoke is not None and auto_smoke.get("available"):
                 auto_test_chain.append(
                     {
-                        "mode": "blackbox",
+                        "mode": "service_smoke",
                         "passed": bool(auto_smoke.get("passed")),
                         "status_code": auto_smoke.get("status_code"),
                         "latency_ms": auto_smoke.get("latency_ms"),
                         "via": "preview_smoke",
+                        "scope": "http_root_smoke",
                     }
                 )
         _require_execution_lease(db, environment_id, execution_token)
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
+        if agent_test_generation is not None:
+            evidence["agent_test_generation"] = agent_test_generation
+        if environment.purpose == "test":
+            evidence["deterministic_test_execution"] = {
+                "requested_mode": str(environment.test_mode or ""),
+                "worker_mode": str(worker_mode or ""),
+                "status": "passed" if _worker_execution_passed(
+                    purpose=environment.purpose,
+                    state=state,
+                    target_status=target_status,
+                    conclusion=worker_conclusion,
+                ) else "failed",
+                "exit_code": worker_conclusion.get("exit_code"),
+            }
         agent_tests_result: dict[str, Any] | None = None
         worker_logs = (
             worker_conclusion.get("logs")
@@ -4883,32 +5852,100 @@ def _execute_environment(
                 event_type = "complete" if agent_ok else "failed"
             _append_event(db, environment, event_type, "agent_tests", message, agent_tests_result)
             _commit_execution(db, environment_id, execution_token)
+        if (
+            environment.purpose == "test"
+            and worker is not None
+            and str(environment.test_mode or "") in {"blackbox", "combined"}
+        ):
+            blackbox_result = _extract_blackbox_result(str(worker_logs.get("text") or "") if worker_logs else "")
+            blackbox_result = _reconcile_blackbox_agent_assertions(
+                blackbox_result,
+                generation=agent_test_generation,
+                expected_files=expected_agent_tests,
+                agent_tests_result=agent_tests_result,
+            )
+            if blackbox_result is None:
+                evidence["blackbox_execution"] = {
+                    "status": "receipt_missing",
+                    "reason": "固定 runner 未返回唯一有效的黑盒路由回执",
+                }
+                target_status = "failed"
+                _append_event(
+                    db, environment, "failed", "blackbox",
+                    "黑盒执行回执缺失或无效，已失败关闭",
+                    evidence["blackbox_execution"],
+                )
+            else:
+                evidence["blackbox_execution"] = blackbox_result
+                if blackbox_result["status"] != "passed":
+                    target_status = "failed"
+                    _append_event(
+                        db, environment, "failed", "blackbox",
+                        "黑盒路由探测或动态断言未通过",
+                        blackbox_result,
+                    )
         if environment.remote_target_url:
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
             _commit_execution(db, environment_id, execution_token)
             _require_execution_lease(db, environment_id, execution_token)
             evidence["remote_blackbox"] = _probe_remote_target(environment.remote_target_url)
-            if int(evidence["remote_blackbox"]["status_code"]) >= 500:
+            remote_execution = _remote_blackbox_execution(evidence["remote_blackbox"])
+            evidence["remote_blackbox_execution"] = remote_execution
+            if config.get("remote_only") or str(environment.test_mode or "") == "combined":
+                evidence["blackbox_execution"] = remote_execution
+            if not _remote_blackbox_passed(remote_execution):
                 target_status = "failed"
-        passed = target_status in {"succeeded", "ready"} and int(worker_conclusion.get("exit_code") or 0) == 0
-        if agent_tests_result is not None:
-            passed = passed and _agent_tests_succeeded(agent_tests_result)
-        if environment.remote_target_url:
-            passed = passed and int(evidence["remote_blackbox"]["status_code"]) < 500
+        passed = _execution_result_passed(
+            purpose=environment.purpose,
+            state=state,
+            target_status=target_status,
+            conclusion=worker_conclusion,
+            test_mode=str(environment.test_mode or ""),
+            evidence=evidence,
+            agent_tests_result=agent_tests_result,
+            agent_test_generation=agent_test_generation,
+            remote_target_url=environment.remote_target_url,
+        )
+        if agent_test_generation and agent_test_generation.get("status") == "generated" and agent_tests_result is None:
+            evidence["agent_tests_receipt"] = {
+                "status": "missing",
+                "reason": "已注入 AI 动态测试，但 runner 没有返回可信执行结果",
+            }
+        if environment.purpose == "test":
+            evidence["verification_coverage"] = _sandbox_verification_coverage({
+                "passed": passed,
+                "evidence": evidence,
+            })
         final_status = "failed" if environment.purpose == "test" and not passed else target_status
         if environment.purpose == "deploy":
             summary = "部署就绪" if passed else "部署失败"
             if auto_test_chain:
                 wb = next((r for r in auto_test_chain if r.get("mode") == "whitebox"), None)
-                bb = next((r for r in auto_test_chain if r.get("mode") == "blackbox"), None)
+                smoke = next((r for r in auto_test_chain if r.get("mode") == "service_smoke"), None)
                 summary += (
-                    f"；自动测试链 白盒{'✓' if wb and wb.get('passed') else '✗'}"
-                    f"/黑盒{'✓' if bb and bb.get('passed') else '✗'}"
+                    f"；自动核验 白盒{'✓' if wb and wb.get('passed') else '✗'}"
+                    f"/服务冒烟{'✓' if smoke and smoke.get('passed') else '✗'}"
                 )
             if auto_smoke and auto_smoke.get("available"):
-                summary += f"；预览冒烟{'✓' if auto_smoke.get('passed') else '✗'}"
+                summary += f"；根路径 HTTP 冒烟{'✓' if auto_smoke.get('passed') else '✗'}"
         else:
-            summary = "测试通过" if passed else "测试未通过"
+            mode_label = {
+                "whitebox": "白盒",
+                "blackbox": "黑盒",
+                "combined": "组合",
+            }.get(str(environment.test_mode or ""), "沙箱")
+            remote_execution = evidence.get("remote_blackbox_execution")
+            if isinstance(remote_execution, dict) and remote_execution.get("status") == "partial":
+                summary = (
+                    f"{mode_label}验证未完成：远程目标返回 HTTP {remote_execution.get('status_code')}；"
+                    "目标有响应，但未通过功能路径验证"
+                )
+            elif passed and agent_test_generation and agent_test_generation.get("status") == "skipped":
+                summary = f"确定性{mode_label}测试通过；AI动态补充未执行"
+            elif passed and agent_tests_result is not None:
+                summary = f"{mode_label}测试与AI动态用例通过"
+            else:
+                summary = f"{mode_label}测试通过" if passed else f"{mode_label}测试未通过"
         conclusion = {
             "passed": passed,
             "summary": summary,

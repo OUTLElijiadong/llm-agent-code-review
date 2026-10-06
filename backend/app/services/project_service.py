@@ -162,6 +162,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "can_execute": can_write or member_roles.get(row.id) == "reviewer",
             "last_review_at": last_task.create_time if last_task else None,
             "score": last_task.score if metrics_visible else None,
+            "coverage": last_task.coverage if metrics_visible else None,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -323,6 +324,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
                 "id": t.id,
                 "review_type": t.review_type,
                 "score": t.score if task_metrics_visible[t.id] else None,
+                "coverage": t.coverage if task_metrics_visible[t.id] else None,
                 "total_issues": (
                     domain_issue_stats[t.id]["total_issues"]
                     if task_metrics_visible[t.id] and t.id in domain_issue_stats

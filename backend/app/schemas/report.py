@@ -14,9 +14,10 @@ class ReportListItem(BaseModel):
     task_name: Optional[str] = None
     project_name: str = ""
     total_issues: int
-    score: int
+    score: Optional[int] = None
     status: str
     create_time: datetime
+    coverage: Optional[dict] = None
     source: dict = Field(default_factory=dict, description="来源、统计依据及既有领域详情接口")
 
 
@@ -42,7 +43,7 @@ class DomainReportExportOut(BaseModel):
     project: dict
     task_info: dict
     statistics: dict
-    score: int
+    score: Optional[int] = None
     summary: str
     domain_data: dict
     native_exports: list[dict] = Field(default_factory=list)

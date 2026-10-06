@@ -8,8 +8,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.v1.review import router
 from app.api.v1.projects import router as projects_router
+from app.api.v1.review import router
 from app.core.database import Base, get_db
 from app.core.error_handlers import register_handlers
 from app.core.exceptions import ServiceUnavailableError
@@ -143,6 +143,7 @@ def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(revi
     task.score = 72
     task.score_breakdown = {"private_metric": "UNIQUE_SECRET_DOMAIN_REPORT_BODY"}
     if review_type == "sandbox_test":
+        task.coverage = {"verification_status": "partial", "reason": "AI 动态补充未执行"}
         db.add(ReviewReport(
             task_id=task.id,
             user_id=task.user_id,
@@ -222,6 +223,7 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     task.score_breakdown = {"private_metric": "REPORT_METRIC_SECRET"}
     task.status = "success"
     if review_type == "sandbox_test":
+        task.coverage = {"verification_status": "partial", "reason": "AI 动态用例未执行"}
         db.add(ReviewReport(
             task_id=task.id,
             user_id=task.user_id,
@@ -282,16 +284,23 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         assert hidden["low_issues"] is None
         assert hidden["score"] is None
         assert hidden["score_breakdown"] is None
+        assert hidden["coverage"] is None
         assert hidden.get("report_issue_summary") is None
         assert hidden["can_view_report"] is False
         assert "REPORT_METRIC_SECRET" not in str(hidden)
 
     # 项目列表和项目详情的近期任务也必须遵守同一报告权限。
     assert member_project_row["score"] is None
+    assert member_project_row["coverage"] is None
     assert member_recent["score"] is None
+    assert member_recent["coverage"] is None
     assert member_recent["total_issues"] is None
     assert owner_project_row["score"] == 73
+    if review_type == "sandbox_test":
+        assert owner_project_row["coverage"]["verification_status"] == "partial"
     assert owner_recent["score"] == 73
+    if review_type == "sandbox_test":
+        assert owner_recent["coverage"]["verification_status"] == "partial"
     assert owner_recent["total_issues"] == (1 if review_type == "sandbox_test" else 41)
 
     for visible in (owner_row, owner_data):

@@ -7,8 +7,11 @@ import hashlib
 import io
 import zipfile
 
+import pytest
+
 from app.services.sandbox_service import (
     _extract_agent_tests_result,
+    _generated_test_contract_issues,
     _inject_agent_test_files,
     _inject_deployment_patch,
     _source_summary_for_agent_tests,
@@ -99,6 +102,231 @@ def test_extract_agent_tests_result_parses_marker() -> None:
 
 def test_extract_agent_tests_result_none_when_missing() -> None:
     assert _extract_agent_tests_result("no marker") is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """import os as env
+from urllib.request import urlopen as open_url
+from urllib.parse import urlencode
+port = env.getenv('PRISM_PREVIEW_PORT')
+query = urlencode({'q': 'hello world'})
+response = open_url('http://127.0.0.1:' + port + '/?' + query, timeout=5)
+""",
+        """from os import getenv as get_port
+import urllib.request as http
+from urllib.parse import quote as encode
+port = get_port('PRISM_PREVIEW_PORT')
+query = encode('hello world')
+response = http.urlopen('http://127.0.0.1:' + port + '/?q=' + query, timeout=5)
+""",
+        """from os import environ as env
+from urllib.request import urlopen as open_url
+port = env['PRISM_PREVIEW_PORT']
+response = open_url(f'http://127.0.0.1:{port}/', timeout=5)
+""",
+        """import os
+os_alias = os
+port_source = os_alias.environ
+port = port_source.get('PRISM_PREVIEW_PORT')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + port + '/', timeout=5)
+""",
+    ],
+    ids=["os-module-alias", "getenv-function-alias", "environ-module-alias", "assignment-aliases"],
+)
+def test_blackbox_contract_accepts_safe_import_aliases_for_dynamic_port(source: str) -> None:
+    assert _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """from urllib.request import urlopen
+urlopen('http://127.0.0.1:8080/', timeout=5)
+""",
+        """from urllib.request import urlopen
+urlopen('http://example.test:' + __import__('os').getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + __import__('os').getenv('PRISM_PREVIEW_PORT') + '/?q=hello world', timeout=5)
+""",
+    ],
+    ids=["fixed-port", "non-loopback-host", "raw-payload"],
+)
+def test_blackbox_contract_still_rejects_unsafe_targets_and_raw_payloads(source: str) -> None:
+    issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+    assert issues
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """import os
+os.environ = {'PRISM_PREVIEW_PORT': '8080'}
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os as env
+env.environ = {'PRISM_PREVIEW_PORT': '8080'}
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + env.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+os.getenv = lambda _key: '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """from os import getenv as get_port
+get_port = lambda _key: '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + get_port('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+os.environ.update({'PRISM_PREVIEW_PORT': '8080'})
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """from os import environ as env
+env['PRISM_PREVIEW_PORT'] = '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + env['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+setattr(os, 'getenv', lambda _key: '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+os.environ |= {'PRISM_PREVIEW_PORT': '8080'}
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+dict.__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+os.__dict__['getenv'] = lambda _key: '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+osdict = os.__dict__
+osdict['environ'] = {'PRISM_PREVIEW_PORT': '8080'}
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+os_alias = os
+os_alias.__dict__['getenv'] = lambda _key: '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os_alias.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+env_data = os.environ._data
+env_data['PRISM_PREVIEW_PORT'] = '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+""",
+        """import os
+vars(os)['getenv'] = lambda _key: '8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+operator.setitem(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+type(os.environ).__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+os.environ._data.update({b'PRISM_PREVIEW_PORT': b'8080'})
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+env_data = os.environ._data
+operator.setitem(env_data, b'PRISM_PREVIEW_PORT', b'8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+operator.setitem(os.__dict__, 'getenv', lambda _key: '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+operator.delitem(os.environ, 'PRISM_PREVIEW_PORT')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+""",
+        """import os
+from operator import delitem as drop_item
+drop_item(os.environ, 'PRISM_PREVIEW_PORT')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+""",
+        """import os
+import operator
+mutate = operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')
+mutate(os.environ)
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+from operator import methodcaller as make_mutator
+mutate = make_mutator('__setitem__', 'PRISM_PREVIEW_PORT', '8080')
+mutate(os.environ)
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+type(os).__setattr__(os, 'getenv', lambda _key: '8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+    ],
+    ids=[
+        "replace-environ",
+        "replace-environ-module-alias",
+        "replace-getenv",
+        "replace-getenv-import-alias",
+        "update-environ",
+        "write-environ-import-alias",
+        "setattr-getenv",
+        "augassign-environ",
+        "dict-setitem-environ",
+        "os-module-dict-getenv",
+        "os-module-dict-environ-alias",
+        "os-module-alias-dict-getenv",
+        "environ-internal-data-alias",
+        "vars-module-dict-getenv",
+        "operator-setitem-environ",
+        "environ-type-setitem",
+        "environ-private-data-update",
+        "operator-setitem-environ-data-alias",
+        "operator-setitem-module-dict",
+        "module-type-setattr",
+        "operator-delitem-environ",
+        "operator-delitem-alias-environ",
+        "operator-methodcaller-setitem-environ",
+        "operator-methodcaller-import-alias-environ",
+    ],
+)
+def test_blackbox_contract_rejects_mutated_dynamic_port_sources(source: str) -> None:
+    issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+    assert issues
 
 
 def test_inject_deployment_patch_adds_launch_script() -> None:

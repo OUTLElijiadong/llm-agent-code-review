@@ -1,0 +1,342 @@
+注：该诊断输出为 pytest 控制台文本；仅规范化对齐分隔符和空白行的行尾空格，测试内容及结果未改。
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+............ssssss...................................................... [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+................................FFF.F................................... [ 58%]
+...................F.................................................... [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+..........F.F........................................................... [ 66%]
+.............................FF......................................... [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+..................................ss.................................... [ 99%]
+....F....F                                                               [100%]
+=================================== FAILURES ===================================
+_______ test_response_rounds_link_root_and_preserve_zero_invalid_unknown _______
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+__________ test_tool_team_claim_dispatch_and_result_keep_exact_origin __________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+________ test_nested_run_persists_root_across_checkpoint_reconstruction ________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_________ test_checkpoint_delete_keeps_usage_and_existing_tool_ledger __________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+____ test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint ____
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_________________ test_recall_knowledge_tool_schema_is_exposed _________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+___________ test_save_knowledge_note_requires_approval_and_persists ____________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_ test_connection_api_uses_authenticated_owner_and_does_not_save_config[/api/api-config/test] _
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_ test_connection_api_uses_authenticated_owner_and_does_not_save_config[/api/admin/llm/test] _
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+__________ test_prepare_source_fingerprint_and_private_container_copy __________
+
+    def test_prepare_source_fingerprint_and_private_container_copy():
+>       assert hashlib.sha256((ROOT / "backend/scripts/prepare_permission_acceptance.py").read_bytes()).hexdigest() == m.PREPARE_SHA256
+E       AssertionError: assert 'b9f790be7b8c...1a8a584bd36fe' == '18d5ccb87620...c2bd9fc1f03b9'
+E
+E         - 18d5ccb87620c9366afd185bf4b416aa906bed434a670323ca6c2bd9fc1f03b9
+E         + b9f790be7b8c45dcda2aa2fee08f1f2d5a2a11cb2f5a11178b31a8a584bd36fe
+
+docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py:181: AssertionError
+_ test_real_local_auth_existing_disable_preserves_history_and_exact_resources __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x126314c50>
+tmp_path = PosixPath('/private/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/pytest-of-li/pytest-324/test_real_local_auth_existing_0')
+capsys = <_pytest.capture.CaptureFixture object at 0x126315a50>
+
+    def test_real_local_auth_existing_disable_preserves_history_and_exact_resources(monkeypatch, tmp_path, capsys):
+        from fastapi.testclient import TestClient
+        from sqlalchemy import create_engine, or_
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        from app.api.v1 import auth as auth_api
+        from app.core.database import Base, get_db
+        from app.core.rate_limit import LoginFailureLimiter
+        from app.core.security import hash_password
+        from app.main import app
+        from app.models.ai_call_log import AiCallLog
+        from app.models.code_file import CodeFile
+        from app.models.project import Project
+        from app.models.project_member import ProjectMember
+        from app.models.rbac import Permission, Role, RolePermission, UserRole
+        from app.models.review_task import ReviewTask
+        from app.models.user import User
+
+        data = manifest()
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        def row_fields(row):
+            return {col.name: getattr(row, col.name) for col in row.__table__.columns}
+        def row_hash(row):
+            return hashlib.sha256(json.dumps(row_fields(row), default=str, sort_keys=True).encode()).hexdigest()
+        with Session() as db:
+            hashed = hash_password("LOCAL_ONLY_Secret_Sentinel")
+            db.add(Role(id=7, name="local QA", code=m.ROLE_CODE, status="active", is_builtin=0))
+            db.add(User(id=1, username="unrelated-real-fixture", role="admin", password=hashed, status=1, token_version=40))
+            for name, uid in m.ACCOUNTS.items():
+                db.add(User(id=uid, username=data["accounts"][name]["username"], role="user", password=hashed, status=1, token_version=5))
+                if name != "no_permission": db.add(UserRole(user_id=uid, role_id=7))
+            for index, permission in enumerate(sorted(m.PERMISSIONS), 1):
+                db.add(Permission(id=index, code=permission, name=permission, module=permission.split(":")[0]))
+                db.add(RolePermission(role_id=7, permission_id=index))
+            for pid, uid in m.PROJECTS.items():
+                db.add(Project(id=pid, user_id=uid, project_name=f"QA权限验收-20260908-{'a' if pid == 164 else 'b'}", status="active"))
+            for row in snap()["memberships"]:
+                db.add(ProjectMember(**row))
+            for fid, pid in m.FILES.items():
+                db.add(CodeFile(id=fid, project_id=pid, file_name="permission.py", file_path="permission.py", language="python", content="print('local fixture')", version_no=2))
+            db.add(Project(id=161, user_id=1, project_name="unrelated historical fixture", status="active"))
+            db.add(ReviewTask(id=161, user_id=1, project_id=161, task_name="historical state must remain", status="success", total_issues=16, summary="historical summary"))
+            db.commit()
+            untouched_before = {"user": row_fields(db.get(User, 1)), "project": row_fields(db.get(Project, 161)), "review": row_fields(db.get(ReviewTask, 161))}
+            project_before = [row_fields(db.get(Project, pid)) for pid in m.PROJECTS]
+            file_before = [row_fields(db.get(CodeFile, fid)) for fid in m.FILES]
+
+        credential = tmp_path / "credentials.json"
+        credential.write_text(json.dumps(data))
+        credential.chmod(0o600)
+        pspec = importlib.util.spec_from_file_location("actual_prepare_20260908", ROOT / "backend/scripts/prepare_permission_acceptance.py")
+        prepare = importlib.util.module_from_spec(pspec)
+        pspec.loader.exec_module(prepare)
+        monkeypatch.setattr(prepare, "SessionLocal", Session)
+        monkeypatch.setattr(auth_api, "login_failure_limiter", LoginFailureLimiter(redis_url="", limit=5, window_seconds=60))
+        old_overrides = dict(app.dependency_overrides)
+        def fixture_db():
+            with Session() as db:
+                yield db
+        app.dependency_overrides[get_db] = fixture_db
+        client = TestClient(app)
+        tokens, requests, disables = [], [], []
+        def open_local(request, timeout):
+            assert request.full_url.startswith(m.BASE + "/api/auth/")
+            requests.append((request.method, request.full_url.removeprefix(m.BASE)))
+            res = client.request(request.method, request.full_url.removeprefix(m.BASE), headers=dict(request.header_items()), content=request.data)
+            if request.method == "POST" and res.status_code == 200:
+                tokens.append(res.json()["data"]["access_token"])
+            body = io.BytesIO(res.content)
+            body.code = res.status_code
+            return body
+        def local_snapshot(role_id):
+            assert role_id == 7
+            value = snap()
+            with Session() as db:
+                value["users"] = [{key: getattr(u, key) for key in ("id", "username", "role", "status", "token_version")}
+                                  for u in db.query(User).filter(User.id.in_(m.ACCOUNTS.values())).order_by(User.id)]
+                value["role"] = [{key: getattr(r, key) for key in ("id", "code", "status", "is_builtin")}
+                                 for r in db.query(Role).filter(or_(Role.id == 7, Role.code == m.ROLE_CODE)).order_by(Role.id)]
+                value["assignments"] = [{"user_id": ur.user_id, "role_id": ur.role_id, "code": role.code}
+                                        for ur, role in db.query(UserRole, Role).join(Role, Role.id == UserRole.role_id)
+                                        .filter(or_(UserRole.user_id.in_(m.ACCOUNTS.values()), UserRole.role_id == 7))
+                                        .order_by(UserRole.user_id, UserRole.role_id)]
+                value["permissions"] = [code for (code,) in db.query(Permission.code).join(RolePermission, RolePermission.permission_id == Permission.id)
+                                        .filter(RolePermission.role_id == 7).order_by(Permission.code)]
+                value["projects"] = [{"id": p.id, "user_id": p.user_id, "status": p.status, "marker_match": int(p.project_name == f"QA权限验收-20260908-{'a' if p.id == 164 else 'b'}"), "row_sha256": row_hash(p)}
+                                     for p in db.query(Project).filter(or_(Project.id.in_(m.PROJECTS), Project.user_id.in_(m.ACCOUNTS.values()))).order_by(Project.id)]
+                value["memberships"] = [{key: getattr(p, key) for key in ("project_id", "user_id", "role_in_project")}
+                                        for p in db.query(ProjectMember).filter(or_(ProjectMember.project_id.in_(m.PROJECTS), ProjectMember.user_id.in_(m.ACCOUNTS.values()))).order_by(ProjectMember.project_id, ProjectMember.user_id)]
+                value["files"] = [{"id": f.id, "project_id": f.project_id, "status": f.status, "row_sha256": row_hash(f)}
+                                  for f in db.query(CodeFile).filter(or_(CodeFile.id.in_(m.FILES), CodeFile.project_id.in_(m.PROJECTS))).order_by(CodeFile.id)]
+                value["counts"] = {"ai_call_log": db.query(AiCallLog).filter(AiCallLog.user_id.in_(m.ACCOUNTS.values())).count(),
+                                   "review_task": db.query(ReviewTask).filter(or_(ReviewTask.user_id.in_(m.ACCOUNTS.values()), ReviewTask.project_id.in_(m.PROJECTS))).count()}
+            return value
+        def actual_disable(_manifest):
+            disables.append("disable")
+            monkeypatch.setattr(sys, "argv", ["prepare", "--marker", m.MARKER, "--credentials", str(credential), "--disable"])
+            prepare.main()
+        monkeypatch.setattr(m, "snapshot", local_snapshot)
+        monkeypatch.setattr(m, "disable", actual_disable)
+        report = {"accounts": []}
+        try:
+>           m.finalize(data, SimpleNamespace(open=open_local), report, lambda: None)
+
+docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py:316:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+docs/失败恢复与复测核验20260908/证据/finalize_qa_20260908.py:246: in finalize
+    disable(manifest)
+docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py:311: in actual_disable
+    prepare.main()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def main() -> None:
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--marker", default="20260907")
+        parser.add_argument("--credentials", type=Path, required=True)
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument("--apply", action="store_true")
+        mode.add_argument("--disable", action="store_true")
+        args = parser.parse_args()
+        if not args.marker.isalnum() or len(args.marker) > 16:
+            parser.error("marker 只能是最多16位的字母数字")
+        role_code = "user"
+        names = {account: f"qa_{args.marker}_{account}" for account in ACCOUNTS}
+        with SessionLocal() as db:
+            if args.disable:
+                manifest = json.loads(args.credentials.read_text())
+                if (
+                    manifest.get("marker") != args.marker
+                    or manifest.get("role_code") != role_code
+                    or manifest.get("role_origin") != "existing_builtin"
+                ):
+>                   raise ValueError("清单标记不匹配")
+E                   ValueError: 清单标记不匹配
+
+backend/scripts/prepare_permission_acceptance.py:57: ValueError
+----------------------------- Captured stderr call -----------------------------
+2026-10-07 05:59:06.668 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:06.670 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:06.856 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:06.858 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:07.042 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:07.044 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:07.230 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+2026-10-07 05:59:07.232 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+=========================== short test summary info ============================
+FAILED backend/tests/unit/services/test_ai_usage_attribution.py::test_response_rounds_link_root_and_preserve_zero_invalid_unknown
+FAILED backend/tests/unit/services/test_ai_usage_attribution.py::test_tool_team_claim_dispatch_and_result_keep_exact_origin
+FAILED backend/tests/unit/services/test_ai_usage_attribution.py::test_nested_run_persists_root_across_checkpoint_reconstruction
+FAILED backend/tests/unit/services/test_ai_usage_attribution.py::test_checkpoint_delete_keeps_usage_and_existing_tool_ledger
+FAILED backend/tests/unit/services/test_background_usage_sources.py::test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint
+FAILED backend/tests/unit/services/test_knowledge_notebook_tools.py::test_recall_knowledge_tool_schema_is_exposed
+FAILED backend/tests/unit/services/test_knowledge_notebook_tools.py::test_save_knowledge_note_requires_approval_and_persists
+FAILED backend/tests/unit/services/test_llm_endpoint_service.py::test_connection_api_uses_authenticated_owner_and_does_not_save_config[/api/api-config/test]
+FAILED backend/tests/unit/services/test_llm_endpoint_service.py::test_connection_api_uses_authenticated_owner_and_does_not_save_config[/api/admin/llm/test]
+FAILED docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py::test_prepare_source_fingerprint_and_private_container_copy
+FAILED docs/失败恢复与复测核验20260908/证据/test_finalize_qa_20260908.py::test_real_local_auth_existing_disable_preserves_history_and_exact_resources
+11 failed, 6543 passed, 8 skipped, 8 warnings in 214.67s (0:03:34)

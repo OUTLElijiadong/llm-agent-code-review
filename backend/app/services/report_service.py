@@ -43,6 +43,15 @@ def is_report_available(task: ReviewTask | None) -> bool:
     )
 
 
+def sandbox_verification_status(task: ReviewTask | None) -> str:
+    """Return verified test coverage state; old sandbox reports remain explicitly unknown."""
+    if task is None or task.review_type != "sandbox_test":
+        return "not_applicable"
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    status = str(coverage.get("verification_status") or "unknown")
+    return status if status in {"complete", "partial", "failed"} else "unknown"
+
+
 def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[bool]:
     """私域摘要查询沿用报告可用性、查看权限与发起人/管理员范围。
 
@@ -140,6 +149,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "project_name": project.project_name if project else "",
             "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
             "total_issues": issue_count, "score": score, "status": row.status,
+            "coverage": row.coverage,
             "source": issue_stats[row.id]["source"],
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
@@ -466,7 +476,7 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
 def _build_task_score_facts(
     task: ReviewTask,
     issue_stats: dict,
-) -> tuple[int, int, dict, dict[str, int]]:
+) -> tuple[int, int | None, dict, dict[str, int]]:
     """标准审查按最终问题评分；领域报告保留原评分，禁止伪造扣分权重。"""
     severity_from_issues = issue_stats["severity"]
     severity_count = {
@@ -487,6 +497,11 @@ def _build_task_score_facts(
             "version": task.score_version,
             "score": task.score,
             "score_source": task.review_type,
+            **(
+                {"verification_status": sandbox_verification_status(task)}
+                if task.review_type == "sandbox_test"
+                else {}
+            ),
             "risk_level": risk_level,
         }, severity_count
     score, score_breakdown = build_report_score_facts(

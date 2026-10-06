@@ -631,6 +631,13 @@ function taskScoreLabel(task: RecentTaskOut): string {
   return '历史评分（类型未确认）'
 }
 
+function taskCoverageNote(task: RecentTaskOut): string {
+  if (task.review_type !== 'sandbox_test' || task.coverage?.verification_status === 'complete') return ''
+  if (task.coverage?.verification_status === 'partial') return ' · 验证范围不完整'
+  if (task.coverage?.verification_status === 'failed') return ' · 验证未通过'
+  return ' · 验证范围未知'
+}
+
 const activityFeed = computed<ActivityItem[]>(() => {
   const tasks = (summary.value?.recent_tasks ?? []) as RecentTaskOut[]
   return tasks.slice(0, 6).map((t, i) => {
@@ -654,7 +661,7 @@ const activityFeed = computed<ActivityItem[]>(() => {
         : ok
           ? `完成 <b>${safeDisplayName}</b>，${scoreLabel} <b style="color: var(--status-fixed);">${score}</b>`
           : `<b>${safeDisplayName}</b> 检出问题`,
-      meta: `状态：${status}${ok ? ` · ${scoreLabel} ${score}` : ''}`,
+      meta: `状态：${status}${ok ? ` · ${scoreLabel} ${score}${taskCoverageNote(t)}` : ''}`,
       when: created || '时间未记录',
       live,
     }

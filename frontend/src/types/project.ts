@@ -16,6 +16,7 @@ export interface ProjectOut {
   last_review_at?: string
   /** v2.0: 最近一次成功审查的真实评分,无审查记录时为 null */
   score?: number | null
+  coverage?: { verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null } | null
   /** 整个项目的 Agent 运转次数(工具调用日志统计) */
   agent_run_count?: number
   last_agent_run_at?: string | null
@@ -58,7 +59,15 @@ export interface ProjectDetailOut {
   last_agent_run_at?: string | null
   create_time: string
   update_time: string
-  recent_tasks: { id: number; review_type?: string; score: number | null; total_issues: number | null; status: string; create_time: string }[]
+  recent_tasks: {
+    id: number
+    review_type?: string
+    score: number | null
+    total_issues: number | null
+    status: string
+    create_time: string
+    coverage?: { verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null } | null
+  }[]
   source_revisions: { id: number; revision_no: number; source_sha256: string; repaired_files: string[]; repair_notes?: string; create_time?: string | null }[]
 }
 

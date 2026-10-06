@@ -259,8 +259,9 @@ def get_summary(db: Session, user: User) -> dict:
         .order_by(ReviewTask.create_time.desc())
         .limit(5)
     )
-    recent_tasks = [
-        {
+    recent_tasks = []
+    for task, project_name, visible_score in recent_q.all():
+        recent_tasks.append({
             "id": task.id,
             "task_name": task.task_name or f"审查任务 #{task.id}",
             "project_id": task.project_id,
@@ -268,10 +269,9 @@ def get_summary(db: Session, user: User) -> dict:
             "status": task.status,
             "review_type": task.review_type,
             "score": visible_score if visible_score is not None and 0 <= visible_score <= 100 else None,
+            "coverage": task.coverage if visible_score is not None else None,
             "create_time": task.create_time.isoformat() if task.create_time else None,
-        }
-        for task, project_name, visible_score in recent_q.all()
-    ]
+        })
 
     return {
         "project_count": project_count,

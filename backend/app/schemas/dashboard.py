@@ -20,6 +20,7 @@ class RecentTaskOut(BaseModel):
     status: str
     score: Optional[int] = None
     review_type: Optional[str] = None
+    coverage: Optional[dict] = None
     create_time: Optional[datetime] = None
 
 

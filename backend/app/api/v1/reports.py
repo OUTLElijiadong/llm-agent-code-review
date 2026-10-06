@@ -105,7 +105,8 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     task = report_service.get_readable_report_task(db, user, task_id)
 
     if task.review_type in {"sandbox_test", "pentest"}:
-        return task, [], task.summary or "", task.score
+        score = task.score
+        return task, [], task.summary or "", score
 
     issues: List[ReviewIssue] = (
         db.query(ReviewIssue)

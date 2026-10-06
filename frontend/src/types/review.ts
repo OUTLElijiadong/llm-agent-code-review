@@ -118,6 +118,7 @@ export interface TaskOut {
   score: number | null
   score_version?: string | null
   score_breakdown?: Record<string, unknown> | null
+  coverage?: TaskCoverageOut | null
   duration_ms: number
   create_time: string
 }
@@ -136,6 +137,12 @@ export interface TaskFileOut {
 
 export interface TaskCoverageOut {
   stage?: string | null
+  verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null
+  requested_mode?: string | null
+  deterministic_status?: string | null
+  ai_dynamic_status?: string | null
+  blackbox_status?: string | null
+  reason?: string | null
   current_file?: string | null
   completed_files?: number | null
   total_files?: number | null

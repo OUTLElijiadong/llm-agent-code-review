@@ -1,0 +1,1076 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-0.26.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 29 items
+
+tests/unit/agents/test_sandbox_agent_context.py .FF                      [ 10%]
+tests/unit/services/test_agent_test_cases.py ...................FFF.     [ 89%]
+tests/test_prism_sandbox_executor.py FF                                  [ 96%]
+tests/unit/services/test_sandbox_report_publish.py .                     [100%]
+
+=================================== FAILURES ===================================
+_ test_python_module_attribute_grounding_is_module_specific[module-alias-fake-export] _
+
+test_source = 'import app.routes as routes\nroutes.phantom_handler()\n'
+expected_issues = ['phantom_handler']
+
+    @pytest.mark.parametrize(
+        ("test_source", "expected_issues"),
+        [
+            ("import app.routes as routes\nroutes.real_route()\n", []),
+            ("import app.routes as routes\nroutes.phantom_handler()\n", ["phantom_handler"]),
+            ("import app.routes\napp.routes.phantom_handler()\n", ["phantom_handler"]),
+        ],
+        ids=["module-attribute-grounded", "module-alias-fake-export", "fully-qualified-fake-export"],
+    )
+    def test_python_module_attribute_grounding_is_module_specific(test_source, expected_issues) -> None:
+        source_summary = {
+            "source_chunks": [
+                {"path": "app/routes.py", "text": "def real_route():\n    return True\n"},
+                {"path": "app/models.py", "text": "def phantom_handler():\n    return True\n"},
+            ]
+        }
+        files = [{"path": "test_ai_route.py", "content": test_source}]
+
+>       assert _grounding_feedback(files, source_summary) == expected_issues
+E       AssertionError: assert [] == ['phantom_handler']
+E
+E         Right contains one more item: 'phantom_handler'
+E         Use -v to get more diff
+
+tests/unit/agents/test_sandbox_agent_context.py:255: AssertionError
+_ test_python_module_attribute_grounding_is_module_specific[fully-qualified-fake-export] _
+
+test_source = 'import app.routes\napp.routes.phantom_handler()\n'
+expected_issues = ['phantom_handler']
+
+    @pytest.mark.parametrize(
+        ("test_source", "expected_issues"),
+        [
+            ("import app.routes as routes\nroutes.real_route()\n", []),
+            ("import app.routes as routes\nroutes.phantom_handler()\n", ["phantom_handler"]),
+            ("import app.routes\napp.routes.phantom_handler()\n", ["phantom_handler"]),
+        ],
+        ids=["module-attribute-grounded", "module-alias-fake-export", "fully-qualified-fake-export"],
+    )
+    def test_python_module_attribute_grounding_is_module_specific(test_source, expected_issues) -> None:
+        source_summary = {
+            "source_chunks": [
+                {"path": "app/routes.py", "text": "def real_route():\n    return True\n"},
+                {"path": "app/models.py", "text": "def phantom_handler():\n    return True\n"},
+            ]
+        }
+        files = [{"path": "test_ai_route.py", "content": test_source}]
+
+>       assert _grounding_feedback(files, source_summary) == expected_issues
+E       AssertionError: assert ['routes'] == ['phantom_handler']
+E
+E         At index 0 diff: 'routes' != 'phantom_handler'
+E         Use -v to get more diff
+
+tests/unit/agents/test_sandbox_agent_context.py:255: AssertionError
+_ test_blackbox_contract_rejects_mutated_dynamic_port_sources[module-type-setattr] _
+
+source = "import os\nimport operator\noperator.delitem(os.environ, 'PRISM_PREVIEW_PORT')\nfrom urllib.request import urlopen\nurlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)\n"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            """import os
+    os.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os as env
+    env.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.getenv = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """from os import getenv as get_port
+    get_port = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + get_port('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ.update({'PRISM_PREVIEW_PORT': '8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """from os import environ as env
+    env['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    setattr(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ |= {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    dict.__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    osdict = os.__dict__
+    osdict['environ'] = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os_alias = os
+    os_alias.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os_alias.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    env_data = os.environ._data
+    env_data['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    vars(os)['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os.environ).__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ._data.update({b'PRISM_PREVIEW_PORT': b'8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    env_data = os.environ._data
+    operator.setitem(env_data, b'PRISM_PREVIEW_PORT', b'8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.__dict__, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.delitem(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    from operator import delitem as drop_item
+    drop_item(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    mutate = operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')
+    mutate(os.environ)
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os).__setattr__(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+        ],
+        ids=[
+            "replace-environ",
+            "replace-environ-module-alias",
+            "replace-getenv",
+            "replace-getenv-import-alias",
+            "update-environ",
+            "write-environ-import-alias",
+            "setattr-getenv",
+            "augassign-environ",
+            "dict-setitem-environ",
+            "os-module-dict-getenv",
+            "os-module-dict-environ-alias",
+            "os-module-alias-dict-getenv",
+            "environ-internal-data-alias",
+            "vars-module-dict-getenv",
+            "operator-setitem-environ",
+            "environ-type-setitem",
+            "environ-private-data-update",
+            "operator-setitem-environ-data-alias",
+            "operator-setitem-module-dict",
+            "module-type-setattr",
+            "operator-delitem-environ",
+            "operator-delitem-alias-environ",
+            "operator-methodcaller-setitem-environ",
+        ],
+    )
+    def test_blackbox_contract_rejects_mutated_dynamic_port_sources(source: str) -> None:
+        issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+>       assert issues
+E       assert []
+
+tests/unit/services/test_agent_test_cases.py:321: AssertionError
+_ test_blackbox_contract_rejects_mutated_dynamic_port_sources[operator-delitem-environ] _
+
+source = "import os\nfrom operator import delitem as drop_item\ndrop_item(os.environ, 'PRISM_PREVIEW_PORT')\nfrom urllib.request import urlopen\nurlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)\n"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            """import os
+    os.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os as env
+    env.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.getenv = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """from os import getenv as get_port
+    get_port = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + get_port('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ.update({'PRISM_PREVIEW_PORT': '8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """from os import environ as env
+    env['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    setattr(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ |= {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    dict.__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    osdict = os.__dict__
+    osdict['environ'] = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os_alias = os
+    os_alias.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os_alias.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    env_data = os.environ._data
+    env_data['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    vars(os)['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os.environ).__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ._data.update({b'PRISM_PREVIEW_PORT': b'8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    env_data = os.environ._data
+    operator.setitem(env_data, b'PRISM_PREVIEW_PORT', b'8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.__dict__, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.delitem(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    from operator import delitem as drop_item
+    drop_item(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    mutate = operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')
+    mutate(os.environ)
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os).__setattr__(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+        ],
+        ids=[
+            "replace-environ",
+            "replace-environ-module-alias",
+            "replace-getenv",
+            "replace-getenv-import-alias",
+            "update-environ",
+            "write-environ-import-alias",
+            "setattr-getenv",
+            "augassign-environ",
+            "dict-setitem-environ",
+            "os-module-dict-getenv",
+            "os-module-dict-environ-alias",
+            "os-module-alias-dict-getenv",
+            "environ-internal-data-alias",
+            "vars-module-dict-getenv",
+            "operator-setitem-environ",
+            "environ-type-setitem",
+            "environ-private-data-update",
+            "operator-setitem-environ-data-alias",
+            "operator-setitem-module-dict",
+            "module-type-setattr",
+            "operator-delitem-environ",
+            "operator-delitem-alias-environ",
+            "operator-methodcaller-setitem-environ",
+        ],
+    )
+    def test_blackbox_contract_rejects_mutated_dynamic_port_sources(source: str) -> None:
+        issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+>       assert issues
+E       assert []
+
+tests/unit/services/test_agent_test_cases.py:321: AssertionError
+_ test_blackbox_contract_rejects_mutated_dynamic_port_sources[operator-delitem-alias-environ] _
+
+source = "import os\nimport operator\nmutate = operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')\nmutate(os.en...nfrom urllib.request import urlopen\nurlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)\n"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            """import os
+    os.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os as env
+    env.environ = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.getenv = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """from os import getenv as get_port
+    get_port = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + get_port('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ.update({'PRISM_PREVIEW_PORT': '8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """from os import environ as env
+    env['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + env['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    setattr(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ |= {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    dict.__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    osdict = os.__dict__
+    osdict['environ'] = {'PRISM_PREVIEW_PORT': '8080'}
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    os_alias = os
+    os_alias.__dict__['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os_alias.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    env_data = os.environ._data
+    env_data['PRISM_PREVIEW_PORT'] = '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/', timeout=5)
+    """,
+            """import os
+    vars(os)['getenv'] = lambda _key: '8080'
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os.environ).__setitem__(os.environ, 'PRISM_PREVIEW_PORT', '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    os.environ._data.update({b'PRISM_PREVIEW_PORT': b'8080'})
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    env_data = os.environ._data
+    operator.setitem(env_data, b'PRISM_PREVIEW_PORT', b'8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.setitem(os.__dict__, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    operator.delitem(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    from operator import delitem as drop_item
+    drop_item(os.environ, 'PRISM_PREVIEW_PORT')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8080') + '/', timeout=5)
+    """,
+            """import os
+    import operator
+    mutate = operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')
+    mutate(os.environ)
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+            """import os
+    type(os).__setattr__(os, 'getenv', lambda _key: '8080')
+    from urllib.request import urlopen
+    urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+    """,
+        ],
+        ids=[
+            "replace-environ",
+            "replace-environ-module-alias",
+            "replace-getenv",
+            "replace-getenv-import-alias",
+            "update-environ",
+            "write-environ-import-alias",
+            "setattr-getenv",
+            "augassign-environ",
+            "dict-setitem-environ",
+            "os-module-dict-getenv",
+            "os-module-dict-environ-alias",
+            "os-module-alias-dict-getenv",
+            "environ-internal-data-alias",
+            "vars-module-dict-getenv",
+            "operator-setitem-environ",
+            "environ-type-setitem",
+            "environ-private-data-update",
+            "operator-setitem-environ-data-alias",
+            "operator-setitem-module-dict",
+            "module-type-setattr",
+            "operator-delitem-environ",
+            "operator-delitem-alias-environ",
+            "operator-methodcaller-setitem-environ",
+        ],
+    )
+    def test_blackbox_contract_rejects_mutated_dynamic_port_sources(source: str) -> None:
+        issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+>       assert issues
+E       assert []
+
+tests/unit/services/test_agent_test_cases.py:321: AssertionError
+_ test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure[204-0-"passed":true] _
+
+tmp_path = PosixPath('/private/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/pytest-of-li/pytest-293/test_real_blackbox_runner_acce0')
+route_status = 204, expected_exit = 0, expected_receipt = '"passed":true'
+
+    @pytest.mark.parametrize(
+        ("route_status", "expected_exit", "expected_receipt"),
+        [(204, 0, '"passed":true'), (503, 1, '"passed":false')],
+    )
+    def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
+        tmp_path: Path, route_status: int, expected_exit: int, expected_receipt: str,
+    ) -> None:
+        """Run the actual trusted runner against an app whose root is 404 but health API is known."""
+        import os
+        import socket
+
+        source = tmp_path / "source"
+        source.mkdir()
+        # The route declaration helps the runner discover framework-specific paths
+        # which are not in the common health-route list.
+        (source / "wsgi.py").write_text(
+            "# path('api/v1/health', health_view)\n"
+            "def application(environ, start_response):\n"
+            "    if environ.get('PATH_INFO') == '/api/v1/health':\n"
+            f"        status = '{route_status} Test'\n"
+            "        body = b''\n"
+            "    else:\n"
+            "        status = '404 Not Found'\n"
+            "        body = b'not found'\n"
+            "    start_response(status, [('Content-Length', str(len(body)))])\n"
+            "    return [body]\n",
+            encoding="utf-8",
+        )
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        env = os.environ.copy()
+        python_bin = str(Path(sys.executable).parent)
+        env.update({
+            "PATH": python_bin + os.pathsep + env.get("PATH", ""),
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "python",
+            "PRISM_TEST_MODE": "blackbox",
+            "PRISM_PREVIEW_PORT": str(port),
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        })
+        completed = subprocess.run(
+            ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env,
+            text=True, capture_output=True, timeout=20, check=False,
+        )
+        assert completed.returncode == expected_exit, completed.stdout + completed.stderr
+        output = completed.stdout + completed.stderr
+        assert "blackbox loopback status=404" in output
+        assert "blackbox route /api/v1/health" in output
+        assert "PRISM_BLACKBOX_DONE" in output
+        assert expected_receipt in output
+        assert f'"status_code":{route_status}' in output
+        assert '"agent_assertions_passed":null' in output
+        receipt = sandbox_service._extract_blackbox_result(output)
+        assert receipt is not None
+        assert receipt["agent_assertions_passed"] is None
+>       assert receipt["basis"] == "route_smoke"
+E       AssertionError: assert 'route_and_agent_assertions' == 'route_smoke'
+E
+E         - route_smoke
+E         + route_and_agent_assertions
+
+tests/test_prism_sandbox_executor.py:210: AssertionError
+_ test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure[503-1-"passed":false] _
+
+tmp_path = PosixPath('/private/var/folders/l4/hkkpqdhj7qg02d93n9488kvr0000gn/T/pytest-of-li/pytest-293/test_real_blackbox_runner_acce1')
+route_status = 503, expected_exit = 1, expected_receipt = '"passed":false'
+
+    @pytest.mark.parametrize(
+        ("route_status", "expected_exit", "expected_receipt"),
+        [(204, 0, '"passed":true'), (503, 1, '"passed":false')],
+    )
+    def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
+        tmp_path: Path, route_status: int, expected_exit: int, expected_receipt: str,
+    ) -> None:
+        """Run the actual trusted runner against an app whose root is 404 but health API is known."""
+        import os
+        import socket
+
+        source = tmp_path / "source"
+        source.mkdir()
+        # The route declaration helps the runner discover framework-specific paths
+        # which are not in the common health-route list.
+        (source / "wsgi.py").write_text(
+            "# path('api/v1/health', health_view)\n"
+            "def application(environ, start_response):\n"
+            "    if environ.get('PATH_INFO') == '/api/v1/health':\n"
+            f"        status = '{route_status} Test'\n"
+            "        body = b''\n"
+            "    else:\n"
+            "        status = '404 Not Found'\n"
+            "        body = b'not found'\n"
+            "    start_response(status, [('Content-Length', str(len(body)))])\n"
+            "    return [body]\n",
+            encoding="utf-8",
+        )
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        env = os.environ.copy()
+        python_bin = str(Path(sys.executable).parent)
+        env.update({
+            "PATH": python_bin + os.pathsep + env.get("PATH", ""),
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "python",
+            "PRISM_TEST_MODE": "blackbox",
+            "PRISM_PREVIEW_PORT": str(port),
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        })
+        completed = subprocess.run(
+            ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env,
+            text=True, capture_output=True, timeout=20, check=False,
+        )
+        assert completed.returncode == expected_exit, completed.stdout + completed.stderr
+        output = completed.stdout + completed.stderr
+        assert "blackbox loopback status=404" in output
+        assert "blackbox route /api/v1/health" in output
+        assert "PRISM_BLACKBOX_DONE" in output
+        assert expected_receipt in output
+        assert f'"status_code":{route_status}' in output
+        assert '"agent_assertions_passed":null' in output
+        receipt = sandbox_service._extract_blackbox_result(output)
+        assert receipt is not None
+        assert receipt["agent_assertions_passed"] is None
+>       assert receipt["basis"] == "route_smoke"
+E       AssertionError: assert 'route_and_agent_assertions' == 'route_smoke'
+E
+E         - route_smoke
+E         + route_and_agent_assertions
+
+tests/test_prism_sandbox_executor.py:210: AssertionError
+=============================== warnings summary ===============================
+../../../../../Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+--------- coverage: platform darwin, python 3.11.15-final-0 ----------
+Name                                              Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------
+app/__init__.py                                       0      0   100%
+app/agents/__init__.py                               17      0   100%
+app/agents/admin_copilot_agent.py                   121    121     0%   3-290
+app/agents/ai_prompt_agent.py                       283    228    19%   56, 60-64, 68-82, 114-130, 138-144, 147-148, 151-153, 156-166, 171-197, 203-222, 228-250, 254-287, 291-309, 331-394, 413-425, 440-490, 507-563, 578
+app/agents/audit_board.py                           100    100     0%   23-169
+app/agents/base.py                                  257    210    18%   66-76, 80-83, 88-103, 120-128, 132-137, 163-478, 495-550, 588-626, 639-642, 654
+app/agents/chat_agent.py                            983    912     7%   88-89, 94-112, 120-288, 312-319, 327-333, 336, 340-346, 398-462, 482-509, 520-524, 533-541, 565-657, 679-697, 823-888, 908-964, 991-1019, 1024-1036, 1044-1060, 1064-1074, 1078-1087, 1092-1137, 1145-1150, 1155-1248, 1273-1331, 1359-1437, 1462-1520, 1536-1570, 1576-1630, 1634-1647, 1652-1672, 1681-1701, 1710-1756, 1763, 1766-1783, 1787-1797, 1808-1816, 1822-1841, 1845-1867, 1871-1896, 1899-1905, 1919-1932, 1935-1951, 1970-1988, 2001-2169
+app/agents/chat_planner.py                          124    124     0%   12-370
+app/agents/clarify_store.py                          74     74     0%   8-103
+app/agents/context_budget.py                          5      2    60%   10-18
+app/agents/contracts.py                              99     30    70%   26, 71, 95-98, 607, 619, 623, 627, 629, 640, 647, 653-656, 661-673
+app/agents/dashboard_agent.py                        42     24    43%   23-25, 33-39, 42-43, 46-49, 52-55, 59-62, 66-69
+app/agents/deployment_coordinator_agent.py           44     28    36%   31, 52-101
+app/agents/discussion_bus.py                        395    395     0%   12-744
+app/agents/event_bus.py                             292    245    16%   33-36, 40-42, 46-57, 61-64, 69-71, 74-75, 79-88, 92, 104-127, 137-142, 145-161, 164-179, 182-200, 204-219, 224-242, 245-264, 287, 339-347, 356-360, 374-385, 405-450, 462-497, 509-522, 532-541
+app/agents/events.py                                 51      5    90%   35, 54-56, 83
+app/agents/evolution_agent.py                       182    151    17%   43-49, 54-64, 92-152, 175-185, 193-211, 214-215, 239-250, 259-277, 283-311, 315-355, 358-411
+app/agents/file_agent.py                             57     37    35%   28-30, 38-44, 47-48, 53-65, 71-122
+app/agents/fullchain_audit_agent.py                 352    352     0%   19-731
+app/agents/language_agent.py                         28     16    43%   19-30, 42-48, 51-67
+app/agents/metagpt/__init__.py                        6      6     0%   25-36
+app/agents/metagpt/environment.py                    81     81     0%   25-260
+app/agents/metagpt/factory.py                        49     49     0%   12-223
+app/agents/metagpt/messages.py                       48     48     0%   15-179
+app/agents/metagpt/role.py                           49     49     0%   27-162
+app/agents/metagpt/role_adapter.py                   55     55     0%   21-207
+app/agents/operations_agent.py                       86     62    28%   52, 77-89, 92-115, 119-123, 126-210
+app/agents/orchestrator.py                          572    464    19%   66-80, 92-98, 101-138, 149-173, 177, 189-232, 236-242, 245-248, 251-254, 257-259, 263-270, 273-277, 280-284, 289-295, 298-302, 309-333, 341, 361-383, 392-404, 409-437, 462-482, 488-492, 495-499, 502-506, 509-511, 514-518, 521-525, 530-532, 538-540, 546-548, 553-559, 563-569, 575-585, 589-591, 605-614, 628-634, 644-646, 649-651, 654-656, 662-664, 668-670, 673-675, 678-680, 683-685, 688-690, 699-701, 711-713, 716-718, 721-723, 730-731, 734-736, 745-746, 754-768, 781-800, 805-818, 825-830, 851-894, 909-947, 955-963, 972-989, 1000-1048, 1051, 1076-1122, 1151-1175, 1185-1187, 1199-1201, 1221-1225, 1244-1246, 1255-1257
+app/agents/project_agent.py                         132    107    19%   32-42, 56-62, 70-143, 147-149, 153-154, 157-174, 178, 185-237
+app/agents/project_manager_agent.py                  81     55    32%   35-36, 44-50, 53-54, 59-78, 84-113, 119-126, 141-153, 157-167
+app/agents/registry.py                               61     48    21%   22, 26-28, 31-37, 40, 43-44, 59-94, 97-116, 128-133
+app/agents/report_agent.py                           35     19    46%   23-25, 33-39, 42-43, 48-54, 61-68
+app/agents/review_agent.py                          353    309    12%   45-52, 64-70, 89-112, 134-290, 325-367, 372-387, 407-666, 711-720, 729-731, 751-754, 773, 838-974, 992-1000, 1014-1020
+app/agents/review_orchestrator_agent.py              56     35    38%   26-28, 36-42, 45-46, 53-68, 73-86, 92-98, 103-116
+app/agents/rule_agent.py                             39     23    41%   23-25, 33-39, 42-43, 46-55, 59-67
+app/agents/sandbox_agents.py                         70     40    43%   18-20, 23-24, 27-29, 33-45, 70-90, 110-128, 131-136, 139-144
+app/agents/security_sentinel_agent.py              1607   1456     9%   123-130, 188-197, 205-211, 216-217, 254-314, 328-330, 334-345, 349-359, 362-378, 381-397, 400-416, 421-450, 462-579, 602-668, 690-728, 745-1588, 1609-1923, 1954-2075, 2086-2096, 2108-2125, 2137-2148, 2168-2249, 2270-2352, 2362-2395, 2402-2435, 2439, 2445-2446, 2451-2498, 2512-2579, 2586-2625, 2636-2726, 2730-2742, 2748-2766, 2776-3051, 3058-3068, 3073, 3129-3249, 3263-3294, 3327-3346, 3350, 3353-3356, 3359-3360, 3363-3367, 3371-3376, 3386-3396, 3406-3424, 3428, 3432-3436, 3439-3443, 3457-3502, 3505-3604, 3608-3614, 3620-3720, 3725-3738, 3741-3744, 3765-3770, 3782-3784, 3815-3820
+app/agents/skills/__init__.py                         4      4     0%   15-19
+app/agents/skills/ai_prompt.py                       70     70     0%   8-271
+app/agents/skills/base.py                            26     26     0%   7-125
+app/agents/skills/chat_assistant.py                  70     70     0%   8-271
+app/agents/skills/code_file_manager.py               70     70     0%   8-270
+app/agents/skills/code_reviewer.py                   72     72     0%   14-265
+app/agents/skills/dashboard.py                       70     70     0%   8-271
+app/agents/skills/evolution.py                       95     95     0%   14-361
+app/agents/skills/language_detector.py               70     70     0%   8-271
+app/agents/skills/orchestrator_skill.py              70     70     0%   10-273
+app/agents/skills/proactive.py                       88     88     0%   12-333
+app/agents/skills/project_analyzer.py                70     70     0%   8-270
+app/agents/skills/project_manager.py                 70     70     0%   8-270
+app/agents/skills/registry.py                        61     61     0%   12-182
+app/agents/skills/reporter.py                        70     70     0%   8-270
+app/agents/skills/review_orchestrator.py             70     70     0%   8-271
+app/agents/skills/rule_manager.py                    70     70     0%   8-271
+app/agents/skills/security_sentinel.py               74     74     0%   13-315
+app/agents/skills/self_improvement.py               162    162     0%   12-545
+app/agents/source_context.py                        274    252     8%   43-212, 221-252, 257-282, 286-300, 309-326, 331-353, 365-506
+app/agents/syntax_repair_agent.py                   118     99    16%   30-31, 43-60, 79-180, 191-206
+app/agents/test_case_generator_agent.py             334    201    40%   405, 407-412, 421, 428, 438-442, 449-462, 467, 470, 479-480, 483, 485-487, 499, 512, 516, 519, 527, 532-536, 542, 545-557, 562-564, 569, 573-574, 579-587, 594-595, 598, 600, 606-610, 618, 620, 622-657, 665-672, 685, 698-700, 726-921
+app/agents/test_review_reporter_agent.py            284    284     0%   3-631
+app/agents/tool_contracts.py                        312     46    85%   64-74, 366-370, 572-575, 783, 788, 793-794, 799, 804, 809-814, 819-822, 827-848
+app/ai/__init__.py                                    0      0   100%
+app/ai/audit_knowledge_loader.py                     82     82     0%   14-182
+app/ai/code_chunker.py                              308    236    23%   72-82, 87, 92-114, 119-143, 148-151, 156-160, 164, 169-187, 205-208, 211, 214-215, 224-231, 234, 237, 240-253, 256-259, 262-265, 268-270, 273, 276-277, 280-281, 295-299, 302, 305, 308, 311-315, 318-327, 331-335, 344-358, 362-371, 375-380, 384-387, 391-413, 418-438, 442, 450-511, 515
+app/ai/cvss.py                                       35     26    26%   16-28, 33-39, 52-57
+app/ai/deepseek_agent.py                            250    219    12%   45-46, 59-125, 133-151, 161-164, 180-201, 211-229, 236-250, 282-413, 431-535, 558-582, 595-620
+app/ai/discussion_orchestrator.py                  1191   1191     0%   25-2447
+app/ai/exceptions.py                                 11      0   100%
+app/ai/finding_aggregator.py                        258    214    17%   42-45, 62-80, 92-152, 182-193, 210-249, 280-324, 383-412, 448-464, 471-478, 482-500, 504-586, 627-630, 634-636, 640, 644-647, 651-655
+app/ai/language_detector.py                           5      2    60%   58-59
+app/ai/multi_agent.py                                45     13    71%   108-109, 119, 131-132, 149-151, 164-168
+app/ai/php_attack_surface.py                        130    130     0%   22-306
+app/ai/prompt_builder.py                             58     46    21%   84, 89, 102-159, 164, 176-192, 213-232
+app/ai/result_parser.py                             194    120    38%   66-70, 164-168, 181-184, 197-200, 212-213, 225, 237-239, 253-271, 283-289, 305-334, 346-391, 427-496
+app/ai/scoring.py                                    22     15    32%   13-20, 25-30, 52
+app/ai/security_patterns.py                          66     37    44%   226-228, 233-242, 255-284, 289, 302-305
+app/ai/security_static_rules.py                     237    175    26%   594-596, 609-683, 695-702, 705-707, 710-714, 717-727, 732-735, 738-740, 743-756, 759-764, 767-773, 776-796, 799-812, 826-832, 837-844, 849, 854, 867, 886-904
+app/ai/static_analyzer.py                           108     54    50%   50-52, 64-80, 94-226, 309-329, 341-346, 364-365, 414, 452-475, 488-494
+app/api/__init__.py                                  43     43     0%   5-93
+app/api/responses.py                                 71     71     0%   8-179
+app/api/v1/__init__.py                                0      0   100%
+app/api/v1/admin_agent_releases.py                   61     61     0%   3-203
+app/api/v1/admin_copilot.py                          56     56     0%   2-84
+app/api/v1/admin_overview.py                        159    159     0%   6-348
+app/api/v1/admin_security_center.py                  54     54     0%   3-152
+app/api/v1/agent_catalog.py                          16     16     0%   3-32
+app/api/v1/agent_governance.py                      241    241     0%   3-1080
+app/api/v1/agent_mesh.py                             96     96     0%   3-286
+app/api/v1/agent_responses.py                       838    838     0%   3-1748
+app/api/v1/agent_studio.py                           84     84     0%   3-298
+app/api/v1/agent_teams.py                            92     92     0%   3-251
+app/api/v1/agents.py                                212    212     0%   17-561
+app/api/v1/ai_chat.py                               109    109     0%   5-218
+app/api/v1/ai_logs.py                                17     17     0%   4-46
+app/api/v1/ai_prompt.py                              63     63     0%   6-127
+app/api/v1/api_config.py                             25     25     0%   4-74
+app/api/v1/audit.py                                  15     15     0%   2-36
+app/api/v1/auth.py                                   66     66     0%   5-169
+app/api/v1/avatars.py                                70     70     0%   9-109
+app/api/v1/beta_invites.py                           40     40     0%   3-123
+app/api/v1/code_files.py                            107    107     0%   4-296
+app/api/v1/dashboard.py                              33     33     0%   4-73
+app/api/v1/discussion.py                             84     84     0%   6-214
+app/api/v1/evolution.py                              68     68     0%   9-197
+app/api/v1/feedback.py                               31     31     0%   4-66
+app/api/v1/forum.py                                  48     48     0%   4-107
+app/api/v1/issues.py                                 33     33     0%   4-95
+app/api/v1/knowledge.py                              46     46     0%   10-118
+app/api/v1/llm_config.py                             96     96     0%   7-264
+app/api/v1/maintenance.py                            31     31     0%   4-65
+app/api/v1/mcp_governance.py                         70     70     0%   3-206
+app/api/v1/pentest.py                                89     89     0%   3-229
+app/api/v1/project_members.py                        40     40     0%   15-172
+app/api/v1/projects.py                              105    105     0%   4-336
+app/api/v1/rbac.py                                  126    126     0%   26-595
+app/api/v1/reports.py                               184    184     0%   29-576
+app/api/v1/review.py                                 36     36     0%   4-92
+app/api/v1/rules.py                                  39     39     0%   4-90
+app/api/v1/sandboxes.py                              78     78     0%   3-234
+app/api/v1/security.py                               74     74     0%   5-221
+app/api/v1/user_profile.py                           24     24     0%   5-44
+app/api/v1/users.py                                  38     38     0%   4-98
+app/api/v1/ws_discussion.py                         324    324     0%   25-537
+app/constants/__init__.py                             0      0   100%
+app/constants/compliance.py                          61     39    36%   440-448, 465-470, 483-486, 499-502, 528-553
+app/constants/security_catalog.py                    29     10    66%   18, 22-23, 33-40
+app/core/__init__.py                                  0      0   100%
+app/core/captcha.py                                  51     51     0%   10-90
+app/core/config.py                                  251     47    81%   281, 296, 298, 300, 303, 305, 314, 316, 318, 323, 329, 340, 349, 351, 363-397
+app/core/database.py                                 15      5    67%   11, 36-40
+app/core/dependencies.py                             40     40     0%   5-99
+app/core/error_handlers.py                           40     40     0%   2-96
+app/core/exceptions.py                               63      9    86%   24-28, 32, 66, 145-146
+app/core/logger.py                                    8      8     0%   2-28
+app/core/observability.py                           101     66    35%   37-39, 53-63, 72-77, 82-83, 88-90, 127-129, 141-146, 158-160, 175, 188-230, 244-252, 261
+app/core/pagination.py                               10      6    40%   11-15, 26
+app/core/password_policy.py                          28     19    32%   27-36, 46-56
+app/core/permission_codes.py                         65      0   100%
+app/core/rate_limit.py                              300    221    26%   26-29, 43-61, 65, 74-88, 119-120, 270-271, 274-296, 299-304, 307-316, 319-329, 332-333, 340-348, 356-360, 372-387, 390-395, 401-408, 414-426, 435-452, 455-464, 467-476, 481-503, 514-545, 550-572, 575-584
+app/core/rbac_dependency.py                          36     36     0%   18-203
+app/core/request_size_limit.py                       76     76     0%   2-123
+app/core/security.py                                 19     10    47%   23-25, 38-40, 54-62, 78
+app/core/super_admin.py                              12      4    67%   22-39
+app/exporters/__init__.py                             0      0   100%
+app/exporters/pdf_exporter.py                        63     63     0%   4-129
+app/exporters/word_exporter.py                       37     37     0%   4-59
+app/main.py                                         176    176     0%   4-348
+app/models/__init__.py                                5      2    60%   54-55
+app/models/admin_chat.py                             39      0   100%
+app/models/agent_capability.py                      125      0   100%
+app/models/agent_governance.py                      217      0   100%
+app/models/agent_mesh.py                             58      0   100%
+app/models/agent_multimodal.py                       14      0   100%
+app/models/agent_response_run.py                     38      0   100%
+app/models/agent_skill_record.py                     15     15     0%   8-51
+app/models/agent_team.py                             77      0   100%
+app/models/ai_call_log.py                            26      1    96%   15
+app/models/api_config.py                             13      0   100%
+app/models/audit_log.py                              16      0   100%
+app/models/base.py                                    9      1    89%   10
+app/models/beta_invite_code.py                       14     14     0%   3-32
+app/models/code_file.py                              22      1    95%   26
+app/models/code_version.py                           13      0   100%
+app/models/custom_agent.py                           84      0   100%
+app/models/eval_case.py                              14      0   100%
+app/models/evolution_proposal.py                     20      0   100%
+app/models/forum_post.py                             14     14     0%   6-32
+app/models/forum_reply.py                            10     10     0%   4-20
+app/models/knowledge_chunk.py                        13     13     0%   8-32
+app/models/knowledge_doc.py                          13     13     0%   7-30
+app/models/maintenance_ticket.py                     15     15     0%   7-35
+app/models/malware_scan_log.py                       15     15     0%   6-37
+app/models/pentest.py                                74      0   100%
+app/models/project.py                                11      0   100%
+app/models/project_import_task.py                    28      0   100%
+app/models/project_member.py                          9      0   100%
+app/models/project_source_archive.py                 29      0   100%
+app/models/project_source_revision.py                18      0   100%
+app/models/rbac.py                                   48      0   100%
+app/models/report_template.py                        12     12     0%   6-31
+app/models/review_experience.py                      19      0   100%
+app/models/review_issue.py                           44      0   100%
+app/models/review_report.py                          12      0   100%
+app/models/review_rule.py                            16      0   100%
+app/models/review_task.py                            31      0   100%
+app/models/review_task_file.py                       12      0   100%
+app/models/roundtable.py                             35     35     0%   3-52
+app/models/system_config.py                           7      0   100%
+app/models/usage_attribution.py                       8      0   100%
+app/models/user.py                                   16      0   100%
+app/models/user_avatar.py                             8      0   100%
+app/models/user_feedback.py                          14     14     0%   8-35
+app/models/user_profile.py                           18      0   100%
+app/schemas/__init__.py                               0      0   100%
+app/schemas/agent.py                                103    103     0%   4-211
+app/schemas/agent_capability.py                     137    137     0%   3-168
+app/schemas/agent_governance.py                     347     32    91%   18-22, 34-42, 86, 99, 160, 173, 229, 242, 280, 293, 335, 364, 405, 433, 446, 497, 510, 543, 556, 606
+app/schemas/agent_mesh.py                            78     78     0%   3-128
+app/schemas/agent_studio.py                         192    192     0%   3-301
+app/schemas/agent_team.py                           101     35    65%   24-26, 42-52, 56-63, 79-83, 102-104, 114-119
+app/schemas/ai_log.py                                71     71     0%   4-87
+app/schemas/ai_prompt.py                             37     37     0%   2-51
+app/schemas/api_config.py                            33     33     0%   4-49
+app/schemas/audit.py                                 16     16     0%   4-24
+app/schemas/auth.py                                  58     11    81%   26, 32-37, 48, 69-71
+app/schemas/beta_invite.py                           21     21     0%   3-37
+app/schemas/code_file.py                             52      0   100%
+app/schemas/code_version.py                          16     16     0%   4-28
+app/schemas/common.py                                15     15     0%   4-34
+app/schemas/dashboard.py                             56     56     0%   5-98
+app/schemas/evolution.py                             77     77     0%   2-105
+app/schemas/feedback.py                              46     46     0%   4-70
+app/schemas/forum.py                                 43     43     0%   4-77
+app/schemas/knowledge.py                             48     48     0%   4-77
+app/schemas/llm_config.py                            65     65     0%   4-101
+app/schemas/maintenance.py                           42     42     0%   4-59
+app/schemas/malware_scan_log.py                      23     23     0%   4-34
+app/schemas/pentest.py                               99     99     0%   3-138
+app/schemas/profile.py                               31     31     0%   5-46
+app/schemas/project.py                              139     10    93%   14-16, 28, 33, 46-48, 53, 68
+app/schemas/project_member.py                        21     21     0%   6-44
+app/schemas/rbac.py                                  86      0   100%
+app/schemas/report.py                                35     35     0%   4-49
+app/schemas/report_template.py                       24     24     0%   4-38
+app/schemas/review.py                               160      6    96%   194-195, 208-209, 214-215
+app/schemas/rule.py                                  53      8    85%   27, 32, 49, 77-81
+app/schemas/security.py                             182    182     0%   2-294
+app/schemas/security_center.py                       60     60     0%   3-88
+app/schemas/user.py                                  27     27     0%   4-51
+app/services/__init__.py                              0      0   100%
+app/services/admin_agent_tools.py                   352    352     0%   10-902
+app/services/admin_capability_registry.py           122    122     0%   8-1330
+app/services/admin_capability_service.py             48     48     0%   3-94
+app/services/admin_chat_history_service.py           70     70     0%   3-164
+app/services/admin_copilot_service.py               366    366     0%   2-815
+app/services/agent_cost_budget_service.py           121    121     0%   3-275
+app/services/agent_governance_service.py            131    131     0%   3-498
+app/services/agent_knowledge_service.py             330    330     0%   2-801
+app/services/agent_memory_service.py                 13     13     0%   2-60
+app/services/agent_mesh_dispatcher.py               703    703     0%   3-1447
+app/services/agent_mesh_service.py                  833    833     0%   3-1976
+app/services/agent_model_service.py                  27     22    19%   9-12, 17-24, 29-42
+app/services/agent_responses_service.py            1974   1974     0%   3-4468
+app/services/agent_scheduler_runtime.py             224    224     0%   10-390
+app/services/agent_service.py                       227    227     0%   8-506
+app/services/agent_studio_service.py                627    627     0%   3-1181
+app/services/agent_supervisor_service.py            204    204     0%   7-455
+app/services/agent_team_dispatcher.py               191    191     0%   3-420
+app/services/agent_team_review.py                   115    115     0%   3-181
+app/services/agent_team_service.py                 1466   1466     0%   3-3256
+app/services/agent_team_summary.py                  108    108     0%   3-173
+app/services/ai_log_service.py                       49     49     0%   4-135
+app/services/ai_usage_context.py                    124    101    19%   25, 29, 33-35, 43, 53-70, 74-86, 97-108, 113-118, 127, 156-202, 217-248
+app/services/api_config_service.py                  215    215     0%   6-511
+app/services/approval_service.py                    271    271     0%   3-560
+app/services/audit_service.py                        53     43    19%   19-20, 57-75, 107-152
+app/services/auth_service.py                         95     81    15%   34-74, 93-144, 149-158, 173-187
+app/services/background_task_recovery.py             85     85     0%   3-141
+app/services/beta_invite_service.py                 107    107     0%   3-229
+app/services/capability_catalog_service.py          168    168     0%   3-364
+app/services/code_file_service.py                   281    232    17%   61-85, 120-151, 179-219, 224-236, 241-244, 265-273, 280-281, 301-322, 344-345, 366-379, 404-449, 469-487, 499-501, 515-532, 560-595, 600-622, 639-643, 660-671, 692-725, 751-768, 797-804, 817-822, 833-835, 851-858, 873-878, 893-897
+app/services/context_fidelity.py                    153    127    17%   92-100, 115-123, 134-171, 178-204, 209-236, 245-289
+app/services/dashboard_service.py                   128     91    29%   41, 45-65, 75-78, 93-94, 122-123, 159-179, 192-276, 300-305, 319-324, 338-354, 372-387, 401-494
+app/services/declarative_agent_runtime.py           344    344     0%   3-730
+app/services/decompilation_service.py               180    122    32%   70-73, 77-78, 82-90, 94-103, 108-141, 145-161, 172-186, 197-211, 216-218, 236-256, 273-302
+app/services/deepseek_responses_runtime.py         1231   1043    15%   77-79, 113-114, 148, 158, 183, 187, 199, 223, 236, 269, 287-288, 378-379, 382-386, 389-393, 396-398, 401-402, 412-425, 449-475, 486-500, 510-540, 550-585, 594-630, 638-694, 705-725, 729, 739-744, 748-749, 762-767, 771-784, 798-1011, 1025-1064, 1077-1238, 1241-1557, 1570-1590, 1597-1708, 1711-1715, 1718-1721, 1731-1751, 1761-1769, 1777-1791, 1818-1822, 1827-1835, 1853-1934, 1944-1952, 1958, 1970-1976, 1991-1995, 1999-2000, 2013-2026, 2036-2057, 2075-2112, 2117-2135, 2139-2155, 2159-2161, 2166-2186, 2190-2232, 2241-2248, 2261-2269, 2278-2286, 2294-2302, 2312-2317, 2321-2354, 2358-2404, 2408-2436, 2440-2477, 2481, 2485-2496, 2500, 2508-2513, 2517-2527
+app/services/deepseek_responses_service.py          664    664     0%   8-1226
+app/services/embedding_service.py                   191    191     0%   12-302
+app/services/eval_gate.py                           139    139     0%   12-313
+app/services/evolution_service.py                   147    147     0%   12-270
+app/services/experience_service.py                   80     60    25%   35-36, 41-43, 69-78, 95-157, 180-189, 198-201
+app/services/feedback_service.py                     33     25    24%   31, 51-98, 108-112
+app/services/forum_service.py                       121    121     0%   9-172
+app/services/geoip_service.py                        44     44     0%   7-80
+app/services/governance_log_privacy_service.py       45     45     0%   3-67
+app/services/issue_merger.py                        474    405    15%   35-64, 69-73, 112-116, 155-156, 187, 197-246, 257-276, 280-287, 291-299, 303-307, 316-374, 378-383, 389-400, 404-408, 412-439, 443-462, 466-511, 515-516, 520-522, 526-529, 540-543, 547-600, 606-638, 681-720, 735-741, 750-756, 760-766, 770-781, 785-801, 805-814, 818-827, 831-839, 854-857, 870-874, 878, 883, 887, 895-899, 903-912, 916-917, 921-928, 932-936, 949-957
+app/services/issue_service.py                        88     88     0%   9-274
+app/services/jarvis_patrol_service.py                99     99     0%   8-285
+app/services/knowledge_service.py                   172    172     0%   12-343
+app/services/maintenance_service.py                  79     79     0%   9-112
+app/services/managed_mcp_adapter.py                 106    106     0%   7-274
+app/services/mcp_governance_service.py              426    426     0%   3-1050
+app/services/mcp_tool_provider.py                   262    262     0%   3-552
+app/services/multimodal_service.py                  135    135     0%   12-250
+app/services/observability_service.py                84     84     0%   3-265
+app/services/ops_service.py                         254    206    19%   243-245, 250, 254, 258-263, 267-273, 277-296, 309-343, 356-514, 519-596, 600, 604, 608-621, 625-641, 645, 657-677
+app/services/page_guide_service.py                   16     16     0%   15-88
+app/services/pentest_service.py                    1555   1555     0%   20-3124
+app/services/personalization_service.py             164    164     0%   11-282
+app/services/policy_engine.py                        83     83     0%   5-250
+app/services/profile_service.py                     192    192     0%   12-335
+app/services/project_import_dispatcher.py            71     71     0%   3-142
+app/services/project_import_service.py              428    356    17%   54, 58, 62-66, 70-72, 83, 93, 97, 101-104, 108-112, 136-139, 155-243, 249-259, 271-317, 327-374, 388-413, 422-464, 470-475, 489-499, 502-522, 525-532, 535-537, 540-541, 546-552, 558-603, 612-636, 642-683, 693-720, 737-868, 886-934, 947-988, 994-996
+app/services/project_member_service.py              203    175    14%   29-37, 56-81, 103-129, 155-185, 190-193, 202-246, 251-269, 298-314, 341-385, 410-436, 463-487, 500-517, 534-555, 566-586
+app/services/project_service.py                     125    105    16%   33-43, 66-168, 192-222, 245-288, 358-370, 385-413
+app/services/project_source_revision_service.py      67     46    31%   35-42, 47-65, 75, 85-93, 113-143, 156-161, 165
+app/services/project_source_service.py              521    434    17%   131-136, 141-143, 152-164, 172-225, 230-232, 243-254, 258, 270-281, 290-350, 359-365, 369-380, 385-386, 415-424, 432-434, 438-442, 447-466, 471-488, 500-523, 532-552, 569-580, 592-682, 687-739, 744-782, 786-797, 802, 811-830, 834-840, 852-938, 950-976, 982-983, 1001-1053
+app/services/published_agent_tools.py               239    239     0%   3-560
+app/services/rbac_service.py                        186    151    19%   70-75, 93-125, 131, 137, 143, 171-202, 218-221, 248-263, 280-288, 308-330, 347, 364, 379, 399-428, 448-458, 471, 502-518, 524-526, 541, 569-577, 598-615
+app/services/report_exporter.py                     243    197    19%   97, 102-108, 115, 119-144, 149, 173-176, 201-209, 225-244, 260-274, 279-284, 298-321, 333-335, 353-362, 377-383, 406-407, 424-434, 459-582, 587-624, 648, 670-671, 694-731, 751-762
+app/services/report_pdf_exporter.py                 231    231     0%   15-665
+app/services/report_service.py                      284    247    13%   37, 48-52, 61-75, 80-89, 109-156, 170-184, 228-231, 236-292, 301-332, 336, 344-354, 365-473, 481-512, 525-576, 593-601, 626-655
+app/services/report_template_service.py              58     58     0%   16-226
+app/services/report_word_exporter.py                243    243     0%   15-599
+app/services/review_admission_service.py             34     34     0%   3-53
+app/services/review_input_service.py                 47     34    28%   15-25, 29-30, 34-39, 55-69, 73-79
+app/services/review_service.py                     1174   1067     9%   92-107, 112-137, 145-147, 162-173, 197-284, 293-308, 313-392, 405-552, 559-584, 588-589, 601-602, 616-620, 675-679, 733-885, 923-1053, 1066, 1108-1275, 1314-1418, 1453-1665, 1677-1691, 1728-1750, 1758, 1799-1815, 1828-1954, 1971-2039, 2057-2062, 2098-2299, 2312-2314, 2330-2331, 2346-2355, 2375-2377, 2407-2494, 2499-2509, 2533-2560, 2595-2617, 2622-2630, 2650-2677, 2712-2735, 2750-2763, 2779-2794, 2798-2804, 2810-2813, 2818-2820, 2851-2868, 2889-2900
+app/services/reward_service.py                       24     24     0%   2-88
+app/services/rollback_service.py                     51     51     0%   2-130
+app/services/roundtable_followup_service.py         136    136     0%   2-231
+app/services/rule_service.py                         66     52    21%   34-42, 59-68, 84, 98-104, 109-128, 133-148, 153-159
+app/services/sandbox_report_summary.py               97     97     0%   2-119
+app/services/sandbox_service.py                    3045   2479    19%   139, 143-145, 149, 153-157, 161-162, 167, 172-192, 215-221, 231-237, 252-257, 266-268, 273, 289-314, 318-320, 341-349, 354-370, 376-413, 417-421, 428-524, 533-555, 560, 573-575, 580-585, 596-609, 613-619, 623-629, 633-639, 643-644, 649-659, 674-696, 708-733, 747-761, 771-799, 1201-1336, 1345-1362, 1367-1534, 1556-1565, 1570-1578, 1592-1594, 1620, 1639, 1651-1652, 1656-1658, 1660-1669, 1678-1680, 1685, 1689-1698, 1710, 1717, 1719-1720, 1725-1758, 1777-1778, 1834, 1853, 1896, 1910, 1946, 1982-1987, 1989-1993, 2024, 2031, 2034, 2036, 2038, 2042-2055, 2079, 2083-2092, 2094, 2096-2107, 2112, 2115, 2117, 2119-2131, 2133, 2140-2161, 2172-2176, 2193, 2205-2209, 2213-2222, 2225, 2227-2228, 2250-2252, 2257-2259, 2261, 2263-2264, 2273, 2275-2283, 2285-2300, 2313, 2316, 2318, 2320, 2325, 2332, 2344, 2346, 2348-2356, 2358, 2363-2384, 2403-2404, 2429, 2433, 2441-2442, 2446-2455, 2459-2463, 2480-2683, 2699-2760, 2765-2769, 2791-2804, 2808-2820, 2825-2969, 2974-3026, 3049-3050, 3110, 3123, 3129-3141, 3152-3210, 3229-3238, 3246-3335, 3340-3347, 3352-3408, 3413-3430, 3443-3509, 3523-3644, 3648, 3660-3662, 3672-3685, 3695-3703, 3712-3728, 3732-3742, 3746-3759, 3768-3805, 3809, 3830-3831, 3836-3856, 3865-3887, 3895-3926, 3934, 3946-3993, 3997-4030, 4038-4063, 4076-4079, 4083-4126, 4130-4136, 4150-4158, 4162-4174, 4178-4184, 4193-4315, 4322-4341, 4345-4372, 4383-4393, 4402, 4413-4444, 4468-4511, 4524-4557, 4561-4565, 4576-4585, 4595-4858, 4863-4917, 4922-4940, 4955-5080, 5085-5200, 5212-5930, 5943-5967, 5971-5973, 5977-5984, 5988-5991, 5999-6006, 6058-6065, 6069, 6078-6103, 6107-6148, 6152-6187, 6191-6224, 6229-6236
+app/services/scheduler_service.py                   474    474     0%   11-1159
+app/services/security_anomaly_service.py            146    146     0%   7-232
+app/services/security_center_service.py             306    306     0%   3-750
+app/services/security_monitor_service.py            332    332     0%   15-940
+app/services/security_posture_service.py             34     34     0%   10-139
+app/services/security_response_service.py            99     99     0%   7-223
+app/services/security_rule_catalog_service.py        64     64     0%   11-191
+app/services/security_service.py                    106    106     0%   11-277
+app/services/security_trace_service.py              192    192     0%   13-421
+app/services/skill_service.py                        83     83     0%   13-277
+app/services/strategy_learning_service.py           153    123    20%   46, 50-54, 58-76, 87-94, 98-111, 115-126, 130, 148-230, 239-261, 284-318
+app/services/system_config_service.py               355    317    11%   26-27, 31-40, 50-82, 87-88, 98-113, 127-152, 160-166, 170, 184-192, 206-215, 225-259, 271-274, 291-314, 344-416, 437-445, 457, 461-471, 483-501, 506-521, 530-552, 557-573, 581-606, 611-615
+app/services/system_service.py                       21     21     0%   6-63
+app/services/temporary_agent_runtime.py             438    438     0%   3-815
+app/services/tool_gateway.py                        152    152     0%   5-585
+app/services/user_capability_registry.py             50     50     0%   9-607
+app/services/user_feedback_service.py               104    104     0%   11-154
+app/services/user_service.py                         82     82     0%   5-191
+app/utils/__init__.py                                 0      0   100%
+app/utils/api_resolver.py                           185    136    26%   68-69, 78-85, 94-106, 118-121, 135, 147-168, 180-184, 196-198, 216-217, 229-230, 252-293, 307-319, 347-356, 377-467
+app/utils/archive_extractor.py                      209    162    22%   71-72, 79-91, 94-99, 106-115, 118-128, 133-154, 165-241, 251-252, 256-262, 266-272, 282-306, 310-333, 344, 348-349
+app/utils/encoding_utils.py                          29     22    24%   27-43, 55-58, 70
+app/utils/file_validator.py                          39     29    26%   27-39, 51-52, 65-67, 103-115
+app/utils/image_utils.py                             54     54     0%   7-83
+app/utils/input_validation.py                        69     58    16%   21-28, 33-36, 41-44, 61-125
+app/utils/malware_scanner.py                        266    213    20%   26-28, 34-36, 122-149, 162-223, 241, 261-301, 305-326, 336-367, 381-408, 416-439, 447-456, 470-480, 494-506, 517-525, 541-563, 575-578, 590-594, 607-609
+app/utils/multipart_limits.py                        39     39     0%   2-72
+app/utils/public_http.py                             63     47    25%   31, 48-105
+app/utils/sanitize.py                                21     12    43%   33-40, 58-70
+app/utils/source_archive_gate.py                     14      6    57%   21-27
+app/utils/upload_reader.py                           19     14    26%   13-29
+-------------------------------------------------------------------------------
+TOTAL                                             51395  45100    12%
+
+=========================== short test summary info ============================
+FAILED tests/unit/agents/test_sandbox_agent_context.py::test_python_module_attribute_grounding_is_module_specific[module-alias-fake-export]
+FAILED tests/unit/agents/test_sandbox_agent_context.py::test_python_module_attribute_grounding_is_module_specific[fully-qualified-fake-export]
+FAILED tests/unit/services/test_agent_test_cases.py::test_blackbox_contract_rejects_mutated_dynamic_port_sources[module-type-setattr]
+FAILED tests/unit/services/test_agent_test_cases.py::test_blackbox_contract_rejects_mutated_dynamic_port_sources[operator-delitem-environ]
+FAILED tests/unit/services/test_agent_test_cases.py::test_blackbox_contract_rejects_mutated_dynamic_port_sources[operator-delitem-alias-environ]
+FAILED tests/test_prism_sandbox_executor.py::test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure[204-0-"passed":true]
+FAILED tests/test_prism_sandbox_executor.py::test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure[503-1-"passed":false]
+=================== 7 failed, 22 passed, 1 warning in 9.80s ====================

@@ -8,15 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from deploy.tests.security_host import Host
+
 MODULE = Path(__file__).resolve().parents[1] / "prism_security_block.py"
 SPEC = importlib.util.spec_from_file_location("prism_security_block", MODULE)
 assert SPEC and SPEC.loader
 security = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(security)
-
-
-from tests.security_host import Host
-
 
 
 @pytest.fixture
@@ -463,7 +461,7 @@ def test_new_log_evidence_changes_candidate_identity(controller, monkeypatch):
 
 
 def test_ipv6_kernel_set_failure_is_reported_without_disabling_ipv4(controller):
-    ctl, host = controller
+    ctl, _host = controller
     original = ctl.runner
     def fail_ipv6(args, **kwargs):
         if args[:3] == ["ipset", "create", security.SETS[6]]:

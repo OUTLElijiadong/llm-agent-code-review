@@ -1,0 +1,786 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+testpaths: tests
+plugins: cov-5.0.0, asyncio-0.26.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 6340 items
+
+tests/fixtures/xiaoling_acceptance/test_main.py .                        [  0%]
+tests/test_c28_report_consistency.py ......................              [  0%]
+tests/test_code_chunk_context.py .......                                 [  0%]
+tests/test_code_file_service.py .............................            [  0%]
+tests/test_complete_permission_matrix.py ............................... [  1%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+................................................................         [ 18%]
+tests/test_compliance_dict.py .......................                    [ 18%]
+tests/test_dashboard_private_report_scope.py ........................... [ 19%]
+.............................................                            [ 19%]
+tests/test_finding_aggregator.py ....................................... [ 20%]
+                                                                         [ 20%]
+tests/test_issue_aggregation_workflow.py .....                           [ 20%]
+tests/test_issue_merger.py .........................                     [ 20%]
+tests/test_malware_scanner.py .......................................... [ 21%]
+.......                                                                  [ 21%]
+tests/test_manual_auth_anonymous_contract.py .........                   [ 21%]
+tests/test_observability.py ...........                                  [ 22%]
+tests/test_permission_route_contexts.py ....................             [ 22%]
+tests/test_prism_sandbox_executor.py ................................... [ 22%]
+................................                                         [ 23%]
+tests/test_production_permission_acceptance_runner.py .......            [ 23%]
+tests/test_project_lifecycle_guards.py ............                      [ 23%]
+tests/test_rbac_api.py ................................................  [ 24%]
+tests/test_rbac_service.py ............................................. [ 25%]
+......................                                                   [ 25%]
+tests/test_release_readonly_collector.py .................               [ 25%]
+tests/test_report_api.py ....................................            [ 26%]
+tests/test_report_exporter.py .......................................... [ 26%]
+...................................                                      [ 27%]
+tests/test_report_object_authorization.py .............................. [ 28%]
+........................................................................ [ 29%]
+....                                                                     [ 29%]
+tests/test_report_project_scope_snapshot.py ............                 [ 29%]
+tests/test_result_parser.py ..........................................   [ 30%]
+tests/test_result_parser_contract.py ......                              [ 30%]
+tests/test_review_admission_fixture.py ......                            [ 30%]
+tests/test_review_input_lifecycle.py .............                       [ 30%]
+tests/test_review_recovery_integrity.py ...................              [ 30%]
+tests/test_review_result_pipeline_regression.py ........................ [ 31%]
+........                                                                 [ 31%]
+tests/test_review_service_v3.py ..................                       [ 31%]
+tests/test_review_task_access_errors.py .....................            [ 31%]
+tests/test_security_catalog_current.py ...........                       [ 32%]
+tests/test_vulnerability_e2e.py ............                             [ 32%]
+tests/test_vulnerability_summary.py ...                                  [ 32%]
+tests/unit/agents/test_agent_contracts.py .......                        [ 32%]
+tests/unit/agents/test_agent_project_quarantine.py ..................    [ 32%]
+tests/unit/agents/test_base_agent_input_capacity.py .......              [ 32%]
+tests/unit/agents/test_c12_context_projection.py ...........             [ 32%]
+tests/unit/agents/test_c13_semantic_coverage.py .....                    [ 33%]
+tests/unit/agents/test_chat_agent_coverage.py .......................... [ 33%]
+.......................                                                  [ 33%]
+tests/unit/agents/test_chat_planner_coverage.py .....................    [ 34%]
+tests/unit/agents/test_code_reviewer_agent.py .......................... [ 34%]
+.                                                                        [ 34%]
+tests/unit/agents/test_discussion_gc.py .........                        [ 34%]
+tests/unit/agents/test_event_bus_coverage.py ........................    [ 35%]
+tests/unit/agents/test_evolution_agent.py ..........                     [ 35%]
+tests/unit/agents/test_file_agent_keyword.py .....                       [ 35%]
+tests/unit/agents/test_finding_locate_evidence.py .....                  [ 35%]
+tests/unit/agents/test_fullchain_context_coverage.py ..................  [ 35%]
+tests/unit/agents/test_metagpt.py .....................                  [ 36%]
+tests/unit/agents/test_operations_context.py .....                       [ 36%]
+tests/unit/agents/test_orchestrator_coverage.py .....................    [ 36%]
+tests/unit/agents/test_project_agent_full_file_context.py .....          [ 36%]
+tests/unit/agents/test_project_manager_no_silent_truncation.py ..        [ 36%]
+tests/unit/agents/test_review_issue_tool_result.py ..                    [ 36%]
+tests/unit/agents/test_review_prompt_isolation.py ...                    [ 36%]
+tests/unit/agents/test_roundtable_followup.py ...............            [ 36%]
+tests/unit/agents/test_roundtable_lifecycle.py ...........               [ 37%]
+tests/unit/agents/test_roundtable_restart_recovery.py .                  [ 37%]
+tests/unit/agents/test_sandbox_agent_context.py ........................ [ 37%]
+                                                                         [ 37%]
+tests/unit/agents/test_scan_entry_input_closure.py ..................... [ 37%]
+....................................................                     [ 38%]
+tests/unit/agents/test_security_sentinel_review.py ........              [ 38%]
+tests/unit/agents/test_self_improvement_boundaries.py ....               [ 38%]
+tests/unit/agents/test_source_context_provenance.py ................     [ 39%]
+tests/unit/agents/test_tool_contracts.py ............................... [ 39%]
+..............                                                           [ 39%]
+tests/unit/agents/test_v4_review_input_selection.py ..                   [ 39%]
+tests/unit/agents/test_ws_discussion_coverage.py ..............          [ 39%]
+tests/unit/ai/test_audit_knowledge_coverage.py .....                     [ 40%]
+tests/unit/ai/test_c15_output_contract.py ..........                     [ 40%]
+tests/unit/ai/test_deepseek_agent_label.py ..........                    [ 40%]
+tests/unit/ai/test_deepseek_agent_response.py ..................         [ 40%]
+tests/unit/ai/test_multi_agent.py ......                                 [ 40%]
+tests/unit/ai/test_prompt_builder.py ...                                 [ 40%]
+tests/unit/ai/test_security_patterns.py ..................               [ 41%]
+tests/unit/ai/test_static_analyzer.py .................................  [ 41%]
+tests/unit/api/test_admin_copilot_api.py ...                             [ 41%]
+tests/unit/api/test_admin_overview.py ..                                 [ 41%]
+tests/unit/api/test_admin_overview_activity.py ..........                [ 41%]
+tests/unit/api/test_agent_release_decision_scope.py .................... [ 42%]
+...                                                                      [ 42%]
+tests/unit/api/test_agent_teams_api.py ..........                        [ 42%]
+tests/unit/api/test_agents_api_coverage.py .......................       [ 42%]
+tests/unit/api/test_auth_rate_limit_api.py ........                      [ 42%]
+tests/unit/api/test_auth_redis_unavailability_api.py ....                [ 42%]
+tests/unit/api/test_avatar_api.py .....                                  [ 42%]
+tests/unit/api/test_beta_invites_api.py .....                            [ 43%]
+tests/unit/api/test_c22_c23_chat_persistence.py ........                 [ 43%]
+tests/unit/api/test_feedback_api.py .....................                [ 43%]
+tests/unit/api/test_folder_upload_resource_cleanup.py ...                [ 43%]
+tests/unit/api/test_mcp_governance_api.py .                              [ 43%]
+tests/unit/api/test_pentest_api.py ......                                [ 43%]
+tests/unit/api/test_personalization_resilience.py ...........            [ 43%]
+tests/unit/api/test_private_agent_account_isolation.py ................. [ 44%]
+....................................                                     [ 44%]
+tests/unit/api/test_private_audit_log_isolation.py ................      [ 44%]
+tests/unit/api/test_private_governance_log_isolation.py ...........      [ 45%]
+tests/unit/api/test_project_import_lifecycle_api.py ..                   [ 45%]
+tests/unit/api/test_project_member_candidates_api.py .                   [ 45%]
+tests/unit/api/test_project_source_download_audit.py ...                 [ 45%]
+tests/unit/api/test_project_viewer_api.py ..........                     [ 45%]
+tests/unit/api/test_responses_api.py .........                           [ 45%]
+tests/unit/api/test_review_start_rate_limit.py ..                        [ 45%]
+tests/unit/api/test_security_monitor_api.py ............................ [ 45%]
+............................................................             [ 46%]
+tests/unit/core/test_app_lifespan_contract.py ...                        [ 46%]
+tests/unit/core/test_config_security.py ...................              [ 47%]
+tests/unit/core/test_login_rate_limit.py ............                    [ 47%]
+tests/unit/core/test_login_rate_limit_real_redis.py ssssss               [ 47%]
+tests/unit/core/test_login_redis_unavailability.py ..........            [ 47%]
+tests/unit/core/test_password_policy.py ............                     [ 47%]
+tests/unit/core/test_single_device_session.py ........                   [ 48%]
+tests/unit/core/test_upload_request_size_limit.py ........               [ 48%]
+tests/unit/schemas/test_input_security_boundaries.py ................... [ 48%]
+...........................                                              [ 48%]
+tests/unit/scripts/test_project_contract_scripts.py ....                 [ 48%]
+tests/unit/scripts/test_quarantine_projects.py ......................... [ 49%]
+...............                                                          [ 49%]
+tests/unit/scripts/test_seed_agent_playbooks_selection.py ...            [ 49%]
+tests/unit/services/test_admin_capability_registry.py .........          [ 49%]
+tests/unit/services/test_admin_copilot_service.py ...................    [ 50%]
+tests/unit/services/test_agent_cost_budget_service.py ........           [ 50%]
+tests/unit/services/test_agent_count_explicit_source.py ..               [ 50%]
+tests/unit/services/test_agent_count_scope.py .........                  [ 50%]
+tests/unit/services/test_agent_governance_api_integration.py ........... [ 50%]
+........                                                                 [ 50%]
+tests/unit/services/test_agent_governance_services.py .................. [ 50%]
+..............................................                           [ 51%]
+tests/unit/services/test_agent_mesh_dispatch_rbac_regression.py ........ [ 51%]
+                                                                         [ 51%]
+tests/unit/services/test_agent_mesh_dispatcher.py ...................... [ 52%]
+.......                                                                  [ 52%]
+tests/unit/services/test_agent_mesh_service.py ......................... [ 52%]
+.                                                                        [ 52%]
+tests/unit/services/test_agent_response_server_history_images.py ....    [ 52%]
+tests/unit/services/test_agent_response_session_history.py ............. [ 52%]
+.                                                                        [ 52%]
+tests/unit/services/test_agent_responses_admin_tools.py ............     [ 53%]
+tests/unit/services/test_agent_responses_integration.py ................ [ 53%]
+........................................................................ [ 54%]
+....................                                                     [ 54%]
+tests/unit/services/test_agent_role_instructions.py .                    [ 54%]
+tests/unit/services/test_agent_runtime_v2.py ..........                  [ 55%]
+tests/unit/services/test_agent_service.py .....                          [ 55%]
+tests/unit/services/test_agent_status_events.py ...                      [ 55%]
+tests/unit/services/test_agent_studio_service.py ...................     [ 55%]
+tests/unit/services/test_agent_team_dispatcher.py ...................... [ 55%]
+........................................................                 [ 56%]
+tests/unit/services/test_agent_team_review.py ..................         [ 56%]
+tests/unit/services/test_agent_team_service.py ......................... [ 57%]
+..................................................                       [ 58%]
+tests/unit/services/test_agent_test_cases.py ........................... [ 58%]
+...................                                                      [ 58%]
+tests/unit/services/test_ai_prompt_agent.py .............                [ 59%]
+tests/unit/services/test_ai_usage_attribution.py ...........             [ 59%]
+tests/unit/services/test_ai_usage_recording.py ...................       [ 59%]
+tests/unit/services/test_api_config_service.py ........                  [ 59%]
+tests/unit/services/test_audit_service.py ...                            [ 59%]
+tests/unit/services/test_authorization_guards.py ................        [ 59%]
+tests/unit/services/test_background_usage_sources.py ........            [ 60%]
+tests/unit/services/test_beta_invite_service.py ........                 [ 60%]
+tests/unit/services/test_c07_tool_authorization.py ..................... [ 60%]
+................................................                         [ 61%]
+tests/unit/services/test_change_password_tool.py ...............         [ 61%]
+tests/unit/services/test_chat_history_assets.py ......                   [ 61%]
+tests/unit/services/test_chat_security_intent.py .....                   [ 61%]
+tests/unit/services/test_clarify_v2.py ......                            [ 61%]
+tests/unit/services/test_code_file_concurrency.py ...                    [ 61%]
+tests/unit/services/test_code_file_keyword_literal.py .                  [ 61%]
+tests/unit/services/test_code_file_service_v2.py .............           [ 62%]
+tests/unit/services/test_community_service_coverage.py ......            [ 62%]
+tests/unit/services/test_context_fidelity.py .........................   [ 62%]
+tests/unit/services/test_context_recall_case_integrity.py .............  [ 62%]
+tests/unit/services/test_core_service_coverage.py ...........            [ 62%]
+tests/unit/services/test_dashboard_live_progress.py ........             [ 63%]
+tests/unit/services/test_dashboard_stats_cache.py ....                   [ 63%]
+tests/unit/services/test_decompilation_service.py .................      [ 63%]
+tests/unit/services/test_deepseek_responses_runtime.py ................. [ 63%]
+..........................................                               [ 64%]
+tests/unit/services/test_deepseek_responses_service.py ................. [ 64%]
+........................                                                 [ 65%]
+tests/unit/services/test_deploy_verify_runner_regressions.py ........... [ 65%]
+.                                                                        [ 65%]
+tests/unit/services/test_domain_report_export_closure.py ............... [ 65%]
+....................................                                     [ 65%]
+tests/unit/services/test_embedding_service.py ....                       [ 66%]
+tests/unit/services/test_embedding_usage_recording.py ...........        [ 66%]
+tests/unit/services/test_eval_gate.py ..........                         [ 66%]
+tests/unit/services/test_event_bus_v2.py ....                            [ 66%]
+tests/unit/services/test_evolution_service.py ..............             [ 66%]
+tests/unit/services/test_executor_backend_contract.py ......             [ 66%]
+tests/unit/services/test_experience_service.py .......                   [ 66%]
+tests/unit/services/test_feedback_service.py ....                        [ 66%]
+tests/unit/services/test_forum_context_compaction.py ......              [ 67%]
+tests/unit/services/test_frontend_api_contract.py ...                    [ 67%]
+tests/unit/services/test_fuzzy_project_resolve.py ........               [ 67%]
+tests/unit/services/test_github_project_import.py ...................... [ 67%]
+..............                                                           [ 67%]
+tests/unit/services/test_jarvis_patrol_service.py .......                [ 67%]
+tests/unit/services/test_knowledge_notebook_tools.py ...........         [ 68%]
+tests/unit/services/test_legacy_transcript_shape_integrity.py .......... [ 68%]
+.......................................                                  [ 68%]
+tests/unit/services/test_llm_config_runtime.py ..................        [ 69%]
+tests/unit/services/test_llm_endpoint_service.py ...............         [ 69%]
+tests/unit/services/test_managed_mcp_adapter.py .......                  [ 69%]
+tests/unit/services/test_mcp_governance_service.py ................      [ 69%]
+tests/unit/services/test_mcp_tool_provider.py ......                     [ 69%]
+tests/unit/services/test_mesh_archive_and_team_normalize.py ..........   [ 69%]
+tests/unit/services/test_model_independent_paths.py .................... [ 70%]
+                                                                         [ 70%]
+tests/unit/services/test_model_registry.py ....                          [ 70%]
+tests/unit/services/test_multimodal_recovery_regressions.py ............ [ 70%]
+........                                                                 [ 70%]
+tests/unit/services/test_multimodal_service.py .....                     [ 70%]
+tests/unit/services/test_page_guide_service.py .............             [ 70%]
+tests/unit/services/test_pentest_viewer_boundaries.py .................. [ 71%]
+..                                                                       [ 71%]
+tests/unit/services/test_personalization_service_coverage.py ........... [ 71%]
+.                                                                        [ 71%]
+tests/unit/services/test_private_agent_knowledge.py ..............       [ 71%]
+tests/unit/services/test_private_approval_isolation.py ............      [ 71%]
+tests/unit/services/test_project_agent_runs.py ........                  [ 71%]
+tests/unit/services/test_project_import_lifecycle.py ................... [ 72%]
+..                                                                       [ 72%]
+tests/unit/services/test_project_import_tasks.py .........               [ 72%]
+tests/unit/services/test_project_member_service.py ..................... [ 72%]
+...........                                                              [ 72%]
+tests/unit/services/test_project_quarantine.py ......................... [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+...........................................................              [ 77%]
+tests/unit/services/test_project_source_revision_integrity.py ...        [ 77%]
+tests/unit/services/test_project_source_service.py ..................... [ 78%]
+.....                                                                    [ 78%]
+tests/unit/services/test_project_viewer_execution.py ................... [ 78%]
+...........                                                              [ 78%]
+tests/unit/services/test_project_viewer_permissions.py ................. [ 78%]
+                                                                         [ 78%]
+tests/unit/services/test_project_viewer_resources.py ........            [ 79%]
+tests/unit/services/test_published_agent_capability_search.py .          [ 79%]
+tests/unit/services/test_published_agent_context.py .................... [ 79%]
+                                                                         [ 79%]
+tests/unit/services/test_published_agent_runtime.py ............         [ 79%]
+tests/unit/services/test_published_dependency_integrity.py .........     [ 79%]
+tests/unit/services/test_real_data_sources.py ..                         [ 79%]
+tests/unit/services/test_remote_archive_streaming.py ...                 [ 79%]
+tests/unit/services/test_remote_target_authorization.py .......          [ 79%]
+tests/unit/services/test_report_dashboard_source_facts.py .............. [ 80%]
+...........................................                              [ 80%]
+tests/unit/services/test_report_service.py .....                         [ 80%]
+tests/unit/services/test_responses_context_token_budget.py ............. [ 81%]
+...........                                                              [ 81%]
+tests/unit/services/test_responses_usage_attempts.py ........            [ 81%]
+tests/unit/services/test_review_admission_shared.py ...                  [ 81%]
+tests/unit/services/test_review_dynamic_roles.py .                       [ 81%]
+tests/unit/services/test_review_non_code_compaction.py ................. [ 81%]
+.........                                                                [ 81%]
+tests/unit/services/test_review_report_context.py ...................... [ 82%]
+.....                                                                    [ 82%]
+tests/unit/services/test_review_service_helpers.py .......               [ 82%]
+tests/unit/services/test_review_service_state_coverage.py .............  [ 82%]
+tests/unit/services/test_review_service_v2.py ..................         [ 82%]
+tests/unit/services/test_review_team_execution_guards.py ...........     [ 83%]
+tests/unit/services/test_review_truncation_retry.py ........             [ 83%]
+tests/unit/services/test_review_worker_reauthorization.py ......         [ 83%]
+tests/unit/services/test_sandbox_api_authorization.py .                  [ 83%]
+tests/unit/services/test_sandbox_decompilation.py .....                  [ 83%]
+tests/unit/services/test_sandbox_multi_agent_review.py .........         [ 83%]
+tests/unit/services/test_sandbox_optimizations.py ..................     [ 83%]
+tests/unit/services/test_sandbox_report_publish.py ..................... [ 84%]
+........................                                                 [ 84%]
+tests/unit/services/test_sandbox_report_summary.py .............         [ 84%]
+tests/unit/services/test_scheduler_configuration_closure.py ............ [ 84%]
+.........................                                                [ 85%]
+tests/unit/services/test_scheduler_skill_contract.py ................... [ 85%]
+.......                                                                  [ 85%]
+tests/unit/services/test_security_anomaly_service.py ................    [ 85%]
+tests/unit/services/test_security_hardening.py ....                      [ 85%]
+tests/unit/services/test_security_monitor_service.py ................... [ 86%]
+.................                                                        [ 86%]
+tests/unit/services/test_security_response_service.py .................. [ 86%]
+...........                                                              [ 87%]
+tests/unit/services/test_security_rule_catalog_service.py ...            [ 87%]
+tests/unit/services/test_security_sentinel_agent.py .................... [ 87%]
+..................................................................       [ 88%]
+tests/unit/services/test_security_service_coverage.py ......             [ 88%]
+tests/unit/services/test_security_trace_service.py ...........           [ 88%]
+tests/unit/services/test_server_ops_service.py ......................... [ 89%]
+.......                                                                  [ 89%]
+tests/unit/services/test_skill_service_coverage.py .......               [ 89%]
+tests/unit/services/test_strategy_learning_service.py ..........         [ 89%]
+tests/unit/services/test_supervised_mesh_dispatch.py ............        [ 89%]
+tests/unit/services/test_surface_persona_separation.py ..............    [ 89%]
+tests/unit/services/test_system_config_api_key_rotation.py ..            [ 89%]
+tests/unit/services/test_team_and_beta_permissions.py .....              [ 89%]
+tests/unit/services/test_temporary_agent_runtime.py .................... [ 90%]
+.................................................                        [ 91%]
+tests/unit/services/test_temporary_team_definition.py ..............     [ 91%]
+tests/unit/services/test_temporary_team_independent_boundaries.py ...... [ 91%]
+...                                                                      [ 91%]
+tests/unit/services/test_user_capability_registry.py ................... [ 91%]
+.............................                                            [ 92%]
+tests/unit/services/test_v4_team_review_contracts.py ................... [ 92%]
+.......                                                                  [ 92%]
+tests/unit/services/test_viewer_execution_boundaries.py ................ [ 92%]
+...................                                                      [ 93%]
+tests/unit/services/test_xiaoling_slim_observability.py ......           [ 93%]
+tests/unit/test_ac2_e2e_fixes.py ...................                     [ 93%]
+tests/unit/test_alembic_metadata_imports.py ....                         [ 93%]
+tests/unit/test_captcha_image.py ........                                [ 93%]
+tests/unit/test_db_url_credentials.py .....                              [ 93%]
+tests/unit/test_discussion_orchestrator_coverage.py .................... [ 94%]
+.............................................                            [ 94%]
+tests/unit/test_export_agent_contracts.py .................              [ 95%]
+tests/unit/test_json_field_serialization_check.py ................       [ 95%]
+tests/unit/test_migration_020_manager_admin_capability.py ....           [ 95%]
+tests/unit/test_migration_021_project_import.py ....                     [ 95%]
+tests/unit/test_migration_022_unique_super_admin.py .........            [ 95%]
+tests/unit/test_migration_023_agent_capabilities.py ...                  [ 95%]
+tests/unit/test_migration_024_source_archives.py ...                     [ 95%]
+tests/unit/test_migration_025_capability_aliases.py .                    [ 95%]
+tests/unit/test_migration_026_source_binary_capacity.py ..               [ 95%]
+tests/unit/test_migration_027_security_alert_fields.py ...               [ 95%]
+tests/unit/test_migration_030_agent_mesh.py .                            [ 95%]
+tests/unit/test_migration_031_agent_mesh_dispatch_lease.py .             [ 95%]
+tests/unit/test_migration_032_strategy_memory.py .                       [ 95%]
+tests/unit/test_migration_033_agent_team.py ..                           [ 95%]
+tests/unit/test_migration_034_agent_draft_permissions.py ...             [ 95%]
+tests/unit/test_migration_035_security_scan_user.py ...                  [ 95%]
+tests/unit/test_migration_036_performance_indexes.py ...                 [ 96%]
+tests/unit/test_migration_041_review_result_pipeline.py ..               [ 96%]
+tests/unit/test_migration_041a_remote_import_tasks.py ..                 [ 96%]
+tests/unit/test_migration_042_merge_heads.py ..                          [ 96%]
+tests/unit/test_migration_043_remote_import_lifecycle.py .               [ 96%]
+tests/unit/test_migration_044_pentest.py .                               [ 96%]
+tests/unit/test_migration_046_finding_aggregation.py ..                  [ 96%]
+tests/unit/test_migration_047_review_input_snapshot.py .                 [ 96%]
+tests/unit/test_migration_048_ai_usage_attribution.py ..                 [ 96%]
+tests/unit/test_migration_049_agent_studio_reviewer_only.py ...          [ 96%]
+tests/unit/test_migration_053_role_pentest_authorization.py ..           [ 96%]
+tests/unit/test_migration_054_archive_excess_conversations.py ..         [ 96%]
+tests/unit/test_migration_055_backfill_agent_conversation_titles.py ..   [ 96%]
+tests/unit/test_migration_056_backfill_titles_from_older_runs.py .       [ 96%]
+tests/unit/test_migration_057_reviewer_audit_menu_route.py .             [ 96%]
+tests/unit/test_migration_062_audit_log_action_length.py ..              [ 96%]
+tests/unit/test_mysql_init_user_contract.py ..                           [ 96%]
+tests/unit/test_nginx_security_headers.py ....                           [ 96%]
+tests/unit/test_orchestrator_model_tiering.py ..........                 [ 96%]
+tests/unit/test_pentest_service.py ..................................... [ 97%]
+....................................                                     [ 97%]
+tests/unit/test_pure_logic_export_coverage.py .........                  [ 97%]
+tests/unit/test_schema_field_coverage_r1_r8.py ......................... [ 98%]
+..............                                                           [ 98%]
+tests/unit/test_security_finding_review_schema.py ..                     [ 98%]
+tests/unit/test_seed_rules_security.py .....                             [ 98%]
+tests/unit/utils/test_api_resolver.py .....................              [ 99%]
+tests/unit/utils/test_api_url_security.py ....................           [ 99%]
+tests/unit/utils/test_archive_extractor.py ............................. [ 99%]
+....                                                                     [ 99%]
+tests/unit/utils/test_multipart_limits.py ....                           [ 99%]
+tests/unit/utils/test_pdf_exporter.py .                                  [ 99%]
+tests/unit/utils/test_upload_reader.py ..                                [100%]
+
+=============================== warnings summary ===============================
+../../../../../Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../../../Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/starlette/testclient.py:53
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+../../../../../Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+app/agents/sandbox_agents.py:48
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/app/agents/sandbox_agents.py:48: PytestCollectionWarning: cannot collect test class 'TestVerifierAgent' because it has a __init__ constructor (from: tests/unit/agents/test_sandbox_agent_context.py)
+    class TestVerifierAgent(_SandboxAgent):
+
+app/agents/test_review_reporter_agent.py:141
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/app/agents/test_review_reporter_agent.py:141: PytestCollectionWarning: cannot collect test class 'TestReviewReporterAgent' because it has a __init__ constructor (from: tests/unit/services/test_review_dynamic_roles.py)
+    class TestReviewReporterAgent(BaseAgent):
+
+tests/unit/services/test_agent_test_cases.py::test_source_summary_rejects_ambiguous_duplicate_zip_members
+  /opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/zipfile.py:1580: UserWarning: Duplicate name: 'main.php'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+--------- coverage: platform darwin, python 3.11.15-final-0 ----------
+Name                                              Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------
+app/__init__.py                                       0      0   100%
+app/agents/__init__.py                               17      0   100%
+app/agents/admin_copilot_agent.py                   121     14    88%   35-37, 61, 81, 160, 175, 268-290
+app/agents/ai_prompt_agent.py                       283     31    89%   74, 79, 81, 152, 158, 172, 182, 188, 207, 281, 343, 414, 416, 419, 441, 443, 446, 456, 460, 472, 480, 508, 510, 513, 523, 538, 545, 548, 557-559
+app/agents/audit_board.py                           100     51    49%   64-65, 68-70, 73-75, 78-80, 85-90, 93-98, 101-103, 107-110, 116, 132-149, 153-158
+app/agents/base.py                                  257     15    94%   92, 102-103, 255-257, 381, 424-426, 428-430, 625-626
+app/agents/chat_agent.py                            983     63    94%   109, 124, 139, 148, 155, 167, 177, 182, 190, 222, 253, 282, 523-524, 582-583, 827, 995, 998, 1007, 1025, 1047, 1049, 1059, 1093, 1156, 1274, 1276, 1360, 1362, 1463, 1469, 1596, 1609, 1635, 1653, 1682, 1690, 1711, 1732, 1767, 1788, 1809, 1815, 1823, 1828, 1846, 1852, 1872, 1900, 1903, 1920, 1936, 1939, 1971, 1986, 2047, 2100-2101, 2135-2138
+app/agents/chat_planner.py                          124      0   100%
+app/agents/clarify_store.py                          74      5    93%   49, 62, 64, 73, 82
+app/agents/context_budget.py                          5      0   100%
+app/agents/contracts.py                              99     10    90%   95-98, 607, 619, 623, 627, 629, 640
+app/agents/dashboard_agent.py                        42     16    62%   46-49, 52-55, 59-62, 66-69
+app/agents/deployment_coordinator_agent.py           44      8    82%   65, 73, 87-88, 90, 93, 97, 100
+app/agents/discussion_bus.py                        395     34    91%   31, 40, 207, 209, 249, 252, 269, 335-337, 391, 413, 472, 511, 572, 574, 611-613, 658-659, 675-687, 694, 713, 739, 742
+app/agents/event_bus.py                             292     96    67%   69-71, 74-75, 80, 145-161, 164-179, 182-200, 204-219, 230, 245-264, 343-344, 359-360, 481, 494-495, 518-519
+app/agents/events.py                                 51      0   100%
+app/agents/evolution_agent.py                       182     45    75%   45-46, 55, 60-61, 108, 138, 240, 259-277, 283-311, 340, 343, 347, 350, 362, 379, 383, 396, 403, 410
+app/agents/file_agent.py                             57      5    91%   54, 72, 76, 121-122
+app/agents/fullchain_audit_agent.py                 352    109    69%   78, 107, 121, 149, 160-210, 227, 241-244, 304-306, 345, 368, 386-426, 432-458, 468, 490, 493-494, 515-522, 529, 541, 571-572, 582-583, 653, 656, 659, 678, 689, 692-693, 700-701, 704-705
+app/agents/language_agent.py                         28      2    93%   54, 60
+app/agents/metagpt/__init__.py                        6      0   100%
+app/agents/metagpt/environment.py                    81      9    89%   127, 129, 167-168, 214-215, 218-219, 260
+app/agents/metagpt/factory.py                        49      3    94%   121-130, 171
+app/agents/metagpt/messages.py                       48      5    90%   169, 171, 173, 177, 179
+app/agents/metagpt/role.py                           49      6    88%   80, 96, 108, 138-141
+app/agents/metagpt/role_adapter.py                   55      5    91%   104-107, 138
+app/agents/operations_agent.py                       86     10    88%   77-89, 128, 149, 151, 158, 177
+app/agents/orchestrator.py                          572    148    74%   159, 163, 226, 230, 246, 252, 276, 283, 293, 301, 312-317, 362, 364, 382-383, 392-404, 414, 429, 436-437, 465, 491, 498, 505, 510, 517, 524, 531, 539, 547, 554, 556, 564, 566, 576, 584, 589-591, 629, 631, 645, 649-651, 654-656, 662-664, 668-670, 673-675, 678-680, 683-685, 688-690, 699-701, 711-713, 716-718, 721-723, 730-731, 734-736, 745-746, 754-768, 781-800, 806, 826-829, 852, 857, 893-894, 910, 915, 946-947, 955-963, 972-989, 1001, 1047-1048, 1085, 1105, 1157, 1186
+app/agents/project_agent.py                         132     29    78%   72, 78, 85, 94, 113, 116, 120, 131, 159, 166, 190, 199, 203-205, 218-237
+app/agents/project_manager_agent.py                  81     18    78%   60, 85, 119-126, 142, 145-153, 158, 161
+app/agents/registry.py                               61     14    77%   35, 67, 97-116
+app/agents/report_agent.py                           35      8    77%   49, 61-68
+app/agents/review_agent.py                          353     58    84%   111, 149, 267-275, 286-287, 329-330, 343, 350-367, 374-375, 385-386, 442, 453-454, 463, 473, 505, 587, 589-590, 595, 603-604, 606-607, 613-614, 654, 842, 854-856, 865, 995
+app/agents/review_orchestrator_agent.py              56     11    80%   54, 62, 74, 92-98, 104
+app/agents/rule_agent.py                             39     10    74%   47, 59-67
+app/agents/sandbox_agents.py                         70     35    50%   27-29, 33-45, 70-90, 110-128, 131-136, 139-144
+app/agents/security_sentinel_agent.py              1607    190    88%   127-128, 281, 301, 306, 336, 342, 363, 382, 392, 401, 469, 603, 606, 703, 725-727, 746, 755, 971, 990, 992, 994, 1133-1138, 1188-1190, 1374-1378, 1382, 1403, 1530-1548, 1610, 1612, 1616-1617, 1760, 1762, 1769, 1771, 1786, 1788, 1797, 1799, 1956, 1959, 1978, 1981, 2039-2042, 2049-2050, 2054-2064, 2068, 2086-2096, 2119-2124, 2174, 2178, 2208, 2210, 2212, 2225, 2236, 2240, 2363, 2403, 2408-2409, 2439, 2445-2446, 2453, 2483-2487, 2489-2493, 2531, 2542-2543, 2551, 2568, 2588, 2596, 2624, 2637, 2671-2673, 2693-2694, 2740, 2750, 2760, 2763, 2778, 2813, 2929, 2966-2968, 3003-3012, 3066-3067, 3170-3172, 3181-3183, 3239, 3264, 3267, 3287-3288, 3331, 3334, 3345, 3441-3442, 3460, 3468, 3479-3485, 3490, 3492, 3496-3502, 3508-3509, 3550, 3563, 3596, 3610-3614, 3665-3666, 3671-3673, 3687, 3691, 3710-3711, 3732-3733, 3769-3770
+app/agents/skills/__init__.py                         4      0   100%
+app/agents/skills/ai_prompt.py                       70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/base.py                            26      2    92%   83, 116
+app/agents/skills/chat_assistant.py                  70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/code_file_manager.py               70     52    26%   47-62, 85-123, 135, 162-194, 205-229, 243-270
+app/agents/skills/code_reviewer.py                   72     50    31%   77-79, 95-107, 119-130, 165-187, 198-222, 236-265
+app/agents/skills/dashboard.py                       70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/evolution.py                       95     46    52%   169, 171, 201-213, 248-270, 281, 295-317, 331-361
+app/agents/skills/language_detector.py               70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/orchestrator_skill.py              70     52    26%   50-65, 88-126, 138, 165-197, 208-232, 246-273
+app/agents/skills/proactive.py                       88     65    26%   80, 93, 107, 118, 132, 152-320
+app/agents/skills/project_analyzer.py                70     52    26%   47-62, 85-123, 135, 162-194, 205-229, 243-270
+app/agents/skills/project_manager.py                 70     52    26%   47-62, 85-123, 135, 162-194, 205-229, 243-270
+app/agents/skills/registry.py                        61     14    77%   90-94, 124, 144, 150, 169, 178-182
+app/agents/skills/reporter.py                        70     52    26%   47-62, 85-123, 135, 162-194, 205-229, 243-270
+app/agents/skills/review_orchestrator.py             70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/rule_manager.py                    70     52    26%   48-63, 86-124, 136, 163-195, 206-230, 244-271
+app/agents/skills/security_sentinel.py               74     52    30%   78-93, 116-157, 172, 207-239, 250-274, 288-315
+app/agents/skills/self_improvement.py               162     25    85%   161-162, 186, 249, 267, 282, 405-411, 437, 442-443, 476-493, 498-502, 530-533
+app/agents/source_context.py                        274     32    88%   50-51, 74, 77, 94-97, 112, 123, 126, 128, 131, 137, 140, 168, 207, 209, 227, 244, 246, 276, 297, 334, 337, 369, 372, 374, 380, 393, 469, 491
+app/agents/syntax_repair_agent.py                   118     31    74%   44, 48-49, 59, 80, 97, 104, 107, 130, 139, 143, 152-155, 169-171, 191-206
+app/agents/test_case_generator_agent.py             371     85    77%   405, 409-410, 438-442, 451-454, 457, 460, 470, 479-480, 483, 485-487, 519, 527, 534-536, 542, 547-548, 569, 573-574, 582-587, 598, 600, 606-610, 658, 664, 670, 675, 688, 692-702, 721-728, 798, 800, 803, 820, 877, 889, 901-909, 911, 918, 921, 931, 940, 945, 948, 952, 954, 956, 958, 960, 968, 971-976
+app/agents/test_review_reporter_agent.py            284     47    83%   166, 219-220, 228, 240-241, 279, 285, 307, 309, 326, 328, 333, 339-348, 402, 405-406, 456, 463-464, 479-480, 483, 495, 526, 538, 550, 553-556, 558, 560, 566-568, 573-574, 582
+app/agents/tool_contracts.py                        312      6    98%   65, 71, 367, 369, 821-822
+app/ai/__init__.py                                    0      0   100%
+app/ai/audit_knowledge_loader.py                     82      6    93%   29, 32-33, 84, 150, 160
+app/ai/code_chunker.py                              308     24    92%   237, 246, 248, 262-265, 268-270, 273, 280-281, 305, 308, 333-335, 358, 368-370, 380, 385
+app/ai/cvss.py                                       35      3    91%   27, 38-39
+app/ai/deepseek_agent.py                            250     21    92%   65, 91, 120, 133-151, 249, 291, 408, 413, 464-465
+app/ai/discussion_orchestrator.py                  1191    130    89%   205, 234-287, 318-323, 341, 345, 351-352, 358, 385, 390, 395, 493-494, 499-500, 504, 555-562, 568-569, 761-766, 768-772, 919-922, 932, 952, 1121, 1151-1155, 1157, 1173, 1184, 1211, 1244, 1371-1372, 1401, 1430-1431, 1451, 1466, 1639-1641, 1679, 1715, 1769-1771, 1805-1806, 1809-1810, 1818, 1967-1969, 1978, 1981, 1990, 2018, 2128-2129, 2132, 2155, 2160, 2173, 2176-2178, 2208, 2222, 2277, 2326-2332, 2343-2344, 2350, 2355, 2401-2409, 2417
+app/ai/exceptions.py                                 11      0   100%
+app/ai/finding_aggregator.py                        258     38    85%   67-72, 76, 98-103, 220-226, 229-236, 283-284, 287-288, 390, 451-457, 461, 499, 521, 524, 629-630, 644-647, 652
+app/ai/language_detector.py                           5      0   100%
+app/ai/multi_agent.py                                45      1    98%   167
+app/ai/php_attack_surface.py                        130     76    42%   133, 138-154, 177-181, 186-236, 241-244, 266-267, 277-306
+app/ai/prompt_builder.py                             58      8    86%   84, 178-192
+app/ai/result_parser.py                             194      8    96%   258, 269-271, 287-289, 331, 348
+app/ai/scoring.py                                    22      0   100%
+app/ai/security_patterns.py                          66      5    92%   238, 264, 267, 270, 305
+app/ai/security_static_rules.py                     237     40    83%   595, 610, 627, 630, 638, 640, 644-645, 655-656, 659-665, 670, 675, 678, 712-714, 721, 723, 738-740, 773, 779, 783, 792-796, 804, 828-829, 843-844
+app/ai/static_analyzer.py                           108      8    93%   65, 69, 79-80, 318-320, 326-327
+app/api/__init__.py                                  43      0   100%
+app/api/responses.py                                 71      1    99%   117
+app/api/v1/__init__.py                                0      0   100%
+app/api/v1/admin_agent_releases.py                   61     28    54%   29-31, 44-46, 66-119, 127-128, 146-155, 184, 193, 203
+app/api/v1/admin_copilot.py                          56      2    96%   27, 83
+app/api/v1/admin_overview.py                        159     17    89%   66-71, 188, 192, 195-196, 198, 231, 315, 330, 336, 342, 348
+app/api/v1/admin_security_center.py                  54      7    87%   32, 57, 114, 123, 133, 142, 152
+app/api/v1/agent_catalog.py                          16      2    88%   22, 32
+app/api/v1/agent_governance.py                      241     14    94%   113-114, 151-152, 422, 436-437, 536, 750, 817, 952-953, 1019-1020
+app/api/v1/agent_mesh.py                             96     35    64%   44, 69-71, 93-95, 119, 148, 161, 174-186, 201-213, 228-240, 256-269, 282-286
+app/api/v1/agent_responses.py                       838    166    80%   116-120, 128-129, 192, 200, 208, 223, 238, 240, 300-301, 303, 389-392, 408-419, 424-437, 450, 455, 458-459, 461, 463, 482, 492, 545-546, 548, 554, 581, 601, 611-612, 614, 617, 650, 704, 712-713, 715, 732-736, 800, 804, 819, 831, 834, 841, 872, 878, 887-888, 901, 905-906, 973-974, 978-980, 987-988, 1022-1023, 1025, 1099-1116, 1154, 1178, 1181, 1207, 1215, 1294, 1311, 1314, 1317, 1350, 1369, 1371, 1395-1405, 1408-1413, 1431-1432, 1452, 1484-1497, 1504-1514, 1534-1535, 1540, 1542-1545, 1564-1565, 1576-1577, 1579-1591, 1605-1606, 1608-1638, 1651, 1691, 1704-1705
+app/api/v1/agent_studio.py                           84     40    52%   36, 47-48, 57-67, 81-89, 98-107, 133-142, 152-160, 176-177, 187-188, 198-199, 209-210, 218-219, 228-238, 252-260, 269-272, 289-298
+app/api/v1/agent_teams.py                            92     14    85%   33, 45-51, 54, 79-81, 96, 123, 150, 174, 198, 227, 251
+app/api/v1/agents.py                                212     16    92%   166-171, 227-230, 240-243, 293, 316
+app/api/v1/ai_chat.py                               109     31    72%   129-130, 140-175, 189-195, 205-211, 217-218
+app/api/v1/ai_logs.py                                17      2    88%   34-39
+app/api/v1/ai_prompt.py                              63      6    90%   60-62, 82, 104, 126
+app/api/v1/api_config.py                             25      6    76%   32-33, 46-47, 59-60
+app/api/v1/audit.py                                  15      0   100%
+app/api/v1/auth.py                                   66      6    91%   139-149, 159-169
+app/api/v1/avatars.py                                70      2    97%   78-79
+app/api/v1/beta_invites.py                           40      3    92%   20, 110-112
+app/api/v1/code_files.py                            107     31    71%   65-74, 89-117, 162-163, 213, 262-263, 271-272, 292-296
+app/api/v1/dashboard.py                              33      4    88%   61-62, 72-73
+app/api/v1/discussion.py                             84      4    95%   83-84, 125, 163
+app/api/v1/evolution.py                              68     35    49%   38-41, 48, 55-56, 62-63, 70-71, 78-79, 86-87, 94-95, 102-103, 110-112, 119-121, 159-197
+app/api/v1/feedback.py                               31      0   100%
+app/api/v1/forum.py                                  48     19    60%   35-36, 43-44, 51, 58-59, 66-67, 74-75, 82-83, 90-91, 98-99, 106-107
+app/api/v1/issues.py                                 33      4    88%   63, 78-86, 95
+app/api/v1/knowledge.py                              46     19    59%   41-42, 49-51, 58-59, 66-67, 73-74, 80, 86, 93-102, 109-118
+app/api/v1/llm_config.py                             96     25    74%   39-40, 103, 110-121, 130, 142-144, 174, 183, 195, 203, 230-251, 258-264
+app/api/v1/maintenance.py                            31     10    68%   21-22, 35-37, 43, 50, 57-58, 65
+app/api/v1/mcp_governance.py                         70     26    63%   26, 43-44, 54-60, 69-70, 79, 88-89, 98, 108-114, 125, 134-135, 150-151, 160, 169-170, 180-186, 195-196, 206
+app/api/v1/pentest.py                                89     24    73%   25, 28-30, 53-55, 83, 108-110, 124-137, 162-164, 202, 227-229
+app/api/v1/project_members.py                        40      3    92%   102, 137-142
+app/api/v1/projects.py                              105     14    87%   49-50, 54, 126-138, 153-154, 195-203, 271-282
+app/api/v1/rbac.py                                  126      4    97%   289, 345-351
+app/api/v1/reports.py                               184      7    96%   150-151, 276, 303, 390, 555, 573
+app/api/v1/review.py                                 36      3    92%   78-83, 92
+app/api/v1/rules.py                                  39      1    97%   21
+app/api/v1/sandboxes.py                              78     25    68%   35, 44-45, 55-56, 65, 73-74, 84-85, 94, 122, 140, 150, 185-195, 217-234
+app/api/v1/security.py                               74     28    62%   45-47, 60-61, 101-107, 121-131, 148-162, 185, 199-203
+app/api/v1/user_profile.py                           24      7    71%   21, 27-28, 36-37, 43-44
+app/api/v1/users.py                                  38     18    53%   18-21, 35-36, 43-50, 58-65, 73-80, 91-98
+app/api/v1/ws_discussion.py                         324     42    87%   69, 189-200, 232-235, 276-277, 327, 375, 379, 399, 406, 410, 421-432, 446-450, 455-457, 466-470, 498, 513-520
+app/constants/__init__.py                             0      0   100%
+app/constants/compliance.py                          61      2    97%   441, 448
+app/constants/security_catalog.py                    29      1    97%   35
+app/core/__init__.py                                  0      0   100%
+app/core/captcha.py                                  51      1    98%   49
+app/core/config.py                                  251     12    95%   298, 303, 316, 349, 365, 367, 378, 384, 386, 388, 390, 392
+app/core/database.py                                 15      1    93%   11
+app/core/dependencies.py                             40      7    82%   22-25, 97-99
+app/core/error_handlers.py                           40      0   100%
+app/core/exceptions.py                               63      0   100%
+app/core/logger.py                                    8      4    50%   15-28
+app/core/observability.py                           101     10    90%   54, 56, 244-252
+app/core/pagination.py                               10      0   100%
+app/core/password_policy.py                          28      1    96%   32
+app/core/permission_codes.py                         65      0   100%
+app/core/rate_limit.py                              300     22    93%   55-56, 74-88, 322, 439, 515, 551, 562-571
+app/core/rbac_dependency.py                          36     15    58%   132, 160-203
+app/core/request_size_limit.py                       76      4    95%   41, 80-81, 108
+app/core/security.py                                 19      0   100%
+app/core/super_admin.py                              12      0   100%
+app/exporters/__init__.py                             0      0   100%
+app/exporters/pdf_exporter.py                        63      7    89%   30-31, 51-54, 58
+app/exporters/word_exporter.py                       37      0   100%
+app/main.py                                         176    107    39%   35-54, 73, 90-93, 113-115, 121-237, 272-288
+app/models/__init__.py                                5      0   100%
+app/models/admin_chat.py                             39      0   100%
+app/models/agent_capability.py                      125      0   100%
+app/models/agent_governance.py                      217      0   100%
+app/models/agent_mesh.py                             58      0   100%
+app/models/agent_multimodal.py                       14      0   100%
+app/models/agent_response_run.py                     38      0   100%
+app/models/agent_skill_record.py                     15      0   100%
+app/models/agent_team.py                             77      0   100%
+app/models/ai_call_log.py                            26      0   100%
+app/models/api_config.py                             13      0   100%
+app/models/audit_log.py                              16      0   100%
+app/models/base.py                                    9      0   100%
+app/models/beta_invite_code.py                       14      0   100%
+app/models/code_file.py                              22      0   100%
+app/models/code_version.py                           13      0   100%
+app/models/custom_agent.py                           84      0   100%
+app/models/eval_case.py                              14      0   100%
+app/models/evolution_proposal.py                     20      0   100%
+app/models/forum_post.py                             14      0   100%
+app/models/forum_reply.py                            10      0   100%
+app/models/knowledge_chunk.py                        13      0   100%
+app/models/knowledge_doc.py                          13      0   100%
+app/models/maintenance_ticket.py                     15      0   100%
+app/models/malware_scan_log.py                       15      0   100%
+app/models/pentest.py                                74      0   100%
+app/models/project.py                                11      0   100%
+app/models/project_import_task.py                    28      0   100%
+app/models/project_member.py                          9      0   100%
+app/models/project_source_archive.py                 29      0   100%
+app/models/project_source_revision.py                18      0   100%
+app/models/rbac.py                                   48      0   100%
+app/models/report_template.py                        12      0   100%
+app/models/review_experience.py                      19      0   100%
+app/models/review_issue.py                           44      0   100%
+app/models/review_report.py                          12      0   100%
+app/models/review_rule.py                            16      0   100%
+app/models/review_task.py                            31      0   100%
+app/models/review_task_file.py                       12      0   100%
+app/models/roundtable.py                             35      1    97%   11
+app/models/system_config.py                           7      0   100%
+app/models/usage_attribution.py                       8      0   100%
+app/models/user.py                                   16      0   100%
+app/models/user_avatar.py                             8      0   100%
+app/models/user_feedback.py                          14      0   100%
+app/models/user_profile.py                           18      0   100%
+app/schemas/__init__.py                               0      0   100%
+app/schemas/agent.py                                103      3    97%   13, 90, 99
+app/schemas/agent_capability.py                     137      8    94%   24-31
+app/schemas/agent_governance.py                     347      2    99%   22, 42
+app/schemas/agent_mesh.py                            78      3    96%   37, 76, 121
+app/schemas/agent_studio.py                         192     15    92%   67, 72, 77, 102, 118, 133, 144, 152, 163, 178-180, 195, 291, 296
+app/schemas/agent_team.py                           101      9    91%   25, 49, 51, 60, 80, 82, 103, 116, 118
+app/schemas/ai_log.py                                71      2    97%   12, 14
+app/schemas/ai_prompt.py                             37      0   100%
+app/schemas/api_config.py                            33      0   100%
+app/schemas/audit.py                                 16      0   100%
+app/schemas/auth.py                                  58      2    97%   33, 37
+app/schemas/beta_invite.py                           21      0   100%
+app/schemas/code_file.py                             52      0   100%
+app/schemas/code_version.py                          16      0   100%
+app/schemas/common.py                                15      0   100%
+app/schemas/dashboard.py                             56      0   100%
+app/schemas/evolution.py                             77     17    78%   10-14, 18-25, 60, 65, 87, 105
+app/schemas/feedback.py                              46      4    91%   28-30, 47
+app/schemas/forum.py                                 43      0   100%
+app/schemas/knowledge.py                             48      0   100%
+app/schemas/llm_config.py                            65      0   100%
+app/schemas/maintenance.py                           42      3    93%   40-42
+app/schemas/malware_scan_log.py                      23     23     0%   4-34
+app/schemas/pentest.py                               99      5    95%   28, 40, 136-138
+app/schemas/profile.py                               31      0   100%
+app/schemas/project.py                              139      1    99%   47
+app/schemas/project_member.py                        21      0   100%
+app/schemas/rbac.py                                  86      0   100%
+app/schemas/report.py                                35      0   100%
+app/schemas/report_template.py                       24      0   100%
+app/schemas/review.py                               160      0   100%
+app/schemas/rule.py                                  53      5    91%   77-81
+app/schemas/security.py                             182      0   100%
+app/schemas/security_center.py                       60      7    88%   40-41, 59, 85-88
+app/schemas/user.py                                  27      3    89%   33-35
+app/services/__init__.py                              0      0   100%
+app/services/admin_agent_tools.py                   352     67    81%   41, 88, 105-108, 116, 123, 136, 162-163, 189, 245, 247-248, 350, 354-355, 358, 371, 373, 376, 379, 381, 408, 410, 413, 421-422, 424-425, 458-460, 467, 476, 478, 480, 511, 515, 524, 538-539, 567, 570-571, 575-576, 599, 654, 685, 763, 765, 768, 797-798, 812, 815, 829, 844-845, 860, 864-865, 879, 899-900
+app/services/admin_capability_registry.py           122     15    88%   33, 35, 37, 52, 1194, 1213, 1217, 1220, 1223, 1231, 1240, 1246, 1258, 1261, 1264
+app/services/admin_capability_service.py             48      5    90%   37, 40, 81-82, 90
+app/services/admin_chat_history_service.py           70      5    93%   86, 111, 118, 158-159
+app/services/admin_copilot_service.py               366     88    76%   73, 127, 131, 133, 135, 160-162, 176, 187-195, 210, 226, 234-235, 273, 290, 313, 332, 348, 350, 352, 354-355, 357-358, 360-361, 363-365, 367-369, 380, 385-395, 397-403, 475-494, 539, 541, 572, 574, 615-618, 620, 622, 641, 660, 662, 664, 673, 709-713, 717-727, 731-741, 745-752, 756, 804-810, 812-814
+app/services/agent_cost_budget_service.py           121     11    91%   72, 166, 217, 226, 228-232, 244-245
+app/services/agent_governance_service.py            131      6    95%   192-194, 232, 262, 381
+app/services/agent_knowledge_service.py             330     75    77%   41, 44-49, 258, 288-289, 322-323, 339, 355-356, 359, 393, 415-418, 429-454, 473, 503, 506-507, 521-529, 546, 564-568, 589, 591, 594-595, 598, 600, 636-637, 656, 660, 663, 667-670, 755, 773, 790
+app/services/agent_memory_service.py                 13      4    69%   18-21
+app/services/agent_mesh_dispatcher.py               703    165    77%   74, 123, 311, 370, 399-402, 426, 428, 438, 456-457, 468-469, 477, 527-534, 548-555, 569-571, 581, 591, 603-608, 622, 625-626, 634, 669, 680, 728, 750, 770-784, 799, 802, 809, 821, 824, 836-838, 855, 860, 863, 866-875, 891, 894-903, 963, 985-986, 988-1038, 1047-1056, 1073, 1078, 1086, 1103, 1106, 1111, 1116, 1119, 1122, 1150-1151, 1154, 1175, 1202, 1207, 1218, 1269-1280, 1287, 1290-1291, 1303, 1308, 1310, 1346-1347, 1356, 1383-1406, 1415-1434, 1440-1447
+app/services/agent_mesh_service.py                  833    101    88%   66, 122-123, 125, 160-161, 171, 223, 297, 398-408, 453, 476-490, 617, 629-631, 650, 931, 934-937, 943, 952, 957, 964-966, 968, 984-985, 996-997, 1014, 1022, 1027, 1079, 1105, 1122, 1210, 1215, 1227, 1261-1273, 1307, 1315, 1319, 1376, 1475, 1477, 1484-1488, 1508-1509, 1606-1607, 1622-1623, 1642, 1672, 1712, 1751, 1775, 1777, 1781-1783, 1794-1802, 1817, 1874, 1877, 1879, 1925, 1976
+app/services/agent_model_service.py                  27      0   100%
+app/services/agent_responses_service.py            1974    337    83%   129, 132, 455, 469-470, 472, 484, 489, 495, 515, 582, 614-615, 617, 672-676, 681-682, 684, 692, 695, 719-720, 736-738, 792, 810-811, 813, 876, 881-883, 885-886, 891-892, 897-899, 950-951, 962, 964-965, 967, 969, 972-975, 1055, 1113, 1116, 1172, 1188, 1255, 1330-1335, 1389, 1412, 1430-1433, 1488, 1493-1501, 1511, 1517, 1530, 1554-1555, 1564, 1572, 1588, 1672-1673, 1697, 1703, 1714-1718, 1749, 1751, 1754, 1762, 1773-1774, 1779, 1791-1792, 1813, 1816-1817, 1838, 1841-1842, 1875, 1904-1905, 1929-1946, 1956, 1969, 1973-1986, 2003-2030, 2042-2065, 2099, 2107-2108, 2110, 2112, 2114, 2116, 2169, 2177, 2205, 2223, 2232, 2234, 2238, 2269, 2271, 2275, 2284, 2308, 2344, 2394, 2424, 2469-2470, 2499, 2505, 2549-2568, 2628-2629, 2641-2642, 2705, 2708-2709, 2727, 2732, 2735, 2744-2768, 2772, 2775, 2786, 2794, 2839, 2854-2855, 2868, 2893, 2903-2904, 2916, 2919, 2925, 2928, 2940, 2946-2947, 2960, 2996-2997, 3074-3136, 3162, 3164, 3186, 3255, 3277-3278, 3319, 3325, 3328, 3330-3333, 3366, 3374, 3428-3429, 3524-3525, 3545, 3573, 3588-3589, 3619, 3634, 3652, 3673, 3683, 3686, 3689, 3710-3711, 3717, 3720, 3725, 3728, 3731-3732, 3734, 3737, 3744-3745, 3748, 3755-3756, 4022, 4052-4053, 4055, 4062, 4091-4092, 4103, 4116, 4134-4135, 4139, 4178-4179, 4181, 4203, 4217, 4236-4239, 4255-4256, 4258, 4286, 4290, 4301-4302, 4441, 4468
+app/services/agent_scheduler_runtime.py             224     58    74%   45-46, 74-75, 91-92, 106-107, 165-166, 191-196, 198, 255, 261-263, 298-344, 371-374, 378-379, 385-390
+app/services/agent_service.py                       227     30    87%   82, 122, 136, 145, 155, 220, 223-227, 237-242, 246, 259, 262-263, 299, 302, 314, 316, 344-345, 349, 409, 417, 495
+app/services/agent_studio_service.py                627    113    82%   80, 108, 111, 115-116, 118, 120, 202, 239, 293, 327-350, 355, 364, 367, 369-375, 379, 382, 385-386, 388, 392, 394, 409, 416, 425, 443-458, 472, 475, 478, 494, 500, 504, 515, 534, 538, 572, 595, 611, 636, 642, 654, 676, 725, 727, 730, 733, 747, 776, 780, 782, 797-803, 810, 820, 824, 827-830, 855-859, 889, 919, 921, 977, 980, 982, 1029, 1032, 1066, 1070, 1089
+app/services/agent_supervisor_service.py            204     11    95%   114, 131-133, 246-247, 266, 269, 273, 278, 298, 300
+app/services/agent_team_dispatcher.py               191     49    74%   80, 93, 110, 128-129, 137-140, 174-175, 202-216, 255, 276-303, 321, 373-377, 389-408, 413-420
+app/services/agent_team_review.py                   115      5    96%   28, 121, 128, 137, 153
+app/services/agent_team_service.py                 1466    188    87%   71, 75-76, 126, 141, 216-217, 232, 234, 253, 284, 303, 329, 331-335, 348, 356, 362, 364, 423, 542, 551-552, 555-556, 585-586, 606-608, 637, 641, 643, 650-651, 664, 671, 679, 687-688, 690, 692, 721, 723, 725, 732, 737, 743, 750, 759, 762, 765-766, 775, 778, 780, 839, 841, 850, 852, 865-867, 903, 931, 933, 950, 988, 992, 1012, 1014, 1021, 1048, 1052, 1056, 1064, 1079, 1081, 1083, 1085, 1090, 1095, 1098, 1106, 1110, 1123, 1155-1156, 1371, 1374, 1377, 1380, 1390-1394, 1410, 1421, 1423, 1427, 1534, 1542-1543, 1591, 1624, 1712-1716, 1785-1789, 1797, 1977, 1981, 2048, 2096, 2146, 2185, 2232, 2240, 2252-2253, 2255-2256, 2259-2260, 2321-2323, 2334-2341, 2467, 2611-2648, 2672, 2674-2676, 2703-2704, 2717-2718, 2723-2724, 2788, 2809-2810, 2886, 2934, 2940, 2947, 2989, 2995, 3099, 3120, 3122, 3128, 3148, 3251
+app/services/agent_team_summary.py                  108      4    96%   34-35, 120, 142
+app/services/ai_log_service.py                       49      6    88%   42, 44, 46, 48, 50, 74
+app/services/ai_usage_context.py                    124      5    96%   226, 231, 234, 237, 242
+app/services/api_config_service.py                  215     49    77%   58-64, 87-90, 145-147, 168-170, 198, 222, 247, 272, 276-282, 292-302, 308, 314, 320, 329, 342-343, 358-359, 367-368, 407-408, 410, 471-472, 483-484
+app/services/approval_service.py                    271     33    88%   63, 65, 86, 92, 95, 100, 102, 108, 111-112, 220-221, 242-243, 277, 287, 290-291, 388, 396, 443, 472, 520-521, 536-545, 547-555, 557-560
+app/services/audit_service.py                        53     11    79%   112, 122-126, 128-132
+app/services/auth_service.py                         95      2    98%   99, 141
+app/services/background_task_recovery.py             85     85     0%   3-141
+app/services/beta_invite_service.py                 107     11    90%   31, 61, 87, 118, 120, 122, 173, 183, 201-202, 219
+app/services/capability_catalog_service.py          168     17    90%   30, 32, 51, 66, 85, 101, 121, 138, 198, 201, 223, 297-298, 308, 314-315, 339
+app/services/code_file_service.py                   281     24    91%   75-76, 78, 185, 190, 197, 232, 411, 441-443, 483, 500, 618, 620, 667-671, 700, 708, 821, 877
+app/services/context_fidelity.py                    153      6    96%   94, 142, 149-155, 223
+app/services/dashboard_service.py                   128      6    95%   57, 62-64, 122-123
+app/services/declarative_agent_runtime.py           344     58    83%   57-62, 78, 85, 90, 111, 126, 128, 142-143, 187, 190-191, 236, 242, 282-292, 326, 338, 386, 410-411, 419, 426, 474, 480, 482, 486, 492, 496, 509-514, 534, 570, 596, 601-608, 621, 635, 642, 653, 660, 688, 699, 708, 723
+app/services/decompilation_service.py               180     11    94%   101-103, 115, 217, 245-246, 250, 274, 294-295
+app/services/deepseek_responses_runtime.py         1231    184    85%   384, 392, 401-402, 418, 421, 450, 497, 515, 531-534, 555, 570-574, 599, 647, 656-657, 661-663, 680-685, 707-725, 764, 808-809, 882, 888, 928-934, 950, 976, 980, 1080, 1126-1142, 1146-1147, 1150, 1153-1156, 1180, 1195, 1215, 1238, 1245, 1247, 1298, 1323, 1335, 1401-1404, 1446, 1488-1489, 1523-1529, 1600, 1603-1610, 1617-1624, 1626-1636, 1650, 1688, 1720, 1741, 1748, 1766, 1820-1821, 1833-1835, 1860, 1892, 1945, 1947, 1950, 1952, 1995, 2020, 2086, 2118, 2132, 2139-2155, 2172, 2177, 2192, 2265, 2280, 2282, 2298, 2314, 2342, 2345-2348, 2380-2382, 2384-2386, 2393, 2421, 2423-2424, 2426, 2442-2477, 2493, 2495, 2509, 2512-2513, 2520, 2523
+app/services/deepseek_responses_service.py          664     79    88%   62, 148, 155, 157, 159, 200, 222, 238-240, 267, 271, 315-316, 319-320, 346, 363-367, 436-438, 601, 605, 625, 630, 644, 665-666, 689, 698, 705, 726, 774, 801-803, 840, 842, 851-854, 865-867, 903, 922, 931, 936, 1004-1007, 1022-1023, 1035-1036, 1060-1063, 1072-1082, 1128, 1131, 1141-1143, 1146, 1202-1204, 1213
+app/services/embedding_service.py                   191     16    92%   61, 111-112, 145-146, 208, 210, 246, 254, 267-268, 272-274, 277-278
+app/services/eval_gate.py                           139     29    79%   50, 124-129, 164-165, 184-186, 277-278, 286-313
+app/services/evolution_service.py                   147     25    83%   36, 41, 85, 92, 104, 122, 154, 174, 199, 202, 225, 232-242, 256, 259-262
+app/services/experience_service.py                   80      1    99%   199
+app/services/feedback_service.py                     33      0   100%
+app/services/forum_service.py                       121      1    99%   71
+app/services/geoip_service.py                        44     32    27%   24-35, 39-43, 55-74, 80
+app/services/governance_log_privacy_service.py       45      5    89%   20-21, 38-40
+app/services/issue_merger.py                        474     53    89%   198, 205-206, 223, 227, 264-275, 318, 383, 398, 405, 422, 430, 432, 435-439, 474, 484, 490, 499-511, 526-529, 552, 589, 593, 599, 694-695, 698-699, 755, 765, 797, 812-814, 827, 898, 906
+app/services/issue_service.py                        88      2    98%   240, 243
+app/services/jarvis_patrol_service.py                99     30    70%   89, 117, 135, 142, 166-172, 174-177, 195, 254-273, 278-285
+app/services/knowledge_service.py                   172      0   100%
+app/services/maintenance_service.py                  79      0   100%
+app/services/managed_mcp_adapter.py                 106     10    91%   88, 115, 118, 176, 188, 211, 213, 228, 232, 274
+app/services/mcp_governance_service.py              426    166    61%   207-208, 224, 226, 243, 246-247, 249, 253, 257-260, 265-275, 309, 323, 327, 334, 338, 340, 343-344, 368-369, 371-372, 380-386, 405-422, 490-503, 534-543, 547, 561, 564, 602-603, 610-616, 651-652, 669-713, 741-743, 777-788, 798-802, 806, 823-827, 838, 852, 855, 859, 879, 882, 887, 929, 943-951, 955-968, 972, 983-986, 995-1033, 1037-1050
+app/services/mcp_tool_provider.py                   262     53    80%   98-99, 101, 107, 110, 115, 152-160, 169, 172, 175, 178, 200, 206, 208, 224-225, 261, 282, 284, 287-288, 290, 326, 334, 359, 362, 405, 445, 449-450, 453, 474, 482, 484-491, 526-534, 536, 547
+app/services/multimodal_service.py                  135      8    94%   121, 138, 147-148, 181-183, 218, 234
+app/services/observability_service.py                84     10    88%   129-140, 242, 248-249, 251
+app/services/ops_service.py                         254     64    75%   243-245, 250, 260-261, 267-273, 357, 397, 403-408, 418, 420, 454-469, 478-496, 520, 529, 535, 542, 545, 548, 550-557, 564-565, 569-570, 572, 633-634, 636, 659-660, 673
+app/services/page_guide_service.py                   16      0   100%
+app/services/pentest_service.py                    1555    273    82%   217, 219, 221, 224-225, 244-246, 251-252, 279, 323, 326, 329, 334, 350, 355, 360, 366, 388-389, 402, 410, 414, 423, 463, 499-503, 518, 586-615, 620-627, 669, 725, 793, 840-841, 845, 855-858, 893-894, 911-914, 917-918, 921, 923, 927, 934-937, 945-967, 1012-1019, 1022, 1032-1033, 1036, 1058-1065, 1210, 1212, 1216, 1233, 1257, 1352, 1382, 1393, 1423, 1448, 1461, 1464, 1515, 1537, 1541, 1550, 1557, 1559-1564, 1572, 1584-1586, 1588-1592, 1606, 1611-1612, 1635, 1723-1727, 1775, 1796, 1801-1807, 1809, 1912, 1957-1958, 1963, 2060, 2076-2077, 2079, 2091, 2121, 2143-2144, 2164-2165, 2195, 2213, 2224-2235, 2237, 2261, 2268, 2283-2284, 2287, 2292, 2330-2331, 2349, 2429-2433, 2449-2450, 2452-2454, 2466, 2490-2491, 2510, 2561, 2584, 2597, 2606-2610, 2656, 2661-2670, 2692-2697, 2703-2704, 2744, 2850, 2860, 2926-2934, 2957, 2972, 2993, 2999-3005, 3018, 3024, 3027, 3043-3045, 3055-3056, 3066-3067, 3076-3077, 3082, 3084
+app/services/personalization_service.py             164      9    95%   70, 87, 108, 110, 123, 125, 128-129, 155
+app/services/policy_engine.py                        83      5    94%   161, 163, 165, 222-223
+app/services/profile_service.py                     192      7    96%   66, 140-141, 290, 333-335
+app/services/project_import_dispatcher.py            71     71     0%   3-142
+app/services/project_import_service.py              428     90    79%   64-65, 103-104, 173, 200, 228-242, 288-289, 367-368, 373-374, 399-400, 407-408, 446-447, 452-453, 463, 472, 510-520, 526, 541, 550, 596, 613-619, 647-648, 704, 720, 740, 745-756, 765, 767-779, 798, 819, 833, 846, 863-868, 909-934, 994-996
+app/services/project_member_service.py              203     13    94%   216, 240, 352, 374-376, 383-384, 424, 434-435, 478, 482
+app/services/project_service.py                     125      5    96%   36, 193, 394, 412-413
+app/services/project_source_revision_service.py      67      9    87%   56, 87, 156-161, 165
+app/services/project_source_service.py              521     98    81%   136, 154-155, 157, 163, 185-186, 207, 222, 250, 274, 277, 280, 294, 361, 372-379, 439, 441, 449, 487-488, 501, 504, 543, 546-547, 549, 551, 600, 602, 611, 613, 620, 634, 679-681, 697, 699, 705, 708, 718, 747, 765, 796, 813-814, 817-818, 820, 822, 825-826, 828, 839, 872, 878-883, 885, 912, 923, 932, 937-938, 950-976, 1013-1014, 1024, 1039-1042, 1044
+app/services/published_agent_tools.py               239     17    93%   93-94, 112-113, 144, 150, 152, 200, 225, 268, 312, 325, 335, 344, 430, 447, 556
+app/services/rbac_service.py                        186     18    90%   102-103, 173, 178, 180, 182, 184, 186, 220, 282, 310, 405, 411, 413, 451, 453, 525, 615
+app/services/report_exporter.py                     243     19    92%   107-108, 128, 142-144, 204, 262-265, 280, 283-284, 305-306, 334, 513, 615, 761
+app/services/report_pdf_exporter.py                 231      5    98%   145, 164, 363, 368, 529
+app/services/report_service.py                      284     16    94%   49, 62, 120, 122, 230-231, 628, 637-648, 654-655
+app/services/report_template_service.py              58      8    86%   40, 81, 101-109, 225-226
+app/services/report_word_exporter.py                243     11    95%   63, 83-85, 129, 305, 310, 475, 564-566
+app/services/review_admission_service.py             34      5    85%   27-28, 30, 51-52
+app/services/review_input_service.py                 47      1    98%   57
+app/services/review_service.py                     1174    137    88%   125, 272-277, 293-308, 329-332, 420-421, 426-434, 451, 465-466, 482-495, 529-530, 548-549, 568, 570, 745, 770, 843-844, 868-872, 880, 940-941, 995, 1115-1117, 1141, 1206-1208, 1250, 1261, 1269-1270, 1316-1366, 1381-1384, 1417-1418, 1536-1543, 1549, 1558, 1565, 1574-1586, 1644, 1649-1665, 1683-1684, 1747, 1829, 1843, 1871, 1885, 1891, 2015, 2104, 2119, 2164, 2169, 2188, 2212, 2218, 2220, 2224-2225, 2266, 2272, 2418, 2420, 2715, 2719, 2722, 2866
+app/services/reward_service.py                       24      8    67%   34-45, 83-85
+app/services/rollback_service.py                     51     12    76%   64, 66, 89-90, 94-95, 125-130
+app/services/roundtable_followup_service.py         136     23    83%   26, 30-32, 35, 103, 117, 131, 133, 141, 144-146, 164-166, 176, 186-187, 219, 226-228
+app/services/rule_service.py                         66      9    86%   37, 100, 114, 135, 141, 143, 145, 147, 155
+app/services/sandbox_report_summary.py               97      1    99%   96
+app/services/sandbox_service.py                    3090   1167    62%   143-145, 167, 173, 176, 220, 295, 297, 343, 346, 354-370, 378-413, 534, 574, 608, 618, 657-658, 717, 719, 771-799, 1201-1336, 1345-1362, 1370, 1381-1382, 1420, 1441-1442, 1454, 1477, 1479-1480, 1482-1483, 1486-1487, 1490-1492, 1494, 1506-1507, 1524-1525, 1527, 1530-1531, 1533, 1563, 1577-1578, 1620, 1641, 1653-1654, 1662-1671, 1689, 1693-1702, 1714, 1725, 1727-1728, 1733-1766, 1785-1786, 1842, 1861, 1911-1912, 1919, 1932-1935, 1946, 1960, 1981, 2009, 2045-2050, 2052-2056, 2087, 2097, 2099, 2101, 2105-2118, 2142, 2155, 2157, 2159-2170, 2175, 2178, 2180, 2182-2194, 2196, 2203-2224, 2235-2239, 2256, 2268-2272, 2276-2285, 2290-2291, 2315, 2320-2322, 2336, 2338-2346, 2348-2363, 2379, 2388, 2409, 2411-2419, 2421, 2426-2447, 2466-2467, 2562-2564, 2567-2576, 2584, 2618-2628, 2653-2662, 2677, 2742, 2768, 2788-2796, 2800-2803, 2818-2823, 2854-2867, 2871-2883, 2893-2894, 2913, 2923-2926, 2931-2932, 2936-2985, 2988-2989, 2992-2993, 3004-3006, 3016, 3025, 3027, 3029, 3031, 3041-3042, 3057, 3060, 3064, 3066, 3071, 3079-3080, 3082, 3087, 3112-3113, 3195, 3201-3202, 3204, 3230, 3239, 3273, 3294, 3297, 3299, 3313-3399, 3423-3424, 3429-3430, 3437, 3439, 3462, 3464, 3477-3494, 3507-3573, 3616, 3618, 3629, 3706-3708, 3780-3790, 3796-3806, 3810-3823, 3832-3869, 3873, 3894-3895, 3916-3917, 3929-3951, 3972-3973, 3983-3985, 3988, 3998, 4010-4057, 4066, 4068, 4071, 4123, 4126, 4141-4143, 4147-4190, 4197, 4226-4238, 4262, 4264, 4266, 4268, 4276-4277, 4279, 4297, 4322-4323, 4325, 4350, 4386-4405, 4411, 4421, 4434-4436, 4466, 4477-4508, 4533, 4535, 4591-4592, 4595, 4601-4602, 4629, 4669-4670, 4687, 4699, 4707, 4717, 4719, 4723, 4732, 4736-4742, 4746, 4756-4759, 4776, 4858-4860, 4927-4981, 4995, 4997, 5025, 5036-5037, 5040, 5043-5045, 5060-5068, 5090, 5097, 5108-5120, 5139-5144, 5189, 5200, 5281, 5283, 5287-5292, 5296, 5307-5317, 5321-5326, 5334, 5341-5353, 5373, 5384-5390, 5406, 5414, 5427, 5465, 5476, 5480, 5482-5491, 5520-5545, 5549-5557, 5560-5617, 5620, 5639, 5643, 5652-5672, 5674-5677, 5713-5727, 5731, 5733-5766, 5769-5782, 5788-5804, 5810-5819, 5832, 5843-5852, 5861, 5867-5870, 5879-5881, 5883-5884, 5886-5887, 5898, 5908, 5921-5922, 5934, 5936, 5950-5953, 5973-5978, 5984-5985, 6043, 6046-6047, 6053, 6122-6129, 6152, 6163-6164, 6173, 6175, 6181-6185, 6187-6199, 6218-6251, 6255-6288, 6293-6300
+app/services/scheduler_service.py                   474    146    69%   81, 90, 93-94, 135-136, 138, 149-151, 179-183, 200-252, 287, 334, 375-378, 420, 432-453, 501-509, 543, 574-580, 637, 658, 662-663, 810-815, 839-893, 937, 963, 974-981, 983-992, 994-995, 1021-1037, 1062-1064, 1073-1075, 1115-1119, 1127-1130, 1138-1139
+app/services/security_anomaly_service.py            146     14    90%   77-78, 84, 112, 117, 121, 127, 129, 131, 134, 137, 139, 148, 227
+app/services/security_center_service.py             306     29    91%   100, 105, 108, 110, 120, 129, 159, 168, 170, 172, 174, 176, 184-186, 222, 224, 239, 251-253, 261-262, 271, 278, 290-291, 316, 530, 538
+app/services/security_monitor_service.py            332     38    89%   83, 104, 107-108, 116-117, 155, 259, 261, 265, 285, 351-352, 407, 444, 447, 452, 468, 484, 488-489, 492, 496, 499-500, 540-541, 576-577, 667-668, 702-705, 839-841
+app/services/security_posture_service.py             34     24    29%   43-139
+app/services/security_response_service.py            99     12    88%   60, 68, 70, 106, 118-119, 121, 126, 129-130, 215-216
+app/services/security_rule_catalog_service.py        64      4    94%   41, 44, 62-63
+app/services/security_service.py                    106      1    99%   54
+app/services/security_trace_service.py              192     66    66%   37-38, 51, 74, 91, 98, 108, 129, 138, 145, 209, 213, 230, 246, 282, 286, 322-361, 383-405, 421
+app/services/skill_service.py                        83      0   100%
+app/services/strategy_learning_service.py           153      9    94%   110, 149, 193-195, 256, 306-307, 311
+app/services/system_config_service.py               355     59    83%   38-40, 67-69, 76-80, 103-104, 109-113, 132-133, 138, 162, 186, 188-189, 191, 208-214, 230-231, 233, 256-257, 294, 303-304, 309, 350-351, 355, 379-380, 393, 411-415, 463, 492, 496, 509, 535, 542, 562-563, 582, 588, 604
+app/services/system_service.py                       21     13    38%   33-63
+app/services/temporary_agent_runtime.py             438     52    88%   51, 58, 85, 91, 127, 142, 165, 187, 190, 220-221, 228, 269, 272, 295-296, 300, 307, 329, 331, 362, 409, 455-459, 465-471, 498-499, 527, 538, 547, 627-628, 663-676, 707-708, 733, 736, 764, 766, 768, 770, 774, 788-789
+app/services/tool_gateway.py                        152     19    88%   65, 195-220, 286, 292-293, 304, 372, 466-467, 470, 497-498, 500-503
+app/services/user_capability_registry.py             50      4    92%   42, 44, 46, 558
+app/services/user_feedback_service.py               104      2    98%   73, 76
+app/services/user_service.py                         82     11    87%   24, 127, 129-133, 176, 179, 182-186, 191
+app/utils/__init__.py                                 0      0   100%
+app/utils/api_resolver.py                           185     11    94%   99, 120, 150-151, 230, 255, 267, 270, 291, 463-464
+app/utils/archive_extractor.py                      209     24    89%   120, 144, 149, 166, 168, 194, 206, 215, 222, 234, 266-272, 283, 285, 301, 328-332
+app/utils/encoding_utils.py                          29      0   100%
+app/utils/file_validator.py                          39      9    77%   29, 31, 33, 36, 38, 65-67, 107
+app/utils/image_utils.py                             54      3    94%   33, 41, 71
+app/utils/input_validation.py                        69      8    88%   62, 83, 87, 93, 96, 107, 121-122
+app/utils/malware_scanner.py                        266     62    77%   26-28, 34-36, 167-168, 173-174, 181, 185, 200-201, 211-213, 301, 314-326, 365-367, 383, 391-393, 418, 426-428, 435-438, 449-456, 470-480, 495, 505, 523-525, 555, 577
+app/utils/multipart_limits.py                        39      2    95%   24, 69
+app/utils/public_http.py                             63     12    81%   52-53, 55, 58-59, 69-70, 74-75, 81-82, 87
+app/utils/sanitize.py                                21      3    86%   40, 59, 70
+app/utils/source_archive_gate.py                     14      0   100%
+app/utils/upload_reader.py                           19      1    95%   14
+-------------------------------------------------------------------------------
+TOTAL                                             51477   8620    83%
+
+=========================== short test summary info ============================
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:127: Requires an explicitly isolated local Redis container or Unix-socket server
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:134: Requires an explicitly isolated local Redis container or Unix-socket server
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:145: Requires an explicitly isolated local Redis container or Unix-socket server
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:153: Requires an explicitly isolated local Redis container or Unix-socket server
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:164: Requires an explicitly isolated local Redis container or Unix-socket server
+SKIPPED [1] tests/unit/core/test_login_rate_limit_real_redis.py:173: URL factory check requires the Unix-socket runner
+=========== 6334 passed, 6 skipped, 6 warnings in 290.13s (0:04:50) ============

@@ -71,6 +71,7 @@ def _domain_fixture(db, owner, project, source, *, status="success"):
         review_type=source, status=status, total_issues=3 if source == "sandbox_test" else 2,
         score=0 if status == "failed" else (100 if source == "sandbox_test" else 84),
         score_version="pentest-v1" if source == "pentest" else None,
+        coverage={"verification_status": "complete"} if source == "sandbox_test" else None,
         summary=REPORT_MD,
     )
     db.add(task)
@@ -170,6 +171,26 @@ def test_non_equivalent_domain_format_is_explicitly_rejected(export_context, sou
     assert "领域" in response.json()["message"]
     assert f"/api/reports/tasks/{task.id}/export?format=json" in response.json()["next_action"]
     assert "content-disposition" not in response.headers
+
+
+def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknown_scope(export_context):
+    client, db, _owner, _other, project, _current = export_context
+    task = _domain_fixture(db, _owner, project, "sandbox_test")
+    task.coverage = None
+    db.commit()
+
+    detail = client.get(f"/api/reports/{task.id}")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+    listing = client.get("/api/reports?page=1&page_size=100")
+
+    assert detail.status_code == exported.status_code == listing.status_code == 200
+    assert detail.json()["data"]["task"]["score"] == task.score
+    assert detail.json()["data"]["task"]["score_breakdown"]["verification_status"] == "unknown"
+    assert detail.json()["data"]["stats"]["score"] == task.score
+    assert exported.json()["score"] == task.score
+    listed = next(item for item in listing.json()["data"]["items"] if item["task_id"] == task.id)
+    assert listed["score"] == task.score
+    assert listed["coverage"] is None
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])

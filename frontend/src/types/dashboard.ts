@@ -6,6 +6,7 @@ export interface RecentTaskOut {
   status: string
   score: number | null
   review_type?: string | null
+  coverage?: { verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null } | null
   create_time: string | null
 }
 

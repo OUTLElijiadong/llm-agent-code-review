@@ -113,7 +113,9 @@ def _assert_only_ordinary_metrics(scope, actor, domain_task, outlet="all"):
         assert summary["review_count"] == 2  # 任务元信息仍沿用项目成员可见范围。
         assert summary["total_issues"] == 1
         assert summary["severe_issues"] == 0
-        assert next(item for item in summary["recent_tasks"] if item["id"] == domain_task.id)["score"] is None
+        private_row = next(item for item in summary["recent_tasks"] if item["id"] == domain_task.id)
+        assert private_row["score"] is None
+        assert private_row["coverage"] is None
         assert next(item for item in summary["recent_tasks"] if item["id"] == scope["ordinary"].id)["score"] == 88
     if outlet in {"all", "risk"}:
         risk = _get(scope, actor, "/api/dashboard/risk-distribution?days=0")
@@ -154,10 +156,16 @@ def test_private_author_without_report_permission_cannot_use_dashboard_as_report
 @pytest.mark.parametrize("actor", ["author", "admin"])
 def test_private_author_and_admin_keep_authorized_metrics(private_dashboard, source, actor):
     task = _domain(private_dashboard, source)
+    if source == "sandbox_test":
+        task.coverage = {"verification_status": "partial", "reason": "AI 动态补充未执行"}
+        private_dashboard["db"].commit()
     summary = _get(private_dashboard, actor, "/api/dashboard/summary")
     assert summary["total_issues"] == 4
     assert summary["severe_issues"] == 3
-    assert next(item for item in summary["recent_tasks"] if item["id"] == task.id)["score"] == 14
+    recent_task = next(item for item in summary["recent_tasks"] if item["id"] == task.id)
+    assert recent_task["score"] == 14
+    if source == "sandbox_test":
+        assert recent_task["coverage"]["verification_status"] == "partial"
     assert {item["task_id"] for item in _get(private_dashboard, actor, "/api/dashboard/score-trend")} == {
         task.id, private_dashboard["ordinary"].id,
     }

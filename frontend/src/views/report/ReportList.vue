@@ -65,8 +65,11 @@
             <div class="rc-line1">
               <b class="rc-name" :title="taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)">{{ taskDisplayTitle(row.task_name, `审查 #${row.task_id}`) }}</b>
               <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">{{ reviewTypeLabel(row.source.type) }}</el-tag>
-              <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
-                {{ row.status === 'success' ? '通过' : '未通过' }}
+              <el-tag :type="reportStatusType(row)" size="small">
+                {{ reportStatusLabel(row) }}
+              </el-tag>
+              <el-tag v-if="isUnverifiedSandboxReport(row)" type="warning" size="small" effect="plain">
+                {{ sandboxCoverageLabel(row.coverage?.verification_status) }}
               </el-tag>
             </div>
             <div class="rc-line2 font-mono">
@@ -76,7 +79,7 @@
               <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
             </div>
           </div>
-          <div class="rc-score" :title="`综合评分 ${row.score}`">
+          <div v-if="row.score != null" class="rc-score" :title="sandboxScoreTitle(row)">
             <svg viewBox="0 0 36 36" class="rc-ring" aria-hidden="true">
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
@@ -87,6 +90,12 @@
               />
             </svg>
             <span :class="scoreClass(row.score)">{{ row.score }}</span>
+            <small v-if="row.source?.type === 'sandbox_test'" class="rc-score-caption">
+              {{ row.coverage?.verification_status === 'complete' ? '测试评分' : '记录分数' }}
+            </small>
+          </div>
+          <div v-else class="rc-score rc-score--unknown" :title="sandboxCoverageLabel(row.coverage?.verification_status)">
+            {{ row.source?.type === 'sandbox_test' ? '暂不评分' : '—' }}
           </div>
           <div class="rc-actions" @click.stop>
             <el-tooltip content="查看详情" placement="top">
@@ -197,6 +206,39 @@ function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
   if (score >= 60) return 'score-medium'
   return 'score-low'
+}
+
+function isUnverifiedSandboxReport(row: ReportListItem) {
+  return row.source?.type === 'sandbox_test' && row.coverage?.verification_status !== 'complete'
+}
+
+function reportStatusLabel(row: ReportListItem) {
+  if (row.status === 'success') return isUnverifiedSandboxReport(row) ? '基础检查完成' : '通过'
+  if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'partial') return '验证未完成'
+  if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'unknown') return '结果未知'
+  return '未通过'
+}
+
+function reportStatusType(row: ReportListItem) {
+  if (row.status === 'success') return isUnverifiedSandboxReport(row) ? 'warning' : 'success'
+  if (row.source?.type === 'sandbox_test' && ['partial', 'unknown'].includes(row.coverage?.verification_status || '')) {
+    return 'warning'
+  }
+  return 'danger'
+}
+
+function sandboxCoverageLabel(status?: string | null) {
+  if (status === 'partial') return '验证范围不完整'
+  if (status === 'failed') return '验证未通过'
+  return '验证范围未知'
+}
+
+function sandboxScoreTitle(row: ReportListItem) {
+  if (row.source?.type !== 'sandbox_test') return `代码质量评分 ${row.score}`
+  const state = row.coverage?.verification_status
+  return state === 'complete'
+    ? `已完成验证范围内的测试评分 ${row.score}`
+    : `记录分数 ${row.score}；${sandboxCoverageLabel(state)}，不代表完整测试通过`
 }
 
 async function loadData() {
@@ -413,6 +455,7 @@ onMounted(() => {
 .rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
 .rc-ring { width: 38px; height: 38px; }
 .rc-score span { font-size: 12.5px; font-weight: 700; }
+.rc-score .rc-score-caption { color: var(--gray-500, #7d8798); font-size: 10px; line-height: 1.2; white-space: nowrap; }
 .rc-actions { display: flex; gap: 4px; align-items: center; }
 
 @media (prefers-reduced-motion: reduce) {

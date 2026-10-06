@@ -74,7 +74,7 @@ def test_compacted_history_remains_user_priority_data() -> None:
     assert "平台上下文压缩" in projected[0]["content"][0]["text"]
 
 
-def test_two_layer_source_compaction_preserves_head_middle_correction_and_tail() -> None:
+def test_source_compaction_preserves_head_middle_correction_and_tail_within_budget() -> None:
     source = _source_summary()
     ids = [chunk["source_id"] for chunk in source["source_chunks"]]
     calls = []
@@ -97,9 +97,10 @@ def test_two_layer_source_compaction_preserves_head_middle_correction_and_tail()
         compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=500)
     calls.clear()
     result = compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=700)
-    assert calls == [[source_id] for source_id in ids] + [ids]
+    assert calls[: len(ids)] == [[source_id] for source_id in ids]
+    assert len(calls) in {len(ids), len(ids) + 1}
     assert result["covered_source_ids"] == ids
-    assert len(result["source_summaries"]) == 1
+    assert len(result["source_summaries"]) <= len(ids)
     rendered = json.dumps(result, ensure_ascii=False)
     assert all(fact in rendered for fact in _FACTS)
     assert rendered.index(_FACTS[1]) < rendered.index(_FACTS[2])
@@ -120,6 +121,78 @@ def test_source_compaction_preserves_middle_permission_fact_when_model_summary_o
     result = compact_source_context(OmittingAgent(), source, ctx=None)
     rendered = json.dumps(result, ensure_ascii=False)
     assert all(fact in rendered for fact in _FACTS)
+
+
+def test_source_compaction_splits_a_large_source_after_repeated_invalid_quotes() -> None:
+    text = "\n".join(
+        f"def handler_{index}(value): return value + {index}  # stable source line {index:04d}"
+        for index in range(120)
+    )
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"main.py-source-{digest[:12]}"
+    source = {
+        "coverage_complete": True,
+        "source_chunks": [{"source_id": source_id, "text": text, "sha256": digest}],
+    }
+    calls: list[tuple[list[str], Any]] = []
+
+    class RecoveringAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _batch_ids(message)
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            calls.append((ids, payload))
+            quotes = _source_quotes(message)
+            if ids == [source_id]:
+                quotes = [{"source_id": source_id, "quotes": ["not present in original source"]}]
+            return SimpleNamespace(success=True, data={
+                "covered_source_ids": ids,
+                "source_quotes": quotes,
+                "summary": "压缩了本批源码结构。",
+            })
+
+    result = compact_source_context(RecoveringAgent(), source, ctx=None)
+
+    assert result["covered_source_ids"] == [source_id]
+    assert calls[0][0] == [source_id]
+    assert calls[1][0] == [source_id]
+    child_calls = [payload for ids, payload in calls if ids != [source_id]]
+    child_texts = [
+        entry.get("text")
+        for payload in child_calls
+        for entry in (payload if isinstance(payload, list) else [payload])
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+    ]
+    assert child_texts
+    assert "".join(child_texts[:2]) == text
+
+
+def test_source_compaction_keeps_small_unverifiable_source_fail_closed() -> None:
+    text = "def main(): return 'source must be proven'"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"main.py-source-{digest[:12]}"
+    calls = 0
+
+    class InvalidQuoteAgent:
+        def call_json(self, message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(success=True, data={
+                "covered_source_ids": _batch_ids(message),
+                "source_quotes": [{"source_id": source_id, "quotes": ["fabricated quote"]}],
+                "summary": "看起来像是已核验。",
+            })
+
+    with pytest.raises(SourceContextError, match="引文无法从对应来源原文核验"):
+        compact_source_context(
+            InvalidQuoteAgent(),
+            {
+                "coverage_complete": True,
+                "source_chunks": [{"source_id": source_id, "text": text, "sha256": digest}],
+            },
+            ctx=None,
+        )
+
+    assert calls == 2
 
 
 @pytest.mark.asyncio

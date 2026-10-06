@@ -2488,6 +2488,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "duration_ms": row.duration_ms,
             "score_version": None if hide_report_metrics else row.score_version,
             "score_breakdown": None if hide_report_metrics else row.score_breakdown,
+            "coverage": None if hide_report_metrics else row.coverage,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -2577,12 +2578,12 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
         "score_breakdown": None if hide_report_metrics else task.score_breakdown,
+        "coverage": None if hide_report_metrics else task.coverage,
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,
         # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
         "error_message": task.error_message,
-        "coverage": task.coverage,
         "files": _task_file_summaries(db, task.id),
         "agent_releases": _task_agent_release_summaries(db, task.id),
         "aggregation_summary": _task_aggregation_summary(db, task.id),

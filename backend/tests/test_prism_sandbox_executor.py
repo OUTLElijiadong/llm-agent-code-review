@@ -36,6 +36,7 @@ from app.models.user import User
 from app.services import sandbox_service
 
 MODULE_PATH = Path(__file__).resolve().parents[2] / "deploy" / "prism_sandbox_executor.py"
+RUNNER_PATH = Path(__file__).resolve().parents[2] / "deploy" / "sandbox" / "runner.sh"
 SPEC = importlib.util.spec_from_file_location("prism_sandbox_executor", MODULE_PATH)
 assert SPEC and SPEC.loader
 executor = importlib.util.module_from_spec(SPEC)
@@ -109,6 +110,162 @@ def test_execute_rejects_arbitrary_command_image_mount_and_environment() -> None
     ):
         with pytest.raises(ValueError, match="未允许字段"):
             executor._validate_execute(_payload(archive, **{field: value}))
+
+
+def test_backend_execute_projection_matches_worker_contract_for_initial_and_repair_rounds() -> None:
+    from app.services.sandbox_service import _worker_execute_payload
+
+    archive = _archive({"main.py": "print('ok')\n"})
+    encoded = base64.b64encode(archive).decode("ascii")
+    source_sha256 = hashlib.sha256(archive).hexdigest()
+    base = {
+        "request_id": "sandbox-request-01",
+        "purpose": "test",
+        "language": "python",
+        "test_mode": "whitebox",
+        "db_type": "none",
+        "source_sha256": source_sha256,
+        "ttl_seconds": 3600,
+        "image_digest": "",
+        "source_revision_id": 18,
+        "source_revision_sha256": "revision-sha",
+        "repair_round": 0,
+    }
+    repair = {
+        **base,
+        "request_id": "sandbox-request-01-r1",
+        "repair_round": 1,
+        "repair_revision_id": 27,
+    }
+
+    for envelope in (base, repair):
+        payload = _worker_execute_payload(envelope, encoded)
+        normalized, decoded, _profile = executor._validate_execute(payload)
+        assert normalized["request_id"] == envelope["request_id"]
+        assert decoded == archive
+        assert normalized["source_sha256"] == source_sha256
+        assert set(payload) == executor.EXECUTE_KEYS
+        assert "repair_round" not in payload
+        assert "source_revision_id" not in payload
+        assert "repair_revision_id" not in payload
+
+
+@pytest.mark.parametrize(
+    ("route_status", "expected_exit", "expected_receipt"),
+    [(204, 0, '"passed":true'), (503, 1, '"passed":false')],
+)
+def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
+    tmp_path: Path, route_status: int, expected_exit: int, expected_receipt: str,
+) -> None:
+    """Run the actual trusted runner against an app whose root is 404 but health API is known."""
+    import os
+    import socket
+
+    source = tmp_path / "source"
+    source.mkdir()
+    # The route declaration helps the runner discover framework-specific paths
+    # which are not in the common health-route list.
+    (source / "wsgi.py").write_text(
+        "# path('api/v1/health', health_view)\n"
+        "def application(environ, start_response):\n"
+        "    if environ.get('PATH_INFO') == '/api/v1/health':\n"
+        f"        status = '{route_status} Test'\n"
+        "        body = b''\n"
+        "    else:\n"
+        "        status = '404 Not Found'\n"
+        "        body = b'not found'\n"
+        "    start_response(status, [('Content-Length', str(len(body)))])\n"
+        "    return [body]\n",
+        encoding="utf-8",
+    )
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    env = os.environ.copy()
+    python_bin = str(Path(sys.executable).parent)
+    env.update({
+        "PATH": python_bin + os.pathsep + env.get("PATH", ""),
+        "PRISM_ACTION": "test",
+        "PRISM_LANGUAGE": "python",
+        "PRISM_TEST_MODE": "blackbox",
+        "PRISM_PREVIEW_PORT": str(port),
+        "PRISM_SOURCE_DIR": str(source),
+        "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+    })
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env,
+        text=True, capture_output=True, timeout=20, check=False,
+    )
+    assert completed.returncode == expected_exit, completed.stdout + completed.stderr
+    output = completed.stdout + completed.stderr
+    assert "blackbox loopback status=404" in output
+    assert "blackbox route /api/v1/health" in output
+    assert "PRISM_BLACKBOX_DONE" in output
+    assert expected_receipt in output
+    assert f'"status_code":{route_status}' in output
+    assert '"agent_assertions_passed":null' in output
+    receipt = sandbox_service._extract_blackbox_result(output)
+    assert receipt is not None
+    assert receipt["agent_assertions_passed"] is None
+    assert receipt["basis"] == "route_smoke"
+    assert receipt["status"] == ("passed" if route_status == 204 else "failed")
+
+
+def test_real_blackbox_runner_marks_executed_agent_assertions_as_passed(tmp_path: Path) -> None:
+    """动态断言真实执行后才标记为 true。"""
+    import os
+    import socket
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "wsgi.py").write_text(
+        "# path('/healthz', health_view)\n"
+        "def application(environ, start_response):\n"
+        "    status = '204 No Content' if environ.get('PATH_INFO') == '/healthz' else '404 Not Found'\n"
+        "    start_response(status, [])\n"
+        "    return []\n",
+        encoding="utf-8",
+    )
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "blackbox.py").write_text(
+        "import os\n"
+        "from urllib.request import urlopen\n"
+        "url = 'http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/healthz'\n"
+        "with urlopen(url, timeout=3) as response:\n"
+        "    assert response.status == 204\n",
+        encoding="utf-8",
+    )
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    env = os.environ.copy()
+    env.update({
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}",
+        "PRISM_ACTION": "test",
+        "PRISM_LANGUAGE": "python",
+        "PRISM_TEST_MODE": "blackbox",
+        "PRISM_PREVIEW_PORT": str(port),
+        "PRISM_SOURCE_DIR": str(source),
+        "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+    })
+
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    receipt = sandbox_service._extract_blackbox_result(completed.stdout + completed.stderr)
+    assert receipt is not None
+    assert receipt["status"] == "passed"
+    assert receipt["route_passed"] is True
+    assert receipt["agent_assertions_passed"] is True
 
 
 def test_fixed_profiles_cover_five_languages_and_are_bounded() -> None:
@@ -1189,6 +1346,14 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
     assert environment.status == "succeeded"
     result = json.loads(environment.result_json)
     assert result["passed"] is True
+    assert result["summary"] == "确定性白盒测试通过；AI动态补充未执行"
+    assert result["evidence"]["agent_test_generation"]["status"] == "skipped"
+    assert result["evidence"]["deterministic_test_execution"] == {
+        "requested_mode": "whitebox",
+        "worker_mode": "whitebox",
+        "status": "passed",
+        "exit_code": 0,
+    }
     assert result["source_provenance"]["worker_receipt"] == {
         "request_id": environment.public_id,
         "source_sha256": hashlib.sha256(b"source").hexdigest(),

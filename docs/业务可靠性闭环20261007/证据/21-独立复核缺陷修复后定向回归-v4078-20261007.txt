@@ -1,0 +1,33 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-0.26.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 200 items
+
+tests/unit/agents/test_sandbox_agent_context.py ........................ [ 12%]
+                                                                         [ 12%]
+tests/unit/services/test_agent_test_cases.py ........................... [ 25%]
+...................                                                      [ 35%]
+tests/test_prism_sandbox_executor.py ................................... [ 52%]
+................................                                         [ 68%]
+tests/unit/services/test_sandbox_report_publish.py ..................... [ 79%]
+........................                                                 [ 91%]
+tests/unit/services/test_sandbox_optimizations.py ..................     [100%]
+
+=============================== warnings summary ===============================
+../../../../../Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+app/agents/sandbox_agents.py:48
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/app/agents/sandbox_agents.py:48: PytestCollectionWarning: cannot collect test class 'TestVerifierAgent' because it has a __init__ constructor (from: tests/unit/agents/test_sandbox_agent_context.py)
+    class TestVerifierAgent(_SandboxAgent):
+
+tests/unit/services/test_agent_test_cases.py::test_source_summary_rejects_ambiguous_duplicate_zip_members
+  /opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/zipfile.py:1580: UserWarning: Duplicate name: 'main.php'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 200 passed, 3 warnings in 15.80s =======================

@@ -77,6 +77,98 @@ describe('报告卡片列表', () => {
     expect(text).toContain('2026-09-05')
   })
 
+  it('局部验证保留记录分数但不伪装成完整通过或综合评分', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: '白盒与黑盒基础检查',
+        score: 100,
+        source: { type: 'sandbox_test' },
+        coverage: { verification_status: 'partial', reason: 'AI 动态用例未执行' },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('基础检查完成')
+    expect(card.text()).toContain('验证范围不完整')
+    expect(card.text()).toContain('记录分数')
+    expect(card.text()).toContain('100')
+    expect(card.find('.rc-score').attributes('title')).toContain('不代表完整测试通过')
+    expect(card.find('.rc-score').attributes('title')).not.toContain('综合评分')
+  })
+
+  it('远程目标 4xx 的局部验证标为未完成，不误报成确认测试失败', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: '受保护路由黑盒核验',
+        status: 'failed',
+        source: { type: 'sandbox_test' },
+        coverage: { verification_status: 'partial', reason: '远程目标返回 HTTP 401' },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('验证未完成')
+    expect(card.text()).not.toContain('未通过')
+  })
+
+  it('确定性执行失败仍显示未通过', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: '黑盒断言失败',
+        status: 'failed',
+        source: { type: 'sandbox_test' },
+        coverage: { verification_status: 'failed', reason: '动态断言失败' },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('未通过')
+    expect(card.text()).not.toContain('验证未完成')
+  })
+
+  it('执行结果缺失时显示结果未知，不推断成断言失败', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: 'Worker 回执缺失',
+        status: 'failed',
+        source: { type: 'sandbox_test' },
+        coverage: { verification_status: 'unknown', reason: '没有完整 Worker 结果' },
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('结果未知')
+    expect(card.text()).not.toContain('未通过')
+  })
+
   it('请求未完成时不把空数组渲染成“暂无报告”或 0 条', async () => {
     let resolveReports!: (value: { items: never[]; total: number }) => void
     api.reports.mockReturnValueOnce(new Promise(resolve => { resolveReports = resolve }))

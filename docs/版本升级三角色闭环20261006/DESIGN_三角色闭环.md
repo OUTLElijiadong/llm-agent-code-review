@@ -68,4 +68,24 @@ flowchart TD
  K -->|404/协议错误/超时| M[保持 stopping、保留错误与重试/人工诊断]
 ```
 
+### v4.0.76 实测后补充：压缩输出预算与 Worker wire schema
+
+```mermaid
+flowchart LR
+ A[已校验源码分片与哈希] --> B[分片压缩：来源 ID、短摘要、原文短引文]
+ A --> C[程序提取的受保护事实账本]
+ B --> D[结构化压缩结果]
+ C --> D
+ D --> E{完整输入仍在 Agent 预算内?}
+ E -->|否| X[明确未完成，不提交动态用例]
+ E -->|是| F[复用同一压缩结果生成测试]
+ F -->|length| G[一次缩小输出范围重试]
+ G -->|仍 length| X
+ F --> H[后端持久审计信封]
+ H --> I[白名单投影]
+ I --> J[Worker 严格 execute schema]
+```
+
+`protected_facts` 按 `{source_id, fact}` 保存，避免事实密集源码因摘要文案上限被直接拒绝；它不享有超预算豁免，仍参与整体输入上限。压缩引用仍绑定对应原文并验证；单片事实账本或模型摘要不能凭空认证事实。`_worker_execute_payload()` 只发送 Worker v1 明确允许的字段；修订 ID、修复轮次留在 `worker_request_json` 与执行配置审计链。
+
 复用 `source_context` 的哈希、引用校验和不可信证据标记，并复用项目已有分层压缩模式；实现前核对 `deepseek_responses_service`、`deepseek_responses_runtime` 与 `declarative_agent_runtime` 的预算/覆盖模式，避免第二套不一致协议。新增状态以现有 SandboxEnvironment 及 worker_request_ids 账本为基础；必要时仅扩展结构化回执字段。限制输入归档大小、片段数、模型调用数和墙钟时间；限制用于资源保护，超过时返回可重试/明确预算错误，绝不静默截断。

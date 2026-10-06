@@ -1,0 +1,38 @@
+
+==================================== ERRORS ====================================
+______________ ERROR collecting deploy/tests/test_prism_decoy.py _______________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_decoy.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+deploy/tests/test_prism_decoy.py:14: in <module>
+    from tests.security_host import Host
+E   ModuleNotFoundError: No module named 'tests.security_host'
+__________ ERROR collecting deploy/tests/test_prism_security_block.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_security_block.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+deploy/tests/test_prism_security_block.py:18: in <module>
+    from tests.security_host import Host
+E   ModuleNotFoundError: No module named 'tests.security_host'
+__________ ERROR collecting deploy/tests/test_prism_security_trace.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_security_trace.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+deploy/tests/test_prism_security_trace.py:32: in <module>
+    from tests.security_host import Host
+E   ModuleNotFoundError: No module named 'tests.security_host'
+=========================== short test summary info ============================
+ERROR deploy/tests/test_prism_decoy.py
+ERROR deploy/tests/test_prism_security_block.py
+ERROR deploy/tests/test_prism_security_trace.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+7 warnings, 3 errors in 2.73s

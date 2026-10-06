@@ -1,0 +1,68 @@
+
+==================================== ERRORS ====================================
+______________ ERROR collecting deploy/tests/test_prism_decoy.py _______________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_decoy.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_prism_decoy'
+___________ ERROR collecting deploy/tests/test_prism_ops_executor.py ___________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_ops_executor.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_prism_ops_executor'
+__________ ERROR collecting deploy/tests/test_prism_security_block.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_security_block.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_prism_security_block'
+__________ ERROR collecting deploy/tests/test_prism_security_trace.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_prism_security_trace.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_prism_security_trace'
+__________ ERROR collecting deploy/tests/test_project_member_probe.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_project_member_probe.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_project_member_probe'
+_________ ERROR collecting deploy/tests/test_security_block_kernel.py __________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_security_block_kernel.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_security_block_kernel'
+____________ ERROR collecting deploy/tests/test_systemd_install.py _____________
+ImportError while importing test module '/Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/deploy/tests/test_systemd_install.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_systemd_install'
+=========================== short test summary info ============================
+ERROR deploy/tests/test_prism_decoy.py
+ERROR deploy/tests/test_prism_ops_executor.py
+ERROR deploy/tests/test_prism_security_block.py
+ERROR deploy/tests/test_prism_security_trace.py
+ERROR deploy/tests/test_project_member_probe.py
+ERROR deploy/tests/test_security_block_kernel.py
+ERROR deploy/tests/test_systemd_install.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 7 errors during collection !!!!!!!!!!!!!!!!!!!!
+7 warnings, 7 errors in 2.59s

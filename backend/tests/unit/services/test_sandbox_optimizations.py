@@ -35,6 +35,14 @@ def _zip_with(files: dict[str, str]) -> str:
 def _clear_agent_test_cache(monkeypatch):
     # 缓存行为测试隔离模型配置，真实配置消费由独立入口回归覆盖。
     monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, user_id: agent)
+    monkeypatch.setattr(
+        "app.agents.source_context.compact_source_context",
+        lambda _agent, summary, **_kwargs: {
+            "covered_source_ids": [chunk["source_id"] for chunk in summary.get("source_chunks", [])],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "全部源码分片已摘要。"}],
+            "protected_facts": [],
+        },
+    )
     sandbox_service._AGENT_TEST_CACHE.clear()
     yield
     sandbox_service._AGENT_TEST_CACHE.clear()
@@ -142,6 +150,93 @@ def test_generate_agent_tests_cache_expires_and_regenerates(db, monkeypatch) -> 
     assert expires_at > 0.0
 
 
+def test_agent_test_feedback_rounds_reuse_one_verified_compaction(db, monkeypatch) -> None:
+    environment = _cache_environment(db)
+    archive = _zip_with({"main.py": "def run(): return True\n"})
+    compaction_calls: list[dict] = []
+    generation_contexts: list[dict] = []
+    events: list[tuple[str, dict]] = []
+
+    def compact(_agent, summary, **_kwargs):
+        compaction_calls.append(summary)
+        return {
+            "covered_source_ids": [chunk["source_id"] for chunk in summary["source_chunks"]],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "入口 run 返回布尔值。"}],
+            "protected_facts": [],
+        }
+
+    class FailingGenerator:
+        _api_key = "configured"
+
+        def generate(self, **kwargs):
+            generation_contexts.append(kwargs["source_summary"].get("_compacted_source_context"))
+            return {
+                "error": "模型输出截断，未返回完整用例",
+                "failure_kind": "output_truncated",
+            }
+
+    monkeypatch.setattr(
+        "app.agents.test_case_generator_agent.TestCaseGeneratorAgent",
+        FailingGenerator,
+    )
+    monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
+    monkeypatch.setattr(
+        "app.services.sandbox_service._append_event",
+        lambda _db, _environment, _event_type, stage, message, payload=None: events.append(
+            (stage, {"message": message, **(payload or {})})
+        ),
+    )
+
+    result = _generate_agent_test_cases(db, environment, archive, "python", "whitebox")
+
+    assert result is None
+    assert len(compaction_calls) == 1
+    assert len(generation_contexts) == 3
+    assert all(context is generation_contexts[0] for context in generation_contexts)
+    test_events = [event for stage, event in events if stage == "agent_tests"]
+    assert any("模型输出被截断" in event["message"] for event in test_events)
+    assert any("最后原因：模型输出被截断" in event["message"] for event in test_events)
+    assert all("结构无效" not in event["message"] for event in test_events)
+    assert all("执行前契约校验" not in event["message"] for event in test_events)
+    assert test_events[-1]["failure_kinds"] == ["output_truncated"] * 3
+
+
+def test_agent_test_contract_rejection_is_not_mislabeled_as_generation_error(db, monkeypatch) -> None:
+    environment = _cache_environment(db)
+    archive = _zip_with({"main.py": "VALUE = 1\n"})
+    events: list[tuple[str, dict]] = []
+
+    class InvalidGenerator:
+        _api_key = "configured"
+
+        def generate(self, **_kwargs):
+            return {
+                "files": [
+                    {"path": "test_ai_one.py", "content": "if:\n    pass\n"},
+                    {"path": "test_ai_two.py", "content": "assert True\n"},
+                ]
+            }
+
+    monkeypatch.setattr(
+        "app.agents.test_case_generator_agent.TestCaseGeneratorAgent",
+        InvalidGenerator,
+    )
+    monkeypatch.setattr(
+        "app.services.sandbox_service._append_event",
+        lambda _db, _environment, _event_type, stage, message, payload=None: events.append(
+            (stage, {"message": message, **(payload or {})})
+        ),
+    )
+
+    result = _generate_agent_test_cases(db, environment, archive, "python", "whitebox")
+
+    assert result is None
+    test_events = [event for stage, event in events if stage == "agent_tests"]
+    assert any("未通过执行前契约校验" in event["message"] for event in test_events)
+    assert "最后原因：用例未通过执行前契约校验" in test_events[-1]["message"]
+    assert test_events[-1]["failure_kinds"] == ["contract_rejected"] * 3
+
+
 def test_grounding_allows_stdlib_from_imports_but_flags_source_absent_attribute() -> None:
     from app.agents import test_case_generator_agent as generator
 
@@ -165,6 +260,117 @@ def test_grounding_allows_stdlib_from_imports_but_flags_source_absent_attribute(
     unsupported = generator._grounding_feedback(files, summary)
 
     assert unsupported == ["absent_attribute"]
+
+
+def test_grounding_uses_exact_source_chunks_and_common_response_attributes() -> None:
+    from app.agents import test_case_generator_agent as generator
+
+    summary = {
+        "source_chunks": [
+            {
+                "path": "app/routes.py",
+                "text": "def find_user(name):\n    return name.lower()\n",
+            }
+        ],
+        "_compacted_source_context": {
+            "source_summaries": [{"summary": "该模块提供用户查询逻辑。"}],
+            "protected_facts": [],
+        },
+    }
+    files = [
+        {
+            "path": "test_ai_flow.py",
+            "content": (
+                "from app.routes import find_user\n"
+                "assert find_user('ALICE') == 'alice'\n"
+                "assert response.status == 200\n"
+                "assert response.getcode() == 200\n"
+                "assert response.absent_route_contract\n"
+            ),
+        }
+    ]
+
+    assert generator._grounding_feedback(files, summary) == ["absent_route_contract"]
+
+
+def test_grounding_does_not_accept_symbols_that_only_appear_in_source_comments() -> None:
+    from app.agents import test_case_generator_agent as generator
+
+    summary = {
+        "language": "python",
+        "source_chunks": [
+            {"path": "app/routes.py", "offset": 0, "text": "# phantom_handler is not implemented\n"},
+        ],
+    }
+    files = [
+        {
+            "path": "test_ai_flow.py",
+            "content": "from app.routes import phantom_handler\nphantom_handler()\n",
+        }
+    ]
+
+    assert generator._grounding_feedback(files, summary) == ["phantom_handler"]
+
+
+def test_grounding_rejects_a_plain_import_missing_from_project_sources() -> None:
+    from app.agents import test_case_generator_agent as generator
+
+    summary = {
+        "language": "python",
+        "files": ["main.py"],
+        "source_chunks": [{"path": "main.py", "offset": 0, "text": "def real_symbol(): return True\n"}],
+    }
+    files = [{"path": "test_ai_flow.py", "content": "import phantom_module\nassert phantom_module\n"}]
+
+    assert generator._grounding_feedback(files, summary) == ["phantom_module"]
+
+
+@pytest.mark.parametrize(
+    ("route_source", "extra_source"),
+    [
+        (
+            "def real_route():\n    phantom_handler = None\n    return phantom_handler\n",
+            None,
+        ),
+        ("def real_route(): return True\n", "def phantom_handler(): return True\n"),
+    ],
+    ids=["function-local-name-is-not-exported", "same-name-in-another-module-is-not-exported"],
+)
+def test_grounding_requires_imported_symbol_to_be_exported_by_that_module(route_source, extra_source) -> None:
+    from app.agents import test_case_generator_agent as generator
+
+    chunks = [{"path": "app/routes.py", "offset": 0, "text": route_source}]
+    if extra_source:
+        chunks.append({"path": "app/models.py", "offset": 0, "text": extra_source})
+    summary = {"language": "python", "source_chunks": chunks}
+    files = [{"path": "test_ai_flow.py", "content": "from app.routes import phantom_handler\nphantom_handler()\n"}]
+
+    assert generator._grounding_feedback(files, summary) == ["phantom_handler"]
+
+
+def test_grounding_accepts_exports_from_packed_small_source_files() -> None:
+    from app.agents import test_case_generator_agent as generator
+
+    summary = {
+        "language": "python",
+        "files": ["app/routes.py"],
+        "source_chunks": [
+            {
+                "path": "<multiple-files>",
+                "text": json.dumps(
+                    [{"path": "app/routes.py", "text": "def find_user(name): return name.lower()"}]
+                ),
+            },
+        ],
+    }
+    files = [
+        {
+            "path": "test_ai_flow.py",
+            "content": "from app.routes import find_user\nassert find_user('ALICE') == 'alice'\n",
+        }
+    ]
+
+    assert generator._grounding_feedback(files, summary) == []
 
 
 def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None:

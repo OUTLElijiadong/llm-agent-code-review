@@ -40,6 +40,9 @@
           <div><dt>当前 / 最近文件分片</dt><dd>{{ coverageCount(task.coverage?.completed_chunks) }} / {{ coverageCount(task.coverage?.total_chunks) }}</dd></div>
         </dl>
         <p v-if="isSandboxReport" class="coverage-note">沙箱测试按任务范围记录完成情况；逐文件、分片和模型信息以报告中已保存的证据为准。</p>
+        <p v-if="isSandboxReport && task?.coverage?.verification_status !== 'complete'" class="coverage-note coverage-note--warning" role="note">
+          {{ sandboxCoverageLabel(task?.coverage?.verification_status) }}<span v-if="task?.coverage?.reason">：{{ task.coverage.reason }}</span>。评分保留为本次记录值，不表示完整黑盒/白盒验证通过。
+        </p>
         <p v-else class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
       </div>
       <div v-if="taskFailure" class="execution-error" role="alert">{{ taskFailure }}</div>
@@ -85,11 +88,11 @@
           <span class="score-out font-mono">/100</span>
         </div>
         <div class="score-meta">
-          <div class="score-label">{{ isTestScore ? '测试评分' : '代码质量' }}</div>
+          <div class="score-label">{{ isSandboxReport && task?.coverage?.verification_status !== 'complete' ? '已测范围分' : isTestScore ? '测试评分' : '代码质量' }}</div>
           <div class="score-status" :style="{ color: scoreFlatColor(displayScore) }">{{ riskLevel }}</div>
         </div>
       </div>
-      <div v-else class="score-unavailable">{{ reportMetricsRestricted ? '报告评分受权限保护' : (task?.status === 'success' ? '评分未知（接口未提供有效评分）' : '尚无最终评分') }}</div>
+      <div v-else class="score-unavailable">{{ reportMetricsRestricted ? '报告评分受权限保护' : (isSandboxReport ? sandboxCoverageLabel(task?.coverage?.verification_status) : (task?.status === 'success' ? '评分未知（接口未提供有效评分）' : '尚无最终评分')) }}</div>
 
       <div v-if="reportMetricsRestricted" class="head-tally tally-access-note" role="note">
         报告问题统计受权限保护
@@ -446,6 +449,11 @@ const displayScore = computed(() => {
   const value = task.value?.score
   return task.value?.status === 'success' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
 })
+function sandboxCoverageLabel(status?: string | null) {
+  if (status === 'partial') return '验证范围不完整，当前分数只代表已完成部分'
+  if (status === 'failed') return '验证未通过；已记录的分数不代表测试通过'
+  return '历史记录未保存覆盖证据，无法确认验证范围'
+}
 const modelLabel = computed(() => task.value?.model_name?.trim() || '模型未知（接口未提供）')
 const stageLabel = computed(() => {
   if (isSandboxReport.value) return statusLabels[task.value?.status ?? ''] || '状态未记录'

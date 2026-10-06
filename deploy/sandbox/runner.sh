@@ -7,6 +7,9 @@ readonly action="${PRISM_ACTION:-}"
 readonly language="${PRISM_LANGUAGE:-}"
 readonly test_mode="${PRISM_TEST_MODE:-whitebox}"
 readonly preview_port="${PRISM_PREVIEW_PORT:-8080}"
+readonly source_dir="${PRISM_SOURCE_DIR:-/source}"
+readonly workspace_dir="${PRISM_WORKSPACE_DIR:-/workspace}"
+readonly blackbox_app_log="$workspace_dir/.prism-tmp/prism-app.log"
 
 proxy_request() {
   [ "$#" -eq 7 ] || { printf '%s\n' 'invalid preview proxy arguments' >&2; exit 64; }
@@ -82,9 +85,12 @@ case "$test_mode" in
   *) printf '%s\n' 'unsupported sandbox test mode' >&2; exit 64 ;;
 esac
 
-cp -R /source/. /workspace/
-chmod -R u+rwX /workspace
-cd /workspace
+case "$source_dir" in /*) ;; *) printf '%s\n' 'source directory must be absolute' >&2; exit 64 ;; esac
+case "$workspace_dir" in /*) ;; *) printf '%s\n' 'workspace directory must be absolute' >&2; exit 64 ;; esac
+mkdir -p "$workspace_dir"
+cp -R "$source_dir"/. "$workspace_dir"/
+chmod -R u+rwX "$workspace_dir"
+cd "$workspace_dir"
 
 mkdir -p .prism-tmp .prism-home .prism-cache/npm .prism-cache/m2 .prism-cache/gradle .prism-cache/go
 
@@ -93,29 +99,52 @@ export PIP_DISABLE_PIP_VERSION_CHECK=1
 export NPM_CONFIG_OFFLINE=true
 export NPM_CONFIG_AUDIT=false
 export NPM_CONFIG_FUND=false
-export NPM_CONFIG_CACHE=/workspace/.prism-cache/npm
-export MAVEN_OPTS="-Dmaven.repo.local=/workspace/.prism-cache/m2 -Djava.io.tmpdir=/workspace/.prism-tmp -Djava.net.preferIPv4Stack=true"
-export GRADLE_USER_HOME=/workspace/.prism-cache/gradle
+export NPM_CONFIG_CACHE="$workspace_dir/.prism-cache/npm"
+export MAVEN_OPTS="-Dmaven.repo.local=$workspace_dir/.prism-cache/m2 -Djava.io.tmpdir=$workspace_dir/.prism-tmp -Djava.net.preferIPv4Stack=true"
+export GRADLE_USER_HOME="$workspace_dir/.prism-cache/gradle"
 export GOPROXY=off
 export GOSUMDB=off
-export GOCACHE=/workspace/.prism-cache/go/build
-export GOMODCACHE=/workspace/.prism-cache/go/modules
+export GOCACHE="$workspace_dir/.prism-cache/go/build"
+export GOMODCACHE="$workspace_dir/.prism-cache/go/modules"
 export COMPOSER_DISABLE_NETWORK=1
-export HOME=/workspace/.prism-home
-export TMPDIR=/workspace/.prism-tmp
+export HOME="$workspace_dir/.prism-home"
+export TMPDIR="$workspace_dir/.prism-tmp"
 export JAVA_TOOL_OPTIONS="-Duser.home=$HOME -Djava.io.tmpdir=$TMPDIR"
+deps_prepare_attempted=0
+deps_prepare_succeeded=0
+
+java_project_classpath() {
+  project_classpath=""
+  for class_dir in \
+    "$workspace_dir/.prism-classes" \
+    "$workspace_dir/target/classes" \
+    "$workspace_dir/build/classes/java/main" \
+    "$workspace_dir/build/classes/kotlin/main"; do
+    [ -d "$class_dir" ] || continue
+    if [ -n "$project_classpath" ]; then
+      project_classpath="$project_classpath:"
+    fi
+    project_classpath="$project_classpath$class_dir"
+  done
+  printf '%s' "$project_classpath"
+}
 
 preflight_agent_test_file() {
   # 先用语言原生工具完成解析/编译，避免后端根据自由文本猜测失败阶段。
   case "$1" in
-    *.py) PYTHONPYCACHEPREFIX=/workspace/.prism-tmp/pycache python -m py_compile "$1" ;;
+    *.py) PYTHONPYCACHEPREFIX="$workspace_dir/.prism-tmp/pycache" python -m py_compile "$1" ;;
     *.js|*.mjs) node --check "$1" ;;
     *.php) php -l "$1" ;;
-    *.go) go build -o /workspace/.prism-tmp/agent-test-bin "$1" ;;
+    *.go) go build -o "$workspace_dir/.prism-tmp/agent-test-bin" "$1" ;;
     *.java)
       cls_dir=".prism-ai-classes"
       mkdir -p "$cls_dir"
-      javac -d "$cls_dir" "$1" ;;
+      project_classpath="$(java_project_classpath)"
+      if [ -n "$project_classpath" ]; then
+        javac -cp "$project_classpath" -d "$cls_dir" "$1"
+      else
+        javac -d "$cls_dir" "$1"
+      fi ;;
     *.sh) sh -n "$1" ;;
     *) return 64 ;;
   esac
@@ -124,14 +153,19 @@ preflight_agent_test_file() {
 run_agent_test_file() {
   # agent 动态生成的测试文件必须自包含可执行；预检成功后这里只执行测试。
   case "$1" in
-    *.py) PYTHONPATH=/workspace${PYTHONPATH:+:$PYTHONPATH} python "$1" ;;
+    *.py) PYTHONPATH="$workspace_dir${PYTHONPATH:+:$PYTHONPATH}" python "$1" ;;
     *.js|*.mjs) node "$1" ;;
     *.php) php "$1" ;;
-    *.go) /workspace/.prism-tmp/agent-test-bin ;;
+    *.go) "$workspace_dir/.prism-tmp/agent-test-bin" ;;
     *.java)
       cls_dir=".prism-ai-classes"
       cls_name="$(basename "$1" .java)"
-      java -cp "$cls_dir" "$cls_name" ;;
+      project_classpath="$(java_project_classpath)"
+      if [ -n "$project_classpath" ]; then
+        java -cp "$cls_dir:$project_classpath" "$cls_name"
+      else
+        java -cp "$cls_dir" "$cls_name"
+      fi ;;
     *.sh) sh "$1" ;;
     *) return 64 ;;
   esac
@@ -211,9 +245,9 @@ run_agent_tests() {
 }
 
 run_agent_blackbox() {
-  # 黑盒:应用就绪后执行 agent 生成的 blackbox 脚本(仅本机回环),失败不阻断就绪结论。
-  # 探测脚本语言与项目语言一致:python→blackbox.py,node→blackbox.js,php→blackbox.php,go→blackbox.go,java→blackbox.java。
-  for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.js ./_agent_tests/blackbox.php ./_agent_tests/blackbox.go ./_agent_tests/blackbox.java ./_agent_tests/blackbox.sh; do
+  # 黑盒:应用就绪后执行 agent 生成的 blackbox 脚本(仅本机回环)。
+  # 新生成的 Node harness 固定为 .mjs,不受项目 package.json type 影响；仍兼容历史 .js。
+  for f in ./_agent_tests/blackbox.py ./_agent_tests/blackbox.mjs ./_agent_tests/blackbox.js ./_agent_tests/blackbox.php ./_agent_tests/blackbox.go ./_agent_tests/blackbox.java ./_agent_tests/blackbox.sh; do
     if [ -f "$f" ]; then
       printf '%s\n' "executing agent blackbox: $f"
       if agent_file_result="$(execute_agent_test "$f" /tmp/agent-bb-out)"; then
@@ -309,6 +343,11 @@ run_test() {
     printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false,"reason":"decompilation_failed"}'
     return 66
   fi
+  if ! prepare_deps; then
+    printf '%s\n' 'whitebox: offline dependency preparation failed (see logs)' >&2
+    printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false,"reason":"dependency_preparation_failed"}'
+    return 1
+  fi
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   # 反编译前置必须先完成,避免注入脚本绕过 Android 证据门禁。
   if [ -f ./_prism_verify.sh ]; then
@@ -390,8 +429,8 @@ run_test() {
         find . -type f -name '*.java' -not -path './_agent_tests/*' -print > /tmp/prism-java-sources
         if [ -s /tmp/prism-java-sources ]; then
           if [ ! -d ./.prism-decompiled ]; then
-            mkdir -p /workspace/.prism-classes
-            if ! javac -d /workspace/.prism-classes @/tmp/prism-java-sources 2>/dev/null; then
+            mkdir -p "$workspace_dir/.prism-classes"
+            if ! javac -d "$workspace_dir/.prism-classes" @/tmp/prism-java-sources 2>/dev/null; then
               printf '%s\n' 'whitebox: javac reported errors (see logs)' >&2
               test_failed=1
             fi
@@ -453,24 +492,72 @@ run_test() {
 }
 
 prepare_deps() {
-  # 离线补全项目依赖(尽力而为):仅用镜像内置缓存或项目 vendor,不联网。
-  # 补全结果不影响主流程;缺失依赖由后端部署核验 agent 记录并在报告中提示。
+  # 依赖只从 Worker 预置缓存或项目 vendor 离线准备；失败必须阻断测试，不能把
+  # 缺依赖情况下跳过的执行报告成通过。combined 模式的白盒/黑盒共用一次准备结果。
+  if [ "$deps_prepare_attempted" -eq 1 ]; then
+    [ "$deps_prepare_succeeded" -eq 1 ]
+    return $?
+  fi
+  deps_prepare_attempted=1
   case "$language" in
     python)
       if [ -f requirements.txt ]; then
-        python -m pip install -q --no-index -r requirements.txt 2>/dev/null || \
-          printf '%s\n' 'PRISM_DEPS python requirements partial (offline)' >&2
+        if ! python -m pip install -q --no-index -r requirements.txt; then
+          printf '%s\n' 'PRISM_DEPS python requirements failed (offline cache incomplete)' >&2
+          return 1
+        fi
       fi
       ;;
     node)
       if [ -d node_modules ]; then :;
       elif [ -f package.json ]; then
-        npm ci --offline --ignore-scripts 2>/dev/null || \
-          printf '%s\n' 'PRISM_DEPS node offline install partial' >&2
+        if ! npm ci --offline --ignore-scripts; then
+          printf '%s\n' 'PRISM_DEPS node install failed (offline cache incomplete)' >&2
+          return 1
+        fi
       fi
       ;;
-    go|java|php) : ;;
+    go)
+      if [ -f go.mod ] && [ ! -d vendor ]; then
+        if ! go mod download; then
+          printf '%s\n' 'PRISM_DEPS go module download failed (offline cache incomplete)' >&2
+          return 1
+        fi
+      fi
+      ;;
+    java)
+      if [ -f mvnw ]; then
+        if ! sh ./mvnw -o -B dependency:go-offline; then
+          printf '%s\n' 'PRISM_DEPS maven dependency preparation failed (offline cache incomplete)' >&2
+          return 1
+        fi
+      elif [ -f gradlew ]; then
+        if ! sh ./gradlew --offline --no-daemon dependencies; then
+          printf '%s\n' 'PRISM_DEPS gradle dependency preparation failed (offline cache incomplete)' >&2
+          return 1
+        fi
+      elif [ -f pom.xml ] && command -v mvn >/dev/null 2>&1; then
+        if ! mvn -o -B dependency:go-offline; then
+          printf '%s\n' 'PRISM_DEPS maven dependency preparation failed (offline cache incomplete)' >&2
+          return 1
+        fi
+      elif { [ -f build.gradle ] || [ -f build.gradle.kts ]; } && command -v gradle >/dev/null 2>&1; then
+        if ! gradle --offline --no-daemon dependencies; then
+          printf '%s\n' 'PRISM_DEPS gradle dependency preparation failed (offline cache incomplete)' >&2
+          return 1
+        fi
+      fi
+      ;;
+    php)
+      if [ -f composer.json ] && [ ! -d vendor ]; then
+        if ! command -v composer >/dev/null 2>&1 || ! composer install --no-interaction --no-progress --no-scripts --no-plugins --prefer-dist; then
+          printf '%s\n' 'PRISM_DEPS composer install failed (offline cache incomplete or composer unavailable)' >&2
+          return 1
+        fi
+      fi
+      ;;
   esac
+  deps_prepare_succeeded=1
   return 0
 }
 
@@ -484,6 +571,60 @@ run_deploy() {
   export SERVER_PORT="$preview_port"
   case "$language" in
     python)
+      if [ -f manage.py ] && python -c 'import django' >/dev/null 2>&1; then
+        exec python manage.py runserver "127.0.0.1:$preview_port" --noreload
+      fi
+      for asgi_module in asgi main app; do
+        if [ -f "$asgi_module.py" ] && python -c 'import uvicorn' >/dev/null 2>&1; then
+          app_ref="$(python - "$asgi_module.py" "$asgi_module" <<'PYAPP'
+import ast
+import sys
+
+path, module = sys.argv[1:]
+try:
+    tree = ast.parse(open(path, encoding="utf-8").read())
+except (OSError, SyntaxError, UnicodeError):
+    raise SystemExit(0)
+for node in ast.walk(tree):
+    targets = []
+    value = None
+    if isinstance(node, ast.Assign):
+        targets, value = node.targets, node.value
+    elif isinstance(node, ast.AnnAssign):
+        targets, value = [node.target], node.value
+    if not isinstance(value, ast.Call):
+        continue
+    func = value.func
+    factory = func.id if isinstance(func, ast.Name) else (func.attr if isinstance(func, ast.Attribute) else "")
+    if factory not in {"FastAPI", "Starlette"}:
+        continue
+    for target in targets:
+        if isinstance(target, ast.Name):
+            print(f"{module}:{target.id}")
+            raise SystemExit(0)
+PYAPP
+          )"
+          if [ -n "$app_ref" ]; then
+            exec python -m uvicorn "$app_ref" --host 127.0.0.1 --port "$preview_port"
+          fi
+        fi
+      done
+      if [ -f asgi.py ] && python -c 'import uvicorn' >/dev/null 2>&1; then
+        exec python -m uvicorn asgi:application --host 127.0.0.1 --port "$preview_port"
+      fi
+      if [ -f wsgi.py ]; then
+        exec python - "$preview_port" <<'PYWSGI'
+import sys
+from wsgiref.simple_server import make_server
+
+namespace = {}
+exec(compile(open("wsgi.py", encoding="utf-8").read(), "wsgi.py", "exec"), namespace)
+application = namespace.get("application") or namespace.get("app")
+if not callable(application):
+    raise SystemExit("wsgi.py must define callable application or app")
+make_server("127.0.0.1", int(sys.argv[1]), application).serve_forever()
+PYWSGI
+      fi
       if [ -f app.py ] && python -c 'import flask' >/dev/null 2>&1; then
         exec python -m flask --app app run --host 127.0.0.1 --port "$preview_port"
       elif [ -f main.py ]; then
@@ -496,7 +637,19 @@ run_deploy() {
       ;;
     node)
       [ -f package.json ] || { printf '%s\n' 'package.json is required' >&2; exit 66; }
-      exec npm start --if-present
+      if node -e 'process.exit(require("./package.json").scripts?.start ? 0 : 1)' 2>/dev/null; then
+        exec npm start
+      fi
+      node_entry="$(node -e 'try { process.stdout.write(require("./package.json").main || "") } catch (_) {}' 2>/dev/null || true)"
+      for candidate in "$node_entry" server.js server.mjs index.js index.mjs app.js main.js; do
+        [ -n "$candidate" ] || continue
+        case "$candidate" in /*|../*|*/../*) continue ;; esac
+        if [ -f "$candidate" ]; then
+          exec node "$candidate"
+        fi
+      done
+      printf '%s\n' 'no supported Node.js start script or entry file was detected' >&2
+      exit 66
       ;;
     java)
       jar_path="$(find . -type f -name '*.jar' -not -name '*-sources.jar' -not -name '*-javadoc.jar' -print -quit)"
@@ -546,13 +699,57 @@ run_deploy() {
   esac
 }
 
+probe_loopback_path() {
+  probe_path="$1"
+  printf '%s\n' "$probe_path" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || return 1
+  bash -c '
+    port="$1"
+    path="$2"
+    exec 3<>"/dev/tcp/127.0.0.1/$port"
+    printf "GET %s HTTP/1.0\r\nHost: 127.0.0.1:%s\r\nConnection: close\r\n\r\n" "$path" "$port" >&3
+    IFS= read -r -t 3 line <&3 || exit 1
+    case "$line" in
+      HTTP/*\ [1-5][0-9][0-9]\ *) code="${line#HTTP/* }"; printf "%s" "${code%% *}" ;;
+      *) exit 1 ;;
+    esac
+  ' prism-route-probe "$preview_port" "$probe_path" 2>/dev/null
+}
+
+discover_route_candidates() {
+  route_prefix='(route|get|post|put|delete|patch|path|HandleFunc|Path|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)[[:space:]]*\([[:space:]]*'
+  double_pattern="${route_prefix}\"[^\"]+\""
+  single_pattern="${route_prefix}'[^']+'"
+  {
+    find . -type f \
+      \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' \
+      -not -path './_agent_tests/*' -print0 \
+      | xargs -0 grep -hiEo "$double_pattern" 2>/dev/null \
+      | sed -nE "s/.*\\([[:space:]]*['\"]([^'\"]+)['\"].*/\\1/p" || true
+    find . -type f \
+      \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' \
+      -not -path './_agent_tests/*' -print0 \
+      | xargs -0 grep -hiEo "$single_pattern" 2>/dev/null \
+      | sed -nE "s/.*\\([[:space:]]*['\"]([^'\"]+)['\"].*/\\1/p" || true
+    printf '%s\n' / /health /healthz /api/health /api/healthz /api /openapi.json /docs /login
+  } | awk '{if (substr($0, 1, 1) != "/") $0 = "/" $0; if (!seen[$0]++) print $0}' | head -n 80
+}
+
 run_blackbox() {
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   if [ -f ./_prism_verify.sh ]; then
     sh ./_prism_verify.sh blackbox
     return $?
   fi
-  run_deploy &
+  # 应用日志与可信 runner 回执分流，防止应用 stdout 伪造 PRISM_* 结果标记。
+  # 先完成本地离线依赖准备，再启动进程，避免缺依赖的应用在安装期间先退出。
+  if ! prepare_deps; then
+    printf '%s\n' 'blackbox: offline dependency preparation failed (application was not started)' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0}\n'
+    return 1
+  fi
+  run_deploy >"$blackbox_app_log" 2>&1 &
   app_pid="$!"
   trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT INT TERM
   attempts=0
@@ -560,7 +757,6 @@ run_blackbox() {
   http_ready=""
   http_status=""
   # 服务就绪探测只确认端口有响应；黑盒通过状态另行判定，不能把错误页当成功。
-  prepare_deps
   while [ "$attempts" -lt 45 ]; do
     if status="$(bash -c '
       port="$1"
@@ -585,14 +781,33 @@ run_blackbox() {
       stable=0
     fi
     if ! kill -0 "$app_pid" >/dev/null 2>&1; then
-      wait "$app_pid"
-      return "$?"
+      if wait "$app_pid"; then
+        app_exit_status=0
+      else
+        app_exit_status=$?
+      fi
+      printf '%s\n' 'blackbox application exited before readiness; startup output follows (last 4000 bytes):' >&2
+      if [ -s "$blackbox_app_log" ]; then
+        tail -c 4000 "$blackbox_app_log" >&2 || true
+      else
+        printf '%s\n' '(application produced no startup output)' >&2
+      fi
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"failure_kind":"application_startup","failure_reason":"application_exited_before_ready"}\n'
+      [ "$app_exit_status" -ne 0 ] || app_exit_status=1
+      return "$app_exit_status"
     fi
     attempts=$((attempts + 1))
     sleep 1
   done
   if [ -z "$http_ready" ]; then
     printf '%s\n' 'application did not become ready on the fixed loopback port' >&2
+    printf '%s\n' 'blackbox application startup output follows (last 4000 bytes):' >&2
+    if [ -s "$blackbox_app_log" ]; then
+      tail -c 4000 "$blackbox_app_log" >&2 || true
+    else
+      printf '%s\n' '(application produced no startup output)' >&2
+    fi
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"failure_kind":"application_startup","failure_reason":"application_readiness_timeout"}\n'
     return 1
   fi
   printf 'blackbox loopback status=%s\n' "$http_status"
@@ -609,13 +824,64 @@ run_blackbox() {
     printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
   fi
   # agent 动态黑盒:应用仍在运行,执行 agent 生成的回环测试脚本(必须放在 kill 之前)
-  blackbox_failed=0
-  case "$http_status" in
-    2*|3*) ;;
-    *) printf 'blackbox: application returned HTTP %s for /\n' "$http_status" >&2; blackbox_failed=1 ;;
-  esac
+  blackbox_failed=1
+  route_passed=false
+  blackbox_route="/"
+  blackbox_status=0
+  failure_route="/"
+  failure_status=0
+  while IFS= read -r probe_path; do
+    [ -n "$probe_path" ] || continue
+    # 源码中的路由字符串是不可信输入；只允许安全的同源 HTTP 路径。
+    printf '%s\n' "$probe_path" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || continue
+    if probe_status="$(probe_loopback_path "$probe_path")"; then
+      printf 'blackbox route %s -> HTTP %s\n' "$probe_path" "$probe_status"
+      case "$probe_status" in
+        2*) blackbox_failed=0; route_passed=true; blackbox_route="$probe_path"; blackbox_status="$probe_status"; break ;;
+        3*) if [ "$failure_status" -eq 0 ]; then failure_route="$probe_path"; failure_status="$probe_status"; fi ;;
+        5*) failure_route="$probe_path"; failure_status="$probe_status" ;;
+        4*) if [ "$failure_status" -eq 0 ]; then failure_route="$probe_path"; failure_status="$probe_status"; fi ;;
+      esac
+    fi
+  done <<EOF
+$(discover_route_candidates)
+EOF
+  if [ "$blackbox_failed" -ne 0 ]; then
+    printf '%s\n' 'blackbox: no discovered application route returned HTTP 2xx' >&2
+    blackbox_route="$failure_route"
+    blackbox_status="$failure_status"
+  fi
+  # No generated blackbox file means AI assertions were not run, not that they passed.
+  agent_assertions_passed=null
+  for agent_test_file in \
+    ./_agent_tests/blackbox.py \
+    ./_agent_tests/blackbox.mjs \
+    ./_agent_tests/blackbox.js \
+    ./_agent_tests/blackbox.php \
+    ./_agent_tests/blackbox.go \
+    ./_agent_tests/blackbox.java \
+    ./_agent_tests/blackbox.sh; do
+    if [ -f "$agent_test_file" ]; then
+      agent_assertions_passed=true
+      break
+    fi
+  done
   if ! run_agent_blackbox; then
     blackbox_failed=1
+    agent_assertions_passed=false
+  fi
+  blackbox_basis=route_smoke
+  if [ "$agent_assertions_passed" != null ]; then
+    blackbox_basis=route_and_agent_assertions
+  fi
+  if [ "$blackbox_failed" -eq 0 ]; then
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s}\n' \
+      "$blackbox_basis" "$agent_assertions_passed" "$route_passed" "$blackbox_route" "$blackbox_status"
+  else
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s}\n' \
+      "$blackbox_basis" \
+      "$agent_assertions_passed" \
+      "$route_passed" "$blackbox_route" "$blackbox_status"
   fi
   kill "$app_pid" >/dev/null 2>&1 || true
   wait "$app_pid" 2>/dev/null || true

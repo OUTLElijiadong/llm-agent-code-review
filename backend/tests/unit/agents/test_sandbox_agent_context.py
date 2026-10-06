@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
 from app.agents.sandbox_agents import TestVerifierAgent
 from app.agents.source_context import SourceContextError, compact_source_context
 from app.agents.syntax_repair_agent import SyntaxRepairAgent
 from app.agents.test_case_generator_agent import TestCaseGeneratorAgent as CaseGeneratorAgent
+from app.agents.test_case_generator_agent import _grounding_feedback
+from app.services import sandbox_service
+
+RUNNER_PATH = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
 
 
 def _source_quotes(message: str) -> list[dict[str, object]]:
@@ -113,6 +120,1001 @@ def test_test_generator_never_calls_model_with_uncovered_source(monkeypatch) -> 
     )
     assert "error" in result
     assert not calls
+
+
+def test_test_generator_changes_output_scope_after_truncation_instead_of_replaying_request(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    messages: list[str] = []
+
+    def call_json(message, **_kwargs):
+        messages.append(message)
+        if len(messages) == 1:
+            return SimpleNamespace(
+                success=False,
+                error="模型输出因长度上限被截断(finish_reason=length)",
+                failure_kind="output_truncated",
+                finish_reason="length",
+            )
+        return SimpleNamespace(
+            success=True,
+            data={
+                "files": [
+                    {"path": "test_ai_one.py", "content": "assert 1 == 1\n"},
+                    {"path": "test_ai_two.py", "content": "assert 2 > 1\n"},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["main.py-source"],
+                "source_summaries": [{"source_id": "all-source-summaries", "summary": "入口 run 返回布尔值。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert [item["path"] for item in result["files"]] == ["test_ai_one.py", "test_ai_two.py"]
+    assert len(messages) == 2
+    assert messages[0] != messages[1]
+    assert "上一轮模型输出因长度上限被截断" in messages[1]
+    assert "每个白盒文件最多 12 行" in messages[1]
+
+
+def test_node_test_generator_uses_module_mode_independent_mjs_harness(monkeypatch) -> None:
+    """Node 测试使用 .mjs + ESM import，避免被项目 package.json 的 type 影响。"""
+    agent = CaseGeneratorAgent()
+    messages: list[str] = []
+
+    def call_json(message, **_kwargs):
+        messages.append(message)
+        return SimpleNamespace(
+            success=True,
+            data={
+                "files": [
+                    {
+                        "path": "test_ai_one.mjs",
+                        "content": "import assert from 'node:assert/strict'; assert.equal(1, 1);",
+                    },
+                    {
+                        "path": "test_ai_two.mjs",
+                        "content": "import assert from 'node:assert/strict'; assert.ok(true);",
+                    },
+                ]
+            },
+        )
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="node",
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["src-1"],
+                "source_summaries": [{"source_id": "src-1", "summary": "项目源码已完整覆盖。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert [item["path"] for item in result["files"]] == ["test_ai_one.mjs", "test_ai_two.mjs"]
+    assert ".mjs" in messages[0]
+    assert "ESM" in messages[0]
+    assert "禁止 require" in messages[0]
+    assert "blackbox.mjs" in messages[0]
+
+
+@pytest.mark.parametrize(
+    ("project_type", "project_source", "test_source"),
+    [
+        (
+            "commonjs",
+            "module.exports = { add: (a, b) => a + b };\n",
+            "import app from '../app.js';\n"
+            "import assert from 'node:assert/strict';\n"
+            "assert.equal(app.add(2, 3), 5);\n",
+        ),
+        (
+            "module",
+            "export const add = (a, b) => a + b;\n",
+            "import { add } from '../app.js';\n"
+            "import assert from 'node:assert/strict';\n"
+            "assert.equal(add(2, 3), 5);\n",
+        ),
+    ],
+    ids=["cjs-project", "esm-project"],
+)
+def test_real_node_whitebox_runner_executes_mjs_for_cjs_and_esm_projects(
+    tmp_path, project_type, project_source, test_source
+) -> None:
+    """固定 runner 能在 CJS/ESM 项目中执行同一种 .mjs 白盒 harness。"""
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    package = {"name": "whitebox-fixture", "version": "1.0.0", "scripts": {}}
+    if project_type == "module":
+        package["type"] = "module"
+    (source / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    (source / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": package["name"],
+                "version": package["version"],
+                "lockfileVersion": 3,
+                "packages": {"": {"name": package["name"], "version": package["version"]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "app.js").write_text(project_source, encoding="utf-8")
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_ai_one.mjs").write_text(test_source, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": "whitebox",
+            "PRISM_PREVIEW_PORT": "39123",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    agent_tests = sandbox_service._extract_agent_tests_result(output)
+    assert agent_tests is not None
+    assert agent_tests["files"]["test_ai_one.mjs"] == "pass"
+
+
+def test_real_node_whitebox_runner_keeps_legacy_cjs_test_file_compatibility(tmp_path) -> None:
+    """历史 CJS .js 测试文件在 CommonJS 项目中仍可执行。"""
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "package.json").write_text(
+        '{"name":"legacy-fixture","version":"1.0.0","scripts":{}}', encoding="utf-8"
+    )
+    (source / "package-lock.json").write_text(
+        '{"name":"legacy-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"legacy-fixture","version":"1.0.0"}}}',
+        encoding="utf-8",
+    )
+    (source / "app.js").write_text(
+        "module.exports = { add: (a, b) => a + b };\n",
+        encoding="utf-8",
+    )
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_ai_legacy.js").write_text(
+        "const assert = require('node:assert/strict');\n"
+        "const app = require('../app.js');\n"
+        "assert.equal(app.add(2, 3), 5);\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": "whitebox",
+            "PRISM_PREVIEW_PORT": "39124",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    agent_tests = sandbox_service._extract_agent_tests_result(output)
+    assert agent_tests is not None
+    assert agent_tests["files"]["test_ai_legacy.js"] == "pass"
+
+
+def test_real_java_whitebox_runner_compiles_and_runs_generated_test_with_project_classes(tmp_path) -> None:
+    """Java AI 白盒 harness 的编译和运行 classpath 都包含项目输出目录。"""
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    project_file = source / "src/main/java/com/example/Business.java"
+    project_file.parent.mkdir(parents=True)
+    project_file.write_text(
+        "package com.example; public class Business { public static int value() { return 7; } }\n",
+        encoding="utf-8",
+    )
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_ai_one.java").write_text(
+        "class test_ai_one { public static void main(String[] args) { "
+        "if (com.example.Business.value() != 7) throw new AssertionError(); } }\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    javac_log = tmp_path / "javac.log"
+    java_log = tmp_path / "java.log"
+    fake_javac = fake_bin / "javac"
+    fake_javac.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$PRISM_TEST_JAVAC_LOG\"\n"
+        "exit \"${PRISM_FAKE_JAVAC_EXIT:-0}\"\n",
+        encoding="utf-8",
+    )
+    fake_java = fake_bin / "java"
+    fake_java.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$PRISM_TEST_JAVA_LOG\"\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_javac.chmod(0o755)
+    fake_java.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "java",
+            "PRISM_TEST_MODE": "whitebox",
+            "PRISM_PREVIEW_PORT": "39125",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_TEST_JAVAC_LOG": str(javac_log),
+            "PRISM_TEST_JAVA_LOG": str(java_log),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    project_classes = str(tmp_path / "workspace" / ".prism-classes")
+    compile_calls = javac_log.read_text(encoding="utf-8").splitlines()
+    generated_compile = next(call for call in compile_calls if "test_ai_one.java" in call)
+    assert "-cp " in generated_compile
+    assert project_classes in generated_compile
+    runtime_call = java_log.read_text(encoding="utf-8").strip()
+    # Worker 镜像使用 Linux classpath 分隔符，即使该 runner 回归在 macOS 上执行。
+    assert "-cp .prism-ai-classes:" in runtime_call
+    assert project_classes in runtime_call
+    assert runtime_call.endswith(" test_ai_one")
+    agent_tests = sandbox_service._extract_agent_tests_result(output)
+    assert agent_tests is not None
+    assert agent_tests["files"]["test_ai_one.java"] == "pass"
+
+
+@pytest.mark.parametrize(
+    ("project_type", "expected_body", "expected_pass"),
+    [
+        ("commonjs", "ok", True),
+        ("module", "ok", True),
+        ("module", "different", False),
+    ],
+    ids=["cjs-project-pass", "esm-project-pass", "esm-project-assertion-fails"],
+)
+def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects(
+    tmp_path, project_type, expected_body, expected_pass
+) -> None:
+    """黑盒回环断言 .mjs 必须由 runner 找到并实际执行，而不能退化为 route-only。"""
+    import os
+    import socket
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    package = {"name": "blackbox-fixture", "version": "1.0.0", "scripts": {"start": "node server.js"}}
+    if project_type == "module":
+        package["type"] = "module"
+    (source / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    (source / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "blackbox-fixture",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "packages": {"": {"name": "blackbox-fixture", "version": "1.0.0"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    if project_type == "module":
+        app_source = (
+            "import http from 'node:http';\n"
+            "http.createServer((req, res) => {\n"
+            "  res.writeHead(200, {'content-type': 'text/plain'});\n"
+            "  res.end(req.url === '/healthz' ? 'ok' : 'root');\n"
+            "}).listen(Number(process.env.PORT), '127.0.0.1');\n"
+        )
+    else:
+        app_source = (
+            "const http = require('node:http');\n"
+            "http.createServer((req, res) => {\n"
+            "  res.writeHead(200, {'content-type': 'text/plain'});\n"
+            "  res.end(req.url === '/healthz' ? 'ok' : 'root');\n"
+            "}).listen(Number(process.env.PORT), '127.0.0.1');\n"
+        )
+    (source / "server.js").write_text(app_source, encoding="utf-8")
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "blackbox.mjs").write_text(
+        "import assert from 'node:assert/strict';\n"
+        "const response = await fetch(`http://127.0.0.1:${process.env.PRISM_PREVIEW_PORT}/healthz`);\n"
+        "assert.equal(response.status, 200);\n"
+        f"assert.equal(await response.text(), {json.dumps(expected_body)});\n",
+        encoding="utf-8",
+    )
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    env = os.environ.copy()
+    env.update(
+        {
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": "blackbox",
+            "PRISM_PREVIEW_PORT": str(port),
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    assert (completed.returncode == 0) is expected_pass, output
+    receipt = sandbox_service._extract_blackbox_result(output)
+    assert receipt is not None
+    assert receipt["status"] == ("passed" if expected_pass else "failed")
+    assert receipt["agent_assertions_passed"] is expected_pass
+    agent_tests = sandbox_service._extract_agent_tests_result(output)
+    assert agent_tests is not None
+    assert agent_tests["files"]["blackbox.mjs"] == ("pass" if expected_pass else "fail")
+
+
+@pytest.mark.parametrize("mode", ["blackbox", "whitebox", "combined"])
+@pytest.mark.parametrize("install_exit", [0, 23], ids=["offline-cache-hit", "offline-cache-miss"])
+def test_real_node_runner_prepares_dependencies_before_tests_and_startup(
+    tmp_path, mode, install_exit
+) -> None:
+    """执行真实 runner：离线安装成功后才测试/启动，失败不能伪报通过；combined 不重复安装。"""
+    import os
+    import socket
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "runner-fixture",
+                "version": "1.0.0",
+                "scripts": {"start": "node server.js", "test": "node whitebox_test.js"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "runner-fixture",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "packages": {"": {"name": "runner-fixture", "version": "1.0.0"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "server.js").write_text(
+        "const fs = require('node:fs');\n"
+        "const http = require('node:http');\n"
+        "if (!fs.existsSync(process.env.PRISM_TEST_DEPENDENCY_MARKER)) {\n"
+        "  console.error('dependency marker missing before application listen'); process.exit(41);\n"
+        "}\n"
+        "http.createServer((req, res) => { res.writeHead(200); res.end('ready'); })\n"
+        "  .listen(Number(process.env.PORT), '127.0.0.1');\n",
+        encoding="utf-8",
+    )
+    (source / "whitebox_test.js").write_text(
+        "const fs = require('node:fs');\n"
+        "if (!fs.existsSync(process.env.PRISM_TEST_DEPENDENCY_MARKER)) process.exit(42);\n",
+        encoding="utf-8",
+    )
+    tests_dir = source / "_agent_tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_ai_dependency.mjs").write_text(
+        "import assert from 'node:assert/strict';\n"
+        "import fs from 'node:fs';\n"
+        "assert.equal(fs.existsSync(process.env.PRISM_TEST_DEPENDENCY_MARKER), true);\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "blackbox.mjs").write_text(
+        "import assert from 'node:assert/strict';\n"
+        "const response = await fetch(`http://127.0.0.1:${process.env.PRISM_PREVIEW_PORT}/healthz`);\n"
+        "assert.equal(response.status, 200);\n"
+        "assert.equal(await response.text(), 'ready');\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    npm_log = tmp_path / "npm.log"
+    marker = tmp_path / "offline-dependency-ready"
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$1\" >> \"$PRISM_TEST_NPM_LOG\"\n"
+        "case \"$1\" in\n"
+        "  ci)\n"
+        "    if [ \"${PRISM_FAKE_NPM_CI_EXIT:-0}\" -ne 0 ]; then exit \"$PRISM_FAKE_NPM_CI_EXIT\"; fi\n"
+        "    sleep 1\n"
+        "    : > \"$PRISM_TEST_DEPENDENCY_MARKER\"\n"
+        "    exit 0 ;;\n"
+        "  test) test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" ;;\n"
+        "  start)\n"
+        "    test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || {\n"
+        "      echo 'dependency marker missing before npm start' >&2; exit 43;\n"
+        "    }\n"
+        "    exec node server.js ;;\n"
+        "  *) echo \"unexpected fake npm command: $*\" >&2; exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": mode,
+            "PRISM_PREVIEW_PORT": str(port),
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_TEST_NPM_LOG": str(npm_log),
+            "PRISM_TEST_DEPENDENCY_MARKER": str(marker),
+            "PRISM_FAKE_NPM_CI_EXIT": str(install_exit),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=45,
+        check=False,
+    )
+
+    output = completed.stdout + completed.stderr
+    npm_calls = npm_log.read_text(encoding="utf-8").splitlines()
+    if install_exit == 0:
+        assert completed.returncode == 0, output
+        assert marker.is_file()
+        assert npm_calls.count("ci") == 1
+        assert npm_calls.index("ci") < npm_calls.index("test") if mode != "blackbox" else True
+        if mode == "blackbox":
+            assert npm_calls.index("ci") < npm_calls.index("start")
+            blackbox = sandbox_service._extract_blackbox_result(output)
+            assert blackbox is not None and blackbox["status"] == "passed"
+            assert blackbox["agent_assertions_passed"] is True
+        if mode in {"whitebox", "combined"}:
+            assert npm_calls.index("ci") < npm_calls.index("test")
+            assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
+        if mode == "combined":
+            assert npm_calls.index("test") < npm_calls.index("start")
+            blackbox = sandbox_service._extract_blackbox_result(output)
+            assert blackbox is not None and blackbox["status"] == "passed"
+            assert blackbox["agent_assertions_passed"] is True
+    else:
+        assert completed.returncode != 0, output
+        assert not marker.exists()
+        assert npm_calls == ["ci"], output
+        if mode in {"whitebox", "combined"}:
+            assert '"passed":false,"reason":"dependency_preparation_failed"' in output
+        if mode in {"blackbox", "combined"}:
+            blackbox = sandbox_service._extract_blackbox_result(output)
+            assert blackbox is not None
+            assert blackbox["status"] == "failed"
+            assert blackbox["basis"] == "route_smoke"
+            assert blackbox["agent_assertions_passed"] is None
+
+
+@pytest.mark.parametrize("tool", ["maven", "gradle", "go", "python"])
+@pytest.mark.parametrize("install_exit", [0, 23], ids=["offline-cache-hit", "offline-cache-miss"])
+def test_real_runner_prepares_offline_dependencies_before_language_whitebox(
+    tmp_path, tool, install_exit
+) -> None:
+    """Maven/Gradle/Go/Python 白盒先真实调用本地依赖准备器，失败不得进入测试并误报通过。"""
+    import os
+    import subprocess
+    import sys
+
+    source = tmp_path / "source"
+    source.mkdir()
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "offline-dependency-ready"
+    command_log = tmp_path / "commands.log"
+
+    if tool == "maven":
+        (source / "pom.xml").write_text("<project/>", encoding="utf-8")
+        (source / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+        (source / "mvnw").write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *dependency:go-offline*) printf 'prepare\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi; "
+            "    : > \"$PRISM_TEST_DEPENDENCY_MARKER\" ;;\n"
+            "  *test*) printf 'test\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43 ;;\n"
+            "  *) exit 64 ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+    elif tool == "gradle":
+        (source / "build.gradle").write_text("plugins {}\n", encoding="utf-8")
+        (source / "Main.java").write_text("class Main {}\n", encoding="utf-8")
+        (source / "gradlew").write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *dependencies*) printf 'prepare\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi; "
+            "    : > \"$PRISM_TEST_DEPENDENCY_MARKER\" ;;\n"
+            "  *test*) printf 'test\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43 ;;\n"
+            "  *) exit 64 ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+    elif tool == "go":
+        (source / "go.mod").write_text("module example.test/fixture\n\ngo 1.20\n", encoding="utf-8")
+        (source / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+        fake_go = fake_bin / "go"
+        fake_go.write_text(
+            "#!/bin/sh\n"
+            "case \"$1 $2\" in\n"
+            "  'mod download') printf 'prepare\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi; "
+            "    : > \"$PRISM_TEST_DEPENDENCY_MARKER\" ;;\n"
+            "  'list ./...') printf 'example.test/fixture\\n' ;;\n"
+            "  'test '* ) printf 'test\\n' >> \"$PRISM_TEST_COMMAND_LOG\"; "
+            "    test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43 ;;\n"
+            "  *) exit 64 ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        fake_go.chmod(0o755)
+    else:
+        (source / "requirements.txt").write_text("offline-fixture==1.0\n", encoding="utf-8")
+        (source / "main.py").write_text("def main():\n    return True\n", encoding="utf-8")
+        tests_dir = source / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_dependencies.py").write_text(
+            "import os\nfrom pathlib import Path\n"
+            "def test_dependency_was_prepared():\n"
+            "    assert Path(os.environ['PRISM_TEST_DEPENDENCY_MARKER']).is_file()\n"
+            "    with open(os.environ['PRISM_TEST_COMMAND_LOG'], 'a') as log: log.write('test\\n')\n",
+            encoding="utf-8",
+        )
+        fake_python = fake_bin / "python"
+        fake_python.write_text(
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = -m ] && [ \"${2:-}\" = pip ]; then shift 2; exec \"$PRISM_TEST_FAKE_PIP\" \"$@\"; fi\n"
+            "exec \"$PRISM_TEST_REAL_PYTHON\" \"$@\"\n",
+            encoding="utf-8",
+        )
+        fake_pip = fake_bin / "pip"
+        fake_pip.write_text(
+            "#!/bin/sh\n"
+            "printf 'prepare\\n' >> \"$PRISM_TEST_COMMAND_LOG\"\n"
+            "if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi\n"
+            ": > \"$PRISM_TEST_DEPENDENCY_MARKER\"\n",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
+        fake_pip.chmod(0o755)
+
+    for wrapper_name in ("mvnw", "gradlew"):
+        wrapper = source / wrapper_name
+        if wrapper.exists():
+            wrapper.chmod(0o755)
+
+    if tool == "python":
+        (source / "requirements.txt").write_text("offline-fixture==1.0\n", encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": {"maven": "java", "gradle": "java", "go": "go", "python": "python"}[tool],
+            "PRISM_TEST_MODE": "whitebox",
+            "PRISM_PREVIEW_PORT": "39127",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_TEST_COMMAND_LOG": str(command_log),
+            "PRISM_TEST_DEPENDENCY_MARKER": str(marker),
+            "PRISM_FAKE_INSTALL_EXIT": str(install_exit),
+        }
+    )
+    if tool == "python":
+        env.update({"PRISM_TEST_REAL_PYTHON": sys.executable, "PRISM_TEST_FAKE_PIP": str(fake_bin / "pip")})
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
+        capture_output=True, timeout=45, check=False,
+    )
+    output = completed.stdout + completed.stderr
+    commands = command_log.read_text(encoding="utf-8").splitlines() if command_log.exists() else []
+
+    if install_exit == 0:
+        assert completed.returncode == 0, output
+        assert marker.is_file()
+        assert commands == ["prepare", "test"]
+        assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
+    else:
+        assert completed.returncode != 0, output
+        assert not marker.exists()
+        assert commands == ["prepare"]
+        assert '"passed":false,"reason":"dependency_preparation_failed"' in output
+
+
+@pytest.mark.parametrize("install_exit", [0, 23], ids=["offline-cache-hit", "offline-cache-miss"])
+def test_real_runner_prepares_dependencies_before_injected_whitebox_verify(tmp_path, install_exit) -> None:
+    """受控 deploy 白盒脚本同样必须在离线依赖准备成功后才能运行。"""
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "package.json").write_text(
+        '{"name":"verify-fixture","version":"1.0.0","scripts":{}}', encoding="utf-8"
+    )
+    (source / "package-lock.json").write_text(
+        '{"name":"verify-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"verify-fixture","version":"1.0.0"}}}',
+        encoding="utf-8",
+    )
+    (source / "app.js").write_text("module.exports = true;\n", encoding="utf-8")
+    (source / "_prism_verify.sh").write_text(
+        "#!/bin/sh\n"
+        "test \"$1\" = whitebox || exit 64\n"
+        "test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43\n"
+        "printf 'verify\\n' >> \"$PRISM_TEST_COMMAND_LOG\"\n"
+        "printf '%s\\n' 'PRISM_WHITEBOX_DONE {\"executed\":true,\"passed\":true}'\n",
+        encoding="utf-8",
+    )
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text(
+        "#!/bin/sh\n"
+        "printf 'prepare\\n' >> \"$PRISM_TEST_COMMAND_LOG\"\n"
+        "if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi\n"
+        ": > \"$PRISM_TEST_DEPENDENCY_MARKER\"\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+    command_log = tmp_path / "commands.log"
+    marker = tmp_path / "dependency-ready"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": "whitebox",
+            "PRISM_PREVIEW_PORT": "39128",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_TEST_COMMAND_LOG": str(command_log),
+            "PRISM_TEST_DEPENDENCY_MARKER": str(marker),
+            "PRISM_FAKE_INSTALL_EXIT": str(install_exit),
+        }
+    )
+    completed = subprocess.run(
+        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
+        capture_output=True, timeout=30, check=False,
+    )
+    output = completed.stdout + completed.stderr
+    commands = command_log.read_text(encoding="utf-8").splitlines()
+    if install_exit == 0:
+        assert completed.returncode == 0, output
+        assert commands == ["prepare", "verify"]
+        assert marker.is_file()
+        assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
+    else:
+        assert completed.returncode != 0, output
+        assert commands == ["prepare"]
+        assert not marker.exists()
+        assert '"passed":false,"reason":"dependency_preparation_failed"' in output
+
+
+def test_test_generator_scopes_probes_to_source_and_configured_database(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    messages: list[str] = []
+
+    def call_json(message, **_kwargs):
+        messages.append(message)
+        return SimpleNamespace(
+            success=True,
+            data={
+                "files": [
+                    {"path": "test_ai_one.py", "content": "assert 1 == 1\n"},
+                    {"path": "test_ai_two.py", "content": "assert 2 > 1\n"},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["src-1"],
+                "source_summaries": [{"source_id": "src-1", "summary": "模块仅定义 parse_formula(text)。"}],
+                "protected_facts": [],
+            },
+        },
+        db_type="none",
+    )
+
+    assert len(result["files"]) == 2
+    assert len(messages) == 1
+    assert "白盒仅测试摘要或源码原文明确存在的函数、类、参数和行为" in messages[0]
+    assert "不得猜测 /health、登录路径、查询参数、权限模型或数据库 schema" in messages[0]
+    assert "数据库为 none 时禁止导入或猜测数据库 API" in messages[0]
+
+
+def test_test_generator_accepts_symbol_present_in_full_source_but_omitted_from_summary(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    monkeypatch.setattr(
+        agent,
+        "call_json",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            success=True,
+            data={
+                "files": [
+                    {
+                        "path": "test_ai_lookup.py",
+                        "content": "from app.routes import find_user\nassert find_user('ALICE') == 'alice'\n",
+                    },
+                    {"path": "test_ai_boundary.py", "content": "assert find_user('') is None\n"},
+                ]
+            },
+        ),
+    )
+
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "source_chunks": [
+                {"path": "app/routes.py", "text": "def find_user(name):\n    return name.lower()\n"},
+            ],
+            "_compacted_source_context": {
+                "covered_source_ids": ["source-1"],
+                "source_summaries": [{"source_id": "source-1", "summary": "存在用户名查询逻辑。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert len(result["files"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("test_source", "expected_issues"),
+    [
+        ("import app.routes as routes\nroutes.real_route()\n", []),
+        ("import app.routes\napp.routes.real_route()\n", []),
+        ("from app import routes\nroutes.real_route()\n", []),
+        ("import app.routes as routes\nroutes.phantom_handler()\n", ["phantom_handler"]),
+        ("import app.routes\napp.routes.phantom_handler()\n", ["phantom_handler"]),
+    ],
+    ids=[
+        "module-attribute-grounded",
+        "fully-qualified-module-attribute-grounded",
+        "from-package-module-attribute-grounded",
+        "module-alias-fake-export",
+        "fully-qualified-fake-export",
+    ],
+)
+def test_python_module_attribute_grounding_is_module_specific(test_source, expected_issues) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "app/routes.py", "text": "def real_route():\n    return True\n"},
+            {"path": "app/models.py", "text": "def phantom_handler():\n    return True\n"},
+        ]
+    }
+    files = [{"path": "test_ai_route.py", "content": test_source}]
+
+    assert _grounding_feedback(files, source_summary) == expected_issues
+
+
+def test_test_generator_returns_schema_error_for_non_object_file_items(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    monkeypatch.setattr(
+        agent,
+        "call_json",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            success=True,
+            data={"files": [None]},
+        ),
+    )
+
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["src-1"],
+                "source_summaries": [{"source_id": "src-1", "summary": "main.py 定义函数 run。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["failure_kind"] == "schema_invalid"
+    assert "测试文件项格式无效" in result["error"]
+
+
+def test_test_generator_rejects_non_string_file_fields_instead_of_coercing_them(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    monkeypatch.setattr(
+        agent,
+        "call_json",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            success=True,
+            data={
+                "files": [
+                    {"path": "test_ai_one.py", "content": 1},
+                    {"path": 2, "content": "assert True"},
+                ]
+            },
+        ),
+    )
+
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["src-1"],
+                "source_summaries": [{"source_id": "src-1", "summary": "main.py 定义函数 run。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["failure_kind"] == "schema_invalid"
+    assert "路径和内容必须为字符串" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("language", "files"),
+    [
+        (
+            "node",
+            [
+                {
+                    "path": "test_ai_one.mjs",
+                    "content": "import assert from 'node:assert/strict'; assert.equal(1, 1);",
+                },
+                {
+                    "path": "test_ai_two.mjs",
+                    "content": "import assert from 'node:assert/strict'; assert.ok(true);",
+                },
+            ],
+        ),
+        (
+            "php",
+            [
+                {"path": "test_ai_one.php", "content": "<?php assert(true);"},
+                {"path": "test_ai_two.php", "content": "<?php if (1 !== 1) { throw new Exception('failed'); }"},
+            ],
+        ),
+        (
+            "go",
+            [
+                {
+                    "path": "test_ai_one.go",
+                    "content": 'package main\nfunc main() { if 1 != 1 { panic("failed") } }',
+                },
+                {
+                    "path": "test_ai_two.go",
+                    "content": 'package main\nfunc main() { if true != true { panic("failed") } }',
+                },
+            ],
+        ),
+        (
+            "java",
+            [
+                {
+                    "path": "test_ai_one.java",
+                    "content": "class TestOne{public static void main(String[] a){if(1!=1)throw new Error();}}",
+                },
+                {
+                    "path": "test_ai_two.java",
+                    "content": "class TestTwo{public static void main(String[] a){if(true!=true)throw new Error();}}",
+                },
+            ],
+        ),
+    ],
+    ids=["node-smoke", "php-smoke", "go-smoke", "java-smoke"],
+)
+def test_test_generator_does_not_apply_python_grounding_to_other_languages(monkeypatch, language, files) -> None:
+    agent = CaseGeneratorAgent()
+    calls: list[str] = []
+
+    def call_json(message, **_kwargs):
+        calls.append(message)
+        return SimpleNamespace(success=True, data={"files": files})
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language=language,
+        test_mode="whitebox",
+        source_summary={
+            "_compacted_source_context": {
+                "covered_source_ids": ["src-1"],
+                "source_summaries": [{"source_id": "src-1", "summary": "项目源码已完整覆盖。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["files"] == files
+    assert len(calls) == 1
 
 
 def test_source_compaction_calls_each_chunk_and_checks_coverage(monkeypatch) -> None:

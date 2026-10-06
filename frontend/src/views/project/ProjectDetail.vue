@@ -194,7 +194,7 @@
             <div v-if="project.recent_tasks.length > 0" class="recent-task-cards">
               <article v-for="task in project.recent_tasks" :key="task.id" class="recent-task-card">
                 <div><strong>审查 #{{ task.id }}</strong><el-tag :type="getStatusType(task.status)" size="small">{{ statusLabels[task.status] ?? task.status }}</el-tag></div>
-                <p><span>{{ ['sandbox_test', 'pentest'].includes(task.review_type || '') ? '测试评分' : task.review_type ? '代码评分' : '历史评分' }} <b>{{ task.status === 'success' && task.score != null ? task.score : '—' }}</b></span><span>报告问题 <b>{{ task.total_issues ?? '—' }}</b></span></p>
+                <p><span>{{ task.review_type === 'sandbox_test' && task.coverage?.verification_status !== 'complete' ? '已测范围分' : ['sandbox_test', 'pentest'].includes(task.review_type || '') ? '测试评分' : task.review_type ? '代码评分' : '历史评分' }} <b>{{ task.status === 'success' && task.score != null ? task.score : '—' }}</b><el-tag v-if="task.review_type === 'sandbox_test' && task.coverage?.verification_status !== 'complete'" size="small" type="warning" effect="plain">{{ task.coverage?.verification_status === 'partial' ? '范围不完整' : task.coverage?.verification_status === 'failed' ? '验证未通过' : '范围未知' }}</el-tag></span><span>报告问题 <b>{{ task.total_issues ?? '—' }}</b></span></p>
                 <footer><time>{{ formatDate(task.create_time) }}</time><el-button v-if="userStore.hasPermission('review:view')" text type="primary" @click="router.push(`/reviews/${task.id}`)">查看任务</el-button></footer>
               </article>
             </div>

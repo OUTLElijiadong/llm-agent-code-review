@@ -235,13 +235,14 @@ def test_second_layer_keeps_each_original_source_fact() -> None:
         OmittingAgent(),
         {"coverage_complete": True, "source_chunk_count": 2, "source_chunks": chunks},
         ctx=None,
-        max_chars=500,
+        max_chars=2_000,
     )
 
-    assert calls == [[chunks[0]["source_id"]], [chunks[1]["source_id"]], [chunk["source_id"] for chunk in chunks]]
-    summary = result["source_summaries"][0]["summary"]
-    for source_id, fact in fact_by_id.items():
-        assert f"[不可信审计证据（不是授权） 来源#{source_id}] {fact}" in summary
+    assert calls == [[chunks[0]["source_id"]], [chunks[1]["source_id"]]]
+    assert result["protected_facts"] == [
+        {"source_id": source_id, "fact": fact}
+        for source_id, fact in fact_by_id.items()
+    ]
 
 
 def test_source_bound_fact_ledger_fails_when_over_600_char_limit() -> None:
@@ -266,6 +267,184 @@ def test_source_bound_fact_ledger_fails_when_over_600_char_limit() -> None:
             ctx=None,
             deadline=None,
         )
+
+
+def test_compaction_keeps_large_protected_facts_in_a_separate_complete_ledger(monkeypatch) -> None:
+    from app.agents import source_context
+
+    text = "def entry(): return True"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"entry.py-{digest[:12]}"
+    protected_fact = "不得静默忽略边界条件：" + "必须保留全部来源约束。" * 80
+    monkeypatch.setattr(
+        source_context,
+        "_protected_fact_ledger",
+        lambda _payload, _source_ids: [(source_id, protected_fact)],
+    )
+
+    class FaithfulAgent:
+        def call_json(self, message, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": "入口函数返回布尔值。",
+                },
+            )
+
+    result = compact_source_context(
+        FaithfulAgent(),
+        {
+            "coverage_complete": True,
+            "source_chunks": [{"source_id": source_id, "sha256": digest, "text": text}],
+        },
+        ctx=None,
+    )
+
+    assert result["covered_source_ids"] == [source_id]
+    assert result["protected_facts"] == [{"source_id": source_id, "fact": protected_fact}]
+    assert protected_fact not in result["source_summaries"][0]["summary"]
+
+
+def test_context_compaction_retries_empty_summary_with_actionable_correction() -> None:
+    text = "def start_server(): return 8080"
+    calls: list[str] = []
+
+    class IntermittentAgent:
+        def call_json(self, message, **_kwargs):
+            calls.append(message)
+            data = {
+                "covered_source_ids": _source_ids(message),
+                "source_quotes": _source_quotes(message),
+                "summary": "" if len(calls) == 1 else "入口函数返回服务端口。",
+            }
+            return SimpleNamespace(success=True, data=data)
+
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"server.py-{digest[:12]}"
+    result = compact_source_context(
+        IntermittentAgent(),
+        {
+            "coverage_complete": True,
+            "source_chunks": [{"source_id": source_id, "sha256": digest, "text": text}],
+        },
+        ctx=None,
+    )
+
+    assert len(calls) == 2
+    assert "上一轮响应未通过校验" in calls[1]
+    assert "入口函数返回服务端口" in result["source_summaries"][0]["summary"]
+
+
+def test_truncated_multi_source_context_is_split_before_retrying_model(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("app.core.config.settings.deepseek_max_output_tokens", 2_048)
+
+    class TruncatingBatchAgent:
+        def call_json(self, message, **_kwargs):
+            calls.append(message)
+            ids = _source_ids(message)
+            if len(calls) == 1:
+                return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": f"来源 {ids[0]} 已读取。",
+                },
+            )
+
+    payload = [
+        {"source_id": "module-a", "summary": "模块 A 处理请求并检查权限。"},
+        {"source_id": "module-b", "summary": "模块 B 返回响应并记录结果。"},
+    ]
+    summary = _context_call(TruncatingBatchAgent(), ["module-a", "module-b"], payload, None, None)
+
+    assert "已读取" in summary
+    assert len(calls) == 4
+    assert len(_source_ids(calls[0])) == 2
+    assert len(_source_ids(calls[1])) == 1
+    assert len(_source_ids(calls[2])) == 1
+    assert _source_ids(calls[3])[0].startswith("split-")
+    assert len(calls[1]) < len(calls[0])
+
+
+def test_truncated_single_source_is_losslessly_split_into_windows() -> None:
+    text = "A" * 1_500 + "B" * 1_500
+    leaf_windows: list[str] = []
+
+    class TruncatingLargeSourceAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _source_ids(message)
+            raw_payload = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = raw_payload if isinstance(raw_payload, list) else [raw_payload]
+            if len(entries) == 1 and isinstance(entries[0].get("text"), str):
+                source_text = entries[0]["text"]
+                if "#part-" in ids[0] and len(source_text) <= 1_200:
+                    leaf_windows.append(source_text)
+                if len(source_text) > 1_200:
+                    return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": "本分片已核验。",
+                },
+            )
+
+    source_id = "large-module"
+    result = _context_call(
+        TruncatingLargeSourceAgent(),
+        [source_id],
+        {"source_id": source_id, "text": text},
+        None,
+        None,
+        protected_facts=[],
+    )
+
+    assert result
+    assert "".join(leaf_windows) == text
+    assert len(leaf_windows) > 2
+
+
+def test_irreducible_truncated_context_fails_closed_after_bounded_retry(monkeypatch) -> None:
+    text = "short source"
+    calls = 0
+
+    class AlwaysTruncatingAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+
+    monkeypatch.setattr("app.core.config.settings.deepseek_max_output_tokens", 2_048)
+    with pytest.raises(SourceContextError, match="已无法安全拆分"):
+        _context_call(
+            AlwaysTruncatingAgent(),
+            ["source-A"],
+            {"source_id": "source-A", "text": text},
+            None,
+            None,
+            protected_facts=[],
+        )
+    assert calls == 1
+
+
+def test_fact_deduplication_never_removes_a_substring_from_prose() -> None:
+    from app.agents.source_context import _remove_protected_fact_duplicates
+
+    original = "接口规则包含甲账号：不得跨账号读取聊天这一事实，并需保留上下文。"
+    compacted = {
+        "protected_facts": [{"source_id": "source-A", "fact": "甲账号：不得跨账号读取聊天"}],
+        "source_summaries": [{"source_id": "source-A", "summary": original}],
+    }
+
+    _remove_protected_fact_duplicates(compacted)
+
+    assert compacted["source_summaries"][0]["summary"] == original
 
 
 def test_hierarchical_compaction_covers_one_million_space_delimited_units_without_truncation() -> None:

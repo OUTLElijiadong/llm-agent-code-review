@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from deploy.tests.security_host import Host
+
 MODULE = Path(__file__).resolve().parents[1] / "prism_security_block.py"
 SPEC = importlib.util.spec_from_file_location("prism_security_block", MODULE)
 assert SPEC and SPEC.loader
@@ -29,7 +31,6 @@ def web_line(ip: str, path: str, status: str = "404", stamp: str = "2026-10-05T1
     return f'{ip} - - [{stamp}] "GET {path} HTTP/1.1" {status} 153 "-" "curl/8.0"'
 
 
-from tests.security_host import Host
 @pytest.fixture
 def controller(tmp_path, monkeypatch):
     host = Host()
@@ -69,7 +70,7 @@ def test_web_attacker_summary_only_accepts_sensitive_paths():
 
 
 def test_ip_trace_scores_local_evidence_and_marks_external_attribution_separately(controller):
-    ctl, host = controller
+    ctl, _host = controller
     result = ctl.ip_trace({"ip": "45.155.205.7"})
     assert result["ip"] == "45.155.205.7"
     assert result["is_public"] is True
@@ -155,7 +156,7 @@ def test_ip_trace_marks_protected_sources_and_empty_evidence(tmp_path, monkeypat
 
 
 def test_surface_audit_reports_listeners_and_installed_applications(controller):
-    ctl, host = controller
+    ctl, _host = controller
     result = ctl.surface_audit()
     assert result["public_listeners"], "应识别监听在 0.0.0.0 的端口"
     assert {row["port"] for row in result["public_listeners"]} == {"443", "22"}
@@ -177,7 +178,7 @@ def test_surface_audit_never_installs_or_modifies(controller):
 
 
 def test_traffic_summary_exposes_metadata_without_payload(controller):
-    ctl, host = controller
+    ctl, _host = controller
     result = ctl.traffic_summary({"since_hours": 24})
     assert result["payload_captured"] is False
     assert result["window_hours"] == 24
