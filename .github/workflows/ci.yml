@@ -50,8 +50,11 @@ jobs:
           socket_dir="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/prism-login-redis-${RUN_ID}-${RUN_ATTEMPT}"
           mkdir -p "$socket_dir"
           chmod 0700 "$socket_dir"
-          echo "PRISM_CI_REDIS_CONTAINER=$name" >> "$GITHUB_ENV"
-          echo "PRISM_LOGIN_TEST_REDIS_SOCKET=$socket_dir/redis.sock" >> "$GITHUB_ENV"
+          {
+            echo "PRISM_CI_REDIS_CONTAINER=$name"
+            echo "PRISM_LOGIN_TEST_REDIS_SOCKET=$socket_dir/redis.sock"
+            echo "PRISM_LOGIN_TEST_REDIS_SERVER_SOCKET=/tmp/redis.sock"
+          } >> "$GITHUB_ENV"
           docker run --detach --name "$name" --network none \
             --user "$(id -u):$(id -g)" \
             --volume "$socket_dir:/tmp" \

@@ -23,7 +23,8 @@ from app.core.rate_limit import LoginFailureLimiter
 
 CONTAINER = os.environ.get('PRISM_LOGIN_TEST_REDIS_CONTAINER', '')
 SOCKET = os.environ.get('PRISM_LOGIN_TEST_REDIS_SOCKET', '')
-pytestmark = pytest.mark.skipif(
+SERVER_SOCKET = os.environ.get('PRISM_LOGIN_TEST_REDIS_SERVER_SOCKET', '')
+requires_redis = pytest.mark.skipif(
     not (CONTAINER or SOCKET),
     reason='Requires an explicitly isolated local Redis container or Unix-socket server',
 )
@@ -81,8 +82,37 @@ def _isolated_socket_redis() -> _UnixSocketRedis:
     assert client.client.ping()
     assert client.client.config_get('port').get('port') == '0', 'TCP must be disabled'
     assert client.client.config_get('tls-port').get('tls-port') == '0', 'TLS TCP must be disabled'
-    assert Path(client.client.config_get('unixsocket').get('unixsocket', '')).resolve() == socket_path.resolve()
+    _assert_redis_server_socket_path(
+        client.client.config_get('unixsocket').get('unixsocket', ''),
+        socket_path,
+        SERVER_SOCKET,
+    )
     return client
+
+
+def _assert_redis_server_socket_path(configured_socket: str, host_socket: Path, server_socket: str = '') -> None:
+    expected_socket = Path(server_socket) if server_socket else host_socket
+    actual_socket = Path(configured_socket)
+    assert expected_socket.is_absolute() and expected_socket.name == 'redis.sock'
+    assert actual_socket == expected_socket, (
+        f'Redis server socket path {actual_socket} does not match expected in-server path {expected_socket}'
+    )
+
+
+def test_redis_socket_path_check_accepts_same_namespace(tmp_path):
+    socket_path = tmp_path / 'redis.sock'
+    _assert_redis_server_socket_path(str(socket_path), socket_path)
+
+
+def test_redis_socket_path_check_accepts_container_bind_mount_namespace(tmp_path):
+    host_socket = tmp_path / 'prism-login-redis-123-1' / 'redis.sock'
+    _assert_redis_server_socket_path('/tmp/redis.sock', host_socket, '/tmp/redis.sock')
+
+
+def test_redis_socket_path_check_rejects_unexpected_server_socket(tmp_path):
+    host_socket = tmp_path / 'prism-login-redis-123-1' / 'redis.sock'
+    with pytest.raises(AssertionError, match='does not match expected in-server path'):
+        _assert_redis_server_socket_path('/var/run/redis.sock', host_socket, '/tmp/redis.sock')
 
 
 @pytest.fixture
@@ -124,6 +154,7 @@ def _last_subsecond(redis, limiter, ip):
     return key
 
 
+@requires_redis
 def test_real_lua_keeps_same_window_blocked(redis_limiter):
     _, limiter, ip = redis_limiter
     _fail(limiter, ip, 5)
@@ -131,6 +162,7 @@ def test_real_lua_keeps_same_window_blocked(redis_limiter):
     assert not limiter.begin_attempt(ip).allowed
 
 
+@requires_redis
 def test_real_lua_subsecond_remaining_reports_one_second_and_then_expires(redis_limiter):
     redis, limiter, ip = redis_limiter
     _fail(limiter, ip, 5)
@@ -142,6 +174,7 @@ def test_real_lua_subsecond_remaining_reports_one_second_and_then_expires(redis_
     assert limiter.begin_attempt(ip).allowed
 
 
+@requires_redis
 def test_real_lua_admission_near_expiry_does_not_restart_window(redis_limiter):
     redis, limiter, ip = redis_limiter
     _fail(limiter, ip, 4)
@@ -150,6 +183,7 @@ def test_real_lua_admission_near_expiry_does_not_restart_window(redis_limiter):
     assert 0 < int(redis.command('PTTL', key)) <= 450
 
 
+@requires_redis
 def test_real_lua_failure_settlement_near_expiry_does_not_restart_window(redis_limiter):
     redis, limiter, ip = redis_limiter
     _fail(limiter, ip, 4)
@@ -161,6 +195,7 @@ def test_real_lua_failure_settlement_near_expiry_does_not_restart_window(redis_l
     assert 0 < int(redis.command('PTTL', key)) <= 450
 
 
+@requires_redis
 def test_real_lua_check_and_legacy_increment_preserve_subsecond_window(redis_limiter):
     redis, limiter, ip = redis_limiter
     _fail(limiter, ip, 4)
@@ -170,6 +205,7 @@ def test_real_lua_check_and_legacy_increment_preserve_subsecond_window(redis_lim
     assert 0 < int(redis.command('PTTL', key)) <= 450
 
 
+@requires_redis
 @pytest.mark.skipif(not SOCKET, reason='URL factory check requires the Unix-socket runner')
 def test_real_lua_client_factory_connects_through_unix_socket(redis_limiter):
     redis_client, _, ip = redis_limiter

@@ -11,7 +11,7 @@
 - Redis 限流场景：block 持续、亚秒过期、admission window、失败结算窗口、旧检查窗口、Unix socket factory 均通过，证据/36。临时无网络容器、socket 和数据已删除。
 - 前端：1850 tests passed / 142 files；ESLint 与 vue-tsc/Vite v4.0.79 构建通过，证据/38–40。
 - 发布绑定：33 项通过；同一 test_scripts.sh 所含故障注入矩阵对备份、校验、构建、迁移、切换、健康、HTTPS失败及回滚拒绝进行了预期断言，证据/41。
-- 持续集成：新增 `.github/workflows/ci.yml`，按候选 SHA 执行后端全量回归与覆盖率（启动网络隔离 Redis，让 Lua 限流 6 项从 skip 转为真实执行）、前端依赖审计/测试/ESLint/构建、部署执行器/发布故障矩阵/ShellCheck/Compose 配置校验。首次 GitHub run `37572839777` 前端 job 成功；后端 6489 passed、6 failed、6 errors（dash 调用 Bash runner 导致 6 个黑盒测试实例等待子进程关闭超时，Redis 容器名与 socket fixture 冲突导致 6 个 setup errors）；部署脚本 job 仍需按新增阶段标记复查。runner 调用与 CI fixture 已修，本地相关两个模块 125 项及部署脚本全流程通过；最新 SHA 的 GitHub 复跑待完成。证据见/59。
+- 持续集成：新增 `.github/workflows/ci.yml`，按候选 SHA 执行后端全量回归与覆盖率（启动网络隔离 Redis，让 Lua 限流 6 项从 skip 转为真实执行）、前端依赖审计/测试/ESLint/构建、部署执行器/发布故障矩阵/ShellCheck/Compose 配置校验。首次 run `37572839777` 的 Linux `sh`/Bash runner 和 Redis fixture 互斥错误已修复；第二次 run `37574657795` 在同一 SHA `c5e3301244ab703e31975465a23e4a8885bd2be1` 上前端和部署 job 通过，后端为 6495 passed、0 failed、6 errors。6 个错误都是 Redis 测试把容器内 `/tmp/redis.sock` 与宿主机映射路径比较；连接、权限和 TCP/TLS 关闭检查已通过，但 Redis Lua 行为用例未进入断言。已增加容器内路径显式配置及三个路径单元测试，本机 3 passed、6 个需要 Redis 的用例跳过；修复后的真实 Redis 用例和全量 CI 尚待复跑。证据见/59–60。
 - Ruff（实现与新增测试）、compileall、ShellCheck error 级、runner/install 脚本 `bash -n`、`git diff --check` 均通过；默认 ShellCheck 模式仍报告已有 warning/info，见证据/49 与最终检查。
 
 以上仅为候选自动化证据，不能表述为生产 Worker 验收。grounding 无效仍失败关闭；不可拆分小片或调用预算耗尽仍返回失败。它提高已观察故障路径的确定性，不证明任意外部项目、模型、语言、依赖或网络环境都成功。
