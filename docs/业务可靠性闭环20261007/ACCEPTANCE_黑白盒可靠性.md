@@ -40,3 +40,11 @@ v4.0.79 仍是候选，尚未在生产 Worker 执行本轮新样本。精确代�
 基于这次真实回放，本地复现并修复标准库反射误拒绝、白名单绑定遮蔽绕过，以及 UI 未区分 runner 生命周期成功与整体 coverage partial。grounding 负例现覆盖导入/赋值/函数和 lambda 参数/循环与 with 目标/walrus/match/del 等遮蔽。v4.0.80 当前候选本地后端三文件回归 280 passed、3 warnings；后端全量 6511 passed、6 skipped、5 warnings；前端 142 文件、1851 passed；前端 lint、vue-tsc/Vite build、Ruff、compileall 通过。详见证据/65–66。精确 SHA 的 CI、v4.0.80 生产发布、同一白盒任务三轮复测、黑盒无入口负例与 loopback 应用正例均未完成，因此整体目标仍未验收完成。
 
 测试任务 `sbx_65b29eecb2754ab5a856a023` 的 Worker 环境和作业目录已在回执中确认回收，但生产界面没有终态任务删除入口，默认保留 72 小时；不能声称持久化任务行已即时删除。仅在产品生命周期到期后能继续核验其清理状态，历史生产记录保持不动。
+
+## v4.0.80 生产发布与复测边界（2026-10-07）
+
+v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7` 已发布。CI 的 Business、CodeQL 全绿；生产备份 gzip/checksum、104 表隔离恢复、Alembic 062、后端/前端健康、API、HTTPS、前端资源版本和运行账本一致均已核验。生产健康/就绪接口与前端 `buildInfo` 均报告 v4.0.80 和该 SHA。完整发布回执、bundle 校验值和降级边界见证据/68。
+
+发布后 `ops-check` 为 `degraded`、`can_continue=true`，唯一降级为磁盘使用 89%（85% 告警、95% 阻断）；未执行清理。可选诱捕镜像构建因 Alpine 包安装停滞被终止，现有 v4.0.79 诱捕容器保持健康；对应源代码与 Compose 未变化，镜像版本标签未同步。
+
+生产服务端验收不等于黑白盒业务验收。Safari 页面在真实点击刷新时被切换，之后为避免打断当前页面停止操作；因此没有 v4.0.80 Worker 任务回放，没有新建生产沙箱任务。白盒动态测试与 partial UI 修复、无入口黑盒负例、loopback 应用黑盒正例及各三轮复测仍待普通 Safari 恢复后完成。详细记录见证据/69。

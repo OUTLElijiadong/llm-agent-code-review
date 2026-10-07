@@ -7,11 +7,11 @@
 | 3 | 修复递归拆分重复携带完整文件元数据，校验分片拼接和单次出现 | 完成，v4.0.79 |
 | 4 | 修复 Python AST 动态端口来源漏检；覆盖反射、容器/描述符/委托、参数/返回值、os.environb 和字节别名，同时保留只读 helper/无关环境变量正例 | 完成，v4.0.79 |
 | 5 | 修复 runner 依赖准备跳过和黑盒超时遗留子进程，补充普通/注入/combined 回归 | 完成，v4.0.79 |
-| 6 | 后端/前端全量回归、静态检查、构建、发布绑定/故障注入 | v4.0.79 门禁见证据 57–60；v4.0.80 本地后端全量 6511 passed/6 skipped/5 warnings，三文件定向 280 passed，前端 1851 passed、lint/typecheck/build 通过；精确 SHA CI 待跑 |
-| 7 | 从生产精确提交发布 v4.0.79，核对备份、迁移、运行 SHA、镜像、健康与资产 | 完成；发布后 ops-check 仅因磁盘 88% 告警降级，其他发布、容器、备份、迁移和 HTTPS 检查通过 |
+| 6 | 后端/前端全量回归、静态检查、构建、发布绑定/故障注入 | v4.0.80 本地后端全量 6511 passed/6 skipped/5 warnings，三文件定向 280 passed，前端 1851 passed、lint/typecheck/build 通过；精确 SHA Business CI、CodeQL 成功。详见证据/68 |
+| 7 | 从生产精确提交发布 v4.0.80，核对备份、迁移、运行 SHA、镜像、健康与资产 | 主后端/前端、账本、健康、备份、隔离恢复、迁移与 HTTPS 已核验；ops-check degraded：磁盘 89%。独立复核另发现 decoy 实际仍为健康 v4.0.79，与当前 Compose 期望不一致；详见证据/68 |
 | 8 | 普通 Safari 实测首个白盒样本并回读多 Agent 报告 | 完成但仅部分通过：任务 `sbx_65b29eecb2754ab5a856a023` 的确定性 runner 通过，AI 动态用例三轮被 grounding 拒绝，整体 coverage=partial；详见证据/64 |
-| 9 | 复核生产证据、修复白盒 grounding 误拒绝与“已通过”覆盖状态误导 | 修复候选 4.0.80 已实现，须在生产复测后关闭 |
-| 10 | 建立候选 SHA 自动化门禁，覆盖后端全量及隔离 Redis、前端 lint/test/build、部署故障注入和 Compose 配置 | 完成：run `37576385449` 在 SHA `d3dc73eeddb802d2b8d9408cf24a9eee014c0247` 上三 job 全部通过；后端 6504 passed（含 Redis Lua 六用例）、前端 1850 passed、部署 137 passed/2 skipped。CI 暴露的问题均已记录并修复 |
-| 11 | 为 inspect/importlib 等受信标准库反射链增加 grounding 红绿回归，保留项目 API 幻觉拒绝 | 本地已复现并修复；导入、赋值、参数/循环/with、walrus、match、del 遮蔽负例均通过；三文件 280 passed，完整候选 SHA 门禁及生产 Worker 复测待执行 |
-| 12 | 结构化覆盖为 partial 时让任务列表、详情标签和结论显示“部分通过” | 本地回归通过，候选构建通过；生产 Safari 复测待执行 |
-| 13 | 复测白盒动态用例、黑盒启动失败负例和 loopback runnable 服务正例；完成三轮关键路径并清理本轮测试数据 | 待 4.0.80 发布；产品当前未提供终态沙箱任务删除入口，须核对可用的回收/到期机制，不能声称任务记录已删除 |
+| 9 | 复核生产证据、修复白盒 grounding 误拒绝与“已通过”覆盖状态误导 | 修复已随 v4.0.80 发布；生产 Worker 与 UI 复测未完成，不能关闭验收 |
+| 10 | 建立候选 SHA 自动化门禁，覆盖后端全量及隔离 Redis、前端 lint/test/build、部署故障注入和 Compose 配置 | v4.0.80 精确 SHA `396ca2312cefb229d6bbccc81315d41ce64a1ce7` 的 Business CI run `37611845225` 与 CodeQL run `37611845349` 全部成功；详情见证据/68 |
+| 11 | 为 inspect/importlib 等受信标准库反射链增加 grounding 红绿回归，保留项目 API 幻觉拒绝 | 本地已复现并修复；导入、赋值、参数/循环/with、walrus、match、del 遮蔽负例均通过；三文件 280 passed，精确 SHA CI 通过；生产 Worker 复测待执行 |
+| 12 | 结构化覆盖为 partial 时让任务列表、详情标签和结论显示“部分通过” | 本地回归与候选构建通过，精确 SHA CI 通过；生产 Safari 页面标签复测待执行 |
+| 13 | 复测白盒动态用例、黑盒启动失败负例和 loopback runnable 服务正例；完成三轮关键路径并清理本轮测试数据 | 未完成：发布后 Safari 真实点击被中断，尚未在 v4.0.80 Worker 执行新样本；历史任务保留 72h 且无终态删除入口，本轮未创建新任务。到期清理需后续核验 |
