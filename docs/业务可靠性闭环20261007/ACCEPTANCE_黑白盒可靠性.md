@@ -1,5 +1,13 @@
 # 黑白盒业务可靠性验收记录
 
+## v4.0.82 当前生产状态（2026-10-08）
+
+v4.0.82 / `fad2f2ddd364486f5bddcd0e1059c343e67ef45a` 已部署到生产主站与独立 Sandbox Worker。Worker profile 已从 v4.0.78 runner 更新至当前 v4.0.82 runner 镜像，五种语言的 profile digest 与镜像 ID、runner 源码 SHA 一致；执行器 `runsc`、五语言 whitebox/blackbox/combined 支持和 browser blackbox health 均 ready。五种语言隔离白盒冒烟通过，Python loopback 黑盒 smoke 三轮通过。详情及依赖下载/部署原因见[证据 73](证据/73-v4082生产部署与Worker复核-20261008.md)。
+
+这些 smoke 仅证明生产 Worker 的固定执行链能运行隔离样本。尚未用真实业务 Web 项目完成黑盒 UI 任务回放；唯一可选的历史项目没有可运行入口，不能作为黑盒正例。原 v4.0.81 任务的 `exit_code=124` 已确认是 Python profile 120 秒硬时限到期；为什么路由失败后容器继续运行到时限仍未查明。v4.0.82 只修复终态模式文案，没有声称修复该运行行为或业务路由。
+
+发布后 `ops-check` 为 `degraded`、`can_continue=true`、无阻断项，磁盘使用率 93%（告警线 85%、临界线 95%）。未运行 cleanup/prune。发布备份、隔离恢复、Alembic、HTTPS 和服务健康情况详见证据 73。
+
 ## 候选 v4.0.79（生产发布前）
 
 修复前红测：在生产基线临时 worktree 运行新增回归，7 failed / 62 deselected；具体失败项见证据/43。候选同一批修复后定向回归为 142 passed，见证据/35。后续独立红队进一步发现动态调用、描述符、容器索引、`os.environb` 和 runner 子进程清理问题；最终红绿/全量结果见证据/49。复核时又发现静态字符串组合上限误伤复杂但合法的 URL 查询参数；现仅对导入、反射及动态方法解析的局部溢出执行 fail-closed，危险动态导入仍由上限负例覆盖，合法查询正例见 `test_blackbox_contract_keeps_encoded_high_complexity_query_with_trusted_port`。
