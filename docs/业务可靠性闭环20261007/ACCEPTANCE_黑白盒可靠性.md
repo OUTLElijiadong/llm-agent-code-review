@@ -6,12 +6,12 @@
 
 候选从生产 v4.0.78 commit 957a6588fc59b924ed1ebae81446a361b37c28bf 的相同 Git tree（b85c818b56f764ba7182fb688db0b9308072bade）开始，当前 v4.0.79 修复范围：多文件源码正文原样进入 grounding 以保留逐字引文；递归压缩请求只带来源 ID 和当前正文，避免重复提交整个文件元数据；Python 黑盒动态端口来源检查覆盖间接调用、helper 参数/返回、反射与 `os.environb` 别名；普通及部署注入 runner 的离线依赖准备失败会阻止假通过；黑盒探活超时后按进程组回收应用及其子进程。
 
-- 最新后端完整测试（`backend/.venv311/bin/python -m pytest -q --no-cov`）：6495 passed、6 skipped、5 warnings，见证据/57。6 项 Redis 用例按测试配置跳过，不计为通过；隔离 Redis Unix socket 集成另见证据/36。
+- 本地候选后端全量回归（`backend/.venv311/bin/python -m pytest -q --no-cov`）：6495 passed、6 skipped、5 warnings，见证据/57。6 项 Redis 用例按测试配置跳过，不计为通过；后续 CI 已在隔离 Redis Unix socket 上实际执行六项，见证据/60。
 - 最终黑白盒/源码/runner 定向回归：244 passed、3 warnings，见证据/56；新增真实 SIGINT/SIGTERM runner 中断与 Node 子进程回收测试。
 - Redis 限流场景：block 持续、亚秒过期、admission window、失败结算窗口、旧检查窗口、Unix socket factory 均通过，证据/36。临时无网络容器、socket 和数据已删除。
 - 前端：1850 tests passed / 142 files；ESLint 与 vue-tsc/Vite v4.0.79 构建通过，证据/38–40。
 - 发布绑定：33 项通过；同一 test_scripts.sh 所含故障注入矩阵对备份、校验、构建、迁移、切换、健康、HTTPS失败及回滚拒绝进行了预期断言，证据/41。
-- 持续集成：新增 `.github/workflows/ci.yml`，按候选 SHA 执行后端全量回归与覆盖率（启动网络隔离 Redis，让 Lua 限流 6 项从 skip 转为真实执行）、前端依赖审计/测试/ESLint/构建、部署执行器/发布故障矩阵/ShellCheck/Compose 配置校验。首次 run `37572839777` 的 Linux `sh`/Bash runner 和 Redis fixture 互斥错误已修复；第二次 run `37574657795` 在同一 SHA `c5e3301244ab703e31975465a23e4a8885bd2be1` 上前端和部署 job 通过，后端为 6495 passed、0 failed、6 errors。6 个错误都是 Redis 测试把容器内 `/tmp/redis.sock` 与宿主机映射路径比较；连接、权限和 TCP/TLS 关闭检查已通过，但 Redis Lua 行为用例未进入断言。已增加容器内路径显式配置及三个路径单元测试，本机 3 passed、6 个需要 Redis 的用例跳过；修复后的真实 Redis 用例和全量 CI 尚待复跑。证据见/59–60。
+- 持续集成：GitHub Actions run [`37576385449`](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/37576385449) 在 SHA `d3dc73eeddb802d2b8d9408cf24a9eee014c0247` 三个 job 全部成功。后端全量 6504 passed、5 warnings、0 failed/error/skipped，覆盖率 83%；六个真实 Redis Lua 限流场景和三个 socket 路径测试均执行。Ruff、compileall、pip-audit 通过，未发现已知依赖漏洞。前端 142 个测试文件、1850 项通过，npm audit 0 vulnerabilities，ESLint、类型检查及构建通过。部署回归 137 passed、2 skipped（opt-in Linux kernel cases），33 项绑定和故障注入脚本、ShellCheck、Compose 校验通过。第二轮 CI 暴露的容器/宿主机 Redis socket 路径比较错误已复现并修正；详见证据/59–60。
 - Ruff（实现与新增测试）、compileall、ShellCheck error 级、runner/install 脚本 `bash -n`、`git diff --check` 均通过；默认 ShellCheck 模式仍报告已有 warning/info，见证据/49 与最终检查。
 
 以上仅为候选自动化证据，不能表述为生产 Worker 验收。grounding 无效仍失败关闭；不可拆分小片或调用预算耗尽仍返回失败。它提高已观察故障路径的确定性，不证明任意外部项目、模型、语言、依赖或网络环境都成功。

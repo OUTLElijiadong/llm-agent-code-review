@@ -11,4 +11,4 @@
 | 7 | 从生产精确提交发布 v4.0.79，核对备份、迁移、运行 SHA、镜像、健康与资产 | 阻塞：Docker 已关闭，SSH 部署凭据不可用；生产仍为 v4.0.78 |
 | 8 | 普通 Safari 实测白盒、无入口启动失败负例、loopback 服务黑盒正例及持久化/清理 | 待发布后 |
 | 9 | 复核生产证据、更新验收和遗留范围 | 待发布后 |
-| 10 | 建立候选 SHA 自动化门禁，覆盖后端全量及隔离 Redis、前端 lint/test/build、部署故障注入和 Compose 配置 | 首次与第二次 CI 依次揭出 runner 解释器、fixture 互斥和容器/宿主机 socket 路径断言问题；前两项已由后续远端 run 验证修复，最新路径修复已本机单测，待推送并复跑三 job |
+| 10 | 建立候选 SHA 自动化门禁，覆盖后端全量及隔离 Redis、前端 lint/test/build、部署故障注入和 Compose 配置 | 完成：run `37576385449` 在 SHA `d3dc73eeddb802d2b8d9408cf24a9eee014c0247` 上三 job 全部通过；后端 6504 passed（含 Redis Lua 六用例）、前端 1850 passed、部署 137 passed/2 skipped。CI 暴露的问题均已记录并修复 |
