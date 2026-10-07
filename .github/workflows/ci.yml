@@ -1,0 +1,164 @@
+name: 业务回归与发布前检查
+
+on:
+  push:
+    branches: [main, 'codex/**', 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端全量业务回归
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 配置 Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+
+      - name: 安装运行库
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libarchive13t64
+
+      - name: 按锁文件安装后端测试依赖
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+
+      - name: 启动网络隔离 Redis 限流夹具
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          name="prism-login-audit-${RUN_ID}-${RUN_ATTEMPT}"
+          socket_dir="$RUNNER_TEMP/$name"
+          mkdir -p "$socket_dir"
+          chmod 0777 "$socket_dir"
+          echo "PRISM_LOGIN_TEST_REDIS_CONTAINER=$name" >> "$GITHUB_ENV"
+          echo "PRISM_LOGIN_TEST_REDIS_SOCKET=$socket_dir/redis.sock" >> "$GITHUB_ENV"
+          docker run --detach --name "$name" --network none \
+            --volume "$socket_dir:/tmp" \
+            redis:7-alpine redis-server --port 0 \
+              --unixsocket /tmp/redis.sock --unixsocketperm 777 \
+              --save '' --appendonly no
+          ready=0
+          for ((attempt = 1; attempt <= 30; attempt++)); do
+            if docker exec "$name" redis-cli -s /tmp/redis.sock ping 2>/dev/null | grep -qx PONG; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs "$name"
+            exit 1
+          fi
+
+      - name: 后端全量测试与覆盖率
+        run: python -m pytest -q -rs --cov=app --cov-report=term --cov-report=xml
+
+      - name: 后端 Ruff 与字节码编译
+        run: |
+          ruff check app
+          python -m compileall -q app
+
+      - name: 后端依赖漏洞审计
+        run: pip-audit -r requirements-dev.lock --require-hashes
+
+      - name: 清理 Redis 测试夹具
+        if: always()
+        working-directory: .
+        run: |
+          name="${PRISM_LOGIN_TEST_REDIS_CONTAINER:-}"
+          if [[ "$name" =~ ^prism-login-audit-[0-9]+-[0-9]+$ ]]; then
+            docker rm --force "$name" >/dev/null 2>&1 || true
+            rm -rf -- "${RUNNER_TEMP:?}/$name"
+          fi
+
+  frontend:
+    name: 前端测试、静态检查与构建
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 配置 Node.js 20
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 按锁文件安装前端依赖
+        run: npm ci --registry=https://registry.npmjs.org --replace-registry-host=always
+
+      - name: 前端依赖漏洞审计
+        run: npm audit --registry=https://registry.npmjs.org --audit-level=high
+
+      - name: 前端完整单元测试
+        run: npm test
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: 类型检查与生产构建
+        run: npm run build
+
+  deployment-contracts:
+    name: 部署、执行器与故障注入回归
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 配置 Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+
+      - name: 安装部署测试依赖与 ShellCheck
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends shellcheck
+
+      - name: 部署执行器 Python 回归
+        run: python -m pytest -q -rs --no-cov deploy/tests
+
+      - name: 发布脚本绑定与故障注入
+        run: bash deploy/tests/test_scripts.sh
+
+      - name: Shell 语法与 ShellCheck
+        run: |
+          find deploy -type f -name '*.sh' -print0 | xargs -0 -r -n 1 bash -n
+          find deploy -type f -name '*.sh' -print0 | xargs -0 -r shellcheck --severity=error
+
+      - name: Compose 配置校验
+        run: |
+          cp deploy/.env.example deploy/.env
+          trap 'rm -f deploy/.env' EXIT
+          docker compose --project-directory deploy --env-file deploy/.env.example \
+            -f deploy/docker-compose.yml config --quiet

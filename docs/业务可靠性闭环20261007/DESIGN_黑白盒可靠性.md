@@ -39,3 +39,23 @@ flowchart LR
 `passed` 是所有必需证据的合取条件，不由 Worker exit code 单独决定。远程探测使用 `follow_redirects=false`，因此只有 2xx 是通过；重定向不代表最终业务页面已验证。生成的 AI 动态用例需要执行清单与结果数量、哈希和通过状态一致。清理回执独立保存；未知 Worker/资源状态不能记录成已释放。
 
 AI 动态用例回执语义：未生成/未执行为 `null`，执行失败为 `false`，仅已执行且通过才为 `true`。
+
+## 候选持续集成门禁
+
+```mermaid
+flowchart LR
+ A[候选 SHA 推送或 PR] --> B[后端全量测试与覆盖率]
+ A --> C[前端单测、lint、构建与依赖审计]
+ A --> D[部署执行器、脚本故障注入、Compose 校验]
+ B --> E{所有工作成功?}
+ C --> E
+ D --> E
+ E -->|是| F[候选具备进入生产预检的自动化证据]
+ E -->|否| G[阻断并修复后重跑]
+ F -. 不替代 .-> H[生产 Worker / Safari 真实业务验收]
+```
+
+- 后端工作流从锁文件安装 Python 3.11 依赖；以 `--network none` 的 Redis Unix socket 容器启用真实 Lua 限流集成，而不是把 6 个可执行用例留作 skipped。
+- 前端工作流使用锁文件安装，并执行依赖审计、Vitest、ESLint 与 Vite/TypeScript 生产构建。
+- 部署工作流执行部署执行器 Python 测试、发布绑定与故障注入、ShellCheck/语法和 Compose 静态配置检查。
+- Action 引用固定到提交 SHA，CI 仅有读取仓库权限；所有步骤不连接生产账号或生产 Worker。
