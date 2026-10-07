@@ -15,3 +15,4 @@
 | 11 | 为 inspect/importlib 等受信标准库反射链增加 grounding 红绿回归，保留项目 API 幻觉拒绝 | 本地已复现并修复；导入、赋值、参数/循环/with、walrus、match、del 遮蔽负例均通过；三文件 280 passed，精确 SHA CI 通过；生产 Worker 复测待执行 |
 | 12 | 结构化覆盖为 partial 时让任务列表、详情标签和结论显示“部分通过” | 本地回归与候选构建通过，精确 SHA CI 通过；生产 Safari 页面标签复测待执行 |
 | 13 | 复测白盒动态用例、黑盒启动失败负例和 loopback runnable 服务正例；完成三轮关键路径并清理本轮测试数据 | 未完成：发布后 Safari 真实点击被中断，尚未在 v4.0.80 Worker 执行新样本；历史任务保留 72h 且无终态删除入口，本轮未创建新任务。到期清理需后续核验 |
+| 14 | 修复内联标准库调用结果的 grounding 误拒绝，复测生成器与黑白盒门禁 | v4.0.81 本地候选完成；红绿回归、沙箱上下文定向 110 passed/2 warnings、后端全量 6556 passed/6 skipped/5 warnings（250.84 秒）、Ruff/compileall/diff-check 通过；精确 SHA CI、生产发布与 Worker 复测待完成。详见证据/70 |

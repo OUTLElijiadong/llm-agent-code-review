@@ -408,6 +408,7 @@ _SAFE_STDLIB_ATTRIBUTE_CHAINS = frozenset(
         "inspect.Parameter.empty",
         "inspect.Signature.parameters",
         "inspect.Signature.parameters.annotation",
+        "inspect.Parameter.annotation",
         "importlib.util",
         "importlib.util.module_from_spec",
         "importlib.util.spec_from_file_location",
@@ -415,6 +416,25 @@ _SAFE_STDLIB_ATTRIBUTE_CHAINS = frozenset(
         "importlib.machinery.ModuleSpec.loader.exec_module",
     }
 )
+_SAFE_STDLIB_CALL_RESULT_TYPES = {
+    "inspect.signature": "inspect.Signature",
+    "importlib.util.spec_from_file_location": "importlib.machinery.ModuleSpec",
+}
+_SAFE_STDLIB_BINDABLE_REFERENCES = frozenset(
+    {
+        *_STDLIB_MODULES,
+        "importlib.util",
+        "inspect.Parameter",
+        "inspect.Signature",
+        "inspect.Signature.parameters",
+        "inspect.signature",
+        "importlib.machinery.ModuleSpec",
+        "importlib.util.spec_from_file_location",
+        *_SAFE_STDLIB_CALL_RESULT_TYPES.values(),
+    }
+)
+
+
 def _exact_source_texts(source_summary: dict[str, Any]) -> list[str]:
     texts: list[str] = []
     chunks = source_summary.get("source_chunks")
@@ -541,6 +561,11 @@ def _grounding_feedback(
         parts = module.split(".")
         source_modules.update(".".join(parts[:index]) for index in range(1, len(parts) + 1) if parts[:index])
 
+    def is_stdlib_module(module: str) -> bool:
+        """项目中存在同名模块时优先按项目源码解析，避免误用标准库白名单。"""
+        root = module.split(".", 1)[0]
+        return root in _STDLIB_MODULES and root not in source_modules
+
     module_exports: dict[str, set[str]] = {}
 
     def module_name_for_path(path: str) -> str | None:
@@ -552,9 +577,35 @@ def _grounding_feedback(
     def assigned_names(target: ast.AST) -> set[str]:
         if isinstance(target, ast.Name):
             return {target.id}
+        if isinstance(target, ast.Starred):
+            return assigned_names(target.value)
         if isinstance(target, (ast.Tuple, ast.List)):
             return set().union(*(assigned_names(item) for item in target.elts))
         return set()
+
+    def root_name(expression: ast.AST) -> str | None:
+        if isinstance(expression, ast.Name):
+            return expression.id
+        if isinstance(expression, ast.Starred):
+            return root_name(expression.value)
+        if isinstance(expression, (ast.Attribute, ast.Subscript)):
+            return root_name(expression.value)
+        return None
+
+    def global_mapping_target_name(target: ast.AST) -> str | None:
+        if not isinstance(target, ast.Subscript):
+            return None
+        mapping = target.value
+        key = target.slice
+        if (
+            isinstance(mapping, ast.Call)
+            and isinstance(mapping.func, ast.Name)
+            and mapping.func.id == "globals"
+            and isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+        ):
+            return key.value
+        return None
 
     module_segments: dict[str, list[tuple[int, str]]] = {}
     chunks = source_summary.get("source_chunks")
@@ -671,7 +722,7 @@ def _grounding_feedback(
                         stdlib_aliases.pop(bound_name, None)
                         stdlib_symbols.pop(bound_name, None)
                         module_aliases.pop(bound_name, None)
-                        if alias.name.split(".", 1)[0] in _STDLIB_MODULES:
+                        if is_stdlib_module(alias.name):
                             project_shadowed_names.discard(bound_name)
                             stdlib_aliases[bound_name] = bound_module
                         else:
@@ -687,9 +738,9 @@ def _grounding_feedback(
                         stdlib_aliases.pop(bound_name, None)
                         stdlib_symbols.pop(bound_name, None)
                         module_aliases.pop(bound_name, None)
-                        if import_node.module.split(".", 1)[0] in _STDLIB_MODULES:
+                        if is_stdlib_module(import_node.module):
                             project_shadowed_names.discard(bound_name)
-                            if imported_module in _STDLIB_MODULES:
+                            if imported_module in _STDLIB_MODULES and is_stdlib_module(imported_module):
                                 stdlib_aliases[bound_name] = imported_module
                             else:
                                 stdlib_symbols[bound_name] = imported_module
@@ -713,6 +764,95 @@ def _grounding_feedback(
                 # is insufficient: require an actual import binding first.
                 return None
 
+            def canonical_stdlib_expression(expression: ast.AST) -> str | None:
+                if isinstance(expression, ast.Name):
+                    return canonical_stdlib_reference(expression.id)
+                if isinstance(expression, ast.Attribute):
+                    parent = canonical_stdlib_expression(expression.value)
+                    return f"{parent}.{expression.attr}" if parent else None
+                if isinstance(expression, ast.Subscript):
+                    value = canonical_stdlib_expression(expression.value)
+                    return "inspect.Parameter" if value == "inspect.Signature.parameters" else value
+                if isinstance(expression, ast.Call):
+                    called = canonical_stdlib_expression(expression.func)
+                    return _SAFE_STDLIB_CALL_RESULT_TYPES.get(called)
+                return None
+
+            def invalidate_stdlib_binding(target: ast.AST) -> None:
+                canonical_target = canonical_stdlib_expression(target)
+                module_root = canonical_target.split(".", 1)[0] if canonical_target else None
+                raw_root = root_name(target)
+                for bound_name, canonical_name in stdlib_aliases.items():
+                    same_module = module_root and (
+                        canonical_name == module_root or canonical_name.startswith(f"{module_root}.")
+                    )
+                    if bound_name == raw_root or same_module:
+                        assignment_shadowed_names.add(bound_name)
+                for bound_name, canonical_name in stdlib_symbols.items():
+                    same_module = module_root and (
+                        canonical_name == module_root or canonical_name.startswith(f"{module_root}.")
+                    )
+                    if bound_name == raw_root or same_module:
+                        assignment_shadowed_names.add(bound_name)
+
+            def stdlib_names_in_argument(expression: ast.AST) -> set[str]:
+                if isinstance(expression, ast.Name):
+                    if expression.id in stdlib_aliases or expression.id in stdlib_symbols:
+                        return {expression.id}
+                    return set()
+                if isinstance(expression, (ast.Attribute, ast.Subscript)):
+                    root = root_name(expression)
+                    if root in stdlib_aliases or root in stdlib_symbols:
+                        return {root}
+                    return set()
+                if isinstance(expression, ast.Call):
+                    called_name = expression.func.id if isinstance(expression.func, ast.Name) else None
+                    if called_name in dynamic_getter_names and expression.args:
+                        return stdlib_names_in_argument(expression.args[0])
+                    return set()
+                if isinstance(expression, ast.Starred):
+                    return stdlib_names_in_argument(expression.value)
+                if isinstance(expression, (ast.Tuple, ast.List, ast.Set)):
+                    return set().union(*(stdlib_names_in_argument(item) for item in expression.elts))
+                if isinstance(expression, ast.Dict):
+                    values = [*expression.keys, *expression.values]
+                    return set().union(*(stdlib_names_in_argument(item) for item in values if item is not None))
+                return set()
+
+            def identifier_is_shadowed(name: str) -> bool:
+                return (
+                    name in assignment_shadowed_names
+                    or name in project_shadowed_names
+                    or name in scoped_shadowed_names
+                    or name in stdlib_aliases
+                    or name in stdlib_symbols
+                    or name in module_aliases
+                    or any(isinstance(node, ast.arg) and node.arg == name for node in ast.walk(tree))
+                )
+
+            def is_readonly_builtin_observation(node: ast.Call, called_name: str | None) -> bool:
+                if not called_name or identifier_is_shadowed(called_name) or node.keywords:
+                    return False
+
+                def direct_stdlib_name(expression: ast.AST) -> bool:
+                    if isinstance(expression, ast.Name) and (
+                        expression.id in stdlib_aliases or expression.id in stdlib_symbols
+                    ):
+                        return True
+                    canonical = canonical_stdlib_expression(expression)
+                    return canonical in _SAFE_STDLIB_BINDABLE_REFERENCES or canonical in _SAFE_STDLIB_ATTRIBUTE_CHAINS
+
+                if called_name in {"print", "repr", "str", "type", "id", "hash", "callable", "list"}:
+                    return len(node.args) == 1 and direct_stdlib_name(node.args[0])
+                return (
+                    called_name == "isinstance"
+                    and len(node.args) == 2
+                    and direct_stdlib_name(node.args[0])
+                    and isinstance(node.args[1], ast.Name)
+                    and node.args[1].id == "object"
+                    and not identifier_is_shadowed("object")
+                )
+
             assignment_nodes = sorted(
                 (
                     node
@@ -721,25 +861,59 @@ def _grounding_feedback(
                 ),
                 key=lambda node: (node.lineno, node.col_offset),
             )
+            dynamic_setter_names = {"setattr", "delattr"}
+            dynamic_code_names = {"exec", "eval"}
+            dynamic_getter_names = {"getattr"}
+            for import_node in import_nodes:
+                if isinstance(import_node, ast.ImportFrom) and import_node.module == "builtins":
+                    for alias in import_node.names:
+                        bound_name = alias.asname or alias.name
+                        if alias.name in {"setattr", "delattr"}:
+                            dynamic_setter_names.add(bound_name)
+                        elif alias.name in {"exec", "eval"}:
+                            dynamic_code_names.add(bound_name)
+                        elif alias.name == "getattr":
+                            dynamic_getter_names.add(bound_name)
+
             for assignment in assignment_nodes:
                 value = getattr(assignment, "value", None)
-                called = canonical_stdlib_reference(_dotted_name(value.func)) if isinstance(value, ast.Call) else None
-                if called == "inspect.signature":
-                    bound_value = "inspect.Signature"
-                elif called == "importlib.util.spec_from_file_location":
-                    bound_value = "importlib.machinery.ModuleSpec"
-                else:
-                    bound_value = None
+                value_binding = canonical_stdlib_expression(value) if isinstance(value, ast.AST) else None
+                bound_value = value_binding if value_binding in _SAFE_STDLIB_BINDABLE_REFERENCES else None
 
                 target_names: set[str] = set()
                 if isinstance(assignment, ast.Assign):
-                    for target in assignment.targets:
+                    assignment_targets = assignment.targets
+                    for target in assignment_targets:
                         target_names.update(assigned_names(target))
                 elif isinstance(assignment, ast.Delete):
-                    for target in assignment.targets:
+                    assignment_targets = assignment.targets
+                    for target in assignment_targets:
                         target_names.update(assigned_names(target))
                 else:
+                    assignment_targets = [assignment.target]
                     target_names.update(assigned_names(assignment.target))
+
+                value_names = {
+                    node.id for node in ast.walk(value) if isinstance(node, ast.Name)
+                } if isinstance(value, ast.AST) else set()
+                if value_names & dynamic_setter_names:
+                    dynamic_setter_names.update(target_names)
+                if value_names & dynamic_code_names:
+                    dynamic_code_names.update(target_names)
+                if value_names & dynamic_getter_names:
+                    dynamic_getter_names.update(target_names)
+
+                for target in assignment_targets:
+                    root = root_name(target)
+                    if isinstance(target, (ast.Attribute, ast.Subscript)) and (
+                        root in stdlib_aliases or root in stdlib_symbols
+                    ):
+                        # 写入或删除标准库对象属性后，撤销该导入名的白名单信任。
+                        invalidate_stdlib_binding(target)
+                    global_name = global_mapping_target_name(target)
+                    if global_name in stdlib_aliases or global_name in stdlib_symbols:
+                        # globals()["module"] = value 也会替换模块级导入绑定。
+                        invalidate_stdlib_binding(ast.Name(id=global_name))
 
                 for target_name in target_names:
                     if bound_value:
@@ -751,6 +925,43 @@ def _grounding_feedback(
                         stdlib_aliases.pop(target_name, None)
                         stdlib_symbols.pop(target_name, None)
                         assignment_shadowed_names.add(target_name)
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                called_name = node.func.id if isinstance(node.func, ast.Name) else None
+                called_stdlib_expression = canonical_stdlib_expression(node.func)
+                trusted_stdlib_call = (
+                    called_stdlib_expression in _SAFE_STDLIB_ATTRIBUTE_CHAINS
+                    or called_stdlib_expression in _SAFE_STDLIB_CALL_RESULT_TYPES
+                )
+                # 将受信标准库模块传给项目 helper 后无法只凭调用点证明其只读；
+                # 保守撤销该模块及同源别名信任，覆盖 helper 参数中的属性写入。
+                readonly_builtin_observation = is_readonly_builtin_observation(node, called_name)
+                if not trusted_stdlib_call and not readonly_builtin_observation:
+                    call_arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+                    for argument in call_arguments:
+                        for bound_name in stdlib_names_in_argument(argument):
+                            invalidate_stdlib_binding(ast.Name(id=bound_name))
+                if called_name in dynamic_code_names:
+                    assignment_shadowed_names.update(stdlib_aliases)
+                    assignment_shadowed_names.update(stdlib_symbols)
+                elif called_name in dynamic_setter_names and node.args:
+                    # 动态属性写入/删除同样撤销模块及其所有导入别名的白名单信任。
+                    invalidate_stdlib_binding(node.args[0])
+                elif called_name in dynamic_getter_names and node.args:
+                    # 动态读取标准库模块属性后可能取得可变命名空间，撤销模块及别名白名单信任。
+                    invalidate_stdlib_binding(node.args[0])
+
+            if any(
+                isinstance(node, ast.Name)
+                and node.id in {"globals", "locals", "vars", "__builtins__", "exec", "eval"}
+                for node in ast.walk(tree)
+            ):
+                # 命名空间映射和动态执行可通过变量键、别名或字符串重写导入；
+                # 静态 AST 难以证明安全，因此不再信任其中任何标准库导入名。
+                assignment_shadowed_names.update(stdlib_aliases)
+                assignment_shadowed_names.update(stdlib_symbols)
 
             def resolve_source_module(expression: str) -> str | None:
                 candidates = [
@@ -766,7 +977,7 @@ def _grounding_feedback(
 
             for node in ast.walk(tree):
                 if isinstance(node, ast.Attribute):
-                    stdlib_chain = canonical_stdlib_reference(_dotted_name(node))
+                    stdlib_chain = canonical_stdlib_expression(node)
                     if stdlib_chain in _SAFE_STDLIB_ATTRIBUTE_CHAINS:
                         # 只放行显式白名单中的反射/模块加载链；其余属性仍执行源码 grounding。
                         continue
@@ -787,7 +998,7 @@ def _grounding_feedback(
                             unsupported_imports.add(node.attr)
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
-                        if alias.name.split(".", 1)[0] in _STDLIB_MODULES:
+                        if is_stdlib_module(alias.name):
                             continue
                         if alias.name not in source_modules and alias.name not in source_imports:
                             candidates.add(alias.name)
@@ -795,13 +1006,9 @@ def _grounding_feedback(
                     module = node.module or ""
                     if not module:
                         continue
-                    if (
-                        module.split(".", 1)[0] not in _STDLIB_MODULES
-                        and module not in source_modules
-                        and module not in source_imports
-                    ):
+                    if not is_stdlib_module(module) and module not in source_modules and module not in source_imports:
                         candidates.add(module)
-                    if module.split(".", 1)[0] in _STDLIB_MODULES:
+                    if is_stdlib_module(module):
                         continue
                     for alias in node.names:
                         if alias.name == "*":

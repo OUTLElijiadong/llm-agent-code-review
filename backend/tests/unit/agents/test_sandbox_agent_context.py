@@ -1104,6 +1104,182 @@ def test_grounding_accepts_stdlib_reflection_used_to_inspect_real_source_symbols
     assert _grounding_feedback(files, source_summary) == []
 
 
+@pytest.mark.parametrize(
+    "test_source",
+    [
+        (
+            "import inspect as reflector\n"
+            "assert list(reflector.signature(lambda user_name: None).parameters) == ['user_name']\n"
+        ),
+        (
+            "from inspect import signature as get_signature, Parameter\n"
+            "parameter = get_signature(lambda user_name: None).parameters['user_name']\n"
+            "assert parameter.annotation is Parameter.empty\n"
+        ),
+    ],
+    ids=["aliased-inline-signature-call", "from-import-inline-signature-call"],
+)
+def test_grounding_accepts_inline_signature_result_attributes(test_source: str) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "review_sample.py", "text": "def find_user(user_name):\n    return user_name\n"},
+        ]
+    }
+    files = [{"path": "test_ai_inline_inspection.py", "content": test_source}]
+
+    assert _grounding_feedback(files, source_summary) == []
+
+
+def test_grounding_accepts_aliased_importlib_source_loader_chain() -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "review_sample.py", "text": "def find_user(user_name):\n    return user_name\n"},
+        ]
+    }
+    files = [
+        {
+            "path": "test_ai_importlib_alias.py",
+            "content": (
+                "import importlib\n"
+                "from pathlib import Path\n"
+                "util = importlib.util\n"
+                "spec = util.spec_from_file_location('review_sample', Path.cwd() / 'review_sample.py')\n"
+                "module = util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(module)\n"
+                "assert module.find_user('alice') == 'alice'\n"
+            ),
+        }
+    ]
+
+    assert _grounding_feedback(files, source_summary) == []
+
+
+@pytest.mark.parametrize(
+    "inspection",
+    ["print(inspect)", "repr(inspect)", "isinstance(inspect, object)"],
+    ids=["print-module", "repr-module", "isinstance-module-object"],
+)
+def test_grounding_accepts_readonly_builtin_module_observation(inspection: str) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "review_sample.py", "text": "def find_user(user_name):\n    return user_name\n"},
+        ]
+    }
+    files = [
+        {
+            "path": "test_ai_readonly_builtin.py",
+            "content": f"import inspect\n{inspection}\n"
+            "inspect.signature(lambda user_name: None).parameters\n",
+        }
+    ]
+
+    assert _grounding_feedback(files, source_summary) == []
+
+
+@pytest.mark.parametrize("builtin_name", ["print", "list", "repr"])
+def test_grounding_rejects_project_functions_shadowing_readonly_builtins(builtin_name: str) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "app/routes.py", "text": "def signature(function):\n    return function\n"},
+        ]
+    }
+    files = [
+        {
+            "path": "test_ai_shadowed_builtin.py",
+            "content": (
+                "import inspect\nfrom app import routes\n"
+                f"def {builtin_name}(module):\n    module.signature = routes.signature\n"
+                f"{builtin_name}(inspect)\n"
+                "inspect.signature(lambda value: value).parameters\n"
+            ),
+        }
+    ]
+
+    assert "parameters" in _grounding_feedback(files, source_summary)
+
+
+def test_test_generator_keeps_inline_reflection_cases_instead_of_grounding_retry(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    messages: list[str] = []
+    generated_files = [
+        {
+            "path": "test_ai_signature.py",
+            "content": (
+                "import importlib\n"
+                "import inspect\n"
+                "from pathlib import Path\n"
+                "spec = importlib.util.spec_from_file_location('app.routes', Path.cwd() / 'app/routes.py')\n"
+                "module = importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(module)\n"
+                "assert list(inspect.signature(module.find_user).parameters) == ['user_name']\n"
+                "parameter = inspect.signature(module.find_user).parameters['user_name']\n"
+                "assert parameter.annotation is inspect.Parameter.empty\n"
+            ),
+        },
+        {"path": "test_ai_smoke.py", "content": "assert 2 + 2 == 4\n"},
+    ]
+
+    def call_json(message, **_kwargs):
+        messages.append(message)
+        return SimpleNamespace(success=True, data={"files": generated_files})
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="whitebox",
+        source_summary={
+            "source_chunks": [
+                {"path": "app/routes.py", "text": "def find_user(user_name):\n    return user_name\n"},
+            ],
+            "_compacted_source_context": {
+                "covered_source_ids": ["route-source"],
+                "source_summaries": [{"source_id": "route-source", "summary": "find_user(user_name) 返回用户名。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["files"] == generated_files
+    assert len(messages) == 1
+    assert '"previous_generation_feedback":' not in messages[0]
+
+
+@pytest.mark.parametrize(
+    ("test_source", "expected_issues"),
+    [
+        (
+            "import inspect\n"
+            "from app import routes as inspect\n"
+            "inspect.signature(lambda user_name: None).parameters\n",
+            ["parameters", "signature"],
+        ),
+        (
+            "import inspect\n"
+            "inspect = object()\n"
+            "inspect.signature(lambda user_name: None).parameters\n",
+            ["parameters", "signature"],
+        ),
+        (
+            "from app import routes\n"
+            "routes.signature(lambda user_name: None).parameters\n",
+            ["parameters", "signature"],
+        ),
+    ],
+    ids=["project-import-shadows-inspect", "assignment-shadows-inspect", "project-fakes-signature"],
+)
+def test_grounding_rejects_untrusted_inline_signature_result_attributes(
+    test_source: str, expected_issues: list[str]
+) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "app/routes.py", "text": "def real_route():\n    return True\n"},
+        ]
+    }
+    files = [{"path": "test_ai_shadowed_inline_inspection.py", "content": test_source}]
+
+    assert _grounding_feedback(files, source_summary) == expected_issues
+
+
 def test_grounding_does_not_allow_arbitrary_attributes_from_imported_stdlib() -> None:
     source_summary = {"source_chunks": [{"path": "main.py", "text": "def real_symbol(): return True\n"}]}
     files = [{"path": "test_ai_unsafe.py", "content": "import os\nos.system('id')\n"}]
@@ -1163,6 +1339,322 @@ def test_grounding_requires_a_live_stdlib_binding_for_allowlisted_chains(
     files = [{"path": "test_ai_alias_shadow.py", "content": test_source}]
 
     assert _grounding_feedback(files, source_summary) == [expected_issue]
+
+
+@pytest.mark.parametrize(
+    ("source_path", "source_text", "test_source", "expected_issue"),
+    [
+        (
+            "inspect.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\ninspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "importlib.py",
+            "util = object()\n",
+            "import importlib\nimportlib.util.module_from_spec(None)\n",
+            "module_from_spec",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "inspect.signature = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\ndel inspect.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "*inspect, = [routes]\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "setattr(inspect, 'signature', routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\ndelattr(inspect, 'signature')\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "globals()['inspect'] = routes\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "locals()['inspect'] = routes\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "vars(inspect)['signature'] = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "getattr(inspect, '__dict__')['signature'] = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "getattr(inspect, '__dict__').update(signature=routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "key = '__dict__'\n"
+            "getattr(inspect, key)['signature'] = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "get = getattr\n"
+            "get(inspect, '__dict__')['signature'] = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "key = '__dict__'\n"
+            "get = getattr\n"
+            "get(inspect, key).update(signature=routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module, replacement):\n    module.signature = replacement\n"
+            "mutate(inspect, routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module, replacement):\n    setattr(module, 'signature', replacement)\n"
+            "mutate(inspect, routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module, replacement):\n"
+            "    getattr(module, '__dict__')['signature'] = replacement\n"
+            "mutate(inspect, routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module, replacement, put=setattr):\n    put(module, 'signature', replacement)\n"
+            "mutate(inspect, routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module, replacement):\n    module.signature = replacement\n"
+            "mutate(*(inspect, routes.signature))\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module):\n    module.signature = routes.signature\n"
+            "mutate({'module': inspect})\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "def mutate(module):\n    module.signature = routes.signature\n"
+            "mutate(**{'module': inspect})\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import importlib\nfrom app import routes\n"
+            "def mutate(module, replacement):\n"
+            "    getattr(module, '__dict__')['spec_from_file_location'] = replacement\n"
+            "mutate(importlib.util, routes.signature)\n"
+            "importlib.util.spec_from_file_location('app.routes', 'app/routes.py')\n",
+            "spec_from_file_location",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "name = 'inspect'\n"
+            "globals()[name] = routes\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "globals().update({'inspect': routes})\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "globals().update(inspect=routes)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "__builtins__['globals']()['inspect'] = routes\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "exec(\"globals()['inspect'] = routes\")\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nimport inspect as reflector\nfrom app import routes\n"
+            "reflector.signature = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "reflector = inspect\n"
+            "reflector.signature = routes.signature\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "put = setattr\n"
+            "put(inspect, 'signature', routes.signature)\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+        (
+            "app/routes.py",
+            "def signature(function):\n    return function\n",
+            "import inspect\nfrom app import routes\n"
+            "run = exec\n"
+            "run(\"globals()['inspect'] = routes\")\n"
+            "inspect.signature(lambda value: value).parameters\n",
+            "parameters",
+        ),
+    ],
+    ids=[
+        "source-inspect-module-wins",
+        "source-importlib-module-wins",
+        "attribute-assignment-invalidates-stdlib-binding",
+        "attribute-delete-invalidates-stdlib-binding",
+        "starred-destructuring-shadows-stdlib-binding",
+        "setattr-invalidates-stdlib-binding",
+        "delattr-invalidates-stdlib-binding",
+        "globals-rebinding-shadows-stdlib-binding",
+        "locals-rebinding-shadows-stdlib-binding",
+        "vars-module-dictionary-invalidates-stdlib-binding",
+        "getattr-module-dictionary-assignment-invalidates-binding",
+        "getattr-module-dictionary-update-invalidates-binding",
+        "getattr-module-dictionary-variable-key-invalidates-binding",
+        "getattr-alias-module-dictionary-invalidates-binding",
+        "getattr-alias-variable-key-invalidates-binding",
+        "helper-attribute-write-receiving-stdlib-module-invalidates-binding",
+        "helper-setattr-receiving-stdlib-module-invalidates-binding",
+        "helper-module-dictionary-write-receiving-stdlib-module-invalidates-binding",
+        "helper-default-setter-receiving-stdlib-module-invalidates-binding",
+        "helper-starred-stdlib-module-invalidates-binding",
+        "helper-container-stdlib-module-invalidates-binding",
+        "helper-keyword-container-stdlib-module-invalidates-binding",
+        "helper-stdlib-attribute-invalidates-root-module-binding",
+        "globals-dynamic-key-invalidates-stdlib-binding",
+        "globals-mapping-update-invalidates-stdlib-binding",
+        "globals-keyword-update-invalidates-stdlib-binding",
+        "builtins-namespace-mutation-invalidates-stdlib-binding",
+        "exec-dynamic-mutation-invalidates-stdlib-binding",
+        "import-alias-attribute-mutation-invalidates-original-binding",
+        "assigned-module-alias-attribute-mutation-invalidates-original-binding",
+        "setter-alias-invalidates-stdlib-binding",
+        "dynamic-executor-alias-invalidates-stdlib-binding",
+    ],
+)
+def test_grounding_rejects_shadowed_or_mutated_stdlib_chains(
+    source_path: str, source_text: str, test_source: str, expected_issue: str
+) -> None:
+    source_summary = {"source_chunks": [{"path": source_path, "text": source_text}]}
+    files = [{"path": "test_ai_shadowed_stdlib.py", "content": test_source}]
+
+    assert expected_issue in _grounding_feedback(files, source_summary)
 
 
 def test_test_generator_returns_schema_error_for_non_object_file_items(monkeypatch) -> None:

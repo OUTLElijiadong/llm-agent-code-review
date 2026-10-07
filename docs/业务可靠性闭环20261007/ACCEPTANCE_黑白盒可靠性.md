@@ -48,3 +48,11 @@ v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7` 已发布。CI 的 Business
 发布后 `ops-check` 为 `degraded`、`can_continue=true`，唯一降级为磁盘使用 89%（85% 告警、95% 阻断）；未执行清理。可选诱捕镜像构建因 Alpine 包安装停滞被终止，现有 v4.0.79 诱捕容器保持健康；对应源代码与 Compose 未变化，镜像版本标签未同步。
 
 生产服务端验收不等于黑白盒业务验收。Safari 页面在真实点击刷新时被切换，之后为避免打断当前页面停止操作；因此没有 v4.0.80 Worker 任务回放，没有新建生产沙箱任务。白盒动态测试与 partial UI 修复、无入口黑盒负例、loopback 应用黑盒正例及各三轮复测仍待普通 Safari 恢复后完成。详细记录见证据/69。
+
+## v4.0.81 最终候选复测（2026-10-08）
+
+历史生产任务 `sbx_65b29eecb2754ab5a856a023`（任务版本 v4.0.79）发生三轮 AI 动态用例 grounding 拒绝并回退到确定性检查；原始模型脚本未保留。本地复现同类 AST 调用结果属性误判后修复了绑定、遮蔽、模块写入、动态命名空间、helper 参数与安全 builtin 同名伪装边界。正向样本保留合法 inline inspect/importlib loader 与只读 builtin 行为；具体红绿和静态分析范围见证据/70。
+
+最终候选定向回归 `test_sandbox_agent_context.py` 为 **110 passed、2 warnings**；后端全量为 **6556 passed、6 skipped、5 warnings（250.84 秒）**。前端 142 个测试文件、1851 passed，lint 与 typecheck/build 通过，Vite 转换 3742 个模块，产物版本为 v4.0.81、构建时间 `2026-10-07T16:12:32Z`。目标 Ruff、全后端 compileall、发布脚本 33 项绑定及故障注入、`git diff --check` 均通过。后端全量命令使用 `--disable-warnings`，仅记录实际 warning 总数，不猜测来源。CI 精确候选 SHA 待推送后执行。
+
+生产 `/healthz`/`readyz` 仍报告 v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7`；SSH 部署认证返回公钥拒绝，仓库无部署 workflow。尚未发布 v4.0.81、未新建 Worker 任务，因而没有生产修复后回放或真实 Safari 验收。磁盘 89% 告警和 decoy 版本偏差是最近一次只读复核中的独立待办，需部署通道恢复后重新核验。详见证据/68、70。
