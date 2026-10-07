@@ -18,7 +18,11 @@
 
 ## 生产基线与发布后验收
 
-2026-10-07 只读请求 `GET https://lijiadong.cn/healthz` 返回 `{"status":"ok","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`，详见证据/54。schema 基线为 `062_audit_log_action_length`。v4.0.79 仍是候选，线上 Worker/Safari 尚未执行本轮新样本；本轮无法部署（Docker 由用户关闭，SSH 部署凭据不可用）。发布后必须真实执行 Python 白盒、无入口样本启动失败负例、loopback-only runnable service 黑盒正例，并核对动态用例清单、Worker 原始回执、报告回读、任务终态及资源清理。健康页不替代业务测试。
+2026-10-07 只读请求 `GET https://lijiadong.cn/healthz` 与 `/readyz` 分别返回 `{"status":"ok","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`、`{"status":"ready","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`。普通 Safari 新加载的工作台页脚也显示 v4.0.78。一个此前打开的 `/readyz` 标签仍显示旧的 v4.0.75；真实点击刷新后更新为 v4.0.78，与接口一致，因此这次观察支持“旧标签页保留旧响应”，不支持当前新加载页面存在版本错配的结论。详见证据/54、证据/61。schema 基线为 `062_audit_log_action_length`。
+
+本轮在普通 Safari 代码沙箱页只读查看了已有生产任务，没有创建、重试、取消或删除任务，也没有下载附件。观察到一个黑盒任务失败（`sbx_3950674251e94925afdbad92`）：源码来源校验先报分片引文无法核验，后续压缩覆盖校验虽通过，动态用例仍引用不存在的 `HTTPError`、`Path`，再触发 `'Name' object has no attribute 'func'`；最终应用未就绪、`/` 返回状态码 0，黑盒失败。另一条白盒任务 `sbx_1fdc7440f3d34081b5ef7f55` 的确定性检查通过，但 AI 动态补充因源码压缩核验失败而跳过。黑盒任务 `sbx_0bb11491c12a402d9b0fda43` 的 `/health` 路由与 Agent 断言通过（200），但动态用例三轮引用不存在符号后回退，因此其结论仅为确定性黑盒通过。此为现有历史任务的页面观察，不是本轮新建任务或修复后生产复测；逐项证据见证据/61。
+
+v4.0.79 仍是候选，尚未在生产 Worker 执行本轮新样本。部署检查再次确认 Docker daemon 未运行，`li@81.70.251.90` SSH 返回 `Permission denied (publickey,...)`，GitHub 仓库没有生产部署 workflow；因此不能声称候选已部署或这些生产失败已由候选修复。发布后必须针对已观察的来源压缩/动态用例失败重跑原场景，并执行 Python 白盒、无入口样本启动失败负例、loopback-only runnable service 黑盒正例；每个关键场景至少独立重复三轮，核对动态用例清单、Worker 原始回执、报告回读、任务终态及资源清理。健康页不替代业务测试。
 
 ## 未覆盖范围
 
