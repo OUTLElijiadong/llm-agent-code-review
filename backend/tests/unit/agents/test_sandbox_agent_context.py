@@ -556,7 +556,10 @@ def test_real_node_runner_prepares_dependencies_before_tests_and_startup(
         "if (!fs.existsSync(process.env.PRISM_TEST_DEPENDENCY_MARKER)) {\n"
         "  console.error('dependency marker missing before application listen'); process.exit(41);\n"
         "}\n"
-        "http.createServer((req, res) => { res.writeHead(200); res.end('ready'); })\n"
+        "http.createServer((req, res) => {\n"
+        "  const health = req.url === '/healthz';\n"
+        "  res.writeHead(health ? 200 : 404); res.end(health ? 'ready' : 'not found');\n"
+        "})\n"
         "  .listen(Number(process.env.PORT), '127.0.0.1');\n",
         encoding="utf-8",
     )

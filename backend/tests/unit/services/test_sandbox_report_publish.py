@@ -18,6 +18,7 @@ from app.services.sandbox_service import (
     _artifact_documents,
     _execution_result_passed,
     _extract_agent_test_failures,
+    _extract_agent_tests_result,
     _extract_blackbox_result,
     _publish_sandbox_report,
     _reconcile_blackbox_agent_assertions,
@@ -224,6 +225,20 @@ def test_blackbox_receipt_fails_closed_on_missing_duplicate_or_invalid_receipt()
     assert _extract_blackbox_result("no runner marker") is None
 
 
+def test_agent_runner_timeout_is_reported_as_execution_timeout_not_protocol_error() -> None:
+    result = _extract_agent_tests_result(
+        'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":1,"passed":0,"failed":1,'
+        '"passed_count":0,"files":{"blackbox.py":"fail"},"file_results":{"blackbox.py":'
+        '{"status":"fail","phase":"execute","failure_kind":"timeout","exit_code":137,'
+        '"output_encoding":"base64","output_base64":"aGFuZ2Vk"}}} PRISM_AGENT_TESTS_END'
+    )
+
+    assert result is not None
+    assert result["files"] == {"blackbox.py": "fail"}
+    assert result["file_results"]["blackbox.py"]["failure_kind"] == "timeout"
+    assert result["file_results"]["blackbox.py"]["phase"] == "execute"
+
+
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [(302, "partial"), (401, "partial"), (403, "partial"), (404, "failed"), (500, "failed")],
@@ -253,16 +268,37 @@ def test_blackbox_redirect_or_auth_receipt_is_not_a_functional_pass(
     )
 
 
-def test_blackbox_root_route_receipt_is_valid_when_it_returns_2xx() -> None:
+def test_blackbox_receipt_accepts_declared_root_entrypoint_when_it_returns_2xx() -> None:
     receipt = (
         'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke",'
-        '"agent_assertions_passed":null,"route_passed":true,'
+        '"agent_assertions_passed":null,"route_passed":true,"route_origin":"source_route",'
         '"route":"/","status_code":204}'
     )
     result = _extract_blackbox_result(receipt)
     assert result is not None
     assert result["status"] == "passed"
     assert result["route"] == "/"
+
+
+def test_blackbox_receipt_rejects_root_success_without_route_evidence() -> None:
+    receipt = (
+        'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke",'
+        '"agent_assertions_passed":null,"route_passed":true,"route":"/","status_code":200}'
+    )
+    assert _extract_blackbox_result(receipt) is None
+
+
+def test_blackbox_runner_budget_timeout_is_a_structured_failure() -> None:
+    receipt = (
+        'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke",'
+        '"agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,'
+        '"route_origin":"none","failure_kind":"timeout","failure_reason":"runner_budget_exhausted"}'
+    )
+    result = _extract_blackbox_result(receipt)
+    assert result is not None
+    assert result["status"] == "failed"
+    assert result["failure_kind"] == "timeout"
+    assert result["failure_reason"] == "runner_budget_exhausted"
 
 
 def test_blackbox_assertions_are_not_claimed_when_generation_was_skipped() -> None:

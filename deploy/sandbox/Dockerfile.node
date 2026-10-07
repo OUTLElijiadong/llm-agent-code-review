@@ -6,7 +6,7 @@ RUN set -eu; \
     [ "$image_digest" != "$BASE_IMAGE" ]; \
     [ "${#image_digest}" -eq 64 ]; \
     case "$image_digest" in *[!0-9a-f]*) exit 1 ;; esac
-RUN test -x /bin/bash
+RUN test -x /bin/bash && timeout --version | grep -q 'GNU coreutils'
 # The fixed runner uses only the runtime and the base image's shell for local
 # health probes; no mutable package repository is accessed during the build.
 ARG PRISM_RUNNER_SHA256

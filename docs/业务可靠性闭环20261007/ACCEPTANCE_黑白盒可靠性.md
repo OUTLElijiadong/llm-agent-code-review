@@ -8,6 +8,14 @@ v4.0.82 / `fad2f2ddd364486f5bddcd0e1059c343e67ef45a` 已部署到生产主站与
 
 发布后 `ops-check` 为 `degraded`、`can_continue=true`、无阻断项，磁盘使用率 93%（告警线 85%、临界线 95%）。未运行 cleanup/prune。发布备份、隔离恢复、Alembic、HTTPS 和服务健康情况详见证据 73。
 
+## v4.0.83 候选发布验收（2026-10-08）
+
+候选修复了 runner 的有界运行、超时分阶段回执、启动失败回执和路由候选词法提取。历史 `exit_code=124` 的直接原因是 120 秒 profile 硬时限；旧样本无 Web 入口，黑盒 404 是符合样本的负例。旧日志不足以证明 5 秒后继续运行至 120 秒的具体阶段，因此本候选只声明限制等待并提高后续诊断能力，不声称反推出历史卡点。独立复核新发现的普通字符串伪路由已先复现，再由源码词法扫描修复；注释、字符串、Python 多行字符串负例及 Node `===` 真实路径正例均已回归。证据见[证据 74](证据/74-v4083候选黑盒超时归因与最终回归-20261008.md)。
+
+本地后端全量 **6577 passed、6 skipped、5 warnings**；runner 回归 **25 passed**，黑盒上下文 **9 passed**，执行器与报告 **137 passed**，部署 Python 回归 **137 passed、2 skipped**，部署脚本绑定与故障注入 **33 项通过**。Ruff、compileall、ShellCheck error 级、Shell 语法、Compose 配置、`git diff --check` 通过。skip 与 warnings 单独列示，不计为通过。精确 SHA 的远端 CI 尚待完成。
+
+发布前只读核验确认主站健康/就绪、容器镜像、`APP_RELEASE` 与活动发布树均指向 v4.0.82 / `fad2f2ddd364486f5bddcd0e1059c343e67ef45a`；`/opt/code-review` 是历史 v4.0.72 遗留 checkout。生产备份隔离恢复验证通过（104 张表，Alembic 062）。`ops-check` 状态为 `degraded`、`can_continue=true`、无阻断项，唯一降级是磁盘 93%；可用空间 14,365,466,624 字节，略高于发布脚本 12 GiB 下限。未做 cleanup/prune。当前仍是发布前候选，不能记为生产已修复；精确 SHA、容量复查及主站/Worker 发布回执待补。
+
 ## 候选 v4.0.79（生产发布前）
 
 修复前红测：在生产基线临时 worktree 运行新增回归，7 failed / 62 deselected；具体失败项见证据/43。候选同一批修复后定向回归为 142 passed，见证据/35。后续独立红队进一步发现动态调用、描述符、容器索引、`os.environb` 和 runner 子进程清理问题；最终红绿/全量结果见证据/49。复核时又发现静态字符串组合上限误伤复杂但合法的 URL 查询参数；现仅对导入、反射及动态方法解析的局部溢出执行 fail-closed，危险动态导入仍由上限负例覆盖，合法查询正例见 `test_blackbox_contract_keeps_encoded_high_complexity_query_with_trusted_port`。

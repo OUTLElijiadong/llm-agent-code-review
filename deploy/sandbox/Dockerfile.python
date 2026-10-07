@@ -6,7 +6,7 @@ RUN set -eu; \
     [ "$image_digest" != "$BASE_IMAGE" ]; \
     [ "${#image_digest}" -eq 64 ]; \
     case "$image_digest" in *[!0-9a-f]*) exit 1 ;; esac
-RUN test -x /bin/bash
+RUN test -x /bin/bash && timeout --version | grep -q 'GNU coreutils'
 # Keep the runner build offline and reproducible after the base image is pinned.
 # Uploaded projects may provide pytest in their own locked/vendor tree; otherwise
 # runner.sh falls back to the standard-library unittest discovery path.

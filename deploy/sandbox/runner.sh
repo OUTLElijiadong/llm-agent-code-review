@@ -10,6 +10,61 @@ readonly preview_port="${PRISM_PREVIEW_PORT:-8080}"
 readonly source_dir="${PRISM_SOURCE_DIR:-/source}"
 readonly workspace_dir="${PRISM_WORKSPACE_DIR:-/workspace}"
 readonly blackbox_app_log="$workspace_dir/.prism-tmp/prism-app.log"
+test_timeout_seconds="${PRISM_TEST_TIMEOUT_SECONDS:-120}"
+case "$test_timeout_seconds" in ''|*[!0-9]*) test_timeout_seconds=120 ;; esac
+readonly test_timeout_seconds
+agent_test_timeout_seconds="${PRISM_AGENT_TEST_TIMEOUT_SECONDS:-30}"
+case "$agent_test_timeout_seconds" in ''|*[!0-9]*|0) agent_test_timeout_seconds=30 ;; esac
+readonly agent_test_timeout_seconds
+poc_timeout_seconds="${PRISM_POC_TIMEOUT_SECONDS:-20}"
+case "$poc_timeout_seconds" in ''|*[!0-9]*|0) poc_timeout_seconds=20 ;; esac
+readonly poc_timeout_seconds
+blackbox_startup_timeout_seconds="${PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS:-45}"
+case "$blackbox_startup_timeout_seconds" in ''|*[!0-9]*|0) blackbox_startup_timeout_seconds=45 ;; esac
+readonly blackbox_startup_timeout_seconds
+blackbox_probe_budget_seconds="${PRISM_BLACKBOX_PROBE_BUDGET_SECONDS:-45}"
+case "$blackbox_probe_budget_seconds" in ''|*[!0-9]*|0) blackbox_probe_budget_seconds=45 ;; esac
+readonly blackbox_probe_budget_seconds
+startup_timeout_seconds="${PRISM_STARTUP_TIMEOUT_SECONDS:-$blackbox_startup_timeout_seconds}"
+case "$startup_timeout_seconds" in ''|*[!0-9]*|0) startup_timeout_seconds="$blackbox_startup_timeout_seconds" ;; esac
+readonly startup_timeout_seconds
+runner_reserve_seconds=$((test_timeout_seconds / 10))
+[ "$runner_reserve_seconds" -ge 2 ] || runner_reserve_seconds=2
+[ "$runner_reserve_seconds" -le 10 ] || runner_reserve_seconds=10
+runner_deadline=$((SECONDS + test_timeout_seconds - runner_reserve_seconds))
+RUN_BOUNDED_TIMED_OUT=0
+
+remaining_runner_seconds() {
+  remaining_seconds=$((runner_deadline - SECONDS))
+  [ "$remaining_seconds" -gt 0 ] || remaining_seconds=0
+  printf '%s' "$remaining_seconds"
+}
+
+run_bounded() {
+  requested_seconds="$1"
+  shift
+  RUN_BOUNDED_TIMED_OUT=0
+  remaining_seconds="$(remaining_runner_seconds)"
+  if [ "$remaining_seconds" -le 0 ]; then
+    printf '%s\n' 'sandbox test time budget exhausted before bounded command' >&2
+    RUN_BOUNDED_TIMED_OUT=1
+    return 124
+  fi
+  [ "$requested_seconds" -le "$remaining_seconds" ] || requested_seconds="$remaining_seconds"
+  timeout_diagnostic="$workspace_dir/.prism-tmp/bounded-timeout-$$.log"
+  if timeout --verbose --signal=TERM --kill-after=2s "${requested_seconds}s" "$@" 2>"$timeout_diagnostic"; then
+    bounded_rc=0
+  else
+    bounded_rc=$?
+  fi
+  if grep -q '^timeout: sending signal ' "$timeout_diagnostic"; then
+    RUN_BOUNDED_TIMED_OUT=1
+    printf 'sandbox bounded command timed out after at most %ss: %s\n' "$requested_seconds" "$*" >&2
+  fi
+  cat "$timeout_diagnostic" >&2
+  : > "$timeout_diagnostic"
+  return "$bounded_rc"
+}
 
 proxy_request() {
   [ "$#" -eq 7 ] || { printf '%s\n' 'invalid preview proxy arguments' >&2; exit 64; }
@@ -87,6 +142,73 @@ esac
 
 case "$source_dir" in /*) ;; *) printf '%s\n' 'source directory must be absolute' >&2; exit 64 ;; esac
 case "$workspace_dir" in /*) ;; *) printf '%s\n' 'workspace directory must be absolute' >&2; exit 64 ;; esac
+
+# Runner 自身比 docker wait 的 profile 时限提前一个保留窗口结束。这样慢阶段会
+# 先由 runner 回报超时，而不是等执行器到期后强杀整个容器且只留下 exit_code=124。
+if [ "$action" = test ] && [ "${PRISM_RUNNER_SUPERVISED:-0}" != 1 ]; then
+  mkdir -p "$workspace_dir/.prism-tmp"
+  supervisor_reserve_seconds=$((test_timeout_seconds / 10))
+  [ "$supervisor_reserve_seconds" -ge 2 ] || supervisor_reserve_seconds=2
+  [ "$supervisor_reserve_seconds" -le 10 ] || supervisor_reserve_seconds=10
+  supervisor_timeout_seconds=$((test_timeout_seconds - supervisor_reserve_seconds))
+  [ "$supervisor_timeout_seconds" -ge 5 ] || supervisor_timeout_seconds=5
+  supervisor_id="$$"
+  export PRISM_RUNNER_WHITEBOX_MARKER="$workspace_dir/.prism-tmp/runner-$supervisor_id.whitebox"
+  export PRISM_RUNNER_BLACKBOX_MARKER="$workspace_dir/.prism-tmp/runner-$supervisor_id.blackbox"
+  export PRISM_RUNNER_SUPERVISED=1
+  supervisor_signal=""
+  timeout --verbose --signal=TERM --kill-after=2s "${supervisor_timeout_seconds}s" "$0" &
+  supervisor_pid=$!
+  # Background jobs inherit SIGINT as ignored on non-interactive shells. Send
+  # TERM through timeout so it forwards cancellation to the supervised runner.
+  trap 'supervisor_signal=INT; kill -TERM "$supervisor_pid" 2>/dev/null || true' INT
+  trap 'supervisor_signal=TERM; kill -TERM "$supervisor_pid" 2>/dev/null || true' TERM
+  while :; do
+    if wait "$supervisor_pid"; then
+      supervisor_rc=0
+      break
+    else
+      supervisor_rc=$?
+    fi
+    # A shell wait interrupted by a signal may return before the supervised
+    # timeout process exits. Reap it after it forwards the signal to the runner.
+    if [ -n "$supervisor_signal" ] && kill -0 "$supervisor_pid" 2>/dev/null; then
+      continue
+    fi
+    break
+  done
+  trap - INT TERM
+  case "$supervisor_signal" in
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+  esac
+  [ "$supervisor_rc" -eq 0 ] && exit 0
+  if [ "$supervisor_rc" -eq 124 ]; then
+    printf 'sandbox runner exceeded profile budget (%ss); unfinished stages were stopped\n' "$supervisor_timeout_seconds" >&2
+    case "$test_mode" in
+      whitebox)
+        if [ ! -f "$PRISM_RUNNER_WHITEBOX_MARKER" ]; then
+          printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false,"reason":"runner_budget_exhausted"}'
+        fi
+        ;;
+      blackbox)
+        if [ ! -f "$PRISM_RUNNER_BLACKBOX_MARKER" ]; then
+          printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"timeout","failure_reason":"runner_budget_exhausted"}\n'
+        fi
+        ;;
+      combined)
+        if [ ! -f "$PRISM_RUNNER_WHITEBOX_MARKER" ]; then
+          printf '%s\n' 'PRISM_WHITEBOX_DONE {"executed":true,"passed":false,"reason":"runner_budget_exhausted"}'
+        fi
+        if [ ! -f "$PRISM_RUNNER_BLACKBOX_MARKER" ]; then
+          printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"timeout","failure_reason":"runner_budget_exhausted"}\n'
+        fi
+        ;;
+    esac
+    exit 124
+  fi
+  exit "$supervisor_rc"
+fi
 mkdir -p "$workspace_dir"
 cp -R "$source_dir"/. "$workspace_dir"/
 chmod -R u+rwX "$workspace_dir"
@@ -132,18 +254,18 @@ java_project_classpath() {
 preflight_agent_test_file() {
   # 先用语言原生工具完成解析/编译，避免后端根据自由文本猜测失败阶段。
   case "$1" in
-    *.py) PYTHONPYCACHEPREFIX="$workspace_dir/.prism-tmp/pycache" python -m py_compile "$1" ;;
-    *.js|*.mjs) node --check "$1" ;;
-    *.php) php -l "$1" ;;
-    *.go) go build -o "$workspace_dir/.prism-tmp/agent-test-bin" "$1" ;;
+    *.py) run_bounded "$agent_test_timeout_seconds" env PYTHONPYCACHEPREFIX="$workspace_dir/.prism-tmp/pycache" python -m py_compile "$1" ;;
+    *.js|*.mjs) run_bounded "$agent_test_timeout_seconds" node --check "$1" ;;
+    *.php) run_bounded "$agent_test_timeout_seconds" php -l "$1" ;;
+    *.go) run_bounded "$agent_test_timeout_seconds" go build -o "$workspace_dir/.prism-tmp/agent-test-bin" "$1" ;;
     *.java)
       cls_dir=".prism-ai-classes"
       mkdir -p "$cls_dir"
       project_classpath="$(java_project_classpath)"
       if [ -n "$project_classpath" ]; then
-        javac -cp "$project_classpath" -d "$cls_dir" "$1"
+        run_bounded "$agent_test_timeout_seconds" javac -cp "$project_classpath" -d "$cls_dir" "$1"
       else
-        javac -d "$cls_dir" "$1"
+        run_bounded "$agent_test_timeout_seconds" javac -d "$cls_dir" "$1"
       fi ;;
     *.sh) sh -n "$1" ;;
     *) return 64 ;;
@@ -153,20 +275,20 @@ preflight_agent_test_file() {
 run_agent_test_file() {
   # agent 动态生成的测试文件必须自包含可执行；预检成功后这里只执行测试。
   case "$1" in
-    *.py) PYTHONPATH="$workspace_dir${PYTHONPATH:+:$PYTHONPATH}" python "$1" ;;
-    *.js|*.mjs) node "$1" ;;
-    *.php) php "$1" ;;
-    *.go) "$workspace_dir/.prism-tmp/agent-test-bin" ;;
+    *.py) run_bounded "$agent_test_timeout_seconds" env PYTHONPATH="$workspace_dir${PYTHONPATH:+:$PYTHONPATH}" python "$1" ;;
+    *.js|*.mjs) run_bounded "$agent_test_timeout_seconds" node "$1" ;;
+    *.php) run_bounded "$agent_test_timeout_seconds" php "$1" ;;
+    *.go) run_bounded "$agent_test_timeout_seconds" "$workspace_dir/.prism-tmp/agent-test-bin" ;;
     *.java)
       cls_dir=".prism-ai-classes"
       cls_name="$(basename "$1" .java)"
       project_classpath="$(java_project_classpath)"
       if [ -n "$project_classpath" ]; then
-        java -cp "$cls_dir:$project_classpath" "$cls_name"
+        run_bounded "$agent_test_timeout_seconds" java -cp "$cls_dir:$project_classpath" "$cls_name"
       else
-        java -cp "$cls_dir" "$cls_name"
+        run_bounded "$agent_test_timeout_seconds" java -cp "$cls_dir" "$cls_name"
       fi ;;
-    *.sh) sh "$1" ;;
+    *.sh) run_bounded "$agent_test_timeout_seconds" sh "$1" ;;
     *) return 64 ;;
   esac
 }
@@ -199,13 +321,21 @@ execute_agent_test() {
       agent_rc=$?
     fi
     agent_kind="execution_failure"
+    if [ "$RUN_BOUNDED_TIMED_OUT" -eq 1 ]; then agent_kind="timeout"; fi
     case "$agent_rc" in 126|127) agent_kind="infrastructure_error" ;; esac
+    if [ "$agent_kind" = timeout ] && [[ "$(basename "$agent_file")" == blackbox.* ]]; then
+      : > "$workspace_dir/.prism-tmp/agent-blackbox-timeout"
+    fi
     agent_test_file_json "$agent_file" fail execute "$agent_kind" "$agent_rc" "$agent_output_file"
     return "$agent_rc"
   fi
   agent_rc="$agent_preflight_rc"
   agent_kind="compile_error"
+  if [ "$RUN_BOUNDED_TIMED_OUT" -eq 1 ]; then agent_kind="timeout"; fi
   case "$agent_rc" in 126|127) agent_kind="infrastructure_error" ;; esac
+  if [ "$agent_kind" = timeout ] && [[ "$(basename "$agent_file")" == blackbox.* ]]; then
+    : > "$workspace_dir/.prism-tmp/agent-blackbox-timeout"
+  fi
   agent_test_file_json "$agent_file" fail compile "$agent_kind" "$agent_rc" "$agent_output_file"
   return "$agent_rc"
 }
@@ -502,7 +632,7 @@ prepare_deps() {
   case "$language" in
     python)
       if [ -f requirements.txt ]; then
-        if ! python -m pip install -q --no-index -r requirements.txt; then
+        if ! run_bounded 90 python -m pip install -q --no-index -r requirements.txt; then
           printf '%s\n' 'PRISM_DEPS python requirements failed (offline cache incomplete)' >&2
           return 1
         fi
@@ -511,7 +641,7 @@ prepare_deps() {
     node)
       if [ -d node_modules ]; then :;
       elif [ -f package.json ]; then
-        if ! npm ci --offline --ignore-scripts; then
+        if ! run_bounded 90 npm ci --offline --ignore-scripts; then
           printf '%s\n' 'PRISM_DEPS node install failed (offline cache incomplete)' >&2
           return 1
         fi
@@ -519,7 +649,7 @@ prepare_deps() {
       ;;
     go)
       if [ -f go.mod ] && [ ! -d vendor ]; then
-        if ! go mod download; then
+        if ! run_bounded 90 go mod download; then
           printf '%s\n' 'PRISM_DEPS go module download failed (offline cache incomplete)' >&2
           return 1
         fi
@@ -527,22 +657,22 @@ prepare_deps() {
       ;;
     java)
       if [ -f mvnw ]; then
-        if ! sh ./mvnw -o -B dependency:go-offline; then
+        if ! run_bounded 120 sh ./mvnw -o -B dependency:go-offline; then
           printf '%s\n' 'PRISM_DEPS maven dependency preparation failed (offline cache incomplete)' >&2
           return 1
         fi
       elif [ -f gradlew ]; then
-        if ! sh ./gradlew --offline --no-daemon dependencies; then
+        if ! run_bounded 120 sh ./gradlew --offline --no-daemon dependencies; then
           printf '%s\n' 'PRISM_DEPS gradle dependency preparation failed (offline cache incomplete)' >&2
           return 1
         fi
       elif [ -f pom.xml ] && command -v mvn >/dev/null 2>&1; then
-        if ! mvn -o -B dependency:go-offline; then
+        if ! run_bounded 120 mvn -o -B dependency:go-offline; then
           printf '%s\n' 'PRISM_DEPS maven dependency preparation failed (offline cache incomplete)' >&2
           return 1
         fi
       elif { [ -f build.gradle ] || [ -f build.gradle.kts ]; } && command -v gradle >/dev/null 2>&1; then
-        if ! gradle --offline --no-daemon dependencies; then
+        if ! run_bounded 120 gradle --offline --no-daemon dependencies; then
           printf '%s\n' 'PRISM_DEPS gradle dependency preparation failed (offline cache incomplete)' >&2
           return 1
         fi
@@ -550,7 +680,7 @@ prepare_deps() {
       ;;
     php)
       if [ -f composer.json ] && [ ! -d vendor ]; then
-        if ! command -v composer >/dev/null 2>&1 || ! composer install --no-interaction --no-progress --no-scripts --no-plugins --prefer-dist; then
+        if ! command -v composer >/dev/null 2>&1 || ! run_bounded 90 composer install --no-interaction --no-progress --no-scripts --no-plugins --prefer-dist; then
           printf '%s\n' 'PRISM_DEPS composer install failed (offline cache incomplete or composer unavailable)' >&2
           return 1
         fi
@@ -559,6 +689,37 @@ prepare_deps() {
   esac
   deps_prepare_succeeded=1
   return 0
+}
+
+php_doc_root() {
+  if [ -f ./index.php ] || [ -f ./index.html ]; then
+    printf '%s\n' .
+    return 0
+  fi
+  if [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
+    printf '%s\n' public
+    return 0
+  fi
+  nested_root=""
+  nested_count=0
+  for directory in */; do
+    [ -d "$directory" ] || continue
+    case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
+    nested_candidate=""
+    if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
+      nested_candidate="${directory%/}"
+    elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
+      nested_candidate="${directory%/}/public"
+    fi
+    [ -n "$nested_candidate" ] || continue
+    nested_root="$nested_candidate"
+    nested_count=$((nested_count + 1))
+  done
+  if [ "$nested_count" -eq 1 ]; then
+    printf '%s\n' "$nested_root"
+  else
+    printf '%s\n' .
+  fi
 }
 
 run_deploy() {
@@ -667,33 +828,7 @@ PYWSGI
       exec go run .
       ;;
     php)
-      # 与 sandbox_service 内嵌 runner 一致:顶层入口优先,空 public 不抢占,
-      # 嵌套包(zip 多套一层目录)递归下探唯一候选。
-      document_root=.
-      if [ -f ./index.php ] || [ -f ./index.html ]; then
-        document_root=.
-      elif [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
-        document_root=public
-      else
-        nested_root=""
-        nested_count=0
-        for directory in */; do
-          [ -d "$directory" ] || continue
-          case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
-          candidate=""
-          if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
-            candidate="${directory%/}"
-          elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
-            candidate="${directory%/}/public"
-          fi
-          [ -n "$candidate" ] || continue
-          nested_root="$candidate"
-          nested_count=$((nested_count + 1))
-        done
-        if [ "$nested_count" -eq 1 ]; then
-          document_root="$nested_root"
-        fi
-      fi
+      document_root="$(php_doc_root)"
       exec php -S "127.0.0.1:$preview_port" -t "$document_root"
       ;;
   esac
@@ -701,13 +836,13 @@ PYWSGI
 
 probe_loopback_path() {
   probe_path="$1"
-  printf '%s\n' "$probe_path" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || return 1
-  bash -c '
+  printf '%s\n' "$probe_path" | grep -Eq '^(/|/[A-Za-z0-9._~!$&+,;=@%/?-]+)$' || return 1
+  timeout --signal=TERM --kill-after=1s 3s bash -c '
     port="$1"
     path="$2"
     exec 3<>"/dev/tcp/127.0.0.1/$port"
     printf "GET %s HTTP/1.0\r\nHost: 127.0.0.1:%s\r\nConnection: close\r\n\r\n" "$path" "$port" >&3
-    IFS= read -r -t 3 line <&3 || exit 1
+    IFS= read -r -t 2 line <&3 || exit 1
     case "$line" in
       HTTP/*\ [1-5][0-9][0-9]\ *) code="${line#HTTP/* }"; printf "%s" "${code%% *}" ;;
       *) exit 1 ;;
@@ -716,45 +851,124 @@ probe_loopback_path() {
 }
 
 discover_route_candidates() {
-  route_prefix='(route|get|post|put|delete|patch|path|HandleFunc|Path|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)[[:space:]]*\([[:space:]]*'
-  double_pattern="${route_prefix}\"[^\"]+\""
-  single_pattern="${route_prefix}'[^']+'"
+  route_source_matches() {
+    find . -type f \
+      \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' \
+      -not -path './_agent_tests/*' -print0 \
+      | xargs -0 awk '
+        function lex(line, tokens,    n,i,c,next2,q,triple,value,closed,count,j) {
+          n=length(line); i=1; count=0
+          while (i <= n) {
+            c=substr(line,i,1); next2=substr(line,i,2)
+            if (in_block) {
+              if (next2 == "*/") { in_block=0; i+=2 } else i++
+              continue
+            }
+            if (in_multiline) {
+              if (multiline_quote == "`") {
+                if (c == "`") { in_multiline=0; i++ } else i++
+              } else if (substr(line,i,3) == multiline_quote multiline_quote multiline_quote) {
+                in_multiline=0; i+=3
+              } else i++
+              continue
+            }
+            if (c ~ /[[:space:]]/) { i++; continue }
+            if (next2 == "/*") { in_block=1; i+=2; continue }
+            if (next2 == "//" || c == "#") break
+            if (c == "\"" || c == sprintf("%c",39) || c == "`") {
+              q=c; triple=(q != "`" && substr(line,i,3) == q q q)
+              i += triple ? 3 : 1; value=""; closed=0
+              while (i <= n) {
+                if (substr(line,i,2) == "\\\\") {
+                  value=value substr(line,i+1,1); i+=2; continue
+                }
+                if (triple && substr(line,i,3) == q q q) { i+=3; closed=1; break }
+                if (!triple && substr(line,i,1) == q) { i++; closed=1; break }
+                value=value substr(line,i,1); i++
+              }
+              if (!closed && (triple || q == "`")) { in_multiline=1; multiline_quote=q }
+              tokens[++count]="Q:" value
+              continue
+            }
+            if (c ~ /[[:alpha:]_\$]/) {
+              j=i+1
+              while (j <= n && substr(line,j,1) ~ /[[:alnum:]_\$]/) j++
+              tokens[++count]=substr(line,i,j-i); i=j; continue
+            }
+            tokens[++count]=c; i++
+          }
+          return count
+        }
+        function is_route_name(name) {
+          name=tolower(name)
+          return name == "route" || name == "get" || name == "post" || name == "put" || name == "delete" || name == "patch" || name == "path" || name == "handlefunc" || name == "getmapping" || name == "postmapping" || name == "putmapping" || name == "deletemapping" || name == "patchmapping" || name == "requestmapping"
+        }
+        function emit_path(token) { if (substr(token,1,3) == "Q:/") print substr(token,3) }
+        FNR == 1 { in_block=0; in_multiline=0; multiline_quote="" }
+        {
+          count=lex($0,tokens)
+          for (i=1; i<=count; i++) {
+            if (is_route_name(tokens[i]) && tokens[i+1] == "(" ) emit_path(tokens[i+2])
+            target=0; end_index=i
+            if (tokens[i] == "PATH_INFO" || tokens[i] == "Q:PATH_INFO") target=1
+            if ((tokens[i] == "request" || tokens[i] == "req") && tokens[i+1] == "." && (tokens[i+2] == "path" || tokens[i+2] == "url")) { target=1; end_index=i+2 }
+            if (tokens[i] == "r" && tokens[i+1] == "." && tokens[i+2] == "URL" && tokens[i+3] == "." && tokens[i+4] == "Path") { target=1; end_index=i+4 }
+            if (target) {
+              j=end_index+1
+              if (tokens[j] == ")") j++
+              if (tokens[j] == "=") {
+                while (tokens[j] == "=") j++
+                emit_path(tokens[j])
+              }
+            }
+          }
+        }' 2>/dev/null || true
+  }
   {
-    find . -type f \
-      \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
-      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' \
-      -not -path './_agent_tests/*' -print0 \
-      | xargs -0 grep -hiEo "$double_pattern" 2>/dev/null \
-      | sed -nE "s/.*\\([[:space:]]*['\"]([^'\"]+)['\"].*/\\1/p" || true
-    find . -type f \
-      \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
-      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' \
-      -not -path './_agent_tests/*' -print0 \
-      | xargs -0 grep -hiEo "$single_pattern" 2>/dev/null \
-      | sed -nE "s/.*\\([[:space:]]*['\"]([^'\"]+)['\"].*/\\1/p" || true
-    printf '%s\n' / /health /healthz /api/health /api/healthz /api /openapi.json /docs /login
-  } | awk '{if (substr($0, 1, 1) != "/") $0 = "/" $0; if (!seen[$0]++) print $0}' | head -n 80
+    route_source_matches
+    if [ "$language" = php ]; then
+      php_root="$(php_doc_root)"
+    else
+      php_root=""
+    fi
+    if [ -n "$php_root" ] && { [ -f "$php_root/index.html" ] || [ -f "$php_root/index.php" ]; }; then
+      printf '%s\n' /
+    fi
+  } | awk 'substr($0, 1, 1) == "/" && !seen[$0]++ {print $0}' | head -n 80
 }
 
 run_blackbox() {
+  printf 'blackbox stage=dependency_preparation elapsed=%ss\n' "$SECONDS"
   # 依赖准备必须覆盖受控 deploy 黑盒脚本：部署自动核验会为 whitebox/blackbox
   # 分别启动一次性 worker，不能假定先前的白盒容器已经填好依赖缓存。
   if ! prepare_deps; then
     printf '%s\n' 'blackbox: offline dependency preparation failed (application was not started)' >&2
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0}\n'
+    if [ "$RUN_BOUNDED_TIMED_OUT" -eq 1 ]; then
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"timeout","failure_reason":"dependency_preparation_timeout"}\n'
+    else
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none"}\n'
+    fi
+    return 1
+  fi
+  if [ "$(remaining_runner_seconds)" -le 0 ]; then
+    printf '%s\n' 'blackbox: runner time budget exhausted during dependency preparation' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"timeout","failure_reason":"runner_budget_exhausted"}\n'
     return 1
   fi
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   if [ -f ./_prism_verify.sh ]; then
-    bash ./_prism_verify.sh blackbox
-    return $?
+    if run_bounded 900 bash ./_prism_verify.sh blackbox; then
+      return 0
+    else
+      verify_rc=$?
+      [ "$RUN_BOUNDED_TIMED_OUT" -eq 0 ] || verify_rc=1
+      return "$verify_rc"
+    fi
   fi
   # 应用日志与可信 runner 回执分流，防止应用 stdout 伪造 PRISM_* 结果标记。
   # 启用作业控制，使应用及其 npm/shell 后代拥有独立进程组，超时或中断时可整体回收。
-  set -m
-  run_deploy >"$blackbox_app_log" 2>&1 &
-  app_pid="$!"
-  set +m
+  app_pid=""
   stop_blackbox_app() {
     [ -n "${app_pid:-}" ] || return 0
     kill -TERM "-$app_pid" >/dev/null 2>&1 || true
@@ -766,17 +980,24 @@ run_blackbox() {
   trap 'stop_blackbox_app; exit 130' INT
   trap 'stop_blackbox_app; exit 143' TERM
   trap 'stop_blackbox_app' EXIT
-  attempts=0
+  set -m
+  run_deploy >"$blackbox_app_log" 2>&1 &
+  app_pid="$!"
+  set +m
   stable=0
   http_ready=""
   http_status=""
+  attempts=0
+  startup_deadline=$((SECONDS + startup_timeout_seconds))
+  [ "$runner_deadline" -lt "$startup_deadline" ] && startup_deadline="$runner_deadline"
+  printf 'blackbox stage=application_readiness started elapsed=%ss\n' "$SECONDS"
   # 服务就绪探测只确认端口有响应；黑盒通过状态另行判定，不能把错误页当成功。
-  while [ "$attempts" -lt 45 ]; do
+  while [ "$attempts" -lt "$startup_timeout_seconds" ] && [ "$SECONDS" -lt "$startup_deadline" ]; do
     if status="$(bash -c '
       port="$1"
       exec 3<>"/dev/tcp/127.0.0.1/$port"
       printf "GET / HTTP/1.0\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n" >&3
-      IFS= read -r line <&3
+      IFS= read -r -t 2 line <&3 || exit 1
       case "$line" in
         HTTP/*\ [1-5][0-9][0-9]\ *)
           code="${line#HTTP/* }"
@@ -806,7 +1027,7 @@ run_blackbox() {
       else
         printf '%s\n' '(application produced no startup output)' >&2
       fi
-      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"failure_kind":"application_startup","failure_reason":"application_exited_before_ready"}\n'
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"application_startup","failure_reason":"application_exited_before_ready"}\n'
       [ "$app_exit_status" -ne 0 ] || app_exit_status=1
       return "$app_exit_status"
     fi
@@ -821,9 +1042,10 @@ run_blackbox() {
     else
       printf '%s\n' '(application produced no startup output)' >&2
     fi
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"failure_kind":"application_startup","failure_reason":"application_readiness_timeout"}\n'
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"application_startup","failure_reason":"application_readiness_timeout"}\n'
     return 1
   fi
+  printf 'blackbox stage=application_readiness completed elapsed=%ss status=%s\n' "$SECONDS" "$http_status"
   printf 'blackbox loopback status=%s\n' "$http_status"
   collect_facts
   # ── v3.4 真实 PoC 验证 ──
@@ -833,7 +1055,16 @@ run_blackbox() {
   # 创建的数据;脚本缺失或失败不阻断黑盒就绪结论。
   if [ -f ./_prism_poc.sh ]; then
     printf '%s\n' 'prism poc script detected, executing'
-    PRISM_POC_PORT="$preview_port" sh ./_prism_poc.sh || printf '%s\n' 'prism poc script exited non-zero'
+    if run_bounded "$poc_timeout_seconds" env PRISM_POC_PORT="$preview_port" sh ./_prism_poc.sh; then
+      printf '%s\n' 'blackbox stage=poc completed'
+    else
+      poc_rc=$?
+      if [ "$poc_rc" -eq 124 ] || [ "$poc_rc" -eq 137 ]; then
+        printf 'blackbox stage=poc timeout after at most %ss (exit=%s)\n' "$poc_timeout_seconds" "$poc_rc" >&2
+      else
+        printf 'prism poc script exited non-zero (exit=%s)\n' "$poc_rc"
+      fi
+    fi
   else
     printf '%s\n' 'no _prism_poc.sh present, skip poc execution'
   fi
@@ -842,29 +1073,53 @@ run_blackbox() {
   route_passed=false
   blackbox_route="/"
   blackbox_status=0
+  blackbox_route_origin=none
   failure_route="/"
   failure_status=0
+  route_deadline=$((SECONDS + blackbox_probe_budget_seconds))
+  [ "$runner_deadline" -lt "$route_deadline" ] && route_deadline="$runner_deadline"
+  printf 'blackbox stage=route_probe started elapsed=%ss\n' "$SECONDS"
+  route_candidates="$(discover_route_candidates)"
+  printf 'blackbox discovered route candidates=%s\n' "$(printf '%s\n' "$route_candidates" | sed '/^$/d' | wc -l | tr -d ' ')"
   while IFS= read -r probe_path; do
     [ -n "$probe_path" ] || continue
+    if [ "$SECONDS" -ge "$route_deadline" ]; then
+      printf '%s\n' 'blackbox route discovery/probe budget exhausted' >&2
+      break
+    fi
     # 源码中的路由字符串是不可信输入；只允许安全的同源 HTTP 路径。
-    printf '%s\n' "$probe_path" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || continue
+    printf '%s\n' "$probe_path" | grep -Eq '^(/|/[A-Za-z0-9._~!$&+,;=@%/?-]+)$' || continue
     if probe_status="$(probe_loopback_path "$probe_path")"; then
       printf 'blackbox route %s -> HTTP %s\n' "$probe_path" "$probe_status"
       case "$probe_status" in
-        2*) blackbox_failed=0; route_passed=true; blackbox_route="$probe_path"; blackbox_status="$probe_status"; break ;;
+        2*)
+          blackbox_failed=0
+          route_passed=true
+          blackbox_route="$probe_path"
+          blackbox_status="$probe_status"
+          blackbox_route_origin=source_route
+          if [ "$probe_path" = "/" ] && [ "$language" = php ]; then
+            php_root="$(php_doc_root)"
+            if [ -f "$php_root/index.html" ] || [ -f "$php_root/index.php" ]; then
+              blackbox_route_origin=static_entrypoint
+            fi
+          fi
+          break
+          ;;
         3*) if [ "$failure_status" -eq 0 ]; then failure_route="$probe_path"; failure_status="$probe_status"; fi ;;
         5*) failure_route="$probe_path"; failure_status="$probe_status" ;;
         4*) if [ "$failure_status" -eq 0 ]; then failure_route="$probe_path"; failure_status="$probe_status"; fi ;;
       esac
+    else
+      printf 'blackbox route %s probe failed before HTTP status\n' "$probe_path" >&2
     fi
-  done <<EOF
-$(discover_route_candidates)
-EOF
+  done <<< "$route_candidates"
   if [ "$blackbox_failed" -ne 0 ]; then
     printf '%s\n' 'blackbox: no discovered application route returned HTTP 2xx' >&2
     blackbox_route="$failure_route"
     blackbox_status="$failure_status"
   fi
+  printf 'blackbox stage=route_probe completed elapsed=%ss passed=%s route=%s status=%s\n' "$SECONDS" "$route_passed" "$blackbox_route" "$blackbox_status"
   # No generated blackbox file means AI assertions were not run, not that they passed.
   agent_assertions_passed=null
   for agent_test_file in \
@@ -884,21 +1139,25 @@ EOF
     blackbox_failed=1
     agent_assertions_passed=false
   fi
+  printf 'blackbox stage=agent_assertions completed elapsed=%ss passed=%s\n' "$SECONDS" "$agent_assertions_passed"
   blackbox_basis=route_smoke
   if [ "$agent_assertions_passed" != null ]; then
     blackbox_basis=route_and_agent_assertions
   fi
-  if [ "$blackbox_failed" -eq 0 ]; then
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s}\n' \
-      "$blackbox_basis" "$agent_assertions_passed" "$route_passed" "$blackbox_route" "$blackbox_status"
-  else
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s}\n' \
-      "$blackbox_basis" \
-      "$agent_assertions_passed" \
-      "$route_passed" "$blackbox_route" "$blackbox_status"
-  fi
+  agent_assertions_timed_out=0
+  [ "$agent_assertions_passed" != false ] || [ ! -f "$workspace_dir/.prism-tmp/agent-blackbox-timeout" ] || agent_assertions_timed_out=1
   stop_blackbox_app
   trap - EXIT INT TERM
+  if [ "$agent_assertions_timed_out" -eq 1 ]; then
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"%s","agent_assertions_passed":false,"route_passed":%s,"route":"%s","status_code":%s,"route_origin":"%s","failure_kind":"timeout","failure_reason":"agent_assertion_timeout"}\n' \
+      "$blackbox_basis" "$route_passed" "$blackbox_route" "$blackbox_status" "$blackbox_route_origin"
+  elif [ "$blackbox_failed" -eq 0 ]; then
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s,"route_origin":"%s"}\n' \
+      "$blackbox_basis" "$agent_assertions_passed" "$route_passed" "$blackbox_route" "$blackbox_status" "$blackbox_route_origin"
+  else
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"%s","agent_assertions_passed":%s,"route_passed":%s,"route":"%s","status_code":%s,"route_origin":"%s"}\n' \
+      "$blackbox_basis" "$agent_assertions_passed" "$route_passed" "$blackbox_route" "$blackbox_status" "$blackbox_route_origin"
+  fi
   return "$blackbox_failed"
 }
 
@@ -1018,9 +1277,26 @@ PRISM_FACTS_END"
 
 if [ "$action" = test ]; then
   case "$test_mode" in
-    whitebox) run_test ;;
-    blackbox) run_blackbox ;;
-    combined) run_combined ;;
+    whitebox)
+      if run_test; then runner_exit_code=0; else runner_exit_code=$?; fi
+      [ -z "${PRISM_RUNNER_WHITEBOX_MARKER:-}" ] || : > "$PRISM_RUNNER_WHITEBOX_MARKER"
+      exit "$runner_exit_code"
+      ;;
+    blackbox)
+      if run_blackbox; then runner_exit_code=0; else runner_exit_code=$?; fi
+      [ -z "${PRISM_RUNNER_BLACKBOX_MARKER:-}" ] || : > "$PRISM_RUNNER_BLACKBOX_MARKER"
+      exit "$runner_exit_code"
+      ;;
+    combined)
+      if run_test; then whitebox_exit_code=0; else whitebox_exit_code=$?; fi
+      [ -z "${PRISM_RUNNER_WHITEBOX_MARKER:-}" ] || : > "$PRISM_RUNNER_WHITEBOX_MARKER"
+      if run_blackbox; then blackbox_exit_code=0; else blackbox_exit_code=$?; fi
+      [ -z "${PRISM_RUNNER_BLACKBOX_MARKER:-}" ] || : > "$PRISM_RUNNER_BLACKBOX_MARKER"
+      if [ "$whitebox_exit_code" -eq 0 ] && [ "$blackbox_exit_code" -eq 0 ]; then
+        exit 0
+      fi
+      exit 1
+      ;;
   esac
 else
   run_deploy

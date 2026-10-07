@@ -821,6 +821,8 @@ set -u
 MODE="${1:-combined}"
 LANG_="${PRISM_LANGUAGE:-python}"
 PORT="${PRISM_PREVIEW_PORT:-8080}"
+STARTUP_TIMEOUT="${PRISM_STARTUP_TIMEOUT_SECONDS:-30}"
+case "$STARTUP_TIMEOUT" in ''|*[!0-9]*|0) STARTUP_TIMEOUT=30 ;; esac
 cd "${PRISM_WORKSPACE:-/workspace}" 2>/dev/null || true
 
 # ── v3.5 多Agent测试: Recon 事实采集(零LLM,结构化facts供沙箱外Agent推理) ──
@@ -1103,53 +1105,139 @@ except Exception as e:
   print(getattr(e,'code',0) or 0)" "$url_path" 2>/dev/null || echo 0
   else
     # 无 python(PHP 沙箱):用 bash /dev/tcp 探测,与 run_blackbox 探活一致
-    bash -c 'port="$1"; path="$2"; exec 3<>"/dev/tcp/127.0.0.1/$port"; printf "GET %s HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" "$path" >&3; IFS= read -r line <&3; case "$line" in HTTP/*\ [1-5][0-9][0-9]\ *) code="${line#HTTP/* }"; printf "%s" "${code%% *}" ;; *) printf "0" ;; esac' prism-probe "$PORT" "$url_path" 2>/dev/null || echo 0
+    bash -c 'port="$1"; path="$2"; exec 3<>"/dev/tcp/127.0.0.1/$port"; printf "GET %s HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" "$path" >&3; IFS= read -r -t 2 line <&3 || exit 1; case "$line" in HTTP/*\ [1-5][0-9][0-9]\ *) code="${line#HTTP/* }"; printf "%s" "${code%% *}" ;; *) printf "0" ;; esac' prism-probe "$PORT" "$url_path" 2>/dev/null || echo 0
   fi
 }
 
 discover_probe_routes() {
-  route_prefix='(route|get|post|put|delete|patch|path|HandleFunc|Path|GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)[[:space:]]*\([[:space:]]*'
-  double_pattern="${route_prefix}\"[^\"]+\""
-  single_pattern="${route_prefix}'[^']+'"
+  route_source_matches() {
+    find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
+      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' -not -path './_agent_tests/*' -print0 \
+      | xargs -0 awk '
+        function lex(line, tokens,    n,i,c,next2,q,triple,value,closed,count,j) {
+          n=length(line); i=1; count=0
+          while (i <= n) {
+            c=substr(line,i,1); next2=substr(line,i,2)
+            if (in_block) {
+              if (next2 == "*/") { in_block=0; i+=2 } else i++
+              continue
+            }
+            if (in_multiline) {
+              if (multiline_quote == "`") {
+                if (c == "`") { in_multiline=0; i++ } else i++
+              } else if (substr(line,i,3) == multiline_quote multiline_quote multiline_quote) {
+                in_multiline=0; i+=3
+              } else i++
+              continue
+            }
+            if (c ~ /[[:space:]]/) { i++; continue }
+            if (next2 == "/*") { in_block=1; i+=2; continue }
+            if (next2 == "//" || c == "#") break
+            if (c == "\"" || c == sprintf("%c",39) || c == "`") {
+              q=c; triple=(q != "`" && substr(line,i,3) == q q q)
+              i += triple ? 3 : 1; value=""; closed=0
+              while (i <= n) {
+                if (substr(line,i,2) == "\\\\") {
+                  value=value substr(line,i+1,1); i+=2; continue
+                }
+                if (triple && substr(line,i,3) == q q q) { i+=3; closed=1; break }
+                if (!triple && substr(line,i,1) == q) { i++; closed=1; break }
+                value=value substr(line,i,1); i++
+              }
+              if (!closed && (triple || q == "`")) { in_multiline=1; multiline_quote=q }
+              tokens[++count]="Q:" value
+              continue
+            }
+            if (c ~ /[[:alpha:]_\$]/) {
+              j=i+1
+              while (j <= n && substr(line,j,1) ~ /[[:alnum:]_\$]/) j++
+              tokens[++count]=substr(line,i,j-i); i=j; continue
+            }
+            tokens[++count]=c; i++
+          }
+          return count
+        }
+        function is_route_name(name) {
+          name=tolower(name)
+          return name == "route" || name == "get" || name == "post" || name == "put" || name == "delete" || name == "patch" || name == "path" || name == "handlefunc" || name == "getmapping" || name == "postmapping" || name == "putmapping" || name == "deletemapping" || name == "patchmapping" || name == "requestmapping"
+        }
+        function emit_path(token) { if (substr(token,1,3) == "Q:/") print substr(token,3) }
+        FNR == 1 { in_block=0; in_multiline=0; multiline_quote="" }
+        {
+          count=lex($0,tokens)
+          for (i=1; i<=count; i++) {
+            if (is_route_name(tokens[i]) && tokens[i+1] == "(" ) emit_path(tokens[i+2])
+            target=0; end_index=i
+            if (tokens[i] == "PATH_INFO" || tokens[i] == "Q:PATH_INFO") target=1
+            if ((tokens[i] == "request" || tokens[i] == "req") && tokens[i+1] == "." && (tokens[i+2] == "path" || tokens[i+2] == "url")) { target=1; end_index=i+2 }
+            if (tokens[i] == "r" && tokens[i+1] == "." && tokens[i+2] == "URL" && tokens[i+3] == "." && tokens[i+4] == "Path") { target=1; end_index=i+4 }
+            if (target) {
+              j=end_index+1
+              if (tokens[j] == ")") j++
+              if (tokens[j] == "=") {
+                while (tokens[j] == "=") j++
+                emit_path(tokens[j])
+              }
+            }
+          }
+        }' 2>/dev/null || true
+  }
   {
-    find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
-      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' -not -path './_agent_tests/*' -print0 \
-      | xargs -0 grep -hiEo "$double_pattern" 2>/dev/null \
-      | sed -nE "s/.*\([[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" || true
-    find . -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.go' -o -name '*.java' -o -name '*.php' \) \
-      -not -path './.git/*' -not -path './node_modules/*' -not -path './vendor/*' -not -path './_agent_tests/*' -print0 \
-      | xargs -0 grep -hiEo "$single_pattern" 2>/dev/null \
-      | sed -nE "s/.*\([[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" || true
-    printf '%s\n' / /health /healthz /api/health /api/healthz /api /openapi.json /docs /login
-  } | awk '{if (substr($0, 1, 1) != "/") $0 = "/" $0; if (!seen[$0]++) print $0}' | head -n 80
+    route_source_matches
+    if [ "$LANG_" = php ]; then
+      root="$(php_doc_root)"
+      if [ -f "$root/index.php" ] || [ -f "$root/index.html" ]; then printf '%s\n' /; fi
+    fi
+  } | awk 'substr($0, 1, 1) == "/" && !seen[$0]++ {print $0}' | head -n 80
 }
 
 run_blackbox() {
-  start_app || { echo "blackbox: 无法启动应用"; return 1; }
+  APP_PID=""
   trap 'stop_app; exit 130' INT
   trap 'stop_app; exit 143' TERM
   trap 'stop_app' EXIT
+  if ! start_app; then
+    echo "blackbox: 无法启动应用"
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"application_startup","failure_reason":"application_start_failed"}\n'
+    return 1
+  fi
   sleep 1
-  i=0; READY=0
-  while [ $i -lt 30 ]; do
+  READY=0
+  attempts=0
+  startup_deadline=$((SECONDS + STARTUP_TIMEOUT))
+  while [ "$attempts" -lt "$STARTUP_TIMEOUT" ] && [ "$SECONDS" -lt "$startup_deadline" ]; do
     S=$(http_probe "/")
     case "$S" in 1*|2*|3*|4*|5*) READY=1; break;; esac  # 存活探测只证明端口有响应，不代表测试通过
     kill -0 "$APP_PID" 2>/dev/null || break
-    i=$((i+1)); sleep 1
+    attempts=$((attempts + 1))
+    sleep 1
   done
-  if [ "$READY" != "1" ]; then echo "blackbox: 应用未在回环端口就绪"; return 1; fi
+  if [ "$READY" != "1" ]; then
+    echo "blackbox: 应用未在回环端口就绪"
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","route_passed":false,"route":"/","status_code":0,"route_origin":"none","failure_kind":"application_startup","failure_reason":"application_readiness_timeout"}\n'
+    return 1
+  fi
   blackbox_route=""
   blackbox_status="0"
+  blackbox_route_origin="none"
   route_passed=false
   failure_route="/"
   failure_status="0"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    printf '%s\n' "$p" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@%/?-]+$' || continue
+    printf '%s\n' "$p" | grep -Eq '^(/|/[A-Za-z0-9._~!$&+,;=@%/?-]+)$' || continue
     probe_status="$(http_probe "$p")"
     printf 'blackbox probe %s -> %s\n' "$p" "$probe_status"
     case "$probe_status" in
-      2*) blackbox_route="$p"; blackbox_status="$probe_status"; route_passed=true; break ;;
+      2*)
+        blackbox_route="$p"; blackbox_status="$probe_status"; route_passed=true
+        blackbox_route_origin=source_route
+        if [ "$p" = / ] && [ "$LANG_" = php ]; then
+          root="$(php_doc_root)"
+          if [ -f "$root/index.php" ] || [ -f "$root/index.html" ]; then blackbox_route_origin=static_entrypoint; fi
+        fi
+        break
+        ;;
       3*) if [ "$failure_status" -eq 0 ]; then failure_route="$p"; failure_status="$probe_status"; fi ;;
       5*) failure_route="$p"; failure_status="$probe_status" ;;
       4*) if [ "$failure_status" -eq 0 ]; then failure_route="$p"; failure_status="$probe_status"; fi ;;
@@ -1165,9 +1253,9 @@ EOFROUTES
   stop_app
   trap - EXIT INT TERM
   if [ "$route_passed" = true ]; then
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke","route_passed":true,"route":"%s","status_code":%s}\n' "$blackbox_route" "$blackbox_status"
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke","route_passed":true,"route":"%s","status_code":%s,"route_origin":"%s"}\n' "$blackbox_route" "$blackbox_status" "$blackbox_route_origin"
   else
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","route_passed":false,"route":"%s","status_code":%s}\n' "$failure_route" "$failure_status"
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","route_passed":false,"route":"%s","status_code":%s,"route_origin":"none"}\n' "$failure_route" "$failure_status"
     return 1
   fi
   echo "blackbox: route $blackbox_route returned HTTP $blackbox_status"
@@ -4130,6 +4218,8 @@ def _valid_agent_test_tuple(status: str, phase: str, failure_kind: str, exit_cod
         return False
     if failure_kind == "infrastructure_error":
         return phase in {"compile", "execute"} and exit_code in {126, 127}
+    if failure_kind == "timeout":
+        return phase in {"compile", "execute"} and exit_code in {124, 137}
     if phase == "compile":
         return failure_kind == "compile_error"
     if phase == "execute":
@@ -4379,8 +4469,15 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
     basis = str(result.get("basis") or "route_and_agent_assertions")
     failure_kind = result.get("failure_kind")
     failure_reason = result.get("failure_reason")
+    route_origin = result.get("route_origin")
     route_status_passed = type(status_code) is int and 200 <= status_code < 300
     startup_failure = failure_kind == "application_startup"
+    timeout_failure = failure_kind == "timeout"
+    timeout_reasons = {
+        "runner_budget_exhausted",
+        "dependency_preparation_timeout",
+        "agent_assertion_timeout",
+    }
     if (
         result.get("executed") is not True
         or type(result.get("passed")) is not bool
@@ -4395,7 +4492,9 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
         or (result["passed"] and not route_passed)
         or (result["passed"] and agent_assertions_passed is False)
         or (basis == "route_smoke" and agent_assertions_passed is not None)
-        or (failure_kind is not None and not startup_failure)
+        or (route_origin is not None and route_origin not in {"none", "source_route", "static_entrypoint"})
+        or (route == "/" and result["passed"] and route_origin not in {"source_route", "static_entrypoint"})
+        or (failure_kind is not None and not (startup_failure or timeout_failure))
         or (
             startup_failure
             and (
@@ -4403,22 +4502,37 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
                 or route_passed
                 or status_code != 0
                 or agent_assertions_passed is not None
-                or failure_reason not in {"application_exited_before_ready", "application_readiness_timeout"}
+                or failure_reason not in {
+                    "application_exited_before_ready",
+                    "application_readiness_timeout",
+                    "application_start_failed",
+                }
             )
         )
-        or (failure_reason is not None and not startup_failure)
+        or (
+            timeout_failure
+            and (
+                result["passed"]
+                or failure_reason not in timeout_reasons
+                or (
+                    failure_reason == "agent_assertion_timeout"
+                    and (agent_assertions_passed is not False or basis != "route_and_agent_assertions")
+                )
+                or (
+                    failure_reason != "agent_assertion_timeout"
+                    and (route_passed or status_code != 0 or agent_assertions_passed is not None)
+                )
+            )
+        )
+        or (failure_reason is not None and not (startup_failure or timeout_failure))
     ):
         return None
     failure_kind = None
     if not result["passed"]:
-        failure_kind = (
+        failure_kind = "timeout" if timeout_failure else (
             "application_startup"
             if startup_failure
-            else (
-                "dynamic_assertion"
-                if route_passed and agent_assertions_passed is False
-                else "route_or_dynamic_assertion"
-            )
+            else ("dynamic_assertion" if route_passed and agent_assertions_passed is False else "route_or_dynamic_assertion")
         )
     if result["passed"]:
         status = "passed"
@@ -4441,6 +4555,10 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
     }
     if startup_failure:
         receipt["failure_reason"] = failure_reason
+    elif timeout_failure:
+        receipt["failure_reason"] = failure_reason
+    if route_origin is not None:
+        receipt["route_origin"] = route_origin
     return receipt
 
 

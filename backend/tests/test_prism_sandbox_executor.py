@@ -172,6 +172,44 @@ def test_monitor_test_uses_requested_mode_for_terminal_event(
     assert terminal_events[0]["message"] == expected_message
 
 
+def test_monitor_test_records_profile_deadline_as_timeout_not_oom(isolated_paths: Path, monkeypatch) -> None:
+    request_id = "blackbox-profile-timeout"
+    profile = executor._load_profiles()["python"]
+    payload = _payload(
+        _archive({"review_sample.py": "VALUE = 1\n"}),
+        request_id=request_id,
+        test_mode="blackbox",
+    )
+    executor._write_state(executor._new_state(payload, profile, executor._request_digest(payload)))
+    commands: list[list[str]] = []
+
+    def fake_run_command(args, **_kwargs):
+        commands.append(list(args))
+        if args[1] == "wait":
+            raise TimeoutError("profile timeout")
+        return {"stdout": "", "exit_code": 0}
+
+    monkeypatch.setattr(executor, "_run_command", fake_run_command)
+    monkeypatch.setattr(executor, "_inspect_container", lambda _container: {"OOMKilled": False, "Status": "exited"})
+    monkeypatch.setattr(executor, "_collect_logs_safe", lambda _container: {"text": "", "bytes_seen": 0})
+    terminal_events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        executor,
+        "_queue_terminal_cleanup",
+        lambda _request_id, **kwargs: terminal_events.append(kwargs) or True,
+    )
+
+    executor._monitor_test(request_id, profile)
+
+    result = terminal_events[0]["result"]
+    assert commands[0][:3] == ["docker", "wait", executor._container_name(request_id)]
+    assert ["docker", "kill", "--signal", "KILL", executor._container_name(request_id)] in commands
+    assert terminal_events[0]["status_value"] == "failed"
+    assert result["exit_code"] == 124
+    assert result["timed_out"] is True
+    assert result["oom_killed"] is False
+
+
 def test_backend_execute_projection_matches_worker_contract_for_initial_and_repair_rounds() -> None:
     from app.services.sandbox_service import _worker_execute_payload
 
@@ -223,10 +261,7 @@ def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
 
     source = tmp_path / "source"
     source.mkdir()
-    # The route declaration helps the runner discover framework-specific paths
-    # which are not in the common health-route list.
     (source / "wsgi.py").write_text(
-        "# path('api/v1/health', health_view)\n"
         "def application(environ, start_response):\n"
         "    if environ.get('PATH_INFO') == '/api/v1/health':\n"
         f"        status = '{route_status} Test'\n"
@@ -409,6 +444,8 @@ def test_docker_create_uses_non_overridable_hardening(isolated_paths: Path) -> N
     assert "max-size=1m" in args and "max-file=2" in args
     assert f"/workspace:rw,exec,nosuid,nodev,size={profile.workspace_mb}m,mode=1777,uid=65532,gid=65532" in args
     assert "PRISM_TEST_MODE=combined" in args
+    assert f"PRISM_TEST_TIMEOUT_SECONDS={profile.test_timeout_seconds}" in args
+    assert f"PRISM_STARTUP_TIMEOUT_SECONDS={profile.startup_timeout_seconds}" in args
     assert args[-1] == image_id
     assert "--publish" not in args and "-p" not in args
     assert "--privileged" not in args

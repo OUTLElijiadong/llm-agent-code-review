@@ -1,5 +1,11 @@
 # 黑白盒可靠性阶段交付
 
+## v4.0.83 候选修复状态（2026-10-08）
+
+已在候选代码中增加黑白盒 runner 的总时限与单阶段/动态断言时限，区分应用启动失败、依赖准备超时、断言超时和总预算耗尽，并在终止时清理应用进程。路由词法扫描忽略注释和字符串，覆盖了独立复核发现的 `ROUTE_DOC = "route('/healthz')"` 假路由。历史故障的 120 秒 `exit_code=124` 有证据支持；触发具体等待的旧阶段仍不可追溯。
+
+候选本地后端全量 **6577 passed、6 skipped、5 warnings**；关键 runner **25 passed**、黑盒上下文 **9 passed**、执行器/报告 **137 passed**、deploy Python **137 passed、2 skipped**；部署脚本 33 项绑定及故障注入通过。静态检查与 Compose 配置通过。精确提交、CI 和生产发布后，需补录本节状态；候选未发布期间生产仍为 v4.0.82。生产只读门禁显示磁盘 93%、无 blocking checks，仍须在实际切换前重查容量。
+
 ## v4.0.82 部署更新（2026-10-08）
 
 v4.0.82 已部署到生产主站和独立 Sandbox Worker。独立 Worker 漂移已补齐：执行器、profile 与 Python/Node/Java/Go/PHP 五种 runner 镜像均使用本次发布的 runner 源码 SHA，profile digest 与本地镜像 ID 完全匹配，`runsc` 和 browser blackbox health ready。生产 Worker 五语言白盒隔离 smoke 通过，Python loopback 黑盒 smoke 三轮通过。部署、备份、CI、Safari 版本和完整运行态细节见[证据 73](证据/73-v4082生产部署与Worker复核-20261008.md)。
