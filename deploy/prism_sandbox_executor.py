@@ -1461,6 +1461,17 @@ def _collect_logs_safe(container: str) -> dict[str, Any]:
         }
 
 
+def _test_terminal_message(test_mode: str, outcome: str) -> str:
+    """Keep user-visible completion events aligned with the requested test mode."""
+    mode_label = {
+        "whitebox": "白盒",
+        "blackbox": "黑盒",
+        "combined": "黑白盒",
+    }.get(str(test_mode or ""), "沙箱")
+    result_label = "完成" if outcome == "succeeded" else "失败"
+    return f"{mode_label}测试{result_label}"
+
+
 def _remove_container(container: str) -> None:
     _run_command(["docker", "rm", "-f", container], timeout=30, allow_failure=True)
     remaining = _run_command(["docker", "inspect", container], timeout=20, allow_failure=True)
@@ -1500,7 +1511,9 @@ def _monitor_test(request_id: str, profile: Profile) -> None:
     container = _container_name(request_id)
     timed_out = False
     exit_code: int | None = None
+    test_mode = "whitebox"
     try:
+        test_mode = str(_read_state(request_id).get("test_mode") or test_mode)
         try:
             waited = _run_command(
                 ["docker", "wait", container],
@@ -1538,8 +1551,8 @@ def _monitor_test(request_id: str, profile: Profile) -> None:
             request_id,
             status_value=outcome,
             stage=outcome,
-            message="白盒测试完成" if outcome == "succeeded" else "白盒测试失败",
-            error="" if outcome == "succeeded" else "白盒测试未通过",
+            message=_test_terminal_message(test_mode, outcome),
+            error="" if outcome == "succeeded" else _test_terminal_message(test_mode, outcome),
             result=result,
         )
     except Exception as exc:  # noqa: BLE001

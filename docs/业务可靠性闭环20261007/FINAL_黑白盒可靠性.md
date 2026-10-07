@@ -20,4 +20,6 @@ v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7` 已于 2026-10-07 发布至
 
 候选代码提交 `b5c81173aed6784e8a3172cf9b212d550f02b1c0` 的 Business CI [37654707054](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/37654707054) 与 CodeQL [37654707139](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/37654707139) 均成功。Business CI 后端全量 6562 passed、5 warnings、0 skipped（847.63 秒；隔离 Redis 用例实际执行），前端 142 files / 1851 passed，依赖审计无已知漏洞；部署和故障注入 job 成功。CodeQL Python 与 JavaScript/TypeScript 均成功。
 
-整体生产验收**未完成**：当前生产 `/healthz`/`readyz` 为 v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7`；SSH 返回公钥拒绝，没有可用生产部署 workflow。v4.0.81 尚未生产部署；候选 CI 已在上文记录成功，但 Worker 白盒原场景、partial UI 读回、无入口黑盒负例、loopback runnable 黑盒正例及三轮重复均未完成。本轮没有创建或修改生产任务。最近只读记录的磁盘 89% 告警与 decoy v4.0.79 偏差仍须在运维通道恢复后核验。测试历史记录默认保留 72 小时且无终态删除入口，不能声称数据已即时删除或所有真实业务路径已通过。
+2026-10-08 更新：v4.0.81 已发布，生产发布基线、健康/就绪、运行镜像、备份与独立 ops-check 复核通过，详细见证据/71。部署时的 SSH 拒绝原因是首次使用了不匹配的 `li` 登录名；用已配置密钥的 `root` 身份后完成发布。普通 Safari 页面刷新后显示 v4.0.81；真实白盒任务 `sbx_c3c03892e4684e5691a5e950` 终态已通过，动态用例 3/3、容器/作业目录回收确认。但报告指出项目没有自带测试文件或可启动 Web 入口，AI 用例的业务覆盖深度有限；这不能外推为完整白盒或黑盒通过。
+
+**整体黑白盒业务验收仍未完成。** v4.0.81 目前仅有一个生产白盒样本通过，未达到多独立样本/三轮重复要求。唯一可选项目没有 `main/app/index/server`，因此黑盒正例及无入口负例的新版本复测仍待补足；历史 v4.0.79 失败记录不能代表新版本。Safari 时间线显示 Agent 报告“角色 5/4”，下载报告没有角色清单，记为 UI/计数待核验，不判定为已确认调度漏洞。运维 `ops-check` 仍为 degraded，唯一告警是磁盘使用率 91%（告警线 85%、临界线 95%）；未执行清理。真实账号 RBAC、论坛和全业务角色闭环本次未覆盖，测试记录默认保留 72 小时。详见证据/71。

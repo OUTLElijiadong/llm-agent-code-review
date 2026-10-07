@@ -112,6 +112,66 @@ def test_execute_rejects_arbitrary_command_image_mount_and_environment() -> None
             executor._validate_execute(_payload(archive, **{field: value}))
 
 
+@pytest.mark.parametrize(
+    ("test_mode", "outcome", "expected"),
+    [
+        ("whitebox", "succeeded", "白盒测试完成"),
+        ("whitebox", "failed", "白盒测试失败"),
+        ("blackbox", "succeeded", "黑盒测试完成"),
+        ("blackbox", "failed", "黑盒测试失败"),
+        ("combined", "succeeded", "黑白盒测试完成"),
+        ("combined", "failed", "黑白盒测试失败"),
+    ],
+)
+def test_terminal_test_message_matches_requested_mode(
+    test_mode: str,
+    outcome: str,
+    expected: str,
+) -> None:
+    assert executor._test_terminal_message(test_mode, outcome) == expected
+
+
+@pytest.mark.parametrize(
+    ("wait_output", "expected_outcome", "expected_message"),
+    [
+        ("0\n", "succeeded", "黑盒测试完成"),
+        ("1\n", "failed", "黑盒测试失败"),
+    ],
+)
+def test_monitor_test_uses_requested_mode_for_terminal_event(
+    isolated_paths: Path,
+    monkeypatch,
+    wait_output: str,
+    expected_outcome: str,
+    expected_message: str,
+) -> None:
+    request_id = "blackbox-terminal-event"
+    profile = executor._load_profiles()["python"]
+    payload = _payload(
+        _archive({"review_sample.py": "VALUE = 1\n"}),
+        request_id=request_id,
+        test_mode="blackbox",
+    )
+    state = executor._new_state(payload, profile, executor._request_digest(payload))
+    state.update({"status": "running_whitebox", "container_name": "prism-test"})
+    executor._write_state(state)
+
+    monkeypatch.setattr(executor, "_run_command", lambda *_args, **_kwargs: {"stdout": wait_output})
+    monkeypatch.setattr(executor, "_inspect_container", lambda _container: {"OOMKilled": False})
+    monkeypatch.setattr(executor, "_collect_logs_safe", lambda _container: {"text": "", "bytes_seen": 0})
+    terminal_events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        executor,
+        "_queue_terminal_cleanup",
+        lambda _request_id, **kwargs: terminal_events.append(kwargs) or True,
+    )
+
+    executor._monitor_test(request_id, profile)
+
+    assert terminal_events[0]["status_value"] == expected_outcome
+    assert terminal_events[0]["message"] == expected_message
+
+
 def test_backend_execute_projection_matches_worker_contract_for_initial_and_repair_rounds() -> None:
     from app.services.sandbox_service import _worker_execute_payload
 
