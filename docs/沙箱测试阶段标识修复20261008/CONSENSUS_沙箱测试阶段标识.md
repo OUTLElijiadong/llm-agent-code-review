@@ -5,13 +5,14 @@
 - 保留 `status=running_whitebox` 这一既有活动状态，避免影响轮询、停止和清理协议。
 - 后端事件 `stage` 使用 `running_whitebox`、`running_blackbox`、`running_combined` 区分模式。
 - 前端显示新阶段；对旧版统一存成 `running_whitebox` 的事件，使用环境的 `test_mode` 做兼容显示。
+- `_recover_jobs()` 必须在处理 active 状态前检查进程内 `SUBMISSIONS_INFLIGHT` 和 `PENDING_SUBMISSIONS`；同进程 janitor 不得与 `submit_job()` 争抢进行中的 validating/preparing 状态。进程重启后预约集合为空，旧的 validating/preparing 任务仍失败关闭并清理。
 - 不改变历史数据库记录、不删改审计日志；本次生产 Worker 临时状态只在逐项确认清理后删除。
 
 ## 验收范围
 
-候选代码：执行器阶段和界面标签单测、相关文件 Lint、前端正式构建、CI。
+候选代码：执行器阶段和 janitor 竞态回归单测、界面标签单测、相关文件 Lint、前端正式构建、完整 CI。
 
-生产环境：核对精确提交、备份/迁移/健康/HTTPS/磁盘，使用固定本地沙箱样本复测；普通 Safari 真实点击检查黑盒和白盒时间线，不使用无痕模式。
+生产环境：核对精确提交、备份/迁移/健康/HTTPS/磁盘，使用固定本地沙箱样本对四类场景各重复三次；普通 Safari 真实点击检查新版和兼容历史事件，不使用无痕模式。
 
 ## 停止条件
 

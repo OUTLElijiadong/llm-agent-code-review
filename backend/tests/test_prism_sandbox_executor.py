@@ -927,6 +927,158 @@ def test_cleanup_failure_remains_active_until_janitor_reclaims(
     assert executor._active_job_count() == 0
 
 
+@pytest.mark.parametrize("active_status", ["validating", "preparing"])
+@pytest.mark.parametrize("reservation", ["inflight", "pending"])
+def test_recovery_skips_submission_that_is_still_in_flight(
+    isolated_paths: Path,
+    monkeypatch,
+    active_status: str,
+    reservation: str,
+) -> None:
+    request_id = "sandbox-recover-inflight-01"
+    archive = _archive({"main.py": "print('ok')\n"})
+    profile = executor._load_profiles()["python"]
+    payload = _payload(archive, request_id=request_id)
+    state = executor._new_state(payload, profile, executor._request_digest(payload))
+    state["status"] = active_status
+    state["stage"] = active_status
+    executor._write_state(state)
+    monkeypatch.setattr(executor, "_load_profiles", lambda: {"python": profile})
+    monkeypatch.setattr(executor, "_remove_container", lambda _container: None)
+    monkeypatch.setattr(executor, "_remove_job_data", lambda _value: None)
+
+    with executor.STATE_CONDITION:
+        if reservation == "inflight":
+            executor.SUBMISSIONS_INFLIGHT.add(request_id)
+        else:
+            executor.PENDING_SUBMISSIONS[request_id] = state["request_digest"]
+    try:
+        executor._recover_jobs()
+        recovered = executor._read_state(request_id)
+    finally:
+        with executor.STATE_CONDITION:
+            executor.SUBMISSIONS_INFLIGHT.discard(request_id)
+            executor.PENDING_SUBMISSIONS.pop(request_id, None)
+            executor.STATE_CONDITION.notify_all()
+
+    assert recovered["status"] == active_status
+    assert recovered["stage"] == active_status
+    assert not any(event["event_type"] == "result" for event in recovered["events"])
+
+
+@pytest.mark.parametrize("active_status", ["validating", "preparing"])
+def test_recovery_fails_closed_after_submission_reservation_is_gone(
+    isolated_paths: Path,
+    monkeypatch,
+    active_status: str,
+) -> None:
+    request_id = "sandbox-recover-after-restart-01"
+    archive = _archive({"main.py": "print('ok')\n"})
+    profile = executor._load_profiles()["python"]
+    payload = _payload(archive, request_id=request_id)
+    state = executor._new_state(payload, profile, executor._request_digest(payload))
+    state["status"] = active_status
+    state["stage"] = active_status
+    executor._write_state(state)
+    monkeypatch.setattr(executor, "_load_profiles", lambda: {"python": profile})
+    monkeypatch.setattr(executor, "_remove_container", lambda _container: None)
+    monkeypatch.setattr(executor, "_remove_job_data", lambda _value: None)
+
+    executor._recover_jobs()
+
+    recovered = executor._read_state(request_id)
+    assert recovered["status"] == "failed"
+    assert recovered["stage"] == "failed"
+    assert recovered["result"]["cleanup_confirmed"] is True
+    assert "任务恢复失败" in recovered["error"]
+
+
+@pytest.mark.parametrize("blocked_stage", ["validating", "preparing"])
+def test_janitor_does_not_recover_a_live_submit_job(
+    isolated_paths: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    blocked_stage: str,
+) -> None:
+    request_id = f"sandbox-live-submit-{blocked_stage}"
+    archive = _archive({"main.py": "print('ok')\n"})
+    image_id = "sha256:" + ("c" * 64)
+    entered_block = threading.Event()
+    release_block = threading.Event()
+    submit_result: dict[str, object] = {}
+    submit_errors: list[BaseException] = []
+
+    def wait_at_live_stage() -> None:
+        entered_block.set()
+        if not release_block.wait(timeout=5):
+            raise TimeoutError("test did not release the active submission")
+
+    def resolve_runtime() -> str:
+        if blocked_stage == "validating":
+            wait_at_live_stage()
+        return "runsc"
+
+    def extract_archive(_archive_bytes: bytes, _request_id: str) -> Path:
+        if blocked_stage == "preparing":
+            wait_at_live_stage()
+        source = tmp_path / f"source-{blocked_stage}"
+        source.mkdir(exist_ok=True)
+        return source
+
+    monkeypatch.setattr(executor, "_resolve_runtime", resolve_runtime)
+    monkeypatch.setattr(
+        executor,
+        "_resolve_image",
+        lambda *_args: executor.ResolvedImage("allowed", image_id, image_id, image_id),
+    )
+    monkeypatch.setattr(executor, "_extract_archive", extract_archive)
+    monkeypatch.setattr(executor, "_build_docker_create_args", lambda **_kwargs: ["docker", "create"])
+    monkeypatch.setattr(executor, "_start_monitor", lambda *_args: None)
+
+    def fake_run(args: list[str], **_kwargs) -> dict[str, object]:
+        stdout = "d" * 64 if args[:2] == ["docker", "create"] else ""
+        return {
+            "exit_code": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "output_bytes": len(stdout),
+            "output_truncated": False,
+        }
+
+    monkeypatch.setattr(executor, "_run_command", fake_run)
+
+    def submit() -> None:
+        try:
+            submit_result["value"] = executor.submit_job(_payload(archive, request_id=request_id))
+        except BaseException as exc:  # keep thread failures visible to the test
+            submit_errors.append(exc)
+
+    thread = threading.Thread(target=submit, name=f"test-{blocked_stage}-submit")
+    thread.start()
+    try:
+        assert entered_block.wait(timeout=5), "submission did not reach the expected live stage"
+        before = executor._read_state(request_id)
+        assert before["status"] == blocked_stage
+        executor._recover_jobs()
+        during = executor._read_state(request_id)
+        assert during["status"] == blocked_stage
+        assert not any(event["event_type"] == "result" for event in during["events"])
+    finally:
+        release_block.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert submit_errors == []
+    result, duplicate = submit_result["value"]
+    assert duplicate is False
+    assert result["status"] == "running_whitebox"
+    assert [event["stage"] for event in result["events"]] == [
+        "validating",
+        "preparing",
+        "running_whitebox",
+    ]
+
+
 def test_evidence_artifacts_are_structured_escaped_and_integrity_checked(monkeypatch) -> None:
     environment = SimpleNamespace(
         id=101,

@@ -1387,6 +1387,15 @@ def _recover_jobs() -> None:
             if status_value not in ACTIVE_STATUSES:
                 continue
             request_id = _validate_request_id(state.get("request_id"))
+            # The janitor runs in the same process as submissions. A persisted
+            # validating/preparing state can therefore be live work, not an
+            # interrupted job from a previous process. Leave those requests to
+            # submit_job until its in-flight reservation is released; after a
+            # real restart the in-memory reservation is empty and stale work is
+            # still reconciled below.
+            with STATE_CONDITION:
+                if request_id in SUBMISSIONS_INFLIGHT or request_id in PENDING_SUBMISSIONS:
+                    continue
             if status_value == "stopping":
                 if not isinstance(state.get("pending_terminal"), dict):
                     _finish_submission_error(
