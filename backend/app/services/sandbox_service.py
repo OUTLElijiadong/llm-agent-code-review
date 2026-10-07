@@ -1137,8 +1137,9 @@ discover_probe_routes() {
               q=c; triple=(q != "`" && substr(line,i,3) == q q q)
               i += triple ? 3 : 1; value=""; closed=0
               while (i <= n) {
-                if (substr(line,i,2) == "\\\\") {
-                  value=value substr(line,i+1,1); i+=2; continue
+                if (substr(line,i,1) == "\\") {
+                  if (i < n) { value=value substr(line,i+1,1); i+=2; continue }
+                  i++; continue
                 }
                 if (triple && substr(line,i,3) == q q q) { i+=3; closed=1; break }
                 if (!triple && substr(line,i,1) == q) { i++; closed=1; break }

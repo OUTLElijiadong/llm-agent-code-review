@@ -626,12 +626,15 @@ def test_real_runner_does_not_treat_route_text_inside_string_as_business_route(t
     source.mkdir()
     (source / "wsgi.py").write_text(
         'ROUTE_DOC = "route(\'/healthz\')"\n'
+        r'''ESCAPED_DOC = "example \" route('/escaped')"''' + "\n"
+        r'''TRIPLE_DOC = """example \""" route('/triple')"""''' + "\n"
         'EXAMPLE = """\n@app.get(\'/docs\')\n"""\n'
         "def application(environ, start_response):\n"
         "    start_response('200 OK', [('Content-Type', 'text/plain')])\n"
         "    return [b'fallback']\n",
         encoding="utf-8",
     )
+    compile((source / "wsgi.py").read_text(encoding="utf-8"), "wsgi.py", "exec")
     runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
     env = {
         **os.environ,
@@ -699,12 +702,15 @@ def test_embedded_blackbox_does_not_treat_route_text_inside_string_as_route(tmp_
     source.mkdir()
     (source / "wsgi.py").write_text(
         'ROUTE_DOC = "route(\'/healthz\')"\n'
+        r'''ESCAPED_DOC = "example \" route('/escaped')"''' + "\n"
+        r'''TRIPLE_DOC = """example \""" route('/triple')"""''' + "\n"
         'EXAMPLE = """\n@app.get(\'/docs\')\n"""\n'
         "def application(environ, start_response):\n"
         "    start_response('200 OK', [('Content-Type', 'text/plain')])\n"
         "    return [b'fallback']\n",
         encoding="utf-8",
     )
+    compile((source / "wsgi.py").read_text(encoding="utf-8"), "wsgi.py", "exec")
     runner = tmp_path / "_prism_verify.sh"
     runner.write_text(_DEPLOY_VERIFY_RUNNER, encoding="utf-8")
     env = {
