@@ -6,5 +6,5 @@
 - [ ] 执行一个无入口样本黑盒诊断负例及一个 loopback-only runnable app 黑盒正例；各重复三轮。当前审查员项目列表只有 `V4验收样本20260920`，需确认是否有可安全运行且获授权的完整 Web 样本；不得将无入口项目当正例。
 - [ ] 核对 Worker/AI 执行清单、来源哈希、报告持久化、任务终态及资源回收。生产页面没有终态沙箱任务删除入口，测试任务默认保留 72h；不能声称即时删除，需记录 TTL 和到期清理证据。旧生产历史记录保留。
 - [ ] 将 Redis 故障转移/网络分区、跨语言源码语义 grounding 和真实供应商百万 token 测试保留为明确待覆盖项；不能把当前候选回归解释为任意外部项目、模型、依赖和网络环境绝对不失败。
-- [x] 修复 inline `inspect.signature(...).parameters` 与 `importlib.util` 赋值别名 grounding 误判；v4.0.81 本地候选后端全量 6556 passed、6 skipped、5 warnings（250.84 秒），目标定向 110 passed、2 warnings，Ruff、compileall、diff-check 通过。详见证据/70。
+- [x] 修复 inline `inspect.signature(...).parameters` 与 `importlib.util` 赋值别名 grounding 误判；v4.0.81 候选本地与 CI 全量、定向、前端、部署故障注入和 CodeQL 均已验证。提交 `b5c81173aed6784e8a3172cf9b212d550f02b1c0` 的 Business CI 为 6562 passed/5 warnings/0 skipped，CodeQL Python/JavaScript 均成功；本地结果和 bundle 校验值见证据/70。
 - [ ] 将 v4.0.81 部署生产，并完成普通 Safari Worker 白盒、黑盒负例/正例及三轮复测。当前生产只读健康检查为 v4.0.80，SSH 返回公钥拒绝，且仓库没有自动部署 workflow；待恢复有授权的部署通道后继续。生产任务默认保留 72h，页面无终态删除入口。

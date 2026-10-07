@@ -18,4 +18,6 @@ v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7` 已于 2026-10-07 发布至
 
 候选本地验收：沙箱上下文定向 **110 passed、2 warnings**；后端全量 **6556 passed、6 skipped、5 warnings（250.84 秒）**；前端 **142 个测试文件、1851 passed**，lint、vue-tsc/Vite 构建通过（3742 个模块；构建注入 v4.0.81 和时间 `2026-10-07T16:12:32Z`）；目标 Ruff、全后端 compileall、33 项发布绑定/故障注入、`git diff --check` 通过。后端全量命令使用 `--disable-warnings`，仅记录准确汇总数，不猜测 warning 来源。skip 和 warnings 单独保留，不冒充通过或零告警。
 
-整体生产验收**未完成**：当前生产 `/healthz`/`readyz` 为 v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7`；SSH 返回公钥拒绝，没有可用生产部署 workflow。v4.0.81 尚未生产部署，精确 SHA CI 尚待推送触发，Worker 白盒原场景、partial UI 读回、无入口黑盒负例、loopback runnable 黑盒正例及三轮重复均未完成。本轮没有创建或修改生产任务。最近只读记录的磁盘 89% 告警与 decoy v4.0.79 偏差仍须在运维通道恢复后核验。测试历史记录默认保留 72 小时且无终态删除入口，不能声称数据已即时删除或所有真实业务路径已通过。
+候选代码提交 `b5c81173aed6784e8a3172cf9b212d550f02b1c0` 的 Business CI [37654707054](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/37654707054) 与 CodeQL [37654707139](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/37654707139) 均成功。Business CI 后端全量 6562 passed、5 warnings、0 skipped（847.63 秒；隔离 Redis 用例实际执行），前端 142 files / 1851 passed，依赖审计无已知漏洞；部署和故障注入 job 成功。CodeQL Python 与 JavaScript/TypeScript 均成功。
+
+整体生产验收**未完成**：当前生产 `/healthz`/`readyz` 为 v4.0.80 / `396ca2312cefb229d6bbccc81315d41ce64a1ce7`；SSH 返回公钥拒绝，没有可用生产部署 workflow。v4.0.81 尚未生产部署；候选 CI 已在上文记录成功，但 Worker 白盒原场景、partial UI 读回、无入口黑盒负例、loopback runnable 黑盒正例及三轮重复均未完成。本轮没有创建或修改生产任务。最近只读记录的磁盘 89% 告警与 decoy v4.0.79 偏差仍须在运维通道恢复后核验。测试历史记录默认保留 72 小时且无终态删除入口，不能声称数据已即时删除或所有真实业务路径已通过。
