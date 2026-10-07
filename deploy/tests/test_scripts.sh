@@ -1719,8 +1719,25 @@ expected = {
     "go": "sha256:" + "4" * 64,
     "php": "sha256:" + "5" * 64,
 }
+
 assert {language: profile["digest"] for language, profile in profiles.items()} == expected
 PY
+}
+
+# 在完整 Shell 集成回归中标记阶段边界，CI 失败时能定位具体异常场景。
+# 参数: $1 阶段名；$2..$N 测试函数及参数。
+# 返回: 子测试成功时返回 0；失败时报告阶段并保留原退出码。
+run_deploy_test_stage() {
+  local stage="$1" status
+  shift
+  printf 'deploy regression stage: %s\n' "$stage"
+  if "$@"; then
+    printf 'PASS deploy regression stage: %s\n' "$stage"
+  else
+    status=$?
+    printf 'FAIL deploy regression stage: %s (exit=%s)\n' "$stage" "$status" >&2
+    return "$status"
+  fi
 }
 
 # 静态验证 systemd 模板并渲染占位符。
@@ -2028,12 +2045,12 @@ run_database_credential_validation "$test_root"
 run_frontend_tls_asset_validation "$test_root"
 run_checkpoint_reader_probe_tests
 run_release_binding_tests "$test_root"
-run_backup_archive_drift_simulation "$fake_bin" "$test_root"
-run_verify_backup_guard_simulation "$fake_bin" "$test_root"
-run_restore_failure_simulation "$test_root"
-run_deploy_failure_rollback_simulation "$test_root"
+run_deploy_test_stage backup_archive_drift run_backup_archive_drift_simulation "$fake_bin" "$test_root"
+run_deploy_test_stage verify_backup_guards run_verify_backup_guard_simulation "$fake_bin" "$test_root"
+run_deploy_test_stage restore_failure_recovery run_restore_failure_simulation "$test_root"
+run_deploy_test_stage deploy_failure_rollback run_deploy_failure_rollback_simulation "$test_root"
 source tests/deploy_failure_cases.sh
-run_deploy_failure_matrix "$test_root"
+run_deploy_test_stage deploy_failure_injection_matrix run_deploy_failure_matrix "$test_root"
 run_ops_check_simulation "$fake_bin" "$test_root"
 run_cleanup_simulation "$fake_bin" "$test_root"
 run_sandbox_pin_simulation "$fake_bin" "$test_root"

@@ -11,7 +11,7 @@
 - Redis 限流场景：block 持续、亚秒过期、admission window、失败结算窗口、旧检查窗口、Unix socket factory 均通过，证据/36。临时无网络容器、socket 和数据已删除。
 - 前端：1850 tests passed / 142 files；ESLint 与 vue-tsc/Vite v4.0.79 构建通过，证据/38–40。
 - 发布绑定：33 项通过；同一 test_scripts.sh 所含故障注入矩阵对备份、校验、构建、迁移、切换、健康、HTTPS失败及回滚拒绝进行了预期断言，证据/41。
-- 持续集成：新增 `.github/workflows/ci.yml`，按候选 SHA 执行后端全量回归与覆盖率（启动网络隔离 Redis，让 Lua 限流 6 项从 skip 转为真实执行）、前端依赖审计/测试/ESLint/构建、部署执行器/发布故障矩阵/ShellCheck/Compose 配置校验。最终 SHA 的 GitHub Actions 结果待推送后记录；本地 actionlint、依赖审计和部署合同检查见证据/59。
+- 持续集成：新增 `.github/workflows/ci.yml`，按候选 SHA 执行后端全量回归与覆盖率（启动网络隔离 Redis，让 Lua 限流 6 项从 skip 转为真实执行）、前端依赖审计/测试/ESLint/构建、部署执行器/发布故障矩阵/ShellCheck/Compose 配置校验。首次 GitHub run `37572839777` 的前端 job 成功、部署脚本 job 失败、后端 job 仍在运行；部署日志未提供失败阶段，工作树已加入阶段标记，本地完整复跑通过，最终 GitHub 复跑仍待完成。证据见/59。
 - Ruff（实现与新增测试）、compileall、ShellCheck error 级、runner/install 脚本 `bash -n`、`git diff --check` 均通过；默认 ShellCheck 模式仍报告已有 warning/info，见证据/49 与最终检查。
 
 以上仅为候选自动化证据，不能表述为生产 Worker 验收。grounding 无效仍失败关闭；不可拆分小片或调用预算耗尽仍返回失败。它提高已观察故障路径的确定性，不证明任意外部项目、模型、语言、依赖或网络环境都成功。
