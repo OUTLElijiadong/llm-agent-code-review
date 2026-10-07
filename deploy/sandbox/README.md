@@ -28,6 +28,8 @@ export PHP_BASE_IMAGE_DIGEST='<64-hex-digest>'
 docker compose -f deploy/sandbox/docker-compose.build.yml build
 ```
 
+`PRISM_RUNNER_SHA256` 默认值固定绑定仓库中的 `runner.sh`；更新 runner 时必须同步维护五个语言服务的默认值。`deploy/tests/test_sandbox_runner_digest.py` 会校验五处默认摘要与源码 SHA-256 一致，防止镜像构建在 Dockerfile 哈希门禁处失败。
+
 构建完成后，脚本从五个 profile 中现有的本地受信任 tag 读取 Docker image
 ID。默认是 dry-run，不会改文件；只有 `--apply` 才会对 `profiles.json` 做
 同目录临时文件、fsync、rename 的原子替换：
