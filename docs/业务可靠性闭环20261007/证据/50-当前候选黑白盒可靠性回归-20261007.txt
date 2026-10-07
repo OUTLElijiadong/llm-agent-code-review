@@ -1,0 +1,21 @@
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 73%]
+........................................................................ [ 91%]
+.................................                                        [100%]
+=============================== warnings summary ===============================
+.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/.venv311/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+app/agents/sandbox_agents.py:48
+  /Users/li/.codex/worktrees/v4-1m-context-retest/基于大模型智能体的代码审查平台/backend/app/agents/sandbox_agents.py:48: PytestCollectionWarning: cannot collect test class 'TestVerifierAgent' because it has a __init__ constructor (from: tests/unit/agents/test_sandbox_agent_context.py)
+    class TestVerifierAgent(_SandboxAgent):
+
+tests/unit/services/test_agent_test_cases.py::test_source_summary_rejects_ambiguous_duplicate_zip_members
+  /opt/homebrew/Cellar/python@3.11/3.11.15_1/Frameworks/Python.framework/Versions/3.11/lib/python3.11/zipfile.py:1580: UserWarning: Duplicate name: 'main.php'
+    return self._open_to_write(zinfo, force_zip64=force_zip64)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+393 passed, 3 warnings in 78.16s (0:01:18)

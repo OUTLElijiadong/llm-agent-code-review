@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
 from app.agents.sandbox_agents import TestVerifierAgent
 from app.agents.source_context import SourceContextError, compact_source_context
@@ -269,7 +268,7 @@ def test_real_node_whitebox_runner_executes_mjs_for_cjs_and_esm_projects(
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -323,7 +322,7 @@ def test_real_node_whitebox_runner_keeps_legacy_cjs_test_file_compatibility(tmp_
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -396,7 +395,7 @@ def test_real_java_whitebox_runner_compiles_and_runs_generated_test_with_project
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -497,7 +496,7 @@ def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -626,7 +625,7 @@ def test_real_node_runner_prepares_dependencies_before_tests_and_startup(
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -790,7 +789,7 @@ def test_real_runner_prepares_offline_dependencies_before_language_whitebox(
     if tool == "python":
         env.update({"PRISM_TEST_REAL_PYTHON": sys.executable, "PRISM_TEST_FAKE_PIP": str(fake_bin / "pip")})
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
+        ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
         capture_output=True, timeout=45, check=False,
     )
     output = completed.stdout + completed.stderr
@@ -861,7 +860,7 @@ def test_real_runner_prepares_dependencies_before_injected_whitebox_verify(tmp_p
         }
     )
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
+        ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
         capture_output=True, timeout=30, check=False,
     )
     output = completed.stdout + completed.stderr
@@ -876,6 +875,99 @@ def test_real_runner_prepares_dependencies_before_injected_whitebox_verify(tmp_p
         assert commands == ["prepare"]
         assert not marker.exists()
         assert '"passed":false,"reason":"dependency_preparation_failed"' in output
+
+
+@pytest.mark.parametrize("mode", ["blackbox", "combined"])
+@pytest.mark.parametrize("install_exit", [0, 23], ids=["offline-cache-hit", "offline-cache-miss"])
+def test_real_runner_prepares_dependencies_before_injected_blackbox_verify(
+    tmp_path, mode, install_exit
+) -> None:
+    """独立 deploy 黑盒和 combined 的受控验证都先预备依赖，失败不能进入注入脚本。"""
+    import os
+    import subprocess
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "package.json").write_text(
+        '{"name":"verify-fixture","version":"1.0.0","scripts":{}}', encoding="utf-8"
+    )
+    (source / "package-lock.json").write_text(
+        '{"name":"verify-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"verify-fixture","version":"1.0.0"}}}',
+        encoding="utf-8",
+    )
+    (source / "app.js").write_text("module.exports = true;\n", encoding="utf-8")
+    (source / "_prism_verify.sh").write_text(
+        "#!/bin/sh\n"
+        "test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43\n"
+        "printf '%s\\n' \"$1\" >> \"$PRISM_TEST_COMMAND_LOG\"\n"
+        "case \"$1\" in\n"
+        "  whitebox) printf '%s\\n' 'PRISM_WHITEBOX_DONE {\"executed\":true,\"passed\":true}' ;;\n"
+        "  blackbox) printf '%s\\n' 'PRISM_BLACKBOX_DONE "
+        "{\"executed\":true,\"passed\":true,\"basis\":\"route_smoke\","
+        "\"route_passed\":true,\"route\":\"/healthz\",\"status_code\":200}' ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$1\" >> \"$PRISM_TEST_NPM_LOG\"\n"
+        "test \"$1\" = ci || exit 64\n"
+        "if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi\n"
+        ": > \"$PRISM_TEST_DEPENDENCY_MARKER\"\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+    command_log = tmp_path / "commands.log"
+    npm_log = tmp_path / "npm.log"
+    marker = tmp_path / "dependency-ready"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": mode,
+            "PRISM_PREVIEW_PORT": "39129",
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_TEST_COMMAND_LOG": str(command_log),
+            "PRISM_TEST_NPM_LOG": str(npm_log),
+            "PRISM_TEST_DEPENDENCY_MARKER": str(marker),
+            "PRISM_FAKE_INSTALL_EXIT": str(install_exit),
+        }
+    )
+    completed = subprocess.run(
+        ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
+        capture_output=True, timeout=30, check=False,
+    )
+    output = completed.stdout + completed.stderr
+    commands = command_log.read_text(encoding="utf-8").splitlines() if command_log.exists() else []
+    npm_calls = npm_log.read_text(encoding="utf-8").splitlines()
+
+    if install_exit == 0:
+        assert completed.returncode == 0, output
+        assert marker.is_file()
+        assert npm_calls == ["ci"]
+        assert commands == (["blackbox"] if mode == "blackbox" else ["whitebox", "blackbox"])
+        if mode == "combined":
+            assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
+        blackbox = sandbox_service._extract_blackbox_result(output)
+        assert blackbox is not None and blackbox["status"] == "passed"
+        assert blackbox["agent_assertions_passed"] is None
+    else:
+        assert completed.returncode != 0, output
+        assert not marker.exists()
+        assert npm_calls == ["ci"]
+        assert commands == []
+        blackbox = sandbox_service._extract_blackbox_result(output)
+        assert blackbox is not None
+        assert blackbox["status"] == "failed"
+        assert blackbox["basis"] == "route_smoke"
+        assert blackbox["agent_assertions_passed"] is None
 
 
 def test_test_generator_scopes_probes_to_source_and_configured_database(monkeypatch) -> None:

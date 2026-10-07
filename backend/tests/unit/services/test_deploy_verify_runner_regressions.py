@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
-
 from app.services.sandbox_service import _DEPLOY_VERIFY_RUNNER, _extract_blackbox_result
 
 
@@ -55,7 +56,7 @@ def test_embedded_blackbox_runner_requires_success_http_status(
     }
 
     result = subprocess.run(
-        ["sh", str(runner), "blackbox"],
+        ["bash", str(runner), "blackbox"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -91,7 +92,7 @@ def test_embedded_go_whitebox_fails_when_go_vet_fails(tmp_path: Path) -> None:
     }
 
     result = subprocess.run(
-        ["sh", str(runner), "whitebox"],
+        ["bash", str(runner), "whitebox"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -133,7 +134,7 @@ def test_real_runner_separates_route_success_from_agent_assertion_failure(tmp_pa
         "PRISM_WORKSPACE_DIR": str(workspace),
     }
     result = subprocess.run(
-        ["sh", str(runner)],
+        ["bash", str(runner)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -178,7 +179,7 @@ def test_real_runner_reports_application_startup_failure_with_diagnostics(
     }
 
     result = subprocess.run(
-        ["sh", str(runner)],
+        ["bash", str(runner)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -224,7 +225,7 @@ def test_real_runner_reports_readiness_timeout_with_structured_failure(tmp_path:
     }
 
     result = subprocess.run(
-        ["sh", str(runner)],
+        ["bash", str(runner)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -243,6 +244,211 @@ def test_real_runner_reports_readiness_timeout_with_structured_failure(tmp_path:
     assert receipt["status_code"] == 0
     assert receipt["failure_kind"] == "application_startup"
     assert receipt["failure_reason"] == "application_readiness_timeout"
+
+
+@pytest.mark.parametrize("runner_kind", ["trusted-runner", "embedded-deploy-runner"])
+def test_node_readiness_timeout_stops_application_child_processes(
+    tmp_path: Path, runner_kind: str
+) -> None:
+    """黑盒就绪超时必须回收 npm 下启动的 Node 子进程，而非只杀 npm 父进程。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required for the isolated process-tree regression")
+
+    source = tmp_path / "source"
+    source.mkdir()
+    ticks = tmp_path / "ticks.log"
+    child_pid = tmp_path / "child.pid"
+    (source / "package.json").write_text(
+        '{"name":"timeout-fixture","version":"1.0.0","scripts":{"start":"node server.js"}}',
+        encoding="utf-8",
+    )
+    (source / "package-lock.json").write_text(
+        '{"name":"timeout-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"timeout-fixture","version":"1.0.0"}}}',
+        encoding="utf-8",
+    )
+    (source / "server.js").write_text(
+        "const fs = require('node:fs');\n"
+        "fs.writeFileSync(process.env.PRISM_TEST_CHILD_PID, String(process.pid));\n"
+        "setInterval(() => fs.appendFileSync(process.env.PRISM_TEST_TICKS, 'x'), 20);\n",
+        encoding="utf-8",
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  ci) exit 0 ;;\n"
+        "  start)\n"
+        "    \"$PRISM_TEST_REAL_NODE\" server.js &\n"
+        "    child=$!\n"
+        "    wait \"$child\" ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+    fake_sleep = fake_bin / "sleep"
+    fake_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_sleep.chmod(0o755)
+
+    if runner_kind == "trusted-runner":
+        runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
+        cwd = tmp_path
+        env = {
+            **os.environ,
+            "PATH": f"{fake_bin}:{Path(node).parent}:{Path(sys.executable).parent}:{os.environ.get('PATH', '')}",
+            "PRISM_ACTION": "test",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_TEST_MODE": "blackbox",
+            "PRISM_PREVIEW_PORT": str(_free_port()),
+            "PRISM_SOURCE_DIR": str(source),
+            "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        }
+        command = ["bash", str(runner)]
+    else:
+        from app.services.sandbox_service import _DEPLOY_VERIFY_RUNNER
+
+        runner = tmp_path / "_prism_verify.sh"
+        runner.write_text(_DEPLOY_VERIFY_RUNNER, encoding="utf-8")
+        cwd = source
+        env = {
+            **os.environ,
+            "PATH": f"{fake_bin}:{Path(node).parent}:{Path(sys.executable).parent}:{os.environ.get('PATH', '')}",
+            "PRISM_LANGUAGE": "node",
+            "PRISM_PREVIEW_PORT": str(_free_port()),
+            "PRISM_WORKSPACE": str(source),
+        }
+        command = ["bash", str(runner), "blackbox"]
+
+    env.update(
+        {
+            "PRISM_TEST_REAL_NODE": node,
+            "PRISM_TEST_CHILD_PID": str(child_pid),
+            "PRISM_TEST_TICKS": str(ticks),
+        }
+    )
+    result = subprocess.run(
+        command, cwd=cwd, env=env, capture_output=True, text=True, timeout=20, check=False
+    )
+    pid = int(child_pid.read_text(encoding="utf-8")) if child_pid.exists() else None
+    try:
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, output
+        assert any(
+            marker in output
+            for marker in (
+                "readiness_timeout",
+                "did not become ready",
+                "未在回环端口就绪",
+                "PRISM_VERIFY blackbox fail",
+            )
+        ), output
+        assert pid is not None, output
+        time.sleep(0.2)
+        first_size = ticks.stat().st_size if ticks.exists() else 0
+        time.sleep(0.2)
+        second_size = ticks.stat().st_size if ticks.exists() else 0
+        assert second_size == first_size, f"Node child {pid} kept running after timeout\n{output}"
+    finally:
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.parametrize(("interrupt_signal", "expected_exit"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
+def test_runner_signal_stops_application_child_processes(
+    tmp_path: Path, interrupt_signal: int, expected_exit: int
+) -> None:
+    """runner 收到取消信号时，必须回收应用进程组及 npm 启动的 Node 子进程。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required for the isolated signal-cleanup regression")
+
+    source = tmp_path / "source"
+    source.mkdir()
+    ticks = tmp_path / "ticks.log"
+    child_pid = tmp_path / "child.pid"
+    (source / "package.json").write_text(
+        '{"name":"signal-fixture","version":"1.0.0","scripts":{"start":"node server.js"}}',
+        encoding="utf-8",
+    )
+    (source / "package-lock.json").write_text(
+        '{"name":"signal-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"signal-fixture","version":"1.0.0"}}}',
+        encoding="utf-8",
+    )
+    (source / "server.js").write_text(
+        "const fs = require('node:fs');\n"
+        "fs.writeFileSync(process.env.PRISM_TEST_CHILD_PID, String(process.pid));\n"
+        "setInterval(() => fs.appendFileSync(process.env.PRISM_TEST_TICKS, 'x'), 20);\n",
+        encoding="utf-8",
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  ci) exit 0 ;;\n"
+        "  start)\n"
+        "    \"$PRISM_TEST_REAL_NODE\" server.js &\n"
+        "    child=$!\n"
+        "    wait \"$child\" ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_npm.chmod(0o755)
+
+    runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{Path(node).parent}:{Path(sys.executable).parent}:{os.environ.get('PATH', '')}",
+        "PRISM_ACTION": "test",
+        "PRISM_LANGUAGE": "node",
+        "PRISM_TEST_MODE": "blackbox",
+        "PRISM_PREVIEW_PORT": str(_free_port()),
+        "PRISM_SOURCE_DIR": str(source),
+        "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        "PRISM_TEST_REAL_NODE": node,
+        "PRISM_TEST_CHILD_PID": str(child_pid),
+        "PRISM_TEST_TICKS": str(ticks),
+    }
+    process = subprocess.Popen(
+        ["bash", str(runner)],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    pid: int | None = None
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline and process.poll() is None and not child_pid.exists():
+            time.sleep(0.05)
+        assert child_pid.exists(), "application child did not start before cancellation"
+        pid = int(child_pid.read_text(encoding="utf-8"))
+        process.send_signal(interrupt_signal)
+        stdout, stderr = process.communicate(timeout=10)
+        output = stdout + stderr
+        assert process.returncode == expected_exit, output
+        first_size = ticks.stat().st_size if ticks.exists() else 0
+        time.sleep(0.2)
+        second_size = ticks.stat().st_size if ticks.exists() else 0
+        assert second_size == first_size, f"Node child {pid} kept running after signal\n{output}"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_embedded_node_blackbox_discovers_route_without_python3(tmp_path: Path) -> None:
@@ -282,7 +488,7 @@ def test_embedded_node_blackbox_discovers_route_without_python3(tmp_path: Path) 
     }
 
     result = subprocess.run(
-        ["sh", str(runner), "blackbox"],
+        ["bash", str(runner), "blackbox"],
         cwd=tmp_path,
         env=env,
         capture_output=True,

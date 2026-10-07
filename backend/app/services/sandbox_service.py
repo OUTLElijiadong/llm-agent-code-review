@@ -16,6 +16,7 @@ import hmac
 import html
 import io
 import ipaddress
+import itertools
 import json
 import re
 import stat
@@ -814,7 +815,7 @@ def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[s
 # 用 deploy 镜像自带的解释器运行,不依赖项目镜像 runner.sh 的 test 分支(deploy 镜像通常不含)。
 # 白盒执行可用的静态/编译/既有单测；黑盒仅探测源码候选路由的 HTTP 可达性，不生成或执行 AI 动态断言。
 # 冒烟结果不得作为业务路径或授权渗透已经覆盖的证据。
-_DEPLOY_VERIFY_RUNNER = r"""#!/bin/sh
+_DEPLOY_VERIFY_RUNNER = r"""#!/bin/bash
 set -u
 # runner.sh 已把源码(含本脚本)拷到 /workspace 并 cd 进去,这里就地运行。
 MODE="${1:-combined}"
@@ -1013,6 +1014,8 @@ php_doc_root() {
 start_app() {
   : > /tmp/prism-app.log
   APP_PID=""
+  # 将应用及 npm/shell 后代放入独立作业进程组，超时/退出时可统一回收。
+  set -m
   is_asgi_application() {
     [ -f "$1" ] || return 1
     python -c 'import ast,sys
@@ -1051,13 +1054,14 @@ PYWSGI
         python main.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
       elif [ -f app.py ]; then
         python app.py >/tmp/prism-app.log 2>&1 & APP_PID=$!
-      else return 1; fi
+      else set +m; return 1; fi
       ;;
     node)
       node_entry=""
       if [ -f package.json ]; then
         if node -e 'process.exit(require("./package.json").scripts?.start ? 0 : 1)' 2>/dev/null; then
           npm start >/tmp/prism-app.log 2>&1 & APP_PID=$!
+          set +m
           return 0
         fi
         node_entry="$(node -e 'try { process.stdout.write(require("./package.json").main || "") } catch (_) {}' 2>/dev/null || true)"
@@ -1070,13 +1074,23 @@ PYWSGI
           break
         fi
       done
-      [ -n "$APP_PID" ] || return 1
+      if [ -z "$APP_PID" ]; then set +m; return 1; fi
       ;;
-    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); [ -n "$JAR" ] || return 1; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); if [ -z "$JAR" ]; then set +m; return 1; fi; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
     go)     go run . >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
     php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
   esac
+  set +m
   [ -n "$APP_PID" ]
+}
+
+stop_app() {
+  [ -n "${APP_PID:-}" ] || return 0
+  kill -TERM "-$APP_PID" >/dev/null 2>&1 || true
+  sleep 1
+  kill -KILL "-$APP_PID" >/dev/null 2>&1 || true
+  wait "$APP_PID" >/dev/null 2>&1 || true
+  APP_PID=""
 }
 
 http_probe() {
@@ -1112,7 +1126,9 @@ discover_probe_routes() {
 
 run_blackbox() {
   start_app || { echo "blackbox: 无法启动应用"; return 1; }
-  trap 'kill "$APP_PID" 2>/dev/null || true' EXIT INT TERM
+  trap 'stop_app; exit 130' INT
+  trap 'stop_app; exit 143' TERM
+  trap 'stop_app' EXIT
   sleep 1
   i=0; READY=0
   while [ $i -lt 30 ]; do
@@ -1146,9 +1162,7 @@ EOFROUTES
     blackbox_route="$failure_route"
     blackbox_status="$failure_status"
   fi
-  kill "$APP_PID" 2>/dev/null || true
-  wait "$APP_PID" 2>/dev/null
-  APP_PID=""
+  stop_app
   trap - EXIT INT TERM
   if [ "$route_passed" = true ]; then
     printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"route_smoke","route_passed":true,"route":"%s","status_code":%s}\n' "$blackbox_route" "$blackbox_status"
@@ -1457,12 +1471,22 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
             def flush_packed_files() -> None:
                 if not packed_files:
                     return
-                text = json.dumps(packed_files, ensure_ascii=False, separators=(",", ":"))
+                # Keep file bodies verbatim inside the source text. JSON-encoding
+                # the whole bundle escapes quotes and backslashes, so an exact
+                # source quote from the model can never match the text checked by
+                # source_context. Paths are metadata; code remains lossless.
+                packed_source_files = [dict(item) for item in packed_files]
+                text = "\n".join(
+                    f"[FILE PATH JSON] {json.dumps(item['path'], ensure_ascii=False)}\n"
+                    f"[SOURCE TEXT]\n{item['text']}"
+                    for item in packed_source_files
+                )
                 digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
                 chunks.append(
                     {
                         "source_id": f"files-{len(chunks) + 1:03d}-{digest[:12]}",
                         "path": "<multiple-files>",
+                        "files": packed_source_files,
                         "text": text,
                         "sha256": digest,
                     }
@@ -1631,9 +1655,22 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
         trusted_port_calls: set[str] = set()
         trusted_environ_names: set[str] = set()
         trusted_os_module_names: set[str] = set()
-        trusted_setitem_calls: set[str] = set()
-        trusted_delitem_calls: set[str] = set()
+        trusted_operator_module_names: set[str] = set()
+        trusted_builtin_module_names: set[str] = set()
+        trusted_importlib_module_names: set[str] = set()
+        trusted_sys_module_names: set[str] = set()
+        trusted_functools_module_names: set[str] = set()
+        trusted_import_functions: set[str] = {"__import__"}
+        trusted_import_module_functions: set[str] = set()
+        trusted_partial_calls: set[str] = set()
+        trusted_partialmethod_calls: set[str] = set()
+        trusted_dict_getitem_calls: set[str] = {"dict.__getitem__"}
+        trusted_dict_update_calls: set[str] = {"dict.update"}
+        trusted_getattr_calls: set[str] = {"getattr"}
+        trusted_setitem_calls: set[str] = {"dict.__setitem__"}
+        trusted_delitem_calls: set[str] = {"dict.__delitem__", "dict.pop"}
         trusted_methodcaller_calls: set[str] = set()
+        dynamic_execution_names = {"exec", "eval", "compile"}
 
         def bind_name(name: str, statement: ast.AST, value: ast.AST) -> None:
             scope = enclosing_scope(statement)
@@ -1673,8 +1710,22 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                             prefix = bound
                             trusted_os_module_names.add(prefix)
                             trusted_port_calls.update({f"{prefix}.getenv", f"{prefix}.environ.get"})
-                            trusted_environ_names.add(f"{prefix}.environ")
+                            trusted_environ_names.update({f"{prefix}.environ", f"{prefix}.environb"})
+                        elif alias.name == "builtins":
+                            trusted_builtin_module_names.add(bound)
+                            trusted_import_functions.add(f"{bound}.__import__")
+                            trusted_getattr_calls.add(f"{bound}.getattr")
+                        elif alias.name == "importlib":
+                            trusted_importlib_module_names.add(bound)
+                            trusted_import_module_functions.add(f"{bound}.import_module")
+                        elif alias.name == "sys":
+                            trusted_sys_module_names.add(bound)
+                        elif alias.name == "functools":
+                            trusted_functools_module_names.add(bound)
+                            trusted_partial_calls.add(f"{bound}.partial")
+                            trusted_partialmethod_calls.add(f"{bound}.partialmethod")
                         elif alias.name in {"operator", "_operator"}:
+                            trusted_operator_module_names.add(bound)
                             trusted_setitem_calls.add(f"{bound}.setitem")
                             trusted_delitem_calls.add(f"{bound}.delitem")
                             trusted_methodcaller_calls.add(f"{bound}.methodcaller")
@@ -1708,6 +1759,9 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                         elif alias.name == "environ":
                             trusted_environ_names.add(bound)
                             trusted_port_calls.add(f"{bound}.get")
+                        elif alias.name == "environb":
+                            trusted_environ_names.add(bound)
+                            trusted_port_calls.add(f"{bound}.get")
                 elif import_node.module == "operator":
                     for alias in import_node.names:
                         if alias.name == "setitem":
@@ -1716,6 +1770,125 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                             trusted_delitem_calls.add(alias.asname or alias.name)
                         elif alias.name == "methodcaller":
                             trusted_methodcaller_calls.add(alias.asname or alias.name)
+                elif import_node.module == "_operator":
+                    for alias in import_node.names:
+                        if alias.name == "methodcaller":
+                            trusted_methodcaller_calls.add(alias.asname or alias.name)
+                elif import_node.module == "builtins":
+                    for alias in import_node.names:
+                        if alias.name == "__import__":
+                            trusted_import_functions.add(alias.asname or alias.name)
+                        elif alias.name == "getattr":
+                            trusted_getattr_calls.add(alias.asname or alias.name)
+                        elif alias.name in dynamic_execution_names:
+                            dynamic_execution_names.add(alias.asname or alias.name)
+                elif import_node.module == "importlib":
+                    for alias in import_node.names:
+                        if alias.name == "import_module":
+                            trusted_import_module_functions.add(alias.asname or alias.name)
+                elif import_node.module == "functools":
+                    for alias in import_node.names:
+                        if alias.name == "partial":
+                            trusted_partial_calls.add(alias.asname or alias.name)
+                        elif alias.name == "partialmethod":
+                            trusted_partialmethod_calls.add(alias.asname or alias.name)
+            static_dynamic_name_cache: dict[ast.AST, str | None] = {}
+
+            def static_dynamic_name(node: ast.AST) -> str | None:
+                if node in static_dynamic_name_cache:
+                    return static_dynamic_name_cache[node]
+                result: str | None = None
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    result = node.value
+                elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                    left = static_dynamic_name(node.left)
+                    right = static_dynamic_name(node.right)
+                    if left is not None and right is not None and len(left) + len(right) <= 64:
+                        result = f"{left}{right}"
+                elif isinstance(node, ast.JoinedStr):
+                    parts = [static_dynamic_name(value) for value in node.values]
+                    if all(value is not None for value in parts):
+                        joined = "".join(value or "" for value in parts)
+                        if len(joined) <= 64:
+                            result = joined
+                static_dynamic_name_cache[node] = result
+                return result
+
+            def builtin_namespace_reference(node: ast.AST, seen: set[str] | None = None) -> bool:
+                visited = set(seen or ())
+                if isinstance(node, ast.Name):
+                    if node.id == "__builtins__" or node.id in trusted_builtin_module_names:
+                        return True
+                    if node.id in visited:
+                        return False
+                    visited.add(node.id)
+                    for assignment in ast.walk(tree):
+                        targets = (
+                            assignment.targets
+                            if isinstance(assignment, ast.Assign)
+                            else [assignment.target]
+                            if isinstance(assignment, ast.AnnAssign)
+                            else []
+                        )
+                        value = getattr(assignment, "value", None)
+                        if value is not None and any(
+                            isinstance(target, ast.Name) and target.id == node.id for target in targets
+                        ) and builtin_namespace_reference(value, visited):
+                            return True
+                    return False
+                if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+                    return builtin_namespace_reference(node.value, visited)
+                if isinstance(node, ast.Subscript):
+                    return builtin_namespace_reference(node.value, visited)
+                if isinstance(node, ast.Call):
+                    name = call_name(node)
+                    if name == "vars" and node.args:
+                        return builtin_namespace_reference(node.args[0], visited)
+                    if name in trusted_import_functions | trusted_import_module_functions and node.args:
+                        return static_dynamic_name(node.args[0]) == "builtins"
+                return False
+
+            dynamic_execution_used = any(
+                isinstance(node, ast.Name) and node.id in dynamic_execution_names
+                or isinstance(node, ast.Attribute) and node.attr in dynamic_execution_names
+                or isinstance(node, ast.Subscript)
+                and builtin_namespace_reference(node.value)
+                and (
+                    not isinstance(node.slice, ast.Constant)
+                    or static_dynamic_name(node.slice) in dynamic_execution_names
+                )
+                or isinstance(node, ast.Call)
+                and call_name(node) in trusted_getattr_calls
+                and len(node.args) >= 2
+                and builtin_namespace_reference(node.args[0])
+                and (
+                    not isinstance(node.args[1], ast.Constant)
+                    or static_dynamic_name(node.args[1]) in dynamic_execution_names
+                )
+                for node in ast.walk(tree)
+            )
+            dynamic_name_literal = any(
+                static_dynamic_name(node) in dynamic_execution_names
+                for node in ast.walk(tree)
+            )
+            dynamic_reflection_used = any(
+                isinstance(node, ast.Attribute)
+                and node.attr == "__dict__"
+                and builtin_namespace_reference(node.value)
+                or isinstance(node, ast.Call)
+                and call_name(node) in {"vars", "globals", "locals"}
+                or isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and builtin_namespace_reference(node.func.value)
+                for node in ast.walk(tree)
+            )
+            dynamic_execution_used = dynamic_execution_used or dynamic_name_literal and dynamic_reflection_used
+            if dynamic_execution_used:
+                issues.append(
+                    f"{path or '未命名文件'} Python 动态测试不得使用 exec/eval/compile 或其反射别名，"
+                    "以保证端口来源和请求目标可静态核验"
+                )
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
@@ -1729,6 +1902,48 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
             function_defs = {
                 node.name: node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
+
+            def expanded_keyword_entries(
+                value: ast.AST,
+                call: ast.Call,
+                seen: set[tuple[int, str]] | None = None,
+            ) -> list[tuple[ast.AST | None, ast.AST]]:
+                """Resolve statically assigned dicts passed through ``**kwargs``."""
+                visited = set(seen or ())
+                if isinstance(value, ast.Dict):
+                    entries: list[tuple[ast.AST | None, ast.AST]] = []
+                    for key, item in zip(value.keys, value.values):
+                        if key is None:
+                            entries.extend(expanded_keyword_entries(item, call, visited))
+                        else:
+                            entries.append((key, item))
+                    return entries
+                if isinstance(value, ast.Name):
+                    scope = enclosing_scope(call)
+                    if scope is not None:
+                        token = (id(scope), value.id)
+                        if token not in visited:
+                            position = (
+                                int(getattr(call, "lineno", 1 << 30) or (1 << 30)),
+                                int(getattr(call, "col_offset", 1 << 30) or (1 << 30)),
+                            )
+                            bindings = [
+                                assignment_value
+                                for line, column, assignment_value in assignment_bindings.get((scope, value.id), [])
+                                if (line, column) < position
+                            ]
+                            if not bindings and scope is not module_scope and value.id not in local_names.get(scope, set()):
+                                bindings = [
+                                    assignment_value
+                                    for line, column, assignment_value in assignment_bindings.get(
+                                        (module_scope, value.id), []
+                                    )
+                                    if (line, column) < position
+                                ]
+                            if bindings:
+                                return expanded_keyword_entries(bindings[-1], call, visited | {token})
+                return [(None, value)]
+
             for function in function_defs.values():
                 outer_scope = enclosing_scope(parents.get(function, tree))
                 if outer_scope is not None:
@@ -1764,6 +1979,107 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                     for keyword in call.keywords:
                         if keyword.arg in parameter_names:
                             parameter_sources.setdefault((function, keyword.arg), []).append(keyword.value)
+                    if function.args.vararg is not None and len(call.args) > len(positional):
+                        parameter_sources.setdefault((function, function.args.vararg.arg), []).append(
+                            ast.Tuple(elts=list(call.args[len(positional) :]), ctx=ast.Load())
+                        )
+                    if function.args.kwarg is not None:
+                        unpacked_keywords = [
+                            entry
+                            for keyword in call.keywords
+                            if keyword.arg is None
+                            for entry in expanded_keyword_entries(keyword.value, call)
+                        ]
+                        keyword_values = {
+                            keyword.arg: keyword.value
+                            for keyword in call.keywords
+                            if keyword.arg is not None and keyword.arg not in parameter_names
+                        }
+                        if keyword_values or unpacked_keywords:
+                            parameter_sources.setdefault((function, function.args.kwarg.arg), []).append(
+                                ast.Dict(
+                                    keys=[
+                                        *[ast.Constant(value=name) for name in keyword_values],
+                                        *[key for key, _item in unpacked_keywords],
+                                    ],
+                                    values=[*keyword_values.values(), *[item for _key, item in unpacked_keywords]],
+                                )
+                            )
+
+            # Lambda aliases and functools.partialmethod do not appear as ordinary
+            # named-function calls. Add their concrete call-site argument sources
+            # so the security contract can follow environment and callback values
+            # across those wrappers as well.
+            lambda_aliases: dict[ast.Lambda, set[str]] = {}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            lambda_aliases.setdefault(node.value, set()).add(target.id)
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Lambda) and isinstance(node.target, ast.Name):
+                    lambda_aliases.setdefault(node.value, set()).add(node.target.id)
+            for lambda_node, aliases in lambda_aliases.items():
+                lambda_arguments = [*lambda_node.args.posonlyargs, *lambda_node.args.args]
+                calls = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and (
+                        node.func is lambda_node
+                        or isinstance(node.func, ast.Name) and node.func.id in aliases
+                    )
+                ]
+                for call in calls:
+                    for argument, value in zip(lambda_arguments, call.args):
+                        parameter_sources.setdefault((lambda_node, argument.arg), []).append(value)
+                    for keyword in call.keywords:
+                        if keyword.arg is not None and keyword.arg in {argument.arg for argument in lambda_arguments}:
+                            parameter_sources.setdefault((lambda_node, keyword.arg), []).append(keyword.value)
+
+            for lambda_node, aliases in lambda_aliases.items():
+                for alias in aliases:
+                    function_defs[alias] = lambda_node
+
+            for class_node in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+                methods = {
+                    node.name: node
+                    for node in class_node.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+                partial_methods: dict[str, tuple[ast.FunctionDef | ast.AsyncFunctionDef, list[ast.AST]]] = {}
+                for statement in class_node.body:
+                    if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                        continue
+                    value = statement.value
+                    if not isinstance(value, ast.Call) or call_name(value) not in trusted_partialmethod_calls:
+                        continue
+                    if not value.args or not isinstance(value.args[0], ast.Name):
+                        continue
+                    underlying = methods.get(value.args[0].id)
+                    if underlying is None:
+                        continue
+                    targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            partial_methods[target.id] = (underlying, list(value.args[1:]))
+                for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+                    if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Call):
+                        continue
+                    constructor = call.func.value
+                    if not isinstance(constructor.func, ast.Name) or constructor.func.id != class_node.name:
+                        continue
+                    partial_method = partial_methods.get(call.func.attr)
+                    if partial_method is None:
+                        continue
+                    underlying, bound_arguments = partial_method
+                    positional = [*underlying.args.posonlyargs, *underlying.args.args]
+                    callable_arguments = positional[1:] if positional else []
+                    values = [*bound_arguments, *call.args]
+                    for argument, value in zip(callable_arguments, values):
+                        parameter_sources.setdefault((underlying, argument.arg), []).append(value)
+                    for keyword in call.keywords:
+                        if keyword.arg in {argument.arg for argument in callable_arguments}:
+                            parameter_sources.setdefault((underlying, keyword.arg), []).append(keyword.value)
             for bindings in assignment_bindings.values():
                 bindings.sort(key=lambda binding: (binding[0], binding[1]))
 
@@ -1777,20 +2093,79 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
             # Track simple references to os.environ so writes through a local alias
             # cannot make a hard-coded port look like a trusted runtime value.
             alias_dependents: dict[str, set[str]] = {}
+
+            def bind_alias_target(target: ast.AST, value: ast.AST) -> None:
+                if isinstance(target, ast.Name):
+                    source = dotted_name(value)
+                    if source:
+                        alias_dependents.setdefault(source, set()).add(target.id)
+                elif isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)):
+                    for target_item, value_item in zip(target.elts, value.elts):
+                        bind_alias_target(target_item, value_item)
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
-                    values = [node.value]
                     targets = node.targets
+                    for target in targets:
+                        bind_alias_target(target, node.value)
                 elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
-                    values = [node.value]
-                    targets = [node.target]
-                else:
-                    continue
-                value_paths = {dotted_name(value) for value in values}
-                for target in targets:
-                    if isinstance(target, ast.Name):
-                        for source in value_paths:
-                            alias_dependents.setdefault(source, set()).add(target.id)
+                    bind_alias_target(node.target, node.value)
+
+            def expand_alias_names(names: set[str]) -> None:
+                pending = list(names)
+                while pending:
+                    source = pending.pop()
+                    for alias in alias_dependents.get(source, set()) - names:
+                        names.add(alias)
+                        pending.append(alias)
+
+            expand_alias_names(trusted_builtin_module_names)
+            expand_alias_names(trusted_importlib_module_names)
+            expand_alias_names(trusted_sys_module_names)
+            expand_alias_names(trusted_functools_module_names)
+            expand_alias_names(trusted_partial_calls)
+            expand_alias_names(trusted_partialmethod_calls)
+            expand_alias_names(trusted_dict_getitem_calls)
+            expand_alias_names(trusted_dict_update_calls)
+            expand_alias_names(trusted_setitem_calls)
+            expand_alias_names(trusted_delitem_calls)
+            expand_alias_names(trusted_import_functions)
+            for module_name in trusted_builtin_module_names:
+                trusted_import_functions.add(f"{module_name}.__import__")
+                trusted_getattr_calls.add(f"{module_name}.getattr")
+            for module_name in trusted_importlib_module_names:
+                trusted_import_module_functions.add(f"{module_name}.import_module")
+            for module_name in trusted_functools_module_names:
+                trusted_partial_calls.add(f"{module_name}.partial")
+                trusted_partialmethod_calls.add(f"{module_name}.partialmethod")
+            expand_alias_names(trusted_import_functions)
+            expand_alias_names(trusted_import_module_functions)
+            expand_alias_names(trusted_partial_calls)
+            expand_alias_names(trusted_partialmethod_calls)
+            expand_alias_names(trusted_getattr_calls)
+            # Preserve the operator module's trusted mutator paths across module
+            # object aliases (operator_alias = operator), including alias chains.
+            pending_operator_modules = list(trusted_operator_module_names)
+            while pending_operator_modules:
+                source = pending_operator_modules.pop()
+                for alias in alias_dependents.get(source, set()) - trusted_operator_module_names:
+                    trusted_operator_module_names.add(alias)
+                    trusted_setitem_calls.add(f"{alias}.setitem")
+                    trusted_delitem_calls.add(f"{alias}.delitem")
+                    trusted_methodcaller_calls.add(f"{alias}.methodcaller")
+                    pending_operator_modules.append(alias)
+            expand_alias_names(trusted_setitem_calls)
+            expand_alias_names(trusted_delitem_calls)
+            expand_alias_names(trusted_dict_update_calls)
+            # Track function-object aliases of operator.methodcaller as well as
+            # module/import aliases. Otherwise an indirect mutator can rewrite
+            # PRISM_PREVIEW_PORT without poisoning the trusted environment source.
+            pending_methodcaller_aliases = list(trusted_methodcaller_calls)
+            while pending_methodcaller_aliases:
+                source = pending_methodcaller_aliases.pop()
+                for alias in alias_dependents.get(source, set()) - trusted_methodcaller_calls:
+                    trusted_methodcaller_calls.add(alias)
+                    pending_methodcaller_aliases.append(alias)
             # Track module aliases too (``os_alias = os``), otherwise writes through
             # an ordinary assignment would evade the trusted-getenv/environ checks.
             pending_modules = list(trusted_os_module_names)
@@ -1799,7 +2174,7 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 for alias in alias_dependents.get(source, set()) - trusted_os_module_names:
                     trusted_os_module_names.add(alias)
                     trusted_port_calls.update({f"{alias}.getenv", f"{alias}.environ.get"})
-                    trusted_environ_names.add(f"{alias}.environ")
+                    trusted_environ_names.update({f"{alias}.environ", f"{alias}.environb"})
                     pending_modules.append(alias)
 
             environ_aliases.update(trusted_environ_names)
@@ -1825,6 +2200,34 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                 for alias in alias_dependents.get(source, set()) - os_module_dict_aliases:
                     os_module_dict_aliases.add(alias)
                     pending_dict_aliases.append(alias)
+
+        def constant_string(node: ast.AST) -> str | None:
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                left = constant_string(node.left)
+                right = constant_string(node.right)
+                return f"{left}{right}" if left is not None and right is not None else None
+            return None
+
+        def constant_mapping_key(node: ast.AST) -> str | None:
+            if isinstance(node, ast.Constant):
+                if isinstance(node.value, str):
+                    return node.value
+                if isinstance(node.value, bytes):
+                    try:
+                        return node.value.decode("utf-8")
+                    except UnicodeDecodeError:
+                        return None
+            return None
+
+        def mapping_update_may_change_port(node: ast.AST | None) -> bool:
+            if not isinstance(node, ast.Dict):
+                return True
+            return any(
+                key is None or constant_mapping_key(key) in {None, "PRISM_PREVIEW_PORT"}
+                for key in node.keys
+            )
 
         def module_dict_reference(node: ast.AST) -> bool:
             if dotted_name(node) in os_module_dict_aliases:
@@ -1865,12 +2268,126 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
         def is_environ_reference(name: str) -> bool:
             return any(name == alias or name.startswith(f"{alias}.") for alias in environ_aliases)
 
-        def contains_environ_reference(node: ast.AST) -> bool:
-            return any(
-                is_environ_reference(dotted_name(child))
-                for child in ast.walk(node)
-                if isinstance(child, (ast.Name, ast.Attribute))
+        def environ_mapping_reference(node: ast.AST, seen_parameters: set[tuple[int, str]] | None = None) -> bool:
+            visited = set(seen_parameters or ())
+            if is_environ_reference(dotted_name(node)):
+                return True
+            if isinstance(node, ast.Starred):
+                return environ_mapping_reference(node.value, visited)
+            if isinstance(node, ast.Name):
+                scope = enclosing_scope(node)
+                if scope is not None:
+                    token = (id(scope), node.id)
+                    if token not in visited and any(
+                        environ_mapping_reference(value, visited | {token})
+                        for value in parameter_sources.get((scope, node.id), [])
+                    ):
+                        return True
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+                scope = enclosing_scope(node.value)
+                if scope is not None:
+                    token = (id(scope), node.value.id)
+                    if token not in visited:
+                        key = constant_mapping_key(node.slice)
+                        index = node.slice.value if isinstance(node.slice, ast.Constant) else None
+                        for source in parameter_sources.get((scope, node.value.id), []):
+                            selected: list[ast.AST] = []
+                            if isinstance(source, (ast.Tuple, ast.List)) and isinstance(index, int):
+                                if -len(source.elts) <= index < len(source.elts):
+                                    selected = [source.elts[index]]
+                            elif isinstance(source, ast.Dict):
+                                selected = [
+                                    value
+                                    for source_key, value in zip(source.keys, source.values)
+                                    if source_key is None or key is None or constant_mapping_key(source_key) == key
+                                ]
+                            if any(
+                                environ_mapping_reference(value, visited | {token})
+                                for value in selected
+                            ):
+                                return True
+            if isinstance(node, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
+                values = node.values if isinstance(node, ast.Dict) else node.elts
+                return any(
+                    value is not None and environ_mapping_reference(value, visited)
+                    for value in values
+                )
+            if isinstance(node, ast.Subscript) and module_dict_reference(node.value):
+                return constant_string(node.slice) in {None, "environ"}
+            if isinstance(node, ast.Call):
+                if (
+                    call_name(node) == "getattr"
+                    and len(node.args) >= 2
+                    and dotted_name(node.args[0]) in trusted_os_module_names
+                    and constant_string(node.args[1]) in {None, "environ"}
+                ):
+                    return True
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and module_dict_reference(node.func.value)
+                    and node.args
+                    and constant_string(node.args[0]) in {None, "environ"}
+                ):
+                    return True
+            return False
+
+        def assignment_name_pairs(target: ast.AST, value: ast.AST) -> list[tuple[ast.Name, ast.AST]]:
+            if isinstance(target, ast.Name):
+                return [(target, value)]
+            if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)):
+                return [
+                    pair
+                    for target_item, value_item in zip(target.elts, value.elts)
+                    for pair in assignment_name_pairs(target_item, value_item)
+                ]
+            return []
+
+        if tree is not None:
+            environment_alias_assignments = [
+                pair
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Assign)
+                for target in node.targets
+                for pair in assignment_name_pairs(target, node.value)
+            ]
+            environment_alias_assignments.extend(
+                pair
+                for node in ast.walk(tree)
+                if isinstance(node, ast.AnnAssign) and node.value is not None
+                for pair in assignment_name_pairs(node.target, node.value)
             )
+            changed = True
+            while changed:
+                changed = False
+                for target, value in environment_alias_assignments:
+                    value_is_alias = isinstance(value, ast.Name) and value.id in environ_aliases
+                    if target.id not in environ_aliases and (value_is_alias or environ_mapping_reference(value)):
+                        environ_aliases.add(target.id)
+                        changed = True
+            trusted_environ_names.update(environ_aliases)
+            trusted_port_calls.update(f"{alias}.get" for alias in environ_aliases)
+
+        def contains_environ_reference(node: ast.AST) -> bool:
+            visited_parameters: set[tuple[int, str]] = set()
+
+            def contains_reference(value: ast.AST) -> bool:
+                if environ_mapping_reference(value):
+                    return True
+                if isinstance(value, ast.Name):
+                    scope = enclosing_scope(value)
+                    if scope is not None:
+                        token = (id(scope), value.id)
+                        if token not in visited_parameters:
+                            visited_parameters.add(token)
+                            if any(
+                                contains_reference(source)
+                                for source in parameter_sources.get((scope, value.id), [])
+                            ):
+                                return True
+                return any(contains_reference(child) for child in ast.iter_child_nodes(value))
+
+            return contains_reference(node)
 
         def contains_os_module_reference(node: ast.AST) -> bool:
             return any(
@@ -1887,54 +2404,617 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
             )
             mutated_port_sources.update(trusted_port_calls)
 
-        def poison_environ_trust() -> None:
+        def poison_environ_trust(key: ast.AST | str | None = None) -> None:
+            key_value = constant_mapping_key(key) if isinstance(key, ast.AST) else key
+            if key_value is not None and key_value != "PRISM_PREVIEW_PORT":
+                return
             mutated_port_sources.update(environ_aliases)
             # getenv and imported getenv aliases read this same environment mapping.
             mutated_port_sources.update(trusted_port_calls)
 
         methodcaller_mutator_names: set[str] = set()
+        mutation_methods = {
+            "__setitem__",
+            "__delitem__",
+            "__ior__",
+            "update",
+            "clear",
+            "pop",
+            "popitem",
+            "setdefault",
+        }
+
+        mutated_port_sources: set[str] = set()
+
+        def builtins_module_reference(node: ast.AST) -> bool:
+            return isinstance(node, ast.Name) and (
+                node.id == "__builtins__" or node.id in trusted_builtin_module_names
+            )
+
+        def function_return_values(
+            function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+        ) -> list[ast.AST]:
+            if isinstance(function, ast.Lambda):
+                return [function.body]
+            return [
+                node.value
+                for node in ast.walk(function)
+                if isinstance(node, ast.Return)
+                and node.value is not None
+                and enclosing_scope(node) is function
+            ]
+
+        MAX_STATIC_STRING_VALUES = 256
+        MAX_STATIC_STRING_PRODUCTS = 4096
+        MAX_STATIC_STRING_LENGTH = 16_384
+        static_string_resolution_overflow = False
+
+        def bounded_static_strings(values: Iterable[str]) -> set[str]:
+            nonlocal static_string_resolution_overflow
+            result: set[str] = set()
+            for examined, value in enumerate(values, start=1):
+                if examined > MAX_STATIC_STRING_PRODUCTS:
+                    static_string_resolution_overflow = True
+                    return set()
+                if len(value) > MAX_STATIC_STRING_LENGTH:
+                    static_string_resolution_overflow = True
+                    return set()
+                result.add(value)
+                if len(result) > MAX_STATIC_STRING_VALUES:
+                    static_string_resolution_overflow = True
+                    return set()
+            return result
+
+        def static_product_within_limit(groups: list[set[str]]) -> bool:
+            nonlocal static_string_resolution_overflow
+            combinations = 1
+            for group in groups:
+                combinations *= len(group)
+                if combinations > MAX_STATIC_STRING_PRODUCTS:
+                    static_string_resolution_overflow = True
+                    return False
+            return True
+
+        def resolved_string_values(node: ast.AST, seen: set[str] | None = None) -> set[str]:
+            visited = set(seen or ())
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return bounded_static_strings((node.value,))
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                left = resolved_string_values(node.left, visited)
+                right = resolved_string_values(node.right, visited)
+                if not static_product_within_limit([left, right]):
+                    return set()
+                return bounded_static_strings(f"{left_value}{right_value}" for left_value in left for right_value in right)
+            if isinstance(node, ast.Name):
+                scope = enclosing_scope(node)
+                if scope is None:
+                    return set()
+                token = f"{id(scope)}:{node.id}"
+                if token in visited:
+                    return set()
+                position = (
+                    int(getattr(node, "lineno", 1 << 30) or (1 << 30)),
+                    int(getattr(node, "col_offset", 1 << 30) or (1 << 30)),
+                )
+                bindings = assignment_bindings.get((scope, node.id), [])
+                prior = [value for line, column, value in bindings if (line, column) < position]
+                values = [prior[-1]] if prior else parameter_sources.get((scope, node.id), [])
+                if not values and scope is not module_scope:
+                    module_bindings = assignment_bindings.get((module_scope, node.id), [])
+                    module_prior = [value for line, column, value in module_bindings if (line, column) < position]
+                    values = [module_prior[-1]] if module_prior else []
+                return bounded_static_strings(
+                    value
+                    for source in values
+                    for value in resolved_string_values(source, visited | {token})
+                )
+            if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                return bounded_static_strings(
+                    value
+                    for item in node.elts
+                    for value in resolved_string_values(item, visited)
+                )
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                function = function_defs.get(node.func.id)
+                token = f"call:{node.func.id}"
+                if function is not None and token not in visited:
+                    return bounded_static_strings(
+                        value
+                        for result in function_return_values(function)
+                        for value in resolved_string_values(result, visited | {token})
+                    )
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "join":
+                separator_values = resolved_string_values(node.func.value, visited)
+                sequence = node.args[0] if node.args else None
+                if isinstance(sequence, (ast.List, ast.Tuple, ast.Set)):
+                    elements = [resolved_string_values(item, visited) for item in sequence.elts]
+                    groups = [separator_values, *elements]
+                    if separator_values and all(elements) and static_product_within_limit(groups):
+                        return bounded_static_strings(
+                            separator.join(values)
+                            for separator in separator_values
+                            for values in itertools.product(*elements)
+                        )
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+                templates = resolved_string_values(node.func.value, visited)
+                arguments = [resolved_string_values(value, visited) for value in node.args]
+                groups = [templates, *arguments]
+                if templates and all(arguments) and static_product_within_limit(groups):
+                    rendered: list[str] = []
+                    for template in templates:
+                        for values in itertools.product(*arguments):
+                            try:
+                                rendered.append(template.format(*values))
+                            except (IndexError, KeyError, ValueError):
+                                continue
+                    return bounded_static_strings(rendered)
+            return set()
+
+        def operator_import_call(node: ast.AST) -> bool:
+            if not isinstance(node, ast.Call) or not node.args:
+                return False
+            module_names = resolved_string_values(node.args[0])
+            if not module_names or not module_names <= {"operator", "_operator"}:
+                return False
+            function = node.func
+            if dotted_name(function) in trusted_import_functions:
+                return True
+            if (
+                isinstance(function, ast.Attribute)
+                and function.attr == "__import__"
+                and builtins_module_reference(function.value)
+            ):
+                return True
+            if (
+                isinstance(function, ast.Subscript)
+                and builtins_module_reference(function.value)
+                and constant_string(function.slice) == "__import__"
+            ):
+                return True
+            if dotted_name(function) in trusted_import_module_functions:
+                return True
+            return False
+
+        def sys_modules_reference(node: ast.AST) -> bool:
+            return (
+                isinstance(node, ast.Attribute)
+                and node.attr == "modules"
+                and isinstance(node.value, ast.Name)
+                and node.value.id in trusted_sys_module_names
+            )
+
+        def operator_module_reference(node: ast.AST, seen_functions: set[str] | None = None) -> bool:
+            seen = seen_functions or set()
+            if isinstance(node, ast.Name) and node.id in trusted_operator_module_names:
+                return True
+            if isinstance(node, ast.Name):
+                scope = enclosing_scope(node)
+                if scope is not None:
+                    token = f"{id(scope)}:{node.id}"
+                    if token not in seen:
+                        return any(
+                            operator_module_reference(value, {*seen, token})
+                            for value in parameter_sources.get((scope, node.id), [])
+                        )
+            if operator_import_call(node):
+                return True
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id not in seen:
+                function = function_defs.get(node.func.id)
+                if function is not None:
+                    next_seen = {*seen, node.func.id}
+                    if any(
+                        operator_module_reference(value, next_seen)
+                        for value in function_return_values(function)
+                    ):
+                        return True
+            if isinstance(node, ast.Subscript) and sys_modules_reference(node.value):
+                return constant_string(node.slice) in {None, "operator", "_operator"}
+            return (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and sys_modules_reference(node.func.value)
+                and bool(node.args)
+                and constant_string(node.args[0]) in {None, "operator", "_operator"}
+            )
+
+        assignment_pairs: list[tuple[ast.Name, ast.AST]] = []
         if tree is not None:
-            mutation_methods = {
-                "__setitem__",
-                "__delitem__",
-                "update",
-                "clear",
-                "pop",
-                "popitem",
-                "setdefault",
-            }
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
-                    targets = node.targets
-                    value = node.value
+                    assignment_pairs.extend(
+                        pair for target in node.targets for pair in assignment_name_pairs(target, node.value)
+                    )
                 elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                    targets = [node.target]
-                    value = node.value
-                else:
-                    continue
-                if not isinstance(value, ast.Call) or call_name(value) not in trusted_methodcaller_calls:
-                    continue
-                method = value.args[0].value if value.args and isinstance(value.args[0], ast.Constant) else None
-                if method not in mutation_methods:
-                    continue
-                for target in targets:
-                    if isinstance(target, ast.Name):
-                        methodcaller_mutator_names.add(target.id)
-            # Simple local aliases of a mutating methodcaller are equally capable
-            # of changing the environment mapping.
+                    assignment_pairs.extend(assignment_name_pairs(node.target, node.value))
+
+        mutator_names = mutation_methods | {"setitem", "delitem"}
+        mutator_aliases: dict[str, tuple[str, bool, tuple[ast.AST, ...]]] = {}
+
+        def resolved_callable_expression(node: ast.AST, seen: set[str] | None = None) -> ast.AST:
+            visited = set(seen or ())
+            if not isinstance(node, ast.Name) or node.id in visited:
+                return node
+            visited.add(node.id)
+            scope = enclosing_scope(node)
+            if scope is None:
+                return node
+            position = (
+                int(getattr(node, "lineno", 1 << 30) or (1 << 30)),
+                int(getattr(node, "col_offset", 1 << 30) or (1 << 30)),
+            )
+            bindings = [
+                value
+                for line, column, value in assignment_bindings.get((scope, node.id), [])
+                if (line, column) < position
+            ]
+            if not bindings and scope is not module_scope and node.id not in local_names.get(scope, set()):
+                bindings = [
+                    value
+                    for line, column, value in assignment_bindings.get((module_scope, node.id), [])
+                    if (line, column) < position
+                ]
+            if bindings:
+                return resolved_callable_expression(bindings[-1], visited)
+            parameter_values = parameter_sources.get((scope, node.id), [])
+            if len(parameter_values) == 1:
+                return resolved_callable_expression(parameter_values[0], visited)
+            return node
+
+        def mutator_callable_spec(
+            node: ast.AST, seen: set[str] | None = None
+        ) -> tuple[str, bool, tuple[ast.AST, ...]] | None:
+            visited = set(seen or ())
+            if isinstance(node, ast.Name):
+                if node.id in mutator_aliases:
+                    return mutator_aliases[node.id]
+                if node.id not in visited:
+                    visited.add(node.id)
+                    scope = enclosing_scope(node)
+                    if scope is not None:
+                        specs = [
+                            spec
+                            for value in parameter_sources.get((scope, node.id), [])
+                            if (spec := mutator_callable_spec(value, visited)) is not None
+                        ]
+                        if specs:
+                            return specs[0] if all(spec == specs[0] for spec in specs) else ("", False, ())
+                return None
+            if isinstance(node, ast.Attribute):
+                return (node.attr, environ_mapping_reference(node.value), ()) if node.attr in mutator_names else None
+            if isinstance(node, ast.Subscript):
+                method = constant_string(node.slice)
+                return (method, False, ()) if method in mutator_names else None
+            if isinstance(node, ast.Call):
+                getter = resolved_callable_expression(node.func)
+                if isinstance(getter, ast.Name) and getter.id in trusted_getattr_calls | {"getattr", "object.__getattribute__"} and len(node.args) >= 2:
+                    method = constant_string(node.args[1])
+                    if method in mutator_names:
+                        return (method, environ_mapping_reference(node.args[0]), ())
+                if dotted_name(getter) == "object.__getattribute__" and len(node.args) >= 2:
+                    method = constant_string(node.args[1])
+                    if method in mutator_names:
+                        return (method, environ_mapping_reference(node.args[0]), ())
+                if (
+                    isinstance(getter, ast.Attribute)
+                    and getter.attr == "__getattribute__"
+                    and node.args
+                ):
+                    method = constant_string(node.args[0])
+                    if method in mutator_names:
+                        return (method, environ_mapping_reference(getter.value), ())
+                if call_name(node) in trusted_partial_calls and node.args:
+                    spec = mutator_callable_spec(node.args[0], visited)
+                    if spec is not None:
+                        method, bound, prior = spec
+                        return method, bound, (*prior, *node.args[1:])
+                if isinstance(node.func, ast.Name) and node.func.id not in visited:
+                    function = function_defs.get(node.func.id)
+                    if function is not None:
+                        next_visited = {*visited, node.func.id}
+                        specs = [
+                            spec
+                            for value in function_return_values(function)
+                            if (spec := mutator_callable_spec(value, next_visited)) is not None
+                        ]
+                        if specs:
+                            return specs[0] if all(spec == specs[0] for spec in specs) else ("", False, ())
+                name = call_name(node)
+                if name in trusted_setitem_calls:
+                    return "setitem", False, ()
+                if name in trusted_delitem_calls:
+                    return "delitem", False, ()
+                if name in trusted_dict_update_calls:
+                    return "update", False, ()
+            return None
+
+        def mutator_call_may_change_port(
+            method: str, bound: bool, bound_arguments: tuple[ast.AST, ...], call: ast.Call
+        ) -> bool:
+            arguments = [*bound_arguments, *call.args]
+            if method in {"__setitem__", "__delitem__", "setitem", "delitem", "pop", "setdefault"}:
+                key_index = 0 if bound else 1
+                target_index = None if bound else 0
+                if target_index is not None and (
+                    target_index >= len(arguments) or not environ_mapping_reference(arguments[target_index])
+                ):
+                    return False
+                if key_index < len(arguments):
+                    return constant_mapping_key(arguments[key_index]) in {None, "PRISM_PREVIEW_PORT"}
+                return True
+            if method == "update":
+                target_index = None if bound else 0
+                mapping_index = 0 if bound else 1
+                if target_index is not None and (
+                    target_index >= len(arguments) or not environ_mapping_reference(arguments[target_index])
+                ):
+                    return False
+                return mapping_index >= len(arguments) or mapping_update_may_change_port(arguments[mapping_index])
+            if method in {"clear", "popitem", "__ior__"}:
+                target_index = None if bound else 0
+                return target_index is None or (
+                    target_index < len(arguments) and environ_mapping_reference(arguments[target_index])
+                )
+            return False
+
+        if tree is not None:
             changed = True
             while changed:
                 changed = False
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
-                        if node.value.id not in methodcaller_mutator_names:
-                            continue
-                        for target in node.targets:
-                            if isinstance(target, ast.Name) and target.id not in methodcaller_mutator_names:
-                                methodcaller_mutator_names.add(target.id)
-                                changed = True
+                for target, value in assignment_pairs:
+                    spec = mutator_callable_spec(value)
+                    if target.id not in mutator_aliases and spec is not None:
+                        mutator_aliases[target.id] = spec
+                        changed = True
 
-        mutated_port_sources: set[str] = set()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name) and node.func.id in mutator_aliases:
+                    method, bound, bound_arguments = mutator_aliases[node.func.id]
+                    if mutator_call_may_change_port(method, bound, bound_arguments, node):
+                        poison_environ_trust()
+                elif any(mutator_callable_spec(argument) is not None for argument in node.args) and contains_environ_reference(node):
+                    # Passing a mutator through a helper can hide its eventual target;
+                    # keep the runner port untrusted rather than guessing the callee.
+                    poison_environ_trust()
+
+            # Resolve aliases created from importlib, __import__, and sys.modules.
+            # Without this fixed point, an assigned module object looks unrelated to
+            # operator even though its source is statically known.
+            changed = True
+            while changed:
+                changed = False
+                for target, value in assignment_pairs:
+                    if target.id not in trusted_operator_module_names and operator_module_reference(value):
+                        trusted_operator_module_names.add(target.id)
+                        trusted_setitem_calls.add(f"{target.id}.setitem")
+                        trusted_delitem_calls.add(f"{target.id}.delitem")
+                        trusted_methodcaller_calls.add(f"{target.id}.methodcaller")
+                        changed = True
+
+        def operator_dict_reference(node: ast.AST) -> bool:
+            if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+                return operator_module_reference(node.value)
+            if isinstance(node, ast.Call) and call_name(node) == "vars" and node.args:
+                return operator_module_reference(node.args[0])
+            return False
+
+        operator_dict_getter_names: set[str] = set()
+
+        def trusted_getattr_call(node: ast.Call) -> bool:
+            return dotted_name(node.func) in trusted_getattr_calls
+
+        def operator_dict_getter_reference(node: ast.AST) -> bool:
+            if isinstance(node, ast.Name):
+                return node.id in operator_dict_getter_names
+            if isinstance(node, ast.Attribute) and dotted_name(node) in trusted_dict_getitem_calls:
+                return True
+            if isinstance(node, ast.Attribute) and node.attr == "get":
+                return operator_dict_reference(node.value)
+            if (
+                isinstance(node, ast.Call)
+                and trusted_getattr_call(node)
+                and len(node.args) >= 2
+                and operator_dict_reference(node.args[0])
+                and constant_string(node.args[1]) == "get"
+            ):
+                return True
+            return False
+
+        if tree is not None:
+            changed = True
+            while changed:
+                changed = False
+                for target, value in assignment_pairs:
+                    if target.id not in operator_dict_getter_names and operator_dict_getter_reference(value):
+                        operator_dict_getter_names.add(target.id)
+                        changed = True
+
+        def is_partial_call(node: ast.AST) -> bool:
+            return isinstance(node, ast.Call) and call_name(node) in trusted_partial_calls
+
+        methodcaller_factory_names = set(trusted_methodcaller_calls)
+
+        def methodcaller_factory_reference(node: ast.AST, seen_functions: set[str] | None = None) -> bool:
+            seen = seen_functions or set()
+            if isinstance(node, ast.Name) and node.id in methodcaller_factory_names:
+                return True
+            if isinstance(node, ast.Attribute) and node.attr == "methodcaller":
+                return operator_module_reference(node.value)
+            if isinstance(node, ast.Call):
+                if (
+                    trusted_getattr_call(node)
+                    and len(node.args) >= 2
+                    and (operator_module_reference(node.args[0]) or operator_dict_reference(node.args[0]))
+                    and (constant_string(node.args[1]) in {None, "methodcaller"})
+                ):
+                    return True
+                if (
+                    operator_dict_getter_reference(node.func)
+                    and bool(node.args)
+                    and constant_string(node.args[0]) in {None, "methodcaller"}
+                ):
+                    return True
+                if (
+                    call_name(node) == "dict.__getitem__"
+                    and len(node.args) >= 2
+                    and operator_dict_reference(node.args[0])
+                    and constant_string(node.args[1]) in {None, "methodcaller"}
+                ):
+                    return True
+                if isinstance(node.func, ast.Name) and node.func.id not in seen:
+                    function = function_defs.get(node.func.id)
+                    if function is not None:
+                        next_seen = {*seen, node.func.id}
+                        return any(
+                            methodcaller_factory_reference(value, next_seen)
+                            for value in function_return_values(function)
+                        )
+            if isinstance(node, ast.Subscript) and operator_dict_reference(node.value):
+                key = constant_string(node.slice)
+                return key in {None, "methodcaller"}
+            return False
+
+        methodcaller_mutator_specs: dict[str, tuple[str | None, ast.AST | None]] = {}
+
+        def methodcaller_mutator_spec(
+            node: ast.AST, seen_functions: set[str] | None = None
+        ) -> tuple[str | None, ast.AST | None] | None:
+            seen = seen_functions or set()
+            if isinstance(node, ast.Name):
+                known = methodcaller_mutator_specs.get(node.id)
+                if known is not None:
+                    return known
+                scope = enclosing_scope(node)
+                token = f"{id(scope)}:{node.id}"
+                if scope is not None and token not in seen:
+                    specs = [
+                        spec
+                        for value in parameter_sources.get((scope, node.id), [])
+                        if (spec := methodcaller_mutator_spec(value, {*seen, token})) is not None
+                    ]
+                    if specs:
+                        return specs[0] if all(spec == specs[0] for spec in specs) else (None, None)
+                return None
+            if isinstance(node, ast.Call):
+                if is_partial_call(node) and node.args:
+                    callable_expression = node.args[0]
+                    if methodcaller_factory_reference(callable_expression):
+                        method = constant_string(node.args[1]) if len(node.args) > 1 else None
+                        if method is not None and method not in mutation_methods:
+                            return None
+                        key_index = (
+                            2
+                            if method in {"__setitem__", "__delitem__", "pop", "setdefault", "update", "__ior__"}
+                            else None
+                        )
+                        return method, node.args[key_index] if key_index is not None and len(node.args) > key_index else None
+                    return methodcaller_mutator_spec(callable_expression, seen)
+                if isinstance(node.func, ast.Name) and node.func.id in methodcaller_mutator_specs:
+                    return methodcaller_mutator_specs[node.func.id]
+                if methodcaller_factory_reference(node.func):
+                    method = constant_string(node.args[0]) if node.args else None
+                    if method is not None and method not in mutation_methods:
+                        return None
+                    key_index = (
+                        1
+                        if method in {"__setitem__", "__delitem__", "pop", "setdefault", "update", "__ior__"}
+                        else None
+                    )
+                    return method, node.args[key_index] if key_index is not None and len(node.args) > key_index else None
+                if isinstance(node.func, ast.Name) and node.func.id not in seen:
+                    function = function_defs.get(node.func.id)
+                    if function is not None:
+                        next_seen = {*seen, node.func.id}
+                        specs = [
+                            spec
+                            for value in function_return_values(function)
+                            if (spec := methodcaller_mutator_spec(value, next_seen)) is not None
+                        ]
+                        if specs:
+                            return specs[0] if all(spec == specs[0] for spec in specs) else (None, None)
+            return None
+
+        def methodcaller_mutator_expression(node: ast.AST, seen_functions: set[str] | None = None) -> bool:
+            return methodcaller_mutator_spec(node, seen_functions) is not None
+
+        def poison_methodcaller_target(method: str | None, key_or_mapping: ast.AST | None) -> None:
+            if method in {"__setitem__", "__delitem__", "pop", "setdefault"}:
+                poison_environ_trust(key_or_mapping)
+            elif method in {"update", "__ior__"}:
+                if mapping_update_may_change_port(key_or_mapping):
+                    poison_environ_trust()
+            else:
+                poison_environ_trust()
+
+        if tree is not None:
+            # Do not rely on recognizing the callable's origin: generated code can
+            # recover methodcaller through descriptors, containers, or wrappers.
+            # A statically recoverable mutator configured to alter the runner's
+            # dynamic port invalidates that port source even when the eventual
+            # invocation is indirect.
+            dynamic_port_mutators = {
+                method
+                for method in mutation_methods
+                if method not in {"clear", "popitem"}
+            }
+            has_environment_reference = contains_environ_reference(tree)
+            for candidate in ast.walk(tree):
+                if not isinstance(candidate, ast.Call):
+                    continue
+                prior_overflow = static_string_resolution_overflow
+                static_string_resolution_overflow = False
+                argument_strings = {
+                    value
+                    for argument in [*candidate.args, *(keyword.value for keyword in candidate.keywords)]
+                    for child in ast.walk(argument)
+                    for value in resolved_string_values(child)
+                }
+                candidate_overflow = static_string_resolution_overflow
+                static_string_resolution_overflow = prior_overflow or candidate_overflow
+                if argument_strings & dynamic_port_mutators and "PRISM_PREVIEW_PORT" in argument_strings:
+                    poison_environ_trust("PRISM_PREVIEW_PORT")
+                elif has_environment_reference and argument_strings & {"clear", "popitem"}:
+                    poison_environ_trust()
+                candidate_callable = resolved_callable_expression(candidate.func)
+                candidate_name = dotted_name(candidate_callable)
+                overflow_sensitive_call = (
+                    candidate_name in trusted_import_functions
+                    | trusted_import_module_functions
+                    | trusted_getattr_calls
+                    | trusted_partial_calls
+                    | trusted_methodcaller_calls
+                    | {"object.__getattribute__"}
+                    or (
+                        isinstance(candidate_callable, ast.Attribute)
+                        and candidate_callable.attr == "__getattribute__"
+                    )
+                )
+                if candidate_overflow and has_environment_reference and overflow_sensitive_call:
+                    # Bound combinatorial work for reflection/import/mutator
+                    # resolution, while leaving unrelated application strings
+                    # (such as encoded query parameters) out of this trust gate.
+                    poison_environ_trust()
+
+        if tree is not None:
+            changed = True
+            while changed:
+                changed = False
+                for target, value in assignment_pairs:
+                    if target.id not in methodcaller_factory_names and methodcaller_factory_reference(value):
+                        methodcaller_factory_names.add(target.id)
+                        changed = True
+            changed = True
+            while changed:
+                changed = False
+                for target, value in assignment_pairs:
+                    spec = methodcaller_mutator_spec(value)
+                    if target.id not in methodcaller_mutator_names and spec is not None:
+                        methodcaller_mutator_names.add(target.id)
+                        methodcaller_mutator_specs[target.id] = spec
+                        changed = True
+
         if tree is not None:
             for node in ast.walk(tree):
                 targets: list[ast.AST] = []
@@ -1954,17 +3034,24 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                         isinstance(target, ast.Name)
                         and target.id in environ_aliases
                         and binding_value is not None
-                        and is_environ_reference(dotted_name(binding_value))
+                        and environ_mapping_reference(binding_value)
                     )
                     if isinstance(target, (ast.Tuple, ast.List)):
                         target_paths = [target_path(child) for child in target.elts]
                     else:
                         target_paths = [target_path(target)]
                     for target_name in target_paths:
-                        if target_name in trusted_environ_names or target_name in trusted_port_calls:
+                        is_mapping_item = isinstance(target, ast.Subscript) and (
+                            is_environ_reference(target_name) or environ_mapping_reference(target.value)
+                        )
+                        if (
+                            (target_name in trusted_environ_names or target_name in trusted_port_calls)
+                            and not alias_initialization
+                            and not is_mapping_item
+                        ):
                             mutated_port_sources.add(target_name)
-                        if is_environ_reference(target_name) and not alias_initialization:
-                            poison_environ_trust()
+                        if (is_environ_reference(target_name) or is_mapping_item) and not alias_initialization:
+                            poison_environ_trust(target.slice if isinstance(target, ast.Subscript) else None)
                     for target in (target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target]):
                         module_dict_mutation(target)
 
@@ -1972,20 +3059,22 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                     continue
                 if call_name(node) in trusted_delitem_calls and node.args:
                     if contains_environ_reference(node.args[0]):
-                        poison_environ_trust()
-                if (
-                    isinstance(node.func, ast.Call)
-                    and call_name(node.func.func) in trusted_methodcaller_calls
-                    and any(contains_environ_reference(argument) for argument in node.args)
-                ):
-                    poison_environ_trust()
-                if call_name(node) in methodcaller_mutator_names and any(
-                    contains_environ_reference(argument) for argument in node.args
-                ):
-                    poison_environ_trust()
+                        poison_environ_trust(node.args[1] if len(node.args) > 1 else None)
+                methodcaller_spec = methodcaller_mutator_spec(node.func)
+                bound_partial_environment = is_partial_call(node.func) and any(
+                    contains_environ_reference(argument) for argument in node.func.args[1:]
+                )
+                if methodcaller_spec is not None and (bound_partial_environment or any(
+                    contains_environ_reference(argument)
+                    for argument in [*node.args, *(keyword.value for keyword in node.keywords)]
+                )):
+                    poison_methodcaller_target(*methodcaller_spec)
+                if is_partial_call(node) and len(node.args) > 1:
+                    partial_spec = methodcaller_mutator_spec(node)
+                    if partial_spec is not None and any(contains_environ_reference(argument) for argument in node.args[1:]):
+                        poison_methodcaller_target(*partial_spec)
                 if isinstance(node.func, ast.Attribute):
-                    receiver = dotted_name(node.func.value)
-                    if is_environ_reference(receiver) and node.func.attr in {
+                    if environ_mapping_reference(node.func.value) and node.func.attr in {
                         "clear",
                         "pop",
                         "popitem",
@@ -1994,7 +3083,13 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                         "__delitem__",
                         "__setitem__",
                     }:
-                        poison_environ_trust()
+                        if node.func.attr in {"__setitem__", "__delitem__", "pop", "setdefault"}:
+                            poison_environ_trust(node.args[0] if node.args else None)
+                        elif node.func.attr in {"update", "__ior__"}:
+                            if mapping_update_may_change_port(node.args[0] if node.args else None):
+                                poison_environ_trust()
+                        else:
+                            poison_environ_trust()
                     if module_dict_reference(node.func.value) and node.func.attr in {
                         "clear",
                         "pop",
@@ -2036,30 +3131,35 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                             )
                         ):
                             poison_os_mapping_trust()
-                if call_name(node) in {"dict.__setitem__", "dict.__delitem__", "dict.pop", "dict.update"} and node.args:
+                dict_setitem = call_name(node) in trusted_setitem_calls
+                dict_delitem = call_name(node) in trusted_delitem_calls
+                dict_update = call_name(node) in trusted_dict_update_calls
+                if (dict_setitem or dict_delitem or dict_update) and node.args:
                     target = node.args[0]
-                    target_name = dotted_name(target)
-                    if is_environ_reference(target_name):
-                        poison_environ_trust()
+                    if environ_mapping_reference(target):
+                        if dict_setitem or dict_delitem:
+                            poison_environ_trust(node.args[1] if len(node.args) > 1 else None)
+                        elif mapping_update_may_change_port(node.args[1] if len(node.args) > 1 else None):
+                            poison_environ_trust()
                     if module_dict_reference(target):
                         key = node.args[1] if len(node.args) > 1 else None
-                        if call_name(node) in {"dict.__setitem__", "dict.__delitem__", "dict.pop"}:
+                        if dict_setitem or dict_delitem:
                             module_dict_mutation(ast.Subscript(value=target, slice=key or ast.Constant(None), ctx=ast.Store()))
                         else:
                             # dict.update accepts an arbitrary mapping/kwargs.
                             poison_os_mapping_trust()
                 if call_name(node) == "setitem" and len(node.args) >= 3:
                     target_name = dotted_name(node.args[0])
-                    if is_environ_reference(target_name):
-                        poison_environ_trust()
+                    if environ_mapping_reference(node.args[0]):
+                        poison_environ_trust(node.args[1])
                     if module_dict_reference(node.args[0]):
                         module_dict_mutation(
                             ast.Subscript(value=node.args[0], slice=node.args[1], ctx=ast.Store())
                         )
                 if call_name(node) in trusted_setitem_calls and len(node.args) >= 3:
                     target = node.args[0]
-                    if contains_environ_reference(target):
-                        poison_environ_trust()
+                    if environ_mapping_reference(target):
+                        poison_environ_trust(node.args[1])
                     if module_dict_reference(target):
                         module_dict_mutation(ast.Subscript(value=target, slice=node.args[1], ctx=ast.Store()))
                 if (
@@ -2196,8 +3296,118 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                     return False
             return True
 
+        def trusted_port_alias_call(node: ast.Call, seen: set[str] | None = None) -> bool:
+            if not isinstance(node.func, ast.Name):
+                return False
+            visited = set(seen or ())
+            alias = node.func.id
+            if alias in visited:
+                return False
+            visited.add(alias)
+            sources = name_values(alias, node.func)
+            if not sources:
+                return False
+
+            def source_is_trusted(source: ast.AST) -> bool:
+                if isinstance(source, ast.Attribute):
+                    return trusted_reference(dotted_name(source), source, trusted_port_calls)
+                if isinstance(source, ast.Name):
+                    return trusted_port_alias_call(
+                        ast.Call(func=source, args=[], keywords=[]), visited
+                    )
+                if isinstance(source, ast.Call):
+                    if (
+                        call_name(source) in trusted_getattr_calls | {"object.__getattribute__"}
+                        and len(source.args) >= 2
+                        and constant_string(source.args[1]) == "get"
+                        and trusted_environ_mapping(source.args[0])
+                    ):
+                        return True
+                    return (
+                        isinstance(source.func, ast.Attribute)
+                        and source.func.attr == "__getattribute__"
+                        and bool(source.args)
+                        and constant_string(source.args[0]) == "get"
+                        and trusted_environ_mapping(source.func.value)
+                    )
+                return False
+
+            return all(source_is_trusted(source) for source in sources)
+
         def trusted_call(node: ast.Call, trusted_names: set[str]) -> bool:
-            return trusted_reference(call_name(node), node, trusted_names)
+            return trusted_reference(call_name(node), node, trusted_names) or (
+                trusted_names is trusted_port_calls and trusted_port_alias_call(node)
+            )
+
+        def trusted_environ_mapping(node: ast.AST, seen: set[tuple[int, str]] | None = None) -> bool:
+            visited = set(seen or ())
+            reference_name = dotted_name(node)
+            if is_environ_reference(reference_name):
+                return trusted_reference(reference_name, node, trusted_environ_names)
+            if isinstance(node, ast.Starred):
+                return trusted_environ_mapping(node.value, visited)
+            if isinstance(node, ast.Name):
+                scope = enclosing_scope(node)
+                if scope is not None:
+                    token = (id(scope), node.id)
+                    if token not in visited:
+                        sources = parameter_sources.get((scope, node.id), [])
+                        if sources:
+                            return all(trusted_environ_mapping(source, visited | {token}) for source in sources)
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+                scope = enclosing_scope(node.value)
+                if scope is not None:
+                    token = (id(scope), node.value.id)
+                    if token not in visited:
+                        key = constant_mapping_key(node.slice)
+                        index = node.slice.value if isinstance(node.slice, ast.Constant) else None
+                        selected: list[ast.AST] = []
+                        for source in parameter_sources.get((scope, node.value.id), []):
+                            if isinstance(source, (ast.Tuple, ast.List)) and isinstance(index, int):
+                                if -len(source.elts) <= index < len(source.elts):
+                                    selected.append(source.elts[index])
+                            elif isinstance(source, ast.Dict):
+                                selected.extend(
+                                    value
+                                    for source_key, value in zip(source.keys, source.values)
+                                    if source_key is None or key is None or constant_mapping_key(source_key) == key
+                                )
+                        if selected:
+                            return all(
+                                trusted_environ_mapping(value, visited | {token})
+                                for value in selected
+                            )
+            if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+                return bool(node.elts) and all(trusted_environ_mapping(value, visited) for value in node.elts)
+            if isinstance(node, ast.Dict):
+                return bool(node.values) and all(
+                    trusted_environ_mapping(value, visited) for value in node.values
+                )
+            if isinstance(node, ast.Subscript) and module_dict_reference(node.value):
+                key = constant_string(node.slice)
+                if key in {None, "environ"}:
+                    return any(
+                        trusted_reference(f"{module_name}.environ", node, trusted_environ_names)
+                        for module_name in trusted_os_module_names
+                    )
+            if isinstance(node, ast.Call) and node.args:
+                if call_name(node) == "getattr" and dotted_name(node.args[0]) in trusted_os_module_names:
+                    if constant_string(node.args[1]) in {None, "environ"}:
+                        return any(
+                            trusted_reference(f"{module_name}.environ", node, trusted_environ_names)
+                            for module_name in trusted_os_module_names
+                        )
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and module_dict_reference(node.func.value)
+                    and constant_string(node.args[0]) in {None, "environ"}
+                ):
+                    return any(
+                        trusted_reference(f"{module_name}.environ", node, trusted_environ_names)
+                        for module_name in trusted_os_module_names
+                    )
+            return False
 
         def constant_numeric_guess(node: ast.AST, seen: set[str] | None = None) -> bool:
             seen = set(seen or ())
@@ -2393,16 +3603,51 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                     and trusted_reference(dotted_name(node.value), node.value, trusted_environ_names)
                 ):
                     return [("port", "")]
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "PRISM_PREVIEW_PORT"
+                    and trusted_environ_mapping(node.value)
+                ):
+                    return [("port", "")]
                 segments = expression_segments(node.value, seen)
                 return segments or [("unknown", "subscript")]
             if isinstance(node, ast.Attribute):
                 return [("unknown", node.attr)]
             if isinstance(node, ast.Call):
                 name = call_name(node)
+                if (
+                    isinstance(node.func, ast.Call)
+                    and call_name(node.func) in trusted_getattr_calls | {"object.__getattribute__"}
+                    and len(node.func.args) >= 2
+                    and constant_string(node.func.args[1]) == "get"
+                    and node.args
+                    and "PRISM_PREVIEW_PORT" in resolved_string_values(node.args[0])
+                    and trusted_environ_mapping(node.func.args[0])
+                ):
+                    return [("port", "")]
+                if (
+                    isinstance(node.func, ast.Call)
+                    and isinstance(node.func.func, ast.Attribute)
+                    and node.func.func.attr == "__getattribute__"
+                    and node.func.args
+                    and constant_string(node.func.args[0]) == "get"
+                    and node.args
+                    and "PRISM_PREVIEW_PORT" in resolved_string_values(node.args[0])
+                    and trusted_environ_mapping(node.func.func.value)
+                ):
+                    return [("port", "")]
                 if trusted_call(node, trusted_port_calls) and node.args:
                     first = node.args[0]
                     if isinstance(first, ast.Constant) and first.value == "PRISM_PREVIEW_PORT":
                         return [("port", "")]
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and node.args
+                    and "PRISM_PREVIEW_PORT" in resolved_string_values(node.args[0])
+                    and trusted_environ_mapping(node.func.value)
+                ):
+                    return [("port", "")]
                 if trusted_call(node, trusted_encoder_calls):
                     return [("encoded", "")]
                 if name in {"str", "int"} and node.args:
@@ -2417,6 +3662,17 @@ def _generated_test_contract_issues(files: list[dict[str, str]], language: str) 
                         )
                     )
                     return expression_segments(request_url, seen) if request_url is not None else [("unknown", "url")]
+                if isinstance(node.func, ast.Name):
+                    function = function_defs.get(node.func.id)
+                    token = f"call:{node.func.id}"
+                    if function is not None and token not in seen:
+                        returned = [
+                            segment
+                            for value in function_return_values(function)
+                            for segment in expression_segments(value, seen | {token})
+                        ]
+                        if returned:
+                            return returned
                 if isinstance(node.func, ast.Attribute) and node.func.attr in {"join", "format", "format_map"}:
                     values = [node.func.value, *node.args, *(keyword.value for keyword in node.keywords)]
                 else:

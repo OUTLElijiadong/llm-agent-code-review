@@ -11,7 +11,6 @@ import zipfile
 from types import SimpleNamespace
 
 import pytest
-
 from app.agents.source_context import SourceContextError, _context_call, compact_source_context
 from app.services.sandbox_service import _source_summary_for_agent_tests
 
@@ -84,6 +83,193 @@ def test_rejects_quote_that_only_exists_in_hallucinated_claim() -> None:
             ctx=None,
             deadline=None,
         )
+
+
+def test_small_packed_sources_keep_raw_quotes_verifiable_with_json_special_characters() -> None:
+    source = 'def greet(name):\n    return "你好\\\\world " + name\n'
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("src/app.py", source)
+        archive.writestr("src/other.py", "VALUE = 42\n")
+    source_summary = _source_summary_for_agent_tests(
+        base64.b64encode(archive_buffer.getvalue()).decode("ascii"),
+        "python",
+    )
+    chunks = source_summary["source_chunks"]
+    packed = next(chunk for chunk in chunks if chunk["path"] == "<multiple-files>")
+    assert "src/app.py" in packed["text"]
+    assert "src/other.py" in packed["text"]
+    assert source_summary["coverage_complete"] is True
+
+    quotes = {
+        chunk["source_id"]: ('return "你好\\\\world "' if chunk is packed else chunk["text"][:40])
+        for chunk in chunks
+    }
+
+    class QuotingAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _source_ids(message)
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": [
+                        {"source_id": source_id, "quotes": [quotes[source_id]]} for source_id in ids
+                    ],
+                    "summary": "已接收本批源码与路径清单。",
+                },
+            )
+
+    compacted = compact_source_context(QuotingAgent(), source_summary, ctx=None)
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in chunks]
+    assert packed["sha256"] == hashlib.sha256(packed["text"].encode("utf-8")).hexdigest()
+
+    from app.agents.test_case_generator_agent import _grounding_feedback
+
+    generated_test = [
+        {
+            "path": "test_ai_flow.py",
+            "content": (
+                "from src.app import greet\nfrom src.other import VALUE\n"
+                "assert greet('A')\nassert VALUE == 42\n"
+            ),
+        }
+    ]
+    assert _grounding_feedback(generated_test, source_summary) == []
+
+
+def test_packed_metadata_is_not_duplicated_or_retained_in_split_model_requests() -> None:
+    source = "PACKED_SOURCE_SENTINEL\n" + ("x" * 3_200)
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    source_id = f"packed-{digest[:12]}"
+    messages: list[str] = []
+
+    class TruncatingPackedAgent:
+        def call_json(self, message, **_kwargs):
+            messages.append(message)
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = payload if isinstance(payload, list) else [payload]
+            text_entries = [
+                entry for entry in entries if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+            ]
+            assert all("files" not in entry for entry in entries if isinstance(entry, dict))
+            if any(len(entry["text"]) > 2_000 for entry in text_entries):
+                return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+            quotes = [
+                {
+                    "source_id": entry["source_id"],
+                    "quotes": [(entry.get("text") or entry.get("summary"))[:32]],
+                }
+                for entry in entries
+            ]
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": quotes,
+                    "summary": "按来源压缩并保留结构。",
+                },
+            )
+
+    result = compact_source_context(
+        TruncatingPackedAgent(),
+        {
+            "coverage_complete": True,
+            "source_chunks": [
+                {
+                    "source_id": source_id,
+                    "path": "<multiple-files>",
+                    "files": [{"path": "src/app.py", "text": source}],
+                    "text": source,
+                    "sha256": digest,
+                }
+            ],
+        },
+        ctx=None,
+    )
+
+    assert result["covered_source_ids"] == [source_id]
+    parsed_payloads = [json.loads(message.split("原始材料:\n", 1)[1]) for message in messages]
+    source_payloads = [
+        entry
+        for payload in parsed_payloads
+        for entry in (payload if isinstance(payload, list) else [payload])
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+    ]
+    split_payloads = [entry for entry in source_payloads if "#part-" in entry["source_id"]]
+    assert len(split_payloads) == 2
+    assert "".join(entry["text"] for entry in split_payloads) == source
+    assert max(len(entry["text"]) for entry in split_payloads) < len(source)
+    for message in messages:
+        if "PACKED_SOURCE_SENTINEL" in message:
+            assert message.count("PACKED_SOURCE_SENTINEL") == 1
+
+
+def test_real_multifile_archive_keeps_grounding_through_recursive_split() -> None:
+    long_file = (
+        'def greet(name):\n    marker = "PACKED_SOURCE_SENTINEL"\n'
+        + "    # "
+        + ("x" * 2_700)
+        + "\n    return marker + name\n"
+    )
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("src/app.py", long_file)
+        archive.writestr("src/constants.py", "VALUE = 42\n")
+    source_summary = _source_summary_for_agent_tests(
+        base64.b64encode(archive_buffer.getvalue()).decode("ascii"),
+        "python",
+    )
+    packed = next(chunk for chunk in source_summary["source_chunks"] if chunk["path"] == "<multiple-files>")
+    assert {item["path"] for item in packed["files"]} == {"src/app.py", "src/constants.py"}
+    messages: list[str] = []
+
+    class TruncatingArchiveAgent:
+        def call_json(self, message, **_kwargs):
+            messages.append(message)
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = payload if isinstance(payload, list) else [payload]
+            text_entries = [
+                entry
+                for entry in entries
+                if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+            ]
+            assert all("files" not in entry for entry in entries if isinstance(entry, dict))
+            if any(len(entry["text"]) > 1_500 for entry in text_entries):
+                return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": [
+                        {
+                            "source_id": entry["source_id"],
+                            "quotes": [(entry.get("text") or entry.get("summary"))[:32]],
+                        }
+                        for entry in entries
+                        if isinstance(entry, dict) and isinstance(entry.get("source_id"), str)
+                    ],
+                    "summary": "分片来源已逐条核验。",
+                },
+            )
+
+    compacted = compact_source_context(TruncatingArchiveAgent(), source_summary, ctx=None)
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in source_summary["source_chunks"]]
+    payload_entries = []
+    for message in messages:
+        payload = json.loads(message.split("原始材料:\n", 1)[1])
+        payload_entries.extend(payload if isinstance(payload, list) else [payload])
+    assert any("#part-" in entry["source_id"] for entry in payload_entries if isinstance(entry, dict))
+    for message in messages:
+        if "PACKED_SOURCE_SENTINEL" in message:
+            assert message.count("PACKED_SOURCE_SENTINEL") == 1
+
+    from app.agents.test_case_generator_agent import _grounding_feedback
+
+    assert _grounding_feedback(
+        [{"path": "test_generated.py", "content": "from src.app import greet\nfrom src.constants import VALUE\n"}],
+        source_summary,
+    ) == []
 
 
 def test_valid_quote_keeps_summary_marked_as_unverified_projection() -> None:

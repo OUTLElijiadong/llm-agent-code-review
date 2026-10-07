@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 # This script is part of the trusted runner image. Request payloads cannot
@@ -351,7 +351,7 @@ run_test() {
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   # 反编译前置必须先完成,避免注入脚本绕过 Android 证据门禁。
   if [ -f ./_prism_verify.sh ]; then
-    sh ./_prism_verify.sh whitebox
+    bash ./_prism_verify.sh whitebox
     return $?
   fi
   # 基础测试继续收集所有失败证据，但最终必须以非零退出码反映任何真实失败。
@@ -737,21 +737,35 @@ discover_route_candidates() {
 }
 
 run_blackbox() {
-  # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
-  if [ -f ./_prism_verify.sh ]; then
-    sh ./_prism_verify.sh blackbox
-    return $?
-  fi
-  # 应用日志与可信 runner 回执分流，防止应用 stdout 伪造 PRISM_* 结果标记。
-  # 先完成本地离线依赖准备，再启动进程，避免缺依赖的应用在安装期间先退出。
+  # 依赖准备必须覆盖受控 deploy 黑盒脚本：部署自动核验会为 whitebox/blackbox
+  # 分别启动一次性 worker，不能假定先前的白盒容器已经填好依赖缓存。
   if ! prepare_deps; then
     printf '%s\n' 'blackbox: offline dependency preparation failed (application was not started)' >&2
     printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"route_smoke","agent_assertions_passed":null,"route_passed":false,"route":"/","status_code":0}\n'
     return 1
   fi
+  # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
+  if [ -f ./_prism_verify.sh ]; then
+    bash ./_prism_verify.sh blackbox
+    return $?
+  fi
+  # 应用日志与可信 runner 回执分流，防止应用 stdout 伪造 PRISM_* 结果标记。
+  # 启用作业控制，使应用及其 npm/shell 后代拥有独立进程组，超时或中断时可整体回收。
+  set -m
   run_deploy >"$blackbox_app_log" 2>&1 &
   app_pid="$!"
-  trap 'kill "$app_pid" >/dev/null 2>&1 || true' EXIT INT TERM
+  set +m
+  stop_blackbox_app() {
+    [ -n "${app_pid:-}" ] || return 0
+    kill -TERM "-$app_pid" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "-$app_pid" >/dev/null 2>&1 || true
+    wait "$app_pid" >/dev/null 2>&1 || true
+    app_pid=""
+  }
+  trap 'stop_blackbox_app; exit 130' INT
+  trap 'stop_blackbox_app; exit 143' TERM
+  trap 'stop_blackbox_app' EXIT
   attempts=0
   stable=0
   http_ready=""
@@ -883,8 +897,7 @@ EOF
       "$agent_assertions_passed" \
       "$route_passed" "$blackbox_route" "$blackbox_status"
   fi
-  kill "$app_pid" >/dev/null 2>&1 || true
-  wait "$app_pid" 2>/dev/null || true
+  stop_blackbox_app
   trap - EXIT INT TERM
   return "$blackbox_failed"
 }

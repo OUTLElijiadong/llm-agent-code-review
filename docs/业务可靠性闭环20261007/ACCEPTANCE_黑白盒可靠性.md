@@ -1,31 +1,27 @@
-# 黑白盒可靠性验收记录
+# 黑白盒业务可靠性验收记录
 
-## 候选 v4.0.78
+## 候选 v4.0.79（生产发布前）
 
-本次修复针对生产实测暴露的黑盒回执误标、白盒源码上下文校验失败、Node 动态测试模块模式不稳定，以及 Worker 缺依赖时仍启动测试等问题。修复遵循“证据不足即失败或降级标记，不把未执行说成通过”。
+修复前红测：在生产基线临时 worktree 运行新增回归，7 failed / 62 deselected；具体失败项见证据/43。候选同一批修复后定向回归为 142 passed，见证据/35。后续独立红队进一步发现动态调用、描述符、容器索引、`os.environb` 和 runner 子进程清理问题；最终红绿/全量结果见证据/49。复核时又发现静态字符串组合上限误伤复杂但合法的 URL 查询参数；现仅对导入、反射及动态方法解析的局部溢出执行 fail-closed，危险动态导入仍由上限负例覆盖，合法查询正例见 `test_blackbox_contract_keeps_encoded_high_complexity_query_with_trusted_port`。
 
-- 源码上下文压缩：模型响应两轮仍未通过来源覆盖/原文引用校验时，对原输入无损拆分并逐片复核；达到深度上限或小片不可拆时失败关闭，不放宽校验。修复前有精确复现，修复后来源压缩修复已纳入沙箱专项回归与当前后端/仓库完整回归；修复前失败与修复后结果分别见证据/20、21。
-- 黑盒回执：将 AI 动态断言和 HTTP 路由烟测分别核验。只有 Worker 注入唯一预期黑盒文件且逐文件可信回执为 pass，才声明 AI 断言通过；未生成/未执行时标成 route_smoke；动态断言失败和契约缺失保持失败。回执一致性测试纳入当前后端和仓库完整回归；相关新增反例见证据/20、21。
-- 运行时兼容：Node harness 固定使用 ESM 的 .mjs，兼容 CJS/ESM 项目导入；Java harness 编译和执行时加入项目常见 class 输出目录。Agent 上下文、runner 隔离及用例生成测试均纳入当前后端和仓库完整回归。
-- 离线依赖准备：Python、Node、Go、Maven/Gradle、Composer 在黑盒启动、白盒和 combined 执行前先准备依赖；全部按缓存/离线模式运行，失败则不启动目标程序或测试。combined 共用一次准备结果。覆盖缓存命中/缺失、黑盒启动失败、白盒脚本及多语言 runner 夹具。
-- 黑盒/combined executor 目标复跑：12 passed、55 deselected，详见证据/33。
-- 后端全量回归：6,373 passed、6 skipped、6 warnings，覆盖率 83%，305.42 秒。6 个 Redis 限流集成测试需要隔离 Redis 容器或 Unix socket，均为 skip，不算通过。日志：证据/28-候选后端全量回归-v4078-20261007.txt。
-- 仓库根目录全量回归：6,510 passed、8 skipped、6 warnings，213.27 秒，测试执行到 100% 且无收集错误，见证据/32-仓库根目录全量回归-v4078-20261007.txt。8 个 skip 中，6 个是需要隔离 Redis 容器或 Unix socket 的测试；另 2 个来自 opt-in Linux 内核验收测试。该内核测试须显式设置 PRISM_KERNEL_TEST=1、运行于 Linux root 环境，并依赖 ip、ipset、iptables、python3；根测试日志只记总数，未记载这 2 项的具体跳过条件。均不计作通过。
-- 部署脚本发布绑定 33 项通过；健康检查、资产、HTTPS、回滚拒绝等故障注入按预期失败关闭。日志：证据/29-部署脚本回归-v4078-20261007.txt。
-- 本轮变更 Python 文件 Ruff 通过；runner shell 语法和 git diff 空白检查通过。完整后端和仓库测试各报告 6 条 warning，本验收记录数量但未逐条消除。
-- 本轮前端源码未改。既有前端 1,850 项测试、ESLint 通过，见证据/13、14。远端候选提交 SHA 4300a7d21958ed14d922d2028eec75fb1e6c91d3 的生产构建也通过；bundle 内版本、完整 SHA、构建时间已核验，见证据/34。
+候选从生产 v4.0.78 commit 957a6588fc59b924ed1ebae81446a361b37c28bf 的相同 Git tree（b85c818b56f764ba7182fb688db0b9308072bade）开始，当前 v4.0.79 修复范围：多文件源码正文原样进入 grounding 以保留逐字引文；递归压缩请求只带来源 ID 和当前正文，避免重复提交整个文件元数据；Python 黑盒动态端口来源检查覆盖间接调用、helper 参数/返回、反射与 `os.environb` 别名；普通及部署注入 runner 的离线依赖准备失败会阻止假通过；黑盒探活超时后按进程组回收应用及其子进程。
 
-修复前问题复现及独立复核详见证据/20、21、24、26。根目录 pytest 收集配置及早期失败边界记录见证据/27、31；当前规范根目录测试结果以证据/32为准。本轮定向复跑、静态检查与在线只读核验收口记录见证据/33。
+- 最新后端完整测试（`backend/.venv311/bin/python -m pytest -q --no-cov`）：6495 passed、6 skipped、5 warnings，见证据/57。6 项 Redis 用例按测试配置跳过，不计为通过；隔离 Redis Unix socket 集成另见证据/36。
+- 最终黑白盒/源码/runner 定向回归：244 passed、3 warnings，见证据/56；新增真实 SIGINT/SIGTERM runner 中断与 Node 子进程回收测试。
+- Redis 限流场景：block 持续、亚秒过期、admission window、失败结算窗口、旧检查窗口、Unix socket factory 均通过，证据/36。临时无网络容器、socket 和数据已删除。
+- 前端：1850 tests passed / 142 files；ESLint 与 vue-tsc/Vite v4.0.79 构建通过，证据/38–40。
+- 发布绑定：33 项通过；同一 test_scripts.sh 所含故障注入矩阵对备份、校验、构建、迁移、切换、健康、HTTPS失败及回滚拒绝进行了预期断言，证据/41。
+- Ruff（实现与新增测试）、compileall、ShellCheck error 级、runner/install 脚本 `bash -n`、`git diff --check` 均通过；默认 ShellCheck 模式仍报告已有 warning/info，见证据/49 与最终检查。
 
-## 生产状态
+以上仅为候选自动化证据，不能表述为生产 Worker 验收。grounding 无效仍失败关闭；不可拆分小片或调用预算耗尽仍返回失败。它提高已观察故障路径的确定性，不证明任意外部项目、模型、语言、依赖或网络环境都成功。
 
-本轮只读 GET https://lijiadong.cn/healthz 与 /readyz 均返回 ready，版本 v4.0.77，release 083c64a9af018c00339d7288b196dee4650b17c4。SSH 公钥认证此前被拒，v4.0.78 没有上传或发布。因此生产未运行本次修复；没有真实 Worker、模型调用、白盒/黑盒任务或 Safari 候选复测。
+## 生产基线与发布后验收
 
-## 未覆盖边界
+2026-10-07 只读请求 `GET https://lijiadong.cn/healthz` 返回 `{"status":"ok","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`，详见证据/54。schema 基线为 `062_audit_log_action_length`。v4.0.79 仍是候选，线上 Worker/Safari 尚未执行本轮新样本；本轮无法部署（Docker 由用户关闭，SSH 部署凭据不可用）。发布后必须真实执行 Python 白盒、无入口样本启动失败负例、loopback-only runnable service 黑盒正例，并核对动态用例清单、Worker 原始回执、报告回读、任务终态及资源清理。健康页不替代业务测试。
 
-- 本轮没有隔离 Redis、Docker Worker 或真实生产项目执行。
-- Node、PHP、Go、Java 尚未具有与 Python 同等的结构化源码 grounding 和目标业务调用证明；runner 夹具不能代替真实项目验证。
-- 百万 token 场景目前是压缩/完整性模拟器验证，不等于真实模型端到端处理 1,000,000 token，也不证明压缩后的语义回忆完整。
-- 任何测试集都不能证明任意第三方代码、依赖、模型或网络条件下永不失败。当前目标是对已复现失败增加门禁，并让缺证据、缺依赖和异常状态显式失败，禁止误报成功。
+## 未覆盖范围
 
-生产发布后仍需按 TODO 执行真实 Python 白盒、loopback-only 黑盒、报告持久化、Worker 回执和资源回收检查，之后才能完成生产验收。
+- 隔离 Redis 场景通过不覆盖生产 Redis 故障转移或网络分区。
+- Node/PHP/Go/Java runner 测试不代表其源码语义 grounding 已达到 Python 覆盖。
+- 模拟压缩结果不证明真实供应商端到端接收并理解超过 1,000,000 token。
+- Safari 生产任务和资源清理闭环待部署后执行。

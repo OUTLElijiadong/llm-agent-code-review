@@ -404,10 +404,12 @@ def _exact_source_texts(source_summary: dict[str, Any]) -> list[str]:
             if not isinstance(item, dict) or not isinstance(item.get("text"), str):
                 continue
             if item.get("path") == "<multiple-files>":
-                try:
-                    packed = json.loads(item["text"])
-                except (TypeError, ValueError):
-                    continue
+                packed = item.get("files")
+                if not isinstance(packed, list):
+                    try:
+                        packed = json.loads(item["text"])
+                    except (TypeError, ValueError):
+                        continue
                 if isinstance(packed, list):
                     texts.extend(
                         entry["text"]
@@ -542,10 +544,12 @@ def _grounding_feedback(
             continue
         path = chunk.get("path")
         if path == "<multiple-files>":
-            try:
-                packed = json.loads(chunk["text"])
-            except (TypeError, ValueError):
-                continue
+            packed = chunk.get("files")
+            if not isinstance(packed, list):
+                try:
+                    packed = json.loads(chunk["text"])
+                except (TypeError, ValueError):
+                    continue
             if isinstance(packed, list):
                 for entry in packed:
                     if (

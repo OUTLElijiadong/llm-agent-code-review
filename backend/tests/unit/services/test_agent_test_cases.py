@@ -5,10 +5,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
+import subprocess
+import sys
+import time
 import zipfile
 
 import pytest
-
 from app.services.sandbox_service import (
     _extract_agent_tests_result,
     _generated_test_contract_issues,
@@ -296,6 +299,55 @@ type(os).__setattr__(os, 'getenv', lambda _key: '8080')
 from urllib.request import urlopen
 urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
 """,
+        """import os
+os.environb[b'PRISM_PREVIEW_PORT'] = b'8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+os.environb.update({b'PRISM_PREVIEW_PORT': b'8080'})
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+env_data = os.environb._data
+env_data[b'PRISM_PREVIEW_PORT'] = b'8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """from os import environb as envb
+envb[b'PRISM_PREVIEW_PORT'] = b'8080'
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + __import__('os').getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+env_alias = os.environb
+env_alias.update({b'PRISM_PREVIEW_PORT': b'8080'})
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+operator.setitem(os.environb, b'PRISM_PREVIEW_PORT', b'8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+import operator
+operator.methodcaller('__setitem__', b'PRISM_PREVIEW_PORT', b'8080')(os.environb)
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+os.environb |= {b'PRISM_PREVIEW_PORT': b'8080'}
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
+        """import os
+type(os.environb).__setitem__(os.environb, b'PRISM_PREVIEW_PORT', b'8080')
+from urllib.request import urlopen
+urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
+""",
     ],
     ids=[
         "replace-environ",
@@ -322,11 +374,849 @@ urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)
         "operator-delitem-alias-environ",
         "operator-methodcaller-setitem-environ",
         "operator-methodcaller-import-alias-environ",
+        "replace-dynamic-port-through-environb",
+        "update-dynamic-port-through-environb",
+        "mutate-environb-private-data",
+        "write-environb-import-alias",
+        "update-environb-assignment-alias",
+        "operator-setitem-environb",
+        "operator-methodcaller-environb",
+        "augassign-environb",
+        "environb-type-setitem",
     ],
 )
 def test_blackbox_contract_rejects_mutated_dynamic_port_sources(source: str) -> None:
     issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
     assert issues
+
+
+@pytest.mark.parametrize(
+    ("body", "rejected"),
+    [
+        (
+            "from operator import methodcaller\n"
+            "methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator as op\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "methodcaller_factory = operator.methodcaller\n"
+            "methodcaller_factory('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator as op\n"
+            "methodcaller_factory = op.methodcaller\n"
+            "methodcaller_alias = methodcaller_factory\n"
+            "methodcaller_alias('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "op = operator\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "first_alias = operator\n"
+            "second_alias = first_alias\n"
+            "second_alias.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import _operator as op\n"
+            "alias = op\n"
+            "alias.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "(module_alias,) = (operator,)\n"
+            "module_alias.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "(factory,) = (operator.methodcaller,)\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "from operator import methodcaller as factory\n"
+            "(first,) = (factory,)\n"
+            "(second,) = (first,)\n"
+            "second('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "getattr(operator, 'methodcaller')('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "def make_factory():\n"
+            "    return operator.methodcaller\n"
+            "factory = make_factory()\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "from operator import methodcaller as make_call\n"
+            "result = make_call('upper')('safe')\n",
+            False,
+        ),
+        (
+            "import json\n"
+            "import operator\n"
+            "from urllib.request import urlopen\n"
+            "json.dumps(os.environ)\n"
+            "operator.methodcaller('upper')('safe')\n",
+            False,
+        ),
+        (
+            "from urllib.request import urlopen\n"
+            "import operator\n"
+            "def read_port(mapping):\n"
+            "    return mapping.get('PRISM_PREVIEW_PORT')\n"
+            "port = read_port(os.environ)\n"
+            "operator.methodcaller('upper')('safe')\n",
+            False,
+        ),
+        (
+            "getattr(__import__('operator'), 'methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "__import__('operator').__dict__['methodcaller']"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import builtins\n"
+            "builtins.__import__('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "from builtins import __import__ as load_module\n"
+            "load_module('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "__builtins__['__import__']('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import importlib\n"
+            "importlib.import_module('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "from importlib import import_module as load_module\n"
+            "load_module('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8080')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')"
+            "(os.__dict__['environ'])\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8080')"
+            "(os.__dict__.get('environ'))\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "operator.methodcaller('__setitem__', 'OTHER_FLAG', '1')(os.environ)\n",
+            False,
+        ),
+        (
+            "os.environ['OTHER_FLAG'] = '1'\n",
+            False,
+        ),
+        (
+            "import operator\n"
+            "operator.__dict__.get('methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8101')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "vars(operator).get('methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8102')(os.environ)\n",
+            True,
+        ),
+        (
+            "import sys\n"
+            "sys.modules.get('operator').methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8103')(os.environ)\n",
+            True,
+        ),
+        (
+            "import functools\n"
+            "import operator\n"
+            "functools.partial(operator.methodcaller"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8104'), os.environ)()\n",
+            True,
+        ),
+        (
+            "import functools\n"
+            "import operator\n"
+            "mutate = functools.partial(operator.methodcaller,"
+            " '__setitem__', 'PRISM_PREVIEW_PORT', '8105')\n"
+            "mutate()(os.environ)\n",
+            True,
+        ),
+        (
+            "import sys\n"
+            "op = sys.modules.get('operator')\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8106')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "get_method = operator.__dict__.get\n"
+            "get_method('methodcaller')('__setitem__', 'PRISM_PREVIEW_PORT', '8107')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "get_method = vars(operator).get\n"
+            "get_method('methodcaller')('__setitem__', 'PRISM_PREVIEW_PORT', '8108')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "getattr(vars(operator), 'methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8109')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "getattr(operator.__dict__, 'get')('methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8110')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "from builtins import getattr as attr\n"
+            "attr(operator, 'methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8111')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "dict.__getitem__(operator.__dict__, 'methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8112')(os.environ)\n",
+            True,
+        ),
+        (
+            "import importlib\n"
+            "op = importlib.import_module('operator')\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8113')(os.environ)\n",
+            True,
+        ),
+        (
+            "op = __import__('operator')\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8114')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "fetch = dict.__getitem__\n"
+            "fetch(operator.__dict__, 'methodcaller')"
+            "('__setitem__', 'PRISM_PREVIEW_PORT', '8202')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "def mutate(target):\n"
+            "    operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8201')(target)\n"
+            "mutate(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "def apply(fn, target):\n"
+            "    fn(target)\n"
+            "apply(operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8203'), os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "mutate = lambda target: operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8204')(target)\n"
+            "mutate(os.environ)\n",
+            True,
+        ),
+        (
+            "import importlib\n"
+            "def load(name):\n"
+            "    return importlib.import_module(name)\n"
+            "op = load('operator')\n"
+            "op.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8204')(os.environ)\n",
+            True,
+        ),
+        (
+            "import functools\n"
+            "import operator\n"
+            "class Mutator:\n"
+            "    def change(self, target):\n"
+            "        operator.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8206')(target)\n"
+            "    run = functools.partialmethod(change)\n"
+            "Mutator().run(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "class Resolver:\n"
+            "    @property\n"
+            "    def factory(self):\n"
+            "        return operator.methodcaller\n"
+            "Resolver().factory('__setitem__', 'PRISM_PREVIEW_PORT', '8203')(os.environ)\n",
+            True,
+        ),
+        (
+            "class FactoryDescriptor:\n"
+            "    def __get__(self, instance, owner):\n"
+            "        return __import__('operator').methodcaller\n"
+            "class Resolver:\n"
+            "    factory = FactoryDescriptor()\n"
+            "Resolver().factory('__setitem__', 'PRISM_PREVIEW_PORT', '8204')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "container = (operator.methodcaller,)\n"
+            "factory = container[0]\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8206')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "container = {'factory': operator.methodcaller}\n"
+            "factory = container['factory']\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8207')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "namespace = vars(operator)\n"
+            "factory = namespace['methodcaller']\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8208')(os.environ)\n",
+            True,
+        ),
+        (
+            "class Dispatcher:\n"
+            "    def __init__(self): self.target = __import__('operator').methodcaller\n"
+            "    def __call__(self, *args): return self.target(*args)\n"
+            "Dispatcher()('__setitem__', 'PRISM_PREVIEW_PORT', '8210')(os.environ)\n",
+            True,
+        ),
+        (
+            "import importlib\n"
+            "module = importlib.import_module(''.join(['oper', 'ator']))\n"
+            "factory = getattr(module, ''.join(['method', 'caller']))\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8212')(os.environ)\n",
+            True,
+        ),
+        (
+            "loader = getattr(globals()['__builtins__'], '__import__')\n"
+            "loader('operator').methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8213')(os.environ)\n",
+            True,
+        ),
+        (
+            "import operator\n"
+            "def expose(fn): return fn\n"
+            "factory = expose(operator.methodcaller)\n"
+            "factory('__setitem__', 'PRISM_PREVIEW_PORT', '8217')(os.environ)\n",
+            True,
+        ),
+    ],
+    ids=[
+        "nested-name-mutator",
+        "nested-attribute-mutator",
+        "nested-assigned-factory",
+        "nested-assigned-factory-chain",
+        "operator-module-alias",
+        "operator-module-alias-chain",
+        "underscore-operator-module-alias",
+        "operator-module-destructuring-alias",
+        "methodcaller-destructuring-alias",
+        "methodcaller-destructuring-function-chain",
+        "getattr-methodcaller",
+        "factory-returning-methodcaller",
+        "nested-benign-call",
+        "benign-methodcaller-with-json-environ",
+        "benign-methodcaller-with-read-only-environ-helper",
+        "getattr-import-reflection-mutator",
+        "module-dict-reflection-mutator",
+        "builtins-import-reflection-mutator",
+        "import-alias-reflection-mutator",
+        "builtins-dict-import-reflection-mutator",
+        "importlib-import-module-reflection-mutator",
+        "importlib-function-reflection-mutator",
+        "os-module-dict-environ-reflection-mutator",
+        "os-module-dict-get-environ-reflection-mutator",
+        "mutator-changes-unrelated-environment-key",
+        "direct-change-to-unrelated-environment-key",
+        "operator-dict-get-methodcaller-mutator",
+        "operator-vars-get-methodcaller-mutator",
+        "sys-modules-get-methodcaller-mutator",
+        "functools-partial-binds-environ",
+        "functools-partial-methodcaller-factory",
+        "assigned-sys-modules-operator-alias",
+        "assigned-operator-dict-get-alias",
+        "assigned-operator-vars-get-alias",
+        "getattr-operator-vars-dict",
+        "getattr-operator-dict-get-alias",
+        "builtins-getattr-import-alias",
+        "dict-getitem-operator-dict",
+        "assigned-importlib-operator-alias",
+        "assigned-builtin-import-operator-alias",
+        "assigned-dict-getitem-methodcaller",
+        "function-parameter-environ-mutator",
+        "function-parameter-methodcaller-callback",
+        "lambda-parameter-environ-mutator",
+        "function-return-imported-operator-alias",
+        "partialmethod-environ-mutator",
+        "property-methodcaller-factory",
+        "descriptor-methodcaller-factory",
+        "tuple-index-methodcaller-factory",
+        "dictionary-index-methodcaller-factory",
+        "vars-dictionary-methodcaller-factory",
+        "callable-wrapper-methodcaller-mutator",
+        "joined-dynamic-import-methodcaller-mutator",
+        "globals-builtin-import-methodcaller-mutator",
+        "helper-returned-methodcaller-mutator",
+    ],
+)
+def test_nested_call_ast_contract_does_not_crash_and_keeps_environment_guard(body: str, rejected: bool) -> None:
+    source = "import os\n" + body
+    source = source.replace("import os\n", "import os\nfrom urllib.request import urlopen\n")
+    source = source.rstrip() + "\nurlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT') + '/', timeout=5)\n"
+    issues = _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python")
+
+    if rejected:
+        assert any("PRISM_PREVIEW_PORT" in issue for issue in issues)
+    else:
+        assert issues == []
+
+
+def test_blackbox_contract_accepts_encoded_url_with_read_only_port_helper() -> None:
+    source = """import os
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+def read_port(mapping):
+    return mapping.get('PRISM_PREVIEW_PORT')
+
+port = read_port(os.environ)
+query = urlencode({'q': 'hello world'})
+urlopen('http://127.0.0.1:' + port + '/?' + query, timeout=5)
+"""
+    assert _generated_test_contract_issues([{"path": "blackbox.py", "content": source}], "python") == []
+
+
+def _blackbox_contract_source(body: str) -> str:
+    return (
+        "import os\n"
+        "from urllib.parse import urlencode\n"
+        "from urllib.request import urlopen\n"
+        f"{body.rstrip()}\n"
+        "query = urlencode({'q': 'safe query'})\n"
+        "urlopen('http://127.0.0.1:' + os.getenv('PRISM_PREVIEW_PORT', '8099') + '/?' + query, timeout=5)\n"
+    )
+
+
+def _isolated_preview_port_after(body: str, initial_port: str = "8200") -> str:
+    completed = subprocess.run(
+        [sys.executable, "-c", f"import os\n{body.rstrip()}\nprint(os.getenv('PRISM_PREVIEW_PORT', '<missing>'))\n"],
+        env={**os.environ, "PRISM_PREVIEW_PORT": initial_port},
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return completed.stdout.strip().splitlines()[-1]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_port"),
+    [
+        ("exec(\"os.environ['PRISM_PREVIEW_PORT']='8701'\")", "8701"),
+        ("run = exec\nrun(\"os.environ['PRISM_PREVIEW_PORT']='8702'\")", "8702"),
+        ("eval(\"os.environ.__setitem__('PRISM_PREVIEW_PORT','8703')\")", "8703"),
+        ("evaluate = eval\nevaluate(\"os.environ.__setitem__('PRISM_PREVIEW_PORT','8704')\")", "8704"),
+        (
+            "import builtins\nbuiltins.exec(\"os.environ['PRISM_PREVIEW_PORT']='8705'\")",
+            "8705",
+        ),
+        (
+            "from builtins import exec as run\nrun(\"os.environ['PRISM_PREVIEW_PORT']='8706'\")",
+            "8706",
+        ),
+        (
+            "code = compile(\"os.environ['PRISM_PREVIEW_PORT']='8707'\", '<generated>', 'exec')\nexec(code)",
+            "8707",
+        ),
+        (
+            "def mutate(source):\n    exec(source)\nmutate(\"os.environ['PRISM_PREVIEW_PORT']='8708'\")",
+            "8708",
+        ),
+        (
+            "import builtins\nrun = getattr(builtins, 'ex' + 'ec')\nrun(\"os.environ['PRISM_PREVIEW_PORT']='8709'\")",
+            "8709",
+        ),
+        (
+            "import builtins\nrun = builtins.__dict__['ex' + 'ec']\n"
+            "run(\"os.environ['PRISM_PREVIEW_PORT']='8710'\")",
+            "8710",
+        ),
+        (
+            "import builtins\nnamespace = vars(builtins)\nrun = namespace['ex' + 'ec']\n"
+            "run(\"os.environ['PRISM_PREVIEW_PORT']='8711'\")",
+            "8711",
+        ),
+        (
+            "run = __import__('builtins').__dict__['ex' + 'ec']\n"
+            "run(\"os.environ['PRISM_PREVIEW_PORT']='8712'\")",
+            "8712",
+        ),
+    ],
+    ids=[
+        "exec-direct",
+        "exec-alias",
+        "eval-direct",
+        "eval-alias",
+        "builtins-exec",
+        "builtins-exec-import-alias",
+        "compile-then-exec",
+        "helper-inner-exec",
+        "builtins-reflective-exec",
+        "builtins-dict-dynamic-key",
+        "vars-builtins-dynamic-key",
+        "import-builtin-dict-dynamic-key",
+    ],
+)
+def test_blackbox_contract_rejects_dynamic_python_execution_aliases(body: str, expected_port: str) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert any("exec/eval/compile" in issue for issue in issues)
+    assert _isolated_preview_port_after(body) == expected_port
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_port"),
+    [
+        (
+            "def mutate(*args):\n    args[0]['PRISM_PREVIEW_PORT'] = '8801'\nmutate(os.environ)",
+            "8801",
+        ),
+        (
+            "def mutate(**kwargs):\n    kwargs['mapping']['PRISM_PREVIEW_PORT'] = '8802'\nmutate(mapping=os.environ)",
+            "8802",
+        ),
+        (
+            "def mutate(**kwargs):\n    kwargs['env']['PRISM_PREVIEW_PORT'] = '8804'\n"
+            "kwargs = {'env': os.environ}\nmutate(**kwargs)",
+            "8804",
+        ),
+    ],
+    ids=["varargs-environment-source", "kwargs-environment-source", "kwargs-expanded-dict-environment-source"],
+)
+def test_blackbox_contract_rejects_varargs_and_kwargs_environment_mutation(body: str, expected_port: str) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert any("PRISM_PREVIEW_PORT" in issue for issue in issues)
+    assert _isolated_preview_port_after(body) == expected_port
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_port"),
+    [
+        (
+            "setter = getattr(os.environ, '__setitem__')\n"
+            "setter('PRISM_PREVIEW_PORT', '8817')",
+            "8817",
+        ),
+        (
+            "data = os.environ._data\nsetter = getattr(dict, '__setitem__')\n"
+            "setter(data, b'PRISM_PREVIEW_PORT', b'8814')",
+            "8814",
+        ),
+        (
+            "data = os.environ._data\nsetter = type(data).__setitem__\n"
+            "setter(data, b'PRISM_PREVIEW_PORT', b'8815')",
+            "8815",
+        ),
+        (
+            "data = os.environ._data\nupdate = getattr(dict, 'update')\n"
+            "update(data, {b'PRISM_PREVIEW_PORT': b'8816'})",
+            "8816",
+        ),
+        (
+            "data = os.environ._data\nsetter = dict.__dict__['__setitem__']\n"
+            "setter(data, b'PRISM_PREVIEW_PORT', b'8818')",
+            "8818",
+        ),
+        (
+            "setter = os.environ.__setitem__\nsetter('PRISM_PREVIEW_PORT', '8819')",
+            "8819",
+        ),
+        (
+            "updater = os.environ.update\nupdater({'PRISM_PREVIEW_PORT': '8820'})",
+            "8820",
+        ),
+        (
+            "from functools import partial\n"
+            "setter = partial(os.environ.__setitem__, 'PRISM_PREVIEW_PORT', '8821')\nsetter()",
+            "8821",
+        ),
+        (
+            "from functools import partial\n"
+            "setter = partial(dict.__setitem__, os.environ._data, b'PRISM_PREVIEW_PORT', b'8822')\nsetter()",
+            "8822",
+        ),
+        (
+            "import operator\nsetter = getattr(operator, 'setitem')\n"
+            "setter(os.environ, 'PRISM_PREVIEW_PORT', '8823')",
+            "8823",
+        ),
+        (
+            "setter = object.__getattribute__(os.environ, '__setitem__')\n"
+            "setter('PRISM_PREVIEW_PORT', '8830')",
+            "8830",
+        ),
+        (
+            "setter = os.environ.__getattribute__('__setitem__')\n"
+            "setter('PRISM_PREVIEW_PORT', '8831')",
+            "8831",
+        ),
+        (
+            "fetch = object.__getattribute__\nsetter = fetch(os.environ, '__setitem__')\n"
+            "setter('PRISM_PREVIEW_PORT', '8910')",
+            "8910",
+        ),
+        (
+            "fetch = os.environ.__getattribute__\nsetter = fetch('__setitem__')\n"
+            "setter('PRISM_PREVIEW_PORT', '8911')",
+            "8911",
+        ),
+        (
+            "def get_setter(mapping):\n    return mapping.__setitem__\n"
+            "setter = get_setter(os.environ)\nsetter('PRISM_PREVIEW_PORT', '8913')",
+            "8913",
+        ),
+    ],
+    ids=[
+        "environ-bound-setitem-alias",
+        "dict-bound-setitem-alias",
+        "type-bound-setitem-alias",
+        "dict-bound-update-alias",
+        "dict-descriptor-setitem-alias",
+        "environ-direct-method-alias",
+        "environ-bound-update-alias",
+        "partial-bound-environ-method",
+        "partial-unbound-dict-method",
+        "operator-reflective-setitem-alias",
+        "object-getattribute-bound-setitem",
+        "environ-getattribute-bound-setitem",
+        "object-getattribute-function-alias",
+        "bound-getattribute-function-alias",
+        "helper-returned-environment-mutator",
+    ],
+)
+def test_blackbox_contract_rejects_reflective_environment_mutator_aliases(body: str, expected_port: str) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert any("PRISM_PREVIEW_PORT" in issue for issue in issues)
+    assert _isolated_preview_port_after(body) == expected_port
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "setter = os.environ.__setitem__\nsetter('OTHER_FLAG', 'safe')",
+        "updater = os.environ.update\nupdater({'OTHER_FLAG': 'safe'})",
+    ],
+    ids=["unrelated-bound-setitem", "unrelated-bound-update"],
+)
+def test_blackbox_contract_accepts_environment_mutations_unrelated_to_preview_port(body: str) -> None:
+    assert _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def read_port(*args):\n    return args[0].get('PRISM_PREVIEW_PORT')\nport = read_port(os.environ)",
+        (
+            "def read_port(**kwargs):\n    return kwargs['mapping'].get('PRISM_PREVIEW_PORT')\n"
+            "port = read_port(mapping=os.environ)"
+        ),
+        (
+            "def read_port(**kwargs):\n    return kwargs['mapping'].get('PRISM_PREVIEW_PORT')\n"
+            "source = {'mapping': os.environ}\nport = read_port(**source)"
+        ),
+    ],
+    ids=["read-only-varargs-helper", "read-only-kwargs-helper", "read-only-expanded-kwargs-helper"],
+)
+def test_blackbox_contract_accepts_read_only_varargs_and_kwargs_port_helpers(body: str) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert issues == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "get_port = os.environ.get\nport = get_port('PRISM_PREVIEW_PORT')",
+        "get_port = getattr(os.environ, 'get')\nport = get_port('PRISM_PREVIEW_PORT')",
+        "port = getattr(os.environ, 'get')('PRISM_PREVIEW_PORT')",
+        "get_port = object.__getattribute__(os.environ, 'get')\nport = get_port('PRISM_PREVIEW_PORT')",
+    ],
+    ids=[
+        "bound-environ-get-alias",
+        "reflective-environ-get-alias",
+        "inline-reflective-environ-get",
+        "object-getattribute-environ-get-alias",
+    ],
+)
+def test_blackbox_contract_accepts_read_only_bound_environment_getters(body: str) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert issues == []
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_port"),
+    [
+        (
+            "data = os.environ._data\nset_item = dict.__setitem__\nset_item(data, b'PRISM_PREVIEW_PORT', b'8811')",
+            "8811",
+        ),
+        (
+            "data = os.environ._data\nupdate = dict.update\nupdate(data, {b'PRISM_PREVIEW_PORT': b'8812'})",
+            "8812",
+        ),
+        (
+            "data = os.environ._data\ndel_item = dict.__delitem__\ndel_item(data, b'PRISM_PREVIEW_PORT')",
+            "<missing>",
+        ),
+        (
+            "data = os.environ._data\npop_item = dict.pop\npop_item(data, b'PRISM_PREVIEW_PORT', None)",
+            "<missing>",
+        ),
+    ],
+    ids=["dict-setitem-alias", "dict-update-alias", "dict-delitem-alias", "dict-pop-alias"],
+)
+def test_blackbox_contract_rejects_dict_descriptor_aliases_mutating_environ(
+    body: str, expected_port: str
+) -> None:
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert any("PRISM_PREVIEW_PORT" in issue for issue in issues)
+    assert _isolated_preview_port_after(body) == expected_port
+
+
+def test_blackbox_contract_allows_dict_descriptor_alias_for_unrelated_environ_key() -> None:
+    body = "data = os.environ._data\nset_item = dict.__setitem__\nset_item(data, b'OTHER_FLAG', b'1')"
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source(body)}], "python"
+    )
+    assert issues == []
+    assert _isolated_preview_port_after(body) == "8200"
+
+
+def test_blackbox_contract_bounds_static_string_products_and_fails_closed() -> None:
+    letters = list("operator")
+    parameter_count = 13
+    body_lines: list[str] = []
+    fragments: list[str] = []
+    for index in range(parameter_count):
+        function_name = f"fragment_{index}"
+        included = letters[index] if index < len(letters) else "x"
+        runtime_include = index < len(letters)
+        body_lines.extend(
+            [
+                f"def {function_name}():",
+                f"    if {runtime_include!r}:",
+                f"        return {included!r}",
+                "    return ''",
+            ]
+        )
+        fragments.append(f"{function_name}()")
+    body_lines.extend(
+        [
+            "module_name = " + repr("{}" * parameter_count) + ".format(" + ", ".join(fragments) + ")",
+            "operator_module = __import__(module_name)",
+            "operator_module.methodcaller('__setitem__', 'PRISM_PREVIEW_PORT', '8899')(os.environ)",
+        ]
+    )
+    started = time.monotonic()
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": _blackbox_contract_source("\n".join(body_lines))}],
+        "python",
+    )
+    elapsed = time.monotonic() - started
+    assert elapsed < 2.0
+    assert any("PRISM_PREVIEW_PORT" in issue for issue in issues)
+
+
+def test_blackbox_contract_keeps_encoded_high_complexity_query_with_trusted_port() -> None:
+    lines = [
+        "import os",
+        "from urllib.parse import urlencode",
+        "from urllib.request import urlopen",
+    ]
+    arguments = []
+    for index in range(11):
+        name = f"piece_{index}"
+        choice = "x" if index % 2 == 0 else "y"
+        lines.extend(
+            [
+                f"def {name}():",
+                "    if True:",
+                f"        return {choice!r}",
+                "    return ''",
+            ]
+        )
+        arguments.append(f"{name}()")
+    lines.extend(
+        [
+            "value=" + repr("{}" * 11) + ".format(" + ",".join(arguments) + ")",
+            "query=urlencode({'q':value})",
+            "port=os.environ.get('PRISM_PREVIEW_PORT')",
+            "urlopen('http://127.0.0.1:'+port+'/?'+query,timeout=5)",
+        ]
+    )
+    issues = _generated_test_contract_issues(
+        [{"path": "blackbox.py", "content": "\n".join(lines)}], "python"
+    )
+    assert issues == []
 
 
 def test_inject_deployment_patch_adds_launch_script() -> None:
@@ -414,7 +1304,6 @@ def test_syntax_repair_revision_config_binds_repair_to_next_worker_request() -> 
 
 def test_worker_receipt_requires_exact_request_and_archive_digest() -> None:
     import pytest
-
     from app.services.sandbox_service import _validate_worker_execution_receipt
 
     valid = {"request_id": "sbx_1-r1", "source_sha256": "a" * 64}

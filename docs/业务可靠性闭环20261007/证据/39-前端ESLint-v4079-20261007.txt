@@ -1,0 +1,4 @@
+注：仅规范化控制台输出中的行尾空格与末尾空行，检查内容和结果未改。
+
+> code-review-platform@1.0.0 lint
+> eslint .

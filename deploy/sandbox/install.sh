@@ -197,6 +197,7 @@ for language in ("python", "node", "java", "go", "php"):
         'image_digest="${BASE_IMAGE##*@sha256:}"',
         '[ "${#image_digest}" -eq 64 ]',
         "*[!0-9a-f]*) exit 1",
+        "RUN test -x /bin/bash",
     }
     if (
         dockerfile_lines[:3] != expected_prefix

@@ -6,6 +6,7 @@ RUN set -eu; \
     [ "$image_digest" != "$BASE_IMAGE" ]; \
     [ "${#image_digest}" -eq 64 ]; \
     case "$image_digest" in *[!0-9a-f]*) exit 1 ;; esac
+RUN test -x /bin/bash
 # The fixed runner uses the pinned JDK and a shell-only local health probe.
 ARG PRISM_RUNNER_SHA256
 ARG JADX_VERSION=1.5.6

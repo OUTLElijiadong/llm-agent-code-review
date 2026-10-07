@@ -420,7 +420,7 @@ def compact_source_context(
                     "summary": _context_call(
                         agent,
                         [source_id],
-                        chunk,
+                        {"source_id": source_id, "text": chunk["text"]},
                         ctx,
                         deadline,
                         protected_facts=[],
@@ -450,7 +450,10 @@ def compact_source_context(
         nodes: list[dict[str, Any]] = [
             {
                 "source_id": entry["source_id"],
-                "payload": original,
+                # File-level grounding metadata is consumed by the test generator,
+                # not the summarizer. Keep the model input lossless but avoid sending
+                # every packed file twice or retaining whole-file metadata on splits.
+                "payload": entry,
                 "source_ids": [entry["source_id"]],
                 "protected_facts": _protected_fact_ledger(original, [entry["source_id"]]),
             }
