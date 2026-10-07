@@ -47,15 +47,16 @@ jobs:
         run: |
           set -euo pipefail
           name="prism-login-audit-${RUN_ID}-${RUN_ATTEMPT}"
-          socket_dir="$RUNNER_TEMP/$name"
+          socket_dir="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/prism-login-redis-${RUN_ID}-${RUN_ATTEMPT}"
           mkdir -p "$socket_dir"
-          chmod 0777 "$socket_dir"
-          echo "PRISM_LOGIN_TEST_REDIS_CONTAINER=$name" >> "$GITHUB_ENV"
+          chmod 0700 "$socket_dir"
+          echo "PRISM_CI_REDIS_CONTAINER=$name" >> "$GITHUB_ENV"
           echo "PRISM_LOGIN_TEST_REDIS_SOCKET=$socket_dir/redis.sock" >> "$GITHUB_ENV"
           docker run --detach --name "$name" --network none \
+            --user "$(id -u):$(id -g)" \
             --volume "$socket_dir:/tmp" \
-            redis:7-alpine redis-server --port 0 \
-              --unixsocket /tmp/redis.sock --unixsocketperm 777 \
+            redis:7-alpine redis-server --dir /tmp --port 0 \
+              --unixsocket /tmp/redis.sock --unixsocketperm 700 \
               --save '' --appendonly no
           ready=0
           for ((attempt = 1; attempt <= 30; attempt++)); do
@@ -85,10 +86,13 @@ jobs:
         if: always()
         working-directory: .
         run: |
-          name="${PRISM_LOGIN_TEST_REDIS_CONTAINER:-}"
+          name="${PRISM_CI_REDIS_CONTAINER:-}"
           if [[ "$name" =~ ^prism-login-audit-[0-9]+-[0-9]+$ ]]; then
             docker rm --force "$name" >/dev/null 2>&1 || true
-            rm -rf -- "${RUNNER_TEMP:?}/$name"
+          fi
+          socket_path="${PRISM_LOGIN_TEST_REDIS_SOCKET:-}"
+          if [[ "$socket_path" =~ ^/tmp/prism-login-redis-[0-9]+-[0-9]+/redis\.sock$ ]]; then
+            rm -rf -- "${socket_path%/redis.sock}"
           fi
 
   frontend:

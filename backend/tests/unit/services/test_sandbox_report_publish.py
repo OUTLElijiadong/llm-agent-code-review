@@ -646,10 +646,10 @@ def test_deploy_verification_runner_probes_api_route_when_root_is_404(
             "PRISM_PREVIEW_PORT": str(port),
         }
     )
-    syntax = subprocess.run(["sh", "-n", str(runner)], capture_output=True, text=True, check=False)
+    syntax = subprocess.run(["bash", "-n", str(runner)], capture_output=True, text=True, check=False)
     assert syntax.returncode == 0, syntax.stderr
     completed = subprocess.run(
-        ["sh", str(runner), "blackbox"],
+        ["bash", str(runner), "blackbox"],
         env=env,
         text=True,
         capture_output=True,
@@ -688,7 +688,7 @@ def test_deploy_verification_runner_starts_asgi_entrypoint(tmp_path: Path) -> No
         }
     )
     completed = subprocess.run(
-        ["sh", str(runner), "blackbox"],
+        ["bash", str(runner), "blackbox"],
         env=env,
         text=True,
         capture_output=True,

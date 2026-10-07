@@ -193,7 +193,7 @@ def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
     })
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)], cwd=tmp_path, env=env,
+        ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env,
         text=True, capture_output=True, timeout=20, check=False,
     )
     assert completed.returncode == expected_exit, completed.stdout + completed.stderr
@@ -251,7 +251,7 @@ def test_real_blackbox_runner_marks_executed_agent_assertions_as_passed(tmp_path
     })
 
     completed = subprocess.run(
-        ["sh", str(RUNNER_PATH)],
+        ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
         env=env,
         text=True,
