@@ -1234,7 +1234,14 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
                     "blackbox": "黑盒测试容器已启动",
                     "combined": "黑白盒测试容器已启动",
                 }.get(normalized["test_mode"], "测试容器已启动")
-                _transition(state, "running_whitebox", "running_whitebox", mode_label)
+                mode_stage = {
+                    "whitebox": "running_whitebox",
+                    "blackbox": "running_blackbox",
+                    "combined": "running_combined",
+                }.get(normalized["test_mode"], "running_whitebox")
+                # Keep the active status stable for existing stop/poll semantics;
+                # the event stage carries the actual requested test mode.
+                _transition(state, "running_whitebox", mode_stage, mode_label)
             else:
                 _transition(state, "starting", "starting", "持续部署容器已启动，等待回环健康检查")
         _start_monitor(request_id, profile)

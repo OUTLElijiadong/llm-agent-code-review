@@ -11,6 +11,7 @@ import {
   sandboxStatusLabel,
   sandboxStatusPresentation,
   sortSandboxEvents,
+  stageLabel,
 } from './sandboxPresentation'
 import type { SandboxEnvironment } from '@/types/sandbox'
 
@@ -22,6 +23,14 @@ const baseEnvironment: SandboxEnvironment = {
 }
 
 describe('sandbox presentation rules', () => {
+  it('labels current and legacy worker stages according to the actual test mode', () => {
+    expect(stageLabel('running_whitebox', 'whitebox')).toBe('白盒测试')
+    expect(stageLabel('running_whitebox', 'blackbox')).toBe('黑盒测试')
+    expect(stageLabel('running_whitebox', 'combined')).toBe('黑白盒测试')
+    expect(stageLabel('running_blackbox')).toBe('黑盒测试')
+    expect(stageLabel('running_combined')).toBe('黑白盒测试')
+  })
+
   it('sorts Agent events by durable sequence before timestamps', () => {
     const events = [
       { id: 3, event_type: 'complete', stage: 'conclusion', message: '结论', payload: {}, create_time: '2026-08-02T10:00:00' },

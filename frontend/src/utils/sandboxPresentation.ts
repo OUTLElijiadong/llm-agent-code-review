@@ -116,7 +116,8 @@ export function isRemoteAuthorizationRequired(testMode: string, remoteUrl: strin
 const STAGE_LABELS: Record<string, string> = {
   authorization: '权限校验', snapshot: '源码快照', worker: '执行器调度', executor: '执行器',
   deploy_verify: '部署核验', agent_tests: '动态测试用例', validating: '沙箱校验', preparing: '环境准备',
-  running_whitebox: '白盒测试', starting: '启动应用', health_checking: '健康检查', running: '运行中',
+  running_whitebox: '白盒测试', running_blackbox: '黑盒测试', running_combined: '黑白盒测试',
+  starting: '启动应用', health_checking: '健康检查', running: '运行中',
   finalizing: '生成报告',
   stopping: '回收环境', succeeded: '成功', failed: '失败', blocked: '安全阻断', stopped: '已停止',
   conclusion: '测试结论', syntax_repair: '语法修复', multi_agent_review: '多 Agent 审查',
@@ -126,6 +127,10 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 /** Agent 事件阶段英文码 → 中文标签(未收录时原样返回)。 */
-export function stageLabel(stage: string): string {
+export function stageLabel(stage: string, testMode?: SandboxEnvironment['test_mode']): string {
+  // Older worker events used running_whitebox for every test mode. Interpret
+  // those historical events using the environment's persisted test mode.
+  if (stage === 'running_whitebox' && testMode === 'blackbox') return '黑盒测试'
+  if (stage === 'running_whitebox' && testMode === 'combined') return '黑白盒测试'
   return STAGE_LABELS[stage] || stage
 }

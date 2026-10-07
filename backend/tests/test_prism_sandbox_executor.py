@@ -652,7 +652,17 @@ def test_worker_marks_compression_ratio_over_200_as_blocked(
     assert "压缩比超过" in stored["error"]
 
 
-def test_submit_structured_events_and_idempotent_status(isolated_paths: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("test_mode", "running_stage"),
+    [
+        ("whitebox", "running_whitebox"),
+        ("blackbox", "running_blackbox"),
+        ("combined", "running_combined"),
+    ],
+)
+def test_submit_structured_events_and_idempotent_status(
+    isolated_paths: Path, monkeypatch: pytest.MonkeyPatch, test_mode: str, running_stage: str
+) -> None:
     archive = _archive({"main.py": "print('ok')\n"})
     image_id = "sha256:" + ("b" * 64)
     commands: list[list[str]] = []
@@ -672,15 +682,15 @@ def test_submit_structured_events_and_idempotent_status(isolated_paths: Path, mo
         return {"exit_code": 0, "stdout": "", "stderr": "", "output_bytes": 0, "output_truncated": False}
 
     monkeypatch.setattr(executor, "_run_command", fake_run)
-    first, duplicate = executor.submit_job(_payload(archive))
-    second, duplicate_second = executor.submit_job(_payload(archive))
+    first, duplicate = executor.submit_job(_payload(archive, test_mode=test_mode))
+    second, duplicate_second = executor.submit_job(_payload(archive, test_mode=test_mode))
 
     assert duplicate is False
     assert duplicate_second is True
     assert first["status"] == "running_whitebox"
     assert second["request_id"] == first["request_id"]
     assert [event["sequence"] for event in first["events"]] == [1, 2, 3]
-    assert [event["stage"] for event in first["events"]] == ["validating", "preparing", "running_whitebox"]
+    assert [event["stage"] for event in first["events"]] == ["validating", "preparing", running_stage]
     assert any(args[:2] == ["docker", "create"] for args in commands)
     assert len([args for args in commands if args[:2] == ["docker", "create"]]) == 1
     assert executor.status_job({"request_id": "sandbox-request-01", "after_sequence": 2})["events"][0]["sequence"] == 3

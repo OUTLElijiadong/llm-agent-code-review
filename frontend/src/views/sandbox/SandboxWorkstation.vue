@@ -740,7 +740,7 @@ onBeforeUnmount(() => {
                 <span class="event-marker"></span>
                 <div class="event-body">
                   <div class="event-head">
-                    <b>{{ stageLabel(event.stage) }}</b>
+                    <b>{{ stageLabel(event.stage, selected.test_mode) }}</b>
                     <time class="font-mono">{{ formatTime(event.create_time) }}</time>
                   </div>
                   <p>{{ event.message }}</p>
