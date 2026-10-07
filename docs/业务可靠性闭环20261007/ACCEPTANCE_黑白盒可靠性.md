@@ -7,7 +7,7 @@
 候选从生产 v4.0.78 commit 957a6588fc59b924ed1ebae81446a361b37c28bf 的相同 Git tree（b85c818b56f764ba7182fb688db0b9308072bade）开始，当前 v4.0.79 修复范围：多文件源码正文原样进入 grounding 以保留逐字引文；递归压缩请求只带来源 ID 和当前正文，避免重复提交整个文件元数据；Python 黑盒动态端口来源检查覆盖间接调用、helper 参数/返回、反射与 `os.environb` 别名；普通及部署注入 runner 的离线依赖准备失败会阻止假通过；黑盒探活超时后按进程组回收应用及其子进程。
 
 - 本地候选后端全量回归（`backend/.venv311/bin/python -m pytest -q --no-cov`）：6495 passed、6 skipped、5 warnings，见证据/57。6 项 Redis 用例按测试配置跳过，不计为通过；后续 CI 已在隔离 Redis Unix socket 上实际执行六项，见证据/60。
-- 最终黑白盒/源码/runner 定向回归：244 passed、3 warnings，见证据/56；新增真实 SIGINT/SIGTERM runner 中断与 Node 子进程回收测试。
+- 最终黑白盒/源码/runner 定向回归：244 passed、3 warnings，见证据/56；新增真实 SIGINT/SIGTERM runner 中断与 Node 子进程回收测试。为复核生产记录中的嵌套调用 AST 异常，本轮在候选上独立重复相关过滤测试三轮，每轮 89 passed、68 deselected、1 warning，覆盖 nested-call AST 不崩溃与动态端口正负边界，见证据/62。该单测未调用真实模型，也不等于生产任务复测。
 - Redis 限流场景：block 持续、亚秒过期、admission window、失败结算窗口、旧检查窗口、Unix socket factory 均通过，证据/36。临时无网络容器、socket 和数据已删除。
 - 前端：1850 tests passed / 142 files；ESLint 与 vue-tsc/Vite v4.0.79 构建通过，证据/38–40。
 - 发布绑定：33 项通过；同一 test_scripts.sh 所含故障注入矩阵对备份、校验、构建、迁移、切换、健康、HTTPS失败及回滚拒绝进行了预期断言，证据/41。
@@ -20,7 +20,7 @@
 
 2026-10-07 只读请求 `GET https://lijiadong.cn/healthz` 与 `/readyz` 分别返回 `{"status":"ok","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`、`{"status":"ready","version":"4.0.78","release":"957a6588fc59b924ed1ebae81446a361b37c28bf"}`。普通 Safari 新加载的工作台页脚也显示 v4.0.78。一个此前打开的 `/readyz` 标签仍显示旧的 v4.0.75；真实点击刷新后更新为 v4.0.78，与接口一致，因此这次观察支持“旧标签页保留旧响应”，不支持当前新加载页面存在版本错配的结论。详见证据/54、证据/61。schema 基线为 `062_audit_log_action_length`。
 
-本轮在普通 Safari 代码沙箱页只读查看了已有生产任务，没有创建、重试、取消或删除任务，也没有下载附件。观察到一个黑盒任务失败（`sbx_3950674251e94925afdbad92`）：源码来源校验先报分片引文无法核验，后续压缩覆盖校验虽通过，动态用例仍引用不存在的 `HTTPError`、`Path`，再触发 `'Name' object has no attribute 'func'`；最终应用未就绪、`/` 返回状态码 0，黑盒失败。另一条白盒任务 `sbx_1fdc7440f3d34081b5ef7f55` 的确定性检查通过，但 AI 动态补充因源码压缩核验失败而跳过。黑盒任务 `sbx_0bb11491c12a402d9b0fda43` 的 `/health` 路由与 Agent 断言通过（200），但动态用例三轮引用不存在符号后回退，因此其结论仅为确定性黑盒通过。此为现有历史任务的页面观察，不是本轮新建任务或修复后生产复测；逐项证据见证据/61。
+本轮在普通 Safari 代码沙箱页只读查看了已有生产任务，没有创建、重试、取消或删除任务。下载并查看了既有失败任务的小型 `sandbox.log`，复核后将本机下载副本移入废纸篓。黑盒任务 `sbx_3950674251e94925afdbad92` 的生成步骤出现来源引文核验失败、动态用例引用未证实的 `HTTPError`、`Path`，以及 `'Name' object has no attribute 'func'` 异常；Worker 的原始 `sandbox.log` 记录未检测到支持的 Python 部署入口，因此这条状态码 0 记录不能证明可运行应用的黑盒正例会失败，也没有独立证明样本归档确实无入口。源码复核发现 v4.0.78 的嵌套 AST 调用路径能够产生相同 `Name.func` 异常，候选改用显式 AST 类型分派，相关回归三轮通过；但生产生成用例原文和完整模型栈追踪不可得，仍不能证明该路径就是线上异常的准确触发点，也不能证明它导致了 Worker 的入口检测/启动失败或已完成线上修复。另两条任务分别为白盒确定性检查通过但 AI 动态补充因压缩核验跳过，以及 `/health` 200 的确定性黑盒通过但 AI 动态用例三轮引用不存在符号后回退。它们都不能证明 AI 动态测试已完成。本轮仅查看既有历史记录，没有进行候选版本生产复测；逐项证据见证据/61、62。
 
 v4.0.79 仍是候选，尚未在生产 Worker 执行本轮新样本。部署检查再次确认 Docker daemon 未运行，`li@81.70.251.90` SSH 返回 `Permission denied (publickey,...)`，GitHub 仓库没有生产部署 workflow；因此不能声称候选已部署或这些生产失败已由候选修复。发布后必须针对已观察的来源压缩/动态用例失败重跑原场景，并执行 Python 白盒、无入口样本启动失败负例、loopback-only runnable service 黑盒正例；每个关键场景至少独立重复三轮，核对动态用例清单、Worker 原始回执、报告回读、任务终态及资源清理。健康页不替代业务测试。
 
