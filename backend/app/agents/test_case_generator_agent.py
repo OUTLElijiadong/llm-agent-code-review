@@ -23,6 +23,10 @@ MAX_FILE_BYTES = 60_000
 # 测试脚本允许引用的常见标准库/内建属性，避免把合法的 urllib/json/os 使用误判为幻觉。
 _SAFE_ATTRIBUTES = frozenset(
     {
+        "__doc__",
+        "__name__",
+        "__module__",
+        "__qualname__",
         "append",
         "add",
         "get",
@@ -396,6 +400,21 @@ _STDLIB_MODULES = frozenset(
         "email.message",
     }
 )
+
+_SAFE_STDLIB_ATTRIBUTE_CHAINS = frozenset(
+    {
+        "inspect.signature",
+        "inspect.Parameter",
+        "inspect.Parameter.empty",
+        "inspect.Signature.parameters",
+        "inspect.Signature.parameters.annotation",
+        "importlib.util",
+        "importlib.util.module_from_spec",
+        "importlib.util.spec_from_file_location",
+        "importlib.machinery.ModuleSpec.loader",
+        "importlib.machinery.ModuleSpec.loader.exec_module",
+    }
+)
 def _exact_source_texts(source_summary: dict[str, Any]) -> list[str]:
     texts: list[str] = []
     chunks = source_summary.get("source_chunks")
@@ -614,18 +633,124 @@ def _grounding_feedback(
             tree = None
         if tree is not None:
             module_aliases: dict[str, str] = {}
-            for import_node in (node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))):
+            stdlib_aliases: dict[str, str] = {}
+            stdlib_symbols: dict[str, str] = {}
+            project_shadowed_names: set[str] = set()
+            assignment_shadowed_names: set[str] = set()
+            scoped_shadowed_names: set[str] = set()
+            for binding in ast.walk(tree):
+                if isinstance(binding, ast.arg):
+                    scoped_shadowed_names.add(binding.arg)
+                elif isinstance(binding, (ast.For, ast.AsyncFor)):
+                    scoped_shadowed_names.update(assigned_names(binding.target))
+                elif isinstance(binding, ast.comprehension):
+                    scoped_shadowed_names.update(assigned_names(binding.target))
+                elif isinstance(binding, (ast.With, ast.AsyncWith)):
+                    for item in binding.items:
+                        if item.optional_vars:
+                            scoped_shadowed_names.update(assigned_names(item.optional_vars))
+                elif isinstance(binding, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    scoped_shadowed_names.add(binding.name)
+                elif isinstance(binding, ast.ExceptHandler) and binding.name:
+                    scoped_shadowed_names.add(binding.name)
+                elif isinstance(binding, ast.MatchAs) and binding.name:
+                    scoped_shadowed_names.add(binding.name)
+                elif isinstance(binding, ast.MatchStar) and binding.name:
+                    scoped_shadowed_names.add(binding.name)
+                elif isinstance(binding, ast.MatchMapping) and binding.rest:
+                    scoped_shadowed_names.add(binding.rest)
+            import_nodes = sorted(
+                (node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))),
+                key=lambda node: (node.lineno, node.col_offset),
+            )
+            for import_node in import_nodes:
                 if isinstance(import_node, ast.Import):
                     for alias in import_node.names:
                         bound_name = alias.asname or alias.name.split(".", 1)[0]
                         bound_module = alias.name if alias.asname else alias.name.split(".", 1)[0]
+                        stdlib_aliases.pop(bound_name, None)
+                        stdlib_symbols.pop(bound_name, None)
+                        module_aliases.pop(bound_name, None)
+                        if alias.name.split(".", 1)[0] in _STDLIB_MODULES:
+                            project_shadowed_names.discard(bound_name)
+                            stdlib_aliases[bound_name] = bound_module
+                        else:
+                            # Imports bind names in source order. A project or third-party
+                            # import named ``inspect`` must shadow the stdlib whitelist.
+                            project_shadowed_names.add(bound_name)
                         if bound_module in source_modules:
                             module_aliases[bound_name] = bound_module
                 elif import_node.module:
                     for alias in import_node.names:
                         imported_module = f"{import_node.module}.{alias.name}"
+                        bound_name = alias.asname or alias.name
+                        stdlib_aliases.pop(bound_name, None)
+                        stdlib_symbols.pop(bound_name, None)
+                        module_aliases.pop(bound_name, None)
+                        if import_node.module.split(".", 1)[0] in _STDLIB_MODULES:
+                            project_shadowed_names.discard(bound_name)
+                            if imported_module in _STDLIB_MODULES:
+                                stdlib_aliases[bound_name] = imported_module
+                            else:
+                                stdlib_symbols[bound_name] = imported_module
+                        else:
+                            project_shadowed_names.add(bound_name)
                         if alias.name != "*" and imported_module in source_modules:
-                            module_aliases[alias.asname or alias.name] = imported_module
+                            module_aliases[bound_name] = imported_module
+
+            def canonical_stdlib_reference(expression: str) -> str | None:
+                bindings = {**stdlib_aliases, **stdlib_symbols}
+                for bound_name, canonical_name in sorted(bindings.items(), key=lambda item: len(item[0]), reverse=True):
+                    if expression == bound_name or expression.startswith(f"{bound_name}."):
+                        if (
+                            bound_name in project_shadowed_names
+                            or bound_name in assignment_shadowed_names
+                            or bound_name in scoped_shadowed_names
+                        ):
+                            return None
+                        return canonical_name + expression[len(bound_name) :]
+                # A string that happens to resemble an allowlisted stdlib chain
+                # is insufficient: require an actual import binding first.
+                return None
+
+            assignment_nodes = sorted(
+                (
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr, ast.Delete))
+                ),
+                key=lambda node: (node.lineno, node.col_offset),
+            )
+            for assignment in assignment_nodes:
+                value = getattr(assignment, "value", None)
+                called = canonical_stdlib_reference(_dotted_name(value.func)) if isinstance(value, ast.Call) else None
+                if called == "inspect.signature":
+                    bound_value = "inspect.Signature"
+                elif called == "importlib.util.spec_from_file_location":
+                    bound_value = "importlib.machinery.ModuleSpec"
+                else:
+                    bound_value = None
+
+                target_names: set[str] = set()
+                if isinstance(assignment, ast.Assign):
+                    for target in assignment.targets:
+                        target_names.update(assigned_names(target))
+                elif isinstance(assignment, ast.Delete):
+                    for target in assignment.targets:
+                        target_names.update(assigned_names(target))
+                else:
+                    target_names.update(assigned_names(assignment.target))
+
+                for target_name in target_names:
+                    if bound_value:
+                        stdlib_aliases[target_name] = bound_value
+                        stdlib_symbols.pop(target_name, None)
+                        assignment_shadowed_names.discard(target_name)
+                        project_shadowed_names.discard(target_name)
+                    else:
+                        stdlib_aliases.pop(target_name, None)
+                        stdlib_symbols.pop(target_name, None)
+                        assignment_shadowed_names.add(target_name)
 
             def resolve_source_module(expression: str) -> str | None:
                 candidates = [
@@ -641,6 +766,10 @@ def _grounding_feedback(
 
             for node in ast.walk(tree):
                 if isinstance(node, ast.Attribute):
+                    stdlib_chain = canonical_stdlib_reference(_dotted_name(node))
+                    if stdlib_chain in _SAFE_STDLIB_ATTRIBUTE_CHAINS:
+                        # 只放行显式白名单中的反射/模块加载链；其余属性仍执行源码 grounding。
+                        continue
                     # A project symbol in another file cannot prove that the
                     # imported module exports the same name. Resolve module aliases
                     # first, then check this specific module's top-level exports.
@@ -713,9 +842,12 @@ def _grounding_feedback(
 def _dotted_name(node: ast.AST) -> str:
     parts: list[str] = []
     current = node
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
+    while isinstance(current, (ast.Attribute, ast.Subscript)):
+        if isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        else:
+            current = current.value
     if isinstance(current, ast.Name):
         parts.append(current.id)
     return ".".join(reversed(parts))

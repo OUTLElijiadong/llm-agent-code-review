@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
 from app.agents.sandbox_agents import TestVerifierAgent
 from app.agents.source_context import SourceContextError, compact_source_context
@@ -1071,6 +1072,97 @@ def test_python_module_attribute_grounding_is_module_specific(test_source, expec
     files = [{"path": "test_ai_route.py", "content": test_source}]
 
     assert _grounding_feedback(files, source_summary) == expected_issues
+
+
+def test_grounding_accepts_stdlib_reflection_used_to_inspect_real_source_symbols() -> None:
+    source_summary = {
+        "source_chunks": [
+            {
+                "path": "review_sample.py",
+                "text": "def find_user(connection, user_name):\n    return connection.execute(user_name)\n",
+            }
+        ]
+    }
+    files = [
+        {
+            "path": "test_ai_inspection.py",
+            "content": (
+                "import importlib.util\n"
+                "import inspect\n"
+                "from pathlib import Path\n"
+                "spec = importlib.util.spec_from_file_location('review_sample', Path.cwd() / 'review_sample.py')\n"
+                "module = importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(module)\n"
+                "signature = inspect.signature(module.find_user)\n"
+                "assert list(signature.parameters) == ['connection', 'user_name']\n"
+                "assert signature.parameters['user_name'].annotation is inspect.Parameter.empty\n"
+                "assert module.find_user.__doc__ is None\n"
+            ),
+        }
+    ]
+
+    assert _grounding_feedback(files, source_summary) == []
+
+
+def test_grounding_does_not_allow_arbitrary_attributes_from_imported_stdlib() -> None:
+    source_summary = {"source_chunks": [{"path": "main.py", "text": "def real_symbol(): return True\n"}]}
+    files = [{"path": "test_ai_unsafe.py", "content": "import os\nos.system('id')\n"}]
+
+    assert _grounding_feedback(files, source_summary) == ["system"]
+
+
+@pytest.mark.parametrize(
+    ("test_source", "expected_issue"),
+    [
+        ("inspect.signature()\n", "signature"),
+        (
+            "import inspect\nfrom app import routes as inspect\ninspect.signature()\n",
+            "signature",
+        ),
+        (
+            "import inspect\nfrom app import routes\ninspect = routes\ninspect.signature()\n",
+            "signature",
+        ),
+        ("import inspect\ndef check(inspect):\n    inspect.signature()\n", "signature"),
+        ("import inspect\ncheck = lambda inspect: inspect.signature()\n", "signature"),
+        ("import inspect\nfor inspect in []:\n    inspect.signature()\n", "signature"),
+        ("import inspect\nwith open(__file__) as inspect:\n    inspect.signature()\n", "signature"),
+        (
+            "import inspect\nfrom app import routes\nif True:\n    (inspect := routes)\n    inspect.signature()\n",
+            "signature",
+        ),
+        ("import inspect\nmatch None:\n    case inspect:\n        inspect.signature()\n", "signature"),
+        ("import inspect\ndel inspect\ninspect.signature()\n", "signature"),
+        (
+            "import importlib.util as util\nfrom app import routes as util\nutil.module_from_spec(None)\n",
+            "module_from_spec",
+        ),
+    ],
+    ids=[
+        "unbound-stdlib-name",
+        "project-import-shadows-inspect",
+        "project-assignment-shadows-inspect",
+        "function-argument-shadows-inspect",
+        "lambda-argument-shadows-inspect",
+        "for-target-shadows-inspect",
+        "with-target-shadows-inspect",
+        "walrus-shadows-inspect",
+        "match-binding-shadows-inspect",
+        "delete-shadows-inspect",
+        "project-import-shadows-importlib",
+    ],
+)
+def test_grounding_requires_a_live_stdlib_binding_for_allowlisted_chains(
+    test_source: str, expected_issue: str
+) -> None:
+    source_summary = {
+        "source_chunks": [
+            {"path": "app/routes.py", "text": "def real_route():\n    return True\n"},
+        ]
+    }
+    files = [{"path": "test_ai_alias_shadow.py", "content": test_source}]
+
+    assert _grounding_feedback(files, source_summary) == [expected_issue]
 
 
 def test_test_generator_returns_schema_error_for_non_object_file_items(monkeypatch) -> None:

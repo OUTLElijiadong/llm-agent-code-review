@@ -31,6 +31,8 @@ flowchart LR
 - 黑盒回执的 `basis` 与动态断言状态必须吻合：未执行用例只能标为路由冒烟，执行并产生布尔结论才能标为路由与断言；解析器拒绝错配回执。
 - 大源码分片在模型截断或逐字引文校验连续失败时确定性二分；每层仍要求来源 ID、顺序、逐字引文和覆盖完整，切分/调用预算耗尽即失败关闭。
 - Node 动态用例统一生成 `.mjs` 并用 ESM 导入，避免项目 `package.json` 的 `type` 改变 harness 语义；runner 同时保留历史 CommonJS `.js` 白盒入口并实际识别 `blackbox.mjs`。
+- Python grounding 在保留项目符号逐模块核验的同时，仅对显式导入并命中窄白名单的 `inspect`/`importlib` 反射链免除项目 API 检查；其他标准库属性仍按原规则检查，且放行链仍须由隔离 runner 实际执行。
+- 任务列表和详情的状态呈现以 `verification_coverage.verification_status` 补充执行状态：runner 已退出但覆盖为 `partial` 时，显示警示态“部分通过”。
 - Java 动态白盒 harness 编译和运行 classpath 同时包括 Worker 生成的 AI 测试类和已编译项目类目录；Maven/Gradle 第三方依赖仅在隔离缓存已具备时可用，缺失时必须作为未完成处理。
 - 常规白盒和黑盒在应用启动/测试前执行离线依赖准备；离线缓存不具备所需依赖时不得把空跑或语法检查包装为业务通过。
 

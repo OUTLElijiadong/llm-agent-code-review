@@ -39,7 +39,7 @@ import {
   isSandboxActive,
   projectSandboxLanguage,
   sandboxConclusionPresentation,
-  sandboxStatusLabel,
+  sandboxStatusPresentation,
   sortSandboxEvents,
   stageLabel,
 } from '@/utils/sandboxPresentation'
@@ -200,13 +200,6 @@ function syncProjectLanguage(projectId: number | null): void {
   const project = projects.value.find((item) => item.id === projectId)
   const language = projectSandboxLanguage(project?.language)
   if (language) form.language = language
-}
-
-function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
-  if (status === 'succeeded' || status === 'ready') return 'success'
-  if (status === 'failed' || status === 'blocked') return 'danger'
-  if (status === 'queued' || status === 'dispatching' || status === 'running' || status === 'finalizing' || status === 'stopping') return 'warning'
-  return 'info'
 }
 
 function purposeLabel(item: SandboxEnvironment): string {
@@ -709,7 +702,7 @@ onBeforeUnmount(() => {
                 <b>{{ purposeLabel(item) }} · {{ item.language }}</b>
                 <small>{{ item.public_id }} · {{ formatTime(item.expires_at) }} 到期</small>
               </span>
-              <el-tag size="small" :type="statusType(item.status)">{{ sandboxStatusLabel(item.status) }}</el-tag>
+              <el-tag size="small" :type="sandboxStatusPresentation(item).type">{{ sandboxStatusPresentation(item).label }}</el-tag>
               <el-icon><ArrowRight /></el-icon>
             </button>
           </div>
@@ -730,7 +723,7 @@ onBeforeUnmount(() => {
           </div>
 
           <dl class="fact-grid">
-            <div><dt>状态</dt><dd><el-tag size="small" :type="statusType(selected.status)">{{ sandboxStatusLabel(selected.status) }}</el-tag></dd></div>
+            <div><dt>状态</dt><dd><el-tag size="small" :type="sandboxStatusPresentation(selected).type">{{ sandboxStatusPresentation(selected).label }}</el-tag></dd></div>
             <div><dt>源码指纹</dt><dd class="font-mono">{{ selected.source_sha256.slice(0, 16) }}</dd></div>
             <div><dt>源码来源</dt><dd>{{ selected.source_revision_id ? `修复副本 #${selected.source_revision_id}` : '原始源码' }}</dd></div>
             <div><dt>执行方式</dt><dd>{{ purposeLabel(selected) }}</dd></div>

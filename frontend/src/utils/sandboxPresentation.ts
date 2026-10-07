@@ -53,6 +53,36 @@ export function sandboxStatusLabel(status: string): string {
   return STATUS_LABELS[status] || status
 }
 
+type SandboxStatusTone = 'success' | 'warning' | 'danger' | 'info' | 'primary'
+
+function statusTone(status: string): SandboxStatusTone {
+  if (status === 'succeeded' || status === 'ready') return 'success'
+  if (status === 'failed' || status === 'blocked') return 'danger'
+  if (['queued', 'dispatching', 'running', 'finalizing', 'stopping'].includes(status)) return 'warning'
+  return 'info'
+}
+
+function verificationCoverageStatus(environment: SandboxEnvironment): string | null {
+  const result = environment.result
+  const evidence = result?.evidence
+  const coverage = evidence && typeof evidence === 'object' && !Array.isArray(evidence)
+    ? (evidence as Record<string, unknown>).verification_coverage
+    : result?.verification_coverage
+  if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)) return null
+  const verificationStatus = (coverage as Record<string, unknown>).verification_status
+  return typeof verificationStatus === 'string' ? verificationStatus : null
+}
+
+export function sandboxStatusPresentation(environment: SandboxEnvironment): {
+  label: string
+  type: SandboxStatusTone
+} {
+  if (environment.status === 'succeeded' && verificationCoverageStatus(environment) === 'partial') {
+    return { label: '部分通过', type: 'warning' }
+  }
+  return { label: sandboxStatusLabel(environment.status), type: statusTone(environment.status) }
+}
+
 export interface SandboxConclusionPresentation {
   type: 'success' | 'warning' | 'error'
   title: string
@@ -66,6 +96,9 @@ export function sandboxConclusionPresentation(environment: SandboxEnvironment): 
   const title = typeof summary === 'string' && summary
     ? summary
     : environment.error || (environment.status === 'ready' ? '部署已启动，可创建预览会话。' : '任务已结束，未返回摘要。')
+  if (environment.status === 'succeeded' && verificationCoverageStatus(environment) === 'partial') {
+    return { type: 'warning', title }
+  }
   return {
     type: environment.status === 'succeeded' || environment.status === 'ready' ? 'success' : 'error',
     title,

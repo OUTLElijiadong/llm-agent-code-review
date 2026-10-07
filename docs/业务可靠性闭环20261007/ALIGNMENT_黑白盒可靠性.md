@@ -9,6 +9,11 @@
 - 定位到多文件源码 JSON 转义导致引文无法精确核验、递归拆分重复携带完整文件元数据、AST 深层调用类型不一致，以及 methodcaller 赋值别名间接改写预览端口来源等故障。
 - 生产已有函数级样本没有可运行服务入口，只能验黑盒启动失败诊断，不能作为成功黑盒样本。
 
+## v4.0.79 首轮生产回放补充
+- 普通 Safari 实际执行白盒任务 `sbx_65b29eecb2754ab5a856a023`，项目 `V4验收样本20260920`，Python、production-fallback worker。确定性 runner 退出码 0，但项目事实发现为 0 个测试文件；AI 动态用例三轮因 `Parameter`、`signature`、`module_from_spec`、`exec_module` 等符号被 grounding 拒绝，最终 skipped。报告总体门禁为 partial，不能等同于白盒完整测试通过。
+- 同一任务的列表/详情仍把生命周期状态 `succeeded` 显示成绿色“已通过”，没有把 `verification_coverage=partial` 表达出来。候选修复同时覆盖标准库反射误判和覆盖状态标签。
+- 受限证据：没有取得被拒绝的模型原始测试脚本文本；本地以对应的合法标准库反射链精确复现 grounding 拒绝，修复范围只针对明确标准库 import 绑定。v4.0.80 必须使用同一生产样本回放验证，不能仅凭本地正例结案。
+
 ## 本轮范围
 修复源码 grounding、递归模型输入和 Python AST 动态端口别名检查；执行修复前红测、修复后同场景与新增变体；运行后端/前端完整回归、发布门禁、隔离 Redis；发布后以普通 Safari 实测白盒、黑盒负例和 loopback runnable service 正例，并核验任务及资源清理。
 

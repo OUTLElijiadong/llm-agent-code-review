@@ -30,3 +30,13 @@ v4.0.79 仍是候选，尚未在生产 Worker 执行本轮新样本。精确代�
 - Node/PHP/Go/Java runner 测试不代表其源码语义 grounding 已达到 Python 覆盖。
 - 模拟压缩结果不证明真实供应商端到端接收并理解超过 1,000,000 token。
 - Safari 生产任务和资源清理闭环待部署后执行。
+
+## 生产状态更正与 v4.0.80 候选（2026-10-07）
+
+本文前述“生产仍为 v4.0.78、v4.0.79 未部署”为发布前快照，现已被以下事实更新：v4.0.79 / `d3dc73eeddb802d2b8d9408cf24a9eee014c0247` 已成功发布；部署备份 gzip/checksum、104 表隔离恢复、Alembic 062、前后端构建、API smoke、资产切换、HTTPS 和运行 SHA 一致均通过。发布后 `ops-check` 为 `degraded` 且 `can_continue=true`，唯一告警是磁盘 88%（告警线 85%、严重线 95%）；没有执行清理。
+
+普通 Safari 的生产白盒任务 `sbx_65b29eecb2754ab5a856a023` 终态为 runner succeeded，但结构化报告 `verification_status=partial`：项目无自动发现测试文件，AI 动态用例三轮被 grounding 拒绝并 skipped。Safari 原 UI 仍显示绿色“已通过”。详见证据/64，结论仅覆盖确定性 runner 实际执行范围，未有黑盒路由回执。
+
+基于这次真实回放，本地复现并修复标准库反射误拒绝、白名单绑定遮蔽绕过，以及 UI 未区分 runner 生命周期成功与整体 coverage partial。grounding 负例现覆盖导入/赋值/函数和 lambda 参数/循环与 with 目标/walrus/match/del 等遮蔽。v4.0.80 当前候选本地后端三文件回归 280 passed、3 warnings；后端全量 6511 passed、6 skipped、5 warnings；前端 142 文件、1851 passed；前端 lint、vue-tsc/Vite build、Ruff、compileall 通过。详见证据/65–66。精确 SHA 的 CI、v4.0.80 生产发布、同一白盒任务三轮复测、黑盒无入口负例与 loopback 应用正例均未完成，因此整体目标仍未验收完成。
+
+测试任务 `sbx_65b29eecb2754ab5a856a023` 的 Worker 环境和作业目录已在回执中确认回收，但生产界面没有终态任务删除入口，默认保留 72 小时；不能声称持久化任务行已即时删除。仅在产品生命周期到期后能继续核验其清理状态，历史生产记录保持不动。

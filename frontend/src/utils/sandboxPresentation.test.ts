@@ -9,6 +9,7 @@ import {
   projectSandboxLanguage,
   sandboxConclusionPresentation,
   sandboxStatusLabel,
+  sandboxStatusPresentation,
   sortSandboxEvents,
 } from './sandboxPresentation'
 import type { SandboxEnvironment } from '@/types/sandbox'
@@ -68,6 +69,24 @@ describe('sandbox presentation rules', () => {
     })).toEqual({
       type: 'error',
       title: '最终测试失败',
+    })
+  })
+
+  it('shows a partial verification as partial in task badges and the conclusion panel', () => {
+    const partial = {
+      ...baseEnvironment,
+      status: 'succeeded',
+      result: {
+        passed: true,
+        summary: '确定性白盒测试通过；AI动态补充未执行',
+        evidence: { verification_coverage: { verification_status: 'partial' } },
+      },
+    }
+
+    expect(sandboxStatusPresentation(partial)).toEqual({ label: '部分通过', type: 'warning' })
+    expect(sandboxConclusionPresentation(partial)).toEqual({
+      type: 'warning',
+      title: '确定性白盒测试通过；AI动态补充未执行',
     })
   })
 
