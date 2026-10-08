@@ -95,3 +95,20 @@ v4.0.94 对同一 481 源片 bWAPP 项目的真实复测不再以输出超限失
 - PHP 并行语法修复以最多 2 个在途文件为窗口；`billing_error` 或 `usage_accounting_error` 后不再提交后续文件，等待已在途调用收敛，不返回部分修复源码，并将原始失败类型回传沙箱任务 fuse。
 - Agent Mesh 将两类不可重试失败写入消息错误、死信事件和 `task.error` 回执，不按 `max_attempts` 重新排队；未分类瞬时错误继续沿用已有退避重试。
 - 压缩并行任务须通过屏障测试证明最多只有已进入并发槽的请求继续；队列中的批次在不可重试失败后不得启动。日志记录实际失败类型与阶段，不把普通确定性 runner 结果提升为动态 AI 通过。
+
+## v4.0.97 HTTP 402 防重试设计
+
+```mermaid
+flowchart LR
+  A[模型 HTTP 响应] --> B{HTTP 状态}
+  B -->|402| C[固定错误分类 billing_error]
+  C --> D[停止入口重试]
+  C --> E[阻止 Responses 模型降级]
+  D --> F[保留确定性执行与报告]
+  E --> F
+  F --> G[AI 审查未完成标记 + partial]
+  B -->|429/5xx/网络错误| H[沿用瞬时错误重试策略]
+```
+
+- `NativeResponsesTransport` 将结构化状态码附在 `ObservedResponseError` 上；runtime 对 402 优先执行不可降级判断，避免模型名文本导致额外请求。用户可见的 402 错误固定化，不回传供应商正文。
+- 聊天与旧 DeepSeek 请求入口直接将 402 归类为不可重试计费错误。沙箱只有在角色总数、成功执行数及有效 AI 报告均满足契约时，才发布“多 Agent AI 审查完成”；确定性 fallback 保留但明确区分。

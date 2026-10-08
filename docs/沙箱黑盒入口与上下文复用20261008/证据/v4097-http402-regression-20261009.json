@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-10-09",
+  "candidate_version": "4.0.97",
+  "worktree_head_sha_before_v4_0_97_candidate": "dcfb6eea122ef2a5763d3ef10424ad6cf70b54ef",
+  "production_before_deployment": {
+    "version": "4.0.96",
+    "release_sha": "73b4dcfdebee88f978bd6dc644501fed81422d64",
+    "healthz_status": "ok",
+    "recent_real_sandbox_task_ids": [
+      "sbx_d430800657d2421d9c9f97e8",
+      "sbx_d0a419678b134a18bb0a5562",
+      "sbx_7f2d1411cafe47f592c3e1a5"
+    ],
+    "observed_task_result": {
+      "modes": ["blackbox", "blackbox_repeat", "whitebox"],
+      "model_context_http_status": 402,
+      "failure_class": "billing_error",
+      "dynamic_cases": 0,
+      "dynamic_review_status": "skipped",
+      "overall_status": "partial",
+      "deterministic_route_or_runner_checks": "passed_in_recorded_scope"
+    },
+    "interpretation_limit": "HTTP 402 confirms these requests were rejected as billing/quota errors; it does not establish that the provider account balance is zero."
+  },
+  "fixes_in_candidate": [
+    "ChatAssistant and the legacy DeepSeek entry point stop after a single HTTP 402 and classify it as non-retryable billing_error.",
+    "Responses runtime preserves the HTTP status for internal classification, drops the provider response body from audit callbacks, and does not model-fallback on HTTP 402 even when the error text contains a model name.",
+    "Sandbox AI completion requires all mandatory roles, only allowlisted roles, between four and seven total roles, successful role results, exact count agreement, and a non-empty raw AI report candidate.",
+    "An invalid role manifest or empty report candidate causes both the persisted artifact and published report to use the deterministic report; completion metadata identifies the reason."
+  ],
+  "reproduction_and_regression": {
+    "invalid_manifest_before_fix": {
+      "test": "test_report_completion_requires_consistent_successful_role_manifest",
+      "result": "5 invalid-manifest samples failed because the saved report still contained the AI candidate while status claimed deterministic fallback."
+    },
+    "after_fix": {
+      "sandbox_report_core_independent_tests": "8 passed",
+      "related_402_and_sandbox_test_files": "123 passed",
+      "asserted_persistence_paths": ["browser_artifact", "published_sandbox_report"],
+      "real_provider_called": false
+    }
+  },
+  "validation": {
+    "backend_full_suite": {
+      "command": "python -m pytest -q --no-cov",
+      "passed": 6685,
+      "skipped": 6,
+      "warnings": 1213,
+      "duration_seconds": 306.09,
+      "skip_scope": "Redis-dependent local tests skipped because local Redis was unavailable; skipped tests are not counted as passed."
+    },
+    "ruff": "passed for all modified Python files",
+    "git_diff_check": "passed",
+    "deployment_scripts": {
+      "release_binding": "33 passed, 0 failed",
+      "backup_restore_rollback_failure_injection": "passed"
+    },
+    "independent_review": "passed; reviewer confirmed invalid/empty candidates cannot reach artifact persistence or report publication"
+  },
+  "approved_cleanup": {
+    "scope": "User-approved cleanup preview: remove release image tags outside the retained set and prune dangling images/build cache older than 168 hours.",
+    "commands": [
+      "./cleanup.sh --apply --keep-release-images 2 --keep-release-states 999 --cache-until 168h"
+    ],
+    "effect": "Removed v4.0.92 backend/frontend tags outside the retained set; Docker reported Total reclaimed space: 0B.",
+    "preserved": ["database", "backups", "volumes", "production tasks", "running containers"]
+  },
+  "production_capacity_gate": {
+    "root_fs": "/dev/vda1",
+    "latest_df_available_kib": 11775864,
+    "latest_df_available_bytes": 12058484736,
+    "disk_used_percent": 94,
+    "required_available_kib": 12582912,
+    "required_available_bytes": 12884901888,
+    "deficit_kib": 807048,
+    "deficit_bytes": 826417152,
+    "release_script_gate_status": "blocked",
+    "docker_builder_du": {
+      "total_reclaimable": "2.845 GB",
+      "private": "1.942 GB",
+      "shared": "902.8 MB",
+      "active_builds": 0,
+      "observed_last_access_range": "about 1 hour to 3 days",
+      "cleanup_status": "not removed; outside the approved 168-hour cleanup preview"
+    },
+    "other_cleanup_candidates": "Older image data, /tmp and logs were not removed because they are outside the approved preview or may affect rollback/data retention."
+  },
+  "release_status": {
+    "v4_0_97_deployed": false,
+    "reason": "After the approved cleanup, production still had less than the mandatory 12 GiB free-space gate. deploy.sh was not run and the capacity check was not bypassed.",
+    "production_post_deploy_tests": "not run because candidate is not deployed",
+    "ai_blackbox_whitebox_retest": "still required after deployment and provider HTTP 402 recovery"
+  }
+}

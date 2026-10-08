@@ -56,4 +56,5 @@ def test_orchestrator_adds_extra_roles(db, monkeypatch) -> None:
     assert "sast" in roles
     assert "dast" in roles
     assert result.data["roles_executed"] == 6  # whitebox/blackbox/verify/report + sast/dast
+    assert result.data["roles_total"] == 6
     assert any("SAST" in c for c in calls)

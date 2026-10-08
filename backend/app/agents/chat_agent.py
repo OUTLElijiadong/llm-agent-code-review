@@ -2060,6 +2060,7 @@ class ChatAssistantAgent(BaseAgent):
         from app.services.ai_usage_context import record_usage_attempt, usage_tokens
 
         last_error = None
+        last_failure_kind = "upstream_error"
         last_finish_reason = ""
         retry_context_limited = False
         usage_log_ids = []
@@ -2118,6 +2119,7 @@ class ChatAssistantAgent(BaseAgent):
                             finish_reason="stop",
                         )
                     last_error = f"模型输出不完整(finish_reason={finish_reason or 'missing'})"
+                    last_failure_kind = "output_truncated" if finish_reason == "length" else "incomplete_response"
                     if finish_reason == "length" and attempt < self._max_retries:
                         from app.core.config import settings
 
@@ -2134,6 +2136,7 @@ class ChatAssistantAgent(BaseAgent):
                                     >= settings.deepseek_context_window_tokens):
                                 retry_context_limited = True
                                 last_error = "重试提示和输出预算超过模型容量，未发送不完整上下文"
+                                last_failure_kind = "context_compaction_limit"
                                 retry_planned = False
                                 break
                             response_budget = next_budget
@@ -2141,14 +2144,23 @@ class ChatAssistantAgent(BaseAgent):
                             continue
                     retry_planned = False
                     break
-                if resp.status_code == 429:
+                if resp.status_code == 402:
+                    last_error = "模型服务计费或额度拒绝 (HTTP 402)"
+                    last_failure_kind = "billing_error"
+                    retry_planned = False
+                elif resp.status_code == 429:
                     last_error = "请求过于频繁"
+                    last_failure_kind = "rate_limited"
                 elif resp.status_code >= 500:
                     last_error = f"服务异常({resp.status_code})"
+                    last_failure_kind = "upstream_error"
                 else:
                     last_error = f"调用失败({resp.status_code})"
+                    last_failure_kind = "http_error"
+                    retry_planned = False
             except Exception as e:
                 last_error = str(e)
+                last_failure_kind = "transport_error"
             finally:
                 if request_sent:
                     log_id = record_usage_attempt(
@@ -2163,15 +2175,15 @@ class ChatAssistantAgent(BaseAgent):
                     )
                     if log_id is not None:
                         usage_log_ids.append(log_id)
-            if attempt < self._max_retries:
+            if retry_planned:
                 time.sleep(2 ** (attempt + 1))
+            else:
+                break
 
         return AgentResult(
             success=False,
             error=f"聊天失败: {last_error}",
-            failure_kind=("context_compaction_limit" if retry_context_limited else
-                          "output_truncated" if last_finish_reason == "length"
-                          else "incomplete_response" if last_finish_reason else "upstream_error"),
+            failure_kind=("context_compaction_limit" if retry_context_limited else last_failure_kind),
             finish_reason=last_finish_reason,
             usage_log_ids=usage_log_ids,
             http_attempts=http_attempts,

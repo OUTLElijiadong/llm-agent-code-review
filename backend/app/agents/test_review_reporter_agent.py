@@ -636,6 +636,11 @@ class TestReviewReporterAgent(BaseAgent):
         executed = sum(1 for r in roles.values() if r.get("ok"))
         return AgentResult(
             success=True,
-            data={"report_md": report_md, "roles": roles, "roles_executed": executed},
+            data={
+                "report_md": report_md,
+                "roles": roles,
+                "roles_executed": executed,
+                "roles_total": 4 + len(extra_roles),
+            },
             model=rp.model, duration_ms=rp.duration_ms, tokens=rp.tokens,
         )

@@ -63,6 +63,74 @@ async def test_native_non_200_usage_reaches_failed_round(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_native_402_keeps_status_and_hides_provider_error_body(monkeypatch):
+    from app.services import agent_responses_service as service
+
+    original = httpx.AsyncClient
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            402,
+            json={
+                "error": {"message": "billing denied for deepseek-v4-pro; private account detail"},
+                "model": "deepseek-v4-pro",
+            },
+        )
+
+    monkeypatch.setattr(
+        service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
+    )
+    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    events = await transport.create_response({"model": "deepseek-v4-pro", "input": "unit"})
+
+    with pytest.raises(ObservedResponseError) as error:
+        async for _event in events:
+            pass
+
+    assert error.value.status_code == 402
+    assert "402" in str(error.value)
+    assert "private account detail" not in str(error.value)
+    assert error.value.observed_response == {}
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_native_402_runtime_logs_no_provider_body_and_never_falls_back(monkeypatch):
+    from app.services import agent_responses_service as service
+
+    original = httpx.AsyncClient
+    requests, logs = [], []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            402,
+            json={
+                "error": {"message": "billing denied for deepseek-v4-pro"},
+                "model": "deepseek-v4-pro",
+                "account_context": "private provider account marker",
+            },
+        )
+
+    monkeypatch.setattr(
+        service.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
+    )
+    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    runtime = _runtime(transport, logs.append)
+    result = await runtime.start("unit", run_id="run_native_billing_error")
+
+    assert result.status == "failed"
+    assert len(requests) == len(logs) == 1
+    assert logs[0]["model"] == "requested-model"
+    assert "private provider account marker" not in repr(logs)
+    assert "billing denied" not in repr(logs)
+    checkpoint = await runtime.get_checkpoint("run_native_billing_error")
+    assert checkpoint is not None and checkpoint.model == "requested-model"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["disconnect", "cancel", "no_terminal"])
 async def test_observed_usage_survives_stream_failure_and_cancellation(ending):
     logs = []

@@ -5161,11 +5161,14 @@ def _run_test_review_report(
     """
     try:
         from app.agents.base import AgentContext
-        from app.agents.test_review_reporter_agent import TestReviewReporterAgent
+        from app.agents.test_review_reporter_agent import _EXTRA_ROLE_PROMPTS, TestReviewReporterAgent
 
         agent = configure_subagent(db, TestReviewReporterAgent(), environment.owner_id)
         data: dict[str, Any] = {}
         roles: dict[str, Any] = {}
+        model_review_completed = False
+        roles_manifest_valid = False
+        report_candidate_valid = False
         report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
             _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置，已使用确定性测试报告兜底")
@@ -5211,10 +5214,36 @@ def _run_test_review_report(
                 ctx.extra["before_model_call"]()
                 if result.success:
                     data = result.data if isinstance(result.data, dict) else {}
-                    candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
-                    if candidate.strip():
-                        report_md = candidate
+                    raw_candidate = data.get("report_md")
+                    report_candidate_valid = isinstance(raw_candidate, str) and bool(raw_candidate.strip())
+                    candidate = _fact_gate_report(str(raw_candidate or ""), conclusion)
                     roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
+                    executed = data.get("roles_executed")
+                    total = data.get("roles_total")
+                    required_roles = {"whitebox", "blackbox", "verify", "report"}
+                    allowed_roles = required_roles | set(_EXTRA_ROLE_PROMPTS)
+                    roles_manifest_valid = (
+                        isinstance(roles, dict)
+                        and isinstance(executed, int) and not isinstance(executed, bool)
+                        and isinstance(total, int) and not isinstance(total, bool)
+                        and 4 <= total <= 7
+                        and required_roles.issubset(roles)
+                        and set(roles).issubset(allowed_roles)
+                        and executed == total == len(roles)
+                        and all(
+                            isinstance(role, dict) and role.get("ok") is True
+                            for role in roles.values()
+                        )
+                    )
+                    model_review_completed = (
+                        roles_manifest_valid and report_candidate_valid and bool(candidate.strip())
+                    )
+                    if model_review_completed:
+                        report_md = candidate
+                    else:
+                        # 只有完整角色清单和非空报告候选均通过校验时才允许保存或发布模型报告。
+                        # 任何不完整返回都使用确定性内容，避免“AI 未完成”状态却泄出未验证报告。
+                        report_md = _build_deterministic_test_report(conclusion)
                 else:
                     failure_kind = str(getattr(result, "failure_kind", "") or "")
                     if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
@@ -5241,10 +5270,28 @@ def _run_test_review_report(
             mime_type="text/markdown",
             content=report_md.encode("utf-8", errors="replace"),
         )
+        roles_executed = sum(
+            1 for role in roles.values()
+            if isinstance(role, dict) and role.get("ok") is True
+        )
+        raw_roles_total = data.get("roles_total")
+        roles_total = (
+            raw_roles_total
+            if (
+                isinstance(raw_roles_total, int) and not isinstance(raw_roles_total, bool)
+                and 4 <= raw_roles_total <= 7 and raw_roles_total >= roles_executed
+            )
+            else max(4, len(roles))
+        )
         summary = {
             "agent_code": "test_reviewer",
             "artifact_id": artifact.id,
-            "roles_executed": int(data.get("roles_executed") or 0),
+            "roles_executed": roles_executed,
+            "roles_total": roles_total,
+            "roles_manifest_valid": roles_manifest_valid,
+            "report_candidate_valid": report_candidate_valid,
+            "review_mode": "multi_agent" if model_review_completed else "deterministic_fallback",
+            "ai_review_complete": model_review_completed,
             "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
             "report_bytes": len(report_md.encode("utf-8")),
         }
@@ -5257,7 +5304,21 @@ def _run_test_review_report(
             environment,
             "complete",
             "multi_agent_review",
-            f"多 Agent 测试审查报告已生成(角色 {summary['roles_executed']}/4)",
+            (
+                f"多 Agent 测试审查报告已生成（角色 {roles_executed}/{roles_total}）"
+                if model_review_completed
+                else (
+                    f"确定性测试报告已生成；多 Agent AI 审查未完成"
+                    f"（角色 {roles_executed}/{roles_total}）"
+                    + (
+                        "；Agent 角色清单或计数未通过完整性校验"
+                        if data and not roles_manifest_valid
+                        else "；AI 报告内容为空"
+                        if data and not report_candidate_valid
+                        else ""
+                    )
+                )
+            ),
             summary,
         )
         db.commit()

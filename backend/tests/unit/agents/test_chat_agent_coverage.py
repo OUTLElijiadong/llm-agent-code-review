@@ -1770,11 +1770,11 @@ def test_handle_chat_never_returns_length_or_filtered_output(
     assert result.failure_kind == "incomplete_response"
 
 
-def test_handle_chat_retries_status_errors_and_network_failure(
+def test_handle_chat_retries_transient_status_errors_and_network_failure(
     agent: ChatAssistantAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """429、5xx、4xx 应指数退避重试，网络异常应转为明确失败结果。"""
+    """429、5xx 与网络异常可重试；非瞬时 4xx 不应被当作瞬时故障。"""
     import time
 
     agent.set_orchestrator(FakeOrchestrator())  # type: ignore[arg-type]
@@ -1788,19 +1788,59 @@ def test_handle_chat_retries_status_errors_and_network_failure(
     agent._max_retries = 2
     requests = _install_http(
         monkeypatch,
-        [FakeHttpResponse(429), FakeHttpResponse(503), FakeHttpResponse(400)],
+        [
+            FakeHttpResponse(429),
+            FakeHttpResponse(503),
+            FakeHttpResponse(200, {
+                "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
+            }),
+        ],
     )
-    failed = agent._handle_chat([{"role": "user", "content": "hello"}], None)
+    retried = agent._handle_chat([{"role": "user", "content": "hello"}], None)
 
-    assert failed.success is False
-    assert failed.error == "聊天失败: 调用失败(400)"
+    assert retried.success is True
+    assert retried.data == "ok"
     assert sleeps == [2, 4]
     assert len(requests) == 3
+
+    sleeps.clear()
+    requests = _install_http(monkeypatch, [FakeHttpResponse(400)])
+    bad_request = agent._handle_chat([{"role": "user", "content": "hello"}], None)
+    assert bad_request.success is False
+    assert bad_request.failure_kind == "http_error"
+    assert len(requests) == 1
+    assert sleeps == []
 
     agent._max_retries = 0
     _install_http(monkeypatch, [RuntimeError("network down")])
     network = agent._handle_chat([{"role": "user", "content": "hello"}], None)
     assert network.error == "聊天失败: network down"
+
+
+def test_handle_chat_stops_on_billing_error_without_retry_or_provider_details(
+    agent: ChatAssistantAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP 402 不重试，并保持供应商原始错误消息不进入用户结果。"""
+    import time
+
+    agent.set_orchestrator(FakeOrchestrator())  # type: ignore[arg-type]
+    agent._max_retries = 2
+    sleeps: list[int] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    requests = _install_http(monkeypatch, [FakeHttpResponse(402, {
+        "error": {"message": "private provider account details"},
+    })])
+
+    result = agent._handle_chat([{"role": "user", "content": "hello"}], None)
+
+    assert result.success is False
+    assert result.failure_kind == "billing_error"
+    assert "402" in result.error
+    assert "private provider account details" not in result.error
+    assert result.http_attempts == 1
+    assert len(requests) == 1
+    assert sleeps == []
 
 
 def test_handle_chat_personalization_error_degrades_to_plain_prompt(

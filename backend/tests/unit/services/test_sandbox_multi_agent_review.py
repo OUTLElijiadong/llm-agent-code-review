@@ -96,6 +96,170 @@ def test_nonretryable_model_failure_uses_deterministic_review_report(monkeypatch
     assert result["artifact_id"] == 77
     assert calls == 0
     assert any(event[3] == "multi_agent_review" and "确定性报告" in event[4] for event in events)
+    completion = next(event for event in events if event[2] == "complete")
+    assert completion[4] == "确定性测试报告已生成；多 Agent AI 审查未完成（角色 0/4）"
+    assert completion[5]["review_mode"] == "deterministic_fallback"
+    assert completion[5]["ai_review_complete"] is False
+
+
+@pytest.mark.parametrize(
+    (
+        "reported_executed", "reported_total", "roles", "expected_complete",
+        "expected_executed", "expected_total", "expect_manifest_note",
+    ),
+    [
+        (4, 4, {
+            "whitebox": {"ok": True}, "blackbox": {"ok": True},
+            "verify": {"ok": True}, "report": {"ok": True},
+        }, True, 4, 4, False),
+        (5, 4, {
+            "whitebox": {"ok": True}, "blackbox": {"ok": True},
+            "verify": {"ok": True}, "report": {"ok": True},
+        }, False, 4, 4, True),
+        (3, 4, {
+            "whitebox": {"ok": True}, "blackbox": {"ok": True},
+            "verify": {"ok": False}, "report": {"ok": True},
+        }, False, 3, 4, True),
+        (3, 4, {
+            "whitebox": {"ok": True}, "verify": {"ok": True}, "report": {"ok": True},
+        }, False, 3, 4, True),
+        (5, 5, {
+            "whitebox": {"ok": True}, "blackbox": {"ok": True},
+            "verify": {"ok": True}, "report": {"ok": True}, "unknown_role": {"ok": True},
+        }, False, 5, 5, True),
+        (8, 8, {
+            "whitebox": {"ok": True}, "blackbox": {"ok": True},
+            "verify": {"ok": True}, "report": {"ok": True},
+            "unknown_1": {"ok": True}, "unknown_2": {"ok": True},
+            "unknown_3": {"ok": True}, "unknown_4": {"ok": True},
+        }, False, 8, 8, True),
+    ],
+)
+def test_report_completion_requires_consistent_successful_role_manifest(
+    monkeypatch, reported_executed: int, reported_total: int,
+    roles: dict[str, dict[str, bool]], expected_complete: bool,
+    expected_executed: int, expected_total: int, expect_manifest_note: bool,
+) -> None:
+    events: list[tuple] = []
+    persisted: list[dict[str, Any]] = []
+    published: list[str] = []
+    candidate = "MODEL-CANDIDATE-MUST-NOT-PUBLISH"
+    data = {
+        "report_md": candidate,
+        "roles": roles,
+        "roles_executed": reported_executed,
+        "roles_total": reported_total,
+    }
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            return SimpleNamespace(success=True, data=data)
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_build_deterministic_test_report",
+        lambda _conclusion: "DETERMINISTIC FALLBACK",
+    )
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda _db, _environment, **kwargs: persisted.append(kwargs) or SimpleNamespace(id=88),
+    )
+    monkeypatch.setattr(
+        sandbox_service,
+        "_publish_sandbox_report",
+        lambda _db, _environment, _conclusion, report: published.append(report),
+    )
+
+    summary = sandbox_service._run_test_review_report(
+        SimpleNamespace(commit=lambda: None),
+        SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_role_manifest"),
+        {"passed": False, "summary": "partial", "evidence": {}},
+    )
+
+    completion = next(event for event in events if event[2] == "complete")
+    assert summary is not None
+    assert summary["roles_executed"] == expected_executed
+    assert summary["roles_total"] == expected_total
+    assert summary["ai_review_complete"] is expected_complete
+    assert summary["roles_manifest_valid"] is expected_complete
+    assert summary["report_candidate_valid"] is True
+    assert len(persisted) == 1
+    persisted_content = persisted[0]["content"].decode("utf-8")
+    assert len(published) == 1
+    if expected_complete:
+        assert summary["review_mode"] == "multi_agent"
+        assert completion[4] == "多 Agent 测试审查报告已生成（角色 4/4）"
+        assert candidate in persisted_content
+        assert candidate in published[0]
+    else:
+        assert summary["review_mode"] == "deterministic_fallback"
+        assert completion[4].startswith("确定性测试报告已生成；多 Agent AI 审查未完成")
+        assert ("角色清单或计数未通过完整性校验" in completion[4]) is expect_manifest_note
+        assert persisted_content == "DETERMINISTIC FALLBACK"
+        assert published[0] == "DETERMINISTIC FALLBACK"
+
+
+def test_empty_report_candidate_falls_back_with_explicit_reason(monkeypatch) -> None:
+    events: list[tuple] = []
+    persisted: list[dict[str, Any]] = []
+    published: list[str] = []
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "report_md": " \n ",
+                    "roles": {
+                        "whitebox": {"ok": True}, "blackbox": {"ok": True},
+                        "verify": {"ok": True}, "report": {"ok": True},
+                    },
+                    "roles_executed": 4,
+                    "roles_total": 4,
+                },
+            )
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_build_deterministic_test_report",
+        lambda _conclusion: "DETERMINISTIC FALLBACK",
+    )
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda _db, _environment, **kwargs: persisted.append(kwargs) or SimpleNamespace(id=89),
+    )
+    monkeypatch.setattr(
+        sandbox_service,
+        "_publish_sandbox_report",
+        lambda _db, _environment, _conclusion, report: published.append(report),
+    )
+
+    summary = sandbox_service._run_test_review_report(
+        SimpleNamespace(commit=lambda: None),
+        SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_empty_report_candidate"),
+        {"passed": False, "summary": "partial", "evidence": {}},
+    )
+
+    completion = next(event for event in events if event[2] == "complete")
+    assert summary is not None
+    assert summary["roles_manifest_valid"] is True
+    assert summary["report_candidate_valid"] is False
+    assert summary["ai_review_complete"] is False
+    assert "AI 报告内容为空" in completion[4]
+    assert persisted[0]["content"] == b"DETERMINISTIC FALLBACK"
+    assert published == ["DETERMINISTIC FALLBACK"]
 
 
 def test_usage_accounting_error_preserves_deterministic_review_report(monkeypatch) -> None:

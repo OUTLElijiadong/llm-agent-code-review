@@ -1,14 +1,22 @@
 # 沙箱源码上下文与黑白盒部署阶段报告
 
-## 当前结论（2026-10-09）
+## 最新候选结论（v4.0.97，2026-10-09）
 
-v4.0.96 已于 `2026-10-08T15:54:59Z` 正式发布，版本 `4.0.96`、SHA `73b4dcfdebee88f978bd6dc644501fed81422d64`；健康端点、运行镜像、`APP_RELEASE` 与前端构建信息核对一致。备份完整性及隔离恢复 104 张表通过，临时恢复库已清理，post-deploy `ops-check` 无阻断（磁盘 94% degraded）。发布前的磁盘门禁通过用户批准的旧镜像标签及可再生构建缓存清理解除；数据库卷、备份、任务数据保留。
+v4.0.97 已完成代码修复，后端全量 `6685 passed, 6 skipped`，402/报告相关定向测试 `123 passed`，Ruff、部署脚本 binding `33/33` 与故障注入矩阵通过；独立复核也确认无效模型报告不会进入持久化或发布。六项 Redis 测试因本机 Redis 条件未满足而跳过。
 
-生产真实点击复测两次 bWAPP/PHP 黑盒和一次白盒，三份任务结果回执均记录 Worker exit 0、`cleanup_confirmed=true`；两个黑盒 `/login.php` smoke 为 HTTP 200。三条 AI 源码上下文请求均收到 HTTP 402 (`billing_error`)，动态用例 0 / skipped，最终 `verification_status=partial`。生产界面三条进度事件均显示多 Agent 报告角色 0/4；下载的第一条任务 Markdown 报告记录确定性黑盒检查通过、AI 动态补充未执行，未记录角色数。故角色数和阶段事件链属于本轮生产 UI 观察，不是结果文件中可独立复核的字段；未保存截图、DOM 导出或事件 ID，外部无法重放。部署成功、确定性子流程通过，但 AI 驱动的完整黑白盒验收未通过，不能宣称 AI 审查闭环。
+本候选尚未部署。生产仍运行 v4.0.96 / SHA `73b4dcfdebee88f978bd6dc644501fed81422d64`。按用户批准的镜像/缓存预览执行清理后只回收 `0B`，最新根盘可用 `11,775,864 KiB`，低于正式发布最低 `12,582,912 KiB`（12 GiB）门槛，差 `807,048 KiB`（约 0.77 GiB）。只读 Docker 统计另见 2.845 GB 可回收构建缓存，但最近访问在约 1 小时至 3 天内，超出已批准的 168 小时清理范围；数据库、备份、卷、任务和其他服务均未删除/停止。故本轮没有运行 v4.0.97 部署或部署后验收。
 
-详细生产回执见 `ACCEPTANCE_沙箱黑盒入口与上下文复用.md`、`证据/v4096-production-sandbox-retests-20261009.json` 和下载的确定性报告 `证据/sandbox-review-report-sbx_d430800657d2421d9c9f97e8.md`。HTTP 402 说明本次服务请求遭计费/额度拒绝，不能仅据此断言余额为零；恢复模型服务可用性后还需重跑 AI 黑盒与白盒。百万 token 上下文能力、Java Runner 和其他语言/项目仍未验证。
+本候选修复 HTTP 402 重试/误降级和沙箱多 Agent 报告完整性。真实生产的三条历史 PHP 黑白盒任务仍为 `partial`、AI 动态用例 0 / skipped；402 本身不能证明供应商余额为零。部署后仍需等待模型服务恢复，再真实重跑黑盒与白盒。百万 token 上下文理解、Java Runner 和其他语言/项目仍未验证。机器可读候选验收见 `ACCEPTANCE_沙箱黑盒入口与上下文复用.md` 与 `证据/v4097-http402-regression-20261009.json`。
 
-## 当前结论
+## 历史基线：v4.0.96 生产发布与真实复测
+
+v4.0.96 于 `2026-10-08T15:54:59Z` 正式发布，版本和 SHA 为 `73b4dcfdebee88f978bd6dc644501fed81422d64`；健康端点、运行镜像、`APP_RELEASE` 与前端构建信息当时核对一致。备份完整性及隔离恢复 104 张表通过，post-deploy `ops-check` 无阻断（磁盘 94% degraded）。
+
+生产真实点击复测两次 bWAPP/PHP 黑盒和一次白盒，三份任务结果回执均记录 Worker exit 0、`cleanup_confirmed=true`；两个黑盒 `/login.php` smoke 为 HTTP 200。三条 AI 源码上下文请求均收到 HTTP 402 (`billing_error`)，动态用例 0 / skipped，最终 `verification_status=partial`。生产界面多 Agent 报告角色 0/4 属于 UI 观察，不是结果 JSON 中可独立复核的字段；未保存截图、DOM 导出或事件 ID，外部无法重放。完整 AI 黑白盒验收未通过，不能宣称 AI 审查闭环。
+
+详细生产回执见 `ACCEPTANCE_沙箱黑盒入口与上下文复用.md`、`证据/v4096-production-sandbox-retests-20261009.json` 和下载的确定性报告 `证据/sandbox-review-report-sbx_d430800657d2421d9c9f97e8.md`。
+
+## 历史记录：v4.0.94 / v4.0.95
 
 以下为历史阶段的 v4.0.94 记录；当前状态以本页开头的 2026-10-09 结论为准。v4.0.94 的真实黑盒任务 `sbx_e32876716e62433cb3eeb8fc` 中，确定性 `/login.php` 路由通过，但模型引文无法通过来源原文核验，AI 动态用例为 0，整体仅部分通过。
 

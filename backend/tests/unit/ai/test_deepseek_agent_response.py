@@ -164,6 +164,26 @@ def test_call_raw_does_not_retry_deterministic_4xx(monkeypatch):
     assert len(calls) == 1
 
 
+def test_call_raw_classifies_402_without_retrying_or_exposing_provider_body(monkeypatch):
+    agent = _agent(max_retries=4)
+    calls = _install_responses(
+        monkeypatch,
+        agent,
+        [_Response(402, text='{"error":{"message":"private provider account details"}}')],
+    )
+    sleeps = []
+    monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", sleeps.append)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        agent.call_raw("system", "user")
+
+    assert getattr(exc_info.value, "failure_kind", "") == "billing_error"
+    assert "402" in str(exc_info.value)
+    assert "private provider account details" not in str(exc_info.value)
+    assert len(calls) == 1
+    assert sleeps == []
+
+
 def test_call_raw_retries_transient_network_errors_until_exhausted(monkeypatch):
     agent = _agent(max_retries=2)
     calls = []
@@ -207,6 +227,40 @@ def test_chat_logs_length_as_failed_and_does_not_retry(monkeypatch):
     assert record.status == "failed"
     assert record.response is None
     assert "finish_reason=length" in record.error_message
+
+
+def test_chat_classifies_402_as_nonretryable_without_exposing_provider_body(monkeypatch):
+    agent = _agent(max_retries=5)
+    calls = _install_responses(
+        monkeypatch,
+        agent,
+        [_Response(402, text='{"error":{"message":"private provider account details"}}')],
+    )
+    sleeps = []
+    monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", sleeps.append)
+    db = MagicMock()
+
+    with pytest.raises(AiServiceError) as exc_info:
+        agent.chat(
+            system_prompt="system",
+            user_prompt="user",
+            db=db,
+            task_id=12,
+            agent_label="security_sentinel",
+        )
+
+    assert exc_info.value.retryable is False
+    assert exc_info.value.http_status == 502
+    assert getattr(exc_info.value, "failure_kind", "") == "billing_error"
+    assert "402" in exc_info.value.message
+    assert "private provider account details" not in exc_info.value.message
+    assert len(calls) == 1
+    assert sleeps == []
+    record = db.add.call_args.args[0]
+    assert record.status == "failed"
+    assert record.response is None
+    assert "402" in record.error_message
+    assert "private provider account details" not in record.error_message
 
 
 def test_chat_logs_malformed_content_as_failed_without_retry(monkeypatch):

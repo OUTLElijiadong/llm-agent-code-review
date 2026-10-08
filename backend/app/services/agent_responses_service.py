@@ -949,8 +949,19 @@ class NativeResponsesTransport:
                         observed = json.loads(raw)
                     except (TypeError, ValueError):
                         observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
                     raise ObservedResponseError(
-                        _upstream_error(raw, response.status_code), observed if isinstance(observed, Mapping) else {},
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
                     )
                 event_name = ""
                 data_lines: list[str] = []

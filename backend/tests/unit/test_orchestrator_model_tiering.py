@@ -14,6 +14,7 @@ from app.services.deepseek_responses_runtime import (
     FAILED,
     DeepSeekResponsesRuntime,
     InMemoryCheckpointStore,
+    ObservedResponseError,
     ToolExecutionResult,
 )
 
@@ -295,6 +296,25 @@ async def test_runtime_does_not_fallback_for_non_model_error() -> None:
     assert checkpoint.model == "deepseek-v4-pro"
     assert transport.calls == 1
     assert len(transport.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_fallback_on_billing_402_even_when_error_mentions_model() -> None:
+    error = ObservedResponseError(
+        "HTTP 402: billing denied for deepseek-v4-pro",
+        {"error": {"message": "billing denied for deepseek-v4-pro"}},
+    )
+    error.status_code = 402
+    transport = ModelErrorThenSuccessTransport(error, "不应通过切换模型绕过计费拒绝")
+    runtime = _runtime(transport)
+
+    result = await runtime.start("你好", run_id="run_billing_error_no_fallback")
+
+    assert result.status == FAILED
+    assert transport.calls == 1
+    assert [payload["model"] for payload in transport.payloads] == ["deepseek-v4-pro"]
+    checkpoint = await runtime.get_checkpoint("run_billing_error_no_fallback")
+    assert checkpoint.model == "deepseek-v4-pro"
 
 
 @pytest.mark.asyncio

@@ -109,9 +109,10 @@ def _semantic_compaction_json_schema(source_ids: Sequence[str]) -> Dict[str, Any
 class ObservedResponseError(RuntimeError):
     """Transport failure carrying provider metadata already observed before the failure."""
 
-    def __init__(self, message: str, response: Mapping[str, Any]):
+    def __init__(self, message: str, response: Mapping[str, Any], *, status_code: Optional[int] = None):
         super().__init__(message)
         self.observed_response = copy.deepcopy(dict(response))
+        self.status_code = status_code
 
 
 class RoundAccountingError(RuntimeError):
@@ -2240,6 +2241,10 @@ def _is_model_unavailable_error(exc: BaseException) -> bool:
     """
     if isinstance(exc, RoundAccountingError):
         return False
+    # A billing rejection is account/provider state, not model availability.
+    # Never spend another request by switching models after HTTP 402.
+    if getattr(exc, "status_code", None) == 402:
+        return False
     text = str(exc).lower()
     if "deepseek-v4-pro" in text:
         return True
@@ -2340,7 +2345,9 @@ async def _collect_response(output: TransportOutput) -> Tuple[Dict[str, Any], Li
                 extra = getattr(exc, "observed_response", None)
                 if isinstance(extra, Mapping):
                     observed.update(dict(extra))
-                raise ObservedResponseError(str(exc), observed) from exc
+                raise ObservedResponseError(
+                    str(exc), observed, status_code=getattr(exc, "status_code", None),
+                ) from exc
             raise
     elif isinstance(output, Sequence):
         events.extend(copy.deepcopy(dict(event)) for event in output if isinstance(event, Mapping))

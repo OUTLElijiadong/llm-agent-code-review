@@ -295,10 +295,12 @@ class DeepSeekAgent:
         usage_log_ids: list[int] = []
         http_attempts = 0
 
-        def failure(message):
+        def failure(message, *, failure_kind: str = ""):
             error = RuntimeError(message)
             error.usage_log_ids = list(usage_log_ids)
             error.http_attempts = http_attempts
+            if failure_kind:
+                error.failure_kind = failure_kind
             return error
 
         def raw_attempt(attempt):
@@ -394,6 +396,13 @@ class DeepSeekAgent:
                     "create_time": datetime.now(timezone.utc),
                 }
 
+            if resp.status_code == 402:
+                err = "模型服务计费或额度拒绝 (HTTP 402)"
+                logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
+                raise failure(
+                    f"[call_raw] {agent_label} 请求被模型服务计费或额度拒绝 (HTTP 402)",
+                    failure_kind="billing_error",
+                )
             if resp.status_code == 429:
                 err = "DeepSeek 限流"
             elif resp.status_code >= 500:
@@ -502,7 +511,16 @@ class DeepSeekAgent:
                 )
                 return content, meta
 
-            if resp.status_code == 429:
+            if resp.status_code == 402:
+                err = AiServiceError(
+                    "模型服务计费或额度拒绝 (HTTP 402)",
+                    code=50201,
+                    retryable=False,
+                    next_action="请检查模型供应商账户的计费、额度或调用权限后再重试",
+                )
+                err.failure_kind = "billing_error"
+                retryable = False
+            elif resp.status_code == 429:
                 err = AiServiceError("DeepSeek 限流", code=42900)
                 retryable = True
             elif resp.status_code >= 500:
@@ -532,6 +550,8 @@ class DeepSeekAgent:
             time.sleep(min(60, 2 ** (attempt + 1)))
             attempt += 1
 
+        if getattr(last_err, "failure_kind", "") == "billing_error":
+            raise last_err
         raise AiServiceError(
             f"DeepSeek 调用失败: {last_err}", code=50201,
         ) from last_err

@@ -71,8 +71,10 @@ def test_402_stops_but_429_503_timeout_retry_and_count_every_attempt(
     monkeypatch.setattr(denied, "_do_request", lambda _url, _headers, payload: (
         denied_requests.append(payload) or httpx.Response(402, text="payment required"), 1,
     ))
-    with pytest.raises(RuntimeError, match="确定性请求失败") as error:
+    with pytest.raises(RuntimeError, match="HTTP 402") as error:
         denied.call_raw("system", "user")
+    assert error.value.failure_kind == "billing_error"
+    assert "payment required" not in str(error.value)
     assert len(denied_requests) == 1
     assert error.value.http_attempts == 1
     assert error.value.usage_log_ids == [1]
