@@ -13,7 +13,11 @@
       "sbx_7f2d1411cafe47f592c3e1a5"
     ],
     "observed_task_result": {
-      "modes": ["blackbox", "blackbox_repeat", "whitebox"],
+      "modes": [
+        "blackbox",
+        "blackbox_repeat",
+        "whitebox"
+      ],
       "model_context_http_status": 402,
       "failure_class": "billing_error",
       "dynamic_cases": 0,
@@ -37,7 +41,10 @@
     "after_fix": {
       "sandbox_report_core_independent_tests": "8 passed",
       "related_402_and_sandbox_test_files": "123 passed",
-      "asserted_persistence_paths": ["browser_artifact", "published_sandbox_report"],
+      "asserted_persistence_paths": [
+        "browser_artifact",
+        "published_sandbox_report"
+      ],
       "real_provider_called": false
     }
   },
@@ -58,38 +65,163 @@
     },
     "independent_review": "passed; reviewer confirmed invalid/empty candidates cannot reach artifact persistence or report publication"
   },
-  "approved_cleanup": {
-    "scope": "User-approved cleanup preview: remove release image tags outside the retained set and prune dangling images/build cache older than 168 hours.",
-    "commands": [
-      "./cleanup.sh --apply --keep-release-images 2 --keep-release-states 999 --cache-until 168h"
-    ],
-    "effect": "Removed v4.0.92 backend/frontend tags outside the retained set; Docker reported Total reclaimed space: 0B.",
-    "preserved": ["database", "backups", "volumes", "production tasks", "running containers"]
-  },
   "production_capacity_gate": {
     "root_fs": "/dev/vda1",
-    "latest_df_available_kib": 11775864,
-    "latest_df_available_bytes": 12058484736,
-    "disk_used_percent": 94,
     "required_available_kib": 12582912,
     "required_available_bytes": 12884901888,
-    "deficit_kib": 807048,
-    "deficit_bytes": 826417152,
-    "release_script_gate_status": "blocked",
-    "docker_builder_du": {
-      "total_reclaimable": "2.845 GB",
-      "private": "1.942 GB",
-      "shared": "902.8 MB",
-      "active_builds": 0,
-      "observed_last_access_range": "about 1 hour to 3 days",
-      "cleanup_status": "not removed; outside the approved 168-hour cleanup preview"
+    "initial_blocked_snapshot_after_168h_cleanup": {
+      "available_kib": 11775864,
+      "available_bytes": 12058484736,
+      "used_percent": 94,
+      "deficit_kib": 807048,
+      "deficit_bytes": 826417152
     },
-    "other_cleanup_candidates": "Older image data, /tmp and logs were not removed because they are outside the approved preview or may affect rollback/data retention."
+    "additional_cache_prune": {
+      "command": "docker builder prune --force --filter until=6h",
+      "docker_reported_reclaimed": "1.424GB"
+    },
+    "deploy_preflight": {
+      "available_kib": 13130492,
+      "required_kib": 12582912,
+      "margin_kib": 547580,
+      "status": "passed"
+    },
+    "post_deploy": {
+      "available_kib": 12078252,
+      "available_bytes": 12368130048,
+      "used_percent": 94,
+      "deficit_to_next_12gib_release_gate_kib": 504660,
+      "status": "degraded; no blocking checks; can_continue=true"
+    },
+    "docker_storage_sample": {
+      "checked_at_utc": "2026-10-08T17:45:35Z",
+      "timing": "after deployment, before removing the two v4.0.93 tags",
+      "images_total": "15.34GB",
+      "images_reclaimable": "13.38GB (87%)",
+      "build_cache_total_and_reclaimable": "958.2MB",
+      "volumes": "34.23GB; no volume cleanup performed"
+    }
   },
   "release_status": {
-    "v4_0_97_deployed": false,
-    "reason": "After the approved cleanup, production still had less than the mandatory 12 GiB free-space gate. deploy.sh was not run and the capacity check was not bypassed.",
-    "production_post_deploy_tests": "not run because candidate is not deployed",
-    "ai_blackbox_whitebox_retest": "still required after deployment and provider HTTP 402 recovery"
+    "v4_0_97_deployed": true,
+    "production_code_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+    "production_health_and_release_binding": "passed",
+    "production_backup_and_migration": "passed",
+    "post_deploy_ops_status": "degraded_only_for_disk_94_percent; can_continue=true; no blocking checks",
+    "production_post_deploy_browser_clicks": "not run because Cua state capture timed out twice",
+    "production_ai_blackbox_whitebox": "not re-run; provider must first resolve/clarify HTTP 402 billing_error",
+    "next_release_gate": "Do not start a later release until the required 12GiB free-space gate is met."
+  },
+  "production_deployment": {
+    "command": "./deploy.sh all --revision c1243cf70b891fee18cb883b3b3b64523ed4679a",
+    "completed_at_utc": "2026-10-08T17:43:04Z",
+    "exit_code": 0,
+    "version": "4.0.97",
+    "release_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+    "bundle": {
+      "size_bytes": 107153532,
+      "sha256": "da080d2e04f6da1e21b5b26ba37c73a855b003fd1a427a0145f1f55f5fb91a23"
+    },
+    "healthz": {
+      "status": "ok",
+      "version": "4.0.97",
+      "release": "c1243cf70b891fee18cb883b3b3b64523ed4679a"
+    },
+    "readyz": {
+      "status": "ready",
+      "version": "4.0.97",
+      "release": "c1243cf70b891fee18cb883b3b3b64523ed4679a"
+    },
+    "release_ledger": {
+      "target": "all",
+      "backend_release": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+      "frontend_release": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+      "alembic_revision": "062_audit_log_action_length",
+      "backend_image_id": "sha256:15da32848dfba405e7730e687575281cd15aec9c0b413573af16ff49cec2bf92",
+      "frontend_image_id": "sha256:57b71a200f24fb25ddba266d6aaf0f77d41fb47e669f34df4ed88ece8a783e42",
+      "deployed_at_utc": "2026-10-08T17:42:40Z"
+    },
+    "backup_and_restore": {
+      "file": "code_review_20261008T173452Z_c1243cf70b89.sql.gz",
+      "gzip_ok": true,
+      "sha256_ok": true,
+      "metadata_ok": true,
+      "restored_table_count": 104,
+      "restored_alembic_revision": "062_audit_log_action_length",
+      "temporary_schema_dropped": true
+    },
+    "critical_containers": {
+      "backend": "healthy",
+      "frontend": "healthy",
+      "mysql": "healthy",
+      "redis": "healthy",
+      "clamav": "healthy",
+      "decoy": "healthy"
+    },
+    "ops_check": {
+      "checked_at_utc": "2026-10-08T17:48:20Z",
+      "status": "degraded",
+      "can_continue": true,
+      "blocking_checks": [],
+      "release_containers_backup_alembic_https": "ok",
+      "disk_used_percent": 94,
+      "disk_warning_threshold_percent": 85,
+      "disk_critical_threshold_percent": 95
+    },
+    "test_database_preservation": {
+      "container": "cr_testdb",
+      "status": "running",
+      "age_at_check": "8 weeks",
+      "mounted_volume_retained": true,
+      "temporary_prism_verify_schema_remaining": false
+    },
+    "disk_usage_diagnosis": {
+      "/opt/code-review/backups": "46GB",
+      "/opt/prism-releases": "36GB",
+      "/var/lib/docker": "49GB",
+      "/var/log/journal": "3.9GB",
+      "/tmp": "4.6GB",
+      "cleanup_boundary": "Only the previously approved v4.0.93 backend/frontend release tags were removed; other directories and data were left untouched."
+    },
+    "browser_acceptance": {
+      "status": "not_completed",
+      "reason": "Cua getState timed out twice; no authenticated visual or role-flow click test was performed in this deployment turn.",
+      "http_smoke_and_static_build_info": "passed"
+    },
+    "ai_blackbox_whitebox_retest": {
+      "status": "not_repeated_after_deployment",
+      "reason": "Prior production samples on v4.0.96 were rejected by the model provider with HTTP 402 billing_error; no new paid model request was started.",
+      "required_next": "After provider billing/quota policy is checked and service is available, run one isolated PHP black-box and one white-box scenario on v4.0.97."
+    },
+    "frontend_build": {
+      "public_entry_asset": "/assets/index-DiQRwzjS.js",
+      "referenced_build_info_asset": "/assets/buildInfo-BZVwvzJD.js",
+      "build_info_version": "4.0.97",
+      "build_info_release_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+      "build_time_utc": "2026-10-08T17:34:36Z",
+      "direct_https_asset_check": "passed"
+    }
+  },
+  "cleanup_actions": {
+    "scope": "The explicit approval named old Prism release image tags outside the retained set and continuing the deployment, while preserving database, backups, volumes, and test tasks. The cleanup script also attempted an older-than-168h cache prune, which reclaimed 0B. A later until=6h cache prune was a separate action during the instruction to continue deployment; it is broader than the 168h age filter and is not represented as falling within that filter.",
+    "commands": [
+      "./cleanup.sh --apply --keep-release-images 2 --keep-release-states 999 --cache-until 168h",
+      "docker builder prune --force --min-free-space 13958643712 (failed: could not stat fs; no state change)",
+      "docker builder prune --force --filter until=6h",
+      "docker image rm prism-backend:8f8eb57f3d13674ccf5b40f0391df1dbdc22f42c prism-frontend:8f8eb57f3d13674ccf5b40f0391df1dbdc22f42c"
+    ],
+    "effect": "The explicitly approved old-release-tag cleanup removed v4.0.92 backend/frontend tags; the older-than-168h cache prune reclaimed 0B. A Docker min-free-space prune attempt failed without changing state. A separate until=6h BuildKit prune reclaimed 1.424GB and allowed the official 12GiB preflight to pass; this filter is broader than 168h because it also removes more recent cache entries, and is recorded as a separate action rather than part of the approved tag cleanup or 168h preview. After deployment, the updated retention preview identified only v4.0.93 backend/frontend tags; those two exact tags were removed. The latest Docker inventory still shows 958.2MB reclaimable BuildKit cache younger than 168h, which was left in place.",
+    "preserved": [
+      "production database and backups",
+      "all volumes",
+      "production and sandbox task records",
+      "cr_testdb container and mounted volume",
+      "cr_testdb temporary restore schema was dropped after successful verification"
+    ],
+    "age_filter_boundary": {
+      "168h_cache_prune_result": "0B reclaimed",
+      "additional_until_6h_prune": "1.424GB reclaimed",
+      "comparison": "until=6h removes more recent cache entries than until=168h; record as a separate action, not as part of the 168h cleanup preview."
+    }
   }
 }

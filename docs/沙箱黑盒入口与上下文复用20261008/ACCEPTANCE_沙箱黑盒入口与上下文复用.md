@@ -2,18 +2,20 @@
 
 ## 当前状态（2026-10-09）
 
-- 生产已运行 v4.0.96 / SHA `73b4dcfdebee88f978bd6dc644501fed81422d64`。正式 `deploy.sh all --revision <完整 SHA>` 于 `2026-10-08T15:54:59Z` 完成并退出码 0；健康端点、运行镜像标签、后端 `APP_RELEASE`、前端构建信息与发布 SHA/版本一致。发布包大小 `106,966,548` bytes，SHA-256 `cd6a3c485150bb75d2593d41a95104fc32d7fe19116d5cc0fa69107c306e2092`。
-- 部署前曾因根盘低于 12 GiB 门槛而暂停；按用户批准回收旧 Docker 发布镜像标签和可再生 BuildKit 缓存后，发布门禁通过。发布后 `ops-check` 为 `can_continue=true`、无阻断项，磁盘仍为 94% degraded；最近可用空间记录 `13,510,909,952` bytes，较 12 GiB 门槛多 `626,008,064` bytes。未删除数据库卷、备份或任务记录。
-- 备份 gzip/SHA/元数据核验通过；隔离恢复读取 104 张表且 Alembic head 一致，临时 `cr_testdb` 已清理。HTTPS `/healthz`、`/readyz` 返回相同版本和 SHA。Backend、Frontend、MySQL、Redis、ClamAV 与 decoy 健康。
+- 生产已运行 v4.0.97 / SHA `c1243cf70b891fee18cb883b3b3b64523ed4679a`。正式 `deploy.sh all --revision c1243cf70b891fee18cb883b3b3b64523ed4679a` 于 `2026-10-08T17:43:04Z` 退出码 0；HTTPS `/healthz`、`/readyz`、运行镜像标签、后端 `APP_RELEASE`、前端活动构建信息和发布账本均一致。发布包大小 `107,153,532` bytes，SHA-256 `da080d2e04f6da1e21b5b26ba37c73a855b003fd1a427a0145f1f55f5fb91a23`。
+- 发布前门禁曾因根盘可用空间低于 12 GiB 而暂停。用户批准的清理范围是删除保留集以外的旧 Prism 发布镜像标签；按此范围移除了 v4.0.92 前后端标签。`cleanup.sh --cache-until 168h` 另报告 BuildKit 缓存回收 0B。之后还单独执行 `docker builder prune --filter until=6h`，回收 1.424 GB 并使正式容量预检通过；此命令比 168 小时预览更宽，会清理较新的缓存，不能视为原批准范围内操作。部署后 `ops-check` 为 `can_continue=true`、无阻断项，但磁盘 94% 为 degraded；最后可用 `12,078,252 KiB`（约 11.52 GiB），低于下一次部署的 12 GiB 门槛约 493 MiB。部署后又按保留策略移除了 v4.0.93 前后端镜像标签，没有扩大到日志、备份、卷或旧发布树清理。
+- 备份 gzip/SHA/元数据核验通过；隔离恢复读取 104 张表且 Alembic head 一致，临时恢复 schema 已清理。`cr_testdb` 仍运行，挂载卷仍在使用且未删除。Alembic 当前为 `062_audit_log_action_length (head)`。Backend、Frontend、MySQL、Redis、ClamAV 与 decoy 健康。
+- 部署时真实前端 `vue-tsc` 与 Vite 构建通过（3,742 modules，约 1m10s）；生产入口 `/assets/index-DiQRwzjS.js` 引用的 buildInfo 资产 `/assets/buildInfo-BZVwvzJD.js` 通过 HTTPS 直接核验为 v4.0.97 / SHA `c1243cf70b891fee18cb883b3b3b64523ed4679a`，构建时间 `2026-10-08T17:34:36Z`。同源 HTTP→HTTPS 返回 308，HTTPS 健康/就绪检查通过。尝试使用已打开浏览器做页面真实点击时，Cua 状态读取两次超时，因此本轮没有完成登录后的视觉或角色业务流验收，不把 HTTP 冒烟当作浏览器全流程验收。
 - v4.0.96 发布后通过普通 Chrome 管理员会话真实点击，在 bWAPP/PHP 隔离沙箱重复执行两次黑盒和一次白盒。三份任务结果回执均记录 worker exit 0、`cleanup_confirmed=true`；其清理范围字段称容器和任务目录已移除（本轮未另行执行主机侧容器检查）。两次 `/login.php` route smoke 均 HTTP 200。三条任务的 AI 上下文阶段均被模型服务 HTTP 402 (`billing_error`) 拒绝，动态用例 0 / skipped，最终均为 `verification_status=partial`。生产界面三条任务的进度事件均显示“多 Agent 测试审查报告已生成（角色 0/4）”；下载的第一条任务 Markdown 报告记录确定性黑盒检查通过、AI 动态补充未执行、模型增强因 `billing_error` 停止，但未记录角色计数，故角色数的证据来源仅为当时界面事件。确定性部分通过不代表 AI 黑白盒通过。逐任务证据见 `证据/v4096-production-sandbox-retests-20261009.json`。
 - HTTP 402 只能确认本次模型服务计费/额度请求被拒，不能仅凭此认定账户余额为零。需要模型服务管理员检查供应商计费/额度后，再真实复测 AI 动态黑白盒；本轮未更改供应商账户或凭据。
+- 磁盘只读诊断（`du -x`）：`/opt/code-review/backups` 约 46 GB、`/opt/prism-releases` 约 36 GB、`/var/lib/docker` 约 49 GB、`/var/log/journal` 约 3.9 GB、`/tmp` 约 4.6 GB。当前 94% 磁盘告警的主要占用位于备份、发布树、Docker 数据、系统日志和历史 bundle；除已批准的两个旧镜像标签外，本轮未删除这些内容。
 
 ## v4.0.96 候选本地验证（2026-10-08）
 
 - 后端完整 `tests/unit`：`4606 passed, 6 skipped`，243.27 秒；6 项依赖本机 Redis，未运行。测试报告 944 条告警，主要为既有弃用与 pytest 收集告警。
 - 改动 Python 文件 Ruff、`compileall`、`git diff --check` 通过。全仓 Ruff 还报告 63 条未改文件 lint 问题，因此不把全仓 Ruff 标为通过。
 - 独立候选审查补充定向路径 `475 passed`，并验证用量记录并发样本；与全量单元套件属于候选代码证据，不是生产模型调用证据。
-- 本段为发布前候选验证记录：当时磁盘门禁未通过，尚未部署。旧镜像标签清理与首次 BuildKit prune 未释放足够空间；后续在用户批准的范围内完成可再生缓存回收、重新通过容量门禁并发布，详见本文件“v4.0.96 生产发布与真实复测”。
+- 本段为发布前候选验证记录：当时磁盘门禁未通过，尚未部署。获批旧镜像标签清理和 168 小时 BuildKit prune（0B）未释放足够空间；随后另行执行了范围更宽的 `until=6h` 缓存清理，再通过容量门禁并发布。各动作的范围与状态见本文件“当前状态”。
 - 候选本地验证不等于生产 AI 动态审查成功；发布后真实生产样本均保持 `partial`，原因和覆盖边界详见本文件末尾。
 
 ## 历史验收范围（v4.0.94 阶段）
@@ -145,7 +147,7 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 ## v4.0.96 生产发布与真实复测（2026-10-08—09）
 
 - 正式发布：`deploy.sh all --revision 73b4dcfdebee88f978bd6dc644501fed81422d64` 于 `2026-10-08T15:54:59Z` 退出码 0。bundle 为 `106,966,548` bytes，SHA-256 `cd6a3c485150bb75d2593d41a95104fc32d7fe19116d5cc0fa69107c306e2092`。运行镜像标签、后端 `APP_RELEASE`、前端构建信息、HTTPS `/healthz` 与 `/readyz` 的版本/完整 SHA 相符。
-- 发布验收：备份压缩/哈希/元数据核验通过；隔离恢复 104 张表，Alembic head 匹配，临时 `cr_testdb` 已移除。Backend、Frontend、MySQL、Redis、ClamAV 和 decoy 健康。post-deploy `ops-check` 为 `can_continue=true` 且无阻断项，磁盘 94% degraded。最近可用空间 `13,510,909,952` bytes，高于 12 GiB 门槛 `626,008,064` bytes。
+- 发布验收：备份压缩/哈希/元数据核验通过；隔离恢复 104 张表，Alembic head 匹配，临时恢复 schema 已从 `cr_testdb` 清理。Backend、Frontend、MySQL、Redis、ClamAV 和 decoy 健康。post-deploy `ops-check` 为 `can_continue=true` 且无阻断项，磁盘 94% degraded。最近可用空间 `13,510,909,952` bytes，高于 12 GiB 门槛 `626,008,064` bytes。
 - 发布前门禁原因及处理：根盘低于发布门槛；用户批准清理旧 Docker 发布镜像标签，并在已批准的缓存清理边界内回收可再生 BuildKit 缓存（记录为 308→164 项、`df` 可用空间增加约 3.99 GB）。随后正式容量预检、备份/恢复和部署通过。未动数据库卷、备份和生产任务。
 - 浏览器验收：普通 Chrome 既有超级管理员会话，未开无痕窗口；项目 bWAPP / PHP，测试目标为隔离沙箱，远程目标留空，记录按 72 小时保留。三份任务结果回执均记录 `cleanup_confirmed=true`、worker exit 0；清理范围字段称容器与任务目录已移除。本轮没有独立主机侧容器检查。结果下载件 SHA-256 与当时生产界面显示的 artifact 摘要前缀一致。
 
@@ -160,7 +162,7 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 - 本轮识别出的实际阻断：生产配置的模型服务在源码上下文压缩请求返回 HTTP 402，三条任务均同类失败。该码证明本次请求被计费/额度拒绝，不能单独证明余额为零；需模型服务管理员核验额度/计费，再重复 AI 黑盒与白盒。百万 token 模型上下文能力仍未实测。
 
 
-## v4.0.97 HTTP 402 与多 Agent 报告完整性候选验收（2026-10-09）
+## v4.0.97 HTTP 402 与多 Agent 报告完整性及生产发布验收（2026-10-09）
 
 ### 复现与修复范围
 
@@ -177,11 +179,15 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 - 发布脚本：release binding `33/33`，备份配置、恢复、部署回滚与故障注入矩阵通过。
 - 未改前端；本轮修改集中于 LLM 402 处理、多 Agent 报告完成/发布门和对应后端测试。
 
-### 当前生产发布阻断
+### 正式生产发布结果
 
-- 用户批准的清理预览已执行：仅移除不在保留集中的 v4.0.92 backend/frontend 镜像标签，并尝试清理超过 168 小时的 BuildKit 缓存/悬空镜像；Docker 回执显示实际回收 `0B`。数据库、备份、卷、测试任务和生产服务未被删除或停止。
-- 清理后最新只读 `df -Pk /`：可用 `11,775,864 KiB`，磁盘 94%；正式发布门槛为至少 `12,582,912 KiB`（12 GiB），仍差 `807,048 KiB`（约 0.77 GiB）。正式 `deploy.sh` 尚未运行，v4.0.97 没有发布。
-- `docker builder du` 显示 2.845 GB BuildKit 缓存可回收、当前无活动构建；缓存最近访问时间为约 1 小时至 3 天，超出已批准的 168 小时清理预览。另有可回收旧镜像和较大的 `/tmp`/日志目录，但其清理会超出现有批准范围或可能影响回滚，不作删除。
-- 因容量门槛未达到，本轮没有生产部署后健康、页面或真实 AI 黑白盒复测；不得把候选本地测试写作生产验收。恢复模型供应商额度/策略后，仍需在 v4.0.97 生产环境重新跑黑盒与白盒，确认 AI 动态用例、多 Agent 角色、报告内容和清理回执。
+- 正式 `deploy.sh all --revision c1243cf70b891fee18cb883b3b3b64523ed4679a` 于 `2026-10-08T17:43:04Z` 退出码 0。镜像 ID：Backend `sha256:15da32848dfba405e7730e687575281cd15aec9c0b413573af16ff49cec2bf92`；Frontend `sha256:57b71a200f24fb25ddba266d6aaf0f77d41fb47e669f34df4ed88ece8a783e42`。发布账本时间 `2026-10-08T17:42:40Z`，记录 `TARGET=all`、备份路径及 Alembic 版本。
+- HTTPS `/healthz` 返回 `{"status":"ok","version":"4.0.97","release":"c1243cf70b891fee18cb883b3b3b64523ed4679a"}`；`/readyz` 返回 `ready` 且版本与 SHA 相同。运行中后端环境、前后端镜像、活动前端 `buildInfo`、发布账本及 Alembic `062_audit_log_action_length (head)` 一致。HTTP→HTTPS 返回 308。
+- 发布前备份 `code_review_20261008T173452Z_c1243cf70b89.sql.gz` 的 gzip、SHA、元数据及隔离恢复校验通过；恢复出 104 张表，迁移版本匹配。`prism_verify_*` 临时 schema 已删除；`cr_testdb` 容器仍运行约 8 周，挂载卷仍在使用且未删除。
+- 正式运维巡检 `2026-10-08T17:48:20Z` 为 `degraded`、`can_continue=true`、`blocking_checks=[]`。发布账本、关键容器、备份、Alembic、HTTPS 均为 `ok`；唯一降级为磁盘使用 94%（告警阈值 85%，临界阈值 95%），可用 `12,078,252 KiB`。部署前容量门禁已通过；部署后可用空间低于下一次发布的 12 GiB 门槛约 493 MiB。
+- 成功部署后按先前确认的保留规则删除 v4.0.93 Backend/Frontend 两个标签；对应两个镜像 ID 已被 Docker 确认删除。后续 `cleanup.sh --cache-until 168h` dry-run 仍列出 958.2 MB 可回收 BuildKit 缓存，但其未满 168 小时，因此未继续清理。Docker 存储统计（删除标签前）为镜像 15.34 GB（13.38 GB 可回收）、缓存 958.2 MB；没有据此执行全局 prune。
+- 缓存范围记录：`until=6h` 的 1.424 GB 回收动作比原 `until=168h` 预览更宽；不将其写作 168 小时范围内的清理。后续缓存/旧发布树/日志/备份的额外删除需先核对范围并确认。
+- 只读磁盘目录占用：备份约 46 GB、发布树约 36 GB、Docker 约 49 GB、系统 journal 约 3.9 GB、`/tmp` 约 4.6 GB（含历史 release bundle）。只删除了已获准的旧镜像标签；未清理备份、日志、`/tmp`、旧 release 工作树或任何数据库/数据卷。
+- 生产浏览器真实点击未完成：两次 Cua `getState` 均超时。已完成的是 SSH 部署脚本验收、HTTPS/API 健康冒烟和静态资产版本核验；不把这些表述成登录后的浏览器视觉验收。未在 v4.0.97 上另起付费模型请求；之前三条生产 PHP 黑白盒样本均遇 HTTP 402，AI 动态覆盖仍需供应商侧恢复后真实复测。
 
 详细机器可读记录见 [`v4097-http402-regression-20261009.json`](证据/v4097-http402-regression-20261009.json)。
