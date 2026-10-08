@@ -72,7 +72,8 @@ beforeEach(() => {
     items: [{ id: 22, project_name: '现有项目' }],
     total: 1,
     page: 1,
-    page_size: 200,
+    page_size: 100,
+    pages: 1,
   })
 })
 
@@ -101,11 +102,142 @@ describe('RoleManage data scope', () => {
     await flushPromises()
 
     expect(rbacApi.fetchRoleDataScope).toHaveBeenCalledWith(role.id)
-    expect(projectApi.getProjects).toHaveBeenCalledWith({ page: 1, page_size: 200 })
+    expect(projectApi.getProjects).toHaveBeenCalledWith({ page: 1, page_size: 100 })
     expect(state.scopeForm.scope_type).toBe('custom')
     expect(state.scopeForm.project_ids).toEqual([22])
     expect(rbacApi.updateRoleDataScope).not.toHaveBeenCalled()
 
+    wrapper.unmount()
+  })
+
+  it('loads later project pages so custom scopes can select projects beyond the first 100', async () => {
+    projectApi.getProjects.mockImplementation(({ page }: { page: number }) => {
+      if (page === 1) {
+        return Promise.resolve({
+          items: Array.from({ length: 100 }, (_, index) => ({
+            id: index + 1,
+            project_name: `项目${index + 1}`,
+          })),
+          total: 101,
+          page: 1,
+          page_size: 100,
+          pages: 2,
+        })
+      }
+      return Promise.resolve({
+        items: [{ id: 101, project_name: '第 101 个项目' }],
+        total: 101,
+        page: 2,
+        page_size: 100,
+        pages: 2,
+      })
+    })
+    rbacApi.fetchRoleDataScope.mockResolvedValueOnce({
+      id: 1,
+      role_id: role.id,
+      scope_type: 'custom',
+      project_ids: [101],
+    })
+
+    const wrapper = mountRoleManage()
+    await flushPromises()
+    const state = setupState(wrapper)
+    await state.onSetDataScope(role)
+    await flushPromises()
+
+    expect(projectApi.getProjects).toHaveBeenNthCalledWith(1, { page: 1, page_size: 100 })
+    expect(projectApi.getProjects).toHaveBeenNthCalledWith(2, { page: 2, page_size: 100 })
+    expect(state.projectOptions).toHaveLength(101)
+    expect(state.projectOptions.at(-1)).toEqual({ id: 101, project_name: '第 101 个项目' })
+    expect(state.scopeForm.project_ids).toEqual([101])
+    expect(state.scopeDialogVisible).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('rejects incomplete project pagination instead of showing a partial data-scope list', async () => {
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: Array.from({ length: 100 }, (_, index) => ({ id: index + 1, project_name: `项目${index + 1}` })),
+      total: 101,
+      page: 1,
+      page_size: 100,
+      pages: 2,
+    })
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: [],
+      total: 101,
+      page: 2,
+      page_size: 100,
+      pages: 2,
+    })
+
+    const wrapper = mountRoleManage()
+    await flushPromises()
+    const state = setupState(wrapper)
+    await state.onSetDataScope(role)
+    await flushPromises()
+
+    expect(projectApi.getProjects).toHaveBeenNthCalledWith(2, { page: 2, page_size: 100 })
+    expect(state.scopeDialogVisible).toBe(false)
+    expect(state.projectOptions).toEqual([])
+    expect(messages.error).toHaveBeenCalledWith('数据范围加载失败')
+
+    wrapper.unmount()
+  })
+
+  it('rejects project pages whose declared total changes while loading', async () => {
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: Array.from({ length: 100 }, (_, index) => ({ id: index + 1, project_name: `项目${index + 1}` })),
+      total: 101,
+      page: 1,
+      page_size: 100,
+      pages: 2,
+    })
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: [{ id: 101, project_name: '第 101 个项目' }],
+      total: 102,
+      page: 2,
+      page_size: 100,
+      pages: 2,
+    })
+
+    const wrapper = mountRoleManage()
+    await flushPromises()
+    const state = setupState(wrapper)
+    await state.onSetDataScope(role)
+    await flushPromises()
+
+    expect(state.scopeDialogVisible).toBe(false)
+    expect(state.projectOptions).toEqual([])
+    expect(messages.error).toHaveBeenCalledWith('数据范围加载失败')
+    wrapper.unmount()
+  })
+
+  it('rejects duplicate projects across pages', async () => {
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: Array.from({ length: 100 }, (_, index) => ({ id: index + 1, project_name: `项目${index + 1}` })),
+      total: 101,
+      page: 1,
+      page_size: 100,
+      pages: 2,
+    })
+    projectApi.getProjects.mockResolvedValueOnce({
+      items: [{ id: 100, project_name: '重复项目' }],
+      total: 101,
+      page: 2,
+      page_size: 100,
+      pages: 2,
+    })
+
+    const wrapper = mountRoleManage()
+    await flushPromises()
+    const state = setupState(wrapper)
+    await state.onSetDataScope(role)
+    await flushPromises()
+
+    expect(state.scopeDialogVisible).toBe(false)
+    expect(state.projectOptions).toEqual([])
+    expect(messages.error).toHaveBeenCalledWith('数据范围加载失败')
     wrapper.unmount()
   })
 

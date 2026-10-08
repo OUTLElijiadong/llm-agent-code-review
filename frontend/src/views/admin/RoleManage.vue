@@ -151,6 +151,7 @@ import {
 import { getProjects } from '@/api/project'
 import type { Role, Permission, DataScopeType, DataScopeUpdateIn } from '@/types/rbac'
 import type { ProjectOut } from '@/types/project'
+import type { Page } from '@/types/common'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
 /** 权限树节点 */
@@ -235,6 +236,65 @@ const scopeForm = reactive<{ scope_type: DataScopeType; project_ids: number[] }>
   project_ids: [],
 })
 const projectOptions = ref<ProjectOut[]>([])
+
+/**
+ * 加载角色数据范围所需的完整项目选项集。
+ * 项目接口每页最多返回 100 条，必须读取所有页，避免只显示前 100 个项目。
+ */
+async function loadAllProjectOptions(): Promise<ProjectOut[]> {
+  const pageSize = 100
+  const firstPage = await getProjects({ page: 1, page_size: pageSize })
+  const expectedTotal = firstPage.total
+  const expectedPages = Math.ceil(expectedTotal / pageSize)
+  if (!isValidProjectPage(firstPage, 1, expectedTotal, expectedPages, pageSize)) {
+    throw new Error('项目列表分页信息无效')
+  }
+
+  const items: ProjectOut[] = [...firstPage.items]
+  const ids = new Set(items.map((project) => project.id))
+  if (items.some((project) => !Number.isSafeInteger(project.id) || project.id < 1)
+    || ids.size !== items.length
+    || items.length > expectedTotal) {
+    throw new Error('项目列表包含重复或超出总数的数据')
+  }
+
+  for (let page = 2; page <= expectedPages; page += 1) {
+    const result = await getProjects({ page, page_size: pageSize })
+    if (!isValidProjectPage(result, page, expectedTotal, expectedPages, pageSize)) {
+      throw new Error('项目列表分页期间发生变化')
+    }
+    for (const project of result.items) {
+      if (!Number.isSafeInteger(project.id) || project.id < 1 || ids.has(project.id)) {
+        throw new Error('项目列表分页包含重复或无效记录')
+      }
+      ids.add(project.id)
+      items.push(project)
+    }
+    if (items.length > expectedTotal) throw new Error('项目列表超过声明的总数')
+  }
+
+  if (items.length !== expectedTotal) throw new Error('项目列表未完整加载')
+  return items
+}
+
+function isValidProjectPage(
+  page: Page<ProjectOut>,
+  requestedPage: number,
+  expectedTotal: number,
+  expectedPages: number,
+  expectedPageSize: number,
+): boolean {
+  return Array.isArray(page.items)
+    && Number.isSafeInteger(page.total)
+    && page.total === expectedTotal
+    && page.page === requestedPage
+    && page.page_size === expectedPageSize
+    && page.pages === expectedPages
+    && page.items.length === Math.min(
+      expectedPageSize,
+      Math.max(0, expectedTotal - (requestedPage - 1) * expectedPageSize),
+    )
+}
 
 /**
  * 加载角色列表
@@ -407,15 +467,15 @@ async function onSetDataScope(row: Role): Promise<void> {
   scopeDialogVisible.value = true
   scopeLoading.value = true
   try {
-    const [scope, projectPage] = await Promise.all([
+    const [scope, options] = await Promise.all([
       fetchRoleDataScope(row.id),
       projectOptions.value.length === 0
-        ? getProjects({ page: 1, page_size: 200 })
+        ? loadAllProjectOptions()
         : Promise.resolve(null),
     ])
     scopeForm.scope_type = scope?.scope_type ?? 'project_own'
     scopeForm.project_ids = [...(scope?.project_ids ?? [])]
-    if (projectPage) projectOptions.value = projectPage.items
+    if (options) projectOptions.value = options
   } catch {
     scopeDialogVisible.value = false
     ElMessage.error('数据范围加载失败')

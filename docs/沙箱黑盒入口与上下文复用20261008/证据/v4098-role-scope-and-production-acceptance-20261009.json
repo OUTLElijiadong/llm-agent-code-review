@@ -1,0 +1,131 @@
+{
+  "recorded_at_utc": "2026-10-08T18:36:17Z",
+  "production": {
+    "version": "4.0.97",
+    "release_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+    "healthz": "HTTP 200; version and release match",
+    "readyz": "HTTP 200; ready; version and release match",
+    "host_disk": {
+      "captured_at_utc": "2026-10-08T18:31:53Z",
+      "filesystem": "/dev/vda1",
+      "total_bytes": 193205350400,
+      "used_bytes": 182009430016,
+      "available_bytes": 11195920384,
+      "use_percent": 95,
+      "deploy_minimum_free_bytes": 12884901888,
+      "shortfall_bytes": 1688981504,
+      "ops_check": "2026-10-08T18:32:15Z: status=error; can_continue=false; blocking_checks=[disk]; publish/write prohibited",
+      "previous_snapshot": {
+        "captured_at_utc": "2026-10-08T18:08:56Z",
+        "used_bytes": 181108674560,
+        "available_bytes": 12096675840,
+        "use_percent": 94,
+        "observed_growth_bytes": 900755456,
+        "elapsed_seconds": 1377,
+        "growth_source": "Pending read-only host investigation"
+      }
+    },
+    "approved_cleanup_preview": {
+      "captured_at_utc": "2026-10-08T18:18:13Z",
+      "command": "cleanup.sh --keep-release-images 2 --keep-release-states 10 --cache-until 168h",
+      "unprotected_prism_release_tags_found": 0,
+      "applied": false,
+      "note": "Current, previous, and two most recent backend/frontend release tags were protected. No broader cache cleanup was applied."
+    },
+    "candidate_deployed": false,
+    "disk_growth_investigation": {
+      "window_start_utc": "2026-10-08T18:08:56Z",
+      "window_end_utc": "2026-10-08T18:31:53Z",
+      "root_used_growth_bytes": 900755456,
+      "scheduled_backup": {
+        "path": "/opt/code-review/backups/code_review_20261008T181923Z_c1243cf70b89.sql.gz",
+        "birth_time_utc": "2026-10-08T18:19:23Z",
+        "size_bytes": 822175988,
+        "allocated_bytes": 822181888,
+        "timer": "prism-backup.timer triggered at 2026-10-08T18:19:22Z",
+        "service": "prism-backup.service; backup.sh --reason scheduled; exit status 0",
+        "share_of_observed_growth_percent": 91.28
+      },
+      "unattributed_residual_bytes": 78573568,
+      "short_sample_utc": "2026-10-08T18:35:23Z to 2026-10-08T18:35:43Z",
+      "short_sample_used_growth_bytes": 40960,
+      "limits": "Existing database file mtimes changed but file birth times predate the window and no baseline sizes are available; no attribution made. No logs/backups were read, and no files were deleted or altered. Backup retention configuration check pending."
+    }
+  },
+  "real_browser_sample": {
+    "date_local": "2026-10-09",
+    "browser": "Safari ordinary window; no private browsing",
+    "build_footer": "v4.0.97",
+    "admin": {
+      "login": "success",
+      "fixed_roles": [
+        "user",
+        "reviewer",
+        "admin",
+        "super_admin"
+      ],
+      "separate_auditor_role": false,
+      "permission_catalog_count": 61,
+      "reviewer_permissions_observed": {
+        "review_start": true,
+        "review_view": true,
+        "audit_view": true,
+        "user_management": false,
+        "role_management": false,
+        "server_ops": false
+      },
+      "reviewer_data_scope_click": {
+        "visible_messages": [
+          "参数校验失败",
+          "数据范围加载失败"
+        ],
+        "dialog_closed": true,
+        "network_status_captured": false
+      }
+    },
+    "reviewer": {
+      "login": "success",
+      "dashboard_visible_project_count": 1,
+      "operations_audit_navigation": true,
+      "direct_admin_access": "redirected to /403; access-denied page shown; no 404 observed"
+    },
+    "regular_user": {
+      "login": "success",
+      "dashboard_visible_project_count": 12,
+      "operations_audit_navigation": false,
+      "direct_admin_access": "redirected to /403; access-denied page shown; no 404 observed"
+    },
+    "chat_history_isolation_sample": {
+      "both_accounts_opened_own_conversation_list": true,
+      "visible_titles_differed": true,
+      "cross_account_title_observed": false,
+      "history_bodies_opened": false,
+      "messages_sent": false,
+      "scope_limit": "Two-account UI sample only; not exhaustive API or all-history proof."
+    },
+    "business_data_mutations": 0
+  },
+  "candidate_fix": {
+    "base_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+    "version": "4.0.98",
+    "change": "Fetch project options with page_size=100, traverse all pages, validate exact expected page sizes, page index/page size/total/page count and duplicate/invalid IDs, and fail closed on incomplete pagination; preserve existing data-scope values and permission behavior.",
+    "red_test": "On the v4.0.97 source baseline with page_size=200, the initial focused regression was red: 1 failed, 5 passed.",
+    "green_test": "Final RoleManage.test.ts: 10 passed, rerun after correcting the empty-page fixture; confirms request of page 2 before rejection, and covers project 101 from page 2, changed total, and duplicate IDs.",
+    "frontend_build": "vue-tsc and Vite build passed at 2026-10-08T18:36:17Z after the final application-source and test-fixture changes; 3742 modules transformed.",
+    "production_retest": "Pending release; after release, reopen the admin role data-scope dialog and verify project options across pages.",
+    "changed_files_lint": "ESLint passed for RoleManage.vue and RoleManage.test.ts at 2026-10-08T18:34Z.",
+    "backend_source_changed": false,
+    "frontend_tests_full": "142 test files passed; 1857 tests passed after the final pagination test-fixture correction."
+  },
+  "model_testing": {
+    "new_paid_requests_sent": 0,
+    "new_provider_requests_sent": 0,
+    "payments_or_topups": 0,
+    "previous_php_black_whitebox_results": "Remain partial after HTTP 402; AI dynamic cases were skipped. This candidate did not repeat those calls."
+  },
+  "source_contract_mismatch": {
+    "frontend": "frontend/src/views/admin/RoleManage.vue:413 requested page_size=200 on the v4.0.97 baseline",
+    "backend_contract": "backend/app/api/v1/projects.py:69 declares page_size Query(20, ge=1, le=100)",
+    "conclusion": "The observed UI validation failure is consistent with the frontend request exceeding the project-list parameter contract. The browser network status was not captured, so this is a strongly supported explanation rather than a directly captured HTTP rejection."
+  }
+}
