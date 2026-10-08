@@ -1,6 +1,17 @@
 # 沙箱黑盒入口与上下文复用验收
 
-## 当前状态（2026-10-09）
+## 最新验收结果（生产 v4.0.98，2026-10-09）
+
+- 正式发布命令 `deploy.sh all --revision 22404e44a05682e55740abe5a294da66761e2148` 成功退出；版本 `4.0.98`，完整 SHA `22404e44a05682e55740abe5a294da66761e2148`。独立只读复核确认 HTTPS `/healthz`、`/readyz` 为 200，活动 Backend/Frontend 镜像标签和 image ID 与发布账本一致；线上 buildInfo 返回同版本、同 SHA。构建时间 `2026-10-08T20:34:33Z`，ledger 部署时间 `2026-10-08T20:42:32Z`。HTTP→HTTPS 为 308，HTTPS 冒烟通过。
+- 本次代码修复让 `mysqldump` 在独立的一次性容器中运行：复用运行 MySQL 的镜像 ID 和网络命名空间，内存限额 512 MiB；临时环境文件仅含必要凭据且权限为 0600，退出时清理。`bash deploy/tests/test_scripts.sh`、`bash -n`、`git diff --check` 全部通过；测试覆盖客户端隔离、凭据权限、归档统计漂移、客户端失败和清理。生产 MySQL OOM 计数未增加。
+- 手动预检备份 `code_review_20261008T202711Z_22404e44a056.sql.gz` 与正式 pre-deploy 备份 `code_review_20261008T203446Z_22404e44a056.sql.gz` 均通过 SHA-256 与 gzip 完整性检查；分别在隔离库恢复并核对 104 张表、Alembic `062_audit_log_action_length (head)`。发布账本指向正式 pre-deploy 备份；临时 `prism_verify_` schema 数为 0。`cr_testdb` 容器和卷保留。
+- 生产 Backend、Frontend、MySQL、Redis、ClamAV、Decoy healthy；Alembic current/head 一致。Embedding 和 `cr_testdb` 为 running，但未配置 healthcheck。独立复核没有发现发布 SHA、镜像、账本、迁移或备份不一致。
+- Safari 普通窗口中管理员、审查员、普通用户均成功登录并打开论坛；菜单按角色呈现。管理员真实发布了 v4.0.98 版本更新帖子 #44（`/forum/44`），详情页显示标题和正文。管理员安全中心也可打开。此为三角色页面级抽样，不等于完整 RBAC/API 与所有业务路径均已穷举。
+- 发布后 `ops-check` 为 `degraded`、`can_continue=true`，唯一降级是根盘使用率 86% 高于 85% 告警线；可用约 25.3 GiB，高于 12 GiB 硬部署门槛。按用户批准的清理预览仅移除 v4.0.94 前后端镜像标签，当前、上一版和最近两版回滚镜像保留；168 小时 BuildKit 清理回收 0B。磁盘告警尚未消除。
+- 应用户授权，从服务器移除非 Prism 项目目录 `/opt/auto-surface-mm-local`、`/opt/momentum-radar`、`/opt/flytrap`、`/opt/flytrap-sync`、`/opt/lijiadong-portfolio` 及未使用的 Ollama 镜像。AutoSurface SQLite/图片未形成有效归档，不能声称已备份；本机仅有不完整 `.partial` 文件。Prism 数据库、业务卷、生产任务、备份和近期回滚镜像未删除。
+- 沙箱 AI 验收仍未闭环：已有三条 PHP 黑白盒真实任务在 AI 上下文阶段收到 HTTP 402，动态用例为 0 / skipped，终态 `partial`。本次发布和页面验收不证明 AI 黑白盒成功，也没有验证 100 万 token 压缩理解、Java Runner 或其他语言运行时。恢复模型服务计费/额度后须重跑，不能把确定性路由检查当作 AI 验收。
+
+## 历史快照：生产 v4.0.97（2026-10-09，已被上方发布结果取代）
 
 - 生产已运行 v4.0.97 / SHA `c1243cf70b891fee18cb883b3b3b64523ed4679a`。正式 `deploy.sh all --revision c1243cf70b891fee18cb883b3b3b64523ed4679a` 于 `2026-10-08T17:43:04Z` 退出码 0；HTTPS `/healthz`、`/readyz`、运行镜像标签、后端 `APP_RELEASE`、前端活动构建信息和发布账本均一致。发布包大小 `107,153,532` bytes，SHA-256 `da080d2e04f6da1e21b5b26ba37c73a855b003fd1a427a0145f1f55f5fb91a23`。
 - 发布前门禁曾因根盘可用空间低于 12 GiB 而暂停。用户批准的清理范围是删除保留集以外的旧 Prism 发布镜像标签；按此范围移除了 v4.0.92 前后端标签。`cleanup.sh --cache-until 168h` 另报告 BuildKit 缓存回收 0B。之后还单独执行 `docker builder prune --filter until=6h`，回收 1.424 GB 并使正式容量预检通过；此命令比 168 小时预览更宽，会清理较新的缓存，不能视为原批准范围内操作。部署后 `ops-check` 为 `can_continue=true`、无阻断项，但磁盘 94% 为 degraded；最后可用 `12,078,252 KiB`（约 11.52 GiB），低于下一次部署的 12 GiB 门槛约 493 MiB。部署后又按保留策略移除了 v4.0.93 前后端镜像标签，没有扩大到日志、备份、卷或旧发布树清理。
@@ -10,7 +21,7 @@
 - HTTP 402 只能确认本次模型服务计费/额度请求被拒，不能仅凭此认定账户余额为零。需要模型服务管理员检查供应商计费/额度后，再真实复测 AI 动态黑白盒；本轮未更改供应商账户或凭据。
 - 磁盘只读诊断（`du -x`）：`/opt/code-review/backups` 约 46 GB、`/opt/prism-releases` 约 36 GB、`/var/lib/docker` 约 49 GB、`/var/log/journal` 约 3.9 GB、`/tmp` 约 4.6 GB。当前 94% 磁盘告警的主要占用位于备份、发布树、Docker 数据、系统日志和历史 bundle；除已批准的两个旧镜像标签外，本轮未删除这些内容。
 
-## v4.0.98 角色数据范围修复候选与生产角色抽样（2026-10-09）
+## 发布前历史记录：v4.0.98 角色数据范围修复候选与生产角色抽样（2026-10-09）
 
 ### 生产复现与根因
 
