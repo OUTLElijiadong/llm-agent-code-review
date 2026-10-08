@@ -1,27 +1,27 @@
 {
-  "recorded_at_utc": "2026-10-08T18:42:29Z",
+  "recorded_at_utc": "2026-10-08T18:54:45Z",
   "production": {
     "version": "4.0.97",
     "release_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
     "healthz": "HTTP 200; version and release match",
     "readyz": "HTTP 200; ready; version and release match",
     "host_disk": {
-      "captured_at_utc": "2026-10-08T18:42:07Z",
+      "captured_at_utc": "2026-10-08T18:54:45Z",
       "filesystem": "/dev/vda1",
       "total_bytes": 193205350400,
-      "used_bytes": 182074552320,
-      "available_bytes": 11130798080,
+      "used_bytes": 182178942976,
+      "available_bytes": 11026407424,
       "use_percent": 95,
       "deploy_minimum_free_bytes": 12884901888,
-      "shortfall_bytes": 1754103808,
-      "ops_check": "2026-10-08T18:42:29Z: status=error; can_continue=false; blocking_checks=[disk]; release, containers, backup checks, Alembic and HTTPS ok",
+      "shortfall_bytes": 1858494464,
+      "ops_check": "Latest recorded journal result 2026-10-08T18:46:01Z: status=error; can_continue=false; blocking_checks=[disk]; other release, container, backup, Alembic and HTTPS checks ok. Not rerun after this snapshot to avoid a write-producing service invocation.",
       "previous_snapshot": {
-        "captured_at_utc": "2026-10-08T18:37:06Z",
-        "used_bytes": 182050664448,
-        "available_bytes": 11154685952,
+        "captured_at_utc": "2026-10-08T18:42:07Z",
+        "used_bytes": 182074552320,
+        "available_bytes": 11130798080,
         "use_percent": 95,
-        "additional_used_bytes_by_18_42_07": 23887872,
-        "growth_source": "No additional attribution was made for this short interval. The earlier 18:08:56–18:31:53 increase was mostly explained by a scheduled backup; residual 78573568 bytes remains unattributed."
+        "additional_used_bytes_by_18_54_45": 104390656,
+        "growth_source": "No attribution was established for this interval."
       }
     },
     "post_18_31_53_growth": {
@@ -30,8 +30,14 @@
       "used_growth_bytes": 65122304,
       "attribution": "Unattributed; this is separate from the 78573568-byte residual in the earlier 18:08:56–18:31:53 window."
     },
+    "post_18_42_07_growth": {
+      "window_start_utc": "2026-10-08T18:42:07Z",
+      "window_end_utc": "2026-10-08T18:54:45Z",
+      "used_growth_bytes": 104390656,
+      "attribution": "Unattributed."
+    },
     "approved_cleanup_preview": {
-      "captured_at_utc": "2026-10-08T18:18:13Z",
+      "captured_at_utc": "2026-10-08T18:48:40Z",
       "command": "cleanup.sh --keep-release-images 2 --keep-release-states 10 --cache-until 168h",
       "unprotected_prism_release_tags_found": 0,
       "applied": false,
@@ -45,6 +51,30 @@
       "format_flag_supported": false,
       "is_prune_dry_run": false,
       "prune_executed": false
+    },
+    "backup_cleanup_candidate_preview": {
+      "captured_at_utc": "2026-10-08T18:54:45Z",
+      "strict_retention_cutoff_utc": "2026-09-24T18:54:45.454947Z",
+      "candidate_groups": 10,
+      "candidate_allocated_bytes": 4239601664,
+      "current_script_eligible_groups": 1,
+      "current_script_eligible_allocated_bytes": 421904384,
+      "current_script_age_semantics": "find -mtime +14 uses whole-day rounding; this live run selects only the oldest group, effectively older than 15 full days.",
+      "deletion_authorized": false,
+      "deletion_performed": false,
+      "consequence": "Deleting all 10 groups would remove database restore points and associated checksum/metadata sidecars; user previously limited cleanup to old release image tags and explicitly excluded backups.",
+      "groups": [
+        {"stem":"code_review_20260923T182718Z_nogit","sql_mtime_utc":"2026-09-23T18:28:38Z","sql_logical_bytes":421893957,"sql_allocated_bytes":421896192,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":421904384,"current_script_eligible":true},
+        {"stem":"code_review_20260923T185357Z_c86a7483aec1","sql_mtime_utc":"2026-09-23T18:55:17Z","sql_logical_bytes":421906736,"sql_allocated_bytes":421908480,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":421916672,"current_script_eligible":false},
+        {"stem":"code_review_20260924T023000Z_nogit","sql_mtime_utc":"2026-09-24T02:31:24Z","sql_logical_bytes":422523447,"sql_allocated_bytes":422526976,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":422535168,"current_script_eligible":false},
+        {"stem":"code_review_20260924T115433Z_0143a51c85eb","sql_mtime_utc":"2026-09-24T11:55:55Z","sql_logical_bytes":422978176,"sql_allocated_bytes":422981632,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":422989824,"current_script_eligible":false},
+        {"stem":"code_review_20260924T140914Z_83334a099e63","sql_mtime_utc":"2026-09-24T14:10:36Z","sql_logical_bytes":424390586,"sql_allocated_bytes":424390656,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":424398848,"current_script_eligible":false},
+        {"stem":"code_review_20260924T143217Z_d982e3cea201","sql_mtime_utc":"2026-09-24T14:33:44Z","sql_logical_bytes":424400578,"sql_allocated_bytes":424402944,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":424411136,"current_script_eligible":false},
+        {"stem":"code_review_20260924T155738Z_5c26cc1f8eb0","sql_mtime_utc":"2026-09-24T15:58:57Z","sql_logical_bytes":424909611,"sql_allocated_bytes":424910848,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":424919040,"current_script_eligible":false},
+        {"stem":"code_review_20260924T164154Z_e3ac8462dec2","sql_mtime_utc":"2026-09-24T16:43:15Z","sql_logical_bytes":425256195,"sql_allocated_bytes":425259008,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":425267200,"current_script_eligible":false},
+        {"stem":"code_review_20260924T181848Z_nogit","sql_mtime_utc":"2026-09-24T18:20:08Z","sql_logical_bytes":425618812,"sql_allocated_bytes":425619456,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":425627648,"current_script_eligible":false},
+        {"stem":"code_review_20260924T182137Z_e58a700f52ae","sql_mtime_utc":"2026-09-24T18:22:56Z","sql_logical_bytes":425622922,"sql_allocated_bytes":425623552,"sidecar_files":2,"sidecar_allocated_bytes":8192,"group_allocated_bytes":425631744,"current_script_eligible":false}
+      ]
     },
     "candidate_deployed": false,
     "disk_growth_investigation": {
@@ -79,7 +109,7 @@
     "browser": "Safari ordinary window; no private browsing",
     "build_footer": "v4.0.97",
     "admin": {
-      "login": "success",
+      "initial_login_result": "success in an earlier acceptance sample; exact timestamp not captured",
       "fixed_roles": [
         "user",
         "reviewer",
@@ -103,6 +133,15 @@
         ],
         "dialog_closed": true,
         "network_status_captured": false
+      },
+      "latest_retest": {
+        "sequence": "later retry after the earlier successful acceptance login",
+        "attempted_in_ordinary_safari": true,
+        "result": "login did not complete; UI showed username-or-password error",
+        "attribution": "Not treated as a verified credential or authentication defect because secure-field input through the UI automation was not reliably confirmed.",
+        "retries_stopped": true,
+        "password_field_cleared": true,
+        "role_scope_fix_tested": false
       }
     },
     "reviewer": {
