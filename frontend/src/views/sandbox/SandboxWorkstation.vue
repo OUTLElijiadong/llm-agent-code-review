@@ -39,6 +39,7 @@ import {
   isSandboxActive,
   projectSandboxLanguage,
   sandboxConclusionPresentation,
+  sandboxEventMessage,
   sandboxStatusPresentation,
   sortSandboxEvents,
   stageLabel,
@@ -743,7 +744,7 @@ onBeforeUnmount(() => {
                     <b>{{ stageLabel(event.stage, selected.test_mode) }}</b>
                     <time class="font-mono">{{ formatTime(event.create_time) }}</time>
                   </div>
-                  <p>{{ event.message }}</p>
+                  <p>{{ sandboxEventMessage(event, selected.test_mode) }}</p>
                 </div>
               </li>
             </ol>

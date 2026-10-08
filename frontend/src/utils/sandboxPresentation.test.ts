@@ -11,6 +11,7 @@ import {
   sandboxStatusLabel,
   sandboxStatusPresentation,
   sortSandboxEvents,
+  sandboxEventMessage,
   stageLabel,
 } from './sandboxPresentation'
 import type { SandboxEnvironment } from '@/types/sandbox'
@@ -29,6 +30,21 @@ describe('sandbox presentation rules', () => {
     expect(stageLabel('running_whitebox', 'combined')).toBe('黑白盒测试')
     expect(stageLabel('running_blackbox')).toBe('黑盒测试')
     expect(stageLabel('running_combined')).toBe('黑白盒测试')
+  })
+
+  it('projects only exact legacy terminal result messages according to the persisted test mode', () => {
+    const failed = { event_type: 'result', stage: 'failed', message: '白盒测试失败' }
+    const succeeded = { event_type: 'result', stage: 'succeeded', message: '白盒测试完成' }
+
+    expect(sandboxEventMessage(failed, 'blackbox')).toBe('黑盒测试失败')
+    expect(sandboxEventMessage(failed, 'combined')).toBe('黑白盒测试失败')
+    expect(sandboxEventMessage(succeeded, 'blackbox')).toBe('黑盒测试完成')
+    expect(sandboxEventMessage(succeeded, 'combined')).toBe('黑白盒测试完成')
+    expect(sandboxEventMessage(failed, 'whitebox')).toBe('白盒测试失败')
+    expect(sandboxEventMessage({ ...failed, event_type: 'failed' }, 'blackbox')).toBe('白盒测试失败')
+    expect(sandboxEventMessage({ ...failed, stage: 'running' }, 'blackbox')).toBe('白盒测试失败')
+    expect(sandboxEventMessage({ ...failed, message: '白盒测试失败：runner 超时' }, 'blackbox'))
+      .toBe('白盒测试失败：runner 超时')
   })
 
   it('sorts Agent events by durable sequence before timestamps', () => {

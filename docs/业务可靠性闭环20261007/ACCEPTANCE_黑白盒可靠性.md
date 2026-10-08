@@ -1,5 +1,22 @@
 # 黑白盒业务可靠性验收记录
 
+## v4.0.86 候选：部署诊断与历史事件兼容（2026-10-08）
+
+### 部署原因核验
+
+- 生产 HTTPS `/healthz` 与 `/readyz` 均正常，报告 v4.0.85 / `727d636c22e5ff7e8d7fe887f934867ce591e1f3`。因此本次不是线上服务不可用。
+- 本机主工作区位于 v4.0.2，且发布构建源 `backend/`、`frontend/` 有未提交内容。`deploy/deploy.sh` 在任何发布变更前调用 `assert_deploy_sources_clean`，随后还要求待发布 SHA 等于当前 HEAD；从该工作区发布会被拒绝，不能通过跳过门禁解决。
+- Git `production/live` 仍指向 v3.7.0，但它不是当前运行发布指针。生产活动树与账本、运行镜像和公共健康接口均绑定 v4.0.85。近期没有执行中的部署 workflow；Business CI 与 CodeQL 是发布前质量流水线，不会自动把分支部署到生产。
+- 生产只读 `ops-check`：`degraded`、`can_continue=true`、无阻断项；MySQL/Redis/ClamAV/Backend/Frontend 均健康，Alembic current=head=`062_audit_log_action_length`，最新备份 gzip/checksum 通过且年龄 0 小时，HTTPS 冒烟通过。唯一降级是磁盘 88%（85% 告警、95% 临界），可用 23,646,736 KiB；本轮未清理。
+
+### 真实展示缺陷与候选修复
+
+- 生产历史黑盒任务 `sbx_3b317e05c0fa45128c20e31d` 的模式为黑盒，终态事件却显示“白盒测试失败”。只读追踪确认旧 Worker 曾固定写入该终态正文；后端按原样序列化事件，前端直接显示 `event.message`。这属于可复现的历史 UI 文案不一致，不代表黑盒执行结果本身被改写或误判。
+- v4.0.86 候选增加 `sandboxEventMessage` 纯展示投影：仅匹配 `event_type=result`、`stage=succeeded/failed` 和旧 Worker 已证实的精确白盒终态文案；黑盒/组合模式显示相应文案。白盒、未知模式、非终态、非精确字符串保留原文，DB/API/审计事件不写回。
+- 红测在实现前因 helper 不存在按预期失败；实现后定向文件为 7 tests passed（含 8 个边界断言）。前端全量 142 files / 1,853 tests passed；ESLint、`vue-tsc --noEmit`、Vite 生产构建、`git diff --check` 通过。精确 SHA CI 和生产部署尚待完成。
+
+本节不代表 v4.0.86 已上线，也不代表完整黑白盒业务验收完成。真实 Safari 旧任务刷新、精确 CI 与部署结果将在获得回执后续记。
+
 ## v4.0.82 当前生产状态（2026-10-08）
 
 v4.0.82 / `fad2f2ddd364486f5bddcd0e1059c343e67ef45a` 已部署到生产主站与独立 Sandbox Worker。Worker profile 已从 v4.0.78 runner 更新至当前 v4.0.82 runner 镜像，五种语言的 profile digest 与镜像 ID、runner 源码 SHA 一致；执行器 `runsc`、五语言 whitebox/blackbox/combined 支持和 browser blackbox health 均 ready。五种语言隔离白盒冒烟通过，Python loopback 黑盒 smoke 三轮通过。详情及依赖下载/部署原因见[证据 73](证据/73-v4082生产部署与Worker复核-20261008.md)。

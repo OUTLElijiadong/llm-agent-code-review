@@ -113,6 +113,22 @@ export function isRemoteAuthorizationRequired(testMode: string, remoteUrl: strin
   return Boolean(remoteUrl.trim()) && (testMode === 'blackbox' || testMode === 'combined')
 }
 
+const LEGACY_TERMINAL_EVENT_MESSAGES: Record<string, Partial<Record<SandboxEnvironment['test_mode'], string>>> = {
+  '白盒测试完成': { blackbox: '黑盒测试完成', combined: '黑白盒测试完成' },
+  '白盒测试失败': { blackbox: '黑盒测试失败', combined: '黑白盒测试失败' },
+}
+
+/** Correct exact legacy terminal result copy for display without mutating persisted audit events. */
+export function sandboxEventMessage(
+  event: Pick<SandboxEvent, 'event_type' | 'stage' | 'message'>,
+  testMode?: SandboxEnvironment['test_mode'],
+): string {
+  if (event.event_type !== 'result' || !['succeeded', 'failed'].includes(event.stage) || !testMode) {
+    return event.message
+  }
+  return LEGACY_TERMINAL_EVENT_MESSAGES[event.message]?.[testMode] || event.message
+}
+
 const STAGE_LABELS: Record<string, string> = {
   authorization: '权限校验', snapshot: '源码快照', worker: '执行器调度', executor: '执行器',
   deploy_verify: '部署核验', agent_tests: '动态测试用例', validating: '沙箱校验', preparing: '环境准备',
