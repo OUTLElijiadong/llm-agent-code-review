@@ -11,6 +11,7 @@ import zipfile
 from types import SimpleNamespace
 
 import pytest
+
 from app.agents.source_context import SourceContextError, _context_call, compact_source_context
 from app.services.sandbox_service import _source_summary_for_agent_tests
 
@@ -136,6 +137,54 @@ def test_small_packed_sources_keep_raw_quotes_verifiable_with_json_special_chara
         }
     ]
     assert _grounding_feedback(generated_test, source_summary) == []
+
+
+def test_lossless_json_file_chunks_are_explicitly_marked_as_fragments() -> None:
+    source_text = json.dumps(
+        [{"path": f"modules/item_{index:04d}.php", "size": index} for index in range(600)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert len(source_text) > 5_000
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("data/manifest.json", source_text)
+    source_summary = _source_summary_for_agent_tests(
+        base64.b64encode(archive_buffer.getvalue()).decode("ascii"),
+        "php",
+    )
+    file_chunks = [chunk for chunk in source_summary["source_chunks"] if chunk["path"] == "data/manifest.json"]
+    assert len(file_chunks) >= 2
+    assert all(chunk["source_length"] == len(source_text) for chunk in file_chunks)
+
+    class FragmentAwareAgent:
+        def call_json(self, message, **_kwargs):
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = payload if isinstance(payload, list) else [payload]
+            for entry in entries:
+                if entry.get("path") == "data/manifest.json" and entry["source_length"] > len(entry["text"]):
+                    if "无损源码片段" not in message or "不完整 JSON 语法是预期情况" not in message:
+                        return SimpleNamespace(
+                            success=True,
+                            data={
+                                "error": "输入 text 为不完整 JSON 数组，末尾 size 值处被截断，"
+                                "无法确认完整源码清单。"
+                            },
+                        )
+            ids = _source_ids(message)
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": "按可见片段压缩；文件结构在片段边界处不完整，不据此推断缺失内容。",
+                },
+            )
+
+    compacted = compact_source_context(FragmentAwareAgent(), source_summary, ctx=None, max_chars=40_000)
+
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in source_summary["source_chunks"]]
+    assert all(chunk["source_id"] in json.dumps(compacted, ensure_ascii=False) for chunk in file_chunks)
 
 
 def test_packed_metadata_is_not_duplicated_or_retained_in_split_model_requests() -> None:

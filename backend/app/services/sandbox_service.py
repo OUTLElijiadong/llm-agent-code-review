@@ -1655,6 +1655,7 @@ def _source_summary_for_agent_tests(source_archive_base64: str, language: str) -
                             "source_id": source_id,
                             "path": name,
                             "offset": offset,
+                            "source_length": len(decoded),
                             "text": text,
                             "sha256": digest,
                         }

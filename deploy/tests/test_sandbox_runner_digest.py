@@ -4,7 +4,6 @@ import hashlib
 import re
 from pathlib import Path
 
-
 DEPLOY_DIR = Path(__file__).resolve().parents[1]
 
 
