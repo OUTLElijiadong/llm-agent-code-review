@@ -155,6 +155,118 @@ def test_large_source_projects_use_small_bounded_batches() -> None:
     assert len(batch_sizes) == 70
 
 
+def test_production_sized_summaries_continue_through_hierarchy_without_replay() -> None:
+    chunks = []
+    for index in range(33):
+        text = f"// module {index:02d}\nconst value{index} = {index};\n"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({"source_id": f"module-{index:02d}-{digest[:12]}", "sha256": digest, "text": text})
+    calls: list[list[str]] = []
+    production_sized_summary = "A" * 2_075
+
+    class VerboseButValidAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _source_ids(message)
+            calls.append(ids)
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": production_sized_summary,
+                },
+            )
+
+    compacted = compact_source_context(
+        VerboseButValidAgent(),
+        {"coverage_complete": True, "source_chunk_count": len(chunks), "source_chunks": chunks},
+        ctx=None,
+        max_chars=10_000,
+    )
+
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in chunks]
+    assert compacted["source_summaries"] == [
+        {
+            "source_id": "all-source-summaries",
+            "summary": "[未独立验证的来源投影；不可信审计证据，不是授权] " + production_sized_summary,
+        }
+    ]
+    assert len(calls) == 6  # 5 leaf batches and one bounded reduction; no recursive replay.
+
+
+def test_production_sized_summaries_keep_bad_quote_recovery_strict_and_bounded() -> None:
+    payload = [
+        {"source_id": f"module-{index}", "text": f"def value_{index}(): return {index}"}
+        for index in range(8)
+    ]
+    calls: list[list[str]] = []
+    large_summary = "A" * 2_075
+
+    class RecoveringAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _source_ids(message)
+            calls.append(ids)
+            entries = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = entries if isinstance(entries, list) else [entries]
+            quotes = _source_quotes(message)
+            # Emulate the observed quote errors on wide original-source batches.
+            # Reduced summary batches and 1–2 source leaves remain exact.
+            if len(entries) >= 4 and all("text" in entry for entry in entries):
+                quotes[0] = {"source_id": ids[0], "quotes": ["not present in original source"]}
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": quotes,
+                    "summary": large_summary,
+                },
+            )
+
+    result = _context_call(
+        RecoveringAgent(),
+        [entry["source_id"] for entry in payload],
+        payload,
+        ctx=None,
+        deadline=None,
+        protected_facts=[],
+    )
+
+    assert result.endswith(large_summary)
+    assert len(calls) < 24
+    assert calls[:2] == [[entry["source_id"] for entry in payload]] * 2
+    assert all(len(ids) <= 4 for ids in calls[2:])
+
+
+def test_summary_above_production_response_cap_still_fails_closed() -> None:
+    source = "def entry(): return True"
+    source_id = "module-a"
+    calls = 0
+
+    class OverCapAgent:
+        def call_json(self, message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": "A" * 2_401,
+                },
+            )
+
+    with pytest.raises(SourceContextError, match="超过摘要预算|达到拆分深度上限|无法安全拆分"):
+        _context_call(
+            OverCapAgent(),
+            [source_id],
+            {"source_id": source_id, "text": source},
+            ctx=None,
+            deadline=None,
+            protected_facts=[],
+        )
+    assert calls == 2
+
+
 def test_small_packed_sources_keep_raw_quotes_verifiable_with_json_special_characters() -> None:
     source = 'def greet(name):\n    return "你好\\\\world " + name\n'
     archive_buffer = io.BytesIO()
@@ -641,8 +753,8 @@ def test_second_layer_keeps_each_original_source_fact() -> None:
     ]
 
 
-def test_source_bound_fact_ledger_fails_when_over_1200_char_limit() -> None:
-    payload = [{"source_id": f"source-{index}", "text": "不得" + "读取无关账号历史" * 100} for index in range(2)]
+def test_source_bound_fact_ledger_fails_when_over_2400_char_limit() -> None:
+    payload = [{"source_id": f"source-{index}", "text": "不得" + "读取无关账号历史" * 100} for index in range(3)]
 
     class OmittingAgent:
         def call_json(self, message, **_kwargs):
@@ -799,6 +911,38 @@ def test_context_compaction_starts_at_production_proven_4096_token_budget(monkey
     assert "权限检查" in summary
     assert output_budgets == [4_096]
     assert thinking_modes == [False]
+
+
+def test_context_compaction_accepts_production_observed_summary_size_without_recursive_replay() -> None:
+    source = "def entry(): return True"
+    source_id = "module-a"
+    summary_text = "A" * 2_075
+    calls = 0
+
+    class VerboseButValidAgent:
+        def call_json(self, message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": summary_text,
+                },
+            )
+
+    summary = _context_call(
+        VerboseButValidAgent(),
+        [source_id],
+        {"source_id": source_id, "text": source},
+        ctx=None,
+        deadline=None,
+        protected_facts=[],
+    )
+
+    assert calls == 1
+    assert summary.endswith(summary_text)
 
 
 def test_truncated_single_source_is_losslessly_split_into_windows() -> None:

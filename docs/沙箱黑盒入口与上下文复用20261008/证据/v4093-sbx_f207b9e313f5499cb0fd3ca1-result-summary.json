@@ -1,0 +1,67 @@
+{
+  "task_id": "sbx_f207b9e313f5499cb0fd3ca1",
+  "production_version": "4.0.93",
+  "project_id": 157,
+  "mode": "blackbox",
+  "language": "php",
+  "source_archive_sha256": "52a0285eb9b37a498459c5fceafec44ae723b2d3671cf7a0cd5e332a41ee613e",
+  "source_archive_file_count": 259,
+  "source_chunks": 481,
+  "execution_source_sha256": "5a243f9c38038a3afa1fa3e17170519aa69a8e481bf9970354804d2af832df5e",
+  "source_compaction": {
+    "status": "failed",
+    "model_calls": 178,
+    "elapsed_ms": 153241,
+    "failure_kind": "source_context",
+    "reason": "源码分片摘要为空或超长；达到拆分深度上限"
+  },
+  "verification_coverage": {
+    "ai_dynamic_status": "skipped",
+    "blackbox_status": "passed",
+    "deterministic_status": "passed",
+    "reason": "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围",
+    "remote_blackbox_status": "not_required",
+    "requested_mode": "blackbox",
+    "verification_status": "partial"
+  },
+  "agent_test_generation": {
+    "count": 0,
+    "mode": "blackbox",
+    "reason": "未生成可执行的 AI 动态测试用例；结果只覆盖确定性 runner 实际执行的检查。详情见 agent_tests/source_compaction 事件。",
+    "status": "skipped"
+  },
+  "blackbox_execution": {
+    "agent_assertions_passed": null,
+    "basis": "route_smoke",
+    "failure_kind": null,
+    "passed": true,
+    "route": "/login.php",
+    "route_origin": "php_entrypoint",
+    "route_passed": true,
+    "status": "passed",
+    "status_code": 200
+  },
+  "deterministic_test_execution": {
+    "exit_code": 0,
+    "requested_mode": "blackbox",
+    "status": "passed",
+    "worker_mode": "blackbox"
+  },
+  "worker_receipt": {
+    "outcome": "succeeded",
+    "exit_code": 0,
+    "cleanup_confirmed": true,
+    "cleanup_scope": "container and job directory removal were confirmed",
+    "container_state": {
+      "finished_at": "2026-10-08T09:27:32.85756182Z",
+      "started_at": "2026-10-08T09:27:26.624379353Z",
+      "status": "exited"
+    }
+  },
+  "raw_result_artifact": {
+    "sha256": "b8ec7da24c62917c0cfb450a6d85e5475965ea82c33f193895ea9f7a45ad5010",
+    "bytes": 6382,
+    "contains_worker_logs": true,
+    "note": "原始结果已在任务记录中保留；本副本仅保存验收字段，不复制源码扫描日志。"
+  }
+}

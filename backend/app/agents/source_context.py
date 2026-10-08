@@ -16,7 +16,12 @@ from app.services.context_fidelity import extract_protected_facts
 # 32 was an accidental model-round ceiling. This is only a hard resource guard;
 # large projects are compressed through bounded batches and recursive reduction.
 MAX_SOURCE_CHUNKS = 4_096
-MAX_CHUNK_SUMMARY_CHARS = 1_200
+# The production model sometimes returns 1,200–2,075 character summaries even
+# when asked for a shorter projection. Rejecting every such response caused the
+# same already-summarized pair to be split and re-merged until the depth limit.
+# Keep a finite cap (and the final context budget) while allowing that observed
+# response range to flow to the next bounded hierarchy level for compression.
+MAX_CHUNK_SUMMARY_CHARS = 2_400
 MAX_COMPACTION_CALLS = 512
 MAX_BATCH_SOURCE_CHARS = 40_000
 MAX_BATCH_SOURCE_ITEMS = 8
@@ -97,7 +102,8 @@ def _context_call(
         '必须返回 JSON: {"covered_source_ids":[全部输入 source_id],'
         '"source_quotes":[{"source_id":"原 ID","quotes":["逐字引文"]}],'
         '"summary":"..."}；'
-        "summary 长度不超过 600 字。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
+        "summary 尽量精炼，目标不超过 1,200 字；优先保留入口、调用关系、鉴权、数据流与异常处理，"
+        "不要复述源码或逐条复制前层摘要。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
         "语法未闭合的源码片段仍需按可见内容正常摘要。\n"
     )
     last_error = "源码分片压缩失败"

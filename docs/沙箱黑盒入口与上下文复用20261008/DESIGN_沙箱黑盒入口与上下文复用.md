@@ -65,3 +65,10 @@ flowchart TD
 - 根因核对 `BaseAgent.call()` 的请求体构造与 DeepSeek 官方 API 文档：调用方未传 `thinking` 时保留供应商默认值，而 DeepSeek 默认启用思考模式，隐藏推理 token 也计入 `max_tokens`。结构化源码摘要的 4,096 token 输出预算因此可能被隐藏推理消耗，JSON 结果在长度上限处截断；失败后递归拆分继续消耗共享 300 秒期限。
 - `_context_call()` 现显式传 `thinking=False`，只作用于需要保真校验的结构化压缩请求；其他 Agent 的思考模式保持原行为。摘要仍需通过来源 ID、哈希、原文引文和受保护事实完整性校验，不放宽截断处理、不缩减源码覆盖、不把失败降级为成功。
 - 依据：[DeepSeek 思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/)；[DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)。
+
+
+## v4.0.94 摘要超限修复
+
+生产模型对 481 源片项目返回过最长 2,075 字的摘要；旧 1,200 字阈值使已摘要的节点继续递归拆并，最终撞到拆分深度上限。v4.0.94 把有限单层上限调整为 2,400 字，提示仍要求精炼并优先保留入口、调用、鉴权、数据流与异常；较长摘要只作为下一层压缩输入。
+
+来源 ID 顺序、精确引文校验、源 SHA、关键事实账本和最终上下文预算保持原样。宽批次引文错误仍通过两次校验失败后无损拆分恢复；超过 2,400 字、关键事实账本超预算、来源不完整或最终上下文超限继续 fail-closed。
