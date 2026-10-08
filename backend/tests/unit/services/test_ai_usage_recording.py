@@ -232,7 +232,7 @@ def test_parallel_source_compaction_preserves_usage_context_per_batch(ledger_db,
     db.rollback()
     rows = db.query(AiCallLog).order_by(AiCallLog.id).all()
     assert compacted["compression"]["source_chunks"] == len(chunks)
-    assert len(requests) == compacted["compression"]["model_calls"] == 3
+    assert len(requests) == compacted["compression"]["model_calls"] == 6
     assert len(rows) == len(requests)
     assert all(row.user_id == 7 and row.total_tokens == 9 for row in rows)
     assert all(model_attribution(row) == origin for row in rows)

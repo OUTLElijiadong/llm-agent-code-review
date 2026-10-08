@@ -86,6 +86,75 @@ def test_rejects_quote_that_only_exists_in_hallucinated_claim() -> None:
         )
 
 
+def test_accepts_exact_source_quote_longer_than_legacy_prompt_limit() -> None:
+    source = "<?php\n" + "$value = 'trusted';\n" * 16
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    source_id = f"small.php-{digest[:12]}"
+    quote = source[:128]
+    calls = 0
+
+    class LongQuoteAgent:
+        def call_json(self, message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": [{"source_id": source_id, "quotes": [quote]}],
+                    "summary": "PHP 片段定义变量。",
+                },
+            )
+
+    summary = _context_call(
+        LongQuoteAgent(),
+        [source_id],
+        {"source_id": source_id, "text": source},
+        ctx=None,
+        deadline=None,
+    )
+
+    assert calls == 1
+    assert "PHP 片段定义变量" in summary
+
+
+def test_large_source_projects_use_small_bounded_batches() -> None:
+    chunks = []
+    for index in range(481):
+        text = f"// module {index:04d}\n" + ("source evidence; " * 12)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({
+            "source_id": f"module-{index:04d}-{digest[:12]}",
+            "sha256": digest,
+            "text": text,
+        })
+    batch_sizes: list[int] = []
+
+    class FaithfulAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _source_ids(message)
+            batch_sizes.append(len(ids))
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": "已核验本批源码结构。",
+                },
+            )
+
+    compacted = compact_source_context(
+        FaithfulAgent(),
+        {"coverage_complete": True, "source_chunk_count": len(chunks), "source_chunks": chunks},
+        ctx=None,
+        max_chars=40_000,
+    )
+
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in chunks]
+    assert max(batch_sizes) <= 8
+    assert len(batch_sizes) == 70
+
+
 def test_small_packed_sources_keep_raw_quotes_verifiable_with_json_special_characters() -> None:
     source = 'def greet(name):\n    return "你好\\\\world " + name\n'
     archive_buffer = io.BytesIO()
@@ -378,8 +447,8 @@ def test_large_project_compaction_uses_bounded_batches_and_covers_every_source()
 
     assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in chunks]
     assert compacted["compression"]["source_chunks"] == 481
-    assert len(calls) <= 32
-    assert max(calls) > 8
+    assert len(calls) <= 100
+    assert max(calls) <= 8
     assert 1 < peak_calls <= 4
     assert not guard_overlap
 

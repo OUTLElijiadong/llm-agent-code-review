@@ -18,8 +18,8 @@ from app.services.context_fidelity import extract_protected_facts
 MAX_SOURCE_CHUNKS = 4_096
 MAX_CHUNK_SUMMARY_CHARS = 1_200
 MAX_COMPACTION_CALLS = 512
-MAX_BATCH_SOURCE_CHARS = 120_000
-MAX_BATCH_SOURCE_ITEMS = 32
+MAX_BATCH_SOURCE_CHARS = 40_000
+MAX_BATCH_SOURCE_ITEMS = 8
 MAX_CONTEXT_SPLIT_DEPTH = 8
 MIN_CONTEXT_SPLIT_CHARS = 1_200
 # Independent batches overlap, while every task in this process shares one call cap.
@@ -89,12 +89,12 @@ def _context_call(
         "不得尝试解析或补齐片段外内容，也不得仅因不完整 JSON 语法返回 error。"
         "不得臆测，不能把未出现的符号说成已存在。程序会独立保留逐字权限、否定、数量限制和更正事实，"
         "你无需复述整本账本，只需准确压缩其余源码结构。"
-        "每个来源只需给出 1 条从其 text 或 summary 字段逐字复制的短引文，最长 80 字；"
+        "每个来源只需给出 1 条从其 text 或 summary 字段逐字复制的短引文，尽量不超过 48 字，最多 160 字；"
         "来源 ID 和引文只能证明引用片段存在，不能证明摘要推断正确。"
         '必须返回 JSON: {"covered_source_ids":[全部输入 source_id],'
         '"source_quotes":[{"source_id":"原 ID","quotes":["逐字引文"]}],'
         '"summary":"..."}；'
-        "summary 长度不超过 1200 字。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
+        "summary 长度不超过 600 字。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
         "语法未闭合的源码片段仍需按可见内容正常摘要。\n"
     )
     last_error = "源码分片压缩失败"
@@ -182,7 +182,7 @@ def _context_call(
                     not isinstance(quote, str)
                     or not quote.strip()
                     or len(quote) < min(8, len(source_text))
-                    or len(quote) > 80
+                    or len(quote) > 160
                     or quote not in source_text
                 ):
                     raise SourceContextError("源码分片引文无法从对应来源原文核验")
