@@ -700,26 +700,59 @@ php_doc_root() {
     printf '%s\n' public
     return 0
   fi
-  nested_root=""
-  nested_count=0
-  for directory in */; do
-    [ -d "$directory" ] || continue
-    case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
-    nested_candidate=""
-    if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
-      nested_candidate="${directory%/}"
-    elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
-      nested_candidate="${directory%/}/public"
+  # ZIP 常会把应用放在多层目录中(例如 bWAPP-master/app/index.php)。
+  # 仅检查仓库根下一层会让 PHP 启动成功，却把无关仓库根的 404 当成应用。
+  local -a candidates=() roots=() preferred=()
+  local index_file root candidate ancestor covered basename
+  while IFS= read -r -d '' index_file; do
+    root="${index_file%/*}"
+    covered=0
+    for candidate in "${candidates[@]-}"; do
+      [ -n "$candidate" ] || continue
+      if [ "$candidate" = "$root" ]; then covered=1; break; fi
+    done
+    [ "$covered" -eq 1 ] || candidates+=("$root")
+    if [ "${#candidates[@]}" -gt 128 ]; then
+      printf '%s\n' 'PHP document root discovery exceeded the candidate limit' >&2
+      return 2
     fi
-    [ -n "$nested_candidate" ] || continue
-    nested_root="$nested_candidate"
-    nested_count=$((nested_count + 1))
+  done < <(find . -mindepth 2 -maxdepth 8 \
+    \( -type d \( -name '.*' -o -name vendor -o -name node_modules -o -name tests -o -name test \
+       -o -name build -o -name dist -o -name coverage -o -name __pycache__ \
+       -o -name prism-tmp -o -name prism-home -o -name prism-cache \) -prune \) -o \
+    \( -type f \( -name index.php -o -name index.html \) -print0 \))
+  for candidate in "${candidates[@]-}"; do
+    [ -n "$candidate" ] || continue
+    covered=0
+    for ancestor in "${candidates[@]-}"; do
+      [ -n "$ancestor" ] || continue
+      if [ "$candidate" != "$ancestor" ] && [[ "$candidate" == "$ancestor/"* ]]; then
+        covered=1
+        break
+      fi
+    done
+    [ "$covered" -eq 1 ] || roots+=("$candidate")
   done
-  if [ "$nested_count" -eq 1 ]; then
-    printf '%s\n' "$nested_root"
-  else
-    printf '%s\n' .
+  if [ "${#roots[@]}" -eq 1 ]; then
+    printf '%s\n' "${roots[0]#./}"
+    return 0
   fi
+  # 多应用归档只有在唯一常见 Web 根目录可判定时才自动选择；不猜测兄弟应用。
+  for candidate in "${roots[@]-}"; do
+    [ -n "$candidate" ] || continue
+    basename="${candidate##*/}"
+    case "$basename" in app|public|web|www|htdocs|html|site|docroot) preferred+=("$candidate") ;; esac
+  done
+  if [ "${#preferred[@]}" -eq 1 ]; then
+    printf '%s\n' "${preferred[0]#./}"
+    return 0
+  fi
+  if [ "${#roots[@]}" -gt 1 ]; then
+    printf 'PHP document root is ambiguous (%s candidate roots)\n' "${#roots[@]}" >&2
+    return 2
+  fi
+  printf '%s\n' 'PHP document root not found within supported depth (8)' >&2
+  return 2
 }
 
 run_deploy() {
@@ -828,7 +861,10 @@ PYWSGI
       exec go run .
       ;;
     php)
-      document_root="$(php_doc_root)"
+      if ! document_root="$(php_doc_root)"; then
+        printf '%s\n' 'PHP document root could not be selected safely' >&2
+        return 1
+      fi
       exec php -S "127.0.0.1:$preview_port" -t "$document_root"
       ;;
   esac

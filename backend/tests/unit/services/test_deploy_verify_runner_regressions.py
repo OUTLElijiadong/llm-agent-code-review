@@ -8,6 +8,7 @@ import signal
 import socket
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -24,6 +25,206 @@ def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _fake_php_server(tmp_path: Path) -> Path:
+    """Provide a deterministic PHP-like server for runner root-discovery tests."""
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    fake_php = bin_dir / "php"
+    fake_php.write_text(
+        f"#!{sys.executable}\n"
+        + textwrap.dedent(
+            """\
+            import http.server
+            import json
+            import pathlib
+            import sys
+            args = sys.argv[1:]
+            if args and args[0] == '-S':
+                port = int(args[1].rsplit(':', 1)[1])
+                root = pathlib.Path(args[args.index('-t') + 1]).resolve()
+                class Handler(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        path = self.path.split('?', 1)[0].lstrip('/')
+                        target = (root / path).resolve()
+                        has_index = (root / 'index.php').is_file() or (root / 'index.html').is_file()
+                        if self.path.split('?', 1)[0] == '/' and has_index:
+                            status = 200
+                        elif target.is_file() and target.is_relative_to(root):
+                            status = 200
+                        else:
+                            status = 404
+                        self.send_response(status)
+                        self.end_headers()
+                        self.wfile.write(b'ok')
+                    def log_message(self, *args):
+                        pass
+                http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+            else:
+                print('PRISM_FACTS_BEGIN')
+                facts = {'entrypoints': [], 'test_files': {'found': 0, 'framework': ''},
+                         'endpoints': [], 'param_hints': [], 'hardcoded_secrets': []}
+                print(json.dumps(facts))
+                print('PRISM_FACTS_END')
+            """
+        ),
+        encoding="utf-8",
+    )
+    fake_php.chmod(0o755)
+    return bin_dir
+
+
+def _write_bWAPP_layout(root: Path) -> None:
+    app = root / "bWAPP-master" / "app"
+    (app / "admin").mkdir(parents=True)
+    (app / "index.php").write_text("<?php echo 'bWAPP'; ?>", encoding="utf-8")
+    (app / "admin" / "index.php").write_text("<?php echo 'admin'; ?>", encoding="utf-8")
+
+
+def _run_worker_php_blackbox(source: Path, work: Path, fake_bin: Path) -> subprocess.CompletedProcess[str]:
+    runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        "PRISM_ACTION": "test",
+        "PRISM_LANGUAGE": "php",
+        "PRISM_TEST_MODE": "blackbox",
+        "PRISM_PREVIEW_PORT": str(_free_port()),
+        "PRISM_SOURCE_DIR": str(source),
+        "PRISM_WORKSPACE_DIR": str(work),
+        "PRISM_TEST_TIMEOUT_SECONDS": "20",
+        "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "5",
+        "PRISM_BLACKBOX_PROBE_BUDGET_SECONDS": "5",
+    }
+    return subprocess.run(
+        ["bash", str(runner)],
+        cwd=source,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("layout", ["nested", "root", "public"])
+def test_worker_php_blackbox_finds_nested_document_root(tmp_path: Path, layout: str) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    if layout == "nested":
+        _write_bWAPP_layout(source)
+    elif layout == "root":
+        (source / "index.php").write_text("<?php echo 'root'; ?>", encoding="utf-8")
+    else:
+        public = source / "public"
+        public.mkdir()
+        (public / "index.php").write_text("<?php echo 'public'; ?>", encoding="utf-8")
+    result = _run_worker_php_blackbox(source, tmp_path / "workspace", _fake_php_server(tmp_path))
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert '"passed":true' in output
+    assert '"status_code":200' in output
+
+
+def test_worker_php_blackbox_fails_closed_for_ambiguous_document_roots(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / "frontend").mkdir(parents=True)
+    (source / "backend").mkdir()
+    (source / "frontend" / "index.php").write_text("<?php echo 'front'; ?>", encoding="utf-8")
+    (source / "backend" / "index.php").write_text("<?php echo 'back'; ?>", encoding="utf-8")
+    result = _run_worker_php_blackbox(source, tmp_path / "workspace", _fake_php_server(tmp_path))
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    receipt = _extract_blackbox_result(output)
+    assert receipt is not None
+    assert receipt["failure_kind"] == "application_startup", output
+    assert "PHP document root is ambiguous" in output
+
+
+@pytest.mark.parametrize("layout", ["empty", "too_deep"])
+def test_worker_php_blackbox_fails_closed_when_document_root_is_missing(
+    tmp_path: Path, layout: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    if layout == "too_deep":
+        nested = source.joinpath(*[f"level-{index}" for index in range(9)])
+        nested.mkdir(parents=True)
+        (nested / "index.php").write_text("<?php echo 'too deep'; ?>", encoding="utf-8")
+
+    result = _run_worker_php_blackbox(source, tmp_path / "workspace", _fake_php_server(tmp_path))
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    receipt = _extract_blackbox_result(output)
+    assert receipt is not None
+    assert receipt["status"] == "failed"
+    assert receipt["failure_kind"] == "application_startup"
+    assert "PHP document root not found within supported depth (8)" in output
+    assert '"status_code":0' in output
+
+
+def test_embedded_deploy_verifier_fails_closed_when_php_document_root_is_missing(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = tmp_path / "_prism_verify.sh"
+    runner.write_text(_DEPLOY_VERIFY_RUNNER, encoding="utf-8")
+    fake_bin = _fake_php_server(tmp_path)
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        "PRISM_LANGUAGE": "php",
+        "PRISM_PREVIEW_PORT": str(_free_port()),
+        "PRISM_WORKSPACE": str(workspace),
+        "PRISM_STARTUP_TIMEOUT_SECONDS": "5",
+    }
+
+    result = subprocess.run(
+        ["bash", str(runner), "blackbox"],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "PHP document root not found within supported depth (8)" in output
+    assert "PRISM_BLACKBOX_DONE" in output
+    assert '"passed":false' in output
+
+
+def test_embedded_deploy_verifier_finds_nested_php_document_root(tmp_path: Path) -> None:
+    from app.services.sandbox_service import _DEPLOY_VERIFY_RUNNER
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_bWAPP_layout(workspace)
+    runner = tmp_path / "_prism_verify.sh"
+    runner.write_text(_DEPLOY_VERIFY_RUNNER, encoding="utf-8")
+    fake_bin = _fake_php_server(tmp_path)
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        "PRISM_LANGUAGE": "php",
+        "PRISM_PREVIEW_PORT": str(_free_port()),
+        "PRISM_WORKSPACE": str(workspace),
+        "PRISM_STARTUP_TIMEOUT_SECONDS": "5",
+    }
+    result = subprocess.run(
+        ["bash", str(runner), "blackbox"],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert '"passed":true' in output
+    assert '"status_code":200' in output
 
 
 @pytest.mark.parametrize(

@@ -50,16 +50,29 @@ class DeploymentCoordinatorAgent(BaseAgent):
         deadline: Optional[float] = None,
     ) -> dict[str, Any]:
         deadline = deadline if deadline is not None else time.monotonic() + 120
+        compacted = source_summary.get("_compacted_source_context")
+        diagnostics = source_summary.setdefault("_source_context_diagnostics", {})
         try:
-            compacted = compact_source_context(
-                self,
-                source_summary,
-                ctx=ctx,
-                deadline=deadline,
-                max_chars=9_000,
-            )
+            if not isinstance(compacted, dict):
+                compacted = compact_source_context(
+                    self,
+                    source_summary,
+                    ctx=ctx,
+                    deadline=deadline,
+                    # The same full, verified summary is reused by the test agent;
+                    # compressing it again to a smaller deployment-only view would
+                    # either lose detail or repeat model calls on the raw archive.
+                    max_chars=40_000,
+                    diagnostics=diagnostics,
+                )
+                source_summary["_compacted_source_context"] = compacted
         except SourceContextError as exc:
-            return {"error": f"源码上下文未完整覆盖: {exc}"}
+            source_summary["_source_context_error"] = str(exc)
+            return {
+                "error": f"源码上下文未完整覆盖: {exc}",
+                "failure_kind": "source_context",
+                "source_context_diagnostics": dict(diagnostics),
+            }
         db_instruction = ""
         if db_type == "mysql":
             db_instruction = (
@@ -85,12 +98,27 @@ class DeploymentCoordinatorAgent(BaseAgent):
         try:
             agent_result = self.call_json(user_message, ctx=ctx, deadline_monotonic=deadline)
         except Exception as exc:  # noqa: BLE001
-            return {"error": str(exc)[:300]}
+            return {
+                "error": str(exc)[:300],
+                "failure_kind": "model_call_failed",
+                "source_coverage": compacted,
+                "source_context_diagnostics": dict(diagnostics),
+            }
         if not getattr(agent_result, "success", False):
-            return {"error": str(getattr(agent_result, "error", "生成失败"))[:300]}
+            return {
+                "error": str(getattr(agent_result, "error", "生成失败"))[:300],
+                "failure_kind": str(getattr(agent_result, "failure_kind", "model_call_failed") or "model_call_failed"),
+                "source_coverage": compacted,
+                "source_context_diagnostics": dict(diagnostics),
+            }
         data = getattr(agent_result, "data", None)
         if not isinstance(data, dict):
-            return {"error": "部署计划结果格式错误"}
+            return {
+                "error": "部署计划结果格式错误",
+                "failure_kind": "schema_invalid",
+                "source_coverage": compacted,
+                "source_context_diagnostics": dict(diagnostics),
+            }
         launch_script = str(data.get("launch_script") or "").strip()
         notes = str(data.get("notes") or "").strip()
         if launch_script and len(launch_script.encode("utf-8", errors="ignore")) > MAX_LAUNCH_BYTES:
@@ -98,4 +126,9 @@ class DeploymentCoordinatorAgent(BaseAgent):
         # 只允许普通文本 shell 脚本,禁止明显的外联/危险指令
         if re.search(r"(curl|wget|nc\s|/dev/tcp|ssh\s|scp\s)", launch_script, re.I):
             launch_script = ""
-        return {"launch_script": launch_script, "notes": notes[:2000], "source_coverage": compacted}
+        return {
+            "launch_script": launch_script,
+            "notes": notes[:2000],
+            "source_coverage": compacted,
+            "source_context_diagnostics": dict(diagnostics),
+        }

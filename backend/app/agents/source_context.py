@@ -368,8 +368,12 @@ def compact_source_context(
     ctx: Any,
     deadline: float | None = None,
     max_chars: int = 10_000,
+    diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """保留完整源码分片清单，以有界叶子批次和递归归并压缩；失败时不交给决策模型。"""
+    started_at = time.monotonic()
+    if diagnostics is not None:
+        diagnostics.update(model_calls=0, elapsed_ms=0)
     if source_summary.get("coverage_complete") is not True:
         raise SourceContextError(str(source_summary.get("coverage_error") or "源码覆盖不完整"))
     chunks = source_summary.get("source_chunks")
@@ -408,6 +412,30 @@ def compact_source_context(
         for chunk in chunks
         for source_id, fact in _protected_fact_ledger(chunk, [chunk["source_id"]])
     ]
+
+    def compress_batch(
+        source_ids: list[str],
+        payload: Any,
+        *,
+        protected_facts: list[tuple[str, str]] | None = None,
+    ) -> str:
+        try:
+            return _context_call(
+                agent,
+                source_ids,
+                payload,
+                ctx,
+                deadline,
+                protected_facts=protected_facts,
+                call_counter=call_counter,
+            )
+        finally:
+            if diagnostics is not None:
+                diagnostics.update(
+                    model_calls=call_counter[0],
+                    elapsed_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+                )
+
     if len(verified_chunks) <= 32:
         # Keep exact facts outside the model-generated summary so a dense file does
         # not force facts to be repeated into a 600-character model output budget.
@@ -417,14 +445,10 @@ def compact_source_context(
             compressed.append(
                 {
                     "source_id": source_id,
-                    "summary": _context_call(
-                        agent,
+                    "summary": compress_batch(
                         [source_id],
                         {"source_id": source_id, "text": chunk["text"]},
-                        ctx,
-                        deadline,
                         protected_facts=[],
-                        call_counter=call_counter,
                     ),
                 }
             )
@@ -434,14 +458,10 @@ def compact_source_context(
             compacted["source_summaries"] = [
                 {
                     "source_id": "all-source-summaries",
-                    "summary": _context_call(
-                        agent,
+                    "summary": compress_batch(
                         expected_ids,
                         compressed,
-                        ctx,
-                        deadline,
                         protected_facts=[],
-                        call_counter=call_counter,
                     ),
                 }
             ]
@@ -478,14 +498,10 @@ def compact_source_context(
                     protected_facts.extend(child["protected_facts"])
                 if len(descendants) != len(set(descendants)):
                     raise SourceContextError("递归压缩来源树出现重复来源")
-                summary = _context_call(
-                    agent,
+                summary = compress_batch(
                     ids,
                     batch,
-                    ctx,
-                    deadline,
                     protected_facts=[],
-                    call_counter=call_counter,
                 )
                 digest = hashlib.sha256(("\n".join(ids) + "\n" + summary).encode("utf-8")).hexdigest()
                 reduced.append(
@@ -513,5 +529,20 @@ def compact_source_context(
         }
         _remove_protected_fact_duplicates(compacted)
     if len(json.dumps(compacted, ensure_ascii=False)) > max_chars:
+        if diagnostics is not None:
+            diagnostics.update(
+                model_calls=call_counter[0],
+                elapsed_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+            )
         raise SourceContextError("压缩后源码上下文仍超过模型预算")
+    elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
+    compacted["compression"] = {
+        **(compacted.get("compression") if isinstance(compacted.get("compression"), dict) else {}),
+        "method": "bounded_hierarchical" if len(expected_ids) > 32 else "bounded_per_chunk",
+        "source_chunks": len(expected_ids),
+        "model_calls": call_counter[0],
+        "elapsed_ms": elapsed_ms,
+    }
+    if diagnostics is not None:
+        diagnostics.update(model_calls=call_counter[0], elapsed_ms=elapsed_ms)
     return compacted

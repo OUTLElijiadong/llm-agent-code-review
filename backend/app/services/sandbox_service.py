@@ -974,43 +974,69 @@ run_whitebox() {
   return 0
 }
 
-# 与 deploy/sandbox/runner.sh 的 php_document_root 保持一致:入口在顶层子目录时仅下探唯一候选。
+# 与 deploy/sandbox/runner.sh 保持一致:有限递归发现 PHP 根并拒绝歧义。
 php_doc_root() {
   # 优先:当前目录直接有入口
   if [ -f ./index.php ] || [ -f ./index.html ]; then
-    printf '%s
-' .
+    printf '%s\n' .
     return 0
   fi
   # 其次:public 子目录有入口(且当前目录无入口)
   if [ -d public ] && { [ -f public/index.php ] || [ -f public/index.html ]; }; then
-    printf '%s
-' public
+    printf '%s\n' public
     return 0
   fi
-  # 嵌套包(zip 多套一层目录)递归下探唯一候选
-  nested_root=""
-  nested_count=0
-  for directory in */; do
-    [ -d "$directory" ] || continue
-    case "$directory" in .*|prism-tmp/*|prism-home/*|prism-cache/*) continue ;; esac
-    nested_candidate=""
-    if [ -f "${directory}index.php" ] || [ -f "${directory}index.html" ]; then
-      nested_candidate="${directory%/}"
-    elif [ -f "${directory}public/index.php" ] || [ -f "${directory}public/index.html" ]; then
-      nested_candidate="${directory%/}/public"
+  # 有些源码 ZIP 把 PHP 应用嵌套多层；受限递归后只选唯一可判定的 Web 根。
+  local -a candidates=() roots=() preferred=()
+  local index_file root candidate ancestor covered basename
+  while IFS= read -r -d '' index_file; do
+    root="${index_file%/*}"
+    covered=0
+    for candidate in "${candidates[@]-}"; do
+      [ -n "$candidate" ] || continue
+      if [ "$candidate" = "$root" ]; then covered=1; break; fi
+    done
+    [ "$covered" -eq 1 ] || candidates+=("$root")
+    if [ "${#candidates[@]}" -gt 128 ]; then
+      printf '%s\n' 'PHP document root discovery exceeded the candidate limit' >&2
+      return 2
     fi
-    [ -n "$nested_candidate" ] || continue
-    nested_root="$nested_candidate"
-    nested_count=$((nested_count + 1))
+  done < <(find . -mindepth 2 -maxdepth 8 \
+    \( -type d \( -name '.*' -o -name vendor -o -name node_modules -o -name tests -o -name test \
+       -o -name build -o -name dist -o -name coverage -o -name __pycache__ \
+       -o -name prism-tmp -o -name prism-home -o -name prism-cache \) -prune \) -o \
+    \( -type f \( -name index.php -o -name index.html \) -print0 \))
+  for candidate in "${candidates[@]-}"; do
+    [ -n "$candidate" ] || continue
+    covered=0
+    for ancestor in "${candidates[@]-}"; do
+      [ -n "$ancestor" ] || continue
+      if [ "$candidate" != "$ancestor" ] && [[ "$candidate" == "$ancestor/"* ]]; then
+        covered=1
+        break
+      fi
+    done
+    [ "$covered" -eq 1 ] || roots+=("$candidate")
   done
-  if [ "$nested_count" -eq 1 ]; then
-    printf '%s
-' "$nested_root"
+  if [ "${#roots[@]}" -eq 1 ]; then
+    printf '%s\n' "${roots[0]#./}"
     return 0
   fi
-  printf '%s
-' .
+  for candidate in "${roots[@]-}"; do
+    [ -n "$candidate" ] || continue
+    basename="${candidate##*/}"
+    case "$basename" in app|public|web|www|htdocs|html|site|docroot) preferred+=("$candidate") ;; esac
+  done
+  if [ "${#preferred[@]}" -eq 1 ]; then
+    printf '%s\n' "${preferred[0]#./}"
+    return 0
+  fi
+  if [ "${#roots[@]}" -gt 1 ]; then
+    printf 'PHP document root is ambiguous (%s candidate roots)\n' "${#roots[@]}" >&2
+    return 2
+  fi
+  printf '%s\n' 'PHP document root not found within supported depth (8)' >&2
+  return 2
 }
 
 start_app() {
@@ -1080,7 +1106,7 @@ PYWSGI
       ;;
     java)   JAR=$(find . -type f -name '*.jar' -not -name '*-sources.jar' -print -quit); if [ -z "$JAR" ]; then set +m; return 1; fi; java -Dserver.address=127.0.0.1 -Dserver.port="$PORT" -jar "$JAR" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
     go)     go run . >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
-    php)    ROOT=$(php_doc_root); php -S "127.0.0.1:$PORT" -t "$ROOT" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
+    php)    if ! ROOT=$(php_doc_root); then set +m; return 1; fi; php -S "127.0.0.1:$PORT" -t "$ROOT" >/tmp/prism-app.log 2>&1 & APP_PID=$! ;;
   esac
   set +m
   [ -n "$APP_PID" ]
@@ -3879,6 +3905,7 @@ def _generate_agent_test_cases(
     test_mode: str,
     *,
     deadline: float | None = None,
+    source_summary: dict[str, Any] | None = None,
 ) -> list[dict[str, str]] | None:
     """测试执行前调用 LLM 生成白盒/黑盒自包含断言测试文件。
 
@@ -3907,7 +3934,31 @@ def _generate_agent_test_cases(
             _append_event(db, environment, "progress", "agent_tests", "LLM 未配置,跳过快照 agent 测试用例生成")
             db.commit()
             return None
-        summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        summary = source_summary if isinstance(source_summary, dict) else _source_summary_for_agent_tests(
+            source_archive_base64, language
+        )
+        prior_context_error = str(summary.get("_source_context_error") or "").strip()
+        if prior_context_error:
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "agent_tests",
+                f"动态测试未执行：共享源码上下文未通过完整性核验 ({prior_context_error[:140]})",
+                {
+                    "failure_kind": "source_context",
+                    "source_file_count": summary.get("source_file_count"),
+                    "source_chunk_count": summary.get("source_chunk_count"),
+                    "source_sha256": summary.get("source_archive_sha256"),
+                    **(
+                        summary.get("_source_context_diagnostics")
+                        if isinstance(summary.get("_source_context_diagnostics"), dict)
+                        else {}
+                    ),
+                },
+            )
+            db.commit()
+            return None
         if not summary.get("coverage_complete"):
             _append_event(
                 db,
@@ -3915,7 +3966,12 @@ def _generate_agent_test_cases(
                 "progress",
                 "agent_tests",
                 f"动态测试未执行：源码上下文不完整 ({str(summary.get('coverage_error') or '未知原因')[:140]})",
-                {"source_file_count": summary.get("source_file_count")},
+                {
+                    "failure_kind": "source_coverage_incomplete",
+                    "source_file_count": summary.get("source_file_count"),
+                    "source_chunk_count": summary.get("source_chunk_count"),
+                    "source_sha256": summary.get("source_archive_sha256"),
+                },
             )
             db.commit()
             return None
@@ -3952,22 +4008,34 @@ def _generate_agent_test_cases(
         failure_stages: list[str] = []
         from app.agents.source_context import SourceContextError, compact_source_context
 
+        diagnostics = summary.setdefault("_source_context_diagnostics", {})
         try:
-            summary["_compacted_source_context"] = compact_source_context(
-                agent,
-                summary,
-                ctx=ctx,
-                deadline=generation_deadline,
-                max_chars=40_000,
-            )
+            compacted = summary.get("_compacted_source_context")
+            if not isinstance(compacted, dict):
+                compacted = compact_source_context(
+                    agent,
+                    summary,
+                    ctx=ctx,
+                    deadline=generation_deadline,
+                    max_chars=40_000,
+                    diagnostics=diagnostics,
+                )
+                summary["_compacted_source_context"] = compacted
         except SourceContextError as exc:
+            summary["_source_context_error"] = str(exc)
             _append_event(
                 db,
                 environment,
                 "progress",
                 "agent_tests",
                 f"动态测试未执行：源码上下文压缩未能完整核验 ({str(exc)[:140]})",
-                {"source_file_count": summary.get("source_file_count"), "source_chunk_count": summary.get("source_chunk_count")},
+                {
+                    "failure_kind": "source_context",
+                    "source_file_count": summary.get("source_file_count"),
+                    "source_chunk_count": summary.get("source_chunk_count"),
+                    "source_sha256": summary.get("source_archive_sha256"),
+                    **diagnostics,
+                },
             )
             db.commit()
             return None
@@ -3982,6 +4050,9 @@ def _generate_agent_test_cases(
                 "source_chunk_count": len(compacted.get("covered_source_ids") or []),
                 "protected_fact_count": len(compacted.get("protected_facts") or []),
                 "compression_calls": (compacted.get("compression") or {}).get("model_calls"),
+                "elapsed_ms": (compacted.get("compression") or {}).get("elapsed_ms"),
+                "source_sha256": compacted.get("source_archive_sha256"),
+                "source_manifest_sha256": compacted.get("source_manifest_sha256"),
             },
         )
         db.commit()
@@ -4098,7 +4169,8 @@ def _generate_deployment_patch(
     language: str,
     *,
     deadline: float | None = None,
-) -> dict[str, str] | None:
+    source_summary: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """完整部署核验:LLM 判断入口/依赖是否完整,生成受控补全启动脚本。
 
     失败静默(只记事件不阻断):LLM 未配置/生成失败都回退 runner 内置部署逻辑。
@@ -4111,7 +4183,9 @@ def _generate_deployment_patch(
         agent = configure_subagent(db, DeploymentCoordinatorAgent(), environment.owner_id)
         if not agent._api_key:
             return None
-        summary = _source_summary_for_agent_tests(source_archive_base64, language)
+        summary = source_summary if isinstance(source_summary, dict) else _source_summary_for_agent_tests(
+            source_archive_base64, language
+        )
         ctx = AgentContext(
             user_id=environment.owner_id,
             project_id=environment.project_id,
@@ -4130,15 +4204,33 @@ def _generate_deployment_patch(
         )
         ctx.extra["before_model_call"]()
         if not isinstance(result, dict) or result.get("error"):
+            result = result if isinstance(result, dict) else {"error": "结果格式无效"}
+            source_coverage = result.get("source_coverage")
+            if isinstance(source_coverage, dict):
+                summary["_compacted_source_context"] = source_coverage
+            if result.get("failure_kind") == "source_context":
+                summary["_source_context_error"] = str(result.get("error") or "源码上下文未完整覆盖")
+            diagnostics = result.get("source_context_diagnostics")
+            diagnostics = diagnostics if isinstance(diagnostics, dict) else summary.get("_source_context_diagnostics", {})
             _append_event(
                 db,
                 environment,
                 "progress",
                 "deploy_verify",
-                f"部署核验未形成完整计划: {str(result.get('error') if isinstance(result, dict) else '结果格式无效')[:160]}",
+                f"部署核验未形成完整计划: {str(result.get('error') or '结果格式无效')[:160]}",
+                {
+                    "failure_kind": str(result.get("failure_kind") or "deployment_plan_failed"),
+                    "source_file_count": summary.get("source_file_count"),
+                    "source_chunk_count": summary.get("source_chunk_count"),
+                    "source_sha256": summary.get("source_archive_sha256"),
+                    **(diagnostics if isinstance(diagnostics, dict) else {}),
+                },
             )
             db.commit()
             return None
+        source_coverage = result.get("source_coverage")
+        if isinstance(source_coverage, dict):
+            summary["_compacted_source_context"] = source_coverage
         launch_script = str(result.get("launch_script") or "").strip() if isinstance(result, dict) else ""
         notes = str(result.get("notes") or "").strip() if isinstance(result, dict) else ""
         if not launch_script:
@@ -4156,6 +4248,11 @@ def _generate_deployment_patch(
                 "source_archive_sha256": summary.get("source_archive_sha256"),
                 "source_manifest_sha256": summary.get("source_manifest_sha256"),
                 "source_chunk_count": len(summary.get("source_chunks") or []),
+                **(
+                    result.get("source_context_diagnostics")
+                    if isinstance(result.get("source_context_diagnostics"), dict)
+                    else summary.get("_source_context_diagnostics", {})
+                ),
             },
         )
         db.commit()
@@ -6809,12 +6906,14 @@ def _execute_environment(
                 getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
             )
             # 1) 完整部署核验:LLM 判断入口/依赖,生成补全启动脚本 _prism_launch.sh
+            shared_source_summary = _source_summary_for_agent_tests(source_archive_base64, environment.language)
             deploy_patch = _generate_deployment_patch(
                 db,
                 environment,
                 source_archive_base64,
                 environment.language,
                 deadline=agent_context_deadline,
+                source_summary=shared_source_summary,
             )
             if deploy_patch and deploy_patch.get("launch_script"):
                 effective_source = _inject_deployment_patch(effective_source, deploy_patch["launch_script"])
@@ -6826,6 +6925,7 @@ def _execute_environment(
                 environment.language,
                 worker_mode,
                 deadline=agent_context_deadline,
+                source_summary=shared_source_summary,
             )
             if agent_test_files:
                 expected_agent_tests = {

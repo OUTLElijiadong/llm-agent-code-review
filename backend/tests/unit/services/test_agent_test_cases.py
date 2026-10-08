@@ -12,8 +12,11 @@ import time
 import zipfile
 
 import pytest
+
 from app.services.sandbox_service import (
     _extract_agent_tests_result,
+    _generate_agent_test_cases,
+    _generate_deployment_patch,
     _generated_test_contract_issues,
     _inject_agent_test_files,
     _inject_deployment_patch,
@@ -1304,6 +1307,7 @@ def test_syntax_repair_revision_config_binds_repair_to_next_worker_request() -> 
 
 def test_worker_receipt_requires_exact_request_and_archive_digest() -> None:
     import pytest
+
     from app.services.sandbox_service import _validate_worker_execution_receipt
 
     valid = {"request_id": "sbx_1-r1", "source_sha256": "a" * 64}
@@ -1381,6 +1385,142 @@ def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
     assert result is not None
     assert "launch_script" in result
     assert captured["language"] == "python"
+
+
+def test_deployment_and_test_agents_share_one_verified_source_compaction(db, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.agents import deployment_coordinator_agent as deploy_module
+    from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+    from app.services import sandbox_service
+
+    environment = authorized_sandbox_environment(
+        db,
+        id=1,
+        public_id="sbx_shared_compaction",
+        project_id=1,
+        owner_id=1,
+        test_mode="blackbox",
+        language="php",
+    )
+    archive = _zip_with({"src/main.php": "<?php echo 'ok'; ?>"})
+    summary = _source_summary_for_agent_tests(archive, "php")
+    calls = 0
+    received_summary: dict = {}
+
+    def compact(_agent, source_summary, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {
+            "covered_source_ids": [item["source_id"] for item in source_summary["source_chunks"]],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "PHP 入口已核验。"}],
+            "protected_facts": [],
+            "source_archive_sha256": source_summary["source_archive_sha256"],
+        }
+
+    def configure(_db, agent, _user_id):
+        agent._api_key = "configured"
+        return agent
+
+    monkeypatch.setattr(deploy_module, "compact_source_context", compact)
+    monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
+    monkeypatch.setattr(DeploymentCoordinatorAgent, "call_json", lambda *_a, **_k: SimpleNamespace(
+        success=True, data={"launch_script": "", "notes": "入口已存在"}
+    ))
+    monkeypatch.setattr(sandbox_service, "configure_subagent", configure)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
+
+    class FakeTestGenerator:
+        _api_key = ""
+
+        def generate(self, **kwargs):
+            received_summary.update(kwargs["source_summary"])
+            return {"files": []}
+
+    monkeypatch.setattr("app.agents.test_case_generator_agent.TestCaseGeneratorAgent", FakeTestGenerator)
+    _generate_deployment_patch(
+        db,
+        environment,
+        archive,
+        "php",
+        source_summary=summary,
+    )
+    _generate_agent_test_cases(
+        db,
+        environment,
+        archive,
+        "php",
+        "blackbox",
+        source_summary=summary,
+    )
+
+    assert calls == 1
+    assert summary["_compacted_source_context"]["covered_source_ids"] == [
+        item["source_id"] for item in summary["source_chunks"]
+    ]
+    assert received_summary["_compacted_source_context"] == summary["_compacted_source_context"]
+
+
+def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monkeypatch) -> None:
+    from app.agents import deployment_coordinator_agent as deploy_module
+    from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+    from app.agents.source_context import SourceContextError
+    from app.services import sandbox_service
+
+    environment = authorized_sandbox_environment(
+        db,
+        id=1,
+        public_id="sbx_shared_compaction_timeout",
+        project_id=1,
+        owner_id=1,
+        test_mode="blackbox",
+        language="php",
+    )
+    archive = _zip_with({"src/main.php": "<?php echo 'ok'; ?>"})
+    summary = _source_summary_for_agent_tests(archive, "php")
+    calls = 0
+
+    def compact(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise SourceContextError("源码上下文压缩超过时间预算")
+
+    def configure(_db, agent, _user_id):
+        agent._api_key = "configured"
+        return agent
+
+    monkeypatch.setattr(deploy_module, "compact_source_context", compact)
+    monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
+    monkeypatch.setattr(sandbox_service, "configure_subagent", configure)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
+    monkeypatch.setattr(
+        DeploymentCoordinatorAgent,
+        "call_json",
+        lambda *_a, **_k: pytest.fail("context must fail before planning"),
+    )
+
+    class FakeTestGenerator:
+        _api_key = ""
+
+        def generate(self, **_kwargs):
+            pytest.fail("test generation must stop after incomplete shared context")
+
+    monkeypatch.setattr("app.agents.test_case_generator_agent.TestCaseGeneratorAgent", FakeTestGenerator)
+    _generate_deployment_patch(db, environment, archive, "php", source_summary=summary)
+    result = _generate_agent_test_cases(
+        db,
+        environment,
+        archive,
+        "php",
+        "blackbox",
+        source_summary=summary,
+    )
+
+    assert result is None
+    assert calls == 1
+    assert summary["_source_context_error"] == "源码上下文未完整覆盖: 源码上下文压缩超过时间预算"
 
 
 def test_deployment_coordinator_shares_deadline_with_final_model_call(monkeypatch) -> None:
