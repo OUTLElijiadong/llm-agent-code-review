@@ -1,0 +1,133 @@
+{
+  "recorded_at": "2026-10-09 Asia/Taipei",
+  "release": {
+    "version": "4.0.96",
+    "sha": "73b4dcfdebee88f978bd6dc644501fed81422d64",
+    "bundle_bytes": 106966548,
+    "bundle_sha256": "cd6a3c485150bb75d2593d41a95104fc32d7fe19116d5cc0fa69107c306e2092",
+    "deploy_completed_at_utc": "2026-10-08T15:54:59Z",
+    "deploy_exit_code": 0,
+    "post_deploy_ops_check": "can_continue=true; no blocking checks; disk degraded at 94%",
+    "backup_restore": "gzip/SHA/meta verified; isolated restore recovered 104 tables with matching Alembic head; temporary cr_testdb removed",
+    "health": "HTTPS /healthz and /readyz reported matching version and SHA; backend APP_RELEASE and image tags matched",
+    "frontend_build_info": "v4.0.96; 2026-10-08T15:46:39Z; SHA matched"
+  },
+  "browser_acceptance": {
+    "method": "real clicks in existing regular Chrome session; no incognito/private window",
+    "role": "super administrator",
+    "target": "test sandbox only; remote target field left blank; tasks retained per 72h policy"
+  },
+  "review_ui_observations": [
+    {
+      "task_id": "sbx_d430800657d2421d9c9f97e8",
+      "observed_at_local": "2026-10-09 00:05:38 Asia/Taipei",
+      "source": "production task progress timeline in the regular Chrome accessibility tree",
+      "dynamic_test_event_at_local": "2026-10-09 00:05:26 Asia/Taipei",
+      "dynamic_test_event_text": "本次任务后续 AI 修复与多 Agent 报告已停止；继续运行确定性沙箱检查",
+      "review_event_at_local": "2026-10-09 00:05:38 Asia/Taipei",
+      "review_event_text": "本次任务存在不可重试模型错误，已跳过后续模型审查并生成确定性报告",
+      "role_count_event_text": "多 Agent 测试审查报告已生成（角色 0/4）"
+    },
+    {
+      "task_id": "sbx_d0a419678b134a18bb0a5562",
+      "observed_at_local": "2026-10-09 00:06:28 Asia/Taipei",
+      "source": "production task progress timeline in the regular Chrome accessibility tree",
+      "dynamic_test_event_at_local": "2026-10-09 00:06:18 Asia/Taipei",
+      "dynamic_test_event_text": "本次任务后续 AI 修复与多 Agent 报告已停止；继续运行确定性沙箱检查",
+      "review_event_at_local": "2026-10-09 00:06:28 Asia/Taipei",
+      "review_event_text": "本次任务存在不可重试模型错误，已跳过后续模型审查并生成确定性报告",
+      "role_count_event_text": "多 Agent 测试审查报告已生成（角色 0/4）"
+    },
+    {
+      "task_id": "sbx_7f2d1411cafe47f592c3e1a5",
+      "observed_at_local": "2026-10-09 00:07:34 Asia/Taipei",
+      "source": "production task progress timeline in the regular Chrome accessibility tree",
+      "dynamic_test_event_at_local": "2026-10-09 00:07:25 Asia/Taipei",
+      "dynamic_test_event_text": "本次任务后续 AI 修复与多 Agent 报告已停止；继续运行确定性沙箱检查",
+      "review_event_at_local": "2026-10-09 00:07:34 Asia/Taipei",
+      "review_event_text": "本次任务存在不可重试模型错误，已跳过后续模型审查并生成确定性报告",
+      "role_count_event_text": "多 Agent 测试审查报告已生成（角色 0/4）"
+    }
+  ],
+  "review_report_artifact": {
+    "task_id": "sbx_d430800657d2421d9c9f97e8",
+    "filename": "sandbox-review-report-sbx_d430800657d2421d9c9f97e8.md",
+    "sha256": "287a93b73e52c922aeb1d20ae282685be2bedbe66c929c481bf3cd0a0823e87f",
+    "summary": "The report states deterministic blackbox checks passed, AI dynamic supplement was not executed (0 generated), and model enhancement stopped for billing_error.",
+    "role_count_present": false
+  },
+  "ui_observation_limitations": [
+    "The progress events and role counts were transcribed from the live production UI accessibility tree during this run.",
+    "No screenshot, DOM export, or event ID was retained for independent replay; downloaded result JSON and Markdown do not contain these progress events or role counts."
+  ],
+  "tasks": [
+    {
+      "task_id": "sbx_d430800657d2421d9c9f97e8",
+      "project": "bWAPP",
+      "runtime": "PHP",
+      "mode": "blackbox",
+      "started_at_utc": "2026-10-08T16:05:29.728469462Z",
+      "finished_at_utc": "2026-10-08T16:05:36.004314571Z",
+      "status": "partial",
+      "ai_failure_kind": "billing_error",
+      "ai_dynamic_status": "skipped",
+      "ai_dynamic_count": 0,
+      "deterministic_status": "passed",
+      "runner_exit_code": 0,
+      "cleanup_confirmed": true,
+      "cleanup_scope": "container and job directory removal were confirmed",
+      "result_artifact_sha256_prefix_as_shown_in_ui": "2f2bb65cdaa0",
+      "downloaded_result_sha256": "2f2bb65cdaa03f9132b92a7523c09c290ccac8f45c07b7a2be88ac7ebd788315",
+      "route_smoke": {
+        "route": "/login.php",
+        "origin": "php_entrypoint",
+        "http_status": 200,
+        "passed": true
+      }
+    },
+    {
+      "task_id": "sbx_d0a419678b134a18bb0a5562",
+      "project": "bWAPP",
+      "runtime": "PHP",
+      "mode": "blackbox",
+      "started_at_utc": "2026-10-08T16:06:20.893653328Z",
+      "finished_at_utc": "2026-10-08T16:06:27.34280178Z",
+      "status": "partial",
+      "ai_failure_kind": "billing_error",
+      "ai_dynamic_status": "skipped",
+      "ai_dynamic_count": 0,
+      "deterministic_status": "passed",
+      "runner_exit_code": 0,
+      "cleanup_confirmed": true,
+      "cleanup_scope": "container and job directory removal were confirmed",
+      "result_artifact_sha256_prefix_as_shown_in_ui": "1e3007f27d58",
+      "downloaded_result_sha256": "1e3007f27d58332fd596febc469dfb9c11e832762b0e372c6bd54f07461bf383",
+      "route_smoke": {
+        "route": "/login.php",
+        "origin": "php_entrypoint",
+        "http_status": 200,
+        "passed": true
+      }
+    },
+    {
+      "task_id": "sbx_7f2d1411cafe47f592c3e1a5",
+      "project": "bWAPP",
+      "runtime": "PHP",
+      "mode": "whitebox",
+      "started_at_utc": "2026-10-08T16:07:28.912426752Z",
+      "finished_at_utc": "2026-10-08T16:07:30.809948503Z",
+      "status": "partial",
+      "ai_failure_kind": "billing_error",
+      "ai_dynamic_status": "skipped",
+      "ai_dynamic_count": 0,
+      "deterministic_status": "passed",
+      "runner_exit_code": 0,
+      "cleanup_confirmed": true,
+      "cleanup_scope": "container and job directory removal were confirmed",
+      "result_artifact_sha256_prefix_as_shown_in_ui": "2966786a64e6",
+      "downloaded_result_sha256": "2966786a64e682ab5baec49be440660d38f8018bd514dd5cc82acfa095560c8e",
+      "php_lint_observation": "runner log recorded PHP deprecation warnings from legacy NuSOAP optional-parameter declarations; deterministic worker exit remained 0"
+    }
+  ],
+  "conclusion": "All 3 task result receipts report deterministic workers completed with exit code 0 and cleanup_confirmed=true; their cleanup_scope fields say the container and job directory were removed, but no independent host-side container inspection was performed in this turn. Both blackbox route smoke checks returned HTTP 200 at /login.php. AI source-context compression was rejected with HTTP 402 (billing_error) in all 3 tasks; dynamic cases were skipped (0), and verification_status stayed partial. Production UI progress events for all 3 tasks displayed multi-agent review roles 0/4 and recorded that subsequent AI repair and multi-agent report work stopped, later model review was skipped, and a deterministic report was produced. These progress events were transcribed from the live UI accessibility tree; no screenshot, DOM export, or event ID was retained for replay. The downloaded Markdown report and result JSON do not contain these progress events or role-count fields, so those details are documented as live UI observations only, not independently corroborated report data. This does not establish AI-driven blackbox/whitebox acceptance."
+}

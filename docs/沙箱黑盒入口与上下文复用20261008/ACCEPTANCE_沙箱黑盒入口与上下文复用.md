@@ -1,20 +1,20 @@
 # 沙箱黑盒入口与上下文复用验收
 
-## 当前状态（2026-10-08）
+## 当前状态（2026-10-09）
 
-- 生产当前为 v4.0.95 / SHA `b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`；v4.0.96 仍是候选，尚未发布。
-- 最新只读容量证据采集于 `2026-10-08T14:42:17Z`：根盘 95%，可用 `10,688,143,360` bytes；发布门槛为 `12,884,901,888` bytes（12 GiB），短缺 `2,196,758,528` bytes（约 2.044 GiB）。按用户批准范围删除旧 Docker 发布镜像标签后仍低于门槛。获准的一次 BuildKit 缓存清理因 Docker 28.0.1 graphdriver 错误失败，缓存统计未变；没有清理 dangling images、回滚状态、数据库卷、备份或任务。
-- `ops-check` 最新完整检查时间为 `14:23:38Z`，唯一阻断为磁盘且禁止发布/写入；其他服务与备份/迁移/HTTPS检查通过。`14:27:25Z..14:27:26Z` `/healthz` 与 `/readyz` 为 HTTP 200，仍运行 v4.0.95。完整只读记录见本目录 `证据/v4096-发布阻断-20261008.md`。
-- 活动 builder `default` 的 308 条缓存记录共 `6,188,408,317` bytes；按 LastUsedAt >6h 统计有 247 条、`3,750,006,192` bytes。`buildx du --filter until=6h` 返回全部记录，附加 `private=true` 返回 0 条（但完整清单有 167 条 Private），筛选预览异常。一次已获准的 `docker buildx prune --builder default --force --min-free-space 12884901888` 在 Docker 28.0.1 / overlay2 graphdriver 上返回 `could not stat fs at : no such file or directory`，未释放缓存；该错误与 Moby #5821 / 修复 PR #49623 的已知问题一致。不得据此估算可释放空间；升级 Docker 需要维护窗口。
-- 只读盘点显示占用主要分布于 `/opt` 106.41GB、`/var` 60.83GB、Docker 54.31GB、旧 `/opt/code-review/backups` 48.28GB、`/opt/prism-releases` 34.98GB、`/tmp` 4.94GB 和 journald 4.09GB；这些是占用位置，不代表可直接删除。MySQL 数据卷约 30.97GB，Docker 仅标记约 19KB 可回收。当前候选还没有生产验收。HTTP 402 是模型服务计费或额度拒绝，不能仅凭状态码认定余额归零。生产 AI 动态用例目前未生成，真实黑白盒整体尚未通过。
+- 生产已运行 v4.0.96 / SHA `73b4dcfdebee88f978bd6dc644501fed81422d64`。正式 `deploy.sh all --revision <完整 SHA>` 于 `2026-10-08T15:54:59Z` 完成并退出码 0；健康端点、运行镜像标签、后端 `APP_RELEASE`、前端构建信息与发布 SHA/版本一致。发布包大小 `106,966,548` bytes，SHA-256 `cd6a3c485150bb75d2593d41a95104fc32d7fe19116d5cc0fa69107c306e2092`。
+- 部署前曾因根盘低于 12 GiB 门槛而暂停；按用户批准回收旧 Docker 发布镜像标签和可再生 BuildKit 缓存后，发布门禁通过。发布后 `ops-check` 为 `can_continue=true`、无阻断项，磁盘仍为 94% degraded；最近可用空间记录 `13,510,909,952` bytes，较 12 GiB 门槛多 `626,008,064` bytes。未删除数据库卷、备份或任务记录。
+- 备份 gzip/SHA/元数据核验通过；隔离恢复读取 104 张表且 Alembic head 一致，临时 `cr_testdb` 已清理。HTTPS `/healthz`、`/readyz` 返回相同版本和 SHA。Backend、Frontend、MySQL、Redis、ClamAV 与 decoy 健康。
+- v4.0.96 发布后通过普通 Chrome 管理员会话真实点击，在 bWAPP/PHP 隔离沙箱重复执行两次黑盒和一次白盒。三份任务结果回执均记录 worker exit 0、`cleanup_confirmed=true`；其清理范围字段称容器和任务目录已移除（本轮未另行执行主机侧容器检查）。两次 `/login.php` route smoke 均 HTTP 200。三条任务的 AI 上下文阶段均被模型服务 HTTP 402 (`billing_error`) 拒绝，动态用例 0 / skipped，最终均为 `verification_status=partial`。生产界面三条任务的进度事件均显示“多 Agent 测试审查报告已生成（角色 0/4）”；下载的第一条任务 Markdown 报告记录确定性黑盒检查通过、AI 动态补充未执行、模型增强因 `billing_error` 停止，但未记录角色计数，故角色数的证据来源仅为当时界面事件。确定性部分通过不代表 AI 黑白盒通过。逐任务证据见 `证据/v4096-production-sandbox-retests-20261009.json`。
+- HTTP 402 只能确认本次模型服务计费/额度请求被拒，不能仅凭此认定账户余额为零。需要模型服务管理员检查供应商计费/额度后，再真实复测 AI 动态黑白盒；本轮未更改供应商账户或凭据。
 
-## v4.0.96 候选最终复测
+## v4.0.96 候选本地验证（2026-10-08）
 
 - 后端完整 `tests/unit`：`4606 passed, 6 skipped`，243.27 秒；6 项依赖本机 Redis，未运行。测试报告 944 条告警，主要为既有弃用与 pytest 收集告警。
 - 改动 Python 文件 Ruff、`compileall`、`git diff --check` 通过。全仓 Ruff 还报告 63 条未改文件 lint 问题，因此不把全仓 Ruff 标为通过。
 - 独立候选审查补充定向路径 `475 passed`，并验证用量记录并发样本；与全量单元套件属于候选代码证据，不是生产模型调用证据。
-- 生产磁盘发布门禁不通过且 `can_continue=false`。未运行生产 deploy、未做生产备份/恢复变更、未切换服务。旧镜像标签删除与一次失败的 BuildKit prune 尝试均未提供足够容量。候选 bundle 已只写入独立 tmpfs `/dev/shm`，远端大小、SHA-256、Git bundle 完整性和唯一 HEAD 均通过；尚未创建根盘 staging。
-- 未完成发布后 Safari/Chrome 点击验收，也未证明生产 AI 动态用例能生成并执行；此前黑白盒动态用例为 0 的生产结果仍只判部分通过。
+- 本段为发布前候选验证记录：当时磁盘门禁未通过，尚未部署。旧镜像标签清理与首次 BuildKit prune 未释放足够空间；后续在用户批准的范围内完成可再生缓存回收、重新通过容量门禁并发布，详见本文件“v4.0.96 生产发布与真实复测”。
+- 候选本地验证不等于生产 AI 动态审查成功；发布后真实生产样本均保持 `partial`，原因和覆盖边界详见本文件末尾。
 
 ## 历史验收范围（v4.0.94 阶段）
 
@@ -79,7 +79,7 @@
 - 部署脚本验证：`bash deploy/tests/test_scripts.sh` 通过，release binding `33/33`，备份/恢复和部署故障注入矩阵均通过；`ruff check` 与 `git diff --check` 通过。
 - 上述为本地候选证据，不代表已生产发布或已证明模型动态测试成功。生产容量门禁、发布账本、健康状态、两次黑盒与一次白盒结果须在下文逐项补录。
 
-## 生产发布与复测
+## 历史生产发布与复测记录（v4.0.90—v4.0.95）
 
 v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 / SHA `0c017fb700287bc45167c25eef2f210b64530e1c`；当时 Worker active，活动 release 路径与该版本一致。v4.0.90 发布后 Worker 仍从 v4.0.89 release 路径启动，但执行器源码 SHA 与 v4.0.90 候选源码 SHA 一致，profile pin 也一致；路径版本未对齐需明确保留这一边界。v4.0.91 部署后生产健康核验通过，但实际黑盒复测因压缩耗尽 300 秒而未执行 AI 动态用例。v4.0.93 已于 2026-10-08 发布；本轮候选为 v4.0.94，发布前必须刷新容量、备份/恢复和当前运行 SHA 门禁。
 
@@ -91,9 +91,9 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 | v4.0.92 样本 A | v4.0.92 | PHP 黑盒 | `sbx_eb4ec5deea23402bbdd0fd8f` | 部分通过 | 481 片；压缩 131 次模型调用、300,254 ms 后 `finish_reason=length`；`/login.php` 200；动态用例 0 | 待从结果回执独立复核 |
 | v4.0.93 样本 A | v4.0.93 | PHP 黑盒 | `sbx_f207b9e313f5499cb0fd3ca1` | 部分通过 | 项目 157，归档 259 文件、来源 481 片；压缩 178 次/153,241 ms 后摘要校验失败，AI 动态用例 0；`/login.php` HTTP 200 | `cleanup_confirmed=true`，容器与任务目录清理 |
 | v4.0.94 样本 A | v4.0.94 | PHP 黑盒 | `sbx_e32876716e62433cb3eeb8fc` | 部分通过 | `/login.php` 来源 `php_entrypoint` HTTP 200，确定性 runner exit 0；来源引文无法从对应来源原文核验，AI 动态生成 skipped/0，整体 `verification_status=partial` | `cleanup_confirmed=true`，容器与任务目录回收 |
-| v4.0.95 样本 A | v4.0.95 | PHP 黑盒 | 待发布 | 待测 | 原场景复测；要求完整压缩、AI 动态用例生成并执行、确定性路由通过 | 待核 |
-| v4.0.95 样本 B | v4.0.95 | PHP 黑盒重复 | 待发布 | 待测 | 重复同一 PHP 黑盒场景，观察摘要校验、调用数和耗时是否稳定 | 待核 |
-| v4.0.95 样本 C | v4.0.95 | PHP 白盒 | 待发布 | 待测 | 同一项目白盒扫描；核验 AI 动态用例、执行结果、源码覆盖和清理回执 | 待核 |
+| v4.0.95 样本 A | v4.0.95 | PHP 黑盒 | `sbx_9b4a64d5566b4f4184740e91` | 部分通过 | `/login.php` 200；确定性 runner 通过；AI 动态用例 0 / skipped | 已核实 cleanup |
+| v4.0.95 样本 B | v4.0.95 | PHP 黑盒重复 | `sbx_35ef276ad6f340afb7906bf9` | 部分通过 | `/login.php` 200；确定性 runner 通过；AI 动态用例 0 / skipped | 已核实 cleanup |
+| v4.0.95 样本 C | v4.0.95 | PHP 白盒 | `sbx_8eb995ad8a0d4b09b2fd0e0b` | 部分通过 | 确定性 runner 通过；AI 动态用例 0 / skipped | 已核实 cleanup |
 
 历史记录中的 v4.0.94 已部署且生产健康。v4.0.95 随后发布，但后续三项生产样本的 AI 动态覆盖均未生成；不得声明黑白盒全通过。真实任务记录按用户要求保留。
 
@@ -103,7 +103,7 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 - 6 项 Redis 用例在本轮因本地环境条件跳过；另未据此声明所有业务路径、所有语言运行时或所有浏览器通过。
 - Java Runner 镜像此前未能更新，版本仍为旧 digest；本次 PHP 样本不能证明 Java 环境已恢复。
 - 100 万 token 的模型理解能力没有真实生产证明；481 个源码片段样本不是等价证明。
-- v4.0.96 尚未发布；发布前仍须满足容量门禁并完成新备份/隔离恢复。发布后重复黑盒及白盒样本、AI 用量归因、Worker cleanup receipt 尚待逐项验收。
+- v4.0.96 已发布，备份/隔离恢复和本轮三项 Worker 清理回执已核验；AI 动态黑白盒仍因 HTTP 402 未完成。百万 token 外部模型理解能力、Java Runner、其他语言运行时及非 PHP 项目均未由本轮证明。
 
 
 ## v4.0.93 生产复测失败与 v4.0.94 修复
@@ -135,8 +135,26 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 | `sbx_35ef276ad6f340afb7906bf9` | bWAPP / PHP 黑盒重复 | `/login.php` HTTP 200；确定性 runner exit 0；Worker cleanup 确认；AI 动态用例 0 / skipped | 部分通过；与首个样本一致 |
 | `sbx_40a277fe7fe242648f5f0082` | 额外无入口样本（语言待核） | 无 Web 入口候选；路由状态 0；runner exit 1；cleanup 确认 | 不适合作为 bWAPP 黑盒验收样本，单独记录失败；下载 JSON 未提供语言/runtime |
 
-先前生产 UI/事件中有一次 HTTP 402 观察，但本地没有保存 event ID、采集时间或状态码原始回执。已下载的四份 JSON 结果不含该状态的逐任务关联，因此上述任务只据各自结果字段判定；402 仅作为未关联的计费/额度拒绝观察，不推断余额为零，也不将每个任务错误唯一归因于它。
+在 v4.0.95 历史样本中，曾有一条未保存 event ID 与逐任务关联的 HTTP 402 观察；不把该旧观察倒推到那些任务。v4.0.96 的三条新生产 JSON 则分别明确记录 `billing_error`，以各自结果字段判定。两阶段都不能仅凭 HTTP 402 推断余额归零。
 
 候选 v4.0.96 对 402 执行不可重试分类、压缩并发队列快速停止、测试生成内外层停止重试，并增加 Python 标准库 `from-import` 成员真实导入校验。复核继续发现 PHP 并行语法修复会在账务失败后启动排队调用，Agent Mesh 会将文件读取账务错误重新排队，报告阶段账务异常也不会保存确定性报告；已增加语法修复任务级停止、Mesh 失败类型保留/死信和报告确定性回退。早先 5 个相关测试文件 `332 passed` 及 `tests/unit` `4565 passed, 6 skipped` 均发生在这三处改动之前；最终新增针对测试与全量回归正在进行。此前候选的前端及部署脚本通过记录不替代发布后验收。
 
-发布状态仍为阻断：最新容量快照为 `2026-10-08T14:26:57Z` 根盘可用 `10,814,038,016` bytes，比 12 GiB 下限少 `2,070,863,872` bytes（约 1.929 GiB）；活动 `ops-check` 明确 `can_continue=false`。容量门禁、发布备份/隔离恢复和真实浏览器发布后验收尚未完成。不得绕过门禁，也不得把本地测试通过写成生产通过。
+以上为 v4.0.96 发布前的历史阻断快照：当时容量门禁为 `can_continue=false`，根盘可用 `10,814,038,016` bytes。后续经授权的缓存回收后正式部署并完成备份/隔离恢复；当前生产状态以本文件开头和末尾的“v4.0.96 生产发布与真实复测”记录为准。
+
+
+## v4.0.96 生产发布与真实复测（2026-10-08—09）
+
+- 正式发布：`deploy.sh all --revision 73b4dcfdebee88f978bd6dc644501fed81422d64` 于 `2026-10-08T15:54:59Z` 退出码 0。bundle 为 `106,966,548` bytes，SHA-256 `cd6a3c485150bb75d2593d41a95104fc32d7fe19116d5cc0fa69107c306e2092`。运行镜像标签、后端 `APP_RELEASE`、前端构建信息、HTTPS `/healthz` 与 `/readyz` 的版本/完整 SHA 相符。
+- 发布验收：备份压缩/哈希/元数据核验通过；隔离恢复 104 张表，Alembic head 匹配，临时 `cr_testdb` 已移除。Backend、Frontend、MySQL、Redis、ClamAV 和 decoy 健康。post-deploy `ops-check` 为 `can_continue=true` 且无阻断项，磁盘 94% degraded。最近可用空间 `13,510,909,952` bytes，高于 12 GiB 门槛 `626,008,064` bytes。
+- 发布前门禁原因及处理：根盘低于发布门槛；用户批准清理旧 Docker 发布镜像标签，并在已批准的缓存清理边界内回收可再生 BuildKit 缓存（记录为 308→164 项、`df` 可用空间增加约 3.99 GB）。随后正式容量预检、备份/恢复和部署通过。未动数据库卷、备份和生产任务。
+- 浏览器验收：普通 Chrome 既有超级管理员会话，未开无痕窗口；项目 bWAPP / PHP，测试目标为隔离沙箱，远程目标留空，记录按 72 小时保留。三份任务结果回执均记录 `cleanup_confirmed=true`、worker exit 0；清理范围字段称容器与任务目录已移除。本轮没有独立主机侧容器检查。结果下载件 SHA-256 与当时生产界面显示的 artifact 摘要前缀一致。
+
+| 任务 ID | 模式 | 结果状态 | AI 动态用例 | 确定性执行 | Worker 清理 |
+|---|---|---|---|---|---|
+| `sbx_d430800657d2421d9c9f97e8` | bWAPP / PHP 黑盒 | `partial` | HTTP 402 / `billing_error`，动态用例 0 / skipped；界面事件显示角色 0/4 | `/login.php` 来源 `php_entrypoint` HTTP 200；runner exit 0 | 回执 `cleanup_confirmed=true`；范围字段称容器和任务目录已移除 |
+| `sbx_d0a419678b134a18bb0a5562` | bWAPP / PHP 黑盒重复 | `partial` | HTTP 402 / `billing_error`，动态用例 0 / skipped；界面事件显示角色 0/4 | `/login.php` 来源 `php_entrypoint` HTTP 200；runner exit 0 | 回执 `cleanup_confirmed=true`；范围字段称容器和任务目录已移除 |
+| `sbx_7f2d1411cafe47f592c3e1a5` | bWAPP / PHP 白盒 | `partial` | HTTP 402 / `billing_error`，动态用例 0 / skipped；界面事件显示角色 0/4 | 白盒 runner 执行通过，exit 0；日志含旧 NuSOAP PHP 弃用告警 | 回执 `cleanup_confirmed=true`；范围字段称容器和任务目录已移除 |
+
+- 三条结果都没有把 AI 未运行伪装成通过；按本轮生产界面进度事件观察，后续 AI 修复与多 Agent 报告已停止，后续模型审查被跳过并生成确定性报告。事件原文和当时观察时间已记录在 JSON，但未留存截图、DOM 导出或事件 ID，结果 JSON 与 Markdown 也没有这组阶段事件字段，外部无法重放该 UI 观察。两条黑盒的 route smoke 通过只说明登录入口可达，不代表完成渗透或 AI 驱动的黑盒安全审查。白盒确定性执行退出 0 也不表示 AI 对整个源码完成审计。
+- 逐任务字段化证据：[`v4096-production-sandbox-retests-20261009.json`](证据/v4096-production-sandbox-retests-20261009.json)，SHA-256 `c4aa558dd34de6d3f191ad2c7277e80fe665d8ae90a7fc595512a8e56203fe8f`。证据由普通 Chrome 下载的三个生产结果 JSON 字段化，未保留原始 worker 日志或源码内容；三条生产界面进度时间线的原文及观察时间也一并记录。生产界面下载的第一条任务 Markdown 报告保存在 `证据/sandbox-review-report-sbx_d430800657d2421d9c9f97e8.md`，SHA-256 `287a93b73e52c922aeb1d20ae282685be2bedbe66c929c481bf3cd0a0823e87f`；其正文确认 AI 动态补充未执行、生成 0 个动态用例以及模型增强因 `billing_error` 停止，但不包含 Agent 角色数。三条任务的 0/4 均来自生产界面进度事件观察，不是结果 JSON 或 Markdown 报告中的字段；未保存截图、DOM 导出或事件 ID，无法供外部重放。
+- 本轮识别出的实际阻断：生产配置的模型服务在源码上下文压缩请求返回 HTTP 402，三条任务均同类失败。该码证明本次请求被计费/额度拒绝，不能单独证明余额为零；需模型服务管理员核验额度/计费，再重复 AI 黑盒与白盒。百万 token 模型上下文能力仍未实测。
