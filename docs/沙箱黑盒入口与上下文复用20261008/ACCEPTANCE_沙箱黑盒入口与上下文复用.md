@@ -43,7 +43,7 @@
 - v4.0.92 修复为首轮直接使用 `min(4096, configured_output_tokens)`；保持来源 ID、SHA、逐来源引文、受保护事实、递归无损拆分、512 次调用上限、共享期限和 fail-closed 语义不变。新增回归断言：配置允许时首轮即请求 4,096，不先发已被生产证实易截断的 2,048 请求。
 - 本地验证（v4.0.92 候选）：源码上下文定向测试 `25 passed`；后端 `backend/tests/unit` 为 `4539 passed, 6 skipped, 927 warnings`；Ruff 与 `git diff --check` 通过；`bash deploy/tests/test_scripts.sh` 发布绑定 `33/33` 且部署/回滚故障注入矩阵通过；前端 `npm --prefix frontend run build` 通过（3742 modules）。
 - v4.0.92 bundle：`prism-v4.0.92-0bda311b.bundle`，106,729,969 bytes，SHA-256 `05fc8b56bb61fec6350a367d94bf4d0be7edca6e9c101700081e68b7afcec226`。
-- 部署状态：尚未发布。生产可用空间 `11,172,478,976` bytes，低于项目默认 12 GiB 容量门槛；对构建缓存执行受限回收未增加文件系统可用空间，因为底层数据仍被旧镜像标签引用。项目 `cleanup.sh` dry-run 显示旧 Prism 镜像标签可按保留策略清理。需用户确认后才能删旧镜像；当前生产仍保持 v4.0.91。
+- 部署状态：尚未发布。最新核验生产可用空间 `11,083,206,656` bytes（95%），低于项目默认 12 GiB 容量门槛；对构建缓存执行受限回收未增加文件系统可用空间，因为底层数据仍被旧镜像标签引用。项目 `cleanup.sh` dry-run 显示保留策略之外有 52 个 Backend 和 53 个 Frontend 旧标签。需用户确认后才能删这些旧镜像；当前生产仍保持 v4.0.91。
 
 ## 生产发布与复测
 
