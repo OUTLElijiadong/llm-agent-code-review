@@ -409,7 +409,13 @@ class BaseAgent:
                         finish_reason=finish_reason,
                     )
 
-                if resp.status_code == 429:
+                if resp.status_code == 402:
+                    # Billing/quota failures cannot recover by resending the same
+                    # request. Keep provider response bodies out of task events.
+                    last_error = "模型服务计费或额度拒绝 (HTTP 402)"
+                    last_failure_kind = "billing_error"
+                    retryable = False
+                elif resp.status_code == 429:
                     last_error = "请求过于频繁"
                     last_failure_kind = "rate_limited"
                 elif resp.status_code >= 500:

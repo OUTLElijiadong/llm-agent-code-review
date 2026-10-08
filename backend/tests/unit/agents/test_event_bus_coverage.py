@@ -391,6 +391,51 @@ def test_base_agent_still_retries_rate_limit_then_accepts_stop_response(
     assert responses == []
 
 
+def test_base_agent_classifies_http_402_without_exposing_provider_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post_calls = 0
+    provider_body = "Insufficient Balance: private provider account details"
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            nonlocal post_calls
+            post_calls += 1
+            return httpx.Response(402, text=provider_body)
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__("app.utils.public_http", fromlist=["PinnedPublicUrl"]).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    agent = BaseAgent()
+    agent._api_key = "test-key"
+    agent._max_retries = 2
+
+    result = agent.call("test")
+
+    assert result.success is False
+    assert result.failure_kind == "billing_error"
+    assert "402" in str(result.error)
+    assert provider_body not in str(result.error)
+    assert post_calls == 1
+
+
 @pytest.mark.parametrize(
     ("thinking", "expected"),
     [

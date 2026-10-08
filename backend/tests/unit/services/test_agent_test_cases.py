@@ -1354,6 +1354,69 @@ def test_large_source_does_not_call_dynamic_test_agent_with_partial_context(db, 
     assert calls == []
 
 
+def test_grounding_rejection_stops_outer_generation_retries(db, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.services import sandbox_service
+
+    environment = SimpleNamespace(
+        public_id="sbx_grounding_rejected",
+        owner_id=7,
+        project_id=9,
+        agent_config_json="{}",
+        execution_token="test-execution-token",
+    )
+    archive = _zip_with({"main.py": "def parse_formula(value):\n    return value\n"})
+    summary = _source_summary_for_agent_tests(archive, "python")
+    generation_calls = 0
+    events: list[tuple] = []
+
+    def compact(_agent, source_summary, **_kwargs):
+        return {
+            "covered_source_ids": [item["source_id"] for item in source_summary["source_chunks"]],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "仅有 parse_formula。"}],
+            "protected_facts": [],
+            "source_archive_sha256": source_summary["source_archive_sha256"],
+            "source_manifest_sha256": source_summary["source_manifest_sha256"],
+        }
+
+    class FakeGenerator:
+        _api_key = "configured"
+
+        def generate(self, **_kwargs):
+            nonlocal generation_calls
+            generation_calls += 1
+            return {
+                "error": "生成测试引用了源码中不存在的符号: HTTPError",
+                "failure_kind": "grounding_rejected",
+            }
+
+    monkeypatch.setattr(
+        "app.agents.test_case_generator_agent.TestCaseGeneratorAgent",
+        FakeGenerator,
+    )
+    monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, _user_id: agent)
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
+
+    result = sandbox_service._generate_agent_test_cases(
+        db,
+        environment,
+        archive,
+        "python",
+        "whitebox",
+        source_summary=summary,
+    )
+
+    assert result is None
+    assert generation_calls == 1, events
+    assert any("第 1 轮" in str(event) for event in events)
+    assert "1 轮后仍未形成" in events[-1][4]
+    assert events[-1][5]["attempts"] == 1
+
+
 def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
 
     from app.services.sandbox_service import _generate_deployment_patch

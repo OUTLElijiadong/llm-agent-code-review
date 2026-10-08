@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import re
+import threading
 import zipfile
 from types import SimpleNamespace
 
@@ -842,6 +843,43 @@ def test_context_compaction_retries_empty_summary_with_actionable_correction() -
     assert len(calls) == 2
     assert "上一轮响应未通过校验" in calls[1]
     assert "入口函数返回服务端口" in result["source_summaries"][0]["summary"]
+
+
+def test_compaction_stops_billing_failures_without_retrying_parallel_batches() -> None:
+    calls = 0
+    lock = threading.Lock()
+    chunks = []
+    for index in range(41):
+        text = f"VALUE_{index} = {index}\n"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({
+            "source_id": f"module_{index}.py-{digest[:12]}",
+            "sha256": digest,
+            "text": text,
+        })
+
+    class BillingFailureAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            with lock:
+                calls += 1
+            return SimpleNamespace(
+                success=False,
+                failure_kind="billing_error",
+                error="上游额度或计费拒绝 (HTTP 402)",
+            )
+
+    diagnostics: dict[str, int] = {}
+    with pytest.raises(SourceContextError, match="402"):
+        compact_source_context(
+            BillingFailureAgent(),
+            {"coverage_complete": True, "source_chunks": chunks},
+            ctx=None,
+            diagnostics=diagnostics,
+        )
+
+    assert 1 <= calls <= 4
+    assert diagnostics["model_calls"] == calls
 
 
 def test_truncated_multi_source_context_is_split_before_retrying_model(monkeypatch) -> None:

@@ -1291,6 +1291,87 @@ def test_grounding_does_not_allow_arbitrary_attributes_from_imported_stdlib() ->
 
 
 @pytest.mark.parametrize(
+    ("test_source", "expected_issues"),
+    [
+        ("from urllib.error import Request\n", ["Request"]),
+        ("from urllib.request import DefinitelyNotAnExport\n", ["DefinitelyNotAnExport"]),
+        ("from urllib.error import HTTPError, URLError\n", []),
+        ("from urllib.request import Request\n", []),
+    ],
+    ids=["wrong-module-member", "missing-stdlib-member", "valid-error-types", "valid-request-type"],
+)
+def test_grounding_checks_standard_library_from_import_members(test_source, expected_issues) -> None:
+    source_summary = {"source_chunks": [{"path": "main.py", "text": "def run(): return True\n"}]}
+    files = [{"path": "test_ai_imports.py", "content": test_source}]
+
+    assert _grounding_feedback(files, source_summary) == expected_issues
+
+
+def test_test_generator_corrects_a_standard_library_import_from_the_wrong_module(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    messages: list[str] = []
+    responses = [
+        {"files": [{"path": "blackbox.py", "content": "from urllib.error import Request\n"}]},
+        {"files": [{"path": "blackbox.py", "content": "from urllib.request import Request\n"}]},
+    ]
+
+    def call_json(message, **_kwargs):
+        messages.append(message)
+        return SimpleNamespace(success=True, data=responses.pop(0))
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="blackbox",
+        source_summary={
+            "source_chunks": [{"path": "app/main.py", "text": "def run(): return True\n"}],
+            "_compacted_source_context": {
+                "covered_source_ids": ["main-source"],
+                "source_summaries": [{"source_id": "main-source", "summary": "run 函数返回 True。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result == {"files": [{"path": "blackbox.py", "content": "from urllib.request import Request\n"}]}
+    assert len(messages) == 2
+    assert "Request" in messages[1]
+
+
+def test_test_generator_does_not_retry_a_billing_failure(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    calls = 0
+
+    def call_json(_message, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(
+            success=False,
+            failure_kind="billing_error",
+            error="provider response body must not be surfaced",
+        )
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="blackbox",
+        source_summary={
+            "source_chunks": [{"path": "app/main.py", "text": "def run(): return True\n"}],
+            "_compacted_source_context": {
+                "covered_source_ids": ["main-source"],
+                "source_summaries": [{"source_id": "main-source", "summary": "run 函数返回 True。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["failure_kind"] == "billing_error"
+    assert calls == 1
+    assert "402" in result["error"]
+    assert "provider response body" not in result["error"]
+
+
+@pytest.mark.parametrize(
     ("test_source", "expected_issue"),
     [
         ("inspect.signature()\n", "signature"),

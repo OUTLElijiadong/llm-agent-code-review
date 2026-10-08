@@ -41,6 +41,14 @@ _SOURCE_CONTEXT_SYSTEM_PROMPT = (
 class SourceContextError(ValueError):
     """源码上下文未完整覆盖，禁止把局部材料当完整项目。"""
 
+    failure_kind = "source_context"
+
+
+class NonRetryableModelError(SourceContextError):
+    """模型明确拒绝计费/额度请求时，停止重试和排队中的压缩任务。"""
+
+    failure_kind = "billing_error"
+
 
 def _source_quote_hint(text: str) -> str:
     """Choose a short exact source span for the model to echo as provenance."""
@@ -187,6 +195,8 @@ def _context_call(
             continue
         if not getattr(result, "success", False) or not isinstance(getattr(result, "data", None), dict):
             failure_kind = str(getattr(result, "failure_kind", "") or "")
+            if failure_kind == "billing_error":
+                raise NonRetryableModelError("模型服务计费或额度拒绝 (HTTP 402)")
             last_error = f"源码分片压缩失败: {str(getattr(result, 'error', '无有效 JSON'))[:160]}"
             if failure_kind == "output_truncated":
                 saw_output_truncated = True
@@ -533,6 +543,7 @@ def compact_source_context(
     call_counter = [0]
     call_counter_lock = threading.Lock()
     diagnostics_lock = threading.Lock()
+    abort_event = threading.Event()
     compression_ctx = _serialize_model_guard(ctx)
     protected_fact_ledger = [
         {"source_id": source_id, "fact": fact}
@@ -546,13 +557,20 @@ def compact_source_context(
         *,
         protected_facts: list[tuple[str, str]] | None = None,
     ) -> str:
-        if deadline is None:
-            _COMPACTION_MODEL_SEMAPHORE.acquire()
-        else:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not _COMPACTION_MODEL_SEMAPHORE.acquire(timeout=remaining):
-                raise SourceContextError("源码上下文压缩超过时间预算")
+        acquired = False
         try:
+            while not abort_event.is_set():
+                timeout = 0.1
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise SourceContextError("源码上下文压缩超过时间预算")
+                    timeout = min(timeout, remaining)
+                acquired = _COMPACTION_MODEL_SEMAPHORE.acquire(timeout=timeout)
+                if acquired:
+                    break
+            if abort_event.is_set():
+                raise NonRetryableModelError("模型服务计费或额度拒绝 (HTTP 402)，已停止剩余源码压缩请求")
             return _context_call(
                 agent,
                 source_ids,
@@ -563,8 +581,12 @@ def compact_source_context(
                 call_counter=call_counter,
                 call_counter_lock=call_counter_lock,
             )
+        except NonRetryableModelError:
+            abort_event.set()
+            raise
         finally:
-            _COMPACTION_MODEL_SEMAPHORE.release()
+            if acquired:
+                _COMPACTION_MODEL_SEMAPHORE.release()
             if diagnostics is not None:
                 with call_counter_lock:
                     model_calls = call_counter[0]

@@ -4005,6 +4005,7 @@ def _generate_agent_test_cases(
             "contract_rejected": "用例未通过执行前契约校验",
             "empty_generation": "模型未生成用例",
             "generation_failed": "用例生成未完成",
+            "billing_error": "模型服务计费或额度拒绝 (HTTP 402)",
         }
         failure_stages: list[str] = []
         from app.agents.source_context import SourceContextError, compact_source_context
@@ -4024,6 +4025,7 @@ def _generate_agent_test_cases(
                 summary["_compacted_source_context"] = compacted
         except SourceContextError as exc:
             summary["_source_context_error"] = str(exc)
+            failure_kind = str(getattr(exc, "failure_kind", "source_context") or "source_context")
             _append_event(
                 db,
                 environment,
@@ -4031,7 +4033,7 @@ def _generate_agent_test_cases(
                 "agent_tests",
                 f"动态测试未执行：源码上下文压缩未能完整核验 ({str(exc)[:140]})",
                 {
-                    "failure_kind": "source_context",
+                    "failure_kind": failure_kind,
                     "source_file_count": summary.get("source_file_count"),
                     "source_chunk_count": summary.get("source_chunk_count"),
                     "source_sha256": summary.get("source_archive_sha256"),
@@ -4100,7 +4102,18 @@ def _generate_agent_test_cases(
                     environment,
                     "progress",
                     "agent_tests",
-                    f"第 {generation_round} 轮动态用例未形成可注入文件（{failure_labels[failure_kind]}）,已反馈重试: {feedback[:120]}",
+                    (
+                        f"第 {generation_round} 轮动态用例未形成可注入文件（{failure_labels[failure_kind]}）,"
+                        + (
+                            f"生成器已完成纠错尝试，停止相同源码的外层重试: {feedback[:120]}"
+                            if failure_kind == "grounding_rejected"
+                            else (
+                                f"上游计费或额度拒绝，停止模型重试: {feedback[:120]}"
+                                if failure_kind == "billing_error"
+                                else f"已反馈重试: {feedback[:120]}"
+                            )
+                        )
+                    ),
                     {
                         "generation_round": generation_round,
                         "failure_kind": failure_kind,
@@ -4108,6 +4121,8 @@ def _generate_agent_test_cases(
                     },
                 )
                 db.commit()
+                if failure_kind in {"grounding_rejected", "billing_error"}:
+                    break
                 continue
             issues = _generated_test_contract_issues(files, language)
             if not issues:
@@ -4145,11 +4160,12 @@ def _generate_agent_test_cases(
             environment,
             "progress",
             "agent_tests",
-            "动态用例连续 3 轮后仍未形成可执行文件（最后原因："
+            f"动态用例在 {generation_round} 轮后仍未形成可执行文件（最后原因："
             + failure_labels[failure_stages[-1] if failure_stages else "generation_failed"]
             + "）,本轮回退到确定性测试",
             {
                 "failure_kinds": failure_stages,
+                "attempts": generation_round,
                 "issues": [str(summary.get("previous_generation_feedback") or "生成失败")],
             },
         )

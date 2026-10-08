@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import json
 import re
 import time
@@ -566,6 +567,20 @@ def _grounding_feedback(
         root = module.split(".", 1)[0]
         return root in _STDLIB_MODULES and root not in source_modules
 
+    def stdlib_member_exists(module: str, name: str) -> bool:
+        """核验标准库 from-import 符号，兼容包通过子模块导出的成员。"""
+        try:
+            imported_module = importlib.import_module(module)
+        except Exception:  # noqa: BLE001 - 无法解析的标准库导入不能视为已验证
+            return False
+        if hasattr(imported_module, name):
+            return True
+        try:
+            importlib.import_module(f"{module}.{name}")
+        except Exception:  # noqa: BLE001 - from package import name 可能绑定子模块
+            return False
+        return True
+
     module_exports: dict[str, set[str]] = {}
 
     def module_name_for_path(path: str) -> str | None:
@@ -1009,6 +1024,11 @@ def _grounding_feedback(
                     if not is_stdlib_module(module) and module not in source_modules and module not in source_imports:
                         candidates.add(module)
                     if is_stdlib_module(module):
+                        unsupported_imports.update(
+                            alias.name
+                            for alias in node.names
+                            if alias.name != "*" and not stdlib_member_exists(module, alias.name)
+                        )
                         continue
                     for alias in node.names:
                         if alias.name == "*":
@@ -1229,6 +1249,8 @@ class TestCaseGeneratorAgent(BaseAgent):
                 )
                 if getattr(agent_result, "success", False):
                     break
+                if getattr(agent_result, "failure_kind", "") == "billing_error":
+                    return _generation_error("模型服务计费或额度拒绝 (HTTP 402)", "billing_error")
                 last_error = str(getattr(agent_result, "error", "生成失败"))[:300]
                 if getattr(agent_result, "failure_kind", "") == "output_truncated":
                     if truncation_retried:
