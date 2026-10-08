@@ -1,36 +1,50 @@
 {
-  "recorded_at_utc": "2026-10-08T18:36:17Z",
+  "recorded_at_utc": "2026-10-08T18:42:29Z",
   "production": {
     "version": "4.0.97",
     "release_sha": "c1243cf70b891fee18cb883b3b3b64523ed4679a",
     "healthz": "HTTP 200; version and release match",
     "readyz": "HTTP 200; ready; version and release match",
     "host_disk": {
-      "captured_at_utc": "2026-10-08T18:31:53Z",
+      "captured_at_utc": "2026-10-08T18:42:07Z",
       "filesystem": "/dev/vda1",
       "total_bytes": 193205350400,
-      "used_bytes": 182009430016,
-      "available_bytes": 11195920384,
+      "used_bytes": 182074552320,
+      "available_bytes": 11130798080,
       "use_percent": 95,
       "deploy_minimum_free_bytes": 12884901888,
-      "shortfall_bytes": 1688981504,
-      "ops_check": "2026-10-08T18:32:15Z: status=error; can_continue=false; blocking_checks=[disk]; publish/write prohibited",
+      "shortfall_bytes": 1754103808,
+      "ops_check": "2026-10-08T18:42:29Z: status=error; can_continue=false; blocking_checks=[disk]; release, containers, backup checks, Alembic and HTTPS ok",
       "previous_snapshot": {
-        "captured_at_utc": "2026-10-08T18:08:56Z",
-        "used_bytes": 181108674560,
-        "available_bytes": 12096675840,
-        "use_percent": 94,
-        "observed_growth_bytes": 900755456,
-        "elapsed_seconds": 1377,
-        "growth_source": "Pending read-only host investigation"
+        "captured_at_utc": "2026-10-08T18:37:06Z",
+        "used_bytes": 182050664448,
+        "available_bytes": 11154685952,
+        "use_percent": 95,
+        "additional_used_bytes_by_18_42_07": 23887872,
+        "growth_source": "No additional attribution was made for this short interval. The earlier 18:08:56–18:31:53 increase was mostly explained by a scheduled backup; residual 78573568 bytes remains unattributed."
       }
+    },
+    "post_18_31_53_growth": {
+      "window_start_utc": "2026-10-08T18:31:53Z",
+      "window_end_utc": "2026-10-08T18:42:07Z",
+      "used_growth_bytes": 65122304,
+      "attribution": "Unattributed; this is separate from the 78573568-byte residual in the earlier 18:08:56–18:31:53 window."
     },
     "approved_cleanup_preview": {
       "captured_at_utc": "2026-10-08T18:18:13Z",
       "command": "cleanup.sh --keep-release-images 2 --keep-release-states 10 --cache-until 168h",
       "unprotected_prism_release_tags_found": 0,
       "applied": false,
-      "note": "Current, previous, and two most recent backend/frontend release tags were protected. No broader cache cleanup was applied."
+      "note": "Current, previous, and two most recent backend/frontend release tags were protected. No unprotected Prism release tags were found. No cache cleanup was applied."
+    },
+    "buildkit_cache_readonly_inspection": {
+      "tool": "docker buildx du",
+      "records": 170,
+      "oldest_last_access_age": "3 days",
+      "estimated_reclaimable_over_168h_bytes": 0,
+      "format_flag_supported": false,
+      "is_prune_dry_run": false,
+      "prune_executed": false
     },
     "candidate_deployed": false,
     "disk_growth_investigation": {
@@ -49,7 +63,15 @@
       "unattributed_residual_bytes": 78573568,
       "short_sample_utc": "2026-10-08T18:35:23Z to 2026-10-08T18:35:43Z",
       "short_sample_used_growth_bytes": 40960,
-      "limits": "Existing database file mtimes changed but file birth times predate the window and no baseline sizes are available; no attribution made. No logs/backups were read, and no files were deleted or altered. Backup retention configuration check pending."
+      "latest_short_interval_utc": "2026-10-08T18:37:06Z to 2026-10-08T18:42:07Z",
+      "latest_short_interval_used_growth_bytes": 23887872,
+      "limits": "Existing database file mtimes changed but file birth times predate the window and no baseline sizes are available; no attribution made. No backup contents were read, and no files were deleted or altered."
+    },
+    "backup_retention_source": {
+      "repository_default_days": 14,
+      "repository_daily_timer_local": "02:15",
+      "production_override": "No systemd EnvironmentFile, BACKUP_RETENTION_DAYS environment override, or --retention-days argument; production uses the 14-day script default. No secret values requested or recorded.",
+      "production_timer_local": "Daily at 02:15"
     }
   },
   "real_browser_sample": {
