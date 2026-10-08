@@ -1280,6 +1280,72 @@ def test_syntax_repair_round_writes_complete_reconstructed_file(db, monkeypatch)
         assert zf.namelist().count("main.php") == 1
 
 
+@pytest.mark.parametrize("failure_kind", ["usage_accounting_error", "billing_error"])
+def test_syntax_repair_round_preserves_nonretryable_model_failure(db, monkeypatch, failure_kind: str) -> None:
+    from app.services import sandbox_service
+
+    archive = _zip_with({"main.php": "<?php echo broken;\n"})
+    environment = authorized_sandbox_environment(
+        db,
+        public_id="sbx_repair_usage_error",
+        owner_id=7,
+        project_id=9,
+        language="php",
+        source_sha256="parent-sha",
+    )
+
+    class FakeRepair:
+        _api_key = "configured"
+
+        def repair(self, **_kwargs):
+            return {
+                "error": "用量审计提交失败",
+                "failure_kind": failure_kind,
+            }
+
+    monkeypatch.setattr(sandbox_service, "SyntaxRepairAgent", FakeRepair)
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda _db, agent, _user_id: agent)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *_args, **_kwargs: None)
+
+    result = sandbox_service._syntax_repair_round(
+        db,
+        environment,
+        archive,
+        [{"file": "main.php", "line": 1, "message": "unexpected token"}],
+    )
+
+    assert result == {
+        "error": "用量审计提交失败",
+        "failure_kind": failure_kind,
+    }
+
+
+def test_syntax_repair_wrapper_preserves_thrown_billing_failure(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.services import sandbox_service
+
+    events: list[tuple] = []
+
+    def throw_billing(*_args, **_kwargs):
+        error = RuntimeError("provider refused request")
+        error.failure_kind = "billing_error"
+        raise error
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", throw_billing)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    result = sandbox_service._syntax_repair_round(
+        SimpleNamespace(commit=lambda: None),
+        SimpleNamespace(owner_id=7, project_id=9, public_id="sbx_syntax_wrapper", language="php"),
+        _zip_with({"main.php": "<?php echo broken;\n"}),
+        [{"file": "main.php", "line": 1, "message": "unexpected token"}],
+    )
+
+    assert result["failure_kind"] == "billing_error"
+    assert events[-1][3] == "syntax_repair"
+    assert events[-1][5]["failure_kind"] == "billing_error"
+
+
 def test_syntax_repair_revision_config_binds_repair_to_next_worker_request() -> None:
     import json
 
@@ -1354,7 +1420,15 @@ def test_large_source_does_not_call_dynamic_test_agent_with_partial_context(db, 
     assert calls == []
 
 
-def test_grounding_rejection_stops_outer_generation_retries(db, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("failure_kind", "error_text"),
+    [
+        ("grounding_rejected", "生成测试引用了源码中不存在的符号: HTTPError"),
+        ("billing_error", "模型服务计费或额度拒绝 (HTTP 402)"),
+        ("usage_accounting_error", "用量审计提交失败，停止模型重发"),
+    ],
+)
+def test_non_retryable_generation_failures_stop_outer_retries(db, monkeypatch, failure_kind, error_text) -> None:
     from types import SimpleNamespace
 
     from app.services import sandbox_service
@@ -1387,8 +1461,8 @@ def test_grounding_rejection_stops_outer_generation_retries(db, monkeypatch) -> 
             nonlocal generation_calls
             generation_calls += 1
             return {
-                "error": "生成测试引用了源码中不存在的符号: HTTPError",
-                "failure_kind": "grounding_rejected",
+                "error": error_text,
+                "failure_kind": failure_kind,
             }
 
     monkeypatch.setattr(
@@ -1415,6 +1489,45 @@ def test_grounding_rejection_stops_outer_generation_retries(db, monkeypatch) -> 
     assert any("第 1 轮" in str(event) for event in events)
     assert "1 轮后仍未形成" in events[-1][4]
     assert events[-1][5]["attempts"] == 1
+
+
+@pytest.mark.parametrize("stage", ["agent_tests", "deploy_verify"])
+def test_sandbox_model_wrapper_preserves_thrown_nonretryable_failure(monkeypatch, stage: str) -> None:
+    from types import SimpleNamespace
+
+    from app.services import sandbox_service
+
+    archive = _zip_with({"main.py": "print('ok')\n"})
+    summary = _source_summary_for_agent_tests(archive, "python")
+    environment = SimpleNamespace(
+        public_id=f"sbx_wrapper_{stage}", owner_id=7, project_id=9,
+        agent_config_json="{}", test_mode="blackbox",
+    )
+    events: list[tuple] = []
+
+    def throw_billing(*_args, **_kwargs):
+        error = RuntimeError("provider refused request")
+        error.failure_kind = "billing_error"
+        raise error
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", throw_billing)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
+    db = SimpleNamespace(commit=lambda: None)
+
+    if stage == "agent_tests":
+        result = sandbox_service._generate_agent_test_cases(
+            db, environment, archive, "python", "blackbox", source_summary=summary,
+        )
+    else:
+        result = sandbox_service._generate_deployment_patch(
+            db, environment, archive, "python", source_summary=summary,
+        )
+
+    assert result is None
+    assert summary["_ai_model_stop_reason"]["failure_kind"] == "billing_error"
+    assert events[-1][3] == stage
+    assert events[-1][5]["failure_kind"] == "billing_error"
 
 
 def test_generate_deployment_patch_uses_agent_plan(db, monkeypatch) -> None:
@@ -1525,10 +1638,16 @@ def test_deployment_and_test_agents_share_one_verified_source_compaction(db, mon
     assert received_summary["_compacted_source_context"] == summary["_compacted_source_context"]
 
 
-def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_event_kind"),
+    [("source_context", "source_context"), ("usage_accounting_error", "usage_accounting_error")],
+)
+def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(
+    db, monkeypatch, failure_kind, expected_event_kind
+) -> None:
     from app.agents import deployment_coordinator_agent as deploy_module
     from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
-    from app.agents.source_context import SourceContextError
+    from app.agents.source_context import NonRetryableModelError, SourceContextError
     from app.services import sandbox_service
 
     environment = authorized_sandbox_environment(
@@ -1547,6 +1666,11 @@ def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monk
     def compact(*_args, **_kwargs):
         nonlocal calls
         calls += 1
+        if failure_kind == "usage_accounting_error":
+            raise NonRetryableModelError(
+                "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止压缩",
+                failure_kind=failure_kind,
+            )
         raise SourceContextError("源码上下文压缩超过时间预算")
 
     def configure(_db, agent, _user_id):
@@ -1556,7 +1680,8 @@ def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monk
     monkeypatch.setattr(deploy_module, "compact_source_context", compact)
     monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
     monkeypatch.setattr(sandbox_service, "configure_subagent", configure)
-    monkeypatch.setattr(sandbox_service, "_append_event", lambda *_a, **_k: None)
+    events: list[tuple] = []
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_k: events.append(args))
     monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
     monkeypatch.setattr(
         DeploymentCoordinatorAgent,
@@ -1565,7 +1690,7 @@ def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monk
     )
 
     class FakeTestGenerator:
-        _api_key = ""
+        _api_key = "configured"
 
         def generate(self, **_kwargs):
             pytest.fail("test generation must stop after incomplete shared context")
@@ -1583,7 +1708,86 @@ def test_failed_shared_source_compaction_is_not_repeated_for_test_agent(db, monk
 
     assert result is None
     assert calls == 1
-    assert summary["_source_context_error"] == "源码上下文未完整覆盖: 源码上下文压缩超过时间预算"
+    assert summary["_source_context_failure_kind"] == expected_event_kind
+    assert events[-1][5]["failure_kind"] == expected_event_kind
+    if failure_kind == "source_context":
+        assert summary["_source_context_error"] == "源码上下文未完整覆盖: 源码上下文压缩超过时间预算"
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error", "thrown_billing_error"])
+def test_nonretryable_deployment_model_failure_blocks_later_test_generation(
+    db, monkeypatch, failure_kind
+) -> None:
+    from types import SimpleNamespace
+
+    from app.agents import deployment_coordinator_agent as deploy_module
+    from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
+    from app.services import sandbox_service
+    from app.services.ai_usage_context import UsageAccountingError
+
+    environment = authorized_sandbox_environment(
+        db,
+        id=1,
+        public_id=f"sbx_deploy_{failure_kind}",
+        project_id=1,
+        owner_id=1,
+        test_mode="blackbox",
+        language="php",
+    )
+    archive = _zip_with({"src/main.php": "<?php echo 'ok'; ?>"})
+    summary = _source_summary_for_agent_tests(archive, "php")
+    compaction_calls = 0
+    events: list[tuple] = []
+
+    def compact(_agent, source_summary, **_kwargs):
+        nonlocal compaction_calls
+        compaction_calls += 1
+        return {
+            "covered_source_ids": [item["source_id"] for item in source_summary["source_chunks"]],
+            "source_summaries": [{"source_id": "all-source-summaries", "summary": "PHP 入口已核验。"}],
+            "protected_facts": [],
+            "source_archive_sha256": source_summary["source_archive_sha256"],
+        }
+
+    def configure(_db, agent, _user_id):
+        agent._api_key = "configured"
+        return agent
+
+    def fail_or_reject(*_args, **_kwargs):
+        if failure_kind == "usage_accounting_error":
+            raise UsageAccountingError("模型请求已执行，但用量审计事务提交失败；不能重发模型请求")
+        if failure_kind == "thrown_billing_error":
+            error = RuntimeError("provider response body must not be surfaced")
+            error.failure_kind = "billing_error"
+            raise error
+        return SimpleNamespace(success=False, failure_kind="billing_error", error="模型服务计费或额度拒绝")
+
+    monkeypatch.setattr(deploy_module, "compact_source_context", compact)
+    monkeypatch.setattr("app.agents.source_context.compact_source_context", compact)
+    monkeypatch.setattr(DeploymentCoordinatorAgent, "call_json", fail_or_reject)
+    monkeypatch.setattr(sandbox_service, "configure_subagent", configure)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_get_cached_agent_test_files", lambda _key: None)
+
+    class FakeTestGenerator:
+        _api_key = "configured"
+
+        def generate(self, **_kwargs):
+            pytest.fail("前序模型不可重试失败后不得再进入动态用例生成")
+
+    monkeypatch.setattr("app.agents.test_case_generator_agent.TestCaseGeneratorAgent", FakeTestGenerator)
+    sandbox_service._generate_deployment_patch(
+        db, environment, archive, "php", source_summary=summary
+    )
+    result = sandbox_service._generate_agent_test_cases(
+        db, environment, archive, "php", "blackbox", source_summary=summary
+    )
+
+    assert result is None
+    assert compaction_calls == 1
+    expected_failure_kind = "billing_error" if failure_kind == "thrown_billing_error" else failure_kind
+    assert summary["_source_context_failure_kind"] == expected_failure_kind
+    assert events[-1][5]["failure_kind"] == expected_failure_kind
 
 
 def test_deployment_coordinator_shares_deadline_with_final_model_call(monkeypatch) -> None:

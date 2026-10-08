@@ -109,6 +109,30 @@ def test_deployment_never_claims_complete_with_uncovered_source(monkeypatch) -> 
     assert "error" in result
 
 
+def test_deployment_preserves_usage_accounting_failure(monkeypatch) -> None:
+    from app.services.ai_usage_context import UsageAccountingError
+
+    agent = DeploymentCoordinatorAgent()
+    agent._api_key = "configured"
+
+    def fail_after_model_request(*_args, **_kwargs):
+        raise UsageAccountingError("模型请求已执行，但用量审计事务提交失败；不能重发模型请求")
+
+    monkeypatch.setattr(agent, "call_json", fail_after_model_request)
+    result = agent.plan(
+        language="python",
+        test_mode="blackbox",
+        source_summary={
+            "coverage_complete": True,
+            "source_chunks": [],
+            "_compacted_source_context": {"covered_source_ids": [], "source_summaries": []},
+        },
+    )
+
+    assert result["failure_kind"] == "usage_accounting_error"
+    assert "用量审计" in result["error"]
+
+
 def test_test_generator_never_calls_model_with_uncovered_source(monkeypatch) -> None:
     agent = CaseGeneratorAgent()
     calls: list[str] = []
@@ -1369,6 +1393,69 @@ def test_test_generator_does_not_retry_a_billing_failure(monkeypatch) -> None:
     assert calls == 1
     assert "402" in result["error"]
     assert "provider response body" not in result["error"]
+
+
+def test_test_generator_does_not_retry_thrown_billing_failure(monkeypatch) -> None:
+    agent = CaseGeneratorAgent()
+    calls = 0
+
+    def call_json(_message, **_kwargs):
+        nonlocal calls
+        calls += 1
+        error = RuntimeError("provider response body must not be surfaced")
+        error.failure_kind = "billing_error"
+        raise error
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="blackbox",
+        source_summary={
+            "source_chunks": [{"path": "app/main.py", "text": "def run(): return True\n"}],
+            "_compacted_source_context": {
+                "covered_source_ids": ["main-source"],
+                "source_summaries": [{"source_id": "main-source", "summary": "run 函数返回 True。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["failure_kind"] == "billing_error"
+    assert calls == 1
+    assert result["error"] == "模型服务计费或额度拒绝 (HTTP 402)"
+
+
+def test_test_generator_does_not_retry_after_usage_accounting_failure(monkeypatch) -> None:
+    import time
+
+    from app.services.ai_usage_context import UsageAccountingError
+
+    agent = CaseGeneratorAgent()
+    calls = 0
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    def call_json(_message, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise UsageAccountingError("模型请求已执行，但用量审计事务提交失败；不能重发模型请求")
+
+    monkeypatch.setattr(agent, "call_json", call_json)
+    result = agent.generate(
+        language="python",
+        test_mode="blackbox",
+        source_summary={
+            "source_chunks": [{"path": "app/main.py", "text": "def run(): return True\n"}],
+            "_compacted_source_context": {
+                "covered_source_ids": ["main-source"],
+                "source_summaries": [{"source_id": "main-source", "summary": "run 函数返回 True。"}],
+                "protected_facts": [],
+            },
+        },
+    )
+
+    assert result["failure_kind"] == "usage_accounting_error"
+    assert calls == 1
+    assert "用量审计" in result["error"]
 
 
 @pytest.mark.parametrize(

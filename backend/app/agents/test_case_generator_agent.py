@@ -17,7 +17,8 @@ from io import StringIO
 from typing import Any, Optional
 
 from app.agents.base import AgentContext, BaseAgent
-from app.agents.source_context import SourceContextError, compact_source_context
+from app.agents.source_context import NonRetryableModelError, SourceContextError, compact_source_context
+from app.services.ai_usage_context import UsageAccountingError
 
 MAX_FILES = 5
 MAX_FILE_BYTES = 60_000
@@ -1155,6 +1156,8 @@ class TestCaseGeneratorAgent(BaseAgent):
                     max_chars=40_000,
                 )
                 source_summary = {**source_summary, "_compacted_source_context": compacted}
+        except NonRetryableModelError as exc:
+            return _generation_error(str(exc), exc.failure_kind)
         except SourceContextError as exc:
             return _generation_error(f"源码上下文未完整覆盖: {exc}", "source_context")
         model_summary = dict(compacted)
@@ -1251,6 +1254,11 @@ class TestCaseGeneratorAgent(BaseAgent):
                     break
                 if getattr(agent_result, "failure_kind", "") == "billing_error":
                     return _generation_error("模型服务计费或额度拒绝 (HTTP 402)", "billing_error")
+                if getattr(agent_result, "failure_kind", "") == "usage_accounting_error":
+                    return _generation_error(
+                        "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止",
+                        "usage_accounting_error",
+                    )
                 last_error = str(getattr(agent_result, "error", "生成失败"))[:300]
                 if getattr(agent_result, "failure_kind", "") == "output_truncated":
                     if truncation_retried:
@@ -1266,7 +1274,20 @@ class TestCaseGeneratorAgent(BaseAgent):
                         "不得省略 JSON 结束符，不得输出解释文字；如果无法完成就返回完整 JSON error 字段。"
                     )
                     continue
+            except UsageAccountingError:
+                return _generation_error(
+                    "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止",
+                    "usage_accounting_error",
+                )
             except Exception as exc:  # noqa: BLE001 - 重试后仍失败由调用方降级
+                failure_kind = str(getattr(exc, "failure_kind", "") or "")
+                if failure_kind in {"billing_error", "usage_accounting_error"}:
+                    error_message = (
+                        "模型服务计费或额度拒绝 (HTTP 402)"
+                        if failure_kind == "billing_error"
+                        else "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止"
+                    )
+                    return _generation_error(error_message, failure_kind)
                 last_error = str(exc)[:300]
             if deadline is None:
                 _time.sleep(2.0)

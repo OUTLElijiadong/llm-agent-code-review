@@ -15,6 +15,15 @@ from app.agents.base import AgentContext, BaseAgent
 
 MAX_FILE_BYTES = 40_000  # 单次模型输入源码上限；超出时以唯一原文锚定补丁重建。
 MAX_FILES_PER_ROUND = 8  # 每轮最多修复文件数,控制成本与超时
+NON_RETRYABLE_MODEL_FAILURES = {"billing_error", "usage_accounting_error"}
+
+
+class _NonRetryableRepairError(RuntimeError):
+    """携带不可重试模型失败类型，以停止后续并行文件请求。"""
+
+    def __init__(self, message: str, *, failure_kind: str) -> None:
+        super().__init__(message)
+        self.failure_kind = failure_kind
 
 
 class SyntaxRepairAgent(BaseAgent):
@@ -78,6 +87,10 @@ class SyntaxRepairAgent(BaseAgent):
         """
         if language != "php" or not errors or not files:
             return {"error": "当前仅支持 PHP 语法修复"}
+        from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+        from app.services.ai_usage_context import UsageAccountingError
+
         # 大文件修复耗时,临时把单次模型超时提到 300s
         old_timeout = self._timeout
         self._timeout = max(float(old_timeout or 0), 300.0)
@@ -89,8 +102,6 @@ class SyntaxRepairAgent(BaseAgent):
                 by_file.setdefault(f, []).append(err)
         # 每个文件单独一次 LLM 调用,避免多文件输出超长被截断;
         # 文件间并发(上限 2)缩短整体修复耗时,同时避免触发模型限流。
-        from concurrent.futures import ThreadPoolExecutor
-
         def _repair_one(path: str, content: str) -> str | None:
             file_errors = by_file.get(path, [])
             if not file_errors:
@@ -126,6 +137,16 @@ class SyntaxRepairAgent(BaseAgent):
                 f"{output_contract}"
             )
             agent_result = self.call_json(user_message, ctx=ctx)
+            failure_kind = str(getattr(agent_result, "failure_kind", "") or "")
+            if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                fallback_message = (
+                    "模型服务计费或额度拒绝" if failure_kind == "billing_error"
+                    else "用量审计记录失败；停止后续模型请求"
+                )
+                raise _NonRetryableRepairError(
+                    str(getattr(agent_result, "error", None) or fallback_message),
+                    failure_kind=failure_kind,
+                )
             if not getattr(agent_result, "success", False):
                 return None
             data = agent_result.data if isinstance(agent_result.data, dict) else {}
@@ -156,25 +177,81 @@ class SyntaxRepairAgent(BaseAgent):
 
         cleaned: dict[str, str] = {}
         last_error = ""
+        non_retryable_error: dict[str, str] | None = None
         try:
-            with ThreadPoolExecutor(max_workers=min(2, len(files))) as pool:
-                futures = {
-                    pool.submit(copy_context().run, _repair_one, path, content): path
-                    for path, content in files.items()
-                }
-                for fut in futures:
-                    path = futures[fut]
+            file_iter = iter(files.items())
+            max_workers = min(2, len(files))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures: dict[Any, str] = {}
+
+                def _submit_next() -> bool:
                     try:
-                        repaired_content = fut.result()
-                    except Exception as exc:  # noqa: BLE001
-                        last_error = f"{path}: {str(exc)[:120]}"
-                        continue
-                    if repaired_content:
-                        cleaned[path] = repaired_content
-                    else:
-                        last_error = f"{path}: 未返回有效内容或补丁无法唯一定位"
+                        path, content = next(file_iter)
+                    except StopIteration:
+                        return False
+                    futures[pool.submit(copy_context().run, _repair_one, path, content)] = path
+                    return True
+
+                for _ in range(max_workers):
+                    _submit_next()
+
+                while futures:
+                    done, _pending = wait(futures, return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        path = futures.pop(fut)
+                        if fut.cancelled():
+                            continue
+                        try:
+                            repaired_content = fut.result()
+                        except (_NonRetryableRepairError, UsageAccountingError) as exc:
+                            if non_retryable_error is None:
+                                failure_kind = (
+                                    exc.failure_kind
+                                    if isinstance(exc, _NonRetryableRepairError)
+                                    else "usage_accounting_error"
+                                )
+                                fallback_message = (
+                                    "模型服务计费或额度拒绝" if failure_kind == "billing_error"
+                                    else "用量审计记录失败；停止后续模型请求"
+                                )
+                                non_retryable_error = {
+                                    "error": str(exc)[:300] or fallback_message,
+                                    "failure_kind": failure_kind,
+                                }
+                                # 已提交但尚未开始的 Future 可安全撤销；已经开始的调用
+                                # 保持收敛并等待完成，不再填充后续文件。
+                                for pending in futures:
+                                    pending.cancel()
+                            continue
+                        except Exception as exc:  # noqa: BLE001
+                            failure_kind = str(getattr(exc, "failure_kind", "") or "")
+                            if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                                if non_retryable_error is None:
+                                    fallback_message = (
+                                        "模型服务计费或额度拒绝" if failure_kind == "billing_error"
+                                        else "用量审计记录失败；停止后续模型请求"
+                                    )
+                                    non_retryable_error = {
+                                        "error": str(exc)[:300] or fallback_message,
+                                        "failure_kind": failure_kind,
+                                    }
+                                    for pending in futures:
+                                        pending.cancel()
+                                continue
+                            last_error = f"{path}: {str(exc)[:120]}"
+                            continue
+                        if repaired_content:
+                            cleaned[path] = repaired_content
+                        else:
+                            last_error = f"{path}: 未返回有效内容或补丁无法唯一定位"
+
+                    if non_retryable_error is None:
+                        while len(futures) < max_workers and _submit_next():
+                            pass
         finally:
             self._timeout = old_timeout
+        if non_retryable_error is not None:
+            return non_retryable_error
         if len(cleaned) != len(files):
             return {"error": last_error or "部分文件未修复，本轮不写回"}
         return {"files": cleaned}

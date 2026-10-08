@@ -19,6 +19,7 @@ from app.services import sandbox_service
 from app.services.sandbox_service import (
     _agent_test_cache_key,
     _generate_agent_test_cases,
+    _restore_nonretryable_model_stop_reason,
     heartbeat_and_recover_sandboxes,
 )
 
@@ -90,6 +91,56 @@ def _fake_generator(calls: list[list[dict[str, str]]]) -> type:
             }
 
     return FakeGenerator
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_model_failure_event_survives_database_session_restart(db, monkeypatch, failure_kind: str) -> None:
+    """A real dynamic-generation failure event restores the task fuse in a fresh ORM session."""
+    environment = _cache_environment(db)
+    archive = _zip_with({"main.py": "def run():\n    return True\n"})
+
+    class FailingGenerator:
+        _api_key = "configured"
+
+        def generate(self, **_kwargs):
+            return {
+                "error": "模型服务计费或用量审计失败",
+                "failure_kind": failure_kind,
+            }
+
+    monkeypatch.setattr("app.agents.test_case_generator_agent.TestCaseGeneratorAgent", FailingGenerator)
+    result = _generate_agent_test_cases(db, environment, archive, "python", "blackbox")
+    assert result is None
+
+    persisted_events = (
+        db.query(SandboxEvent)
+        .filter_by(environment_id=environment.id, stage="agent_tests")
+        .order_by(SandboxEvent.id.desc())
+        .all()
+    )
+    persisted_event = next(
+        (
+            event for event in persisted_events
+            if json.loads(event.payload_json or "{}").get("failure_kind") == failure_kind
+        ),
+        None,
+    )
+    assert persisted_event is not None, [
+        (event.message, json.loads(event.payload_json or "{}")) for event in persisted_events
+    ]
+    bind = db.get_bind()
+    db.close()
+    restarted_session = sandbox_service.sessionmaker(bind=bind, autoflush=False, expire_on_commit=False)()
+    try:
+        recovered_environment = restarted_session.get(SandboxEnvironment, environment.id)
+        reason = _restore_nonretryable_model_stop_reason(restarted_session, recovered_environment)
+    finally:
+        restarted_session.close()
+
+    assert reason == {
+        "failure_kind": failure_kind,
+        "message": "已从持久化沙箱事件恢复不可重试模型熔断",
+    }
 
 
 def test_generate_agent_tests_cache_hits_and_uses_archive_sha256(db, monkeypatch) -> None:

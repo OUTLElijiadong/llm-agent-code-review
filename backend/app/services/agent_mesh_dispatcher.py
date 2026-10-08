@@ -21,7 +21,7 @@ from app.models.agent_mesh import AgentMeshMessage
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.services import rbac_service
-from app.services.ai_usage_context import model_attribution, usage_context
+from app.services.ai_usage_context import UsageAccountingError, model_attribution, usage_context
 
 _scheduler = None
 
@@ -58,6 +58,30 @@ _PROTECTED_CODES = frozenset({"chat_assistant", "manager", "orchestrator"})
 _SANDBOX_FAILURE_STATES = frozenset({"failed", "blocked", "stopped", "expired"})
 _SANDBOX_POLL_SECONDS = 2.0
 _MAX_LINE_OFFSET = 10_000_000
+_NON_RETRYABLE_FAILURE_KINDS = frozenset({"billing_error", "usage_accounting_error"})
+
+
+def _known_non_retryable_failure_kind(value: Any) -> str:
+    kind = str(getattr(value, "failure_kind", "") or "").strip().lower()
+    if isinstance(value, dict):
+        kind = str(value.get("failure_kind") or "").strip().lower()
+        if kind not in _NON_RETRYABLE_FAILURE_KINDS:
+            errors = value.get("errors")
+            if isinstance(errors, list):
+                error_kind = next(
+                    (
+                        str(item.get("code") or "").strip().lower()
+                        for item in errors
+                        if isinstance(item, dict)
+                        and str(item.get("code") or "").strip().lower() in _NON_RETRYABLE_FAILURE_KINDS
+                    ),
+                    "",
+                )
+                if error_kind:
+                    kind = error_kind
+    if isinstance(value, UsageAccountingError):
+        return "usage_accounting_error"
+    return kind if kind in _NON_RETRYABLE_FAILURE_KINDS else ""
 
 
 def _validated_line_offset(value: Any) -> int:
@@ -172,6 +196,8 @@ def _as_mesh_result(result: AgentResult, *, action: str) -> dict[str, Any]:
             errors=[{"code": result.failure_kind, "finish_reason": result.finish_reason or None}],
         )
         failed["retryable"] = False
+        if result.failure_kind:
+            failed["failure_kind"] = result.failure_kind
         return failed
     if result.failure_kind:
         retryable = result.failure_kind in {
@@ -188,6 +214,7 @@ def _as_mesh_result(result: AgentResult, *, action: str) -> dict[str, Any]:
             }],
         )
         failed["retryable"] = retryable
+        failed["failure_kind"] = result.failure_kind
         return failed
     blocked = _result(
         "blocked",
@@ -1366,6 +1393,33 @@ def dispatch_once(*, limit: int = 4) -> dict[str, int]:
                     ).one()
                     with usage_context(int(user.id), model_attribution(source), db=db):
                         target_name, result = _handle(db, user, target_address, {**claimed, "user_id": user.id})
+                failure_kind = _known_non_retryable_failure_kind(result)
+                result_failed = str(result.get("status") or "").strip().lower() == "failed"
+                if failure_kind or result_failed:
+                    retryable = result.get("retryable")
+                    if not isinstance(retryable, bool):
+                        retryable = None
+                    completion = agent_mesh_service.complete_dispatch_message(
+                        db,
+                        user,
+                        message_id,
+                        target_address=target_address,
+                        target_name=target_name,
+                        lease_token=lease_token,
+                        success=False,
+                        summary=result,
+                        error=str(result.get("summary") or failure_kind),
+                        failure_kind=failure_kind,
+                        retryable=retryable,
+                    )
+                    stats["failed"] += 1
+                    if completion["status"] == "dead_letter" and failure_kind:
+                        logger.warning(
+                            "[agent-mesh-dispatcher] non-retryable failure message_id={} kind={}",
+                            message_id,
+                            failure_kind,
+                        )
+                    continue
                 completion = agent_mesh_service.complete_dispatch_message(
                     db,
                     user,
@@ -1384,6 +1438,7 @@ def dispatch_once(*, limit: int = 4) -> dict[str, int]:
                 db.rollback()
                 try:
                     target_name = CONTRACTS.get(target_address.split(":", 1)[1])
+                    failure_kind = _known_non_retryable_failure_kind(exc)
                     agent_mesh_service.complete_dispatch_message(
                         db,
                         user,
@@ -1392,8 +1447,14 @@ def dispatch_once(*, limit: int = 4) -> dict[str, int]:
                         target_name=getattr(target_name, "name", target_address),
                         lease_token=lease_token,
                         success=False,
-                        summary={"status": "failed", "summary": str(exc)},
+                        summary={
+                            "status": "failed",
+                            "summary": str(exc),
+                            **({"failure_kind": failure_kind} if failure_kind else {}),
+                        },
                         error=str(exc),
+                        failure_kind=failure_kind,
+                        retryable=False if failure_kind else None,
                     )
                 except Exception as completion_exc:  # noqa: BLE001
                     db.rollback()

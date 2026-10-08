@@ -14,6 +14,7 @@ from app.models.rbac import Role, UserRole
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshMessageIn
 from app.services import agent_mesh_dispatcher, agent_mesh_service
+from app.services.ai_usage_context import UsageAccountingError
 
 
 def test_orchestrator_is_a_protected_session_only_target():
@@ -39,6 +40,8 @@ def test_mesh_line_offset_accepts_supported_values(value):
         ("invalid_response", False),
         ("invalid_json", False),
         ("incomplete_response", False),
+        ("billing_error", False),
+        ("usage_accounting_error", False),
         ("transport_error", True),
     ],
 )
@@ -63,6 +66,18 @@ def test_unclassified_review_failure_is_not_replayed_as_same_source():
 
     assert mesh_result["status"] == "blocked"
     assert mesh_result["retryable"] is False
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_mesh_dispatch_prefers_canonical_nonretryable_error_over_unknown_top_level_kind(failure_kind):
+    result = {
+        "status": "failed",
+        "failure_kind": "model_failure",
+        "retryable": True,
+        "errors": [{"code": failure_kind}],
+    }
+
+    assert agent_mesh_dispatcher._known_non_retryable_failure_kind(result) == failure_kind
 
 
 def test_builtin_reviewer_receives_structured_retry_metadata_without_prompt_strategy(monkeypatch):
@@ -389,6 +404,290 @@ def test_terminal_failure_returns_one_task_error(tmp_path):
         assert len(replies) == 1
     finally:
         db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_non_retryable_failure_kind_is_preserved_and_dead_lettered_immediately(tmp_path, failure_kind):
+    engine, factory = _factory(tmp_path)
+    user, created = _seed(factory, _message(max_attempts=3))
+    db = factory()
+    try:
+        claimed = agent_mesh_service.claim_dispatch_message(
+            db, user, created["message_id"], target_address="agent:code_reviewer"
+        )
+        failed = agent_mesh_service.complete_dispatch_message(
+            db,
+            user,
+            created["message_id"],
+            target_address="agent:code_reviewer",
+            target_name="代码审查 Agent",
+            lease_token=claimed["lease_token"],
+            success=False,
+            summary={"status": "failed", "summary": "模型调用停止", "failure_kind": failure_kind},
+            error="模型调用停止",
+            failure_kind=failure_kind,
+        )
+
+        assert failed["status"] == "dead_letter"
+        assert failed["attempt_count"] == 1
+        assert failed["errors"][-1]["code"] == failure_kind
+        failed_row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert failed_row.next_attempt_at is None
+        reply = db.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).one()
+        assert reply.payload_json.find(failure_kind) >= 0
+        assert reply.errors_json.find(failure_kind) >= 0
+        events = db.query(AgentMeshMessageEvent).filter_by(message_id=created["message_id"]).all()
+        assert any(failure_kind in event.detail_json for event in events)
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_transient_failure_still_requeues_before_max_attempts(tmp_path):
+    engine, factory = _factory(tmp_path)
+    user, created = _seed(factory, _message(max_attempts=3))
+    db = factory()
+    try:
+        claimed = agent_mesh_service.claim_dispatch_message(
+            db, user, created["message_id"], target_address="agent:code_reviewer"
+        )
+        failed = agent_mesh_service.complete_dispatch_message(
+            db,
+            user,
+            created["message_id"],
+            target_address="agent:code_reviewer",
+            target_name="代码审查 Agent",
+            lease_token=claimed["lease_token"],
+            success=False,
+            summary={"status": "failed", "summary": "暂时网络异常"},
+            error="暂时网络异常",
+        )
+        assert failed["status"] == "queued"
+        assert failed["attempt_count"] == 1
+        row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.next_attempt_at is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_dispatch_once_keeps_non_retryable_handler_exception_without_requeue(
+    tmp_path, monkeypatch, failure_kind
+):
+    engine, factory = _factory(tmp_path)
+    db = factory()
+    user = User(id=7, username="owner", password="unused", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="admin",
+        session_key="session-a1",
+        trusted_source=True,
+        message=_message(max_attempts=3),
+    )
+    db.close()
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "SessionLocal", factory)
+
+    class TypedFailure(RuntimeError):
+        pass
+
+    def raise_failure(*_args):
+        if failure_kind == "usage_accounting_error":
+            raise UsageAccountingError("用量审计事务提交失败；不能重发模型请求")
+        exc = TypedFailure("模型服务计费或额度拒绝")
+        exc.failure_kind = failure_kind
+        raise exc
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", raise_failure)
+    stats = agent_mesh_dispatcher.dispatch_once(limit=1)
+
+    assert stats["failed"] == 1
+    verify = factory()
+    try:
+        row = verify.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.status == "dead_letter"
+        assert row.attempt_count == 1
+        assert any(item["code"] == failure_kind for item in agent_mesh_service._load(row.errors_json, []))
+        reply = verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).one()
+        assert agent_mesh_service._load(reply.payload_json, {})["failure_kind"] == failure_kind
+        assert agent_mesh_service._load(reply.errors_json, [])[0]["code"] == failure_kind
+    finally:
+        verify.close()
+        engine.dispose()
+
+
+def test_dispatch_once_still_requeues_unclassified_transient_exception(tmp_path, monkeypatch):
+    engine, factory = _factory(tmp_path)
+    db = factory()
+    user = User(id=7, username="owner", password="unused", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
+    request = _message(max_attempts=3)
+    request.idempotency_key = "dispatch-transient-exception"
+    created = agent_mesh_service.send_message(
+        db, user, surface="admin", session_key="session-a1", trusted_source=True, message=request
+    )
+    db.close()
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "SessionLocal", factory)
+
+    def raise_transient(*_args):
+        raise RuntimeError("暂时网络异常")
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", raise_transient)
+    stats = agent_mesh_dispatcher.dispatch_once(limit=1)
+
+    assert stats["failed"] == 1
+    verify = factory()
+    try:
+        row = verify.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.status == "queued"
+        assert row.attempt_count == 1
+        assert row.next_attempt_at is not None
+        assert verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).count() == 0
+    finally:
+        verify.close()
+        engine.dispose()
+
+
+def test_dispatch_once_requeues_returned_retryable_agent_failure(tmp_path, monkeypatch):
+    engine, factory = _factory(tmp_path)
+    db = factory()
+    user = User(id=7, username="owner", password="unused", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
+    request = _message(max_attempts=3)
+    request.idempotency_key = "dispatch-returned-transient-result"
+    created = agent_mesh_service.send_message(
+        db, user, surface="admin", session_key="session-a1", trusted_source=True, message=request
+    )
+    db.close()
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "SessionLocal", factory)
+    mesh_result = agent_mesh_dispatcher._as_mesh_result(
+        AgentResult(success=False, error="上游暂时不可用", failure_kind="transport_error"),
+        action="代码审查",
+    )
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", lambda *_args: ("代码审查 Agent", mesh_result))
+
+    stats = agent_mesh_dispatcher.dispatch_once(limit=1)
+
+    assert stats["failed"] == 1
+    verify = factory()
+    try:
+        row = verify.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.status == "queued"
+        assert row.attempt_count == 1
+        assert row.next_attempt_at is not None
+        assert verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.result"
+        ).count() == 0
+        assert verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).count() == 0
+    finally:
+        verify.close()
+        engine.dispose()
+
+
+def test_dispatch_once_dead_letters_returned_nonretryable_agent_failure(tmp_path, monkeypatch):
+    engine, factory = _factory(tmp_path)
+    db = factory()
+    user = User(id=7, username="owner", password="unused", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
+    request = _message(max_attempts=3)
+    request.idempotency_key = "dispatch-returned-nonretryable-result"
+    created = agent_mesh_service.send_message(
+        db, user, surface="admin", session_key="session-a1", trusted_source=True, message=request
+    )
+    db.close()
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "SessionLocal", factory)
+    mesh_result = agent_mesh_dispatcher._as_mesh_result(
+        AgentResult(success=False, error="输出已按领域规则压缩但仍不完整", failure_kind="output_truncated"),
+        action="代码审查",
+    )
+    monkeypatch.setattr(agent_mesh_dispatcher, "_handle", lambda *_args: ("代码审查 Agent", mesh_result))
+
+    stats = agent_mesh_dispatcher.dispatch_once(limit=1)
+
+    assert stats["failed"] == 1
+    verify = factory()
+    try:
+        row = verify.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.status == "dead_letter"
+        assert row.attempt_count == 1
+        assert verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.result"
+        ).count() == 0
+        reply = verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).one()
+        assert agent_mesh_service._load(reply.payload_json, {})["status"] == "failed"
+    finally:
+        verify.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_dispatch_once_dead_letters_explicit_non_retryable_agent_result(tmp_path, monkeypatch, failure_kind):
+    engine, factory = _factory(tmp_path)
+    db = factory()
+    user = User(id=7, username="owner", password="unused", role="admin", status=1)
+    db.add(user)
+    db.commit()
+    agent_mesh_service.heartbeat(db, user, surface="admin", session_key="session-a1", title="来源会话")
+    request = _message(max_attempts=3)
+    request.idempotency_key = f"dispatch-nonretryable-result-{failure_kind}"
+    created = agent_mesh_service.send_message(
+        db, user, surface="admin", session_key="session-a1", trusted_source=True, message=request
+    )
+    db.close()
+
+    monkeypatch.setattr(agent_mesh_dispatcher, "SessionLocal", factory)
+    monkeypatch.setattr(
+        agent_mesh_dispatcher,
+        "_handle",
+        lambda *_args: ("代码审查 Agent", {
+            "status": "failed",
+            "summary": "模型调用停止",
+            "failure_kind": failure_kind,
+            "errors": [{"code": failure_kind}],
+            "retryable": False,
+        }),
+    )
+    stats = agent_mesh_dispatcher.dispatch_once(limit=1)
+
+    assert stats["failed"] == 1
+    verify = factory()
+    try:
+        row = verify.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert row.status == "dead_letter"
+        assert row.attempt_count == 1
+        assert any(item["code"] == failure_kind for item in agent_mesh_service._load(row.errors_json, []))
+        reply = verify.query(AgentMeshMessage).filter_by(
+            correlation_id=created["message_id"], message_type="task.error"
+        ).one()
+        assert agent_mesh_service._load(reply.payload_json, {})["failure_kind"] == failure_kind
+        assert agent_mesh_service._load(reply.errors_json, [])[0]["code"] == failure_kind
+    finally:
+        verify.close()
         engine.dispose()
 
 

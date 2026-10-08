@@ -70,7 +70,13 @@ from app.services import (
     strategy_learning_service,
 )
 from app.services.agent_model_service import configure_subagent
-from app.services.ai_usage_context import ATTRIBUTION_FIELDS, current_attribution, model_attribution, usage_context
+from app.services.ai_usage_context import (
+    ATTRIBUTION_FIELDS,
+    UsageAccountingError,
+    current_attribution,
+    model_attribution,
+    usage_context,
+)
 from app.services.project_member_service import (
     get_visible_project_ids,
     require_project_access,
@@ -82,6 +88,7 @@ from app.utils.public_http import pin_public_http_url
 
 LANGUAGES = ("python", "node", "java", "go", "php")
 MODES = ("whitebox", "blackbox", "combined", "deploy")
+NON_RETRYABLE_MODEL_FAILURES = frozenset({"billing_error", "usage_accounting_error"})
 ACTIVE_STATES = ("queued", "recovering", "dispatching", "running", "finalizing", "ready", "stopping")
 TERMINAL_STATES = ("succeeded", "failed", "blocked", "stopped", "expired")
 PREVIEW_COOKIE_NAME = "prism_sandbox_preview"
@@ -93,6 +100,13 @@ _IMAGE_REFS = {
     "go": "prism-sandbox-go:1.23",
     "php": "prism-sandbox-php:8.3",
 }
+
+
+def _nonretryable_model_failure_kind(error: BaseException) -> str:
+    if isinstance(error, UsageAccountingError):
+        return "usage_accounting_error"
+    failure_kind = str(getattr(error, "failure_kind", "") or "").strip().lower()
+    return failure_kind if failure_kind in NON_RETRYABLE_MODEL_FAILURES else ""
 _PROJECT_LANGUAGE_TO_RUNTIME = {
     "python": "python",
     "py": "python",
@@ -3940,14 +3954,26 @@ def _generate_agent_test_cases(
         )
         prior_context_error = str(summary.get("_source_context_error") or "").strip()
         if prior_context_error:
+            prior_failure_kind = str(
+                summary.get("_source_context_failure_kind") or "source_context"
+            ).strip() or "source_context"
+            if prior_failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                summary["_ai_model_stop_reason"] = {
+                    "failure_kind": prior_failure_kind,
+                    "message": prior_context_error[:300],
+                }
             _append_event(
                 db,
                 environment,
                 "progress",
                 "agent_tests",
-                f"动态测试未执行：共享源码上下文未通过完整性核验 ({prior_context_error[:140]})",
+                (
+                    f"动态测试未执行：共享源码上下文未通过完整性核验 ({prior_context_error[:140]})"
+                    if prior_failure_kind == "source_context"
+                    else f"动态测试未执行：前序模型阶段不可重试，已阻止重复请求 ({prior_context_error[:140]})"
+                ),
                 {
-                    "failure_kind": "source_context",
+                    "failure_kind": prior_failure_kind,
                     "source_file_count": summary.get("source_file_count"),
                     "source_chunk_count": summary.get("source_chunk_count"),
                     "source_sha256": summary.get("source_archive_sha256"),
@@ -4006,6 +4032,7 @@ def _generate_agent_test_cases(
             "empty_generation": "模型未生成用例",
             "generation_failed": "用例生成未完成",
             "billing_error": "模型服务计费或额度拒绝 (HTTP 402)",
+            "usage_accounting_error": "模型已响应但用量审计提交失败",
         }
         failure_stages: list[str] = []
         from app.agents.source_context import SourceContextError, compact_source_context
@@ -4026,6 +4053,12 @@ def _generate_agent_test_cases(
         except SourceContextError as exc:
             summary["_source_context_error"] = str(exc)
             failure_kind = str(getattr(exc, "failure_kind", "source_context") or "source_context")
+            summary["_source_context_failure_kind"] = failure_kind
+            if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                summary["_ai_model_stop_reason"] = {
+                    "failure_kind": failure_kind,
+                    "message": str(exc)[:300],
+                }
             _append_event(
                 db,
                 environment,
@@ -4097,6 +4130,11 @@ def _generate_agent_test_cases(
                 failure_stages.append(failure_kind)
                 feedback = str(result_error or "生成结果为空")[:2000]
                 summary["previous_generation_feedback"] = feedback
+                if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                    summary["_ai_model_stop_reason"] = {
+                        "failure_kind": failure_kind,
+                        "message": feedback[:300],
+                    }
                 _append_event(
                     db,
                     environment,
@@ -4110,7 +4148,11 @@ def _generate_agent_test_cases(
                             else (
                                 f"上游计费或额度拒绝，停止模型重试: {feedback[:120]}"
                                 if failure_kind == "billing_error"
-                                else f"已反馈重试: {feedback[:120]}"
+                                else (
+                                    f"模型请求已发出但用量审计提交失败，停止重发: {feedback[:120]}"
+                                    if failure_kind == "usage_accounting_error"
+                                    else f"已反馈重试: {feedback[:120]}"
+                                )
                             )
                         )
                     ),
@@ -4121,7 +4163,7 @@ def _generate_agent_test_cases(
                     },
                 )
                 db.commit()
-                if failure_kind in {"grounding_rejected", "billing_error"}:
+                if failure_kind in {"grounding_rejected", "billing_error", "usage_accounting_error"}:
                     break
                 continue
             issues = _generated_test_contract_issues(files, language)
@@ -4174,6 +4216,23 @@ def _generate_agent_test_cases(
     except (ForbiddenError, NotFoundError):
         raise
     except Exception as exc:  # noqa: BLE001 - 生成失败不阻断原测试链
+        failure_kind = _nonretryable_model_failure_kind(exc)
+        if failure_kind:
+            if isinstance(source_summary, dict):
+                source_summary["_ai_model_stop_reason"] = {
+                    "failure_kind": failure_kind,
+                    "message": "动态测试阶段遇到不可重试模型错误；后续模型请求已停止",
+                }
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "agent_tests",
+                "动态测试生成遇到不可重试模型错误；已停止后续模型请求",
+                {"failure_kind": failure_kind},
+            )
+            db.commit()
+            return None
         _append_event(db, environment, "progress", "agent_tests", f"agent 测试用例生成异常: {str(exc)[:120]}")
         db.commit()
         return None
@@ -4225,8 +4284,15 @@ def _generate_deployment_patch(
             source_coverage = result.get("source_coverage")
             if isinstance(source_coverage, dict):
                 summary["_compacted_source_context"] = source_coverage
-            if result.get("failure_kind") == "source_context":
+            failure_kind = str(result.get("failure_kind") or "")
+            if failure_kind in {"source_context", "billing_error", "usage_accounting_error"}:
                 summary["_source_context_error"] = str(result.get("error") or "源码上下文未完整覆盖")
+                summary["_source_context_failure_kind"] = failure_kind
+            if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                summary["_ai_model_stop_reason"] = {
+                    "failure_kind": failure_kind,
+                    "message": str(result.get("error") or "不可重试的模型请求失败")[:300],
+                }
             diagnostics = result.get("source_context_diagnostics")
             diagnostics = diagnostics if isinstance(diagnostics, dict) else summary.get("_source_context_diagnostics", {})
             _append_event(
@@ -4277,6 +4343,25 @@ def _generate_deployment_patch(
     except (ForbiddenError, NotFoundError):
         raise
     except Exception as exc:  # noqa: BLE001 - 补全失败不阻断原测试链
+        failure_kind = _nonretryable_model_failure_kind(exc)
+        if failure_kind:
+            if isinstance(source_summary, dict):
+                source_summary["_ai_model_stop_reason"] = {
+                    "failure_kind": failure_kind,
+                    "message": "部署规划阶段遇到不可重试模型错误；后续模型请求已停止",
+                }
+                source_summary["_source_context_failure_kind"] = failure_kind
+                source_summary["_source_context_error"] = "部署规划模型请求不可重试"
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "deploy_verify",
+                "部署核验遇到不可重试模型错误；已停止后续模型请求",
+                {"failure_kind": failure_kind},
+            )
+            db.commit()
+            return None
         _append_event(db, environment, "progress", "deploy_verify", f"部署核验异常: {str(exc)[:120]}")
         db.commit()
         return None
@@ -5044,6 +5129,11 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
     failed_count = int(agent_tests.get("failed") or 0)
     coverage = _sandbox_verification_coverage(conclusion)
+    model_status = (
+        f"模型增强：因不可重试错误（{conclusion['ai_model_stop_reason'].get('failure_kind', 'unknown')}）已停止。\n\n"
+        if isinstance(conclusion.get("ai_model_stop_reason"), dict)
+        else ""
+    )
     report = (
         "## 总体结论\n\n"
         f"系统验证门禁：{coverage['verification_status']}。\n\n"
@@ -5052,7 +5142,8 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
         f"动态用例：生成 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。\n"
         f"确定性执行：{coverage['deterministic_status']}；AI 动态用例：{coverage['ai_dynamic_status']}；"
         f"黑盒路由：{coverage['blackbox_status']}。\n\n"
-        "## 问题清单\n\n"
+        + model_status
+        + "## 问题清单\n\n"
         + ("- 反编译或白盒执行未通过，详见执行日志与结构化证据。\n" if not passed else "- 未发现确定性执行失败。\n")
     )
     return _fact_gate_report(report, conclusion)
@@ -5078,28 +5169,70 @@ def _run_test_review_report(
         report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
             _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置，已使用确定性测试报告兜底")
+        elif isinstance(conclusion.get("ai_model_stop_reason"), dict):
+            stop_reason = conclusion["ai_model_stop_reason"]
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "multi_agent_review",
+                "本次任务存在不可重试模型错误，已跳过后续模型审查并生成确定性报告",
+                {
+                    "failure_kind": str(stop_reason.get("failure_kind") or "model_call_failed"),
+                },
+            )
         else:
             ctx = AgentContext(
                 user_id=environment.owner_id,
                 project_id=environment.project_id,
                 extra={"trace_id": environment.public_id, "before_model_call": _execution_model_guard(db, environment)},
             )
-            result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
-            ctx.extra["before_model_call"]()
-            if result.success:
-                data = result.data if isinstance(result.data, dict) else {}
-                candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
-                if candidate.strip():
-                    report_md = candidate
-                roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
-            else:
+            try:
+                result = agent.review(db, environment=environment, conclusion=conclusion, ctx=ctx)
+            except Exception as exc:
+                failure_kind = _nonretryable_model_failure_kind(exc)
+                if not failure_kind:
+                    raise
+                conclusion["ai_model_stop_reason"] = {
+                    "failure_kind": failure_kind,
+                    "message": "模型审查请求不可重试；已使用确定性报告并停止后续模型请求",
+                }
+                report_md = _build_deterministic_test_report(conclusion)
                 _append_event(
                     db,
                     environment,
                     "progress",
                     "multi_agent_review",
-                    f"多 Agent 测试审查未生成，已使用确定性报告兜底: {str(result.error)[:120]}",
+                    "模型审查请求不可重试，已使用确定性报告兜底",
+                    {"failure_kind": failure_kind},
                 )
+                db.commit()
+            else:
+                ctx.extra["before_model_call"]()
+                if result.success:
+                    data = result.data if isinstance(result.data, dict) else {}
+                    candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
+                    if candidate.strip():
+                        report_md = candidate
+                    roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
+                else:
+                    failure_kind = str(getattr(result, "failure_kind", "") or "")
+                    if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                        conclusion["ai_model_stop_reason"] = {
+                            "failure_kind": failure_kind,
+                            "message": "报告知识压缩或模型调用遇到不可重试错误；已使用确定性报告兜底",
+                        }
+                        report_md = _build_deterministic_test_report(conclusion)
+                    _append_event(
+                        db,
+                        environment,
+                        "progress",
+                        "multi_agent_review",
+                        f"多 Agent 测试审查未生成，已使用确定性报告兜底: {str(result.error)[:120]}",
+                        {"failure_kind": failure_kind} if failure_kind in NON_RETRYABLE_MODEL_FAILURES else None,
+                    )
+                    if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+                        db.commit()
         artifact = _persist_browser_artifact(
             db,
             environment,
@@ -5132,6 +5265,22 @@ def _run_test_review_report(
     except (ForbiddenError, NotFoundError):
         raise
     except Exception as exc:  # noqa: BLE001 - 审查增强失败不阻断测试结论
+        failure_kind = _nonretryable_model_failure_kind(exc)
+        if failure_kind:
+            conclusion["ai_model_stop_reason"] = {
+                "failure_kind": failure_kind,
+                "message": "测试报告审查遇到不可重试模型错误；后续模型请求已停止",
+            }
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "multi_agent_review",
+                "测试报告审查遇到不可重试模型错误；保留确定性执行结论",
+                {"failure_kind": failure_kind},
+            )
+            db.commit()
+            return None
         _append_event(db, environment, "progress", "multi_agent_review", f"多 Agent 测试审查异常: {str(exc)[:120]}")
         db.commit()
         return None
@@ -6021,6 +6170,36 @@ def _append_event(
     return event
 
 
+def _restore_nonretryable_model_stop_reason(
+    db: Session,
+    environment: SandboxEnvironment,
+) -> dict[str, str] | None:
+    """从持久化事件恢复任务级模型熔断，避免进程重启后重复付费请求。"""
+    if not getattr(environment, "id", None):
+        return None
+    model_stages = ("agent_tests", "deploy_verify", "syntax_repair", "multi_agent_review")
+    events = (
+        db.query(SandboxEvent)
+        .filter(
+            SandboxEvent.environment_id == environment.id,
+            SandboxEvent.stage.in_(model_stages),
+        )
+        .order_by(SandboxEvent.id.desc())
+        .all()
+    )
+    for event in events:
+        payload = _loads(event.payload_json, {})
+        if not isinstance(payload, dict):
+            continue
+        failure_kind = str(payload.get("failure_kind") or "")
+        if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+            return {
+                "failure_kind": failure_kind,
+                "message": "已从持久化沙箱事件恢复不可重试模型熔断",
+            }
+    return None
+
+
 def _emit(
     environment: SandboxEnvironment,
     type_: AgentEventType,
@@ -6619,6 +6798,19 @@ def _syntax_repair_round(
             ctx=ctx,
         )
         ctx.extra["before_model_call"]()
+        failure_kind = str(result.get("failure_kind") or "") if isinstance(result, dict) else ""
+        if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
+            error = str(result.get("error") or "不可重试的模型错误")[:300]
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "syntax_repair",
+                "语法修复遇到不可重试的模型失败，停止后续模型请求",
+                {"failure_kind": failure_kind},
+            )
+            db.commit()
+            return {"error": error, "failure_kind": failure_kind}
         repaired = result.get("files") if isinstance(result.get("files"), dict) else {}
         if not repaired:
             _append_event(
@@ -6702,7 +6894,36 @@ def _syntax_repair_round(
         }
     except (ForbiddenError, NotFoundError):
         raise
+    except UsageAccountingError:
+        _append_event(
+            db,
+            environment,
+            "progress",
+            "syntax_repair",
+            "模型请求已发出但用量审计提交失败，停止后续模型请求",
+            {"failure_kind": "usage_accounting_error"},
+        )
+        db.commit()
+        return {
+            "error": "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止",
+            "failure_kind": "usage_accounting_error",
+        }
     except Exception as exc:  # noqa: BLE001 - 修复失败不阻断原测试链
+        failure_kind = _nonretryable_model_failure_kind(exc)
+        if failure_kind:
+            _append_event(
+                db,
+                environment,
+                "progress",
+                "syntax_repair",
+                "语法修复遇到不可重试模型错误；已停止后续模型请求",
+                {"failure_kind": failure_kind},
+            )
+            db.commit()
+            return {
+                "error": "语法修复模型请求不可重试，已停止后续模型请求",
+                "failure_kind": failure_kind,
+            }
         _append_event(db, environment, "progress", "syntax_repair", f"语法修复异常: {str(exc)[:120]}")
         db.commit()
         return None
@@ -6858,6 +7079,7 @@ def _execute_environment(
         config = _loads(environment.agent_config_json, {})
         if not worker and not config.get("remote_only"):
             raise RuntimeError("Sandbox worker 已被删除")
+        ai_model_stop_reason = _restore_nonretryable_model_stop_reason(db, environment)
         environment.status = "dispatching"
         _append_event(db, environment, "progress", "executor", "独立执行器已接收固定测试配置")
         _commit_execution(db, environment_id, execution_token)
@@ -6920,7 +7142,7 @@ def _execute_environment(
                     "count": len(expected_agent_tests),
                     "source": "persisted_execution_snapshot",
                 }
-        elif worker and environment.purpose == "test":
+        elif worker and environment.purpose == "test" and ai_model_stop_reason is None:
             # 压缩、部署规划与动态用例共享一个时间预算，禁止各阶段分别重置超时。
             agent_context_deadline = time.monotonic() + int(
                 getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
@@ -6938,15 +7160,17 @@ def _execute_environment(
             if deploy_patch and deploy_patch.get("launch_script"):
                 effective_source = _inject_deployment_patch(effective_source, deploy_patch["launch_script"])
             # 2) agent 动态生成白盒/黑盒测试用例,注入 _agent_tests/ 后由沙箱 runner 确定性执行
-            agent_test_files = _generate_agent_test_cases(
-                db,
-                environment,
-                effective_source,
-                environment.language,
-                worker_mode,
-                deadline=agent_context_deadline,
-                source_summary=shared_source_summary,
-            )
+            agent_test_files = None
+            if not isinstance(shared_source_summary.get("_ai_model_stop_reason"), dict):
+                agent_test_files = _generate_agent_test_cases(
+                    db,
+                    environment,
+                    effective_source,
+                    environment.language,
+                    worker_mode,
+                    deadline=agent_context_deadline,
+                    source_summary=shared_source_summary,
+                )
             if agent_test_files:
                 expected_agent_tests = {
                     str(item.get("path") or "").strip()
@@ -6969,8 +7193,31 @@ def _execute_environment(
                     "count": 0,
                     "reason": "未生成可执行的 AI 动态测试用例；结果只覆盖确定性 runner 实际执行的检查。详情见 agent_tests/source_compaction 事件。",
                 }
+            stop_reason = shared_source_summary.get("_ai_model_stop_reason")
+            if isinstance(stop_reason, dict) and str(stop_reason.get("failure_kind") or "") in NON_RETRYABLE_MODEL_FAILURES:
+                ai_model_stop_reason = {
+                    "failure_kind": str(stop_reason.get("failure_kind")),
+                    "message": str(stop_reason.get("message") or "本次沙箱模型阶段遇到不可重试错误")[:300],
+                }
+                _append_event(
+                    db,
+                    environment,
+                    "progress",
+                    "agent_tests",
+                    "本次任务后续 AI 修复与多 Agent 报告已停止；继续运行确定性沙箱检查",
+                    ai_model_stop_reason,
+                )
+                db.commit()
             if effective_source != source_archive_base64:
                 effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
+        elif worker and environment.purpose == "test":
+            agent_test_generation = {
+                "status": "skipped",
+                "mode": worker_mode,
+                "count": 0,
+                "reason": "已从持久化事件恢复不可重试模型熔断；跳过新的 AI 规划与动态用例，继续确定性执行",
+                "failure_kind": ai_model_stop_reason["failure_kind"],
+            }
         if worker:
             max_repair_rounds = int(getattr(settings, "sandbox_max_repair_rounds", 2) or 2)
             while True:
@@ -7123,7 +7370,12 @@ def _execute_environment(
                         _commit_execution(db, environment_id, execution_token)
                     return
                 # ── 后端语法修复:白盒 php -l 报错时,LLM 修复文件后重跑(最多 max_repair_rounds 轮) ──
-                if environment.purpose == "test" and environment.language == "php" and repair_round < max_repair_rounds:
+                if (
+                    environment.purpose == "test"
+                    and environment.language == "php"
+                    and repair_round < max_repair_rounds
+                    and ai_model_stop_reason is None
+                ):
                     worker_concl = result.get("result") if isinstance(result.get("result"), dict) else result
                     wlogs = worker_concl.get("logs") if isinstance(worker_concl, dict) else None
                     log_text = str((wlogs or {}).get("text") or "")
@@ -7136,7 +7388,21 @@ def _execute_environment(
                             lint_errors,
                             parent_source_sha256=effective_sha,
                         )
-                        if repaired:
+                        if isinstance(repaired, dict) and str(repaired.get("failure_kind") or "") in NON_RETRYABLE_MODEL_FAILURES:
+                            ai_model_stop_reason = {
+                                "failure_kind": str(repaired.get("failure_kind")),
+                                "message": str(repaired.get("error") or "语法修复遇到不可重试的模型错误")[:300],
+                            }
+                            _append_event(
+                                db,
+                                environment,
+                                "progress",
+                                "syntax_repair",
+                                "本次任务后续 AI 修复与多 Agent 报告已停止；继续使用当前确定性执行结果",
+                                ai_model_stop_reason,
+                            )
+                            db.commit()
+                        elif repaired:
                             effective_source = repaired["source"]
                             effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
                             revision = repaired.get("repair_revision")
@@ -7448,6 +7714,8 @@ def _execute_environment(
             "agent_code": environment.agent_code,
             "source_provenance": _source_provenance(environment, worker_receipt),
         }
+        if ai_model_stop_reason is not None:
+            conclusion["ai_model_stop_reason"] = ai_model_stop_reason
         if agent_tests_result is not None:
             conclusion["agent_tests"] = agent_tests_result
             if isinstance(agent_tests_result.get("details"), dict) and agent_tests_result["details"]:

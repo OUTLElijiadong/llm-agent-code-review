@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from app.agents.base import AgentContext, BaseAgent
 from app.agents.source_context import SourceContextError, compact_source_context
+from app.services.ai_usage_context import UsageAccountingError
 
 MAX_LAUNCH_BYTES = 20_000
 
@@ -68,9 +69,11 @@ class DeploymentCoordinatorAgent(BaseAgent):
                 source_summary["_compacted_source_context"] = compacted
         except SourceContextError as exc:
             source_summary["_source_context_error"] = str(exc)
+            failure_kind = str(getattr(exc, "failure_kind", "source_context") or "source_context")
+            source_summary["_source_context_failure_kind"] = failure_kind
             return {
                 "error": f"源码上下文未完整覆盖: {exc}",
-                "failure_kind": "source_context",
+                "failure_kind": failure_kind,
                 "source_context_diagnostics": dict(diagnostics),
             }
         db_instruction = ""
@@ -97,10 +100,27 @@ class DeploymentCoordinatorAgent(BaseAgent):
         )
         try:
             agent_result = self.call_json(user_message, ctx=ctx, deadline_monotonic=deadline)
-        except Exception as exc:  # noqa: BLE001
+        except UsageAccountingError:
             return {
-                "error": str(exc)[:300],
-                "failure_kind": "model_call_failed",
+                "error": "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止",
+                "failure_kind": "usage_accounting_error",
+                "source_coverage": compacted,
+                "source_context_diagnostics": dict(diagnostics),
+            }
+        except Exception as exc:  # noqa: BLE001
+            failure_kind = str(getattr(exc, "failure_kind", "") or "")
+            if failure_kind in {"billing_error", "usage_accounting_error"}:
+                error = (
+                    "模型服务计费或额度拒绝 (HTTP 402)"
+                    if failure_kind == "billing_error"
+                    else "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止"
+                )
+            else:
+                failure_kind = "model_call_failed"
+                error = str(exc)[:300]
+            return {
+                "error": error,
+                "failure_kind": failure_kind,
                 "source_coverage": compacted,
                 "source_context_diagnostics": dict(diagnostics),
             }

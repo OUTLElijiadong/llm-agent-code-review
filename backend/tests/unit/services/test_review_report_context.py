@@ -499,6 +499,34 @@ def test_review_limits_total_knowledge_compaction_calls(monkeypatch) -> None:
     assert len(calls) == 12
 
 
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_knowledge_compaction_preserves_nonretryable_failure_kind(monkeypatch, failure_kind: str) -> None:
+    from app.services.ai_usage_context import UsageAccountingError
+
+    agent = ReporterAgent()
+    agent._api_key = "test-key"
+
+    def fail_role_call(*_args, **_kwargs):
+        if failure_kind == "usage_accounting_error":
+            raise UsageAccountingError("usage audit commit failed")
+        error = RuntimeError("provider rejected request")
+        error.failure_kind = failure_kind
+        raise error
+
+    monkeypatch.setattr(agent, "_role_call", fail_role_call)
+    with pytest.raises(reporter_module.KnowledgeReferenceError) as exc_info:
+        agent._compact_knowledge_source(
+            "a compact test knowledge source with enough content for processing",
+            "source-1",
+            "whitebox",
+            1,
+            None,
+            {"used": 0},
+        )
+
+    assert exc_info.value.failure_kind == failure_kind
+
+
 @pytest.mark.parametrize(
     ("attempts", "expected_retry_caps"),
     [(3, [2, 2, 2, 2]), (2, [2, 2, 2, 2, 2, 1])],

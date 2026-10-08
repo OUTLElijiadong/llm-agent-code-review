@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.services import agent_knowledge_service
+from app.services.ai_usage_context import UsageAccountingError
 
 # ── 四角色系统提示词 ──────────────────────────────────────────
 _WHITEBOX_PROMPT = (
@@ -217,9 +218,14 @@ class TestReviewReporterAgent(BaseAgent):
                     max_tokens=2048,
                 )
             except Exception as exc:
+                failure_kind = str(getattr(exc, "failure_kind", "") or "")
+                if isinstance(exc, UsageAccountingError):
+                    failure_kind = "usage_accounting_error"
+                if failure_kind not in {"billing_error", "usage_accounting_error"}:
+                    failure_kind = "knowledge_compaction_failed"
                 raise KnowledgeReferenceError(
                     f"{stage} 知识来源 {index} 片段 {part_index} 压缩调用异常",
-                    "knowledge_compaction_failed",
+                    failure_kind,
                 ) from exc
             finally:
                 self._max_retries = old_retries

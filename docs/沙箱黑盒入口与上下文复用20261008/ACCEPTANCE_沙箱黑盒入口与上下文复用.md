@@ -2,15 +2,23 @@
 
 ## 当前状态（2026-10-08）
 
-- 生产当前为 v4.0.95 / SHA `b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`；候选 v4.0.96 的代码与全量本地验证完成，尚未发布。
-- 已确认正式发布门禁未满足：根盘 94%，可用 `12,318,531,584` bytes（约 11.47 GiB），低于至少 12 GiB。按用户批准的清理预览移除 v4.0.91 的 backend/frontend 旧标签后，空间未显著增加；未运行 builder cache prune。
-- 活动运维/发布树是 `/opt/prism-releases/b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`。`/opt/code-review` 指向旧 v4.0.72 源目录；不能用其旧账本核验活动生产。活动 `ops-check` 的 release、容器、备份、迁移、HTTPS 均通过，整体 `degraded/can_continue=true`，磁盘 94% 是唯一降级项。
+- 生产当前为 v4.0.95 / SHA `b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`；v4.0.96 仍是候选，尚未发布。
+- 最新只读容量证据采集于 `2026-10-08T13:33:33Z`：根盘 95%，可用 `11,259,387,904` bytes；活动发布脚本门槛为 `12,884,901,888` bytes（12 GiB），短缺 `1,625,513,984` bytes（约 1.514 GiB）。按用户批准范围删除旧 Docker 发布镜像标签后，仍低于门槛；未清理 BuildKit 缓存。
+- 最新活动 `ops-check` 为 `status=error`、`can_continue=false`、`blocking_checks=["disk"]`。release/image/default env、backend/frontend、MySQL/Redis/ClamAV、备份校验、Alembic 062 与 HTTPS 均通过；磁盘余量是唯一阻断项。生产 `/healthz` 与 `/readyz` 为 HTTP 200，仍运行 v4.0.95。完整只读记录见本目录 `证据/v4096-发布阻断-20261008.md`。
 - 当前候选还没有生产验收。HTTP 402 是模型服务计费或额度拒绝，不能仅凭状态码认定余额归零。生产 AI 动态用例目前未生成，真实黑白盒整体尚未通过。
 
-## 验收范围
+## v4.0.96 候选最终复测
 
-- 当前生产：v4.0.94 / SHA `3ccd1c3d783b3c0bed24fe5bf4016beb72194beb`。
-- 当前候选：v4.0.95（精确来源引文提示；本地测试已完成，等待生产发布与原场景复测）。
+- 后端完整 `tests/unit`：`4606 passed, 6 skipped`，243.27 秒；6 项依赖本机 Redis，未运行。测试报告 944 条告警，主要为既有弃用与 pytest 收集告警。
+- 改动 Python 文件 Ruff、`compileall`、`git diff --check` 通过。全仓 Ruff 还报告 63 条未改文件 lint 问题，因此不把全仓 Ruff 标为通过。
+- 独立候选审查补充定向路径 `475 passed`，并验证用量记录并发样本；与全量单元套件属于候选代码证据，不是生产模型调用证据。
+- 生产磁盘发布门禁不通过且 `can_continue=false`。未运行生产 deploy、未做生产备份/恢复变更、未切换服务。旧镜像标签删除没有提供足够容量；未执行 BuildKit prune。
+- 未完成发布后 Safari/Chrome 点击验收，也未证明生产 AI 动态用例能生成并执行；此前黑白盒动态用例为 0 的生产结果仍只判部分通过。
+
+## 历史验收范围（v4.0.94 阶段）
+
+- 当时生产：v4.0.94 / SHA `3ccd1c3d783b3c0bed24fe5bf4016beb72194beb`。
+- 当时候选：v4.0.95（精确来源引文提示；本地测试已完成，等待生产发布与原场景复测）。
 - 生产复现任务：bWAPP / PHP 黑盒 `sbx_f55815302ddf42859d1c4291`，记录保留。
 - v4.0.90 修复后真实复测：bWAPP / PHP 黑盒 `sbx_f5aff86c030a4cceb61d516d`，记录保留。
 - v4.0.91 再复测：bWAPP / PHP 黑盒 `sbx_b0e1448463804dcea6a696f3`，记录保留。
@@ -124,10 +132,10 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 | `sbx_9b4a64d5566b4f4184740e91` | bWAPP / PHP 黑盒 | `/login.php` HTTP 200；确定性 runner exit 0；Worker cleanup 确认；AI 动态用例 0 / skipped | 部分通过，不是 AI 黑盒通过 |
 | `sbx_8eb995ad8a0d4b09b2fd0e0b` | bWAPP / PHP 白盒 | 确定性 runner exit 0；Worker cleanup 确认；AI 动态用例 0 / skipped | 部分通过，不是 AI 白盒通过 |
 | `sbx_35ef276ad6f340afb7906bf9` | bWAPP / PHP 黑盒重复 | `/login.php` HTTP 200；确定性 runner exit 0；Worker cleanup 确认；AI 动态用例 0 / skipped | 部分通过；与首个样本一致 |
-| `sbx_40a277fe7fe242648f5f0082` | Python 非 Web 样本 | 无 Web 入口；路由状态 0；runner exit 1；cleanup 确认 | 不适合作为 bWAPP 黑盒验收样本，单独记录失败 |
+| `sbx_40a277fe7fe242648f5f0082` | 额外无入口样本（语言待核） | 无 Web 入口候选；路由状态 0；runner exit 1；cleanup 确认 | 不适合作为 bWAPP 黑盒验收样本，单独记录失败；下载 JSON 未提供语言/runtime |
 
-生产 UI/事件观察到上游模型 HTTP 402。已下载的四份 JSON 结果不含该状态的逐任务原始 HTTP 关联，因此上述任务只据其自身结果字段判定；HTTP 402 作为模型服务计费/额度拒绝信号记录，不据此推断余额为零或把每个任务错误唯一归因于它。
+先前生产 UI/事件中有一次 HTTP 402 观察，但本地没有保存 event ID、采集时间或状态码原始回执。已下载的四份 JSON 结果不含该状态的逐任务关联，因此上述任务只据各自结果字段判定；402 仅作为未关联的计费/额度拒绝观察，不推断余额为零，也不将每个任务错误唯一归因于它。
 
-候选 v4.0.96 对 402 执行不可重试分类、压缩并发队列快速停止、测试生成内外层停止重试，并增加 Python 标准库 `from-import` 成员真实导入校验。先红后绿的针对性复现确认旧逻辑会重复调用及误放错误导入；修复后目标套件 357 通过。全量后端 `6619 passed, 6 skipped, 1196 warnings`；Python compileall、Ruff、发布脚本 `33/33`、前端 lint、Vitest `142 files / 1853 tests`、Vite `3742 modules` 构建均通过。上述都属于本地候选证据。
+候选 v4.0.96 对 402 执行不可重试分类、压缩并发队列快速停止、测试生成内外层停止重试，并增加 Python 标准库 `from-import` 成员真实导入校验。复核继续发现 PHP 并行语法修复会在账务失败后启动排队调用，Agent Mesh 会将文件读取账务错误重新排队，报告阶段账务异常也不会保存确定性报告；已增加语法修复任务级停止、Mesh 失败类型保留/死信和报告确定性回退。早先 5 个相关测试文件 `332 passed` 及 `tests/unit` `4565 passed, 6 skipped` 均发生在这三处改动之前；最终新增针对测试与全量回归正在进行。此前候选的前端及部署脚本通过记录不替代发布后验收。
 
-发布状态仍为阻断：在移除旧 v4.0.91 镜像 tag 后，根盘仅可用 `12,318,531,584` bytes，低于 12 GiB；容量门禁、备份/隔离恢复和真实浏览器发布后验收尚未完成。不得从容量不足直接推断无法部署已彻底解决，也不得把本地测试通过写成生产通过。
+发布状态仍为阻断：最新容量快照为 `2026-10-08T13:33:33Z` 根盘可用 `11,259,387,904` bytes，比 12 GiB 下限少 `1,625,513,984` bytes；活动 `ops-check` 明确 `can_continue=false`。容量门禁、备份/隔离恢复和真实浏览器发布后验收尚未完成。不得绕过门禁，也不得把本地测试通过写成生产通过。

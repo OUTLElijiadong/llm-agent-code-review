@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+
+from app.services import sandbox_service
 
 # 支持两种定位:仓库内(tests/unit/services -> backend/) 与生产容器(/app)
 _HERE = Path(__file__).resolve()
@@ -50,6 +54,155 @@ def test_multi_agent_review_functions_exist(service_src: str) -> None:
     assert "multi_agent_review" in service_src
     # 测试终态后必须调用审查编排
     assert "_run_test_review_report(db, environment, conclusion)" in service_src
+
+
+def test_nonretryable_model_failure_uses_deterministic_review_report(monkeypatch) -> None:
+    calls = 0
+    events: list[tuple] = []
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            pytest.fail("不可重试模型失败后不得再次请求多 Agent 审查")
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda *_args, **_kwargs: SimpleNamespace(id=77),
+    )
+    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    db = SimpleNamespace(commit=lambda: None)
+    environment = SimpleNamespace(owner_id=1, public_id="sbx_nonretryable_review")
+
+    result = sandbox_service._run_test_review_report(
+        db,
+        environment,
+        {
+            "passed": False,
+            "summary": "AI 动态用例未完成",
+            "evidence": {},
+            "ai_model_stop_reason": {
+                "failure_kind": "usage_accounting_error",
+                "message": "用量审计提交失败，后续 AI 阶段已停止",
+            },
+        },
+    )
+
+    assert result["artifact_id"] == 77
+    assert calls == 0
+    assert any(event[3] == "multi_agent_review" and "确定性报告" in event[4] for event in events)
+
+
+def test_usage_accounting_error_preserves_deterministic_review_report(monkeypatch) -> None:
+    from app.services.ai_usage_context import UsageAccountingError
+
+    calls = 0
+    persisted: list[dict[str, Any]] = []
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise UsageAccountingError("audit write failed")
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_build_deterministic_test_report",
+        lambda _conclusion: "DETERMINISTIC FALLBACK",
+    )
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda _db, _environment, **kwargs: persisted.append(kwargs) or SimpleNamespace(id=78),
+    )
+    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    db = SimpleNamespace(commit=lambda: None)
+    environment = SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_usage_accounting_review")
+
+    result = sandbox_service._run_test_review_report(
+        db,
+        environment,
+        {"passed": False, "summary": "AI 动态用例未完成", "evidence": {}},
+    )
+
+    assert calls == 1
+    assert result["artifact_id"] == 78
+    assert len(persisted) == 1
+    assert persisted[0]["content"] == b"DETERMINISTIC FALLBACK"
+
+
+@pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
+def test_reporter_nonretryable_result_is_committed_for_recovery(monkeypatch, failure_kind: str) -> None:
+    events: list[tuple] = []
+    commits: list[bool] = []
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                success=False,
+                error="model stage stopped",
+                failure_kind=failure_kind,
+            )
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    monkeypatch.setattr(sandbox_service, "_persist_browser_artifact", lambda *_args, **_kwargs: SimpleNamespace(id=79))
+    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    db = SimpleNamespace(commit=lambda: commits.append(True))
+
+    result = sandbox_service._run_test_review_report(
+        db,
+        SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_reporter_nonretryable"),
+        {"passed": False, "summary": "partial", "evidence": {}},
+    )
+
+    failure_events = [
+        event for event in events
+        if event[3] == "multi_agent_review"
+        and len(event) > 5
+        and isinstance(event[5], dict)
+        and event[5].get("failure_kind") == failure_kind
+    ]
+    assert result["artifact_id"] == 79
+    assert failure_events
+    assert commits, "the stop event must survive a worker/process restart"
+
+
+def test_reporter_wrapper_persists_thrown_nonretryable_failure(monkeypatch) -> None:
+    events: list[tuple] = []
+    conclusion = {"passed": True, "summary": "deterministic execution passed", "evidence": {}}
+
+    def throw_billing(*_args, **_kwargs):
+        error = RuntimeError("provider refused request")
+        error.failure_kind = "billing_error"
+        raise error
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", throw_billing)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    commits: list[bool] = []
+    db = SimpleNamespace(commit=lambda: commits.append(True))
+    environment = SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_reporter_wrapper")
+
+    result = sandbox_service._run_test_review_report(db, environment, conclusion)
+
+    assert result is None
+    assert conclusion["ai_model_stop_reason"]["failure_kind"] == "billing_error"
+    assert events[-1][3] == "multi_agent_review"
+    assert events[-1][5]["failure_kind"] == "billing_error"
+    assert commits
 
 
 def test_review_report_artifact_type(service_src: str) -> None:

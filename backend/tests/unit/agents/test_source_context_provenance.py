@@ -845,7 +845,10 @@ def test_context_compaction_retries_empty_summary_with_actionable_correction() -
     assert "入口函数返回服务端口" in result["source_summaries"][0]["summary"]
 
 
-def test_compaction_stops_billing_failures_without_retrying_parallel_batches() -> None:
+@pytest.mark.parametrize("failure_style", ["returned", "raised"])
+def test_compaction_stops_billing_failures_without_retrying_parallel_batches(failure_style: str) -> None:
+    from app.agents.source_context import NonRetryableModelError
+
     calls = 0
     lock = threading.Lock()
     chunks = []
@@ -863,6 +866,10 @@ def test_compaction_stops_billing_failures_without_retrying_parallel_batches() -
             nonlocal calls
             with lock:
                 calls += 1
+            if failure_style == "raised":
+                error = RuntimeError("provider rejected request")
+                error.failure_kind = "billing_error"
+                raise error
             return SimpleNamespace(
                 success=False,
                 failure_kind="billing_error",
@@ -870,7 +877,7 @@ def test_compaction_stops_billing_failures_without_retrying_parallel_batches() -
             )
 
     diagnostics: dict[str, int] = {}
-    with pytest.raises(SourceContextError, match="402"):
+    with pytest.raises(NonRetryableModelError, match="402") as error:
         compact_source_context(
             BillingFailureAgent(),
             {"coverage_complete": True, "source_chunks": chunks},
@@ -880,6 +887,191 @@ def test_compaction_stops_billing_failures_without_retrying_parallel_batches() -
 
     assert 1 <= calls <= 4
     assert diagnostics["model_calls"] == calls
+    assert error.value.failure_kind == "billing_error"
+
+
+def test_compaction_does_not_retry_after_usage_accounting_failure() -> None:
+    from app.agents.source_context import NonRetryableModelError
+    from app.services.ai_usage_context import UsageAccountingError
+
+    calls = 0
+
+    class AccountingFailureAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise UsageAccountingError("模型请求已执行，但用量审计事务提交失败；不能重发模型请求")
+
+    source = "VALUE = 1\n"
+    digest = hashlib.sha256(source.encode()).hexdigest()
+    with pytest.raises(NonRetryableModelError, match="用量审计") as error:
+        compact_source_context(
+            AccountingFailureAgent(),
+            {
+                "coverage_complete": True,
+                "source_chunks": [{
+                    "source_id": f"main.py-{digest[:12]}",
+                    "sha256": digest,
+                    "text": source,
+                }],
+            },
+            ctx=None,
+        )
+
+    assert calls == 1
+    assert error.value.failure_kind == "usage_accounting_error"
+
+
+def test_compaction_does_not_retry_thrown_billing_failure() -> None:
+    from app.agents.source_context import NonRetryableModelError
+
+    calls = 0
+
+    class BillingExceptionAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            error = RuntimeError("provider adapter rejected request")
+            error.failure_kind = "billing_error"
+            raise error
+
+    source = "VALUE = 1\n"
+    digest = hashlib.sha256(source.encode()).hexdigest()
+    with pytest.raises(NonRetryableModelError) as error:
+        compact_source_context(
+            BillingExceptionAgent(),
+            {
+                "coverage_complete": True,
+                "source_chunks": [{
+                    "source_id": f"main.py-{digest[:12]}",
+                    "sha256": digest,
+                    "text": source,
+                }],
+            },
+            ctx=None,
+        )
+
+    assert calls == 1
+    assert error.value.failure_kind == "billing_error"
+
+
+def test_compaction_stops_usage_accounting_failure_result_without_retry() -> None:
+    from app.agents.source_context import NonRetryableModelError
+
+    calls = 0
+
+    class AccountingFailureResultAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return SimpleNamespace(
+                success=False,
+                failure_kind="usage_accounting_error",
+                error="审计事务提交失败",
+            )
+
+    source = "VALUE = 1\n"
+    digest = hashlib.sha256(source.encode()).hexdigest()
+    with pytest.raises(NonRetryableModelError, match="用量审计") as error:
+        compact_source_context(
+            AccountingFailureResultAgent(),
+            {
+                "coverage_complete": True,
+                "source_chunks": [{
+                    "source_id": f"main.py-{digest[:12]}",
+                    "sha256": digest,
+                    "text": source,
+                }],
+            },
+            ctx=None,
+        )
+
+    assert error.value.failure_kind == "usage_accounting_error"
+    assert calls == 1
+
+
+def test_parallel_compaction_stops_queued_calls_after_usage_accounting_failure() -> None:
+    from app.agents.source_context import NonRetryableModelError
+    from app.services.ai_usage_context import UsageAccountingError
+
+    calls = 0
+    lock = threading.Lock()
+    started = threading.Barrier(4)
+    chunks = []
+    for index in range(41):
+        text = f"VALUE_{index} = {index}\n"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({
+            "source_id": f"module_{index}.py-{digest[:12]}",
+            "sha256": digest,
+            "text": text,
+        })
+
+    class AccountingFailureAgent:
+        def call_json(self, _message, **_kwargs):
+            nonlocal calls
+            with lock:
+                calls += 1
+            started.wait(timeout=5)
+            raise UsageAccountingError("模型请求已执行，但用量审计事务提交失败；不能重发模型请求")
+
+    diagnostics: dict[str, int] = {}
+    with pytest.raises(NonRetryableModelError, match="用量审计") as error:
+        compact_source_context(
+            AccountingFailureAgent(),
+            {"coverage_complete": True, "source_chunks": chunks},
+            ctx=None,
+            diagnostics=diagnostics,
+        )
+
+    assert error.value.failure_kind == "usage_accounting_error"
+    assert calls == 4
+    assert diagnostics["model_calls"] == 4
+
+
+def test_parallel_compaction_preserves_first_usage_failure_for_waiting_batch(monkeypatch) -> None:
+    import time
+
+    import app.agents.source_context as source_context
+    from app.agents.source_context import NonRetryableModelError
+    from app.services.ai_usage_context import UsageAccountingError
+
+    first_worker_waiting = threading.Event()
+    usage_failure_started = threading.Event()
+
+    class OrderedSemaphore:
+        def acquire(self, timeout=None):
+            if threading.current_thread().name.endswith("_0"):
+                first_worker_waiting.set()
+                usage_failure_started.wait(timeout=5)
+                time.sleep(0.05)
+                return False
+            assert first_worker_waiting.wait(timeout=5)
+            return True
+
+        def release(self):
+            return None
+
+    monkeypatch.setattr(source_context, "_COMPACTION_MODEL_SEMAPHORE", OrderedSemaphore())
+    chunks = []
+    for index in range(41):
+        text = f"VALUE_{index} = {index}\n"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({"source_id": f"module_{index}.py-{digest[:12]}", "sha256": digest, "text": text})
+
+    class MixedFailureAgent:
+        def call_json(self, _message, **_kwargs):
+            usage_failure_started.set()
+            raise UsageAccountingError("调用已发生，用量流水提交失败")
+
+    with pytest.raises(NonRetryableModelError) as error:
+        compact_source_context(
+            MixedFailureAgent(),
+            {"coverage_complete": True, "source_chunks": chunks},
+            ctx=None,
+        )
+
+    assert error.value.failure_kind == "usage_accounting_error"
 
 
 def test_truncated_multi_source_context_is_split_before_retrying_model(monkeypatch) -> None:

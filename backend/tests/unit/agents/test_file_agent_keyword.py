@@ -2,9 +2,11 @@
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
 from app.agents import file_agent
 from app.agents.file_agent import CodeFileManagerAgent
-from app.agents.source_context import SourceContextError
+from app.agents.source_context import NonRetryableModelError, SourceContextError
 from app.services import code_file_service
 
 
@@ -123,7 +125,8 @@ def test_file_agent_compacts_source_over_32_chunks_without_losing_coverage(monke
     ]
 
 
-def test_file_agent_does_not_claim_success_when_compaction_fails(monkeypatch):
+@pytest.mark.parametrize("failure_kind", ["source_context", "usage_accounting_error"])
+def test_file_agent_does_not_claim_success_when_compaction_fails(monkeypatch, failure_kind):
     monkeypatch.setattr(
         code_file_service, "get_file",
         lambda db, user, file_id: SimpleNamespace(
@@ -133,6 +136,8 @@ def test_file_agent_does_not_claim_success_when_compaction_fails(monkeypatch):
     )
 
     def fail_compaction(agent, source, *, ctx):
+        if failure_kind == "usage_accounting_error":
+            raise NonRetryableModelError("用量审计提交失败，停止模型重发", failure_kind=failure_kind)
         raise SourceContextError("来源分片 2 缺失")
 
     monkeypatch.setattr(file_agent, "compact_source_context", fail_compaction)
@@ -142,5 +147,7 @@ def test_file_agent_does_not_claim_success_when_compaction_fails(monkeypatch):
     result = agent.get_file(786)
 
     assert result.success is False
-    assert result.failure_kind == "source_coverage_incomplete"
-    assert "来源分片 2 缺失" in result.error
+    assert result.failure_kind == (
+        "usage_accounting_error" if failure_kind == "usage_accounting_error" else "source_coverage_incomplete"
+    )
+    assert ("用量审计" if failure_kind == "usage_accounting_error" else "来源分片 2 缺失") in result.error

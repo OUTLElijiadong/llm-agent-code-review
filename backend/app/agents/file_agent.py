@@ -117,6 +117,9 @@ class CodeFileManagerAgent(BaseAgent):
             data.update(content=None, content_mode="compacted", content_context=compressed)
             return AgentResult(success=True, data=data)
         except SourceContextError as e:
-            return AgentResult(success=False, error=str(e), failure_kind="source_coverage_incomplete")
+            failure_kind = str(getattr(e, "failure_kind", "") or "")
+            if failure_kind not in {"billing_error", "usage_accounting_error"}:
+                failure_kind = "source_coverage_incomplete"
+            return AgentResult(success=False, error=str(e), failure_kind=failure_kind)
         except Exception as e:
             return AgentResult(success=False, error=str(e))

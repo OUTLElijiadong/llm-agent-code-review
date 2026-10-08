@@ -45,9 +45,11 @@ class SourceContextError(ValueError):
 
 
 class NonRetryableModelError(SourceContextError):
-    """模型明确拒绝计费/额度请求时，停止重试和排队中的压缩任务。"""
+    """请求不可安全重发时，停止重试和排队中的压缩任务。"""
 
-    failure_kind = "billing_error"
+    def __init__(self, message: str, *, failure_kind: str = "billing_error") -> None:
+        super().__init__(message)
+        self.failure_kind = failure_kind
 
 
 def _source_quote_hint(text: str) -> str:
@@ -190,13 +192,33 @@ def _context_call(
                 system_prompt=_SOURCE_CONTEXT_SYSTEM_PROMPT,
             )
         except Exception as exc:  # noqa: BLE001 - 模型异常必须暴露为未完成压缩。
+            from app.services.ai_usage_context import UsageAccountingError
+
+            failure_kind = str(getattr(exc, "failure_kind", "") or "")
+            if isinstance(exc, UsageAccountingError):
+                failure_kind = "usage_accounting_error"
+            if failure_kind in {"billing_error", "usage_accounting_error"}:
+                message = (
+                    "模型服务计费或额度拒绝 (HTTP 402)"
+                    if failure_kind == "billing_error"
+                    else "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止压缩"
+                )
+                raise NonRetryableModelError(
+                    message,
+                    failure_kind=failure_kind,
+                ) from exc
             last_error = f"源码分片压缩调用异常: {str(exc)[:160]}"
             retry_feedback = f"\n上一轮响应未通过校验：{last_error}。本轮只返回更短的有效 JSON，不得漏掉来源 ID。"
             continue
         if not getattr(result, "success", False) or not isinstance(getattr(result, "data", None), dict):
             failure_kind = str(getattr(result, "failure_kind", "") or "")
-            if failure_kind == "billing_error":
-                raise NonRetryableModelError("模型服务计费或额度拒绝 (HTTP 402)")
+            if failure_kind in {"billing_error", "usage_accounting_error"}:
+                message = (
+                    "模型服务计费或额度拒绝 (HTTP 402)"
+                    if failure_kind == "billing_error"
+                    else "模型请求已发出，但用量审计提交失败；为避免重复模型请求已停止压缩"
+                )
+                raise NonRetryableModelError(message, failure_kind=failure_kind)
             last_error = f"源码分片压缩失败: {str(getattr(result, 'error', '无有效 JSON'))[:160]}"
             if failure_kind == "output_truncated":
                 saw_output_truncated = True
@@ -544,12 +566,23 @@ def compact_source_context(
     call_counter_lock = threading.Lock()
     diagnostics_lock = threading.Lock()
     abort_event = threading.Event()
+    failure_lock = threading.Lock()
+    stop_failure: NonRetryableModelError | None = None
     compression_ctx = _serialize_model_guard(ctx)
     protected_fact_ledger = [
         {"source_id": source_id, "fact": fact}
         for chunk in chunks
         for source_id, fact in _protected_fact_ledger(chunk, [chunk["source_id"]])
     ]
+
+    def _record_nonretryable_failure(error: NonRetryableModelError) -> NonRetryableModelError:
+        nonlocal stop_failure
+        with failure_lock:
+            if stop_failure is None:
+                stop_failure = error
+            reason = stop_failure
+            abort_event.set()
+        return NonRetryableModelError(str(reason), failure_kind=reason.failure_kind)
 
     def compress_batch(
         source_ids: list[str],
@@ -570,7 +603,9 @@ def compact_source_context(
                 if acquired:
                     break
             if abort_event.is_set():
-                raise NonRetryableModelError("模型服务计费或额度拒绝 (HTTP 402)，已停止剩余源码压缩请求")
+                raise _record_nonretryable_failure(
+                    NonRetryableModelError("模型服务计费或额度拒绝 (HTTP 402)，已停止剩余源码压缩请求")
+                )
             return _context_call(
                 agent,
                 source_ids,
@@ -581,9 +616,8 @@ def compact_source_context(
                 call_counter=call_counter,
                 call_counter_lock=call_counter_lock,
             )
-        except NonRetryableModelError:
-            abort_event.set()
-            raise
+        except NonRetryableModelError as exc:
+            raise _record_nonretryable_failure(exc) from exc
         finally:
             if acquired:
                 _COMPACTION_MODEL_SEMAPHORE.release()

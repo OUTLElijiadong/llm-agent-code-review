@@ -69,6 +69,16 @@ class _CompressionFailed(ValueError):
         self.failure_kind = failure_kind
 
 
+_NON_RETRYABLE_MODEL_FAILURES = frozenset({"billing_error", "usage_accounting_error"})
+
+
+def _non_retryable_model_failure_kind(error) -> str:
+    if isinstance(error, UsageAccountingError):
+        return "usage_accounting_error"
+    kind = str(getattr(error, "failure_kind", "") or "").strip().lower()
+    return kind if kind in _NON_RETRYABLE_MODEL_FAILURES else ""
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
@@ -454,8 +464,14 @@ def _compact_context(
                 )
             except UsageAccountingError as exc:
                 raise _CompressionFailed("上下文压缩用量审计失败，不能自动重发",
-                                         failure_kind="usage_accounting_failed") from exc
+                                         failure_kind="usage_accounting_error") from exc
             except Exception as exc:
+                failure_kind = _non_retryable_model_failure_kind(exc)
+                if failure_kind:
+                    raise _CompressionFailed(
+                        "上下文压缩遇到不可重试的模型错误，已停止重复请求",
+                        failure_kind=failure_kind,
+                    ) from exc
                 raise _CompressionFailed("上下文压缩模型调用失败") from exc
             usage["usage_log_ids"].extend(response.usage_log_ids)
             usage["http_attempts"] += response.http_attempts or 0
@@ -470,7 +486,7 @@ def _compact_context(
                     except Exception as exc:
                         raise _CompressionFailed(
                             "上下文压缩解析失败且用量审计更新失败",
-                            failure_kind="usage_accounting_failed",
+                            failure_kind="usage_accounting_error",
                         ) from exc
                 raise _CompressionFailed("上下文压缩未完成", failure_kind=response.failure_kind or "model_failure")
             data = response.data
@@ -498,7 +514,7 @@ def _compact_context(
                 except Exception as exc:
                     raise _CompressionFailed(
                         "上下文压缩契约失败且用量审计更新失败",
-                        failure_kind="usage_accounting_failed",
+                        failure_kind="usage_accounting_error",
                     ) from exc
                 raise _CompressionFailed("上下文压缩来源覆盖或摘要校验失败",
                                          failure_kind="context_coverage_invalid")
@@ -612,6 +628,7 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
     except _CompressionFailed as exc:
         return {
             **_result("failed", str(exc), errors=[{"code": exc.failure_kind}]),
+            "failure_kind": exc.failure_kind,
             **compaction_usage, "retryable": False,
         }
     except UsageAccountingError:
@@ -619,12 +636,25 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
             **_result(
                 "failed",
                 "模型已请求但用量审计未完成，不能自动重发",
-                errors=[{"code": "temporary_usage_accounting_failed"}],
+                errors=[{"code": "usage_accounting_error"}],
             ),
+            "failure_kind": "usage_accounting_error",
             **compaction_usage,
             "retryable": False,
         }
-    except Exception:
+    except Exception as exc:
+        failure_kind = _non_retryable_model_failure_kind(exc)
+        if failure_kind:
+            return {
+                **_result(
+                    "failed",
+                    "模型请求遇到不可重试错误，不能自动重发",
+                    errors=[{"code": failure_kind}],
+                ),
+                "failure_kind": failure_kind,
+                **compaction_usage,
+                "retryable": False,
+            }
         return {
             **_result("failed", "临时分析模型调用未完成", errors=[{"code": "temporary_model_failure"}]),
             **compaction_usage,
@@ -665,14 +695,29 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                 **_result(
                     "failed",
                     "模型已请求但用量审计未完成，不能自动重发",
-                    errors=[{"code": "temporary_usage_accounting_failed"}],
+                    errors=[{"code": "usage_accounting_error"}],
                 ),
+                "failure_kind": "usage_accounting_error",
                 "usage_log_ids": usage_log_ids,
                 "model": response.model,
                 "http_attempts": http_attempts,
                 "retryable": False,
             }
-        except Exception:
+        except Exception as exc:
+            failure_kind = _non_retryable_model_failure_kind(exc)
+            if failure_kind:
+                return {
+                    **_result(
+                        "failed",
+                        "模型请求遇到不可重试错误，不能自动重发",
+                        errors=[{"code": failure_kind}],
+                    ),
+                    "failure_kind": failure_kind,
+                    "usage_log_ids": usage_log_ids,
+                    "model": response.model,
+                    "http_attempts": http_attempts,
+                    "retryable": False,
+                }
             return {
                 **_result("failed", "临时分析模型调用未完成", errors=[{"code": "temporary_model_failure"}]),
                 "usage_log_ids": usage_log_ids,
@@ -698,6 +743,18 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
             "retryable": False,
         }
     if not response.success:
+        failure_kind = str(response.failure_kind or "").strip().lower()
+        if failure_kind in _NON_RETRYABLE_MODEL_FAILURES:
+            return {
+                **_result(
+                    "failed",
+                    "模型请求遇到不可重试错误，不能自动重发",
+                    errors=[{"code": failure_kind}],
+                ),
+                "failure_kind": failure_kind,
+                **usage,
+                "retryable": False,
+            }
         if response.failure_kind == "invalid_json":
             # HTTP 已成功的原始调用，直到 JSON 解码后才能知道语义失败。
             try:
@@ -709,8 +766,9 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                     **_result(
                         "failed",
                         "临时分析解析失败且用量审计更新失败，不能自动重发",
-                        errors=[{"code": "temporary_usage_accounting_failed"}],
+                        errors=[{"code": "usage_accounting_error"}],
                     ),
+                    "failure_kind": "usage_accounting_error",
                     **usage,
                     "retryable": False,
                 }
@@ -790,8 +848,9 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                 **_result(
                     "failed",
                     "临时分析输出无效且用量审计更新失败，不能自动重发",
-                    errors=[{"code": "temporary_usage_accounting_failed"}],
+                    errors=[{"code": "usage_accounting_error"}],
                 ),
+                "failure_kind": "usage_accounting_error",
                 **usage,
                 "retryable": False,
             }

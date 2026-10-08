@@ -10,13 +10,108 @@ from unittest.mock import Mock
 import pytest
 
 from app.agents.base import AgentResult
+from app.models.agent_mesh import AgentMeshMessage
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
-from app.services import agent_mesh_dispatcher, agent_team_dispatcher, agent_team_service, published_agent_tools
+from app.services import (
+    agent_mesh_dispatcher,
+    agent_mesh_service,
+    agent_team_dispatcher,
+    agent_team_service,
+    published_agent_tools,
+)
+
+
+def test_temporary_agent_usage_accounting_failure_closes_team_and_mesh_error(monkeypatch, db):
+    from app.agents.base import BaseAgent
+    from app.services.ai_usage_context import UsageAccountingError
+
+    user = User(username="temporary-usage-owner", password="x", email="temporary-usage@example.test",
+                role="user", status=1)
+    db.add(user)
+    db.commit()
+    from app.services import rbac_service
+
+    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: True)
+    payload = AgentTeamCreateIn.model_validate({
+        "surface": "user",
+        "session_id": "session-temp-usage",
+        "title": "临时 Agent 用量失败闭环",
+        "objective": "分析当前输入并准确记录模型用量失败",
+        "members": [{
+            "member_key": "specialist",
+            "display_name": "临时分析 Agent",
+            "address": "temporary:specialist",
+            "role": "verifier",
+            "definition": {"purpose": "分析输入", "instructions": "只基于当前任务输入给出有界分析"},
+        }],
+        "tasks": [{
+            "task_key": "analyze",
+            "member_key": "specialist",
+            "title": "分析任务输入",
+            "instructions": "只分析当前输入并汇报结论",
+            "max_attempts": 3,
+            "input": {"question": "核对已提供的输入"},
+        }],
+    })
+    created = agent_team_service.create_team_from_xiaoling(db, user, payload)
+    monkeypatch.setattr(agent_team_dispatcher, "SessionLocal", lambda: db)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_enabled", True)
+    monkeypatch.setattr(agent_team_dispatcher.settings, "agent_team_max_active_children", 1)
+    monkeypatch.setattr(agent_team_dispatcher.rbac_service, "check_permission", lambda *_args: True)
+
+    class ImmediateExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def submit(self, fn, *args):
+            future = Future()
+            future.set_result(fn(*args))
+            return future
+
+    def configure(_db, agent, user_id=None):
+        agent._api_key = "configured-test-key"
+        return agent
+
+    def fail_usage(*_args, **_kwargs):
+        raise UsageAccountingError("模型请求已发出但用量审计提交失败")
+
+    monkeypatch.setattr(agent_team_dispatcher, "ThreadPoolExecutor", ImmediateExecutor)
+    monkeypatch.setattr("app.services.agent_model_service.configure_subagent", configure)
+    monkeypatch.setattr(BaseAgent, "call_json", fail_usage)
+
+    stats = agent_team_dispatcher.dispatch_once(limit=1)
+
+    assert stats["claimed"] == 1
+    assert stats["failed"] == 1
+    assert stats["completed"] == 0
+    db.expire_all()
+    team = agent_team_service.get_team(db, user, created["team_id"])
+    task = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="analyze").one()
+    assert task.status == "failed"
+    assert task.attempt_count == 1
+    assert task.next_attempt_at is None
+    assert any(
+        item.get("code") == "usage_accounting_error"
+        for item in agent_team_service._unjson(task.errors_json, [])
+    )
+    assert db.query(AgentTeamEvent).filter_by(team_id=created["team_id"], event_type="task.retry_queued").count() == 0
+    assert team["status"] == "failed"
+    error_message = db.query(AgentMeshMessage).filter_by(
+        user_id=user.id, correlation_id=f"team:{created['team_id']}", message_type="task.error",
+    ).one()
+    assert agent_mesh_service._load(error_message.payload_json, {})["failure_kind"] == "usage_accounting_error"
+    assert agent_mesh_service._load(error_message.errors_json, [])[0]["code"] == "usage_accounting_error"
 
 
 def test_retry_confirmation_authorizes_only_the_exact_retried_high_risk_attempt(db, monkeypatch):

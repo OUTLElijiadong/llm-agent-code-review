@@ -508,6 +508,47 @@ def test_accounting_failure_never_retries_a_model_request(db, actor, model, monk
     monkeypatch.setattr(BaseAgent, "call_json", answer)
     result = run(db, actor)
     assert result["status"] == "failed" and result["retryable"] is False
+    assert result["failure_kind"] == "usage_accounting_error"
+    assert result["errors"][0]["code"] == "usage_accounting_error"
+
+
+def test_compaction_accounting_failure_uses_canonical_kind_and_stops(db, actor, model, monkeypatch):
+    from app.services.ai_usage_context import UsageAccountingError
+
+    monkeypatch.setattr(BaseAgent, "_project_input", lambda self, message, **_kwargs: (str(message), True))
+    calls = 0
+
+    def answer(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise UsageAccountingError("压缩请求已发出但用量提交失败")
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"file_id": 811})
+
+    assert result["status"] == "failed"
+    assert result["failure_kind"] == "usage_accounting_error"
+    assert result["errors"][0]["code"] == "usage_accounting_error"
+    assert result["retryable"] is False
+    assert calls == 1
+
+
+@pytest.mark.parametrize("failure_style", ["raised", "returned"])
+def test_billing_failure_is_canonical_and_never_retried(db, actor, model, monkeypatch, failure_style):
+    def answer(*_args, **_kwargs):
+        if failure_style == "raised":
+            error = RuntimeError("provider denied request")
+            error.failure_kind = "billing_error"
+            raise error
+        return AgentResult(success=False, failure_kind="billing_error", error="provider denied request")
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor)
+
+    assert result["status"] == "failed"
+    assert result["retryable"] is False
+    assert result["failure_kind"] == "billing_error"
+    assert result["errors"][0]["code"] == "billing_error"
 
 
 @pytest.mark.parametrize(

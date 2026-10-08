@@ -24,6 +24,7 @@ from app.services.ai_usage_context import current_attribution, model_attribution
 
 ONLINE_WINDOW = timedelta(seconds=90)
 _SESSION_TERMINAL = {"completed", "failed", "expired", "dead_letter"}
+_NON_RETRYABLE_DISPATCH_FAILURE_KINDS = frozenset({"billing_error", "usage_accounting_error"})
 _BLOCKED_JARVIS_MESSAGE_STATUSES = ("queued", "delivered", "acknowledged", "processing")
 _ACTIVE_RESPONSE_RUN_STATUSES = (
     "running",
@@ -1456,6 +1457,8 @@ def complete_dispatch_message(
     success: bool,
     summary: Mapping[str, Any],
     error: str = "",
+    failure_kind: str = "",
+    retryable: Optional[bool] = None,
 ) -> dict[str, Any]:
     """仅允许当前租约持有者完成消息，并向来源会话回传唯一结果。"""
     row = (
@@ -1479,8 +1482,28 @@ def complete_dispatch_message(
     now = _now()
     if not success:
         row.last_error = error or str(summary.get("summary") or "Agent 消息处理失败")
-        _event(db, row, "failed", target_address, {"error": row.last_error})
-        if int(row.attempt_count or 0) < int(row.max_attempts or 1):
+        failure_kind = str(failure_kind or summary.get("failure_kind") or "").strip().lower()
+        if failure_kind not in _NON_RETRYABLE_DISPATCH_FAILURE_KINDS:
+            failure_kind = ""
+        if failure_kind:
+            existing_errors = _load(row.errors_json, [])
+            existing_errors = existing_errors if isinstance(existing_errors, list) else []
+            if not any(
+                isinstance(item, dict) and item.get("code") == failure_kind
+                for item in existing_errors
+            ):
+                existing_errors.append({"code": failure_kind, "message": row.last_error})
+            row.errors_json = _json(existing_errors)
+        failure_detail = {"error": row.last_error}
+        if failure_kind:
+            failure_detail["failure_kind"] = failure_kind
+        _event(db, row, "failed", target_address, failure_detail)
+        should_retry = (
+            failure_kind not in _NON_RETRYABLE_DISPATCH_FAILURE_KINDS
+            and retryable is not False
+            and int(row.attempt_count or 0) < int(row.max_attempts or 1)
+        )
+        if should_retry:
             row.status = "queued"
             row.next_attempt_at = now + timedelta(seconds=min(60, 2 ** int(row.attempt_count or 1)))
             row.lease_token = None
@@ -1490,6 +1513,15 @@ def complete_dispatch_message(
                 "next_attempt_at": _iso(row.next_attempt_at),
             })
         else:
+            reply_payload = {
+                "status": "failed",
+                "summary": row.last_error,
+                "in_reply_to": row.message_id,
+            }
+            reply_errors = [{"code": "agent_dispatch_failed", "message": row.last_error}]
+            if failure_kind:
+                reply_payload["failure_kind"] = failure_kind
+                reply_errors = [{"code": failure_kind, "message": row.last_error}]
             try:
                 reply = _send_dispatch_reply(
                     db,
@@ -1498,12 +1530,8 @@ def complete_dispatch_message(
                     target_address=target_address,
                     target_name=target_name,
                     message_type="task.error",
-                    payload={
-                        "status": "failed",
-                        "summary": row.last_error,
-                        "in_reply_to": row.message_id,
-                    },
-                    errors=[{"code": "agent_dispatch_failed", "message": row.last_error}],
+                    payload=reply_payload,
+                    errors=reply_errors,
                 )
             except AgentMeshError as reply_error:
                 return _dead_letter_undeliverable_reply(
@@ -1519,6 +1547,7 @@ def complete_dispatch_message(
             _event(db, row, "dead_letter", "system", {
                 "error": row.last_error,
                 "reply_message_id": reply["message_id"],
+                **({"failure_kind": failure_kind} if failure_kind else {}),
             })
         db.commit()
         db.refresh(row)
