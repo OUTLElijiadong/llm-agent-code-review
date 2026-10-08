@@ -963,7 +963,6 @@ discover_route_candidates() {
         }' 2>/dev/null || true
   }
   {
-    route_source_matches
     if [ "$language" = php ]; then
       php_root="$(php_doc_root)"
     else
@@ -972,6 +971,17 @@ discover_route_candidates() {
     if [ -n "$php_root" ] && { [ -f "$php_root/index.html" ] || [ -f "$php_root/index.php" ]; }; then
       printf '%s\n' /
     fi
+    # PHP applications may intentionally return 404 at `/` while exposing a
+    # safe login or landing entrypoint. Probe only a small allowlist of GET
+    # pages; never sweep arbitrary PHP files such as reset/install actions.
+    if [ -n "$php_root" ]; then
+      for php_entry in index.php login.php home.php dashboard.php admin/index.php; do
+        if [ -f "$php_root/$php_entry" ]; then
+          printf '/%s\n' "$php_entry"
+        fi
+      done
+    fi
+    route_source_matches
   } | awk 'substr($0, 1, 1) == "/" && !seen[$0]++ {print $0}' | head -n 80
 }
 
@@ -1135,6 +1145,9 @@ run_blackbox() {
           blackbox_route="$probe_path"
           blackbox_status="$probe_status"
           blackbox_route_origin=source_route
+          if [ "$language" = php ] && [[ "$probe_path" == *.php ]]; then
+            blackbox_route_origin=php_entrypoint
+          fi
           if [ "$probe_path" = "/" ] && [ "$language" = php ]; then
             php_root="$(php_doc_root)"
             if [ -f "$php_root/index.html" ] || [ -f "$php_root/index.php" ]; then

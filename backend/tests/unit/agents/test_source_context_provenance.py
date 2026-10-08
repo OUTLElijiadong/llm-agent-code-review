@@ -321,6 +321,69 @@ def test_real_multifile_archive_keeps_grounding_through_recursive_split() -> Non
     ) == []
 
 
+def test_large_project_compaction_uses_bounded_batches_and_covers_every_source() -> None:
+    chunks = []
+    for index in range(481):
+        text = f"FILE {index:04d} SOURCE_SENTINEL_{index:04d}\n" + ("x" * 4_900)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({"source_id": f"file-{index:04d}-{digest[:12]}", "sha256": digest, "text": text})
+    calls: list[int] = []
+
+    class ScalableAgent:
+        def call_json(self, message, **_kwargs):
+            source_ids = _source_ids(message)
+            calls.append(len(source_ids))
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": source_ids,
+                    "source_quotes": _source_quotes(message),
+                    "summary": f"本批包含 {len(source_ids)} 个已逐条核验来源，结构与调用关系按层级归并。",
+                },
+            )
+
+    compacted = compact_source_context(
+        ScalableAgent(),
+        {"coverage_complete": True, "source_chunks": chunks, "source_chunk_count": len(chunks)},
+        ctx=None,
+        max_chars=40_000,
+    )
+
+    assert compacted["covered_source_ids"] == [chunk["source_id"] for chunk in chunks]
+    assert compacted["compression"]["source_chunks"] == 481
+    assert len(calls) <= 32
+    assert max(calls) > 8
+
+
+def test_source_summary_over_old_limit_is_preserved_without_truncation() -> None:
+    source = "def entry(): return 'preserve all'"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    source_id = f"entry.py-{digest[:12]}"
+    long_summary = "结构信息" * 180
+
+    class LongSummaryAgent:
+        def call_json(self, message, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": long_summary,
+                },
+            )
+
+    compacted = compact_source_context(
+        LongSummaryAgent(),
+        {
+            "coverage_complete": True,
+            "source_chunks": [{"source_id": source_id, "sha256": digest, "text": source}],
+        },
+        ctx=None,
+    )
+
+    assert compacted["source_summaries"][0]["summary"].endswith(long_summary)
+
+
 def test_valid_quote_keeps_summary_marked_as_unverified_projection() -> None:
     source = 'def hello(): return "ok"'
     system_prompts: list[str] = []
@@ -480,8 +543,8 @@ def test_second_layer_keeps_each_original_source_fact() -> None:
     ]
 
 
-def test_source_bound_fact_ledger_fails_when_over_600_char_limit() -> None:
-    payload = [{"source_id": f"source-{index}", "text": "不得" + "读取无关账号历史" * 45} for index in range(2)]
+def test_source_bound_fact_ledger_fails_when_over_1200_char_limit() -> None:
+    payload = [{"source_id": f"source-{index}", "text": "不得" + "读取无关账号历史" * 100} for index in range(2)]
 
     class OmittingAgent:
         def call_json(self, message, **_kwargs):

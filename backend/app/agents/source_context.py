@@ -12,10 +12,10 @@ from app.services.context_fidelity import extract_protected_facts
 # 32 was an accidental model-round ceiling. This is only a hard resource guard;
 # large projects are compressed through bounded batches and recursive reduction.
 MAX_SOURCE_CHUNKS = 4_096
-MAX_CHUNK_SUMMARY_CHARS = 600
+MAX_CHUNK_SUMMARY_CHARS = 1_200
 MAX_COMPACTION_CALLS = 512
-MAX_BATCH_SOURCE_CHARS = 18_000
-MAX_BATCH_SOURCE_ITEMS = 8
+MAX_BATCH_SOURCE_CHARS = 120_000
+MAX_BATCH_SOURCE_ITEMS = 32
 MAX_CONTEXT_SPLIT_DEPTH = 8
 MIN_CONTEXT_SPLIT_CHARS = 1_200
 _SOURCE_CONTEXT_SYSTEM_PROMPT = (
@@ -67,7 +67,7 @@ def _context_call(
         '必须返回 JSON: {"covered_source_ids":[全部输入 source_id],'
         '"source_quotes":[{"source_id":"原 ID","quotes":["逐字引文"]}],'
         '"summary":"..."}；'
-        "summary 长度不超过 600 字。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
+        "summary 长度不超过 1200 字。只有材料为空、无法读取或来源标识无效时才返回 error 字段；"
         "语法未闭合的源码片段仍需按可见内容正常摘要。\n"
     )
     last_error = "源码分片压缩失败"
@@ -298,18 +298,33 @@ def _protected_fact_ledger(payload: Any, source_ids: list[str]) -> list[tuple[st
     return entries
 
 
+def _source_batch_char_budget() -> int:
+    """按已配置模型窗口限制批次，并为提示词和模型输出保留余量。"""
+    try:
+        from app.core.config import settings
+
+        context_window = int(settings.deepseek_context_window_tokens)
+        output_reserve = min(4_096, max(1, int(settings.deepseek_max_output_tokens)))
+        input_budget = max(8_000, context_window - output_reserve - 4_096)
+        # 中文源码按较高字符/token 比例留余量；再受固定批次上限保护。
+        return min(MAX_BATCH_SOURCE_CHARS, max(8_000, input_budget * 3 // 5))
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return MAX_BATCH_SOURCE_CHARS
+
+
 def _source_batches(entries: list[dict[str, str]]) -> list[list[dict[str, str]]]:
     batches: list[list[dict[str, str]]] = []
     current: list[dict[str, str]] = []
+    char_budget = _source_batch_char_budget()
     for entry in entries:
         candidate = [*current, entry]
         size = len(json.dumps(candidate, ensure_ascii=False, separators=(",", ":")))
-        if current and (size > MAX_BATCH_SOURCE_CHARS or len(candidate) > MAX_BATCH_SOURCE_ITEMS):
+        if current and (size > char_budget or len(candidate) > MAX_BATCH_SOURCE_ITEMS):
             batches.append(current)
             current = [entry]
         else:
             current = candidate
-        if len(json.dumps(current, ensure_ascii=False, separators=(",", ":"))) > MAX_BATCH_SOURCE_CHARS:
+        if len(json.dumps(current, ensure_ascii=False, separators=(",", ":"))) > char_budget:
             raise SourceContextError("单个源码分片超过压缩批次预算")
     if current:
         batches.append(current)

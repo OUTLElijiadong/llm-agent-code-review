@@ -38,6 +38,7 @@ def _fake_php_server(tmp_path: Path) -> Path:
             """\
             import http.server
             import json
+            import os
             import pathlib
             import sys
             args = sys.argv[1:]
@@ -50,7 +51,9 @@ def _fake_php_server(tmp_path: Path) -> Path:
                         target = (root / path).resolve()
                         has_index = (root / 'index.php').is_file() or (root / 'index.html').is_file()
                         if self.path.split('?', 1)[0] == '/' and has_index:
-                            status = 200
+                            status = int(os.environ.get('FAKE_PHP_ROOT_STATUS', '200'))
+                        elif path == 'index.php' and target.is_file():
+                            status = int(os.environ.get('FAKE_PHP_INDEX_STATUS', '200'))
                         elif target.is_file() and target.is_relative_to(root):
                             status = 200
                         else:
@@ -82,7 +85,9 @@ def _write_bWAPP_layout(root: Path) -> None:
     (app / "admin" / "index.php").write_text("<?php echo 'admin'; ?>", encoding="utf-8")
 
 
-def _run_worker_php_blackbox(source: Path, work: Path, fake_bin: Path) -> subprocess.CompletedProcess[str]:
+def _run_worker_php_blackbox(
+    source: Path, work: Path, fake_bin: Path, *, root_status: int | None = None, index_status: int | None = None
+) -> subprocess.CompletedProcess[str]:
     runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
     env = {
         **os.environ,
@@ -97,6 +102,10 @@ def _run_worker_php_blackbox(source: Path, work: Path, fake_bin: Path) -> subpro
         "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "5",
         "PRISM_BLACKBOX_PROBE_BUDGET_SECONDS": "5",
     }
+    if root_status is not None:
+        env["FAKE_PHP_ROOT_STATUS"] = str(root_status)
+    if index_status is not None:
+        env["FAKE_PHP_INDEX_STATUS"] = str(index_status)
     return subprocess.run(
         ["bash", str(runner)],
         cwd=source,
@@ -125,6 +134,32 @@ def test_worker_php_blackbox_finds_nested_document_root(tmp_path: Path, layout: 
     assert result.returncode == 0, output
     assert '"passed":true' in output
     assert '"status_code":200' in output
+
+
+def test_worker_php_blackbox_falls_back_to_safe_php_entrypoint_when_root_is_404(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_bWAPP_layout(source)
+    app = source / "bWAPP-master" / "app"
+    (app / "login.php").write_text("<?php echo 'login'; ?>", encoding="utf-8")
+
+    result = _run_worker_php_blackbox(
+        source,
+        tmp_path / "workspace",
+        _fake_php_server(tmp_path),
+        root_status=404,
+        index_status=302,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode == 0, output
+    assert "blackbox loopback status=404" in output
+    assert "blackbox route /login.php -> HTTP 200" in output
+    receipt = _extract_blackbox_result(output)
+    assert receipt is not None
+    assert receipt["status"] == "passed"
+    assert receipt["route"] == "/login.php"
+    assert receipt["route_origin"] == "php_entrypoint"
 
 
 def test_worker_php_blackbox_fails_closed_for_ambiguous_document_roots(tmp_path: Path) -> None:

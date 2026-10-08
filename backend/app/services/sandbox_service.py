@@ -4591,7 +4591,10 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
         or (result["passed"] and not route_passed)
         or (result["passed"] and agent_assertions_passed is False)
         or (basis == "route_smoke" and agent_assertions_passed is not None)
-        or (route_origin is not None and route_origin not in {"none", "source_route", "static_entrypoint"})
+        or (
+            route_origin is not None
+            and route_origin not in {"none", "source_route", "static_entrypoint", "php_entrypoint"}
+        )
         or (route == "/" and result["passed"] and route_origin not in {"source_route", "static_entrypoint"})
         or (failure_kind is not None and not (startup_failure or timeout_failure))
         or (
