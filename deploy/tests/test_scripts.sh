@@ -634,7 +634,7 @@ case "${1:-}" in
         env_file="${2:?env file is required}"
         shift 2
         if [[ "${1:-}" == "config" && "${2:-}" == "--environment" ]]; then
-          awk '/^[[:space:]]*(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)[[:space:]]*=/ {
+          awk '/^[[:space:]]*(MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD|MYSQL_DATABASE|DEEPSEEK_API_KEY)[[:space:]]*=/ {
             line=$0
             sub(/^[[:space:]]*/, "", line)
             sub(/[[:space:]]+#.*/, "", line)
@@ -671,7 +671,10 @@ case "${1:-}" in
                 printf '1\t101\t101\n'
               fi
               ;;
-            *'mysqldump'*) printf '%s\n' 'CREATE TABLE backup_test(id INT);' ;;
+            *'mysqldump'*)
+              printf 'mysqldump must not run inside the MySQL daemon container\n' >&2
+              exit 92
+              ;;
           esac
         else
           case "$*" in
@@ -693,6 +696,14 @@ case "${1:-}" in
           *) printf 'cid-%s\n' "$last" ;;
         esac
         ;;
+      *'{{.Image}}'*)
+        case "$last" in
+          cid-mysql) printf 'sha256:%064d\n' 0 | tr '0' 'a' ;;
+          cr_backend) printf '%s\n' 'sha256:running-backend' ;;
+          cr_frontend) printf '%s\n' 'sha256:running-frontend' ;;
+          *) printf '%s\n' 'unknown' ;;
+        esac
+        ;;
       *'{{.State.Running}}'*) printf '%s\n' 'true' ;;
       *'{{.HostConfig.Memory}}'*) printf '%s\n' '0' ;;
       *)
@@ -703,6 +714,36 @@ case "${1:-}" in
           *) printf '%s\n' 'unknown' ;;
         esac
         ;;
+    esac
+    ;;
+  run)
+    case "$*" in
+      *'mysqldump'*)
+        env_file=""
+        previous=""
+        for argument in "$@"; do
+          if [[ "$previous" == "--env-file" ]]; then env_file="$argument"; fi
+          previous="$argument"
+        done
+        [[ -n "$env_file" && -f "$env_file" ]] || {
+          printf 'one-off mysqldump client is missing its env file\n' >&2
+          exit 93
+        }
+        env_mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+        [[ "$env_mode" == "600" ]] || {
+          printf 'one-off mysqldump env file permissions are not 0600\n' >&2
+          exit 95
+        }
+        if [[ -n "${FAKE_BACKUP_ENV_KEYS:-}" ]]; then
+          awk -F= '{ print $1 }' "$env_file" > "$FAKE_BACKUP_ENV_KEYS"
+        fi
+        if [[ "${FAKE_BACKUP_CLIENT_FAIL:-0}" == "1" ]]; then
+          printf 'simulated mysqldump client failure\n' >&2
+          exit 91
+        fi
+        printf '%s\n' 'CREATE TABLE backup_test(id INT);'
+        ;;
+      *) printf 'unexpected docker run in script tests: %s\n' "$*" >&2; exit 94 ;;
     esac
     ;;
   exec)
@@ -1452,12 +1493,19 @@ run_backup_archive_drift_simulation() {
   local docker_log="$workspace/docker.log"
   local state_file="$workspace/stats-count"
   local output_file="$workspace/output.log"
+  local env_keys_file="$workspace/client-env-keys"
+  local temporary_dir="$workspace/tmp"
 
-  mkdir -p "$workspace" "$output_dir"
+  mkdir -p "$workspace" "$output_dir" "$temporary_dir"
   write_strong_database_test_env "$env_file"
+  cat >> "$env_file" <<'ENV'
+MYSQL_DATABASE=code_review
+DEEPSEEK_API_KEY=must-not-enter-mysql-client
+ENV
   : > "$docker_log"
   if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
     FAKE_DOCKER_SCENARIO=backup_archive_drift FAKE_BACKUP_STATE="$state_file" \
+    FAKE_BACKUP_ENV_KEYS="$env_keys_file" TMPDIR="$temporary_dir" \
     DEPLOY_ENV_FILE="$env_file" BACKUP_DIR="$output_dir" BACKUP_RETENTION_DAYS=0 \
     MAINTENANCE_LOCK_DIR="$lock_dir" \
     ./backup.sh --reason test-drift > "$output_file" 2>&1; then
@@ -1465,6 +1513,21 @@ run_backup_archive_drift_simulation() {
     exit 1
   fi
   assert_contains "$output_file" '隔离归档统计在备份期间发生变化'
+  assert_contains "$docker_log" 'inspect --format {{.Image}} cid-mysql'
+  assert_contains "$docker_log" 'run --rm --network container:cid-mysql --memory 512m --env-file'
+  assert_contains "$docker_log" "sha256:$(printf '%064d' 0 | tr '0' 'a')"
+  if awk '/mysqldump/ && /compose exec/ { found=1 } END { exit !found }' "$docker_log"; then
+    printf 'backup 仍在 MySQL daemon 容器中启动 mysqldump\n' >&2
+    exit 1
+  fi
+  [[ "$(cat "$env_keys_file")" == $'MYSQL_ROOT_PASSWORD\nMYSQL_DATABASE' ]] || {
+    printf 'mysqldump one-off 容器收到的环境变量超出最小凭据集合\n' >&2
+    exit 1
+  }
+  [[ -z "$(find "$temporary_dir" -maxdepth 1 -type f -print -quit)" ]] || {
+    printf 'backup 退出后未清理 mysqldump 临时凭据文件\n' >&2
+    exit 1
+  }
   [[ "$(cat "$state_file")" == "2" ]] || {
     printf 'backup 未在 dump 前后各读取一次隔离归档统计\n' >&2
     exit 1
@@ -1475,6 +1538,30 @@ run_backup_archive_drift_simulation() {
   }
   [[ ! -e "$lock_dir" ]] || {
     printf 'backup 统计漂移后未释放维护锁\n' >&2
+    exit 1
+  }
+
+  : > "$docker_log"
+  if env PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$docker_log" \
+    FAKE_DOCKER_SCENARIO=backup_archive_drift FAKE_BACKUP_STATE="$state_file" \
+    FAKE_BACKUP_ENV_KEYS="$env_keys_file" FAKE_BACKUP_CLIENT_FAIL=1 TMPDIR="$temporary_dir" \
+    DEPLOY_ENV_FILE="$env_file" BACKUP_DIR="$output_dir" BACKUP_RETENTION_DAYS=0 \
+    MAINTENANCE_LOCK_DIR="$lock_dir" \
+    ./backup.sh --reason test-client-failure > "$output_file" 2>&1; then
+    printf 'backup 未传播隔离 mysqldump 客户端失败\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" 'simulated mysqldump client failure'
+  [[ -z "$(find "$temporary_dir" -maxdepth 1 -type f -print -quit)" ]] || {
+    printf 'mysqldump 客户端失败后未清理临时凭据文件\n' >&2
+    exit 1
+  }
+  [[ -z "$(find "$output_dir" -maxdepth 1 -type f -print -quit)" ]] || {
+    printf 'mysqldump 客户端失败后发布了备份或边车文件\n' >&2
+    exit 1
+  }
+  [[ ! -e "$lock_dir" ]] || {
+    printf 'mysqldump 客户端失败后未释放维护锁\n' >&2
     exit 1
   }
 }

@@ -63,12 +63,16 @@ if [[ "${PRISM_MAINTENANCE_LOCK_HELD:-0}" != "1" ]]; then
   lock_acquired=1
 fi
 tmp_file=""
+mysql_client_env_file=""
+mysql_container=""
+mysql_image_id=""
 
 # 清理临时文件和锁。
 # 参数: 无。
 # 返回: 始终返回 0。
 cleanup() {
   [[ -z "$tmp_file" || ! -f "$tmp_file" ]] || rm -f "$tmp_file"
+  [[ -z "$mysql_client_env_file" || ! -f "$mysql_client_env_file" ]] || rm -f "$mysql_client_env_file"
   [[ "$lock_acquired" == "1" ]] || return 0
   release_directory_lock "$lock_dir"
 }
@@ -86,6 +90,29 @@ read_archive_stats() {
   ' 2>/dev/null | tr -d '\r' | tail -n 1
 }
 
+# 准备隔离的 mysqldump 客户端容器。它只共享 MySQL 网络命名空间，不共享
+# 900 MiB mysqld 容器的内存 cgroup；临时 env 文件只包含备份所需的数据库凭据。
+prepare_mysqldump_client() {
+  local env_file="${DEPLOY_ENV_FILE:-.env}"
+
+  mysql_container="$(service_container_id mysql)" || fatal "无法确定 MySQL 容器，拒绝备份"
+  mysql_image_id="$(docker inspect --format '{{.Image}}' "$mysql_container" 2>/dev/null)" \
+    || fatal "无法读取 MySQL 容器镜像 ID，拒绝备份"
+  [[ "$mysql_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "MySQL 容器镜像 ID 无效，拒绝备份"
+
+  mysql_client_env_file="$(mktemp "${TMPDIR:-/tmp}/prism-mysqldump-env.XXXXXX")" \
+    || fatal "无法创建 mysqldump 客户端临时凭据文件"
+  chmod 600 "$mysql_client_env_file"
+  if ! compose --env-file "$env_file" config --environment \
+    | awk -F= '$1 == "MYSQL_ROOT_PASSWORD" || $1 == "MYSQL_DATABASE" { print }' \
+      > "$mysql_client_env_file"; then
+    fatal "无法解析 mysqldump 客户端数据库凭据"
+  fi
+  grep -q '^MYSQL_ROOT_PASSWORD=.' "$mysql_client_env_file" \
+    && grep -q '^MYSQL_DATABASE=.' "$mysql_client_env_file" \
+    || fatal "mysqldump 客户端数据库凭据缺失"
+}
+
 archive_stats_before="$(read_archive_stats)"
 
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
@@ -99,7 +126,16 @@ checksum_file="$backup_file.sha256"
 metadata_file="$backup_file.meta"
 
 log_info "开始 MySQL 一致性备份(reason=$reason)"
-compose exec -T mysql sh -ec '
+prepare_mysqldump_client
+docker run --rm \
+  --network "container:$mysql_container" \
+  --memory 512m \
+  --env-file "$mysql_client_env_file" \
+  --entrypoint sh \
+  "$mysql_image_id" \
+  -ec '
+  test -n "$MYSQL_ROOT_PASSWORD"
+  test -n "$MYSQL_DATABASE"
   MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump \
     --protocol=TCP -h 127.0.0.1 -uroot \
     --single-transaction --quick --routines --triggers --events \
