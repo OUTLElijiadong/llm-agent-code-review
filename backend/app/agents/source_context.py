@@ -42,6 +42,42 @@ class SourceContextError(ValueError):
     """源码上下文未完整覆盖，禁止把局部材料当完整项目。"""
 
 
+def _source_quote_hint(text: str) -> str:
+    """Choose a short exact source span for the model to echo as provenance."""
+    for line in text.splitlines():
+        candidate = line.strip()
+        if len(candidate) >= 8:
+            return candidate[:48]
+    if len(text) >= 8:
+        start = next((index for index, char in enumerate(text) if not char.isspace()), 0)
+        return text[start : start + 48]
+    return text
+
+
+def _payload_with_source_quote_hints(payload: Any) -> Any:
+    """Add exact quote anchors while leaving the original validation input intact."""
+    if isinstance(payload, dict):
+        entries = [payload]
+        was_list = False
+    elif isinstance(payload, list):
+        entries = payload
+        was_list = True
+    else:
+        return payload
+
+    hinted: list[Any] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            hinted.append(entry)
+            continue
+        copy_entry = dict(entry)
+        source_text = entry.get("text") if isinstance(entry.get("text"), str) else entry.get("summary")
+        if isinstance(source_text, str):
+            copy_entry["source_quote_hint"] = _source_quote_hint(source_text)
+        hinted.append(copy_entry)
+    return hinted if was_list else hinted[0]
+
+
 def _serialize_model_guard(ctx: Any) -> Any:
     """并行模型调用时串行执行共享 SQLAlchemy Session 上的权限/租约检查。"""
     extra = getattr(ctx, "extra", None)
@@ -97,7 +133,9 @@ def _context_call(
         "不得尝试解析或补齐片段外内容，也不得仅因不完整 JSON 语法返回 error。"
         "不得臆测，不能把未出现的符号说成已存在。程序会独立保留逐字权限、否定、数量限制和更正事实，"
         "你无需复述整本账本，只需准确压缩其余源码结构。"
-        "每个来源只需给出 1 条从其 text 或 summary 字段逐字复制的短引文，尽量不超过 48 字，最多 160 字；"
+        "每个来源都带有程序从对应 text 或 summary 原文抽取的 source_quote_hint；"
+        "source_quotes 中必须将该 hint 原样复制为唯一引文，不得改写、补标点或用省略号替代。"
+        "每个来源只需给出 1 条逐字短引文，最多 160 字；"
         "来源 ID 和引文只能证明引用片段存在，不能证明摘要推断正确。"
         '必须返回 JSON: {"covered_source_ids":[全部输入 source_id],'
         '"source_quotes":[{"source_id":"原 ID","quotes":["逐字引文"]}],'
@@ -128,7 +166,7 @@ def _context_call(
             base_instruction
             + retry_feedback
             + f"\n本批来源 ID: {json.dumps(source_ids, ensure_ascii=False)}\n"
-            + f"原始材料:\n{json.dumps(payload, ensure_ascii=False, default=str)}"
+            + f"原始材料:\n{json.dumps(_payload_with_source_quote_hints(payload), ensure_ascii=False, default=str)}"
         )
         try:
             result = agent.call_json(

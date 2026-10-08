@@ -195,6 +195,41 @@ def test_source_compaction_keeps_small_unverifiable_source_fail_closed() -> None
     assert calls == 2
 
 
+def test_source_compaction_provides_exact_quote_hint_without_relaxing_validation() -> None:
+    text = "<?php\nfunction login_user($name) { return authenticate($name); }\n"
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"login.php-source-{digest[:12]}"
+
+    class HintFollowingAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _batch_ids(message)
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            entries = payload if isinstance(payload, list) else [payload]
+            quote_items = []
+            for entry in entries:
+                hint = entry.get("source_quote_hint")
+                original = entry.get("text") or entry.get("summary")
+                assert isinstance(hint, str) and hint in original
+                quote_items.append({"source_id": entry["source_id"], "quotes": [hint]})
+            return SimpleNamespace(success=True, data={
+                "covered_source_ids": ids,
+                "source_quotes": quote_items,
+                "summary": "登录入口调用 authenticate。",
+            })
+
+    result = compact_source_context(
+        HintFollowingAgent(),
+        {
+            "coverage_complete": True,
+            "source_chunks": [{"source_id": source_id, "text": text, "sha256": digest}],
+        },
+        ctx=None,
+    )
+
+    assert result["covered_source_ids"] == [source_id]
+    assert result["source_summaries"][0]["summary"].endswith("登录入口调用 authenticate。")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("window,should_fit", [(5000, False), (16000, True)])
 async def test_runtime_preserves_middle_restriction_when_model_summary_has_all_anchors(

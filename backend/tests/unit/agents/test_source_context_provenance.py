@@ -430,9 +430,8 @@ def test_packed_metadata_is_not_duplicated_or_retained_in_split_model_requests()
     assert len(split_payloads) == 2
     assert "".join(entry["text"] for entry in split_payloads) == source
     assert max(len(entry["text"]) for entry in split_payloads) < len(source)
-    for message in messages:
-        if "PACKED_SOURCE_SENTINEL" in message:
-            assert message.count("PACKED_SOURCE_SENTINEL") == 1
+    assert all(entry["text"].count("PACKED_SOURCE_SENTINEL") <= 1 for entry in source_payloads)
+    assert all(entry["source_quote_hint"] in entry["text"] for entry in source_payloads)
 
 
 def test_real_multifile_archive_keeps_grounding_through_recursive_split() -> None:

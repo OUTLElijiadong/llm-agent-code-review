@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "release": {
+    "version": "4.0.94",
+    "sha": "3ccd1c3d783b3c0bed24fe5bf4016beb72194beb"
+  },
+  "task_id": "sbx_e32876716e62433cb3eeb8fc",
+  "mode": "blackbox",
+  "project_id": 14,
+  "source_sha256": "fad1234a7c235e37e941f1fc2d68b39549fcb662003ed8c5547306b805b1729d",
+  "source_compaction": {
+    "status": "failed_closed",
+    "reason": "源码分片引文无法从对应来源原文核验"
+  },
+  "ai_dynamic_tests": {
+    "status": "skipped",
+    "count": 0
+  },
+  "deterministic_execution": {
+    "exit_code": 0,
+    "requested_mode": "blackbox",
+    "status": "passed",
+    "worker_mode": "blackbox"
+  },
+  "blackbox_execution": {
+    "agent_assertions_passed": null,
+    "basis": "route_smoke",
+    "failure_kind": null,
+    "passed": true,
+    "route": "/login.php",
+    "route_origin": "php_entrypoint",
+    "route_passed": true,
+    "status": "passed",
+    "status_code": 200
+  },
+  "verification_coverage": {
+    "ai_dynamic_status": "skipped",
+    "blackbox_status": "passed",
+    "deterministic_status": "passed",
+    "reason": "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围",
+    "remote_blackbox_status": "not_required",
+    "requested_mode": "blackbox",
+    "verification_status": "partial"
+  },
+  "worker": {
+    "exit_code": 0,
+    "cleanup_confirmed": true,
+    "cleanup_scope": "container and job directory removal were confirmed",
+    "container_state": "exited"
+  },
+  "downloaded_artifact": {
+    "bytes": 6383,
+    "sha256": "44a424f942e53d0ff65a6f01e0fb166e397cff8e0b8c467b806ac1445b8d4c54",
+    "raw_logs_copied": false
+  }
+}
