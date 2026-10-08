@@ -1,5 +1,7 @@
 """每次真实 HTTP 的精确记账、去重、独立事务及失败边界。"""
 
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from types import SimpleNamespace
@@ -11,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.base import AgentContext, BaseAgent
+from app.agents.source_context import compact_source_context
 from app.ai.deepseek_agent import DeepSeekAgent
 from app.core.database import Base
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
@@ -165,6 +168,74 @@ def test_real_base_worker_uses_own_session_and_preserves_context(ledger_db, monk
     assert len(requests) == 1 and result.success
     assert current_attribution(7) == {}
     assert model_attribution(db.query(AiCallLog).one()) == origin
+
+
+def test_parallel_source_compaction_preserves_usage_context_per_batch(ledger_db, monkeypatch):
+    db, origin, _task_id, _file_id = ledger_db
+    original_client = httpx.Client
+    requests = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        prompt = body["messages"][1]["content"]
+        ids_text = prompt.split("\n本批来源 ID: ", 1)[1].split("\n原始材料:", 1)[0]
+        source_ids = json.loads(ids_text)
+        payload_text = prompt.split("\n原始材料:\n", 1)[1]
+        payload = json.loads(payload_text)
+        entries = payload if isinstance(payload, list) else [payload]
+        quotes = []
+        for source_id, entry in zip(source_ids, entries):
+            source = entry.get("text") or entry.get("summary") or ""
+            quotes.append({"source_id": source_id, "quotes": [source[:80]]})
+        answer = json.dumps(
+            {
+                "covered_source_ids": source_ids,
+                "source_quotes": quotes,
+                "summary": "保留源码结构和入口信息",
+            },
+            ensure_ascii=False,
+        )
+        requests.append(source_ids)
+        return httpx.Response(200, json=_body(content=answer))
+
+    monkeypatch.setattr(
+        "app.agents.base.httpx.Client",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: SimpleNamespace(request_url=url, host_header="unit.example", request_extensions={}),
+    )
+    agent = BaseAgent(system_prompt="unit", model="unit-model")
+    agent.name = "source_compactor"
+    agent._model = "unit-model"
+    agent._base_url = "https://unit.example/v1"
+    agent._api_key = "unit"
+    agent._max_retries = 0
+    agent._timeout = 5
+    agent._emit = lambda *_args, **_kwargs: None
+
+    chunks = []
+    for index in range(33):
+        source = f"source-{index:02d} ENTRY_MARKER_{index:02d}"
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        chunks.append({"source_id": f"file-{index:02d}-{digest[:12]}", "sha256": digest, "text": source})
+
+    with usage_context(7, origin, db=db):
+        compacted = compact_source_context(
+            agent,
+            {"coverage_complete": True, "source_chunks": chunks, "source_chunk_count": len(chunks)},
+            ctx=AgentContext(user_id=7),
+            max_chars=20_000,
+        )
+
+    db.rollback()
+    rows = db.query(AiCallLog).order_by(AiCallLog.id).all()
+    assert compacted["compression"]["source_chunks"] == len(chunks)
+    assert len(requests) == compacted["compression"]["model_calls"] == 3
+    assert len(rows) == len(requests)
+    assert all(row.user_id == 7 and row.total_tokens == 9 for row in rows)
+    assert all(model_attribution(row) == origin for row in rows)
 
 
 def test_explicit_source_records_without_context_but_fake_database_does_not_connect(ledger_db, monkeypatch):

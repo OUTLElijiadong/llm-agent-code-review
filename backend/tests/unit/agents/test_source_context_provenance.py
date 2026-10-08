@@ -322,17 +322,44 @@ def test_real_multifile_archive_keeps_grounding_through_recursive_split() -> Non
 
 
 def test_large_project_compaction_uses_bounded_batches_and_covers_every_source() -> None:
+    import threading
+    import time
+
+    from app.agents.base import AgentContext
+
     chunks = []
     for index in range(481):
         text = f"FILE {index:04d} SOURCE_SENTINEL_{index:04d}\n" + ("x" * 4_900)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         chunks.append({"source_id": f"file-{index:04d}-{digest[:12]}", "sha256": digest, "text": text})
     calls: list[int] = []
+    active_calls = 0
+    peak_calls = 0
+    call_lock = threading.Lock()
+    active_guards = 0
+    guard_overlap = False
+
+    def before_model_call() -> None:
+        nonlocal active_guards, guard_overlap
+        with call_lock:
+            guard_overlap = guard_overlap or active_guards > 0
+            active_guards += 1
+        time.sleep(0.002)
+        with call_lock:
+            active_guards -= 1
 
     class ScalableAgent:
-        def call_json(self, message, **_kwargs):
+        def call_json(self, message, **kwargs):
+            nonlocal active_calls, peak_calls
+            kwargs["ctx"].extra["before_model_call"]()
             source_ids = _source_ids(message)
-            calls.append(len(source_ids))
+            with call_lock:
+                calls.append(len(source_ids))
+                active_calls += 1
+                peak_calls = max(peak_calls, active_calls)
+            time.sleep(0.01)
+            with call_lock:
+                active_calls -= 1
             return SimpleNamespace(
                 success=True,
                 data={
@@ -345,7 +372,7 @@ def test_large_project_compaction_uses_bounded_batches_and_covers_every_source()
     compacted = compact_source_context(
         ScalableAgent(),
         {"coverage_complete": True, "source_chunks": chunks, "source_chunk_count": len(chunks)},
-        ctx=None,
+        ctx=AgentContext(extra={"before_model_call": before_model_call}),
         max_chars=40_000,
     )
 
@@ -353,6 +380,8 @@ def test_large_project_compaction_uses_bounded_batches_and_covers_every_source()
     assert compacted["compression"]["source_chunks"] == 481
     assert len(calls) <= 32
     assert max(calls) > 8
+    assert 1 < peak_calls <= 4
+    assert not guard_overlap
 
 
 def test_source_summary_over_old_limit_is_preserved_without_truncation() -> None:
