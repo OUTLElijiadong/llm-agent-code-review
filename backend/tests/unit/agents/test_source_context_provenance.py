@@ -767,6 +767,37 @@ def test_truncated_multi_source_context_is_split_before_retrying_model(monkeypat
     assert len(calls[1]) < len(calls[0])
 
 
+def test_context_compaction_starts_at_production_proven_4096_token_budget(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.config.settings.deepseek_max_output_tokens", 65_536)
+    output_budgets: list[int] = []
+
+    class ProductionBudgetAgent:
+        def call_json(self, message, **kwargs):
+            output_budgets.append(kwargs["max_tokens"])
+            if kwargs["max_tokens"] < 4_096:
+                return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": "源码入口与权限检查已按来源核验。",
+                },
+            )
+
+    summary = _context_call(
+        ProductionBudgetAgent(),
+        ["module-a"],
+        {"source_id": "module-a", "text": "def authorize(): return True"},
+        None,
+        None,
+        protected_facts=[],
+    )
+
+    assert "权限检查" in summary
+    assert output_budgets == [4_096]
+
+
 def test_truncated_single_source_is_losslessly_split_into_windows() -> None:
     text = "A" * 1_500 + "B" * 1_500
     leaf_windows: list[str] = []

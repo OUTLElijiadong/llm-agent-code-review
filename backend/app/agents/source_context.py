@@ -76,9 +76,12 @@ def _context_call(
         configured_output_tokens = max(1, int(settings.deepseek_max_output_tokens or 2_048))
     except (ImportError, AttributeError, TypeError, ValueError):
         pass
-    output_budgets = [2_048]
-    if configured_output_tokens > 2_048:
-        output_budgets.append(min(4_096, configured_output_tokens))
+    # Production evidence showed that 2,048-token attempts frequently exhausted
+    # the completion budget before returning JSON, while 4,096-token attempts
+    # usually succeeded. Start at the proven budget to avoid paying for a
+    # guaranteed-truncated first response; oversized source is still split
+    # losslessly when it cannot fit.
+    output_budgets = [min(4_096, configured_output_tokens)]
 
     base_instruction = (
         "请压缩以下沙箱源码材料，保留入口、依赖、模块、调用和安全相关事实。"
