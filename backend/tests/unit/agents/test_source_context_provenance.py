@@ -770,10 +770,12 @@ def test_truncated_multi_source_context_is_split_before_retrying_model(monkeypat
 def test_context_compaction_starts_at_production_proven_4096_token_budget(monkeypatch) -> None:
     monkeypatch.setattr("app.core.config.settings.deepseek_max_output_tokens", 65_536)
     output_budgets: list[int] = []
+    thinking_modes: list[bool | None] = []
 
     class ProductionBudgetAgent:
         def call_json(self, message, **kwargs):
             output_budgets.append(kwargs["max_tokens"])
+            thinking_modes.append(kwargs.get("thinking"))
             if kwargs["max_tokens"] < 4_096:
                 return SimpleNamespace(success=False, failure_kind="output_truncated", error="length")
             return SimpleNamespace(
@@ -796,6 +798,7 @@ def test_context_compaction_starts_at_production_proven_4096_token_budget(monkey
 
     assert "权限检查" in summary
     assert output_budgets == [4_096]
+    assert thinking_modes == [False]
 
 
 def test_truncated_single_source_is_losslessly_split_into_windows() -> None:

@@ -130,6 +130,11 @@ def _context_call(
                 ctx=ctx,
                 max_tokens=output_budget,
                 deadline_monotonic=deadline,
+                # DeepSeek enables thinking by default and counts hidden reasoning
+                # tokens against max_tokens. This task needs a compact, validated
+                # JSON projection; reasoning can consume the whole output budget
+                # before the JSON is returned, as seen in production truncations.
+                thinking=False,
                 system_prompt=_SOURCE_CONTEXT_SYSTEM_PROMPT,
             )
         except Exception as exc:  # noqa: BLE001 - 模型异常必须暴露为未完成压缩。

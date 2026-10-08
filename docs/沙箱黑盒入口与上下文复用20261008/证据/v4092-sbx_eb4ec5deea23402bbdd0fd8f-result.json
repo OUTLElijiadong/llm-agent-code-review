@@ -1,0 +1,73 @@
+{
+  "agent_code": "test_verifier",
+  "evidence": {
+    "agent_test_generation": {
+      "count": 0,
+      "mode": "blackbox",
+      "reason": "未生成可执行的 AI 动态测试用例；结果只覆盖确定性 runner 实际执行的检查。详情见 agent_tests/source_compaction 事件。",
+      "status": "skipped"
+    },
+    "blackbox_execution": {
+      "agent_assertions_passed": null,
+      "basis": "route_smoke",
+      "failure_kind": null,
+      "passed": true,
+      "route": "/login.php",
+      "route_origin": "php_entrypoint",
+      "route_passed": true,
+      "status": "passed",
+      "status_code": 200
+    },
+    "deterministic_test_execution": {
+      "exit_code": 0,
+      "requested_mode": "blackbox",
+      "status": "passed",
+      "worker_mode": "blackbox"
+    },
+    "verification_coverage": {
+      "ai_dynamic_status": "skipped",
+      "blackbox_status": "passed",
+      "deterministic_status": "passed",
+      "reason": "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围",
+      "remote_blackbox_status": "not_required",
+      "requested_mode": "blackbox",
+      "verification_status": "partial"
+    },
+    "worker_result": {
+      "artifacts": [],
+      "cleanup_confirmed": true,
+      "cleanup_scope": "container and job directory removal were confirmed",
+      "container_state": {
+        "finished_at": "2026-10-08T08:43:07.18959005Z",
+        "started_at": "2026-10-08T08:43:00.940855292Z",
+        "status": "exited"
+      },
+      "exit_code": 0,
+      "logs": {
+        "bytes_seen": 3607,
+        "text": "2026-10-08T08:43:01.646217995Z blackbox stage=dependency_preparation elapsed=0s\n2026-10-08T08:43:01.653517466Z blackbox stage=application_readiness started elapsed=0s\n2026-10-08T08:43:04.826695697Z blackbox stage=application_readiness completed elapsed=3s status=302\n2026-10-08T08:43:04.826721135Z blackbox loopback status=302\n2026-10-08T08:43:04.938053341Z PRISM_FACTS_BEGIN\n2026-10-08T08:43:04.938084635Z {\"entrypoints\":[\"bWAPP-master\\/app\\/index.php\",\"bWAPP-master\\/app\\/admin\\/index.php\"],\"test_files\":{\"found\":0,\"framework\":\"\"},\"endpoints\":[{\"path\":\"\\/\\/hero[genre = \",\"file\":\"bWAPP-master\\/app\\/xmli_2.php\"},{\"path\":\"\\/\\/hero[contains(genre, \",\"file\":\"bWAPP-master\\/app\\/xmli_2.php\"},{\"path\":\"\\/\\/hero[contains(translate(genre, \",\"file\":\"bWAPP-master\\/app\\/xmli_2.php\"},{\"path\":\"\\/\\/hero[contains(translate(genre, \",\"file\":\"bWAPP-master\\/app\\/xmli_2.php\"},{\"path\":\"\\/heroes\\/hero[login=\",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/heroes\\/hero\\/login\",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/login\",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/heroes\\/hero\",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[movie = \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[contains(password, \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[password = [REDACTED],\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[login = \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[login = \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[movie = \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[movie = \",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"},{\"path\":\"\\/\\/hero[login\\/text()=\",\"file\":\"bWAPP-master\\/app\\/xmli_1.php\"}],\"param_hints\":[\"filename\",\"id\",\"file\",\"callback\",\"next\",\"url\",\"upload\",\"path\",\"download\"],\"hardcoded_secrets\":[{\"file\":\"bWAPP-master\\/app\\/xmli_1.php\",\"kind\":\"password\"},{\"file\":\"bWAPP-master\\/app\\/xmli_1.php\",\"kind\":\"password\"},{\"file\":\"bWAPP-master\\/app\\/xmli_1.php\",\"kind\":\"password\"},{\"file\":\"bWAPP-master\\/app\\/top_security.php\",\"kind\":\"secret\"},{\"file\":\"bWAPP-master\\/app\\/sm_mitm_2.php\",\"kind\":\"secret\"},{\"file\":\"bWAPP-master\\/app\\/insecure_crypt_storage_1.php\",\"kind\":\"secret\"},{\"file\":\"bWAPP-master\\/app\\/ba_weak_pwd.php\",\"kind\":\"password\"},{\"file\":\"bWAPP-master\\/app\\/ba_weak_pwd.php\",\"kind\":\"password\"},{\"file\":\"bWAPP-master\\/app\\/ba_insecure_login_2.php\",\"kind\":\"secret\"},{\"file\":\"bWAPP-master\\/app\\/ba_insecure_login_2.php\",\"kind\":\"secret\"},{\"file\":\"bWAPP-master\\/app\\/ba_forgotten.php\",\"kind\":\"secret\"}]}\n2026-10-08T08:43:04.938095547Z PRISM_FACTS_END\n2026-10-08T08:43:04.954499495Z no _prism_poc.sh present, skip poc execution\n2026-10-08T08:43:04.954820061Z blackbox stage=route_probe started elapsed=3s\n2026-10-08T08:43:05.868395419Z blackbox discovered route candidates=4\n2026-10-08T08:43:05.975913689Z blackbox route / -> HTTP 302\n2026-10-08T08:43:06.069600994Z blackbox route /index.php -> HTTP 302\n2026-10-08T08:43:06.164221970Z blackbox route /login.php -> HTTP 200\n2026-10-08T08:43:06.164491995Z blackbox stage=route_probe completed elapsed=5s passed=true route=/login.php status=200\n2026-10-08T08:43:06.165127989Z PRISM_AGENT_TESTS_BEGIN {\"protocol_version\":2,\"generated\":0,\"passed\":0,\"failed\":0,\"passed_count\":0,\"files\":{},\"file_results\":{}} PRISM_AGENT_TESTS_END\n2026-10-08T08:43:06.165146220Z blackbox stage=agent_assertions completed elapsed=5s passed=null\n2026-10-08T08:43:07.177992921Z PRISM_BLACKBOX_DONE {\"executed\":true,\"passed\":true,\"basis\":\"route_smoke\",\"agent_assertions_passed\":null,\"route_passed\":true,\"route\":\"/login.php\",\"status_code\":200,\"route_origin\":\"php_entrypoint\"}\n",
+        "truncated": false
+      },
+      "oom_killed": false,
+      "outcome": "succeeded",
+      "timed_out": false
+    }
+  },
+  "passed": true,
+  "source_provenance": {
+    "execution_round": 0,
+    "execution_source_sha256": null,
+    "original_source_sha256": "52a0285eb9b37a498459c5fceafec44ae723b2d3671cf7a0cd5e332a41ee613e",
+    "source_revision_id": null,
+    "source_revision_no": null,
+    "source_revision_parent_sha256": null,
+    "source_revision_sha256": null,
+    "syntax_repair_revisions": [],
+    "worker_receipt": {
+      "request_id": "sbx_eb4ec5deea23402bbdd0fd8f",
+      "source_sha256": "e8fff627629e27cd03e3a3c6c6a745f2f36de47ca3f4446e635175abfa6e99d6"
+    },
+    "worker_request_id": null
+  },
+  "summary": "确定性黑盒测试通过；AI动态补充未执行"
+}

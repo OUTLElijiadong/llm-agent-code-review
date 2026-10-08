@@ -58,3 +58,10 @@ flowchart TD
 - v4.0.90 生产回归完成 481 片压缩预算内 138 次模型调用，其中 55 次因输出达到模型上限而截断、4 次请求读超时；引文校验还拒绝了 19 条确实是源码子串、但超过旧 80 字硬上限的返回。源码覆盖仍 fail-closed，确定性 PHP 路由单独通过。
 - 将单批上限收紧为 8 个来源与 40,000 字符，减少模型在一次响应中复述大量 ID/引文的压力；摘要提示目标收紧到 600 字。逐字源码校验不放宽，真实引文允许至多 160 字，以匹配模型实际返回的精确子串长度。
 - 生产验收必须同时记录压缩调用数/耗时、动态用例数量与执行、独立路由结果、最终状态和 `cleanup_confirmed`。命中确定性路由不能代替 AI 动态覆盖。
+
+## v4.0.93 修复补充
+
+- v4.0.92 生产真实任务 `sbx_eb4ec5deea23402bbdd0fd8f` 在 481 个源码分片上压缩失败；事件记录 `model_calls=131`、`elapsed_ms=300254`，原因仍为 `finish_reason=length`。确定性黑盒 `/login.php` 返回 HTTP 200，但 AI 动态用例未生成，因此该任务只能算部分通过。
+- 根因核对 `BaseAgent.call()` 的请求体构造与 DeepSeek 官方 API 文档：调用方未传 `thinking` 时保留供应商默认值，而 DeepSeek 默认启用思考模式，隐藏推理 token 也计入 `max_tokens`。结构化源码摘要的 4,096 token 输出预算因此可能被隐藏推理消耗，JSON 结果在长度上限处截断；失败后递归拆分继续消耗共享 300 秒期限。
+- `_context_call()` 现显式传 `thinking=False`，只作用于需要保真校验的结构化压缩请求；其他 Agent 的思考模式保持原行为。摘要仍需通过来源 ID、哈希、原文引文和受保护事实完整性校验，不放宽截断处理、不缩减源码覆盖、不把失败降级为成功。
+- 依据：[DeepSeek 思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/)；[DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)。
