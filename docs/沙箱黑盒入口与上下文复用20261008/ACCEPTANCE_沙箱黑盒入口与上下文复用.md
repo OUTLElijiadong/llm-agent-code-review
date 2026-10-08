@@ -3,16 +3,17 @@
 ## 当前状态（2026-10-08）
 
 - 生产当前为 v4.0.95 / SHA `b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`；v4.0.96 仍是候选，尚未发布。
-- 最新只读容量证据采集于 `2026-10-08T13:33:33Z`：根盘 95%，可用 `11,259,387,904` bytes；活动发布脚本门槛为 `12,884,901,888` bytes（12 GiB），短缺 `1,625,513,984` bytes（约 1.514 GiB）。按用户批准范围删除旧 Docker 发布镜像标签后，仍低于门槛；未清理 BuildKit 缓存。
-- 最新活动 `ops-check` 为 `status=error`、`can_continue=false`、`blocking_checks=["disk"]`。release/image/default env、backend/frontend、MySQL/Redis/ClamAV、备份校验、Alembic 062 与 HTTPS 均通过；磁盘余量是唯一阻断项。生产 `/healthz` 与 `/readyz` 为 HTTP 200，仍运行 v4.0.95。完整只读记录见本目录 `证据/v4096-发布阻断-20261008.md`。
-- 当前候选还没有生产验收。HTTP 402 是模型服务计费或额度拒绝，不能仅凭状态码认定余额归零。生产 AI 动态用例目前未生成，真实黑白盒整体尚未通过。
+- 最新只读容量证据采集于 `2026-10-08T14:42:17Z`：根盘 95%，可用 `10,688,143,360` bytes；发布门槛为 `12,884,901,888` bytes（12 GiB），短缺 `2,196,758,528` bytes（约 2.044 GiB）。按用户批准范围删除旧 Docker 发布镜像标签后仍低于门槛。获准的一次 BuildKit 缓存清理因 Docker 28.0.1 graphdriver 错误失败，缓存统计未变；没有清理 dangling images、回滚状态、数据库卷、备份或任务。
+- `ops-check` 最新完整检查时间为 `14:23:38Z`，唯一阻断为磁盘且禁止发布/写入；其他服务与备份/迁移/HTTPS检查通过。`14:27:25Z..14:27:26Z` `/healthz` 与 `/readyz` 为 HTTP 200，仍运行 v4.0.95。完整只读记录见本目录 `证据/v4096-发布阻断-20261008.md`。
+- 活动 builder `default` 的 308 条缓存记录共 `6,188,408,317` bytes；按 LastUsedAt >6h 统计有 247 条、`3,750,006,192` bytes。`buildx du --filter until=6h` 返回全部记录，附加 `private=true` 返回 0 条（但完整清单有 167 条 Private），筛选预览异常。一次已获准的 `docker buildx prune --builder default --force --min-free-space 12884901888` 在 Docker 28.0.1 / overlay2 graphdriver 上返回 `could not stat fs at : no such file or directory`，未释放缓存；该错误与 Moby #5821 / 修复 PR #49623 的已知问题一致。不得据此估算可释放空间；升级 Docker 需要维护窗口。
+- 只读盘点显示占用主要分布于 `/opt` 106.41GB、`/var` 60.83GB、Docker 54.31GB、旧 `/opt/code-review/backups` 48.28GB、`/opt/prism-releases` 34.98GB、`/tmp` 4.94GB 和 journald 4.09GB；这些是占用位置，不代表可直接删除。MySQL 数据卷约 30.97GB，Docker 仅标记约 19KB 可回收。当前候选还没有生产验收。HTTP 402 是模型服务计费或额度拒绝，不能仅凭状态码认定余额归零。生产 AI 动态用例目前未生成，真实黑白盒整体尚未通过。
 
 ## v4.0.96 候选最终复测
 
 - 后端完整 `tests/unit`：`4606 passed, 6 skipped`，243.27 秒；6 项依赖本机 Redis，未运行。测试报告 944 条告警，主要为既有弃用与 pytest 收集告警。
 - 改动 Python 文件 Ruff、`compileall`、`git diff --check` 通过。全仓 Ruff 还报告 63 条未改文件 lint 问题，因此不把全仓 Ruff 标为通过。
 - 独立候选审查补充定向路径 `475 passed`，并验证用量记录并发样本；与全量单元套件属于候选代码证据，不是生产模型调用证据。
-- 生产磁盘发布门禁不通过且 `can_continue=false`。未运行生产 deploy、未做生产备份/恢复变更、未切换服务。旧镜像标签删除没有提供足够容量；未执行 BuildKit prune。
+- 生产磁盘发布门禁不通过且 `can_continue=false`。未运行生产 deploy、未做生产备份/恢复变更、未切换服务。旧镜像标签删除与一次失败的 BuildKit prune 尝试均未提供足够容量。候选 bundle 已只写入独立 tmpfs `/dev/shm`，远端大小、SHA-256、Git bundle 完整性和唯一 HEAD 均通过；尚未创建根盘 staging。
 - 未完成发布后 Safari/Chrome 点击验收，也未证明生产 AI 动态用例能生成并执行；此前黑白盒动态用例为 0 的生产结果仍只判部分通过。
 
 ## 历史验收范围（v4.0.94 阶段）
@@ -138,4 +139,4 @@ v4.0.90 部署前只读核对：生产 `/healthz` 与 `/readyz` 均为 v4.0.89 /
 
 候选 v4.0.96 对 402 执行不可重试分类、压缩并发队列快速停止、测试生成内外层停止重试，并增加 Python 标准库 `from-import` 成员真实导入校验。复核继续发现 PHP 并行语法修复会在账务失败后启动排队调用，Agent Mesh 会将文件读取账务错误重新排队，报告阶段账务异常也不会保存确定性报告；已增加语法修复任务级停止、Mesh 失败类型保留/死信和报告确定性回退。早先 5 个相关测试文件 `332 passed` 及 `tests/unit` `4565 passed, 6 skipped` 均发生在这三处改动之前；最终新增针对测试与全量回归正在进行。此前候选的前端及部署脚本通过记录不替代发布后验收。
 
-发布状态仍为阻断：最新容量快照为 `2026-10-08T13:33:33Z` 根盘可用 `11,259,387,904` bytes，比 12 GiB 下限少 `1,625,513,984` bytes；活动 `ops-check` 明确 `can_continue=false`。容量门禁、备份/隔离恢复和真实浏览器发布后验收尚未完成。不得绕过门禁，也不得把本地测试通过写成生产通过。
+发布状态仍为阻断：最新容量快照为 `2026-10-08T14:26:57Z` 根盘可用 `10,814,038,016` bytes，比 12 GiB 下限少 `2,070,863,872` bytes（约 1.929 GiB）；活动 `ops-check` 明确 `can_continue=false`。容量门禁、发布备份/隔离恢复和真实浏览器发布后验收尚未完成。不得绕过门禁，也不得把本地测试通过写成生产通过。

@@ -4,7 +4,7 @@
 
 生产为 v4.0.95 / SHA `b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad`。v4.0.96 候选修复了 HTTP 402/用量审计错误在源码压缩、部署规划、动态用例、PHP 并行语法修复与 Agent Mesh 中的快速停止及不重排，并让报告阶段保留确定性报告；另包含 Python 标准库导入成员校验。候选后端完整 `tests/unit` 为 `4606 passed, 6 skipped`；改动文件 Ruff、`compileall`、`git diff --check` 通过。候选审查的定向测试 475 项通过，并覆盖用量记录并发样本。
 
-候选未发布。`2026-10-08T13:33:33Z` 生产根盘可用 `11,259,387,904` bytes，少于 12 GiB 发布门槛 `1,625,513,984` bytes；活动 `ops-check` 返回 `can_continue=false`，唯一阻断为 disk。按用户批准删除旧 Docker 发布镜像标签后，容量仍不足；未清理 BuildKit cache、未运行 deploy。生产健康检查仍为 HTTP 200，版本仍为 v4.0.95。证据见同目录 `ACCEPTANCE` 与 `证据/v4096-发布阻断-20261008.md`。
+候选未发布。`2026-10-08T14:42:17Z` 生产根盘可用 `10,688,143,360` bytes，少于 12 GiB 发布门槛 `2,196,758,528` bytes（约 2.044 GiB）；最新 `ops-check` 的唯一 blocker 是 disk。用户批准的旧 Docker 发布镜像标签清理后仍不足；一次获准的 BuildKit prune 在 Docker Engine 28.0.1 / overlay2 graphdriver 上触发已知 `could not stat fs at : no such file or directory`，未释放缓存。候选 bundle 已在独立 tmpfs `/dev/shm` 完成远端字节数、SHA-256、bundle 完整性及唯一 HEAD 校验。Docker Engine 升级会影响运行容器，本轮未执行。没有绕过门禁或运行部署。上次健康检查为 `14:27Z` HTTP 200、v4.0.95；需解除容量门禁后重新检查。证据见同目录 `ACCEPTANCE` 与 `证据/v4096-发布阻断-20261008.md`。
 
 三个 bWAPP/PHP 生产样本的确定性执行/清理成功，但 AI 动态用例均为 0，均只判部分通过。先前生产 UI/事件记录过一次 HTTP 402 观察，但本地未保存 event ID、采集时间或原始状态码回执；下载结果 JSON 没有逐任务关联，故不能据此认定账户余额为零或将该原因映射到每个任务。额外无入口样本的 runner 失败单独记录；其语言/runtime 未从结果 JSON 核实，不计为 bWAPP 黑盒样本。
 

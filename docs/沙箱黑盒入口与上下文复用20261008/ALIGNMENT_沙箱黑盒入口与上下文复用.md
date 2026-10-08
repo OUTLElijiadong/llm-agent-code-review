@@ -49,4 +49,4 @@
 - 三个有效 bWAPP/PHP 生产样本的确定性路径返回 `/login.php` HTTP 200、runner exit 0、清理回执通过；AI 动态用例为 0，任务是部分通过。另一个无入口样本的结果为 runner exit 1；结果 JSON 没有语言/runtime 字段，故不标注其语言，也不并入 bWAPP 样本统计。
 - 先前生产 UI/事件中记录过一次上游 HTTP 402 观察，但本地证据未保存 event ID、采集时间或状态码原始回执。已下载任务结果没有逐条关联模型响应的字段，因此只能把它记为未关联观察；不推断余额归零，也不把所有任务失败都归因于该响应。
 - 当前修复目标限定为：402 分类和停止重复模型调用、压缩并发队列中止、测试生成外层停止重试、Python 标准库导入成员校验。不给模型供应商配置或账户做修改。
-- 最新生产根文件系统只读采集为 `2026-10-08T13:33:33Z`、95%、可用 `11,259,387,904` bytes，低于 12 GiB 发布门槛 `1,625,513,984` bytes。已批准的旧 Docker 发布镜像标签已清理，但仍未满足容量预检；`ops-check` 为 `can_continue=false`，在新读数满足正式门禁前不切换生产版本，也未清理 BuildKit 缓存。
+- 最新生产根文件系统只读采集为 `2026-10-08T14:42:17Z`、95%、可用 `10,688,143,360` bytes，低于 12 GiB 发布门槛 `2,196,758,528` bytes（约 2.044 GiB）。已批准的旧 Docker 发布镜像标签已清理，但仍未满足容量预检；`ops-check` 最新快照 `can_continue=false`。获准的 BuildKit prune 因 Docker Engine 28.0.1 / overlay2 已知 `min-free-space` 缺陷报 `could not stat fs at : no such file or directory`，缓存未释放；候选 bundle 已在生产独立 `/dev/shm` 完成 SHA、大小、完整性与 HEAD 校验。需维护窗口升级 Docker 或扩容系统盘后重新预检，未运行 deploy。
