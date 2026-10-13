@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -132,6 +133,8 @@ async function togglePin() {
 
 onMounted(load)
 onBeforeUnmount(() => { loadGeneration++ })
+
+useAgentPageRefresh({ pages: ['/forum'], refresh: load, canRefresh: () => !replying.value && !actionBusy.value })
 </script>
 
 <template>

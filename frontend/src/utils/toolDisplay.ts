@@ -85,6 +85,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   // 页面能力(帮我操作)
   user_execute_capability: { label: '执行页面操作', running: '小菱正在帮你操作页面…', group: 'capability', isPageAction: true },
   admin_execute_capability: { label: '执行管理操作', running: '小菱正在执行管理操作…', group: 'capability', isPageAction: true },
+  operate_current_page: { label: '操作当前页面', running: '小菱正在读取或操作当前页面…', group: 'capability', isPageAction: true },
 
   // 多智能体编排(子 Agent 团队)
   create_agent_team: { label: '创建子Agent团队', running: '小菱正在组建子Agent团队…', group: 'capability' },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
@@ -161,6 +162,8 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
 }, { flush: 'sync' })
 onBeforeUnmount(closeDeleteConfirmation)
 onMounted(refreshKnowledge)
+
+useAgentPageRefresh({ pages: ['/knowledge'], refresh: refreshKnowledge, canRefresh: () => !addVisible.value && !adding.value && !syncing.value })
 </script>
 
 <template>

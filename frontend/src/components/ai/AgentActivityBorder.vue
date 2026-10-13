@@ -38,7 +38,7 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: var(--z-index-fixed);
+  z-index: var(--layer-agent-status);
 }
 
 /* 内层光谱条:四边流动的光带 */
@@ -110,7 +110,7 @@ const badgeLabel = computed(() => store.current?.label || '小菱正在帮你操
 
 .agent-activity-badge {
   position: absolute;
-  top: 10px;
+  top: calc(var(--header-height) + 12px);
   right: 14px;
   display: flex;
   align-items: center;

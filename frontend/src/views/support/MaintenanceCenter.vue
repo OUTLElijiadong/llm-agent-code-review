@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { useUserStore } from '@/stores/user'
@@ -122,6 +123,8 @@ async function close(t: Ticket) {
 }
 
 onMounted(load)
+
+useAgentPageRefresh({ pages: ['/support'], refresh: load, canRefresh: () => !submitVisible.value && !handleVisible.value && !submitting.value && !actionBusy.value })
 </script>
 
 <template>

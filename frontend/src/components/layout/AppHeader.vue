@@ -319,6 +319,8 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .app-header {
+  position: relative;
+  z-index: var(--layer-header);
   display: flex;
   align-items: center;
   justify-content: space-between;

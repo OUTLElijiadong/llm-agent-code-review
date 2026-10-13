@@ -2030,6 +2030,8 @@ assert_contains lib/common.sh "--network \"container:\$mysql_container\""
 assert_contains lib/common.sh '-e DB_USER=root'
 assert_not_contains lib/common.sh 'log_bin_trust_function_creators'
 assert_contains docker-compose.yml 'CLAMAV_HOST: clamav'
+assert_contains docker-compose.yml 'mem_limit: ${CLAMAV_MEM_LIMIT:-2200m}'
+assert_contains docker-compose.yml "CLAMD_CONF_ConcurrentDatabaseReload: 'no'"
 assert_not_contains docker-compose.yml '"3310:3310"'
 assert_contains sandbox/docker-compose.build.yml 'PYTHON_BASE_IMAGE_DIGEST:?PYTHON_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest'
 assert_contains sandbox/docker-compose.build.yml 'NODE_BASE_IMAGE_DIGEST:?NODE_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest'

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -133,6 +134,8 @@ onMounted(() => {
   loadDashboardSummary()
 })
 onBeforeUnmount(() => { disposed = true })
+
+useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.all([loadChecklist(), loadDashboardSummary()]) })
 </script>
 
 <template>

@@ -83,6 +83,17 @@ beforeEach(() => {
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
 
 describe('论坛列表读取与键盘导航', () => {
+  it('refreshes visible posts after a confirmed Xiaoling mutation', async () => {
+    const { wrapper } = await render(ForumList)
+    api.getPosts.mockResolvedValue(page('小菱发布的新帖子'))
+    window.dispatchEvent(new CustomEvent('prism:agent-page-invalidated', {
+      detail: { page: '/forum', capability: 'forum.posts.create', call_id: 'forum-create-1' },
+    }))
+    await new Promise(resolve => setTimeout(resolve, 80))
+    await flushPromises()
+    expect(wrapper.text()).toContain('小菱发布的新帖子')
+  })
+
   it('旧列表迟到不会覆盖新搜索结果', async () => {
     const old = deferred<ReturnType<typeof page>>()
     api.getPosts.mockReturnValueOnce(old.promise).mockResolvedValueOnce(page('新筛选结果'))

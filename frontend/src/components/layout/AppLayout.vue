@@ -135,7 +135,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 1990;
+    z-index: var(--layer-sidebar-backdrop);
     background: rgba(13, 18, 32, 0.42);
   }
 }

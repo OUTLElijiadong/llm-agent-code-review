@@ -50,6 +50,8 @@ _DEFAULT_GOVERNANCE_AGENTS = (
         ),  # noqa: E501
     ),
     ("approval", "审批Agent", "低风险自动审批，高风险升级", "governance", ("approval",)),
+    ("site_operator", "站点执行子 Agent", "按固定业务契约执行并独立读回当前账号的站点结果", "operations",
+     ("site_execution", "site_verification")),
     ("policy", "安全策略Agent", "动作风险评分与策略决策", "security", ("policy",)),
     (
         "supervisor",

@@ -115,6 +115,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
@@ -249,6 +250,8 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   if (userStore.token && userStore.profile) void loadLogs()
 }, { flush: 'sync' })
 onMounted(loadLogs)
+
+useAgentPageRefresh({ pages: ['/admin/operations', '/admin/access', '/admin/governance', '/audit'], refresh: loadLogs })
 </script>
 
 <style scoped lang="scss">

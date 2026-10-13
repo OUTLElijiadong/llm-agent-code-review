@@ -15,6 +15,7 @@ export type ResponseStreamEventType =
   | 'response.approval.required'
   | 'response.input.required'
   | 'response.sensitive.result'
+  | 'response.browser.required'
   | 'response.completed'
   | 'response.incomplete'
   | 'response.failed'
@@ -136,6 +137,20 @@ export interface ResponseSensitiveResultEvent extends ResponseStreamEventBase {
   values: string[]
 }
 
+export interface ResponseBrowserRequiredEvent extends ResponseStreamEventBase {
+  type: 'response.browser.required'
+  action_id: number
+  run_id: string
+  session_id: string
+  surface: 'user' | 'admin'
+  account_id: number
+  client_nonce: string
+  observation_snapshot_id: string
+  action: 'inspect' | 'navigate' | 'click' | 'fill' | 'select' | 'check' | 'scroll'
+  args: { route?: string; client_handle?: string; snapshot_id?: string; value?: string; checked?: boolean; direction?: 'up' | 'down' }
+  expires_at: string
+}
+
 export interface ResponseApprovalDecision {
   action: 'approve' | 'reject'
   confirmation?: string
@@ -190,6 +205,7 @@ export type ResponseStreamEvent =
   | ResponseApprovalRequiredEvent
   | ResponseInputRequiredEvent
   | ResponseSensitiveResultEvent
+  | ResponseBrowserRequiredEvent
   | ResponseSandboxProgressEvent
   | ResponseAuditProgressEvent
   | ResponseTerminalEvent

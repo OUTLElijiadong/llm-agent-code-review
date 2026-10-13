@@ -1041,6 +1041,7 @@ describe('AdminCopilot Responses stream', () => {
       call_id: 'call-unproven',
       tool_name: 'admin_execute_capability',
       arguments: { capability: 'report_templates.delete' },
+      page_action: { page: '/report/templates', capability: 'report_templates.delete', phase: 'started', mutation: true },
     })
     expect(useAgentActivityStore().isActing).toBe(true)
     emit(0, { type: 'response.completed', response: { id: 'run-unproven', status: 'completed' } })

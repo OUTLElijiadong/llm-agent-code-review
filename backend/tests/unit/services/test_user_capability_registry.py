@@ -75,7 +75,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 114
+    assert len(USER_CAPABILITIES) == 125
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
@@ -109,11 +109,11 @@ def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
         "security.scan_all_projects",
     }
 
-    sandbox_codes = {spec.code for spec in USER_CAPABILITIES if spec.page == "/sandboxes"}
+    sandbox_codes = {spec.code for spec in USER_CAPABILITIES if spec.code.startswith("sandboxes.")}
     assert sandbox_codes == {"sandboxes.list", "sandboxes.get"}
     # 沙箱创建/停止/续期属于副作用操作,只能走专用固定工具,不开放通用执行器
     assert not any(
-        spec.page == "/sandboxes" and spec.method != "GET" for spec in USER_CAPABILITIES
+        spec.code.startswith("sandboxes.") and spec.method != "GET" for spec in USER_CAPABILITIES
     )
 
 
@@ -162,6 +162,7 @@ def test_user_discovery_returns_exact_openapi_contract() -> None:
         "issues.get",
         "issues.update_status",
         "issues.batch_update_status",
+        "issues.review_decision",
     }
     update = next(row for row in rows if row["capability"] == "issues.update_status")
     assert update["risk"] == "write"
@@ -930,6 +931,8 @@ async def test_unique_super_admin_roundtable_is_owner_only(
 
 @pytest.mark.asyncio
 async def test_user_capability_reuses_current_identity_and_auto_executes_medium_write(db, monkeypatch) -> None:
+    from app.services import agent_team_service
+
     user = _user(db)
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
     monkeypatch.setattr(
@@ -939,11 +942,15 @@ async def test_user_capability_reuses_current_identity_and_auto_executes_medium_
     )
     calls: list[tuple[int, str, dict[str, Any]]] = []
 
-    async def fake_execute(actor, spec, params, *, request_id):
-        calls.append((actor.id, spec.code, dict(params)))
-        return {"capability": spec.code, "request_id": request_id, "data": {"updated": True}}
+    def submit_team(_db, actor, payload, **_kwargs):
+        task = payload.tasks[0]
+        calls.append((actor.id, task.input["capability"], dict(task.input["params"])))
+        assert task.max_attempts == 1
+        assert payload.tasks[1].input == {"operation": "verify_results"}
+        assert payload.tasks[1].depends_on == [task.task_key]
+        return {"team_id": 71, "status": "queued"}
 
-    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    monkeypatch.setattr(agent_team_service, "create_team_from_xiaoling", submit_team)
     executor = _executor(db, user, "run_profile_update")
     call = ToolCall(
         "call_profile_update",
@@ -954,7 +961,13 @@ async def test_user_capability_reuses_current_identity_and_auto_executes_medium_
 
     completed = await executor.execute(call)
     assert completed.status == "success"
+    assert completed.output["completed"] is False
+    assert completed.output["verification_status"] == "pending"
+    assert completed.output["team_id"] == 71
     assert calls == [(user.id, "profile.update", {"goals": "全量白盒审计"})]
+    repeated = await executor.execute(call)
+    assert repeated.output["team_id"] == 71
+    assert len(calls) == 1
     ledger = db.query(AgentToolExecution).filter_by(run_id="run_profile_update").one()
     assert ledger.status == "success"
     assert db.query(ApprovalItem).filter_by(resource="response_run:run_profile_update").count() == 0

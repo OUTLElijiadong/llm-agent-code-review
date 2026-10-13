@@ -2299,13 +2299,17 @@ async def test_admin_capability_tools_are_admin_only_and_discover_exact_contract
             '{"page":"/admin/security-center"}',
         )
     )
-    # 安全中心可枚举只读能力，但执行仍必须通过唯一超级管理员门禁。
+    # 安全中心可枚举契约，执行仍必须通过唯一超级管理员及监督门禁。
     assert security_discovery.status == "success"
     assert {row["capability"] for row in security_discovery.output["items"]} == {
         "security_center.surface",
         "security_center.trace",
         "security_center.traffic",
         "security_center.decoy.get",
+        "security_center.decoy.apply",
+        "security_center.automatic_blocking.get",
+        "security_center.automatic_blocking.update",
+        "security_center.automatic_blocking.release",
     }
 
     security_execution = await executor.execute(
@@ -2351,11 +2355,20 @@ async def test_admin_capability_read_and_medium_write_execute_without_confirmati
     )
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def fake_execute(_user, spec, params, *, request_id):
-        calls.append((spec.code, dict(params)))
-        return {"capability": spec.code, "request_id": request_id, "data": {"ok": True}}
+    def fake_submit(_db, user, payload, **approval):
+        task = payload.tasks[0]
+        assert user.id == 7
+        assert task.input["scope"] == "admin"
+        assert payload.tasks[1].depends_on == [task.task_key]
+        assert payload.tasks[1].input["operation"] == "verify_results"
+        if task.input["capability"] == "report_templates.delete":
+            assert approval["supervisor_confirmed_by"] == 7
+            assert approval["supervisor_plan_sha256"]
+        calls.append((task.input["capability"], dict(task.input["params"])))
+        return {"team_id": len(calls) + 70, "status": "queued"}
 
-    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    from app.services import agent_team_service
+    monkeypatch.setattr(agent_team_service, "create_team_from_xiaoling", fake_submit)
     executor = PrismToolExecutor(
         db,
         SimpleNamespace(id=7, role="admin", token_version=0),
@@ -2372,6 +2385,8 @@ async def test_admin_capability_read_and_medium_write_execute_without_confirmati
     )
     read = await executor.execute(read_call)
     assert read.status == "success"
+    assert read.output["completed"] is False
+    assert read.output["verification_status"] == "pending"
     assert calls == [("overview.security", {})]
 
     write_params = {"name": "内测模板", "type": "custom", "content": "<h1>{{ title }}</h1>"}
@@ -2406,11 +2421,20 @@ async def test_super_admin_high_capability_cannot_bypass_supervisor_confirmation
     )
     calls = []
 
-    async def fake_execute(_user, spec, params, *, request_id):
-        calls.append((spec.code, dict(params)))
-        return {"deleted_count": 1, "request_id": request_id}
+    def fake_submit(_db, user, payload, **approval):
+        task = payload.tasks[0]
+        assert user.id == 7
+        assert task.input["scope"] == "admin"
+        assert payload.tasks[1].depends_on == [task.task_key]
+        assert payload.tasks[1].input["operation"] == "verify_results"
+        if task.input["capability"] == "report_templates.delete":
+            assert approval["supervisor_confirmed_by"] == 7
+            assert approval["supervisor_plan_sha256"]
+        calls.append((task.input["capability"], dict(task.input["params"])))
+        return {"team_id": len(calls) + 70, "status": "queued"}
 
-    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    from app.services import agent_team_service
+    monkeypatch.setattr(agent_team_service, "create_team_from_xiaoling", fake_submit)
     executor = PrismToolExecutor(
         db,
         SimpleNamespace(id=7, username="admin", role="super_admin", token_version=0),
@@ -2432,6 +2456,7 @@ async def test_super_admin_high_capability_cannot_bypass_supervisor_confirmation
 
     approved = await executor.execute(call, approved=True)
     assert approved.status == "success"
+    assert approved.output["completed"] is False
     assert calls == [("report_templates.delete", {"template_id": 55})]
 
 
@@ -2460,11 +2485,20 @@ async def test_manager_registered_admin_capability_executes_through_real_gateway
 
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def fake_execute(_user, spec, params, *, request_id):
-        calls.append((spec.code, dict(params)))
-        return {"capability": spec.code, "request_id": request_id, "data": {"users": []}}
+    def fake_submit(_db, user, payload, **approval):
+        task = payload.tasks[0]
+        assert user.id == 7
+        assert task.input["scope"] == "admin"
+        assert payload.tasks[1].depends_on == [task.task_key]
+        assert payload.tasks[1].input["operation"] == "verify_results"
+        if task.input["capability"] == "report_templates.delete":
+            assert approval["supervisor_confirmed_by"] == 7
+            assert approval["supervisor_plan_sha256"]
+        calls.append((task.input["capability"], dict(task.input["params"])))
+        return {"team_id": len(calls) + 70, "status": "queued"}
 
-    monkeypatch.setattr(service_module.admin_capability_service, "execute_api", fake_execute)
+    from app.services import agent_team_service
+    monkeypatch.setattr(agent_team_service, "create_team_from_xiaoling", fake_submit)
     executor = PrismToolExecutor(
         db,
         SimpleNamespace(id=7, role="admin", token_version=0),
@@ -2482,6 +2516,7 @@ async def test_manager_registered_admin_capability_executes_through_real_gateway
     )
 
     assert result.status == "success"
+    assert result.output["completed"] is False
     assert calls == [("users.list", {})]
     decision = db.query(PolicyDecisionLog).filter_by(action="admin.users.list").one()
     assert decision.decision == "allow"

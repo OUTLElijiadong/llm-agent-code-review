@@ -293,7 +293,7 @@ function askMember(member: AgentTeamMember): void {
 
 <style scoped>
 .team-side-panel-overlay {
-  position: fixed; inset: 0; z-index: 3200;
+  position: fixed; inset: 0; z-index: var(--layer-modal);
   background: rgba(0,0,0,0.18);
   display: flex; justify-content: flex-end;
 }

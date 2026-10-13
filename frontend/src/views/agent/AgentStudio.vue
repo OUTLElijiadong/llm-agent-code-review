@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, Delete, MagicStick, Plus, Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -283,6 +284,8 @@ function resetWizard(): void {
 }
 
 onMounted(loadAssets)
+
+useAgentPageRefresh({ pages: ['/agents', '/agent-studio', '/admin/governance'], refresh: loadAssets, canRefresh: () => !loading.value })
 </script>
 
 <template>

@@ -139,6 +139,16 @@ ANALYSIS_INPUTS = ("orchestrator", "review_orchestrator", "user", "system")
 
 _CONTRACTS = (
     _contract(
+        "site_operator", "站点执行子 Agent", "runtime_service",
+        "按小菱绑定的页面业务契约执行当前账号操作，独立读回真实结果。",
+        ("执行固定能力注册表中的明确任务", "核验当前团队持久回执和同目标结果"),
+        ("持有效团队租约执行 execute_capability", "通过 verify_results 只读核验依赖"),
+        ("不得根据文本猜测写操作", "不得修改身份、方法、URL或绕过审批", "不得重放结果不确定的写调用"),
+        (_skill("site.execute_capability", "站点业务执行", "复用真实业务API与权限", "显式绑定scope、capability与params"),
+         _skill("site.verify_results", "站点结果核验", "读取本团队执行账本并读回同目标", "必须依赖真实执行任务")),
+        ("chat_assistant", "orchestrator", "user", "system"), (), COMMON_OUTPUT,
+    ),
+    _contract(
         "chat_assistant",
         "小菱唯一主控",
         "protected_runtime",

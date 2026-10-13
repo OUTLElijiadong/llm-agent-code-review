@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 
 import { getEmbeddingConfig, reembedAll, updateEmbeddingConfig } from '@/api/knowledge'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const form = reactive({ base_url: '', model: '', api_key: '', enabled: false })
 const apiKeySet = ref(false)
+const savedFormSnapshot = ref('')
 const saving = ref(false)
 const reembedding = ref(false)
 const reembedStats = ref<string>('')
@@ -17,6 +19,7 @@ async function load() {
   form.enabled = cfg.enabled
   form.api_key = ''
   apiKeySet.value = cfg.api_key_set
+  savedFormSnapshot.value = JSON.stringify(form)
 }
 
 async function save() {
@@ -31,6 +34,7 @@ async function save() {
     form.enabled = cfg.enabled
     apiKeySet.value = cfg.api_key_set
     form.api_key = ''
+    savedFormSnapshot.value = JSON.stringify(form)
     ElMessage.success('已保存')
   } finally {
     saving.value = false
@@ -56,6 +60,8 @@ async function onReembed() {
   }
 }
 onMounted(load)
+useAgentPageRefresh({ pages: ['/admin/platform'], refresh: load,
+  canRefresh: () => !saving.value && !reembedding.value && JSON.stringify(form) === savedFormSnapshot.value })
 </script>
 
 <template>

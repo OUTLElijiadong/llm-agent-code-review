@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 /**
  * 历史 bug 回归复现集:锁定本 PR 修复的每一类缺陷。
  *
@@ -123,24 +124,17 @@ describe('历史bug回归:子Agent工作卡片', () => {
 })
 
 describe('历史bug回归:团队悬浮窗遮挡', () => {
-  it('【修复】悬浮窗 z-index 必须盖过聊天抽屉(旧版 1060 被 3000 压住,「查看详情」后整窗不可见)', async () => {
+  it('【修复】团队悬浮窗在聊天浮窗上方，且低于确认窗', async () => {
     // jsdom 不解析 scoped CSS,zIndex 计算值恒为 0;直接校验组件源码中的声明值
     const source = (await import('./AgentTeamWindow.vue?raw')).default as string
     const match = source.match(/\.agent-team-window\s*\{[^}]*z-index:\s*([^;]+);/s)
     expect(match).not.toBeNull()
     const declared = match![1].trim()
-    const value = Number(declared)
-    // 允许令牌形式,但禁止回落到 --z-index-popover(=1060,低于聊天抽屉 3000)
-    expect(declared).not.toContain('--z-index-popover')
-    if (Number.isFinite(value)) {
-      // 聊天抽屉硬编码 z-index: 3000;悬浮窗必须高于它
-      expect(value).toBeGreaterThan(3000)
-    } else {
-      // 令牌引用:解析 variables.scss 确认其数值 > 3000
-      const vars = (await import('@/assets/styles/variables.scss?raw')).default as string
-      const token = declared.match(/var\((--[\w-]+)/)?.[1]
-      const tokenValue = token ? Number(vars.match(new RegExp(`${token}:\\s*(\\d+)`))?.[1]) : NaN
-      expect(tokenValue).toBeGreaterThan(3000)
-    }
+    const vars = readFileSync('src/assets/styles/variables.scss', 'utf8')
+    const tokenValue = (token: string) => Number(vars.match(new RegExp(`${token}:\\s*(\\d+)`))?.[1])
+    const token = declared.match(/var\((--[\w-]+)/)?.[1]
+    expect(token).toBe('--layer-agent-team')
+    expect(tokenValue(token!)).toBeGreaterThan(tokenValue('--layer-assistant'))
+    expect(tokenValue(token!)).toBeLessThan(tokenValue('--layer-modal'))
   })
 })

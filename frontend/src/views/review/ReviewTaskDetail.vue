@@ -375,6 +375,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { goBack } from '@/utils/navigation'
@@ -1044,6 +1045,8 @@ onUnmounted(() => {
   viewGeneration++
   stopPolling()
 })
+
+useAgentPageRefresh({ pages: ['/reviews', '/issues', '/security'], refresh: loadAllData })
 </script>
 
 <style scoped lang="scss">

@@ -198,6 +198,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, reactive } from 'vue'
 import { type FormInstance, type FormRules } from 'element-plus'
@@ -469,6 +470,8 @@ function openPreviewDialog(row: ReportTemplate): void {
 onMounted(() => {
   loadData()
 })
+
+useAgentPageRefresh({ pages: ['/report/templates', '/admin/platform'], refresh: loadData, canRefresh: () => !formDialogVisible.value })
 </script>
 
 <style scoped lang="scss">

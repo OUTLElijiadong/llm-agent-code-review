@@ -146,6 +146,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -421,6 +422,8 @@ onMounted(() => {
   loadProjects()
   loadData()
 })
+
+useAgentPageRefresh({ pages: ['/reports', '/reviews'], refresh: loadData })
 </script>
 
 <style scoped lang="scss">

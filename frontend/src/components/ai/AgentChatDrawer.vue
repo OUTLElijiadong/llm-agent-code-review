@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
@@ -63,6 +64,7 @@ import {
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
+import { useSiteBrowserBridge } from '@/composables/useSiteBrowserBridge'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { actionableError } from '@/composables/withFeedback'
 import { CHAT_IMAGE_MIME, useChatImages } from '@/composables/useChatImages'
@@ -205,6 +207,8 @@ let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
+const siteBrowser = useSiteBrowserBridge({ surface: 'user', sessionId: () => sessionId.value,
+  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '', router })
 const sessionRestoring = ref(true)
 const sessionPollError = ref('')
 const sessionLastPolledAt = ref('')
@@ -426,37 +430,6 @@ const meshBridge = createAgentMeshBridge({
 
 function messageId(): string {
   return crypto.randomUUID()
-}
-
-/**
- * 从页面操作类工具参数中提取目标路由/动作语义,供虚拟鼠标定位真实元素。
- * 认识的参数形态:capability 的 page('/admin/users')、project_id 等实体 id
- * 会被 VirtualCursor 的路由匹配进一步消化;这里只做无副作用的字符串提取。
- */
-function pageActionTargetHint(args?: string | Record<string, unknown>): string | undefined {
-  if (!args) return undefined
-  let parsed: Record<string, unknown> | null = null
-  if (typeof args === 'string') {
-    try {
-      parsed = JSON.parse(args) as Record<string, unknown>
-    } catch {
-      return undefined
-    }
-  } else if (typeof args === 'object') {
-    parsed = args
-  }
-  if (!parsed) return undefined
-  const page = typeof parsed.page === 'string' ? parsed.page : ''
-  const params = parsed.params
-  const nestedPage = params && typeof params === 'object' && typeof (params as Record<string, unknown>).page === 'string'
-    ? (params as Record<string, unknown>).page as string
-    : ''
-  const route = page || nestedPage
-  const action = typeof parsed.action === 'string' ? parsed.action : ''
-  if (route || action) {
-    return [route, action].filter(Boolean).join(' ').trim()
-  }
-  return undefined
 }
 
 function welcomeMessage(): ChatMessage {
@@ -914,6 +887,7 @@ async function runBackgroundMeshMessage(
   }, {
     onEvent(event) {
       if (!scopeCurrent()) return
+      if (siteBrowser.handle(event)) return
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
       }
@@ -1003,6 +977,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     const details = settled
       .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
       .map((result) => result.value)
+    for (const team of details) notifyVerifiedTeamPageActions(team, userStore.profile?.id)
     const failedCount = settled.length - details.length
     if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
     const currentById = new Map<number, AgentTeamDetail>(
@@ -1054,7 +1029,8 @@ function scheduleSessionPoll(immediate = false): void {
   if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   // 网络抖动时指数退避,恢复后立即重试;活跃任务仍保持秒级反馈。
-  const base = agentResponseSessionPollInterval(sessionRun.value?.status)
+  const base = agentTeams.value.some(team => ['queued', 'running', 'verifying'].includes(team.status))
+    ? 1000 : agentResponseSessionPollInterval(sessionRun.value?.status)
   const backoff = Math.min(sessionPollFailures, 3)
   const delay = immediate ? 0 : base * (2 ** backoff)
   sessionPollTimer = window.setTimeout(() => {
@@ -1496,6 +1472,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   const handle = streamResponses(payload, {
     onEvent(event) {
       if (!scopeCurrent()) return
+      if (siteBrowser.handle(event)) return
       if (event.type === 'response.created') {
         const model = event.response.model
         if (typeof model === 'string' && model) modelName.value = model
@@ -1525,12 +1502,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
         notifyRoundtableToolCompleted(event, userStore.profile?.id)
+        notifyCompletedPageAction(event, userStore.profile?.id)
         if (event.type === 'response.tool.started' && typeof event.tool_name === 'string' && event.tool_name) {
           lastActiveToolName.value = event.tool_name
           // 页面操作类工具:点亮全屏彩框 + 虚拟鼠标;targetHint 携带目标路由,
           // 虚拟光标会定位到页面上真实元素并在需要时真实点击跳转
-          if (isPageActionTool(event.tool_name)) {
-            activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id, pageActionTargetHint(event.arguments))
+          if (isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
+            activityStore.begin(toolRunningPhrase(event.tool_name), event.call_id, pageActionTargetHint(event))
           }
         } else if (
           (event.type === 'response.tool.completed'
@@ -1547,7 +1525,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         }
         if (
           typeof event.tool_name === 'string'
-          && ['create_agent_team', 'get_agent_team', 'retry_agent_team'].includes(event.tool_name)
+          && ['create_agent_team', 'get_agent_team', 'retry_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(event.tool_name)
           && (event.type === 'response.tool.started' || event.type === 'response.tool.completed')
         ) {
           // create_agent_team.started 时可能尚未落库，独立轮询会持续到 SSE 结束；
@@ -2492,6 +2470,14 @@ onMounted(() => {
   window.addEventListener('offline', handleOffline)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
+
+// SSE 提交完成后，实际写入与独立核验仍由团队账本持续提供。
+watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
+  for (const team of agentTeams.value) {
+    if (team.user_id !== undefined && team.user_id !== userStore.profile?.id) continue
+    for (const message of messages.value) applyTeamResultToToolCalls(message.toolCalls ?? [], team)
+  }
+})
 </script>
 
 <template>
@@ -3079,7 +3065,7 @@ onMounted(() => {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 3000;
+  z-index: var(--layer-assistant);
 }
 
 .chat-drawer {
@@ -3126,7 +3112,7 @@ onMounted(() => {
 }
 
 .chat-fab {
-  position: fixed; right: 24px; bottom: 24px; z-index: 3000;
+  position: fixed; right: 24px; bottom: 24px; z-index: var(--layer-assistant);
   width: 60px; height: 60px; border: 0; border-radius: 50%;
   background: linear-gradient(145deg, #ffffff, #eef0fb);
   display: grid; place-items: center;
@@ -4042,7 +4028,7 @@ onMounted(() => {
 }
 
 :global(.agent-clarify-popper) {
-  z-index: 3100 !important;
+  /* 使用 Element Plus 全局递增层级，不能盖过后续确认窗。 */
 }
 
 .clarify-foot {

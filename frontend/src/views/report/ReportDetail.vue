@@ -486,6 +486,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -1138,6 +1139,8 @@ onBeforeUnmount(() => {
   pendingPreviewWindow = null
   for (const url of [...previewUrlTimers.keys()]) releasePreviewUrl(url)
 })
+
+useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: () => Promise.all([loadReport(), loadIssues()]) })
 </script>
 
 <style scoped lang="scss">

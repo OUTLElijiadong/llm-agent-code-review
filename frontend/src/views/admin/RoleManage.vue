@@ -136,6 +136,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, reactive, computed, onMounted } from 'vue'
 
 import type { FormInstance, FormRules } from 'element-plus'
@@ -511,6 +512,8 @@ async function onConfirmScope(): Promise<void> {
 onMounted(() => {
   loadRoles()
 })
+
+useAgentPageRefresh({ pages: ['/admin/access'], refresh: loadRoles, canRefresh: () => !formDialogVisible.value && !permDrawerVisible.value && !scopeDialogVisible.value })
 </script>
 
 <style scoped lang="scss">

@@ -647,7 +647,7 @@ async function cancelTeam(): Promise<void> {
   right: 24px;
   bottom: 24px;
   /* 必须盖过聊天抽屉(3000)与 Element 弹层,否则被压在主聊天窗下面 */
-  z-index: 3200;
+  z-index: var(--layer-agent-team);
   display: flex;
   flex-direction: column;
   width: min(440px, calc(100vw - 24px));

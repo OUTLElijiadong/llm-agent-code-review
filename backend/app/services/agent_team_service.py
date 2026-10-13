@@ -54,7 +54,7 @@ class AgentTeamLeaseError(AgentTeamError):
 
 _TERMINAL_TEAM = frozenset({"completed", "failed", "cancelled", "expired"})
 _TERMINAL_TASK = frozenset({"completed", "failed", "blocked", "cancelled", "dead_letter", "expired"})
-_TEAM_GOVERNED_RUNTIME_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations"})
+_TEAM_GOVERNED_RUNTIME_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations", "site_operator"})
 MAX_CUSTOM_TEAM_CODE_CHARS = 12_000
 
 
@@ -626,6 +626,21 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
     from app.services.project_member_service import require_scoped_project_execution
 
     raw = task_input.input
+    if address == "agent:site_operator" or (
+        address.startswith("temporary:") and raw.get("operation") in {"execute_capability", "verify_results"}
+    ):
+        from app.services.site_agent_service import resolve_site_input
+        try:
+            spec, _ = resolve_site_input(raw)
+        except ValueError as exc:
+            raise AgentTeamValidationError(str(exc)) from exc
+        if spec is None and not task_input.depends_on:
+            raise AgentTeamValidationError("站点核验必须依赖当前团队的执行任务")
+        if spec is not None and raw.get("scope") == "admin" and not _is_admin(db, user):
+            raise AgentTeamAccessError("当前账号不能创建管理站点执行任务")
+        if spec is not None and spec.risk != "read" and task_input.max_attempts != 1:
+            raise AgentTeamValidationError("站点写操作只能尝试一次，不能盲目重复副作用")
+        return
     def check_execution_scope():
         try:
             require_scoped_project_execution(db, user, raw)
@@ -1242,6 +1257,9 @@ def _serialize_task(row: AgentTeamTask, member_key: str = "") -> dict[str, Any]:
 
 
 def _serialize_event(row: AgentTeamEvent) -> dict[str, Any]:
+    detail = _unjson(row.detail_json, {})
+    if isinstance(detail, dict):
+        detail.pop("site_request_origin", None)
     return {
         "event_id": int(row.id),
         "team_id": int(row.team_id),
@@ -1254,7 +1272,7 @@ def _serialize_event(row: AgentTeamEvent) -> dict[str, Any]:
         "trace_id": row.trace_id,
         "message_id": row.message_id,
         "correlation_id": row.correlation_id,
-        "detail": _public(_unjson(row.detail_json, {})),
+        "detail": _public(detail),
         "created_at": row.create_time.isoformat() if row.create_time else None,
     }
 
@@ -1521,6 +1539,7 @@ def create_team_from_xiaoling(
 ) -> dict[str, Any]:
     """小菱唯一的团队创建入口；仍由 _create_team 执行完整账号与资源校验。"""
     from app.services import agent_supervisor_service
+    from app.core.site_request_context import trusted_request_origin
 
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     if review["needs_confirmation"]:
@@ -1558,6 +1577,8 @@ def create_team_from_xiaoling(
             "tasks": review["tasks"],
             "confirmed_by_user_id": int(user.id) if review["needs_confirmation"] else None,
             "authorized_high_risk_fingerprints": authorized_fingerprints,
+            # 仅服务端可信来源；不得从model/task input赋值或送入模型上下文。
+            "site_request_origin": trusted_request_origin(),
         },
     )
     db.commit()

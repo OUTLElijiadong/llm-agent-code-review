@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, Close, EditPen, Refresh, RefreshLeft, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -242,6 +243,8 @@ function afterText(field: keyof AgentReleaseAuthoring): string {
 }
 
 onMounted(load)
+
+useAgentPageRefresh({ pages: ['/admin/governance'], refresh: load, canRefresh: () => !reviseVisible.value && !actionBusy.value })
 </script>
 
 <template>
@@ -335,7 +338,7 @@ onMounted(load)
       </article>
     </section>
 
-    <el-drawer v-model="drawerVisible" title="发布包审查" size="min(760px, 96vw)" append-to-body :z-index="4200" :close-on-click-modal="false">
+    <el-drawer v-model="drawerVisible" title="发布包审查" size="min(760px, 96vw)" append-to-body :close-on-click-modal="false">
       <template v-if="selected">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="Agent">{{ selected.agent?.name }}</el-descriptions-item>
@@ -375,7 +378,7 @@ onMounted(load)
       </template>
     </el-drawer>
 
-    <el-dialog v-model="reviseVisible" title="创建管理员修订版" width="min(760px, 94vw)" append-to-body :z-index="4300" :close-on-click-modal="false">
+    <el-dialog v-model="reviseVisible" title="创建管理员修订版" width="min(760px, 94vw)" append-to-body :close-on-click-modal="false">
       <el-form :model="reviseForm" label-position="top">
         <el-form-item label="系统提示词"><el-input v-model="reviseForm.prompt" type="textarea" :rows="10" /></el-form-item>
         <el-form-item label="审查重点"><el-input v-model="reviseForm.review_focus" type="textarea" :rows="5" /></el-form-item>

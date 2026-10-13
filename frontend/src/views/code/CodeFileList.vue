@@ -145,6 +145,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 /**
  * 代码文件列表组件
  * 展示项目下的代码文件,支持语言筛选、查看代码和版本历史
@@ -359,6 +360,8 @@ onMounted(() => {
   fetchFiles()
 })
 onBeforeUnmount(() => { disposed = true; requestVersion++ })
+
+useAgentPageRefresh({ pages: ['/code', '/projects'], refresh: fetchFiles })
 </script>
 
 <style scoped lang="scss">

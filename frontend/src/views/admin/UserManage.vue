@@ -161,6 +161,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, onMounted } from 'vue'
 import { CopyDocument } from '@element-plus/icons-vue'
 
@@ -361,6 +362,8 @@ onMounted(() => {
   })
   void loadData()
 })
+
+useAgentPageRefresh({ pages: ['/admin/access'], refresh: loadData, canRefresh: () => !roleDialogVisible.value && !passwordDialogVisible.value && !submitting.value })
 </script>
 
 <style scoped lang="scss">

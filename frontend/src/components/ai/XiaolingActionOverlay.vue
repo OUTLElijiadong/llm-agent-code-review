@@ -12,7 +12,7 @@
 .xiaoling-action-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2990;
+  z-index: var(--layer-agent-status);
   pointer-events: none;
 }
 .xiaoling-action-frame {
@@ -32,7 +32,7 @@
 }
 .xiaoling-action-pill {
   position: absolute;
-  top: 24px;
+  top: calc(var(--header-height) + 12px);
   right: 28px;
   display: inline-flex;
   align-items: center;

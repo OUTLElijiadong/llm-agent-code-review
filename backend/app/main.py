@@ -24,6 +24,7 @@ from app.core.observability import (
 )
 from app.core.rate_limit import limiter
 from app.core.request_size_limit import MULTIPART_OVERHEAD_BYTES, UploadRequestSizeLimitMiddleware
+from app.core.site_request_context import SiteRequestContextMiddleware
 
 
 def _ensure_schema() -> None:
@@ -261,6 +262,7 @@ app.add_middleware(
     max_json_bytes=4 * 1024 * 1024,
 )
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(SiteRequestContextMiddleware)
 
 # 接口限流: 注册 Limiter 与 429 处理器(返回项目统一的 Resp 信封)
 app.state.limiter = limiter

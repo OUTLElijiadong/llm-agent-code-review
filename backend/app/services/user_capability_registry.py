@@ -80,6 +80,21 @@ USER_PAGE_ROUTES: tuple[str, ...] = (
 
 
 USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
+    _cap("project_members.candidates", "/projects", "查询当前项目可添加的成员候选", "GET",
+         "/api/projects/{project_id}/members/candidates", permission="project:member:manage"),
+    _cap("projects.remote_import.status", "/projects", "查询我的远程导入任务", "GET",
+         "/api/projects/remote-imports/{task_id}", permission="project:import"),
+    _cap("projects.remote_import.cancel", "/projects", "取消我的远程导入任务", "POST",
+         "/api/projects/remote-imports/{task_id}/cancel", WRITE, "project:import"),
+    _cap("issues.review_decision", "/issues", "接受、驳回审计结论或要求补充证据", "PUT",
+         "/api/issues/{issue_id}/review-decision", WRITE, "issue:handle"),
+    _cap("avatar.set_builtin", "/profile", "设置本人内置头像或已上传的头像", "PUT", "/api/me/avatar", WRITE),
+    _cap("avatar.clear", "/profile", "恢复本人默认头像", "DELETE", "/api/me/avatar", WRITE),
+    _cap("pentest.rules", "/sandboxes", "查看授权测试规则和时间窗", "GET", "/api/pentest/rules", permission="pentest:view"),
+    _cap("pentest.list", "/sandboxes", "查看当前账号允许的渗透委托", "GET", "/api/pentest/engagements", permission="pentest:view"),
+    _cap("pentest.get", "/sandboxes", "查看授权测试委托详情", "GET", "/api/pentest/engagements/{public_id}", permission="pentest:view"),
+    _cap("pentest.cancel", "/sandboxes", "取消本人的渗透委托", "POST", "/api/pentest/engagements/{public_id}/cancel", WRITE, "pentest:start"),
+    _cap("pentest.delete", "/sandboxes", "删除本人已结束或草稿的渗透委托", "DELETE", "/api/pentest/engagements/{public_id}", CRITICAL, "pentest:start"),
     # 工作台
     _cap("dashboard.summary", "/dashboard", "查询工作台汇总", "GET", "/api/dashboard/summary"),
     _cap("dashboard.risk_distribution", "/dashboard", "查询风险分布", "GET", "/api/dashboard/risk-distribution"),

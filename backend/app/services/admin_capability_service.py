@@ -8,12 +8,17 @@ from urllib.parse import quote
 import httpx
 
 from app.core.security import create_access_token
+from app.core.site_request_context import trusted_request_origin
 from app.models.user import User
 from app.services.admin_capability_registry import AdminCapabilitySpec, operation_contract
 
 
 class AdminCapabilityError(ValueError):
     """能力契约或真实 API 执行失败。"""
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def prepare_request(
@@ -58,12 +63,15 @@ async def execute_api(
 
     openapi = app.openapi()
     path, query, body = prepare_request(spec, params, openapi)
+    origin = trusted_request_origin()
+    if spec.method == "PUT" and path == "/api/admin/security-center/automatic-blocking" and origin is None:
+        raise AdminCapabilityError("缺少可信管理员请求来源，请重新发起自动封禁策略更新", status_code=409)
     token = create_access_token(
         int(user.id),
         str(user.role),
         int(getattr(user, "token_version", 0) or 0),
     )
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False, client=(origin or "127.0.0.1", 0))
     async with httpx.AsyncClient(transport=transport, base_url="http://prism.internal", timeout=120.0) as client:
         response = await client.request(
             spec.method,
@@ -84,7 +92,8 @@ async def execute_api(
         message = payload.get("message") if isinstance(payload, Mapping) else None
         detail = payload.get("detail") if isinstance(payload, Mapping) else None
         raise AdminCapabilityError(
-            f"能力 {spec.code} 执行失败(HTTP {response.status_code}): " f"{message or detail or '未知错误'}"
+            f"能力 {spec.code} 执行失败(HTTP {response.status_code}): " f"{message or detail or '未知错误'}",
+            status_code=response.status_code,
         )
     if isinstance(payload, Mapping) and int(payload.get("code", 0) or 0) != 0:
         raise AdminCapabilityError(

@@ -57,8 +57,10 @@ services:
     image: ${CLAMAV_IMAGE:-clamav/clamav:stable}
     container_name: cr_clamav
     restart: unless-stopped
-    mem_limit: ${CLAMAV_MEM_LIMIT:-1400m}
+    mem_limit: ${CLAMAV_MEM_LIMIT:-2200m}
     cpus: ${CLAMAV_CPUS:-1.5}
+    environment:
+      CLAMD_CONF_ConcurrentDatabaseReload: 'no'
     expose:
       - "3310"
     volumes:

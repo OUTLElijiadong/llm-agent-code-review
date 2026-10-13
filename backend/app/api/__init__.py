@@ -10,6 +10,7 @@ from app.api.v1 import (
     admin_overview,
     admin_security_center,
     agent_catalog,
+    agent_browser,
     agent_governance,
     agent_mesh,
     agent_responses,
@@ -82,6 +83,7 @@ api_router.include_router(admin_overview.router, prefix="/admin", tags=["管理�
 api_router.include_router(admin_security_center.router, prefix="/admin/security-center", tags=["管理员安全中心"])
 api_router.include_router(agent_studio.router, prefix="/agent-studio", tags=["Agent 工坊"])
 api_router.include_router(agent_responses.router, prefix="/agent-responses", tags=["Responses Agent"])
+api_router.include_router(agent_browser.router, prefix="/agent-browser", tags=["小菱受控页面操作"])
 api_router.include_router(agent_mesh.router, prefix="/agent-mesh", tags=["小菱 Agent Mesh"])
 api_router.include_router(agent_teams.router, prefix="/agent-teams", tags=["小菱动态子 Agent 团队"])
 api_router.include_router(agent_catalog.router, prefix="/agent-catalog", tags=["Agent 目录"])

@@ -80,6 +80,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 /**
  * 版本历史页�?
  * 展示文件版本历史列表，支持查看和恢复版本
@@ -193,6 +194,8 @@ onMounted(() => {
   void fetchVersions()
   void fetchProjectPermission()
 })
+
+useAgentPageRefresh({ pages: ['/code'], refresh: fetchVersions, canRefresh: () => !contentDialogVisible.value })
 </script>
 
 <style scoped lang="scss">

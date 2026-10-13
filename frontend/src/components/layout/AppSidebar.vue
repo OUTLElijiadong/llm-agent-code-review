@@ -283,7 +283,7 @@ function go(item: MenuItem): void {
   overflow: hidden;
   flex-shrink: 0;
   position: relative;
-  z-index: 2000;
+  z-index: var(--layer-sidebar);
   transition: width 0.2s ease, box-shadow 0.2s ease;
 
   &.is-collapsed {

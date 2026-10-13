@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -702,6 +703,8 @@ onUnmounted(() => {
   ++surfaceRequestGeneration
   ++trafficRequestGeneration
 })
+
+useAgentPageRefresh({ pages: ['/admin/security-center'], refresh: refreshAll, canRefresh: () => !saveLoading.value && !runLoading.value })
 </script>
 
 <template>

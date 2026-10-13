@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -85,6 +86,7 @@ import {
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
+import { useSiteBrowserBridge } from '@/composables/useSiteBrowserBridge'
 import { useFloatingChatPosition } from '@/composables/useFloatingChatPosition'
 import { actionableError } from '@/composables/withFeedback'
 import { CHAT_IMAGE_MIME, useChatImages } from '@/composables/useChatImages'
@@ -135,33 +137,6 @@ interface ChatEntry {
   }
 }
 
-
-/**
- * 从页面操作类工具参数中提取目标路由/动作语义,供虚拟鼠标定位真实元素。
- */
-function pageActionTargetHint(args?: string | Record<string, unknown>): string | undefined {
-  if (!args) return undefined
-  let parsed: Record<string, unknown> | null = null
-  if (typeof args === 'string') {
-    try {
-      parsed = JSON.parse(args) as Record<string, unknown>
-    } catch {
-      return undefined
-    }
-  } else if (typeof args === 'object') {
-    parsed = args
-  }
-  if (!parsed) return undefined
-  const page = typeof parsed.page === 'string' ? parsed.page : ''
-  const params = parsed.params
-  const nestedPage = params && typeof params === 'object' && typeof (params as Record<string, unknown>).page === 'string'
-    ? (params as Record<string, unknown>).page as string
-    : ''
-  const route = page || nestedPage
-  const action = typeof parsed.action === 'string' ? parsed.action : ''
-  if (route || action) return [route, action].filter(Boolean).join(' ').trim()
-  return undefined
-}
 
 const ASSISTANT_NAME = '小菱 · 管理员工作台'
 const MASCOT_NAME = '小菱'
@@ -330,6 +305,8 @@ const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.pro
 const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
+const siteBrowser = useSiteBrowserBridge({ surface: 'admin', sessionId: () => sessionId.value,
+  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '', router })
 const chatAccountEpoch = ref(0)
 const chatScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => sessionId.value)
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
@@ -623,6 +600,7 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     const details = settled
       .filter((result): result is PromiseFulfilledResult<AgentTeamDetail> => result.status === 'fulfilled')
       .map((result) => result.value)
+    for (const team of details) notifyVerifiedTeamPageActions(team, userStore.profile?.id)
     const failedCount = settled.length - details.length
     if (!details.length && failedCount) throw new Error('团队详情暂时无法同步')
     const currentById = new Map<number, AgentTeamDetail>(
@@ -646,7 +624,8 @@ function scheduleSessionPoll(immediate = false): void {
   if (sessionPollStopped || !sessionId.value) return
   const generation = sessionPollGeneration
   // 网络抖动时指数退避,恢复后立即重试;活跃任务仍保持秒级反馈。
-  const base = agentResponseSessionPollInterval(sessionRun.value?.status)
+  const base = agentTeams.value.some(team => ['queued', 'running', 'verifying'].includes(team.status))
+    ? 1000 : agentResponseSessionPollInterval(sessionRun.value?.status)
   const backoff = Math.min(sessionPollFailures, 3)
   const delay = immediate ? 0 : base * (2 ** backoff)
   sessionPollTimer = window.setTimeout(() => {
@@ -1331,6 +1310,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   const handle = streamResponses(payload, {
     async onEvent(event) {
       if (!isCurrentSubmission()) return
+      if (siteBrowser.handle(event)) return
       if (event.type === 'response.created') {
         if (typeof event.response.id === 'string' && event.response.id) unconfirmedStart.value = null
         const runId = typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? ''
@@ -1364,6 +1344,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       } else if (isResponseToolEvent(event)) {
         showTyping.value = false
         notifyRoundtableToolCompleted(event, userStore.profile?.id)
+        notifyCompletedPageAction(event, userStore.profile?.id)
         if (event.type === 'response.sandbox.progress' && typeof event.message === 'string') {
           sandboxProgress.value = event.message
         }
@@ -1374,8 +1355,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
             ElMessage.info(toolRunningPhrase(event.tool_name, MASCOT_NAME))
           }
           // 页面操作类:点亮彩框+虚拟鼠标,targetHint 带目标路由供真实定位
-          if (isPageActionTool(event.tool_name)) {
-            activityStore.begin(toolRunningPhrase(event.tool_name, MASCOT_NAME), event.call_id, pageActionTargetHint(event.arguments))
+          if (isPageActionTool(event.tool_name) && pageActionTargetHint(event)) {
+            activityStore.begin(toolRunningPhrase(event.tool_name, MASCOT_NAME), event.call_id, pageActionTargetHint(event))
           }
         } else if (
           (event.type === 'response.tool.completed'
@@ -1391,10 +1372,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           syncTimeline()
         }
         // Detect create_agent_team tool completion and immediately fetch team
-        if (event.type === 'response.tool.completed' && event.tool_name === 'create_agent_team') {
+        if (event.type === 'response.tool.completed' && ['create_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(String(event.tool_name))) {
           try {
             const result = typeof event.output === 'object' && event.output !== null ? event.output : {}
-            const teamId = (result as any).team_id ?? (result as any).data?.team_id
+            const teamId = event.team_id ?? (result as any).team_id ?? (result as any).data?.team_id
             if (typeof teamId === 'number') {
               const detail = await getAgentTeam(teamId)
               if (!isCurrentSubmission()) return
@@ -1903,6 +1884,14 @@ onMounted(() => {
   window.addEventListener('prism:close-admin-copilot', handleExternalClose)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
+
+// SSE 提交完成后，实际写入与独立核验仍由团队账本持续提供。
+watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
+  for (const team of agentTeams.value) {
+    if (team.user_id !== undefined && team.user_id !== userStore.profile?.id) continue
+    for (const message of messages.value) applyTeamResultToToolCalls(message.toolCalls ?? [], team)
+  }
+})
 </script>
 
 <template>
@@ -2325,7 +2314,7 @@ onMounted(() => {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 1900;
+  z-index: var(--layer-assistant);
   color: var(--agent-text);
 }
 
@@ -2351,7 +2340,7 @@ input { font: inherit; }
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 1900;
+  z-index: var(--layer-assistant);
 }
 
 .copilot-trigger.is-header-trigger {

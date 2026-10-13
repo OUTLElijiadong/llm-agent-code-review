@@ -911,7 +911,7 @@ connectWs()
 .discuss-overlay {
   position: fixed;
   inset: 0;
-  z-index: 3200;
+  z-index: var(--layer-modal);
   background: rgba(15, 18, 40, 0.45);
   backdrop-filter: blur(2px);
   display: flex;

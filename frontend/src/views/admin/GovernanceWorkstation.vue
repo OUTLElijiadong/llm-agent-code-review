@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
 import { confirmDanger } from '@/composables/useDangerConfirm'
@@ -801,6 +802,8 @@ watch(selectedAgent, () => {
 })
 
 onMounted(loadData)
+
+useAgentPageRefresh({ pages: ['/admin/governance', '/admin/operations'], refresh: loadData, canRefresh: () => !loading.value })
 </script>
 
 <template>

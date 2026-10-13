@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
@@ -220,6 +221,8 @@ onBeforeUnmount(() => {
   stopRefresh()
   document.removeEventListener('visibilitychange', visibilityChanged)
 })
+
+useAgentPageRefresh({ pages: ['/support'], refresh: () => load(true), canRefresh: () => canRefresh() })
 </script>
 
 <template>

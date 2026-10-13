@@ -15,6 +15,21 @@ import {
 } from '@/utils/responsesTimeline'
 
 describe('responsesTimeline', () => {
+  it('keeps a submitted page-operation team pending until independent verification', () => {
+    const calls: ResponseToolCall[] = []
+    applyResponseToolEvent(calls, { type: 'response.tool.completed', call_id: 'site-submit',
+      tool_name: 'user_execute_capability', output: { team_id: 19, status: 'queued', completed: false,
+        verification_status: 'pending' } })
+    expect(calls[0]).toMatchObject({ status: 'submitted', teamId: 19 })
+  })
+  it('uses submitted page metadata and team identity even when the event omits an output body', () => {
+    const calls: ResponseToolCall[] = []
+    applyResponseToolEvent(calls, { type: 'response.tool.completed', call_id: 'metadata-submit',
+      tool_name: 'admin_execute_capability', team_id: 20, page_action: { phase: 'submitted' } })
+    expect(calls[0]).toMatchObject({ status: 'submitted', teamId: 20 })
+    finishResponseToolCalls(calls, 'failed', '回答结束')
+    expect(calls[0].status).toBe('submitted')
+  })
   it('uses the backend lifecycle identity and success summary', () => {
     const calls: ResponseToolCall[] = []
     applyResponseToolEvent(calls, {

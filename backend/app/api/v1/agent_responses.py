@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, List, Literal, Mapping, Optional, Sequence
@@ -1023,6 +1024,10 @@ def _public_completed_tool_events(
             result = {}
         if not isinstance(result, Mapping):
             result = {}
+        site_metadata = _recovered_site_metadata(
+            str(row.tool_name), arguments, result.get("output"), int(run.user_id),
+            failed=row.status != "success", trusted_completed=True,
+        )
         sequence += 1
         if row.status == "success" and str(result.get("status") or "success") == "success":
             events.append(
@@ -1037,6 +1042,7 @@ def _public_completed_tool_events(
                     "cached": True,
                     "output_summary": _public_text(result.get("output")),
                     "sequence_number": sequence,
+                    **site_metadata,
                 }
             )
         else:
@@ -1052,6 +1058,7 @@ def _public_completed_tool_events(
                     "cached": True,
                     "error": _public_text(result.get("error") or row.error or "工具执行失败"),
                     "sequence_number": sequence,
+                    **site_metadata,
                 }
             )
 
@@ -1238,6 +1245,50 @@ def _public_pending_event(run_id: str, status: str, value: Any) -> Optional[dict
     }
 
 
+def _recovered_site_metadata(tool_name: str, arguments: Any, output: Any, account_id: int,
+                             *, failed: bool = False, trusted_completed: bool = False) -> dict[str, Any]:
+    """由固定能力注册表重建，避免遗留检查点伪造页面或完成状态。"""
+    if tool_name not in {"user_execute_capability", "admin_execute_capability"} or not isinstance(arguments, Mapping):
+        return {}
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except (ValueError, TypeError):
+            output = {}
+    output = output if isinstance(output, Mapping) else {}
+    team_id = output.get("team_id")
+    valid_team = type(team_id) is int and team_id > 0
+    scope = "admin" if tool_name == "admin_execute_capability" else "user"
+    from app.services.site_agent_service import capability_page_action
+
+    phase = "failed" if failed else "submitted" if valid_team else "completed" if trusted_completed else "pending"
+    try:
+        page_action = capability_page_action(scope, str(arguments.get("capability") or ""), phase, account_id, output)
+    except KeyError:
+        return {}
+    return {"page_action": page_action, **({"team_id": team_id} if valid_team else {})}
+
+
+def _public_site_event_metadata(event: Mapping[str, Any]) -> dict[str, Any]:
+    page = event.get("page_action")
+    if not isinstance(page, Mapping) or type(page.get("account_id")) is not int or page["account_id"] < 1:
+        return {}
+    tool = str(event.get("tool_name") or "")
+    phase = str(page.get("phase") or "")
+    if phase not in {"pending", "submitted", "completed", "failed"}:
+        return {}
+    metadata = _recovered_site_metadata(tool, {"capability": page.get("capability")},
+                                        {"team_id": event.get("team_id")}, page["account_id"],
+                                        failed=phase == "failed", trusted_completed=phase == "completed")
+    # 动态论坛详情仅接受本站正整数 ID 路由；其余目标从注册表生成。
+    action = metadata.get("page_action")
+    route = page.get("result_route")
+    if (action and isinstance(route, str) and re.fullmatch(r"/forum/[1-9][0-9]*", route)
+            and str(page.get("capability") or "").startswith("forum.posts.")):
+        action["result_route"] = route
+    return metadata
+
+
 def _public_stream_event(
     event: Mapping[str, Any],
     *,
@@ -1245,6 +1296,10 @@ def _public_stream_event(
 ) -> Optional[dict[str, Any]]:
     """内部 Agent 流只暴露 UI 需要的协议事件，不透传 reasoning 或原始工具参数。"""
     event_type = str(event.get("type") or "")
+    if event_type == "response.browser.required":
+        from app.services.agent_browser_service import public_required_event
+
+        return public_required_event(event)
     if event_type == "response.output_text.delta":
         delta = event.get("delta")
         if not isinstance(delta, str) or not delta:
@@ -1274,6 +1329,7 @@ def _public_stream_event(
             "arguments": redact_agent_event_value(event.get("arguments")),
             "output_summary": redact_agent_event_value(event.get("output_summary")),
             "error": redact_agent_event_value(error),
+            **_public_site_event_metadata(event),
         }
     if event_type == "response.approval.required":
         return {

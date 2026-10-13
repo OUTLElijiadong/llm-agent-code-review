@@ -303,6 +303,8 @@ async function logout(): Promise<void> {
 }
 
 .admin-header {
+  position: relative;
+  z-index: var(--layer-header);
   flex: 0 0 auto;
   min-height: 72px;
   display: flex;

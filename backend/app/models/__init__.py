@@ -4,6 +4,7 @@ from importlib import import_module
 
 _MODEL_MODULES = (
     "admin_chat",
+    "agent_browser_action",
     "agent_capability",
     "agent_governance",
     "agent_mesh",

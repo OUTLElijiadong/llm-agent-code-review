@@ -44,6 +44,7 @@ _READONLY_RUNTIME_CODES = frozenset(
 _APPROVAL_REQUIRED_CODES = frozenset(
     {
         "test_verifier",
+        "site_operator",
         "sandbox_deployer",
         "operations",
         "incident_responder",
@@ -586,6 +587,14 @@ def _runtime_handler(
             evidence=[{"source": "ops_execution", "data": execution}],
             artifacts=[{"type": "ops_execution", "data": execution}],
         )
+
+    if code == "site_operator":
+        if not trusted_team_execution:
+            return _result("blocked", "站点执行只允许小菱创建的有效团队任务")
+        import asyncio
+        from app.services.site_agent_service import execute_site_task
+        return asyncio.run(execute_site_task(db, user, team_id=int(context.get("team_id") or 0),
+            task_id=int(context.get("agent_team_task_id") or 0), lease_token=str(context.get("lease_token") or "")))
 
     from app.agents.orchestrator import get_request_orchestrator
 
@@ -1289,6 +1298,12 @@ def _handle(
             name, definition = agent_team_service.resolve_temporary_member(db, user, target_address, message)
         except (ValueError, TypeError) as exc:
             return code, _result("blocked", str(exc), errors=[{"code": "invalid_temporary_member"}])
+        if _payload(message).get("operation") in {"execute_capability", "verify_results"}:
+            import asyncio
+            from app.services.site_agent_service import execute_site_task
+            context = message.get("context") or {}
+            return name, asyncio.run(execute_site_task(db, user, team_id=int(context.get("team_id") or 0),
+                task_id=int(context.get("agent_team_task_id") or 0), lease_token=str(context.get("lease_token") or "")))
         return name, temporary_agent_runtime.run_temporary_agent(
             db, user, message, definition=definition, display_name=name,
         )
@@ -1320,7 +1335,7 @@ def _handle(
             f"{contract.name}是有状态入口，请改发到 session:{surface}:<session_id>",
         )
     if state == "approval_required" and not (
-        trusted_team_execution and code in {"test_verifier", "sandbox_deployer", "operations"}
+        trusted_team_execution and code in {"test_verifier", "sandbox_deployer", "operations", "site_operator"}
     ):
         return contract.name, _result(
             "approval_required",

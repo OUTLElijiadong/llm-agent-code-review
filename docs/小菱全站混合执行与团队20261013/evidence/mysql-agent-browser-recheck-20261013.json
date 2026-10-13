@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-13",
+  "scope": "pre-release isolated MySQL validation; no production deployment",
+  "database_target": {
+    "container": "cr_testdb",
+    "engine": "MySQL 8.0.46",
+    "default_transaction_isolation": "REPEATABLE-READ",
+    "production_code_review_schema_touched": false
+  },
+  "candidate_source": {
+    "git_head": "86cfb1a9a2d665f77c94fc21fc4d8b9109b04e0b",
+    "implementation_committed_at_test_time": false,
+    "files_sha256": {
+      "backend/app/services/agent_browser_service.py": "0d479dfa1f18c9c3bb058b1ea86a69bec8ca1a8f923bba2b6d286e185f682224",
+      "backend/alembic/versions/063_agent_browser_actions.py": "3d6aeafaa816f55410404d0e50f064a767caeb5843425ec5bd2ba92abb36d6a1",
+      "backend/app/models/agent_browser_action.py": "f0b8a0cef196f7c87571c963b3198d51b5ad10670365f71b25d2d6283111f6f8"
+    }
+  },
+  "real_helper_ack_trials": {
+    "helper": "agent_browser_service.request_action",
+    "ack_path": [
+      "agent_browser_service.claim_action",
+      "agent_browser_service.acknowledge_action"
+    ],
+    "sessions": "two independent SQLAlchemy Sessions with distinct MySQL CONNECTION_ID() values",
+    "ack_sequence": "first request_action refresh observed queued; second Session claimed and committed completed ACK; first helper's next refresh observed completed",
+    "isolated_schemas": [
+      "prism_verify_agent_browser_ack1_20261013",
+      "prism_verify_agent_browser_ack2_20261013",
+      "prism_verify_agent_browser_ack3_20261013"
+    ],
+    "trials": [
+      {"round": 1, "result": "completed", "elapsed_ms": 442, "refresh_states": ["queued", "completed"], "passed": true},
+      {"round": 2, "result": "completed", "elapsed_ms": 453, "refresh_states": ["queued", "completed"], "passed": true},
+      {"round": 3, "result": "completed", "elapsed_ms": 448, "refresh_states": ["queued", "completed"], "passed": true}
+    ],
+    "result": "3/3 passed"
+  },
+  "token_revocation_trial": {
+    "isolated_schema": "prism_verify_agent_browser_revoke_20261013",
+    "second_session_action": "incremented user.token_version and removed the user's AGENT_CHAT RolePermission after the initial queued refresh",
+    "result": "request_action raised ForbiddenError and marked the action cancelled",
+    "elapsed_ms": 455,
+    "passed": true
+  },
+  "migration_063": {
+    "baseline_revision": "062_audit_log_action_length",
+    "per_helper_schema_sequence": [
+      "upgrade to 063_agent_browser_actions",
+      "verify indexes and LONGTEXT columns",
+      "downgrade to 062 while action table is empty",
+      "verify action table removed",
+      "re-upgrade to 063_agent_browser_actions",
+      "run helper trial"
+    ],
+    "results": "passed in all three ACK schemas and the separate revocation schema",
+    "indexes": {
+      "uq_agent_browser_request": {"columns": ["request_id"], "unique": true},
+      "ix_agent_browser_owner_session": {"columns": ["user_id", "surface", "session_key", "run_id"], "unique": false}
+    },
+    "json_columns": {
+      "arguments_json": "LONGTEXT",
+      "observation_json": "LONGTEXT"
+    }
+  },
+  "large_receipt_capacity": {
+    "schema": "prism_verify_agent_browser_luna_20261013",
+    "payload": "JSON with 28,000 Chinese/emoji characters in text and 120 controls with long labels",
+    "utf8_bytes": 421674,
+    "mysql_char_length": 164474,
+    "arguments_json_bytes_read_back": 421674,
+    "arguments_json_valid": true,
+    "observation_json_bytes_read_back": 421674,
+    "observation_json_valid": true,
+    "result": "exact UTF-8 byte lengths preserved"
+  },
+  "cleanup": {
+    "all_named_temporary_schemas_dropped": true,
+    "temporary_credentials_removed": true,
+    "candidate_source_copied_read_only_to_ephemeral_container": true,
+    "production_mysql_container_or_schema_modified": false
+  },
+  "limitations": [
+    "This exercised the candidate service helper and ACK helpers against isolated MySQL, not the public HTTP route or a real browser.",
+    "The test populated isolated RBAC/run fixtures only; no business or production records were used.",
+    "The 421,674-byte check proves MySQL LONGTEXT persistence, not an end-to-end HTTP/browser request-size limit."
+  ]
+}

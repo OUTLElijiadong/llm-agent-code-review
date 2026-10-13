@@ -149,6 +149,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, reactive, computed, onMounted } from 'vue'
 
 import { Plus } from '@element-plus/icons-vue'
@@ -360,6 +361,8 @@ function resetForm() {
 onMounted(() => {
   loadRules()
 })
+
+useAgentPageRefresh({ pages: ['/security'], refresh: loadRules, canRefresh: () => !dialogVisible.value })
 </script>
 
 <style scoped lang="scss">

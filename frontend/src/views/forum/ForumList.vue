@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { View, ChatLineRound } from '@element-plus/icons-vue'
@@ -66,6 +67,8 @@ function search() {
 
 onMounted(load)
 onBeforeUnmount(() => { loadGeneration++ })
+
+useAgentPageRefresh({ pages: ['/forum'], refresh: load })
 </script>
 
 <template>

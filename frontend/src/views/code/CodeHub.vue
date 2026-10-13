@@ -57,6 +57,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
@@ -101,6 +102,8 @@ async function loadProjects(): Promise<void> {
 }
 
 onMounted(loadProjects)
+
+useAgentPageRefresh({ pages: ['/code', '/projects'], refresh: loadProjects })
 </script>
 
 <style scoped lang="scss">

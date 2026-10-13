@@ -50,6 +50,7 @@ const STATUS_NOTES: Record<ResponseToolCallStatus, string> = {
   running: '正在进行…',
   waiting_approval: '等你确认后继续',
   waiting_input: '在等你的回答',
+  submitted: '已交给团队，等待执行与核验',
   completed: '做好了',
   failed: '没做成',
   rejected: '已按你的要求取消',
@@ -152,6 +153,8 @@ function summaryText(): string {
   if (active > 0) parts.push(`${active} 步进行中`)
   const waiting = steps.value.filter((step) => step.waiting).length
   if (waiting) parts.push(`${waiting} 步待确认`)
+  const submitted = steps.value.filter((step) => step.status === 'submitted').length
+  if (submitted) parts.push(`${submitted} 步交由团队执行`)
   const cancelled = steps.value.filter((step) => step.status === 'rejected').length
   if (cancelled) parts.push(`${cancelled} 步已取消`)
   if (failedCount.value) parts.push(`${failedCount.value} 步出错`)

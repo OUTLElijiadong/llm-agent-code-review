@@ -9,6 +9,7 @@ export type ResponseToolCallStatus =
   | 'running'
   | 'waiting_approval'
   | 'waiting_input'
+  | 'submitted'
   | 'completed'
   | 'failed'
   | 'rejected'
@@ -24,6 +25,8 @@ export interface ResponseToolCall {
   subject?: string
   direction?: 'send' | 'receive'
   traceId?: string
+  /** 已提交的业务团队；提交成功不能表示任务执行成功。 */
+  teamId?: number
   protocolStatus?: string
   argumentsText: string
   status: ResponseToolCallStatus
@@ -239,6 +242,15 @@ export function applyResponseToolEvent(
     if (event.type === 'response.tool.started') call.status = 'running'
     if (event.type === 'response.tool.completed') {
       call.status = 'completed'
+      const rawOutput = event.output ?? event.output_summary ?? event.preview
+      const output = rawOutput && typeof rawOutput === 'object' ? rawOutput as Record<string, unknown> : null
+      const data = output?.data && typeof output.data === 'object' ? output.data as Record<string, unknown> : output
+      const action = event.page_action && typeof event.page_action === 'object' ? event.page_action as Record<string, unknown> : null
+      const teamId = typeof event.team_id === 'number' ? event.team_id : data?.team_id
+      if ((data?.completed === false || action?.phase === 'submitted') && typeof teamId === 'number') {
+        call.teamId = teamId
+        call.status = 'submitted'
+      }
       call.resultPreview = formatResponseValue(event.preview ?? event.output_summary ?? event.output)
     }
     if (event.type === 'response.tool.failed') {
@@ -307,7 +319,7 @@ export function finishResponseToolCalls(
   error?: string,
 ): void {
   for (const call of calls) {
-    if (['completed', 'failed', 'rejected', 'waiting_approval', 'waiting_input'].includes(call.status)) continue
+    if (['completed', 'failed', 'rejected', 'waiting_approval', 'waiting_input', 'submitted'].includes(call.status)) continue
     call.status = status
     call.error = error ? formatResponseValue(error) : '调用未完成'
   }

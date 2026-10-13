@@ -26,6 +26,7 @@ class AdminCapabilitySpec:
     path: str
     risk: str = READ
     permission: Optional[str] = None
+    section: str = ""
 
     def __post_init__(self) -> None:
         method = self.method.upper()
@@ -50,7 +51,23 @@ def _cap(
     canonical_page = _ADMIN_PAGE_CANONICAL.get(page)
     if canonical_page is None:
         raise ValueError(f"管理能力使用未登记的页面路由: {page}")
-    return AdminCapabilitySpec(code, canonical_page, description, method, path, risk, permission)
+    section = _ADMIN_PAGE_SECTIONS.get(page, "")
+    if page == "/admin/security-center":
+        section = ("strategies" if any(part in code for part in ("policy.", "automatic_blocking"))
+                   else "decoy" if ".decoy." in code else "trace" if ".trace" in code else
+                   "events" if ".events" in code else "overview")
+    return AdminCapabilitySpec(code, canonical_page, description, method, path, risk, permission, section)
+
+
+_ADMIN_PAGE_SECTIONS = {
+    "/admin/overview": "overview", "/admin/agents": "agents", "/admin/approvals": "approvals",
+    "/admin/agent-releases": "approvals", "/admin/evolution": "evolution", "/admin/knowledge": "knowledge",
+    "/admin/skills": "skills", "/admin/policies": "policies", "/admin/tools": "tools", "/admin/jobs": "jobs",
+    "/admin/observability": "observability", "/admin/rewards": "rewards", "/admin/rollback": "rollback",
+    "/admin/users": "users", "/admin/rbac/roles": "roles", "/admin/rbac/permissions": "permissions",
+    "/admin/ai-logs": "logs", "/admin/audit": "logs", "/admin/beta-codes": "beta-codes",
+    "/admin/embedding": "embedding", "/admin/llm": "llm", "/admin/mcp-workers": "mcp-workers",
+}
 
 
 _ADMIN_PAGE_CANONICAL = {
@@ -82,6 +99,8 @@ _ADMIN_PAGE_CANONICAL = {
     "/admin/platform": "/admin/platform",
     "/admin/security-center": "/admin/security-center",
     "/report/templates": "/report/templates",
+    "/support": "/support",
+    "/forum": "/forum",
 }
 
 
@@ -92,10 +111,24 @@ ADMIN_PAGE_ROUTES: tuple[str, ...] = (
     "/admin/platform",
     "/admin/security-center",
     "/report/templates",
+    "/support",
+    "/forum",
 )
 
 
 ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
+    _cap("forum.posts.pin", "/forum", "置顶或取消置顶论坛帖子", "PUT", "/api/forum/posts/{post_id}/pin", WRITE),
+    _cap("feedback.reply", "/support", "管理员回复用户反馈", "PUT", "/api/feedback/{feedback_id}/reply", WRITE),
+    _cap("feedback.read", "/support", "管理员确认反馈已读", "POST", "/api/feedback/{feedback_id}/read", WRITE),
+    _cap("maintenance.handle", "/support", "管理员受理、回复或变更工单状态", "PUT", "/api/maintenance/{ticket_id}/handle", WRITE),
+    _cap("security_center.automatic_blocking.get", "/admin/security-center", "读取实际自动封禁状态", "GET",
+         "/api/admin/security-center/automatic-blocking", permission="super_admin"),
+    _cap("security_center.automatic_blocking.update", "/admin/security-center", "调整自动封禁策略", "PUT",
+         "/api/admin/security-center/automatic-blocking", CRITICAL, "super_admin"),
+    _cap("security_center.automatic_blocking.release", "/admin/security-center", "解除一条实际封禁规则", "POST",
+         "/api/admin/security-center/automatic-blocking/release", CRITICAL, "super_admin"),
+    _cap("security_center.decoy.apply", "/admin/security-center", "应用已命中来源的诱捕引流", "POST",
+         "/api/admin/security-center/decoy/apply", CRITICAL, "super_admin"),
     # 总览大屏
     _cap(
         "overview.system",
@@ -1301,6 +1334,7 @@ def describe_capabilities(
             {
                 "capability": spec.code,
                 "page": spec.page,
+                "section": spec.section,
                 "description": spec.description,
                 "risk": spec.risk,
                 "permission": spec.permission or "admin",

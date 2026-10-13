@@ -1,11 +1,12 @@
 <template>
   <Teleport :to="headerSlotAvailable ? '#roundtable-header-slot' : 'body'" :disabled="!headerSlotAvailable">
-    <div v-if="sessions.length || selected || listError" class="roundtable-dock" :class="{ 'is-header': headerSlotAvailable }">
+    <div v-if="sessions.length || selected || listError" ref="dockRef" class="roundtable-dock" :class="{ 'is-header': headerSlotAvailable }">
       <div v-if="listError" class="roundtable-dock-error" role="status">
         {{ listError }}
         <button type="button" @click="loadSessions">重试</button>
       </div>
-      <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" class="roundtable-choices" aria-label="我的圆桌讨论">
+      <Teleport to="body" :disabled="!headerSlotAvailable">
+      <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" ref="choicesRef" class="roundtable-choices" :class="{ 'is-header-popup': headerSlotAvailable }" :style="headerSlotAvailable ? choicesStyle : undefined" role="dialog" aria-label="我的圆桌讨论">
         <button
           v-for="session in sessions"
           :key="session.session_id"
@@ -20,11 +21,15 @@
           {{ moreLoading ? '正在加载…' : '加载更多圆桌' }}
         </button>
       </div>
+      </Teleport>
       <button
+        ref="triggerRef"
         v-if="!visible && (sessions.length || selected)"
         class="roundtable-fab"
         type="button"
         aria-label="打开圆桌讨论"
+        aria-haspopup="dialog"
+        :aria-expanded="showChoices"
         :title="`圆桌讨论：可继续 ${activeCount} 个，已结束 ${sessions.length - activeCount} 个`"
         @click="openFromDock"
       >
@@ -55,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AgentDiscussionPanel from './AgentDiscussionPanel.vue'
@@ -72,6 +77,10 @@ const sessions = ref<DiscussionSessionSummary[]>([])
 const selected = ref<DiscussionSessionDetail | null>(null)
 const visible = ref(false)
 const showChoices = ref(false)
+const dockRef = ref<HTMLElement | null>(null)
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const choicesRef = ref<HTMLElement | null>(null)
+const choicesStyle = ref<Record<string, string>>({})
 const listError = ref('')
 const nextOffset = ref<number | null>(null)
 const moreLoading = ref(false)
@@ -186,6 +195,70 @@ function closePanel(): void {
   visible.value = false
 }
 
+/** 菜单脱离玻璃页头的 stacking context；坐标以触发按钮与视口为准。 */
+function positionChoices(): void {
+  if (!showChoices.value || !headerSlotAvailable.value || !triggerRef.value) return
+  const box = triggerRef.value.getBoundingClientRect()
+  const width = Math.min(300, Math.max(0, window.innerWidth - 24))
+  const left = Math.max(12, Math.min(box.right - width, window.innerWidth - width - 12))
+  const top = Math.max(12, Math.min(box.bottom + 8, window.innerHeight - 60))
+  choicesStyle.value = {
+    left: `${left}px`, top: `${top}px`, width: `${width}px`,
+    maxHeight: `${Math.max(40, Math.min(320, window.innerHeight - top - 12))}px`,
+  }
+}
+
+function closeChoices(restoreFocus = false): void {
+  if (!showChoices.value) return
+  showChoices.value = false
+  detailGeneration++
+  if (restoreFocus) triggerRef.value?.focus()
+}
+
+function stackingLayer(element: HTMLElement): number {
+  let layer = 0
+  for (let node: HTMLElement | null = element; node && node !== document.body; node = node.parentElement) {
+    const parsed = Number.parseInt(getComputedStyle(node).zIndex, 10)
+    if (Number.isFinite(parsed)) layer = Math.max(layer, parsed)
+  }
+  return layer
+}
+
+function hasHigherDialogThanChoices(): boolean {
+  const menu = choicesRef.value
+  if (!menu) return false
+  const menuLayer = stackingLayer(menu)
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"],.el-message-box,[aria-modal="true"]'))
+    .some(dialog => dialog !== menu && !menu.contains(dialog)
+      && !dialog.closest('[hidden],[aria-hidden="true"],[inert]')
+      && getComputedStyle(dialog).display !== 'none'
+      && getComputedStyle(dialog).visibility !== 'hidden'
+      && stackingLayer(dialog) > menuLayer)
+}
+
+function onOutsideClick(event: Event): void {
+  const target = event.target
+  if (!(target instanceof Node) || dockRef.value?.contains(target) || choicesRef.value?.contains(target)) return
+  closeChoices()
+}
+
+function onMenuKeydown(event: KeyboardEvent): void {
+  if (!showChoices.value || event.key !== 'Escape' || hasHigherDialogThanChoices()) return
+  event.preventDefault()
+  // 菜单只有在没有更高模态层时才消费 Escape 并恢复触发按钮焦点。
+  event.stopImmediatePropagation()
+  closeChoices(true)
+}
+
+watch(showChoices, async (open) => {
+  if (!open) return
+  positionChoices()
+  await nextTick()
+  positionChoices()
+  choicesRef.value?.querySelector<HTMLButtonElement>('button')?.focus()
+})
+watch(() => route.fullPath, () => closeChoices())
+
 function openFromDock(): void {
   if (sessions.value.length === 1 && nextOffset.value === null) {
     void openSession(sessions.value[0].session_id)
@@ -261,6 +334,10 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('prism:open-roundtable', onOpenEvent)
   window.addEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
+  document.addEventListener('click', onOutsideClick, true)
+  window.addEventListener('keydown', onMenuKeydown, true)
+  window.addEventListener('resize', positionChoices)
+  window.addEventListener('scroll', positionChoices, true)
   // 后台工具完成事件可能发生在异步宿主挂载前；可见页低频对账兜底。
   refreshTimer = setInterval(() => {
     if (document.visibilityState === 'visible') void loadSessions()
@@ -275,20 +352,24 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('prism:open-roundtable', onOpenEvent)
   window.removeEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
+  document.removeEventListener('click', onOutsideClick, true)
+  window.removeEventListener('keydown', onMenuKeydown, true)
+  window.removeEventListener('resize', positionChoices)
+  window.removeEventListener('scroll', positionChoices, true)
   if (refreshTimer) clearInterval(refreshTimer)
   if (followupTimer) clearInterval(followupTimer)
 })
 </script>
 
 <style scoped>
-.roundtable-dock { position: fixed; right: 24px; bottom: 100px; z-index: 2990; display: grid; justify-items: end; gap: 8px; max-width: min(320px, calc(100vw - 24px)); }
+.roundtable-dock { position: fixed; right: 24px; bottom: 100px; z-index: var(--layer-agent-status); display: grid; justify-items: end; gap: 8px; max-width: min(320px, calc(100vw - 24px)); }
 .roundtable-dock.is-header { position: relative; inset: auto; z-index: auto; display: flex; justify-items: initial; max-width: none; }
 .roundtable-fab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid #d9ddfa; border-radius: 999px; background: #fff; color: #292e67; box-shadow: 0 8px 28px #24295c33; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
 .roundtable-fab:focus-visible, .roundtable-choice:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 .roundtable-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px; background: #eef0ff; font-size: 11px; }
 .roundtable-choices { display: grid; gap: 4px; width: min(300px, calc(100vw - 24px)); max-height: min(320px, 45dvh); overflow-y: auto; padding: 6px; border: 1px solid #dfe2f5; border-radius: 12px; background: white; box-shadow: 0 12px 30px #24295c30; }
-.roundtable-dock.is-header .roundtable-choices,
-.roundtable-dock.is-header .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 3100; }
+.roundtable-choices.is-header-popup { position: fixed; z-index: var(--layer-element-base); }
+.roundtable-dock.is-header .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1; }
 .roundtable-choice { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 40px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: #292e67; text-align: left; cursor: pointer; }
 .roundtable-choice:hover { background: #f2f3ff; }
 .roundtable-choice span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

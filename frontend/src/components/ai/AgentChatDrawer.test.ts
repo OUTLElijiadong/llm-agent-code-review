@@ -1278,7 +1278,8 @@ describe('AgentChatDrawer Responses stream', () => {
       type: 'response.tool.started',
       call_id: 'call-network-page-action',
       tool_name: 'user_execute_capability',
-      arguments: { capability: 'projects.list', page: '/projects' },
+      arguments: { capability: 'projects.list', params: {} },
+      page_action: { page: '/projects', capability: 'projects.list', phase: 'started', mutation: false },
     })
     expect(useAgentActivityStore().isActing).toBe(true)
 

@@ -214,6 +214,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -390,6 +391,8 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
 onMounted(() => {
   loadData()
 })
+
+useAgentPageRefresh({ pages: ['/admin/operations'], refresh: loadData })
 </script>
 
 <style scoped lang="scss">

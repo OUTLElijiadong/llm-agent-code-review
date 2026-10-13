@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
   position: fixed;
   right: 24px;
   bottom: 96px;
-  z-index: 2980;
+  z-index: var(--layer-guide);
   display: flex;
   align-items: center;
   gap: 10px;

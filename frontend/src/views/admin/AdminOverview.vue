@@ -157,6 +157,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
@@ -478,6 +479,8 @@ onBeforeUnmount(() => {
   mapChart?.dispose()
   mapChart = null
 })
+
+useAgentPageRefresh({ pages: ['/admin/operations', '/admin/governance', '/admin/access', '/admin/security-center'], refresh: loadAll })
 </script>
 
 <style scoped lang="scss">

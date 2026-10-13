@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { Check, Connection, Download, Refresh } from '@element-plus/icons-vue'
 
 import {
@@ -26,6 +27,9 @@ const PROVIDER_PRESETS: Record<string, { base_url: string; model: string }> = {
   custom: { base_url: '', model: '' },
 }
 
+const savedFormSnapshot = ref('')
+const savedRegistrySnapshot = ref('')
+const savedAssignmentSnapshot = ref('')
 const cfg = ref<LlmConfig | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -111,6 +115,7 @@ function applyConfig(value: LlmConfig): void {
   form.active = value.source === 'global'
   form.api_key = ''
   modelOptions.value = form.model ? [form.model] : []
+  savedFormSnapshot.value = JSON.stringify(form)
 }
 
 async function load(): Promise<void> {
@@ -287,12 +292,14 @@ async function loadRegistry(): Promise<void> {
   try {
     const view = await getModelRegistry()
     registry.value = view.models
+    savedRegistrySnapshot.value = JSON.stringify(registry.value)
     registryWarnings.value = view.warnings ?? []
     registryReady.value = true
     roleLabels.value = view.roles
     for (const role of Object.keys(view.roles)) {
       assignments[role] = view.assignments[role] ?? ''
     }
+    savedAssignmentSnapshot.value = JSON.stringify(assignments)
   } catch (error) {
     registryError.value = errorText(error, '模型注册表加载失败，请重试')
   } finally {
@@ -306,7 +313,10 @@ async function syncRegistry(): Promise<void> {
   registryError.value = ''
   try {
     const result = await syncModelRegistry(draftPayload())
-    if (result.success) registry.value = result.models
+    if (result.success) {
+      registry.value = result.models
+      savedRegistrySnapshot.value = JSON.stringify(registry.value)
+    }
     else registryError.value = result.message
     ElMessage[result.success ? 'success' : 'warning'](result.message)
   } catch (error) {
@@ -344,6 +354,7 @@ async function persistRegistry(): Promise<void> {
       registry.value.map((item) => ({ id: item.id, label: item.label, vision: item.vision })),
     )
     registry.value = view.models
+    savedRegistrySnapshot.value = JSON.stringify(registry.value)
     registryWarnings.value = view.warnings ?? []
     ElMessage.success('注册表已保存')
   } catch (error) {
@@ -364,6 +375,7 @@ async function persistAssignments(): Promise<void> {
     for (const role of Object.keys(view.roles)) {
       assignments[role] = view.assignments[role] ?? ''
     }
+    savedAssignmentSnapshot.value = JSON.stringify(assignments)
     ElMessage.success('模型分配已更新')
   } catch (error) {
     registryError.value = errorText(error, '模型分配保存失败，编辑内容已保留')
@@ -390,6 +402,15 @@ watch(
 onMounted(() => {
   void load()
   void loadRegistry()
+})
+
+useAgentPageRefresh({
+  pages: ['/admin/platform'], refresh: () => Promise.all([load(), loadRegistry()]),
+  canRefresh: () => !loading.value && !saving.value && !testing.value && !restoring.value
+    && !registrySaving.value && !registrySyncing.value && !newModelId.value
+    && JSON.stringify(form) === savedFormSnapshot.value
+    && JSON.stringify(registry.value) === savedRegistrySnapshot.value
+    && JSON.stringify(assignments) === savedAssignmentSnapshot.value,
 })
 </script>
 

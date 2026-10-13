@@ -37,7 +37,7 @@ _KNOWN_MEDIUM_MARKERS = (
 _READONLY_TEAM_AGENTS = frozenset({
     "language_detector", "project_analyzer", "code_reviewer", "project_manager", "code_file_manager",
     "review_orchestrator", "dashboard", "reporter", "rule_manager", "ai_prompt", "security_sentinel",
-    "monitor", "supervisor", "test_verifier", "sandbox_deployer", "custom", "temporary",
+    "monitor", "supervisor", "test_verifier", "sandbox_deployer", "custom", "temporary", "site_operator",
 })
 _LOW_RESPONSE_TOOLS = frozenset({
     "admin_governance_overview", "admin_list_agent_release_approvals", "admin_list_agents",
@@ -186,7 +186,11 @@ def review_agent_team_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "input": {
                     str(key): value
                     for key, value in (item.get("input", {}) or {}).items()
-                    if key != "operation" and key != "remote_target_authorized" and not str(key).startswith("_")
+                    if (key != "operation" or _team_agent_code(
+                        str(member_by_key.get(str(item.get("member_key") or ""), {}).get("address") or ""),
+                        member_by_key.get(str(item.get("member_key") or ""), {}),
+                    ) in {"site_operator", "temporary"})
+                    and key != "remote_target_authorized" and not str(key).startswith("_")
                 } if isinstance(item.get("input", {}), Mapping) else {},
             }
             for item in tasks if isinstance(item, Mapping)
@@ -224,6 +228,8 @@ def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
         # 它仍影响本次实际运行，必须参与精确授权指纹。空策略不进入旧指纹，
         # 以便部署期间旧任务的既有确认仍按原算法校验。
         payload["execution_strategy"] = dict(execution_strategy)
+    if address == "agent:site_operator" or address.startswith("temporary:") or raw_input.get("operation") in {"execute_capability", "verify_results"}:
+        payload["operation"] = raw_input.get("operation")
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -256,6 +262,16 @@ def _review_team_task(
     )
     if has_external_target:
         return SupervisionReview(ESCALATE, HIGH, "任务包含外部目标，等待当前账号确认", True, "external_target")
+    if code == "site_operator" or (code == "temporary" and operation in {"execute_capability", "verify_results"}):
+        if operation == "verify_results":
+            return SupervisionReview(ALLOW, LOW, "只读核验本团队持久执行回执", False, "site_readback")
+        try:
+            from app.services.site_agent_service import resolve_site_input
+            spec, _ = resolve_site_input(task_input)
+        except ValueError:
+            return SupervisionReview(ESCALATE, HIGH, "站点操作未绑定合法业务契约", True, "unclassified_site_operation")
+        risk = declared_capability_risk(spec.risk)
+        return review_action("site." + spec.code, spec.page, declared_risk=risk)
     if code in {"operations", "incident_responder"}:
         return SupervisionReview(ESCALATE, HIGH, "运维或事件处置任务需当前账号确认", True, "privileged_agent")
     if code in {"custom", "temporary"}:
@@ -315,7 +331,14 @@ def review_response_tool(tool_name: str, arguments: Mapping[str, Any]) -> dict[s
     extra: dict[str, Any] = {}
     declared_risk: str | None = None
 
-    if name == "create_agent_team":
+    if name == "operate_current_page":
+        browser_action = str(arguments.get("action") or "")
+        if browser_action in {"inspect", "navigate", "scroll"}:
+            review = SupervisionReview(ALLOW, LOW, "已登记的当前会话页面读取或站内导航", False, "browser_read")
+        else:
+            review = SupervisionReview(ESCALATE, HIGH, "页面交互效果需当前账号确认；控件句柄不授予业务权限", True, "browser_control")
+        action = f"browser.{browser_action or 'unknown'}"
+    elif name == "create_agent_team":
         team_review = review_agent_team_plan(arguments)
         review = SupervisionReview(
             team_review["decision"], team_review["risk_level"],

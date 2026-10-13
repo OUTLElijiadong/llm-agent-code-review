@@ -39,6 +39,7 @@ import { ElTag } from 'element-plus/es/components/tag/index'
 import { ElTooltip } from 'element-plus/es/components/tooltip/index'
 import { ElTree } from 'element-plus/es/components/tree/index'
 import { provideGlobalConfig } from 'element-plus/es/components/config-provider/index'
+import { ELEMENT_OVERLAY_BASE } from '@/constants/layers'
 import {
   Aim,
   ArrowDown,
@@ -182,9 +183,9 @@ export function registerElementPlus(app: App, options: { locale?: Language } = {
   app.use(ElLoading)
   // locale:EP 2.x 组件经 config-provider 上下文读 locale,不读 $ELEMENT,
   // 必须用 provideGlobalConfig 注入,否则分页/日期/弹窗按钮回退英文
-  if (options.locale) {
-    provideGlobalConfig({ locale: options.locale }, app, true)
-  }
+  // 菜单/选择框/确认窗统一使用递增器，始终高于自定义聊天与团队浮窗。
+  // 不给单个 popper 强制 !important，否则嵌套确认窗可能被它反压。
+  provideGlobalConfig({ ...(options.locale ? { locale: options.locale } : {}), zIndex: ELEMENT_OVERLAY_BASE }, app, true)
   for (const comp of components) {
     app.component(comp.name as string, comp)
   }

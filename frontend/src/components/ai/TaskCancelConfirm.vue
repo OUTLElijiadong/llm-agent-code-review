@@ -65,7 +65,7 @@ function confirmCancel(): void {
 .cancel-confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 3200;
+  z-index: var(--layer-modal-nested);
   display: grid;
   place-items: center;
   background: rgba(15, 18, 34, 0.42);

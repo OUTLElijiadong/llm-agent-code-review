@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
 import VirtualCursor from './VirtualCursor.vue'
+import { useAgentActivityStore } from '@/stores/agentActivity'
 
 describe('VirtualCursor real navigation click', () => {
   let wrapper: ReturnType<typeof mount> | null = null
@@ -51,6 +52,70 @@ describe('VirtualCursor real navigation click', () => {
     expect(navigate).toHaveBeenCalledOnce()
     expect(wrapper.find('.virtual-cursor-click-label').text()).toBe('已打开')
     expect(wrapper.find('.virtual-cursor').exists()).toBe(true)
+  })
+
+  it('does not guess an unrelated create button when the tool has no authorized page target', async () => {
+    const main = document.createElement('main')
+    const unrelated = document.createElement('button')
+    unrelated.textContent = '创建项目'
+    unrelated.getBoundingClientRect = () => ({
+      x: 20, y: 30, left: 20, top: 30, right: 140, bottom: 70,
+      width: 120, height: 40, toJSON: () => ({}),
+    })
+    main.appendChild(unrelated)
+    document.body.appendChild(main)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    useAgentActivityStore().begin('小菱正在回复反馈', 'unknown-target')
+    await flushPromises()
+    vi.advanceTimersByTime(1400)
+    await flushPromises()
+    expect(unrelated.classList.contains('xl-vcursor-target')).toBe(false)
+    expect(wrapper.find('.virtual-cursor').exists()).toBe(false)
+    main.remove()
+  })
+
+  it('does not point to or activate a route hidden behind a modal', async () => {
+    target = document.createElement('button')
+    target.dataset.route = '/reports'
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    const clicked = vi.fn()
+    target.addEventListener('click', clicked)
+    document.body.appendChild(target)
+    const modal = document.createElement('div')
+    document.body.appendChild(modal)
+    const original = document.elementFromPoint
+    document.elementFromPoint = vi.fn(() => modal)
+    try {
+      wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+      requestXiaolingNavigation('/reports', '审查报告', vi.fn())
+      await flushPromises()
+      vi.advanceTimersByTime(1400)
+      await flushPromises()
+      expect(clicked).not.toHaveBeenCalled()
+      expect(wrapper.find('.virtual-cursor-layer').exists()).toBe(false)
+    } finally {
+      document.elementFromPoint = original
+      modal.remove()
+    }
+  })
+
+  it('visualizes the exact browser bridge element without clicking it again', async () => {
+    target = document.createElement('button')
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    const clicked = vi.fn()
+    target.addEventListener('click', clicked)
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    window.dispatchEvent(new CustomEvent('prism:site-browser-target', { detail: { element: target, action: 'click', label: '论坛发表' } }))
+    await flushPromises()
+    vi.advanceTimersByTime(800)
+    await flushPromises()
+    expect(target.classList.contains('xl-vcursor-target')).toBe(true)
+    expect(wrapper.find('.virtual-cursor').exists()).toBe(true)
+    expect(clicked).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+    expect(wrapper.find('.virtual-cursor').exists()).toBe(false)
   })
 
   it('uses the authorized callback once when no page navigation element exists', async () => {

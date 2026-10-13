@@ -27,6 +27,7 @@ EXPECTED_RUNTIME = {
     "evolution",
 }
 EXPECTED_SERVICES = {
+    "site_operator",
     "manager",
     "operations",
     "approval",
@@ -50,7 +51,7 @@ EXPECTED_SERVICES = {
 
 
 def test_contract_catalog_covers_all_agents_and_has_unique_skill_owners() -> None:
-    """33 个现有 Agent/服务画像必须全部覆盖且每个 Skill 只有一个所有者。"""
+    """现有 Agent/服务和站点执行画像必须全部覆盖且 Skill 所有者唯一。"""
     assert set(CONTRACTS) == EXPECTED_RUNTIME | EXPECTED_SERVICES
     assert PROTECTED_AGENT_CODES == {"chat_assistant", "manager"}
     skill_codes = [skill.code for item in CONTRACTS.values() for skill in item.skills]

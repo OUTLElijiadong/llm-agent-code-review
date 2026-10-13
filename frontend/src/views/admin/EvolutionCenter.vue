@@ -290,6 +290,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, ref } from 'vue'
 
 import { Refresh } from '@element-plus/icons-vue'
@@ -704,6 +705,8 @@ onMounted(() => {
   }
   void reloadAll()
 })
+
+useAgentPageRefresh({ pages: ['/admin/governance'], refresh: reloadAll, canRefresh: () => !running.value && !triggering.value })
 </script>
 
 <style scoped lang="scss">

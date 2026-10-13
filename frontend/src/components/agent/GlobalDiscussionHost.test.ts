@@ -16,7 +16,7 @@ const current = {
   report_task_id: 0, max_rounds: 2, progress: { phase: 'speaking', completed_units: 1, total_units: 10, current_round: 1, seq: 2 },
 }
 
-async function mountHost(userId = 5) {
+async function mountHost(userId = 5, attachTo?: Element) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/dashboard', component: { template: '<div />' } }, { path: '/agents', component: { template: '<div />' } }],
@@ -24,6 +24,7 @@ async function mountHost(userId = 5) {
   await router.push('/dashboard')
   await router.isReady()
   const wrapper = mount(GlobalDiscussionHost, {
+    attachTo,
     props: { userId },
     global: {
       plugins: [router],
@@ -98,6 +99,39 @@ it('旧账号详情的迟到响应不能在新账号显示', async () => {
   await flushPromises()
   expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
   wrapper.unmount()
+})
+
+it('Esc只关闭最高交互层：高层模态存在时圆桌菜单不抢键也不夺焦点', async () => {
+  discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-second' }], next_offset: null })
+  const { wrapper } = await mountHost(5, document.body)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+    const menu = wrapper.get('.roundtable-choices')
+    const menuItem = menu.get('button').element
+    const modal = document.createElement('section')
+    modal.setAttribute('role', 'dialog')
+    modal.style.zIndex = '5000'
+    modal.innerHTML = '<button>更高层确认</button>'
+    document.body.append(modal)
+
+    const blockedEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    window.dispatchEvent(blockedEscape)
+    await flushPromises()
+    expect(blockedEscape.defaultPrevented).toBe(false)
+    expect(wrapper.find('.roundtable-choices').exists()).toBe(true)
+    expect(document.activeElement).toBe(menuItem)
+
+    modal.remove()
+    const menuEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    window.dispatchEvent(menuEscape)
+    await flushPromises()
+    expect(menuEscape.defaultPrevented).toBe(true)
+    expect(wrapper.find('.roundtable-choices').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('[aria-label="打开圆桌讨论"]').element)
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it.each([1, 2, 3])('同账号快速选择会话只保留最后选择：A慢B快A晚（第%d轮）', async () => {
@@ -454,6 +488,45 @@ it('全局顶栏存在时将圆桌入口挂在顶栏中，避免固定浮层盖�
 
   wrapper.unmount()
   target.remove()
+})
+
+it.each([1, 2, 3])('顶栏菜单传送到 body 且保持视口内，Esc/外部操作/路由切换关闭（第%d轮）', async () => {
+  const header = document.createElement('div')
+  header.id = 'roundtable-header-slot'
+  document.body.appendChild(header)
+  discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-other' }], next_offset: null })
+  const { wrapper, router } = await mountHost()
+  const trigger = header.querySelector<HTMLButtonElement>('.roundtable-fab')!
+  trigger.getBoundingClientRect = () => ({ left: 900, top: 10, right: 1100, bottom: 50, width: 200, height: 40 } as DOMRect)
+  try {
+    trigger.click()
+    await flushPromises()
+    const popup = document.querySelector<HTMLElement>('.roundtable-choices')!
+    expect(popup.parentElement).toBe(document.body)
+    expect(header.contains(popup)).toBe(false)
+    expect(parseFloat(popup.style.left)).toBeGreaterThanOrEqual(12)
+    expect(parseFloat(popup.style.left) + parseFloat(popup.style.width)).toBeLessThanOrEqual(window.innerWidth - 12)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(document.querySelector('.roundtable-choices')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+
+    trigger.click()
+    await flushPromises()
+    document.body.click()
+    await flushPromises()
+    expect(document.querySelector('.roundtable-choices')).toBeNull()
+
+    trigger.click()
+    await flushPromises()
+    await router.push('/agents')
+    await flushPromises()
+    expect(document.querySelector('.roundtable-choices')).toBeNull()
+  } finally {
+    wrapper.unmount()
+    header.remove()
+  }
 })
 
 it('结束后的五分钟追问窗口显示为可追问并计入入口角标，超时后显示已结束', async () => {

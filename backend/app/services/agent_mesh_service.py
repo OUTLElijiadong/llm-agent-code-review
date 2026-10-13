@@ -813,7 +813,7 @@ def _custom_agents(db: Session, user: User) -> list[dict[str, Any]]:
     ]
 
 
-_TEAM_GOVERNED_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations"})
+_TEAM_GOVERNED_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations", "site_operator"})
 
 
 # 成员面隐藏的纯治理 Agent 契约(与 /api/agents/runtime 的 USER_HIDDEN_BUILTIN
@@ -884,6 +884,13 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
             item["team_input_contract"] = {"required": ["code"], "scope": "code_snippet_only"}
         elif code == "reporter":
             item["team_input_contract"] = {"depends_on": "all_work_nodes", "role": "summarizer"}
+        elif code == "site_operator":
+            item["team_input_contract"] = {
+                "operation": ["execute_capability", "verify_results"],
+                "execute_capability": {"required": ["scope", "capability", "params"], "scope": ["user", "admin"],
+                                       "execution": "trusted_team_lease_only", "mutation_max_attempts": 1},
+                "verify_results": {"depends_on": "site_execution_nodes", "execution": "persisted_receipt_readback_only"},
+            }
         if code == "operations":
             from app.services.ops_service import TEAM_READ_ONLY_ACTIONS
 

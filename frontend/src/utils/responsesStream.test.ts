@@ -27,6 +27,16 @@ describe('streamResponses', () => {
     setToken('responses-token')
   })
 
+  it('delivers browser, supervision and real progress events without treating browser work as terminal', async () => {
+    const types = ['response.browser.required', 'response.supervisor.reviewed', 'response.sandbox.progress', 'response.audit.progress', 'response.tool.rejected']
+    const frames = types.map(type => `data: ${JSON.stringify({ type, action_id: 1, phase: 'analysis', message: '实际分析中' })}\n\n`)
+    frames.push('data: {"type":"response.completed","response":{"id":"progress-run","status":"completed"}}\n\n')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(frames)))
+    const events: ResponseStreamEvent[] = []
+    await streamResponses({}, { onEvent: event => events.push(event) }).done
+    expect(events.map(event => event.type)).toEqual([...types, 'response.completed'])
+  })
+
   it('parses split CRLF frames, multiline data and keepalive comments', async () => {
     const response = streamResponse([
       ': keep-alive\r',

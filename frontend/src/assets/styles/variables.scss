@@ -315,7 +315,20 @@ $dim-security: #B85AC4;
   --content-max-width:       1440px;
   --layout-main-padding:     28px;
 
-  /* z-index */
+  /* 全局层级契约。局部装饰层不进入此表；弹出内容需离开有 filter/transform 的祖先。 */
+  --layer-header:            100;
+  --layer-sidebar-backdrop:  1900;
+  --layer-sidebar:           1910;
+  --layer-guide:             2400;
+  --layer-agent-status:      2410;
+  --layer-assistant:         2500;
+  --layer-agent-team:        2600;
+  --layer-agent-cursor:      2700;
+  --layer-modal:             3000;
+  --layer-modal-nested:      3100;
+  --layer-element-base:      4000;
+
+  /* 兼容既有变量。新增全局弹层使用上面的语义令牌。 */
   --z-index-dropdown:       1000;
   --z-index-sticky:         1020;
   --z-index-fixed:          1030;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   Check,
@@ -356,6 +357,8 @@ async function seedProductionWorker(): Promise<void> {
 }
 
 onMounted(loadAll)
+
+useAgentPageRefresh({ pages: ['/admin/platform'], refresh: loadAll, canRefresh: () => !acting.value && !serverDialog.value && !bindingDialog.value && !aliasDialog.value && !workerDialog.value })
 </script>
 
 <template>

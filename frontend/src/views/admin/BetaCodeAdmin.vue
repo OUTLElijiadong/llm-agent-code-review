@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import { CopyDocument, Delete, Plus, Refresh, Remove } from '@element-plus/icons-vue'
@@ -99,6 +100,8 @@ function changeFilter(): void {
 }
 
 onMounted(loadCodes)
+
+useAgentPageRefresh({ pages: ['/admin/platform'], refresh: loadCodes, canRefresh: () => !generating.value && !codesDialogVisible.value })
 </script>
 
 <template>

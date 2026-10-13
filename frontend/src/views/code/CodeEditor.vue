@@ -93,6 +93,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 /**
  * 代码编辑器页面
  * 使用 MonacoEditor 组件进行代码查看与编辑
@@ -271,6 +272,7 @@ async function handleSave(): Promise<void> {
     })
     if (!target.isCurrent() || fileDetail.value !== detail || !canEdit.value) return
     fileDetail.value.version_no = result.version_no
+    fileDetail.value.content = content
     ElMessage.success('保存成功')
   } catch (error: unknown) {
     if (target.isCurrent() && typeof error === 'object' && error !== null && 'code' in error && error.code === 40904) {
@@ -354,6 +356,8 @@ onBeforeUnmount(() => {
   lifecycleGeneration += 1
   document.removeEventListener('keydown', onKeydown)
 })
+
+useAgentPageRefresh({ pages: ['/code'], refresh: fetchDetail, canRefresh: () => !saving.value && codeContent.value === (fileDetail.value?.content || '') })
 </script>
 
 <style scoped lang="scss">

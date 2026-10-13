@@ -32,6 +32,7 @@ const clicking = ref(false)
 const navigationResult = ref<'success' | 'failure' | null>(null)
 /** 目标元素屏幕矩形,用于定位涟漪与聚焦光晕 */
 const targetBox = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+const cursorLayerZ = ref<string | number>('var(--layer-agent-cursor)')
 const cursorStyle = computed(() => ({ transform: `translate3d(${x.value}px, ${y.value}px, 0)` }))
 const haloStyle = computed(() => {
   const box = targetBox.value
@@ -58,11 +59,30 @@ let lastTargetEl: HTMLElement | null = null
 /** 导航确认按钮发出的单次可视化导航请求。 */
 let requestedNavigation: XiaolingNavigationRequest | null = null
 let requestedActivityKey = ''
+let browserTarget: HTMLElement | null = null
+let browserActivityKey = ''
 
 interface Candidate {
   el: HTMLElement
   route?: string
   activate?: () => unknown | Promise<unknown>
+}
+
+/** 装饰鼠标只跟随当前真正可命中的控件，不穿过遮罩指向后台页面。 */
+function isUnobscuredTarget(el: HTMLElement): boolean {
+  if (typeof document.elementFromPoint !== 'function') return true
+  const rect = el.getBoundingClientRect()
+  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+  return Boolean(hit && (hit === el || el.contains(hit)))
+}
+
+function layerForTarget(el: HTMLElement): number | string {
+  let top = Number(getComputedStyle(document.documentElement).getPropertyValue('--layer-agent-cursor')) || 2700
+  for (let parent: HTMLElement | null = el; parent; parent = parent.parentElement) {
+    const z = Number.parseInt(getComputedStyle(parent).zIndex, 10)
+    if (Number.isFinite(z)) top = Math.max(top, z + 1)
+  }
+  return top
 }
 
 function isVisibleTarget(el: HTMLElement): boolean {
@@ -143,9 +163,12 @@ function onRoute(route: string): boolean {
 /**
  * 在当前页面找目标元素:
  * - hint 有路由且不在该页 → 找侧边导航中指向该路由的菜单项(点击可跳转)
- * - 已在目标页/无路由 → 找页面主操作按钮(创建/发起等)或与 hint 语义匹配的按钮
+ * - 已在目标页/无固定目标 → 不猜测业务按钮，等待执行团队与真实页面读取结果
  */
 function findTarget(): Candidate | null {
+  if (browserTarget && store.current?.key === browserActivityKey && isVisibleTarget(browserTarget)) {
+    return { el: browserTarget }
+  }
   const hint = store.current?.targetHint
   const route = requestedNavigation?.route || routeFromHint(hint)
 
@@ -197,22 +220,8 @@ function findTarget(): Candidate | null {
     }
   }
 
-  // 当前页内的行动点:先按 hint 中文词匹配,再兜底主操作按钮
-  const actionWords = (hint?.match(/[一-龥]{2,6}/g) ?? []).filter((w) => !routeLabel(route) || !(hint ?? '').includes(w + '页'))
-  const pageButtons = [...document.querySelectorAll<HTMLElement>('main button, .app-main button, [class*=content] button')]
-    .filter(isVisibleTarget)
-  const byHint = pageButtons.find((btn) => {
-    const text = (btn.textContent || '').trim()
-    return Boolean(text) && actionWords.some((w) => w.length >= 2 && text.includes(w))
-  })
-  if (byHint) return { el: byHint }
-
-  const primary = pageButtons.find((btn) => {
-    const text = (btn.textContent || '').trim()
-    const disabled = (btn as HTMLButtonElement).disabled === true
-    return /创建|新建|发起|上传|添加|导出/.test(text) && !disabled
-  })
-  if (primary) return { el: primary }
+  // 业务工具本身已经执行请求；没有固定 UI 动作标识时不能猜测页面按钮，
+  // 否则会把论坛回复/查询错误呈现成“创建项目”，甚至重复提交写操作。
   return null
 }
 
@@ -250,6 +259,8 @@ function waitForRoute(route: string, timeoutMs = 1200): Promise<boolean> {
 
 async function activateTarget(target: Candidate, sequence: number): Promise<boolean> {
   try {
+    // 定位后、动画到达前页面可能弹出对话框，点击前再次检查实际命中。
+    if (target.el !== document.body && (!isVisibleTarget(target.el) || !isUnobscuredTarget(target.el))) return false
     const result = target.activate ? target.activate() : target.el.click()
     if (isPromiseLike(result)) await result
     if (sequence !== activitySequence) return false
@@ -302,7 +313,13 @@ function moveToTarget(): void {
       if (target) {
         if (!isVisibleTarget(target.el)) return
         bringTargetIntoView(target.el)
+        if (!isUnobscuredTarget(target.el)) {
+          visible.value = false
+          if (requestedNavigation) finishRequestedNavigation(false)
+          return
+        }
         const c = centerOf(target.el)
+        cursorLayerZ.value = layerForTarget(target.el)
         point = { x: c.x, y: c.y }
         targetBox.value = c.box
         lastTargetEl = target.el
@@ -328,6 +345,12 @@ function moveToTarget(): void {
           }
         }, 700)
       } else {
+        // API 排队、后台核验等阶段没有 DOM 点击目标：只保留工作状态，
+        // 不把鼠标停在任意卡片/按钮中央，避免制造实际点击的假象。
+        if (!requestedNavigation) {
+          visible.value = false
+          return
+        }
         point = fallbackPoint()
         targetBox.value = null
         arriveTimer = window.setTimeout(() => {
@@ -361,6 +384,20 @@ function moveToTarget(): void {
   })
 }
 
+/** Browser bridge 负责真实动作；本事件仅可视化已定位的控件，绝不重复点击。 */
+function handleBrowserTarget(event: Event): void {
+  const detail = (event as CustomEvent<{ element?: HTMLElement; action?: string; label?: string }>).detail
+  if (!(detail?.element instanceof HTMLElement) || !isVisibleTarget(detail.element)) return
+  if (!['click', 'fill', 'select', 'check', 'scroll'].includes(detail.action || '')) return
+  // 在开始显示光标前就进入目标控件所在层级；等双 RAF 定位后再改会让首帧落在弹层后面。
+  cursorLayerZ.value = layerForTarget(detail.element)
+  if (browserActivityKey) store.end(browserActivityKey)
+  browserTarget = detail.element
+  browserActivityKey = `site-browser-visual-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  store.begin(detail.label || '小菱正在操作已定位控件', browserActivityKey)
+  store.complete(browserActivityKey, 1400)
+}
+
 function finishRequestedNavigation(_success: boolean): void {
   if (requestedActivityKey) store.complete(requestedActivityKey, 900)
   requestedNavigation = null
@@ -386,6 +423,20 @@ function clearHalo(): void {
   lastTargetEl = null
 }
 
+function syncTargetGeometry(): void {
+  if (!visible.value || !lastTargetEl) return
+  if (!isVisibleTarget(lastTargetEl) || !isUnobscuredTarget(lastTargetEl)) {
+    targetBox.value = null
+    visible.value = false
+    clearHalo()
+    return
+  }
+  const point = centerOf(lastTargetEl)
+  x.value = point.x
+  y.value = point.y
+  targetBox.value = point.box
+}
+
 watch(
   () => [store.isActing, store.current?.key] as const,
   ([acting]) => {
@@ -409,6 +460,8 @@ watch(
       targetBox.value = null
       requestedNavigation = null
       requestedActivityKey = ''
+      browserTarget = null
+      browserActivityKey = ''
       haloTimer = window.setTimeout(clearHalo, 400)
     }
   },
@@ -416,6 +469,9 @@ watch(
 
 onMounted(() => {
   window.addEventListener(XIAOLING_NAVIGATION_EVENT, handleNavigationRequest)
+  window.addEventListener('prism:site-browser-target', handleBrowserTarget)
+  window.addEventListener('resize', syncTargetGeometry)
+  window.addEventListener('scroll', syncTargetGeometry, true)
 })
 
 onBeforeUnmount(() => {
@@ -426,6 +482,10 @@ onBeforeUnmount(() => {
   window.cancelAnimationFrame(startRaf)
   window.cancelAnimationFrame(targetRaf)
   window.removeEventListener(XIAOLING_NAVIGATION_EVENT, handleNavigationRequest)
+  window.removeEventListener('prism:site-browser-target', handleBrowserTarget)
+  window.removeEventListener('resize', syncTargetGeometry)
+  window.removeEventListener('scroll', syncTargetGeometry, true)
+  if (browserActivityKey) store.end(browserActivityKey)
   if (requestedActivityKey) store.end(requestedActivityKey)
   activitySequence += 1
   requestedNavigation = null
@@ -436,7 +496,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Transition name="virtual-cursor-fade">
-    <div v-if="visible" class="virtual-cursor-layer" aria-hidden="true">
+    <div v-if="visible" class="virtual-cursor-layer" :style="{ zIndex: cursorLayerZ }" aria-hidden="true">
       <!-- 目标元素聚焦光晕(定位到真实元素矩形) -->
       <div v-if="arrived && targetBox" class="virtual-cursor-halo" :style="haloStyle"></div>
       <div class="virtual-cursor" :class="{ 'is-arrived': arrived, 'is-clicking': clicking }" :style="cursorStyle">
@@ -472,7 +532,7 @@ onBeforeUnmount(() => {
 .virtual-cursor-layer {
   position: fixed;
   inset: 0;
-  z-index: calc(var(--z-index-message) + 200);
+  z-index: var(--layer-agent-cursor);
   pointer-events: none;
 }
 

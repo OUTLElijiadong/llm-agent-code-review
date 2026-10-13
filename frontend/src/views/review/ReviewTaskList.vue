@@ -167,6 +167,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
@@ -495,6 +496,8 @@ onUnmounted(() => {
   loadRequest++
   clearPoll()
 })
+
+useAgentPageRefresh({ pages: ['/reviews'], refresh: loadData })
 </script>
 
 <style scoped lang="scss">

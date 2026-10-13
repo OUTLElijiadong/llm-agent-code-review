@@ -52,6 +52,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { ref, computed, onMounted } from 'vue'
 import { Search, Files } from '@element-plus/icons-vue'
 import { listPermissions } from '@/api/rbac'
@@ -155,6 +156,8 @@ async function loadPermissions(): Promise<void> {
 onMounted(() => {
   loadPermissions()
 })
+
+useAgentPageRefresh({ pages: ['/admin/access'], refresh: loadPermissions })
 </script>
 
 <style scoped lang="scss">

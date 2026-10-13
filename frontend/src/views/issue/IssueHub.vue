@@ -170,6 +170,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -515,6 +516,8 @@ function goReviewList(): void {
 onMounted(async () => {
   await Promise.all([loadProjects(), loadIssues()])
 })
+
+useAgentPageRefresh({ pages: ['/issues', '/reviews', '/security'], refresh: loadIssues, canRefresh: () => !batchSubmitting.value })
 </script>
 
 <style scoped lang="scss">
