@@ -5,13 +5,16 @@ set -Eeuo pipefail
 sha="${1:?完整提交 SHA 必填}"
 expected_digest="${2:?Git bundle SHA-256 必填}"
 expected_size="${3:?Git bundle 字节数必填}"
+version="${4:?目标语义版本必填}"
+base_sha="${5:?当前活动生产完整 SHA 必填}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_digest" =~ ^[0-9a-f]{64}$ ]]
 [[ "$expected_size" =~ ^[0-9]+$ ]]
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
 
-base_sha=22404e44a05682e55740abe5a294da66761e2148
 base="/opt/prism-releases/$base_sha"
-bundle="/dev/shm/prism-v4.0.99-$sha.bundle"
+bundle="/dev/shm/prism-v$version-$sha.bundle"
 dest="/opt/prism-releases/$sha"
 [[ -d "$base" && -f "$base/deploy/.env" && -f "$base/deploy/sandbox/.env" ]]
 [[ -f "$bundle" && ! -e "$dest" ]]
@@ -26,7 +29,7 @@ git -C "$dest" bundle verify "$bundle"
 git -C "$dest" fetch --no-tags "$bundle" refs/heads/codex/sandbox-php-context
 git -C "$dest" checkout --detach FETCH_HEAD
 [[ "$(git -C "$dest" rev-parse HEAD)" == "$sha" ]]
-[[ "$(tr -d '[:space:]' < "$dest/VERSION")" == 4.0.99 ]]
+[[ "$(tr -d '[:space:]' < "$dest/VERSION")" == "$version" ]]
 [[ -f "$dest/deploy/.env" && -f "$dest/deploy/sandbox/.env" ]]
 chmod 600 "$dest/deploy/.env" "$dest/deploy/sandbox/.env"
 cd "$dest/deploy"
@@ -34,4 +37,4 @@ source lib/common.sh
 assert_deploy_sources_clean "$dest"
 assert_frontend_tls_assets .env
 assert_deploy_capacity "$dest" "$(configured_backup_dir)"
-printf 'staged_version=%s\nstaged_sha=%s\nstaged_path=%s\n' 4.0.99 "$sha" "$dest"
+printf 'staged_version=%s\nstaged_sha=%s\nstaged_path=%s\n' "$version" "$sha" "$dest"

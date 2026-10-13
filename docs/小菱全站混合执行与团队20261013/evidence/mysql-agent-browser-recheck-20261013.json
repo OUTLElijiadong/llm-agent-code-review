@@ -30,9 +30,36 @@
       "prism_verify_agent_browser_ack3_20261013"
     ],
     "trials": [
-      {"round": 1, "result": "completed", "elapsed_ms": 442, "refresh_states": ["queued", "completed"], "passed": true},
-      {"round": 2, "result": "completed", "elapsed_ms": 453, "refresh_states": ["queued", "completed"], "passed": true},
-      {"round": 3, "result": "completed", "elapsed_ms": 448, "refresh_states": ["queued", "completed"], "passed": true}
+      {
+        "round": 1,
+        "result": "completed",
+        "elapsed_ms": 442,
+        "refresh_states": [
+          "queued",
+          "completed"
+        ],
+        "passed": true
+      },
+      {
+        "round": 2,
+        "result": "completed",
+        "elapsed_ms": 453,
+        "refresh_states": [
+          "queued",
+          "completed"
+        ],
+        "passed": true
+      },
+      {
+        "round": 3,
+        "result": "completed",
+        "elapsed_ms": 448,
+        "refresh_states": [
+          "queued",
+          "completed"
+        ],
+        "passed": true
+      }
     ],
     "result": "3/3 passed"
   },
@@ -45,23 +72,42 @@
   },
   "migration_063": {
     "baseline_revision": "062_audit_log_action_length",
-    "per_helper_schema_sequence": [
-      "upgrade to 063_agent_browser_actions",
-      "verify indexes and LONGTEXT columns",
-      "downgrade to 062 while action table is empty",
-      "verify action table removed",
-      "re-upgrade to 063_agent_browser_actions",
-      "run helper trial"
-    ],
     "results": "passed in all three ACK schemas and the separate revocation schema",
     "indexes": {
-      "uq_agent_browser_request": {"columns": ["request_id"], "unique": true},
-      "ix_agent_browser_owner_session": {"columns": ["user_id", "surface", "session_key", "run_id"], "unique": false}
+      "uq_agent_browser_request": {
+        "columns": [
+          "request_id"
+        ],
+        "unique": true
+      },
+      "ix_agent_browser_owner_session": {
+        "columns": [
+          "user_id",
+          "surface",
+          "session_key",
+          "run_id"
+        ],
+        "unique": false
+      }
     },
     "json_columns": {
       "arguments_json": "LONGTEXT",
       "observation_json": "LONGTEXT"
-    }
+    },
+    "test_schemas": [
+      "prism_verify_agent_browser_luna_20261013",
+      "prism_verify_agent_browser_ack2_20261013",
+      "prism_verify_agent_browser_ack3_20261013",
+      "prism_verify_agent_browser_revoke_20261013"
+    ],
+    "sequence": [
+      "upgrade from 062_audit_log_action_length",
+      "verify indexes and LONGTEXT columns",
+      "downgrade to 062 while action table is empty",
+      "verify action table removed",
+      "re-upgrade to 063_agent_browser_actions"
+    ],
+    "result": "sequence passed in all four listed temporary schemas; ACK helper ran in ack1/ack2/ack3 schemas and capacity stress ran in the first schema"
   },
   "large_receipt_capacity": {
     "schema": "prism_verify_agent_browser_luna_20261013",

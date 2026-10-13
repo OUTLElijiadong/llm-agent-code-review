@@ -1,0 +1,291 @@
+{
+  "time_utc": "2026-10-13T08:04:39.346469+00:00",
+  "release_sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+  "scope": "Production HTTP role read/deny matrix and existing chat session isolation; no business records created.",
+  "cases": [
+    {
+      "role": "anonymous",
+      "case": "browser pending requires login",
+      "http": 401,
+      "expected": [
+        401
+      ],
+      "passed": true
+    },
+    {
+      "role": "anonymous",
+      "case": "claim requires login",
+      "http": 401,
+      "expected": [
+        401
+      ],
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "users admin boundary",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "security center boundary",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser user unknown run defensive response",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "admin",
+      "case": "browser admin surface boundary",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "admin",
+      "case": "unknown claim does not disclose action",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "reviewer",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "users admin boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "security center boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser user unknown run defensive response",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "reviewer",
+      "case": "browser admin surface boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "unknown claim does not disclose action",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "user",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "users admin boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "security center boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser user unknown run defensive response",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    },
+    {
+      "role": "user",
+      "case": "browser admin surface boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "unknown claim does not disclose action",
+      "http": 200,
+      "expected": [
+        404
+      ],
+      "passed": false
+    }
+  ],
+  "chat_isolation": [
+    {
+      "owner_role": "admin",
+      "requester_role": "admin",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 2,
+      "passed": true
+    },
+    {
+      "owner_role": "admin",
+      "requester_role": "reviewer",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "admin",
+      "requester_role": "user",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "admin",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "reviewer",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 3,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "user",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "admin",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "reviewer",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "user",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 3,
+      "passed": true
+    }
+  ],
+  "passed": false,
+  "initial_failure": "Authenticated admin pending GET returned HTTP 200 HTML, triggering json.decoder.JSONDecodeError in the original HTTP driver. The tolerant follow-up records HTTP status failures for all three roles.",
+  "source_cause": "frontend/nginx.conf.template /api/: proxy_intercept_errors on; error_page 404 405 = /index.html;"
+}

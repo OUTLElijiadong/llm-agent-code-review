@@ -1,22 +1,26 @@
 # 小菱全站混合执行与团队独立复核
 
-观察日期：2026-10-13。生产检查为只读；本报告不表示候选已发布或已通过生产验收。
+观察日期：2026-10-13。生产检查为只读；复核报告与 MySQL、发布证据追加在候选提交之后。v4.0.99 的受支持发布门已通过，但真实 API 与 Safari 业务验收尚未通过/完成，因此不代表整体功能验收通过。
 
 ## 结论
 
-当前没有可发布的候选提交。工作树 HEAD `86cfb1a9a2d665f77c94fc21fc4d8b9109b04e0b` 只包含 v4.0.98 的三份旧发布文档；本次后端、前端和 Alembic 063 的实现仍有 105 个 `backend`、`frontend`、`deploy` 路径处于脏状态。`deploy/deploy.sh` 要求来源干净、revision 与 HEAD 完全相同，并且仅允许 `all`。因此，不能把 `86cfb1a9` 当作新功能发布 SHA；实际功能提交、版本号和发布制品哈希尚待确定。
+首次独立预检时，工作树 HEAD `86cfb1a9a2d665f77c94fc21fc4d8b9109b04e0b` 只包含 v4.0.98 的三份旧发布文档，后端、前端和 Alembic 063 尚有 105 个路径未提交；这是当时的历史快照，不能继续作为当前候选状态描述。
 
-生产仍运行 v4.0.98 / `22404e44a05682e55740abe5a294da66761e2148`，数据库 revision 为 `062_audit_log_action_length`。当前健康状态只证明旧版本运行正常，不能证明未发布的 063 候选。
+随后形成的最终候选为 `8f719975ba9398f078d2204e02d56a385e7ee92c` / v4.0.99。发布后本次独立复核在服务器重新计算 bundle 为 108,176,170 bytes、SHA-256 `0a8b7110b68be7e94ea0d33d8b7ab65af41f959012569c0c292c74eeedaf5f15`，均与预期一致；运行 Compose/ledger、镜像 ID、migration 063、health/ready、备份隔离恢复和公网 buildInfo 也已复核。详见[发布证据 JSON](evidence/production/release-v4099.json)。主代理随后报告 v4.0.99 的真实 HTTP 验收发现 API 错误状态被旧 Nginx 模板转换为 200 HTML，管理员未知 run 响应触发 JSONDecodeError；该版本仍不能宣称真实 API/权限验收通过，Safari 真实账号验收也尚待完成。
+
+最后一次已读的生产快照发生在本次发布之前：v4.0.98 / `22404e44a05682e55740abe5a294da66761e2148`，数据库 `062_audit_log_action_length`。发布过程尚待主代理明确完成后再独立读取新状态；旧快照只证明当时旧版本运行正常，不能证明 v4.0.99 已部署。
 
 ## 需求范围与完成声明
 
 ALIGNMENT、CONSENSUS 已将原始“网站所有功能由小菱代操作”收敛成有权限边界的混合执行：按现有能力注册表执行当前账号可访问的页面能力、复用已有或任务内临时执行/核验成员、按原权限和风险策略处理，并在真实业务完成后定位页面与刷新。登录/注册、秘密输入和文件上传/下载继续使用本人或已有专用控件/工具；这不等于所有网站控件都能无人操作。
 
-因此，交付不能写成“全站全部功能已无人值守完成”。较准确的完成声明应限于“已接入注册能力的页面操作链及其授权、回执和刷新路径已实现”，并同时列出尚未接入的页面能力、专用输入流程和真实浏览器验收缺口。现有 114 项用户注册能力与 134 项管理注册能力包含重复项，不能相加后宣称为独立功能覆盖数。
+因此，交付不能写成“全站全部功能已无人值守完成”。较准确的完成声明应限于“已接入注册能力的页面操作链及其授权、回执和刷新路径已实现”，并同时列出尚未接入的页面能力、专用输入流程和真实浏览器验收缺口。最终候选能力表按当前文档计为 125 项用户能力、142 项管理能力；两侧包含重复项，不能相加后宣称为独立功能覆盖数。早期 114/134 是更早的注册表快照，不能与最终能力表混用。
 
-任务文档仍把阶段标为“基线核验与先复现后修复”，只记录原有 346 项测试基线，没有吸收本轮代码范围、最新日志、E2E 失败修复过程或当前阻塞。它不是本轮交付验收记录，应在最终候选提交确定后更新。
+早期预检时，任务文档仅记录346项基线，未吸收本轮范围和失败修复过程；此项随后由主代理更新到 ACCEPTANCE，记录最终定向351项、前端1897项及99发布后的API复验阻断。早期文档快照不作为当前交付状态。
 
 ## 候选本地证据
+
+下表中的 `/tmp/prism-*` 早期日志是 86cf 后、最终提交前的工作树快照，保留为历史证据，不能自动改标成最终候选结果。最终候选 `8f719975...` 的测试摘要由主代理另行报告：后端定向 351 passed（11 个文件）、前端 1,897 passed（146 个文件）、vue-tsc/Vite build 通过；Luna 定向 176 项、三视口 E2E 每视口三轮和 build 通过。上述摘要尚未由本子代理重新读取原日志；发布后证据仍需单独复核。
 
 | 证据 | 结果 | 能证明什么 / 不能证明什么 |
 | --- | --- | --- |
@@ -31,7 +35,7 @@ ALIGNMENT、CONSENSUS 已将原始“网站所有功能由小菱代操作”收�
 
 本地圆桌菜单截图保存在 `frontend/test-results/overlay-layers-玻璃页头圆桌、聊天、选择框与确认窗的真实几何-命中：{375,768,1280}px，重复3轮}/roundtable-{width}.png`。截图呈现的是 API fixture 的仪表盘；当前任务目录未保存生产 Safari 截图。主代理报告的生产 Safari 圆桌菜单遮挡复现必须作为旧生产缺陷单独记录，不能与这些本地截图混为候选生产验证。
 
-未找到本轮证据证明：生产版本执行 migration 063、生产备份的隔离恢复、实际发布镜像/账本对齐、真实模型请求、普通 Safari 中小菱执行业务并由用户/管理员/其他账号验证权限隔离与持久化。它们仍是发布后验收门，不可由上述单测、模拟 E2E、HTTP 200 或旧生产论坛列表替代。
+本次已独立验证生产运行版本执行 migration 063、发布镜像/ledger 对齐、发布备份校验和在 `cr_testdb` 的 104 表隔离恢复。仍未由本子代理验证真实模型请求、认证 API 权限矩阵、普通 Safari 真实账号业务、跨账号隔离和业务读回持久化。主代理报告的 API 404/405 被转成 200 HTML 与未知 run JSONDecodeError 是当前明确阻断；不得用首页 HTTP 200、单测、模拟 E2E 或旧生产论坛列表替代这些验收。
 
 ## 新增隔离 MySQL 边界复核（2026-10-13）
 
@@ -47,9 +51,11 @@ ALIGNMENT、CONSENSUS 已将原始“网站所有功能由小菱代操作”收�
 
 完整可机读记录（含候选源码 SHA-256、每轮结果和边界限制）见 [MySQL 复核证据 JSON](evidence/mysql-agent-browser-recheck-20261013.json)。
 
-**边界复核结果：** 当前候选的事务边界修复通过三轮真实 MySQL helper/双 Session ACK 复验，也通过独立 token_version 与 RBAC 撤权测试。该项不再单独阻塞候选发布；候选仍未发布，真实 API 路由、普通 Safari、真实业务读回、生产备份恢复、镜像/ledger/version 对齐等发布门仍未通过或尚未执行。
+**边界复核结果：** 最终候选的事务边界修复通过三轮真实 MySQL helper/双 Session ACK 复验，也通过独立 token_version 与 RBAC 撤权测试。v4.0.99 已完成受支持发布，备份恢复、镜像/ledger/version、migration、health/ready、HTTPS 和 served buildInfo 门已通过；真实 API 错误语义、权限矩阵、普通 Safari 和真实业务读回仍未通过或尚未执行。
 
-## 生产只读快照
+## 发布前生产只读快照（不是当前发布后状态）
+
+以下仅保留 staging 启动前的历史只读快照。99发布后已另行只读核验并记录，不能用本段替代后续发布的实际状态。
 
 - `cr_backend` 与 `cr_frontend` 都是 healthy，镜像标签分别为 `prism-backend:22404e44…`、`prism-frontend:22404e44…`；容器内 `/healthz` 与 `/readyz` 都报告 `4.0.98 / 22404e44…`。
 - 生产 `alembic current` 是 `062_audit_log_action_length (head)`；新候选本地 `alembic heads` 是唯一 `063_agent_browser_actions (head)`。这表示 063 尚未在生产运行。
@@ -58,24 +64,24 @@ ALIGNMENT、CONSENSUS 已将原始“网站所有功能由小菱代操作”收�
 - 容器 Compose `working_dir` 为 `/opt/prism-releases/22404e44a05682e55740abe5a294da66761e2148/deploy`。当前账本为该目录下 `.releases/current.env`，`RELEASE_STATE_DIR` 未在 dotenv 中设置，因此脚本默认使用 `deploy/.releases`。该账本指向 22404、v4.0.98、Alembic 062；其上一发布是 4.0.97 / `c1243cf70b891fee18cb883b3b3b64523ed4679a`。`/opt/prism-release-state` 存在但不是运行 Compose 树所用的账本目录，勿把它当作当前状态源。
 - 当前账本引用的 2026-10-08 备份文件存在，大小 822,398,152 字节，记录的 SHA-256 与文件当前 SHA-256 匹配。该检查没有完成 gzip 全量校验或隔离恢复，也不是新候选的发布备份/恢复证据。`cr_testdb` 容器存在并运行，但没有健康检查；本轮独立隔离验证未使用备份恢复。新增测试随后在该容器中创建并删除了唯一命名的临时 schema，未访问生产 `cr_mysql`。
 
-## 发布前阻塞项与建议步骤
+## 发布后状态与剩余验收门
 
-1. **先形成唯一候选。** 审阅并提交这 105 个代码/迁移/前端变更及相应验收文档；确认根目录 `VERSION`。当前为 `4.0.98`，与生产语义版本相同。提交完整 SHA 后再决定发布，不要用 86cf 文档提交代替实现候选。
-2. **隔离 MySQL migration 与轮询边界已通过。** 063 在四个临时 schema 上 upgrade / 空表 downgrade / re-upgrade 通过，索引、LONGTEXT 大回执及 helper ACK/权限撤销场景均已核验。`downgrade()` 在账本表非空时会拒绝删除；应用回滚不自动降级数据库，必须保留此行为及表数据。
-3. **准备完整制品和运行目录。** 以最终 SHA 生成 Git bundle，记录并在服务器重组后复核完整字节数与 SHA-256。将该 SHA 的干净源码、部署文件和既有生产 dotenv/证书/共享卷关系放入实际发布路径；保持 `.releases` 账本被新发布进程读取，核对真实 `working_dir`，不使用旧 `/opt/prism-release-state`。不把 dotenv 内容复制进报告或日志。
-4. **重新检查资源和恢复门。** 发布前确认发布、Docker、备份目录各自仍至少有 12 GiB 可用且占用未触及 95% 阻断线；执行 `backup.sh --reason pre_deploy` 并对该次备份运行 `verify-backup.sh <备份文件>`，确认恢复目标为独立 `cr_testdb`，验证库不是 `cr_mysql`。不要用 10 月 8 日备份替代本次备份。
-5. **仅用支持的精确发布入口。** 在干净的候选 SHA 工作树内从 `deploy/` 运行 `./deploy.sh all --revision <40位完整SHA>`；不要分开部署前后端，不手工 `compose up`。脚本会做备份恢复、容量、迁移、健康与 HTTPS 门禁；任一失败按脚本留存的 pending/previous 状态诊断，不自行清理。
-6. **候选部署后逐项闭环。** 核对运行镜像摘要、`APP_RELEASE`、`APP_VERSION`、current/previous ledger、Alembic `current=head=063_agent_browser_actions`、health/ready、HTTPS 首页及全部新哈希前端资源。然后在普通 Safari 用受控测试账号真实点击，按普通用户/管理员及第二账号分别验证执行、当前账号/租约变更拒绝、高风险审批、真实业务读回、页面定位刷新、失败/排队不误报完成；关键确定性路径至少三轮。生产真实浏览器证据与本地 fixture 证据分开记账。
-7. **保留回滚边界。** `deploy.sh` 的回滚只切应用镜像，不会 downgrade/restore 数据库。迁移后若新表已写入，063 的 downgrade 会拒绝删除非空账本；先评估上一应用对额外表的兼容性，不能为恢复旧应用而清除新账本记录。
+1. **v4.0.99 受支持发布成功。** 部署日志记录 `all` 发布成功、SHA `8f719975ba9398f078d2204e02d56a385e7ee92c`、Alembic `063_agent_browser_actions`；服务器制品字节数/SHA 与预期完全一致。实际 Compose 目录是 `/opt/prism-releases/8f719975ba9398f078d2204e02d56a385e7ee92c/deploy`，运行账本是该目录 `.releases/current.env`，不是旧 `/opt/prism-release-state`。
+2. **部署基础门已通过。** current/previous ledger、前后端镜像 SHA 和 image ID、APP_RELEASE/APP_VERSION、backend healthz/readyz、frontend healthy、公网首页和 served buildInfo、Alembic head 均已核对。ClamAV 容器 healthy，发布后磁盘可用 23,682,772,992 bytes（88% 使用率）。运行 backend 容器 `BACKEND_RELEASE`、`FRONTEND_RELEASE` 环境键仍残留 22404 值；主 APP_RELEASE/APP_VERSION、镜像、ledger、已校准 `.env` 一致。这是非主身份 env_file 字段的运行时遗留，记录供后续清理/核实，不把它误报成镜像漂移。
+3. **发布备份恢复门已通过。** 本次备份为 `code_review_20261013T074818Z_8f719975ba93.sql.gz`，830,881,273 bytes，gzip 校验通过，sidecar 与重算 SHA-256 均为 `1adf6a0a2d4cc0cfee2b4200bc4091c165095eedcb9a9297192dc0a9cc7bca6d`。发布日志确认其恢复到隔离 `cr_testdb` 的临时库，共 104 张表、revision 062；这是迁移前备份恢复验证，不是将生产库回滚。
+4. **API/真实业务验收仍阻断。** 主代理报告 v4.0.99 的匿名 401 正常，但 API 404/405 被 Nginx 的 `proxy_intercept_errors`/SPA `error_page` 映射成 200 HTML，未知 run JSON 响应触发 JSONDecodeError。主代理正修复并计划 v4.0.100；该修复版本的真实 API/权限矩阵须重新验证，不能沿用 v4.0.99 部署成功结论。
+5. **Safari 与真实账号验收未完成。** 本子代理未登录或使用 GUI。需要在修正版上由已授权流程验证普通用户/管理员及第二账号的操作、权限拒绝、审批、业务读回/持久化、页面刷新和失败/排队状态；论坛旧列表、生产首页 200、fixture E2E 不构成替代证据。
+6. **保留回滚边界。** `deploy.sh` 回滚只切应用镜像，不会 downgrade/restore 数据库。迁移后若新表已写入，063 的 downgrade 会拒绝删除非空账本；先评估上一应用对额外表的兼容性，不能为恢复旧应用而清除新账本记录。
 
 ## 独立复核阻断清单
 
-- [ ] 代码与验收文档进入一个新的、干净、完整 SHA 候选；不能发布当前 86cfb1a9。
-- [ ] 候选语义版本、构建镜像及前后端 `APP_RELEASE` / `APP_VERSION` 一致。
+- [x] 最终候选 SHA `8f719975ba9398f078d2204e02d56a385e7ee92c` / v4.0.99 已形成；86cfb1a9 仅为历史预检快照。
+- [x] 候选语义版本、构建镜像及 backend `APP_RELEASE` / `APP_VERSION`、served frontend buildInfo 一致；runtime backend 仍带旧非主身份 `BACKEND_RELEASE` / `FRONTEND_RELEASE`，见偏差记录。
 - [x] 隔离 MySQL 063 upgrade / 空表 downgrade / re-upgrade 通过，JSON 列为 LONGTEXT，大回执读回成功。
 - [x] 新候选 MySQL `REPEATABLE-READ` 双 Session ACK 可见性：真实 helper 三轮通过；token_version/RBAC 撤销取消通过。
-- [ ] 本次备份 checksum、gzip、隔离恢复与表/revision 检查完成。
-- [ ] bundle 服务器重组后的字节数/SHA-256、容量、active ledger 路径通过。
-- [ ] 完整 `all --revision <SHA>` 部署完成，运行镜像、release ledger、数据库 revision、资源与 health/ready/HTTPS 一致。
+- [x] 本次备份 checksum、gzip、隔离恢复与 104 表/062 revision 检查完成。
+- [x] bundle 服务器字节数/SHA-256、容量、active ledger 路径通过。
+- [x] 完整 `all --revision <SHA>` 部署完成，运行镜像、release ledger、数据库 revision、served buildInfo 与 health/ready/HTTPS 一致。
+- [ ] v4.0.99 API 错误语义已发现阻断并由主代理修复中；需在后续候选重新验证匿名 401、404/405 JSON、未知 run 错误响应和角色权限矩阵。
 - [ ] 普通 Safari 的真实账号业务场景重复三轮；论坛 44/43/42 的旧生产只读列表不作为新候选证据。
 - [ ] 更新 ACCEPTANCE、FINAL、TODO，明确哪些页面能力或专用输入仍未覆盖。

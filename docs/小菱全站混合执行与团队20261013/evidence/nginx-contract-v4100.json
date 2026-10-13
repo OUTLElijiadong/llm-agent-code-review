@@ -1,0 +1,189 @@
+{
+  "scope": "Isolated candidate Nginx template containers on server loopback only; live backend read-only anonymous responses; upstream fault injected in a temporary copy; production frontend unmodified.",
+  "time_utc": "2026-10-13T14:56:10.799858+00:00",
+  "candidate_template_sha256": "5d1a13020ab86d6a95b579f9a5f9fc4a55338ad5dc456ec29305bce533af8d2e",
+  "test_image_id": "sha256:76fab601ec0148deeea5e0b4b049481426b9358c12707aa0a5e9b83df39a43cb",
+  "cases": [
+    {
+      "round": 1,
+      "case": "missing route",
+      "status": 404,
+      "expected": 404,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "case": "wrong method",
+      "status": 405,
+      "expected": 405,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "case": "anonymous",
+      "status": 401,
+      "expected": 401,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "case": "body limit",
+      "status": 413,
+      "expected": 413,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "case": "upstream unavailable",
+      "status": 503,
+      "expected": 503,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 1,
+      "case": "SPA fallback",
+      "status": 200,
+      "expected": 200,
+      "content_type": "text/html",
+      "json_valid": null,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "missing route",
+      "status": 404,
+      "expected": 404,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "wrong method",
+      "status": 405,
+      "expected": 405,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "anonymous",
+      "status": 401,
+      "expected": 401,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "body limit",
+      "status": 413,
+      "expected": 413,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "upstream unavailable",
+      "status": 503,
+      "expected": 503,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 2,
+      "case": "SPA fallback",
+      "status": 200,
+      "expected": 200,
+      "content_type": "text/html",
+      "json_valid": null,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "missing route",
+      "status": 404,
+      "expected": 404,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "wrong method",
+      "status": 405,
+      "expected": 405,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "anonymous",
+      "status": 401,
+      "expected": 401,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "body limit",
+      "status": 413,
+      "expected": 413,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "upstream unavailable",
+      "status": 503,
+      "expected": 503,
+      "content_type": "application/json",
+      "json_valid": true,
+      "body_matches_expected_contract": true,
+      "passed": true
+    },
+    {
+      "round": 3,
+      "case": "SPA fallback",
+      "status": 200,
+      "expected": 200,
+      "content_type": "text/html",
+      "json_valid": null,
+      "body_matches_expected_contract": true,
+      "passed": true
+    }
+  ],
+  "passed": true
+}

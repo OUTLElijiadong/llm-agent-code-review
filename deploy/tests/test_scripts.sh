@@ -2032,6 +2032,8 @@ assert_not_contains lib/common.sh 'log_bin_trust_function_creators'
 assert_contains docker-compose.yml 'CLAMAV_HOST: clamav'
 assert_contains docker-compose.yml 'mem_limit: ${CLAMAV_MEM_LIMIT:-2200m}'
 assert_contains docker-compose.yml "CLAMD_CONF_ConcurrentDatabaseReload: 'no'"
+assert_contains docker-compose.yml 'BACKEND_RELEASE: ${BACKEND_RELEASE:-local}'
+assert_contains docker-compose.yml 'FRONTEND_RELEASE: ${FRONTEND_RELEASE:-local}'
 assert_not_contains docker-compose.yml '"3310:3310"'
 assert_contains sandbox/docker-compose.build.yml 'PYTHON_BASE_IMAGE_DIGEST:?PYTHON_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest'
 assert_contains sandbox/docker-compose.build.yml 'NODE_BASE_IMAGE_DIGEST:?NODE_BASE_IMAGE_DIGEST must be the reviewed 64-hex digest'
@@ -2095,6 +2097,38 @@ assert_contains ../frontend/nginx.conf.template 'location = /metrics'
 assert_contains ../frontend/nginx.conf.template 'location = /readyz'
 assert_contains ../frontend/nginx.conf.template 'proxy_pass http://backend:8000/readyz;'
 assert_contains ../frontend/nginx.conf.template 'proxy_cache off;'
+assert_contains ../frontend/nginx.conf.template 'proxy_intercept_errors off;'
+assert_not_contains ../frontend/nginx.conf.template 'proxy_intercept_errors on;'
+assert_not_contains ../frontend/nginx.conf.template 'error_page 404 405 = /index.html;'
+assert_contains ../frontend/nginx.conf.template 'error_page 413 = @json_request_too_large;'
+assert_contains ../frontend/nginx.conf.template 'error_page 502 503 504 = @json_api_unavailable;'
+assert_contains ../frontend/nginx.conf.template 'location @json_api_unavailable {'
+assert_contains ../frontend/nginx.conf.template 'return 503 '\''{"code":50300,"message":"服务暂不可用，请稍后重试"'
+assert_contains ../frontend/nginx.conf.template 'error_page 400 401 403 404 405 408 429 500 502 503 504 = /index.html;'
+python3 - <<'PY'
+from pathlib import Path
+
+template = Path("../frontend/nginx.conf.template").read_text(encoding="utf-8")
+api_locations = (
+    "location = /healthz {",
+    "location = /readyz {",
+    "location /api/ws/ {",
+    "location ~ ^/api/(code-files/upload|projects/[1-9][0-9]*/audit-source-archive)$ {",
+    "location = /api/me/avatar/image {",
+    "location = /api/code-files/upload-folder {",
+    "location /api/ {",
+    "location /v1/ {",
+)
+for marker in api_locations:
+    assert marker in template, f"missing API location: {marker}"
+    body = template.split(marker, 1)[1].split("\n    }", 1)[0]
+    assert "proxy_intercept_errors off;" in body, marker
+    assert "error_page 413 = @json_request_too_large;" in body, marker
+    assert "error_page 502 503 504 = @json_api_unavailable;" in body, marker
+
+assert "error_page 400 401 403 404 405 408 429 500 502 503 504 = /index.html;" in template
+assert "location / {" in template and "try_files $uri $uri/ /index.html;" in template
+PY
 assert_not_contains ../frontend/nginx.conf.template 'location = /readyz { return 404; }'
 assert_contains ../frontend/nginx.conf 'server_tokens off;'
 assert_contains ../frontend/nginx.conf.template 'server_tokens off;'

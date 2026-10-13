@@ -1,0 +1,63 @@
+{
+  "time_utc": "2026-10-13T08:00:01.120316+00:00",
+  "release_sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+  "cases": [
+    {
+      "round": 1,
+      "sample": "clean",
+      "returncode": 0,
+      "passed": true,
+      "output": "stream: OK\n\n----------- SCAN SUMMARY -----------\nInfected files: 0\nTime: 0.364 sec (0 m 0 s)\nStart Date: 2026:10:13 07:58:57\nEnd Date:   2026:10:13 07:58:57"
+    },
+    {
+      "round": 1,
+      "sample": "EICAR",
+      "returncode": 1,
+      "passed": true,
+      "output": "stream: Eicar-Test-Signature FOUND\n\n----------- SCAN SUMMARY -----------\nInfected files: 1\nTime: 0.038 sec (0 m 0 s)\nStart Date: 2026:10:13 07:58:59\nEnd Date:   2026:10:13 07:58:59\nexit status 1"
+    },
+    {
+      "round": 2,
+      "sample": "clean",
+      "returncode": 0,
+      "passed": true,
+      "output": "stream: OK\n\n----------- SCAN SUMMARY -----------\nInfected files: 0\nTime: 0.005 sec (0 m 0 s)\nStart Date: 2026:10:13 07:59:00\nEnd Date:   2026:10:13 07:59:00"
+    },
+    {
+      "round": 2,
+      "sample": "EICAR",
+      "returncode": 1,
+      "passed": true,
+      "output": "stream: Eicar-Test-Signature FOUND\n\n----------- SCAN SUMMARY -----------\nInfected files: 1\nTime: 0.012 sec (0 m 0 s)\nStart Date: 2026:10:13 07:59:01\nEnd Date:   2026:10:13 07:59:01\nexit status 1"
+    },
+    {
+      "round": 3,
+      "sample": "clean",
+      "returncode": 0,
+      "passed": true,
+      "output": "stream: OK\n\n----------- SCAN SUMMARY -----------\nInfected files: 0\nTime: 0.007 sec (0 m 0 s)\nStart Date: 2026:10:13 07:59:02\nEnd Date:   2026:10:13 07:59:02"
+    },
+    {
+      "round": 3,
+      "sample": "EICAR",
+      "returncode": 1,
+      "passed": true,
+      "output": "stream: Eicar-Test-Signature FOUND\n\n----------- SCAN SUMMARY -----------\nInfected files: 1\nTime: 0.011 sec (0 m 0 s)\nStart Date: 2026:10:13 07:59:03\nEnd Date:   2026:10:13 07:59:03\nexit status 1"
+    },
+    {
+      "case": "reload_requested",
+      "returncode": 0,
+      "passed": true,
+      "output": ""
+    },
+    {
+      "case": "post_reload_scan",
+      "returncode": 0,
+      "passed": true,
+      "output": "stream: OK\n\n----------- SCAN SUMMARY -----------\nInfected files: 0\nTime: 54.722 sec (0 m 54 s)\nStart Date: 2026:10:13 07:59:05\nEnd Date:   2026:10:13 08:00:00"
+    }
+  ],
+  "state": "health=healthy memory=2306867200 oom=false\nConcurrentDatabaseReload no",
+  "passed": true,
+  "limit": "Direct scanner verification; not the full upload flow and not overnight OOM observation."
+}

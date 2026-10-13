@@ -1,0 +1,31 @@
+{
+  "candidate_sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+  "local_only": true,
+  "logs": [
+    {
+      "log": "/tmp/prism-v4099-frontend-final.log",
+      "scope": "full frontend unit/component",
+      "sha256": "6f8574ec7a1b9057cbf170b5e858926edb57bb5f00fda07b6eb55466089277e8",
+      "summary": [
+        "Test Files  146 passed (146)",
+        "Tests  1897 passed (1897)"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4099-backend-final.log",
+      "scope": "11 targeted backend files",
+      "sha256": "919a86920005dcd36bee21f24658442c26528ae49b0c4ce34c79fc2024750ec4",
+      "summary": [
+        "====================== 351 passed, 159 warnings in 9.99s ======================="
+      ]
+    },
+    {
+      "log": "/tmp/prism-guard-pending-language-fixed.log",
+      "scope": "completion guard targeted red/green regression",
+      "sha256": "3bbadd2f90d7638d9440625328addc0d31ab5c01b5deee123bfc392f4e533f3b",
+      "summary": [
+        "================= 52 passed, 78 deselected, 1 warning in 1.04s ================="
+      ]
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "verification_kind": "independent_read_only_post_release",
+  "observed_at": "2026-10-13",
+  "release": {
+    "sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+    "version": "4.0.99",
+    "deployment_status": "supported_all_release_succeeded",
+    "deployment_log": "/var/log/prism-deploy-v4099-8f719975.log",
+    "completed_at_utc": "2026-10-13T07:57:23Z",
+    "overall_feature_acceptance": "pending_real_api_and_browser_acceptance"
+  },
+  "artifact": {
+    "path": "/dev/shm/prism-v4.0.99-8f719975ba9398f078d2204e02d56a385e7ee92c.bundle",
+    "expected_bytes": 108176170,
+    "observed_bytes": 108176170,
+    "expected_sha256": "0a8b7110b68be7e94ea0d33d8b7ab65af41f959012569c0c292c74eeedaf5f15",
+    "observed_sha256": "0a8b7110b68be7e94ea0d33d8b7ab65af41f959012569c0c292c74eeedaf5f15",
+    "matches": true,
+    "staged_git_head": "8f719975ba9398f078d2204e02d56a385e7ee92c"
+  },
+  "compose_and_ledger": {
+    "working_dir": "/opt/prism-releases/8f719975ba9398f078d2204e02d56a385e7ee92c/deploy",
+    "config_file": "/opt/prism-releases/8f719975ba9398f078d2204e02d56a385e7ee92c/deploy/docker-compose.yml",
+    "current_ledger": {
+      "release_sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "version": "4.0.99",
+      "backend_release": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "frontend_release": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "backend_image_id": "sha256:af852f631d8add2ed76eeaf443093ba992edcf8634d75a2b5274627178529fb1",
+      "frontend_image_id": "sha256:76fab601ec0148deeea5e0b4b049481426b9358c12707aa0a5e9b83df39a43cb",
+      "target": "all",
+      "alembic_revision": "063_agent_browser_actions",
+      "deployed_at_utc": "2026-10-13T07:56:57Z"
+    },
+    "previous_ledger": {
+      "release_sha": "22404e44a05682e55740abe5a294da66761e2148",
+      "version": "4.0.98",
+      "backend_image_id": "sha256:15da32848dfba405e7730e687575281cd15aec9c0b413573af16ff49cec2bf92",
+      "frontend_image_id": "sha256:bd0688a8669b03e799de63d5dc7eaa77853b04875baa8a81e0fc402284bc3be5",
+      "alembic_revision": "062_audit_log_action_length"
+    },
+    "ops_executor_rebound_and_ops_check_passed": true
+  },
+  "runtime": {
+    "backend": {
+      "image": "prism-backend:8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "image_id": "sha256:af852f631d8add2ed76eeaf443093ba992edcf8634d75a2b5274627178529fb1",
+      "container_state": "running",
+      "health": "healthy",
+      "app_release": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "app_version": "4.0.99",
+      "healthz": {
+        "status": "ok",
+        "version": "4.0.99",
+        "release": "8f719975ba9398f078d2204e02d56a385e7ee92c"
+      },
+      "readyz": {
+        "status": "ready",
+        "version": "4.0.99",
+        "release": "8f719975ba9398f078d2204e02d56a385e7ee92c"
+      },
+      "alembic_current": "063_agent_browser_actions",
+      "runtime_env_anomaly": {
+        "backend_release": "22404e44a05682e55740abe5a294da66761e2148",
+        "frontend_release": "22404e44a05682e55740abe5a294da66761e2148",
+        "note": "The running backend container retains old non-primary release variables from env_file. APP_RELEASE/APP_VERSION, image tags and IDs, current ledger, current deploy .env and Alembic state agree on v4.0.99. Record as stale runtime env fields; deployment checks do not treat these two env_file fields as runtime identity."
+      }
+    },
+    "frontend": {
+      "image": "prism-frontend:8f719975ba9398f078d2204e02d56a385e7ee92c",
+      "image_id": "sha256:76fab601ec0148deeea5e0b4b049481426b9358c12707aa0a5e9b83df39a43cb",
+      "container_state": "running",
+      "health": "healthy"
+    },
+    "decoy": {
+      "image": "prism-decoy:4.0.99",
+      "container_state": "running",
+      "health": "healthy"
+    },
+    "clamav": {
+      "image": "clamav/clamav:stable",
+      "container_state": "running",
+      "health": "healthy",
+      "memory_capacity_gib": 2.148,
+      "memory_capacity_source": "parent_agent_report"
+    }
+  },
+  "backup_restore": {
+    "backup_path": "/opt/code-review/backups/code_review_20261013T074818Z_8f719975ba93.sql.gz",
+    "bytes": 830881273,
+    "sha256": "1adf6a0a2d4cc0cfee2b4200bc4091c165095eedcb9a9297192dc0a9cc7bca6d",
+    "sidecar_sha256_matches": true,
+    "gzip_integrity": "passed",
+    "restore_receipt": {
+      "container": "cr_testdb",
+      "temporary_schema": "prism_verify_20261013075132_29389",
+      "table_count": 104,
+      "alembic_revision": "062_audit_log_action_length",
+      "result": "passed",
+      "logged_at_utc": "2026-10-13T07:53:42Z",
+      "source": "deployment_log"
+    },
+    "note": "The restore validation checked the pre-deploy backup in isolated cr_testdb before migration 063."
+  },
+  "served_frontend": {
+    "origin": "https://lijiadong.cn/",
+    "https_status": 200,
+    "index_bytes": 1617,
+    "index_sha256": "7988b288936dbbd1106fbabfd08d74444da25248844afa4e4faf5b36ce74280f",
+    "build_info_asset": "/assets/buildInfo-L4yNConZ.js",
+    "build_info_status": 200,
+    "build_info_bytes": 250,
+    "build_info_sha256": "3b00df2686141ee43abda833c78f85df90637a50fbea5514699b190a92c29f52",
+    "version": "4.0.99",
+    "release_sha": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+    "build_time": "2026-10-13T07:47:44Z"
+  },
+  "capacity": {
+    "deploy_preflight_available_kib": 24439480,
+    "deploy_preflight_min_free_gib": 12,
+    "independent_recheck_available_bytes": 23682772992,
+    "filesystem_use_percent": 88
+  },
+  "remaining_acceptance_gates": [
+    {
+      "gate": "real_authenticated_api_and_permission_matrix",
+      "status": "pending",
+      "note": "Parent reports v4.0.99 HTTP validation found nginx proxy_intercept_errors mapping API 404/405 responses to 200 HTML; admin API pending unknown-run caused JSONDecodeError; anonymous 401 worked. The parent is fixing this for v4.0.100. This subagent did not log in or re-run protected API checks."
+    },
+    {
+      "gate": "ordinary_safari_real_account_business_acceptance",
+      "status": "pending",
+      "note": "No GUI or login performed in this verification."
+    }
+  ],
+  "secrets": "none_recorded"
+}

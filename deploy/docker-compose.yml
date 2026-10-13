@@ -138,6 +138,8 @@ services:
       APP_ENV: prod
       APP_RELEASE: ${APP_RELEASE:-local}
       APP_VERSION: ${APP_VERSION:-3.8.1}
+      BACKEND_RELEASE: ${BACKEND_RELEASE:-local}
+      FRONTEND_RELEASE: ${FRONTEND_RELEASE:-local}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${MYSQL_USER}

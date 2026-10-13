@@ -40,6 +40,11 @@ server {
         return 413 '{"code":41300,"message":"请求体超过容量上限，请减小内容后重新提交","request_id":"$request_id","retryable":false,"next_action":"请减小内容后重新提交"}';
     }
 
+    location @json_api_unavailable {
+        default_type application/json;
+        return 503 '{"code":50300,"message":"服务暂不可用，请稍后重试","request_id":"$request_id","retryable":true,"next_action":"请稍后重试"}';
+    }
+
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
@@ -80,6 +85,9 @@ server {
     }
 
     location = /healthz {
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_pass http://backend:8000/healthz;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -92,6 +100,9 @@ server {
 
     # 只转发后端的最小就绪契约: status + release。
     location = /readyz {
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_pass http://backend:8000/readyz;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -104,6 +115,9 @@ server {
     }
 
     location /api/ws/ {
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_pass http://backend:8000/api/ws/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -123,6 +137,9 @@ server {
     }
 
     location /v1/ {
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_pass http://backend:8000/v1/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -140,6 +157,9 @@ server {
 
     location ~ ^/api/(code-files/upload|projects/[1-9][0-9]*/audit-source-archive)$ {
         client_max_body_size 21m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_request_buffering off;
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;
@@ -158,6 +178,9 @@ server {
 
     location = /api/me/avatar/image {
         client_max_body_size 1m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_request_buffering off;
         proxy_pass http://backend:8000/api/me/avatar/image;
         proxy_set_header Host $host;
@@ -176,6 +199,9 @@ server {
 
     location = /api/code-files/upload-folder {
         client_max_body_size 512m;
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_request_buffering off;
         proxy_pass http://backend:8000/api/code-files/upload-folder;
         proxy_set_header Host $host;
@@ -193,10 +219,11 @@ server {
     }
 
     location /api/ {
-        # 未匹配的接口路径同样回落到站点页面，让"存在/不存在"在响应上不可区分。
-        # proxy_intercept_errors 必须打开：否则后端返回的 404 会原样透传（JSON 指纹仍在）。
-        error_page 404 405 = /index.html;
-        proxy_intercept_errors on;
+        # API 必须保留后端原始 HTTP/JSON 错误；不要继承 server 级 SPA HTML error_page。
+        # 仅 Nginx 自身的请求体限制和上游不可用错误改为稳定 JSON 响应。
+        error_page 413 = @json_request_too_large;
+        error_page 502 503 504 = @json_api_unavailable;
+        proxy_intercept_errors off;
         proxy_pass http://backend:8000/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -212,7 +239,7 @@ server {
         proxy_read_timeout 600s;
     }
 
-    # 统一错误页：4xx/5xx 一律回落到站点自身页面，不暴露 nginx 默认错误页与版本指纹。
+    # SPA 浏览页面与静态资源仍回落到站点页面；API location 本地覆盖错误映射以保留 HTTP/JSON 契约。
     error_page 400 401 403 404 405 408 429 500 502 503 504 = /index.html;
 
     location / {
