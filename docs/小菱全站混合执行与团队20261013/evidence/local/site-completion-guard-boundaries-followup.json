@@ -1,0 +1,67 @@
+{
+  "observation_date_local": "2026-10-15",
+  "timezone": "Asia/Taipei",
+  "scope": "Local isolated SQLite, registered site execution/verifier and own-run ledgers; business HTTP response fixture",
+  "production_accepted": false,
+  "model_api_used": false,
+  "browser_used": false,
+  "git_head_baseline": "8378875184a907da47aff3689983323570a6a7dd",
+  "working_tree_source_files": {
+    "backend/app/services/agent_responses_service.py": {
+      "bytes": 242882,
+      "sha256": "cc039e8e4d9989700817f81102040d8feed464e0fa03cf88c0235eab9ca4eb8c"
+    },
+    "backend/tests/unit/services/test_site_completion_guard_recheck.py": {
+      "bytes": 24091,
+      "sha256": "36cb19379c90340b39ab4599fcd4d89d99cff5d5704920f7fce1007615582b3b"
+    }
+  },
+  "checks": {
+    "independent_boundary_red_reproduced": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-independent-root-repeat-red.log",
+      "bytes": 10707,
+      "sha256": "86c760ebbf1b935ac0c0cd881f478b730fb8db9ae89b020bacd5df62859b885e",
+      "summary": "6 failed, 1 passed, 8 warnings in 2.11s"
+    },
+    "negation_and_direct_context_red": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-negation-owned-run-red.log",
+      "bytes": 15667,
+      "sha256": "205b78531e20d749ca4a8a1f7908000ee7b81b892115abc6fda16ccf3e50cf0a",
+      "summary": "6 failed, 2 passed, 76 deselected, 4 warnings in 1.62s"
+    },
+    "green_round_1": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-guard-boundaries-green-1.log",
+      "bytes": 4185,
+      "sha256": "46b5546bca45060e6213777d8b53797302f2a3874a7d324610abac2aba664b83",
+      "summary": "304 passed, 186 warnings in 10.62s"
+    },
+    "green_round_2": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-guard-boundaries-green-2.log",
+      "bytes": 4185,
+      "sha256": "ccb588fbbdcb0acf200d8c8e5551e3c9592b91c52c761e8f97276a6fc22c500a",
+      "summary": "304 passed, 186 warnings in 10.77s"
+    },
+    "green_round_3": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-guard-boundaries-green-3.log",
+      "bytes": 4185,
+      "sha256": "d11bf0fd8af56c85a23bc39958e31ce94cd50ed1094d99dfb46f3ba0fba65cab",
+      "summary": "304 passed, 186 warnings in 10.63s"
+    }
+  },
+  "test_case_count": {
+    "own_guard_file": 85,
+    "original_site_files": 42,
+    "related_responses_files": 161,
+    "independent_boundary_file": 7,
+    "independent_language_file": 9,
+    "combined_per_round": 304
+  },
+  "ruff": "passed",
+  "git_diff_check": "passed",
+  "known_limitations": [
+    "No production/browser retest by this subagent",
+    "No paid model output conformity test",
+    "No 1M token capacity proof",
+    "Finite language sample, not a proof of arbitrary semantic accuracy"
+  ]
+}

@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/forum/ForumViews.test.ts src/api/forum.test.ts
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  2 passed (2)
+      Tests  44 passed (44)
+   Start at  00:33:39
+   Duration  970ms (transform 238ms, setup 55ms, import 309ms, tests 337ms, environment 534ms)
+

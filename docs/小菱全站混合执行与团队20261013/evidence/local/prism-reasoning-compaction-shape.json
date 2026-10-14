@@ -1,0 +1,32 @@
+[
+  {
+    "scenario": "tool_pair",
+    "original_budget_units": 1141,
+    "omitted_indices": [
+      1
+    ],
+    "projected_types": [
+      "message",
+      "user",
+      "function_call",
+      "function_call_output"
+    ],
+    "original_reasoning_chars": 900,
+    "scope": "local_synthetic_projection_only_no_provider_request"
+  },
+  {
+    "scenario": "no_tool_answer",
+    "original_budget_units": 1135,
+    "omitted_indices": [
+      1
+    ],
+    "projected_types": [
+      "message",
+      "user",
+      "message",
+      "user"
+    ],
+    "original_reasoning_chars": 900,
+    "scope": "local_synthetic_projection_only_no_provider_request"
+  }
+]

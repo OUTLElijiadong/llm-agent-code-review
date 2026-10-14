@@ -1,0 +1,58 @@
+{
+  "observed_at": "2026-10-15T00:44:15.978433+08:00",
+  "scope": "independent_local_MockTransport_no_live_model_no_production",
+  "original_red_cases": 3,
+  "original_44_green": true,
+  "extra_cases": 40,
+  "final_cases": 84,
+  "independent_process_rounds": 3,
+  "all_final_cases_passed": true,
+  "old_ledger_and_payload_preserved": true,
+  "source_and_evidence": [
+    {
+      "path": "backend/app/services/deepseek_provider_compat.py",
+      "bytes": 3335,
+      "sha256": "81d901d455723d450af6bb483527602943dbaef05377bcec1f366185f7b6010c"
+    },
+    {
+      "path": "backend/app/services/deepseek_responses_service.py",
+      "bytes": 54240,
+      "sha256": "6cbf74a9dfe404d2d8f52bae36ab6195e041ac5cfe42ba385d34aff6047f6250"
+    },
+    {
+      "path": "backend/app/services/deepseek_responses_runtime.py",
+      "bytes": 118973,
+      "sha256": "b4c6b3c1ebb56fe38b70cb47ca9250d2e745edf98d78908612ee319af1434053"
+    },
+    {
+      "path": "backend/tests/unit/services/test_deepseek_tool_choice_compatibility.py",
+      "bytes": 11990,
+      "sha256": "a7618313263fae2ab8381596013072d67b9259cc7f2c87082892a563776f7704"
+    },
+    {
+      "path": "docs/小菱全站混合执行与团队20261013/evidence/independent/test_deepseek_history_compat_order.py",
+      "bytes": 11015,
+      "sha256": "d22575db7f2e4f9169b02701bbf2dc63eb92ea31da0cba814d1d5d5ac815ee83"
+    },
+    {
+      "path": "docs/小菱全站混合执行与团队20261013/evidence/independent/prism-independent-history-compat-order-green.log",
+      "bytes": 99,
+      "sha256": "42ced9bcbe52228e623afb388c9d027b7edfc525fdce59ff3c84009455460d06"
+    },
+    {
+      "path": "docs/小菱全站混合执行与团队20261013/evidence/independent/prism-independent-history-compat-order-extra.log",
+      "bytes": 179,
+      "sha256": "075a06b3627eeaf063f1f2d8bb503b4b5b92aaa2df93749e451501753185d309"
+    },
+    {
+      "path": "docs/小菱全站混合执行与团队20261013/evidence/independent/prism-independent-history-compat-order-extra-round-2.log",
+      "bytes": 179,
+      "sha256": "27d318824ee1a05401715b2443a39fc4287fddaf6f4450cf154f864faaf9f88e"
+    },
+    {
+      "path": "docs/小菱全站混合执行与团队20261013/evidence/independent/prism-independent-history-compat-order-extra-round-3.log",
+      "bytes": 179,
+      "sha256": "075a06b3627eeaf063f1f2d8bb503b4b5b92aaa2df93749e451501753185d309"
+    }
+  ]
+}

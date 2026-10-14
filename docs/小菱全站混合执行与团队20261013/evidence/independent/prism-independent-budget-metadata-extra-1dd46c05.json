@@ -1,0 +1,11 @@
+{
+  "candidate": "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+  "scope": "independent_local_sqlite_no_production",
+  "budget_samples": 80,
+  "collection_pages": 2,
+  "reconstructed_keys": 25,
+  "reconstructed_bodies": 25,
+  "foreign_owner_denied": 2,
+  "invalid_pointer_rejected": 3,
+  "raw_result_unchanged": true
+}

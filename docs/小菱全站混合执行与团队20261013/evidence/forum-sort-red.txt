@@ -1,0 +1,85 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/views/forum/ForumViews.test.ts -t 真实排序控件|旧置顶排序
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/frontend
+
+ ❯ src/views/forum/ForumViews.test.ts (38 tests | 4 failed | 34 skipped) 46ms
+     × 第 1 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数 30ms
+     × 第 2 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数 4ms
+     × 第 3 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数 5ms
+     × 旧置顶排序迟到不能覆盖最新发布结果 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 第 1 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 第 2 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 第 3 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数
+AssertionError: expected last "vi.fn()" call to have been called with [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
++     "category": "",
++     "keyword": "",
+      "page": 1,
+-     "sort": "default",
++     "page_size": 10,
+    },
+  ]
+
+ ❯ src/views/forum/ForumViews.test.ts:89:26
+     87|     api.getPosts.mockResolvedValue({ ...page(), total: 25, pages: 3 })
+     88|     const { wrapper } = await render(ForumList)
+     89|     expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContain…
+       |                          ^
+     90|     const sort = wrapper.get('select[aria-label="帖子排序"]')
+     91|     expect(sort.findAll('option').map(option => [option.text(), option…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/views/forum/ForumViews.test.ts > 论坛列表读取与键盘导航 > 旧置顶排序迟到不能覆盖最新发布结果
+Error: Unable to get select[aria-label="帖子排序"] within: <div data-v-a2eea63e="" class="forum-page">
+  <div data-v-a2eea63e="" class="page-header">
+    <div data-v-a2eea63e="">
+      <h2 data-v-a2eea63e="">开发者论坛</h2>
+      <p data-v-a2eea63e="" class="page-sub">提问、分享经验、交流审查实践</p>
+    </div><button data-v-a2eea63e="" type="submit">发布新帖</button>
+  </div>
+  <div data-v-a2eea63e="" shadow="never" class="filter-card">
+    <div data-v-a2eea63e="" class="filter-row"><input data-v-a2eea63e="" placeholder="搜索标题" aria-label="搜索帖子标题" clearable="" class="search-input" value=""><select data-v-a2eea63e="" aria-label="帖子分类" placeholder="全部分类" clearable="" class="category-select" value="">
+        <option data-v-a2eea63e="" value="qa">问答</option>
+        <option data-v-a2eea63e="" value="tech">技术</option>
+        <option data-v-a2eea63e="" value="share">分享</option>
+        <option data-v-a2eea63e="" value="announce">公告</option>
+        <option data-v-a2eea63e="" value="other">其他</option>
+      </select><button data-v-a2eea63e="">搜索</button></div>
+  </div>
+  <div data-v-a2eea63e="" shadow="never">
+    <div data-v-a2eea63e="" class="post-list" aria-busy="true">
+      <!--v-if-->
+      <!--v-if-->
+    </div>
+    <!--v-if-->
+  </div>
+</div>
+ ❯ VueWrapper.BaseWrapper.get node_modules/@vue/test-utils/dist/vue-test-utils.cjs.js:7279:15
+ ❯ src/views/forum/ForumViews.test.ts:115:19
+    113|     api.getPosts.mockReturnValueOnce(old.promise).mockResolvedValueOnc…
+    114|     const { wrapper } = await render(ForumList)
+    115|     await wrapper.get('select[aria-label="帖子排序"]').setValue('newest')
+       |                   ^
+    116|     await flushPromises()
+    117|     old.resolve(page('旧置顶结果'))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 34 skipped (38)
+   Start at  18:32:50
+   Duration  595ms (transform 143ms, setup 19ms, import 211ms, tests 46ms, environment 249ms)
+

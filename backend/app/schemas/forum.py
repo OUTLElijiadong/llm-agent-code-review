@@ -41,6 +41,7 @@ class PostListItemOut(BaseModel):
     R7 修复(2026-06-25):补齐 status 字段,对齐 ForumPost ORM。
     """
     id: int
+    detail_route: str = Field(description="服务端确认的单帖详情页面路径")
     user_id: int
     author_name: str = ""
     category: str

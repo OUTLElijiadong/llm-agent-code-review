@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "<stdin>", line 139, in <module>
+  File "<stdin>", line 39, in hashfile
+  File "/usr/lib64/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/opt/prism-releases/1dd46c05db02a1794c459c6b4b0e688c03927fb1/deploy/nginx/default.conf.template'

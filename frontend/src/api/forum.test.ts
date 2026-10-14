@@ -12,10 +12,11 @@ vi.mock('./http', () => ({
   del: vi.fn(),
 }))
 
-import { getPost } from './forum'
+import { getPost, getPosts } from './forum'
 
 const detail = {
   id: 7,
+  detail_route: '/forum/7',
   user_id: 3,
   author_name: '测试用户',
   category: 'discussion',
@@ -58,6 +59,16 @@ describe('forum detail API', () => {
   it('详情读取失败不记录浏览，错误交给页面重试', async () => {
     httpApi.get.mockRejectedValueOnce(new Error('detail unavailable'))
     await expect(getPost(7)).rejects.toThrow('detail unavailable')
+    expect(httpApi.post).not.toHaveBeenCalled()
+  })
+
+  it('最新列表保留服务端单帖链接，排序和筛选只使用 GET', async () => {
+    const latest = { ...detail, id: 44, detail_route: '/forum/44' }
+    httpApi.get.mockResolvedValue({ items: [latest], total: 1, page: 1, page_size: 10, pages: 1 })
+    const params = { keyword: '审查', category: 'tech', sort: 'newest', page: 1, page_size: 10 }
+    const result = await getPosts(params)
+    expect(httpApi.get).toHaveBeenCalledWith('/forum/posts', params)
+    expect(result.items[0].detail_route).toBe('/forum/44')
     expect(httpApi.post).not.toHaveBeenCalled()
   })
 })

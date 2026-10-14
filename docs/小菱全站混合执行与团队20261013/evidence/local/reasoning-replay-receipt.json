@@ -1,0 +1,49 @@
+{
+  "observed_at": "2026-10-14T18:23:47.828877+08:00",
+  "scope": "local_synthetic_SSE_SQL_free_no_live_model_or_production_write",
+  "production_version_not_retested": "4.0.101",
+  "source_files": [
+    {
+      "path": "backend/app/services/deepseek_responses_runtime.py",
+      "bytes": 118973,
+      "sha256": "b4c6b3c1ebb56fe38b70cb47ca9250d2e745edf98d78908612ee319af1434053"
+    },
+    {
+      "path": "backend/tests/unit/services/test_deepseek_reasoning_replay.py",
+      "bytes": 7978,
+      "sha256": "8ea860339ca2ef3d915558ec2a6e0b0c91334f5831d91d80ef4923f23a3d6916"
+    }
+  ],
+  "evidence": [
+    {
+      "name": "prism-reasoning-replay-red.log",
+      "bytes": 13751,
+      "sha256": "2bf324a5469a7b106812b45e3c64b479cde93cb49bba5c0327c57b9fdf501327"
+    },
+    {
+      "name": "prism-reasoning-replay-final-15.log",
+      "bytes": 651,
+      "sha256": "95b7773fe065a34a88b01607132f6329a088aeb7b1d094d8ce2fd91ef46d7a12"
+    },
+    {
+      "name": "prism-reasoning-replay-final-15-round-2.log",
+      "bytes": 651,
+      "sha256": "a4e3816d2bc0f3af6052ed416d81b2ca67a11c448d6d96200250e59d84b2ef75"
+    },
+    {
+      "name": "prism-reasoning-replay-final-15-round-3.log",
+      "bytes": 651,
+      "sha256": "95b7773fe065a34a88b01607132f6329a088aeb7b1d094d8ce2fd91ef46d7a12"
+    },
+    {
+      "name": "prism-reasoning-replay-integrated-182.log",
+      "bytes": 3115,
+      "sha256": "d6ae9662fe8d39c242d710ffe2f79e7d4d452e937cd7f69d0761dcf6d1476b69"
+    },
+    {
+      "name": "prism-reasoning-compaction-shape.json",
+      "bytes": 650,
+      "sha256": "9fcec8396cfd3a10c5004fdcbcf13f2735584e471695584ee68dfd892957e0c8"
+    }
+  ]
+}

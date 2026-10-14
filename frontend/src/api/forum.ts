@@ -1,8 +1,11 @@
 import { get, post, put, del } from './http'
 import type { Page } from '@/types/common'
 
+export type ForumPostSort = 'default' | 'newest'
+
 export interface ForumPost {
   id: number
+  detail_route: string
   user_id: number
   author_name: string
   category: string

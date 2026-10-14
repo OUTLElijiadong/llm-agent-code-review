@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-10-14T17:40:17.790668+08:00",
+  "candidate": "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+  "scope": "independent_local_only",
+  "files": [
+    {
+      "name": "prism-independent-budget-metadata-extra-1dd46c05.json",
+      "bytes": 316,
+      "sha256": "d2af679eada8e36aaefb18f3d5343ec6f67f4c4c852e529971e78437a6039a53"
+    },
+    {
+      "name": "prism-independent-budget-metadata-1dd46c05.log",
+      "bytes": 1744,
+      "sha256": "a843386e3d28932792df90f1779589f4790005420ede070d116ca8a7e9a6a2fa"
+    }
+  ]
+}

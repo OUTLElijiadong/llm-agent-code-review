@@ -1,0 +1,74 @@
+[
+  {
+    "action_id": 3,
+    "account_id": 5,
+    "surface": "user",
+    "session_sha256": "64860af56ceb8a38a05ffcd4359186c8cca612f0df59d8fdaf231562cee75a39",
+    "run_id": "run_0eb04bfa31114731bf7f742962ead689",
+    "action": "inspect",
+    "action_status": "completed",
+    "claimed": true,
+    "observation_keys": [
+      "controls",
+      "evidence_kind",
+      "messages",
+      "route",
+      "snapshot_id",
+      "title"
+    ],
+    "observed_path": "/dashboard",
+    "control_count": 13,
+    "error_present": false,
+    "run_status": "completed",
+    "created_utc": "2026-10-14T09:51:36",
+    "updated_utc": "2026-10-14T09:51:36"
+  },
+  {
+    "action_id": 4,
+    "account_id": 5,
+    "surface": "user",
+    "session_sha256": "9229fd80a49eebdc3379a55c7a5ff6cdcdf06e2ffb8fdc2c9f19643759337af8",
+    "run_id": "run_c57f990492eb4fb6b428a23d99ad8060",
+    "action": "inspect",
+    "action_status": "completed",
+    "claimed": true,
+    "observation_keys": [
+      "controls",
+      "evidence_kind",
+      "messages",
+      "route",
+      "snapshot_id",
+      "title"
+    ],
+    "observed_path": "/forum",
+    "control_count": 16,
+    "error_present": false,
+    "run_status": "completed",
+    "created_utc": "2026-10-14T09:56:52",
+    "updated_utc": "2026-10-14T09:56:53"
+  },
+  {
+    "action_id": 5,
+    "account_id": 5,
+    "surface": "user",
+    "session_sha256": "c4826483400482907b5889ce3fe31f4dc7baa7d8f373a6e046b889e2ae3124f9",
+    "run_id": "run_fae027399eaa4efe85a7d39e4fce4899",
+    "action": "inspect",
+    "action_status": "completed",
+    "claimed": true,
+    "observation_keys": [
+      "controls",
+      "evidence_kind",
+      "messages",
+      "route",
+      "snapshot_id",
+      "title"
+    ],
+    "observed_path": "/support",
+    "control_count": 6,
+    "error_present": false,
+    "run_status": "completed",
+    "created_utc": "2026-10-14T10:01:41",
+    "updated_utc": "2026-10-14T10:01:42"
+  }
+]

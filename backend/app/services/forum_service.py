@@ -163,6 +163,7 @@ def delete_reply(db: Session, user: User, reply_id: int) -> None:
 def _post_dict(p: ForumPost, author_name: str) -> dict:
     return {
         "id": p.id, "user_id": p.user_id, "author_name": author_name,
+        "detail_route": f"/forum/{p.id}",
         "category": p.category, "title": p.title,
         "view_count": p.view_count, "reply_count": p.reply_count,
         "is_pinned": bool(p.is_pinned),

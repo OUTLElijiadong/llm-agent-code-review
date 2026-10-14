@@ -1,0 +1,57 @@
+{
+  "scope": "local_AST_predicates_only_not_production",
+  "candidate": "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+  "baseline_check_count": 17,
+  "baseline_passed": true,
+  "negative_cases": [
+    {
+      "case": "wrong_component_ledger",
+      "rejected_by": [
+        "ledger_sha"
+      ]
+    },
+    {
+      "case": "wrong_container_image_id",
+      "rejected_by": [
+        "image_tags"
+      ]
+    },
+    {
+      "case": "wrong_default_env",
+      "rejected_by": [
+        "backend_env"
+      ]
+    },
+    {
+      "case": "missing_restore_success",
+      "rejected_by": [
+        "restore_cleanup"
+      ]
+    },
+    {
+      "case": "wrong_restore_table_count",
+      "rejected_by": [
+        "restore_cleanup"
+      ]
+    },
+    {
+      "case": "wrong_restore_revision",
+      "rejected_by": [
+        "restore_cleanup"
+      ]
+    },
+    {
+      "case": "only_old_completion_line",
+      "rejected_by": [
+        "deployment_completed"
+      ]
+    },
+    {
+      "case": "deploy_process_still_running",
+      "rejected_by": [
+        "deployment_completed"
+      ]
+    }
+  ],
+  "explicit_failure_exit_present": true
+}

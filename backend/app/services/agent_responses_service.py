@@ -122,6 +122,7 @@ _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", 
 _FULL_VALIDATION_POLL_SECONDS = 2.0
 _ROUNDTABLE_TOOL_OUTPUT_BYTES = 8000
 _RELEASE_HEALTH_TOOL = "admin_release_health"
+_PENDING_SITE_SUBMISSION_REASON = "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
 
 
 def _is_release_health_only_request(messages: Sequence[Mapping[str, Any]]) -> bool:
@@ -338,6 +339,7 @@ _MUTATION_SUCCESS_PATTERNS = (
     re.compile(r"(?<!未)(?<!不)(?<!待)(?:已处理|已操作|已执行|处理完成|操作完成|执行完成|已完成)"),
 )
 _MUTATION_FAILURE_PATTERNS = (
+    re.compile(r"(?:任务|请求|操作|执行)[^，,。；;\n]{0,12}(?:失败|未能完成)"),
     re.compile(
         r"(?:未(?:能|成功|完成)?|没(?:有)?|无法|不能|不会|失败|未执行|未完成)"
         r".{0,24}" + _CN_MUTATION_VERB
@@ -3651,6 +3653,20 @@ class AgentResponsesService:
         self, checkpoint: RunCheckpoint, output_text: str,
     ) -> Optional[str]:
         reason = _pending_site_submission_guard(checkpoint, output_text)
+        capability_calls = {
+            str(item.get("call_id") or "") for item in _current_turn_transcript(checkpoint.transcript)
+            if item.get("type") == "function_call"
+            and item.get("name") in {"user_execute_capability", "admin_execute_capability"}
+        }
+        if capability_calls and _claims_mutation_success(output_text):
+            verified = _verified_site_submission_calls(
+                self._db, user_id=int(self._user.id), surface=self._surface,
+                session_key=self._session_key, checkpoint=checkpoint,
+            )
+            reason = _pending_site_submission_guard(
+                checkpoint, output_text, verified_site_calls=verified,
+                unverified_site_calls=frozenset(capability_calls) - verified,
+            )
         if reason or self._surface != "admin":
             return reason
         return await self._validate_admin_completion(checkpoint, output_text)
@@ -3666,6 +3682,15 @@ class AgentResponsesService:
             user_id=int(self._user.id),
             checkpoint=checkpoint,
         )
+        if any(terminal[1] == "pending" for terminal in ledger_evidence.values()):
+            verified = _verified_site_submission_calls(
+                self._db, user_id=int(self._user.id), surface=self._surface,
+                session_key=self._session_key, checkpoint=checkpoint,
+            )
+            ledger_evidence = {
+                call_id: (code, "success" if call_id in verified and status == "pending" else status)
+                for call_id, (code, status) in ledger_evidence.items()
+            }
         # 成功必须由持久化审计账本证明；回传文本只能证明失败或拒绝。
         evidence = dict(ledger_evidence)
         for call_id, terminal in transcript_evidence.items():
@@ -4001,6 +4026,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "低、中风险按当前账号权限自动执行，高风险和危急风险等待用户点击确认。普通管理员仍按权限执行。"
         "用户请求超出权限时直接说明原因并拒绝,不要尝试调用也不会报'工具权限不足'错误。"
         "所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
+        "自然业务答复默认只给结果和页面链接，不显示内部 capability、task_id、request_hash、账号 ID 等；"
+        "除非用户明确索要技术证据，执行细节保留在系统记录中。"
+        "论坛最新查询的 newest 按发布时间严格排序并忽略置顶，default 才置顶优先，不得混淆两种排序。"
         "评分口径：代码审查 0-100 分是平台内部按严重程度扣分，不是 CVSS 或国家漏洞定级；CVSS 只依据合法向量。"
         "国内定级按现行 GB/T 30279-2020 区分技术等级和结合环境的综合等级。当前没有 CNVD/CNNVD 实时查询能力；"
         "询问权威性或最新数据时必须说明本轮是否实际查询官方精确记录，未查询时只能称 AI 初步判断，"
@@ -4117,7 +4145,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
         "回复中的站内 markdown 链接必须使用真实路由；需要跳转时必须在回复末尾追加一行"
         ' <!--PRISM_NAVIGATE {"action":"navigate","route":"/真实路由","label":"页面名称"}-->，'
-        "路由必须来自 recall_knowledge 检索到的页面指南，不得编造路由。"
+        "路由必须来自 recall_knowledge 检索到的页面指南，或当前账号已成功业务工具返回的服务器 detail_route；"
+        "不得凭对象 ID 拼接未提供的路径，也不得编造路由。"
         "涉及名称近义表达或自定义 Agent 能力时先调用 search_published_agents；候选不唯一时用 ask_user "
         "展示动态候选，确认后才能调用 invoke_published_agent。"
         "涉及用户批量操作时必须先查询真实用户。用户说序号、第几条或范围而未明确是用户 ID 时，"
@@ -4134,15 +4163,20 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
     )
 
 
+def _current_turn_transcript(transcript: Sequence[Mapping[str, Any]]) -> Sequence[Mapping[str, Any]]:
+    start = max((i for i, item in enumerate(transcript) if item.get("role") == "user"), default=-1)
+    return transcript[start + 1:]
+
+
 def _pending_site_submission_guard(
     checkpoint: RunCheckpoint, output_text: str,
+    *, verified_site_calls: frozenset[str] = frozenset(),
+    unverified_site_calls: frozenset[str] = frozenset(),
 ) -> Optional[str]:
     """工具提交成功不等于页面业务已完成，两个账号端同样约束。"""
     if not _claims_mutation_success(output_text):
         return None
-    start = max((i for i, item in enumerate(checkpoint.transcript)
-                 if item.get("role") == "user"), default=-1)
-    current = checkpoint.transcript[start + 1:]
+    current = _current_turn_transcript(checkpoint.transcript)
     calls: dict[str, str] = {}
     for item in current:
         if item.get("type") != "function_call":
@@ -4172,9 +4206,190 @@ def _pending_site_submission_guard(
         if (calls[str(item.get("call_id") or "")] == "browser" and isinstance(output, Mapping)
                 and output.get("server_verified") is not True):
             return "仅有浏览器操作观察，尚无服务端业务结果核验；请说明实际观察范围，不能声称业务写入完成"
-        if _site_output_pending(output):
-            return "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
+        if _site_output_pending(output) and str(item.get("call_id") or "") not in verified_site_calls:
+            return _PENDING_SITE_SUBMISSION_REASON
+    if unverified_site_calls:
+        return _PENDING_SITE_SUBMISSION_REASON
     return None
+
+
+def _verified_site_submission_calls(
+    db: Session, *, user_id: int, surface: str, session_key: str, checkpoint: RunCheckpoint,
+) -> frozenset[str]:
+    """完成声明只信本轮原调用账本；团队提交另需同账号/会话独立核验。"""
+    from app.services.agent_team_service import _unjson
+
+    current = _current_turn_transcript(checkpoint.transcript)
+    calls: dict[str, ToolCall] = {}
+    outputs: dict[str, str] = {}
+    invalid: set[str] = set()
+    for item in current:
+        if item.get("type") == "function_call_output":
+            call_id = str(item.get("call_id") or "")
+            raw_output = item.get("output")
+            fingerprint = _canonical_json(_unjson(raw_output, raw_output))
+            if call_id in outputs and outputs[call_id] != fingerprint:
+                invalid.add(call_id)
+            outputs[call_id] = fingerprint
+            continue
+        if item.get("type") != "function_call" or item.get("name") not in {
+            "user_execute_capability", "admin_execute_capability",
+        }:
+            continue
+        call_id = str(item.get("call_id") or "")
+        arguments = _unjson(item.get("arguments"), {})
+        if not call_id or not isinstance(arguments, dict):
+            continue
+        call = ToolCall(call_id, str(item["name"]), arguments, _canonical_json(arguments))
+        if call_id in calls and (
+            calls[call_id].name, _canonical_json(calls[call_id].arguments)
+        ) != (call.name, _canonical_json(call.arguments)):
+            invalid.add(call_id)
+        calls[call_id] = call
+    verified: set[str] = set()
+    for item in current:
+        call_id = str(item.get("call_id") or "")
+        if item.get("type") != "function_call_output" or call_id not in calls or call_id in invalid:
+            continue
+        payload = _unjson(item.get("output"), {})
+        output = payload.get("output") if isinstance(payload, Mapping) else None
+        if not isinstance(output, Mapping):
+            continue
+        call = calls[call_id]
+        scope = "admin" if call.name == "admin_execute_capability" else "user"
+        registry = CAPABILITY_BY_CODE if scope == "admin" else USER_CAPABILITY_BY_CODE
+        capability = call.arguments.get("capability")
+        if (not isinstance(capability, str) or capability not in registry
+                or (scope == "admin" and surface != "admin")):
+            continue
+        row = db.query(AgentToolExecution).filter_by(
+            request_id=_request_id(checkpoint.run_id, call_id), user_id=user_id,
+        ).populate_existing().first()
+        if row is None or row.status != "success" or not _execution_row_matches_call(
+            row, call, request_id=_request_id(checkpoint.run_id, call_id),
+            run_id=checkpoint.run_id, user_id=user_id,
+        ):
+            continue
+        stored = _unjson(row.result_json, {})
+        submission = stored.get("output") if isinstance(stored, Mapping) else None
+        if not isinstance(stored, Mapping) or stored.get("status") != "success" or not isinstance(submission, Mapping):
+            continue
+        if _site_output_pending(submission) or "team_id" in submission:
+            if (_canonical_json(submission.get("team_id")) == _canonical_json(output.get("team_id"))
+                    and _site_submission_is_verified(db, call, submission, user_id=user_id, surface=surface,
+                                                     session_key=session_key)):
+                verified.add(call_id)
+        elif (submission.get("capability") == call.arguments.get("capability")
+              and "data" in submission and type(submission.get("status_code")) is int
+              and 200 <= submission["status_code"] < 300 and submission["status_code"] != 202
+              and db.query(AgentResponseRun.run_id).filter_by(
+                  run_id=checkpoint.run_id, user_id=user_id, surface=surface, session_key=session_key,
+              ).first() is not None):
+            # 一次性凭据等主会话能力不组队，沿用同调用的真实同步 API 回执。
+            verified.add(call_id)
+    return frozenset(verified)
+
+
+def _site_submission_is_verified(
+    db: Session, call: ToolCall, submission: Mapping[str, Any], *, user_id: int,
+    surface: str, session_key: str,
+) -> bool:
+    """固定站点执行/核验图的原始证据；不信任模型可见的裁剪结果或团队状态。"""
+    from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
+    from app.services.agent_team_service import _unjson
+    from app.services.site_agent_service import _readback_spec, capability_page_action
+
+    team_id = submission.get("team_id")
+    if not isinstance(team_id, int) or isinstance(team_id, bool) or team_id <= 0:
+        return False
+    team = db.query(AgentTeam.id).filter_by(
+        id=team_id, user_id=user_id, surface=surface, session_key=session_key,
+        status="completed",
+    ).first()
+    scope = "admin" if call.name == "admin_execute_capability" else "user"
+    registry = CAPABILITY_BY_CODE if scope == "admin" else USER_CAPABILITY_BY_CODE
+    spec = registry.get(str(call.arguments.get("capability") or ""))
+    params = call.arguments.get("params", {})
+    if team is None or spec is None or not isinstance(params, Mapping) or (scope == "admin" and surface != "admin"):
+        return False
+    tasks = db.query(AgentTeamTask, AgentTeamMember.role).join(
+        AgentTeamMember, AgentTeamMember.id == AgentTeamTask.member_id,
+    ).filter(
+        AgentTeamTask.team_id == team_id, AgentTeamTask.task_key.in_(("execute", "verify")),
+        AgentTeamTask.status == "completed", AgentTeamMember.team_id == team_id,
+        AgentTeamMember.address == "agent:site_operator",
+    ).populate_existing().all()
+    by_key = {task.task_key: (task, role) for task, role in tasks}
+    if (set(by_key) != {"execute", "verify"} or by_key["verify"][1] != "verifier"
+            or by_key["execute"][1] != "worker"):
+        return False
+    execute, verify = by_key["execute"][0], by_key["verify"][0]
+    expected_input = {
+        "operation": "execute_capability", "scope": scope, "capability": spec.code, "params": dict(params),
+    }
+    if (_canonical_json(_unjson(execute.input_json, {})) != _canonical_json(expected_input)
+            or _canonical_json(_unjson(verify.input_json, {})) != _canonical_json({"operation": "verify_results"})
+            or _canonical_json(_unjson(verify.dependency_keys_json, [])) != _canonical_json([execute.task_key])):
+        return False
+    executed, verified = _unjson(execute.result_json, {}), _unjson(verify.result_json, {})
+    if not isinstance(executed, Mapping) or not isinstance(verified, Mapping):
+        return False
+    receipt, final = executed.get("result_receipt"), verified.get("result_receipt")
+    if (executed.get("status") != "completed" or verified.get("status") != "completed"
+            or not isinstance(receipt, Mapping) or not isinstance(final, Mapping)):
+        return False
+    ledger = db.query(AgentToolExecution).filter_by(
+        request_id=receipt.get("request_id"), user_id=user_id,
+        run_id=f"site-team-{team_id}", call_id=str(execute.id),
+        tool_name="site_execute_capability", status="success",
+    ).populate_existing().first()
+    recorded = _unjson(ledger.result_json, {}) if ledger is not None else {}
+    if (ledger is None or _canonical_json_text(ledger.arguments_json) != _canonical_json(expected_input)
+            or not isinstance(recorded, Mapping)
+            or _canonical_json(recorded.get("result_receipt")) != _canonical_json(receipt)
+            or recorded.get("status") != "completed"
+            or receipt.get("scope") != scope or receipt.get("capability") != spec.code
+            or _canonical_json(receipt.get("request_params")) != _canonical_json(
+                redact_agent_model_context_value(params)
+            )):
+        return False
+    output = receipt.get("output")
+    if (not isinstance(output, Mapping) or "data" not in output or output.get("capability") != spec.code
+            or not isinstance(output.get("status_code"), int) or not 200 <= output["status_code"] < 300
+            or output["status_code"] == 202):
+        return False
+    if any(_canonical_json(final.get(key)) != _canonical_json(receipt.get(key)) for key in (
+        "scope", "capability", "request_id", "request_params", "status_code", "output",
+    )) or _canonical_json(final.get("page_action")) != _canonical_json(
+        capability_page_action(scope, spec.code, "completed", user_id, output)
+    ):
+        return False
+    pair = _readback_spec(scope, spec, params, output)
+    if pair is None:
+        return final.get("verification_scope") == "synchronous_api_receipt_only"
+    readback = final.get("readback")
+    if not isinstance(readback, Mapping):
+        return False
+    if spec.method == "DELETE":
+        return type(readback.get("status_code")) is int and readback["status_code"] == 404
+    code = readback.get("status_code")
+    if (readback.get("capability") != pair[0].code or "data" not in readback
+            or not isinstance(code, int) or not 200 <= code < 300 or code == 202):
+        return False
+    original, data = output.get("data"), readback.get("data")
+    if isinstance(original, Mapping) and not isinstance(data, Mapping):
+        return False
+    if isinstance(original, list) and _canonical_json(original) != _canonical_json(data):
+        return False
+    if isinstance(original, Mapping) and isinstance(data, Mapping):
+        keys = ("items", "page", "page_size", "total") if spec.method == "GET" else ("id",)
+        if any(key in original and _canonical_json(original[key]) != _canonical_json(data.get(key)) for key in keys):
+            return False
+        # 原参数/任务/回执已严格比较；HTTP 可将合法 1.0 规范为 1。
+        # 读回快照与原 API 输出仍按精确 JSON 比较，不能将 True 当作 1。
+        if any(key in data and value != data[key] for key, value in params.items()):
+            return False
+    return True
 
 
 def _site_output_pending(output: Any) -> bool:
@@ -4254,14 +4469,21 @@ def _claims_mutation_success(output_text: str) -> bool:
         for match in pattern.finditer(output_text):
             prefix = output_text[max(0, match.start() - 16):match.start()]
             # “不能声称已完成”等约束/否定描述不是操作成功陈述。
-            if re.search(r"(?:不能|不要|不得|禁止|拒绝).{0,12}$", prefix):
+            if re.search(r"(?:不能|不要|不得|禁止|拒绝)[^，,。；;\n]{0,12}$", prefix):
                 continue
             return True
     return False
 
 
 def _claims_mutation_failure(output_text: str) -> bool:
-    return bool(output_text) and any(pattern.search(output_text) for pattern in _MUTATION_FAILURE_PATTERNS)
+    if not output_text:
+        return False
+    # 否定“失败”不等于实际失败，不能借此掩盖后面的业务完成声明。
+    normalized = re.sub(r"(?:没有|并未|未)(?:发生|出现)?(?:任何)?失败", "", output_text)
+    normalized = re.sub(
+        r"(?:不能|不要|不得|禁止)(?:说|声称)[^，。；;\n]{0,12}失败", "", normalized,
+    )
+    return any(pattern.search(normalized) for pattern in _MUTATION_FAILURE_PATTERNS)
 
 
 def _requested_admin_write_capabilities(
@@ -4304,7 +4526,12 @@ def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
     # 只读意图优先：明确查询/查看/统计类请求，无强写动词按只读处理；
     # 若同时含强写动词（如“查询后删除”）则按写请求处理，避免复合指令漏判。
     if _ADMIN_READ_INTENT.search(text):
-        return bool(_ADMIN_CLEAR_WRITE_VERB.search(text))
+        # 仅去除独立、完整的否定写入子句，不吞掉“查询后删除”等复合写要求。
+        read_text = re.sub(
+            r"(?:^|[，。；;])\s*(?:不要|不得|禁止|无需|不必|不)(?:进行|执行)?(?:任何)?写入(?=[，。；;]|$)",
+            "", text,
+        )
+        return bool(_ADMIN_CLEAR_WRITE_VERB.search(read_text))
     if re.search(r"确认.{0,8}反馈.{0,4}已读", text):
         return True
     if _ADMIN_MUTATION_REQUEST.search(text):
@@ -4321,7 +4548,7 @@ def _requests_admin_mutation(transcript: Sequence[Mapping[str, Any]]) -> bool:
 
 def _admin_write_calls(transcript: Sequence[Mapping[str, Any]]) -> dict[str, _AdminWriteCall]:
     calls: dict[str, _AdminWriteCall] = {}
-    for item in transcript:
+    for item in _current_turn_transcript(transcript):
         if str(item.get("type") or "") == "function_call":
             call_id = str(item.get("call_id") or "")
             name = str(item.get("name") or "")
@@ -4362,7 +4589,7 @@ def _transcript_admin_write_evidence(
 ) -> dict[str, tuple[str, str]]:
     calls = _admin_write_calls(transcript)
     evidence: dict[str, tuple[str, str]] = {}
-    for item in transcript:
+    for item in _current_turn_transcript(transcript):
         if str(item.get("type") or "") != "function_call_output":
             continue
         call_id = str(item.get("call_id") or "")

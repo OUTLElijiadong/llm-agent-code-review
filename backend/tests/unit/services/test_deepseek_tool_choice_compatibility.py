@@ -19,6 +19,69 @@ from app.utils.api_resolver import ApiConfig
 CHOICES = ["none", "required", {"type": "function", "name": "read_forum"}]
 
 
+def reasoning_item():
+    return {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "synthetic-protocol-state"}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["native", "gateway"])
+@pytest.mark.parametrize("choice", [None, "auto"])
+@pytest.mark.parametrize("history", [
+    [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+    [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+     {"type": "function_call_output", "call_id": "one", "output": "ok"},
+     {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+     {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+    [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+     {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+     {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+])
+async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+    payload = {"model": "deepseek-flash", "input": history, "stream": True,
+               "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+    if choice:
+        payload["tool_choice"] = choice
+    original = copy.deepcopy(payload)
+    seen = []
+    def handler(request):
+        outgoing = json.loads(request.content)
+        seen.append(outgoing)
+        if outgoing.get("reasoning", {}).get("effort") != "none":
+            return httpx.Response(400, json={"error": {
+                "message": "The reasoning_text in the thinking mode must be passed back",
+            }})
+        return provider_response(outgoing)
+    await send(monkeypatch, kind, payload, handler)
+    assert seen[0]["reasoning"]["effort"] == "none"
+    assert seen[0]["input"] == history
+    assert seen[0]["tools"] == payload["tools"]
+    assert payload == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["native", "gateway"])
+async def test_complete_reasoning_batches_keep_thinking_and_parallel_calls(monkeypatch, kind):
+    history = [reasoning_item(),
+        {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+        {"type": "function_call", "call_id": "two", "name": "read_forum", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "one", "output": "ok"},
+        {"type": "function_call_output", "call_id": "two", "output": "ok"},
+        reasoning_item(), {"type": "message", "role": "assistant", "content": "真实回复"},
+        {"role": "user", "content": "下一个问题"}]
+    payload = {"model": "deepseek-flash", "input": history, "stream": True,
+               "reasoning": {"effort": "high"}, "tool_choice": "auto",
+               "tools": [{"type": "function", "name": "read_forum"}]}
+    seen = []
+    def handler(request):
+        outgoing = json.loads(request.content)
+        seen.append(outgoing)
+        return provider_response(outgoing)
+    await send(monkeypatch, kind, payload, handler)
+    assert seen[0]["reasoning"]["effort"] == "high"
+    assert seen[0]["input"] == history
+    assert "tool_choice" not in seen[0]
+
+
 @pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-flash", "gpt-example"])
 def test_completion_guard_required_constraint_is_not_weakened_for_thinking_models(model):
     assert _tool_choice_for_round(model, 1) == "required"
@@ -137,8 +200,8 @@ async def test_other_provider_constraints_and_reasoning_are_unchanged(monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-flash"])
-async def test_runtime_guard_and_native_transport_keep_required_then_restore_autonomous_thinking(monkeypatch, model):
-    """模拟上游限制的三轮调用，不用放宽监督来让HTTP请求变绿。"""
+async def test_runtime_guard_keeps_required_and_replays_forced_non_thinking_turn_safely(monkeypatch, model):
+    """纠错轮无reasoning可回传，后续同历史请求兼容且保持监督约束。"""
     seen = []
 
     def handler(request):
@@ -146,6 +209,8 @@ async def test_runtime_guard_and_native_transport_keep_required_then_restore_aut
         seen.append(payload)
         if "tool_choice" in payload and payload.get("reasoning", {}).get("effort") != "none":
             return provider_response(payload)
+        if len(seen) == 3 and payload.get("reasoning", {}).get("effort") != "none":
+            return httpx.Response(400, json={"error": {"message": "reasoning_text must be passed back"}})
         if len(seen) == 2:
             output = [{"type": "function_call", "call_id": "forum-call", "name": "read_forum", "arguments": "{}"}]
         else:
@@ -187,5 +252,6 @@ async def test_runtime_guard_and_native_transport_keep_required_then_restore_aut
     assert len(executor.calls) == 1 and executor.calls[0].name == "read_forum"
     assert [payload.get("tool_choice") for payload in seen] == [None, "required", None]
     assert seen[1]["reasoning"] == {"effort": "none"}
-    assert "reasoning" not in seen[0] and "reasoning" not in seen[2]
+    assert "reasoning" not in seen[0]
+    assert seen[2]["reasoning"] == {"effort": "none"}
     assert all(payload["model"] == model for payload in seen)

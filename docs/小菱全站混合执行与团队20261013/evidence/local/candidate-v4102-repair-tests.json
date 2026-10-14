@@ -1,0 +1,55 @@
+{
+  "observed_utc": "2026-10-14T17:11:03.951576+00:00",
+  "scope": "Local candidate tests; not production/1M token/Luna GUI acceptance",
+  "backend": {
+    "files": 32,
+    "passed": 889
+  },
+  "frontend": {
+    "files": 146,
+    "passed": 1929
+  },
+  "build": "passed",
+  "gateway_independent": {
+    "passed_per_round": 84,
+    "process_rounds": 3
+  },
+  "forum_independent": {
+    "backend_passed": 12,
+    "frontend_passed": 44
+  },
+  "site_guard_independent": {
+    "passed_per_round": 16,
+    "process_rounds": 3,
+    "additional_existing_boundary_passed": 7,
+    "report": "evidence/independent/SITE_GUARD_RECHECK.md",
+    "source_sha256": "cc039e8e4d9989700817f81102040d8feed464e0fa03cf88c0235eab9ca4eb8c"
+  },
+  "logs": [
+    {
+      "path": "evidence/local/prism-v4102-backend-final.txt",
+      "bytes": 8586,
+      "sha256": "f1938fe1107f1feff3b0379bdb21ba5eb1c96a6762af308cd0208ee487507016"
+    },
+    {
+      "path": "evidence/local/prism-v4102-frontend-final.txt",
+      "bytes": 264023,
+      "sha256": "9426d965b9f55a69fe495482d93e1e2656b140afd035169e1ba2101bd016193a"
+    },
+    {
+      "path": "evidence/local/prism-v4102-frontend-build.txt",
+      "bytes": 22268,
+      "sha256": "17a36b665aa6753f14b1a5ee08b71ac107d157d3ce79c212c39668fe934d1a86"
+    },
+    {
+      "path": "evidence/local/prism-v4102-history-compat-green.txt",
+      "bytes": 697,
+      "sha256": "74974471b2bf347c3050538b426e4f9597fd82193d82db5dacd50ff25f17c5c6"
+    },
+    {
+      "path": "evidence/local/prism-v4102-reasoning-compat-red.txt",
+      "bytes": 61451,
+      "sha256": "132792f96764bb06f270974a53508c67a57d6a1d4ebe37878b9613e4ccda3345"
+    }
+  ]
+}

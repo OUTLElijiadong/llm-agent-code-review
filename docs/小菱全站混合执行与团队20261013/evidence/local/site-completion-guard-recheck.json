@@ -1,0 +1,77 @@
+{
+  "observation_date_local": "2026-10-15",
+  "timezone": "Asia/Taipei",
+  "scope": "Local isolated SQLite, registered worker/verifier and persistent tool ledgers, mocked business HTTP boundary",
+  "production_accepted": false,
+  "model_api_used": false,
+  "browser_used": false,
+  "git_head_baseline": "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+  "working_tree_source_files": {
+    "backend/app/services/agent_responses_service.py": {
+      "bytes": 239726,
+      "sha256": "a8fcb8b69ad909b6ea4cd73ba3a70fd8356b625604f84a138d027407ab3ad893"
+    },
+    "backend/tests/unit/services/test_site_completion_guard_recheck.py": {
+      "bytes": 17401,
+      "sha256": "fe3473012aafb51ff00869b3ad29557f2b4b7e1216264e1ac00611c50c632381"
+    }
+  },
+  "checks": {
+    "baseline_red": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-guard-red.log",
+      "bytes": 8466,
+      "sha256": "e2f2c811c450535e6b183f62ad5083d9a30c9cfad7f61b7560468f65c804599d",
+      "summary": "6 failed, 38 passed, 45 warnings in 4.88s"
+    },
+    "instructions_red": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-extra-red.log",
+      "bytes": 4390,
+      "sha256": "8e46e06aeff32ea52102b1e6af599fb6ecf1ced085de81e3720922fd449e5f9c",
+      "summary": "2 failed, 1 passed, 44 deselected, 2 warnings in 1.52s"
+    },
+    "duplicate_first_implementation_red": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-duplicate-submission-red.log",
+      "bytes": 2852,
+      "sha256": "10aa9138dd24859a18b4cc35e9a1c6f9d87441627cf4e0a69d0ce487c9dac990",
+      "summary": "1 failed, 66 deselected, 2 warnings in 1.33s"
+    },
+    "green_round_1": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-guard-green-1.log",
+      "bytes": 1985,
+      "sha256": "b60fbfd1db259e6b9c166236eeaca6cf816754a1d1e491a4f315a9630c98dc85",
+      "summary": "109 passed, 76 warnings in 7.54s"
+    },
+    "green_round_2": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-guard-green-2.log",
+      "bytes": 1985,
+      "sha256": "cec4535d301fe86849c47f2aa7cc8abd842b87aab0e8bcbf9447f47915dd1594",
+      "summary": "109 passed, 76 warnings in 7.44s"
+    },
+    "green_round_3": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-guard-green-3.log",
+      "bytes": 1985,
+      "sha256": "842c3b0ab7e1ac78568b170cbe6708551121685d7b769832bddca1df45b80cff",
+      "summary": "109 passed, 76 warnings in 7.49s"
+    },
+    "related_regression": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-related.log",
+      "bytes": 3560,
+      "sha256": "29aa7191aab1b99698fda3b8439832ec873de2f75ad1767e89ae0e34896dd7c4",
+      "summary": "161 passed, 86 warnings in 2.88s"
+    },
+    "final_constant_refactor": {
+      "file": "docs/小菱全站混合执行与团队20261013/evidence/local/prism-site-completion-guard-final-after-constant.log",
+      "bytes": 1684,
+      "sha256": "846b7e0de8a05654e6288f61623588c43533429b41ff5f9aabe1ed5e3123405f",
+      "summary": "67 passed, 66 warnings in 6.53s"
+    }
+  },
+  "ruff": "passed",
+  "git_diff_check": "passed",
+  "known_limitations": [
+    "No production/browser retest by this subagent",
+    "No paid model output conformity test",
+    "No 1M token capacity proof",
+    "Only fixed auto-created site execute/verify graph clears submission pending"
+  ]
+}

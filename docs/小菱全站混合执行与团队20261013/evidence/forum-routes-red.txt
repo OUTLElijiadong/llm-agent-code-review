@@ -1,0 +1,230 @@
+..FFFFFFF                                                                [100%]
+=================================== FAILURES ===================================
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-1] _
+
+db = <sqlalchemy.orm.session.Session object at 0x11011d0a0>, sort = 'default'
+round_index = 1
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-2] _
+
+db = <sqlalchemy.orm.session.Session object at 0x110270890>, sort = 'default'
+round_index = 2
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-3] _
+
+db = <sqlalchemy.orm.session.Session object at 0x1104229f0>, sort = 'default'
+round_index = 3
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-1] _
+
+db = <sqlalchemy.orm.session.Session object at 0x11009cf80>, sort = 'newest'
+round_index = 1
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-2] _
+
+db = <sqlalchemy.orm.session.Session object at 0x110422d50>, sort = 'newest'
+round_index = 2
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+_ test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-3] _
+
+db = <sqlalchemy.orm.session.Session object at 0x10bb18230>, sort = 'newest'
+round_index = 3
+
+    @pytest.mark.parametrize("round_index", [1, 2, 3])
+    @pytest.mark.parametrize("sort", ["default", "newest"])
+    def test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly(db, sort, round_index):
+        actor = User(username=f"forum-route-{sort}-{round_index}", password="unused", role="user", status=1)
+        db.add(actor)
+        db.flush()
+        when = datetime(2026, 10, 14)
+        visible = [ForumPost(user_id=actor.id, title=f"精准命中{i}", content="正文", category="tech",
+                             status="normal", is_pinned=(i == 0),
+                             create_time=when - timedelta(days=1) if i == 0 else when)
+                   for i in range(4)]
+        unavailable = [ForumPost(user_id=actor.id, title="精准命中不可见", content="不可见正文", category="tech",
+                                status=status, is_pinned=True, create_time=when + timedelta(days=1))
+                       for status in ("deleted", "hidden")]
+        db.add_all([*visible, *unavailable])
+        db.commit()
+        listed = forum_service.list_posts(db, keyword="精准命中", category="tech", page_size=2, sort=sort)
+        second = forum_service.list_posts(db, keyword="精准命中", category="tech", page=2, page_size=2, sort=sort)
+        rows = [*listed["items"], *second["items"]]
+        assert listed["total"] == second["total"] == 4
+        expected = [visible[0].id, *[post.id for post in reversed(visible[1:])]] if sort == "default" else [post.id for post in reversed(visible)]
+        assert [row["id"] for row in rows] == expected
+        for row in rows:
+>           assert row["detail_route"] == f'/forum/{row["id"]}'
+                   ^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:71: KeyError
+___________ test_forum_response_schemas_preserve_server_detail_route ___________
+
+    def test_forum_response_schemas_preserve_server_detail_route():
+        post = {
+            "id": 44, "user_id": 8, "author_name": "测试作者", "category": "tech", "title": "真实链接",
+            "create_time": datetime(2026, 10, 14), "update_time": datetime(2026, 10, 14),
+            "detail_route": "/forum/44", "content": "正文", "replies": [],
+        }
+        page = Resp[PageOut[PostListItemOut]](data=PageOut[PostListItemOut](items=[post], total=1, page=1, page_size=10, pages=1))
+        detail = Resp[PostDetailOut](data=PostDetailOut(**post))
+>       assert page.model_dump()["data"]["items"][0]["detail_route"] == "/forum/44"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'detail_route'
+
+tests/unit/services/test_forum_ordering.py:91: KeyError
+=============================== warnings summary ===============================
+tests/unit/services/test_forum_ordering.py::test_model_discovery_uses_same_api_sort_enum
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-1]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-2]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[default-3]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-1]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-2]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_authoritative_routes_exclude_hidden_posts_and_get_stays_readonly[newest-3]
+FAILED tests/unit/services/test_forum_ordering.py::test_forum_response_schemas_preserve_server_detail_route
+7 failed, 2 passed, 1 warning in 1.02s

@@ -567,7 +567,7 @@ class DeepSeekResponsesService:
         credential_fingerprint: str,
         authorization: str,
     ) -> Tuple[Dict[str, Any], List[Any]]:
-        upstream_payload = prepare_deepseek_responses_payload(copy.deepcopy(payload), self._responses_url)
+        upstream_payload = copy.deepcopy(payload)
         previous_response_id = payload.get("previous_response_id")
         previous = None
         if isinstance(previous_response_id, str) and previous_response_id:
@@ -581,7 +581,9 @@ class DeepSeekResponsesService:
         projected = await self._project_input(input_items, upstream_payload, authorization)
         if previous is not None or projected is not input_items:
             upstream_payload["input"] = projected
-        return upstream_payload, input_items
+        # Compatibility must inspect the actual replay projection, after local
+        # previous-response restoration and compaction; the complete ledger stays intact.
+        return prepare_deepseek_responses_payload(upstream_payload, self._responses_url), input_items
 
     async def _project_input(
         self,

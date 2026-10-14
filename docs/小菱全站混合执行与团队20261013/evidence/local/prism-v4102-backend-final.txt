@@ -1,0 +1,96 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 889 items
+
+tests/unit/services/test_agent_responses_integration.py ................ [  1%]
+........................................................................ [  9%]
+....................                                                     [ 12%]
+tests/unit/services/test_agent_responses_admin_tools.py ............     [ 13%]
+tests/unit/services/test_responses_site_teams.py ....................... [ 16%]
+....                                                                     [ 16%]
+tests/unit/services/test_site_agent_service.py ...............           [ 18%]
+tests/unit/services/test_agent_browser_service.py ....................   [ 20%]
+tests/unit/services/test_agent_team_service.py ......................... [ 23%]
+..................................................                       [ 28%]
+tests/unit/services/test_user_capability_registry.py ................... [ 31%]
+.............................                                            [ 34%]
+tests/unit/services/test_admin_capability_registry.py .........          [ 35%]
+tests/unit/services/test_admin_capability_service_origin.py ...........  [ 36%]
+tests/unit/core/test_site_request_context.py ......................      [ 39%]
+tests/unit/agents/test_agent_contracts.py .......                        [ 39%]
+tests/unit/services/test_browser_required_stream_delivery.py ........... [ 41%]
+.................                                                        [ 42%]
+tests/unit/services/test_deepseek_tool_choice_compatibility.py ......... [ 43%]
+..............................................                           [ 49%]
+tests/unit/services/test_deepseek_responses_runtime.py ................. [ 51%]
+..........................................                               [ 55%]
+tests/unit/services/test_deepseek_responses_service.py ................. [ 57%]
+........................                                                 [ 60%]
+tests/unit/services/test_responses_usage_attempts.py ..........          [ 61%]
+tests/unit/services/test_community_service_coverage.py ......            [ 62%]
+tests/unit/services/test_forum_ordering.py ............                  [ 63%]
+tests/unit/services/test_team_business_projection.py ..................  [ 65%]
+tests/unit/services/test_v4_team_review_contracts.py ................... [ 67%]
+.......                                                                  [ 68%]
+tests/unit/services/test_agent_mesh_run_state_projection.py ....         [ 68%]
+tests/unit/services/test_agent_mesh_service.py ......................... [ 71%]
+.                                                                        [ 71%]
+tests/unit/services/test_agent_mesh_dispatcher.py ...................... [ 74%]
+.....................                                                    [ 76%]
+tests/unit/services/test_agent_mesh_dispatch_rbac_regression.py ........ [ 77%]
+                                                                         [ 77%]
+tests/unit/services/test_session_history_metadata_queries.py .           [ 77%]
+tests/unit/services/test_agent_team_list_metadata.py ....                [ 78%]
+tests/unit/agents/test_tool_contracts.py ............................... [ 81%]
+..............                                                           [ 83%]
+tests/unit/services/test_agent_team_summary_queries.py ....              [ 83%]
+tests/unit/services/test_deepseek_reasoning_replay.py ...............    [ 85%]
+tests/unit/services/test_site_completion_guard_recheck.py .............. [ 86%]
+.......................................................................  [ 94%]
+tests/unit/test_schema_field_coverage_r1_r8.py ......................... [ 97%]
+..............                                                           [ 99%]
+tests/unit/services/test_forum_context_compaction.py ......              [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/unit/services/test_agent_responses_integration.py::test_public_completed_tool_events_includes_inflight_calls
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_responses_integration.py:3642: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+tests/unit/services/test_agent_responses_integration.py::test_public_completed_tool_events_includes_inflight_calls
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_responses_integration.py:3656: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+tests/unit/services/test_agent_responses_integration.py::test_public_completed_tool_events_includes_inflight_calls
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/tests/unit/services/test_agent_responses_integration.py:3670: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+tests/unit/services/test_agent_responses_admin_tools.py: 82 warnings
+tests/unit/services/test_site_agent_service.py: 10 warnings
+tests/unit/services/test_agent_team_service.py: 66 warnings
+tests/unit/services/test_team_business_projection.py: 14 warnings
+tests/unit/services/test_agent_mesh_dispatch_rbac_regression.py: 2 warnings
+tests/unit/services/test_agent_team_list_metadata.py: 3 warnings
+tests/unit/services/test_site_completion_guard_recheck.py: 77 warnings
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/app/services/audit_service.py:67: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+tests/unit/services/test_community_service_coverage.py::test_feedback_create_list_and_admin_read_enforce_user_isolation
+tests/unit/services/test_community_service_coverage.py::test_feedback_reply_and_stats_cover_permissions_and_status_precedence
+tests/unit/services/test_community_service_coverage.py::test_feedback_reply_and_stats_cover_permissions_and_status_precedence
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/sqlalchemy/sql/schema.py:3623: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+tests/unit/services/test_forum_ordering.py::test_forum_http_responses_keep_routes_and_reject_hidden_posts[1]
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 889 passed, 262 warnings in 20.79s ======================

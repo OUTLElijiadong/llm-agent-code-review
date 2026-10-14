@@ -1,0 +1,16 @@
+
+> code-review-platform@1.0.0 test:e2e
+> playwright test e2e/overlay-layers.spec.ts
+
+[WebServer] (node:21729) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 3 tests using 1 worker
+
+(node:21732) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/overlay-layers.spec.ts:35:3 › 玻璃页头圆桌、聊天、选择框与确认窗的真实几何/命中：375px，重复3轮 (12.4s)
+  ✓  2 e2e/overlay-layers.spec.ts:35:3 › 玻璃页头圆桌、聊天、选择框与确认窗的真实几何/命中：768px，重复3轮 (7.7s)
+  ✓  3 e2e/overlay-layers.spec.ts:35:3 › 玻璃页头圆桌、聊天、选择框与确认窗的真实几何/命中：1280px，重复3轮 (9.3s)
+
+  3 passed (30.1s)

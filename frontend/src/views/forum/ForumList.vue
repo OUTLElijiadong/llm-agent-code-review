@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { View, ChatLineRound } from '@element-plus/icons-vue'
 import { formatDate } from '@/utils/format'
-import { getPosts, type ForumPost } from '@/api/forum'
+import { getPosts, type ForumPost, type ForumPostSort } from '@/api/forum'
 
 const router = useRouter()
 
@@ -21,6 +21,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const keyword = ref('')
 const category = ref('')
+const sort = ref<ForumPostSort>('default')
 const loading = ref(false)
 const loadError = ref('')
 const appliedFilters = ref({ keyword: '', category: '' })
@@ -33,7 +34,7 @@ async function load() {
   const generation = ++loadGeneration
   const params = {
     page: page.value, page_size: pageSize.value,
-    keyword: keyword.value.trim(), category: category.value,
+    keyword: keyword.value.trim(), category: category.value, sort: sort.value,
   }
   loading.value = true
   loadError.value = ''
@@ -89,6 +90,10 @@ useAgentPageRefresh({ pages: ['/forum'], refresh: load })
           @change="search">
           <el-option v-for="(label, val) in CATEGORY" :key="val" :label="label" :value="val" />
         </el-select>
+        <el-select v-model="sort" aria-label="帖子排序" class="sort-select" @change="search">
+          <el-option label="置顶优先" value="default" />
+          <el-option label="最新发布" value="newest" />
+        </el-select>
         <el-button @click="search">搜索</el-button>
       </div>
     </el-card>
@@ -99,7 +104,7 @@ useAgentPageRefresh({ pages: ['/forum'], refresh: load })
           <div><strong>帖子暂未读取</strong><p>{{ loadError }}</p></div>
           <el-button @click="load">重试</el-button>
         </div>
-        <RouterLink v-for="p in posts" :key="p.id" :to="`/forum/${p.id}`" class="post-item">
+        <RouterLink v-for="p in posts" :key="p.id" :to="p.detail_route" class="post-item">
           <div class="post-main">
             <div class="post-title">
               <el-tag v-if="p.is_pinned" type="danger" size="small" effect="dark">置顶</el-tag>
@@ -136,7 +141,7 @@ useAgentPageRefresh({ pages: ['/forum'], refresh: load })
 .filter-card { margin-bottom: 16px; }
 .filter-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .search-input { flex: 1 1 240px; min-width: 0; }
-.category-select { flex: 0 1 160px; min-width: 0; }
+.category-select, .sort-select { flex: 0 1 160px; min-width: 0; }
 .forum-page :deep(.el-button) { min-height: 44px; }
 .filter-row :deep(.el-input__wrapper), .filter-row :deep(.el-select__wrapper) { min-height: 44px; box-sizing: border-box; }
 .post-list { min-height: 200px; }
@@ -164,7 +169,7 @@ useAgentPageRefresh({ pages: ['/forum'], refresh: load })
   .forum-page { padding: 0; }
   .page-header { gap: 12px; margin-bottom: 16px; }
   .page-header h2 { font-size: 22px; }
-  .category-select { flex: 1 1 140px; }
+  .category-select, .sort-select { flex: 1 1 140px; }
   .post-item { flex-direction: column; align-items: stretch; gap: 12px; padding-inline: 0; }
   .post-stats { align-self: flex-end; }
   .forum-page :deep(.el-card__body) { padding: 16px; }

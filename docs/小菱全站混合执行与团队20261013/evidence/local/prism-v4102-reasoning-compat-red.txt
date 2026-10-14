@@ -1,0 +1,980 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 55 items
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py FFFFFFFFF [ 16%]
+FFF...........................................                           [100%]
+
+=================================== FAILURES ===================================
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history0-None-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10abb5dc0>
+kind = 'native', choice = None
+history = [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d5bc860>
+payload = {'model': 'deepseek-flash', 'input': [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history0-None-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bdfd0>
+kind = 'gateway', choice = None
+history = [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bdfd0>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d7293a0>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d63e460>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history0-auto-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bedb0>
+kind = 'native', choice = 'auto'
+history = [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d5bc9e0>
+payload = {'model': 'deepseek-flash', 'input': [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history0-auto-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bdbe0>
+kind = 'gateway', choice = 'auto'
+history = [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bdbe0>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'role': 'assistant', 'content': '旧版真实回复，无原始reasoning'}, {'role': 'user', 'content': '继续'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d72aa20>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d575f10>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history1-None-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bec00>
+kind = 'native', choice = None
+history = [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-protocol-state'}]}, {'type': 'functio..., 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'forced-none', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d5bc8c0>
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-...unction_call_output', 'call_id': 'forced-none', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history1-None-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bc2c0>
+kind = 'gateway', choice = None
+history = [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-protocol-state'}]}, {'type': 'functio..., 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'forced-none', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d5bc2c0>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-...unction_call_output', 'call_id': 'forced-none', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d72b2e0>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d575030>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history1-auto-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d53f110>
+kind = 'native', choice = 'auto'
+history = [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-protocol-state'}]}, {'type': 'functio..., 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'forced-none', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d65ee40>
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-...unction_call_output', 'call_id': 'forced-none', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history1-auto-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d65df10>
+kind = 'gateway', choice = 'auto'
+history = [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-protocol-state'}]}, {'type': 'functio..., 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'forced-none', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d65df10>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'content': [{'type': 'reasoning_text', 'text': 'synthetic-...unction_call_output', 'call_id': 'forced-none', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d6707c0>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d63f230>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history2-None-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6b53d0>
+kind = 'native', choice = None
+history = [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reasoning'}]}, {'type': 'function_call', '...': 'one', 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'one', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d6b7e30>
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reaso...ype': 'function_call_output', 'call_id': 'one', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history2-None-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6b7950>
+kind = 'gateway', choice = None
+history = [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reasoning'}]}, {'type': 'function_call', '...': 'one', 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'one', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6b7950>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reaso...ype': 'function_call_output', 'call_id': 'one', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d671da0>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d63e570>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history2-auto-native] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6c4b90>
+kind = 'native', choice = 'auto'
+history = [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reasoning'}]}, {'type': 'function_call', '...': 'one', 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'one', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:111: in send
+    return [event async for event in await client.create_response(payload)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <app.services.agent_responses_service.NativeResponsesTransport object at 0x10d6c73e0>
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reaso...ype': 'function_call_output', 'call_id': 'one', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+
+    async def _stream(self, payload: Mapping[str, Any]) -> AsyncIterator[Mapping[str, Any]]:
+        url = _responses_url(self._config.base_url)
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
+        timeout_seconds = self._config.timeout_seconds or settings.deepseek_timeout
+        timeout = httpx.Timeout(float(timeout_seconds), read=float(timeout_seconds))
+        async def emit_observed(event):
+            try:
+                await _emit(self._event_sink, event)
+            except (Exception, asyncio.CancelledError) as exc:
+                observed = event.get("response")
+                if isinstance(observed, Mapping):
+                    exc.observed_response = dict(observed)
+                raise
+    
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
+                if response.status_code >= 400:
+                    raw = (await response.aread()).decode("utf-8", errors="replace")
+                    from app.services.deepseek_responses_runtime import ObservedResponseError
+    
+                    try:
+                        observed = json.loads(raw)
+                    except (TypeError, ValueError):
+                        observed = {}
+                    safe_observed = (
+                        {}
+                        if response.status_code == 402
+                        else observed if isinstance(observed, Mapping) else {}
+                    )
+>                   raise ObservedResponseError(
+                        (
+                            "Responses 上游计费或额度拒绝 (HTTP 402)"
+                            if response.status_code == 402
+                            else _upstream_error(raw, response.status_code)
+                        ),
+                        safe_observed,
+                        status_code=response.status_code,
+                    )
+E                   app.services.deepseek_responses_runtime.ObservedResponseError: Responses 上游 HTTP 400: The reasoning_text in the thinking mode must be passed back
+
+app/services/agent_responses_service.py:961: ObservedResponseError
+_ test_missing_reasoning_history_continues_locally_without_fabrication[history2-auto-gateway] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6c7b90>
+kind = 'gateway', choice = 'auto'
+history = [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reasoning'}]}, {'type': 'function_call', '...': 'one', 'name': 'read_forum', 'arguments': '{}'}, {'type': 'function_call_output', 'call_id': 'one', 'output': 'ok'}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["native", "gateway"])
+    @pytest.mark.parametrize("choice", [None, "auto"])
+    @pytest.mark.parametrize("history", [
+        [{"role": "assistant", "content": "旧版真实回复，无原始reasoning"}, {"role": "user", "content": "继续"}],
+        [reasoning_item(), {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"},
+         {"type": "function_call", "call_id": "forced-none", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "forced-none", "output": "ok"}],
+        [{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要不能替代原reasoning"}]},
+         {"type": "function_call", "call_id": "one", "name": "read_forum", "arguments": "{}"},
+         {"type": "function_call_output", "call_id": "one", "output": "ok"}],
+    ])
+    async def test_missing_reasoning_history_continues_locally_without_fabrication(monkeypatch, kind, choice, history):
+        payload = {"model": "deepseek-flash", "input": history, "stream": True,
+                   "reasoning": {"effort": "high"}, "tools": [{"type": "function", "name": "read_forum"}]}
+        if choice:
+            payload["tool_choice"] = choice
+        original = copy.deepcopy(payload)
+        seen = []
+        def handler(request):
+            outgoing = json.loads(request.content)
+            seen.append(outgoing)
+            if outgoing.get("reasoning", {}).get("effort") != "none":
+                return httpx.Response(400, json={"error": {"message": "The reasoning_text in the thinking mode must be passed back"}})
+            return provider_response(outgoing)
+>       await send(monkeypatch, kind, payload, handler)
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d6c7b90>
+kind = 'gateway'
+payload = {'model': 'deepseek-flash', 'input': [{'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': '摘要不能替代原reaso...ype': 'function_call_output', 'call_id': 'one', 'output': 'ok'}], 'stream': True, 'reasoning': {'effort': 'high'}, ...}
+handler = <function test_missing_reasoning_history_continues_locally_without_fabrication.<locals>.handler at 0x10d673100>
+base_url = 'https://api.deepseek.com/v1'
+
+    async def send(monkeypatch, kind, payload, handler, base_url="https://api.deepseek.com/v1"):
+        original_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+    
+        def factory(*args, **kwargs):
+            return original_client(*args, transport=transport, **kwargs)
+    
+        if kind == "native":
+            monkeypatch.setattr(native.httpx, "AsyncClient", factory)
+            client = native.NativeResponsesTransport(
+                ApiConfig(api_key="unit-test-key", base_url=base_url, model=payload["model"]),
+            )
+            return [event async for event in await client.create_response(payload)]
+        gateway = DeepSeekResponsesService(
+            base_url=base_url, storage=MemoryTranscriptStore(), client_factory=factory,
+        )
+        response = await gateway.create(payload, "Bearer unit-test-key")
+>       assert response.status_code == 200
+E       AssertionError: assert 400 == 200
+E        +  where 400 = StreamingGatewayResponse(status_code=400, headers={'content-length': '83', 'content-type': 'application/json'}, body=<async_generator object DeepSeekResponsesService._open_stream.<locals>.relay at 0x10d63e460>).status_code
+
+tests/unit/services/test_deepseek_tool_choice_compatibility.py:116: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history0-None-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history0-None-gateway]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history0-auto-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history0-auto-gateway]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history1-None-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history1-None-gateway]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history1-auto-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history1-auto-gateway]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history2-None-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history2-None-gateway]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history2-auto-native]
+FAILED tests/unit/services/test_deepseek_tool_choice_compatibility.py::test_missing_reasoning_history_continues_locally_without_fabrication[history2-auto-gateway]
+=================== 12 failed, 43 passed, 1 warning in 0.60s ===================

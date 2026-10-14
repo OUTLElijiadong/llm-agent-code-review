@@ -30,7 +30,7 @@ const Drawer = defineComponent({ props: ['modelValue', 'size'], template: '<asid
 
 function detail(overrides: Partial<PostDetail> = {}): PostDetail {
   return {
-    id: 7, user_id: 2, author_name: '发帖者', category: 'qa', title: '原始标题', content: '原始正文',
+    id: 7, detail_route: '/forum/7', user_id: 2, author_name: '发帖者', category: 'qa', title: '原始标题', content: '原始正文',
     view_count: 3, reply_count: 0, is_pinned: false, create_time: '2026-10-06T01:00:00Z',
     update_time: '2026-10-06T01:00:00Z', replies: [], ...overrides,
   }
@@ -83,6 +83,59 @@ beforeEach(() => {
 afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
 
 describe('论坛列表读取与键盘导航', () => {
+  it.each([1, 2, 3])('第 %i 轮：真实排序控件保留搜索分类、回第一页并使用准确排序参数', async () => {
+    api.getPosts.mockResolvedValue({ ...page(), total: 25, pages: 3 })
+    const { wrapper } = await render(ForumList)
+    expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'default', page: 1 }))
+    const sort = wrapper.get('select[aria-label="帖子排序"]')
+    expect(sort.findAll('option').map(option => [option.text(), option.attributes('value')])).toEqual([
+      ['置顶优先', 'default'], ['最新发布', 'newest'],
+    ])
+    await wrapper.get('input').setValue(' 核验关键词 ')
+    await wrapper.get('select[aria-label="帖子分类"]').setValue('tech')
+    await flushPromises()
+    await button(wrapper, '下一页').trigger('click')
+    await flushPromises()
+    expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, keyword: '核验关键词', category: 'tech' }))
+    await sort.setValue('newest')
+    await flushPromises()
+    expect(api.getPosts).toHaveBeenLastCalledWith({ page: 1, page_size: 10, keyword: '核验关键词', category: 'tech', sort: 'newest' })
+    await button(wrapper, '下一页').trigger('click')
+    await flushPromises()
+    expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, sort: 'newest' }))
+    await sort.setValue('default')
+    await flushPromises()
+    expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort: 'default', keyword: '核验关键词', category: 'tech' }))
+  })
+
+  it('旧置顶排序迟到不能覆盖最新发布结果', async () => {
+    const old = deferred<ReturnType<typeof page>>()
+    api.getPosts.mockReturnValueOnce(old.promise).mockResolvedValueOnce(page('最新发布的真实帖子'))
+    const { wrapper } = await render(ForumList)
+    await wrapper.get('select[aria-label="帖子排序"]').setValue('newest')
+    await flushPromises()
+    old.resolve(page('旧置顶结果'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('最新发布的真实帖子')
+    expect(wrapper.text()).not.toContain('旧置顶结果')
+    expect(wrapper.get('.post-list').attributes('aria-busy')).toBe('false')
+  })
+
+  it('最新发布失败可按原筛选重试，不回退置顶或混入旧结果', async () => {
+    const { wrapper } = await render(ForumList)
+    await wrapper.get('input').setValue('需要保留的搜索')
+    await wrapper.get('select[aria-label="帖子分类"]').setValue('share')
+    await flushPromises()
+    api.getPosts.mockRejectedValueOnce(new Error('最新列表读取失败'))
+    await wrapper.get('select[aria-label="帖子排序"]').setValue('newest')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('最新列表读取失败')
+    expect(wrapper.text()).not.toContain('原始标题')
+    await button(wrapper, '重试').trigger('click')
+    await flushPromises()
+    expect(api.getPosts).toHaveBeenLastCalledWith(expect.objectContaining({ keyword: '需要保留的搜索', category: 'share', sort: 'newest', page: 1 }))
+  })
+
   it('refreshes visible posts after a confirmed Xiaoling mutation', async () => {
     const { wrapper } = await render(ForumList)
     api.getPosts.mockResolvedValue(page('小菱发布的新帖子'))

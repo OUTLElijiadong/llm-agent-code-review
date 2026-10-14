@@ -1,0 +1,162 @@
+FFFFF.F                                                                  [100%]
+=================================== FAILURES ===================================
+_______ test_admin_new_user_read_turn_does_not_inherit_old_pending_write _______
+
+db = <sqlalchemy.orm.session.Session object at 0x10db04620>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10dab3740>
+
+    @pytest.mark.asyncio
+    async def test_admin_new_user_read_turn_does_not_inherit_old_pending_write(db, monkeypatch):
+        case = await scenario(db, monkeypatch, surface="admin", capability="forum.posts.pin")
+        assert await case.validator._validate_site_completion(case.checkpoint, "帖子已置顶成功。") is None
+        case.checkpoint.transcript.append({"role": "user", "content": "更正：本轮只读取刚才团队的状态，不进行写入。"})
+        detail = agent_team_service.get_team(db, case.actor, case.team.id)
+        case.checkpoint.transcript.extend([
+            {"type": "function_call", "call_id": "new-turn-read", "name": "get_agent_team",
+             "arguments": json.dumps({"team_id": case.team.id})},
+            {"type": "function_call_output", "call_id": "new-turn-read",
+             "output": json.dumps({"status": "success", "output": detail})},
+        ])
+        verified = service._verified_site_submission_calls(
+            db, user_id=case.actor.id, surface="admin", session_key=case.validator._session_key,
+            checkpoint=case.checkpoint,
+        )
+        assert verified == frozenset()  # 当前轮次不能借用旧轮次提交。
+>       assert await case.validator._validate_site_completion(case.checkpoint, "本轮只读查询已完成。") is None
+E       AssertionError: assert '回复声称管理写操作已完成，但当前运行缺少逐调用成功证据: original-submission(未成功)' is None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:49: AssertionError
+______ test_fixed_execute_input_preserves_exact_json_parameter_type[True] ______
+
+db = <sqlalchemy.orm.session.Session object at 0x11120d0a0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111064890>
+changed_page = True
+
+    @pytest.mark.parametrize("changed_page", [True, 1.0])
+    @pytest.mark.asyncio
+    async def test_fixed_execute_input_preserves_exact_json_parameter_type(db, monkeypatch, changed_page):
+        case = await scenario(db, monkeypatch)
+        execute = case.tasks["execute"]
+        raw = json.loads(execute.input_json)
+        assert raw["params"]["page"] == 1 and type(raw["params"]["page"]) is int
+        raw["params"]["page"] = changed_page
+        execute.input_json = json.dumps(raw)
+        db.commit()
+        # 不修改原执行账本和回执；持久任务输入已经与它们的 JSON 类型不一致。
+>       assert await case.validator._validate_site_completion(case.checkpoint, "已查询，执行完成。") is not None
+E       assert None is not None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:64: AssertionError
+______ test_fixed_execute_input_preserves_exact_json_parameter_type[1.0] _______
+
+db = <sqlalchemy.orm.session.Session object at 0x110c32690>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1110f0c80>
+changed_page = 1.0
+
+    @pytest.mark.parametrize("changed_page", [True, 1.0])
+    @pytest.mark.asyncio
+    async def test_fixed_execute_input_preserves_exact_json_parameter_type(db, monkeypatch, changed_page):
+        case = await scenario(db, monkeypatch)
+        execute = case.tasks["execute"]
+        raw = json.loads(execute.input_json)
+        assert raw["params"]["page"] == 1 and type(raw["params"]["page"]) is int
+        raw["params"]["page"] = changed_page
+        execute.input_json = json.dumps(raw)
+        db.commit()
+        # 不修改原执行账本和回执；持久任务输入已经与它们的 JSON 类型不一致。
+>       assert await case.validator._validate_site_completion(case.checkpoint, "已查询，执行完成。") is not None
+E       assert None is not None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:64: AssertionError
+______ test_readback_snapshot_does_not_equate_boolean_with_integer[page] _______
+
+db = <sqlalchemy.orm.session.Session object at 0x1108fcdd0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111125b50>
+field = 'page'
+
+    @pytest.mark.parametrize("field", ["page", "item_id"])
+    @pytest.mark.asyncio
+    async def test_readback_snapshot_does_not_equate_boolean_with_integer(db, monkeypatch, field):
+        case = await scenario(db, monkeypatch)
+        verify = case.tasks["verify"]
+        final = json.loads(verify.result_json)
+        snapshot = final["result_receipt"]["readback"]["data"]
+        if field == "page":
+            snapshot["page"] = True
+        else:
+            assert snapshot["items"][-1]["id"] == 1
+            snapshot["items"][-1]["id"] = True
+        verify.result_json = json.dumps(final)
+        db.commit()
+>       assert await case.validator._validate_site_completion(case.checkpoint, "已查询，执行完成。") is not None
+E       assert None is not None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:81: AssertionError
+_____ test_readback_snapshot_does_not_equate_boolean_with_integer[item_id] _____
+
+db = <sqlalchemy.orm.session.Session object at 0x1115a0c80>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11151dbe0>
+field = 'item_id'
+
+    @pytest.mark.parametrize("field", ["page", "item_id"])
+    @pytest.mark.asyncio
+    async def test_readback_snapshot_does_not_equate_boolean_with_integer(db, monkeypatch, field):
+        case = await scenario(db, monkeypatch)
+        verify = case.tasks["verify"]
+        final = json.loads(verify.result_json)
+        snapshot = final["result_receipt"]["readback"]["data"]
+        if field == "page":
+            snapshot["page"] = True
+        else:
+            assert snapshot["items"][-1]["id"] == 1
+            snapshot["items"][-1]["id"] = True
+        verify.result_json = json.dumps(final)
+        db.commit()
+>       assert await case.validator._validate_site_completion(case.checkpoint, "已查询，执行完成。") is not None
+E       assert None is not None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:81: AssertionError
+____ test_public_completed_submission_cannot_override_queued_persisted_team ____
+
+db = <sqlalchemy.orm.session.Session object at 0x111952150>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1118e37a0>
+
+    @pytest.mark.asyncio
+    async def test_public_completed_submission_cannot_override_queued_persisted_team(db, monkeypatch):
+        case = await scenario(db, monkeypatch)
+        case.team.status = "queued"
+        db.commit()
+        # 验证边界是“不一致公开 checkpoint”，不是声称生产模型可注入平台工具输出。
+        public = copy.deepcopy(case.checkpoint.transcript[2])
+        value = json.loads(public["output"])
+        value["output"].update(completed=True, verification_status="completed", status="completed")
+        public["output"] = json.dumps(value)
+        case.checkpoint.transcript[2] = public
+>       assert await case.validator._validate_site_completion(case.checkpoint, "已查询，执行完成。") is not None
+E       assert None is not None
+
+../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py:104: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_admin_new_user_read_turn_does_not_inherit_old_pending_write
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_fixed_execute_input_preserves_exact_json_parameter_type[True]
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_fixed_execute_input_preserves_exact_json_parameter_type[1.0]
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_readback_snapshot_does_not_equate_boolean_with_integer[page]
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_readback_snapshot_does_not_equate_boolean_with_integer[item_id]
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_execute_member_must_be_worker_even_if_public_team_is_completed
+docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_public_completed_submission_cannot_override_queued_persisted_team
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/app/services/audit_service.py:67: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_admin_new_user_read_turn_does_not_inherit_old_pending_write
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_fixed_execute_input_preserves_exact_json_parameter_type[True]
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_fixed_execute_input_preserves_exact_json_parameter_type[1.0]
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_readback_snapshot_does_not_equate_boolean_with_integer[page]
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_readback_snapshot_does_not_equate_boolean_with_integer[item_id]
+FAILED ../docs/小菱全站混合执行与团队20261013/evidence/independent/test_site_guard_independent.py::test_public_completed_submission_cannot_override_queued_persisted_team
+6 failed, 1 passed, 8 warnings in 1.95s

@@ -1,0 +1,32 @@
+{
+  "recorded_at": "2026-10-15T00:32:58.218071+08:00",
+  "scope": "local_mock_HTTP_request_order_no_live_model_no_production",
+  "root_file_modified": false,
+  "root_existing_compat_tests_passed": 55,
+  "independent_cases_passed": 41,
+  "independent_cases_failed": 3,
+  "failed_cases": [
+    "previous_response_id_replay",
+    "compacted_tool_pair",
+    "compacted_no_tool_assistant"
+  ],
+  "red_code_order": "compat -> previous_response_id replay -> _project_input -> HTTP send without second compatibility check",
+  "files": [
+    {
+      "file": "evidence/independent/test_deepseek_history_compat_order_red44.py",
+      "bytes": 7558,
+      "sha256": "a5c6d7e4f5fae7b480059a4969132317d56a5896b51e758353df655a364d4fe2"
+    },
+    {
+      "file": "evidence/independent/prism-independent-history-compat-order-red.log",
+      "bytes": 8955,
+      "sha256": "7dd1f30dddbe931d5ca0778fa8d41c55e37503cdc8128955d513fa94acecd74b"
+    },
+    {
+      "file": "evidence/independent/prism-independent-latest-provider-compat.log",
+      "bytes": 1237,
+      "sha256": "43da6175fd9247590bd80361d6ea8bea5620f6e4306eaa86f3103538620f0a02"
+    }
+  ],
+  "note": "Original red44 source archived at matching SHA; primary source later extended to84."
+}

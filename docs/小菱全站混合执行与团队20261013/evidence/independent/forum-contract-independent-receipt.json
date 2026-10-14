@@ -1,0 +1,76 @@
+{
+  "observed_at": "2026-10-15T00:48:47.043695+08:00",
+  "scope": "independent_readonly_source_and_local_tests_no_production_no_GUI",
+  "source_modified": false,
+  "backend_cases_passed": 12,
+  "frontend_files": 2,
+  "frontend_cases_passed": 44,
+  "blocking_defects_confirmed": 0,
+  "verified_contracts": [
+    "Only normal posts returned by list/get; hidden/deleted excluded from list and rejected by detail",
+    "detail_route constructed from persisted ORM id and preserved through schema/API/RouterLink",
+    "newest=create_time DESC,id DESC without pin; default=is_pinned DESC then same stable order",
+    "loadGeneration guards late success/error/loading for search/sort/page; sort resets page1 and retains filters",
+    "Detail GET does not record view; explicit view POST is separate",
+    "Mobile CSS static review: flex wrap,min-width0,44px targets,max600px column layout"
+  ],
+  "mobile_geometry_acceptance": "not_run; jsdom tests do not prove visual geometry",
+  "remaining_scope": [
+    "Production role/account actions and model-triggered forum tasks remain root acceptance",
+    "Real desktop/mobile layout and dropdown layers remain root GUI acceptance"
+  ],
+  "source_hashes": [
+    {
+      "path": "backend/app/services/forum_service.py",
+      "bytes": 7170,
+      "sha256": "4f7e9bfde6badddc3a4df0d6569dff8ac1a74b258d194e2e79fa16d01caf472d"
+    },
+    {
+      "path": "backend/app/schemas/forum.py",
+      "bytes": 2005,
+      "sha256": "38368eb8fcada6fd90828bbf8146cbd9fd6ed9b9f2cc8a2b636919f0a13aad72"
+    },
+    {
+      "path": "backend/app/api/v1/forum.py",
+      "bytes": 4253,
+      "sha256": "c21691b604d7b694fddece954b5eacd5b67b9bbe868730d6eaf123120036109d"
+    },
+    {
+      "path": "backend/tests/unit/services/test_forum_ordering.py",
+      "bytes": 6777,
+      "sha256": "d565fdf70f4e15a07014605f92c3877757d0f8c5405680a4cc6c115af610f011"
+    },
+    {
+      "path": "frontend/src/api/forum.ts",
+      "bytes": 2634,
+      "sha256": "5c04968446a700379a8cb80cdcdaeedc7b2e8ede748c500f54d47dd7c4c98c96"
+    },
+    {
+      "path": "frontend/src/api/forum.test.ts",
+      "bytes": 2456,
+      "sha256": "6ce661bd07989b402554ca0d2dd53312b30fdede98bb87acd5f5738944147206"
+    },
+    {
+      "path": "frontend/src/views/forum/ForumList.vue",
+      "bytes": 8343,
+      "sha256": "32509615ef1e6eb6cd3a6386b4fb232c9963616a7e175ab6d06501952488f4e8"
+    },
+    {
+      "path": "frontend/src/views/forum/ForumViews.test.ts",
+      "bytes": 24194,
+      "sha256": "e96cbf653d848b58d3e5ea14e8d3fdcc355b59e1185329928bad92d429d51be5"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "evidence/independent/prism-independent-forum-ordering.log",
+      "bytes": 1636,
+      "sha256": "2d8a53815d429d4ee0d8bc71cd6449a9a4518af7d20f663c9d5176d20760748c"
+    },
+    {
+      "path": "evidence/independent/prism-independent-forum-frontend.log",
+      "bytes": 397,
+      "sha256": "fa06345f538e1f12ad7ad505c3062b1eaa262d1efe37744202e89b276e0d50ca"
+    }
+  ]
+}

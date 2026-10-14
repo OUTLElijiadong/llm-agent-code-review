@@ -1,0 +1,18 @@
+...............................................................          [100%]
+=============================== warnings summary ===============================
+tests/unit/services/test_forum_ordering.py::test_model_discovery_uses_same_api_sort_enum
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/unit/services/test_forum_ordering.py::test_forum_http_responses_keep_routes_and_reject_hidden_posts[1]
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/unit/services/test_community_service_coverage.py::test_feedback_create_list_and_admin_read_enforce_user_isolation
+tests/unit/services/test_community_service_coverage.py::test_feedback_reply_and_stats_cover_permissions_and_status_precedence
+tests/unit/services/test_community_service_coverage.py::test_feedback_reply_and_stats_cover_permissions_and_status_precedence
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/sqlalchemy/sql/schema.py:3623: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+63 passed, 5 warnings in 3.50s

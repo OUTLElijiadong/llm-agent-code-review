@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "degraded",
+  "can_continue": true,
+  "summary": "关键服务可继续，但存在需要人工处理的降级项",
+  "actions": [{"code":"disk_cleanup_review","label":"审阅磁盘清理","message":"磁盘使用率 90% 已达到或超过告警阈值 85%，请先执行 cleanup.sh dry-run 并由人确认。","requires_human":true}],
+  "blocking_checks": [],
+  "checked_at_utc": "2026-10-14T10:02:46Z",
+  "checks": {
+    "release": {"ok": true, "status": "ok", "message": "发布账本、运行镜像和默认环境一致"},
+    "containers": {"ok": true, "status": "ok", "services": {"mysql":"healthy","redis":"healthy","clamav":"healthy","backend":"healthy","frontend":"healthy"}},
+    "disk": {"ok": false, "status": "degraded", "used_percent": 90, "max_percent": 85, "critical_percent": 95},
+    "memory": {"ok": true, "status": "ok", "used_percent": 47, "max_percent": 90, "critical_percent": 98},
+    "backup": {"ok": true, "status": "ok", "file": "code_review_20261014T093538Z_1dd46c05db02.sql.gz", "age_hours": 0, "max_age_hours": 30, "gzip_ok": true, "checksum_ok": true},
+    "alembic": {"ok": true, "status": "ok", "current": "063_agent_browser_actions", "head": "063_agent_browser_actions"},
+    "https": {"ok": true, "status": "ok", "mode": "required", "http_redirect_code": "308", "health": "ok"}
+  }
+}

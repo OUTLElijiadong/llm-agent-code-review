@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-10-14T17:51:03.625644+08:00",
+  "scope": "independent_read_only_release_no_authenticated_GUI",
+  "files": [
+    {
+      "file": "evidence/independent/release-v4101-independent-strict.py",
+      "bytes": 10056,
+      "sha256": "d146a149391afe05af67f8925c5182e6163b19ebaf0502febcc58bfa27141d63"
+    },
+    {
+      "file": "evidence/independent/release-v4101-checker-negative-cases.json",
+      "bytes": 1126,
+      "sha256": "fff90fcf1d721efd81ce7ceb17e530b944738bdd1152c790b1075ec89ec4eed4"
+    },
+    {
+      "file": "evidence/independent/release-v4101-checker-attempt1-template-path.err",
+      "bytes": 468,
+      "sha256": "51866cad376f0c1f1a069509ae4c248fbf4919235a7d1efbcdd969fb14a120d5"
+    },
+    {
+      "file": "evidence/production/release-v4101-independent.json",
+      "bytes": 12719,
+      "sha256": "3e51d0d3fba656b5d54d9a56fea9dc4d896bb1b5b4fb04da3a1a74ad0b0ccb5e"
+    }
+  ]
+}

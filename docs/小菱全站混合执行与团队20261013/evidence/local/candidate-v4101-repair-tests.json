@@ -55,6 +55,11 @@
       "path": "evidence/local/prism-v4101-descriptor-repeat.txt",
       "bytes": 5316,
       "sha256": "eb7ecc164c226ad861069a5d2393d3c99d7e04d1697a6941767120712e7206e7"
+    },
+    {
+      "path": "evidence/local/prism-v4101-final2-overlay-e2e.txt",
+      "bytes": 933,
+      "sha256": "de4ea0e1378f88f07b204b6b68636127fd617f7ee417b66558e2ea428ec7d8b7"
     }
   ],
   "additional_team_summary_queries": {
@@ -64,5 +69,15 @@
   "result_and_list_repeat": {
     "independent_process_rounds": 3,
     "passed_per_round": 22
+  },
+  "overlay_fixture": {
+    "viewports": [
+      375,
+      768,
+      1280
+    ],
+    "rounds_per_viewport": 3,
+    "passed": 3,
+    "production": false
   }
 }

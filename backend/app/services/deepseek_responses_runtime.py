@@ -2364,9 +2364,37 @@ async def _collect_response(output: TransportOutput) -> Tuple[Dict[str, Any], Li
 def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     completed_response: Optional[Dict[str, Any]] = None
     items: Dict[Union[int, str], Dict[str, Any]] = {}
+    item_ids: Dict[str, Union[int, str]] = {}
+    reasoning_parts: Dict[Union[int, str], Dict[int, List[str]]] = {}
+    finished_parts: set[Tuple[Union[int, str], int]] = set()
     text_deltas: List[str] = []
     status = ""
     observed_metadata: Dict[str, Any] = {}
+
+    def item_key(event: Mapping[str, Any], item: Optional[Mapping[str, Any]] = None) -> Union[int, str]:
+        item_id = str((item or {}).get("id") or event.get("item_id") or "")
+        key = item_ids.get(item_id, event.get("output_index", item_id or len(items)))
+        if item_id:
+            item_ids[item_id] = key
+        return key
+
+    def with_reasoning_content(item: Mapping[str, Any], key: Union[int, str]) -> Dict[str, Any]:
+        output = copy.deepcopy(dict(item))
+        parts = reasoning_parts.get(key, {})
+        if output.get("type") != "reasoning" or not parts:
+            return output
+        content = output.get("content")
+        if isinstance(content, str) and content:
+            return output
+        existing = content if isinstance(content, list) else []
+        merged = []
+        for index in sorted(set(range(len(existing))) | set(parts)):
+            part = copy.deepcopy(existing[index]) if index < len(existing) else {"type": "reasoning_text"}
+            if isinstance(part, dict) and part.get("type") == "reasoning_text" and not part.get("text"):
+                part["text"] = "".join(parts.get(index, []))
+            merged.append(part)
+        output["content"] = merged
+        return output
 
     for event in events:
         event_type = str(event.get("type") or "")
@@ -2381,14 +2409,49 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
         elif event_type in {"response.output_item.added", "response.output_item.done"}:
             item = event.get("item")
             if isinstance(item, Mapping):
-                key: Union[int, str] = event.get("output_index", item.get("id", len(items)))  # type: ignore[arg-type]
+                key = item_key(event, item)
                 items[key] = copy.deepcopy(dict(item))
+                if item.get("type") == "reasoning" and isinstance(item.get("content"), list):
+                    for index, part in enumerate(item["content"]):
+                        if isinstance(part, Mapping) and part.get("type") == "reasoning_text":
+                            text = part.get("text")
+                            if isinstance(text, str) and text:
+                                reasoning_parts.setdefault(key, {})[index] = [text]
+                                if event_type.endswith(".done"):
+                                    finished_parts.add((key, index))
+        elif event_type in {"response.content_part.added", "response.content_part.done",
+                            "response.reasoning_text.delta", "response.reasoning_text.done"}:
+            part = event.get("part")
+            if event_type.startswith("response.content_part") and (
+                not isinstance(part, Mapping) or part.get("type") != "reasoning_text"
+            ):
+                continue
+            key = item_key(event)
+            item = items.setdefault(key, {"type": "reasoning"})
+            if event.get("item_id"):
+                item.setdefault("id", event["item_id"])
+            index = event.get("content_index", 0)
+            if type(index) is not int or index < 0:
+                continue
+            parts = reasoning_parts.setdefault(key, {})
+            if event_type == "response.reasoning_text.delta":
+                delta = event.get("delta")
+                if isinstance(delta, str) and (key, index) not in finished_parts:
+                    parts.setdefault(index, []).append(delta)
+            else:
+                text = part.get("text") if isinstance(part, Mapping) else event.get("text")
+                if isinstance(text, str):
+                    if event_type.endswith(".done"):
+                        parts[index] = [text]
+                        finished_parts.add((key, index))
+                    else:
+                        parts.setdefault(index, [text])
         elif event_type == "response.function_call_arguments.delta":
-            key = event.get("output_index", event.get("item_id", len(items)))
+            key = item_key(event)
             item = items.setdefault(key, {"type": "function_call", "arguments": ""})
             item["arguments"] = str(item.get("arguments") or "") + str(event.get("delta") or "")
         elif event_type == "response.function_call_arguments.done":
-            key = event.get("output_index", event.get("item_id", len(items)))
+            key = item_key(event)
             item = items.setdefault(key, {"type": "function_call"})
             item["arguments"] = str(event.get("arguments") or item.get("arguments") or "")
         elif event_type == "response.output_text.delta":
@@ -2397,9 +2460,27 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
                 text_deltas.append(delta)
 
     if completed_response is not None and completed_response.get("output") is not None:
+        output = completed_response["output"]
+        if isinstance(output, list):
+            # 完整终帧原文优先；只补采集到的reasoning，不制造空推理或改变工具输出。
+            for key, streamed in items.items():
+                if streamed.get("type") != "reasoning":
+                    continue
+                index = next((index for index, item in enumerate(output)
+                              if isinstance(item, Mapping) and streamed.get("id")
+                              and item.get("id") == streamed["id"]), None)
+                if index is None and isinstance(key, int) and key < len(output):
+                    if isinstance(output[key], Mapping) and output[key].get("type") == "reasoning":
+                        index = key
+                if index is not None:
+                    output[index] = with_reasoning_content(output[index], key)
+                else:
+                    recovered = with_reasoning_content(streamed, key)
+                    if recovered.get("content"):
+                        output.insert(min(key, len(output)) if isinstance(key, int) else len(output), recovered)
         return {**observed_metadata, **completed_response}
 
-    ordered_items = list(items.values())
+    ordered_items = [with_reasoning_content(item, key) for key, item in items.items()]
     if text_deltas and not _extract_output_text(ordered_items):
         ordered_items.append(
             {
