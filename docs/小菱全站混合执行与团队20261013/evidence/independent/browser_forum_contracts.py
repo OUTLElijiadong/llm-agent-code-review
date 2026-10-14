@@ -51,10 +51,11 @@ def check():
             assert response.status_code == 401
             results.append({"scenario": "真实鉴权依赖无认证请求", "http_status": response.status_code})
             app.dependency_overrides[get_current_user] = lambda: actor
-            for sort, code in [("newest", 200), ("default", 200), ("created desc; drop table", 422),
-                               ("NEWEST", 422), ("", 422)]:
+            # 使用项目注册的全局参数错误合同400，而不是FastAPI原生默认422。
+            for sort, code in [("newest", 200), ("default", 200), ("created desc; drop table", 400),
+                               ("NEWEST", 400), ("", 400)]:
                 response = await client.get("/api/forum/posts", params={"sort": sort, "page_size": 2})
-                assert response.status_code == code
+                assert response.status_code == code, (sort, response.status_code, response.text)
                 results.append({"scenario": "隔离认证替身sort参数合同", "sort": sort,
                                 "http_status": response.status_code})
             response = await client.get("/api/forum/posts", params={"sort": "newest", "page": 2, "page_size": 2})
