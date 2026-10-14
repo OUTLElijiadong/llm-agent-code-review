@@ -260,6 +260,9 @@ def _readback_spec(scope, spec, params, output):
     data = data if isinstance(data, Mapping) else {}
     from app.main import app
 
+    if spec.method == "GET":
+        # 同一查询的独立读回必须保留排序、筛选和分页，不能退回另一 GET 的默认页。
+        return spec, dict(params)
     candidates = sorted((item for item in registry.values() if item.method == "GET"), key=lambda item: item.code)
     for read in candidates:
         if (
@@ -269,7 +272,7 @@ def _readback_spec(scope, spec, params, output):
         ):
             continue
         contract = operation_contract(read, app.openapi())
-        values = {name: params[name] for name in contract.path_names if name in params}
+        values = {name: params[name] for name in (*contract.path_names, *contract.query_names) if name in params}
         missing = set(contract.path_names) - set(values)
         if len(missing) == 1 and "id" in data:
             values[next(iter(missing))] = data["id"]
@@ -357,6 +360,7 @@ async def execute_site_task(db: Session, user: User, *, team_id: int, task_id: i
                 "scope": raw["scope"],
                 "capability": spec.code,
                 "request_id": request_id,
+                "request_params": redact_agent_model_context_value(params),
                 "status_code": output.get("status_code"),
                 "output": safe,
                 "page_action": capability_page_action(raw["scope"], spec.code, "pending", actor.id, output),
@@ -433,10 +437,21 @@ async def _verify_dependencies(db, actor, team, task, lease_token):
             original = receipt["output"].get("data")
             if isinstance(data, Mapping):
                 for key, expected in params.items():
-                    if key in data and key not in {"page", "page_size"} and data[key] != expected:
+                    if key in data and data[key] != expected:
                         return _result("blocked", "目标业务结果与请求字段不一致：" + key, receipt=receipt)
                 if isinstance(original, Mapping) and "id" in original and data.get("id") != original["id"]:
                     return _result("blocked", "目标业务结果 ID 与创建回执不一致", receipt=receipt)
+            if spec.method == "GET" and isinstance(original, Mapping) and isinstance(data, Mapping):
+                from app.services.agent_responses_service import redact_agent_model_context_value
+
+                # 总数相等不能证明条目相等。快照有变化时保留原回执，明确要求重新读取。
+                for key in ("items", "page", "page_size", "total"):
+                    if key in original and (
+                        key not in data
+                        or redact_agent_model_context_value(data[key])
+                        != redact_agent_model_context_value(original[key])
+                    ):
+                        return _result("blocked", "查询条目快照已变化，不能确认一致：" + key, receipt=receipt)
             if spec.method == "DELETE" and readback.get("status_code") != 404:
                 return _result("blocked", "删除目标仍可读，业务结果尚未确认", receipt=receipt)
             from app.services.agent_responses_service import redact_agent_model_context_value

@@ -511,6 +511,10 @@ class GetAgentTeamArguments(FixedToolArguments):
     """读取当前账户团队详情。"""
 
     team_id: int = Field(gt=0)
+    task_id: Optional[int] = Field(default=None, gt=0, description="按原任务引用分页读取完整结果")
+    result_path: str = Field(default="", max_length=1000, description="结果内JSON Pointer路径，仅task_id提供时有效")
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=20, ge=1, le=20)
 
 
 class CancelAgentTeamArguments(FixedToolArguments):
@@ -611,7 +615,8 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     ),
     FixedToolContract(
         "get_agent_team",
-        "读取当前账户指定子 Agent 团队的成员、任务、事件和消息状态",
+        "读取当前账户指定团队；任务小结果完整返回，结构摘要含result_reference时"
+        "请按其中task_id/result_path/offset/limit读取原结果，不要因预览缺明细重复新建团队。",
         GetAgentTeamArguments,
         True,
     ),

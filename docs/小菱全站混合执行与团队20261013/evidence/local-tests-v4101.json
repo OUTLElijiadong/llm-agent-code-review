@@ -1,0 +1,88 @@
+{
+  "observed_at_utc": "2026-10-14T04:23:48.191914+00:00",
+  "candidate_version": "4.0.101",
+  "local_only": true,
+  "logs": [
+    {
+      "log": "/tmp/prism-v4101-frontend-final.log",
+      "scope": "full frontend unit/component 146 files",
+      "sha256": "3637434753f74cd23311a520d83d8aa8013cbacfd6829fd87cdf71b8aa6157eb",
+      "summary": [
+        "Test Files  146 passed (146)",
+        "Tests  1906 passed (1906)"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4101-frontend-version-build.log",
+      "scope": "v101 TypeScript/Vite candidate build",
+      "sha256": "5bd4189d52f8f512fc8c9f0e472f905aad7e2985c5d72760e49e7c4ae8981e96",
+      "summary": [
+        "✓ built in 12.31s"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4101-backend-integrated-final.log",
+      "scope": "20 targeted backend files, integrated after all fixes",
+      "sha256": "f9c9b9799d2cd868915f43cc5547ed8f86b371492e2b71d405343c87e1e256c2",
+      "summary": [
+        "====================== 573 passed, 170 warnings in 11.59s ======================"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4101-critical-repeat-1.log",
+      "scope": "critical regression repetition 1",
+      "sha256": "822b2bfa4c10c2ef3a46e3f8c5c465f5d594cdaeeececd06f07b6a4e1639a2d7",
+      "summary": [
+        "======================= 92 passed, 16 warnings in 2.67s ========================"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4101-critical-repeat-2.log",
+      "scope": "critical regression repetition 2",
+      "sha256": "7946accb8e5b5fd4ab195cf30779789631dfd09215640343c79dfc8d08b789a1",
+      "summary": [
+        "======================= 92 passed, 16 warnings in 2.49s ========================"
+      ]
+    },
+    {
+      "log": "/tmp/prism-v4101-critical-repeat-3.log",
+      "scope": "critical regression repetition 3",
+      "sha256": "4da6842230d01f5cbe411b2f2e3e5812307c5573ef1b0b90540958a08acde81b",
+      "summary": [
+        "======================= 92 passed, 16 warnings in 2.48s ========================"
+      ]
+    },
+    {
+      "log": "/tmp/prism-business-projection-red.log",
+      "scope": "new result paging/reporter red tests",
+      "sha256": "738b3d27c7a09ddce1e2d21e2475a9afb6abee95c8a9c1ff9d0a949e5dc2c929",
+      "summary": [
+        "======================== 2 failed, 2 warnings in 1.61s ========================="
+      ]
+    },
+    {
+      "log": "/tmp/prism-team-summary-red.log",
+      "scope": "final summary deep clipping red",
+      "sha256": "7672e25450b9cc185bfdb53085a2f97976453fd5ca77c18ae91c75a3a08bef71",
+      "summary": [
+        "================= 1 failed, 14 deselected, 2 warnings in 1.60s ================="
+      ]
+    },
+    {
+      "log": "/tmp/prism-forum-sort-red-2.log",
+      "scope": "forum newest sort contract red",
+      "sha256": "81d249355ffe956f67985a020de5343ee8afecf9473da0bb558cb25eaa42cd37",
+      "summary": [
+        "========================= 2 failed, 1 warning in 0.82s ========================="
+      ]
+    },
+    {
+      "log": "/tmp/prism-deepseek-tool-choice-red-2.log",
+      "scope": "provider compatibility red tests with fixture errors corrected",
+      "sha256": "6ad1dcdb63e072d87049dece287f72ba98bc2039527bfb6e65467be53796c3de",
+      "summary": [
+        "=================== 28 failed, 6 passed, 1 warning in 0.88s ===================="
+      ]
+    }
+  ]
+}

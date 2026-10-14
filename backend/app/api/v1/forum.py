@@ -1,6 +1,8 @@
 """
 开发者论坛 API 路由
 """
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -28,11 +30,14 @@ def list_posts(
     category: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    sort: Literal["default", "newest"] = Query(
+        "default", description="default 置顶优先；newest 仅按创建时间和编号倒序，用于最新帖子查询",
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """帖子列表(全员可浏览)"""
-    result = forum_service.list_posts(db, keyword, category, page, page_size)
+    result = forum_service.list_posts(db, keyword, category, page, page_size, sort)
     return Resp(data=PageOut(**result))
 
 

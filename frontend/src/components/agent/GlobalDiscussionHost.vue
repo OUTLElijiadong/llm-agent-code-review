@@ -224,15 +224,27 @@ function stackingLayer(element: HTMLElement): number {
   return layer
 }
 
+function dialogIsVisible(element: HTMLElement): boolean {
+  if (!element.isConnected || element.closest('[hidden],[aria-hidden="true"],[inert]')
+    || element.getClientRects().length === 0) return false
+  const visibility = getComputedStyle(element).visibility
+  if (visibility === 'hidden' || visibility === 'collapse') return false
+  // 已关闭的 Element Plus overlay 仍保留 display:block 的 dialog 子节点。
+  // 只有自身与祖先都实际渲染的模态才能优先消费 Escape。
+  // visibility 可被后代显式覆盖，因此只判断 dialog 最终的计算值。
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    if (getComputedStyle(node).display === 'none') return false
+  }
+  return true
+}
+
 function hasHigherDialogThanChoices(): boolean {
   const menu = choicesRef.value
   if (!menu) return false
   const menuLayer = stackingLayer(menu)
   return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"],.el-message-box,[aria-modal="true"]'))
     .some(dialog => dialog !== menu && !menu.contains(dialog)
-      && !dialog.closest('[hidden],[aria-hidden="true"],[inert]')
-      && getComputedStyle(dialog).display !== 'none'
-      && getComputedStyle(dialog).visibility !== 'hidden'
+      && dialogIsVisible(dialog)
       && stackingLayer(dialog) > menuLayer)
 }
 

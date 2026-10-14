@@ -1983,25 +1983,25 @@ def _without_unpaired_function_calls(
 
 
 def _tool_choice_for_round(model: str, force_tool_rounds: int) -> Optional[str]:
-    """选择本轮工具策略；DeepSeek 思考模式不支持任何显式 tool_choice。
+    """自主轮次省略冗余 auto；监督纠错的 required 约束必须保留。
 
-    上游对 thinking 模型返回 HTTP 400: Thinking mode does not support this
-    tool_choice（auto/required 都拒绝），必须整体省略该字段，而不是降级为
-    auto。省略字段仍允许模型按工具定义自主决定是否调用工具。
+    官方 DeepSeek 传输适配器会仅为受约束的当前请求关闭思考，不能通过
+    省略 required 来放松执行证据校验。运行时不修改全局模型配置。
     """
-    if _model_disallows_required_tool_choice(model):
+    if force_tool_rounds > 0:
+        return "required"
+    if _model_defaults_to_thinking(model):
         return None
-    if force_tool_rounds <= 0:
-        return "auto"
-    return "required"
+    return "auto"
 
 
-def _model_disallows_required_tool_choice(model: str) -> bool:
+def _model_defaults_to_thinking(model: str) -> bool:
     normalized = model.casefold()
     return any(
         marker in normalized
         for marker in (
             "deepseek-v4",
+            "deepseek-flash",
             "deepseek-r1",
             "deepseek-reasoner",
             "reasoner",

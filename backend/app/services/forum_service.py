@@ -27,7 +27,9 @@ def _author_names(db: Session, user_ids) -> dict:
 
 
 def list_posts(db: Session, keyword: str = "", category: str = "",
-               page: int = 1, page_size: int = 20) -> dict:
+               page: int = 1, page_size: int = 20, sort: str = "default") -> dict:
+    if sort not in {"default", "newest"}:
+        raise ValidationError("不支持的帖子排序方式", code=42201)
     q = db.query(ForumPost).filter(ForumPost.status == "normal")
     if category:
         q = q.filter(ForumPost.category == category)
@@ -35,7 +37,10 @@ def list_posts(db: Session, keyword: str = "", category: str = "",
         q = q.filter(ForumPost.title.contains(keyword))
     total = q.count()
     pg = Pagination(page, page_size, total)
-    rows = (q.order_by(ForumPost.is_pinned.desc(), ForumPost.create_time.desc())
+    order = [ForumPost.create_time.desc(), ForumPost.id.desc()]
+    if sort == "default":
+        order.insert(0, ForumPost.is_pinned.desc())
+    rows = (q.order_by(*order)
             .offset(pg.offset).limit(pg.page_size).all())
     names = _author_names(db, [p.user_id for p in rows])
     items = [_post_dict(p, names.get(p.user_id, "")) for p in rows]

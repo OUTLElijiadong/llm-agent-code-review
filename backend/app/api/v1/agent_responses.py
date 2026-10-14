@@ -861,6 +861,18 @@ def _public_text(value: Any, *, limit: int = 1000) -> str:
     return str(safe_value)[:limit]
 
 
+def _browser_receipt_error(tool_name: str, output: Any) -> str:
+    """旧包装成功不能覆盖页面回执的失败/未完成事实；仅修正公开投影。"""
+    if tool_name != "operate_current_page" or not isinstance(output, Mapping):
+        return ""
+    nested = output.get("output")
+    receipt = nested if isinstance(nested, Mapping) else output
+    if (str(receipt.get("status") or "") in {"failed", "cancelled", "indeterminate", "user_required"}
+            or receipt.get("completed") is False):
+        return str(receipt.get("error") or "页面动作尚未完成或需要本人处理，请核对实际回执")
+    return ""
+
+
 def _transcript_function_calls(checkpoint: Mapping[str, Any]) -> list[dict[str, Any]]:
     """按出现顺序提取 transcript 中的函数调用及对应终态输出（取每个 call_id 最后一次）。
 
@@ -913,8 +925,10 @@ def _transcript_function_calls(checkpoint: Mapping[str, Any]) -> list[dict[str, 
         output = outputs.get(call_id)
         if output is not None:
             status = str(output.get("status") or "").casefold()
-            entry["output"] = output
+            browser_error = _browser_receipt_error(str(entry["name"]), output)
+            entry["output"] = {**output, "error": browser_error} if browser_error else output
             entry["output_status"] = (
+                "failed" if browser_error else
                 "success"
                 if status in {"success", "completed", "ok"}
                 else "failed"
@@ -1024,12 +1038,16 @@ def _public_completed_tool_events(
             result = {}
         if not isinstance(result, Mapping):
             result = {}
+        browser_error = _browser_receipt_error(str(row.tool_name), result)
+        execution_failed = (
+            row.status != "success" or str(result.get("status") or "success") != "success" or bool(browser_error)
+        )
         site_metadata = _recovered_site_metadata(
             str(row.tool_name), arguments, result.get("output"), int(run.user_id),
-            failed=row.status != "success", trusted_completed=True,
+            failed=execution_failed, trusted_completed=True,
         )
         sequence += 1
-        if row.status == "success" and str(result.get("status") or "success") == "success":
+        if not execution_failed:
             events.append(
                 {
                     "type": "response.tool.completed",
@@ -1056,7 +1074,7 @@ def _public_completed_tool_events(
                     "agent_code": agent_code,
                     "status": "failed",
                     "cached": True,
-                    "error": _public_text(result.get("error") or row.error or "工具执行失败"),
+                    "error": _public_text(browser_error or result.get("error") or row.error or "工具执行失败"),
                     "sequence_number": sequence,
                     **site_metadata,
                 }
@@ -1480,9 +1498,14 @@ async def stream_agent_response(
                 allow_sensitive=payload.surface == "admin",
             )
             if public_event is not None:
+                # sink已验签并裁剪字段；内队列保留签名供encode再次校验。
+                # encode对外剥离私有签名，既不吞掉真实指令，也不接受上游伪造。
+                queued_event = public_event
+                if event_type == "response.browser.required":
+                    queued_event = {**public_event, "_browser_signature": event.get("_browser_signature")}
                 while not discard_events:
                     try:
-                        await asyncio.wait_for(queue.put(public_event), timeout=1.0)
+                        await asyncio.wait_for(queue.put(queued_event), timeout=1.0)
                         return
                     except asyncio.TimeoutError:
                         continue

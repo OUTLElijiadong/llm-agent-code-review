@@ -79,6 +79,7 @@ from app.services.admin_capability_registry import (
     READ as CAPABILITY_READ,
 )
 from app.services.ai_usage_context import current_attribution, run_attribution, usage_context, usage_tokens
+from app.services.deepseek_provider_compat import prepare_deepseek_responses_payload
 from app.services.deepseek_responses_runtime import (
     CANCELLED,
     COMPLETED,
@@ -940,7 +941,10 @@ class NativeResponsesTransport:
                 raise
 
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            async with client.stream("POST", url, headers=headers, json=dict(payload)) as response:
+            async with client.stream(
+                "POST", url, headers=headers,
+                json=prepare_deepseek_responses_payload(payload, url),
+            ) as response:
                 if response.status_code >= 400:
                     raw = (await response.aread()).decode("utf-8", errors="replace")
                     from app.services.deepseek_responses_runtime import ObservedResponseError
@@ -1366,6 +1370,15 @@ class PrismToolExecutor:
                     event_sink=self._event_sink, approved=approved,
                 )
                 # 客户端观察属于页面执行证据，不等同于持久业务回读。
+                if result.get("status") != "completed" or result.get("completed") is not True:
+                    error = str(result.get("error") or "页面动作尚未完成或需要本人处理，请核对实际回执")
+                    return ToolExecutionResult(
+                        status="error", output=result, error=error,
+                        failure_kind=(
+                            "user_required" if result.get("status") == "user_required"
+                            else strategy_learning_service.classify_failure(error)
+                        ),
+                    )
                 return ToolExecutionResult.success(result)
 
             return await self._execute_once(call, operate)

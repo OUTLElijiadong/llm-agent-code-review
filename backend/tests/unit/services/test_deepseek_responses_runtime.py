@@ -1361,7 +1361,7 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
     assert result.output_text == "模板删除成功"
     assert [payload.get("tool_choice") for payload in transport.payloads] == [
         None,
-        None,
+        "required",
         None,
     ]
     projected_text = json.dumps(transport.payloads[-1]["input"], ensure_ascii=False)
@@ -1371,7 +1371,7 @@ async def test_completion_guard_discards_unverified_text_and_forces_tool_retry()
 
 
 @pytest.mark.asyncio
-async def test_completion_guard_retry_uses_auto_for_deepseek_thinking_models() -> None:
+async def test_completion_guard_retry_preserves_required_for_deepseek_thinking_models() -> None:
     transport = ScriptedTransport(
         [
             _message_response("已删除模板，deleted_count=1"),
@@ -1401,7 +1401,7 @@ async def test_completion_guard_retry_uses_auto_for_deepseek_thinking_models() -
     assert result.status == "completed"
     assert [payload.get("tool_choice") for payload in transport.payloads] == [
         None,
-        None,
+        "required",
         None,
     ]
     projected_text = json.dumps(transport.payloads[1]["input"], ensure_ascii=False)
@@ -1456,8 +1456,8 @@ async def test_completion_guard_fails_after_bounded_retries_without_persisting_c
     assert "执行证据校验失败" in result.error
     assert [payload.get("tool_choice") for payload in transport.payloads] == [
         None,
-        None,
-        None,
+        "required",
+        "required",
     ]
 
 

@@ -21,6 +21,7 @@ from loguru import logger
 
 from app.core.config import settings
 from app.services.context_fidelity import extract_protected_facts
+from app.services.deepseek_provider_compat import prepare_deepseek_responses_payload
 from app.services.deepseek_responses_runtime import (
     ContextBudgetError,
     _split_compaction_source,
@@ -566,7 +567,7 @@ class DeepSeekResponsesService:
         credential_fingerprint: str,
         authorization: str,
     ) -> Tuple[Dict[str, Any], List[Any]]:
-        upstream_payload = copy.deepcopy(payload)
+        upstream_payload = prepare_deepseek_responses_payload(copy.deepcopy(payload), self._responses_url)
         previous_response_id = payload.get("previous_response_id")
         previous = None
         if isinstance(previous_response_id, str) and previous_response_id:

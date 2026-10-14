@@ -75,6 +75,17 @@ beforeEach(() => {
   })
 })
 
+it('圆桌房间声明真实业务模态语义，供无障碍和小菱观察当前交互层', () => {
+  const wrapper = mountPanel({ initialStatus: 'concluded' })
+  try {
+    expect(wrapper.get('.discuss-room').attributes()).toMatchObject({
+      role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Agent 圆桌讨论',
+    })
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('刷新后先显示最近 100 条，按服务端游标加载更早发言且保持顺序', async () => {
   const latest = Array.from({ length: 100 }, (_, index) => turn(index + 51, 'security', index + 51))
   discussionApi.detail.mockResolvedValueOnce({

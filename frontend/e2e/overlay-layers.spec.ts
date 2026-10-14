@@ -108,13 +108,23 @@ for (const width of [375, 768, 1280]) {
           await expect(page.locator('.roundtable-choices')).toBeVisible()
           expect(await page.evaluate(() => (document.activeElement as HTMLElement)?.textContent)).toBe('更高层模态操作')
           await page.locator('[data-testid="higher-layer-dialog"]').evaluate((dialog) => dialog.remove())
-          // 页面可能还有应用自身的引导层；通过触发按钮关闭菜单，不假设此时没有其他模态。
-          await trigger.click()
-          await expect(page.locator('.roundtable-choices')).toHaveCount(0)
-        } else {
-          await trigger.click()
-          await expect(page.locator('.roundtable-choices')).toHaveCount(0)
         }
+        // 真实EP保留式关闭结构：overlay不渲染，但子dialog自身仍为display:block。
+        // 每视口三轮直接按Esc复验，不用触发按钮绕过键盘分支。
+        await page.evaluate(() => {
+          const overlay = document.createElement('div')
+          overlay.className = 'el-overlay'
+          overlay.dataset.testid = 'closed-overlay'
+          overlay.style.display = 'none'
+          overlay.innerHTML = '<section role="dialog" style="display:block;visibility:visible;z-index:5001"><button>已关闭模态</button></section>'
+          document.body.append(overlay)
+        })
+        await expect(page.locator('[data-testid="closed-overlay"] [role="dialog"]')).toBeHidden()
+        expect(await page.locator('[data-testid="closed-overlay"] [role="dialog"]').evaluate(dialog => getComputedStyle(dialog).display)).toBe('block')
+        await page.keyboard.press('Escape')
+        await expect(page.locator('.roundtable-choices')).toHaveCount(0)
+        await expect(trigger).toBeFocused()
+        await page.locator('[data-testid="closed-overlay"]').evaluate(overlay => overlay.remove())
 
         // 外部真正点击小菱会关闭旧菜单；菜单不在后台残留。
         await trigger.click()

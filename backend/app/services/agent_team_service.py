@@ -25,6 +25,7 @@ from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn, TemporaryAgentDefinition
 from app.services import audit_service
+from app.services.agent_team_projection import pointer_child, project_team_result
 from app.services.ai_usage_context import current_attribution, model_attribution
 
 
@@ -1231,7 +1232,7 @@ def _member_release_snapshot(row: Optional[AgentTeamMember]) -> dict[str, Any]:
     }
 
 
-def _serialize_task(row: AgentTeamTask, member_key: str = "") -> dict[str, Any]:
+def _serialize_task(row: AgentTeamTask, member_key: str = "", *, result_budget: int = 16000) -> dict[str, Any]:
     return {
         "task_id": int(row.id),
         "task_key": row.task_key,
@@ -1248,7 +1249,8 @@ def _serialize_task(row: AgentTeamTask, member_key: str = "") -> dict[str, Any]:
         "max_attempts": row.max_attempts,
         "next_attempt_at": row.next_attempt_at.isoformat() if row.next_attempt_at else None,
         "lease_expires_at": row.lease_expires_at.isoformat() if row.lease_expires_at else None,
-        "result": _public(_unjson(row.result_json, {})),
+        "result": project_team_result(_unjson(row.result_json, {}), team_id=int(row.team_id),
+                                      task_id=int(row.id), budget=result_budget),
         "artifacts": _public(_unjson(row.artifacts_json, [])),
         "errors": _public(_unjson(row.errors_json, [])),
         "started_at": row.started_at.isoformat() if row.started_at else None,
@@ -1335,6 +1337,19 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
     )
     tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).order_by(AgentTeamTask.id.asc()).all()
     member_key_by_id = {int(item.id): item.member_key for item in members}
+    verification_ids = {item.id for item in members if item.role in {"verifier", "summarizer"}}
+    verification = [item for item in tasks if item.member_id in verification_ids and item.status == "completed"]
+    # 从原任务构建新公开摘要，旧summary账本可能只存了预览；不覆写历史记录。
+    summary = _unjson(team.summary_json, {})
+    if verification and isinstance(summary, dict):
+        results = [{"task_key": item.task_key, "result": project_team_result(
+            _unjson(item.result_json, {}), team_id=team.id, task_id=item.id, budget=8000,
+        )} for item in verification]
+        summary = {**summary, "verification_results": results, "final_result": results[-1]["result"]}
+        if len(_json(summary).encode()) > 24000:
+            summary["verification_results"] = [{"task_key": item.task_key, "result_reference": {
+                "tool": "get_agent_team", "team_id": team.id, "task_id": item.id, "result_path": "",
+            }} for item in verification]
     output = {
         "team_id": int(team.id),
         "user_id": int(team.user_id),
@@ -1350,13 +1365,15 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
         "deadline_at": team.deadline_at.isoformat() if team.deadline_at else None,
         "started_at": team.started_at.isoformat() if team.started_at else None,
         "completed_at": team.completed_at.isoformat() if team.completed_at else None,
-        "summary": _public(_unjson(team.summary_json, {})),
+        "summary": project_team_result(summary, team_id=team.id,
+                                       task_id=verification[-1].id if verification else 0, budget=24000),
         "error": _public(_unjson(team.error_json, {})),
         "created_at": team.create_time.isoformat() if team.create_time else None,
         "updated_at": team.update_time.isoformat() if team.update_time else None,
         "archived_at": team.archived_at.isoformat() if team.archived_at else None,
         "members": [_serialize_member(item) for item in members],
-        "tasks": [_serialize_task(item, member_key_by_id.get(int(item.member_id), "")) for item in tasks],
+        "tasks": [_serialize_task(item, member_key_by_id.get(int(item.member_id), ""),
+                                  result_budget=min(16000, max(1600, 24000 // max(1, len(tasks))))) for item in tasks],
         "counts": _task_counts(tasks),
     }
     if include_events:
@@ -1538,8 +1555,8 @@ def create_team_from_xiaoling(
     supervisor_confirmed_by: Optional[int] = None,
 ) -> dict[str, Any]:
     """小菱唯一的团队创建入口；仍由 _create_team 执行完整账号与资源校验。"""
-    from app.services import agent_supervisor_service
     from app.core.site_request_context import trusted_request_origin
+    from app.services import agent_supervisor_service
 
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     if review["needs_confirmation"]:
@@ -1650,6 +1667,51 @@ def list_teams(
 
 def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
     return _team_out(db, _team_or_raise(db, user, team_id), include_events=True)
+
+
+def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
+                         result_path: str = "", offset: int = 0, limit: int = 20) -> dict[str, Any]:
+    """当前账号原任务结果的 JSON Pointer 分页，不读文件或任意模型指定对象。"""
+    from app.services.agent_responses_service import redact_agent_model_context_value
+
+    team = _team_or_raise(db, user, team_id)
+    task = db.query(AgentTeamTask).filter_by(team_id=team.id, id=task_id).first()
+    if task is None:
+        raise AgentTeamNotFoundError("任务不属于当前团队或不存在")
+    if (not isinstance(result_path, str) or len(result_path) > 1000
+            or result_path and not result_path.startswith("/") or offset < 0 or not 1 <= limit <= 20):
+        raise AgentTeamValidationError("结果路径或分页参数无效")
+    value = redact_agent_model_context_value(_unjson(task.result_json, {}))
+    try:
+        for token in result_path.split("/")[1:] if result_path else []:
+            if re.search(r"~(?![01])", token):
+                raise KeyError(token)
+            key = token.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, dict):
+                value = value[key]
+            elif isinstance(value, list) and key.isdecimal():
+                value = value[int(key)]
+            else:
+                raise KeyError(key)
+    except (KeyError, IndexError, ValueError):
+        raise AgentTeamValidationError("结果路径不存在") from None
+    output = {"team_id": int(team.id), "task_id": int(task.id), "result_path": result_path}
+    if isinstance(value, str):
+        end = min(len(value), offset + 2000)
+        output.update(text=value[offset:end], total=len(value))
+    elif isinstance(value, (dict, list)):
+        children = list(value.items()) if isinstance(value, dict) else list(enumerate(value))
+        end = min(len(children), offset + limit)
+        items = [(key, project_team_result(child, team_id=team.id, task_id=task.id,
+                                           result_path=pointer_child(result_path, key), budget=600))
+                 for key, child in children[offset:end]]
+        output.update(items=dict(items) if isinstance(value, dict) else [child for _, child in items],
+                      total=len(children))
+    else:
+        end = 1
+        output.update(value=value, total=1)
+    output.update(has_more=end < output["total"], next_offset=end if end < output["total"] else None)
+    return output
 
 
 def list_team_events(
@@ -1880,7 +1942,9 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         team.status = "completed"
         team.completed_at = team.completed_at or _now()
         verification_results = [
-            {"task_key": item.task_key, "result": _public(_unjson(item.result_json, {}))} for item in verification
+            {"task_key": item.task_key, "result": project_team_result(
+                _unjson(item.result_json, {}), team_id=team.id, task_id=item.id,
+            )} for item in verification
         ]
         team.summary_json = _json(
             {
@@ -1906,7 +1970,9 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         ]
         if completed_summarizers:
             verification_results = [
-                {"task_key": item.task_key, "result": _public(_unjson(item.result_json, {}))}
+                {"task_key": item.task_key, "result": project_team_result(
+                    _unjson(item.result_json, {}), team_id=team.id, task_id=item.id,
+                )}
                 for item in verification
                 if item.status == "completed"
             ]

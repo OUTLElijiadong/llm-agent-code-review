@@ -950,6 +950,10 @@ class Orchestrator(BaseAgent):
         self,
         team_id: int,
         ctx: Optional[AgentContext] = None,
+        task_id: Optional[int] = None,
+        result_path: str = "",
+        offset: int = 0,
+        limit: int = 20,
     ) -> AgentResult:
         """读取当前账户的团队树和脱敏协作时间线。"""
         del ctx
@@ -958,6 +962,13 @@ class Orchestrator(BaseAgent):
         try:
             from app.services import agent_team_service
 
+            if task_id is not None:
+                return AgentResult(success=True, data=agent_team_service.get_team_result_page(
+                    self._db, self._user, team_id, task_id,
+                    result_path=result_path, offset=offset, limit=limit,
+                ))
+            if result_path or offset:
+                return AgentResult(success=False, error="结果分页必须指定原任务task_id")
             return AgentResult(success=True, data=agent_team_service.get_team(self._db, self._user, team_id))
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))

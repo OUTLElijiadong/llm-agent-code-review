@@ -170,3 +170,71 @@ def test_verifier_does_not_trust_payload_dependency_context(db, actor):
     result = run(db, actor, created, claim)
     assert result["status"] == "blocked"
     assert db.query(AgentToolExecution).count() == 0
+
+
+def test_small_business_receipt_retains_item_identity_in_team_projection(db, actor, monkeypatch):
+    async def api(_user, spec, _params, **_kwargs):
+        return {"capability": spec.code, "status_code": 200, "data": {
+            "total": 3, "page": 1, "page_size": 3,
+            "items": [{"id": i, "title": f"版本说明 {i}", "create_time": "2026-10-14T00:00:00",
+                       "api_key": "sk-projection-secret-value"} for i in range(1, 4)],
+        }}
+    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", api)
+    created, claim = claimed_team(db, actor, capability="forum.posts.list", params={"page": 1, "page_size": 3})
+    result = run(db, actor, created, claim)
+    agent_team_service.complete_task(db, created["team_id"], claim["task_id"],
+                                    lease_token=claim["lease_token"], result=result, success=True)
+    detail = agent_team_service.get_team(db, actor, created["team_id"])
+    projected = next(task for task in detail["tasks"] if task["task_id"] == claim["task_id"])["result"]
+    items = projected["result_receipt"]["output"]["data"]["items"]
+    assert [item["title"] for item in items] == ["版本说明 1", "版本说明 2", "版本说明 3"]
+    assert [item["id"] for item in items] == [1, 2, 3]
+    assert all(item["create_time"] == "2026-10-14T00:00:00" for item in items)
+    assert "sk-projection-secret-value" not in json.dumps(projected)
+    verifier = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    verified = run(db, actor, created, verifier)
+    agent_team_service.complete_task(db, created["team_id"], verifier["task_id"],
+                                    lease_token=verifier["lease_token"], result=verified, success=True)
+    final = agent_team_service.get_team(db, actor, created["team_id"])
+    final_items = final["summary"]["final_result"]["result_receipt"]["output"]["data"]["items"]
+    assert [item["title"] for item in final_items] == ["版本说明 1", "版本说明 2", "版本说明 3"]
+
+
+def test_get_verification_keeps_query_filter_and_pagination(db, actor, monkeypatch):
+    calls = []
+    params = {"page": 2, "page_size": 3, "keyword": "版本", "category": "announce"}
+    async def api(_user, spec, actual, **_kwargs):
+        calls.append(dict(actual))
+        return {"capability": spec.code, "status_code": 200, "data": {
+            "total": 6, "page": actual.get("page", 1), "page_size": actual.get("page_size", 20),
+            "items": [{"id": 4, "title": "版本说明"}],
+        }}
+    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", api)
+    created, claim = claimed_team(db, actor, capability="forum.posts.list", params=params)
+    result = run(db, actor, created, claim)
+    agent_team_service.complete_task(db, created["team_id"], claim["task_id"],
+                                    lease_token=claim["lease_token"], result=result, success=True)
+    verifier = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    verified = run(db, actor, created, verifier)
+    assert verified["status"] == "completed"
+    assert calls == [params, params]
+
+
+def test_get_verifier_blocks_changed_item_despite_same_total(db, actor, monkeypatch):
+    calls = 0
+    async def api(_user, spec, _params, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"capability": spec.code, "status_code": 200, "data": {
+            "total": 3, "page": 1, "page_size": 3,
+            "items": [{"id": 1, "title": "版本说明" if calls == 1 else "已被更改"}],
+        }}
+    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", api)
+    created, claim = claimed_team(db, actor, capability="forum.posts.list", params={"page": 1, "page_size": 3})
+    result = run(db, actor, created, claim)
+    agent_team_service.complete_task(db, created["team_id"], claim["task_id"],
+                                    lease_token=claim["lease_token"], result=result, success=True)
+    verifier = agent_team_service.claim_next_task(db, created["team_id"], lease_seconds=60)
+    verified = run(db, actor, created, verifier)
+    assert verified["status"] == "blocked"
+    assert "快照" in verified["summary"] or "条目" in verified["summary"]

@@ -46,6 +46,11 @@ function deferred<Value>() {
   return { promise, resolve, reject }
 }
 
+function mockClientRects(element: HTMLElement, rendered = true): void {
+  const rect = { left: 0, top: 0, right: 300, bottom: 200, width: 300, height: 200 } as DOMRect
+  vi.spyOn(element, 'getClientRects').mockReturnValue((rendered ? [rect] : []) as unknown as DOMRectList)
+}
+
 beforeEach(() => {
   discussionApi.list.mockReset().mockResolvedValue({ items: [current], next_offset: null })
   discussionApi.detail.mockReset().mockResolvedValue(current)
@@ -114,6 +119,7 @@ it('Esc只关闭最高交互层：高层模态存在时圆桌菜单不抢键也�
     modal.style.zIndex = '5000'
     modal.innerHTML = '<button>更高层确认</button>'
     document.body.append(modal)
+    mockClientRects(modal)
 
     const blockedEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     window.dispatchEvent(blockedEscape)
@@ -130,6 +136,84 @@ it('Esc只关闭最高交互层：高层模态存在时圆桌菜单不抢键也�
     expect(wrapper.find('.roundtable-choices').exists()).toBe(false)
     expect(document.activeElement).toBe(wrapper.get('[aria-label="打开圆桌讨论"]').element)
   } finally {
+    wrapper.unmount()
+  }
+})
+
+it.each([1, 2, 3])('关闭的overlay内残留高层dialog不阻塞圆桌Escape（第%d轮）', async () => {
+  discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-second' }], next_offset: null })
+  const { wrapper } = await mountHost(5, document.body)
+  const overlay = document.createElement('div')
+  overlay.className = 'el-overlay'
+  overlay.style.display = 'none'
+  overlay.innerHTML = '<section role="dialog" style="display:block;visibility:visible;z-index:5001"><button>已关闭确认</button></section>'
+  document.body.append(overlay)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+    const modal = overlay.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(getComputedStyle(modal).display).toBe('block')
+    expect(getComputedStyle(overlay).display).toBe('none')
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    window.dispatchEvent(escape)
+    await flushPromises()
+    expect(escape.defaultPrevented).toBe(true)
+    expect(wrapper.find('.roundtable-choices').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('[aria-label="打开圆桌讨论"]').element)
+  } finally {
+    overlay.remove()
+    wrapper.unmount()
+  }
+})
+
+it.each(['hidden-ancestor', 'collapsed-ancestor', 'no-layout-rect'] as const)(
+  '未实际可见的高层dialog不消费圆桌Escape：%s', async (kind) => {
+    discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-second' }], next_offset: null })
+    const { wrapper } = await mountHost(5, document.body)
+    const overlay = document.createElement('div')
+    if (kind === 'hidden-ancestor') overlay.style.visibility = 'hidden'
+    if (kind === 'collapsed-ancestor') overlay.style.visibility = 'collapse'
+    overlay.innerHTML = '<section role="dialog" style="display:block;z-index:5001"><button>不可见确认</button></section>'
+    document.body.append(overlay)
+    const modal = overlay.querySelector<HTMLElement>('[role="dialog"]')!
+    // jsdom不做布局；visibility隐藏仍占布局，为无布局分支模拟空rect。
+    mockClientRects(modal, kind !== 'no-layout-rect')
+    try {
+      await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+      await flushPromises()
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      window.dispatchEvent(escape)
+      await flushPromises()
+      expect(escape.defaultPrevented).toBe(true)
+      expect(wrapper.find('.roundtable-choices').exists()).toBe(false)
+      expect(document.activeElement).toBe(wrapper.get('[aria-label="打开圆桌讨论"]').element)
+    } finally {
+      overlay.remove()
+      wrapper.unmount()
+    }
+  },
+)
+
+it('隐藏祖先下显式可见的高层dialog仍有优先权，不抢Escape', async () => {
+  discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-second' }], next_offset: null })
+  const { wrapper } = await mountHost(5, document.body)
+  const overlay = document.createElement('div')
+  overlay.style.visibility = 'hidden'
+  overlay.innerHTML = '<section role="dialog" style="display:block;visibility:visible;z-index:5001"><button>仍然可见的确认</button></section>'
+  document.body.append(overlay)
+  mockClientRects(overlay.querySelector<HTMLElement>('[role="dialog"]')!)
+  try {
+    await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+    await flushPromises()
+    const focused = document.activeElement
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    window.dispatchEvent(escape)
+    await flushPromises()
+    expect(escape.defaultPrevented).toBe(false)
+    expect(wrapper.find('.roundtable-choices').exists()).toBe(true)
+    expect(document.activeElement).toBe(focused)
+  } finally {
+    overlay.remove()
     wrapper.unmount()
   }
 })

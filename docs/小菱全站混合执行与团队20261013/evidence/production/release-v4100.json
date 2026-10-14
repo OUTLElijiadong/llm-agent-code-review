@@ -1,0 +1,314 @@
+{
+  "observed_at_utc": "2026-10-13T15:46:01.245094+00:00",
+  "verification_kind": "independent_read_only_post_release",
+  "scope": "No login, GUI, model invocation or production business writes. Release identity, bundle/backup checks and anonymous HTTP samples only.",
+  "expected_sha": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+  "expected_version": "4.0.100",
+  "runtime": {
+    "cr_backend": {
+      "image": "prism-backend:6534493efbf7ec6eb0365b28019602cf8abd92d8",
+      "image_id": "sha256:af852f631d8add2ed76eeaf443093ba992edcf8634d75a2b5274627178529fb1",
+      "state": "running",
+      "health": "healthy",
+      "compose_working_dir": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy",
+      "compose_config_files": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy/docker-compose.yml",
+      "release_env": {
+        "APP_RELEASE": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+        "APP_VERSION": "4.0.100",
+        "BACKEND_RELEASE": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+        "FRONTEND_RELEASE": "6534493efbf7ec6eb0365b28019602cf8abd92d8"
+      }
+    },
+    "cr_frontend": {
+      "image": "prism-frontend:6534493efbf7ec6eb0365b28019602cf8abd92d8",
+      "image_id": "sha256:90c8b55b0064e9115dd18cf14d8351468078c6e30e3dd6080af6af2653602d15",
+      "state": "running",
+      "health": "healthy",
+      "compose_working_dir": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy",
+      "compose_config_files": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy/docker-compose.yml",
+      "release_env": {
+        "APP_RELEASE": null,
+        "APP_VERSION": null,
+        "BACKEND_RELEASE": null,
+        "FRONTEND_RELEASE": null
+      }
+    },
+    "cr_decoy": {
+      "image": "prism-decoy:4.0.100",
+      "image_id": "sha256:f4a72dc3095b695c2283ff88441ef426ac58ef04e27e58669b5ada10991b182b",
+      "state": "running",
+      "health": "healthy",
+      "compose_working_dir": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy",
+      "compose_config_files": "/opt/prism-releases/6534493efbf7ec6eb0365b28019602cf8abd92d8/deploy/docker-compose.yml",
+      "release_env": {
+        "APP_RELEASE": null,
+        "APP_VERSION": null,
+        "BACKEND_RELEASE": null,
+        "FRONTEND_RELEASE": null
+      }
+    },
+    "cr_clamav": {
+      "image": "clamav/clamav:stable",
+      "image_id": "sha256:fb6b9bbcf90750be878b6d46ae0e3ffd4ee98572283b866eeda0f4e2d34dfb11",
+      "state": "running",
+      "health": "healthy",
+      "compose_working_dir": "/opt/prism-releases/8f719975ba9398f078d2204e02d56a385e7ee92c/deploy",
+      "compose_config_files": "/opt/prism-releases/8f719975ba9398f078d2204e02d56a385e7ee92c/deploy/docker-compose.yml",
+      "release_env": {
+        "APP_RELEASE": null,
+        "APP_VERSION": null,
+        "BACKEND_RELEASE": null,
+        "FRONTEND_RELEASE": null
+      }
+    }
+  },
+  "staged_git_head": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+  "current_ledger": {
+    "RELEASE_SHA": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+    "APP_VERSION": "4.0.100",
+    "BACKEND_RELEASE": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+    "FRONTEND_RELEASE": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+    "BACKEND_IMAGE_ID": "sha256:af852f631d8add2ed76eeaf443093ba992edcf8634d75a2b5274627178529fb1",
+    "FRONTEND_IMAGE_ID": "sha256:90c8b55b0064e9115dd18cf14d8351468078c6e30e3dd6080af6af2653602d15",
+    "TARGET": "all",
+    "BACKUP_FILE": "/opt/code-review/backups/code_review_20261013T150837Z_6534493efbf7.sql.gz",
+    "ALEMBIC_REVISION": "063_agent_browser_actions",
+    "DEPLOYED_AT_UTC": "2026-10-13T15:17:17Z"
+  },
+  "previous_ledger": {
+    "RELEASE_SHA": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+    "APP_VERSION": "4.0.99",
+    "BACKEND_RELEASE": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+    "FRONTEND_RELEASE": "8f719975ba9398f078d2204e02d56a385e7ee92c",
+    "BACKEND_IMAGE_ID": "sha256:af852f631d8add2ed76eeaf443093ba992edcf8634d75a2b5274627178529fb1",
+    "FRONTEND_IMAGE_ID": "sha256:76fab601ec0148deeea5e0b4b049481426b9358c12707aa0a5e9b83df39a43cb",
+    "TARGET": "all",
+    "BACKUP_FILE": "/opt/code-review/backups/code_review_20261013T074818Z_8f719975ba93.sql.gz",
+    "ALEMBIC_REVISION": "063_agent_browser_actions",
+    "DEPLOYED_AT_UTC": "2026-10-13T15:08:18Z"
+  },
+  "alembic_current": {
+    "exit_code": 0,
+    "stdout": "063_agent_browser_actions (head)",
+    "stderr": "INFO  [alembic.runtime.migration] Context impl MySQLImpl.\nINFO  [alembic.runtime.migration] Will assume non-transactional DDL."
+  },
+  "healthz": {
+    "status": 200,
+    "content_type": "application/json",
+    "bytes": 88,
+    "sha256": "6501d3e56ff2a3568281e80101a8c94b76c6cd21cdbd70b45fa078ef065e7918",
+    "body": {
+      "status": "ok",
+      "version": "4.0.100",
+      "release": "6534493efbf7ec6eb0365b28019602cf8abd92d8"
+    }
+  },
+  "readyz": {
+    "status": 200,
+    "content_type": "application/json",
+    "bytes": 91,
+    "sha256": "5ab8a34374800053fec34624d1ec0dcd4ce46ca1f26b91e1338aa5c2ad457b55",
+    "body": {
+      "status": "ready",
+      "version": "4.0.100",
+      "release": "6534493efbf7ec6eb0365b28019602cf8abd92d8"
+    }
+  },
+  "served_index": {
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 1617,
+    "sha256": "fe0481da097f7ec6d26cbcc6e6b4456bf3daf66910f52e711197688f17562c3a"
+  },
+  "served_build_info": {
+    "status": 200,
+    "content_type": "application/javascript",
+    "bytes": 251,
+    "sha256": "269495acbb5a6dcc5b56b61c0342dc89f7c7e0e74047723682e45d3f037f55fb",
+    "asset": "/assets/buildInfo-N4wkHPii.js",
+    "version_matches": true,
+    "release_matches": true,
+    "source": "const a=\"4.0.100\".trim().replace(/^v/i,\"\"),e=\"2026-10-13T15:08:18Z\".trim(),c=\"6534493efbf7ec6eb0365b28019602cf8abd92d8\".trim(),r=`v${a.replace(/\\.0$/,\"\")}`,s=e?e.replace(\"T\",\" \").replace(/Z$/,\" UTC\"):\"构建时间未知\";export{s as A,r as a,c as b};\n"
+  },
+  "deployed_template_sha256": "5d1a13020ab86d6a95b579f9a5f9fc4a55338ad5dc456ec29305bce533af8d2e",
+  "nginx_config_test": {
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful"
+  },
+  "bundle": {
+    "path": "/dev/shm/prism-v4.0.100-6534493efbf7ec6eb0365b28019602cf8abd92d8.bundle",
+    "bytes": 108236013,
+    "sha256": "14198bed3f61df3a3e3f7277c43bcf24eab62ffdae65a2353e50c472db825dd6",
+    "expected_bytes": 108236013,
+    "expected_sha256": "14198bed3f61df3a3e3f7277c43bcf24eab62ffdae65a2353e50c472db825dd6"
+  },
+  "backup": {
+    "path": "/opt/code-review/backups/code_review_20261013T150837Z_6534493efbf7.sql.gz",
+    "bytes": 831479698,
+    "sha256": "2da025a44b4f387b29e11494a02e9af635a169aa5f12dc6b6177b4ba5b962374",
+    "gzip_integrity": {
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "sidecar_sha256": "2da025a44b4f387b29e11494a02e9af635a169aa5f12dc6b6177b4ba5b962374",
+    "metadata": {
+      "created_at_utc": "20261013T150837Z",
+      "reason": "pre_deploy",
+      "git_sha": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+      "alembic_revision": "063_agent_browser_actions",
+      "table_count": "105",
+      "sha256": "2da025a44b4f387b29e11494a02e9af635a169aa5f12dc6b6177b4ba5b962374",
+      "file": "code_review_20261013T150837Z_6534493efbf7.sql.gz"
+    }
+  },
+  "deploy_log_excerpt": [
+    "[2026-10-13T15:08:19Z] INFO  发布预检通过(target=all, version=4.0.100, sha=6534493efbf7ec6eb0365b28019602cf8abd92d8)",
+    "[2026-10-13T15:11:48Z] INFO  在独立容器 cr_testdb 创建隔离恢复库: prism_verify_20261013151147_26335",
+    "[2026-10-13T15:14:18Z] INFO  独立恢复验证通过(container=cr_testdb, tables=105, alembic=063_agent_browser_actions)",
+    "[2026-10-13T15:14:18Z] INFO  发布前备份已完成",
+    "[2026-10-13T15:14:27Z] INFO  Alembic 已位于 head=063_agent_browser_actions",
+    "[2026-10-13T15:17:41Z] INFO  发布完成(target=all, sha=6534493efbf7ec6eb0365b28019602cf8abd92d8, alembic=063_agent_browser_actions)"
+  ],
+  "restore_cleanup": {
+    "exit_code": 0,
+    "stdout": "0",
+    "stderr": ""
+  },
+  "anonymous_http_samples": [
+    {
+      "status": 404,
+      "content_type": "application/json",
+      "bytes": 22,
+      "sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "round": 1,
+      "case": "unknown_api",
+      "route": "/api/independent-v4100-unknown-route",
+      "expected_status": 404,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 405,
+      "content_type": "application/json",
+      "bytes": 31,
+      "sha256": "83c09ba9a8daedb136f90b17a294caa90ad471a016e430df6e229acb5a81e100",
+      "round": 1,
+      "case": "wrong_method",
+      "route": "/api/auth/login",
+      "expected_status": 405,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 401,
+      "content_type": "application/json",
+      "bytes": 145,
+      "sha256": "9cc86bee62dda98cdc86de6a8916fcf612cf2ff859cd9c4ce6fa85506cdee0ca",
+      "round": 1,
+      "case": "browser_pending_requires_login",
+      "route": "/api/agent-browser/pending?run_id=987654321&surface=user",
+      "expected_status": 401,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 404,
+      "content_type": "application/json",
+      "bytes": 22,
+      "sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "round": 2,
+      "case": "unknown_api",
+      "route": "/api/independent-v4100-unknown-route",
+      "expected_status": 404,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 405,
+      "content_type": "application/json",
+      "bytes": 31,
+      "sha256": "83c09ba9a8daedb136f90b17a294caa90ad471a016e430df6e229acb5a81e100",
+      "round": 2,
+      "case": "wrong_method",
+      "route": "/api/auth/login",
+      "expected_status": 405,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 401,
+      "content_type": "application/json",
+      "bytes": 145,
+      "sha256": "c22244373c32d658312c471b63f71a287d6a62030b34ea8e26ffbe63987e1793",
+      "round": 2,
+      "case": "browser_pending_requires_login",
+      "route": "/api/agent-browser/pending?run_id=987654321&surface=user",
+      "expected_status": 401,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 404,
+      "content_type": "application/json",
+      "bytes": 22,
+      "sha256": "37ec4665a8102d115ffd1ac20dae94c98b4dac64b0c1a68228aa2a531caeb35d",
+      "round": 3,
+      "case": "unknown_api",
+      "route": "/api/independent-v4100-unknown-route",
+      "expected_status": 404,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 405,
+      "content_type": "application/json",
+      "bytes": 31,
+      "sha256": "83c09ba9a8daedb136f90b17a294caa90ad471a016e430df6e229acb5a81e100",
+      "round": 3,
+      "case": "wrong_method",
+      "route": "/api/auth/login",
+      "expected_status": 405,
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "status": 401,
+      "content_type": "application/json",
+      "bytes": 145,
+      "sha256": "83d368365c8dd75c2585ee4ccaebee6048683f81d119850cc2c4bc9f5d2068f6",
+      "round": 3,
+      "case": "browser_pending_requires_login",
+      "route": "/api/agent-browser/pending?run_id=987654321&surface=user",
+      "expected_status": 401,
+      "json_valid": true,
+      "passed": true
+    }
+  ],
+  "capacity": "Filesystem        1B-blocks         Used   Available Use% Mounted on\n/dev/vda1      193205350400 170811006976 22394343424  89% /",
+  "remaining_gates": [
+    "Authenticated roles, new business writes/readback, persistence and ordinary Safari GUI remain parent-agent acceptance; no Luna production clicking performed."
+  ],
+  "secrets": "none_recorded",
+  "independent_checks": {
+    "release_git": true,
+    "ledger_sha": true,
+    "ledger_version": true,
+    "backend_env": true,
+    "image_ids": true,
+    "image_tags": true,
+    "compose_path": true,
+    "alembic": true,
+    "health_ready": true,
+    "served_build_info": true,
+    "nginx_test": true,
+    "template_matches": true,
+    "bundle": true,
+    "backup": true,
+    "restore_cleanup": true,
+    "anonymous_samples": true
+  },
+  "release_foundation_passed": true,
+  "overall_business_acceptance": "not_assessed_by_this_subagent"
+}

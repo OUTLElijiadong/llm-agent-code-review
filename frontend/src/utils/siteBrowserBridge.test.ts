@@ -125,6 +125,14 @@ describe('controlled site browser bridge', () => {
     expect(labels).not.toContain('后插入但被遮挡的旧窗口')
     expect(labels).not.toContain('发布帖子')
   })
+  it('observes the roundtable business modal rather than the obscured page behind it', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<div class="discuss-overlay" style="z-index:3000"><div class="discuss-room" role="dialog" aria-modal="true" aria-label="Agent 圆桌讨论"><button aria-label="关闭讨论">关闭</button><label for="followup">圆桌追问</label><textarea id="followup"></textarea></div></div>')
+    await bridge().handle(request(1, 'inspect'))
+    const observation = ack.mock.calls[0]![1].observation
+    expect(observation.controls.map(control => control.label)).toEqual(['关闭讨论', '圆桌追问'])
+    expect(observation.controls.some(control => control.label === '发布帖子')).toBe(false)
+    expect(observation.messages).not.toContain('保存成功')
+  })
   it('recovers queued actions but never replays executing descriptors or obsolete account requests', async () => {
     const agent = bridge(); pending.mockResolvedValueOnce({ actions: [request(1, 'inspect'), { action_id: 2, status: 'executing' }] })
     await agent.recover(); expect(claim).toHaveBeenCalledTimes(1)

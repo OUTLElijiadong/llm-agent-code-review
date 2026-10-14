@@ -86,6 +86,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
     failed = []
     bounded_tasks = []
     coverage_summary = []
+    business_results = {}
     for task_key, entry in sorted(dependencies.items()):
         entry = entry if isinstance(entry, dict) else {}
         result = entry.get("result")
@@ -95,6 +96,25 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         complete = status == "completed" and result_status == "completed"
         if not complete:
             failed.append(task_key)
+        receipts = result.get("result_receipts") or [result.get("result_receipt")]
+        for receipt in receipts if isinstance(receipts, list) else []:
+            if not isinstance(receipt, dict) or not isinstance(receipt.get("output"), dict):
+                continue
+            from app.services.agent_responses_service import redact_agent_model_context_value
+
+            output = receipt["output"]
+            capability = str(output.get("capability") or "")
+            data = redact_agent_model_context_value(output.get("data"))
+            readback = receipt.get("readback")
+            scope = receipt.get("verification_scope") or (
+                "same_query_readback" if isinstance(readback, dict) and capability == readback.get("capability")
+                else "same_target_readback" if isinstance(readback, dict) else "execution_receipt_only"
+            )
+            key = (capability, receipt.get("request_id") or str(data))
+            candidate = {"source_task": task_key, "capability": capability,
+                         "data": data, "verification_scope": scope, "completed": complete}
+            if key not in business_results or scope != "execution_receipt_only":
+                business_results[key] = candidate
         outcomes.append({
             "task_key": task_key, "status": status, "result_status": result_status,
             "summary": str(result.get("summary") or "缺少结果说明"),
@@ -163,6 +183,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "findings": list(findings.values()),
         "references": list(references.values()),
         "coverage_summary": coverage_summary,
+        "business_results": list(business_results.values()),
         "scope": "仅核对依赖节点返回的证据；问题数为已返回条目的精确去重，不代表全项目漏洞总数或实测确认数。",
     }
     # 依赖节点若明确只返回了预览，团队不能把“节点完成”冒充为完整覆盖。
@@ -174,6 +195,7 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "status": "completed" if complete else "failed",
         # 公开团队结果会再次脱敏，关键结论保持浅层；详细聚合仍保留在原始产物。
         "unique_finding_count": len(findings),
+        "business_results": list(business_results.values()),
         "findings": [{**item, "source_task_keys": ",".join(item["source_tasks"])}
                      for item in list(findings.values())[:20]],
         "findings_preview_truncated": len(findings) > 20,
@@ -183,7 +205,9 @@ def summarize_dependencies(dependencies: dict[str, Any]) -> dict[str, Any]:
         "bounded_finding_tasks": bounded_tasks,
         "scope": summary["scope"],
         "summary": (
-            f"已核对 {len(outcomes)} 个子任务的终态与证据，汇总保留问题 {len(findings)} 条；"
+            f"已核对 {len(outcomes)} 个子任务的终态与证据，"
+            + (f"保留业务结果 {len(business_results)} 组；" if business_results else
+               f"汇总保留问题 {len(findings)} 条；") +
             f"实测范围见各项证据。{bounded_note}"
             if complete else (
                 f"团队结果未完整覆盖；待处理节点：{', '.join(failed) or '无'}。"

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div class="discuss-overlay">
-      <div class="discuss-room">
+      <div class="discuss-room" role="dialog" aria-modal="true" aria-label="Agent 圆桌讨论">
         <!-- 顶部 -->
         <header class="room-header">
           <div class="header-main">

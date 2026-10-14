@@ -1,0 +1,533 @@
+{
+  "time_utc": "2026-10-13T15:42:38.203413+00:00",
+  "release_sha": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+  "scope": "Production HTTP role read/deny matrix and existing chat session isolation; no business records created.",
+  "cases": [
+    {
+      "role": "anonymous",
+      "case": "browser pending requires login",
+      "http": 401,
+      "expected": [
+        401
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "anonymous",
+      "case": "claim requires login",
+      "http": 401,
+      "expected": [
+        401
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "users admin boundary",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "security center boundary",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser user unknown run defensive response round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser admin surface boundary round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "unknown claim does not disclose action round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser user unknown run defensive response round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser admin surface boundary round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "unknown claim does not disclose action round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser user unknown run defensive response round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "browser admin surface boundary round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "admin",
+      "case": "unknown claim does not disclose action round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "users admin boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "security center boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser user unknown run defensive response round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser admin surface boundary round 1",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "unknown claim does not disclose action round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser user unknown run defensive response round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser admin surface boundary round 2",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "unknown claim does not disclose action round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser user unknown run defensive response round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "browser admin surface boundary round 3",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "reviewer",
+      "case": "unknown claim does not disclose action round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "current account",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "forum list",
+      "http": 200,
+      "expected": [
+        200
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "users admin boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "security center boundary",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser user unknown run defensive response round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser admin surface boundary round 1",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "unknown claim does not disclose action round 1",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser user unknown run defensive response round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser admin surface boundary round 2",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "unknown claim does not disclose action round 2",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser user unknown run defensive response round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "browser admin surface boundary round 3",
+      "http": 403,
+      "expected": [
+        403
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    },
+    {
+      "role": "user",
+      "case": "unknown claim does not disclose action round 3",
+      "http": 404,
+      "expected": [
+        404
+      ],
+      "content_type": "application/json",
+      "json_valid": true,
+      "passed": true
+    }
+  ],
+  "chat_isolation": [
+    {
+      "owner_role": "admin",
+      "requester_role": "admin",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 2,
+      "passed": true
+    },
+    {
+      "owner_role": "admin",
+      "requester_role": "reviewer",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "admin",
+      "requester_role": "user",
+      "session_sha256": "156d1fed79298674963498793715c08043f0b775aa3e787252ac1efcbca131c4",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "admin",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "reviewer",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 3,
+      "passed": true
+    },
+    {
+      "owner_role": "reviewer",
+      "requester_role": "user",
+      "session_sha256": "b6124901dfd70ae0377d970d397c4c98ec041ac4e245987175110ed89b7e5a85",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "admin",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "reviewer",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 0,
+      "passed": true
+    },
+    {
+      "owner_role": "user",
+      "requester_role": "user",
+      "session_sha256": "6b07c8a605218dc4628f3e37d7cca7389e5de39b8b5164d4c7cdeed4dcf8e34c",
+      "http": 200,
+      "message_count": 3,
+      "passed": true
+    }
+  ],
+  "passed": true
+}
