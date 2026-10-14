@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
-from sqlalchemy import inspect, or_, tuple_, update
+from sqlalchemy import func, inspect, or_, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -506,7 +506,7 @@ def _authoritative_run_state(
     这里读取最新运行记录,避免陈旧快照把已完成会话误判为运行中/等待输入。
     """
     row = (
-        db.query(AgentResponseRun)
+        db.query(AgentResponseRun.run_id, AgentResponseRun.status)
         .filter(
             AgentResponseRun.user_id == int(user_id),
             AgentResponseRun.surface == surface,
@@ -526,16 +526,26 @@ def _latest_run_states(
     user_id: int,
     conversation_refs: list[tuple[str, str]],
 ) -> dict[tuple[str, str], tuple[str, str]]:
-    """一次查询同账号多个会话的最新 Responses 运行，避免列表 N+1。"""
+    """只读同账号每个会话最新运行的状态列，避免列表 N+1 与历史检查点物化。"""
     refs = {(str(surface), str(session_key)) for surface, session_key in conversation_refs}
     if not refs:
         return {}
-    rows = (
-        db.query(AgentResponseRun)
+    latest_ids = (
+        db.query(func.max(AgentResponseRun.id).label("latest_id"))
         .filter(
             AgentResponseRun.user_id == int(user_id),
             tuple_(AgentResponseRun.surface, AgentResponseRun.session_key).in_(sorted(refs)),
         )
+        .group_by(AgentResponseRun.surface, AgentResponseRun.session_key)
+        .subquery()
+    )
+    rows = (
+        db.query(
+            AgentResponseRun.surface, AgentResponseRun.session_key,
+            AgentResponseRun.run_id, AgentResponseRun.status,
+        )
+        .join(latest_ids, AgentResponseRun.id == latest_ids.c.latest_id)
+        .filter(AgentResponseRun.user_id == int(user_id))
         .order_by(AgentResponseRun.id.desc())
         .all()
     )
@@ -889,7 +899,8 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 "operation": ["execute_capability", "verify_results"],
                 "execute_capability": {"required": ["scope", "capability", "params"], "scope": ["user", "admin"],
                                        "execution": "trusted_team_lease_only", "mutation_max_attempts": 1},
-                "verify_results": {"depends_on": "site_execution_nodes", "execution": "persisted_receipt_readback_only"},
+                "verify_results": {"depends_on": "site_execution_nodes",
+                                   "execution": "persisted_receipt_readback_only"},
             }
         if code == "operations":
             from app.services.ops_service import TEAM_READ_ONLY_ACTIONS

@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
 
 const streams = vi.hoisted(() => ({
   start: vi.fn(),
@@ -145,6 +146,120 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+describe('团队轮询复核', () => {
+  const terminalStatuses: AgentTeamStatus[] = ['completed', 'failed', 'cancelled', 'expired']
+  function fixture(teamId: number, status: AgentTeamStatus): AgentTeamDetail {
+    return {
+      team_id: teamId, title: `持久团队 ${teamId}`, surface: 'admin', session_id: 'admin-test',
+      status, max_active_children: 3, trace_id: `trace-${teamId}`,
+      updated_at: '2026-10-14T05:00:00Z',
+      counts: { total: 1, completed: status === 'completed' ? 1 : 0, running: 0, queued: 0, failed: status === 'failed' ? 1 : 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    }
+  }
+
+  it.each([1, 2, 3])('第 %i 轮：16 个已终态管理团队恢复后不再周期拉完整详情', async () => {
+    vi.useFakeTimers()
+    const teams = Array.from({ length: 16 }, (_, index) => fixture(index + 1, terminalStatuses[index % 4]))
+    teamApi.list.mockResolvedValue({ items: teams, total: teams.length })
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    const wrapper = mountCopilot()
+    try {
+      await openCopilot(wrapper)
+      await vi.advanceTimersByTimeAsync(0)
+      await flushPromises()
+      expect((wrapper.vm as any).agentTeams).toHaveLength(16)
+      expect(teamApi.detail).toHaveBeenCalledTimes(16)
+      teamApi.detail.mockClear()
+      await vi.advanceTimersByTimeAsync(9000)
+      expect(teamApi.list.mock.calls.length).toBeGreaterThan(1)
+      expect(teamApi.detail).not.toHaveBeenCalled()
+      expect((wrapper.vm as any).agentTeams).toHaveLength(16)
+      expect(teamApi.events).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('活动状态、首次读取失败与终态转换仍同步，稳定终态结果复用', async () => {
+    let teams = terminalStatuses.map((status, index) => fixture(index + 1, status))
+    teamApi.list.mockImplementation(() => Promise.resolve({ items: teams, total: teams.length }))
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    const wrapper = mountCopilot()
+    try {
+      const vm = wrapper.vm as any
+      vm.sessionId = 'admin-test'
+      await vm.refreshAgentTeam()
+      teams = [...teams, fixture(5, 'completed'), fixture(6, 'running'), fixture(7, 'verifying'), fixture(8, 'queued'), fixture(9, 'draft')]
+      teamApi.detail.mockImplementation((id: number) => id === 5
+        ? Promise.reject(new Error('temporary detail outage'))
+        : Promise.resolve(teams.find(team => team.team_id === id)))
+      await vm.refreshAgentTeam()
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([5, 6, 7, 8, 9])
+      expect(vm.agentTeams.map((team: AgentTeamDetail) => team.team_id)).toEqual([1, 2, 3, 4, 6, 7, 8, 9])
+      teams[5] = fixture(6, 'failed')
+      teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+      await vm.refreshAgentTeam()
+      expect(vm.agentTeams.find((team: AgentTeamDetail) => team.team_id === 6).status).toBe('failed')
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([7, 8, 9])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('终态团队被重试及版本更新后重新拉取，未变版本不会重复读取', async () => {
+    let team = fixture(51, 'completed')
+    teamApi.list.mockImplementation(() => Promise.resolve({ items: [team], total: 1 }))
+    teamApi.detail.mockImplementation(() => Promise.resolve(team))
+    const wrapper = mountCopilot()
+    try {
+      const vm = wrapper.vm as any
+      vm.sessionId = 'admin-test'
+      await vm.refreshAgentTeam()
+      teamApi.detail.mockClear()
+      team = { ...team, updated_at: '2026-10-14T05:01:00Z', summary: { evidence: '更新的管理结果' } }
+      await vm.refreshAgentTeam()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail).toHaveBeenCalledTimes(1)
+      expect(vm.agentTeams[0].summary.evidence).toBe('更新的管理结果')
+      team = { ...team, status: 'queued' }
+      await vm.refreshAgentTeam()
+      expect(vm.agentTeams[0].status).toBe('queued')
+      expect(vm.activeThinkingTeamIds).toEqual([51])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('打开终态管理团队侧面板仍取详情，后台轮询不拉其他终态', async () => {
+    const teams = [fixture(61, 'completed'), fixture(62, 'failed')]
+    teamApi.list.mockResolvedValue({ items: teams, total: teams.length })
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    const wrapper = mountCopilot()
+    try {
+      await openCopilot(wrapper)
+      const vm = wrapper.vm as any
+      teamApi.detail.mockClear()
+      vm.openTeamPanel(61)
+      await flushPromises()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([61])
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([61])
+      vm.selectedTeamId = null
+      await flushPromises()
+      vm.openTeamPanel(61)
+      await flushPromises()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([61, 61])
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })
 
 it('管理端按游标加载更早消息，不把当前页误当全部历史', async () => {

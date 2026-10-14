@@ -1,0 +1,54 @@
+captured_at=2026-10-14T05:13:35Z
+db_name	observed_utc
+code_review	2026-10-14 05:13:35
+table_name	row_count	checkpoint_total_bytes	checkpoint_max_bytes
+agent_response_run	1222	188204325	2094272
+id	status	create_time	update_time	checkpoint_bytes	agent_team_id	agent_team_task_id
+919	completed	2026-09-30 10:50:02	2026-09-30 10:51:22	2094272	NULL	NULL
+918	completed	2026-09-30 10:48:39	2026-09-30 10:49:14	2023444	NULL	NULL
+114	failed	2026-08-06 01:49:02	2026-08-15 03:55:14	1193896	NULL	NULL
+570	completed	2026-08-19 08:36:50	2026-08-19 08:38:48	903434	NULL	NULL
+899	completed	2026-09-28 06:08:31	2026-09-28 06:09:21	842831	76	234
+table_name	row_count	result_total_bytes	result_max_bytes	input_total_bytes	input_max_bytes	errors_total_bytes	errors_max_bytes
+agent_team_task	648	6132682	102625	254875	47348	9746	760
+id	team_id	status	create_time	update_time	result_bytes	input_bytes	errors_bytes
+239	77	failed	2026-09-30 10:51:12	2026-09-30 10:58:49	102625	1648	262
+220	71	completed	2026-09-27 14:08:40	2026-09-27 14:13:28	89492	163	2
+237	77	dead_letter	2026-09-30 10:51:12	2026-09-30 10:58:48	122	47348	132
+219	71	dead_letter	2026-09-27 14:08:40	2026-09-27 14:14:38	106	46234	116
+238	77	completed	2026-09-30 10:51:12	2026-09-30 10:55:05	33874	151	2
+table_name	row_count	prompt_total_bytes	prompt_max_bytes	response_total_bytes	response_max_bytes
+ai_call_log	14036	269365566	251251	129607198	227980
+id	status	create_time	agent_team_id	agent_team_task_id	prompt_bytes	response_bytes
+10486	success	2026-09-27 14:17:20	71	219	173500	227980
+10501	success	2026-09-27 14:20:11	71	219	175205	184444
+10732	success	2026-09-30 08:37:53	72	222	226730	130343
+10737	success	2026-09-30 10:51:11	NULL	NULL	223895	124373
+10521	success	2026-09-27 14:23:02	72	224	208213	118924
+table_name	row_count	message_total_bytes	message_max_bytes
+agent_response_transcript_message	3962	15023641	50520
+user_id	surface	session_key_sha256	run_count	checkpoint_bytes
+5	user	9b8e0b061fcc4ad4c6fa96604ee0c412225cd346da7207c2e3d3d32ba1999859	312	37755507
+5	user	0959139c6618c1991b98a0b25cac893f3abfadd76352a620bd7383380b45394c	17	9205570
+1	admin	92fbaa77003127558781186de6222b09876b7d0ec8ee9f8985a0ff9ef36c048f	25	3493264
+1	admin	55129845e5c0e708b00c7ef78c7d6aa8d9ac0aefcd9d89628b7f881ae115e668	22	3268325
+1	admin	464d18ce4e7c739fb6cdb2161d9a986f548a95828241d96f6db8d25977fd554a	21	2877873
+status	run_count	checkpoint_bytes
+completed	862	150393010
+failed	327	33583013
+cancelled	26	2736417
+max_rounds_exceeded	1	653791
+waiting_input	4	530438
+waiting_approval	2	307656
+id	action	status	started_at	finished_at	create_time	update_time	result_bytes	error_bytes
+172713	status	failed	2026-10-14 04:45:33	2026-10-14 04:46:03	2026-10-14 04:45:33	2026-10-14 04:46:03	1914	94
+172714	ssh_login_events	success	2026-10-14 04:45:33	2026-10-14 04:45:39	2026-10-14 04:45:33	2026-10-14 04:45:39	15348	NULL
+172715	nginx_attack_events	success	2026-10-14 04:45:39	2026-10-14 04:45:39	2026-10-14 04:45:39	2026-10-14 04:45:39	2145	NULL
+172716	backup_audit	success	2026-10-14 04:45:39	2026-10-14 04:45:39	2026-10-14 04:45:39	2026-10-14 04:45:40	16238	NULL
+172717	db_health	success	2026-10-14 04:45:40	2026-10-14 04:45:41	2026-10-14 04:45:40	2026-10-14 04:45:41	457	NULL
+172718	db_threat_signals	success	2026-10-14 04:45:41	2026-10-14 04:46:01	2026-10-14 04:45:41	2026-10-14 04:46:01	350	NULL
+172719	status	failed	2026-10-14 04:46:01	2026-10-14 04:46:26	2026-10-14 04:46:01	2026-10-14 04:46:26	1914	94
+172720	certificate_status	success	2026-10-14 04:46:03	2026-10-14 04:46:04	2026-10-14 04:46:03	2026-10-14 04:46:04	248	NULL
+172721	security_block_status	success	2026-10-14 04:46:26	2026-10-14 04:46:30	2026-10-14 04:46:26	2026-10-14 04:46:30	2535	NULL
+172722	security_block_reconcile	success	2026-10-14 04:46:30	2026-10-14 04:46:41	2026-10-14 04:46:30	2026-10-14 04:46:41	2538	NULL
+172723	security_block_candidates	success	2026-10-14 04:46:41	2026-10-14 04:47:08	2026-10-14 04:46:41	2026-10-14 04:47:08	2557	NULL

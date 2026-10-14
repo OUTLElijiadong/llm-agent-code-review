@@ -1,0 +1,110 @@
+{
+  "scope": "v4.0.100 current container after rollback; candidate container removed",
+  "event_timestamps": {
+    "Started server process": [
+      "2026-10-14T04:39:03.554326086Z",
+      "2026-10-14T04:40:32.713469420Z"
+    ],
+    "mesh_dispatcher": [
+      "2026-10-14T04:39:03.790955754Z",
+      "2026-10-14T04:40:32.950902426Z"
+    ],
+    "agent_team_dispatcher": [
+      "2026-10-14T04:39:03.791729717Z",
+      "2026-10-14T04:40:32.951672869Z"
+    ],
+    "agent_scheduler_runtime": [
+      "2026-10-14T04:39:03.971793896Z",
+      "2026-10-14T04:39:34.094108495Z",
+      "2026-10-14T04:40:04.079849219Z",
+      "2026-10-14T04:40:33.132292844Z",
+      "2026-10-14T04:41:03.263250432Z",
+      "2026-10-14T04:41:33.195158009Z"
+    ],
+    "jarvis_patrol": [
+      "2026-10-14T04:39:03.972922894Z",
+      "2026-10-14T04:40:33.133284546Z"
+    ],
+    "Application startup": [
+      "2026-10-14T04:39:04.310796568Z",
+      "2026-10-14T04:40:33.476474228Z"
+    ]
+  },
+  "routes": {
+    "GET /api/admin/security-center/overview": {
+      "count": 3,
+      "first_utc": "2026-10-14T04:40:08.995701605Z",
+      "last_utc": "2026-10-14T04:40:19.683151170Z"
+    },
+    "GET /api/agent-browser/pending": {
+      "count": 19,
+      "first_utc": "2026-10-14T04:40:06.292742546Z",
+      "last_utc": "2026-10-14T04:40:21.877360178Z"
+    },
+    "GET /api/agent-responses/session": {
+      "count": 14,
+      "first_utc": "2026-10-14T04:39:07.837267674Z",
+      "last_utc": "2026-10-14T04:40:18.104411802Z"
+    },
+    "GET /api/agent-teams": {
+      "count": 13,
+      "first_utc": "2026-10-14T04:39:08.178926952Z",
+      "last_utc": "2026-10-14T04:40:14.251709147Z"
+    },
+    "GET /api/agent-teams/{id}": {
+      "count": 260,
+      "first_utc": "2026-10-14T04:39:08.787871071Z",
+      "last_utc": "2026-10-14T04:40:15.030877444Z"
+    },
+    "GET /api/auth/me": {
+      "count": 3,
+      "first_utc": "2026-10-14T04:40:07.482465282Z",
+      "last_utc": "2026-10-14T04:40:18.328166395Z"
+    },
+    "GET /api/discuss/sessions": {
+      "count": 3,
+      "first_utc": "2026-10-14T04:39:09.560002907Z",
+      "last_utc": "2026-10-14T04:40:08.425026938Z"
+    },
+    "GET /api/forum/posts": {
+      "count": 9,
+      "first_utc": "2026-10-14T04:40:07.782733572Z",
+      "last_utc": "2026-10-14T04:40:19.155045257Z"
+    },
+    "GET /api/users": {
+      "count": 3,
+      "first_utc": "2026-10-14T04:40:08.658507283Z",
+      "last_utc": "2026-10-14T04:40:19.416714294Z"
+    },
+    "GET /healthz": {
+      "count": 20,
+      "first_utc": "2026-10-14T04:39:09.586366831Z",
+      "last_utc": "2026-10-14T04:41:59.680190597Z"
+    },
+    "GET /readyz": {
+      "count": 2,
+      "first_utc": "2026-10-14T04:39:17.612107591Z",
+      "last_utc": "2026-10-14T04:39:17.779337643Z"
+    },
+    "POST /api/agent-browser/actions/{id}/claim": {
+      "count": 10,
+      "first_utc": "2026-10-14T04:40:06.562009636Z",
+      "last_utc": "2026-10-14T04:40:22.171946410Z"
+    },
+    "POST /api/agent-mesh/conversations/heartbeat": {
+      "count": 90,
+      "first_utc": "2026-10-14T04:39:07.053575205Z",
+      "last_utc": "2026-10-14T04:40:17.796795748Z"
+    },
+    "POST /api/agent-mesh/inbox/pull": {
+      "count": 67,
+      "first_utc": "2026-10-14T04:39:09.776179243Z",
+      "last_utc": "2026-10-14T04:40:18.133155021Z"
+    },
+    "POST /api/auth/login": {
+      "count": 3,
+      "first_utc": "2026-10-14T04:40:07.205586490Z",
+      "last_utc": "2026-10-14T04:40:18.067660918Z"
+    }
+  }
+}

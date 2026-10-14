@@ -1,0 +1,47 @@
+{
+  "scope": "本地候选团队轮询复核，未做生产验收",
+  "observed_at": "2026-10-14T05:26:05.743593+00:00",
+  "red": {
+    "test_files_failed": 2,
+    "tests_failed": 6,
+    "terminal_teams_per_case": 16,
+    "rounds_per_surface": 3,
+    "window_ms": 9000,
+    "additional_detail_requests_per_case": 48,
+    "log": "team-polling-red.log"
+  },
+  "green": {
+    "test_files_passed": 8,
+    "tests_passed": 193,
+    "additional_detail_requests_per_terminal_case": 0,
+    "log": "team-polling-green-full.log"
+  },
+  "checks": {
+    "vue_tsc_exit_code": 0,
+    "targeted_eslint_exit_code": 0,
+    "diff_check_exit_code": 0
+  },
+  "source_sha256": {
+    "frontend/src/components/ai/AgentChatDrawer.vue": "d16e237748e556055ba81fba9dbc226846b1e44a0b1166ff19c133d3f19c7826",
+    "frontend/src/components/admin/AdminCopilot.vue": "9d0892981dceeff6d8d721e80ce5c05f39e3c4b9526a075f7c8b6f26ecdafb85",
+    "frontend/src/utils/agentTeamPolling.ts": "585fb82f1bb5d88fee2827d1e2a69ef2b7e03e740c74e696e04ac8bc9aba4b26",
+    "frontend/src/components/ai/AgentChatDrawer.test.ts": "df054a07a62ec3426ea25f27a6bb42fb69a37c5e77bb732e887ebf69fa308f26",
+    "frontend/src/components/admin/AdminCopilot.test.ts": "1e249a693cd45d60803387d30f6b5cd01aef2d135f61636662ef24235281e5c7",
+    "frontend/src/composables/useAgentTeamEvents.test.ts": "4f2ec04642ac687c3fc1da4a37b506b84c603b0709d9154bd54cbe4c14d504a1"
+  },
+  "remaining": "后端团队列表仍使用_team_out构造任务结果；生产OOM因果与部署后行为由主任务核验",
+  "independent": {
+    "test_files_passed": 3,
+    "tests_passed": 25,
+    "tests_skipped_by_filter": 100,
+    "log": "team-polling-independent.txt",
+    "sha256": "e60bd55e50849a4c2b42e9c2d366aef014d777c3e82cd6dd0f69aef087796385",
+    "finding": "未发现本次修复的已确认缺陷，仅本地自动化证据"
+  },
+  "task_result_fixture": {
+    "characters": 100006,
+    "utf8_bytes": 100018,
+    "tail_marker": "结果末尾核验",
+    "exact_equality": true
+  }
+}

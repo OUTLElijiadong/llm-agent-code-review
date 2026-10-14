@@ -1,0 +1,8 @@
+{
+  "status": "not_released_first_attempt_rolled_back",
+  "candidate_sha": "c1066983b0abf9badea6fcd43d34e05fa94c8466",
+  "running_version": "4.0.100",
+  "running_sha": "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+  "reason": "post_release_ops_check failed; original blocking_checks unavailable",
+  "evidence": "deploy-v4101-attempt1.txt"
+}

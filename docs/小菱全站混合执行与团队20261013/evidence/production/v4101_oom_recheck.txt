@@ -1,0 +1,44 @@
+captured_at=2026-10-14T05:12:49Z
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: uvicorn invoked oom-killer: gfp_mask=0x8cc0(GFP_KERNEL|__GFP_NOFAIL), order=0, oom_score_adj=0
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: CPU: 2 PID: 3743096 Comm: uvicorn Kdump: loaded Not tainted 6.6.117-45.oc9.x86_64 #1
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: memory: usage 786432kB, limit 786432kB, failcnt 84024
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: Tasks state (memory values in pages):
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: [  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: [3742915] 10001 3742915   790325   195244  2547712    57376             0 uvicorn
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: [3744466] 10001 3744466   402321     2904   167936        0             0 runc:[2:INIT]
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-82b8c87eaa7730d599a29460a121031709441e0df2990e94227e1ddd949db0df.scope,mems_allowed=0,oom_memcg=/system.slice/docker-82b8c87eaa7730d599a29460a121031709441e0df2990e94227e1ddd949db0df.scope,task_memcg=/system.slice/docker-82b8c87eaa7730d599a29460a121031709441e0df2990e94227e1ddd949db0df.scope,task=uvicorn,pid=3742915,uid=10001
+2026-10-14T04:34:59+00:00 VM-0-16-opencloudos kernel: Memory cgroup out of memory: Killed process 3742915 (uvicorn) total-vm:3161300kB, anon-rss:774836kB, file-rss:6140kB, shmem-rss:0kB, UID:10001 pgtables:2488kB oom_score_adj:0
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: uvicorn invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=0
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: CPU: 3 PID: 3745693 Comm: uvicorn Kdump: loaded Not tainted 6.6.117-45.oc9.x86_64 #1
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: memory: usage 786432kB, limit 786432kB, failcnt 75461
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: Tasks state (memory values in pages):
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: [  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: [3744860] 10001 3744860   790408   199099  2531328    54976             0 uvicorn
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: [3746737]     0 3746737   402090     2482   147456        0             0 runc:[2:INIT]
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,mems_allowed=0,oom_memcg=/system.slice/docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,task_memcg=/system.slice/docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,task=uvicorn,pid=3744860,uid=10001
+2026-10-14T04:36:23+00:00 VM-0-16-opencloudos kernel: Memory cgroup out of memory: Killed process 3744860 (uvicorn) total-vm:3161632kB, anon-rss:777964kB, file-rss:18432kB, shmem-rss:0kB, UID:10001 pgtables:2472kB oom_score_adj:0
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: runc:[2:INIT] invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=0
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: CPU: 0 PID: 3752133 Comm: runc:[2:INIT] Kdump: loaded Not tainted 6.6.117-45.oc9.x86_64 #1
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: memory: usage 786432kB, limit 786432kB, failcnt 115575
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: Tasks state (memory values in pages):
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: [  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: [3746831] 10001 3746831   757612   194803  2396160    15633             0 uvicorn
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: [3751799] 10001 3751799     2733      690    57344        0             0 alembic
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: [3752133] 10001 3752133   402352     2912   176128        0             0 runc:[2:INIT]
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,mems_allowed=0,oom_memcg=/system.slice/docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,task_memcg=/system.slice/docker-a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9.scope,task=uvicorn,pid=3746831,uid=10001
+2026-10-14T04:38:47+00:00 VM-0-16-opencloudos kernel: Memory cgroup out of memory: Killed process 3746831 (uvicorn) total-vm:3030448kB, anon-rss:776884kB, file-rss:2328kB, shmem-rss:0kB, UID:10001 pgtables:2340kB oom_score_adj:0
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: python invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=0
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: CPU: 3 PID: 3755867 Comm: python Kdump: loaded Not tainted 6.6.117-45.oc9.x86_64 #1
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: memory: usage 786432kB, limit 786432kB, failcnt 38559
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: Tasks state (memory values in pages):
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: [  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: [3753284] 10001 3753284   757597   199229  2449408    17056             0 uvicorn
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: [3755867] 10001 3755867     8411     6766   110592        0             0 python
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-9484da60bf8466aea7002a3977862384e7619b9a781e00b22aeff230160659b4.scope,mems_allowed=0,oom_memcg=/system.slice/docker-9484da60bf8466aea7002a3977862384e7619b9a781e00b22aeff230160659b4.scope,task_memcg=/system.slice/docker-9484da60bf8466aea7002a3977862384e7619b9a781e00b22aeff230160659b4.scope,task=uvicorn,pid=3753284,uid=10001
+2026-10-14T04:40:27+00:00 VM-0-16-opencloudos kernel: Memory cgroup out of memory: Killed process 3753284 (uvicorn) total-vm:3030388kB, anon-rss:764956kB, file-rss:31960kB, shmem-rss:0kB, UID:10001 pgtables:2392kB oom_score_adj:0
+2026-10-14T04:38:48+00:00 VM-0-16-opencloudos dockerd[1484]: time="2026-10-14T12:38:48.099765935+08:00" level=info msg="ignoring event" container=a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9 module=libcontainerd namespace=moby topic=/tasks/delete type="*events.TaskDelete"
+2026-10-14T04:38:48+00:00 VM-0-16-opencloudos dockerd[1484]: time="2026-10-14T12:38:48.105950317+08:00" level=warning msg="failed to delete process" container=a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9 error="NotFound: container not created: not found" process=85a16f5e428a639e4c561786bab6e984f6abb299dfe6f9e4e882492b167cae25
+2026-10-14T04:38:58+00:00 VM-0-16-opencloudos dockerd[1484]: time="2026-10-14T12:38:58.661290285+08:00" level=info msg="ignoring event" container=a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9 module=libcontainerd namespace=moby topic=/tasks/delete type="*events.TaskDelete"
+2026-10-14T04:38:58+00:00 VM-0-16-opencloudos dockerd[1484]: time="2026-10-14T12:38:58.678803131+08:00" level=warning msg="ShouldRestart failed, container will not be restarted" container=a24048947dddd74a2c6f9debbd4e9957f7f3bf1407a95b612b28dcebcd1e64b9 daemonShuttingDown=false error="restart canceled" execDuration=10.417854405s exitStatus="{0 2026-10-14 04:38:58.634595896 +0000 UTC}" hasBeenManuallyStopped=true restartCount=2
+candidate_container_directory=absent
+/cr_backend 9484da60bf8466aea7002a3977862384e7619b9a781e00b22aeff230160659b4 image=prism-backend:6534493efbf7ec6eb0365b28019602cf8abd92d8 status=running oom=false restart=1 mem_limit=805306368 started=2026-10-14T04:40:28.091357286Z

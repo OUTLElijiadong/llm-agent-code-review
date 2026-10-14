@@ -27,6 +27,7 @@ import {
   type AgentMeshMessage,
 } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
+import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -594,7 +595,11 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       agentTeamError.value = ''
       return
     }
-    const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
+    const cachedById = new Map<number, AgentTeamDetail>(
+      agentTeams.value.map((team) => [team.team_id, team]),
+    )
+    const requested = listed.items.filter((item) => shouldRefreshAgentTeamDetail(item, cachedById.get(item.team_id)))
+    const settled = await Promise.allSettled(requested.map((item) => getAgentTeam(item.team_id)))
     if (!scopeCurrent()) return
     if (!isCurrent()) return
     const details = settled

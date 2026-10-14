@@ -581,7 +581,7 @@ def _public_session_history_messages(db: Session, selected: AgentResponseRun) ->
         if any(item.position != index for index, item in enumerate(ledger)):
             raise ConflictError("会话 transcript 账本不完整，拒绝返回不完整历史", code=40931)
         run_ids = list(dict.fromkeys(item.run_id for item in ledger if item.run_id))
-        runs = db.query(AgentResponseRun).filter(
+        runs = db.query(AgentResponseRun.run_id, AgentResponseRun.mesh_message_id).filter(
             AgentResponseRun.run_id.in_(run_ids),
             AgentResponseRun.user_id == selected.user_id,
             AgentResponseRun.surface == selected.surface,
@@ -673,7 +673,9 @@ def _session_history_page(
 ) -> dict[str, Any]:
     """只传回一个有界页面；游标是完整历史中的零基起点。"""
 
-    selected = db.query(AgentResponseRun).filter(
+    selected = db.query(
+        AgentResponseRun.user_id, AgentResponseRun.surface, AgentResponseRun.session_key,
+    ).filter(
         AgentResponseRun.user_id == user_id,
         AgentResponseRun.surface == surface,
         AgentResponseRun.session_key == session_id,

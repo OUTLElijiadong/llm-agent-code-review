@@ -499,9 +499,24 @@ PY
         assert_not_contains "$docker_log" 'compose build '
         return 0
       fi
+      if [[ "$test_case" == rollback_version ]]; then
+        sed -e "s/^APP_RELEASE=.*/APP_RELEASE=$current_sha/" \
+          -e 's/^APP_VERSION=.*/APP_VERSION=3.8.4/' \
+          -e "s/^BACKEND_RELEASE=.*/BACKEND_RELEASE=$current_sha/" \
+          -e "s/^FRONTEND_RELEASE=.*/FRONTEND_RELEASE=$current_sha/" \
+          "$workspace/deploy/.env" > "$workspace/deploy/new-default.env"
+        mv "$workspace/deploy/new-default.env" "$workspace/deploy/.env"
+      fi
       export APP_VERSION=3.8.4
       ./rollback.sh all --confirm ROLLBACK_APPLICATION > "$output_file" 2>&1
       assert_contains "$workspace/releases/current.env" 'APP_VERSION=3.8.2'
+      if [[ "$test_case" == rollback_version ]]; then
+        assert_contains "$workspace/deploy/.env" "APP_RELEASE=$previous_sha"
+        assert_contains "$workspace/deploy/.env" 'APP_VERSION=3.8.2'
+        assert_contains "$workspace/deploy/.env" "BACKEND_RELEASE=$previous_sha"
+        assert_contains "$workspace/deploy/.env" "FRONTEND_RELEASE=$previous_sha"
+        assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never decoy | release=$previous_sha version=3.8.2"
+      fi
       assert_contains "$docker_log" "compose up -d --no-deps --no-build --pull never backend | release=$previous_sha version=3.8.2"
       assert_not_contains "$docker_log" "backend | release=$previous_sha version=3.8.4" ;;
     rollback_ledger_compatible|rollback_ledger_empty_old|rollback_ledger_written_old|rollback_ledger_reference_without_schema|rollback_ledger_invalid_json|rollback_ledger_probe_failure|rollback_ledger_probe_unknown|rollback_ledger_db_failure|rollback_ledger_schema_unknown|rollback_ledger_legacy|rollback_member_supported|rollback_member_old|rollback_member_unknown|rollback_member_probe_failure)

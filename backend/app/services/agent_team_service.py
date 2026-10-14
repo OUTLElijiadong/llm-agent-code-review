@@ -7,12 +7,13 @@ import json
 import re
 import secrets
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import or_, update
+from sqlalchemy import func, or_, update
 from sqlalchemy.orm import Session
 
 from app.agents.contracts import CONTRACTS
@@ -25,7 +26,7 @@ from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn, TemporaryAgentDefinition
 from app.services import audit_service
-from app.services.agent_team_projection import pointer_child, project_team_result
+from app.services.agent_team_projection import project_team_result
 from app.services.ai_usage_context import current_attribution, model_attribution
 
 
@@ -109,15 +110,19 @@ def _public(value: Any) -> Any:
         return fallback(value)
 
 
-def _task_counts(tasks: list[AgentTeamTask]) -> dict[str, int]:
+def _task_counts_from_status_totals(totals: dict[str, int]) -> dict[str, int]:
     return {
-        "total": len(tasks),
-        "completed": sum(item.status == "completed" for item in tasks),
-        "running": sum(item.status == "running" for item in tasks),
-        "queued": sum(item.status in {"queued", "waiting_dependency"} for item in tasks),
-        "failed": sum(item.status in {"failed", "dead_letter", "expired"} for item in tasks),
-        "blocked": sum(item.status == "blocked" for item in tasks),
+        "total": sum(totals.values()),
+        "completed": totals.get("completed", 0),
+        "running": totals.get("running", 0),
+        "queued": totals.get("queued", 0) + totals.get("waiting_dependency", 0),
+        "failed": sum(totals.get(status, 0) for status in ("failed", "dead_letter", "expired")),
+        "blocked": totals.get("blocked", 0),
     }
+
+
+def _task_counts(tasks: list[AgentTeamTask]) -> dict[str, int]:
+    return _task_counts_from_status_totals(dict(Counter(item.status for item in tasks)))
 
 
 def _validate_safe_input(value: Any, *, key: str = "", depth: int = 0) -> None:
@@ -1331,6 +1336,30 @@ def _team_message_page(
     }
 
 
+def _team_metadata_out(team: Any, counts: dict[str, int]) -> dict[str, Any]:
+    """列表与详情共用的标识、状态、时间和统计，不读取业务 JSON。"""
+    return {
+        "team_id": int(team.id),
+        "user_id": int(team.user_id),
+        "surface": team.surface,
+        "session_id": team.session_key,
+        "title": team.title,
+        "objective": _public(team.objective),
+        "status": team.status,
+        "max_active_children": team.max_active_children,
+        "max_attempts": team.max_attempts,
+        "priority": team.priority,
+        "trace_id": team.trace_id,
+        "deadline_at": team.deadline_at.isoformat() if team.deadline_at else None,
+        "started_at": team.started_at.isoformat() if team.started_at else None,
+        "completed_at": team.completed_at.isoformat() if team.completed_at else None,
+        "created_at": team.create_time.isoformat() if team.create_time else None,
+        "updated_at": team.update_time.isoformat() if team.update_time else None,
+        "archived_at": team.archived_at.isoformat() if team.archived_at else None,
+        "counts": counts,
+    }
+
+
 def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> dict[str, Any]:
     members = (
         db.query(AgentTeamMember).filter(AgentTeamMember.team_id == team.id).order_by(AgentTeamMember.id.asc()).all()
@@ -1351,30 +1380,13 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
                 "tool": "get_agent_team", "team_id": team.id, "task_id": item.id, "result_path": "",
             }} for item in verification]
     output = {
-        "team_id": int(team.id),
-        "user_id": int(team.user_id),
-        "surface": team.surface,
-        "session_id": team.session_key,
-        "title": team.title,
-        "objective": _public(team.objective),
-        "status": team.status,
-        "max_active_children": team.max_active_children,
-        "max_attempts": team.max_attempts,
-        "priority": team.priority,
-        "trace_id": team.trace_id,
-        "deadline_at": team.deadline_at.isoformat() if team.deadline_at else None,
-        "started_at": team.started_at.isoformat() if team.started_at else None,
-        "completed_at": team.completed_at.isoformat() if team.completed_at else None,
+        **_team_metadata_out(team, _task_counts(tasks)),
         "summary": project_team_result(summary, team_id=team.id,
                                        task_id=verification[-1].id if verification else 0, budget=24000),
         "error": _public(_unjson(team.error_json, {})),
-        "created_at": team.create_time.isoformat() if team.create_time else None,
-        "updated_at": team.update_time.isoformat() if team.update_time else None,
-        "archived_at": team.archived_at.isoformat() if team.archived_at else None,
         "members": [_serialize_member(item) for item in members],
         "tasks": [_serialize_task(item, member_key_by_id.get(int(item.member_id), ""),
                                   result_budget=min(16000, max(1600, 24000 // max(1, len(tasks))))) for item in tasks],
-        "counts": _task_counts(tasks),
     }
     if include_events:
         events = (
@@ -1650,7 +1662,12 @@ def list_teams(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    query = db.query(AgentTeam).filter(AgentTeam.user_id == int(user.id))
+    query = db.query(
+        AgentTeam.id, AgentTeam.user_id, AgentTeam.surface, AgentTeam.session_key, AgentTeam.title,
+        AgentTeam.objective, AgentTeam.status, AgentTeam.max_active_children, AgentTeam.max_attempts,
+        AgentTeam.priority, AgentTeam.trace_id, AgentTeam.deadline_at, AgentTeam.started_at,
+        AgentTeam.completed_at, AgentTeam.create_time, AgentTeam.update_time, AgentTeam.archived_at,
+    ).filter(AgentTeam.user_id == int(user.id))
     if not _is_admin(db, user):
         query = query.filter(AgentTeam.surface == "user")
     if surface:
@@ -1662,7 +1679,19 @@ def list_teams(
         query = query.filter(AgentTeam.status == status)
     total = query.count()
     rows = query.order_by(AgentTeam.id.desc()).offset(max(0, offset)).limit(min(max(1, limit), 100)).all()
-    return {"items": [_team_out(db, row) for row in rows], "total": total}
+    status_totals: dict[int, dict[str, int]] = {int(row.id): {} for row in rows}
+    if rows:
+        task_totals = db.query(
+            AgentTeamTask.team_id, AgentTeamTask.status, func.count(AgentTeamTask.id),
+        ).filter(AgentTeamTask.team_id.in_(status_totals)).group_by(
+            AgentTeamTask.team_id, AgentTeamTask.status,
+        ).all()
+        for team_id, task_status, count in task_totals:
+            status_totals[int(team_id)][str(task_status)] = int(count)
+    return {
+        "items": [_team_metadata_out(row, _task_counts_from_status_totals(status_totals[int(row.id)])) for row in rows],
+        "total": total,
+    }
 
 
 def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
@@ -1670,8 +1699,9 @@ def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
 
 
 def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
-                         result_path: str = "", offset: int = 0, limit: int = 20) -> dict[str, Any]:
-    """当前账号原任务结果的 JSON Pointer 分页，不读文件或任意模型指定对象。"""
+                         result_path: str = "", result_indices: Optional[list[int]] = None,
+                         result_part: str = "value", offset: int = 0, limit: int = 20) -> dict[str, Any]:
+    """当前账号原结果分页；索引引用适配长字典键，仍先完整脱敏。"""
     from app.services.agent_responses_service import redact_agent_model_context_value
 
     team = _team_or_raise(db, user, team_id)
@@ -1679,34 +1709,71 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
     if task is None:
         raise AgentTeamNotFoundError("任务不属于当前团队或不存在")
     if (not isinstance(result_path, str) or len(result_path) > 1000
-            or result_path and not result_path.startswith("/") or offset < 0 or not 1 <= limit <= 20):
+            or result_path and not result_path.startswith("/") or offset < 0 or not 1 <= limit <= 20
+            or result_part not in {"key", "value"}
+            or result_indices is not None and (
+                not isinstance(result_indices, list) or len(result_indices) > 32 or result_path
+                or any(type(index) is not int or not 0 <= index <= 2147483647 for index in result_indices))
+            or result_part == "key" and not result_indices):
         raise AgentTeamValidationError("结果路径或分页参数无效")
     value = redact_agent_model_context_value(_unjson(task.result_json, {}))
+    indices: list[int] = []
     try:
         for token in result_path.split("/")[1:] if result_path else []:
             if re.search(r"~(?![01])", token):
                 raise KeyError(token)
             key = token.replace("~1", "/").replace("~0", "~")
             if isinstance(value, dict):
+                indices.append(list(value).index(key))
                 value = value[key]
             elif isinstance(value, list) and key.isdecimal():
+                indices.append(int(key))
                 value = value[int(key)]
             else:
                 raise KeyError(key)
+        for position, index in enumerate(result_indices or []):
+            indices.append(index)
+            if isinstance(value, dict):
+                key = list(value)[index]
+                value = key if result_part == "key" and position == len(result_indices) - 1 else value[key]
+            elif isinstance(value, list) and (result_part == "value" or position < len(result_indices) - 1):
+                value = value[index]
+            else:
+                raise KeyError(index)
+        if len(indices) > 32:
+            raise ValueError("引用深度超限")
     except (KeyError, IndexError, ValueError):
         raise AgentTeamValidationError("结果路径不存在") from None
-    output = {"team_id": int(team.id), "task_id": int(task.id), "result_path": result_path}
+    output = {"team_id": int(team.id), "task_id": int(task.id), "result_path": result_path,
+              "result_indices": indices, "result_part": result_part}
     if isinstance(value, str):
         end = min(len(value), offset + 2000)
         output.update(text=value[offset:end], total=len(value))
     elif isinstance(value, (dict, list)):
         children = list(value.items()) if isinstance(value, dict) else list(enumerate(value))
         end = min(len(children), offset + limit)
-        items = [(key, project_team_result(child, team_id=team.id, task_id=task.id,
-                                           result_path=pointer_child(result_path, key), budget=600))
-                 for key, child in children[offset:end]]
-        output.update(items=dict(items) if isinstance(value, dict) else [child for _, child in items],
-                      total=len(children))
+        items, entries = [], []
+        oversized_keys = any(len(str(key).encode()) > 100 for key, _ in children[offset:end])
+        for index, (key, child) in enumerate(children[offset:end], start=offset):
+            locator = indices + [index]
+            if len(locator) > 32:
+                raise AgentTeamValidationError("结果引用深度超限")
+            projected = project_team_result(child, team_id=team.id, task_id=task.id,
+                                            result_indices=locator, budget=1024)
+            items.append((key, projected))
+            if oversized_keys:
+                entries.append({
+                    "index": index, "key": key if len(str(key).encode()) <= 100 else None,
+                    "key_length": len(str(key)), "value": projected,
+                    "key_reference": {"tool": "get_agent_team", "team_id": int(team.id),
+                                      "task_id": int(task.id), "result_indices": locator,
+                                      "result_part": "key", "offset": 0, "limit": 20},
+                })
+        output["total"] = len(children)
+        if oversized_keys:
+            output.update(entries=entries, container_type="dict")
+        else:
+            output["items"] = dict(items) if isinstance(value, dict) else [child for _, child in items]
     else:
         end = 1
         output.update(value=value, total=1)

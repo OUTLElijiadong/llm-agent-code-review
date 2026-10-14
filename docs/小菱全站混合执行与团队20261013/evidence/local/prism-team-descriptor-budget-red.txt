@@ -1,0 +1,244 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 17 items
+
+tests/unit/services/test_team_business_projection.py ......FFFFFFFFFFF   [100%]
+
+=================================== FAILURES ===================================
+__________ test_structure_descriptor_itself_obeys_utf8_budget[value0] __________
+
+value = {'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff...fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff': 'safe'}
+
+    @pytest.mark.parametrize("value", [
+        {"f" * 20000: "safe"},
+        {"summary": "长" * 200, "title": "题" * 200, "body": "x" * 5000},
+        {str(i) + "中" * 100: {"body": "末" * 1000} for i in range(20)},
+    ])
+    def test_structure_descriptor_itself_obeys_utf8_budget(value):
+        output = project_team_result(value, team_id=123, task_id=456, budget=1024)
+>       assert len(json.dumps(output, ensure_ascii=False, separators=(",", ":")).encode()) <= 1024
+E       assert 20401 <= 1024
+E        +  where 20401 = len(b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...fbdd","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}')
+E        +    where b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...fbdd","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <built-in method encode of str object at 0x7b88a38000>()
+E        +      where <built-in method encode of str object at 0x7b88a38000> = '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","complete":false,"preview":{},"type":"dict","size_bytes":20011,"item_...fbdd","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}'.encode
+E        +        where '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","complete":false,"preview":{},"type":"dict","size_bytes":20011,"item_...fbdd","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <function dumps at 0x1090ab600>({'summary': '结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。', 'complete': False, 'preview': {}, 'type': 'dict', ...}, ensure_ascii=False, separators=(',', ':'))
+E        +          where <function dumps at 0x1090ab600> = json.dumps
+
+tests/unit/services/test_team_business_projection.py:107: AssertionError
+__________ test_structure_descriptor_itself_obeys_utf8_budget[value1] __________
+
+value = {'summary': '长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长...xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+
+    @pytest.mark.parametrize("value", [
+        {"f" * 20000: "safe"},
+        {"summary": "长" * 200, "title": "题" * 200, "body": "x" * 5000},
+        {str(i) + "中" * 100: {"body": "末" * 1000} for i in range(20)},
+    ])
+    def test_structure_descriptor_itself_obeys_utf8_budget(value):
+        output = project_team_result(value, team_id=123, task_id=456, budget=1024)
+>       assert len(json.dumps(output, ensure_ascii=False, separators=(",", ":")).encode()) <= 1024
+E       assert 2256 <= 1024
+E        +  where 2256 = len(b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...d154","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}')
+E        +    where b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...d154","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <built-in method encode of str object at 0x7b86e0f200>()
+E        +      where <built-in method encode of str object at 0x7b86e0f200> = '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","title":"题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题...d154","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}'.encode
+E        +        where '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","title":"题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题...d154","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <function dumps at 0x1090ab600>({'summary': '结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。', 'title': '题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题...题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题题'}, ...}, ensure_ascii=False, separators=(',', ':'))
+E        +          where <function dumps at 0x1090ab600> = json.dumps
+
+tests/unit/services/test_team_business_projection.py:107: AssertionError
+__________ test_structure_descriptor_itself_obeys_utf8_budget[value2] __________
+
+value = {'0中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中中': {'body': '末末...末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末末'}, ...}
+
+    @pytest.mark.parametrize("value", [
+        {"f" * 20000: "safe"},
+        {"summary": "长" * 200, "title": "题" * 200, "body": "x" * 5000},
+        {str(i) + "中" * 100: {"body": "末" * 1000} for i in range(20)},
+    ])
+    def test_structure_descriptor_itself_obeys_utf8_budget(value):
+        output = project_team_result(value, team_id=123, task_id=456, budget=1024)
+>       assert len(json.dumps(output, ensure_ascii=False, separators=(",", ":")).encode()) <= 1024
+E       assert 6489 <= 1024
+E        +  where 6489 = len(b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...4854","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}')
+E        +    where b'{"summary":"\xe7\xbb\x93\xe6\x9e\x9c\xe8\xb6\x85\xe8\xbf\x87\xe5\x8d\x95\xe6\xac\xa1\xe4\xb8\x8a\xe4\xb8\x8b\xe6\x96...4854","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <built-in method encode of str object at 0x7b88d3f000>()
+E        +      where <built-in method encode of str object at 0x7b88d3f000> = '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","complete":false,"preview":{},"type":"dict","size_bytes":66331,"item_...4854","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}'.encode
+E        +        where '{"summary":"结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。","complete":false,"preview":{},"type":"dict","size_bytes":66331,"item_...4854","result_reference":{"tool":"get_agent_team","team_id":123,"task_id":456,"result_path":"","offset":0,"limit":20}}' = <function dumps at 0x1090ab600>({'summary': '结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。', 'complete': False, 'preview': {}, 'type': 'dict', ...}, ensure_ascii=False, separators=(',', ':'))
+E        +          where <function dumps at 0x1090ab600> = json.dumps
+
+tests/unit/services/test_team_business_projection.py:107: AssertionError
+__ test_long_dictionary_keys_are_fully_retrievable_without_oversized_pointer ___
+
+db = <sqlalchemy.orm.session.Session object at 0x110c82fc0>
+actor = <app.models.user.User object at 0x11103fc50>
+
+    def test_long_dictionary_keys_are_fully_retrievable_without_oversized_pointer(db, actor):
+        created, claim = claimed_team(db, actor)
+        row = db.get(AgentTeamTask, claim["task_id"])
+        key = "中文长字段/" * 3000
+        body = "完整正文" * 1000
+        original = {"data": {key: {"body": body, "password": "never-public"}}}
+        row.result_json = json.dumps(original)
+        db.commit()
+        page = agent_team_service.get_team_result_page(db, actor, created["team_id"], row.id,
+                                                       result_path="/data")
+>       assert len(json.dumps(page, ensure_ascii=False).encode()) < 4000
+E       assert 99568 < 4000
+E        +  where 99568 = len(b'{"team_id": 1, "task_id": 1, "result_path": "/data", "items": {"\xe4\xb8\xad\xe6\x96\x87\xe9\x95\xbf\xe5\xad\x97\xe6...9\x95\xbf\xe5\xad\x97\xe6\xae\xb5~1", "offset": 0, "limit": 20}}}, "total": 1, "has_more": false, "next_offset": null}')
+E        +    where b'{"team_id": 1, "task_id": 1, "result_path": "/data", "items": {"\xe4\xb8\xad\xe6\x96\x87\xe9\x95\xbf\xe5\xad\x97\xe6...9\x95\xbf\xe5\xad\x97\xe6\xae\xb5~1", "offset": 0, "limit": 20}}}, "total": 1, "has_more": false, "next_offset": null}' = <built-in method encode of str object at 0x7b875d8000>()
+E        +      where <built-in method encode of str object at 0x7b875d8000> = '{"team_id": 1, "task_id": 1, "result_path": "/data", "items": {"中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段...中文长字段~1中文长字段~1中文长字段~1中文长字段~1中文长字段~1", "offset": 0, "limit": 20}}}, "total": 1, "has_more": false, "next_offset": null}'.encode
+E        +        where '{"team_id": 1, "task_id": 1, "result_path": "/data", "items": {"中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段...中文长字段~1中文长字段~1中文长字段~1中文长字段~1中文长字段~1", "offset": 0, "limit": 20}}}, "total": 1, "has_more": false, "next_offset": null}' = <function dumps at 0x1090ab600>({'team_id': 1, 'task_id': 1, 'result_path': '/data', 'items': {'中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/中文长字段/...文长字段/': {'summary': '结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。', 'complete': False, 'preview': {}, 'type': 'dict', ...}}, ...}, ensure_ascii=False)
+E        +          where <function dumps at 0x1090ab600> = json.dumps
+
+tests/unit/services/test_team_business_projection.py:121: AssertionError
+___________ test_index_result_locator_rejects_invalid_input[kwargs0] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x110e18590>
+actor = <app.models.user.User object at 0x110e187a0>
+kwargs = {'result_indices': [-1]}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_indices'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs1] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x110c80290>
+actor = <app.models.user.User object at 0x110e186e0>
+kwargs = {'result_indices': [True]}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_indices'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs2] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x110e18b60>
+actor = <app.models.user.User object at 0x110f79af0>
+kwargs = {'result_indices': [999]}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_indices'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs3] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x1111053a0>
+actor = <app.models.user.User object at 0x11103c440>
+kwargs = {'result_indices': [0, 0, 0, 0, 0, 0, ...]}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_indices'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs4] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x111267fb0>
+actor = <app.models.user.User object at 0x111b5e390>
+kwargs = {'result_indices': [0], 'result_path': '/data'}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_indices'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs5] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x111a81760>
+actor = <app.models.user.User object at 0x111a59f40>
+kwargs = {'result_part': 'key'}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_part'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+___________ test_index_result_locator_rejects_invalid_input[kwargs6] ___________
+
+db = <sqlalchemy.orm.session.Session object at 0x111e1f050>
+actor = <app.models.user.User object at 0x111d56300>
+kwargs = {'result_part': 'unknown'}
+
+    @pytest.mark.parametrize("kwargs", [
+        {"result_indices": [-1]}, {"result_indices": [True]}, {"result_indices": [999]},
+        {"result_indices": [0] * 33}, {"result_indices": [0], "result_path": "/data"},
+        {"result_part": "key"}, {"result_part": "unknown"},
+    ])
+    def test_index_result_locator_rejects_invalid_input(db, actor, kwargs):
+        created, claim = claimed_team(db, actor)
+        with pytest.raises(agent_team_service.AgentTeamValidationError):
+>           agent_team_service.get_team_result_page(db, actor, created["team_id"], claim["task_id"], **kwargs)
+E           TypeError: get_team_result_page() got an unexpected keyword argument 'result_part'
+
+tests/unit/services/test_team_business_projection.py:157: TypeError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/unit/services/test_team_business_projection.py: 13 warnings
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/app/services/audit_service.py:67: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_team_business_projection.py::test_structure_descriptor_itself_obeys_utf8_budget[value0]
+FAILED tests/unit/services/test_team_business_projection.py::test_structure_descriptor_itself_obeys_utf8_budget[value1]
+FAILED tests/unit/services/test_team_business_projection.py::test_structure_descriptor_itself_obeys_utf8_budget[value2]
+FAILED tests/unit/services/test_team_business_projection.py::test_long_dictionary_keys_are_fully_retrievable_without_oversized_pointer
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs0]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs1]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs2]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs3]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs4]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs5]
+FAILED tests/unit/services/test_team_business_projection.py::test_index_result_locator_rejects_invalid_input[kwargs6]
+================== 11 failed, 6 passed, 14 warnings in 1.95s ===================

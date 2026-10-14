@@ -1,0 +1,130 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests/unit/services/test_agent_team_list_metadata.py FFF.                [100%]
+
+=================================== FAILURES ===================================
+____________ test_team_list_never_loads_large_task_or_team_json[0] _____________
+
+db = <sqlalchemy.orm.session.Session object at 0x10bae5790>
+actor = <app.models.user.User object at 0x10b3f64b0>, round_number = 0
+
+    @pytest.mark.parametrize("round_number", range(3))
+    def test_team_list_never_loads_large_task_or_team_json(db, actor, round_number):
+        created, claim = claimed_team(db, actor)
+        team = db.get(AgentTeam, created["team_id"])
+        team.summary_json = json.dumps({"body": "s" * 1000000})
+        task = db.get(AgentTeamTask, claim["task_id"])
+        original = {"body": "正文" * 100000, "sentinel": f"完整尾部-{round_number}"}
+        task.result_json = json.dumps(original)
+        db.commit()
+        db.expunge_all()
+        statements = []
+        def capture(_conn, _cursor, sql, _params, _context, _many):
+            if sql.lstrip().upper().startswith("SELECT"):
+                statements.append(sql.lower())
+        event.listen(db.get_bind(), "before_cursor_execute", capture)
+        try:
+            output = agent_team_service.list_teams(db, actor, surface="user", session_id="site-session")
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+        assert output["total"] == 1
+        item = output["items"][0]
+        assert item["team_id"] == created["team_id"]
+        assert item["counts"] == {"total": 2, "completed": 0, "running": 1, "queued": 1, "failed": 0, "blocked": 0}
+>       assert not {"tasks", "members", "summary", "error", "messages", "events"}.intersection(item)
+E       AssertionError: assert not {'error', 'members', 'summary', 'tasks'}
+E        +  where {'error', 'members', 'summary', 'tasks'} = <built-in method intersection of set object at 0x10f2bb920>({'team_id': 1, 'user_id': 1, 'surface': 'user', 'session_id': 'site-session', ...})
+E        +    where <built-in method intersection of set object at 0x10f2bb920> = {'error', 'events', 'members', 'messages', 'summary', 'tasks'}.intersection
+
+tests/unit/services/test_agent_team_list_metadata.py:37: AssertionError
+____________ test_team_list_never_loads_large_task_or_team_json[1] _____________
+
+db = <sqlalchemy.orm.session.Session object at 0x10f6b92e0>
+actor = <app.models.user.User object at 0x10bc3f0b0>, round_number = 1
+
+    @pytest.mark.parametrize("round_number", range(3))
+    def test_team_list_never_loads_large_task_or_team_json(db, actor, round_number):
+        created, claim = claimed_team(db, actor)
+        team = db.get(AgentTeam, created["team_id"])
+        team.summary_json = json.dumps({"body": "s" * 1000000})
+        task = db.get(AgentTeamTask, claim["task_id"])
+        original = {"body": "正文" * 100000, "sentinel": f"完整尾部-{round_number}"}
+        task.result_json = json.dumps(original)
+        db.commit()
+        db.expunge_all()
+        statements = []
+        def capture(_conn, _cursor, sql, _params, _context, _many):
+            if sql.lstrip().upper().startswith("SELECT"):
+                statements.append(sql.lower())
+        event.listen(db.get_bind(), "before_cursor_execute", capture)
+        try:
+            output = agent_team_service.list_teams(db, actor, surface="user", session_id="site-session")
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+        assert output["total"] == 1
+        item = output["items"][0]
+        assert item["team_id"] == created["team_id"]
+        assert item["counts"] == {"total": 2, "completed": 0, "running": 1, "queued": 1, "failed": 0, "blocked": 0}
+>       assert not {"tasks", "members", "summary", "error", "messages", "events"}.intersection(item)
+E       AssertionError: assert not {'error', 'members', 'summary', 'tasks'}
+E        +  where {'error', 'members', 'summary', 'tasks'} = <built-in method intersection of set object at 0x10ee0db60>({'team_id': 1, 'user_id': 1, 'surface': 'user', 'session_id': 'site-session', ...})
+E        +    where <built-in method intersection of set object at 0x10ee0db60> = {'error', 'events', 'members', 'messages', 'summary', 'tasks'}.intersection
+
+tests/unit/services/test_agent_team_list_metadata.py:37: AssertionError
+____________ test_team_list_never_loads_large_task_or_team_json[2] _____________
+
+db = <sqlalchemy.orm.session.Session object at 0x10bae5430>
+actor = <app.models.user.User object at 0x10f34fa10>, round_number = 2
+
+    @pytest.mark.parametrize("round_number", range(3))
+    def test_team_list_never_loads_large_task_or_team_json(db, actor, round_number):
+        created, claim = claimed_team(db, actor)
+        team = db.get(AgentTeam, created["team_id"])
+        team.summary_json = json.dumps({"body": "s" * 1000000})
+        task = db.get(AgentTeamTask, claim["task_id"])
+        original = {"body": "正文" * 100000, "sentinel": f"完整尾部-{round_number}"}
+        task.result_json = json.dumps(original)
+        db.commit()
+        db.expunge_all()
+        statements = []
+        def capture(_conn, _cursor, sql, _params, _context, _many):
+            if sql.lstrip().upper().startswith("SELECT"):
+                statements.append(sql.lower())
+        event.listen(db.get_bind(), "before_cursor_execute", capture)
+        try:
+            output = agent_team_service.list_teams(db, actor, surface="user", session_id="site-session")
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+        assert output["total"] == 1
+        item = output["items"][0]
+        assert item["team_id"] == created["team_id"]
+        assert item["counts"] == {"total": 2, "completed": 0, "running": 1, "queued": 1, "failed": 0, "blocked": 0}
+>       assert not {"tasks", "members", "summary", "error", "messages", "events"}.intersection(item)
+E       AssertionError: assert not {'error', 'members', 'summary', 'tasks'}
+E        +  where {'error', 'members', 'summary', 'tasks'} = <built-in method intersection of set object at 0x10f39c2e0>({'team_id': 1, 'user_id': 1, 'surface': 'user', 'session_id': 'site-session', ...})
+E        +    where <built-in method intersection of set object at 0x10f39c2e0> = {'error', 'events', 'members', 'messages', 'summary', 'tasks'}.intersection
+
+tests/unit/services/test_agent_team_list_metadata.py:37: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[0]
+tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[1]
+tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[2]
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/app/services/audit_service.py:67: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    create_time=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[0]
+FAILED tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[1]
+FAILED tests/unit/services/test_agent_team_list_metadata.py::test_team_list_never_loads_large_task_or_team_json[2]
+=================== 3 failed, 1 passed, 4 warnings in 1.32s ====================

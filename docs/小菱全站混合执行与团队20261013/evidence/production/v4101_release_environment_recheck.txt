@@ -1,0 +1,33 @@
+captured_at=2026-10-14T05:12:49Z
+dotenv release keys
+APP_RELEASE=c1066983b0abf9badea6fcd43d34e05fa94c8466
+APP_VERSION=4.0.101
+BACKEND_RELEASE=c1066983b0abf9badea6fcd43d34e05fa94c8466
+FRONTEND_RELEASE=c1066983b0abf9badea6fcd43d34e05fa94c8466
+current ledger release keys
+RELEASE_SHA=6534493efbf7ec6eb0365b28019602cf8abd92d8
+APP_VERSION=4.0.100
+BACKEND_RELEASE=6534493efbf7ec6eb0365b28019602cf8abd92d8
+FRONTEND_RELEASE=6534493efbf7ec6eb0365b28019602cf8abd92d8
+MainPID=3750444
+ExecMainStartTimestamp=Wed 2026-10-14 12:37:48 CST
+ExecMainStatus=0
+ActiveState=active
+socket=/run/prism-ops/agent.sock mode=660 uid=0 gid=991 mtime=2026-10-14 12:37:48.235396032 +0800
+MemTotal:        7865600 kB
+MemAvailable:    5148956 kB
+SwapTotal:       3146744 kB
+SwapFree:         160528 kB
+cr_frontend memory=6.824MiB / 128MiB cpu=0.00% pids=5
+cr_backend memory=188MiB / 768MiB cpu=0.11% pids=25
+cr_decoy memory=8.344MiB / 128MiB cpu=0.00% pids=2
+cr_mysql memory=277.9MiB / 900MiB cpu=3.38% pids=43
+cr_clamav memory=115.6MiB / 2.148GiB cpu=0.01% pids=5
+cr_embedding memory=46.94MiB / 768MiB cpu=0.27% pids=16
+cr_testdb memory=328.5MiB / 7.501GiB cpu=0.40% pids=41
+cr_redis memory=4.48MiB / 128MiB cpu=0.49% pids=6
+PID                 COMMAND             RSS
+1931461             init                172
+1931528             tail                204
+1931543             freshclam           8
+1931544             clamd               36884

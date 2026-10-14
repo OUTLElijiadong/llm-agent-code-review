@@ -1,0 +1,89 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests/unit/services/test_agent_mesh_run_state_projection.py .FF.         [100%]
+
+=================================== FAILURES ===================================
+__ test_latest_states_do_not_select_or_materialize_large_history_checkpoints ___
+
+state_db = <sqlalchemy.orm.session.Session object at 0x10f2fd850>
+
+    def test_latest_states_do_not_select_or_materialize_large_history_checkpoints(state_db):
+        db = state_db
+        checkpoint = '{"synthetic_payload":"' + "x" * (1024 * 1024) + '"}'
+        for index in range(36):
+            _seed_run(db, run_id=f"synthetic-{index}", checkpoint=checkpoint,
+                      created=datetime(2026, 10, 14) + timedelta(seconds=index))
+        db.commit()
+        db.expunge_all()
+        statements, capture = _capture_selects(db)
+        loaded = []
+    
+        def observe_load(row, _context):
+            loaded.append(row.id)
+    
+        event.listen(AgentResponseRun, "load", observe_load)
+        try:
+            states = agent_mesh_service._latest_run_states(db, user_id=7, conversation_refs=[("user", "session-a")])
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+            event.remove(AgentResponseRun, "load", observe_load)
+    
+        assert states == {("user", "session-a"): ("synthetic-35", "completed")}
+        assert len(statements) == 1
+>       assert "checkpoint_json" not in statements[0].lower()
+E       AssertionError: assert 'checkpoint_json' not in 'select agen..._run.id desc'
+E         
+E         'checkpoint_json' is contained here:
+E         ?           -----------------------               ^
+E           ponse_run.checkpoint_json as agent_response_run_checkpoint_json, agent_response_run.version as agent_response_run_version, agent_response_run.root_agent_run_id as agent_response_run_root_agent_run_id, agent_response_run.agent_run_id as agent_response_run_agent_run_id, agent_response_run.tool_execution_id as agent_response_run_tool_execution_id, agent_response_run.agent_team_id as agent_response_run_agent_team_id, agent_response_run.agent_team_task_id as agent_response_run_agent_team_task_id, a...
+E         
+E         ...Full output truncated (4 lines hidden), use '-vv' to show
+
+tests/unit/services/test_agent_mesh_run_state_projection.py:90: AssertionError
+_______ test_authoritative_state_projects_only_latest_run_id_and_status ________
+
+state_db = <sqlalchemy.orm.session.Session object at 0x10f4f5640>
+
+    def test_authoritative_state_projects_only_latest_run_id_and_status(state_db):
+        db = state_db
+        checkpoint = '{"synthetic_payload":"' + "x" * (2 * 1024 * 1024) + '"}'
+        _seed_run(db, run_id="older", status="running", checkpoint=checkpoint)
+        _seed_run(db, run_id="newer", status="completed", checkpoint=checkpoint, created=datetime(2026, 10, 13))
+        _seed_run(db, run_id="other", owner=8, status="failed", checkpoint=checkpoint)
+        _seed_run(db, run_id="admin", surface="admin", status="failed", checkpoint=checkpoint)
+        db.commit()
+        db.expunge_all()
+        statements, capture = _capture_selects(db)
+        try:
+            state = agent_mesh_service._authoritative_run_state(db, user_id=7, surface="user", session_key="session-a")
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+    
+        assert state == ("newer", "completed")
+        assert len(statements) == 1
+>       assert "checkpoint_json" not in statements[0].lower()
+E       AssertionError: assert 'checkpoint_json' not in 'select agen...t ? offset ?'
+E         
+E         'checkpoint_json' is contained here:
+E         ?           -----------------------               ^
+E           ponse_run.checkpoint_json as agent_response_run_checkpoint_json, agent_response_run.version as agent_response_run_version, agent_response_run.root_agent_run_id as agent_response_run_root_agent_run_id, agent_response_run.agent_run_id as agent_response_run_agent_run_id, agent_response_run.tool_execution_id as agent_response_run_tool_execution_id, agent_response_run.agent_team_id as agent_response_run_agent_team_id, agent_response_run.agent_team_task_id as agent_response_run_agent_team_task_id, a...
+E         
+E         ...Full output truncated (5 lines hidden), use '-vv' to show
+
+tests/unit/services/test_agent_mesh_run_state_projection.py:112: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_mesh_run_state_projection.py::test_latest_states_do_not_select_or_materialize_large_history_checkpoints
+FAILED tests/unit/services/test_agent_mesh_run_state_projection.py::test_authoritative_state_projects_only_latest_run_id_and_status
+==================== 2 failed, 2 passed, 1 warning in 0.18s ====================

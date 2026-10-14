@@ -96,4 +96,54 @@ describe('useAgentTeamEvents', () => {
     expect(harness.controller.error.value).toContain('团队不存在')
     harness.wrapper.unmount()
   })
+
+  it.each([1, 2, 3])('第 %i 轮：多个活动团队保留独立增量游标，完成/失败/取消后停止', async () => {
+    const statuses = new Map([[81, 'completed'], [82, 'failed'], [83, 'cancelled']])
+    teamApi.events.mockImplementation((teamId: number, afterId: number) => Promise.resolve({
+      items: [{ event_id: afterId ? teamId + 100 : teamId, team_id: teamId, event_type: afterId ? 'team.status_changed' : 'task.claimed' }],
+      has_more: false, next_after_id: afterId ? teamId + 100 : teamId, page_size: 2,
+      team_status: afterId ? statuses.get(teamId) : 'running',
+    }))
+    const harness = mountHarness()
+    try {
+      for (const id of statuses.keys()) harness.controller.start(id)
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(teamApi.events.mock.calls).toEqual([
+        [81, 0, 2], [82, 0, 2], [83, 0, 2],
+        [81, 81, 2], [82, 82, 2], [83, 83, 2],
+      ])
+      expect(harness.controller.events.value).toHaveLength(6)
+      expect(harness.controller.teamStatuses.value).toEqual({ 81: 'completed', 82: 'failed', 83: 'cancelled' })
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(teamApi.events).toHaveBeenCalledTimes(6)
+    } finally {
+      harness.wrapper.unmount()
+    }
+  })
+
+  it('短暂 API 异常和未知状态不会误停有效团队，重试沿用已有游标', async () => {
+    teamApi.events
+      .mockResolvedValueOnce({ items: [{ event_id: 7, team_id: 91, event_type: 'task.claimed' }], has_more: false, next_after_id: 7, team_status: 'running' })
+      .mockRejectedValueOnce({ code: 50000, message: '暂时无法读取' })
+      .mockResolvedValueOnce({ items: [], has_more: false, next_after_id: 7, team_status: '' })
+      .mockResolvedValueOnce({ items: [{ event_id: 8, team_id: 91, event_type: 'team.status_changed' }], has_more: false, next_after_id: 8, team_status: 'completed' })
+    const harness = mountHarness()
+    try {
+      harness.controller.start(91)
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(harness.controller.teamStatuses.value[91]).toBe('running')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(harness.controller.teamStatuses.value[91]).toBe('running')
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(teamApi.events.mock.calls).toEqual([[91, 0, 2], [91, 7, 2], [91, 7, 2], [91, 7, 2]])
+      expect(harness.controller.events.value.map(event => event.event_id)).toEqual([7, 8])
+      expect(harness.controller.teamStatuses.value[91]).toBe('completed')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(teamApi.events).toHaveBeenCalledTimes(4)
+    } finally {
+      harness.wrapper.unmount()
+    }
+  })
 })

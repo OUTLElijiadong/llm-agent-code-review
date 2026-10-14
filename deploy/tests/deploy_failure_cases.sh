@@ -5,10 +5,30 @@ run_deploy_failure_matrix() {
   local member_capability member_probe_failure
   local old_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local new_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed; do
+  for scenario in tls backup verify backend_build migration backend_up backend_health backend_smoke frontend_build frontend_up assets frontend_health https ops_check rollback_failed ledger_empty_rollback_refused ledger_written_rollback_refused ledger_probe_failed member_empty_old_refused member_unknown_refused member_probe_failed; do
     workspace="$test_root/failure-matrix-$scenario"
     mkdir -p "$workspace/repo/deploy/lib" "$workspace/repo/backend" "$workspace/bin" "$workspace/releases"
     cp deploy.sh rollback.sh "$workspace/repo/deploy/"
+    if [[ "$scenario" == ops_check ]]; then
+      # 仅在隔离夹具中替换平台判定，实际巡检失败/日志/回滚分支不替换。
+      python3 - "$workspace/repo/deploy/deploy.sh" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+source = p.read_text()
+platform = 'if [[ "$EUID" == 0 && "$(uname -s)" == "Linux" && -d /run/systemd/system ]]; then'
+assert source.count(platform) == 1
+p.write_text(source.replace(platform, 'if true; then'))
+PY
+      mkdir -p "$workspace/repo/deploy/systemd"
+      printf '#!/usr/bin/env bash\nexit 0\n' > "$workspace/repo/deploy/systemd/install.sh"
+      cat > "$workspace/repo/deploy/ops-check.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '{"status":"error","blocking_checks":["https"],"checks":{"https":{"ok":false}}}\n'
+exit 1
+SCRIPT
+      chmod +x "$workspace/repo/deploy/systemd/install.sh" "$workspace/repo/deploy/ops-check.sh"
+    fi
     cp lib/common.sh "$workspace/repo/deploy/lib/"
     cp lib/checkpoint_compatibility.py "$workspace/repo/deploy/lib/"
     cp lib/project_member_compatibility.py "$workspace/repo/deploy/lib/"
@@ -205,6 +225,12 @@ SCRIPT
       printf '故障重复处理（子Shell不得释放主事务锁）: %s\n' "$scenario" >&2; exit 1;
     }
     assert_contains "$workspace/output.log" 'stage='
+    if [[ "$scenario" == ops_check ]]; then
+      assert_contains "$workspace/output.log" 'stage=post_release_ops_check'
+      assert_contains "$workspace/output.log" '发布后巡检失败回执:'
+      assert_contains "$workspace/output.log" '"blocking_checks":["https"]'
+      assert_contains "$workspace/repo/deploy/.env" "APP_RELEASE=$old_sha"
+    fi
     if [[ "$scenario" == migration ]]; then
       assert_contains "$workspace/output.log" '数据库迁移已尝试'
     fi

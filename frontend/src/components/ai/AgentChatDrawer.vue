@@ -8,6 +8,7 @@ import { post } from '@/api/http'
 import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseImageAsset, type AgentResponseSession } from '@/api/agentResponses'
 import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
+import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import { getReviewTasks } from '@/api/review'
@@ -359,6 +360,7 @@ function restoreCachedTeams(teams: AgentChatSnapshotTeam[] | undefined): void {
 function openTeamWindow(team: AgentTeamDetail | AgentTeamSummary): void {
   teamWindowTeamId.value = team.team_id
   teamWindowVisible.value = true
+  void refreshAgentTeam()
 }
 
 /** 吉祥物与标题栏共享的agent状态:运行中/等待用户/空闲 */
@@ -971,7 +973,14 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
       agentTeamError.value = ''
       return
     }
-    const settled = await Promise.allSettled(listed.items.map((item) => getAgentTeam(item.team_id)))
+    const cachedById = new Map<number, AgentTeamDetail>(
+      agentTeams.value.map((team) => [team.team_id, team]),
+    )
+    const requested = listed.items.filter((item) => shouldRefreshAgentTeamDetail(
+      item, cachedById.get(item.team_id),
+      teamWindowVisible.value && item.team_id === teamWindowTeamId.value,
+    ))
+    const settled = await Promise.allSettled(requested.map((item) => getAgentTeam(item.team_id)))
     if (!scopeCurrent()) return
     if (!isCurrent()) return
     const details = settled

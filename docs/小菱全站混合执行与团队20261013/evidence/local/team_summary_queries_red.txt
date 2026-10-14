@@ -1,0 +1,74 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend
+configfile: pyproject.toml
+plugins: platformdirs-4.12.4, cov-5.0.0, asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 4 items
+
+tests/unit/services/test_agent_team_summary_queries.py F.F.              [100%]
+
+=================================== FAILURES ===================================
+__ test_team_list_is_real_summary_without_loading_or_parsing_business_payload __
+
+db = <sqlalchemy.orm.session.Session object at 0x10be9c890>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10be6a0f0>
+
+    def test_team_list_is_real_summary_without_loading_or_parsing_business_payload(db, monkeypatch):
+        team = _seed_team(db)
+        team_id = team.id
+        db.expunge_all()
+        statements, capture = _capture_selects(db)
+        try:
+            listed = agent_team_service.list_teams(db, SimpleNamespace(id=7, role="user"), limit=20)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", capture)
+    
+        assert listed["total"] == 1
+        item = listed["items"][0]
+        assert item["team_id"] == team_id
+        assert {"team_id", "title", "surface", "session_id", "status", "max_active_children", "trace_id", "counts"} <= item.keys()
+        assert item["objective"] == "保留业务目标"
+        assert item["counts"] == {"total": 5, "completed": 1, "running": 1, "queued": 1, "failed": 1, "blocked": 1}
+>       assert not {"members", "tasks", "events", "messages", "summary", "error"} & item.keys()
+E       AssertionError: assert not ({'error', 'events', 'members', 'messages', 'summary', 'tasks'} & dict_keys(['team_id', 'user_id', 'surface', 'session_id', 'title', 'objective', 'status', 'max_active_children', 'max_...rted_at', 'completed_at', 'summary', 'error', 'created_at', 'updated_at', 'archived_at', 'members', 'tasks', 'counts']))
+E        +  where dict_keys(['team_id', 'user_id', 'surface', 'session_id', 'title', 'objective', 'status', 'max_active_children', 'max_...rted_at', 'completed_at', 'summary', 'error', 'created_at', 'updated_at', 'archived_at', 'members', 'tasks', 'counts']) = <built-in method keys of dict object at 0x10c10c180>()
+E        +    where <built-in method keys of dict object at 0x10c10c180> = {'team_id': 1, 'user_id': 7, 'surface': 'user', 'session_id': 'summary-session', ...}.keys
+
+tests/unit/services/test_agent_team_summary_queries.py:68: AssertionError
+_ test_team_summary_refreshes_latest_status_timestamp_and_counts_despite_cached_orm _
+
+db = <sqlalchemy.orm.session.Session object at 0x10c2cb380>
+
+    def test_team_summary_refreshes_latest_status_timestamp_and_counts_despite_cached_orm(db):
+        cached = _seed_team(db)
+        newer = datetime(2026, 10, 14, 1, 2, 3)
+        peer = sessionmaker(bind=db.get_bind(), expire_on_commit=False)()
+        try:
+            peer.execute(update(AgentTeam).where(AgentTeam.id == cached.id).values(status="completed", update_time=newer))
+            peer.execute(update(AgentTeamTask).where(
+                AgentTeamTask.team_id == cached.id, AgentTeamTask.status == "running",
+            ).values(status="completed"))
+            peer.commit()
+        finally:
+            peer.close()
+        assert cached.status == "running"
+    
+        item = agent_team_service.list_teams(db, SimpleNamespace(id=7, role="user"))["items"][0]
+>       assert item["status"] == "completed"
+E       AssertionError: assert 'running' == 'completed'
+E         
+E         - completed
+E         + running
+
+tests/unit/services/test_agent_team_summary_queries.py:125: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_agent_team_summary_queries.py::test_team_list_is_real_summary_without_loading_or_parsing_business_payload
+FAILED tests/unit/services/test_agent_team_summary_queries.py::test_team_summary_refreshes_latest_status_timestamp_and_counts_despite_cached_orm
+==================== 2 failed, 2 passed, 1 warning in 1.56s ====================

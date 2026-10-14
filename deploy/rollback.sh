@@ -108,5 +108,20 @@ if [[ -f "$rollback_from" ]]; then
   cp "$rollback_from" "$previous_state"
 fi
 rm -f "$pending_state"
+calibrate_default_env_file "$APP_RELEASE" "$BACKEND_RELEASE" "$FRONTEND_RELEASE" "$APP_VERSION" \
+  || fatal "回滚镜像已恢复，但默认 Compose 环境校准失败，请保持维护窗口并核对"
+assert_compose_release_environment default \
+  || fatal "回滚后默认 Compose 环境与发布账本不一致"
+# 诱捕为增强项；跟随恢复版本，但旧镜像缺失不能阻止前后端恢复。
+if release_image_exists prism-decoy "$APP_VERSION"; then
+  if compose up -d --no-deps --no-build --pull never decoy \
+    && wait_for_service_health decoy "${DECOY_HEALTH_TIMEOUT:-120}"; then
+    log_info "诱捕增强已随应用回退到版本 $APP_VERSION"
+  else
+    log_warn "前后端已恢复，但诱捕增强未恢复健康，请单独核对"
+  fi
+else
+  log_warn "旧版诱捕镜像不存在，保留当前增强组件；前后端回退已完成"
+fi
 log_info "应用层回滚完成(release=$previous_sha)；检查点格式门已通过，数据库未降级"
 compose ps || log_warn "应用回滚已完成，但容器列表读取失败；请重试只读运维检查"

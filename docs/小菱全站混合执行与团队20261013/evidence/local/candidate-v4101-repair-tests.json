@@ -1,0 +1,68 @@
+{
+  "scope": "local tests, not production acceptance",
+  "backend_targeted": {
+    "files": 27,
+    "passed": 716
+  },
+  "frontend": {
+    "files": 146,
+    "passed": 1923
+  },
+  "build": "passed",
+  "deploy_script_regressions": "passed",
+  "logs": [
+    {
+      "path": "evidence/local/prism-v4101-list-metadata-red.txt",
+      "bytes": 8651,
+      "sha256": "4e2933c2519bd98c3e98cb9f43bcc941e1a07b3cab6bbf62e602e469adb4a34d"
+    },
+    {
+      "path": "evidence/local/prism-v4101-list-descriptor-green.txt",
+      "bytes": 2265,
+      "sha256": "8a38219913257f74182cc00e665232e8621edf92637610ce3ecef9e3a9ce6406"
+    },
+    {
+      "path": "evidence/local/prism-team-descriptor-budget-red.txt",
+      "bytes": 22020,
+      "sha256": "d3995e66a6ea3742168fd7b12e5aea240b0210829773a3ace7dfbca31a84b079"
+    },
+    {
+      "path": "evidence/local/prism-v4101-final2-backend.txt",
+      "bytes": 7500,
+      "sha256": "2320dfd39067b7c43ec27e4580656d50b81e1da97e938044a485489689ffe913"
+    },
+    {
+      "path": "evidence/local/prism-v4101-final2-frontend.txt",
+      "bytes": 353,
+      "sha256": "059c668bd9a12d812596932ee0e24192feb1bc7e3c757293d8c83ea150066ec4"
+    },
+    {
+      "path": "evidence/local/prism-v4101-final2-frontend-build.txt",
+      "bytes": 22268,
+      "sha256": "8a44d6e10915dbf80db9335929cef8bdbf72ccb89e85e48b6612336bed5814d7"
+    },
+    {
+      "path": "evidence/local/prism-v4101-final2-deploy.txt",
+      "bytes": 3195,
+      "sha256": "c96a6ea9893402b33946ebe05a2e36050f330b11fa3c71d207ea942c640a1e97"
+    },
+    {
+      "path": "evidence/local/prism-v4101-team-summary-queries.txt",
+      "bytes": 1156,
+      "sha256": "491b188e771bf1a7310e4261975e687c77fbf7932e3d23118640bb76ea3ab533"
+    },
+    {
+      "path": "evidence/local/prism-v4101-descriptor-repeat.txt",
+      "bytes": 5316,
+      "sha256": "eb7ecc164c226ad861069a5d2393d3c99d7e04d1697a6941767120712e7206e7"
+    }
+  ],
+  "additional_team_summary_queries": {
+    "files": 1,
+    "passed": 4
+  },
+  "result_and_list_repeat": {
+    "independent_process_rounds": 3,
+    "passed_per_round": 22
+  }
+}

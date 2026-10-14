@@ -952,6 +952,8 @@ class Orchestrator(BaseAgent):
         ctx: Optional[AgentContext] = None,
         task_id: Optional[int] = None,
         result_path: str = "",
+        result_indices: Optional[list[int]] = None,
+        result_part: str = "value",
         offset: int = 0,
         limit: int = 20,
     ) -> AgentResult:
@@ -965,9 +967,10 @@ class Orchestrator(BaseAgent):
             if task_id is not None:
                 return AgentResult(success=True, data=agent_team_service.get_team_result_page(
                     self._db, self._user, team_id, task_id,
-                    result_path=result_path, offset=offset, limit=limit,
+                    result_path=result_path, result_indices=result_indices, result_part=result_part,
+                    offset=offset, limit=limit,
                 ))
-            if result_path or offset:
+            if result_path or result_indices is not None or result_part != "value" or offset:
                 return AgentResult(success=False, error="结果分页必须指定原任务task_id")
             return AgentResult(success=True, data=agent_team_service.get_team(self._db, self._user, team_id))
         except Exception as exc:

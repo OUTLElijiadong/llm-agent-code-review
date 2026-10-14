@@ -1,0 +1,10 @@
+[2026-10-14T04:28:25Z] INFO  发布预检通过(target=all, version=4.0.101, sha=c1066983b0abf9badea6fcd43d34e05fa94c8466)
+[2026-10-14T04:34:44Z] INFO  独立恢复验证通过(container=cr_testdb, tables=105, alembic=063_agent_browser_actions)
+[2026-10-14T04:34:44Z] INFO  发布前备份已完成
+[2026-10-14T04:35:10Z] INFO  Backend API 冒烟通过(version=4.0.101, release=c1066983b0abf9badea6fcd43d34e05fa94c8466)
+[2026-10-14T04:37:46Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)
+[2026-10-14T04:38:49Z] WARN  发布事务失败(rc=1, stage=post_release_ops_check, target=all, sha=c1066983b0abf9badea6fcd43d34e05fa94c8466): systemd 重绑后的生产巡检仍有阻断项
+[2026-10-14T04:39:17Z] INFO  Backend API 冒烟通过(version=4.0.100, release=6534493efbf7ec6eb0365b28019602cf8abd92d8)
+[2026-10-14T04:39:17Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)
+[2026-10-14T04:39:17Z] INFO  应用层回滚完成(release=6534493efbf7ec6eb0365b28019602cf8abd92d8)；检查点格式门已通过，数据库未降级
+[2026-10-14T04:39:18Z] INFO  应用自动回滚完成；请核对数据库兼容性与公网冒烟结果

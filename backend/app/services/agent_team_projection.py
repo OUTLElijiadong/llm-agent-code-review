@@ -6,10 +6,16 @@ import json
 from typing import Any
 
 
+def _encoded_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")).encode())
+
+
 def project_team_result(value: Any, *, team_id: int, task_id: int, result_path: str = "",
-                        budget: int = 16000) -> Any:
+                        result_indices: list[int] | None = None, budget: int = 16000) -> Any:
     from app.services.agent_responses_service import redact_agent_model_context_value
 
+    if budget < 1024:
+        raise ValueError("结构摘要预算不能低于1024字节")
     # 脱敏器失败直接抛错，不以未经脱敏的值替代。
     safe = redact_agent_model_context_value(value)
     raw = json.dumps(safe, ensure_ascii=False, default=str, separators=(",", ":")).encode()
@@ -17,21 +23,35 @@ def project_team_result(value: Any, *, team_id: int, task_id: int, result_path: 
         return safe
     reference = {"tool": "get_agent_team", "team_id": team_id,
                  "task_id": task_id, "result_path": result_path, "offset": 0, "limit": 20}
+    if result_indices is not None:
+        reference.pop("result_path")
+        reference["result_indices"] = result_indices
     preview = {}
     if isinstance(safe, dict):
         for key in ("status", "summary", "capability", "status_code", "id", "title", "total", "page", "page_size"):
             child = safe.get(key)
-            if isinstance(child, (int, float, bool)) or isinstance(child, str) and len(child) <= 200:
+            if isinstance(child, (int, float, bool)) or isinstance(child, str) and _encoded_size(child) <= 200:
                 preview[key] = child
-    return {
-        **preview,
+    output = {
         "summary": "结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。",
         "complete": False, "preview": preview,
         "type": type(safe).__name__, "size_bytes": len(raw),
         "item_count": len(safe) if isinstance(safe, (dict, list, str)) else None,
-        "field_names": list(safe)[:20] if isinstance(safe, dict) else [],
+        "field_names": [key for key in safe if _encoded_size(key) <= 100][:20]
+        if isinstance(safe, dict) else [],
         "sha256": hashlib.sha256(raw).hexdigest(), "result_reference": reference,
     }
+    # 元数据也必须计入UTF-8预算，不截断原值或制造不可访问的长路径。
+    while _encoded_size(output) > budget and output["field_names"]:
+        output["field_names"].pop()
+    while _encoded_size(output) > budget and preview:
+        preview.pop(next(reversed(preview)))
+    if _encoded_size(output) > budget:
+        raise ValueError("结构摘要引用超过预算，请使用索引定位引用")
+    for key, child in preview.items():
+        if key not in output and _encoded_size({**output, key: child}) <= budget:
+            output[key] = child
+    return output
 
 
 def pointer_child(path: str, child: Any) -> str:

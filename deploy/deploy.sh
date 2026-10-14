@@ -318,6 +318,7 @@ if [[ "$EUID" == 0 && "$(uname -s)" == "Linux" && -d /run/systemd/system ]]; the
     || deploy_fatal "systemd 运维单元未能绑定到当前发布树"
   deploy_stage="post_release_ops_check"
   if ! ops_check_output="$(./ops-check.sh)"; then
+    log_warn "发布后巡检失败回执: $ops_check_output"
     deploy_fatal "systemd 重绑后的生产巡检仍有阻断项"
   fi
   if ! printf '%s' "$ops_check_output" | python3 -c '
@@ -328,6 +329,7 @@ release = checks.get("release", {})
 if not release.get("ok") or payload.get("status") == "error":
     raise SystemExit(1)
 '; then
+    log_warn "发布后巡检绑定失败回执: $ops_check_output"
     deploy_fatal "systemd 重绑后的发布账本检查未通过"
   fi
   log_info "运维执行器已绑定当前发布树，巡检发布账本通过"

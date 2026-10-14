@@ -1,0 +1,24 @@
+{
+  "sample_type": "local_synthetic_sqlite_no_production_content",
+  "history_rows": 36,
+  "checkpoint_bytes_per_row": 1048600,
+  "metric_scope": "tracemalloc Python heap during query; excludes SQLite C allocations and process RSS",
+  "legacy": {
+    "python_traced_peak_bytes": 37977410,
+    "state_count": 1,
+    "select_count": 1,
+    "select_contains_checkpoint": true,
+    "select_sql": [
+      "SELECT agent_response_run.run_id AS agent_response_run_run_id, agent_response_run.user_id AS agent_response_run_user_id, agent_response_run.surface AS agent_response_run_surface, agent_response_run.session_key AS agent_response_run_session_key, agent_response_run.mesh_message_id AS agent_response_run_mesh_message_id, agent_response_run.status AS agent_response_run_status, agent_response_run.checkpoint_json AS agent_response_run_checkpoint_json, agent_response_run.version AS agent_response_run_version, agent_response_run.root_agent_run_id AS agent_response_run_root_agent_run_id, agent_response_run.agent_run_id AS agent_response_run_agent_run_id, agent_response_run.tool_execution_id AS agent_response_run_tool_execution_id, agent_response_run.agent_team_id AS agent_response_run_agent_team_id, agent_response_run.agent_team_task_id AS agent_response_run_agent_team_task_id, agent_response_run.agent_execution_event_id AS agent_response_run_agent_execution_event_id, agent_response_run.id AS agent_response_run_id, agent_response_run.create_time AS agent_response_run_create_time, agent_response_run.update_time AS agent_response_run_update_time \nFROM agent_response_run \nWHERE agent_response_run.user_id = ? AND (agent_response_run.surface, agent_response_run.session_key) IN (VALUES (?, ?)) ORDER BY agent_response_run.id DESC"
+    ]
+  },
+  "projected": {
+    "python_traced_peak_bytes": 114909,
+    "state_count": 1,
+    "select_count": 1,
+    "select_contains_checkpoint": false,
+    "select_sql": [
+      "SELECT agent_response_run.surface AS agent_response_run_surface, agent_response_run.session_key AS agent_response_run_session_key, agent_response_run.run_id AS agent_response_run_run_id, agent_response_run.status AS agent_response_run_status \nFROM agent_response_run JOIN (SELECT max(agent_response_run.id) AS latest_id \nFROM agent_response_run \nWHERE agent_response_run.user_id = ? AND (agent_response_run.surface, agent_response_run.session_key) IN (VALUES (?, ?)) GROUP BY agent_response_run.surface, agent_response_run.session_key) AS anon_1 ON agent_response_run.id = anon_1.latest_id \nWHERE agent_response_run.user_id = ? ORDER BY agent_response_run.id DESC"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+
+> code-review-platform@1.0.0 test
+> vitest run src/components/ai/AgentChatDrawer.test.ts src/components/admin/AdminCopilot.test.ts src/composables/useAgentTeamEvents.test.ts -t 团队轮询复核|useAgentTeamEvents|迟到的旧团队详情|切换账号|旧恢复结束
+
+
+ RUN  v4.1.11 /Users/li/.codex/worktrees/sandbox-php-context/基于大模型智能体的代码审查平台/frontend
+
+
+ Test Files  3 passed (3)
+      Tests  25 passed | 100 skipped (125)
+   Start at  13:25:29
+   Duration  1.35s (transform 1.22s, setup 44ms, import 1.77s, tests 637ms, environment 464ms)
+

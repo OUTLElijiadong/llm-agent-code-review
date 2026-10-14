@@ -27,3 +27,19 @@ flowchart LR
 `response.browser.required` 只由服务端动作桥签发，模型上游同名事件过滤；执行 nonce 和 claim_token 不进入模型或持久明文。动作账本使用 Alembic 063，新建账号/会话/运行与幂等请求索引；长文本 JSON 使用 MySQL LONGTEXT。客户端观察标为 client_observed，server_verified=false；完成 guard 明确拒绝以此声称业务写入成功。
 
 层级分为页面、侧栏/页头、引导、聊天、团队、圆桌菜单、模态弹窗和弹窗内部下拉。菜单脱离玻璃页头 stacking context 传送 body，固定坐标参照触发按钮并限界视口。指针使用 pointer-events:none，仅在真实目标存在且可命中时显示，根据目标所在弹层同步更新层级；不为未知目标猜按钮，也不穿透遮罩。详细数值及全站扫描见 FRONTEND_LAYER_AUDIT.md。
+
+## v101 的结果与传输契约
+
+页面指令从服务端sink进入内部队列时保留HMAC；encode对外发送前再次验证并移除签名。上游伪造事件仍拒绝，不能用客户端“可信”标记替代验签。页面状态failed/cancelled/indeterminate/user_required或completed=false返回工具错误，历史包装success只在公开读取时纠正，原账本保持不变。
+
+团队结果的公开事件可以是预览，任务结果和最终摘要是业务交付来源。较小的持久结果完整脱敏后投影；超出上下文预算时返回结构摘要、字段/数量、摘要来源哈希及原任务引用。团队最终摘要引用对应的核验原任务，摘要对象的哈希不冒充该任务原文的哈希。`get_agent_team(team_id,task_id,result_path,offset,limit)` 只读取同账号、指定团队已有任务的JSON Pointer路径，不读取文件、不执行脚本；先完整按敏感键脱敏，再取子路径。集合页最多20项，大条目带自己的引用；字符串页最多2000字符。未知路径、他人团队及非法分页均拒绝。默认团队任务结果预算按节点数分配，不能通过提高深度限制把无界原文一次塞入模型。
+
+GET核验使用相同查询/筛选/排序/分页，比较实际items和分页元信息；快照变化返回blocked并要求重新读取。reporter区分执行回执、相同查询读回和相同目标读回，业务data与审查findings分别保留。论坛最新查询显式使用sort=newest，以创建时间和id倒序稳定排序；默认页面置顶排序保持。
+
+官方DeepSeek请求适配只作用于其精确官方host：自主调用省略冗余auto并保留思考，required/none/指定工具保持约束，只在当前请求设置reasoning.effort=none。全局配置不变，其他供应商请求不套用此适配。
+
+### 长字段名与状态查询合同补充
+
+结果结构摘要自身按UTF-8计入硬预算，最小1024字节；预览和字段名只保留能装入预算的元数据，完整脱敏原值不改。原任务JSON Pointer保持；服务端分页遇长字典键返回entries与result_indices（字典键序/数组下标，最多32层）引用，result_part=key可分页恢复完整字段名；不接受同时路径/索引，不读取任意对象或文件。每页最多20子项、每子项1024字节投影，原字符串每页2000字符，秘密键先脱敏再定位。
+
+团队列表只投影元数据和按team/status分组COUNT；详情仍返回有界任务结果与审计时间线。稳定终态缓存只能在已成功读取、status与updated_at均一致时复用；活动/未知/失败/版本变化/显式打开继续读取。历史与Mesh状态只查必要运行元数据，不把checkpoint当作状态列加载。

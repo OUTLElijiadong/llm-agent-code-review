@@ -50,6 +50,7 @@ import {
   saveAgentChatSessions,
   saveAgentChatSnapshot,
 } from '@/utils/agentChatSessions'
+import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
 
 function mountDrawer(prefill?: string, extraPlugins: Plugin[] = []): VueWrapper {
   return mount(AgentChatDrawer, {
@@ -169,6 +170,172 @@ afterEach(() => {
   connectedDisclosureRoots.clear()
   expect(leakedRoots).toEqual([])
   vi.useRealTimers()
+})
+
+describe('团队轮询复核', () => {
+  const terminalStatuses: AgentTeamStatus[] = ['completed', 'failed', 'cancelled', 'expired']
+  function fixture(teamId: number, status: AgentTeamStatus): AgentTeamDetail {
+    return {
+      team_id: teamId, title: `持久团队 ${teamId}`, surface: 'user', session_id: 'user-test',
+      status, max_active_children: 3, trace_id: `trace-${teamId}`,
+      updated_at: '2026-10-14T05:00:00Z',
+      counts: { total: 1, completed: status === 'completed' ? 1 : 0, running: 0, queued: 0, failed: status === 'failed' ? 1 : 0, blocked: 0 },
+      members: [], tasks: [], events: [], messages: [],
+    }
+  }
+
+  it.each([1, 2, 3])('第 %i 轮：16 个已终态团队恢复后不再周期拉完整详情', async () => {
+    vi.useFakeTimers()
+    const teams = Array.from({ length: 16 }, (_, index) => fixture(index + 1, terminalStatuses[index % 4]))
+    teamApi.list.mockResolvedValue({ items: teams, total: teams.length })
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    const wrapper = await mountReadyDrawer()
+    try {
+      expect((wrapper.vm as any).agentTeams).toHaveLength(16)
+      expect(teamApi.detail).toHaveBeenCalledTimes(16)
+      teamApi.detail.mockClear()
+      await vi.advanceTimersByTimeAsync(9000)
+      expect(teamApi.list.mock.calls.length).toBeGreaterThan(1)
+      expect(teamApi.detail).not.toHaveBeenCalled()
+      expect((wrapper.vm as any).agentTeams).toHaveLength(16)
+      expect(teamApi.events).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('稳定终态、未知详情、各类活动团队混合时只重试未稳定的团队', async () => {
+    const stable = terminalStatuses.map((status, index) => fixture(index + 1, status))
+    teamApi.list.mockResolvedValue({ items: stable, total: stable.length })
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(stable.find(team => team.team_id === id)))
+    const wrapper = await mountReadyDrawer()
+    try {
+      await wrapper.setProps({ visible: false })
+      const vm = wrapper.vm as any
+      const pending = [fixture(5, 'completed'), fixture(6, 'running'), fixture(7, 'verifying'), fixture(8, 'queued'), fixture(9, 'draft')]
+      const teams = [...stable, ...pending]
+      teamApi.list.mockResolvedValue({ items: teams, total: teams.length })
+      teamApi.detail.mockImplementation((id: number) => id === 5
+        ? Promise.reject(new Error('temporary detail outage'))
+        : Promise.resolve(teams.find(team => team.team_id === id)))
+      await vm.refreshAgentTeam()
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([5, 6, 7, 8, 9])
+      expect(vm.agentTeams.map((team: AgentTeamDetail) => team.team_id)).toEqual([1, 2, 3, 4, 6, 7, 8, 9])
+      expect(vm.agentTeamError).toContain('已保留对应团队上次成功状态')
+
+      const completed = fixture(6, 'completed')
+      teams[5] = completed
+      teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+      await vm.refreshAgentTeam()
+      expect(vm.agentTeams.find((team: AgentTeamDetail) => team.team_id === 6).status).toBe('completed')
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([7, 8, 9])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('终态账本版本改变时读取一次新结果，100KB 结果保持完整', async () => {
+    let team = fixture(51, 'completed')
+    teamApi.list.mockImplementation(() => Promise.resolve({ items: [team], total: 1 }))
+    teamApi.detail.mockImplementation(() => Promise.resolve(team))
+    const wrapper = await mountReadyDrawer()
+    try {
+      const vm = wrapper.vm as any
+      const evidence = 'x'.repeat(100000) + '结果末尾核验'
+      team = {
+        ...team, updated_at: '2026-10-14T05:01:00Z',
+        tasks: [{
+          task_id: 1, task_key: 'verify', member_id: 1, title: '结果完整性核验',
+          depends_on: [], status: 'completed', priority: 1, attempt_count: 1, max_attempts: 3,
+          result: { evidence },
+        }],
+      }
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail).toHaveBeenCalledTimes(1)
+      expect(vm.agentTeams[0].tasks[0].result.evidence).toBe(evidence)
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('显式打开和刷新终态团队仍读最新详情，关闭后恢复后台停止', async () => {
+    const teams = [fixture(61, 'completed'), fixture(62, 'failed')]
+    teamApi.list.mockResolvedValue({ items: teams, total: 2 })
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    const wrapper = await mountReadyDrawer()
+    try {
+      const vm = wrapper.vm as any
+      await settleAll()
+      teamApi.detail.mockClear()
+      await wrapper.get('.agent-team-open-detail').trigger('click')
+      await flushPromises()
+      expect(teamApi.detail).toHaveBeenCalledWith(61)
+      expect(teamApi.detail.mock.calls.every(([id]) => id === 61)).toBe(true)
+      expect(vm.teamWindowVisible).toBe(true)
+      teams[0] = { ...teams[0], summary: { evidence: '打开后的最新结果' } }
+      teamApi.detail.mockClear()
+      wrapper.findComponent({ name: 'AgentTeamWindow' }).vm.$emit('refreshed')
+      await flushPromises()
+      expect(vm.agentTeams[0].summary.evidence).toBe('打开后的最新结果')
+      expect(teamApi.detail).toHaveBeenCalledWith(61)
+      expect(teamApi.detail.mock.calls.every(([id]) => id === 61)).toBe(true)
+      vm.teamWindowVisible = false
+      teamApi.detail.mockClear()
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('同账号历史恢复重新确认团队一次，切换账号后旧详情不得恢复进新账号', async () => {
+    const user = useUserStore()
+    user.profile = { id: 101, username: 'alice', role: 'user', status: 1 }
+    let teams = [fixture(71, 'completed')]
+    teamApi.list.mockImplementation(() => Promise.resolve({ items: teams, total: teams.length }))
+    teamApi.detail.mockImplementation((id: number) => Promise.resolve(teams.find(team => team.team_id === id)))
+    sessionApi.get.mockImplementation((_surface: string, id: string) => Promise.resolve({
+      surface: 'user', session_id: id, run: null, pending: null,
+      messages: [{ role: 'user', content: '原账号历史任务' }],
+    }))
+    const wrapper = await mountReadyDrawer()
+    try {
+      const vm = wrapper.vm as any
+      teams = [{ ...fixture(72, 'cancelled'), session_id: 'history-team' }]
+      teamApi.detail.mockClear()
+      await vm.handleSessionSelect('history-team')
+      await flushPromises()
+      expect(vm.agentTeams.map((team: AgentTeamDetail) => team.team_id)).toEqual([72])
+      expect(teamApi.detail.mock.calls.map(([id]) => id)).toEqual([72])
+      await vm.refreshAgentTeam()
+      expect(teamApi.detail).toHaveBeenCalledTimes(1)
+      expect(loadAgentChatSnapshot('history-team', agentChatStorageKey('user', 101))?.teams?.map(team => team.team_id)).toEqual([72])
+
+      const old = deferred<AgentTeamDetail>()
+      teams = [{ ...teams[0], updated_at: '2026-10-14T05:02:00Z' }]
+      teamApi.detail.mockReturnValueOnce(old.promise)
+      const staleRequest = vm.refreshAgentTeam()
+      await flushPromises()
+      user.profile = { id: 202, username: 'bob', role: 'user', status: 1 }
+      teams = [{ ...fixture(73, 'expired'), session_id: 'bob-history' }]
+      await vm.handleSessionSelect('bob-history')
+      await flushPromises()
+      old.resolve({ ...fixture(72, 'completed'), summary: { evidence: '旧账号迟到数据' } })
+      await staleRequest
+      expect(vm.agentTeams.map((team: AgentTeamDetail) => team.team_id)).toEqual([73])
+      expect(vm.cachedAgentTeams.map((team: AgentTeamDetail) => team.team_id)).toEqual([73])
+      expect(JSON.stringify(vm.agentTeams)).not.toContain('旧账号迟到数据')
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })
 
 async function mountReadyDrawer(prefill?: string, extraPlugins: Plugin[] = []): Promise<VueWrapper> {
