@@ -244,6 +244,12 @@ export function isNavigationPathAllowed(
     const resolved = router.resolve({ path: pathname })
     if (!resolved.matched.length) return false
     if (resolved.matched.some((record) => String(record.path ?? '').includes(':pathMatch'))) return false
+    // 论坛详情与编辑页只接受业务 ID 的规范正整数形式；Vue Router 的 :id
+    // 参数本身会匹配任意字符串，不能因此把 /forum/未知路径渲染成可点击入口。
+    const dynamicForumRoute = resolved.matched.some((record) => (
+      ['/forum/:id', '/forum/:id/edit'].includes(String(record.path ?? ''))
+    ))
+    if (dynamicForumRoute && !/^\/forum\/[1-9]\d*(?:\/edit)?$/.test(path)) return false
     return isRouteAllowed(resolved, guardSource)
   } catch {
     return false

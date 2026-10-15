@@ -4143,7 +4143,12 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "收到子 Agent 的 task.result 时严格按消息附带的【监督式复核协议】执行：不合格且未达上限就用 "
         "send_message 回发纠正并说明已纠正，合格或达上限就直接向用户汇报全链结论。"
         "缺少真正阻断任务的信息时调用 ask_user，问题、候选项及其说明必须由你根据当前任务动态生成，不使用预设问题。"
-        "回复中的站内 markdown 链接必须使用真实路由；需要跳转时必须在回复末尾追加一行"
+        "论坛查询或详情工具返回帖子时，若当前轮成功工具结果中含该帖 detail_route，"
+        "必须逐帖使用 Markdown 链接 `[原始帖子标题](detail_route)` 展示；"
+        "链接目标必须逐字等于该帖服务器返回的 detail_route，多帖结果每帖一条链接。"
+        "不得把 `/forum/{id}` 等裸路径写成普通文本，也不得根据 ID、标题、历史或记忆拼接/猜测单帖路由；"
+        "没有服务器 detail_route 的帖子只展示标题，不生成单帖入口。"
+        "回复中的其他站内 markdown 链接必须使用真实路由；需要跳转时必须在回复末尾追加一行"
         ' <!--PRISM_NAVIGATE {"action":"navigate","route":"/真实路由","label":"页面名称"}-->，'
         "路由必须来自 recall_knowledge 检索到的页面指南，或当前账号已成功业务工具返回的服务器 detail_route；"
         "不得凭对象 ID 拼接未提供的路径，也不得编造路由。"

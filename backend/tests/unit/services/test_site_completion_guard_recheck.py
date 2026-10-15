@@ -305,6 +305,9 @@ def test_business_answer_and_link_instructions_use_actual_server_result(surface)
     text = service._instructions(surface, SimpleNamespace(username="member", role=surface))
     assert "detail_route" in text
     assert "不得凭对象 ID 拼接" in text
+    assert "必须逐帖使用 Markdown 链接" in text
+    assert "链接目标必须逐字等于该帖服务器返回的 detail_route" in text
+    assert "没有服务器 detail_route 的帖子只展示标题" in text
     assert "自然业务答复默认只给结果和页面链接" in text
     assert "除非用户明确索要技术证据" in text
     assert "newest 按发布时间严格排序并忽略置顶" in text

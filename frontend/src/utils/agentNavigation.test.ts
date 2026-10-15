@@ -77,6 +77,43 @@ describe('shared navigation visibility', () => {
     expect([...root.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['/known'])
     expect(root.querySelector('svg, script, [onload]')).toBeNull()
   })
+
+  it('只把规范论坛详情路径渲染为链接，不自动链接裸路径或未知动态路径', () => {
+    const router = {
+      resolve: ({ path }: { path: string }) => {
+        if (/^\/forum\/[1-9]\d*$/.test(path)) {
+          return { matched: [{ path: '/forum/:id' }], meta: {} }
+        }
+        if (/^\/forum\/[1-9]\d*\/edit$/.test(path)) {
+          return { matched: [{ path: '/forum/:id/edit' }], meta: {} }
+        }
+        if (path === '/forum/new') return { matched: [{ path: '/forum/new' }], meta: {} }
+        return { matched: [], meta: {} }
+      },
+    }
+    const html = renderAuthorizedAgentMarkdown(
+      '[第一篇](/forum/44)\n[第二篇](/forum/43)\n[第三篇](/forum/42)\n'
+      + '裸路径 /forum/44；[非数字 ID](/forum/not-a-post) [零 ID](/forum/0) '
+      + '[伪造页面](/forum/admin) [未登记路径](/forum/999/edit/extra) '
+      + '[添加参数](/forum/44?next=/admin)',
+      router as never,
+      guard(true),
+    )
+    const root = document.createElement('div')
+    root.innerHTML = html
+
+    expect([...root.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['第一篇', '/forum/44'],
+      ['第二篇', '/forum/43'],
+      ['第三篇', '/forum/42'],
+    ])
+    expect(root.textContent).toContain('裸路径 /forum/44')
+    expect(root.textContent).not.toContain('非数字 ID')
+    expect(root.textContent).not.toContain('零 ID')
+    expect(root.textContent).not.toContain('伪造页面')
+    expect(root.textContent).not.toContain('未登记路径')
+    expect(root.textContent).not.toContain('添加参数')
+  })
 })
 
 describe('navigation fallback extraction', () => {
