@@ -1,0 +1,199 @@
+{
+  "release": {
+    "version": "4.0.105",
+    "sha": "1bb4acdf32eb71f2a4027a9124798cb0534b186d",
+    "published_at_utc": "2026-10-15",
+    "source": "production healthz, readyz, release worktree"
+  },
+  "production_checks": {
+    "healthz": {
+      "status": "ok",
+      "version": "4.0.105",
+      "release": "1bb4acdf32eb71f2a4027a9124798cb0534b186d"
+    },
+    "readyz": {
+      "status": "ready",
+      "version": "4.0.105",
+      "release": "1bb4acdf32eb71f2a4027a9124798cb0534b186d"
+    },
+    "backup": {
+      "gzip_valid": true,
+      "checksum_valid": true,
+      "isolated_restore": "passed",
+      "restored_tables": 105,
+      "alembic": "063_agent_browser_actions"
+    },
+    "ops_check": {
+      "status": "degraded",
+      "disk_used_percent": 92,
+      "disk_alert_threshold_percent": 85,
+      "available_gib_approx": 14.9,
+      "blocking_checks": [],
+      "cleanup_performed": false
+    }
+  },
+  "deployment": {
+    "command": "./deploy.sh all --revision 1bb4acdf32eb71f2a4027a9124798cb0534b186d",
+    "exit_status": 0,
+    "backend_build": "passed",
+    "frontend_build": "passed",
+    "alembic_current_and_head": "063_agent_browser_actions",
+    "deployment_ledger": "passed",
+    "note": "Values recorded from the deployment run; current healthz and readyz were independently rechecked after release."
+  },
+  "cleanup_inventory": {
+    "observed_at_utc": "2026-10-15T08:27:27Z",
+    "dry_run_only": true,
+    "docker": {
+      "images_total": 112,
+      "images_active": 7,
+      "images_reclaimable_gb_reported": 8.958,
+      "backend_old_sha_tags_proposed": [
+        "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+        "c1066983b0abf9badea6fcd43d34e05fa94c8466",
+        "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+        "8f719975ba9398f078d2204e02d56a385e7ee92c",
+        "22404e44a05682e55740abe5a294da66761e2148",
+        "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+        "73b4dcfdebee88f978bd6dc644501fed81422d64",
+        "b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad"
+      ],
+      "frontend_old_sha_tags_proposed": [
+        "1dd46c05db02a1794c459c6b4b0e688c03927fb1",
+        "c1066983b0abf9badea6fcd43d34e05fa94c8466",
+        "6534493efbf7ec6eb0365b28019602cf8abd92d8",
+        "8f719975ba9398f078d2204e02d56a385e7ee92c",
+        "22404e44a05682e55740abe5a294da66761e2148",
+        "c1243cf70b891fee18cb883b3b3b64523ed4679a",
+        "73b4dcfdebee88f978bd6dc644501fed81422d64",
+        "b39d15fd69d9d184e9c1d9a3f4a0cf65feb2ffad"
+      ],
+      "protected_release_tags": [
+        "1bb4acdf32eb71f2a4027a9124798cb0534b186d",
+        "6bd4a39d937a657642e61d6325d81931b7252b8d",
+        "55c372c870816a179ffa335ff8c3240383141ad0",
+        "9f554c1261a15d335b4940856c4bdc5c1e57dc37"
+      ],
+      "build_cache_gb_reported": 5.127,
+      "prune_age_filter": "168h",
+      "volumes_reported_gb": 43.36,
+      "volume_reclaimable_kb_reported": 19.02
+    },
+    "sql_backups": {
+      "files_total": 77,
+      "bytes_total": 46379927383,
+      "older_than_14_days_count": 4,
+      "older_than_14_days_bytes": 1784026160,
+      "configured_retention_days": 14,
+      "deletion_recommendation": "Confirm offsite restoreability and retention policy before deleting."
+    },
+    "other_large_paths_gb_reported": {
+      "/opt/prism-releases": 51,
+      "/opt/prism-backups": 4.7,
+      "/root/code-review-backups": 1.8,
+      "/var/log": 5.3,
+      "journald_within_var_log": 3.9
+    },
+    "no_files_or_images_deleted": true
+  },
+  "browser_acceptance": {
+    "browser": "Safari, standard profile; not private browsing",
+    "viewport": "responsive 390x812",
+    "actions": [
+      "Reloaded the same signed-in user session twice",
+      "Opened the Xiaoling discussion list from its secondary control"
+    ],
+    "session_recovery": {
+      "status": "partial_result_restored",
+      "version_visible": "4.0.105",
+      "team_tasks_completed": 1,
+      "team_tasks_total": 3,
+      "failed_or_blocked": 2,
+      "upstream_error": "HTTP 402",
+      "warning_visible": "Result is sourced from the account-scoped team ledger and has not received Xiaoling final model verification.",
+      "duplicate_result_after_second_reload": false,
+      "latency_observation": "On the second reload, the restored card was absent at about 2.5 seconds and appeared after additional waiting; exact completion latency was not instrumented."
+    },
+    "discussion_list": {
+      "opened_by_real_click": true,
+      "terminal_and_partial_records_visible": 7,
+      "scope_limit": "Single page and responsive viewport only; not a full-site or physical-device audit."
+    },
+    "full_ai_review": {
+      "status": "blocked_by_upstream_billing",
+      "completed_nodes": 1,
+      "total_nodes": 3,
+      "verified_complete_review": false,
+      "additional_model_calls_after_release": false
+    }
+  },
+  "independent_recheck": {
+    "observed_at_utc": "2026-10-15T08:34:01Z",
+    "healthz_and_readyz": "v4.0.105 / 1bb4acdf32eb71f2a4027a9124798cb0534b186d",
+    "root_disk": {
+      "used_percent": 92,
+      "available_kib": 15372492,
+      "available_gib_approx": 14.66
+    },
+    "docker": {
+      "images_total": 112,
+      "images_active": 7,
+      "images_reclaimable_gb_reported": 8.958,
+      "build_cache_gb_reported": 5.127,
+      "volumes_reported_gb": 43.41,
+      "volume_reclaimable_kb_reported": 19.02
+    },
+    "sql_backups": {
+      "files_total": 77,
+      "bytes_total": 46379927383,
+      "older_than_14_days_count": 4,
+      "older_than_14_days_bytes": 1784026160
+    },
+    "dry_run_candidate_tags_match_evidence": true,
+    "cleanup_apply_or_deletion_observed": false,
+    "note": "Inventory values can drift while production remains active. Docker reclaimable image/cache totals are not the guaranteed reclaim amount of listed SHA tags; tags may share layers and cache age filter excludes newer entries."
+  },
+  "final_readonly_recheck": {
+    "observed_at_utc": "2026-10-15T08:53:05Z",
+    "cleanup_dry_run_at_utc": "2026-10-15T08:42:13Z",
+    "cleanup_apply_flag": false,
+    "rollback_state_deletion_candidates_printed": 0,
+    "old_sql_backups_over_14_days": [
+      {
+        "file": "code_review_20260930T100857Z_1d472bcd3557.sql.gz",
+        "bytes": 444838990
+      },
+      {
+        "file": "code_review_20260930T101303Z_1d472bcd3557.sql.gz",
+        "bytes": 444842048
+      },
+      {
+        "file": "code_review_20260930T103545Z_62b6afbdc891.sql.gz",
+        "bytes": 444862629
+      },
+      {
+        "file": "code_review_20260930T182800Z_nogit.sql.gz",
+        "bytes": 449482493
+      }
+    ],
+    "backup_retention_note": "The active project script uses find -mtime +14; these files are older than 14 days but less than 15 days at observation time, so the script may not prune them until they cross the rounded find threshold. Validate an offsite restore before manual removal.",
+    "release_directories": {
+      "total_reported_gib": 51,
+      "strict_mtime_older_than_14_days_count": 22,
+      "strict_mtime_older_than_14_days_disk_usage_gib_approx": 5.84184,
+      "gnu_find_mtime_plus_14_days_count": 18,
+      "gnu_find_mtime_plus_14_days_disk_usage_gib_approx": 0.97879,
+      "mtime_rounding_note": "GNU find -mtime +14 uses rounded 24-hour periods and effectively selects entries at about 15 days or older; it is not the exact strict 14-day set.",
+      "active_backend_and_frontend_reference_current_release": true,
+      "systemd_ops_units_reference_current_release_deploy_path": true,
+      "official_cleanup_script_removes_release_directories": false,
+      "recommendation": "Do not bulk delete; top-level directories include historical and operational snapshots, so map rollback/forensic needs first.",
+      "strict_mtime_older_than_14_days_observed_at_utc": "2026-10-15T09:04:06.781495Z",
+      "strict_mtime_older_than_14_days_du_kib": 6125616,
+      "strict_mtime_older_than_14_days_allocated_bytes": 6272630784,
+      "strict_mtime_size_semantics": "du -sk allocated disk usage, not logical file bytes"
+    },
+    "no_production_mutation_performed": true,
+    "independent_cleanup_dry_run_recheck_at_utc": "2026-10-15T09:04:07Z"
+  }
+}
