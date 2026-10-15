@@ -1,0 +1,42 @@
+{
+  "release": {
+    "version": "4.0.104",
+    "sha": "6bd4a39d937a657642e61d6325d81931b7252b8d",
+    "built_at_utc": "2026-10-15T05:18:28Z",
+    "bundle_sha256": "bdd4596846d952f55dade80c9ff8f079ae0963a0fd452dad6935423b674319fb"
+  },
+  "production_checks": {
+    "healthz": {"status": "ok", "version": "4.0.104", "release": "6bd4a39d937a657642e61d6325d81931b7252b8d"},
+    "readyz": {"status": "ready", "version": "4.0.104", "release": "6bd4a39d937a657642e61d6325d81931b7252b8d"},
+    "frontend_build_info_http": 200,
+    "frontend_build_info_contains_version": true,
+    "frontend_build_info_contains_release_sha": true,
+    "backend_image": "prism-backend:6bd4a39d937a657642e61d6325d81931b7252b8d",
+    "frontend_image": "prism-frontend:6bd4a39d937a657642e61d6325d81931b7252b8d",
+    "containers": {"mysql": "healthy", "redis": "healthy", "clamav": "healthy", "backend": "healthy", "frontend": "healthy"},
+    "backup": {
+      "file": "code_review_20261015T051845Z_6bd4a39d937a657642e61d6325d81931b7252b8d.sql.gz",
+      "gzip_valid": true,
+      "checksum_valid": true,
+      "isolated_restore": "passed",
+      "restored_tables": 105,
+      "alembic": "063_agent_browser_actions"
+    },
+    "ops_check": {
+      "status": "degraded",
+      "checked_at_utc": "2026-10-15T05:29:06Z",
+      "disk_used_percent": 92,
+      "disk_alert_threshold_percent": 85,
+      "blocking_checks": [],
+      "disk_cleanup_performed": false
+    }
+  },
+  "browser_acceptance": {
+    "status": "not_completed",
+    "reason": "CUA reported Mac locked and automatic unlock failed; no Safari real-click evidence was collected."
+  },
+  "live_ai_review": {
+    "status": "not_retested_after_release",
+    "prior_observation": "A previous production Responses request returned HTTP 402; full model-success path is not proven by this release's tests."
+  }
+}
