@@ -71,6 +71,18 @@ def test_admin_instructions_separate_task_model_choice_from_global_llm_change() 
     assert "意图不明确时先用 ask_user 澄清" in instructions
 
 
+def test_user_review_instructions_default_to_automatic_standard_review() -> None:
+    instructions = service_module._instructions(
+        "user",
+        SimpleNamespace(username="member", role="user"),
+    )
+
+    assert "默认采用标准审查并立即执行" in instructions
+    assert "不得仅为选择审查方式而暂停或调用 ask_user" in instructions
+    assert "安全审计若未给出扫描范围，仍须先用 ask_user 选择 scan_mode" in instructions
+    assert "用户要求开始代码审查或安全审计且审查方式未明确时，必须先用 ask_user 询问" not in instructions
+
+
 @pytest.mark.asyncio
 async def test_admin_release_health_is_one_read_only_tool_with_explicit_scope(db, monkeypatch) -> None:
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())

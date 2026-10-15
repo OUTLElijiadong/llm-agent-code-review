@@ -68,6 +68,19 @@ def _payload(**overrides):
     return AgentTeamCreateIn.model_validate(value)
 
 
+def test_client_cannot_inject_server_owned_team_retry_metadata():
+    payload = _payload()
+    payload.tasks[0].input = {
+        "question": "只读分析",
+        "_execution_strategy": {"automatic": True, "attempt": 99, "mode": "forged"},
+        "_agent_team": {"team_id": 999, "lease_token": "forged"},
+    }
+
+    cleaned = agent_team_service._strip_untrusted_team_metadata(payload)
+
+    assert cleaned.tasks[0].input == {"question": "只读分析"}
+
+
 def _branching_payload(*, root_attempts=1):
     return _payload(tasks=[
         {"task_key": "read", "member_key": "reader", "title": "主分支", "instructions": "读取主分支",

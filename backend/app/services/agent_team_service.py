@@ -528,6 +528,17 @@ def _normalize_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
     return payload
 
 
+def _strip_untrusted_team_metadata(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
+    """客户端不得伪造仅由服务端签发的团队租约与重试策略。"""
+
+    for task in payload.tasks:
+        data = dict(task.input or {})
+        data.pop("_execution_strategy", None)
+        data.pop("_agent_team", None)
+        task.input = data
+    return payload
+
+
 def _normalize_readonly_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
     """只读团队任务输入规范化的兼容入口,非只读团队保持原行为不变。"""
     if not _payload_is_readonly(payload):
@@ -1401,6 +1412,7 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
 
 
 def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[str, Any]:
+    payload = _strip_untrusted_team_metadata(payload)
     payload = _normalize_task_inputs(payload)
     payload = _normalize_verification_graph(payload)
     payload = _normalize_task_inputs(payload)

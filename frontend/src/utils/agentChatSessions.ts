@@ -32,6 +32,9 @@ export interface AgentChatSnapshotMessage {
   content: string
   /** 消息发起时已发现的子 Agent 团队,用于关闭/重开后恢复卡片位置。 */
   teamIds?: number[]
+  /** 团队终态回执的自动部分答复，按回执 ID 幂等恢复。 */
+  teamFallback?: boolean
+  autoResultKey?: string
   /** 失败卡片只属于其产生的运行,切换账号或会话时不得串入。 */
   runId?: string
   errorCard?: { retryable: boolean; nextAction?: string; requestId?: string }

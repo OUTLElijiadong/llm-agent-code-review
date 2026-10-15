@@ -17,7 +17,7 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn(), cancel: vi.fn() }))
-const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), conversations: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), conversations: vi.fn(), acknowledge: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
@@ -31,6 +31,7 @@ vi.mock('@/api/agentMesh', () => ({
   pullAgentMeshInbox: meshApi.inbox,
   listAgentMeshAgents: meshApi.list,
   listAgentMeshConversations: meshApi.conversations,
+  acknowledgeAgentMeshMessage: meshApi.acknowledge,
   archiveAgentMeshSession: vi.fn().mockResolvedValue({ session_id: '', status: 'archived' }),
 }))
 vi.mock('@/api/agentTeams', () => ({
@@ -109,6 +110,7 @@ beforeEach(() => {
   meshApi.inbox.mockReset().mockResolvedValue([])
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
   meshApi.conversations.mockReset().mockRejectedValue(new Error('会话目录未配置'))
+  meshApi.acknowledge.mockReset().mockResolvedValue({ message_id: 'terminal', status: 'completed' })
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
   teamApi.events.mockReset().mockResolvedValue({
@@ -627,6 +629,53 @@ describe('AdminCopilot Responses stream', () => {
     emit(0, { type: 'response.completed', response: { id: 'run-admin-background' } })
     await finish(0)
     expect(wrapper.find('.session-current').text()).toContain('新对话')
+    wrapper.unmount()
+  })
+
+  it('管理端也会在团队终态汇总模型失败时自动展示子 Agent 部分结果', async () => {
+    const receipt = {
+      schema_version: '1.0', message_id: 'team-89-terminal-1-result', idempotency_key: 'team-89-terminal-1-result',
+      trace_id: 'trace-89', correlation_id: 'team:89', causation_id: 'request-89',
+      sent_from: 'system:agent_team', send_to: 'session:admin:admin-test', message_type: 'task.error',
+      priority: 'normal', subject: '运维审查团队终态', status: 'delivered', payload: { team_id: 89 },
+      context: { team_id: 89, team_terminal: true, session_delivery: true }, artifacts: [], errors: [],
+      requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-10-15T13:00:00Z', create_time: '2026-10-15T12:00:00Z', update_time: '2026-10-15T12:00:01Z',
+    }
+    let deliveredSessionId = ''
+    meshApi.inbox.mockImplementation((_surface: string, sessionId: string) => {
+      deliveredSessionId = sessionId
+      return Promise.resolve([{ ...receipt, send_to: `session:admin:${sessionId}` }])
+    })
+    const teamDetail: AgentTeamDetail = {
+      team_id: 89, title: '管理端自动审查', surface: 'admin', session_id: 'admin-test', status: 'completed',
+      max_active_children: 3, trace_id: 'trace-89',
+      counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      summary: { final_result: { summary: '代码质量 Agent 保存一项证据。' } },
+      members: [], events: [], messages: [],
+      tasks: [{
+        task_id: 1, task_key: 'review', member_id: 1, member_key: 'reviewer', title: '只读审查',
+        depends_on: [], status: 'completed', priority: 0, attempt_count: 1, max_attempts: 3,
+        result: { summary: '发现风险。', findings: [{ severity: '中', title: '缺少边界检查', file_name: 'api.py', line_number: 9 }] },
+      }],
+    }
+    teamApi.detail.mockImplementation(() => Promise.resolve({ ...teamDetail, session_id: deliveredSessionId }))
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+    await flushPromises()
+
+    expect(streams.records).toHaveLength(1)
+    emit(0, { type: 'response.created', response: { id: 'run-team-89' } })
+    emit(0, { type: 'response.failed', response: { id: 'run-team-89', error: { message: 'HTTP 402: quota refused' } } })
+    await finish(0)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).toContain('缺少边界检查')
+    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('admin', deliveredSessionId, receipt.message_id, 'processing', expect.any(String))
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('admin', deliveredSessionId, receipt.message_id, 'completed', expect.stringContaining('自动整理'))
     wrapper.unmount()
   })
 

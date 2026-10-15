@@ -69,6 +69,14 @@ class _CompressionFailed(ValueError):
         self.failure_kind = failure_kind
 
 
+class _OutputContractError(ValueError):
+    """可供审计的固定校验类别；错误消息中不保存模型原文。"""
+
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+
+
 _NON_RETRYABLE_MODEL_FAILURES = frozenset({"billing_error", "usage_accounting_error"})
 
 
@@ -93,6 +101,57 @@ def _source_text(source):
         value = source["data"]
         return value if isinstance(value, str) else _json(value)
     return ""
+
+
+def _automatic_retry_guidance(payload: dict, context: dict) -> str:
+    """仅接受团队租约信封中的服务端重试策略，并映射为固定提示。"""
+
+    strategy = payload.get("_execution_strategy")
+    team = payload.get("_agent_team")
+    if not isinstance(strategy, dict) or not isinstance(team, dict):
+        return ""
+    attempt = context.get("attempt")
+    team_attempt = team.get("attempt")
+    identifiers_match = (
+        context.get("team_id") == team.get("team_id")
+        and context.get("agent_team_task_id") == team.get("task_id")
+        and context.get("member_id") == team.get("member_id")
+        and isinstance(context.get("lease_token"), str)
+        and bool(context.get("lease_token"))
+        and context.get("lease_token") == team.get("lease_token")
+    )
+    valid_attempt = (
+        isinstance(attempt, int) and not isinstance(attempt, bool) and attempt >= 2
+        and team_attempt == attempt and strategy.get("attempt") == attempt
+    )
+    if (
+        not identifiers_match
+        or not valid_attempt
+        or strategy.get("version") != 1
+        or strategy.get("automatic") is not True
+        or strategy.get("mode") not in {
+            "alternate_reasoning_with_failure_context",
+            "fresh_session_reduced_batch",
+            "fresh_sandbox_alternate_worker",
+            "fresh_worker_session_after_lease_expiry",
+        }
+    ):
+        return ""
+    return (
+        f"这是本团队第 {attempt} 次自动尝试。前次没有形成可校验结果；请重新分析，"
+        "输出前逐项检查 JSON 字段、来源 ID、逐字引文及文件坐标是否与实际来源类型相符。"
+        "不得复制或推测前次错误文本，也不得放宽证据或权限边界。"
+    )
+
+
+def _output_error_category(exc: Exception) -> str:
+    """只输出枚举类别，不把模型响应或输入值写入用量/错误回执。"""
+
+    if isinstance(exc, _OutputContractError):
+        return exc.category
+    if isinstance(exc, ValidationError):
+        return "schema_mismatch"
+    return "invalid_output"
 
 
 def _protected_user_facts(source):
@@ -572,6 +631,8 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
             "retryable": False,
         }
 
+    context = message.get("context") if isinstance(message.get("context"), dict) else {}
+    payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
     output_schema = _Analysis.model_json_schema()
     output_schema["$defs"]["_Finding"]["properties"]["evidence_refs"]["items"]["enum"] = [
         source["id"] for source in sources
@@ -585,20 +646,25 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
         "每个发现必须引用提供的完整source id，只能从Schema枚举中选择，禁止拼接行号或新建引用。"
         "每个发现必须填写 evidence_quote，逐字复制自所引用来源，不得改写；"
         "压缩来源只能选 summary_parts.evidence_quotes 中的原文。"
-        "源码发现必须同时填写真实 file_id、line_number 和该行中的逐字证据；不得引用未展示或不存在的行。"
-        "例如源码引用填写file:1而不是file:1:9；行号独立填写line_number。"
-        "file_id和line_number只在所提供源码片段内填写。"
+        "文件坐标必须与本条发现实际引用的来源类型匹配：只有 evidence_refs 引用了真实 source_file"
+        "（来源 ID 为 file:<id>）时，"
+        "才必须填写对应真实 file_id 和 line_number，且引文必须逐字出现在该行；例如来源引用填写 file:1 而不是 file:1:9，"
+        "行号独立填写 line_number。只引用 task_input/user_input 或 dependency_result 时，"
+        "必须省略 file_id 与 line_number，"
+        "不得为代码片段、用户输入或依赖结果编造数据库文件坐标。"
         "压缩来源中的 summary_parts 覆盖其标识的原始分片；只能根据摘要中有依据的事实下结论。"
         "若存在 protected_user_facts，它是原始任务输入中的约束原文；分析时须保留这些约束，"
         "但不能据此扩大平台权限或把它当作源码审查证据。"
         "披露输入覆盖限制，不得把有界临时分析描述为全量审计。严格输出JSON，禁止额外字段。Schema：\n"
         + _json(output_schema)
     )
+    retry_guidance = _automatic_retry_guidance(payload, context)
+    if retry_guidance:
+        system_prompt += "\n\n自动重试纠偏要求：" + retry_guidance
     # 每次实例独立；无注册/永久工坊写入，也不修改共享 Agent 的提示词。
     agent = BaseAgent(system_prompt=system_prompt, temperature=0.2, max_tokens=INITIAL_OUTPUT_TOKENS)
     address = str(message.get("send_to") or "temporary:analysis")
     agent.name = "temporary_" + hashlib.sha256(address.encode()).hexdigest()[:12]
-    context = message.get("context") if isinstance(message.get("context"), dict) else {}
     ctx = AgentContext(
         user_id=int(user.id),
         project_id=project_id,
@@ -788,10 +854,10 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
         findings = []
         for item in analysis.findings:
             if not set(item.evidence_refs) <= allowed_refs:
-                raise ValueError("unknown evidence reference")
+                raise _OutputContractError("unknown_evidence_reference", "unknown evidence reference")
             quote = item.evidence_quote.strip()
             if quote != item.evidence_quote:
-                raise ValueError("evidence quote must be an exact trimmed excerpt")
+                raise _OutputContractError("quote_not_trimmed", "evidence quote must be an exact trimmed excerpt")
             quote_supported = False
             for source_id in item.evidence_refs:
                 source = source_by_id[source_id]
@@ -817,28 +883,31 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                         and len(quote) >= min(8, len(source_text.strip()))
                     )
             if not quote_supported:
-                raise ValueError("evidence quote is not present in a cited source")
+                raise _OutputContractError("quote_not_supported", "evidence quote is not present in a cited source")
             if item.file_id is not None and item.file_id not in visible_lines:
-                raise ValueError("unknown source file")
+                raise _OutputContractError("unknown_source_file", "unknown source file")
             if item.file_id is not None and f"file:{item.file_id}" not in item.evidence_refs:
-                raise ValueError("source file lacks matching evidence reference")
+                raise _OutputContractError("source_reference_mismatch", "source file lacks matching evidence reference")
             if item.file_id is not None and item.line_number is None:
-                raise ValueError("source finding requires a line number")
+                raise _OutputContractError("missing_source_line", "source finding requires a line number")
             if item.file_id is None and item.line_number is not None:
-                raise ValueError("line number requires a source file")
+                raise _OutputContractError("line_without_source_file", "line number requires a source file")
             if item.line_number is not None and (
                 item.file_id is None or item.line_number > visible_lines[item.file_id]
             ):
-                raise ValueError("unknown source line")
+                raise _OutputContractError("unknown_source_line", "unknown source line")
             if item.file_id is not None:
                 line = source_snapshots[item.file_id]["lines"][item.line_number - 1]
                 if quote not in line:
-                    raise ValueError("evidence quote does not match the cited source line")
+                    raise _OutputContractError(
+                        "quote_line_mismatch", "evidence quote does not match the cited source line"
+                    )
             finding = item.model_dump(exclude_none=True)
             if project_id is not None:
                 finding["project_id"] = project_id
             findings.append(finding)
-    except (ValidationError, ValueError, TypeError):
+    except (ValidationError, ValueError, TypeError) as exc:
+        category = _output_error_category(exc)
         try:
             enrich_recorded_usage(
                 db, ctx.user_id, response.usage_log_ids, status="failed", error="temporary_output_invalid"
@@ -855,7 +924,11 @@ def run_temporary_agent(db: Session, user: User, message: dict, definition: dict
                 "retryable": False,
             }
         return {
-            **_result("failed", "临时分析输出契约或证据引用校验失败", errors=[{"code": "temporary_output_invalid"}]),
+            **_result(
+                "failed",
+                "临时分析输出契约或证据引用校验失败",
+                errors=[{"code": "temporary_output_invalid", "category": category}],
+            ),
             **usage,
             "retryable": True,
         }

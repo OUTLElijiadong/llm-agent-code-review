@@ -6,7 +6,7 @@ import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument,
 import dayjs from 'dayjs'
 import { post } from '@/api/http'
 import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseImageAsset, type AgentResponseSession } from '@/api/agentResponses'
-import { archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
+import { acknowledgeAgentMeshMessage, archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
 import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
@@ -59,6 +59,7 @@ import {
 import { normalizeAgentText } from '@/utils/agentText'
 import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
+import { agentTeamFallbackKey, buildAgentTeamFallback } from '@/utils/agentTeamFallback'
 import {
   agentMeshToolCalls,
   findAgentMeshTimeline,
@@ -156,6 +157,9 @@ interface ChatMessage {
   navigations?: AgentNavigateDirective[]
   /** 这条时间线消息发起时已创建/发现的子 Agent 团队。 */
   teamIds?: number[]
+  /** 子 Agent 终态账本生成的自动部分结果，用于幂等与会话恢复。 */
+  teamFallback?: boolean
+  autoResultKey?: string
 }
 
 const props = defineProps<{
@@ -451,6 +455,8 @@ function persistSnapshot(): void {
       role: message.role,
       content: message.images?.length && !message.content.trim() ? '(图片)' : message.content,
       teamIds: message.teamIds?.length ? [...message.teamIds] : undefined,
+      teamFallback: message.teamFallback,
+      autoResultKey: message.autoResultKey,
       runId: message.runId,
       errorCard: message.errorCard,
       // 图片字节不落本地快照，历史缩略图从服务器的本人资产恢复。
@@ -756,6 +762,18 @@ function restoredSessionMessages(
       })))
     }
   }
+  const existingFallbackKeys = new Set(restored.map((message) => message.autoResultKey).filter(Boolean))
+  for (const fallback of (persistedMessages ?? []).filter((message) => (
+    message.role === 'assistant' && message.teamFallback && message.autoResultKey
+  ))) {
+    if (existingFallbackKeys.has(fallback.autoResultKey)) continue
+    restored.push({
+      id: messageId(), role: 'assistant', content: fallback.content, time: restoredTime,
+      teamFallback: true, autoResultKey: fallback.autoResultKey,
+      teamIds: fallback.teamIds?.length ? [...fallback.teamIds] : undefined,
+    })
+    existingFallbackKeys.add(fallback.autoResultKey)
+  }
   return restored
 }
 
@@ -866,7 +884,77 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     sessionRun.value?.status,
     sessionRun.value?.error,
   )
-  return succeeded
+  if (succeeded) return true
+  return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
+}
+
+async function acknowledgeFallbackReceipt(message: AgentMeshMessage, targetSessionId: string, summary: string): Promise<void> {
+  const key = agentTeamFallbackKey(message.message_id)
+  try {
+    // 失败的 Responses 回合会把消息重新排队；推进到 processing 后再完成，避免 402 无限重试。
+    await acknowledgeAgentMeshMessage('user', targetSessionId, message.message_id, 'processing', key)
+    await acknowledgeAgentMeshMessage('user', targetSessionId, message.message_id, 'completed', summary.slice(0, 1800))
+  } catch {
+    // 本地结果已持久化；桥接层仍可重投回执并按稳定键去重。
+  }
+}
+
+async function appendTerminalTeamFallback(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+  scopeCurrent: () => boolean,
+): Promise<boolean> {
+  if (message.context?.team_terminal !== true) return false
+  const key = agentTeamFallbackKey(message.message_id)
+  const teamId = Number(message.payload?.team_id ?? message.context?.team_id)
+  if (!Number.isSafeInteger(teamId) || teamId <= 0) return false
+
+  const activeSession = targetSessionId === sessionId.value
+  const cached = activeSession ? null : loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
+  const alreadySaved = activeSession
+    ? messages.value.some((item) => item.autoResultKey === key)
+    : Boolean(cached?.messages.some((item) => item.autoResultKey === key))
+  if (alreadySaved) {
+    await acknowledgeFallbackReceipt(message, targetSessionId, '团队部分结果已保存并展示；小菱最终模型汇总不可用。')
+    return true
+  }
+
+  try {
+    const detail = await getAgentTeam(teamId)
+    if (!scopeCurrent()) return false
+    const content = buildAgentTeamFallback(detail, {
+      teamId, surface: 'user', sessionId: targetSessionId,
+      upstreamError: sessionRun.value?.error || message.last_error || '',
+    })
+    if (!content) return false
+    const summaryMessage = {
+      role: 'assistant' as const,
+      content,
+      teamIds: [teamId],
+      teamFallback: true,
+      autoResultKey: key,
+    }
+    if (activeSession) {
+      messages.value.push({
+        id: messageId(), ...summaryMessage, time: dayjs().format('HH:mm'),
+      })
+      persistSnapshot()
+      await nextTick()
+      if (scopeCurrent()) scrollToBottom()
+    } else {
+      saveAgentChatSnapshot(targetSessionId, {
+        messages: [...(cached?.messages ?? []), summaryMessage],
+        teams: cached?.teams,
+        runStatus: cached?.runStatus ?? 'failed',
+        updatedAt: Date.now(),
+      }, chatStorageKey.value)
+    }
+    if (!scopeCurrent()) return false
+    await acknowledgeFallbackReceipt(message, targetSessionId, content)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function runBackgroundMeshMessage(
@@ -910,7 +998,9 @@ async function runBackgroundMeshMessage(
   chatScope.track(handle)
   try {
     await handle.done
-    return scopeCurrent() && succeeded
+    if (!scopeCurrent()) return false
+    if (succeeded) return true
+    return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
   } catch {
     return false
   } finally {
@@ -1590,6 +1680,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
             status: event.type === 'response.completed'
               ? 'completed'
               : event.type === 'response.cancelled' ? 'cancelled' : 'failed',
+            error: event.type === 'response.completed' ? '' : eventErrorMessage(event) || sessionRun.value.error,
           }
         }
         invalidateSessionPoll()

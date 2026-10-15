@@ -34,7 +34,10 @@
         :title="`我的圆桌讨论：可继续 ${activeCount} 个，已结束 ${sessions.length - activeCount} 个`"
         @click="openFromDock"
       >
-        <span aria-hidden="true">🗣️</span>
+        <svg class="roundtable-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M3.25 4.75A2.25 2.25 0 0 1 5.5 2.5h9A2.25 2.25 0 0 1 16.75 4.75v5A2.25 2.25 0 0 1 14.5 12H8l-4.75 3v-10.25Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round" />
+          <path d="M6.5 6.5h7M6.5 9h4.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" />
+        </svg>
         <span class="roundtable-label">圆桌</span>
         <span v-if="activeCount > 0" class="roundtable-count" aria-label="可继续的圆桌数量">{{ activeCount }}{{ nextOffset !== null ? '+' : '' }}</span>
       </button>
@@ -387,11 +390,12 @@ onBeforeUnmount(() => {
 .roundtable-dock.is-unassigned { display: none; }
 .roundtable-dock.is-assistant { position: relative; display: flex; justify-items: initial; max-width: none; }
 .roundtable-fab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid #d9ddfa; border-radius: 999px; background: #fff; color: #292e67; box-shadow: 0 8px 28px #24295c33; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
-.roundtable-fab.is-assistant { flex: 0 0 auto; min-height: 36px; padding: 0 9px; gap: 6px; border-color: var(--color-border-light, #e5e7ef); border-radius: 8px; background: rgba(255, 255, 255, 0.72); color: var(--color-text-secondary, #72798a); box-shadow: none; font-size: 12px; font-weight: 550; }
-.roundtable-fab.is-assistant:hover { border-color: var(--brand-200, #d9ddfa); background: var(--brand-50, #f4f3ff); color: var(--brand-600, #4a46d4); }
+.roundtable-fab.is-assistant { flex: 0 0 auto; min-height: 30px; padding: 0 7px; gap: 5px; border-color: transparent; border-radius: 7px; background: transparent; color: var(--color-text-tertiary, #8990a1); box-shadow: none; font-size: 11.5px; font-weight: 500; }
+.roundtable-fab.is-assistant:hover { border-color: transparent; background: var(--color-fill-light, #f3f4f8); color: var(--color-text-primary, #454b5b); }
+.roundtable-icon { display: block; width: 16px; height: 16px; flex: none; }
 .roundtable-fab:focus-visible, .roundtable-choice:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 .roundtable-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px; background: #eef0ff; font-size: 11px; }
-.roundtable-fab.is-assistant .roundtable-count { min-width: 18px; height: 18px; padding: 0 4px; color: var(--brand-600, #4a46d4); font-size: 10px; }
+.roundtable-fab.is-assistant .roundtable-count { min-width: 16px; height: 16px; padding: 0 3px; background: var(--color-fill-light, #f0f1f6); color: var(--color-text-secondary, #72798a); font-size: 9px; }
 .roundtable-choices { display: grid; gap: 4px; width: min(300px, calc(100vw - 24px)); max-height: min(320px, 45dvh); overflow-y: auto; padding: 6px; border: 1px solid #dfe2f5; border-radius: 12px; background: white; box-shadow: 0 12px 30px #24295c30; }
 .roundtable-choices.is-assistant-popup { position: fixed; z-index: var(--layer-assistant-popover); }
 .roundtable-dock.is-assistant .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1; }

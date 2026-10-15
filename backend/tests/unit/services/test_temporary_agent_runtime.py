@@ -99,6 +99,29 @@ def run(db, actor, payload=None, definition=None, context=None):
     )
 
 
+def test_automatic_retry_guidance_requires_matching_server_lease_envelope():
+    context = {
+        "team_id": 88, "agent_team_task_id": 99, "member_id": 89,
+        "lease_token": "lease-2", "attempt": 2,
+    }
+    payload = {
+        "_agent_team": {
+            "team_id": 88, "task_id": 99, "member_id": 89,
+            "lease_token": "lease-2", "attempt": 2,
+        },
+        "_execution_strategy": {
+            "version": 1, "attempt": 2, "automatic": True,
+            "mode": "alternate_reasoning_with_failure_context",
+        },
+    }
+
+    guidance = runtime._automatic_retry_guidance(payload, context)
+    assert "第 2 次自动尝试" in guidance
+    assert "不得复制或推测前次错误文本" in guidance
+    assert runtime._automatic_retry_guidance(payload, {**context, "lease_token": "attacker"}) == ""
+    assert runtime._automatic_retry_guidance(payload, {**context, "attempt": 1}) == ""
+
+
 def test_general_analysis_uses_independent_prompt_and_no_permanent_assets(db, actor, model):
     one = run(db, actor, {"question": "比较两种排序算法"})
     two = run(db, actor, definition={"purpose": "性能分析", "instructions": "关注复杂度"})
@@ -114,6 +137,33 @@ def test_general_analysis_uses_independent_prompt_and_no_permanent_assets(db, ac
     assert db.query(CustomAgent).count() == db.query(CustomAgentVersion).count() == 0
 
 
+def test_task_input_finding_does_not_need_fabricated_database_file_coordinates(db, actor, model, monkeypatch):
+    def answer(*_args, **_kwargs):
+        return AgentResult(
+            success=True,
+            data={
+                "summary": "提供的代码片段存在动态执行风险",
+                "findings": [{
+                    "title": "动态执行用户输入",
+                    "description": "用户输入可能进入表达式执行函数",
+                    "severity": "高",
+                    "kind": "fact",
+                    "evidence_refs": ["task_input"],
+                    "evidence_quote": "eval(user_value)",
+                }],
+                "limitations": [],
+            },
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"code": "eval(user_value)"})
+
+    assert result["status"] == "completed"
+    assert result["findings"][0]["evidence_refs"] == ["task_input"]
+    assert "file_id" not in result["findings"][0]
+    assert "line_number" not in result["findings"][0]
+
+
 def test_file_only_infers_real_project_and_reads_source(db, actor, model):
     result = run(db, actor, {"file_id": 811})
     assert result["status"] == "completed"
@@ -124,6 +174,8 @@ def test_file_only_infers_real_project_and_reads_source(db, actor, model):
     schema = json.loads(model[0][0]["prompt"].split("Schema：\n", 1)[1])
     refs = schema["$defs"]["_Finding"]["properties"]["evidence_refs"]["items"]
     assert set(refs["enum"]) == {"task_input", "project:811", "file:811"}
+    assert "只有 evidence_refs 引用了真实 source_file" in model[0][0]["prompt"]
+    assert "必须省略 file_id 与 line_number" in model[0][0]["prompt"]
 
 
 def test_multiple_files_infer_same_project_and_report_count(db, actor, model):
@@ -901,6 +953,7 @@ def test_file_finding_with_fabricated_quote_is_rejected(db, actor, model, monkey
     result = run(db, actor, {"file_id": 811})
     assert result["status"] == "failed"
     assert result["errors"][0]["code"] == "temporary_output_invalid"
+    assert result["errors"][0]["category"] == "quote_not_supported"
     assert not result.get("findings")
 
 

@@ -28,6 +28,7 @@ import {
 } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
+import { agentTeamFallbackKey, buildAgentTeamFallback } from '@/utils/agentTeamFallback'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -136,6 +137,10 @@ interface ChatEntry {
     startedAt?: string
     completedAt?: string
   }
+  /** 团队终态回执的自动部分答复，用于幂等与会话恢复。 */
+  teamFallback?: boolean
+  autoResultKey?: string
+  teamIds?: number[]
 }
 
 
@@ -432,7 +437,13 @@ function askQuickQuestion(question: string): void {
 function persistSnapshot(): void {
   if (!sessionId.value) return
   saveAgentChatSnapshot(sessionId.value, {
-    messages: messages.value.map((entry) => ({ role: entry.role, content: entry.payload.content ?? '' })),
+    messages: messages.value.map((entry) => ({
+      role: entry.role,
+      content: entry.payload.content ?? '',
+      teamIds: entry.teamIds?.length ? [...entry.teamIds] : undefined,
+      teamFallback: entry.teamFallback,
+      autoResultKey: entry.autoResultKey,
+    })),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
   }, chatStorageKey.value)
@@ -792,6 +803,25 @@ function applySessionSnapshot(session: AgentResponseSession): void {
       time: '',
     })
   }
+  appendPersistedTeamFallbacks(session.session_id)
+}
+
+function appendPersistedTeamFallbacks(targetSessionId: string): void {
+  const snapshot = loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
+  if (!snapshot) return
+  const existing = new Set(messages.value.map((entry) => entry.autoResultKey).filter(Boolean))
+  for (const fallback of snapshot.messages) {
+    if (fallback.role !== 'assistant' || !fallback.teamFallback || !fallback.autoResultKey
+      || existing.has(fallback.autoResultKey)) continue
+    messages.value.push({
+      ...assistantEntry({ type: 'text', content: fallback.content, status: 'completed' }),
+      time: '',
+      teamFallback: true,
+      autoResultKey: fallback.autoResultKey,
+      teamIds: fallback.teamIds?.length ? [...fallback.teamIds] : undefined,
+    })
+    existing.add(fallback.autoResultKey)
+  }
 }
 
 async function pollSessionSnapshot(generation: number): Promise<void> {
@@ -884,7 +914,74 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
     sessionRun.value?.status,
     sessionRun.value?.error,
   )
-  return succeeded
+  if (succeeded) return true
+  return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
+}
+
+async function acknowledgeFallbackReceipt(message: AgentMeshMessage, targetSessionId: string, summary: string): Promise<void> {
+  const key = agentTeamFallbackKey(message.message_id)
+  try {
+    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'processing', key)
+    await acknowledgeAgentMeshMessage('admin', targetSessionId, message.message_id, 'completed', summary.slice(0, 1800))
+  } catch {
+    // 本地结果已持久化；桥接层仍可重投回执并按稳定键去重。
+  }
+}
+
+async function appendTerminalTeamFallback(
+  message: AgentMeshMessage,
+  targetSessionId: string,
+  scopeCurrent: () => boolean,
+): Promise<boolean> {
+  if (message.context?.team_terminal !== true) return false
+  const key = agentTeamFallbackKey(message.message_id)
+  const teamId = Number(message.payload?.team_id ?? message.context?.team_id)
+  if (!Number.isSafeInteger(teamId) || teamId <= 0) return false
+  const activeSession = targetSessionId === sessionId.value
+  const cached = activeSession ? null : loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)
+  const alreadySaved = activeSession
+    ? messages.value.some((entry) => entry.autoResultKey === key)
+    : Boolean(cached?.messages.some((entry) => entry.autoResultKey === key))
+  if (alreadySaved) {
+    await acknowledgeFallbackReceipt(message, targetSessionId, '团队部分结果已保存并展示；小菱最终模型汇总不可用。')
+    return true
+  }
+
+  try {
+    const detail = await getAgentTeam(teamId)
+    if (!scopeCurrent()) return false
+    const content = buildAgentTeamFallback(detail, {
+      teamId, surface: 'admin', sessionId: targetSessionId,
+      upstreamError: sessionRun.value?.error || message.last_error || '',
+    })
+    if (!content) return false
+    const summaryMessage = {
+      role: 'assistant' as const, content, teamIds: [teamId],
+      teamFallback: true, autoResultKey: key,
+    }
+    if (activeSession) {
+      messages.value.push({
+        ...assistantEntry({ type: 'text', content, status: 'completed' }),
+        time: now(),
+        ...summaryMessage,
+      })
+      agentTeams.value = [...agentTeams.value.filter((team) => team.team_id !== teamId), detail]
+      persistSnapshot()
+      await scrollToBottom()
+    } else {
+      saveAgentChatSnapshot(targetSessionId, {
+        messages: [...(cached?.messages ?? []), summaryMessage],
+        teams: cached?.teams,
+        runStatus: cached?.runStatus ?? 'failed',
+        updatedAt: Date.now(),
+      }, chatStorageKey.value)
+    }
+    if (!scopeCurrent()) return false
+    await acknowledgeFallbackReceipt(message, targetSessionId, content)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function runBackgroundMeshMessage(
@@ -927,7 +1024,9 @@ async function runBackgroundMeshMessage(
   chatScope.track(handle)
   try {
     await handle.done
-    return scopeCurrent() && succeeded
+    if (!scopeCurrent()) return false
+    if (succeeded) return true
+    return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
   } catch {
     return false
   } finally {

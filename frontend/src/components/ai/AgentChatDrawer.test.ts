@@ -16,7 +16,7 @@ const streams = vi.hoisted(() => ({
 
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn() }))
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn() }))
-const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn() }))
+const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), acknowledge: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
 const responseApi = vi.hoisted(() => ({ cancel: vi.fn() }))
 const connectedDisclosureRoots = new Set<Element>()
@@ -31,6 +31,7 @@ vi.mock('@/api/agentMesh', () => ({
   heartbeatAgentMesh: meshApi.heartbeat,
   pullAgentMeshInbox: meshApi.inbox,
   listAgentMeshAgents: meshApi.list,
+  acknowledgeAgentMeshMessage: meshApi.acknowledge,
 }))
 vi.mock('@/api/agentTeams', () => ({
   listAgentTeams: teamApi.list,
@@ -120,6 +121,7 @@ beforeEach(() => {
   meshApi.heartbeat.mockReset().mockResolvedValue({})
   meshApi.inbox.mockReset().mockResolvedValue([])
   meshApi.list.mockReset().mockResolvedValue({ items: [], total: 0, by_kind: {} })
+  meshApi.acknowledge.mockReset().mockResolvedValue({ message_id: 'terminal', status: 'completed' })
   teamApi.list.mockReset().mockResolvedValue({ items: [], total: 0 })
   teamApi.detail.mockReset()
   teamApi.events.mockReset().mockResolvedValue({
@@ -628,6 +630,63 @@ describe('AgentChatDrawer Responses stream', () => {
     await finish(0)
 
     expect(wrapper.text()).toContain('代码审查已完成：确认 2 项需修复问题。')
+    expect(wrapper.find('.send-btn').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('终态团队的汇总模型遇到 402 时自动展示并保存有边界的部分结果', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-test', title: '代码审查', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-test')
+    const terminalReceipt = {
+      schema_version: '1.0', message_id: 'team-85-terminal-1-result', idempotency_key: 'team-85-terminal-1-result',
+      trace_id: 'trace-85', correlation_id: 'team:85', causation_id: 'review-request-85',
+      sent_from: 'system:agent_team', send_to: 'session:user:user-test', message_type: 'task.error',
+      priority: 'normal', subject: '代码审查团队已完成', status: 'delivered',
+      payload: { team_id: 85, status: 'failed' },
+      context: { team_id: 85, team_terminal: true, session_delivery: true, execution_generation: 1 },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-10-15T13:00:00Z', create_time: '2026-10-15T12:00:00Z', update_time: '2026-10-15T12:00:01Z',
+    }
+    meshApi.inbox.mockResolvedValue([terminalReceipt])
+    teamApi.detail.mockResolvedValue({
+      team_id: 85, title: '自动代码审查', surface: 'user', session_id: 'user-test', status: 'failed',
+      max_active_children: 3, trace_id: 'trace-85',
+      counts: { total: 2, completed: 1, running: 0, queued: 0, failed: 1, blocked: 0 },
+      summary: { final_result: { summary: '子 Agent 保存了一项需处理的问题。' } },
+      members: [], events: [], messages: [],
+      tasks: [
+        {
+          task_id: 1, task_key: 'review', member_id: 1, member_key: 'reviewer', title: '安全审查',
+          depends_on: [], status: 'completed', priority: 0, attempt_count: 1, max_attempts: 3,
+          result: { summary: '发现动态执行风险。', findings: [{ severity: '高', title: '不可信输入进入 eval', file_name: 'handler.py', line_number: 18, evidence_quote: 'eval(user_value)' }] },
+        },
+        {
+          task_id: 2, task_key: 'verify', member_id: 2, member_key: 'verifier', title: '独立核验',
+          depends_on: ['review'], status: 'failed', priority: 0, attempt_count: 3, max_attempts: 3,
+          result: null, errors: [{ code: 'verifier_unavailable', message: '核验服务不可用，不能视为通过' }],
+        },
+      ],
+    } satisfies AgentTeamDetail)
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+    expect(streams.records).toHaveLength(1)
+    emit(0, { type: 'response.created', response: { id: 'run-team-85' } })
+    emit(0, { type: 'response.failed', response: { id: 'run-team-85', error: { message: 'Responses 上游 HTTP 402: Insufficient Balance' } } })
+    await finish(0)
+    await settleAll()
+
+    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).toContain('额度或计费拒绝')
+    expect(wrapper.text()).toContain('不可信输入进入 eval')
+    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(wrapper.text()).toContain('核验服务不可用，不能视为通过')
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('user', 'user-test', terminalReceipt.message_id, 'processing', expect.any(String))
+    expect(meshApi.acknowledge).toHaveBeenCalledWith('user', 'user-test', terminalReceipt.message_id, 'completed', expect.stringContaining('部分结果'))
+    const snapshot = loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))
+    expect(snapshot?.messages.some((item) => item.teamFallback && item.autoResultKey === 'team-terminal:team-85-terminal-1-result')).toBe(true)
     expect(wrapper.find('.send-btn').exists()).toBe(true)
     wrapper.unmount()
   })
