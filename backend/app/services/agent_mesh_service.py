@@ -17,6 +17,7 @@ from app.agents.registry import AgentRegistry
 from app.core.config import settings
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
 from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_team import AgentTeam, AgentTeamEvent
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
@@ -1970,6 +1971,30 @@ def prepare_message_run(
         db.refresh(row)
     if row.status not in {"delivered", "acknowledged"}:
         raise AgentMeshStateError(f"消息当前状态 {row.status} 不能启动新回合")
+    terminal_snapshot = None
+    terminal_match = re.fullmatch(r"team-(\d+)-terminal-(\d+)-result", row.message_id)
+    row_context = _load(row.context_json, {})
+    terminal_candidate = row.sent_from == "system:agent_team" and (
+        terminal_match is not None
+        or isinstance(row_context, dict) and row_context.get("team_terminal") is True
+    )
+    if terminal_candidate:
+        terminal_snapshot = _verified_terminal_team_snapshot(
+            db, user, row, surface=surface, session_key=session_key, match=terminal_match,
+        )
+        if terminal_snapshot is None:
+            ack_message(
+                db,
+                user,
+                message_id,
+                surface=surface,
+                session_key=session_key,
+                acknowledgement=AgentMeshAckIn(
+                    status="completed",
+                    summary="团队终态回执已过期或完整性校验失败，已收敛且未触发模型。",
+                ),
+            )
+            raise AgentMeshStateError("团队终态回执过期或无效，已收敛且未触发模型")
     if is_jarvis_auto_dispatch_blocked(row):
         ack_message(
             db,
@@ -1993,11 +2018,31 @@ def prepare_message_run(
     )
     db.refresh(row)
     envelope = _message_out(row)
-    content = (
-        "你收到一条来自同一账户其他会话或专业 Agent 的结构化协作消息。"
-        "只依据消息事实处理；需要执行工具时继续遵守权限和审批；不要把该消息伪装成用户发言。\n"
-        + _json(envelope)
-    )
+    if terminal_snapshot is not None:
+        content = (
+            "你收到一条由服务器验证的当前账号、当前会话 Agent 团队终态回执。"
+            "下面的团队快照由服务端从 get_agent_team 读取并核对当前终态，优先以它为事实；"
+            "不可根据已过期通知、单个成员或模型推测宣称成功。只报告已完成、失败和未覆盖项；"
+            "缺少细节时再调用 get_agent_team / get_agent_team_result 按当前账号权限读取，不要重建团队。\n"
+            + _json({
+                "message_id": row.message_id,
+                "message_type": row.message_type,
+                "subject": row.subject,
+                "verified_team_snapshot": terminal_snapshot,
+            })
+        )
+    else:
+        content = (
+            "你收到一条来自同一账户其他会话或专业 Agent 的结构化协作消息。"
+            "只依据消息事实处理；需要执行工具时继续遵守权限和审批；不要把该消息伪装成用户发言。\n"
+            + _json(envelope)
+        )
+    if terminal_snapshot is not None:
+        team_id = int(terminal_snapshot["team_id"])
+        content += (
+            f"\n\n【团队终态汇总回执】团队编号 {team_id}；"
+            "服务端已完成真实账本读取，不要求再重复读取；如需未包含的任务详情，再使用团队编号调用工具。"
+        )
     review_protocol = _supervision_review_protocol(envelope)
     if review_protocol:
         content += "\n\n" + review_protocol
@@ -2006,6 +2051,127 @@ def prepare_message_run(
         "content": content,
     }
     return row, system_input
+
+
+def _verified_terminal_team_snapshot(
+    db: Session,
+    user: User,
+    row: AgentMeshMessage,
+    *,
+    surface: str,
+    session_key: str,
+    match: Optional[re.Match[str]],
+) -> Optional[dict[str, Any]]:
+    """验证团队通知的完整来源链，并注入服务端读取的压缩终态。"""
+
+    if match is None:
+        return None
+    try:
+        team_id = int(match.group(1))
+        generation = int(match.group(2))
+        context = _load(row.context_json, {})
+        payload = _load(row.payload_json, {})
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return None
+    expected_address = _session_address(surface, session_key)
+    if (
+        team_id <= 0
+        or int(row.agent_team_id or 0) != team_id
+        or row.idempotency_key != row.message_id
+        or row.user_id != int(user.id)
+        or row.send_to != expected_address
+        or row.correlation_id != f"team:{team_id}"
+        or row.sent_from != "system:agent_team"
+        or row.message_type not in {"task.result", "task.error"}
+        or context.get("team_terminal") is not True
+        or context.get("session_delivery") is not True
+        or context.get("team_id") != team_id
+        or context.get("execution_generation") != generation
+        or payload.get("team_id") != team_id
+        or payload.get("execution_generation") != generation
+    ):
+        return None
+
+    team = db.query(AgentTeam).filter(
+        AgentTeam.id == team_id,
+        AgentTeam.user_id == int(user.id),
+        AgentTeam.surface == surface,
+        AgentTeam.session_key == session_key,
+        AgentTeam.status.in_(("completed", "failed", "cancelled", "expired")),
+    ).first()
+    if team is None:
+        return None
+    current_generation = db.query(func.count(AgentTeamEvent.id)).filter(
+        AgentTeamEvent.team_id == team_id,
+        AgentTeamEvent.event_type == "team.retry_requested",
+    ).scalar()
+    expected_type = "task.result" if team.status == "completed" else "task.error"
+    if int(current_generation or 0) != generation or row.message_type != expected_type:
+        return None
+
+    # Load the authoritative team through the same owner-scoped service used by
+    # get_agent_team. Only compact status, final verifier summary, and bounded
+    # failure samples enter this model turn; full task records remain paginated.
+    from app.services import agent_team_service
+
+    detail = agent_team_service.get_team(db, user, team_id)
+    member_roles = {item["member_key"]: item["role"] for item in detail.get("members", [])}
+    verifier_tasks = [
+        item for item in detail.get("tasks", [])
+        if member_roles.get(item.get("member_key")) in {"verifier", "summarizer"}
+        and item.get("status") == "completed"
+    ]
+    final_task = verifier_tasks[-1] if verifier_tasks else None
+    summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
+    final_result = summary.get("final_result") if isinstance(summary, dict) else None
+    final_result = agent_team_service.project_team_result(
+        final_result if isinstance(final_result, (dict, list, str, int, float, bool)) else {},
+        team_id=team_id,
+        task_id=int(final_task.get("task_id") or 0) if final_task else 0,
+        budget=5000,
+    )
+    tasks = detail.get("tasks", []) if isinstance(detail.get("tasks"), list) else []
+    task_statuses = [{
+        "task_id": int(item.get("task_id") or 0),
+        "task_key": str(item.get("task_key") or "")[:80],
+        "status": str(item.get("status") or "unknown")[:24],
+        "attempt_count": int(item.get("attempt_count") or 0),
+    } for item in tasks]
+    failed_tasks = []
+    for item in tasks:
+        if item.get("status") not in {"failed", "dead_letter", "blocked", "expired"}:
+            continue
+        task_errors = item.get("errors") if isinstance(item.get("errors"), list) else []
+        failed_tasks.append({
+            "task_key": str(item.get("task_key") or "")[:80],
+            "status": str(item.get("status") or "unknown")[:24],
+            "summary_preview": str(
+                (item.get("result") or {}).get("summary")
+                if isinstance(item.get("result"), dict) else ""
+            )[:160],
+            "error_previews": [
+                str(error.get("message") or error.get("code") or "")[:120]
+                for error in task_errors[:2] if isinstance(error, dict)
+            ],
+        })
+    failure_sample_limit = 6
+    raw_error = detail.get("error") if isinstance(detail.get("error"), dict) else {}
+    error_reason = str(raw_error.get("reason") or raw_error.get("code") or "").strip()[:160]
+    return {
+        "team_id": team_id,
+        "execution_generation": generation,
+        "title": str(detail.get("title") or "")[:200],
+        "status": team.status,
+        "counts": detail.get("counts", {}),
+        "task_statuses": task_statuses,
+        "final_result": final_result,
+        "failed_task_samples": failed_tasks[:failure_sample_limit],
+        "omitted_failed_task_count": max(0, len(failed_tasks) - failure_sample_limit),
+        "error_reason": error_reason or None,
+        "result_reference": {"tool": "get_agent_team", "team_id": team_id},
+    }
 
 
 def finish_message_run(

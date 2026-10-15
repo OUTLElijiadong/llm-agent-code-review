@@ -124,6 +124,8 @@ class Settings(BaseSettings):
     agent_mesh_dispatcher_enabled: bool = True
     agent_mesh_dispatch_interval_seconds: int = 2
     agent_mesh_dispatch_lease_seconds: int = 300
+    # 已完成的 Responses 运行若 Mesh 回执写入失败,定期仅重放数据库回执,不重复调用模型。
+    agent_run_receipt_recovery_interval_seconds: int = Field(default=15, ge=5, le=3600)
     # Agent Mesh 监管者每轮调度允许的最大轮数;1-5 之间,防止监管链无限循环。
     agent_mesh_supervision_max_rounds: int = Field(default=3, ge=1, le=5)
     # 空 Mesh 会话归档阈值:活跃但无消息、无 Responses 运行且超过此时长的会话将被归档。

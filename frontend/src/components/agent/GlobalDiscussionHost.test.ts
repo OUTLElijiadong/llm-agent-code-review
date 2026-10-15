@@ -19,7 +19,11 @@ const current = {
 async function mountHost(userId = 5, attachTo?: Element) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/dashboard', component: { template: '<div />' } }, { path: '/agents', component: { template: '<div />' } }],
+    routes: [
+      { path: '/dashboard', component: { template: '<div />' } },
+      { path: '/agents', component: { template: '<div />' } },
+      { path: '/admin/access', component: { template: '<div />' } },
+    ],
   })
   await router.push('/dashboard')
   await router.isReady()
@@ -56,11 +60,19 @@ beforeEach(() => {
   discussionApi.detail.mockReset().mockResolvedValue(current)
 })
 
-it('跨页有圆桌入口，关闭仅隐藏，仍可从全局入口重开', async () => {
+it('圆桌入口作为小菱的次级操作收纳在助手内，跨页关闭后仍可重开', async () => {
   const { wrapper, router } = await mountHost()
-  expect(wrapper.get('[aria-label="打开圆桌讨论"]')).toBeTruthy()
+  expect(wrapper.get('.roundtable-dock').classes()).toContain('is-unassigned')
+  expect(wrapper.find('[aria-label="打开圆桌讨论"]').exists()).toBe(true)
 
-  await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+  const userSlot = document.createElement('div')
+  userSlot.id = 'roundtable-user-assistant-slot'
+  document.body.append(userSlot)
+  await flushPromises()
+  const trigger = userSlot.querySelector<HTMLButtonElement>('[aria-label="打开圆桌讨论"]')!
+  expect(trigger).not.toBeNull()
+
+  trigger.click()
   await flushPromises()
   expect(wrapper.get('[data-testid="discussion-panel"]').text()).toBe('disc-own')
 
@@ -71,10 +83,11 @@ it('跨页有圆桌入口，关闭仅隐藏，仍可从全局入口重开', asyn
   wrapper.findComponent({ name: 'AgentDiscussionPanel' }).vm.$emit('close')
   await flushPromises()
   expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
-  await wrapper.get('[aria-label="打开圆桌讨论"]').trigger('click')
+  trigger.click()
   await flushPromises()
   expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(true)
   wrapper.unmount()
+  userSlot.remove()
 })
 
 it('仅凭会话 ID 的续会链接也从服务端加载元数据，并在账号切换时丢弃旧账号结果', async () => {
@@ -544,7 +557,7 @@ it('服务端详情的历史页与更早游标交给圆桌面板', async () => {
   wrapper.unmount()
 })
 
-it('同标签页的小菱后台创建圆桌后，当前账号入口无需点链接即可出现', async () => {
+it('仅当前账号的圆桌列表变更事件会触发刷新，面板打开后显示次级入口', async () => {
   discussionApi.list
     .mockResolvedValueOnce({ items: [], next_offset: null })
     .mockResolvedValueOnce({ items: [current], next_offset: null })
@@ -556,27 +569,84 @@ it('同标签页的小菱后台创建圆桌后，当前账号入口无需点链�
   window.dispatchEvent(new CustomEvent('prism:roundtable-list-changed', { detail: { ownerUserId: 5 } }))
   await flushPromises()
   expect(discussionApi.list).toHaveBeenCalledTimes(2)
-  expect(wrapper.get('[aria-label="打开圆桌讨论"]')).toBeTruthy()
+
+  const userSlot = document.createElement('div')
+  userSlot.id = 'roundtable-user-assistant-slot'
+  document.body.append(userSlot)
+  await flushPromises()
+  expect(userSlot.querySelector('[aria-label="打开圆桌讨论"]')).not.toBeNull()
+  wrapper.unmount()
+  userSlot.remove()
+})
+
+it('圆桌入口槽位移除并跨页后，已打开的面板仍留在全局 Host 中', async () => {
+  const userSlot = document.createElement('div')
+  userSlot.id = 'roundtable-user-assistant-slot'
+  document.body.append(userSlot)
+  const { wrapper, router } = await mountHost()
+  await flushPromises()
+  userSlot.querySelector<HTMLButtonElement>('[aria-label="打开圆桌讨论"]')!.click()
+  await flushPromises()
+  expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(true)
+
+  userSlot.remove()
+  await router.push('/agents')
+  await flushPromises()
+  expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(true)
+  expect(wrapper.get('.roundtable-dock').classes()).toContain('is-unassigned')
   wrapper.unmount()
 })
 
-it('全局顶栏存在时将圆桌入口挂在顶栏中，避免固定浮层盖住页面内容', async () => {
+it('小菱面板打开时将圆桌入口收纳进助手操作区', async () => {
   const target = document.createElement('div')
-  target.id = 'roundtable-header-slot'
+  target.id = 'roundtable-user-assistant-slot'
   document.body.appendChild(target)
   const { wrapper } = await mountHost()
   await flushPromises()
 
   expect(target.querySelector('.roundtable-dock')).not.toBeNull()
+  expect(target.querySelector('.roundtable-fab')?.textContent).toContain('圆桌')
   expect(wrapper.find('.roundtable-dock').exists()).toBe(false)
 
   wrapper.unmount()
   target.remove()
 })
 
-it.each([1, 2, 3])('顶栏菜单传送到 body 且保持视口内，Esc/外部操作/路由切换关闭（第%d轮）', async () => {
+it('按当前管理或用户页面把圆桌入口放入对应的小菱面板', async () => {
+  const userSlot = document.createElement('div')
+  userSlot.id = 'roundtable-user-assistant-slot'
+  const { wrapper, router } = await mountHost()
+  // 用户助手面板打开后才会创建该 slot。
+  document.body.append(userSlot)
+  await flushPromises()
+
+  expect(userSlot.querySelector('.roundtable-fab')).not.toBeNull()
+
+  await router.push('/admin/access')
+  await flushPromises()
+  // 管理员 Copilot 尚未打开时，当前仍打开的助手面板继续持有次级入口。
+  expect(userSlot.querySelector('.roundtable-fab')).not.toBeNull()
+
+  const adminSlot = document.createElement('div')
+  adminSlot.id = 'roundtable-admin-assistant-slot'
+  document.body.append(adminSlot)
+  await flushPromises()
+  expect(adminSlot.querySelector('.roundtable-fab')).not.toBeNull()
+  expect(userSlot.querySelector('.roundtable-fab')).toBeNull()
+
+  // 助手面板关闭时入口回到隐藏状态；跨页 host 和会话本身仍保留。
+  adminSlot.remove()
+  userSlot.remove()
+  await flushPromises()
+  expect(wrapper.get('.roundtable-dock').classes()).toContain('is-unassigned')
+  expect(wrapper.find('[data-testid="discussion-panel"]').exists()).toBe(false)
+
+  wrapper.unmount()
+})
+
+it.each([1, 2, 3])('助手内圆桌菜单传送到 body 且保持视口内，Esc/外部操作/路由切换关闭（第%d轮）', async () => {
   const header = document.createElement('div')
-  header.id = 'roundtable-header-slot'
+  header.id = 'roundtable-user-assistant-slot'
   document.body.appendChild(header)
   discussionApi.list.mockResolvedValue({ items: [current, { ...current, session_id: 'disc-other' }], next_offset: null })
   const { wrapper, router } = await mountHost()

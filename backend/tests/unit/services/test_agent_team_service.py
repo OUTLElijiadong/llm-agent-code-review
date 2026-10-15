@@ -1625,10 +1625,12 @@ def test_dependency_handoff_mesh_ledger_and_verifier_status(db, team_user):
 
     messages = db.query(AgentMeshMessage).order_by(AgentMeshMessage.id.asc()).all()
     assert [item.message_type for item in messages] == ["task.request", "task.result", "coordination"]
-    # 回投会话的任务结果必须可被会话 inbox 拉取,触发小菱自动续跑汇报;
+    # 中间任务结果留在团队账本,完成全部工作后才通过唯一团队终态回执续跑小菱;
     # 成员间移交仍为终态账本证据。
     assert messages[1].send_to == "session:user:session-a1"
-    assert messages[1].status == "queued"
+    assert messages[1].status == "completed"
+    assert json.loads(messages[1].context_json)["session_delivery"] is False
+    assert json.loads(messages[1].context_json)["suppression_reason"] == "team_terminal_aggregate"
     assert messages[-1].sent_from == "agent:project_analyzer"
     assert messages[-1].send_to == "agent:code_reviewer"
     assert messages[-1].status == "completed"

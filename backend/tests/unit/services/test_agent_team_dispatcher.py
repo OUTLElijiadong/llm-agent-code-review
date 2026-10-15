@@ -109,9 +109,15 @@ def test_temporary_agent_usage_accounting_failure_closes_team_and_mesh_error(mon
     assert team["status"] == "failed"
     error_message = db.query(AgentMeshMessage).filter_by(
         user_id=user.id, correlation_id=f"team:{created['team_id']}", message_type="task.error",
-    ).one()
+    ).filter(AgentMeshMessage.context_json.contains('"task_id"')).one()
+    assert error_message.status == "failed"
     assert agent_mesh_service._load(error_message.payload_json, {})["failure_kind"] == "usage_accounting_error"
     assert agent_mesh_service._load(error_message.errors_json, [])[0]["code"] == "usage_accounting_error"
+    terminal_message = db.query(AgentMeshMessage).filter_by(
+        user_id=user.id, correlation_id=f"team:{created['team_id']}", message_type="task.error",
+    ).filter(AgentMeshMessage.context_json.contains('"team_terminal"')).one()
+    assert terminal_message.status == "queued"
+    assert agent_mesh_service._load(terminal_message.context_json, {})["session_delivery"] is True
 
 
 def test_retry_confirmation_authorizes_only_the_exact_retried_high_risk_attempt(db, monkeypatch):

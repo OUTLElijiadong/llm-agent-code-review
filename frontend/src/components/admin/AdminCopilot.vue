@@ -1975,9 +1975,12 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             />
           </div>
         </div>
-        <button class="icon-button" type="button" aria-label="收起管理副驾驶" title="收起" @click="closePanel">
-          <el-icon><Close /></el-icon>
-        </button>
+        <div class="copilot-header-actions">
+          <div id="roundtable-admin-assistant-slot" class="roundtable-assistant-slot"></div>
+          <button class="icon-button" type="button" aria-label="收起管理副驾驶" title="收起" @click="closePanel">
+            <el-icon><Close /></el-icon>
+          </button>
+        </div>
       </header>
 
       <div v-if="['thinking', 'working'].includes(mascotStatus) && lastActiveToolName" class="copilot-progress">
@@ -2414,6 +2417,17 @@ input { font: inherit; }
   position: relative;
   z-index: 6;
   border-radius: 18px 18px 0 0;
+}
+.copilot-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.roundtable-assistant-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 /* 运行中头部底边流动光线,与用户端 chat-header-flow 呼应 */

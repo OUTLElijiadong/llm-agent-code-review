@@ -89,7 +89,8 @@ describe('AppHeader navigation visibility', () => {
     expect(dashboard.attributes('aria-current')).toBe('page')
     expect(wrapper.get('.agent-trigger').attributes('aria-label')).toBe('打开小菱助手')
     expect(wrapper.get('.agent-trigger .prismling')).toBeTruthy()
-    expect(wrapper.get('#roundtable-header-slot')).toBeTruthy()
+    expect(wrapper.find('#roundtable-header-slot').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="打开圆桌讨论"]').exists()).toBe(false)
   })
 
   it('功能导航包含问题追踪、代码沙箱和个人中心', () => {

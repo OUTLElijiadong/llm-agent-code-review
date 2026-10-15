@@ -12,8 +12,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import func, or_, update
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agents.contracts import CONTRACTS
@@ -2086,6 +2087,9 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
             detail={"counts": _task_counts(tasks)},
         )
 
+    if team.status in {"completed", "failed"}:
+        _persist_terminal_team_notification(db, team, now=_now())
+
 
 def _mesh_ready(db: Session) -> bool:
     # 复用当前事务连接；从 Engine 另取连接会在 SQLite 内存库中回滚同一底层事务。
@@ -2094,6 +2098,16 @@ def _mesh_ready(db: Session) -> bool:
 
 def _request_message_id(team: AgentTeam, task: AgentTeamTask) -> str:
     return f"team-{team.id}-task-{task.id}-attempt-{task.attempt_count}-request"
+
+
+def _team_execution_generation(db: Session, team_id: int) -> int:
+    """每次用户重试形成新的通知代次；同一代次内重放保持幂等。"""
+
+    count = db.query(func.count(AgentTeamEvent.id)).filter(
+        AgentTeamEvent.team_id == int(team_id),
+        AgentTeamEvent.event_type == "team.retry_requested",
+    ).scalar()
+    return int(count or 0)
 
 
 def _mesh_event(
@@ -2245,17 +2259,20 @@ def _add_terminal_mesh_message(
     success: bool,
     causation_id: str,
     now: datetime,
+    deliver_to_session: bool = True,
 ) -> None:
-    if db.query(AgentMeshMessage).filter(AgentMeshMessage.message_id == message_id).first() is not None:
+    existing = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.message_id == message_id,
+    ).first()
+    if existing is not None:
         return
     status = "completed" if success else "failed"
-    # 回投给发起会话的结果必须进入 inbox 生命周期(queued→delivered→ack→completed),
-    # 否则前端永远拉不到,小菱不会自动把子 Agent 结论汇报回对话。
-    # 成员间移交(coordination)保持终态仅作账本证据,不触发执行。
-    if send_to.startswith("session:"):
+    # 需要回投给发起会话的汇总进入 inbox 生命周期；成员间移交和逐任务结果
+    # 保持终态并留在团队账本，由团队终态汇总统一触发一次会话续跑。
+    session_delivery = send_to.startswith("session:") and deliver_to_session
+    if session_delivery:
         status = "queued"
-    db.add(
-        AgentMeshMessage(
+    row = AgentMeshMessage(
             **_terminal_message_attribution(db, team, causation_id),
             message_id=message_id,
             user_id=int(team.user_id),
@@ -2279,9 +2296,126 @@ def _add_terminal_mesh_message(
             attempt_count=1,
             completed_at=None if status == "queued" else now,
         )
-    )
-    _mesh_event(db, team=team, message_id=message_id, status="queued", actor=sent_from)
+    try:
+        # Parent team row locks serialize normal completion/retry/expiry paths. The
+        # savepoint also makes the unique ledger key safe for duplicate recovery
+        # workers and direct idempotent retries.
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        existing = db.query(AgentMeshMessage).filter(
+            AgentMeshMessage.message_id == message_id,
+        ).first()
+        if existing is not None:
+            return
+        raise
+    if not send_to.startswith("session:") or session_delivery:
+        _mesh_event(db, team=team, message_id=message_id, status="queued", actor=sent_from)
     _mesh_event(db, team=team, message_id=message_id, status=status, actor=send_to)
+
+
+def _persist_terminal_team_notification(db: Session, team: AgentTeam, *, now: datetime) -> None:
+    """团队进入任一终态时只向小菱会话投递一次汇总回执。
+
+    单任务结果仍完整留在 Mesh 和团队时间线，但不逐条触发助手回复。终态回执包含
+    有界的汇总与精确团队引用，助手可再按权限读取完整任务证据；确定性 message_id
+    使重试、重复状态刷新和事务恢复都不会重复投递。
+    """
+
+    if team.status not in {"completed", "failed", "cancelled", "expired"} or not _mesh_ready(db):
+        return
+    tasks = db.query(AgentTeamTask).filter(
+        AgentTeamTask.team_id == int(team.id),
+    ).order_by(AgentTeamTask.id.asc()).all()
+    if not tasks:
+        return
+    summary = _unjson(team.summary_json, {})
+    error = _unjson(team.error_json, {})
+    # Keep the session trigger small and predictable even for the 100-task limit.
+    # Full inputs, outputs, artifacts, and errors remain available in the team ledger
+    # and are fetched under the same owner scope by get_agent_team.
+    statuses = [{
+            "task_id": int(task.id),
+            "task_key": task.task_key,
+            "status": task.status,
+            "attempt_count": int(task.attempt_count or 0),
+        } for task in tasks]
+    failed_tasks = [item for item in tasks if item.status in {"failed", "dead_letter", "blocked", "expired"}]
+    failure_samples = []
+    for task in failed_tasks[:12]:
+        task_result = _unjson(task.result_json, {})
+        task_errors = _unjson(task.errors_json, [])
+        failure_samples.append({
+            "task_key": task.task_key,
+            "status": task.status,
+            "summary_preview": (
+                str(task_result.get("summary") or "")[:240] if isinstance(task_result, dict) else ""
+            ),
+            "error_previews": [
+                str(item.get("message") or item.get("code") or "")[:180]
+                for item in task_errors[:2] if isinstance(item, dict)
+            ] if isinstance(task_errors, list) else [],
+        })
+    omitted_task_count = max(0, len(statuses) - 19)
+    task_statuses = statuses[:19]
+    if omitted_task_count:
+        task_statuses.append({
+            "omitted_task_count": omitted_task_count,
+            "reference": {"tool": "get_agent_team", "team_id": int(team.id)},
+        })
+    # 这里只需选择一个确定的因果引用；避免数据库返回的 naive 时间与 UTC 时间比较。
+    latest_task = next((item for item in reversed(tasks) if item.completed_at is not None), tasks[-1])
+    payload = {
+        "team_id": int(team.id),
+        "team_title": team.title,
+        "status": team.status,
+        "execution_generation": _team_execution_generation(db, int(team.id)),
+        "task_counts": _task_counts(tasks),
+        "summary": project_team_result(
+            summary if isinstance(summary, dict) else {},
+            team_id=int(team.id),
+            task_id=int(latest_task.id),
+            budget=8000,
+        ),
+        "error": project_team_result(
+            error if isinstance(error, dict) else {},
+            team_id=int(team.id),
+            task_id=int(latest_task.id),
+            budget=3000,
+        ),
+        "task_statuses": task_statuses,
+        "omitted_failed_task_count": max(0, len(failed_tasks) - len(failure_samples)),
+        "failed_task_samples": failure_samples,
+        "result_reference": {"tool": "get_agent_team", "team_id": int(team.id)},
+    }
+    terminal_error = team.status != "completed"
+    request_id = _request_message_id(team, latest_task)
+    _add_terminal_mesh_message(
+        db,
+        team,
+        message_id=(
+            f"team-{team.id}-terminal-{payload['execution_generation']}-result"
+        ),
+        sent_from="system:agent_team",
+        send_to=f"session:{team.surface}:{team.session_key}",
+        message_type="task.error" if terminal_error else "task.result",
+        subject=f"Agent 团队终态结果：{team.title}",
+        payload=payload,
+        context={
+            "team_id": int(team.id),
+            "run_id": team.trace_id,
+            "team_terminal": True,
+            "session_delivery": True,
+            "execution_generation": payload["execution_generation"],
+        },
+        artifacts=[],
+        errors=error.get("errors", []) if terminal_error and isinstance(error, dict) else [],
+        success=not terminal_error,
+        causation_id=request_id,
+        now=now,
+        deliver_to_session=True,
+    )
 
 
 def _persist_task_result_message(
@@ -2300,11 +2434,14 @@ def _persist_task_result_message(
         return
     source = member.address if member else "agent:orchestrator"
     request_id = _request_message_id(team, task)
+    # 子任务的逐条结果始终进入团队账本,但只在团队终态时投递一个汇总回执。
     context = {
         "team_id": int(team.id),
         "task_id": int(task.id),
         "member_id": int(task.member_id),
         "run_id": team.trace_id,
+        "session_delivery": False,
+        "suppression_reason": "team_terminal_aggregate",
     }
     artifacts = list((result or {}).get("artifacts") or [])
     errors = list((result or {}).get("errors") or [])
@@ -2322,6 +2459,7 @@ def _persist_task_result_message(
         artifacts=artifacts,
         errors=errors,
         success=success,
+        deliver_to_session=False,
         causation_id=request_id,
         now=now,
     )
@@ -2807,6 +2945,7 @@ def _expire_team(db: Session, team: AgentTeam, *, reason: str) -> None:
         to_status="expired",
         detail={"reason": reason},
     )
+    _persist_terminal_team_notification(db, team, now=now)
 
 
 def expire_due_teams(db: Session, *, limit: int = 100) -> int:
@@ -2820,6 +2959,8 @@ def expire_due_teams(db: Session, *, limit: int = 100) -> int:
         )
         .order_by(AgentTeam.id.asc())
         .limit(max(1, min(int(limit), 500)))
+        .populate_existing()
+        .with_for_update()
         .all()
     )
     for team in rows:
@@ -3034,6 +3175,7 @@ def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户�
         team.status = "cancelled"
         team.completed_at = team.completed_at or _now()
         now = _now()
+        team.error_json = _json({"reason": "user_cancelled"})
         tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
         for task in tasks:
             if task.status in _TERMINAL_TASK:
@@ -3074,6 +3216,7 @@ def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户�
             actor_address=f"user:{user.id}",
             detail={"reason": reason},
         )
+        _persist_terminal_team_notification(db, team, now=now)
         db.commit()
         _cleanup_team_runtime_resources(db, team, reason="user_cancelled")
     return _team_out(db, team, include_events=True)
@@ -3239,6 +3382,51 @@ def _build_retry_preview(
     }
 
 
+def _supersede_unconsumed_terminal_notifications(
+    db: Session,
+    team: AgentTeam,
+    user: User,
+    *,
+    next_generation: int,
+) -> None:
+    """重试前收敛未处理的旧终态回执，已完成历史记录原样保留。"""
+
+    rows = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == int(team.user_id),
+        AgentMeshMessage.correlation_id == f"team:{team.id}",
+        AgentMeshMessage.sent_from == "system:agent_team",
+        AgentMeshMessage.status.in_(("queued", "delivered", "acknowledged", "processing")),
+    ).order_by(AgentMeshMessage.id.asc()).with_for_update().all()
+    for row in rows:
+        context = _unjson(row.context_json, {})
+        if not isinstance(context, dict) or context.get("team_terminal") is not True:
+            continue
+        if row.status == "processing":
+            raise AgentTeamStateError("上一轮团队终态回执正在由小菱处理，请等待回复结束后再重试")
+        context.update({
+            "session_delivery": False,
+            "superseded": True,
+            "superseded_by_generation": int(next_generation),
+        })
+        row.context_json = _json(context)
+        row.status = "completed"
+        row.completed_at = _now()
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.next_attempt_at = None
+        _mesh_event(
+            db,
+            team=team,
+            message_id=row.message_id,
+            status="completed",
+            actor=f"user:{user.id}",
+            detail={
+                "summary": "用户启动新一轮团队重试，旧终态回执已收敛",
+                "superseded_by_generation": int(next_generation),
+            },
+        )
+
+
 def preview_retry_team(
     db: Session,
     user: User,
@@ -3336,6 +3524,10 @@ def retry_team(
     rows = _select_retry_tasks(all_tasks, wanted)
     for task in rows:
         require_task_project_execution(db, user, task)
+    next_generation = _team_execution_generation(db, int(team.id)) + 1
+    _supersede_unconsumed_terminal_notifications(
+        db, team, user, next_generation=next_generation,
+    )
     for task in rows:
         previous_status = task.status
         previous_hash = _task_strategy_hash(task)

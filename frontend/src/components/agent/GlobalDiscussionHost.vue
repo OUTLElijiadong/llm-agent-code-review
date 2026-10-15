@@ -1,12 +1,12 @@
 <template>
-  <Teleport :to="headerSlotAvailable ? '#roundtable-header-slot' : 'body'" :disabled="!headerSlotAvailable">
-    <div v-if="sessions.length || selected || listError" ref="dockRef" class="roundtable-dock" :class="{ 'is-header': headerSlotAvailable }">
+  <Teleport :to="assistantSlotTarget || 'body'" :disabled="!assistantSlotTarget">
+    <div v-if="sessions.length || selected || listError" ref="dockRef" class="roundtable-dock" :class="assistantSlotTarget ? 'is-assistant' : 'is-unassigned'">
       <div v-if="listError" class="roundtable-dock-error" role="status">
         {{ listError }}
         <button type="button" @click="loadSessions">重试</button>
       </div>
-      <Teleport to="body" :disabled="!headerSlotAvailable">
-      <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" ref="choicesRef" class="roundtable-choices" :class="{ 'is-header-popup': headerSlotAvailable }" :style="headerSlotAvailable ? choicesStyle : undefined" role="dialog" aria-label="我的圆桌讨论">
+      <Teleport to="body" :disabled="!assistantSlotTarget">
+      <div v-if="(sessions.length > 1 || nextOffset !== null) && showChoices && !visible" ref="choicesRef" class="roundtable-choices" :class="{ 'is-assistant-popup': assistantSlotTarget }" :style="assistantSlotTarget ? choicesStyle : undefined" role="dialog" aria-label="我的圆桌讨论">
         <button
           v-for="session in sessions"
           :key="session.session_id"
@@ -26,15 +26,16 @@
         ref="triggerRef"
         v-if="!visible && (sessions.length || selected)"
         class="roundtable-fab"
+        :class="{ 'is-assistant': assistantSlotTarget }"
         type="button"
         aria-label="打开圆桌讨论"
         aria-haspopup="dialog"
         :aria-expanded="showChoices"
-        :title="`圆桌讨论：可继续 ${activeCount} 个，已结束 ${sessions.length - activeCount} 个`"
+        :title="`我的圆桌讨论：可继续 ${activeCount} 个，已结束 ${sessions.length - activeCount} 个`"
         @click="openFromDock"
       >
         <span aria-hidden="true">🗣️</span>
-        <span class="roundtable-label">圆桌讨论</span>
+        <span class="roundtable-label">圆桌</span>
         <span v-if="activeCount > 0" class="roundtable-count" aria-label="可继续的圆桌数量">{{ activeCount }}{{ nextOffset !== null ? '+' : '' }}</span>
       </button>
     </div>
@@ -84,7 +85,7 @@ const choicesStyle = ref<Record<string, string>>({})
 const listError = ref('')
 const nextOffset = ref<number | null>(null)
 const moreLoading = ref(false)
-const headerSlotAvailable = ref(false)
+const assistantSlotTarget = ref('')
 const followupClock = ref(Date.now())
 let authGeneration = 0
 let listGeneration = 0
@@ -197,7 +198,7 @@ function closePanel(): void {
 
 /** 菜单脱离玻璃页头的 stacking context；坐标以触发按钮与视口为准。 */
 function positionChoices(): void {
-  if (!showChoices.value || !headerSlotAvailable.value || !triggerRef.value) return
+  if (!showChoices.value || !assistantSlotTarget.value || !triggerRef.value) return
   const box = triggerRef.value.getBoundingClientRect()
   const width = Math.min(300, Math.max(0, window.innerWidth - 24))
   const left = Math.max(12, Math.min(box.right - width, window.innerWidth - width - 12))
@@ -269,7 +270,13 @@ watch(showChoices, async (open) => {
   positionChoices()
   choicesRef.value?.querySelector<HTMLButtonElement>('button')?.focus()
 })
-watch(() => route.fullPath, () => closeChoices())
+watch(() => route.fullPath, () => {
+  closeChoices()
+  syncAssistantSlot()
+})
+watch(assistantSlotTarget, (target) => {
+  if (!target) closeChoices()
+})
 
 function openFromDock(): void {
   if (sessions.value.length === 1 && nextOffset.value === null) {
@@ -312,11 +319,13 @@ function onRoundtableListChanged(event: Event): void {
   if (owner === props.userId) void loadSessions()
 }
 
-function syncHeaderSlot(): void {
-  if (!document.getElementById('roundtable-header-slot')) return
-  headerSlotAvailable.value = true
-  headerSlotObserver?.disconnect()
-  headerSlotObserver = null
+function syncAssistantSlot(): void {
+  const adminSlot = document.getElementById('roundtable-admin-assistant-slot')
+  const userSlot = document.getElementById('roundtable-user-assistant-slot')
+  const preferredSlot = route.path.startsWith('/admin')
+    ? adminSlot || userSlot
+    : userSlot || adminSlot
+  assistantSlotTarget.value = preferredSlot ? `#${preferredSlot.id}` : ''
 }
 
 watch(() => props.userId, () => {
@@ -338,11 +347,11 @@ watch(routeSessionId, (id) => {
 }, { immediate: true })
 
 onMounted(() => {
-  // GlobalDiscussionHost may mount before the lazy-loaded route layout renders its header.
-  // Keep the legacy fallback only until the persistent shell slot appears.
-  headerSlotObserver = new MutationObserver(syncHeaderSlot)
+  // The launcher belongs inside the active Xiaoling panel. Keep this host
+  // mounted at app level so a running discussion survives route changes.
+  headerSlotObserver = new MutationObserver(syncAssistantSlot)
   headerSlotObserver.observe(document.body, { childList: true, subtree: true })
-  syncHeaderSlot()
+  syncAssistantSlot()
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('prism:open-roundtable', onOpenEvent)
   window.addEventListener('prism:roundtable-list-changed', onRoundtableListChanged)
@@ -374,14 +383,18 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.roundtable-dock { position: fixed; right: 24px; bottom: 100px; z-index: var(--layer-agent-status); display: grid; justify-items: end; gap: 8px; max-width: min(320px, calc(100vw - 24px)); }
-.roundtable-dock.is-header { position: relative; inset: auto; z-index: auto; display: flex; justify-items: initial; max-width: none; }
+.roundtable-dock { display: grid; justify-items: end; gap: 8px; max-width: min(320px, calc(100vw - 24px)); }
+.roundtable-dock.is-unassigned { display: none; }
+.roundtable-dock.is-assistant { position: relative; display: flex; justify-items: initial; max-width: none; }
 .roundtable-fab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid #d9ddfa; border-radius: 999px; background: #fff; color: #292e67; box-shadow: 0 8px 28px #24295c33; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.roundtable-fab.is-assistant { flex: 0 0 auto; min-height: 36px; padding: 0 9px; gap: 6px; border-color: var(--color-border-light, #e5e7ef); border-radius: 8px; background: rgba(255, 255, 255, 0.72); color: var(--color-text-secondary, #72798a); box-shadow: none; font-size: 12px; font-weight: 550; }
+.roundtable-fab.is-assistant:hover { border-color: var(--brand-200, #d9ddfa); background: var(--brand-50, #f4f3ff); color: var(--brand-600, #4a46d4); }
 .roundtable-fab:focus-visible, .roundtable-choice:focus-visible { outline: 2px solid #5b58e8; outline-offset: 2px; }
 .roundtable-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px; background: #eef0ff; font-size: 11px; }
+.roundtable-fab.is-assistant .roundtable-count { min-width: 18px; height: 18px; padding: 0 4px; color: var(--brand-600, #4a46d4); font-size: 10px; }
 .roundtable-choices { display: grid; gap: 4px; width: min(300px, calc(100vw - 24px)); max-height: min(320px, 45dvh); overflow-y: auto; padding: 6px; border: 1px solid #dfe2f5; border-radius: 12px; background: white; box-shadow: 0 12px 30px #24295c30; }
-.roundtable-choices.is-header-popup { position: fixed; z-index: var(--layer-element-base); }
-.roundtable-dock.is-header .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1; }
+.roundtable-choices.is-assistant-popup { position: fixed; z-index: var(--layer-assistant-popover); }
+.roundtable-dock.is-assistant .roundtable-dock-error { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1; }
 .roundtable-choice { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 40px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: #292e67; text-align: left; cursor: pointer; }
 .roundtable-choice:hover { background: #f2f3ff; }
 .roundtable-choice span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -391,10 +404,9 @@ onBeforeUnmount(() => {
 .roundtable-load-more:focus-visible { outline: 2px solid #5b58e8; outline-offset: -2px; }
 .roundtable-dock-error { max-width: 260px; padding: 8px 10px; border-radius: 8px; background: #fff8ed; color: #915018; font-size: 12px; }
 .roundtable-dock-error button { margin-left: 7px; padding: 2px 4px; border: 0; background: transparent; color: #5b58e8; cursor: pointer; }
-@media (max-width: 520px) { .roundtable-dock { right: 12px; bottom: calc(82px + env(safe-area-inset-bottom)); } }
 @media (max-width: 920px) {
-  .roundtable-dock.is-header .roundtable-fab { position: relative; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; }
-  .roundtable-dock.is-header .roundtable-label { display: none; }
-  .roundtable-dock.is-header .roundtable-count { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 3px; border: 1px solid #fff; }
+  .roundtable-fab.is-assistant { position: relative; justify-content: center; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; }
+  .roundtable-fab.is-assistant .roundtable-label { display: none; }
+  .roundtable-fab.is-assistant .roundtable-count { position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px; padding: 0 3px; border: 1px solid #fff; }
 }
 </style>

@@ -252,8 +252,6 @@ onBeforeUnmount(() => {
         <span>小菱助手</span>
       </button>
 
-      <div id="roundtable-header-slot" class="roundtable-header-slot"></div>
-
       <el-dropdown trigger="click">
         <div class="user-info">
           <span class="user-avatar">
@@ -447,13 +445,6 @@ onBeforeUnmount(() => {
   gap: 12px;
   min-width: 0;
   flex-shrink: 0;
-}
-
-.roundtable-header-slot {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
 }
 
 .search-trigger {

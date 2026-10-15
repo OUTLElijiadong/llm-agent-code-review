@@ -31,4 +31,9 @@ describe('小菱与团队浮窗触控布局回归', () => {
     const source = (await import('./AgentMemberWorkCard.vue?raw')).default as string
     expect(source).toMatch(/\.member-work-ask\s*\{[^}]*min-height:\s*40px;/s)
   })
+
+  it('助手内圆桌入口在手机断点固定为 40×40px 触控区', async () => {
+    const source = (await import('@/components/agent/GlobalDiscussionHost.vue?raw')).default as string
+    expect(source).toMatch(/@media \(max-width:\s*920px\)[\s\S]*?\.roundtable-fab\.is-assistant\s*\{[^}]*width:\s*40px;[^}]*min-width:\s*40px;[^}]*height:\s*40px;[^}]*min-height:\s*40px;/s)
+  })
 })

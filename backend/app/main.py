@@ -201,11 +201,16 @@ async def lifespan(app: FastAPI):
     )
 
     start_pentest_retention_sweeper()
-    from app.services.background_task_recovery import start_agent_run_recovery
+    from app.services.background_task_recovery import (
+        start_agent_run_recovery,
+        start_terminal_receipt_recovery_scheduler,
+        stop_terminal_receipt_recovery_scheduler,
+    )
     from app.services.review_service import resume_interrupted_tasks
     from app.services.sandbox_service import resume_interrupted_environments
 
     start_agent_run_recovery()
+    start_terminal_receipt_recovery_scheduler()
     resume_interrupted_tasks(orphan_reviews)
     resume_interrupted_environments()
     # 五分钟内已经接受的追问即使重启后过了禁言时间，也必须继续回答；
@@ -236,6 +241,7 @@ async def lifespan(app: FastAPI):
         stop_jarvis_patrol()
         stop_project_import_dispatcher()
         stop_pentest_retention_sweeper()
+        stop_terminal_receipt_recovery_scheduler()
 
 
 app = FastAPI(

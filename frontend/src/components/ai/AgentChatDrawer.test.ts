@@ -596,6 +596,42 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
+  it('团队终态回执会自动续跑并把审查结论显示在聊天中，无需人工点续跑', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-test', title: '代码审查', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-test')
+    const terminalReceipt = {
+      schema_version: '1.0', message_id: 'team-84-terminal-0-result', idempotency_key: 'team-84-terminal-0-result',
+      trace_id: 'trace-84', correlation_id: 'team:84', causation_id: 'review-request-84',
+      sent_from: 'system:agent_team', send_to: 'session:user:user-test', message_type: 'task.result',
+      priority: 'normal', subject: '代码审查团队已完成', status: 'delivered',
+      payload: { team_id: 84, status: 'completed', summary: { final_result: { summary: '确认 2 项需修复问题' } } },
+      context: { team_id: 84, team_terminal: true, session_delivery: true, execution_generation: 0 },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-10-15T13:00:00Z', create_time: '2026-10-15T12:00:00Z', update_time: '2026-10-15T12:00:01Z',
+    }
+    meshApi.inbox.mockResolvedValue([terminalReceipt])
+    sessionApi.get.mockResolvedValue({
+      surface: 'user', session_id: 'user-test', run: null, pending: null, messages: [], mesh_messages: [],
+    })
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body).toEqual(expect.objectContaining({
+      action: 'start', surface: 'user', session_id: 'user-test', mesh_message_id: terminalReceipt.message_id,
+    }))
+    emit(0, { type: 'response.created', response: { id: 'run-team-84', model: 'deepseek-v4-pro' } })
+    emit(0, { type: 'response.output_text.delta', delta: '代码审查已完成：确认 2 项需修复问题。' })
+    emit(0, { type: 'response.completed', response: { id: 'run-team-84' } })
+    await finish(0)
+
+    expect(wrapper.text()).toContain('代码审查已完成：确认 2 项需修复问题。')
+    expect(wrapper.find('.send-btn').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('运行中调用 create_agent_team 时立即显示团队卡片', async () => {
     const wrapper = await mountReadyDrawer()
     teamApi.list.mockResolvedValue({

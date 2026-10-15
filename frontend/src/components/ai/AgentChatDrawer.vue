@@ -2560,15 +2560,18 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 />
               </div>
             </div>
-            <button
-              class="close-btn"
-              type="button"
-              :aria-label="`关闭${MASCOT_NAME}助手`"
-              :title="`关闭${MASCOT_NAME}助手`"
-              @click="close"
-            >
-              <el-icon><Close /></el-icon>
-            </button>
+            <div class="chat-header-actions">
+              <div id="roundtable-user-assistant-slot" class="roundtable-assistant-slot"></div>
+              <button
+                class="close-btn"
+                type="button"
+                :aria-label="`关闭${MASCOT_NAME}助手`"
+                :title="`关闭${MASCOT_NAME}助手`"
+                @click="close"
+              >
+                <el-icon><Close /></el-icon>
+              </button>
+            </div>
           </div>
 
           <div class="chat-body-region">
@@ -3258,6 +3261,17 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   background: linear-gradient(135deg, rgba(91, 88, 232, 0.07), rgba(61, 188, 217, 0.06) 70%, transparent);
   flex-shrink: 0;
 }
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.roundtable-assistant-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 /* 运行中:头部底边泛起品牌色流动光线,一眼知道小菱在工作(尼尔森·状态可见) */
 .chat-header::after {
   content: '';
@@ -3637,6 +3651,18 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .msg-content.markdown-body { white-space: normal; }
 .msg-content.markdown-body :deep(p)        { margin: 0; }
+@media (max-width: 640px) {
+  .msg-content.markdown-body :deep(table) {
+    display: block;
+    width: max-content;
+    min-width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+}
 .msg-content.markdown-body :deep(pre) {
   background: #1e1e2e; color: #cdd6f4;
   border-radius: 6px; padding: 12px;
