@@ -19,8 +19,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 351
-    assert len({row["endpoint"] for row in plan["routes"]}) == 43
+    assert len(plan["routes"]) == 363
+    assert len({row["endpoint"] for row in plan["routes"]}) == 45
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("POST", "/api/auth/login"),
@@ -44,9 +44,18 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/admin/security-center/traffic"),
         ("GET", "/api/admin/security-center/decoy"),
         ("POST", "/api/admin/security-center/decoy/apply"),
+        ("GET", "/api/remote-pentest/rules"),
+        ("POST", "/api/remote-pentest/tasks"),
+        ("POST", "/api/remote-pentest/tasks/{public_id}/submit-authorization"),
+        ("POST", "/api/remote-pentest/tasks/{public_id}/authorize"),
+        ("POST", "/api/remote-pentest/tasks/{public_id}/start"),
+        ("POST", "/api/remote-pentest/tasks/{public_id}/cancel"),
+        ("GET", "/api/remote-pentest/tasks"),
+        ("GET", "/api/remote-pentest/tasks/{public_id}"),
+        ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 337
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 269
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 349
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 281
     feedback_stats = [row for row in plan["routes"]
                       if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
     assert len(feedback_stats) == 1
@@ -85,6 +94,23 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
     assert {row["path"] for row in asset_routes} == private_assets
     assert all(row["method"] == "GET" and row["anonymous"] == row["no_permission"] == "ready"
                for row in asset_routes)
+    remote_guards = {
+        ("GET", "/api/remote-pentest/rules"): "pentest:start",
+        ("POST", "/api/remote-pentest/tasks"): "pentest:start",
+        ("POST", "/api/remote-pentest/tasks/{public_id}/submit-authorization"): "pentest:start",
+        ("POST", "/api/remote-pentest/tasks/{public_id}/authorize"): "pentest:authorize",
+        ("POST", "/api/remote-pentest/tasks/{public_id}/start"): "pentest:start",
+        ("POST", "/api/remote-pentest/tasks/{public_id}/cancel"): "pentest:start",
+        ("GET", "/api/remote-pentest/tasks"): "pentest:view",
+        ("GET", "/api/remote-pentest/tasks/{public_id}"): "pentest:view",
+        ("GET", "/api/remote-pentest/tasks/{public_id}/report"): "pentest:view",
+    }
+    for method, path in remote_guards:
+        route = next(row for row in plan["routes"] if (row["method"], row["path"]) == (method, path))
+        assert route["endpoint"] == "app/api/v1/remote_pentest.py"
+        assert route["guard"] == "app.core.rbac_dependency.require_permission.<locals>._dependency"
+        assert route["anonymous"] == route["no_permission"] == "ready"
+        assert not route["unknown_dependencies"]
 
 
 @pytest.mark.parametrize(

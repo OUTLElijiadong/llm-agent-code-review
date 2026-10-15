@@ -87,10 +87,10 @@ def write_private(path, value, *, exclusive=False):
         os.fsync(stream.fileno())
 
 
-# 已独立复核的2026-09-19基线（含显式会话恢复、收件、浏览及已读动作）；
-# 合法删除路由时须复核并显式更新此门禁。
-MIN_ROUTE_METHODS = 333
-MIN_ENDPOINT_SOURCES = 42
+# 已独立复核的2026-10-15基线覆盖 363 个 method/path 与 45 个端点来源；
+# 留出 18 条方法和 1 个来源的容差，仅防止大范围静默删除，精确值由路由矩阵测试固定。
+MIN_ROUTE_METHODS = 345
+MIN_ENDPOINT_SOURCES = 44
 REQUIRED_ROUTES = {
     ("POST", "/api/auth/login"), ("POST", "/v1/responses"),
     ("POST", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
@@ -176,6 +176,7 @@ def build_plan():
         "app/core/super_admin.py",
         "app/core/observability.py",
         "app/core/request_size_limit.py",
+        "app/core/site_request_context.py",
         "app/services/rbac_service.py",
         # require_studio_role 委托此服务做只读角色校验，必须同样绑定源码。
         "app/services/agent_studio_service.py",
@@ -194,6 +195,7 @@ def build_plan():
         "starlette.middleware.cors.CORSMiddleware",
         "app.core.observability.RequestContextMiddleware",
         "app.core.request_size_limit.UploadRequestSizeLimitMiddleware",
+        "app.core.site_request_context.SiteRequestContextMiddleware",
     }
     for route in iter_api_route_contexts(app.routes, exclusions=exclusions):
         calls = list(ordered(route.dependant))[:-1]
