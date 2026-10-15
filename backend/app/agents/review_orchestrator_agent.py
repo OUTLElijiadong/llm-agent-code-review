@@ -46,7 +46,7 @@ class ReviewOrchestratorAgent(BaseAgent):
         self._user = user
 
     def start_review(self, project_id: int, file_ids: List[int],
-                     review_type: str = "quick", task_name: str = "",
+                     review_type: str = "standard", task_name: str = "",
                      user: Optional[User] = None,
                      ctx: Optional[AgentContext] = None, *,
                      input_exclusions: Optional[list[dict]] = None) -> AgentResult:

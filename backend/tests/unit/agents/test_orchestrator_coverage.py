@@ -469,7 +469,7 @@ def test_start_review_auto_selects_only_active_project_files(db: Any, monkeypatc
     orch.review_orch = SimpleNamespace(start_review=MagicMock(return_value=_result("started")))
     ctx = AgentContext(user_id=3)
 
-    result = orch.start_review(project_id=7, file_ids=[], review_type="standard", ctx=ctx)
+    result = orch.start_review(project_id=7, file_ids=[], ctx=ctx)
 
     assert result.success is True
     orch.review_orch.start_review.assert_called_once_with(

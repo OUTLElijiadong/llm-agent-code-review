@@ -5229,11 +5229,14 @@ def _run_test_review_report(
         model_review_completed = False
         roles_manifest_valid = False
         report_candidate_valid = False
+        review_failure_reason = "多 Agent AI 审查未完成"
         report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
+            review_failure_reason = "模型未配置"
             _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置，已使用确定性测试报告兜底")
         elif isinstance(conclusion.get("ai_model_stop_reason"), dict):
             stop_reason = conclusion["ai_model_stop_reason"]
+            review_failure_reason = f"模型请求不可重试（{str(stop_reason.get('failure_kind') or 'model_call_failed')}）"
             _append_event(
                 db,
                 environment,
@@ -5260,6 +5263,7 @@ def _run_test_review_report(
                     "failure_kind": failure_kind,
                     "message": "模型审查请求不可重试；已使用确定性报告并停止后续模型请求",
                 }
+                review_failure_reason = f"模型请求不可重试（{failure_kind}）"
                 report_md = _build_deterministic_test_report(conclusion)
                 _append_event(
                     db,
@@ -5301,11 +5305,21 @@ def _run_test_review_report(
                     if model_review_completed:
                         report_md = candidate
                     else:
+                        review_failure_reason = (
+                            "AI 报告内容为空"
+                            if not report_candidate_valid or not candidate.strip()
+                            else "多 Agent 角色清单或执行结果未通过完整性校验"
+                        )
                         # 只有完整角色清单和非空报告候选均通过校验时才允许保存或发布模型报告。
                         # 任何不完整返回都使用确定性内容，避免“AI 未完成”状态却泄出未验证报告。
                         report_md = _build_deterministic_test_report(conclusion)
                 else:
                     failure_kind = str(getattr(result, "failure_kind", "") or "")
+                    review_failure_reason = (
+                        f"模型请求不可重试（{failure_kind}）"
+                        if failure_kind in NON_RETRYABLE_MODEL_FAILURES
+                        else "多 Agent 模型审查未成功"
+                    )
                     if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
                         conclusion["ai_model_stop_reason"] = {
                             "failure_kind": failure_kind,
@@ -5352,6 +5366,7 @@ def _run_test_review_report(
             "report_candidate_valid": report_candidate_valid,
             "review_mode": "multi_agent" if model_review_completed else "deterministic_fallback",
             "ai_review_complete": model_review_completed,
+            "ai_review_failure_reason": None if model_review_completed else review_failure_reason,
             "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
             "report_bytes": len(report_md.encode("utf-8")),
         }
@@ -5377,9 +5392,9 @@ def _run_test_review_report(
                 else f"多 Agent 测试审查报告已生成，但写入报告中心失败（角色 {roles_executed}/{roles_total}）"
                 if model_review_completed
                 else (
-                    f"确定性测试报告已生成并写入报告中心（角色 {roles_executed}/{roles_total}）"
+                    f"确定性测试报告已生成并写入报告中心；{review_failure_reason}（角色 {roles_executed}/{roles_total}）"
                     if report_saved
-                    else f"确定性测试报告已生成，但写入报告中心失败（角色 {roles_executed}/{roles_total}）"
+                    else f"确定性测试报告已生成但写入报告中心失败；{review_failure_reason}（角色 {roles_executed}/{roles_total}）"
                 )
             ),
             summary,

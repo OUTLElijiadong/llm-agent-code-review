@@ -34,6 +34,12 @@ PLAYBOOK_PATH = _ROOT / "app" / "ai" / "agent_knowledge" / "sandbox_test_review_
 SEED_PATH = _ROOT / "scripts" / "seed_agent_playbooks.py"
 
 
+def _successful_report_publication(report: str, published: list[str]) -> dict[str, bool]:
+    """测试夹具显式模拟报告已持久化，避免把 None 误当成成功回执。"""
+    published.append(report)
+    return {"report_persisted": True}
+
+
 @pytest.fixture(scope="module")
 def service_src() -> str:
     return SERVICE_PATH.read_text(encoding="utf-8")
@@ -75,7 +81,11 @@ def test_nonretryable_model_failure_uses_deterministic_review_report(monkeypatch
         "_persist_browser_artifact",
         lambda *_args, **_kwargs: SimpleNamespace(id=77),
     )
-    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_publish_sandbox_report",
+        lambda *_args, **_kwargs: {"report_persisted": True},
+    )
     db = SimpleNamespace(commit=lambda: None)
     environment = SimpleNamespace(owner_id=1, public_id="sbx_nonretryable_review")
 
@@ -97,7 +107,10 @@ def test_nonretryable_model_failure_uses_deterministic_review_report(monkeypatch
     assert calls == 0
     assert any(event[3] == "multi_agent_review" and "确定性报告" in event[4] for event in events)
     completion = next(event for event in events if event[2] == "complete")
-    assert completion[4] == "确定性测试报告已生成；多 Agent AI 审查未完成（角色 0/4）"
+    assert completion[4] == (
+        "确定性测试报告已生成并写入报告中心；"
+        "模型请求不可重试（usage_accounting_error）（角色 0/4）"
+    )
     assert completion[5]["review_mode"] == "deterministic_fallback"
     assert completion[5]["ai_review_complete"] is False
 
@@ -173,7 +186,7 @@ def test_report_completion_requires_consistent_successful_role_manifest(
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, report: published.append(report),
+        lambda _db, _environment, _conclusion, report: _successful_report_publication(report, published),
     )
 
     summary = sandbox_service._run_test_review_report(
@@ -194,13 +207,13 @@ def test_report_completion_requires_consistent_successful_role_manifest(
     assert len(published) == 1
     if expected_complete:
         assert summary["review_mode"] == "multi_agent"
-        assert completion[4] == "多 Agent 测试审查报告已生成（角色 4/4）"
+        assert completion[4] == "多 Agent 测试审查报告已生成并写入报告中心（角色 4/4）"
         assert candidate in persisted_content
         assert candidate in published[0]
     else:
         assert summary["review_mode"] == "deterministic_fallback"
-        assert completion[4].startswith("确定性测试报告已生成；多 Agent AI 审查未完成")
-        assert ("角色清单或计数未通过完整性校验" in completion[4]) is expect_manifest_note
+        assert completion[4].startswith("确定性测试报告已生成并写入报告中心；")
+        assert ("多 Agent 角色清单或执行结果未通过完整性校验" in completion[4]) is expect_manifest_note
         assert persisted_content == "DETERMINISTIC FALLBACK"
         assert published[0] == "DETERMINISTIC FALLBACK"
 
@@ -243,7 +256,7 @@ def test_empty_report_candidate_falls_back_with_explicit_reason(monkeypatch) -> 
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, report: published.append(report),
+        lambda _db, _environment, _conclusion, report: _successful_report_publication(report, published),
     )
 
     summary = sandbox_service._run_test_review_report(
@@ -289,7 +302,11 @@ def test_usage_accounting_error_preserves_deterministic_review_report(monkeypatc
         "_persist_browser_artifact",
         lambda _db, _environment, **kwargs: persisted.append(kwargs) or SimpleNamespace(id=78),
     )
-    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_publish_sandbox_report",
+        lambda *_args, **_kwargs: {"report_persisted": True},
+    )
     db = SimpleNamespace(commit=lambda: None)
     environment = SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_usage_accounting_review")
 
@@ -324,7 +341,11 @@ def test_reporter_nonretryable_result_is_committed_for_recovery(monkeypatch, fai
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
     monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
     monkeypatch.setattr(sandbox_service, "_persist_browser_artifact", lambda *_args, **_kwargs: SimpleNamespace(id=79))
-    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_publish_sandbox_report",
+        lambda *_args, **_kwargs: {"report_persisted": True},
+    )
     db = SimpleNamespace(commit=lambda: commits.append(True))
 
     result = sandbox_service._run_test_review_report(

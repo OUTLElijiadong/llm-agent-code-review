@@ -744,7 +744,7 @@ case "${1:-}" in
           printf 'one-off mysqldump client is missing its env file\n' >&2
           exit 93
         }
-        env_mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+        env_mode="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file")"
         [[ "$env_mode" == "600" ]] || {
           printf 'one-off mysqldump env file permissions are not 0600\n' >&2
           exit 95

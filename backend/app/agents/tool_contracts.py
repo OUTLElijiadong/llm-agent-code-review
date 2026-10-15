@@ -122,7 +122,7 @@ class StartReviewArguments(FixedToolArguments):
         default_factory=list,
         description="可选待审查文件 ID；为空时由 Orchestrator 选择项目 active 文件",
     )
-    review_type: str = Field(default="quick", description="审查类型")
+    review_type: str = Field(default="standard", description="审查类型")
     task_name: str = Field(default="", description="任务名称")
 
 

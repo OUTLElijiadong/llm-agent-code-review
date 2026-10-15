@@ -48,6 +48,8 @@ ADMIN_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/admin/platform": ("平台配置中心", "模型、嵌入、内测码、MCP 与运行节点配置"),
     "/admin/security-center": ("小菱安全中心", "查看服务器安全监控、告警证据、巡检状态并调整监控灵敏度"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
+    "/support": ("支持中心", "处理用户反馈、支持工单并跟踪回复状态"),
+    "/forum": ("开发者论坛", "查看、管理和置顶社区讨论"),
 }
 
 _GUIDE_PROTOCOL = """\

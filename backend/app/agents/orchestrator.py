@@ -437,7 +437,7 @@ class Orchestrator(BaseAgent):
             return AgentResult(success=False, error=str(exc))
 
     def start_review(self, project_id: int, file_ids: Optional[List[int]] = None,
-                     review_type: str = "quick", task_name: str = "",
+                     review_type: str = "standard", task_name: str = "",
                      user: Optional[User] = None,
                      ctx: Optional[AgentContext] = None) -> AgentResult:
         """通过统一入口启动项目审查并补齐缺省文件列表。
@@ -450,7 +450,7 @@ class Orchestrator(BaseAgent):
         Args:
             project_id: 待审查项目 ID。
             file_ids: 可选文件 ID 列表；为空时自动解析 active 文件。
-            review_type: 审查类型，默认 quick。
+            review_type: 审查类型，默认 standard。
             task_name: 可选任务名称。
             user: 可选显式用户；通常由已注入的专业 Agent 使用请求用户。
             ctx: 当前 Agent 调用上下文。

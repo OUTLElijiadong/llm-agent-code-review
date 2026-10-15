@@ -46,7 +46,7 @@ _INTENT_SYSTEM = (
     "- review_code: {code, language}\n"
     "- create_project: {project_name, description, language}\n"
     "- delete_project / start_review / list_code_files / list_review_tasks: {project_id?}"
-    "(start_review 另含 review_type:quick)\n"
+    "(start_review 另含 review_type:standard)\n"
     "- list_review_issues: {task_id?}\n"
     "- generate_ai_prompt: {scope: issue|task|project, issue_id?, task_id?, project_id?, target_tool?}\n"
     "- security_audit: {scope: file|task|project, file_id?, task_id?, project_id?, "
@@ -1971,7 +1971,7 @@ class ChatAssistantAgent(BaseAgent):
             return AgentResult(success=False, error="Orchestrator 未注入")
         p = intent.get("payload", {})
         pid = p.get("project_id")
-        review_type = p.get("review_type", "quick")
+        review_type = p.get("review_type", "standard")
         name = p.get("task_name", "")
 
         if not pid:

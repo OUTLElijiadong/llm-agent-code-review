@@ -108,8 +108,8 @@ async def test_admin_surface_uses_one_root_with_business_and_admin_tools(db, adm
     assert "user_execute_capability" in names
 
 
-def test_xiaoling_must_ask_review_mode_before_dispatch_when_unspecified(db):
-    """审查方式未提供时必须先询问，且只呈现对应执行路径支持的模式。"""
+def test_xiaoling_auto_runs_default_review_and_asks_for_unselected_audit_scope(db):
+    """常规代码审查默认自动执行；安全审计仍须选择扫描范围。"""
     row = User(username="review-mode-user", password="x", role="user", status=1)
     db.add(row)
     db.commit()
@@ -117,6 +117,9 @@ def test_xiaoling_must_ask_review_mode_before_dispatch_when_unspecified(db):
     instructions = _instructions("user", row)
 
     assert "审查方式未明确" in instructions
+    assert "默认采用标准审查并立即执行" in instructions
+    assert "不得仅为选择审查方式而暂停或调用 ask_user" in instructions
+    assert "若用户明确要求先选择审查方式" in instructions
     assert "ask_user" in instructions
     assert "allow_free_text=false" in instructions
     assert "option value 必须与对应工具参数值完全一致" in instructions
@@ -125,7 +128,7 @@ def test_xiaoling_must_ask_review_mode_before_dispatch_when_unspecified(db):
     assert "triage|full|static_full" in instructions
     assert "不得把有界语义检查称为完整语义覆盖" in instructions
     assert "正式 AgentTeam 的 review_orchestrator 仅用 full|security" in instructions
-    assert "若用户尚未选择扫描方式，必须先用 ask_user" in instructions
+    assert "安全审计若未给出扫描范围，仍须先用 ask_user 选择 scan_mode" in instructions
     assert "代码解释、报告查询" in instructions
 
 

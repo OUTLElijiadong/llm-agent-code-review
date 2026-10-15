@@ -49,9 +49,10 @@ def _extract_file_constants(source: str) -> dict[str, str]:
         dict[str, str]: 变量名到字符串值的映射;无定义时返回空字典。
     """
     constants: dict[str, str] = {}
-    # 匹配 const NAME = 'value' 或 const NAME = "value"
+    # 匹配 const base = 'value' 或 const BASE = "value"。API 模块会使用
+    # 小写局部常量，变量名不应影响端点契约解析。
     pattern = re.compile(
-        r"\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*(['\"])([^'\"]+)\2",
+        r"\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(['\"])([^'\"]+)\2",
     )
     for match in pattern.finditer(source):
         constants[match.group(1)] = match.group(3)
@@ -75,7 +76,7 @@ def _resolve_template_variables(path: str, constants: dict[str, str]) -> str:
             return constants[var_name]
         return "{param}"
 
-    return re.sub(r"\$\{([A-Z][A-Z0-9_]*)\}", _replace, path)
+    return re.sub(r"\$\{([A-Za-z_$][A-Za-z0-9_$]*)\}", _replace, path)
 
 
 def _backend_http_routes() -> set[tuple[str, str]]:
