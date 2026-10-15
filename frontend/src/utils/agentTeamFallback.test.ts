@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { agentTeamFallbackKey, buildAgentTeamFallback } from './agentTeamFallback'
+import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFailedRun } from './agentTeamFallback'
 import type { AgentTeamDetail } from '@/api/agentTeams'
 
 function detail(overrides: Partial<AgentTeamDetail> = {}): AgentTeamDetail {
@@ -66,5 +66,40 @@ describe('团队审查自动部分结果', () => {
       teamId: 41, surface: 'user', sessionId: 'session-41', upstreamError: '',
     })).toBeNull()
     expect(agentTeamFallbackKey('message-1')).toBe(agentTeamFallbackKey('message-1'))
+  })
+
+  it('按失败 run 的团队创建事件或 Mesh 消息 ID 精确关联当前会话回执', () => {
+    const terminal = {
+      schema_version: '1.0' as const, message_id: 'team-terminal-41', idempotency_key: 'team-terminal-41',
+      trace_id: 'trace-41', correlation_id: 'team:41', causation_id: '',
+      sent_from: 'system:agent_team', send_to: 'session:user:session-41', message_type: 'task.error',
+      priority: 'normal' as const, subject: 'team done', status: 'completed', payload: { team_id: 41 },
+      context: { team_id: 41, team_terminal: true }, artifacts: [], errors: [],
+      requires_ack: false, max_attempts: 1, attempt_count: 1, expires_at: '', create_time: '', update_time: '',
+    }
+    const base = {
+      surface: 'user' as const, session_id: 'session-41',
+      run: { run_id: 'run-41', status: 'failed', model: '', rounds: 1, error: 'HTTP 402', updated_at: '' },
+      messages: [], pending: null, mesh_messages: [terminal],
+    }
+
+    expect(terminalTeamReceiptsForFailedRun({
+      ...base,
+      events: [{ type: 'response.tool.completed', tool_name: 'create_agent_team', output: { team_id: 41 } }],
+    })).toEqual([terminal])
+    expect(terminalTeamReceiptsForFailedRun({
+      ...base,
+      run: { ...base.run, mesh_message_id: 'team-terminal-41' },
+    })).toEqual([terminal])
+    expect(terminalTeamReceiptsForFailedRun({
+      ...base,
+      events: [{ type: 'response.tool.completed', tool_name: 'create_agent_team', output: { team_id: 42 } }],
+      mesh_messages: [{ ...terminal, send_to: 'session:user:other-session' }],
+    })).toEqual([])
+    expect(terminalTeamReceiptsForFailedRun({
+      ...base,
+      run: { ...base.run, status: 'completed', mesh_message_id: '' },
+      events: [{ type: 'response.tool.completed', tool_name: 'create_agent_team', output: { team_id: 41 } }],
+    })).toEqual([])
   })
 })

@@ -679,6 +679,60 @@ describe('AdminCopilot Responses stream', () => {
     wrapper.unmount()
   })
 
+  it('管理端刷新后从失败运行绑定的团队回执恢复部分结果且不重跑模型', async () => {
+    let restoredSessionId = ''
+    const receipt = {
+      schema_version: '1.0', message_id: 'admin-team-90-terminal', idempotency_key: 'admin-team-90-terminal',
+      trace_id: 'trace-admin-90', correlation_id: 'team:90', causation_id: 'request-admin-90',
+      sent_from: 'system:agent_team', send_to: '', message_type: 'task.error',
+      priority: 'normal' as const, subject: '管理端团队审查结束', status: 'completed',
+      payload: { team_id: 90, status: 'failed' },
+      context: { team_id: 90, team_terminal: true, session_delivery: true },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '', create_time: '', update_time: '',
+    }
+    sessionApi.get.mockImplementation((_surface: string, id: string) => {
+      restoredSessionId = id
+      return Promise.resolve({
+        surface: 'admin', session_id: id,
+        run: { run_id: 'run-admin-team-90', mesh_message_id: '', status: 'failed', model: 'deepseek-v4-pro', rounds: 1, error: 'Responses HTTP 402: quota refused', updated_at: '' },
+        messages: [{ role: 'user', content: '只读检查管理 API' }],
+        events: [{ type: 'response.tool.completed', call_id: 'create-admin-team-90', tool_name: 'create_agent_team', output: { team_id: 90 } }],
+        mesh_messages: [{ ...receipt, send_to: `session:admin:${id}` }], pending: null,
+      })
+    })
+    teamApi.list.mockImplementation((_input: { surface: string; session_id: string }) => Promise.resolve({
+      items: [{ team_id: 90, title: '管理端自动审查', surface: 'admin', session_id: restoredSessionId, status: 'failed', max_active_children: 3, trace_id: 'trace-admin-90', counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 } }],
+      total: 1,
+    }))
+    teamApi.detail.mockImplementation(() => Promise.resolve({
+      team_id: 90, title: '管理端自动审查', surface: 'admin', session_id: restoredSessionId, status: 'completed',
+      max_active_children: 3, trace_id: 'trace-admin-90',
+      counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+      summary: { final_result: { summary: '已保存一条管理 API 证据。' } }, members: [], events: [], messages: [],
+      tasks: [{
+        task_id: 1, task_key: 'review', member_id: 1, member_key: 'reviewer', title: '只读管理 API 检查',
+        depends_on: [], status: 'completed', priority: 0, attempt_count: 1, max_attempts: 3,
+        result: { findings: [{ severity: '中', title: '缺少对象级权限校验', file_name: 'admin_api.py', line_number: 20 }] },
+      }],
+    } satisfies AgentTeamDetail))
+
+    const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+
+    expect(streams.records).toHaveLength(0)
+    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).toContain('缺少对象级权限校验')
+    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(meshApi.acknowledge).not.toHaveBeenCalled()
+
+    await (wrapper.vm as any).restoreSession()
+    await flushSessionRestore()
+    expect(wrapper.text().match(/团队审查部分结果（自动整理）/g)).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('恢复当前管理会话时拉取服务端团队并默认折叠展示协作过程', async () => {
     teamApi.list.mockResolvedValue({
       items: [{ team_id: 42, title: '管理端验证', surface: 'admin', session_id: 'admin-test', status: 'verifying', max_active_children: 3, trace_id: 'trace-admin-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],

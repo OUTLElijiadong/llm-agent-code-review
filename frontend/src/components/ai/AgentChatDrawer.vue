@@ -59,7 +59,7 @@ import {
 import { normalizeAgentText } from '@/utils/agentText'
 import { AgentSessionHistoryWindow } from '@/utils/agentSessionHistory'
 import { createAgentMeshBridge } from '@/utils/agentMeshBridge'
-import { agentTeamFallbackKey, buildAgentTeamFallback } from '@/utils/agentTeamFallback'
+import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFailedRun } from '@/utils/agentTeamFallback'
 import {
   agentMeshToolCalls,
   findAgentMeshTimeline,
@@ -811,6 +811,8 @@ async function restoreSession(): Promise<void> {
       showTyping.value = isAgentResponseSessionActive(session.run?.status)
       await refreshAgentTeam()
       if (!scopeCurrent()) return
+      await restoreTerminalTeamFallback(session, scopeCurrent)
+      if (!scopeCurrent()) return
       scheduleSessionPoll()
       return
     }
@@ -832,6 +834,8 @@ async function restoreSession(): Promise<void> {
     }
     messages.value.push(target)
     await refreshAgentTeam()
+    if (!scopeCurrent()) return
+    await restoreTerminalTeamFallback(session, scopeCurrent)
     if (!scopeCurrent()) return
     scheduleSessionPoll()
   } catch {
@@ -954,6 +958,62 @@ async function appendTerminalTeamFallback(
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * 页面刷新时，Responses 运行可能已经失败，Mesh 终态回执也已被确认，
+ * 因此实时桥不会再次投递。仅使用失败 run 明确绑定的终态回执恢复结果，
+ * 不重跑模型、不重复确认回执，也不从其他会话推断团队归属。
+ */
+async function restoreTerminalTeamFallback(
+  session: Awaited<ReturnType<typeof getAgentResponseSession>>,
+  scopeCurrent: () => boolean,
+): Promise<void> {
+  const run = session.run
+  if (
+    session.surface !== 'user'
+    || session.session_id !== sessionId.value
+    || !run
+    || !['failed', 'incomplete', 'max_rounds_exceeded'].includes(run.status)
+  ) return
+
+  for (const receipt of terminalTeamReceiptsForFailedRun(session)) {
+    const teamId = Number(receipt.payload?.team_id ?? receipt.context?.team_id)
+    if (!Number.isSafeInteger(teamId) || teamId <= 0) continue
+    const key = agentTeamFallbackKey(receipt.message_id)
+    if (messages.value.some((message) => message.autoResultKey === key)) continue
+
+    try {
+      const cachedTeam = agentTeams.value.find((team) => team.team_id === teamId)
+      const team = cachedTeam ?? await getAgentTeam(teamId)
+      if (
+        !scopeCurrent()
+        || session.session_id !== sessionId.value
+        || sessionRun.value?.run_id !== run.run_id
+        || messages.value.some((message) => message.autoResultKey === key)
+      ) return
+      const content = buildAgentTeamFallback(team, {
+        teamId,
+        surface: 'user',
+        sessionId: session.session_id,
+        upstreamError: run.error || receipt.last_error || '',
+      })
+      if (!content) continue
+      messages.value.push({
+        id: messageId(),
+        role: 'assistant',
+        content,
+        time: '',
+        runId: run.run_id,
+        teamIds: [teamId],
+        teamFallback: true,
+        autoResultKey: key,
+      })
+      persistSnapshot()
+    } catch {
+      // 历史/团队详情暂时不可用时保留失败卡片；轮询恢复后会再次尝试。
+    }
   }
 }
 
@@ -1191,6 +1251,8 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
           messages.value.push(target)
         }
       }
+      await restoreTerminalTeamFallback(session, scopeCurrent)
+      if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration) return
     }
   } catch {
     if (!scopeCurrent()) return

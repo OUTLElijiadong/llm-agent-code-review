@@ -691,6 +691,105 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
+  it('刷新后从失败运行绑定的终态团队账本恢复部分结果且不重跑模型', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-test', title: '代码审查', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-test')
+    const terminalReceipt = {
+      schema_version: '1.0', message_id: 'team-86-terminal-1-result', idempotency_key: 'team-86-terminal-1-result',
+      trace_id: 'trace-86', correlation_id: 'team:86', causation_id: 'review-request-86',
+      sent_from: 'system:agent_team', send_to: 'session:user:user-test', message_type: 'task.error',
+      priority: 'normal', subject: '代码审查团队已结束', status: 'completed',
+      payload: { team_id: 86, status: 'failed' },
+      context: { team_id: 86, team_terminal: true, session_delivery: true, execution_generation: 1 },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '2026-10-15T13:00:00Z', create_time: '2026-10-15T12:00:00Z', update_time: '2026-10-15T12:00:01Z',
+    }
+    sessionApi.get.mockResolvedValue({
+      surface: 'user', session_id: 'user-test',
+      run: {
+        run_id: 'run-team-86', mesh_message_id: '',
+        status: 'failed', model: 'deepseek-v4-pro', rounds: 1,
+        error: 'Responses 上游 HTTP 402: Insufficient Balance', updated_at: '2026-10-15T12:00:02Z',
+      },
+      messages: [{ role: 'user', content: '审查 Python 除零处理' }],
+      events: [{ type: 'response.tool.completed', call_id: 'create-team-86', tool_name: 'create_agent_team', output: { team_id: 86 } }],
+      mesh_messages: [terminalReceipt], pending: null,
+    })
+    teamApi.list.mockResolvedValue({
+      items: [{ team_id: 86, title: '自动代码审查', surface: 'user', session_id: 'user-test', status: 'failed', max_active_children: 3, trace_id: 'trace-86', counts: { total: 2, completed: 1, running: 0, queued: 0, failed: 1, blocked: 0 } }],
+      total: 1,
+    })
+    teamApi.detail.mockResolvedValue({
+      team_id: 86, title: '自动代码审查', surface: 'user', session_id: 'user-test', status: 'failed',
+      max_active_children: 3, trace_id: 'trace-86',
+      counts: { total: 2, completed: 1, running: 0, queued: 0, failed: 1, blocked: 0 },
+      summary: { final_result: { summary: '已保存一项除零风险。' } },
+      members: [], events: [], messages: [],
+      tasks: [
+        {
+          task_id: 1, task_key: 'review', member_id: 1, member_key: 'reviewer', title: '代码质量检查',
+          depends_on: [], status: 'completed', priority: 0, attempt_count: 1, max_attempts: 3,
+          result: { summary: '发现未处理的除零异常。', findings: [{ severity: '中', title: '除数可能为零', file_name: 'calculator.py', line_number: 4, evidence_quote: 'return a / b' }] },
+        },
+        {
+          task_id: 2, task_key: 'verify', member_id: 2, member_key: 'verifier', title: '独立核验',
+          depends_on: ['review'], status: 'failed', priority: 0, attempt_count: 1, max_attempts: 3,
+          result: null, errors: [{ code: 'billing_error', message: '上游模型额度不足，尚未完成核验' }],
+        },
+      ],
+    } satisfies AgentTeamDetail)
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+
+    expect(streams.records).toHaveLength(0)
+    expect(wrapper.text()).toContain('团队审查部分结果（自动整理）')
+    expect(wrapper.text()).toContain('除数可能为零')
+    expect(wrapper.text()).toContain('未经小菱最终模型复核')
+    expect(meshApi.acknowledge).not.toHaveBeenCalled()
+    const snapshot = loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))
+    expect(snapshot?.messages.filter(item => item.teamFallback)).toHaveLength(1)
+
+    // 同一会话再次恢复必须按终态回执 ID 去重。
+    await (wrapper.vm as any).handleSessionSelect('user-test')
+    await settleAll()
+    expect(wrapper.text().match(/团队审查部分结果（自动整理）/g)).toHaveLength(1)
+    expect(loadAgentChatSnapshot('user-test', agentChatStorageKey('user'))?.messages.filter(item => item.teamFallback)).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('失败运行只恢复精确绑定的当前会话终态回执', async () => {
+    window.localStorage.setItem('prism-agent-sessions:user', JSON.stringify([
+      { id: 'user-test', title: '当前会话', createdAt: 1 },
+    ]))
+    window.localStorage.setItem('prism-agent-active-session:user', 'user-test')
+    sessionApi.get.mockResolvedValue({
+      surface: 'user', session_id: 'user-test',
+      run: { run_id: 'run-unrelated', mesh_message_id: 'other-terminal', status: 'failed', model: '', rounds: 1, error: '上游 HTTP 402', updated_at: '' },
+      messages: [{ role: 'user', content: '当前任务' }],
+      mesh_messages: [{
+        schema_version: '1.0', message_id: 'foreign-terminal', idempotency_key: 'foreign-terminal',
+        trace_id: 'trace-foreign', correlation_id: 'team:87', causation_id: '',
+        sent_from: 'system:agent_team', send_to: 'session:user:another-session', message_type: 'task.error',
+        priority: 'normal', subject: '其他会话团队结束', status: 'completed',
+        payload: { team_id: 87, status: 'failed' }, context: { team_id: 87, team_terminal: true },
+        artifacts: [], errors: [], requires_ack: false, max_attempts: 1, attempt_count: 1,
+        expires_at: '', create_time: '', update_time: '',
+      }], pending: null,
+    })
+    teamApi.list.mockResolvedValue({ items: [], total: 0 })
+
+    const wrapper = await mountReadyDrawer()
+    await settleAll()
+
+    expect(wrapper.text()).not.toContain('团队审查部分结果（自动整理）')
+    expect(teamApi.detail).not.toHaveBeenCalled()
+    expect(meshApi.acknowledge).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('运行中调用 create_agent_team 时立即显示团队卡片', async () => {
     const wrapper = await mountReadyDrawer()
     teamApi.list.mockResolvedValue({

@@ -28,7 +28,7 @@ import {
 } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail } from '@/api/agentTeams'
 import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
-import { agentTeamFallbackKey, buildAgentTeamFallback } from '@/utils/agentTeamFallback'
+import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFailedRun } from '@/utils/agentTeamFallback'
 import { createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -841,6 +841,8 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     if (!loading.value) applySessionSnapshot(session)
     await refreshAgentTeam(generation)
     if (!scopeCurrent()) return
+    if (!loading.value) await restoreTerminalTeamFallback(session, scopeCurrent)
+    if (!scopeCurrent()) return
   } catch {
     if (!scopeCurrent()) return
     sessionPollFailures += 1
@@ -869,6 +871,8 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
     }
     applySessionSnapshot(session)
     await refreshAgentTeam()
+    if (!scopeCurrent()) return
+    await restoreTerminalTeamFallback(session, scopeCurrent)
     if (!scopeCurrent()) return
   } catch {
     if (!scopeCurrent()) return
@@ -981,6 +985,57 @@ async function appendTerminalTeamFallback(
     return true
   } catch {
     return false
+  }
+}
+
+/** 刷新后只从失败运行明确绑定的管理员会话终态回执恢复，不重跑或重复确认。 */
+async function restoreTerminalTeamFallback(
+  session: AgentResponseSession,
+  scopeCurrent: () => boolean,
+): Promise<void> {
+  const run = session.run
+  if (
+    session.surface !== 'admin'
+    || session.session_id !== sessionId.value
+    || !run
+    || !['failed', 'incomplete', 'max_rounds_exceeded'].includes(run.status)
+  ) return
+
+  for (const receipt of terminalTeamReceiptsForFailedRun(session)) {
+    const teamId = Number(receipt.payload?.team_id ?? receipt.context?.team_id)
+    if (!Number.isSafeInteger(teamId) || teamId <= 0) continue
+    const key = agentTeamFallbackKey(receipt.message_id)
+    if (messages.value.some((entry) => entry.autoResultKey === key)) continue
+
+    try {
+      const cachedTeam = agentTeams.value.find((team) => team.team_id === teamId)
+      const team = cachedTeam ?? await getAgentTeam(teamId)
+      if (
+        !scopeCurrent()
+        || session.session_id !== sessionId.value
+        || sessionRun.value?.run_id !== run.run_id
+        || messages.value.some((entry) => entry.autoResultKey === key)
+      ) return
+      const content = buildAgentTeamFallback(team, {
+        teamId,
+        surface: 'admin',
+        sessionId: session.session_id,
+        upstreamError: run.error || receipt.last_error || '',
+      })
+      if (!content) continue
+      messages.value.push({
+        ...assistantEntry({ type: 'text', content, status: 'completed' }),
+        time: '',
+        runId: run.run_id,
+        teamFallback: true,
+        autoResultKey: key,
+        teamIds: [teamId],
+      })
+      agentTeams.value = [...agentTeams.value.filter((team) => team.team_id !== teamId), team]
+      persistSnapshot()
+    } catch {
+      // 详情暂不可用时不伪造成功，后续会话轮询会再次尝试恢复。
+    }
   }
 }
 
