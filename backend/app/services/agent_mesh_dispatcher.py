@@ -592,6 +592,7 @@ def _runtime_handler(
         if not trusted_team_execution:
             return _result("blocked", "站点执行只允许小菱创建的有效团队任务")
         import asyncio
+
         from app.services.site_agent_service import execute_site_task
         return asyncio.run(execute_site_task(db, user, team_id=int(context.get("team_id") or 0),
             task_id=int(context.get("agent_team_task_id") or 0), lease_token=str(context.get("lease_token") or "")))
@@ -1300,6 +1301,7 @@ def _handle(
             return code, _result("blocked", str(exc), errors=[{"code": "invalid_temporary_member"}])
         if _payload(message).get("operation") in {"execute_capability", "verify_results"}:
             import asyncio
+
             from app.services.site_agent_service import execute_site_task
             context = message.get("context") or {}
             return name, asyncio.run(execute_site_task(db, user, team_id=int(context.get("team_id") or 0),

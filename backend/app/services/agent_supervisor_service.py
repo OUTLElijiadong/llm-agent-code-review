@@ -228,7 +228,11 @@ def task_fingerprint(task: Mapping[str, Any], address: str) -> str:
         # 它仍影响本次实际运行，必须参与精确授权指纹。空策略不进入旧指纹，
         # 以便部署期间旧任务的既有确认仍按原算法校验。
         payload["execution_strategy"] = dict(execution_strategy)
-    if address == "agent:site_operator" or address.startswith("temporary:") or raw_input.get("operation") in {"execute_capability", "verify_results"}:
+    if (
+        address == "agent:site_operator"
+        or address.startswith("temporary:")
+        or raw_input.get("operation") in {"execute_capability", "verify_results"}
+    ):
         payload["operation"] = raw_input.get("operation")
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -336,7 +340,13 @@ def review_response_tool(tool_name: str, arguments: Mapping[str, Any]) -> dict[s
         if browser_action in {"inspect", "navigate", "scroll"}:
             review = SupervisionReview(ALLOW, LOW, "已登记的当前会话页面读取或站内导航", False, "browser_read")
         else:
-            review = SupervisionReview(ESCALATE, HIGH, "页面交互效果需当前账号确认；控件句柄不授予业务权限", True, "browser_control")
+            review = SupervisionReview(
+                ESCALATE,
+                HIGH,
+                "页面交互效果需当前账号确认；控件句柄不授予业务权限",
+                True,
+                "browser_control",
+            )
         action = f"browser.{browser_action or 'unknown'}"
     elif name == "create_agent_team":
         team_review = review_agent_team_plan(arguments)
