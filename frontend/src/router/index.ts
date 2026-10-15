@@ -73,6 +73,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '渗透测试详情', permissions: ['pentest:view'] },
       },
       {
+        path: 'remote-pentests',
+        name: 'RemotePentestList',
+        component: () => import('@/views/pentest/RemotePentestList.vue'),
+        meta: { title: '远程网站评估', permissions: ['pentest:view'] },
+      },
+      {
+        path: 'remote-pentests/start',
+        name: 'RemotePentestStart',
+        component: () => import('@/views/pentest/RemotePentestStart.vue'),
+        meta: { title: '发起远程网站评估', permissions: ['pentest:start'] },
+      },
+      {
+        path: 'remote-pentests/:publicId',
+        name: 'RemotePentestDetail',
+        component: () => import('@/views/pentest/RemotePentestDetail.vue'),
+        meta: { title: '远程网站评估详情', permissions: ['pentest:view'] },
+      },
+      {
         path: 'rules',
         name: 'RuleConfig',
         redirect: { path: '/security', query: { section: 'rules' } },

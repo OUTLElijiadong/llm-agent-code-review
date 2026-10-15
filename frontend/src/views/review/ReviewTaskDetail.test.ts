@@ -353,9 +353,10 @@ describe('报告入口权限与可用状态', () => {
   })
 
   it('同项目任务成员无报告访问权时不显示会产生 404 的报告入口', async () => {
-    review.getReviewTaskDetail.mockResolvedValue(taskResult({ status: 'success', can_view_report: false }))
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({ review_type: 'sandbox_test', status: 'success', can_view_report: false }))
     await renderDetail()
     expect(wrapper.text()).not.toContain('报告 #21')
+    expect(wrapper.text()).toContain('报告内容仅对任务发起账号及管理员开放')
   })
 
   it('创建人或管理员可见成功报告入口', async () => {
@@ -370,6 +371,19 @@ describe('报告入口权限与可用状态', () => {
     }))
     await renderDetail()
     expect(wrapper.text()).toContain('报告 #21')
+  })
+
+  it('按实际执行模式命名黑盒任务并显示已保存的失败原因', async () => {
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      task_name: '沙箱黑白盒测试 · sbx_old', review_type: 'sandbox_test', status: 'failed', can_view_report: true,
+      coverage: { verification_status: 'failed', requested_mode: 'blackbox', reason: '黑盒入口返回 HTTP 404，未找到可用应用路由。' },
+      error_message: '黑盒入口返回 HTTP 404，未找到可用应用路由。',
+    }))
+    await renderDetail()
+    expect(wrapper.get('.head-meta').text()).toContain('沙箱黑盒测试')
+    expect(wrapper.get('h1').text()).toContain('沙箱黑盒测试 · sbx_old')
+    expect(wrapper.get('.execution-error').text()).toContain('HTTP 404')
+    expect(wrapper.text()).not.toContain('沙箱黑白盒测试')
   })
 })
 

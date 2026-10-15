@@ -73,13 +73,15 @@ def test_report_author_delete_cap_preserves_reviewer_and_denies_viewer(db, monke
 
 def test_viewer_project_visibility_does_not_grant_others_private_report(db, monkeypatch):
     _, actor, project, task, _ = seed(db, "viewer")
-    task.review_type = "sandbox_test"; task.summary = "owner-private-report"; db.commit()
+    task.review_type = "sandbox_test"; task.summary = "owner-private-report"
+    task.error_message = "owner-private-failure-detail"; db.commit()
     monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: True)
     assert report_service.list_reports(db, actor)["items"] == []
     with pytest.raises(NotFoundError):
         report_service.get_report_detail(db, actor, task.id)
     detail = review_service.get_task_detail(db, actor, task.id)
     assert detail["summary"] is None
+    assert detail["error_message"] is None
     assert detail["score"] is None
     assert detail["can_view_report"] is False
     assert project_service.get_project(db, actor, project.id)["recent_tasks"][0]["score"] is None

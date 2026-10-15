@@ -129,6 +129,42 @@ def test_history_161_reads_four_report_entries_without_mutating_task(db, admin_u
     assert (task.total_issues, task.status, task.coverage, task.update_time) == before
 
 
+def test_owner_detail_derives_legacy_failure_reason_from_saved_runner_evidence(db, admin_user):
+    project = Project(user_id=admin_user.id, project_name='失败回执项目')
+    db.add(project)
+    db.flush()
+    task = ReviewTask(
+        user_id=admin_user.id, project_id=project.id, task_name='沙箱黑白盒测试 · legacy',
+        review_type='sandbox_test', status='failed', total_files=1, processed_files=1,
+        total_issues=0, score=0,
+        coverage={'verification_status': 'failed', 'requested_mode': None, 'reason': None},
+    )
+    db.add(task)
+    db.flush()
+    db.add(ReviewReport(
+        task_id=task.id, user_id=admin_user.id,
+        content_json={
+            'source': 'sandbox_test', 'report_md': '## 总体结论\n未通过',
+            'evidence': {
+                'deterministic_test_execution': {'requested_mode': 'blackbox', 'status': 'failed'},
+                'blackbox_execution': {
+                    'status': 'failed', 'route': '/', 'status_code': 404,
+                    'route_origin': 'none', 'failure_kind': 'route_or_dynamic_assertion',
+                },
+            },
+        },
+        create_time=datetime.now(),
+    ))
+    db.commit()
+
+    detail = get_task_detail(db, admin_user, task.id)
+
+    assert detail['can_view_report'] is True
+    assert detail['coverage']['requested_mode'] == 'blackbox'
+    assert 'HTTP 404' in detail['coverage']['reason']
+    assert 'HTTP 404' in detail['error_message']
+
+
 def test_standard_review_keeps_structured_contract(db, admin_user):
     project = Project(user_id=admin_user.id, project_name='普通审查')
     db.add(project)

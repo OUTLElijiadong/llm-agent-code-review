@@ -33,6 +33,7 @@ _MODEL_MODULES = (
     "project_member",
     "project_source_archive",
     "project_source_revision",
+    "remote_pentest",
     "rbac",
     "report_template",
     "review_experience",

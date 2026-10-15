@@ -22,7 +22,7 @@ export const REVIEW_TYPE_LABELS: Record<string, string> = {
   performance: '性能审查',
   full: '全面审查',
   discuss: '圆桌讨论',
-  sandbox_test: '沙箱黑白盒测试',
+  sandbox_test: '沙箱测试（模式未记录）',
   pentest: '渗透测试',
 }
 
@@ -31,7 +31,15 @@ export const REVIEW_TYPE_LABELS: Record<string, string> = {
  * @param type - 后端 review_type 原始值
  * @returns 用户可读的中文审查类型文案
  */
-export function reviewTypeLabel(type?: string | null): string {
+export function reviewTypeLabel(type?: string | null, mode?: string | null): string {
   if (!type) return '—'
+  if (type === 'sandbox_test') {
+    const labels: Record<string, string> = {
+      whitebox: '沙箱白盒测试',
+      blackbox: '沙箱黑盒测试',
+      combined: '沙箱黑白盒组合测试',
+    }
+    return labels[mode || ''] || REVIEW_TYPE_LABELS.sandbox_test
+  }
   return REVIEW_TYPE_LABELS[type] ?? type
 }

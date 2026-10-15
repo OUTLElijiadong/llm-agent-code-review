@@ -77,6 +77,12 @@ from app.models.project import Project  # noqa: F401,E402
 from app.models.project_import_task import ProjectImportTask  # noqa: F401,E402
 from app.models.project_member import ProjectMember  # noqa: F401,E402  -- v2.4
 from app.models.project_source_archive import ProjectSourceArchive  # noqa: F401,E402
+from app.models.remote_pentest import (  # noqa: F401,E402
+    RemotePentestEngagement,
+    RemotePentestFinding,
+    RemotePentestPhaseRun,
+    RemotePentestReport,
+)
 
 # RBAC 权限体系模型(T02): 确保测试建表时包含 6 张 RBAC 表
 from app.models.rbac import (  # noqa: F401,E402

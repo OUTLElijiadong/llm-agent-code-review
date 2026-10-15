@@ -94,7 +94,7 @@
           <div class="tc-main">
             <div class="tc-line1">
               <button class="tc-name" type="button" @click.stop="onRowClick(row)">{{ taskDisplayTitle(row.task_name, `审查 #${row.id}`) }}</button>
-              <el-tag size="small" type="info" effect="plain">{{ reviewTypeLabel(row.review_type) }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">{{ reviewTypeLabel(row.review_type, row.coverage?.requested_mode) }}</el-tag>
               <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
             </div>
             <div class="tc-line2 font-mono">

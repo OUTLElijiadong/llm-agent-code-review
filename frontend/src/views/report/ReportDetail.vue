@@ -506,6 +506,7 @@ import {
 } from '@/api/report'
 import { getTaskIssues } from '@/api/review'
 import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } from '@/types/report'
+import type { TaskCoverageOut } from '@/types/review'
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
 import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
@@ -599,7 +600,10 @@ const taskName = computed(() => {
     .find((value) => typeof value === 'string' && value.trim())
   return taskDisplayTitle(typeof name === 'string' ? name : undefined, `任务 #${taskId}`)
 })
-const reviewType  = computed(() => reviewTypeLabel(report.value?.task?.review_type as string))
+const reviewType  = computed(() => reviewTypeLabel(
+  report.value?.task?.review_type as string,
+  String((report.value?.task?.coverage as TaskCoverageOut | undefined)?.requested_mode || ''),
+))
 const projectLanguage = computed(() => String(report.value?.project?.language ?? '').trim() || '未标注')
 const reviewedLanguages = computed(() => [...new Set(
   (report.value?.files ?? [])

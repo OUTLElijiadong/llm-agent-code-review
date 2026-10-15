@@ -41,7 +41,7 @@
         </dl>
         <p v-if="isSandboxReport" class="coverage-note">沙箱测试按任务范围记录完成情况；逐文件、分片和模型信息以报告中已保存的证据为准。</p>
         <p v-if="isSandboxReport && task?.coverage?.verification_status !== 'complete'" class="coverage-note coverage-note--warning" role="note">
-          {{ sandboxCoverageLabel(task?.coverage?.verification_status) }}<span v-if="task?.coverage?.reason">：{{ task.coverage.reason }}</span>。评分保留为本次记录值，不表示完整黑盒/白盒验证通过。
+          {{ sandboxCoverageLabel(task?.coverage?.verification_status) }}<span v-if="task?.coverage?.reason && task?.status !== 'failed'">：{{ task.coverage.reason }}</span>。评分保留为本次记录值，不表示完整黑盒/白盒验证通过。
         </p>
         <p v-else class="coverage-note">仅展示服务端返回的执行记录；分片数不是全任务合计，未知字段不推算为进度。</p>
       </div>
@@ -62,9 +62,9 @@
       </el-button>
 
       <div class="head-title">
-        <h1 class="font-display">{{ taskDisplayTitle(task?.task_name, `审查任务 #${taskId}`) }}</h1>
+        <h1 class="font-display">{{ displayTaskTitle }}</h1>
         <div class="head-meta font-mono">
-          <span>{{ reviewTypeLabel(task?.review_type) }}</span>
+          <span>{{ displayReviewTypeLabel }}</span>
           <template v-if="!isSandboxReport || task?.model_name"><span class="dot">·</span>
           <span>{{ modelLabel }}</span></template>
           <span class="dot">·</span>
@@ -97,6 +97,9 @@
       <div v-if="reportMetricsRestricted" class="head-tally tally-access-note" role="note">
         报告问题统计受权限保护
       </div>
+      <p v-if="reportMetricsRestricted" class="report-access-note" role="note">
+        报告内容仅对任务发起账号及管理员开放。请切换到发起任务的账号查看；平台不会向其他账号展示报告正文、评分或问题明细。
+      </p>
       <div v-else class="head-tally">
         <div class="tally-item">
           <span class="t-val font-display" :style="{ color: 'var(--sev-severe)' }">{{ tallyCount('严重', task?.severe_issues) }}</span>
@@ -438,6 +441,27 @@ const reportMetricsRestricted = computed(() => (
   && task.value?.can_view_report === false
 ))
 const isTestScore = computed(() => ['sandbox_test', 'pentest'].includes(task.value?.review_type || ''))
+const sandboxModeLabels: Record<string, string> = {
+  whitebox: '沙箱白盒测试',
+  blackbox: '沙箱黑盒测试',
+  combined: '沙箱黑白盒组合测试',
+}
+const displayReviewTypeLabel = computed(() => {
+  if (isSandboxReport.value) {
+    const mode = task.value?.coverage?.requested_mode
+    return sandboxModeLabels[mode || ''] || '沙箱测试（模式未记录）'
+  }
+  return reviewTypeLabel(task.value?.review_type)
+})
+const displayTaskTitle = computed(() => {
+  const raw = taskDisplayTitle(task.value?.task_name, `审查任务 #${taskId.value}`)
+  if (!isSandboxReport.value) return raw
+  const mode = task.value?.coverage?.requested_mode
+  const label = sandboxModeLabels[mode || '']
+  return label && raw.startsWith('沙箱黑白盒测试')
+    ? raw.replace(/^沙箱黑白盒测试/, label)
+    : raw
+})
 function tallyCount(level: string, fallback: number | null | undefined): number | string {
   if (reportMetricsRestricted.value) return '—'
   if (!isSandboxReport.value) return fallback ?? (isTestScore.value ? '—' : 0)
@@ -465,7 +489,12 @@ const stageLabel = computed(() => {
   }
   return stage ? labels[stage] || `未知阶段（${stage}）` : '阶段未知（接口未提供）'
 })
-const taskFailure = computed(() => task.value?.coverage?.error || task.value?.error_message || (task.value?.status === 'failed' ? '审查失败，接口未提供具体原因。' : ''))
+const taskFailure = computed(() => {
+  if (isSandboxReport.value && task.value?.status === 'failed') {
+    return task.value.coverage?.error || task.value.error_message || task.value.coverage?.reason || '测试失败；当前任务没有保存可展示的具体失败原因。'
+  }
+  return task.value?.coverage?.error || task.value?.error_message || (task.value?.status === 'failed' ? '审查失败，接口未提供具体原因。' : '')
+})
 
 function coverageCount(value: unknown): string {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? String(value) : '未知'
@@ -1118,6 +1147,17 @@ useAgentPageRefresh({ pages: ['/reviews', '/issues', '/security'], refresh: load
   p { margin: 6px 0 10px; }
 }
 .execution-error { margin-top: 12px; }
+.report-access-note {
+  grid-column: 1 / -1;
+  margin: -8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--brand-100);
+  border-radius: 8px;
+  background: var(--brand-50);
+  color: var(--gray-700);
+  font-size: 12px;
+  line-height: 1.65;
+}
 
 .file-row:focus-visible,
 .issue-row:focus-visible,

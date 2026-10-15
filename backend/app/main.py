@@ -185,6 +185,18 @@ async def lifespan(app: FastAPI):
             from loguru import logger as _logger
 
             _logger.exception("[startup] 渗透委托清扫失败(不阻断启动)")
+        try:
+            from app.services import remote_pentest_service as _remote_pentest_service
+
+            _remote_swept = _remote_pentest_service.sweep_stale_running_tasks(_sweep_db)
+            if _remote_swept:
+                from loguru import logger as _logger
+
+                _logger.warning("[startup] 收敛 {} 个重启遗留的远程评估并保存部分报告", _remote_swept)
+        except Exception:  # noqa: BLE001 - 清扫失败不阻断启动(下次启动再试)
+            from loguru import logger as _logger
+
+            _logger.exception("[startup] 远程评估孤儿任务清扫失败(不阻断启动)")
     finally:
         _sweep_db.close()
 

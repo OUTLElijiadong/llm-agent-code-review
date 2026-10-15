@@ -2537,6 +2537,8 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         task.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
     )
     report_issue_summary = None
+    report_coverage = task.coverage if isinstance(task.coverage, dict) else None
+    report_error_message = task.error_message
     if task.review_type == "sandbox_test" and can_view_report:
         from app.models.review_report import ReviewReport
         from app.services.sandbox_report_summary import summarize_sandbox_report
@@ -2549,6 +2551,20 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
             content = {}
         report_issue_summary = summarize_sandbox_report(content.get("report_md"))
         report_issue_summary["structured_issues"] = db.query(ReviewIssue).filter(ReviewIssue.task_id == task.id).count()
+        evidence = content.get("evidence") if isinstance(content.get("evidence"), dict) else {}
+        if evidence:
+            from app.services.sandbox_service import _sandbox_verification_coverage
+
+            derived = _sandbox_verification_coverage({
+                "passed": task.status == "success",
+                "evidence": evidence,
+            })
+            report_coverage = {**(report_coverage or {})}
+            for key, value in derived.items():
+                if value is not None and report_coverage.get(key) in (None, ""):
+                    report_coverage[key] = value
+            if task.status == "failed" and not report_error_message:
+                report_error_message = derived.get("reason")
     report_total = report_issue_summary.get("total") if report_issue_summary else None
     # 沙箱/渗透测试任务把完整 Markdown 报告写入 summary；任务可见范围比报告
     # 查看范围更宽，因此不能随任务元数据一起返回报告正文。
@@ -2578,12 +2594,12 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
         "score_breakdown": None if hide_report_metrics else task.score_breakdown,
-        "coverage": None if hide_report_metrics else task.coverage,
+        "coverage": None if hide_report_metrics else report_coverage,
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,
         "create_time": task.create_time,
         # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
-        "error_message": task.error_message,
+        "error_message": None if hide_report_metrics else report_error_message,
         "files": _task_file_summaries(db, task.id),
         "agent_releases": _task_agent_release_summaries(db, task.id),
         "aggregation_summary": _task_aggregation_summary(db, task.id),

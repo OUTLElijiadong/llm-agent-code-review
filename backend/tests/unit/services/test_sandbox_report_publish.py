@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from app.models.review_task import ReviewTask
+from app.services import sandbox_service
 from app.services.sandbox_service import (
     _DEPLOY_VERIFY_RUNNER,
     _artifact_documents,
@@ -91,20 +92,51 @@ def test_publish_sandbox_report_creates_review_task(db) -> None:
     result = _publish_sandbox_report(
         db,
         environment,
-        {"passed": True, "summary": "ok"},
+        {"passed": False, "summary": "黑盒未通过", "evidence": {
+            "deterministic_test_execution": {"requested_mode": "blackbox", "status": "failed"},
+            "blackbox_execution": {
+                "status": "failed", "route": "/", "status_code": 404,
+                "route_origin": "none", "failure_kind": "route_or_dynamic_assertion",
+            },
+        }},
         report_md,
     )
     assert result["report_task_id"] > 0
     task = db.get(ReviewTask, result["report_task_id"])
-    assert task.task_name == "沙箱黑白盒测试 · sbx_pub"
+    assert task.task_name == "沙箱黑盒测试 · sbx_pub"
     assert task.review_type == "sandbox_test"
-    assert task.score == 100
-    assert task.coverage["verification_status"] == "partial"
+    assert task.score == 0
+    assert task.coverage["verification_status"] == "failed"
+    assert "HTTP 404" in task.error_message
+    assert "未找到可用应用路由" in task.coverage["reason"]
     assert task.total_issues == 2
     # 幂等:再次发布不新建
-    result2 = _publish_sandbox_report(db, environment, {"passed": True}, report_md)
+    result2 = _publish_sandbox_report(db, environment, {"passed": False}, report_md)
     assert result2["report_task_id"] == result["report_task_id"]
-    assert db.query(ReviewTask).filter(ReviewTask.task_name == "沙箱黑白盒测试 · sbx_pub").count() == 1
+    assert db.query(ReviewTask).filter(ReviewTask.task_name == "沙箱黑盒测试 · sbx_pub").count() == 1
+
+
+def test_report_publish_failure_is_explicit_and_logged(db, monkeypatch) -> None:
+    from app.models.user import User
+
+    owner = User(username="sbx_publish_failure_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.commit()
+    environment = SimpleNamespace(public_id="sbx_publish_failure", project_id=1, owner_id=owner.id, test_mode="whitebox")
+    monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("private database details")))
+    logged: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        sandbox_service.logger,
+        "exception",
+        lambda message, public_id: logged.append((message, public_id)),
+    )
+
+    result = _publish_sandbox_report(db, environment, {"passed": True}, "## 总体结论\n通过")
+
+    assert result["report_persisted"] is False
+    assert result["failure_code"] == "report_persistence_failed"
+    assert "private database details" not in str(result)
+    assert logged == [("sandbox report publication failed public_id={}", "sbx_publish_failure")]
 
 
 def test_partial_sandbox_report_preserves_recorded_score_and_exposes_scope() -> None:
@@ -146,6 +178,23 @@ def test_sandbox_verification_coverage_distinguishes_complete_partial_and_failed
     partial = {**evidence, "agent_test_generation": {"status": "skipped", "mode": "blackbox"}}
     assert _sandbox_verification_coverage({"passed": True, "evidence": partial})["verification_status"] == "partial"
     assert _sandbox_verification_coverage({"passed": False, "evidence": evidence})["verification_status"] == "failed"
+
+
+def test_failed_blackbox_coverage_explains_404_without_route() -> None:
+    coverage = _sandbox_verification_coverage({
+        "passed": False,
+        "evidence": {
+            "deterministic_test_execution": {"requested_mode": "blackbox", "status": "failed"},
+            "blackbox_execution": {
+                "status": "failed", "route": "/", "status_code": 404,
+                "route_origin": "none", "failure_kind": "route_or_dynamic_assertion",
+            },
+        },
+    })
+
+    assert coverage["verification_status"] == "failed"
+    assert "HTTP 404" in coverage["reason"]
+    assert "未找到可用应用路由" in coverage["reason"]
 
 
 @pytest.mark.parametrize(

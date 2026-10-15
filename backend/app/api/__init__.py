@@ -36,6 +36,7 @@ from app.api.v1 import (
     maintenance,
     mcp_governance,
     pentest,
+    remote_pentest,
     project_members,
     projects,
     rbac,
@@ -93,3 +94,4 @@ api_router.include_router(beta_invites.router, prefix="/admin/beta-codes", tags=
 api_router.include_router(rbac.router, prefix="/rbac", tags=["RBAC权限管理"])
 # 授权渗透测试(七阶段流水线, 创建/授权/启动/进度/取消)
 api_router.include_router(pentest.router, prefix="/pentest", tags=["渗透测试"])
+api_router.include_router(remote_pentest.router, prefix="/remote-pentest", tags=["远程网站安全评估"])

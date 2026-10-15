@@ -32,6 +32,7 @@ from typing import Any, Iterable
 
 import httpx
 import jwt
+from loguru import logger
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from app.agents.event_bus import emit_event
@@ -4848,6 +4849,15 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         verification_status = "partial"
     elif mode in {"blackbox", "combined"} and blackbox_state != "passed":
         verification_status = "failed" if blackbox_state == "failed" else "partial"
+    reason = (
+        "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围"
+        if verification_status == "partial" and dynamic_state == "skipped"
+        else "黑盒目标返回 3xx/4xx；入口有响应，但最终业务路由未完成验证"
+        if verification_status == "partial" and (remote_state == "partial" or blackbox_state == "partial")
+        else None
+    )
+    if verification_status == "failed" and not reason:
+        reason = _sandbox_verification_failure_reason(evidence, deterministic, dynamic, blackbox)
     return {
         "verification_status": verification_status,
         "requested_mode": mode or None,
@@ -4855,14 +4865,64 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         "ai_dynamic_status": dynamic_state,
         "blackbox_status": blackbox_state,
         "remote_blackbox_status": remote_state,
-        "reason": (
-            "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围"
-            if verification_status == "partial" and dynamic_state == "skipped"
-            else "黑盒目标返回 3xx/4xx；入口有响应，但最终业务路由未完成验证"
-            if verification_status == "partial" and (remote_state == "partial" or blackbox_state == "partial")
-            else None
-        ),
+        "reason": reason,
     }
+
+
+def _sandbox_verification_failure_reason(
+    evidence: dict[str, Any],
+    deterministic: dict[str, Any],
+    dynamic: dict[str, Any],
+    blackbox: dict[str, Any],
+) -> str:
+    """Translate allowlisted runner receipts into a concise owner-visible failure reason."""
+    failure_kind = str(blackbox.get("failure_kind") or "")
+    failure_reason = str(blackbox.get("failure_reason") or "")
+    if failure_kind == "application_startup":
+        startup_messages = {
+            "application_exited_before_ready": "沙箱应用在就绪前退出。",
+            "application_readiness_timeout": "沙箱应用未能在规定时间内就绪。",
+            "application_start_failed": "沙箱应用启动失败，未进入测试阶段。",
+        }
+        return startup_messages.get(failure_reason, "沙箱应用未能启动，黑盒测试没有进入路由探测。")
+    if failure_kind == "timeout":
+        timeout_messages = {
+            "runner_budget_exhausted": "沙箱测试超过执行预算，未完成验证。",
+            "dependency_preparation_timeout": "沙箱依赖准备超时，未完成验证。",
+            "agent_assertion_timeout": "AI 动态断言执行超时，未完成验证。",
+        }
+        return timeout_messages.get(failure_reason, "沙箱测试执行超时，未完成验证。")
+
+    status_code = blackbox.get("status_code")
+    route = str(blackbox.get("route") or "")
+    if not re.fullmatch(r"/[A-Za-z0-9._~!$&+,;=@%/?-]*", route):
+        route = ""
+    route_origin = str(blackbox.get("route_origin") or "")
+    if type(status_code) is int and status_code == 404:
+        if route == "/" and route_origin == "none":
+            return "黑盒入口探测返回 HTTP 404；根路径未找到可用应用路由，因此本次未完成路由验证。"
+        route_note = f"（入口 {route}）" if route else ""
+        return f"黑盒入口探测返回 HTTP 404{route_note}；本次未得到可验证的业务路由。"
+    if type(status_code) is int and 500 <= status_code <= 599:
+        return f"黑盒入口返回 HTTP {status_code}；服务端错误导致本次验证未通过。"
+    if blackbox.get("status") == "receipt_missing" or blackbox.get("failure_kind") == "receipt_missing":
+        return "黑盒执行器没有返回可信的唯一执行回执，任务按失败关闭。"
+    if blackbox.get("agent_assertions_passed") is False:
+        return "黑盒入口有响应，但至少一条动态断言未通过；请查看报告中的逐项结果。"
+    if blackbox.get("status") == "failed":
+        return "黑盒路由或动态断言未通过；请查看报告中的结构化执行证据。"
+    if deterministic.get("status") == "failed":
+        return "确定性沙箱检查未通过；具体失败项以已保存的报告证据为准。"
+    generated = int(dynamic.get("generated") or 0)
+    failed = int(dynamic.get("failed") or 0)
+    if generated and failed:
+        return f"AI 动态测试有 {failed} 条用例未通过（共生成 {generated} 条）。"
+    remote = evidence.get("remote_blackbox_execution")
+    if isinstance(remote, dict):
+        remote_status = remote.get("status_code")
+        if type(remote_status) is int:
+            return f"受授权远程入口返回 HTTP {remote_status}；本次检查未通过。"
+    return "执行回执未保存足够信息，无法从现有证据确定更具体的失败原因。"
 
 
 def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
@@ -5299,24 +5359,27 @@ def _run_test_review_report(
         if published:
             summary["report_task_id"] = published.get("report_task_id")
             summary["issues"] = published.get("issues", 0)
+            summary["report_persisted"] = bool(published.get("report_persisted"))
+            if not summary["report_persisted"]:
+                summary["report_failure_code"] = published.get("failure_code", "report_persistence_failed")
+        else:
+            summary["report_persisted"] = False
+            summary["report_failure_code"] = "report_persistence_failed"
+        report_saved = summary["report_persisted"]
         _append_event(
             db,
             environment,
-            "complete",
+            "complete" if report_saved else "failed",
             "multi_agent_review",
             (
-                f"多 Agent 测试审查报告已生成（角色 {roles_executed}/{roles_total}）"
+                f"多 Agent 测试审查报告已生成并写入报告中心（角色 {roles_executed}/{roles_total}）"
+                if model_review_completed and report_saved
+                else f"多 Agent 测试审查报告已生成，但写入报告中心失败（角色 {roles_executed}/{roles_total}）"
                 if model_review_completed
                 else (
-                    f"确定性测试报告已生成；多 Agent AI 审查未完成"
-                    f"（角色 {roles_executed}/{roles_total}）"
-                    + (
-                        "；Agent 角色清单或计数未通过完整性校验"
-                        if data and not roles_manifest_valid
-                        else "；AI 报告内容为空"
-                        if data and not report_candidate_valid
-                        else ""
-                    )
+                    f"确定性测试报告已生成并写入报告中心（角色 {roles_executed}/{roles_total}）"
+                    if report_saved
+                    else f"确定性测试报告已生成，但写入报告中心失败（角色 {roles_executed}/{roles_total}）"
                 )
             ),
             summary,
@@ -5369,18 +5432,34 @@ def _publish_sandbox_report(
         project_id = int(getattr(environment, "project_id", 0) or 0)
         public_id = str(getattr(environment, "public_id", "") or "")
         passed = bool(conclusion.get("passed"))
-        task_name = f"沙箱黑白盒测试 · {public_id}"
+        mode_labels = {
+            "whitebox": "沙箱白盒测试",
+            "blackbox": "沙箱黑盒测试",
+            "combined": "沙箱黑白盒组合测试",
+        }
+        mode_label = mode_labels.get(str(getattr(environment, "test_mode", "") or ""), "沙箱测试（模式未知）")
+        task_name = f"{mode_label} · {public_id}"
+        legacy_names = [f"沙箱黑白盒测试 · {public_id}"]
+        legacy_names.extend(f"{label} · {public_id}" for label in mode_labels.values())
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
         report_issue_summary = summarize_sandbox_report(report_md)
         verification = _sandbox_verification_coverage(conclusion)
         verification_status = verification["verification_status"]
+        failure_message = (
+            str(verification.get("reason") or "本次验证失败，执行回执没有提供更具体的原因。")[:500]
+            if verification_status == "failed"
+            else None
+        )
         # 旧列不可为空；未知与报告来源另存结构化摘要，详情不把该占位零当真实结论。
         issue_count = report_issue_summary["total"] or 0
         severity_counts = report_issue_summary["severity_counts"]
         task = (
             db.query(ReviewTask)
-            .filter(ReviewTask.task_name == task_name, ReviewTask.review_type == "sandbox_test")
+            .filter(
+                ReviewTask.task_name.in_(legacy_names + [task_name]),
+                ReviewTask.review_type == "sandbox_test",
+            )
             .first()
         )
         now = datetime.now(_tz.utc).replace(tzinfo=None)
@@ -5418,6 +5497,7 @@ def _publish_sandbox_report(
                 low_issues=severity_counts["低"],
                 score=report_score,
                 summary=report_md,
+                error_message=failure_message,
                 start_time=started_at,
                 end_time=stopped_at,
                 duration_ms=duration_ms,
@@ -5428,6 +5508,7 @@ def _publish_sandbox_report(
             )
             db.add(task)
         else:
+            task.task_name = task_name
             task.project_id = project_id
             task.status = "success" if passed else "failed"
             task.total_issues = issue_count
@@ -5437,6 +5518,7 @@ def _publish_sandbox_report(
             task.low_issues = severity_counts["低"]
             task.score = report_score
             task.summary = report_md
+            task.error_message = failure_message
             task.start_time = started_at
             task.end_time = stopped_at
             task.duration_ms = duration_ms
@@ -5476,10 +5558,17 @@ def _publish_sandbox_report(
             report_row.summary = report_md[:2000]
             report_row.score = report_score
         db.commit()
-        return {"report_task_id": task.id, "issues": issue_count}
-    except Exception:  # noqa: BLE001 - 入库失败不阻断测试结论
+        return {"report_task_id": task.id, "issues": issue_count, "report_persisted": True}
+    except Exception:  # noqa: BLE001 - 入库失败不阻断测试执行，但必须可观测
+        public_id = str(getattr(environment, "public_id", "unknown"))[:64]
+        logger.exception("sandbox report publication failed public_id={}", public_id)
         db.rollback()
-        return {}
+        return {
+            "report_task_id": None,
+            "issues": 0,
+            "report_persisted": False,
+            "failure_code": "report_persistence_failed",
+        }
 
 
 def artifact_to_dict(row: SandboxArtifact, *, download_allowed: bool = True) -> dict[str, Any]:
