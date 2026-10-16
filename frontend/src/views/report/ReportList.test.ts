@@ -103,6 +103,22 @@ describe('报告卡片列表', () => {
     expect(card.find('.rc-score').attributes('title')).not.toContain('综合评分')
   })
 
+  it('AI 报告未完成或历史状态未知时，在列表标出提示', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        source: { type: 'sandbox_test', ai_review: { status: 'incomplete', failure_reason: '模型未配置' } },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+    const card = wrapper.find('.report-card')
+    const warning = card.findAll('span').find(item => item.text().includes('AI 报告未完成或状态未知'))
+    expect(warning).toBeTruthy()
+    expect(warning?.attributes('title')).toBe('模型未配置')
+  })
+
   it('远程目标 4xx 的局部验证标为未完成，不误报成确认测试失败', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{

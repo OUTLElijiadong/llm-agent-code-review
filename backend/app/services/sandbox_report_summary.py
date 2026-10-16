@@ -11,11 +11,91 @@ _FIELD = re.compile(
 )
 _FIELD_HEADINGS = {"漏洞位置", "位置", "证据", "描述", "影响", "修复建议", "建议", "poc", "poc/复现",
                    "复现", "vulnerable code", "严重程度", "严重度"}
-_EMPTY = re.compile(r"^(?:无(?:问题|发现|漏洞)?|未发现(?:确定性执行失败|问题|漏洞)|没有发现(?:问题|漏洞))[。.!！\s]*$")
+_EMPTY = re.compile(
+    r"^(?:无(?:问题|发现|漏洞)?|未发现(?:确定性执行失败|问题|漏洞)|"
+    r"没有发现(?:问题|漏洞)|暂无(?:问题|发现|漏洞)?)[。.!！\s]*$"
+)
 
 
 def _heading_text(title: str) -> str:
-    return re.sub(r"^\d+[.、)）]\s*", "", title.replace("**", "").strip()).strip()
+    normalized = title.replace("**", "").strip().rstrip("# ").strip()
+    return re.sub(r"^\d+(?:[.．、)）]\d+)*[.．、)）]?\s*", "", normalized).strip()
+
+
+def _markdown_h2_sections(report_md: str) -> list[dict[str, object]]:
+    """Return real H2 sections and source offsets, ignoring headings inside fenced code."""
+    sections: list[dict[str, object]] = []
+    active: dict[str, object] | None = None
+    fence_char: str | None = None
+    fence_length = 0
+    offset = 0
+
+    for raw_line in report_md.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if marker:
+            token, remainder = marker.group(1), marker.group(2)
+            if fence_char is None:
+                if token[0] != "`" or "`" not in remainder:
+                    fence_char = token[0]
+                    fence_length = len(token)
+                offset += len(raw_line)
+                continue
+            if token[0] == fence_char and len(token) >= fence_length and not remainder.strip():
+                fence_char = None
+                fence_length = 0
+            offset += len(raw_line)
+            continue
+        if fence_char is None:
+            heading = re.match(r"^ {0,3}##[ \t]+(?!#)(.+?)\s*#*[ \t]*$", line)
+            if heading:
+                if active is not None:
+                    active["end"] = offset
+                    sections.append(active)
+                active = {
+                    "title": heading.group(1).strip(),
+                    "start": offset,
+                    "body_start": offset + len(raw_line),
+                    "end": len(report_md),
+                }
+        offset += len(raw_line)
+
+    if active is not None:
+        active["end"] = len(report_md)
+        sections.append(active)
+    return sections
+
+
+def _matches_report_section(title: str, expected: str) -> bool:
+    normalized = _heading_text(title).rstrip(":：").strip()
+    if normalized == expected:
+        return True
+    if not normalized.startswith(expected):
+        return False
+    return normalized[len(expected):len(expected) + 1] in {" ", "（", "(", "：", ":", "-", "—"}
+
+
+def _outside_fenced_lines(text: str) -> list[str]:
+    """Return lines outside fenced code blocks for semantic report parsing."""
+    result: list[str] = []
+    fence_char: str | None = None
+    fence_length = 0
+    for line in text.splitlines():
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if marker:
+            token, remainder = marker.group(1), marker.group(2)
+            if fence_char is None:
+                if token[0] != "`" or "`" not in remainder:
+                    fence_char = token[0]
+                    fence_length = len(token)
+                continue
+            if token[0] == fence_char and len(token) >= fence_length and not remainder.strip():
+                fence_char = None
+                fence_length = 0
+            continue
+        if fence_char is None:
+            result.append(line)
+    return result
 
 
 def _is_field_heading(title: str) -> bool:
@@ -44,32 +124,14 @@ def summarize_sandbox_report(report_md: object) -> dict:
               "severity_counts": {level: 0 for level in ("严重", "高", "中", "低")}, "unclassified": None}
     if not isinstance(report_md, str):
         return result
-    section = []
-    active = False
-    fence = None
-    for line in report_md.splitlines():
-        stripped = line.lstrip()
-        marker = re.match(r"(`{3,}|~{3,})", stripped)
-        if marker:
-            token = marker.group(1)
-            if fence is None:
-                fence = token
-            elif token[0] == fence[0] and len(token) >= len(fence):
-                fence = None
-            continue
-        if fence:
-            continue
-        heading = re.match(r"^#{1,2}\s+(.+?)\s*#*\s*$", line)
-        if heading:
-            if active:
-                break
-            if re.match(r"^问题清单(?:\s|[（(:：]|$)", heading.group(1)):
-                active = True
-            continue
-        if active:
-            section.append(line)
-    if not active:
+    issue_section = next(
+        (item for item in _markdown_h2_sections(report_md)
+         if _matches_report_section(str(item["title"]), "问题清单")),
+        None,
+    )
+    if issue_section is None:
         return result
+    section = _outside_fenced_lines(report_md[int(issue_section["body_start"]):int(issue_section["end"])])
 
     headings = []
     for index, line in enumerate(section):
@@ -78,6 +140,7 @@ def summarize_sandbox_report(report_md: object) -> dict:
             headings.append((index, len(match.group(1)), match.group(2)))
     entries = []
     if headings:
+        heading_entry_ranges: list[tuple[int, int]] = []
         for offset, (index, level, title) in enumerate(headings):
             normalized_title = _heading_text(title).rstrip(":：").lower()
             if _is_field_heading(title):
@@ -95,6 +158,17 @@ def summarize_sandbox_report(report_md: object) -> dict:
             if normalized_title in _LEVELS or _EMPTY.fullmatch(title.strip()):
                 continue
             entries.append((title, section[index + 1:end]))
+            heading_entry_ranges.append((index, end))
+        # Some model reports mix titled findings and root-level list findings.
+        # Count only list items outside a finding heading's body; bullets inside
+        # a heading remain evidence/fields for that finding.
+        for index, line in enumerate(section):
+            match = re.match(r"^(?:[-*+] |\d+[.)]\s+)(.+)", line)
+            if not match or any(start < index < end for start, end in heading_entry_ranges):
+                continue
+            title = match.group(1).replace("**", "").strip()
+            if not _FIELD.match(title) and not _EMPTY.fullmatch(title):
+                entries.append((title, []))
         result["basis"] = "report_headings"
     else:
         for line in section:

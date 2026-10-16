@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import math
 import re
 from dataclasses import dataclass, replace
 from typing import Iterable, List, Optional
@@ -15,6 +16,37 @@ from app.ai.static_analyzer import Finding
 _LINE_PROXIMITY = 2
 _SEVERITY_RANK = {"低": 1, "中": 2, "高": 3, "严重": 4}
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[\u4e00-\u9fff]")
+_SECURITY_ISSUE_TYPES = {
+    "安全", "安全漏洞", "安全问题", "security", "security_issue",
+    "security_vulnerability", "vulnerability", "漏洞",
+}
+_SECURITY_LANGUAGE_RE = re.compile(
+    r"漏洞|注入|越权|未授权|未认证|未验证|鉴权绕过|认证绕过|身份验证绕过|"
+    r"访问控制|跨站|权限提升|权限逃逸|敏感信息泄露|信息泄露|数据泄露|"
+    r"动态\s*SQL|(?:SQL|查询).{0,30}(?:拼接|拼入|插入|插值|字符串拼装)|"
+    r"(?:用户|请求|外部|不可信).{0,30}(?:拼接|拼入|插入|插值|未经转义|未转义).{0,30}(?:SQL|查询)|"
+    r"对象级(?:授权|权限|访问控制)|跨租户|跨账号|租户隔离|账号隔离|"
+    r"任意文件|路径穿越|目录穿越|反序列化|远程代码执行|命令执行|代码执行|"
+    r"硬编码凭据|凭据泄露|密钥泄露|密码泄露|"
+    r"\b(?:SQLi|XSS|CSRF|SSRF|RCE|XXE)\b|"
+    r"\b(?:IDOR|BOLA|injection|vulnerabilit(?:y|ies)|exploit|unauthori[sz]ed|unauthenticated|"
+    r"privilege escalation|privilege bypass|auth(?:entication|orization)? bypass|"
+    r"access control|object[- ]level (?:authorization|access control)|"
+    r"\bdynamic\s+sql\b|"
+    r"(?:user[- ]controlled|user[- ]input|untrusted|request[- ]provided).{0,80}(?:sql|query)|"
+    r"(?:sql|query).{0,80}(?:interpolat\w*|concatenat\w*|without escaping|unescaped)|"
+    r"broken object[- ]level authorization|cross[- ]tenant|tenant isolation|"
+    r"path traversal|directory traversal|remote code execution|"
+    r"command execution|command injection|code execution|deseriali[sz]ation|"
+    r"credential exposure|credential leak|secret leak|information disclosure|data exposure)\b",
+    re.IGNORECASE,
+)
+_EVIDENCE_CONFIDENCE_CAP = {
+    "unsupported": 0.45,
+    "inferred": 0.60,
+    "direct": 0.80,
+    "verified": 0.98,
+}
 
 
 def merge_findings_and_issues(
@@ -37,12 +69,21 @@ def merge_findings_and_issues(
     if not candidates:
         return []
 
+    # Standard/quick reviews used to bypass the richer collaboration adjudicator.
+    # Ground every LLM claim here, immediately before anchors, merge, and persistence,
+    # so every review mode shares the same source-location and human-review rules.
+    candidates = [_prepare_llm_grounding(item, code) for item in candidates]
+
     anchor_index = (
         _build_anchor_index(code, language=language, candidates=candidates)
         if code
         else _AnchorIndex.empty()
     )
     candidates = _attach_code_anchors(candidates, anchor_index)
+    candidates = [
+        _finish_llm_grounding(item, anchor_index)
+        for item in candidates
+    ]
 
     candidates.sort(key=_candidate_sort_key)
     clusters: List[List[Issue]] = []
@@ -62,6 +103,289 @@ def merge_findings_and_issues(
     merged = [_merge_cluster(cluster, file_id, anchor_index) for cluster in clusters]
     merged.sort(key=lambda item: (item.line_number or 0, item.cwe or "", item.title or ""))
     return merged
+
+
+def _prepare_llm_grounding(issue: Issue, code: Optional[str]) -> Issue:
+    """Reject model-supplied coordinates that cannot be grounded to this file.
+
+    A source quote can repair a wrong model line when it occurs at one unique
+    location. Otherwise impossible or ambiguous coordinates are removed before
+    AST/evidence anchors are built. Model-authored source anchors are always
+    discarded; anchors must be reconstructed from the actual source.
+    """
+    if not _has_llm_provenance(issue):
+        return issue
+
+    reported_line = _safe_positive_line(issue.line_number)
+    reported_end_line = _safe_positive_line(issue.end_line)
+    source_line_count = len(code.splitlines()) if code is not None else None
+    evidence = str(issue.evidence or "").strip()
+    exact_ranges = _exact_evidence_ranges(code, evidence) if code is not None else []
+    valid_reported_range = (
+        source_line_count is not None
+        and reported_line is not None
+        and reported_line <= source_line_count
+        and (
+            reported_end_line is None
+            or reported_line <= reported_end_line <= source_line_count
+        )
+    )
+
+    selected_range: Optional[tuple[int, int]] = None
+    if exact_ranges:
+        if len(exact_ranges) == 1:
+            selected_range = exact_ranges[0]
+        elif valid_reported_range:
+            matches_line = [
+                item for item in exact_ranges
+                if item[0] <= reported_line <= item[1]
+            ]
+            if len(matches_line) == 1:
+                selected_range = matches_line[0]
+
+    if selected_range:
+        line_number, end_line = selected_range
+        evidence_quality = "verified"
+        location_state = (
+            "source_quote_exact"
+            if (reported_line, reported_end_line or reported_line) == selected_range
+            else "source_quote_reanchored"
+        )
+        location_resolved = True
+    elif exact_ranges:
+        # The quote exists, but repeated occurrences make this model's location
+        # ambiguous. Do not attach it to whichever occurrence happens to sort first.
+        line_number, end_line = 0, None
+        evidence_quality = "verified"
+        location_state = "source_quote_location_ambiguous"
+        location_resolved = False
+    elif code is None:
+        # Preserve the model's coordinates for traceability when callers do not
+        # supply source, but never present them as verified evidence.
+        line_number = reported_line or 0
+        end_line = (
+            reported_end_line
+            if reported_line and reported_end_line and reported_end_line >= reported_line
+            else reported_line
+        )
+        evidence_quality = "direct" if evidence else "unsupported"
+        location_state = "source_unavailable"
+        location_resolved = False
+    elif valid_reported_range:
+        line_number = reported_line
+        end_line = reported_end_line or reported_line
+        evidence_quality = "direct" if evidence else "inferred"
+        location_state = "line_only_unverified"
+        location_resolved = True
+    else:
+        line_number, end_line = 0, None
+        evidence_quality = "direct" if evidence else "unsupported"
+        location_state = "source_location_out_of_range" if code is not None else "source_unavailable"
+        location_resolved = False
+
+    is_security_claim = _is_security_claim(issue)
+    requires_review = (
+        is_security_claim
+        or not location_resolved
+        or evidence_quality != "verified"
+        or code is None
+    )
+    confidence = issue.confidence
+    if confidence is not None:
+        try:
+            parsed_confidence = float(confidence)
+            confidence = (
+                max(0.0, min(parsed_confidence, _EVIDENCE_CONFIDENCE_CAP[evidence_quality]))
+                if math.isfinite(parsed_confidence)
+                else None
+            )
+        except (TypeError, ValueError):
+            confidence = None
+
+    aggregation = dict(issue.aggregation or {})
+    aggregation["source_grounding"] = {
+        "schema_version": "source-grounding-v1",
+        "source_available": code is not None,
+        "source_line_count": source_line_count,
+        "reported_line_number": reported_line or 0,
+        "reported_end_line": reported_end_line,
+        "grounded_line_number": line_number,
+        "grounded_end_line": end_line,
+        "evidence_match": evidence_quality == "verified",
+        "location_state": location_state,
+        "requires_human_review": requires_review,
+    }
+    details = [dict(item) for item in (issue.source_details or []) if isinstance(item, dict)]
+    if details:
+        details = [_ground_source_detail(item, code) for item in details]
+
+    return replace(
+        issue,
+        line_number=line_number,
+        end_line=end_line,
+        source_anchor="",
+        column_start=None,
+        column_end=None,
+        evidence_quality=evidence_quality,
+        human_review_status=(
+            "pending" if requires_review or issue.human_review_status == "pending"
+            else issue.human_review_status
+        ),
+        confidence=confidence,
+        source_details=details,
+        aggregation=aggregation,
+    )
+
+
+def _finish_llm_grounding(issue: Issue, anchor_index: "_AnchorIndex") -> Issue:
+    """Record deterministic anchors and enforce security adjudication after anchoring."""
+    if not _has_llm_provenance(issue):
+        return issue
+
+    grounding = dict((issue.aggregation or {}).get("source_grounding") or {})
+    anchor = anchor_index.by_anchor.get(issue.source_anchor or "")
+    evidence_quality = issue.evidence_quality or "unsupported"
+    if anchor:
+        grounding["grounded_line_number"] = anchor.line_number
+        grounding["grounded_end_line"] = anchor.end_line
+        grounding["deterministic_anchor"] = True
+        if grounding.get("location_state") in {
+            "source_location_out_of_range", "source_quote_location_ambiguous",
+        }:
+            grounding["location_state"] = "deterministic_source_anchor"
+        if issue.evidence_quality in {"unsupported", "inferred"}:
+            # The location is now deterministic, but a source anchor alone is not
+            # a verbatim quote or proof that the claimed behavior is exploitable.
+            grounding["location_state"] = grounding.get("location_state") or "deterministic_source_anchor"
+            if not issue.evidence:
+                evidence_quality = "inferred"
+
+    requires_review = bool(grounding.get("requires_human_review")) or _is_security_claim(issue)
+    grounding["requires_human_review"] = requires_review
+    aggregation = dict(issue.aggregation or {})
+    aggregation["source_grounding"] = grounding
+
+    return replace(
+        issue,
+        evidence_quality=evidence_quality,
+        human_review_status=(
+            "pending" if requires_review or issue.human_review_status == "pending"
+            else issue.human_review_status
+        ),
+        aggregation=aggregation,
+    )
+
+
+def _ground_source_detail(detail: dict, code: Optional[str]) -> dict:
+    """Preserve each collaborator's original claim while correcting its location."""
+    output = dict(detail)
+    # Anchors supplied by a model are claims, not source evidence. Drop them here;
+    # _merge_source_details may attach only the verified anchor from the grounded issue.
+    output.pop("source_anchor", None)
+    reported_line = _safe_positive_line(output.get("line_number"))
+    evidence = str(output.get("evidence") or "").strip()
+    line_count = len(code.splitlines()) if code is not None else None
+    ranges = _exact_evidence_ranges(code, evidence) if code is not None else []
+    valid_line = bool(line_count is not None and reported_line and reported_line <= line_count)
+    chosen: Optional[tuple[int, int]] = None
+    if len(ranges) == 1:
+        chosen = ranges[0]
+    elif ranges and valid_line:
+        matching = [item for item in ranges if item[0] <= reported_line <= item[1]]
+        if len(matching) == 1:
+            chosen = matching[0]
+
+    if chosen:
+        grounded_line = chosen[0]
+        quality = "verified"
+        location_state = "source_quote_exact" if grounded_line == reported_line else "source_quote_reanchored"
+    elif code is None:
+        grounded_line = reported_line or 0
+        quality = "direct" if evidence else "unsupported"
+        location_state = "source_unavailable"
+    elif ranges:
+        grounded_line = 0
+        quality = "verified"
+        location_state = "source_quote_location_ambiguous"
+    elif valid_line:
+        grounded_line = reported_line
+        quality = "direct" if evidence else "inferred"
+        location_state = "line_only_unverified"
+    else:
+        grounded_line = 0
+        quality = "direct" if evidence else "unsupported"
+        location_state = "source_location_out_of_range"
+
+    output["reported_line_number"] = reported_line or 0
+    output["line_number"] = grounded_line
+    output["evidence_quality"] = quality
+    output["location_state"] = location_state
+    try:
+        source_confidence = float(output.get("confidence"))
+        output["confidence"] = (
+            round(max(0.0, min(source_confidence, _EVIDENCE_CONFIDENCE_CAP[quality])), 4)
+            if math.isfinite(source_confidence)
+            else 0.0
+        )
+    except (TypeError, ValueError):
+        output["confidence"] = 0.0
+    return output
+
+
+def _has_llm_provenance(issue: Issue) -> bool:
+    if _source_family(issue.source) == "llm":
+        return True
+    return any(
+        isinstance(item, dict) and _source_family(str(item.get("source") or "")) == "llm"
+        for item in (issue.source_details or [])
+    )
+
+
+def _is_security_claim(issue: Issue) -> bool:
+    issue_type = str(issue.issue_type or "").strip().lower()
+    if (
+        issue_type in _SECURITY_ISSUE_TYPES
+        or bool(str(issue.cwe or "").strip())
+        or bool(str(issue.owasp or "").strip())
+    ):
+        return True
+
+    claim_text = " ".join(
+        str(value or "")
+        for value in (
+            issue_type,
+            issue.title,
+            issue.description,
+            issue.suggestion,
+            issue.exploit_scenario,
+        )
+    )
+    return bool(_SECURITY_LANGUAGE_RE.search(claim_text))
+
+
+def _safe_positive_line(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number > 0 else None
+
+
+def _exact_evidence_ranges(code: Optional[str], evidence: str) -> list[tuple[int, int]]:
+    if code is None or not evidence:
+        return []
+    ranges: set[tuple[int, int]] = set()
+    offset = 0
+    while True:
+        start = code.find(evidence, offset)
+        if start < 0:
+            break
+        end = start + len(evidence)
+        ranges.add((code.count("\n", 0, start) + 1, code.count("\n", 0, max(start, end - 1)) + 1))
+        offset = start + 1
+    return sorted(ranges)
 
 
 def finding_to_issue(finding: Finding) -> Issue:
@@ -484,7 +808,14 @@ def _resolve_anchor(issue: Issue, index: _AnchorIndex) -> Optional[_CodeAnchor]:
                 match_score = 2
             else:
                 continue
-            distance = abs(int(issue.line_number or 0) - record.line_number)
+            # Without a grounded line, distance to line 1 is not evidence. Treat
+            # all matching occurrences equally so duplicated quotes remain
+            # unlocated instead of arbitrarily selecting the earliest one.
+            distance = (
+                abs(int(issue.line_number) - record.line_number)
+                if int(issue.line_number or 0) > 0
+                else 0
+            )
             scored.append((match_score, -distance, record))
         if not scored:
             return None
@@ -681,18 +1012,34 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
     details: List[dict] = []
     seen: set[tuple] = set()
     for issue in cluster:
+        source_grounding = (issue.aggregation or {}).get("source_grounding") or {}
         raw_details = issue.source_details or [{
             "source": issue.source or "llm",
             "confidence": round(float(issue.confidence or 0.0), 4),
             "evidence": issue.evidence or "",
             "line_number": int(issue.line_number or 0),
+            "reported_line_number": int(source_grounding.get("reported_line_number") or issue.line_number or 0),
             "title": (issue.title or "")[:200],
         }]
         for raw in raw_details:
             try:
-                confidence = round(float(raw.get("confidence", issue.confidence) or 0.0), 4)
+                confidence_value = float(raw.get("confidence", issue.confidence) or 0.0)
+                confidence = (
+                    max(0.0, min(1.0, confidence_value))
+                    if math.isfinite(confidence_value)
+                    else 0.0
+                )
             except (TypeError, ValueError):
-                confidence = round(float(issue.confidence or 0.0), 4)
+                try:
+                    issue_confidence = float(issue.confidence or 0.0)
+                    confidence = max(0.0, min(1.0, issue_confidence)) if math.isfinite(issue_confidence) else 0.0
+                except (TypeError, ValueError):
+                    confidence = 0.0
+            evidence_quality = str(raw.get("evidence_quality") or issue.evidence_quality or "")
+            confidence_cap = _EVIDENCE_CONFIDENCE_CAP.get(evidence_quality)
+            if confidence_cap is not None:
+                confidence = min(confidence, confidence_cap)
+            confidence = round(confidence, 4)
             try:
                 line_number = max(0, int(raw.get("line_number") or 0))
             except (TypeError, ValueError):
@@ -706,6 +1053,7 @@ def _merge_source_details(cluster: List[Issue]) -> List[dict]:
             }
             for key in (
                 "agent_code", "agent_name", "severity", "evidence_quality", "claim_id",
+                "reported_line_number", "location_state",
             ):
                 if raw.get(key) is not None:
                     detail[key] = raw.get(key)

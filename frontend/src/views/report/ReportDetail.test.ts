@@ -98,6 +98,23 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it('常规代码报告显式区分待核实问题与已确认漏洞', async () => {
+    reviewApi.getTaskIssues.mockResolvedValueOnce({
+      items: [{ ...issue, human_review_status: 'pending', evidence_quality: 'unsupported' }],
+      total: 1,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const notice = wrapper.get('[data-testid="report-issue-verification"]')
+    expect(notice.text()).toContain('1 项待人工核实')
+    expect(notice.text()).toContain('包含待核实条目')
+    expect(notice.text()).toContain('不证明漏洞条件或影响已成立')
+    expect(wrapper.get('[data-testid="issue-review-status-7"]').text()).toBe('待人工核实')
+
+    wrapper.unmount()
+  })
+
   it.each([
     { task: { task_name: '项目167 完整代码审查（review_type=full）' }, expected: '项目167 完整代码审查' },
     { task: { name: '项目167 完整代码审查 (review_type=full)' }, expected: '项目167 完整代码审查' },
@@ -197,6 +214,37 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('沙箱报告明确区分 AI 审查未完成与执行验证范围', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '沙箱项目' },
+      task: { task_name: '沙箱黑白盒报告', review_type: 'sandbox_test', total_files: 1,
+        coverage: { verification_status: 'partial', reason: '黑盒路由未配置' } },
+      stats: { score: 60, total_issues: 0 },
+      files: [], rules_snapshot: [],
+      source: { type: 'sandbox_test', ai_review: { status: 'incomplete', failure_reason: '模型未配置' } },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const status = wrapper.get('[data-testid="sandbox-ai-review-status"]')
+    expect(status.text()).toContain('多 Agent AI 报告：未完成（已提供确定性报告）')
+    expect(status.text()).toContain('模型未配置')
+    expect(wrapper.get('[data-testid="sandbox-report-coverage"]').text()).toContain('黑盒路由未配置')
+    wrapper.unmount()
+  })
+
+  it('旧沙箱报告未保存 AI 状态时标为未知，不声称报告审查完成', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: { review_type: 'sandbox_test' }, stats: {}, files: [], rules_snapshot: [],
+      source: { type: 'sandbox_test' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const status = wrapper.get('[data-testid="sandbox-ai-review-status"]')
+    expect(status.text()).toContain('多 Agent AI 报告：状态未知')
+    expect(status.text()).toContain('不能据此确认多 Agent AI 审查已完成')
+    wrapper.unmount()
+  })
+
   it('领域报告只显示真实 JSON 出口并隐藏非等价导出和预览', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '渗透项目', language: 'unknown' },
@@ -276,6 +324,22 @@ describe('ReportDetail 报告口径', () => {
     await flushPromises()
 
     expect(wrapper.find('.cover-task').text()).toContain('后端真实任务名')
+    wrapper.unmount()
+  })
+
+  it('问题明细超过单页上限时逐页读取完整结果，不静默截断统计', async () => {
+    const firstItems = Array.from({ length: 1000 }, (_, index) => ({ ...issue, id: index + 1 }))
+    const lastItem = { ...issue, id: 1001, title: '最后一页问题' }
+    reviewApi.getTaskIssues
+      .mockResolvedValueOnce({ items: firstItems, total: 1001, page: 1, page_size: 1000, pages: 2 })
+      .mockResolvedValueOnce({ items: [lastItem], total: 1001, page: 2, page_size: 1000, pages: 2 })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(1, 42, { page: 1, page_size: 1000 })
+    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(2, 42, { page: 2, page_size: 1000 })
+    expect(setupState(wrapper).issues).toHaveLength(1001)
+    expect(setupState(wrapper).issues.at(-1).title).toBe('最后一页问题')
     wrapper.unmount()
   })
 

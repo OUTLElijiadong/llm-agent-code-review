@@ -97,7 +97,7 @@ def test_n_way_merge_preserves_every_confirmation() -> None:
         "llm:reliability",
     }
     assert {item["evidence"] for item in issue.source_details} == {evidence}
-    assert {item["confidence"] for item in issue.source_details} == {0.96, 0.85}
+    assert {item["confidence"] for item in issue.source_details} == {0.96, 0.8}
     assert issue.static_rule_hits == 1
     assert issue.finding_fingerprint
 

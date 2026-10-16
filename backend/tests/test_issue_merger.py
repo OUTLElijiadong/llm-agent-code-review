@@ -274,12 +274,12 @@ class TestHybridMerge:
         assert result[0].confidence == 0.99
 
     def test_hybrid_takes_higher_confidence_llm_wins(self):
-        """hybrid 合并时 LLM confidence 更高则取 LLM 的"""
+        """源码不可用时，LLM 置信度受证据等级上限约束。"""
         findings = [_make_finding(confidence=0.7)]
         issues = [_make_issue(confidence=0.95)]
         result = merge_findings_and_issues(findings, issues, file_id=1)
         assert len(result) == 1
-        assert result[0].confidence == 0.95
+        assert result[0].confidence == 0.8
 
     def test_hybrid_tracks_static_hits_and_confirmations_separately(self):
         """LLM 确认不应伪装成额外静态规则命中。"""

@@ -107,6 +107,47 @@
       <p v-if="report?.source?.report_issue_summary?.total == null">未保存可识别的问题清单，无法确定条目数；历史记录数保留在来源信息中。</p>
     </section>
 
+    <section v-if="isSandboxReport" class="card report-coverage-note" data-testid="sandbox-report-coverage" role="note">
+      <strong>验证范围：{{ sandboxCoverageLabel }}</strong>
+      <p v-if="sandboxCoverage?.reason">{{ sandboxCoverage.reason }}</p>
+      <p v-if="sandboxCoverageStatus !== 'complete'">评分仅表示本次已记录范围的结果，不代表完整黑盒/白盒验证通过。</p>
+    </section>
+
+    <section v-if="isSandboxReport" class="card report-coverage-note" data-testid="sandbox-ai-review-status" role="note">
+      <strong>多 Agent AI 报告：{{ sandboxAiReviewLabel }}</strong>
+      <p v-if="report?.source?.ai_review?.failure_reason">{{ report.source.ai_review.failure_reason }}</p>
+      <p v-else-if="sandboxAiReviewStatus === 'unknown'">历史报告未保存 AI 审查状态，不能据此确认多 Agent AI 审查已完成。</p>
+      <p v-else-if="sandboxAiReviewStatus === 'complete'">报告结构和 Agent 执行清单已通过完整性校验；其中模型发现仍按“未核实候选”展示。</p>
+    </section>
+
+    <section
+      v-if="issuesLoadState === 'forbidden'"
+      class="card report-issues-note"
+      data-testid="report-issues-restricted"
+      role="note"
+    >
+      当前账号没有问题明细查看权限。报告概览和已授权的报告内容仍可查看。
+    </section>
+    <section
+      v-else-if="issuesLoadState === 'failed'"
+      class="card report-issues-note"
+      data-testid="report-issues-load-error"
+      role="alert"
+    >
+      <span>问题明细暂时无法加载；报告概览仍可查看，明细统计未按空结果处理。</span>
+      <el-button data-testid="report-issues-retry" size="small" :loading="issuesLoading" @click="loadIssues">重试读取明细</el-button>
+    </section>
+
+    <section
+      v-if="issuesLoadState === 'loaded' && issueVerificationNotice"
+      class="card report-coverage-note issue-verification-note"
+      data-testid="report-issue-verification"
+      role="note"
+    >
+      <strong>问题复核状态：{{ issueVerificationNotice }}</strong>
+      <p>问题总数、严重度分布、Top 10 和评分按报告记录统计，包含待核实条目；源码引用匹配只证明引用可定位，不证明漏洞条件或影响已成立。</p>
+    </section>
+
     <section v-if="exportErrorMessage" class="report-export-error no-print" role="alert">
       <strong>{{ exportErrorMessage }}</strong>
       <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
@@ -371,6 +412,12 @@
                 <td class="issue-title">
                   <span class="it-name">{{ it.title || it.issue_type }}</span>
                   <span v-if="it.file_name" class="it-file font-mono">{{ it.file_name }}:{{ it.line_number ?? '?' }}</span>
+                  <span
+                    v-if="issueReviewStatusLabel(it)"
+                    class="it-review-state"
+                    :class="{ 'is-pending': isIssuePendingReview(it) }"
+                    :data-testid="`issue-review-status-${it.id}`"
+                  >{{ issueReviewStatusLabel(it) }}</span>
                 </td>
                 <td class="font-mono col-num" :style="{ color: cvssSeverityColor(deterministicCvssScore(it)), fontWeight: 600 }">
                   {{ deterministicCvssScore(it)?.toFixed(1) ?? '未评分' }}
@@ -551,6 +598,32 @@ const retryExportFormat = ref<ReportFormat | null>(null)
 const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
 const issuesLoading = ref(false)
+const issuesLoadState = ref<'loading' | 'loaded' | 'forbidden' | 'failed'>('loading')
+const issueVerificationNotice = computed(() => {
+  const pending = issues.value.filter(isIssuePendingReview).length
+  const unrecorded = issues.value.filter(issue => !issue.human_review_status).length
+  const parts = []
+  if (pending) parts.push(`${pending} 项待人工核实`)
+  if (unrecorded) parts.push(`${unrecorded} 项复核状态未记录`)
+  return parts.join('；')
+})
+
+function isIssuePendingReview(issue: ReportIssue): boolean {
+  return issue.human_review_status === 'pending' || issue.human_review_status === 'evidence_requested'
+}
+
+function issueReviewStatusLabel(issue: ReportIssue): string {
+  const labels: Record<string, string> = {
+    pending: '待人工核实',
+    evidence_requested: '待补充证据',
+    accepted: '人工已接受',
+    rejected: '人工已驳回',
+    not_required: '无需人工复核',
+  }
+  return issue.human_review_status
+    ? labels[issue.human_review_status] || '复核状态未知'
+    : '复核状态未记录'
+}
 
 /** 只有后端确认由有效 v3.1 向量计算的分数才可作为 CVSS 展示。 */
 function deterministicCvssScore(issue: ReportIssue): number | undefined {
@@ -588,6 +661,14 @@ function canExport(format: ReportFormat): boolean {
 }
 const hasExportFormat = computed(() => (['json', 'html', 'pdf', 'word'] as ReportFormat[]).some(canExport))
 const isSandboxReport = computed(() => report.value?.source?.type === 'sandbox_test')
+const sandboxCoverage = computed(() => report.value?.task?.coverage as TaskCoverageOut | undefined)
+const sandboxCoverageStatus = computed(() => sandboxCoverage.value?.verification_status ?? 'unknown')
+const sandboxCoverageLabel = computed(() => {
+  if (sandboxCoverageStatus.value === 'complete') return '已记录范围内验证完成'
+  if (sandboxCoverageStatus.value === 'partial') return '验证范围不完整'
+  if (sandboxCoverageStatus.value === 'failed') return '验证未通过'
+  return '验证范围未知'
+})
 
 // AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
 const summaryText = computed(() => stripMarkdown((report.value?.summary as string) ?? ''))
@@ -620,6 +701,12 @@ const agentReleases = computed<Array<Record<string, unknown>>>(() => (
 const score = computed(() => {
   const value = Number(stats.value.score ?? 0)
   return Number.isFinite(value) ? value : 0
+})
+const sandboxAiReviewStatus = computed(() => report.value?.source?.ai_review?.status ?? 'unknown')
+const sandboxAiReviewLabel = computed(() => {
+  if (sandboxAiReviewStatus.value === 'complete') return '完成'
+  if (sandboxAiReviewStatus.value === 'incomplete') return '未完成（已提供确定性报告）'
+  return '状态未知'
 })
 const animatedScoreValue = useCountUp(score, 1500)
 const animatedScore = computed(() => Math.round(animatedScoreValue.value))
@@ -780,15 +867,35 @@ function onPrint() {
  * 后端报告详情不含 issues,需单独调用 review API 获取。
  */
 async function loadIssues(): Promise<void> {
-  if (!userStore.hasPermission('issue:view')) return
+  issues.value = []
+  if (!userStore.hasPermission('issue:view')) {
+    issuesLoadState.value = 'forbidden'
+    return
+  }
   issuesLoading.value = true
+  issuesLoadState.value = 'loading'
   try {
-    // 一次取足够多,Top10 与分布统计需要全量数据
-    const data = await getTaskIssues(taskId, { page: 1, page_size: 1000 })
-    issues.value = (data.items as unknown as ReportIssue[]) ?? []
+    // 明细统计（CVSS/Top10）必须覆盖接口返回的全部未关闭条目，不能把首 1000 条当成全量。
+    const pageSize = 1000
+    const firstPage = await getTaskIssues(taskId, { page: 1, page_size: pageSize })
+    const total = Number(firstPage.total)
+    if (!Number.isSafeInteger(total) || total < 0) throw new Error('invalid issue total')
+    const allIssues = [...((firstPage.items as unknown as ReportIssue[]) ?? [])]
+    let page = 1
+    while (allIssues.length < total) {
+      page += 1
+      const next = await getTaskIssues(taskId, { page, page_size: pageSize })
+      const items = (next.items as unknown as ReportIssue[]) ?? []
+      if (items.length === 0 || next.total !== total) throw new Error('incomplete issue pages')
+      allIssues.push(...items)
+    }
+    if (allIssues.length !== total) throw new Error('inconsistent issue total')
+    issues.value = allIssues
+    issuesLoadState.value = 'loaded'
   } catch {
-    // v3 字段展示为增强信息,加载失败不阻塞主报告
+    // 主报告继续可见，但明细加载失败不能伪装为“零问题”。
     issues.value = []
+    issuesLoadState.value = 'failed'
   } finally {
     issuesLoading.value = false
   }
@@ -1152,6 +1259,24 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: () =>
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.report-coverage-note,
+.report-issues-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.report-coverage-note p,
+.report-issues-note p {
+  margin: 0;
+}
+
+.issue-verification-note {
+  border-color: var(--warning-200, #f0d9a5);
+  background: var(--warning-50, #fffaf0);
 }
 
 /* ============ 顶部 ============ */
@@ -1761,6 +1886,22 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: () =>
   .it-file {
     font-size: 11px;
     color: var(--gray-500);
+  }
+
+  .it-review-state {
+    width: fit-content;
+    border: 1px solid var(--gray-200);
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: var(--gray-600);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .it-review-state.is-pending {
+    border-color: var(--warning-300, #eacb79);
+    color: var(--warning-700, #8c6412);
+    background: var(--warning-50, #fffaf0);
   }
 
   tbody tr {

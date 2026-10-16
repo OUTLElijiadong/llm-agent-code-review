@@ -65,6 +65,39 @@ it('仅查看权限实际点击HTML预览仍可用，不触发下载或无权问
   expect(issues.getTaskIssues).not.toHaveBeenCalled()
 })
 
+it('缺少问题明细权限时明确说明权限边界，报告概览仍可查看', async () => {
+  await render()
+  expect(wrapper.get('[data-testid="report-issues-restricted"]').text()).toContain('当前账号没有问题明细查看权限')
+  expect(wrapper.find('[data-testid="report-issues-retry"]').exists()).toBe(false)
+  expect(issues.getTaskIssues).not.toHaveBeenCalled()
+})
+
+it('问题明细接口失败时保留主报告并提供可点击重试', async () => {
+  useUserStore().permissions.add('issue:view')
+  issues.getTaskIssues.mockRejectedValueOnce(new Error('temporary failure'))
+  await render()
+  expect(wrapper.get('[data-testid="report-issues-load-error"]').text()).toContain('问题明细暂时无法加载')
+  expect(wrapper.find('[data-testid="report-issues-retry"]').exists()).toBe(true)
+  issues.getTaskIssues.mockResolvedValueOnce({ items: [], total: 0 })
+  await wrapper.get('[data-testid="report-issues-retry"]').trigger('click')
+  await flushPromises()
+  expect(issues.getTaskIssues).toHaveBeenCalledTimes(2)
+  expect(wrapper.find('[data-testid="report-issues-load-error"]').exists()).toBe(false)
+})
+
+it('沙箱报告显示服务端记录的验证覆盖状态和原因', async () => {
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    task: { coverage: { verification_status: 'partial', requested_mode: 'combined', reason: 'AI 动态测试未执行' } },
+    source: { type: 'sandbox_test' },
+  })
+  await render()
+  const coverage = wrapper.get('[data-testid="sandbox-report-coverage"]')
+  expect(coverage.text()).toContain('验证范围不完整')
+  expect(coverage.text()).toContain('AI 动态测试未执行')
+  expect(coverage.text()).toContain('不代表完整黑盒/白盒验证通过')
+})
+
 it('报告封面区分项目主语言与本次审查文件语言', async () => {
   api.getReportDetail.mockResolvedValueOnce({
     ...report,
