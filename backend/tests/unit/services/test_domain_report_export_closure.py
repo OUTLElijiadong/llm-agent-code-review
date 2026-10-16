@@ -219,6 +219,86 @@ def test_failed_sandbox_json_preserves_zero_score_and_report_body(export_context
     assert response.json()["score"] == 0
 
 
+@pytest.mark.parametrize("status", ["failed", "cancelled", "expired"])
+def test_terminal_code_review_reports_are_listed_readable_and_export_state(export_context, status):
+    client, db, owner, other, project, current = export_context
+    task = ReviewTask(
+        user_id=owner.id,
+        project_id=project.id,
+        task_name=f"终态代码审查-{status}",
+        review_type="standard",
+        status=status,
+        total_files=3,
+        processed_files=1,
+        total_issues=0,
+        score=0,
+        summary="任务未完成，当前结果不代表审查通过。",
+        error_message="worker timeout",
+        coverage={
+            "stage": status,
+            "completed_files": 1,
+            "total_files": 3,
+            "excluded_files": [{"file_name": "vendor/generated.py", "reason": "排除规则"}],
+            "files": {"1": {"file_name": "src/partial.py", "status": "complete"}},
+        },
+    )
+    db.add(task)
+    db.commit()
+
+    listed = client.get("/api/reports").json()["data"]["items"]
+    entry = next(item for item in listed if item["task_id"] == task.id)
+    detail_response = client.get(f"/api/reports/{task.id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["data"]
+    exported_response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+    assert exported_response.status_code == 200
+    exported = exported_response.json()
+    html_response = client.get(f"/api/reports/tasks/{task.id}?template_type=detailed")
+
+    assert entry["status"] == status
+    assert entry["error_message"] == "worker timeout"
+    assert entry["coverage"]["completed_files"] == 1
+    assert detail["task"]["status"] == status
+    assert detail["task"]["error_message"] == "worker timeout"
+    assert detail["task"]["coverage"]["excluded_files"][0]["file_name"] == "vendor/generated.py"
+    assert exported["task_info"]["status"] == status
+    assert exported["task_info"]["error_message"] == "worker timeout"
+    assert exported["task_info"]["coverage"]["total_files"] == 3
+    assert html_response.status_code == 200
+    assert status in html_response.text
+    assert "worker timeout" in html_response.text
+    assert "vendor/generated.py" in html_response.text
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired"])
+def test_terminal_sandbox_domain_reports_are_readable_and_exportable(export_context, status):
+    client, db, owner, other, project, current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test", status=status)
+    task.score = 0
+    task.error_message = "执行在授权窗口结束前被停止"
+    task.coverage = {"stage": status, "tested": ["/health"], "unscanned": ["其余测试项"]}
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+    report.content_json = {
+        **report.content_json,
+        "execution_status": status,
+        "error_message": task.error_message,
+        "coverage": task.coverage,
+    }
+    db.commit()
+
+    detail = client.get(f"/api/reports/{task.id}")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert detail.status_code == 200
+    assert detail.json()["data"]["task"]["status"] == status
+    assert detail.json()["data"]["task"]["coverage"]["unscanned"] == ["其余测试项"]
+    assert exported.status_code == 200
+    assert exported.json()["task_info"]["status"] == status
+    assert exported.json()["domain_data"]["execution_status"] == status
+    assert exported.json()["domain_data"]["error_message"] == task.error_message
+    assert exported.json()["domain_data"]["coverage"]["unscanned"] == ["其余测试项"]
+
+
 @pytest.mark.parametrize("role", ["user", "admin", "super_admin"])
 def test_personal_language_distribution_intersects_visible_projects(db, role):
     owner = User(username=f"language-{role}", password="x", role=role, status=1)
@@ -399,12 +479,34 @@ def test_review_issue_exports_keep_standard_contract_and_match_report_detail(exp
 
 
 @pytest.mark.parametrize("source,status", [("pentest", "failed"), ("sandbox_test", "running")])
-def test_unavailable_domain_report_does_not_export_stale_evidence(export_context, source, status):
+def test_failed_pentest_report_is_visible_and_running_sandbox_is_not(export_context, source, status):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, source, status=status)
+    if source == "pentest":
+        engagement = db.query(PentestEngagement).filter_by(report_task_id=task.id).one()
+        engagement.status = "failed"
+        engagement.error_message = "检测阶段失败"
+        task.error_message = "检测阶段失败"
+        task.coverage = {
+            "coverage_status": "partial",
+            "failed_phases": ["detect"],
+            "unscanned_phases": ["report"],
+        }
+        db.commit()
+
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
-    assert response.status_code == 404
-    assert "domain_data" not in response.json()
+    if source == "pentest":
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["task_info"]["status"] == "failed"
+        assert payload["task_info"]["error_message"] == "检测阶段失败"
+        assert payload["domain_data"]["execution_status"] == "failed"
+        assert payload["domain_data"]["error_message"] == "检测阶段失败"
+        assert payload["domain_data"]["coverage"]["unscanned_phases"] == ["report"]
+        assert "issues" not in payload
+    else:
+        assert response.status_code == 404
+        assert "domain_data" not in response.json()
 
 
 def test_ambiguous_pentest_association_is_explicitly_rejected(export_context):

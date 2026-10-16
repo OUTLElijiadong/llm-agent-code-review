@@ -82,7 +82,7 @@ const activeName = computed(() => {
 const activeTab = computed(() => visibleTabs.value.find((tab) => tab.name === activeName.value) || visibleTabs.value[0])
 
 function selectTab(value: string | number): void {
-  void router.replace({ path: `/admin/${domain.value}`, query: { section: String(value) } })
+  void router.replace({ path: route.path, query: { ...route.query, section: String(value) } })
 }
 </script>
 

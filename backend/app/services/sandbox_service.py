@@ -2314,7 +2314,8 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
 
 def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     """模型不可用时生成可导出的确定性报告，禁止把缺少模型伪装成成功。"""
-    passed = bool(conclusion.get("passed"))
+    status = str(conclusion.get("execution_status") or "")
+    passed = bool(conclusion.get("passed")) and status not in {"stopped", "expired", "cancelled"}
     agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
     generated = int(agent_tests.get("generated") or 0)
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
@@ -2328,7 +2329,47 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
         "## 问题清单\n\n"
         + ("- 反编译或白盒执行未通过，详见执行日志与结构化证据。\n" if not passed else "- 未发现确定性执行失败。\n")
     )
-    return _fact_gate_report(report, conclusion)
+    return _fact_gate_report(report, conclusion) + "\n\n" + _sandbox_execution_disclosure(conclusion)
+
+
+def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
+    """把真实终态、已测范围、未测范围及错误写进所有沙箱报告版本。"""
+    status = str(conclusion.get("execution_status") or ("succeeded" if conclusion.get("passed") else "failed"))
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+
+    def _items(*keys: str) -> list[str]:
+        values: list[str] = []
+        for key in keys:
+            raw = coverage.get(key)
+            if isinstance(raw, (list, tuple, set)):
+                values.extend(str(item) for item in raw if item not in (None, ""))
+            elif raw not in (None, ""):
+                values.append(str(raw))
+        return list(dict.fromkeys(values))
+
+    tested = _items("tested", "tested_paths", "completed_tests")
+    unscanned = _items("unscanned", "unscanned_paths", "unscanned_tests")
+    skipped = _items("skipped", "skipped_tests")
+    excluded = _items("excluded", "excluded_paths", "excluded_files")
+    errors = _items("errors")
+    for error in (conclusion.get("error"), evidence.get("error"), evidence.get("cleanup_error")):
+        if error:
+            errors.append(str(error))
+    if status in {"stopped", "expired", "cancelled"} and not unscanned:
+        unscanned = ["终止时尚未执行的剩余测试项；具体清单未由执行器返回"]
+
+    lines = [
+        "## 执行状态与覆盖范围",
+        "",
+        f"- 最终状态：**{status}**。只有执行器明确返回成功且未被停止/过期时才报告测试通过。",
+        f"- 已测试范围：{'; '.join(tested) if tested else '执行器未提供可核验的逐项范围'}。",
+        f"- 未扫描范围：{'; '.join(unscanned) if unscanned else '执行器未报告未扫描项；不据此推断范围完整'}。",
+        f"- 跳过项：{'; '.join(skipped) if skipped else '无已记录跳过项'}。",
+        f"- 排除项：{'; '.join(excluded) if excluded else '无已记录排除项'}。",
+        f"- 错误：{'; '.join(list(dict.fromkeys(errors))) if errors else '无已记录错误'}。",
+    ]
+    return "\n".join(lines)
 
 
 def _run_test_review_report(
@@ -2336,19 +2377,15 @@ def _run_test_review_report(
     environment: SandboxEnvironment,
     conclusion: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """黑白盒测试终态后,调用多Agent审查编排产出中文报告并落制品。
+    """黑白盒测试终态后生成并发布报告；模型失败可降级，报告入库失败必须冒泡。"""
+    from app.agents.base import AgentContext
+    from app.agents.test_review_reporter_agent import TestReviewReporterAgent
 
-    失败静默(只记事件不阻断):LLM 未配置/超时/任一角色异常都不影响测试结论。
-    返回写入 result_json 的摘要 dict,未执行或失败返回 None。
-    """
+    data: dict[str, Any] = {}
+    roles: dict[str, Any] = {}
+    report_md = _build_deterministic_test_report(conclusion)
     try:
-        from app.agents.base import AgentContext
-        from app.agents.test_review_reporter_agent import TestReviewReporterAgent
-
         agent = configure_subagent(db, TestReviewReporterAgent(), environment.owner_id)
-        data: dict[str, Any] = {}
-        roles: dict[str, Any] = {}
-        report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
             _append_event(db, environment, "progress", "multi_agent_review", "LLM 未配置，已使用确定性测试报告兜底")
         else:
@@ -2362,49 +2399,49 @@ def _run_test_review_report(
                 data = result.data if isinstance(result.data, dict) else {}
                 candidate = _fact_gate_report(str(data.get("report_md") or ""), conclusion)
                 if candidate.strip():
-                    report_md = candidate
+                    report_md = candidate + "\n\n" + _sandbox_execution_disclosure(conclusion)
                 roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
             else:
                 _append_event(
-                    db,
-                    environment,
-                    "progress",
-                    "multi_agent_review",
+                    db, environment, "progress", "multi_agent_review",
                     f"多 Agent 测试审查未生成，已使用确定性报告兜底: {str(result.error)[:120]}",
                 )
-        artifact = _persist_browser_artifact(
-            db,
-            environment,
-            artifact_type="review_report",
-            file_name=f"sandbox-review-report-{environment.public_id}.md",
-            mime_type="text/markdown",
-            content=report_md.encode("utf-8", errors="replace"),
-        )
-        summary = {
-            "agent_code": "test_reviewer",
-            "artifact_id": artifact.id,
-            "roles_executed": int(data.get("roles_executed") or 0),
-            "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
-            "report_bytes": len(report_md.encode("utf-8")),
-        }
-        published = _publish_sandbox_report(db, environment, conclusion, report_md)
-        if published:
-            summary["report_task_id"] = published.get("report_task_id")
-            summary["issues"] = published.get("issues", 0)
+    except Exception as exc:  # noqa: BLE001 - 模型增强失败降级，确定性报告仍必须入库
         _append_event(
-            db,
-            environment,
-            "complete",
-            "multi_agent_review",
-            f"多 Agent 测试审查报告已生成(角色 {summary['roles_executed']}/4)",
-            summary,
+            db, environment, "progress", "multi_agent_review",
+            f"多 Agent 测试审查异常，已使用确定性报告兜底: {str(exc)[:120]}",
         )
-        db.commit()
-        return summary
-    except Exception as exc:  # noqa: BLE001 - 审查增强失败不阻断测试结论
-        _append_event(db, environment, "progress", "multi_agent_review", f"多 Agent 测试审查异常: {str(exc)[:120]}")
-        db.commit()
-        return None
+
+    artifact = _persist_browser_artifact(
+        db,
+        environment,
+        artifact_type="review_report",
+        file_name=f"sandbox-review-report-{environment.public_id}.md",
+        mime_type="text/markdown",
+        content=report_md.encode("utf-8", errors="replace"),
+    )
+    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    if int(published.get("report_task_id") or 0) <= 0:
+        raise RuntimeError("沙箱报告中心未返回有效报告任务 ID")
+    summary = {
+        "agent_code": "test_reviewer",
+        "artifact_id": artifact.id,
+        "report_task_id": published["report_task_id"],
+        "issues": published.get("issues", 0),
+        "roles_executed": int(data.get("roles_executed") or 0),
+        "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
+        "report_bytes": len(report_md.encode("utf-8")),
+    }
+    _append_event(
+        db,
+        environment,
+        "complete",
+        "multi_agent_review",
+        f"测试报告已保存到报告中心(Agent 角色 {summary['roles_executed']}/4)",
+        summary,
+    )
+    db.commit()
+    return summary
 
 
 def _publish_sandbox_report(
@@ -2416,7 +2453,7 @@ def _publish_sandbox_report(
     """把沙箱多 Agent 审查报告正式入库"审查报告"中心(ReviewTask+ReviewReport)。
 
     幂等:按 public_id 写入 task_name 查重,重复执行只更新不重复建。
-    失败静默,不阻断测试结论。
+    入库失败会抛出,调用方不得将缺报告的执行记为成功。
     """
     try:
         from datetime import datetime
@@ -2428,7 +2465,15 @@ def _publish_sandbox_report(
         owner_id = int(getattr(environment, "owner_id", 0) or 0)
         project_id = int(getattr(environment, "project_id", 0) or 0)
         public_id = str(getattr(environment, "public_id", "") or "")
-        passed = bool(conclusion.get("passed"))
+        execution_status = str(conclusion.get("execution_status") or ("succeeded" if conclusion.get("passed") else "failed"))
+        passed = bool(conclusion.get("passed")) and execution_status not in {"stopped", "expired", "cancelled"}
+        review_status = {
+            "succeeded": "success", "success": "success", "failed": "failed", "blocked": "failed",
+            "stopped": "cancelled", "cancelled": "cancelled", "expired": "expired",
+        }.get(execution_status, "failed")
+        coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+        evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+        error_message = str(conclusion.get("error") or evidence.get("error") or evidence.get("cleanup_error") or "")[:500]
         task_name = f"沙箱黑白盒测试 · {public_id}"
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
@@ -2466,7 +2511,7 @@ def _publish_sandbox_report(
                 project_id=project_id,
                 task_name=task_name,
                 review_type="sandbox_test",
-                status="success" if passed else "failed",
+                status=review_status,
                 total_files=1,
                 processed_files=1,
                 total_issues=issue_count,
@@ -2479,11 +2524,13 @@ def _publish_sandbox_report(
                 start_time=started_at,
                 end_time=stopped_at,
                 duration_ms=duration_ms,
+                error_message=error_message or None,
+                coverage={**coverage, "execution_status": execution_status},
             )
             db.add(task)
         else:
             task.project_id = project_id
-            task.status = "success" if passed else "failed"
+            task.status = review_status
             task.total_issues = issue_count
             task.severe_issues = severity_counts["严重"]
             task.high_issues = severity_counts["高"]
@@ -2494,6 +2541,8 @@ def _publish_sandbox_report(
             task.start_time = started_at
             task.end_time = stopped_at
             task.duration_ms = duration_ms
+            task.error_message = error_message or None
+            task.coverage = {**coverage, "execution_status": execution_status}
             origin = model_attribution(environment)
             for field in ATTRIBUTION_FIELDS:
                 setattr(task, field, origin.get(field))
@@ -2508,7 +2557,10 @@ def _publish_sandbox_report(
                     "public_id": public_id,
                     "report_md": report_md,
                     "report_issue_summary": report_issue_summary,
-                    "evidence": conclusion.get("evidence", {}),
+                    "evidence": evidence,
+                    "execution_status": execution_status,
+                    "error_message": error_message or None,
+                    "coverage": {**coverage, "execution_status": execution_status},
                 },
                 summary=report_md[:2000],
                 score=report_score,
@@ -2521,15 +2573,83 @@ def _publish_sandbox_report(
                 "public_id": public_id,
                 "report_md": report_md,
                 "report_issue_summary": report_issue_summary,
-                "evidence": conclusion.get("evidence", {}),
+                "evidence": evidence,
+                "execution_status": execution_status,
+                "error_message": error_message or None,
+                "coverage": {**coverage, "execution_status": execution_status},
             }
             report_row.summary = report_md[:2000]
             report_row.score = report_score
         db.commit()
         return {"report_task_id": task.id, "issues": issue_count}
-    except Exception:  # noqa: BLE001 - 入库失败不阻断测试结论
+    except Exception as exc:  # noqa: BLE001 - 报告入库失败必须向上游暴露
         db.rollback()
-        return {}
+        raise RuntimeError(f"沙箱报告入库失败: {str(exc)[:300]}") from exc
+
+
+def _publish_terminal_sandbox_report(
+    db: Session,
+    environment: "SandboxEnvironment",
+    *,
+    execution_status: str | None = None,
+) -> dict[str, Any] | None:
+    """Persist a deterministic report for any reachable terminal test state."""
+    if environment.purpose != "test":
+        return None
+    status = str(execution_status or environment.status or "failed")
+    conclusion = _loads(environment.result_json, {})
+    if not isinstance(conclusion, dict):
+        conclusion = {}
+    conclusion["execution_status"] = status
+    conclusion["passed"] = bool(conclusion.get("passed")) and status in {"succeeded", "success"}
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    conclusion["evidence"] = evidence
+    if environment.error:
+        conclusion.setdefault("error", environment.error)
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    coverage = dict(coverage)
+    coverage.setdefault("coverage_status", "unknown" if not coverage else "partial")
+    if status in {"stopped", "expired", "cancelled", "failed", "blocked"}:
+        if not coverage.get("unscanned") and not coverage.get("unscanned_paths") and not coverage.get("unscanned_tests"):
+            coverage["unscanned"] = ["终态前尚未执行的测试项；执行器未提供逐项清单"]
+    if status in {"failed", "blocked"} and environment.error:
+        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
+        coverage["errors"] = list(dict.fromkeys([*errors, environment.error]))
+    conclusion["coverage"] = coverage
+    environment.result_json = _json(conclusion)
+    report_md = _build_deterministic_test_report(conclusion)
+    artifact_bytes = report_md.encode("utf-8", errors="replace")
+    digest = hashlib.sha256(artifact_bytes).hexdigest()
+    artifact = (
+        db.query(SandboxArtifact)
+        .filter(
+            SandboxArtifact.environment_id == environment.id,
+            SandboxArtifact.artifact_type == "review_report",
+            SandboxArtifact.sha256 == digest,
+            SandboxArtifact.byte_size == len(artifact_bytes),
+        )
+        .first()
+    )
+    if artifact is None:
+        _persist_browser_artifact(
+            db,
+            environment,
+            artifact_type="review_report",
+            file_name=f"sandbox-review-report-{environment.public_id}.md",
+            mime_type="text/markdown",
+            content=artifact_bytes,
+        )
+    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    _append_event(
+        db,
+        environment,
+        "complete",
+        "report",
+        "终态测试报告已保存到报告中心",
+        {"report_task_id": published["report_task_id"], "execution_status": status},
+    )
+    db.commit()
+    return published
 
 
 def artifact_to_dict(row: SandboxArtifact) -> dict[str, Any]:
@@ -3115,6 +3235,19 @@ def run_browser_blackbox(
     if not isinstance(runs, list):
         runs = []
     conclusion["browser_blackbox_runs"] = [*runs[-19:], evidence]
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    coverage = dict(coverage)
+    tested = coverage.get("tested") if isinstance(coverage.get("tested"), list) else []
+    coverage["tested"] = [*tested, f"授权目标浏览器黑盒探测 ({request_id})"]
+    if not evidence.get("passed"):
+        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
+        coverage["errors"] = [*errors, str(evidence.get("error") or "浏览器黑盒探测未通过")]
+        conclusion["passed"] = False
+        conclusion["execution_status"] = "failed"
+        conclusion["error"] = str(evidence.get("error") or "浏览器黑盒探测未通过")[:500]
+    else:
+        conclusion.setdefault("execution_status", environment.status)
+    conclusion["coverage"] = coverage
     environment.result_json = _json(conclusion)
     _append_event(
         db,
@@ -3139,9 +3272,13 @@ def run_browser_blackbox(
         commit=False,
     )
     db.commit()
+    report = _publish_terminal_sandbox_report(
+        db, environment, execution_status=str(conclusion.get("execution_status") or environment.status)
+    )
     return {
         **evidence,
         "artifacts": [artifact_to_dict(row) for row in artifacts],
+        "report_task_id": report.get("report_task_id") if report else None,
     }
 
 
@@ -4260,7 +4397,10 @@ def _execute_environment(
             "summary": summary,
             "evidence": evidence,
             "agent_code": environment.agent_code,
+            "execution_status": final_status,
         }
+        worker_coverage = worker_conclusion.get("coverage") if isinstance(worker_conclusion.get("coverage"), dict) else {}
+        conclusion["coverage"] = dict(worker_coverage)
         if agent_tests_result is not None:
             conclusion["agent_tests"] = agent_tests_result
             if isinstance(agent_tests_result.get("details"), dict) and agent_tests_result["details"]:
@@ -4341,6 +4481,13 @@ def _execute_environment(
                 "summary": "沙箱执行失败",
                 "evidence": {"error": failure[:1000]},
                 "agent_code": environment.agent_code,
+                "execution_status": "stopped" if cancellation_requested else "failed",
+                "error": failure[:1000],
+                "coverage": {
+                    "coverage_status": "partial",
+                    "unscanned": ["执行器未返回完成清单；终止时剩余测试范围未知"],
+                    "errors": [failure[:1000]],
+                },
             }
             environment.result_json = _json(conclusion)
             if cleanup_confirmed:
@@ -4362,6 +4509,17 @@ def _execute_environment(
                 environment.result_json = _json(conclusion)
                 _append_event(db, environment, "failed", "cleanup", "Worker 未确认全部资源终止，保留 stopping 状态")
             db.commit()
+            if cleanup_confirmed:
+                try:
+                    _publish_terminal_sandbox_report(db, environment, execution_status=conclusion["execution_status"])
+                except Exception as report_exc:  # noqa: BLE001 - publication failure must remain visible
+                    db.rollback()
+                    environment = db.get(SandboxEnvironment, environment_id)
+                    if environment is not None:
+                        message = f"测试终态报告发布失败：{str(report_exc)[:1000]}"
+                        environment.error = f"{environment.error or failure}; {message}"[:4000]
+                        _append_event(db, environment, "failed", "report", message)
+                        db.commit()
             if cleanup_confirmed and not cancellation_requested:
                 try:
                     strategy_learning_service.observe_sandbox_outcome(db, environment, conclusion)
@@ -4521,6 +4679,8 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
+        if row.purpose == "test":
+            _publish_terminal_sandbox_report(db, row, execution_status=row.status)
         return environment_to_dict(db, row)
     worker = db.get(SandboxWorker, row.worker_id) if row.worker_id is not None else None
     row.status = "stopping"
@@ -4558,6 +4718,17 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
         commit=False,
     )
     db.commit()
+    try:
+        _publish_terminal_sandbox_report(db, row, execution_status="stopped")
+    except Exception as exc:  # noqa: BLE001 - caller must see a missing report
+        db.rollback()
+        row = db.get(SandboxEnvironment, row.id)
+        message = f"停止成功，但测试报告发布失败：{str(exc)[:1000]}"
+        if row is not None:
+            row.error = f"{row.error or ''}; {message}"[:4000]
+            _append_event(db, row, "failed", "report", message)
+            db.commit()
+        raise RuntimeError(message) from exc
     return environment_to_dict(db, row)
 
 
@@ -4612,7 +4783,7 @@ def expire_due_environments() -> int:
             .all()
         )
         for row in rows:
-            worker = db.get(SandboxWorker, row.worker_id)
+            worker = db.get(SandboxWorker, row.worker_id) if row.worker_id is not None else None
             if row.worker_id is not None and worker is None:
                 row.status = "stopping"
                 row.error = f"Sandbox Worker 配置不存在：worker_id={row.worker_id}"
@@ -4628,7 +4799,20 @@ def expire_due_environments() -> int:
                 continue
             row.status = "expired"
             row.stopped_at = _utcnow()
-            _append_event(db, row, "complete", "expiry", "沙箱到期已回收")
+            try:
+                _publish_terminal_sandbox_report(db, row, execution_status="expired")
+            except Exception as exc:  # noqa: BLE001 - preserve report publication failure on the environment
+                db.rollback()
+                row = db.get(SandboxEnvironment, row.id)
+                error_message = f"到期回收完成，但测试报告发布失败：{str(exc)[:1000]}"
+                if row is not None:
+                    row.status = "expired"
+                    row.stopped_at = row.stopped_at or _utcnow()
+                    row.error = error_message[:4000]
+                    _append_event(db, row, "failed", "report", row.error)
+                    _append_event(db, row, "complete", "expiry", "沙箱到期已回收；报告发布失败，需人工恢复")
+            else:
+                _append_event(db, row, "complete", "expiry", "沙箱到期已回收")
             count += 1
         db.commit()
         return count

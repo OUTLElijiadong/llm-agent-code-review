@@ -74,7 +74,7 @@ _TASK_FIELDS: tuple = (
     "total_files", "processed_files", "total_issues",
     "severe_issues", "high_issues", "medium_issues", "low_issues",
     "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
-    "start_time", "end_time", "create_time",
+    "start_time", "end_time", "create_time", "error_message", "coverage",
 )
 
 # 模板目录路径(app/templates/)
@@ -176,6 +176,11 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized["name"] = task_name
     # project_name 不在 ReviewTask ORM 上,需调用方传入或补空
     normalized["project_name"] = _to_serializable(raw.get("project_name", "")) or ""
+    if not isinstance(normalized.get("coverage"), dict) or not normalized["coverage"]:
+        normalized["coverage"] = {
+            "coverage_status": "unknown",
+            "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+        }
     return normalized
 
 

@@ -23,7 +23,7 @@ from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 
 ONLINE_WINDOW = timedelta(seconds=90)
-_SESSION_TERMINAL = {"completed", "failed", "expired", "dead_letter"}
+_SESSION_TERMINAL = {"completed", "failed", "cancelled", "expired", "dead_letter"}
 _BLOCKED_JARVIS_MESSAGE_STATUSES = ("queued", "delivered", "acknowledged", "processing")
 _ACTIVE_RESPONSE_RUN_STATUSES = (
     "running",
@@ -1616,11 +1616,15 @@ def ack_message(
     row = _owned_target_message(db, user, message_id, surface=surface, session_key=session_key)
     now = _now()
     requested = acknowledgement.status
+    # 取消是不可逆终态。原始 SSE 驱动循环可能稍后才返回；它的迟到失败/成功
+    # 回执不得把取消改回 queued，否则收件箱桥接会重新派发并再次消耗 Token。
+    if row.status == "cancelled":
+        return _message_out(row)
     allowed = {
-        "queued": {"acknowledged", "processing"},
-        "delivered": {"acknowledged", "processing", "completed", "failed"},
-        "acknowledged": {"processing", "completed", "failed"},
-        "processing": {"completed", "failed"},
+        "queued": {"acknowledged", "processing", "cancelled"},
+        "delivered": {"acknowledged", "processing", "completed", "failed", "cancelled"},
+        "acknowledged": {"processing", "completed", "failed", "cancelled"},
+        "processing": {"completed", "failed", "cancelled"},
     }
     if requested == row.status:
         return _message_out(row)
@@ -1641,6 +1645,14 @@ def ack_message(
         row.status = requested
         row.completed_at = now
         _event(db, row, requested, actor, {"summary": acknowledgement.summary})
+    elif requested == "cancelled":
+        row.status = requested
+        row.completed_at = now
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.next_attempt_at = None
+        row.last_error = acknowledgement.error or acknowledgement.summary or "用户停止了本次运行"
+        _event(db, row, requested, actor, {"reason": row.last_error})
     else:
         row.last_error = acknowledgement.error or acknowledgement.summary or "消息处理失败"
         _event(db, row, "failed", actor, {"error": row.last_error})
@@ -1820,6 +1832,7 @@ def finish_message_run(
     surface: str,
     session_key: str,
     success: bool,
+    cancelled: bool = False,
     summary: str = "",
     error: str = "",
 ) -> dict[str, Any]:
@@ -1831,7 +1844,7 @@ def finish_message_run(
         surface=surface,
         session_key=session_key,
         acknowledgement=AgentMeshAckIn(
-            status="completed" if success else "failed",
+            status="cancelled" if cancelled else "completed" if success else "failed",
             summary=summary[:2000],
             error=error[:2000],
         ),

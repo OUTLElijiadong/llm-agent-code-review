@@ -77,7 +77,7 @@
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
                 cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
-                :stroke="row.score >= 80 ? '#40a35f' : row.score >= 60 ? '#d9a857' : '#dc4961'"
+                :stroke="row.score >= 80 ? 'var(--color-success)' : row.score >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'"
                 :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
                 stroke-dashoffset="25"
               />
@@ -345,7 +345,7 @@ onMounted(() => {
   border-color: var(--brand-300, #a8c4fa);
 }
 .rc-band { width: 4px; height: 38px; border-radius: 999px; }
-.rc-band[data-status='success'] { background: #40a35f; }
+.rc-band[data-status='success'] { background: var(--color-success, #4fb87a); }
 .rc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
 .rc-main { display: grid; gap: 5px; min-width: 0; }
 .rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -401,9 +401,9 @@ onMounted(() => {
   margin-top: 16px;
 }
 
-.score-high { color: #67c23a; font-weight: 600; }
-.score-medium { color: #e6a23c; font-weight: 600; }
-.score-low { color: #f56c6c; font-weight: 600; }
+.score-high { color: var(--color-success, #4fb87a); font-weight: 600; }
+.score-medium { color: var(--color-warning, #d9a857); font-weight: 600; }
+.score-low { color: var(--color-danger, #dc4961); font-weight: 600; }
 
 .danger-item { color: var(--el-color-danger); }
 </style>

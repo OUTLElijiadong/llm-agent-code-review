@@ -414,6 +414,43 @@ async def test_speaker_turn_builds_context_and_returns_trimmed_content() -> None
 
 
 @pytest.mark.asyncio
+async def test_model_wait_publishes_phase_heartbeat_while_speaker_is_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模型调用未返回时，后端仍须周期广播可见的阶段心跳。"""
+    orchestrator = _make_orchestrator()
+    monkeypatch.setattr(module, "_MODEL_STAGE_HEARTBEAT_SECONDS", 0.005, raising=False)
+
+    class SlowAgent:
+        model = "slow-test-model"
+
+        def call_raw(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+            threading.Event().wait(0.03)
+            return (
+                '{"action":"speak","stance":"propose","reply_to":null,"content":"发现测试问题"}',
+                {"model_name": self.model},
+            )
+
+    _, _, ok = await orchestrator._speaker_turn(
+        agent=SlowAgent(),
+        profile=SECURITY_AGENT,
+        code="print('heartbeat')",
+        language="python",
+        file_name="heartbeat.py",
+        all_turns=[],
+        user_inputs=[],
+        round_idx=0,
+        speaker_idx=0,
+    )
+
+    assert ok is True
+    phase_updates = [payload for _sid, action, payload in orchestrator._bus.controls if action == "phase"]
+    assert phase_updates
+    assert phase_updates[0]["stage"] == "agent_thinking"
+    assert SECURITY_AGENT.name in phase_updates[0]["message"]
+
+
+@pytest.mark.asyncio
 async def test_speaker_turn_returns_structured_silence_decision() -> None:
     """Agent 应能自主选择静音，并通过 JSON 模式返回结构化决策。
 
@@ -1412,6 +1449,7 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
     monkeypatch.setattr(module, "build_discussion_environment", build_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
+    monkeypatch.setattr(module, "_ensure_running", lambda _task_id: None)
     monkeypatch.setattr(module, "new_trace_id", fixed_trace_id)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
         "status": "success" if "review" in finalized else "running", "error": "",
@@ -1491,6 +1529,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     orchestrator = _make_orchestrator(bus)
     created = threading.Event()
     cancelled_task_ids: list[int] = []
+    notified_sessions: list[str] = []
     finalized = False
 
     def create_task(**_kwargs: Any) -> int:
@@ -1518,6 +1557,11 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {"status": "cancelled", "error": ""})
+    monkeypatch.setattr(
+        module,
+        "_notify_origin_session",
+        lambda **kwargs: notified_sessions.append(kwargs["discussion_session_id"]),
+    )
 
     run = asyncio.create_task(
         orchestrator.start_discussion(
@@ -1530,6 +1574,8 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
             project_id=12,
             file_id=34,
             max_rounds=1,
+            origin_surface="user",
+            origin_session_key="cancelled-chat",
         )
     )
     assert await asyncio.wait_for(asyncio.to_thread(created.wait, 1), timeout=2)
@@ -1540,8 +1586,10 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
 
     assert cancelled_task_ids == [77]
     assert finalized is False
-    assert session.status == "concluded"
+    assert session.status == "cancelled"
+    assert session.terminal_status == "cancelled"
     assert session.report_task_id == 77
+    assert notified_sessions == []
 
 
 @pytest.mark.asyncio
@@ -1647,7 +1695,8 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
 
     assert orchestrator._env is None
     assert orchestrator._task_id == 0
-    assert session.status == "concluded"
+    assert session.status == "failed"
+    assert session.terminal_status == "failed"
     assert session.report_task_id == 0
     assert len(session.turns) == 1
     assert "database unavailable" in session.turns[0].content

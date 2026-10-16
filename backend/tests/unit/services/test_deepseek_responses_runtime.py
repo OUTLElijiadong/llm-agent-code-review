@@ -1034,21 +1034,27 @@ class BlockingTransport:
 
     def __init__(self) -> None:
         self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
         self.calls = 0
 
     async def create_response(self, payload: Mapping[str, Any]) -> Any:
         self.calls += 1
         self.started.set()
-        await asyncio.Event().wait()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 @pytest.mark.asyncio
 async def test_cancel_marks_running_checkpoint_cancelled_and_stops_loop() -> None:
     transport = BlockingTransport()
+    store = InMemoryCheckpointStore()
     runtime = DeepSeekResponsesRuntime(
         transport=transport,
         tool_executor=RecordingExecutor(),
-        checkpoint_store=InMemoryCheckpointStore(),
+        checkpoint_store=store,
         model="deepseek-v4-pro",
         max_rounds=12,
         stream=False,
@@ -1061,17 +1067,23 @@ async def test_cancel_marks_running_checkpoint_cancelled_and_stops_loop() -> Non
     ))
     await asyncio.wait_for(transport.started.wait(), timeout=5)
 
-    result = await runtime.cancel("run-cancel-1")
+    canceller = DeepSeekResponsesRuntime(
+        transport=ScriptedTransport([]),
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+        stream=False,
+    )
+    result = await canceller.cancel("run-cancel-1", reason="人工停止")
     assert result.status == "cancelled"
+    driven_result = await asyncio.wait_for(task, timeout=1)
+    assert driven_result.status == "cancelled"
+    assert transport.cancelled.is_set()
+    assert transport.calls == 1
 
-    checkpoint = await runtime.get_checkpoint("run-cancel-1")
+    checkpoint = await canceller.get_checkpoint("run-cancel-1")
     assert checkpoint.status == "cancelled"
     assert checkpoint.pending is None
-
-    # 取消后 drive 会在下一轮边界收敛;阻塞 transport 的 task 不会挂起测试。
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    assert checkpoint.cancel_reason == "人工停止"
 
 
 @pytest.mark.asyncio
@@ -1091,6 +1103,66 @@ async def test_cancel_is_idempotent_after_completion() -> None:
     assert cancelled.status == COMPLETED
     checkpoint = await runtime.get_checkpoint("run-cancel-2")
     assert checkpoint.status == COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_late_cancel_cannot_replace_completed_runtime() -> None:
+    class CancelSaveBarrierStore(InMemoryCheckpointStore):
+        def __init__(self):
+            super().__init__()
+            self.pause_cancel_save = True
+            self.cancel_save_started = asyncio.Event()
+            self.release_cancel_save = asyncio.Event()
+
+        async def save(self, checkpoint):
+            if checkpoint.status == "cancelled" and self.pause_cancel_save:
+                self.pause_cancel_save = False
+                self.cancel_save_started.set()
+                await self.release_cancel_save.wait()
+            await super().save(checkpoint)
+
+    class GatedCompletionTransport:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+
+        async def create_response(self, _payload):
+            self.calls += 1
+            self.started.set()
+            await self.release.wait()
+            return _message_response("已完成")
+
+    store = CancelSaveBarrierStore()
+    transport = GatedCompletionTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+        model="deepseek-v4-pro",
+        stream=False,
+    )
+    driver = asyncio.create_task(runtime.start("执行", run_id="run-complete-cancel-race"))
+    await asyncio.wait_for(transport.started.wait(), timeout=2)
+
+    canceller = DeepSeekResponsesRuntime(
+        transport=None,
+        tool_executor=None,
+        checkpoint_store=store,
+        model="",
+    )
+    cancel_request = asyncio.create_task(canceller.cancel("run-complete-cancel-race", reason="迟到停止"))
+    await asyncio.wait_for(store.cancel_save_started.wait(), timeout=2)
+    transport.release.set()
+    drive_result = await asyncio.wait_for(driver, timeout=2)
+    assert drive_result.status == COMPLETED
+
+    store.release_cancel_save.set()
+    cancel_result = await asyncio.wait_for(cancel_request, timeout=2)
+    checkpoint = await store.load("run-complete-cancel-race")
+    assert cancel_result.status == COMPLETED
+    assert checkpoint is not None and checkpoint.status == COMPLETED
+    assert transport.calls == 1
 
 
 @pytest.mark.asyncio

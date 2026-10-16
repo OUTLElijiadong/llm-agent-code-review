@@ -12,7 +12,7 @@ import inspect
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
 from urllib.parse import urlencode
@@ -41,7 +41,7 @@ from app.core.exceptions import AppError
 from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
-from app.models.agent_mesh import AgentMeshConversation
+from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
 from app.services import (
@@ -117,6 +117,120 @@ _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", 
 _FULL_VALIDATION_POLL_SECONDS = 2.0
 
 
+def _is_automatic_task_result_for_roundtable(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    session_id: str = "",
+    run_id: str = "",
+) -> bool:
+    """识别当前小菱运行是否由该圆桌的 task.result 消息自动触发。"""
+
+    if user_id <= 0 or not surface or not session_key:
+        return False
+
+    message_ids: set[str] = set()
+    if run_id:
+        run = (
+            db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.run_id == str(run_id),
+                AgentResponseRun.user_id == int(user_id),
+                AgentResponseRun.surface == str(surface),
+                AgentResponseRun.session_key == str(session_key),
+            )
+            .one_or_none()
+        )
+        if run is not None and run.mesh_message_id:
+            message_ids.add(str(run.mesh_message_id))
+
+    query = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == int(user_id),
+        AgentMeshMessage.send_to == f"session:{surface}:{session_key}",
+        AgentMeshMessage.message_type == "task.result",
+        AgentMeshMessage.status == "processing",
+    )
+    if message_ids:
+        query = query.filter(AgentMeshMessage.message_id.in_(message_ids))
+    else:
+        query = query.order_by(AgentMeshMessage.id.desc()).limit(50)
+
+    for message in query.all():
+        try:
+            payload = json.loads(str(message.payload_json or "{}"))
+        except (TypeError, ValueError):
+            continue
+        result_session_id = str(payload.get("discussion_session_id") or "") if isinstance(payload, dict) else ""
+        if result_session_id and (not session_id or result_session_id == session_id):
+            return True
+    return False
+
+
+_ROUNDTABLE_CONTINUE_INTENT = re.compile(
+    r"(?:继续|接着(?:做|处理|审查|复核|讨论|上次|上一轮)?|再(?:跑|做|审查|复核)(?:一遍|一次)?)"
+)
+_ROUNDTABLE_CONTINUE_NEGATION = re.compile(r"(?:不要|别|不必|无需|暂不|先不).{0,4}(?:继续|接着)")
+
+
+def _has_explicit_human_roundtable_continue_request(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    run_id: str,
+) -> bool:
+    """只接受新的人类 Responses 输入明确要求继续，不以模型工具参数代替用户授权。"""
+
+    if user_id <= 0 or not surface or not session_key or not run_id:
+        return False
+    row = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.run_id == str(run_id),
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == str(surface),
+            AgentResponseRun.session_key == str(session_key),
+            AgentResponseRun.status == "running",
+        )
+        .one_or_none()
+    )
+    # AgentMesh 触发的运行（task.result、status.update、团队事件等）不是新的人类消息。
+    if row is None or row.mesh_message_id:
+        return False
+    try:
+        checkpoint = json.loads(str(row.checkpoint_json or "{}"))
+    except (TypeError, ValueError):
+        return False
+    transcript = checkpoint.get("transcript") if isinstance(checkpoint, dict) else None
+    if not isinstance(transcript, list):
+        return False
+    latest_user = next(
+        (item for item in reversed(transcript) if isinstance(item, dict) and item.get("role") == "user"),
+        None,
+    )
+    if latest_user is None:
+        return False
+    content = latest_user.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    else:
+        text = ""
+    return bool(
+        text.strip()
+        and not _ROUNDTABLE_CONTINUE_NEGATION.search(text)
+        and _ROUNDTABLE_CONTINUE_INTENT.search(text)
+    )
+
+
 class AgentSessionExpiredError(RuntimeError):
     """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
@@ -163,7 +277,7 @@ class ControlRoundtableDiscussionArguments(FixedToolArguments):
     """控制当前用户圆桌讨论的固定参数。"""
 
     session_id: str
-    action: Literal["pause", "resume", "stop", "user_input"]
+    action: Literal["pause", "resume", "stop", "user_input", "continue"]
     content: str = ""
 
 
@@ -478,17 +592,16 @@ class DatabaseCheckpointStore:
             self._db.commit()
             return
         self._assert_owner(row)
-        # 取消是不可覆盖终态:取消请求与原始驱动循环分属不同请求实例,
-        # 驱动循环可能稍后回写 waiting_approval/waiting_input。用条件 UPDATE
-        # 保证并发交错下取消仍最终获胜(先取消者先提交即赢)。
-        if row.status == CANCELLED and checkpoint.status != CANCELLED:
+        # completed 与 cancelled 都是不可覆盖终态。取消和模型结束可能并发；
+        # 以条件 UPDATE 保证先提交的终态获胜，迟到的取消不能覆盖 completed。
+        if row.status in {COMPLETED, CANCELLED}:
             return
         payload = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
         updated = (
             self._db.query(AgentResponseRun)
             .filter(
                 AgentResponseRun.run_id == checkpoint.run_id,
-                AgentResponseRun.status != CANCELLED,
+                AgentResponseRun.status.notin_({COMPLETED, CANCELLED}),
             )
             .update(
                 {
@@ -501,7 +614,7 @@ class DatabaseCheckpointStore:
         )
         self._db.commit()
         if updated == 0:
-            # 并发取消已先落库;保持 cancelled 终态,放弃本次回写。
+            # completed/cancelled 并发终态已先落库;保持现有终态并放弃回写。
             return
 
     async def load(self, run_id: str) -> Optional[RunCheckpoint]:
@@ -513,6 +626,10 @@ class DatabaseCheckpointStore:
                 AgentResponseRun.surface == self._surface,
                 AgentResponseRun.session_key == self._session_key,
             )
+            # SessionLocal uses expire_on_commit=False. A cancellation request can
+            # keep an old RUNNING ORM instance after another request commits a
+            # terminal state, so refresh the identity-map entry from the database.
+            .populate_existing()
             .first()
         )
         if row is None:
@@ -1361,6 +1478,16 @@ class PrismToolExecutor:
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
 
+        if _is_automatic_task_result_for_roundtable(
+            self._db,
+            user_id=int(self._user.id),
+            surface=self._surface,
+            session_key=self._session_key,
+            session_id="",
+            run_id=self._run_id,
+        ):
+            return ToolExecutionResult.failure("圆桌 task.result 只用于汇报，不能自动启动或续跑圆桌")
+
         from app.api.v1.discussion import start_discussion
         from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
 
@@ -1551,7 +1678,7 @@ class PrismToolExecutor:
         })
 
     async def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
-        """按会话归属发送暂停、恢复、停止或用户发言。"""
+        """按会话归属发送控制；仅成功终态且来自新用户回合时允许续会。"""
 
         from app.agents.discussion_bus import DiscussionBus
         from app.agents.events import DiscussionTurn
@@ -1565,12 +1692,39 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
         if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
-        if session.status == "concluded":
-            if action != "user_input":
-                return ToolExecutionResult.failure("圆桌讨论已经结束，只能提交纠正意见发起续会")
+        terminal_status = str(getattr(session, "terminal_status", "") or "").lower()
+        is_terminal = session.status in {"concluded", "partial", "failed", "cancelled"}
+        if is_terminal:
+            if action != "continue":
+                return ToolExecutionResult.failure(
+                    "圆桌已结束；只有用户在新的消息中明确要求继续，且上一轮成功时才能续会"
+                )
+            if terminal_status != "success" or session.status != "concluded":
+                return ToolExecutionResult.failure("只有成功结论可以发起续会；取消、失败或部分结果不可续会")
+            if _is_automatic_task_result_for_roundtable(
+                self._db,
+                user_id=int(self._user.id),
+                surface=self._surface,
+                session_key=self._session_key,
+                session_id=session_id,
+                run_id=self._run_id,
+            ):
+                return ToolExecutionResult.failure("自动 task.result 回合不能续会；请在新的用户消息中明确要求继续")
+            if not _has_explicit_human_roundtable_continue_request(
+                self._db,
+                user_id=int(self._user.id),
+                surface=self._surface,
+                session_key=self._session_key,
+                run_id=self._run_id,
+            ):
+                return ToolExecutionResult.failure(
+                    "续会必须由新的用户消息明确要求继续；自动事件和模型判断不能代替用户指令"
+                )
             if not content:
-                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+                return ToolExecutionResult.failure("continue 必须提供非空 content")
             return await self._continue_roundtable_discussion(session, content)
+        if action == "continue":
+            return ToolExecutionResult.failure("圆桌仍在运行，不能创建续会")
         if action == "user_input":
             if not content:
                 return ToolExecutionResult.failure("user_input 必须提供非空 content")
@@ -1654,7 +1808,7 @@ class PrismToolExecutor:
             "session_id": new_session_id,
             "continued_from_session_id": str(session.session_id),
             "previous_report_task_id": int(getattr(session, "report_task_id", 0) or 0),
-            "action": "user_input",
+            "action": "continue",
             "accepted": True,
             "status": "active",
             "started_by": "user_agent",
@@ -2558,6 +2712,19 @@ class AgentResponsesService:
             transport=None, tool_executor=None, checkpoint_store=self._store, model="",
         )
         result = await runtime.cancel(run_id, reason=reason)
+        cancelled_teams = 0
+        if result.status == CANCELLED:
+            from app.services import agent_team_service
+
+            cancelled_teams = agent_team_service.cancel_response_teams(
+                self._db,
+                self._user,
+                run_id=run_id,
+                surface=self._surface,
+                session_key=self._session_key,
+                reason=reason.strip() or "父级小菱运行已停止",
+            )
+        result = replace(result, cancelled_teams=cancelled_teams)
         observe_event("xiaoling_cancel", labels={"surface": self._surface})
         if reason.strip():
             observe_event("xiaoling_cancel_reasoned", labels={"surface": self._surface})
@@ -3005,8 +3172,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。start_roundtable_discussion 启动后立即结束本轮,"
             "告知用户等待期间可以继续对话;讨论结束后系统会把结论回投本会话,收到 task.result 后直接汇报共识、"
-            "报告入口和是否满足要求;结论不满足时用 control_roundtable_discussion 的 user_input 追加纠正意见，"
-            "系统会自动创建独立续会并沿用原回投会话，不得把旧会话伪装为运行中;"
+            "报告入口和是否满足要求;仅当用户在后续新消息中明确要求继续，且圆桌结论成功时，"
+            "才用 control_roundtable_discussion 的 continue 创建独立续会;"
+            "自动 task.result 只汇报，不得续会，取消/失败/部分结论均不可续会;不得把旧会话伪装为运行中;"
             "不得编造讨论进度或结论。"
             "上传源码后用户要求自动完成部署和黑白盒审查时，必须立即调用 "
             "run_full_project_validation；沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
@@ -3547,7 +3715,8 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
             "name": "control_roundtable_discussion",
             "description": (
                 "暂停、恢复、停止运行中的圆桌讨论或提交用户发言；"
-                "对已结束讨论提交 user_input 会自动创建独立续会；执行前需要批准"
+                "已结束讨论仅在新的明确用户继续请求且原结论成功时，使用 continue 创建独立续会；"
+                "自动 task.result、取消、失败或部分结果不得续会；执行前需要批准"
             ),
             "parameters": ControlRoundtableDiscussionArguments.model_json_schema(),
         },
@@ -3573,6 +3742,8 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
 
     if result.status == COMPLETED:
         event_type = "response.completed"
+    elif result.status == CANCELLED:
+        event_type = "response.cancelled"
     elif result.status == INCOMPLETE:
         event_type = "response.incomplete"
     else:
@@ -3587,6 +3758,7 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
             "output": _public_response_output(result.response.get("output")),
             "error": redact_agent_event_value(result.error) if result.error else None,
             "rounds": result.rounds,
+            "cancelled_teams": result.cancelled_teams,
         },
     }
 

@@ -110,6 +110,7 @@ export interface TaskOut {
   medium_issues: number
   low_issues: number
   score: number
+  coverage?: TaskCoverageOut | null
   duration_ms: number
   create_time: string
 }
@@ -128,6 +129,8 @@ export interface TaskFileOut {
 
 export interface TaskCoverageOut {
   stage?: string | null
+  coverage_status?: string | null
+  /** 沙箱验证结果的覆盖状态，后端列表实际使用 coverage_status。 */
   current_file?: string | null
   completed_files?: number | null
   total_files?: number | null

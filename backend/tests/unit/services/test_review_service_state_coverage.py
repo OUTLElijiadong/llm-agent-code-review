@@ -555,7 +555,37 @@ def test_execute_review_records_failure_reason(monkeypatch: pytest.MonkeyPatch) 
     assert task.status == "failed"
     assert task.error_message == "扫描覆盖不完整: bad.py: review exploded"
     assert task.duration_ms == 199
+    assert task.coverage["stage"] == "failed"
+    assert task.coverage["failed_files"] == ["bad.py"]
+    assert task.coverage["unscanned_files"] == 0
     assert AgentEventType.FAILED in events
+
+
+def test_review_coverage_snapshot_distinguishes_skipped_failed_and_unscanned_files() -> None:
+    """终态报告必须按逐文件账本区分完成、跳过、失败和未开始扫描。"""
+    task = SimpleNamespace(
+        total_files=5,
+        processed_files=3,
+        coverage={
+            "requested_files": ["complete.py", "binary.bin", "broken.py", "queued.py", "never.py"],
+            "files": {
+                "1": {"file_name": "complete.py", "status": "complete"},
+                "2": {"file_name": "binary.bin", "status": "skipped", "reason": "binary_file"},
+                "3": {"file_name": "broken.py", "status": "failed", "error": "model timeout"},
+            },
+        },
+    )
+
+    coverage = review_service._review_coverage_snapshot(task, stage="failed", error="partial failure")
+
+    assert coverage["coverage_status"] == "partial"
+    assert coverage["completed_files"] == 1
+    assert coverage["processed_files"] == 3
+    assert coverage["failed_files"] == ["broken.py"]
+    assert coverage["skipped_files"] == ["binary.bin"]
+    assert coverage["unscanned_files"] == 2
+    assert coverage["unscanned_file_names"] == ["queued.py", "never.py"]
+    assert coverage["error"] == "partial failure"
 
 
 def test_task_queries_cover_visibility_details_filters_and_file_fallback(db: Any) -> None:
@@ -564,6 +594,8 @@ def test_task_queries_cover_visibility_details_filters_and_file_fallback(db: Any
     project = _make_project(db, user.id)
     code_file = _make_file(db, project.id)
     task = _make_task(db, user.id, project.id, status="success")
+    task.review_type = "sandbox_test"
+    task.coverage = {"coverage_status": "partial", "verification_status": "partial"}
     linked_task = _make_task(db, user.id, project.id, task_id=1001, status="success", name="linked")
     deleted_task = _make_task(db, user.id, project.id, task_id=1002, status="deleted", name="deleted")
     db.add(ReviewTaskFile(task_id=linked_task.id, file_id=code_file.id))
@@ -599,6 +631,7 @@ def test_task_queries_cover_visibility_details_filters_and_file_fallback(db: Any
 
     assert page["total"] == 2
     assert {item["id"] for item in page["items"]} == {task.id, linked_task.id}
+    assert next(item for item in page["items"] if item["id"] == task.id)["coverage"] == task.coverage
     assert all(item["project_name"] == project.project_name for item in page["items"])
     assert detail["files"][0]["file_id"] == code_file.id
     assert default_issues["total"] == 1
@@ -627,6 +660,10 @@ def test_delete_cancel_and_cancel_check_enforce_task_state(db: Any, monkeypatch:
 
     review_service.cancel_task(db, user, running.id)
     assert running.status == "cancelled"
+    assert running.coverage["stage"] == "cancelled"
+    assert running.coverage["unscanned_files"] == 1
+    assert running.coverage["coverage_status"] == "partial"
+    assert running.coverage["cancelled_files"] == []
     with pytest.raises(review_service.TaskCancelledError):
         review_service._check_cancelled(db, running)
     with pytest.raises(ValidationError, match="只能取消"):

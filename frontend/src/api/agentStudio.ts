@@ -26,6 +26,13 @@ export function createStudioAgent(body: {
   return post('/agent-studio/agents', body)
 }
 
+export function reviseStudioAgent(agentId: number, body: {
+  prompt: string; review_focus: string
+  model_config_json: { temperature: number; max_tokens: number }; note: string
+}): Promise<StudioVersion> {
+  return post(`/agent-studio/agents/${agentId}/versions`, body)
+}
+
 export function createStudioSkill(body: {
   code: string; name: string; description: string; skill_type: SkillType
   definition: Record<string, unknown>; requested_capabilities: string[]

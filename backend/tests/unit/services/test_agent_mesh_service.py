@@ -235,6 +235,64 @@ def test_inbox_delivery_ack_and_terminal_state_are_ordered(db, user) -> None:
     ]
 
 
+def test_cancelled_inbox_message_cannot_be_requeued_by_late_response(db, user) -> None:
+    """停止中的迟到失败回执不得把任务消息重新排队并再次消耗 Token。"""
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        message=_message(),
+    )
+    agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    )
+    agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="processing"),
+    )
+
+    cancelled = agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="cancelled", summary="用户停止了本次运行"),
+    )
+    late_failure = agent_mesh_service.finish_message_run(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        success=False,
+        error="迟到的响应中断",
+    )
+
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert cancelled["status"] == late_failure["status"] == row.status == "cancelled"
+    assert row.next_attempt_at is None
+    assert row.lease_token is None and row.lease_expires_at is None
+    assert agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    ) == []
+
+
 def test_disabled_jarvis_message_is_completed_without_preparing_model_run(db, user, monkeypatch) -> None:
     for key in ("session-admin-a", "session-admin-b"):
         agent_mesh_service.heartbeat(db, user, surface="admin", session_key=key, title=key)

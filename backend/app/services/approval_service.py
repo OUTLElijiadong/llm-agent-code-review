@@ -253,7 +253,15 @@ def list_items(
     return rows
 
 
-def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str = "") -> ApprovalItem:
+def decide_item(
+    db: Session,
+    admin: User,
+    item_id: int,
+    approve: bool,
+    note: str = "",
+    *,
+    expected_action: Optional[str] = None,
+) -> ApprovalItem:
     """人工审批或拒绝一个审批事项。
 
     Args:
@@ -273,6 +281,16 @@ def decide_item(db: Session, admin: User, item_id: int, approve: bool, note: str
     item = db.query(ApprovalItem).filter(ApprovalItem.id == item_id).with_for_update().first()
     if not item:
         raise NotFoundError("审批事项不存在", code=40400)
+    if expected_action is not None:
+        if item.action != expected_action:
+            raise ForbiddenError("该接口只能处理对应类型的审批事项", code=40300)
+    if item.action == "agent_package.publish":
+        from app.services import agent_studio_service
+        from app.services.rbac_service import is_admin_user
+
+        if not is_admin_user(db, admin.id):
+            raise ForbiddenError("仅管理员可处理 Agent 发布审批", code=40300)
+        agent_studio_service.assert_release_approval_target(db, item)
     if not _can_access(db, admin, item):
         raise ForbiddenError("无权处理该审批；私人会话仅限本人，服务器操作仅限超级管理员", code=40322)
     if item.status in ("approved", "rejected", "auto_approved"):

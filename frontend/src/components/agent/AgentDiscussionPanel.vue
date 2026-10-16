@@ -22,7 +22,10 @@
                   · {{ currentSpeaker }} 决策中
                 </span>
                 <span v-else-if="phase === 'concluded'" class="speaker-info done">
-                  · 讨论已结束
+                  · {{ terminalLabel }}
+                </span>
+                <span v-else-if="stageMessage" class="speaker-info">
+                  · {{ stageMessage }}
                 </span>
               </div>
             </div>
@@ -221,6 +224,7 @@ const reportTaskId = ref(0)
 
 type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 type Phase = 'live' | 'concluded'
+type TerminalStatus = 'success' | 'partial' | 'failed' | 'cancelled' | ''
 
 const turns = ref<DiscussionTurn[]>([])
 // 已渲染发言的稳定 key 集合 —— 用于去重。WS 断线自动重连后,后端 subscribe() 会把
@@ -232,6 +236,8 @@ function turnKey(t: DiscussionTurn): string {
 }
 const status = ref<ConnStatus>('connecting')
 const phase = ref<Phase>('live')
+const terminalStatus = ref<TerminalStatus>('')
+const stageMessage = ref('')
 const lastError = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
@@ -349,12 +355,27 @@ const quickPrompts = [
 ]
 
 const statusTag = computed(() => {
-  if (phase.value === 'concluded') return { type: 'info' as const, text: '已结束' }
+  if (phase.value === 'concluded') {
+    const labels: Record<Exclude<TerminalStatus, ''>, { type: 'success' | 'warning' | 'danger' | 'info'; text: string }> = {
+      success: { type: 'success', text: '已完成' },
+      partial: { type: 'warning', text: '部分完成' },
+      failed: { type: 'danger', text: '失败' },
+      cancelled: { type: 'info', text: '已取消' },
+    }
+    return labels[terminalStatus.value || 'success']
+  }
   if (status.value === 'connecting') return { type: 'warning' as const, text: '连接中' }
   if (status.value === 'connected') return { type: 'success' as const, text: isPaused.value ? '已暂停' : '进行中' }
   if (status.value === 'error') return { type: 'danger' as const, text: '连接错误' }
   return { type: 'danger' as const, text: '已断开' }
 })
+const terminalLabel = computed(() => ({
+  success: '讨论已完成',
+  partial: '讨论部分完成',
+  failed: '讨论失败',
+  cancelled: '讨论已取消',
+  '': '讨论已结束',
+}[terminalStatus.value]))
 
 const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
 const canSend = computed(() => status.value === 'connected' && phase.value === 'live')
@@ -436,6 +457,27 @@ function connectWs() {
 
 function handleControl(msg: { action: string; payload: Record<string, unknown> }) {
   switch (msg.action) {
+    case 'snapshot': {
+      const payload = msg.payload
+      currentRound.value = Number(payload.round) || 0
+      totalRounds.value = Number(payload.total_rounds) || 0
+      currentSpeaker.value = String(payload.speaker_name || '')
+      currentSpeakerCode.value = String(payload.speaker_code || '')
+      stageMessage.value = String(payload.message || '')
+      isPaused.value = payload.status === 'paused'
+      reportTaskId.value = Number(payload.report_task_id) || 0
+      const savedTerminal = String(payload.terminal_status || '') as TerminalStatus
+      if (['success', 'partial', 'failed', 'cancelled'].includes(savedTerminal)) {
+        terminalStatus.value = savedTerminal
+        phase.value = 'concluded'
+        currentSpeaker.value = ''
+        currentSpeakerCode.value = ''
+      } else {
+        terminalStatus.value = ''
+        phase.value = 'live'
+      }
+      break
+    }
     case 'round_start':
       currentRound.value = (msg.payload.round as number) || 0
       totalRounds.value = (msg.payload.total_rounds as number) || 0
@@ -443,7 +485,11 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
     case 'speaker':
       currentSpeaker.value = (msg.payload.speaker_name as string) || ''
       currentSpeakerCode.value = (msg.payload.speaker_code as string) || ''
+      stageMessage.value = String(currentSpeaker.value) + ' 正在决策'
       scrollToBottom()
+      break
+    case 'phase':
+      stageMessage.value = String(msg.payload.message || '')
       break
     case 'paused':
       isPaused.value = true
@@ -452,13 +498,19 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       isPaused.value = false
       break
     case 'stopping':
-      ElMessage.info('讨论正在终止,主持人将给出小结…')
+      terminalStatus.value = 'cancelled'
+      stageMessage.value = '讨论正在终止，不会生成成功小结'
+      ElMessage.info('正在停止圆桌讨论')
       break
     case 'done':
       phase.value = 'concluded'
       currentSpeaker.value = ''
       currentSpeakerCode.value = ''
       reportTaskId.value = (msg.payload?.task_id as number) || 0
+      terminalStatus.value = ['success', 'partial', 'failed', 'cancelled'].includes(String(msg.payload?.status || ''))
+        ? String(msg.payload.status) as TerminalStatus
+        : 'success'
+      stageMessage.value = String(msg.payload?.error || '')
       break
   }
 }
@@ -471,6 +523,8 @@ function reconnect() {
   currentSpeaker.value = ''
   currentSpeakerCode.value = ''
   phase.value = 'live'
+  terminalStatus.value = ''
+  stageMessage.value = ''
   isPaused.value = false
   connectWs()
 }

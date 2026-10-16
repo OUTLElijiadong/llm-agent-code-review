@@ -82,6 +82,60 @@ _RECOVERING_REVIEW_TASK_IDS: set[int] = set()
 _RECOVERY_LOCK = threading.Lock()
 
 
+def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, error: str | None = None) -> dict:
+    """Return a report-safe file coverage summary without treating skipped files as scanned."""
+    coverage = dict(task.coverage) if isinstance(getattr(task, "coverage", None), dict) else {}
+    ledger = coverage.get("files") if isinstance(coverage.get("files"), dict) else {}
+
+    def names_with_status(*statuses: str) -> list[str]:
+        return [
+            str(entry.get("file_name") or file_id)
+            for file_id, entry in ledger.items()
+            if isinstance(entry, dict) and entry.get("status") in statuses
+        ]
+
+    completed = names_with_status("complete", "success")
+    failed = names_with_status("failed")
+    skipped = names_with_status("skipped")
+    cancelled = names_with_status("cancelled")
+    requested = coverage.get("requested_files") if isinstance(coverage.get("requested_files"), list) else []
+    accounted = {
+        str(entry.get("file_name") or file_id)
+        for file_id, entry in ledger.items()
+        if isinstance(entry, dict)
+    }
+    unscanned_names = [str(name) for name in requested if str(name) not in accounted]
+    total = max(0, int(getattr(task, "total_files", 0) or 0))
+    unscanned_count = (
+        len(unscanned_names)
+        if requested
+        else max(0, total - len(completed) - len(failed) - len(skipped) - len(cancelled))
+        if ledger
+        else max(0, total - int(getattr(task, "processed_files", 0) or 0))
+    )
+    if not ledger and not requested:
+        completed_count = max(0, int(getattr(task, "processed_files", 0) or 0))
+    else:
+        completed_count = len(completed)
+    coverage_status = "partial" if failed or skipped or cancelled or unscanned_count else "complete"
+    coverage.update({
+        "coverage_status": coverage_status,
+        "completed_files": completed_count,
+        "processed_files": max(0, int(getattr(task, "processed_files", 0) or 0)),
+        "total_files": total,
+        "failed_files": failed,
+        "skipped_files": skipped,
+        "cancelled_files": cancelled,
+        "unscanned_files": unscanned_count,
+        "unscanned_file_names": unscanned_names,
+    })
+    if stage or coverage.get("stage"):
+        coverage["stage"] = stage or coverage["stage"]
+    if error:
+        coverage["error"] = str(error)[:500]
+    return coverage
+
+
 def _freeze_rules(rules: list[ReviewRule]) -> list[dict]:
     """冻结实际提示规则，避免排队期间规则变更污染任务。"""
     snapshots: list[dict] = []
@@ -235,6 +289,7 @@ def start(
         start_time=datetime.now(timezone.utc),
         execution_token=uuid.uuid4().hex,
         coverage={"stage": "queued", "completed_files": 0, "total_files": len(files),
+                  "requested_files": [str(code_file.file_name) for code_file in files],
                   **({"excluded_files": input_exclusions, "input_selection": "reviewable_text"}
                      if input_exclusions else {})},
     )
@@ -265,7 +320,7 @@ def start(
             task.error_message = error_message
             task.end_time = datetime.now(timezone.utc)
             _update_duration(task)
-            task.coverage = {**(task.coverage or {}), "stage": "failed"}
+            task.coverage = _review_coverage_snapshot(task, stage="failed", error=error_message)
             db.commit()
         except (TaskCancelledError, TaskSupersededError):
             db.rollback()
@@ -365,8 +420,9 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
             failed_task.status = "failed"
             failed_task.error_message = f"重启后自动恢复失败: {exc}"[:500]
             failed_task.end_time = datetime.now(timezone.utc)
-            failed_task.coverage = {**(failed_task.coverage or {}), "stage": "failed",
-                                    "error": failed_task.error_message}
+            failed_task.coverage = _review_coverage_snapshot(
+                failed_task, stage="failed", error=failed_task.error_message
+            )
             _update_issue_counts(db, failed_task)
             _update_duration(failed_task)
         db.commit()
@@ -416,7 +472,10 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             task.status = "failed"
             task.error_message = "账户已停用或删除，审查未执行"
             task.end_time = datetime.now(timezone.utc)
-            task.coverage = {**(task.coverage or {}), "stage": "failed", "reason": "account_inactive"}
+            task.coverage = {
+                **_review_coverage_snapshot(task, stage="failed", error=task.error_message),
+                "reason": "account_inactive",
+            }
             _update_duration(task)
             _safe_commit(db, task)
             _emit_review_event(AgentEventType.FAILED, task, user, task.error_message)
@@ -472,6 +531,10 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             task.status = "failed"
             task.error_message = "本次审查所需 Agent 均已停用，任务未执行"
             task.end_time = datetime.now(timezone.utc)
+            task.coverage = {
+                **_review_coverage_snapshot(task, stage="failed", error=task.error_message),
+                "reason": "no_enabled_agents",
+            }
             task.duration_ms = int((task.end_time - task.start_time).total_seconds() * 1000) if task.start_time else 0
             _safe_commit(db, task)
             _emit_review_event(
@@ -526,7 +589,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
                 task.status = "failed"
                 task.error_message = str(e)[:500]
                 task.end_time = datetime.now(timezone.utc)
-                task.coverage = {**(task.coverage or {}), "stage": "failed"}
+                task.coverage = _review_coverage_snapshot(task, stage="failed", error=task.error_message)
                 _safe_commit(db, task)
             except (TaskCancelledError, TaskSupersededError):
                 db.rollback()
@@ -769,6 +832,7 @@ def _execute_review(
         task.summary = _build_summary(profiles, int(task.total_files or len(files)), len(all_issues), task.score)
         task.status = "success"
         task.coverage = {**(task.coverage or {}), "stage": "complete", "current_file": None}
+        task.coverage = _review_coverage_snapshot(task, stage="complete")
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         _safe_commit(db)
@@ -811,7 +875,7 @@ def _execute_review(
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         _update_issue_counts(db, task)
-        task.coverage = {**(task.coverage or {}), "stage": "failed", "error": str(e)[:500]}
+        task.coverage = _review_coverage_snapshot(task, stage="failed", error=task.error_message)
         _safe_commit(db)
         _emit_review_event(AgentEventType.FAILED, task, user,
                            f"审查任务 #{task.id} 失败: {task.error_message}")
@@ -855,6 +919,18 @@ def _review_one_file(db: Session, collab_agent: DeepSeekAgent, api_config,
     # binary 文件直接跳过(LLM 无法审查二进制内容)
     if getattr(code_file, "is_binary", 0) == 1:
         logger.info(f"[review] 文件 {code_file.file_name} 为二进制,跳过审查")
+        coverage = task.coverage if isinstance(getattr(task, "coverage", None), dict) else {}
+        file_ledger = dict(coverage.get("files") or {})
+        file_ledger[str(getattr(code_file, "id", code_file.file_name))] = {
+            "file_name": code_file.file_name,
+            "status": "skipped",
+            "reason": "binary_file",
+        }
+        skipped_files = list(coverage.get("skipped_files") or [])
+        if code_file.file_name not in skipped_files:
+            skipped_files.append(code_file.file_name)
+        task.coverage = {**coverage, "files": file_ledger, "skipped_files": skipped_files}
+        _safe_commit(db, task)
         return []
 
     validate_review_input(code_file)
@@ -1742,6 +1818,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "medium_issues": row.medium_issues, "low_issues": row.low_issues,
             "score": row.score, "duration_ms": row.duration_ms,
             "score_version": row.score_version, "score_breakdown": row.score_breakdown,
+            "coverage": row.coverage,
             "create_time": row.create_time,
         })
     return pagination.to_dict(items)
@@ -2013,11 +2090,27 @@ def cancel_task(db: Session, user: User, task_id: int) -> None:
     task = db.query(ReviewTask).filter_by(id=task_id).with_for_update().populate_existing().one()
     if task.status != "running":
         raise ValidationError("只能取消运行中的任务", code=40001)
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    files = dict(coverage.get("files") or {})
+    for file_id, entry in list(files.items()):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("status") == "running":
+            files[file_id] = {**entry, "status": "cancelled", "reason": "用户停止任务"}
     task.status = "cancelled"
     task.execution_token = uuid.uuid4().hex
     task.end_time = datetime.now(timezone.utc)
     _update_duration(task)
-    task.coverage = {**(task.coverage or {}), "stage": "cancelled"}
+    task.coverage = {**coverage, "files": files}
+    task.coverage = _review_coverage_snapshot(
+        task,
+        stage="cancelled",
+    )
+    task.coverage.update({
+        "reason": "用户停止任务",
+        "current_file": None,
+        "files": files,
+    })
     _update_issue_counts(db, task)
     db.commit()
 

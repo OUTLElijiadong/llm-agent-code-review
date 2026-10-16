@@ -200,6 +200,12 @@ def _build_header_elements(
     elements.append(Paragraph(f"审查模型:{model_name}", styles["normal"]))
     elements.append(Paragraph(f"生成时间:{create_time}", styles["normal"]))
     elements.append(Paragraph(f"综合评分:<b>{_format_score(score)}</b>", styles["normal"]))
+    elements.append(Paragraph(f"执行状态:{escape(str(task_info.get('status') or 'unknown'))}", styles["normal"]))
+    if task_info.get("error_message"):
+        elements.append(Paragraph(f"错误:{escape(str(task_info['error_message']))}", styles["normal"]))
+    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
+    coverage_text = escape(json.dumps(coverage, ensure_ascii=False, indent=2, sort_keys=True)).replace("\n", "<br/>")
+    elements.append(Paragraph(f"扫描范围与覆盖情况:<br/>{coverage_text}", styles["normal"]))
     elements.append(Spacer(1, 4 * mm))
     return elements
 

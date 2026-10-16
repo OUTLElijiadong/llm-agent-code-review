@@ -15,6 +15,8 @@ class ReportListItem(BaseModel):
     total_issues: int
     score: int
     status: str
+    error_message: Optional[str] = None
+    coverage: dict = Field(default_factory=dict, description="扫描覆盖、未扫描、跳过与排除范围")
     create_time: datetime
     source: dict = Field(default_factory=dict, description="来源、统计依据及既有领域详情接口")
 

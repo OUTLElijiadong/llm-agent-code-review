@@ -32,7 +32,17 @@ class DiscussionSession:
     file_name: str
     owner_user_id: int = 0
     turns: list[DiscussionTurn] = field(default_factory=list)
-    status: str = "active"  # active | paused | concluded
+    status: str = "active"  # active | paused | concluded | partial | failed | cancelled
+    terminal_status: str = ""  # success | partial | failed | cancelled
+    terminal_error: str = ""
+    current_round: int = 0
+    total_rounds: int = 0
+    speaker_code: str = ""
+    speaker_name: str = ""
+    speaker_index: int = 0
+    total_speakers: int = 0
+    stage: str = "preparing"
+    stage_message: str = "圆桌正在准备"
     max_rounds: int = 3
     report_task_id: int = 0  # 讨论沉淀的审查报告 task_id(收尾时回填)
     closed_at: float = 0.0  # concluded 时间戳,供过期清理判断
@@ -100,7 +110,9 @@ class DiscussionBus:
     def close_session(self, session_id: str):
         session = self._sessions.get(session_id)
         if session:
-            session.status = "concluded"
+            if not session.terminal_status:
+                session.terminal_status = "success"
+            session.status = self._session_status_for_terminal(session.terminal_status)
             session.closed_at = time.time()
         # 编排循环已退出,pause/resume/user_input 回调随之失效,立即摘除
         self._control_callbacks.pop(session_id, None)
@@ -119,7 +131,7 @@ class DiscussionBus:
         now = time.time()
         expired = [
             sid for sid, s in self._sessions.items()
-            if s.status == "concluded"
+            if s.status in {"concluded", "partial", "failed", "cancelled"}
             and s.closed_at
             and now - s.closed_at > _CONCLUDED_SESSION_TTL
             and not self._queues.get(sid)
@@ -132,11 +144,27 @@ class DiscussionBus:
             self._discussion_tasks.pop(sid, None)
             logger.debug(f"[DiscussBus] 过期会话已清理 session={sid}")
 
-    def request_stop(self, session_id: str):
+    def request_stop(self, session_id: str, reason: str = ""):
         """标记会话为终止 — 编排循环在下一次检查时退出。"""
         session = self._sessions.get(session_id)
         if session:
-            session.status = "concluded"
+            session.status = "cancelled"
+            session.terminal_status = "cancelled"
+            session.terminal_error = (
+                session.terminal_error
+                or str(reason or "圆桌讨论已取消")[:1000]
+            )
+            session.stage = "cancelled"
+            session.stage_message = session.terminal_error
+
+    @staticmethod
+    def _session_status_for_terminal(terminal_status: str) -> str:
+        return {
+            "success": "concluded",
+            "partial": "partial",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }.get(str(terminal_status or "").lower(), "concluded")
 
     def start_discussion_task(
         self,
@@ -201,11 +229,54 @@ class DiscussionBus:
 
     def publish_control(self, session_id: str, action: str, payload: dict = None):
         """推送控制消息 (暂停/恢复/轮次信息)"""
+        session = self._sessions.get(session_id)
+        data = payload or {}
+        if session:
+            if action == "round_start":
+                session.current_round = int(data.get("round") or 0)
+                session.total_rounds = int(data.get("total_rounds") or session.max_rounds or 0)
+                session.speaker_code = ""
+                session.speaker_name = ""
+                session.speaker_index = 0
+                session.total_speakers = 0
+                session.stage = "round"
+                session.stage_message = f"第 {session.current_round} / {session.total_rounds} 轮"
+            elif action == "speaker":
+                session.speaker_code = str(data.get("speaker_code") or "")[:80]
+                session.speaker_name = str(data.get("speaker_name") or "")[:120]
+                session.speaker_index = int(data.get("speaker_index") or 0)
+                session.total_speakers = int(data.get("total_speakers") or 0)
+                session.stage = "agent_thinking"
+                session.stage_message = f"{session.speaker_name or 'Agent'} 正在组织发言"
+            elif action == "phase":
+                session.stage = str(data.get("stage") or session.stage)[:80]
+                session.stage_message = str(data.get("message") or session.stage_message)[:240]
+                if "round" in data:
+                    session.current_round = int(data.get("round") or 0)
+                if "total_rounds" in data:
+                    session.total_rounds = int(data.get("total_rounds") or 0)
+            elif action == "paused":
+                session.status = "paused"
+                session.stage = "paused"
+                session.stage_message = "讨论已暂停"
+            elif action == "resumed":
+                if session.status == "paused":
+                    session.status = "active"
+                session.stage = "resumed"
+                session.stage_message = "讨论已继续"
+            elif action in {"done", "cancelled"}:
+                terminal_status = str(data.get("status") or ("cancelled" if action == "cancelled" else "success"))
+                session.terminal_status = terminal_status
+                session.terminal_error = str(data.get("error") or "")[:1000]
+                session.status = self._session_status_for_terminal(terminal_status)
+                session.report_task_id = int(data.get("task_id") or session.report_task_id or 0)
+                session.stage = terminal_status
+                session.stage_message = session.terminal_error or "圆桌讨论已结束"
         msg = json_lib.dumps({
             "type": "control",
             "session_id": session_id,
             "action": action,
-            "payload": payload or {},
+            "payload": data,
         }, ensure_ascii=False)
 
         for q in list(self._queues.get(session_id, [])):
@@ -218,10 +289,32 @@ class DiscussionBus:
 
     async def subscribe(self, session_id: str) -> asyncio.Queue:
         """返回队列供 WebSocket 端点消费。先回放已完成的发言。"""
-        q: asyncio.Queue = asyncio.Queue(maxsize=128)
+        session = self._sessions.get(session_id)
+        q: asyncio.Queue = asyncio.Queue(maxsize=max(128, len(session.turns) + 3 if session else 128))
         self._queues.setdefault(session_id, []).append(q)
 
-        session = self._sessions.get(session_id)
+        if session:
+            q.put_nowait(json_lib.dumps({
+                "type": "control",
+                "session_id": session_id,
+                "action": "snapshot",
+                "payload": {
+                    "status": session.status,
+                    "terminal_status": session.terminal_status,
+                    "round": session.current_round,
+                    "total_rounds": session.total_rounds or session.max_rounds,
+                    "speaker_code": session.speaker_code,
+                    "speaker_name": session.speaker_name,
+                    "speaker_index": session.speaker_index,
+                    "total_speakers": session.total_speakers,
+                    "stage": session.stage,
+                    "message": session.stage_message,
+                    "task_id": session.task_id,
+                    "report_task_id": session.report_task_id,
+                    "error": session.terminal_error,
+                },
+            }, ensure_ascii=False))
+
         if session and session.turns:
             for t in session.turns:
                 q.put_nowait(json_lib.dumps({
@@ -232,18 +325,16 @@ class DiscussionBus:
 
         # 重连到已结束会话: 补发终态控制帧,使前端显示「已结束」而非停留「进行中」。
         # (正常首连时 status 为 active,不会触发。)
-        if session and session.status == "concluded":
+        if session and session.status in {"concluded", "partial", "failed", "cancelled"}:
             try:
                 q.put_nowait(json_lib.dumps({
                     "type": "control", "session_id": session_id,
-                    "action": "round_start",
-                    "payload": {"round": session.max_rounds,
-                                "total_rounds": session.max_rounds},
-                }, ensure_ascii=False))
-                q.put_nowait(json_lib.dumps({
-                    "type": "control", "session_id": session_id,
                     "action": "done",
-                    "payload": {"task_id": session.report_task_id},
+                    "payload": {
+                        "task_id": session.report_task_id,
+                        "status": session.terminal_status or "success",
+                        "error": session.terminal_error,
+                    },
                 }, ensure_ascii=False))
             except asyncio.QueueFull:
                 pass

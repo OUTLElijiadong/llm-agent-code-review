@@ -11,6 +11,7 @@ import {
   listAgentVersions,
   listStudioAgents,
   listStudioSkills,
+  reviseStudioAgent,
   submitStudioAgent,
   testStudioAgent,
   unbindStudioSkill,
@@ -35,8 +36,12 @@ const currentAgent = ref<StudioAsset | null>(null)
 const currentVersion = ref<AgentVersionDetail | null>(null)
 const createdSkillVersionId = ref<number | null>(null)
 const savedAgentVersionId = ref<number | null>(null)
+const revisionMode = ref(false)
 const actionError = ref('')
 const testPassed = computed(() => currentVersion.value?.status === 'testing')
+const canStartRevision = computed(() =>
+  !!currentAgent.value && ['published', 'rejected', 'disabled', 'rolled_back'].includes(currentVersion.value?.status || ''),
+)
 
 /* 状态中文标签(界面枚举必须中文,勿直接展示英文原值) */
 const ASSET_STATUS_LABELS: Record<string, { label: string; tone: 'draft' | 'testing' | 'pending' | 'published' | 'rejected' }> = {
@@ -122,20 +127,37 @@ function skillDefinition(): Record<string, unknown> {
 
 async function persistAndTest(): Promise<void> {
   if (loading.value) return
+  if (currentVersion.value && !['draft', 'testing'].includes(currentVersion.value.status)) {
+    actionError.value = '当前版本已锁定，请先创建修订版。'
+    return
+  }
   loading.value = true
   actionError.value = ''
   try {
     if (!savedAgentVersionId.value) {
-      const created = await createStudioAgent({
-        code: agentForm.code,
-        name: agentForm.name,
-        description: agentForm.description,
-        prompt: agentForm.prompt,
-        review_focus: agentForm.review_focus,
-        model_config_json: { temperature: agentForm.temperature, max_tokens: agentForm.max_tokens },
-      })
-      currentAgent.value = created.agent
-      savedAgentVersionId.value = created.version.id
+      if (currentAgent.value && revisionMode.value) {
+        const version = await reviseStudioAgent(currentAgent.value.id, {
+          prompt: agentForm.prompt,
+          review_focus: agentForm.review_focus,
+          model_config_json: { temperature: agentForm.temperature, max_tokens: agentForm.max_tokens },
+          note: '审查员创建修订草稿',
+        })
+        savedAgentVersionId.value = version.id
+        revisionMode.value = false
+      } else if (!currentAgent.value) {
+        const created = await createStudioAgent({
+          code: agentForm.code,
+          name: agentForm.name,
+          description: agentForm.description,
+          prompt: agentForm.prompt,
+          review_focus: agentForm.review_focus,
+          model_config_json: { temperature: agentForm.temperature, max_tokens: agentForm.max_tokens },
+        })
+        currentAgent.value = created.agent
+        savedAgentVersionId.value = created.version.id
+      } else {
+        throw new Error('请先创建修订版')
+      }
     }
     currentVersion.value = await getAgentVersion(savedAgentVersionId.value)
     if (skillForm.enabled && !createdSkillVersionId.value) {
@@ -192,6 +214,7 @@ async function resume(agent: StudioAsset): Promise<void> {
   const versions = await listAgentVersions(agent.id)
   if (!versions.length) return
   const detail = await getAgentVersion(versions[0].id)
+  revisionMode.value = false
   createdSkillVersionId.value = null
   savedAgentVersionId.value = detail.id
   skillForm.enabled = false
@@ -209,6 +232,17 @@ async function resume(agent: StudioAsset): Promise<void> {
   activeStep.value = detail.status === 'pending_approval' ? 6 : 5
   } catch { actionError.value = '草稿读取失败，当前内容保留，请重试。' }
   finally { loading.value = false }
+}
+
+function beginRevision(): void {
+  if (loading.value || !canStartRevision.value) return
+  revisionMode.value = true
+  savedAgentVersionId.value = null
+  currentVersion.value = null
+  createdSkillVersionId.value = null
+  skillForm.enabled = false
+  actionError.value = ''
+  activeStep.value = 1
 }
 
 async function removeBinding(bindingId: number): Promise<void> {
@@ -239,6 +273,7 @@ function resetWizard(): void {
   if (loading.value) return
   actionError.value = ''
   savedAgentVersionId.value = null
+  revisionMode.value = false
   currentAgent.value = null
   currentVersion.value = null
   createdSkillVersionId.value = null
@@ -266,8 +301,9 @@ onMounted(loadAssets)
         </div>
         <div class="hero-actions">
           <span v-if="currentAgent" class="hero-chip font-mono">
-            {{ currentAgent.name }} · v{{ currentVersion?.version_number || 1 }}
+            {{ currentAgent.name }} · {{ revisionMode ? '修订草稿待保存' : `v${currentVersion?.version_number || 1}` }}
           </span>
+          <el-button v-if="canStartRevision" type="primary" plain round @click="beginRevision">创建修订版</el-button>
           <el-button :icon="Refresh" :loading="loading" round @click="loadAssets">刷新</el-button>
           <el-button type="primary" :icon="Plus" round @click="resetWizard">新建 Agent</el-button>
         </div>
@@ -291,7 +327,8 @@ onMounted(loadAssets)
       </button>
     </section>
 
-    <p v-if="savedAgentVersionId" class="saved-version-hint">已保存版本的基础配置为只读；下方可重试绑定、结构校验与提交，避免误改已保存内容。</p>
+    <p v-if="savedAgentVersionId" class="saved-version-hint">已保存版本的基础配置为只读；需修改时请创建修订版。</p>
+    <p v-else-if="revisionMode" class="saved-version-hint">正在编辑新版本；执行测试时将保存修订草稿，原发布版本继续可用。</p>
 
     <section class="workflow-shell prism-rise" style="--rise-delay: 120ms" v-loading="loading">
       <nav class="steps-rail">
@@ -313,8 +350,8 @@ onMounted(loadAssets)
         <el-form v-if="activeStep === 0" :model="agentForm" label-position="top">
           <div class="form-grid three">
             <el-form-item label="Agent 编码"><el-input v-model="agentForm.code" :disabled="!!savedAgentVersionId || !!currentAgent" placeholder="reliability_reviewer" /></el-form-item>
-            <el-form-item label="名称"><el-input v-model="agentForm.name" :disabled="!!savedAgentVersionId" maxlength="120" /></el-form-item>
-            <el-form-item label="说明"><el-input v-model="agentForm.description" :disabled="!!savedAgentVersionId" maxlength="500" /></el-form-item>
+            <el-form-item label="名称"><el-input v-model="agentForm.name" :disabled="!!savedAgentVersionId || !!currentAgent" maxlength="120" /></el-form-item>
+            <el-form-item label="说明"><el-input v-model="agentForm.description" :disabled="!!savedAgentVersionId || !!currentAgent" maxlength="500" /></el-form-item>
           </div>
         </el-form>
 
@@ -368,7 +405,7 @@ onMounted(loadAssets)
               <p>检查声明、权限与输出格式；不运行真实模型或沙箱。</p>
               <p class="font-mono">{{ currentVersion ? `checksum ${currentVersion.checksum.slice(0, 16)}…` : '版本尚未落库' }}</p>
             </div>
-            <el-button type="primary" :icon="Check" :loading="loading" round @click="persistAndTest">执行测试</el-button>
+            <el-button type="primary" :icon="Check" :loading="loading" :disabled="!!currentVersion && !['draft', 'testing'].includes(currentVersion.status)" round @click="persistAndTest">执行测试</el-button>
           </div>
           <div v-if="currentVersion?.bindings.length" class="binding-list">
             <div v-for="item in currentVersion.bindings" :key="item.id"><code>Skill vID {{ item.skill_version_id }}</code><el-button text type="danger" :icon="Delete" @click="removeBinding(item.id)" /></div>

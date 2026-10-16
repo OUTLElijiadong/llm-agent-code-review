@@ -89,6 +89,7 @@ _STANCE_ALIASES = {
     "补充": "supplement", "中立": "neutral",
 }
 _SILENT_DEFAULT = "本轮没有新增证据或不同观点，选择静音。"
+_MODEL_STAGE_HEARTBEAT_SECONDS = 5.0
 
 
 def _build_discussion_agents(user_id: int, profiles):
@@ -561,11 +562,15 @@ class DiscussionOrchestrator:
                 raise RuntimeError("圆桌讨论没有产生有效审查发言，不能生成成功报告")
             stopped = False
             self._emit(AgentEventType.THINKING, "orchestrator", "主持人正在汇总讨论共识")
-            summary_text, summary_meta = await loop.run_in_executor(
-                None, copy_context().run,
-                lambda: self._summarize(
-                    all_turns, code, language, file_name, agent, stopped,
+            summary_text, summary_meta = await self._await_model_stage(
+                loop.run_in_executor(
+                    None, copy_context().run,
+                    lambda: self._summarize(
+                        all_turns, code, language, file_name, agent, stopped,
+                    ),
                 ),
+                stage="host_summarizing",
+                message="小菱主持人正在汇总讨论共识",
             )
             await self._check_active()
             coverage["summary_status"] = "success" if summary_meta is not None else "failed"
@@ -643,6 +648,13 @@ class DiscussionOrchestrator:
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
                     final_status = state["status"]
                     final_error = state.get("error") or ""
+                    coverage_state = state.get("coverage") or {}
+                    if (
+                        final_status == "failed"
+                        and coverage_state.get("stage") == "partial"
+                        and int(coverage_state.get("successful_turns") or 0) > 0
+                    ):
+                        final_status = "partial"
                 except asyncio.CancelledError:
                     cancelled_during_finalization = True
                     report_task_id = await loop.run_in_executor(
@@ -660,7 +672,7 @@ class DiscussionOrchestrator:
                 final_error or ("；".join(coverage["errors"]) if final_status != "success" else ""),
             )
             # 对齐团队派发逻辑:结论回投发起会话,小菱自动续跑汇报,无需用户手动追问。
-            if self._origin_surface and self._origin_session_key:
+            if self._origin_surface and self._origin_session_key and final_status != "cancelled":
                 await loop.run_in_executor(
                     None,
                     lambda: _notify_origin_session(
@@ -687,11 +699,15 @@ class DiscussionOrchestrator:
         )
 
     def _publish_terminal(self, session_id: str, task_id: int, status: str, error: str = "") -> None:
-        """复用发言和 done 控制帧发布可见失败原因，再关闭会话。"""
+        """发布明确终态并关闭会话；取消结果不伪装成成功或生成后续回投。"""
         session = self._bus.get_session(session_id)
         if session:
             session.report_task_id = task_id
-        if status != "success":
+            if status == "cancelled" and session.terminal_status == "cancelled" and session.terminal_error:
+                error = session.terminal_error
+            session.terminal_status = status
+            session.terminal_error = error[:1000]
+        if status not in {"success", "cancelled"}:
             message = error or f"圆桌讨论已结束（{status}），没有生成完整成功报告。"
             self._bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=len(session.turns) + 1 if session else 0,
@@ -703,6 +719,37 @@ class DiscussionOrchestrator:
             self._bus.publish_control(session_id, "cancelled", payload)
         self._bus.publish_control(session_id, "done", payload)
         self._bus.close_session(session_id)
+
+    async def _await_model_stage(self, awaitable, *, stage: str, message: str):
+        """等待模型阶段时周期广播进度；取消协程不宣称能杀死线程中的 HTTP 请求。"""
+
+        interval = max(0.05, float(_MODEL_STAGE_HEARTBEAT_SECONDS))
+        started = time.monotonic()
+
+        def heartbeat() -> None:
+            elapsed = max(1, int(time.monotonic() - started))
+            self._bus.publish_control(self._session_id, "phase", {
+                "stage": stage,
+                "message": f"{message}（已等待 {elapsed} 秒）",
+                "elapsed_seconds": elapsed,
+            })
+
+        heartbeat()
+        future = asyncio.ensure_future(awaitable)
+        try:
+            while True:
+                try:
+                    return await asyncio.wait_for(asyncio.shield(future), timeout=interval)
+                except asyncio.TimeoutError:
+                    heartbeat()
+        except asyncio.CancelledError:
+            # run_in_executor 中的同步 HTTP 调用无法由 asyncio 强制终止；读取最终异常，
+            # 避免后台线程完成后留下未检索异常，同时当前圆桌仍立即停止后续阶段。
+            future.add_done_callback(
+                lambda completed: completed.exception()
+                if not completed.cancelled() else None
+            )
+            raise
 
     # ── 发言逻辑 ──
 
@@ -788,7 +835,11 @@ class DiscussionOrchestrator:
             )
 
         try:
-            content, meta = await loop.run_in_executor(None, copy_context().run, call_speaker)
+            content, meta = await self._await_model_stage(
+                loop.run_in_executor(None, copy_context().run, call_speaker),
+                stage="agent_thinking",
+                message=f"{profile.name} 正在组织第 {round_idx + 1} 轮发言",
+            )
             if not isinstance(content, str) or not content.strip():
                 raise RuntimeError("模型返回空内容，未完成本轮审查")
             return _parse_speaker_decision(content), meta, True
@@ -1010,7 +1061,10 @@ class DiscussionOrchestrator:
             self._bus.request_stop(self._session_id)
             if self._task_id:
                 self._bus.cancel_discussion_task(self._session_id)
-            self._bus.publish_control(self._session_id, "stopping", {})
+            self._bus.publish_control(self._session_id, "stopping", {
+                "status": "cancelled",
+                "message": "讨论正在终止，不会生成成功小结",
+            })
             if self._paused_event:
                 self._paused_event.set()
 

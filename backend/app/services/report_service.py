@@ -26,15 +26,22 @@ from app.services.project_member_service import get_visible_project_ids, require
 from app.services.report_exporter import build_report_score_facts
 
 
+_REPORTABLE_TASK_STATUSES = ("success", "failed", "cancelled", "expired", "stopped")
+
+
+def _task_coverage(task: ReviewTask) -> dict:
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    if coverage:
+        return coverage
+    return {
+        "coverage_status": "unknown",
+        "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+    }
+
+
 def is_report_available(task: ReviewTask | None) -> bool:
-    """报告已生成且可查看；沙箱失败报告也必须保留可读性。"""
-    return bool(
-        task
-        and (
-            task.status == "success"
-            or (task.status == "failed" and task.review_type == "sandbox_test")
-        )
-    )
+    """终态任务均保留报告视图；执行状态由报告明确呈现，不推断为成功。"""
+    return bool(task and task.status in _REPORTABLE_TASK_STATUSES)
 
 
 def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTask:
@@ -68,10 +75,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
     Returns:
         dict: 分页响应
     """
-    q = db.query(ReviewTask).filter(
-        (ReviewTask.status == "success")
-        | ((ReviewTask.status == "failed") & (ReviewTask.review_type == "sandbox_test"))
-    )
+    q = db.query(ReviewTask).filter(ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES))
     visible_ids, _ = get_visible_project_ids(db, user)
     q = q.filter(ReviewTask.project_id.in_(visible_ids))
     if not rbac_service.is_admin_user(db, int(user.id)):
@@ -99,6 +103,8 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
             "total_issues": issue_count, "score": score, "status": row.status,
+            "error_message": row.error_message,
+            "coverage": _task_coverage(row),
             "source": issue_stats[row.id]["source"],
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
@@ -141,6 +147,9 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "score_version": score_breakdown.get("version"),
                  "score_breakdown": score_breakdown,
                  "status": task.status,
+                 "error_message": task.error_message,
+                 "coverage": _task_coverage(task),
+                 "processed_files": task.processed_files,
                  "create_time": task.create_time.isoformat() if task.create_time else None,
                  "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
@@ -204,6 +213,10 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
                 next_action=f"请在 GET /api/reports/{task.id} 查看来源，恢复原始制品或重新生成报告",
             )
         domain_data = dict(content)
+        domain_data.setdefault("execution_status", task.status)
+        domain_data.setdefault("error_message", task.error_message)
+        if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
+            domain_data["coverage"] = _task_coverage(task)
         native_exports = _sandbox_native_exports(db, user, task, content)
     else:
         from app.services.pentest_service import get_engagement_detail
@@ -226,6 +239,9 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
                 next_action=f"请在 GET /api/reports/{task.id} 查看来源，恢复原始关联或重新生成报告",
             )
         domain_data = get_engagement_detail(db, user, engagements[0].public_id)
+        domain_data["execution_status"] = task.status
+        domain_data["error_message"] = task.error_message
+        domain_data["coverage"] = _task_coverage(task)
         if len(domain_data["findings"]) != detail["stats"]["total_issues"]:
             raise ConflictError(
                 "领域发现正在变化，导出计数不一致", code=40943, retryable=True,

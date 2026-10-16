@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CN_VULN_PORTALS } from './cnnvd-knowledge'
 
 const mocks = vi.hoisted(() => ({ checklist: vi.fn(), dashboard: vi.fn() }))
 vi.mock('@/api/security', () => ({ getSecurityChecklist: mocks.checklist, getSecurityDashboard: mocks.dashboard }))
@@ -96,6 +97,50 @@ describe('安全中心独立读取恢复', () => {
     expect(page.text()).toContain('7 个项目还未进行安全审计')
     expect(page.get('[data-testid="dashboard-error"]').text()).toContain('保留上次成功结果')
     expect(page.get('[data-testid="dashboard-error"]').text()).toContain('尚未更新')
+    page.unmount()
+  })
+})
+
+describe('安全分类来源标识', () => {
+  it('先列 CNVD 与 CNNVD，并分别保留各自官方入口', () => {
+    expect(CN_VULN_PORTALS.slice(0, 2).map(portal => portal.name)).toEqual(['CNVD', 'CNNVD'])
+    expect(CN_VULN_PORTALS.find(portal => portal.name === 'CNVD')?.url).toBe('https://www.cnvd.org.cn/')
+    expect(CN_VULN_PORTALS.find(portal => portal.name === 'CNNVD')?.url).toBe('https://www.cnnvd.org.cn/')
+  })
+
+  it('明确官方记录匹配状态与 OWASP 回退边界，不展示臆造的 CNNVD 对照表', async () => {
+    const page = mountPage()
+    await flushPromises()
+
+    const sourceStatus = page.get('[data-testid="cn-source-status"]')
+    expect(sourceStatus.text()).toContain('CNVD / CNNVD 官方记录优先')
+    expect(sourceStatus.text()).toContain('未实现实时官方数据同步')
+    expect(sourceStatus.text()).toContain('记录编号')
+    expect(sourceStatus.text()).toContain('官方详情链接')
+    expect(sourceStatus.text()).toContain('OWASP fallback / 未匹配')
+    expect(sourceStatus.text()).toContain('不根据标题、CWE 或关键词猜测来源')
+    expect(page.text()).not.toContain('CNNVD 26 类')
+    expect(page.find('.cn-mapping-table').exists()).toBe(false)
+    expect(page.get('.cn-portal-card').attributes('href')).toBe('https://www.cnvd.org.cn/')
+    expect(page.findAll('.cn-portal-card')[1].attributes('href')).toBe('https://www.cnnvd.org.cn/')
+    const sectionTitles = page.findAll('.block-title').map(title => title.text())
+    expect(sectionTitles.findIndex(title => title.includes('中国漏洞库来源')))
+      .toBeLessThan(sectionTitles.findIndex(title => title.includes('OWASP Top 10')))
+    page.unmount()
+  })
+
+  it('项目 OWASP 热点明确标为未匹配中国漏洞库的回退分类', async () => {
+    mocks.dashboard.mockResolvedValueOnce({
+      ...dashboard,
+      scanned_project_count: 1,
+      owasp_hotspots: [{ owasp: 'A01:2025', count: 3 }],
+    })
+    const page = mountPage()
+    await flushPromises()
+
+    expect(page.get('.ov-hot-title').text()).toContain('OWASP fallback')
+    expect(page.get('.ov-hot-title').text()).toContain('未匹配 CNVD/CNNVD 官方记录')
+    expect(page.get('.ov-hot-name').text()).toBe('A01:2025')
     page.unmount()
   })
 })

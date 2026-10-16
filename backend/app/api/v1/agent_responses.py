@@ -804,7 +804,7 @@ def _public_response_envelope(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     public: dict[str, Any] = {}
-    for key in ("id", "object", "status", "model", "created_at", "completed_at", "rounds"):
+    for key in ("id", "object", "status", "model", "created_at", "completed_at", "rounds", "cancelled_teams"):
         field = value.get(key)
         if field is not None:
             public[key] = field
@@ -1157,6 +1157,24 @@ async def stream_agent_response(
                         .first()
                     )
                     mesh_message_id = active_row.mesh_message_id if active_row is not None else ""
+                    if payload.action == "cancel" and not mesh_message_id:
+                        # 首次执行尚未结束前，关联 ID 还没写回运行行。当前会话同一时刻
+                        # 只允许一个活动 Responses 运行，因此唯一 processing 消息就是它的来源。
+                        source_message = (
+                            run_db.query(AgentMeshMessage)
+                            .filter(
+                                AgentMeshMessage.user_id == int(run_user.id),
+                                AgentMeshMessage.send_to == f"session:{payload.surface}:{payload.session_id}",
+                                AgentMeshMessage.status == "processing",
+                            )
+                            .order_by(AgentMeshMessage.id.desc())
+                            .first()
+                        )
+                        if source_message is not None:
+                            mesh_message_id = source_message.message_id
+                            if active_row is not None:
+                                active_row.mesh_message_id = mesh_message_id
+                                run_db.commit()
 
                 try:
                     # 运行级状态广播: Agent 中心工位卡实时显示助手「正在工作」。
@@ -1237,6 +1255,7 @@ async def stream_agent_response(
                                 surface=payload.surface,
                                 session_key=payload.session_id,
                                 success=result.status == "completed",
+                                cancelled=result.status == "cancelled",
                                 summary=result.output_text,
                                 error=result.error,
                             )

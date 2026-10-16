@@ -1,7 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
+import { isolatedBackendVerified } from './isolatedGate'
 
 const ADMIN = process.env.E2E_ADMIN || 'admin'
-const ADMIN_PW = process.env.E2E_ADMIN_PW || 'lijd1107'
+const ADMIN_PW = process.env.E2E_ADMIN_PW ?? ''
+
+test.beforeEach(async ({ request }) => {
+  test.skip(!(await isolatedBackendVerified(request, ADMIN_PW)), '登录型 E2E 仅在显式配置的本机隔离环境运行')
+})
 
 async function login(page: Page, username: string, password: string): Promise<void> {
   await page.goto('/login')
