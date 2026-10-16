@@ -178,6 +178,18 @@ def _build_header(doc: Any, task_info: Dict[str, Any], score: int) -> None:
     _add_run(score_para, "综合评分: ", bold=True)
     _add_run(score_para, _format_score(score), bold=True, color=RGBColor(0x11, 0x18, 0x27))
 
+    status_para = doc.add_paragraph()
+    _add_run(status_para, "执行状态: ", bold=True)
+    _add_run(status_para, str(task_info.get("status") or "unknown"))
+    if task_info.get("error_message"):
+        error_para = doc.add_paragraph()
+        _add_run(error_para, "错误: ", bold=True)
+        _add_run(error_para, str(task_info["error_message"]))
+    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
+    coverage_para = doc.add_paragraph()
+    _add_run(coverage_para, "扫描范围与覆盖情况: ", bold=True)
+    _add_run(coverage_para, json.dumps(coverage, ensure_ascii=False, indent=2, sort_keys=True))
+
 
 def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
     """构建统计摘要表格。

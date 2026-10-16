@@ -21,6 +21,7 @@ def db():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
+
     from app.core.database import Base
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
@@ -28,7 +29,8 @@ def db():
     try:
         yield session
     finally:
-        session.close(); engine.dispose()
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -168,7 +170,7 @@ class FakeDiscussionBus:
         self.discussion_tasks[session_id] = task
         return task
 
-    def request_stop(self, session_id: str) -> None:
+    def request_stop(self, session_id: str, reason: str = "") -> None:
         """记录会话停止请求。"""
         self.cancelled_sessions.append(session_id)
 
@@ -188,10 +190,10 @@ def _install_bus(monkeypatch: pytest.MonkeyPatch, bus: FakeDiscussionBus) -> Non
 
 
 def _seed_execution_actor(db, user_id, project_id):
-    from app.models.user import User
+    from app.core.permission_codes import PermissionCode
     from app.models.project import Project
     from app.models.rbac import Permission, Role, RolePermission, UserRole
-    from app.core.permission_codes import PermissionCode
+    from app.models.user import User
     if db.get(User, user_id) is None:
         db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
     if db.get(Project, project_id) is None:
@@ -203,8 +205,12 @@ def _seed_execution_actor(db, user_id, project_id):
     if permission is None:
         permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
         db.add(permission)
-    db.add(role); db.flush()
-    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.add(role)
+    db.flush()
+    db.add_all([
+        UserRole(user_id=user_id, role_id=role.id),
+        RolePermission(role_id=role.id, permission_id=permission.id),
+    ])
     db.commit()
 
 
@@ -449,10 +455,10 @@ async def test_ws_accepts_completed_roundtable_followup_and_starts_background_an
     db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """圆桌主流程结束后，当前账号可经同一 WS 追问并获得持久接收回执。"""
+    from sqlalchemy.orm import Session
+
     from app.agents.discussion_bus import DiscussionBus
     from app.services import roundtable_followup_service
-
-    from sqlalchemy.orm import Session
     _seed_execution_actor(db, 7, 901)
     monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     bus = DiscussionBus()
@@ -641,9 +647,9 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
     db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """合法 pending 会话应在鉴权后消费上下文并异步启动讨论编排器。"""
-    import app.ai.discussion_orchestrator as orchestrator_module
-
     from sqlalchemy.orm import Session
+
+    import app.ai.discussion_orchestrator as orchestrator_module
     _seed_execution_actor(db, 21, 901)
     monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "pending-session"
@@ -696,10 +702,10 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
     db, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """创建圆桌的登录版本失效后，应取消后台编排而不是继续写入结果。"""
+    from sqlalchemy.orm import Session
+
     import app.ai.discussion_orchestrator as orchestrator_module
     from app.agents.discussion_bus import DiscussionBus
-
-    from sqlalchemy.orm import Session
     _seed_execution_actor(db, 21, 901)
     monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "expired-owner-session"
@@ -739,7 +745,62 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
     await asyncio.gather(task, return_exceptions=True)
     await asyncio.sleep(0)
 
-    assert bus.get_session(session_id).status == "concluded"
+    assert bus.get_session(session_id).status == "cancelled"
+    assert bus.get_discussion_task(session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_pending_discussion_stops_when_parent_xiaoling_run_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """父级 Responses 被用户停止后，关联圆桌必须停止并保留 cancelled 终态。"""
+    import app.ai.discussion_orchestrator as orchestrator_module
+    from app.agents.discussion_bus import DiscussionBus
+
+    session_id = "parent-response-cancelled"
+    bus = DiscussionBus()
+    session = bus.create_session(
+        session_id, task_id=0, file_name="cancelled.py", owner_user_id=21, project_id=7,
+    )
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
+    monkeypatch.setattr(module, "_is_discussion_execution_active", lambda *_args: True)
+    checks = 0
+
+    def parent_cancelled(_user_id: int, _run_id: int) -> bool:
+        nonlocal checks
+        checks += 1
+        # 首次检查发生在启动前；第二次检查发生在 orchestrator 已启动后。
+        return checks >= 2
+
+    monkeypatch.setattr(module, "_is_parent_response_run_cancelled", parent_cancelled, raising=False)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class FakeOrchestrator:
+        async def start_discussion(self, **_kwargs: Any) -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(orchestrator_module, "DiscussionOrchestrator", FakeOrchestrator)
+    pending = module.PendingDiscussion(
+        session_id,
+        user_id=21,
+        usage_origin={"agent_run_id": 123},
+    )
+
+    task = module.launch_pending_discussion(pending)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert checks >= 1
+    assert session.status == "cancelled"
+    assert session.terminal_status == "cancelled"
     assert bus.get_discussion_task(session_id) is None
 
 

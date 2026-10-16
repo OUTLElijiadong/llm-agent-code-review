@@ -5391,7 +5391,8 @@ def _separate_unverified_ai_findings(report_md: str) -> tuple[str, int | None]:
 
 def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     """模型不可用时生成可导出的确定性报告，禁止把缺少模型伪装成成功。"""
-    passed = bool(conclusion.get("passed"))
+    execution_status = str(conclusion.get("execution_status") or "")
+    passed = bool(conclusion.get("passed")) and execution_status not in {"stopped", "expired", "cancelled"}
     agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
     generated = int(agent_tests.get("generated") or 0)
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
@@ -5427,7 +5428,47 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
         + "## 问题清单\n\n"
         + (f"- {mode_label}执行未通过；具体失败项以报告中的结构化证据为准。\n" if not passed else "- 未发现确定性执行失败。\n")
     )
-    return _fact_gate_report(report, conclusion)
+    return _fact_gate_report(report, conclusion) + "\n\n" + _sandbox_execution_disclosure(conclusion)
+
+
+def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
+    """Report the actual terminal state and the tested, skipped, excluded, and unknown scope."""
+    status = str(conclusion.get("execution_status") or ("succeeded" if conclusion.get("passed") else "failed"))
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+
+    def _items(*keys: str) -> list[str]:
+        values: list[str] = []
+        for key in keys:
+            raw = coverage.get(key)
+            if isinstance(raw, (list, tuple, set)):
+                values.extend(str(item) for item in raw if item not in (None, ""))
+            elif raw not in (None, ""):
+                values.append(str(raw))
+        return list(dict.fromkeys(values))
+
+    tested = _items("tested", "tested_paths", "completed_tests")
+    unscanned = _items("unscanned", "unscanned_paths", "unscanned_tests")
+    skipped = _items("skipped", "skipped_tests")
+    excluded = _items("excluded", "excluded_paths", "excluded_files")
+    errors = _items("errors")
+    for error in (conclusion.get("error"), evidence.get("error"), evidence.get("cleanup_error")):
+        if error:
+            errors.append(str(error))
+    if status in {"stopped", "expired", "cancelled"} and not unscanned:
+        unscanned = ["终止时尚未执行的剩余测试项；具体清单未由执行器返回"]
+
+    lines = [
+        "## 执行状态与覆盖范围",
+        "",
+        f"- 最终状态：**{status}**。只有执行器明确返回成功且未被停止/过期时才报告测试通过。",
+        f"- 已测试范围：{'; '.join(tested) if tested else '执行器未提供可核验的逐项范围'}。",
+        f"- 未扫描范围：{'; '.join(unscanned) if unscanned else '执行器未报告未扫描项；不据此推断范围完整'}。",
+        f"- 跳过项：{'; '.join(skipped) if skipped else '无已记录跳过项'}。",
+        f"- 排除项：{'; '.join(excluded) if excluded else '无已记录排除项'}。",
+        f"- 错误：{'; '.join(list(dict.fromkeys(errors))) if errors else '无已记录错误'}。",
+    ]
+    return "\n".join(lines)
 
 
 def _persist_deterministic_test_review_fallback(
@@ -5776,7 +5817,19 @@ def _publish_sandbox_report(
         owner_id = int(getattr(environment, "owner_id", 0) or 0)
         project_id = int(getattr(environment, "project_id", 0) or 0)
         public_id = str(getattr(environment, "public_id", "") or "")
-        passed = bool(conclusion.get("passed"))
+        execution_status = str(
+            conclusion.get("execution_status") or ("succeeded" if conclusion.get("passed") else "failed")
+        )
+        passed = bool(conclusion.get("passed")) and execution_status not in {"stopped", "expired", "cancelled"}
+        task_status = {
+            "succeeded": "success",
+            "success": "success",
+            "failed": "failed",
+            "blocked": "failed",
+            "stopped": "cancelled",
+            "cancelled": "cancelled",
+            "expired": "expired",
+        }.get(execution_status, "failed")
         mode_labels = {
             "whitebox": "沙箱白盒测试",
             "blackbox": "沙箱黑盒测试",
@@ -5796,9 +5849,18 @@ def _publish_sandbox_report(
         }
         verification = _sandbox_verification_coverage(conclusion)
         verification_status = verification["verification_status"]
+        raw_coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+        coverage = {**raw_coverage, **verification, "execution_status": execution_status}
+        evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
         failure_message = (
-            str(verification.get("reason") or "本次验证失败，执行回执没有提供更具体的原因。")[:500]
-            if verification_status == "failed"
+            str(
+                conclusion.get("error")
+                or evidence.get("error")
+                or evidence.get("cleanup_error")
+                or verification.get("reason")
+                or "本次验证失败，执行回执没有提供更具体的原因。"
+            )[:500]
+            if verification_status == "failed" or task_status in {"cancelled", "expired"}
             else None
         )
         # 旧列不可为空；未知与报告来源另存结构化摘要，详情不把该占位零当真实结论。
@@ -5837,7 +5899,7 @@ def _publish_sandbox_report(
                 project_id=project_id,
                 task_name=task_name,
                 review_type="sandbox_test",
-                status="success" if passed else "failed",
+                status=task_status if task_status != "success" or passed else "failed",
                 total_files=1,
                 processed_files=1,
                 total_issues=issue_count,
@@ -5851,16 +5913,13 @@ def _publish_sandbox_report(
                 start_time=started_at,
                 end_time=stopped_at,
                 duration_ms=duration_ms,
-                coverage={
-                    "stage": "complete" if verification_status == "complete" else verification_status,
-                    **verification,
-                },
+                coverage={"stage": "complete" if verification_status == "complete" else verification_status, **coverage},
             )
             db.add(task)
         else:
             task.task_name = task_name
             task.project_id = project_id
-            task.status = "success" if passed else "failed"
+            task.status = task_status if task_status != "success" or passed else "failed"
             task.total_issues = issue_count
             task.severe_issues = severity_counts["严重"]
             task.high_issues = severity_counts["高"]
@@ -5872,10 +5931,7 @@ def _publish_sandbox_report(
             task.start_time = started_at
             task.end_time = stopped_at
             task.duration_ms = duration_ms
-            task.coverage = {
-                "stage": "complete" if verification_status == "complete" else verification_status,
-                **verification,
-            }
+            task.coverage = {"stage": "complete" if verification_status == "complete" else verification_status, **coverage}
             origin = model_attribution(environment)
             for field in ATTRIBUTION_FIELDS:
                 setattr(task, field, origin.get(field))
@@ -5891,7 +5947,10 @@ def _publish_sandbox_report(
                     "report_md": report_md,
                     "report_issue_summary": report_issue_summary,
                     "ai_review": ai_review_metadata,
-                    "evidence": conclusion.get("evidence", {}),
+                    "evidence": evidence,
+                    "execution_status": execution_status,
+                    "error_message": failure_message,
+                    "coverage": coverage,
                 },
                 summary=report_md[:2000],
                 score=report_score,
@@ -5905,7 +5964,10 @@ def _publish_sandbox_report(
                 "report_md": report_md,
                 "report_issue_summary": report_issue_summary,
                 "ai_review": ai_review_metadata,
-                "evidence": conclusion.get("evidence", {}),
+                "evidence": evidence,
+                "execution_status": execution_status,
+                "error_message": failure_message,
+                "coverage": coverage,
             }
             report_row.summary = report_md[:2000]
             report_row.score = report_score
@@ -5921,6 +5983,101 @@ def _publish_sandbox_report(
             "report_persisted": False,
             "failure_code": "report_persistence_failed",
         }
+
+
+def _publish_terminal_sandbox_report(
+    db: Session,
+    environment: "SandboxEnvironment",
+    *,
+    execution_status: str | None = None,
+) -> dict[str, Any] | None:
+    """Publish an honest, deterministic report for a terminal test environment."""
+    if environment.purpose != "test":
+        return None
+
+    status = str(execution_status or environment.status or "failed")
+    if status not in TERMINAL_STATES:
+        return None
+
+    conclusion = _loads(environment.result_json, {})
+    if not isinstance(conclusion, dict):
+        conclusion = {}
+    conclusion["execution_status"] = status
+    conclusion["passed"] = bool(conclusion.get("passed")) and status in {"succeeded", "success"}
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    conclusion["evidence"] = evidence
+    if environment.error:
+        conclusion.setdefault("error", environment.error)
+
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    coverage = dict(coverage)
+    coverage.setdefault("coverage_status", "unknown" if not coverage else "partial")
+    if status in {"stopped", "expired", "cancelled", "failed", "blocked"}:
+        if not any(coverage.get(key) for key in ("unscanned", "unscanned_paths", "unscanned_tests")):
+            coverage["unscanned"] = ["终态前尚未执行的测试项；执行器未提供逐项清单"]
+    if status in {"failed", "blocked"} and environment.error:
+        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
+        coverage["errors"] = list(dict.fromkeys([*errors, environment.error]))
+    conclusion["coverage"] = coverage
+    environment.result_json = _json(conclusion)
+    # Persist the terminal execution facts before the optional report and artifact writes.
+    db.commit()
+
+    report_md = _build_deterministic_test_report(conclusion)
+    artifact_bytes = report_md.encode("utf-8", errors="replace")
+    digest = hashlib.sha256(artifact_bytes).hexdigest()
+    artifact = (
+        db.query(SandboxArtifact)
+        .filter(
+            SandboxArtifact.environment_id == environment.id,
+            SandboxArtifact.artifact_type == "review_report",
+            SandboxArtifact.sha256 == digest,
+            SandboxArtifact.byte_size == len(artifact_bytes),
+        )
+        .first()
+    )
+    artifact_error: str | None = None
+    if artifact is None:
+        try:
+            artifact = _persist_browser_artifact(
+                db,
+                environment,
+                artifact_type="review_report",
+                file_name=f"sandbox-review-report-{environment.public_id}.md",
+                mime_type="text/markdown",
+                content=artifact_bytes,
+            )
+        except Exception as exc:  # noqa: BLE001 - report-center persistence remains the primary receipt
+            artifact_error = str(exc)[:500]
+            db.rollback()
+            logger.exception("sandbox terminal report artifact failed public_id={}", environment.public_id)
+            environment = db.get(SandboxEnvironment, environment.id) or environment
+
+    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    persisted = bool(published.get("report_persisted"))
+    if persisted:
+        event_summary = {
+            "report_task_id": published.get("report_task_id"),
+            "execution_status": status,
+            "artifact_id": artifact.id if artifact is not None else None,
+        }
+        if artifact_error:
+            event_summary["artifact_failure"] = artifact_error
+        _append_event(db, environment, "complete", "report", "终态测试报告已保存到报告中心", event_summary)
+    else:
+        failure_code = str(published.get("failure_code") or "report_persistence_failed")
+        message = f"测试终态报告发布失败（{failure_code}）"
+        environment.error = f"{environment.error or ''}; {message}".strip("; ")[:4000]
+        _append_event(
+            db,
+            environment,
+            "failed",
+            "report",
+            message,
+            {"execution_status": status, "failure_code": failure_code},
+        )
+    db.commit()
+    return published
 
 
 def artifact_to_dict(row: SandboxArtifact, *, download_allowed: bool = True) -> dict[str, Any]:
@@ -6567,6 +6724,22 @@ def run_browser_blackbox(
     if not isinstance(runs, list):
         runs = []
     conclusion["browser_blackbox_runs"] = [*runs[-19:], evidence]
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    coverage = dict(coverage)
+    tested = coverage.get("tested") if isinstance(coverage.get("tested"), list) else []
+    coverage["tested"] = [*tested, f"授权目标浏览器黑盒探测 ({request_id})"]
+    if evidence.get("passed") is not True:
+        error = str(evidence.get("error") or "浏览器黑盒探测未通过")[:500]
+        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
+        coverage["errors"] = list(dict.fromkeys([*errors, error]))
+        conclusion["passed"] = False
+        conclusion["execution_status"] = "failed"
+        conclusion["error"] = error
+        environment.status = "failed"
+        environment.error = error
+    else:
+        conclusion.setdefault("execution_status", environment.status)
+    conclusion["coverage"] = coverage
     environment.result_json = _json(conclusion)
     _append_event(
         db,
@@ -6591,9 +6764,16 @@ def run_browser_blackbox(
         commit=False,
     )
     db.commit()
+    report = _publish_terminal_sandbox_report(
+        db,
+        environment,
+        execution_status=str(conclusion.get("execution_status") or environment.status),
+    )
     return {
         **evidence,
         "artifacts": [artifact_to_dict(row) for row in artifacts],
+        "report_task_id": report.get("report_task_id") if report else None,
+        "report_persisted": bool(report and report.get("report_persisted")),
     }
 
 
@@ -8182,7 +8362,13 @@ def _execute_environment(
                 "passed": passed,
                 "evidence": evidence,
             })
-        final_status = "failed" if environment.purpose == "test" and not passed else target_status
+        final_status = (
+            target_status
+            if environment.purpose == "test" and target_status in {"stopped", "expired", "blocked"}
+            else "failed"
+            if environment.purpose == "test" and not passed
+            else target_status
+        )
         if environment.purpose == "deploy":
             summary = "部署就绪" if passed else "部署失败"
             if auto_test_chain:
@@ -8218,6 +8404,12 @@ def _execute_environment(
             "evidence": evidence,
             "agent_code": environment.agent_code,
             "source_provenance": _source_provenance(environment, worker_receipt),
+            "execution_status": final_status,
+            "coverage": (
+                dict(worker_conclusion.get("coverage"))
+                if isinstance(worker_conclusion.get("coverage"), dict)
+                else {}
+            ),
         }
         if ai_model_stop_reason is not None:
             conclusion["ai_model_stop_reason"] = ai_model_stop_reason
@@ -8346,6 +8538,12 @@ def _execute_environment(
                     ),
                 },
                 "agent_code": environment.agent_code,
+                "execution_status": "stopped" if cancellation_requested else "failed",
+                "coverage": {
+                    "coverage_status": "partial",
+                    "unscanned": ["执行器未返回完成清单；终止时剩余测试范围未知"],
+                    "errors": [failure[:1000]],
+                },
             }
             environment.result_json = _json(conclusion)
             if cleanup_confirmed:
@@ -8367,6 +8565,21 @@ def _execute_environment(
                 environment.result_json = _json(conclusion)
                 _append_event(db, environment, "failed", "cleanup", "Worker 未确认全部资源终止，保留 stopping 状态")
             db.commit()
+            if cleanup_confirmed and cancellation_requested and environment.purpose == "test":
+                try:
+                    _publish_terminal_sandbox_report(
+                        db,
+                        environment,
+                        execution_status=str(conclusion["execution_status"]),
+                    )
+                except Exception as report_exc:  # noqa: BLE001 - a report error cannot revive or undo stop
+                    db.rollback()
+                    environment = db.get(SandboxEnvironment, environment_id)
+                    if environment is not None:
+                        message = f"测试终态报告发布失败：{str(report_exc)[:1000]}"
+                        environment.error = f"{environment.error or failure}; {message}"[:4000]
+                        _append_event(db, environment, "failed", "report", message)
+                        db.commit()
             if not cancellation_requested:
                 try:
                     review_summary = _persist_deterministic_test_review_fallback(
@@ -8581,6 +8794,16 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
+        if row.purpose == "test":
+            try:
+                _publish_terminal_sandbox_report(db, row, execution_status=row.status)
+            except Exception as exc:  # noqa: BLE001 - preserve the already-terminal execution state
+                db.rollback()
+                row = db.get(SandboxEnvironment, row.id) or row
+                message = f"测试终态报告发布失败：{str(exc)[:1000]}"
+                row.error = f"{row.error or ''}; {message}".strip("; ")[:4000]
+                _append_event(db, row, "failed", "report", message)
+                db.commit()
         return environment_to_dict(db, row, actor)
     worker = db.get(SandboxWorker, row.worker_id) if row.worker_id is not None else None
     row.status = "stopping"
@@ -8618,6 +8841,16 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
         commit=False,
     )
     db.commit()
+    if row.purpose == "test":
+        try:
+            _publish_terminal_sandbox_report(db, row, execution_status="stopped")
+        except Exception as exc:  # noqa: BLE001 - stop is terminal even if reporting fails
+            db.rollback()
+            row = db.get(SandboxEnvironment, row.id) or row
+            message = f"停止成功，但测试终态报告发布失败：{str(exc)[:1000]}"
+            row.error = f"{row.error or ''}; {message}".strip("; ")[:4000]
+            _append_event(db, row, "failed", "report", message)
+            db.commit()
     return environment_to_dict(db, row, actor)
 
 
@@ -8673,7 +8906,7 @@ def expire_due_environments() -> int:
             .all()
         )
         for row in rows:
-            worker = db.get(SandboxWorker, row.worker_id)
+            worker = db.get(SandboxWorker, row.worker_id) if row.worker_id is not None else None
             if row.worker_id is not None and worker is None:
                 row.status = "stopping"
                 row.error = f"Sandbox Worker 配置不存在：worker_id={row.worker_id}"
@@ -8690,6 +8923,21 @@ def expire_due_environments() -> int:
             row.status = "expired"
             row.stopped_at = _utcnow()
             _append_event(db, row, "complete", "expiry", "沙箱到期已回收")
+            # Commit worker cleanup and the expired terminal state before optional reporting;
+            # a report-center failure must never roll the sandbox back into an active state.
+            db.commit()
+            if row.purpose == "test":
+                try:
+                    _publish_terminal_sandbox_report(db, row, execution_status="expired")
+                except Exception as exc:  # noqa: BLE001 - preserve expired state and expose report failure
+                    db.rollback()
+                    row = db.get(SandboxEnvironment, row.id) or row
+                    row.status = "expired"
+                    row.stopped_at = row.stopped_at or _utcnow()
+                    message = f"到期回收完成，但测试终态报告发布失败：{str(exc)[:1000]}"
+                    row.error = f"{row.error or ''}; {message}".strip("; ")[:4000]
+                    _append_event(db, row, "failed", "report", message)
+                    db.commit()
             count += 1
         db.commit()
         return count

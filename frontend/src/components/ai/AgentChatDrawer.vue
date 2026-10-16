@@ -1461,9 +1461,7 @@ async function cancelResponse(reason = ''): Promise<void> {
       }
       const hint = result.status === 'completed'
         ? '任务已完成，无需停止；已保留最终结果。'
-        : reason.trim()
-          ? `已停止任务（原因：${reason.trim()}），未执行剩余操作；如需继续可重新发起。`
-          : '已停止任务，未执行剩余操作；如需继续可重新发起。'
+        : `${reason.trim() ? `已停止任务（原因：${reason.trim()}）` : '已停止任务'}，未执行剩余操作${result.cancelled_teams ? `；同时停止了 ${result.cancelled_teams} 个关联子 Agent 团队` : ''}；如需继续请重新发起。`
       messages.value.push({ id: messageId(), role: 'assistant', content: hint, time: dayjs().format('HH:mm') })
     }
     await nextTick()
@@ -1790,6 +1788,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       // 停止请求可能晚于真实完成；仅服务端确认cancelled才显示取消卡片。
       if (sessionRun.value?.status === 'completed') return true
       if (sessionRun.value?.status === 'failed' || sessionRun.value?.status === 'incomplete') return false
+      if (sessionRun.value?.status === 'cancelled') return false
       appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
       return false
     }

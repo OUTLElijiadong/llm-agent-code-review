@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 只准备本次完整 Git 制品的独立发布树，不直接切换运行应用。
+# 参数 6 可指定 bundle ref，参数 7 可指定活动生产仓库目录。
 set -Eeuo pipefail
 
 sha="${1:?完整提交 SHA 必填}"
@@ -7,13 +8,17 @@ expected_digest="${2:?Git bundle SHA-256 必填}"
 expected_size="${3:?Git bundle 字节数必填}"
 version="${4:?目标语义版本必填}"
 base_sha="${5:?当前活动生产完整 SHA 必填}"
+bundle_ref="${6:-refs/heads/codex/sandbox-php-context}"
+base="${7:-/opt/prism-releases/$base_sha}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_digest" =~ ^[0-9a-f]{64}$ ]]
 [[ "$expected_size" =~ ^[0-9]+$ ]]
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+[[ "$bundle_ref" =~ ^refs/(heads|tags)/[A-Za-z0-9._/-]+$ ]]
+[[ "$bundle_ref" != *..* && "$bundle_ref" != *//* && "$bundle_ref" != */ ]]
+[[ "$base" == /* && "$base" != / ]]
 
-base="/opt/prism-releases/$base_sha"
 bundle="/dev/shm/prism-v$version-$sha.bundle"
 dest="/opt/prism-releases/$sha"
 [[ -d "$base" && -f "$base/deploy/.env" && -f "$base/deploy/sandbox/.env" ]]
@@ -26,7 +31,7 @@ dest="/opt/prism-releases/$sha"
 # 继承实际活动生产的受保护 dotenv、证书挂载和账本，不读取其明文。
 cp --reflink=always -a "$base" "$dest"
 git -C "$dest" bundle verify "$bundle"
-git -C "$dest" fetch --no-tags "$bundle" refs/heads/codex/sandbox-php-context
+git -C "$dest" fetch --no-tags "$bundle" "$bundle_ref"
 git -C "$dest" checkout --detach FETCH_HEAD
 [[ "$(git -C "$dest" rev-parse HEAD)" == "$sha" ]]
 [[ "$(tr -d '[:space:]' < "$dest/VERSION")" == "$version" ]]

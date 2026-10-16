@@ -12,7 +12,7 @@ from app.agents.base import AgentResult
 from app.ai import finding_aggregator as aggregator_module
 from app.ai.multi_agent import get_agent_profiles
 from app.core.database import Base
-from app.core.exceptions import ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.api_config import UserApiConfig as UserApiConfig
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -289,15 +289,17 @@ def test_task_detail_report_link_capability_matches_owner_admin_and_report_avail
     task.status = "failed"
     rows.database.commit()
     owner_sandbox_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
-    member_sandbox_detail = review_service.get_task_detail(rows.database, member, task.id)
     assert owner_sandbox_detail.get("can_view_report") is True
-    assert member_sandbox_detail.get("can_view_report") is False
+    with pytest.raises(NotFoundError):
+        review_service.get_task_detail(rows.database, member, task.id)
 
     task.review_type = "standard"
     task.status = "failed"
     rows.database.commit()
-    unavailable_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
-    assert unavailable_detail.get("can_view_report") is False
+    failed_detail = review_service.get_task_detail(rows.database, rows.user, task.id)
+    member_failed_detail = review_service.get_task_detail(rows.database, member, task.id)
+    assert failed_detail.get("can_view_report") is True
+    assert member_failed_detail.get("can_view_report") is False
 
     creator_without_report_permission = User(
         username="report-owner-without-view", password="isolated", role="user", status=1,

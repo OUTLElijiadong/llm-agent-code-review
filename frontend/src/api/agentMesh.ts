@@ -139,7 +139,7 @@ export function acknowledgeAgentMeshMessage(
   surface: AgentMeshSurface,
   sessionId: string,
   messageId: string,
-  status: 'acknowledged' | 'processing' | 'completed' | 'failed' = 'completed',
+  status: 'acknowledged' | 'processing' | 'completed' | 'failed' | 'cancelled' = 'completed',
   summary = '',
 ): Promise<{ message_id: string; status: string }> {
   return post<{ message_id: string; status: string }>(

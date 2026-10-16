@@ -77,7 +77,7 @@ _TASK_FIELDS: tuple = (
     "total_files", "processed_files", "total_issues",
     "severe_issues", "high_issues", "medium_issues", "low_issues",
     "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
-    "start_time", "end_time", "create_time", "coverage", "agent_releases",
+    "start_time", "end_time", "create_time", "error_message", "coverage", "agent_releases",
 )
 
 # 模板目录路径(app/templates/)
@@ -271,6 +271,11 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized["name"] = task_name
     # project_name 不在 ReviewTask ORM 上,需调用方传入或补空
     normalized["project_name"] = _to_serializable(raw.get("project_name", "")) or ""
+    if not isinstance(normalized.get("coverage"), dict) or not normalized["coverage"]:
+        normalized["coverage"] = {
+            "coverage_status": "unknown",
+            "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+        }
     return normalized
 
 
@@ -590,7 +595,11 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
         f"{task.get('processed_files') or 0}/{task.get('total_files') or 0}（不等同于语义覆盖率）",
         "统计来源：" + json.dumps(context["source"], ensure_ascii=False, default=str),
         "覆盖记录：" + (
-            json.dumps(task["coverage"], ensure_ascii=False, default=str)
+            "未记录，不能据此判定完整覆盖；"
+            + json.dumps(task["coverage"], ensure_ascii=False, default=str)
+            if isinstance(task.get("coverage"), dict)
+            and task["coverage"].get("coverage_status") == "unknown"
+            else json.dumps(task["coverage"], ensure_ascii=False, default=str)
             if isinstance(task.get("coverage"), dict) and task["coverage"]
             else "未记录，不能据此判定完整覆盖"
         ),

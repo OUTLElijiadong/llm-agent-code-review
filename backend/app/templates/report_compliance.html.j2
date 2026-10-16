@@ -92,6 +92,12 @@
     <div class="meta">任务:{{ task_info.task_name or "未命名任务" }}</div>
     <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
     <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
+    <div class="meta"><strong>执行状态:</strong> {{ task_info.status or "未知" }}</div>
+    {% if task_info.error_message %}<div class="summary-box"><strong>执行错误:</strong> {{ task_info.error_message }}</div>{% endif %}
+    {% if task_info.coverage %}
+    <h2>扫描范围与覆盖情况</h2>
+    <pre class="summary-box">{{ task_info.coverage | tojson(indent=2) }}</pre>
+    {% endif %}
     <div class="meta">
       综合评分:
       {% if score >= 80 %}

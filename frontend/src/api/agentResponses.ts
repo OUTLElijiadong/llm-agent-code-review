@@ -60,6 +60,7 @@ export interface AgentResponseCancelResult {
   status: 'completed' | 'cancelled' | 'failed' | 'incomplete'
   output_text: string
   error: string
+  cancelled_teams?: number
 }
 
 export async function cancelAgentResponseRun(
@@ -86,6 +87,7 @@ export async function cancelAgentResponseRun(
         output_text: typeof event.response.output_text === 'string' ? event.response.output_text : '',
         error: error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
           ? error.message : '',
+        cancelled_teams: typeof event.response.cancelled_teams === 'number' ? event.response.cancelled_teams : 0,
       }
     },
   })

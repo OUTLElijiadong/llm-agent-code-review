@@ -3,11 +3,11 @@
 汇总服务器状态、安全态势、登录来源地理分布、Agent 活跃状态,
 供管理员总览大屏一次拉取渲染。
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import case, func, or_
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.agents.event_bus import AgentEventBus
@@ -284,6 +284,76 @@ def _agent_activity(db: Session) -> list[dict]:
     return sorted(result, key=lambda row: (row["status"] not in {"working", "thinking", "blocked"}, row["name"]))
 
 
+def _daily_token_usage(db: Session, days: int = 30, *, now: Optional[datetime] = None) -> dict:
+    """按 UTC 自然日汇总真实模型调用日志，未知 Token 记录单独计数。"""
+    observed_at = now or datetime.now(timezone.utc)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+    today = observed_at.astimezone(timezone.utc).date()
+    start_day = today - timedelta(days=days - 1)
+    end_day = today + timedelta(days=1)
+    start_at = datetime.combine(start_day, time.min, tzinfo=timezone.utc)
+    end_at = datetime.combine(end_day, time.min, tzinfo=timezone.utc)
+
+    component_total = func.coalesce(AiCallLog.prompt_tokens, 0) + func.coalesce(AiCallLog.completion_tokens, 0)
+    logged_total = func.coalesce(AiCallLog.total_tokens, 0)
+    effective_total = case(
+        (logged_total >= component_total, logged_total),
+        else_=component_total,
+    )
+    has_usage = or_(
+        AiCallLog.total_tokens.isnot(None),
+        and_(
+            AiCallLog.prompt_tokens.isnot(None),
+            AiCallLog.completion_tokens.isnot(None),
+        ),
+    )
+    rows = (
+        db.query(
+            func.date(AiCallLog.create_time).label("day"),
+            func.count(AiCallLog.id).label("calls"),
+            func.sum(case((has_usage, effective_total), else_=0)).label("tokens"),
+            func.sum(case((has_usage, 1), else_=0)).label("known_calls"),
+            func.sum(case((has_usage, 0), else_=1)).label("unknown_calls"),
+        )
+        .filter(AiCallLog.create_time >= start_at, AiCallLog.create_time < end_at)
+        .group_by(func.date(AiCallLog.create_time))
+        .all()
+    )
+    by_day = {
+        row.day.isoformat() if hasattr(row.day, "isoformat") else str(row.day): row
+        for row in rows
+    }
+    daily = []
+    for offset in range(days):
+        day = start_day + timedelta(days=offset)
+        key = day.isoformat()
+        row = by_day.get(key)
+        calls = int(row.calls or 0) if row else 0
+        known_calls = int(row.known_calls or 0) if row else 0
+        unknown_calls = int(row.unknown_calls or 0) if row else 0
+        # 仅有缺失 Token 的调用时返回 null，图表呈现断点而不是误报为 0。
+        tokens = (int(row.tokens or 0) if row else 0) if known_calls or not unknown_calls else None
+        daily.append({
+            "date": key,
+            "tokens": tokens,
+            "calls": calls,
+            "known_calls": known_calls,
+            "unknown_calls": unknown_calls,
+        })
+    total_tokens = sum(item["tokens"] or 0 for item in daily)
+    return {
+        "timezone": "UTC",
+        "days": days,
+        "start_date": start_day.isoformat(),
+        "end_date": today.isoformat(),
+        "total_tokens": total_tokens,
+        "known_calls": sum(item["known_calls"] for item in daily),
+        "unknown_calls": sum(item["unknown_calls"] for item in daily),
+        "daily": daily,
+    }
+
+
 def _login_geo(db: Session, days: int = 30) -> list[dict]:
     """近 N 天成功登录 IP 的地理分布(聚合打点)。
 
@@ -346,3 +416,13 @@ def overview_geo(db: Session = Depends(get_db), _: User = Depends(require_admin)
 def overview_agents_activity(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     """各 Agent 活跃状态(状态/并发用户/今日调用/用途)。"""
     return Resp(data=_agent_activity(db))
+
+
+@router.get("/overview/token-usage", response_model=Resp[dict])
+def overview_token_usage(
+    days: int = Query(default=30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """管理员每日 Token 趋势；只读真实 AiCallLog，缺失用量不伪装成零。"""
+    return Resp(data=_daily_token_usage(db, days=days))

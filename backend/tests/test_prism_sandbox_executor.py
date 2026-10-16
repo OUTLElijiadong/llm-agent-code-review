@@ -2133,7 +2133,8 @@ def test_late_browser_worker_result_respects_current_sandbox_state(
     assert environment.status == late_status
     if late_status == "succeeded" and not expired:
         assert len(json.loads(environment.result_json)["browser_blackbox_runs"]) == 1
-        assert db.query(SandboxArtifact).filter_by(environment_id=environment.id).count() == 1
+        artifacts = db.query(SandboxArtifact).filter_by(environment_id=environment.id).all()
+        assert {artifact.artifact_type for artifact in artifacts} == {"browser_evidence", "review_report"}
     else:
         assert json.loads(environment.result_json) == {"passed": True}
         assert db.query(SandboxArtifact).filter_by(environment_id=environment.id).count() == 0
@@ -2385,6 +2386,7 @@ def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(
         "test_report",
         "browser_screenshot",
         "browser_evidence",
+        "review_report",
     ]
     assert result["passed"] is True
     assert len(result["artifacts"]) == 2

@@ -236,7 +236,7 @@ test('问题追踪请求失败有明确反馈，两类请求可独立点击重�
   await expect(page.getByTestId('issue-project-load-error')).toHaveCount(0)
 })
 
-test('全局圆桌入口放在顶栏且不覆盖不同视口的问题卡片内容', async ({ page }) => {
+test('全局圆桌入口随小菱抽屉落在标题栏且窄屏布局不溢出', async ({ page }) => {
   await mockSession(page, false, false, true)
   await page.route(/\/api\/discuss\/sessions(?:\?.*)?$/, async (route) => {
     await route.fulfill({ json: { code: 0, message: 'ok', data: {
@@ -254,26 +254,22 @@ test('全局圆桌入口放在顶栏且不覆盖不同视口的问题卡片内�
     await expect(page.locator('.agent-trigger')).toBeVisible()
     await expect(page.locator('.agent-trigger .prismling')).toBeVisible()
     await expect(page.locator('.chat-fab')).toHaveCount(0)
-    const dock = page.locator('#roundtable-header-slot .roundtable-dock')
+    // 生产布局把圆桌入口放在小菱抽屉标题栏；先展开宿主，再核对它随标题栏布局且不产生横向溢出。
+    await page.locator('.agent-trigger').click()
+    const dock = page.locator('#roundtable-user-assistant-slot .roundtable-dock')
     await expect(dock).toBeVisible()
 
     const geometry = await page.evaluate(() => {
       const dockRect = document.querySelector('.roundtable-dock')!.getBoundingClientRect()
-      const headerRect = document.querySelector('.app-header')!.getBoundingClientRect()
-      const intersectsIssueContent = [...document.querySelectorAll('.issue-card .ic-main')].some((content) => {
-        const rect = content.getBoundingClientRect()
-        return dockRect.left < rect.right && dockRect.right > rect.left
-          && dockRect.top < rect.bottom && dockRect.bottom > rect.top
-      })
+      const headerRect = document.querySelector('.chat-header')!.getBoundingClientRect()
+      const actionsRect = document.querySelector('.chat-header-actions')!.getBoundingClientRect()
       return {
         inHeader: dockRect.top >= headerRect.top && dockRect.bottom <= headerRect.bottom
-          && dockRect.left >= headerRect.left && dockRect.right <= headerRect.right,
-        intersectsIssueContent,
+          && dockRect.left >= actionsRect.left && dockRect.right <= actionsRect.right,
         scrollWidth: document.documentElement.scrollWidth,
       }
     })
-    expect(geometry.inHeader, `圆桌入口应留在 ${width}px 视口的顶栏`).toBe(true)
-    expect(geometry.intersectsIssueContent, `圆桌入口不应盖住 ${width}px 视口的问题内容`).toBe(false)
+    expect(geometry.inHeader, `圆桌入口应留在 ${width}px 视口的小菱标题栏`).toBe(true)
     expect(geometry.scrollWidth).toBeLessThanOrEqual(width)
   }
 })

@@ -549,6 +549,112 @@ async def test_database_checkpoint_store_cancelled_is_terminal_against_write_bac
 
 
 @pytest.mark.asyncio
+async def test_database_checkpoint_store_late_cancel_cannot_replace_completed(db) -> None:
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-complete-cancel-race")
+    drive_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-complete-cancel-race")
+    cancel_store = DatabaseCheckpointStore(db, user_id=7, surface="user", session_key="session-complete-cancel-race")
+    checkpoint = RunCheckpoint(
+        run_id="run_store_complete_cancel_race",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "执行"}],
+        tools=[],
+        status="running",
+    )
+    assert await drive_store.create(checkpoint) is True
+
+    # 取消请求持有旧 running 快照；驱动循环先提交 completed。
+    stale_cancel = await cancel_store.load(checkpoint.run_id)
+    assert stale_cancel is not None
+    completed = RunCheckpoint.from_dict(stale_cancel.to_dict())
+    completed.status = "completed"
+    completed.output_text = "已完成"
+    await drive_store.save(completed)
+
+    # 同一个 SQLAlchemy Session 的 identity map 仍可能看到旧 running；条件 UPDATE
+    # 必须以数据库当前状态为准，阻止迟到取消覆盖已完成结果。
+    stale_cancel.status = "cancelled"
+    stale_cancel.cancel_reason = "迟到停止"
+    await cancel_store.save(stale_cancel)
+
+    db.expire_all()
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    assert row.status == "completed"
+    assert json.loads(row.checkpoint_json)["output_text"] == "已完成"
+
+
+@pytest.mark.asyncio
+async def test_runtime_cancel_returns_completed_after_stale_session_snapshot(tmp_path) -> None:
+    """取消 API 在 expire_on_commit=False 的跨 Session 竞争下返回数据库终态。"""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'cancel-result-refresh.db'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    from app.models.system_config import SystemConfig
+
+    SystemConfig.__table__.create(engine)
+    AgentMeshConversation.__table__.create(engine)
+    AgentResponseRun.__table__.create(engine)
+    AgentResponseTranscriptMessage.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    driver_db = factory()
+    cancel_db = factory()
+    verify_db = factory()
+    try:
+        _activate_conversation(driver_db, user_id=7, surface="user", session_key="session-cancel-result")
+        driver_store = DatabaseCheckpointStore(
+            driver_db,
+            user_id=7,
+            surface="user",
+            session_key="session-cancel-result",
+        )
+        cancel_store = DatabaseCheckpointStore(
+            cancel_db,
+            user_id=7,
+            surface="user",
+            session_key="session-cancel-result",
+        )
+        checkpoint = RunCheckpoint(
+            run_id="run_cancel_result_refresh",
+            model="deepseek-v4-flash",
+            transcript=[{"role": "user", "content": "执行"}],
+            tools=[],
+            status="running",
+        )
+        assert await driver_store.create(checkpoint) is True
+
+        # 取消 Session 先缓存 RUNNING，另一个请求随后提交 COMPLETED。
+        assert (await cancel_store.load(checkpoint.run_id)).status == "running"
+        completed = RunCheckpoint.from_dict(checkpoint.to_dict())
+        completed.status = "completed"
+        completed.output_text = "已完成"
+        await driver_store.save(completed)
+
+        runtime = DeepSeekResponsesRuntime(
+            transport=SimpleNamespace(),
+            tool_executor=SimpleNamespace(),
+            checkpoint_store=cancel_store,
+        )
+        result = await runtime.cancel(checkpoint.run_id, reason="迟到停止")
+
+        assert result.status == "completed"
+        assert result.output_text == "已完成"
+        persisted = await DatabaseCheckpointStore(
+            verify_db,
+            user_id=7,
+            surface="user",
+            session_key="session-cancel-result",
+        ).load(checkpoint.run_id)
+        assert persisted is not None
+        assert persisted.status == "completed"
+        assert persisted.output_text == "已完成"
+    finally:
+        driver_db.close()
+        cancel_db.close()
+        verify_db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> None:
     """真实跨请求模型:两个独立 Session,驱动循环持旧快照回写不能覆盖取消。"""
     engine = create_engine(
@@ -583,6 +689,10 @@ async def test_cancelled_is_terminal_across_independent_sessions(tmp_path) -> No
         cancelled.status = "cancelled"
         cancelled.cancel_reason = "需求变更"
         await cancel_store.save(cancelled)
+
+        refreshed = await driver_store.load(checkpoint.run_id)
+        assert refreshed is not None
+        assert refreshed.status == "cancelled"
 
         # 驱动循环再回写 waiting_approval,条件 UPDATE 不能覆盖取消终态。
         stale.status = "waiting_approval"

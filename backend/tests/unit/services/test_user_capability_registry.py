@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,7 +14,7 @@ from app.agents.events import DiscussionTurn
 from app.core.permission_codes import ALL_PERMISSION_CODES, PermissionCode
 from app.main import app
 from app.models.agent_governance import ApprovalItem
-from app.models.agent_response_run import AgentToolExecution
+from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -568,6 +569,21 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     original.report_task_id = 731
     bus.close_session(original.session_id)
 
+    # 续会只能由当前运行检查点中的明确用户消息触发，不能把工具参数
+    # 当作用户授权；这条行记录模拟刚收到用户续会请求的活动 Responses run。
+    db.add(AgentResponseRun(
+        run_id="run-roundtable-continuation",
+        user_id=user.id,
+        surface="user",
+        session_key="chat-current",
+        status="running",
+        checkpoint_json=json.dumps({
+            "transcript": [{"role": "user", "content": "请继续核对上次的权限边界结论。"}],
+        }),
+        version=1,
+    ))
+    db.commit()
+
     executor = PrismToolExecutor(
         db,
         user,
@@ -582,7 +598,7 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
         "control_roundtable_discussion",
         {
             "session_id": original.session_id,
-            "action": "user_input",
+            "action": "continue",
             "content": correction,
         },
         "{}",

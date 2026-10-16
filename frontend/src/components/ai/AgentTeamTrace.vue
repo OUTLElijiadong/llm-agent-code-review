@@ -35,6 +35,7 @@ const parentExpanded = inject(messageActivityExpandedKey, null)
 const embedded = computed(() => parentExpanded !== null)
 const detailsExpanded = computed(() => parentExpanded?.value ?? expanded.value)
 const tracePanelId = `agent-team-trace-panel-${getCurrentInstance()?.uid ?? 'instance'}`
+const selectedRootKey = ref<string | null>(null)
 const TRACE_PAGE_SIZE = 12
 const visibleTaskCount = ref(TRACE_PAGE_SIZE)
 const visibleEventCount = ref(TRACE_PAGE_SIZE)
@@ -75,6 +76,88 @@ const progressPercent = computed(() => {
   return Math.max(0, Math.min(100, Math.round((counts.value.completed / counts.value.total) * 100)))
 })
 const problemCount = computed(() => counts.value.failed + counts.value.blocked)
+
+interface DependencyGraphNode {
+  task: AgentTeamTask
+  x: number
+  y: number
+  isRoot: boolean
+}
+
+interface DependencyGraphEdge {
+  sourceKey: string
+  targetKey: string
+  path: string
+}
+
+function graphPoint(index: number): { x: number; y: number } {
+  return { x: 140 + (index % 3) * 360, y: 52 + Math.floor(index / 3) * 112 }
+}
+
+function graphPath(source: DependencyGraphNode, target: DependencyGraphNode): string {
+  const direction = source.x <= target.x ? 1 : -1
+  const sourceX = source.x + direction * 102
+  const targetX = target.x - direction * 102
+  const bend = Math.max(30, Math.abs(targetX - sourceX) * .42)
+  return `M ${sourceX} ${source.y} C ${sourceX + direction * bend} ${source.y}, ${targetX - direction * bend} ${target.y}, ${targetX} ${target.y}`
+}
+
+const dependencyGraph = computed(() => {
+  const allTasks = tasks.value as Array<AgentTeamTask & { depends_on?: unknown }>
+  const rawTasks = visibleTasks.value as Array<AgentTeamTask & { depends_on?: unknown }>
+  if (!rawTasks.length || allTasks.some((task) => (
+    typeof task.task_key !== 'string'
+    || !task.task_key.trim()
+    || !Array.isArray(task.depends_on)
+    || task.depends_on.some((dependency) => typeof dependency !== 'string' || !dependency.trim())
+  ))) return null
+
+  const taskByKey = new Map(allTasks.map((task) => [task.task_key, task]))
+  if (taskByKey.size !== allTasks.length) return null
+  if (allTasks.some((task) => (task.depends_on as string[]).some((dependency) => !taskByKey.has(dependency)))) return null
+  const visibleKeys = new Set(rawTasks.map((task) => task.task_key))
+  if (rawTasks.some((task) => (task.depends_on as string[]).some((dependency) => !visibleKeys.has(dependency)))) return null
+
+  const nodes: DependencyGraphNode[] = rawTasks.map((task, index) => ({
+    task,
+    ...graphPoint(index),
+    isRoot: (task.depends_on as string[]).length === 0,
+  }))
+  const nodeByKey = new Map(nodes.map((node) => [node.task.task_key, node]))
+  const edges: DependencyGraphEdge[] = rawTasks.flatMap((task) => (task.depends_on as string[]).map((sourceKey) => {
+    const source = nodeByKey.get(sourceKey)!
+    const target = nodeByKey.get(task.task_key)!
+    return { sourceKey, targetKey: task.task_key, path: graphPath(source, target) }
+  }))
+  const roots = nodes.filter((node) => node.isRoot)
+  const height = Math.max(120, Math.ceil(nodes.length / 3) * 112 + 24)
+  const labelText = `任务依赖图，${nodes.length} 个任务节点，${edges.length} 条由 depends_on 提供的依赖边。根节点：${roots.length ? roots.map((node) => node.task.title).join('、') : '无'}`
+  return { nodes, edges, roots, height, labelText }
+})
+
+const selectedRoot = computed(() => dependencyGraph.value?.roots.find((node) => node.task.task_key === selectedRootKey.value) ?? null)
+const tracedTaskKeys = computed(() => {
+  const graph = dependencyGraph.value
+  if (!graph || !selectedRoot.value) return new Set<string>()
+
+  const reachable = new Set<string>([selectedRoot.value.task.task_key])
+  const pending = [selectedRoot.value.task.task_key]
+  while (pending.length) {
+    const sourceKey = pending.shift()!
+    for (const edge of graph.edges) {
+      if (edge.sourceKey !== sourceKey || reachable.has(edge.targetKey)) continue
+      reachable.add(edge.targetKey)
+      pending.push(edge.targetKey)
+    }
+  }
+  return reachable
+})
+
+function traceFromRoot(taskKey: string): void {
+  selectedRootKey.value = selectedRootKey.value === taskKey ? null : taskKey
+}
+
+const dependencyMarkerId = computed(() => `agent-team-dependency-arrow-${props.team?.team_id ?? 'unknown'}`)
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '运行中', verifying: '验证中',
@@ -133,6 +216,7 @@ function collapseList(kind: 'task' | 'event' | 'message'): void {
 watch(
   () => props.team?.team_id,
   () => {
+    selectedRootKey.value = null
     visibleTaskCount.value = TRACE_PAGE_SIZE
     visibleEventCount.value = TRACE_PAGE_SIZE
     visibleMessageCount.value = TRACE_PAGE_SIZE
@@ -248,14 +332,96 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 
     <p v-if="error" class="agent-team-error" role="status">{{ error }}</p>
 
-    <div :id="tracePanelId" class="agent-team-trace-body" :hidden="!detailsExpanded">
-      <template v-if="detailsExpanded">
+    <div :id="tracePanelId" class="agent-team-trace-panel">
+      <Transition name="trace-expand">
+        <div v-if="detailsExpanded" class="agent-team-trace-body" data-layout="in-flow">
+          <div class="agent-team-trace-content">
       <div class="agent-team-stats" aria-label="团队任务统计">
         <span><b>{{ counts.completed }}</b>完成</span>
         <span><b>{{ counts.running }}</b>运行</span>
         <span><b>{{ counts.queued }}</b>排队</span>
         <span><b>{{ counts.failed + counts.blocked }}</b>失败/阻塞</span>
       </div>
+
+      <section v-if="tasks.length" class="agent-team-section" aria-label="任务依赖星图">
+        <h4>依赖星图</h4>
+        <div v-if="dependencyGraph" class="agent-team-dependency-map-wrap">
+          <svg
+            class="agent-team-dependency-map"
+            :viewBox="`0 0 1000 ${dependencyGraph.height}`"
+            role="img"
+            :aria-label="dependencyGraph.labelText"
+            preserveAspectRatio="xMinYMin meet"
+          >
+            <defs>
+              <marker :id="dependencyMarkerId" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L8,4 L0,8 z" />
+              </marker>
+            </defs>
+            <path
+              v-for="(edge, edgeIndex) in dependencyGraph.edges"
+              :key="`${edge.sourceKey}->${edge.targetKey}`"
+              :d="edge.path"
+              :data-dependency-edge="`${edge.sourceKey}->${edge.targetKey}`"
+              class="agent-team-dependency-edge"
+              :class="{
+                'is-traced': tracedTaskKeys.has(edge.sourceKey) && tracedTaskKeys.has(edge.targetKey),
+                'is-dimmed': Boolean(selectedRoot && (!tracedTaskKeys.has(edge.sourceKey) || !tracedTaskKeys.has(edge.targetKey))),
+              }"
+              :style="{ '--trace-delay': `${Math.min(edgeIndex * 32, 480)}ms` }"
+              :marker-end="`url(#${dependencyMarkerId})`"
+            />
+            <g
+              v-for="(node, nodeIndex) in dependencyGraph.nodes"
+              :key="node.task.task_key"
+              :data-task-node="node.task.task_key"
+              :data-task-root="node.isRoot ? node.task.task_key : undefined"
+              class="agent-team-dependency-node"
+              :class="{
+                'is-root': node.isRoot,
+                'is-traced': tracedTaskKeys.has(node.task.task_key),
+                'is-dimmed': Boolean(selectedRoot && !tracedTaskKeys.has(node.task.task_key)),
+              }"
+              :style="{ '--trace-delay': `${Math.min(dependencyGraph.edges.length * 32, 480) + Math.min(nodeIndex * 32, 384)}ms` }"
+              :transform="`translate(${node.x - 102}, ${node.y - 24})`"
+            >
+              <title>{{ node.task.title }} · {{ node.isRoot ? '根节点，无前置任务' : `依赖 ${node.task.depends_on.join('、')}` }}</title>
+              <rect width="204" height="48" rx="12" />
+              <circle cx="17" cy="17" r="6" />
+              <text x="31" y="20" class="agent-team-dependency-title">{{ node.task.title.length > 22 ? `${node.task.title.slice(0, 22)}…` : node.task.title }}</text>
+              <text x="31" y="37" class="agent-team-dependency-meta">{{ node.isRoot ? '根节点 · 无前置任务' : `依赖 ${node.task.depends_on.length} 项` }}</text>
+            </g>
+          </svg>
+          <p class="agent-team-dependency-roots">根节点溯源：{{ dependencyGraph.roots.length ? dependencyGraph.roots.map((node) => node.task.title).join('、') : '没有无前置依赖的任务' }}</p>
+          <div v-if="dependencyGraph.roots.length" class="agent-team-root-trace" role="group" aria-label="从根节点追溯任务链路">
+            <span>从根节点追溯</span>
+            <button
+              v-for="root in dependencyGraph.roots"
+              :key="`trace-root-${root.task.task_key}`"
+              type="button"
+              :aria-label="`从根节点 ${root.task.title} 追溯后续任务`"
+              :aria-pressed="selectedRootKey === root.task.task_key"
+              @click="traceFromRoot(root.task.task_key)"
+            >{{ root.task.title }}</button>
+            <button
+              v-if="selectedRoot"
+              type="button"
+              class="agent-team-root-trace-clear"
+              aria-label="清除根节点追溯"
+              @click="selectedRootKey = null"
+            >清除</button>
+          </div>
+          <p v-if="selectedRoot" class="agent-team-root-trace-status" role="status" aria-live="polite">
+            正在从“{{ selectedRoot.task.title }}”追溯：{{ tracedTaskKeys.size }} 个可达任务节点。
+          </p>
+          <ul class="agent-team-dependency-text" aria-label="任务依赖文字说明">
+            <li v-for="node in dependencyGraph.nodes" :key="`dependency-text-${node.task.task_key}`">
+              {{ node.isRoot ? `根节点：${node.task.title}，无前置任务。` : `${node.task.title} 依赖：${node.task.depends_on.join('、')}。` }}
+            </li>
+          </ul>
+        </div>
+        <p v-else class="agent-team-dependency-empty" role="status">依赖链路暂不可读，星图未绘制。</p>
+      </section>
 
       <section v-if="members.length" class="agent-team-section" aria-label="团队成员">
         <h4>成员</h4>
@@ -281,7 +447,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
                 <span class="agent-team-item-status">{{ label(task.status) }}</span>
               </div>
               <small>{{ taskMember(task) }} · 第 {{ task.attempt_count }}/{{ task.max_attempts }} 次</small>
-              <div v-if="task.depends_on.length" class="agent-team-dependencies">
+              <div v-if="Array.isArray(task.depends_on) && task.depends_on.length" class="agent-team-dependencies">
                 依赖: <code v-for="dependency in task.depends_on" :key="dependency">{{ dependency }}</code>
               </div>
               <details v-if="hasTaskEvidence(task)" class="agent-team-evidence">
@@ -398,7 +564,9 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
       <p v-if="!members.length && !tasks.length && !events.length && !messages.length" class="agent-team-empty">
         团队详情正在同步
       </p>
-      </template>
+          </div>
+        </div>
+      </Transition>
     </div>
   </section>
 </template>
@@ -407,7 +575,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 .agent-team-trace { box-sizing: border-box; width: 100%; min-width: 0; margin-top: 8px; overflow: hidden; border: 1px solid var(--gray-200); border-radius: 8px; background: #fff; color: var(--gray-800); font-size: 12px; }
 .agent-team-trace-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 8px 10px; }
 .agent-team-toggle { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; padding: 0; }
-.agent-team-caret { flex: none; color: var(--gray-400); font-size: 18px; line-height: 14px; transition: transform .15s ease; transform: rotate(0deg); }
+.agent-team-caret { flex: none; color: var(--gray-400); font-size: 18px; line-height: 14px; transition: transform var(--motion-duration-fast, 160ms) var(--motion-ease-standard, ease); transform: rotate(0deg); }
 .agent-team-caret.is-open { transform: rotate(90deg); }
 .agent-team-title { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
 .agent-team-status, .agent-team-item-status { flex: none; white-space: nowrap; color: var(--gray-500); font-size: 10px; }
@@ -439,7 +607,48 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 .agent-team-open-detail:hover { border-color: var(--brand-300); background: var(--brand-50); }
 .agent-team-error { margin: 0; padding: 0 10px 8px; color: var(--color-danger); overflow-wrap: anywhere; }
 .agent-team-history-error { margin: 5px 0 0; color: var(--color-danger); overflow-wrap: anywhere; }
-.agent-team-trace-body { min-width: 0; padding: 0 10px 10px; border-top: 1px solid var(--gray-100); }
+.agent-team-trace-panel { min-width: 0; }
+.agent-team-trace-body { display: grid; grid-template-rows: 1fr; min-width: 0; min-height: 0; overflow: hidden; opacity: 1; }
+.trace-expand-enter-active, .trace-expand-leave-active { transition: grid-template-rows var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease), opacity var(--motion-duration-fast, 160ms) ease; }
+.trace-expand-enter-from, .trace-expand-leave-to { grid-template-rows: 0fr; opacity: 0; }
+.trace-expand-enter-to, .trace-expand-leave-from { grid-template-rows: 1fr; opacity: 1; }
+.agent-team-trace-content { min-width: 0; min-height: 0; overflow: hidden; padding: 0 10px 10px; border-top: 1px solid var(--gray-100); }
+.agent-team-dependency-map-wrap { position: relative; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; }
+.agent-team-dependency-map { display: block; width: 100%; min-width: 600px; height: auto; overflow: visible; }
+.agent-team-dependency-edge {
+  fill: none;
+  stroke: #8C85F2;
+  stroke-width: 2;
+  opacity: .62;
+  stroke-dasharray: 2000;
+  stroke-dashoffset: 2000;
+  animation: trace-edge-grow var(--motion-duration-emphasis, 520ms) var(--motion-ease-standard, ease) var(--trace-delay, 0ms) both;
+  transition: opacity var(--motion-duration-fast, 160ms) ease, stroke-width var(--motion-duration-fast, 160ms) ease;
+}
+@keyframes trace-edge-grow { from { stroke-dashoffset: 2000; } to { stroke-dashoffset: 0; } }
+.agent-team-dependency-map marker path { fill: #675BEE; }
+.agent-team-dependency-node { opacity: 0; animation: trace-node-reveal var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease) var(--trace-delay, 0ms) both; transition: opacity var(--motion-duration-fast, 160ms) ease; }
+@keyframes trace-node-reveal { from { opacity: 0; filter: drop-shadow(0 0 0 rgba(103,91,238,0)); } to { opacity: 1; filter: drop-shadow(0 3px 5px rgba(103,91,238,.12)); } }
+.agent-team-dependency-node rect { fill: #fff; stroke: #DEE1ED; stroke-width: 1.4; transition: stroke var(--motion-duration-fast, 160ms) ease, stroke-width var(--motion-duration-fast, 160ms) ease, fill var(--motion-duration-fast, 160ms) ease; }
+.agent-team-dependency-node circle { fill: #675BEE; }
+.agent-team-dependency-node.is-root rect { fill: #F4F3FF; stroke: #A9A4F8; }
+.agent-team-dependency-node.is-root circle { fill: #32A987; }
+.agent-team-dependency-edge.is-traced { stroke: #5146D9; stroke-width: 3.4; opacity: 1; filter: drop-shadow(0 1px 3px rgba(81,70,217,.42)); }
+.agent-team-dependency-edge.is-dimmed { stroke: #AEB2C1; opacity: .16; }
+.agent-team-dependency-node.is-traced rect { fill: #EFEEFF; stroke: #675BEE; stroke-width: 2.6; }
+.agent-team-dependency-node.is-traced circle { fill: #1D9B78; }
+.agent-team-dependency-node.is-dimmed > * { opacity: .24; }
+.agent-team-dependency-title { fill: #31364A; font-size: 13px; font-weight: 650; }
+.agent-team-dependency-meta { fill: #777E94; font-size: 10px; }
+.agent-team-dependency-roots { margin: 4px 0 0; color: var(--gray-500); font-size: 10.5px; overflow-wrap: anywhere; }
+.agent-team-root-trace { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 7px; color: var(--gray-500); font-size: 10px; }
+.agent-team-root-trace button { min-height: 30px; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 999px; background: #fff; color: var(--brand-600); font: inherit; cursor: pointer; }
+.agent-team-root-trace button:hover, .agent-team-root-trace button[aria-pressed='true'] { border-color: var(--brand-400); background: var(--brand-50); color: #5146D9; }
+.agent-team-root-trace button[aria-pressed='true'] { box-shadow: inset 0 0 0 1px rgba(103,91,238,.16); font-weight: 650; }
+.agent-team-root-trace .agent-team-root-trace-clear { border-color: transparent; background: transparent; color: var(--gray-500); text-decoration: underline; }
+.agent-team-root-trace-status { margin: 5px 0 0; color: var(--brand-600); font-size: 10px; }
+.agent-team-dependency-empty { margin: 0; padding: 10px; border: 1px dashed var(--gray-300); border-radius: 6px; color: var(--gray-500); text-align: center; }
+.agent-team-dependency-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .agent-team-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px 0; color: var(--gray-500); text-align: center; }
 .agent-team-stats span { min-width: 0; overflow-wrap: anywhere; }
 .agent-team-stats b { display: block; color: var(--gray-900); font-size: 14px; line-height: 17px; }
@@ -468,6 +677,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 .agent-team-pager-actions { display: flex; gap: 4px; margin-left: auto; }
 .agent-team-page-action { min-width: 56px; min-height: 32px; border: 1px solid var(--gray-300); border-radius: 4px; background: #fff; color: var(--brand-600); cursor: pointer; font-size: 11px; line-height: 1.2; }
 .agent-team-page-action:hover { border-color: var(--brand-300); background: var(--brand-50); }
+.agent-team-toggle:focus-visible, .agent-team-open-detail:focus-visible, .agent-team-page-action:focus-visible, .agent-team-root-trace button:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; }
 .agent-team-record-detail { grid-column: 2; min-width: 0; color: var(--gray-500); }
 .agent-team-record-detail summary { cursor: pointer; overflow-wrap: anywhere; font-size: 10px; }
 .agent-team-record-detail code { display: block; margin-top: 4px; color: var(--gray-700); white-space: pre-wrap; }
@@ -492,5 +702,9 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
 @media (prefers-reduced-motion: reduce) {
   .agent-team-progress-fill { transition: none; }
   .agent-team-caret { transition: none; }
+  .trace-expand-enter-active, .trace-expand-leave-active { transition: none; }
+  .agent-team-dependency-edge { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; transition: none; }
+  .agent-team-dependency-node { animation: none; opacity: 1; filter: none; transition: none; }
+  .agent-team-dependency-node rect { transition: none; }
 }
 </style>

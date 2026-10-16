@@ -11,6 +11,7 @@ from sqlalchemy.sql.dml import Update
 from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_governance import AgentMemory
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
+from app.models.agent_response_run import AgentResponseRun
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
@@ -19,6 +20,7 @@ from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_responses_service, agent_team_service, sandbox_service
+from app.services.ai_usage_context import usage_context
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 
 
@@ -1686,6 +1688,67 @@ def test_cancel_reclaims_running_tasks_and_invalidates_lease(db, team_user):
             lease_token=claimed["lease_token"],
             result={},
         )
+
+
+def test_cancel_response_teams_only_cancels_teams_from_the_stopped_run(db, team_user):
+    root = AgentResponseRun(
+        run_id="parent-run-stopped",
+        user_id=team_user.id,
+        surface="user",
+        session_key="session-a1",
+        status="running",
+        checkpoint_json="{}",
+        version=1,
+    )
+    other = AgentResponseRun(
+        run_id="parent-run-other-session",
+        user_id=team_user.id,
+        surface="user",
+        session_key="session-b1",
+        status="running",
+        checkpoint_json="{}",
+        version=1,
+    )
+    db.add_all([root, other])
+    db.commit()
+
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        stopped_team = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+    with usage_context(team_user.id, {"agent_run_id": other.id, "root_agent_run_id": other.id}):
+        unrelated_team = agent_team_service.create_team_from_xiaoling(
+            db, team_user, _payload(session_id="session-b1"),
+        )
+
+    cancelled_count = agent_team_service.cancel_response_teams(
+        db,
+        team_user,
+        run_id=root.run_id,
+        surface="user",
+        session_key="session-a1",
+        reason="用户停止父级小菱运行",
+    )
+
+    assert cancelled_count == 1
+    assert db.get(AgentTeam, stopped_team["team_id"]).status == "cancelled"
+    assert db.get(AgentTeam, unrelated_team["team_id"]).status == "queued"
+
+
+def test_create_team_is_blocked_after_parent_response_run_is_cancelled(db, team_user):
+    root = AgentResponseRun(
+        run_id="cancelled-parent-run",
+        user_id=team_user.id,
+        surface="user",
+        session_key="session-a1",
+        status="cancelled",
+        checkpoint_json="{}",
+        version=1,
+    )
+    db.add(root)
+    db.commit()
+
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        with pytest.raises(agent_team_service.AgentTeamValidationError, match="父级小菱运行已结束"):
+            agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
 
 
 def test_expired_lease_stops_persisted_runtime_resource_before_requeue(db, team_user, monkeypatch):

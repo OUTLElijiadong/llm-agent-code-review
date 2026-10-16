@@ -271,18 +271,14 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
         _issues(db, task)
     db.commit()
 
-    if source == "sandbox_test":
-        assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == 2
-        assert _listed(db, source_owner, task)["status"] == "failed"
-    else:
-        with pytest.raises(NotFoundError):
-            report_service.get_report_detail(db, source_owner, task.id)
-        assert report_service.list_reports(db, source_owner)["total"] == 0
+    assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == 2
+    assert _listed(db, source_owner, task)["status"] == "failed"
+    assert report_service.list_reports(db, source_owner)["total"] == 1
     summary = dashboard_service.get_summary(db, source_owner)
     assert summary["review_count"] == 0
     assert summary["avg_score"] == 0
     assert summary["recent_tasks"] == []
-    assert summary["total_issues"] == (0 if source == "pentest" else 2)
+    assert summary["total_issues"] == 2
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])

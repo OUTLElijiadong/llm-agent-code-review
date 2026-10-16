@@ -118,6 +118,9 @@
               />
             </svg>
             <span v-if="reportMetricsRestricted(row)" class="no-score">报告受限</span>
+            <span v-else-if="row.review_type === 'sandbox_test' && row.coverage?.coverage_status !== 'complete'" class="no-score">
+              {{ sandboxCoverageLabel(row.coverage?.coverage_status) }}
+            </span>
             <span v-else-if="row.status === 'success' && row.score != null" :class="scoreClass(row.score)">{{ row.score }}</span>
             <span v-else class="no-score">未形成评分</span>
           </div>
@@ -245,6 +248,12 @@ function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
   if (score >= 60) return 'score-medium'
   return 'score-low'
+}
+
+function sandboxCoverageLabel(status?: string | null) {
+  if (status === 'partial') return '验证范围不完整'
+  if (status === 'failed') return '验证未通过'
+  return '验证范围未记录'
 }
 
 function formatDuration(ms: number): string {

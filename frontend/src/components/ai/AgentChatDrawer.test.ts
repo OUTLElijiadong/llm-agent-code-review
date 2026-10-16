@@ -870,17 +870,17 @@ describe('AgentChatDrawer Responses stream', () => {
     const activity = wrapper.get('.agent-message-activity')
     expect(activity.attributes('open')).toBeUndefined()
     expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
-    const tracePanel = wrapper.find('.agent-team-trace-body')
-    expect(tracePanel.exists()).toBe(true)
-    expect(tracePanel.attributes('hidden')).toBeDefined()
+    const tracePanel = wrapper.get('.agent-team-trace-panel')
+    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
     expect(tracePanel.find('.agent-team-stats').exists()).toBe(false)
 
     // 团队嵌入聊天过程卡后共用外层原生 disclosure；打开后团队内容应随之显示。
     await expandTimeline(wrapper)
     expect(activity.attributes('open')).toBeDefined()
     expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
-    expect(tracePanel.attributes('hidden')).toBeUndefined()
-    expect(tracePanel.get('.agent-team-stats').isVisible()).toBe(true)
+    const traceBody = tracePanel.get('.agent-team-trace-body')
+    expect(traceBody.isVisible()).toBe(true)
+    expect(traceBody.get('.agent-team-stats').isVisible()).toBe(true)
     wrapper.unmount()
   })
 
@@ -1513,7 +1513,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片', async () => {
+  it('运行中显示「停止响应」,服务端确认取消后不展示可触发重跑的错误卡片', async () => {
     const wrapper = await mountReadyDrawer()
     expect(wrapper.find('.stop-btn').exists()).toBe(false)
 
@@ -1540,29 +1540,17 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(streams.records[0].aborted).toBe(true)
     const bubbles = wrapper.findAll('.msg-row.assistant .markdown-body')
     expect(bubbles.some((bubble) => bubble.text().includes('我先看一下项目结构'))).toBe(true)
-    // 取消后错误卡片留在消息流,带重试与新建对话入口
-    const errorCard = wrapper.find('.msg-error-card')
-    expect(errorCard.exists()).toBe(true)
-    expect(errorCard.text()).toContain('已停止本次回答')
-    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(true)
+    // 手动停止是最终状态;不展示重试按钮,防止停止回合与重试入口混淆。
+    expect(wrapper.find('.msg-error-card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('已停止任务')
+    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(false)
     // 运行结束,停止按钮自动隐藏
     expect(wrapper.find('.stop-btn').exists()).toBe(false)
     expect(wrapper.find('.send-btn').exists()).toBe(true)
     expect(messages.error).not.toHaveBeenCalled()
 
-    // 点「重试」重新启动；上下文由同账号服务端账本恢复。
-    await wrapper.find('.msg-error-btn.is-retry').trigger('click')
-    await settleAll()
-    expect(streams.records[1].body).toMatchObject({
-      action: 'start',
-      surface: 'user',
-      messages: [{ role: 'user', content: '帮我分析这个项目' }],
-      use_server_history: true,
-    })
-    emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
-    emit(1, { type: 'response.completed', response: { id: 'run-stop-retry' } })
-    await finish(1)
-    expect(wrapper.text()).toContain('这次顺利完成了')
+    expect(streams.records).toHaveLength(1)
+    expect(responseApi.cancel).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 

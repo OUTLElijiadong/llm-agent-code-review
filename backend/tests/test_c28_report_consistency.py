@@ -118,6 +118,7 @@ def test_html_templates_preserve_frozen_scope_and_unknown_coverage(admin_client,
     assert "a" * 64 in response.text
     assert "不等同于语义覆盖率" in response.text
     if coverage is None:
+        assert "coverage_status" in response.text and "unknown" in response.text
         assert "未记录，不能据此判定完整覆盖" in response.text
     else:
         assert coverage["stage"] in response.text
@@ -159,7 +160,8 @@ def test_legacy_file_inventory_does_not_invent_frozen_versions(admin_client):
     report = response.json()
     assert len(report["files"]) == 2
     assert all(item["version_no"] is None and item["content_sha256"] is None for item in report["files"])
-    assert report["task_info"]["coverage"] is None
+    assert report["task_info"]["coverage"]["coverage_status"] == "unknown"
+    assert "无法确认实际扫描范围" in report["task_info"]["coverage"]["unscanned"][0]
 
 
 def test_pdf_code_fragments_select_chinese_font_and_preserve_literal_markup():
@@ -181,7 +183,8 @@ def test_pdf_code_fragments_select_chinese_font_and_preserve_literal_markup():
 def test_normalization_keeps_unknown_scope_unknown_for_direct_export():
     context = export_to_dict({"id": 1, "task_name": "历史任务"}, [], "", 100)
     assert context["files"] == []
-    assert context["task_info"]["coverage"] is None
+    assert context["task_info"]["coverage"]["coverage_status"] == "unknown"
+    assert "无法确认实际扫描范围" in context["task_info"]["coverage"]["unscanned"][0]
     assert any("不能由问题列表推断全部送审文件" in line for line in context["scope_lines"])
 
 

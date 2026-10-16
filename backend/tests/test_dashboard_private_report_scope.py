@@ -219,7 +219,7 @@ def test_private_scores_are_filtered_before_trend_limit(private_dashboard, sourc
     assert [(item["task_id"], item["score"]) for item in trend] == [(private_dashboard["ordinary"].id, 88)]
 
 
-@pytest.mark.parametrize("source,new_status", [("sandbox_test", "cancelled"), ("pentest", "failed")])
+@pytest.mark.parametrize("source,new_status", [("sandbox_test", "running"), ("pentest", "pending")])
 def test_unavailable_domain_result_cannot_reuse_warm_dashboard_cache(
     private_dashboard, monkeypatch, source, new_status,
 ):

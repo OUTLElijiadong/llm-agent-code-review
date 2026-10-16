@@ -53,6 +53,7 @@ CANCELLED = "cancelled"
 
 # 可通过 retry / 幂等续跑恢复的终态；cancelled 与 completed 不可恢复。
 _TERMINAL_RECOVERABLE_STATUSES = frozenset({FAILED, INCOMPLETE, MAX_ROUNDS_EXCEEDED})
+_CANCEL_POLL_INTERVAL_SECONDS = 0.25
 
 DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000
 SEMANTIC_SUMMARY_FORMAT_VERSION = 3
@@ -315,6 +316,7 @@ class RuntimeResult:
     error: str = ""
     rounds: int = 0
     events: Tuple[Mapping[str, Any], ...] = ()
+    cancelled_teams: int = 0
 
 
 TransportOutput = Union[
@@ -389,7 +391,7 @@ class InMemoryCheckpointStore:
     async def save(self, checkpoint: RunCheckpoint) -> None:
         async with self._lock:
             current = self._items.get(checkpoint.run_id)
-            if current is not None and current.get("status") == CANCELLED and checkpoint.status != CANCELLED:
+            if current is not None and current.get("status") in {COMPLETED, CANCELLED}:
                 return
             self._items[checkpoint.run_id] = checkpoint.to_dict()
 
@@ -769,6 +771,11 @@ class DeepSeekResponsesRuntime:
 
     async def _mark_cancelled(self, checkpoint: RunCheckpoint, *, reason: str = "") -> RuntimeResult:
         """把检查点收敛为用户取消终态；旧执行者不得再覆盖该结果。"""
+        latest = await self._store.load(checkpoint.run_id)
+        if latest is None:
+            raise RunNotFoundError(f"运行 {checkpoint.run_id} 不存在或检查点已失效")
+        if latest.status in {COMPLETED, CANCELLED}:
+            return self._result(latest)
         checkpoint.status = CANCELLED
         checkpoint.pending = None
         checkpoint.error = ""
@@ -782,7 +789,12 @@ class DeepSeekResponsesRuntime:
             else f"用户取消了本次运行。{suffix}"
         )
         await self._store.save(checkpoint)
-        return self._result(checkpoint)
+        # Store 以原子终态门保护 completed/cancelled 的先到者；重读后返回
+        # 最终持久状态，避免把迟到取消请求误报成已取消。
+        persisted = await self._store.load(checkpoint.run_id)
+        if persisted is None:
+            raise RunNotFoundError(f"运行 {checkpoint.run_id} 不存在或检查点已失效")
+        return self._result(persisted)
 
     async def _semantic_compact(
         self,
@@ -1390,9 +1402,23 @@ class DeepSeekResponsesRuntime:
                 except (Exception, asyncio.CancelledError) as exc:
                     observed = getattr(exc, "observed_response", {})
                     observed = dict(observed) if isinstance(observed, Mapping) else {}
+                    was_interrupted = isinstance(exc, asyncio.CancelledError)
+                    was_user_cancelled = False
+                    if was_interrupted:
+                        try:
+                            latest = await self._store.load(checkpoint.run_id)
+                            was_user_cancelled = latest is not None and latest.status == CANCELLED
+                        except Exception:  # noqa: BLE001 - 保留原始取消/中断信号
+                            was_user_cancelled = False
                     failed_response = {
                         **(dict(observed) if isinstance(observed, Mapping) else {}),
-                        "status": FAILED, "model": observed.get("model") or payload["model"], "error": str(exc),
+                        "status": CANCELLED if was_user_cancelled else FAILED,
+                        "model": observed.get("model") or payload["model"],
+                        "error": (
+                            "模型请求因用户停止而中断"
+                            if was_user_cancelled
+                            else str(exc) or ("模型请求被外部取消" if was_interrupted else "")
+                        ),
                     }
                     if self._on_round is not None:
                         try:
@@ -1400,7 +1426,7 @@ class DeepSeekResponsesRuntime:
                             # 仅供用量审计记录输入/输出关联。兼容原有单参数回调。
                             self._on_round({**failed_response, "_request_payload": copy.deepcopy(payload)})
                         except Exception as log_error:
-                            if isinstance(exc, asyncio.CancelledError):
+                            if was_interrupted:
                                 raise exc from log_error
                             raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
                     raise
@@ -1413,8 +1439,55 @@ class DeepSeekResponsesRuntime:
                         raise RoundAccountingError("模型请求已执行，但该轮用量记账失败") from log_error
                 return response, turn_events
 
+            async def _wait_for_cancel() -> RuntimeResult:
+                """跨请求轮询持久状态，及时中断当前 HTTP stream。"""
+                while True:
+                    if self._cancel_requested(checkpoint.run_id):
+                        latest = await self._store.load(checkpoint.run_id)
+                        if latest is not None and latest.status in {COMPLETED, CANCELLED}:
+                            return self._result(latest)
+                        return await self._mark_cancelled(
+                            checkpoint,
+                            reason=self._cancel_reasons.get(checkpoint.run_id, ""),
+                        )
+                    persisted = await self._refresh_cancelled_checkpoint(checkpoint)
+                    if persisted is not None:
+                        return persisted
+                    await asyncio.sleep(_CANCEL_POLL_INTERVAL_SECONDS)
+
+            async def _run_model_round_or_cancel() -> Union[
+                tuple[Dict[str, Any], List[Mapping[str, Any]]], RuntimeResult
+            ]:
+                """Race model I/O against durable cancellation and close transport on stop."""
+                model_task = asyncio.create_task(_run_model_round())
+                cancel_task = asyncio.create_task(_wait_for_cancel())
+                try:
+                    done, _ = await asyncio.wait(
+                        {model_task, cancel_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if cancel_task in done:
+                        cancelled_result = cancel_task.result()
+                        model_task.cancel()
+                        await asyncio.gather(model_task, return_exceptions=True)
+                        return cancelled_result
+                    cancel_task.cancel()
+                    await asyncio.gather(cancel_task, return_exceptions=True)
+                    return await model_task
+                except BaseException:
+                    model_task.cancel()
+                    cancel_task.cancel()
+                    await asyncio.gather(model_task, cancel_task, return_exceptions=True)
+                    raise
+
             try:
-                response, turn_events = await _run_model_round()
+                round_result = await _run_model_round_or_cancel()
+                if isinstance(round_result, RuntimeResult):
+                    return replace(
+                        round_result,
+                        events=tuple(copy.deepcopy(events)) + round_result.events,
+                    )
+                response, turn_events = round_result
             except Exception as exc:  # noqa: BLE001 - transport 错误转为可恢复检查点
                 # 只有模型不可用且尚未回退时,才在同一轮把 orchestrator 模型降级到
                 # flash/自定义降级模型并重试一次;工具调用或其他异常分支不触发回退。
@@ -1428,7 +1501,13 @@ class DeepSeekResponsesRuntime:
                     payload["model"] = checkpoint.model
                     await self._store.save(checkpoint)
                     try:
-                        response, turn_events = await _run_model_round()
+                        round_result = await _run_model_round_or_cancel()
+                        if isinstance(round_result, RuntimeResult):
+                            return replace(
+                                round_result,
+                                events=tuple(copy.deepcopy(events)) + round_result.events,
+                            )
+                        response, turn_events = round_result
                     except Exception as retry_exc:  # noqa: BLE001 - 回退后仍失败按原逻辑置终态
                         checkpoint.status = FAILED
                         checkpoint.error = f"Responses transport 调用失败: {retry_exc}"

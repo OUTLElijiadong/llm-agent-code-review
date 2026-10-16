@@ -22,7 +22,10 @@
                   · {{ currentSpeaker }} 决策中
                 </span>
                 <span v-else-if="phase === 'concluded'" class="speaker-info done">
-                  · 讨论已结束
+                  · {{ terminalLabel }}
+                </span>
+                <span v-else-if="stageMessage" class="speaker-info">
+                  · {{ stageMessage }}
                 </span>
                 <span v-if="isFollowupOpen" class="speaker-info done">
                   · 追问剩余 {{ followupCountdown }}
@@ -276,6 +279,14 @@ const reportTaskId = ref(props.initialReportTaskId || 0)
 
 type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 type Phase = 'live' | 'concluded'
+type TerminalStatus = 'success' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted' | ''
+
+function normalizeTerminalStatus(value: unknown): TerminalStatus {
+  const status = String(value || '')
+  return ['success', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(status)
+    ? status as TerminalStatus
+    : ''
+}
 
 const turns = ref<DiscussionTurn[]>([...(props.initialTurns || [])].sort((a, b) =>
   Number(a.seq || 0) - Number(b.seq || 0)))
@@ -294,10 +305,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 let disposed = false
 const status = ref<ConnStatus>('connecting')
+const terminalStatus = ref<TerminalStatus>(normalizeTerminalStatus(props.initialStatus))
 const phase = ref<Phase>(
-  ['concluded', 'completed', 'failed', 'cancelled', 'interrupted'].includes(props.initialStatus || '')
+  ['concluded', 'success', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(props.initialStatus || '')
     ? 'concluded' : 'live',
 )
+const stageMessage = ref('')
 const lastError = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
@@ -306,7 +319,6 @@ const currentSpeakerCode = ref('')
 const serverProgress = ref<DiscussionProgress | null>(props.initialProgress ?? null)
 const observedSpeakers = ref(turns.value.filter((turn) => turn.role === 'agent' && turn.agent_code !== 'orchestrator').length)
 let lastProgressSeq = Number(props.initialProgress?.seq ?? -1)
-const terminalStatus = ref('')
 const followupUntil = ref(Number(props.initialFollowupUntil) || 0)
 const followupStartSeq = ref<number | null>(
   Number.isFinite(props.initialProgress?.followup_start_seq)
@@ -428,19 +440,33 @@ const quickPrompts = [
 
 const statusTag = computed(() => {
   if (phase.value === 'concluded') {
-    if (serverProgress.value?.phase === 'partial') return { type: 'warning' as const, text: '部分完成' }
-    const terminal = ['failed', 'cancelled', 'interrupted'].includes(terminalStatus.value)
-      ? terminalStatus.value : serverProgress.value?.phase || props.initialStatus
-    if (terminal === 'failed') return { type: 'danger' as const, text: '失败' }
-    if (terminal === 'interrupted') return { type: 'warning' as const, text: '已中断' }
-    if (terminal === 'cancelled') return { type: 'info' as const, text: '已取消' }
-    return { type: 'info' as const, text: '已结束' }
+    const labels: Record<Exclude<TerminalStatus, ''>, { type: 'success' | 'warning' | 'danger' | 'info'; text: string }> = {
+      success: { type: 'success', text: '已完成' },
+      completed: { type: 'success', text: '已完成' },
+      partial: { type: 'warning', text: '部分完成' },
+      failed: { type: 'danger', text: '失败' },
+      cancelled: { type: 'info', text: '已取消' },
+      interrupted: { type: 'warning', text: '已中断' },
+    }
+    const terminal = terminalStatus.value
+      || normalizeTerminalStatus(serverProgress.value?.phase)
+      || normalizeTerminalStatus(props.initialStatus)
+    return terminal ? labels[terminal] : { type: 'info' as const, text: '已结束' }
   }
   if (status.value === 'connecting') return { type: 'warning' as const, text: '连接中' }
   if (status.value === 'connected') return { type: 'success' as const, text: isPaused.value ? '已暂停' : '进行中' }
   if (status.value === 'error') return { type: 'danger' as const, text: '连接错误' }
   return { type: 'danger' as const, text: '已断开' }
 })
+const terminalLabel = computed(() => ({
+  success: '讨论已完成',
+  completed: '讨论已完成',
+  partial: '讨论部分完成',
+  failed: '讨论失败',
+  cancelled: '讨论已取消',
+  interrupted: '讨论已中断',
+  '': '讨论已结束',
+}[terminalStatus.value]))
 
 const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
 const hasCompletedReport = computed(() => !['failed', 'cancelled', 'interrupted', 'partial'].includes(terminalStatus.value)
@@ -496,7 +522,8 @@ const progressPercent = computed(() => {
   const actual = Math.round(progressCompleted.value / progressTotal.value * 100)
   // 完成所有发言并不等于主持汇总、结构化抽取和报告落库成功。
   const completed = phase.value === 'concluded'
-    && (serverProgress.value?.phase === 'completed' || terminalStatus.value === 'success')
+    && (serverProgress.value?.phase === 'completed'
+      || terminalStatus.value === 'success' || terminalStatus.value === 'completed')
   return completed ? actual : Math.min(actual, 95)
 })
 const progressLabel = computed(() => {
@@ -518,7 +545,7 @@ const progressLabel = computed(() => {
   if (stage === 'failed') return '圆桌讨论失败'
   if (stage === 'cancelled') return '圆桌讨论已取消'
   if (stage === 'interrupted') return '圆桌讨论已中断'
-  if (terminalStatus.value && terminalStatus.value !== 'success') return '圆桌讨论未完成'
+  if (terminalStatus.value && !['success', 'completed'].includes(terminalStatus.value)) return '圆桌讨论未完成'
   if (phase.value === 'concluded') return '圆桌讨论已结束'
   if (currentSpeaker.value) return '发言进度'
   return progressTotal.value > 0 ? '发言进度' : '准备圆桌讨论'
@@ -614,7 +641,7 @@ function syncLatest(baselineSeq = latestSeq()): Promise<void> {
           const wasLive = phase.value === 'live'
           phase.value = 'concluded'
           const finalStage = String(page.progress?.phase || '')
-          terminalStatus.value = finalStage === 'completed' ? 'success' : finalStage
+          terminalStatus.value = normalizeTerminalStatus(finalStage)
           reportTaskId.value = Number(page.report_task_id) || reportTaskId.value
           followupUntil.value = Number(page.followup_until) || 0
           if (Number.isFinite(page.progress?.followup_start_seq)) {
@@ -739,6 +766,34 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       }
       if (serverProgress.value.current_round > 0) currentRound.value = serverProgress.value.current_round
       if (Number(msg.payload.turn_count) > latestSeq()) void syncLatest()
+      const progressTerminal = normalizeTerminalStatus(msg.payload.phase)
+      if (progressTerminal) {
+        phase.value = 'concluded'
+        terminalStatus.value = progressTerminal
+        currentSpeaker.value = ''
+        currentSpeakerCode.value = ''
+      }
+      break
+    }
+    case 'snapshot': {
+      const payload = msg.payload
+      currentRound.value = Number(payload.round) || 0
+      totalRounds.value = Number(payload.total_rounds) || 0
+      currentSpeaker.value = String(payload.speaker_name || '')
+      currentSpeakerCode.value = String(payload.speaker_code || '')
+      stageMessage.value = String(payload.message || payload.error || '')
+      isPaused.value = payload.status === 'paused'
+      reportTaskId.value = Number(payload.report_task_id) || reportTaskId.value
+      const savedTerminal = normalizeTerminalStatus(payload.terminal_status || payload.status)
+      if (savedTerminal) {
+        terminalStatus.value = savedTerminal
+        phase.value = 'concluded'
+        currentSpeaker.value = ''
+        currentSpeakerCode.value = ''
+      } else {
+        terminalStatus.value = ''
+        phase.value = 'live'
+      }
       break
     }
     case 'round_start':
@@ -748,7 +803,11 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
     case 'speaker':
       currentSpeaker.value = (msg.payload.speaker_name as string) || ''
       currentSpeakerCode.value = (msg.payload.speaker_code as string) || ''
+      stageMessage.value = String(currentSpeaker.value) + ' 正在决策'
       scrollToBottom()
+      break
+    case 'phase':
+      stageMessage.value = String(msg.payload.message || '')
       break
     case 'paused':
       isPaused.value = true
@@ -757,15 +816,18 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       isPaused.value = false
       break
     case 'stopping':
-      ElMessage.info('讨论正在终止,主持人将给出小结…')
+      terminalStatus.value = 'cancelled'
+      stageMessage.value = '讨论正在终止，不会生成成功小结'
+      ElMessage.info('正在停止圆桌讨论')
       break
     case 'done':
       phase.value = 'concluded'
-      terminalStatus.value = String(msg.payload?.status || '')
+      terminalStatus.value = normalizeTerminalStatus(msg.payload?.status) || 'success'
       followupUntil.value = Number(msg.payload?.followup_until) || followupUntil.value
       currentSpeaker.value = ''
       currentSpeakerCode.value = ''
       reportTaskId.value = (msg.payload?.task_id as number) || reportTaskId.value
+      stageMessage.value = String(msg.payload?.error || '')
       emit('settled')
       void syncLatest()
       break
@@ -784,6 +846,11 @@ function reconnect() {
   currentSpeaker.value = ''
   currentSpeakerCode.value = ''
   // 保留已确认发言和进度；服务端重放用 seenKeys 去重，避免重连期间内容闪空。
+  if (phase.value === 'live') {
+    terminalStatus.value = ''
+    stageMessage.value = ''
+    isPaused.value = false
+  }
   connectWs()
 }
 

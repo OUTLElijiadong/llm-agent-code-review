@@ -12,7 +12,7 @@ import type {
 } from '@/types/security'
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
-import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS, OWASP_TO_CNNVD_TYPE } from './cnnvd-knowledge'
+import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS } from './cnnvd-knowledge'
 import { useUserStore } from '@/stores/user'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
@@ -246,7 +246,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
           </div>
 
           <div v-if="dashboardData.owasp_hotspots.length" class="ov-hotspots">
-            <span class="ov-hot-title">你的项目 OWASP 热点</span>
+            <span class="ov-hot-title">项目 OWASP fallback · 未匹配 CNVD/CNNVD 官方记录</span>
             <div class="ov-hot-list">
               <span
                 v-for="(h, i) in dashboardData.owasp_hotspots.slice(0, 5)"
@@ -263,12 +263,53 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
       </div>
     </section>
 
-    <!-- ========== OWASP Top 10 ========== -->
+    <!-- ========== 中国漏洞库来源与匹配状态 ========== -->
     <section class="block">
       <header class="block-head">
-        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}</h3>
+        <h3 class="block-title">中国漏洞库来源与匹配状态</h3>
+        <p class="block-sub">CNVD 与 CNNVD 是两个独立来源，门户与记录编号分别标识；有官方记录证据时优先按对应来源展示。</p>
+      </header>
+      <div class="cn-source-status" data-testid="cn-source-status" role="status">
+        <strong>匹配优先级：CNVD / CNNVD 官方记录优先 → OWASP fallback / 未匹配</strong>
+        <p>只有发现项包含对应来源的官方记录编号或官方详情链接，才能标记为 CNVD 或 CNNVD 命中；不根据标题、CWE 或关键词猜测来源。</p>
+        <p><b>当前状态：未实现实时官方数据同步。</b> 安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号或官方详情链接。因此，当前项目 OWASP 热点按 OWASP fallback / 未匹配展示；这表示本平台没有匹配证据，不表示两库中不存在相关记录。</p>
+      </div>
+      <div class="cn-portal-grid">
+        <a
+          v-for="portal in CN_VULN_PORTALS"
+          :key="portal.name"
+          class="cn-portal-card"
+          :href="portal.url"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <div class="cn-portal-head">
+            <b>{{ portal.name }}</b>
+            <span class="cn-portal-full">{{ portal.fullName }}</span>
+          </div>
+          <div class="cn-portal-operator">{{ portal.operator }}</div>
+          <p class="cn-portal-note">{{ portal.note }}</p>
+        </a>
+      </div>
+      <div class="cn-standard-list">
+        <p class="cn-standard-heading">国家标准参考（独立于漏洞库记录匹配，不代表扫描认证）</p>
+        <span
+          v-for="std in CN_SECURITY_STANDARDS"
+          :key="std.code"
+          class="cn-standard-chip"
+          :title="std.note"
+        >
+          <b class="font-mono">{{ std.code }}</b> {{ std.name }}
+        </span>
+      </div>
+    </section>
+
+    <!-- ========== OWASP Top 10 参考分类 ========== -->
+    <section class="block">
+      <header class="block-head">
+        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}（未匹配中国漏洞库时的回退分类）</h3>
         <p class="block-sub">
-          OWASP 最终版应用安全风险分类，点击查看中文说明与防范示例。
+          这是 OWASP 官方风险分类参考，不等同于 CNVD/CNNVD 记录或认证；发现项没有对应官方记录编号/链接时才标记为 OWASP fallback / 未匹配。点击查看中文说明与防范示例。
           CWE {{ SECURITY_CATALOG_METADATA.cwe_version }} · 官方弱点 {{ SECURITY_CATALOG_METADATA.cwe_weakness_count }} 项 ·
           核验于 {{ SECURITY_CATALOG_METADATA.verified_at }}。
           <a :href="SECURITY_CATALOG_METADATA.owasp_source_url" target="_blank" rel="noopener noreferrer">OWASP 官方来源</a>
@@ -317,57 +358,6 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
             </span>
           </div>
         </article>
-      </div>
-    </section>
-
-    <!-- ========== 中国漏洞库与国家标准对照 ========== -->
-    <section class="block">
-      <header class="block-head">
-        <h3 class="block-title">中国漏洞库与国家标准对照</h3>
-        <p class="block-sub">
-          平台审查规则以 CWE 编号为枢纽,叠加 OWASP 标签后按 CNNVD《漏洞分类指南》的 CWE 对照关系派生 CNNVD 26 类中文类型;
-          危害等级口径对齐 GB/T 30279-2020(超危/高危/中危/低危)。类型对照为平台整理,非 CNNVD 官方发布。
-        </p>
-      </header>
-      <div class="cn-portal-grid">
-        <a
-          v-for="portal in CN_VULN_PORTALS"
-          :key="portal.name"
-          class="cn-portal-card"
-          :href="portal.url"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <div class="cn-portal-head">
-            <b>{{ portal.name }}</b>
-            <span class="cn-portal-full">{{ portal.fullName }}</span>
-          </div>
-          <div class="cn-portal-operator">{{ portal.operator }}</div>
-          <p class="cn-portal-note">{{ portal.note }}</p>
-        </a>
-      </div>
-      <div class="cn-standard-list">
-        <span
-          v-for="std in CN_SECURITY_STANDARDS"
-          :key="std.code"
-          class="cn-standard-chip"
-          :title="std.note"
-        >
-          <b class="font-mono">{{ std.code }}</b> {{ std.name }}
-        </span>
-      </div>
-      <div class="cn-mapping-table-wrap">
-        <table class="cn-mapping-table">
-          <thead>
-            <tr><th>OWASP Top 10 · 2025</th><th>CNNVD 漏洞类型(平台整理)</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="owasp in OWASP_TOP10" :key="owasp.code">
-              <td><span class="font-mono">{{ owasp.code }}</span> {{ owasp.name_zh }}</td>
-              <td>{{ OWASP_TO_CNNVD_TYPE[owasp.code] || '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </section>
 
@@ -1066,7 +1056,23 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
   color: var(--gray-900);
 }
 
-/* ── 中国漏洞库与国家标准对照 ── */
+/* ── 中国漏洞库来源与匹配状态 ── */
+.cn-source-status {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(217, 168, 87, 0.32);
+  border-left: 4px solid #D9A857;
+  border-radius: 10px;
+  background: rgba(217, 168, 87, 0.08);
+  color: var(--gray-800, #323746);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.cn-source-status p {
+  margin: 6px 0 0;
+}
+
 .cn-portal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1124,6 +1130,13 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
   margin-top: 14px;
 }
 
+.cn-standard-heading {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--gray-600, #5b6270);
+  font-size: 12px;
+}
+
 .cn-standard-chip {
   padding: 5px 12px;
   border-radius: 999px;
@@ -1132,27 +1145,4 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
   font-size: 12px;
 }
 
-.cn-mapping-table-wrap {
-  margin-top: 14px;
-  overflow-x: auto;
-}
-
-.cn-mapping-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.cn-mapping-table th,
-.cn-mapping-table td {
-  text-align: left;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--gray-100, #eef0f4);
-}
-
-.cn-mapping-table th {
-  color: var(--gray-500, #6e7689);
-  font-weight: 500;
-  background: rgba(247, 248, 250, 0.8);
-}
 </style>

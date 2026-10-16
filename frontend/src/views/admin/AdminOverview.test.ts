@@ -2,7 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentActivity, GeoPoint, SecurityPosture, SystemStatus } from '@/api/adminOverview'
+import type { AgentActivity, GeoPoint, SecurityPosture, SystemStatus, TokenUsageTrend } from '@/api/adminOverview'
 import type { AgentEvent } from '@/types/agentEvent'
 import type { UserOut } from '@/types/auth'
 
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getSecurityPosture: vi.fn(),
   getLoginGeo: vi.fn(),
   getAgentsActivity: vi.fn(),
+  getTokenUsageTrend: vi.fn(),
   isSuperAdmin: vi.fn(),
   subscribeAgentEvents: vi.fn(),
   closeStream: vi.fn(),
@@ -27,10 +28,12 @@ vi.mock('@/api/adminOverview', () => ({
   getSecurityPosture: mocks.getSecurityPosture,
   getLoginGeo: mocks.getLoginGeo,
   getAgentsActivity: mocks.getAgentsActivity,
+  getTokenUsageTrend: mocks.getTokenUsageTrend,
 }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ ...auth, isSuperAdmin: mocks.isSuperAdmin }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.routerPush }) }))
 vi.mock('@/utils/agentEventStream', () => ({ subscribeAgentEvents: mocks.subscribeAgentEvents }))
+vi.mock('@/composables/useCountUp', () => ({ useCountUp: (source: { value: number }) => source }))
 vi.mock('echarts/core', () => ({
   use: vi.fn(),
   registerMap: vi.fn(),
@@ -107,7 +110,27 @@ function card(wrapper: VueWrapper, title: string) {
 }
 
 function mapOption() {
-  return mocks.setOption.mock.lastCall?.[0]
+  return mocks.setOption.mock.calls.map(([option]) => option).filter((option) => option?.geo).at(-1)
+}
+
+function tokenTrend(days = 30): TokenUsageTrend {
+  return {
+    timezone: 'UTC',
+    days,
+    start_date: '2026-10-15',
+    end_date: '2026-10-16',
+    total_tokens: 1_250,
+    known_calls: 2,
+    unknown_calls: 1,
+    daily: [
+      { date: '2026-10-15', tokens: 1_250, calls: 2, known_calls: 2, unknown_calls: 0 },
+      { date: '2026-10-16', tokens: null, calls: 1, known_calls: 0, unknown_calls: 1 },
+    ],
+  }
+}
+
+function tokenOption() {
+  return mocks.setOption.mock.calls.map(([option]) => option).filter((option) => option?.series?.some((item: { type?: string }) => item.type === 'line')).at(-1)
 }
 
 beforeEach(() => {
@@ -117,6 +140,7 @@ beforeEach(() => {
   mocks.getSecurityPosture.mockResolvedValue(security())
   mocks.getLoginGeo.mockResolvedValue(geo.map((point) => ({ ...point })))
   mocks.getAgentsActivity.mockResolvedValue(agents.map((agent) => ({ ...agent })))
+  mocks.getTokenUsageTrend.mockResolvedValue(tokenTrend())
   mocks.isSuperAdmin.mockReturnValue(true)
   auth.profile = { id: 27, username: 'admin', role: 'super_admin', status: 1 }
   auth.roles = ['super_admin']
@@ -129,6 +153,105 @@ afterEach(() => {
 })
 
 describe('AdminOverview 真实状态与分区反馈', () => {
+  it('按真实每日用量绘图，并把缺失 Token 标记为未知', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const section = card(wrapper, '每日 Token 用量')
+    expect(mocks.getTokenUsageTrend).toHaveBeenCalledWith(30)
+    expect(section.text()).toContain('1,250')
+    expect(section.text()).toContain('1 次模型调用未返回 Token 用量')
+    expect(section.find('.token-chart').attributes('aria-label')).toContain('另有 1 次调用用量未知')
+    expect(section.findAll('.token-heat-cell')).toHaveLength(2)
+    expect(section.find('[data-usage="used"]').attributes('aria-label')).toContain('1,250 Token')
+    expect(section.find('[data-usage="unknown"]').attributes('aria-label')).toContain('用量未知')
+    expect(section.find('tbody').text()).toContain('未知')
+    expect(tokenOption()?.series[0].data).toEqual([1_250, null])
+    expect(tokenOption()?.series[0].connectNulls).toBe(false)
+  })
+
+  it('把真实零用量与未知用量分开显示，并用柔和波形表达已知数据', async () => {
+    const trend = tokenTrend()
+    trend.total_tokens = 0
+    trend.daily = [
+      { date: '2026-10-15', tokens: 0, calls: 2, known_calls: 2, unknown_calls: 0 },
+      { date: '2026-10-16', tokens: null, calls: 1, known_calls: 0, unknown_calls: 1 },
+    ]
+    mocks.getTokenUsageTrend.mockResolvedValue(trend)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const section = card(wrapper, '每日 Token 用量')
+    expect(section.findAll('.token-kpi strong')[0].text()).toBe('0')
+    expect(section.findAll('.token-kpi strong')[1].text()).toBe('0')
+    expect(section.findAll('.token-kpi strong')[2].text()).toBe('0')
+    expect(section.findAll('.token-kpi strong')[3].text()).toBe('未知')
+    expect(section.find('tbody').text()).toContain('0')
+    expect(section.find('tbody').text()).toContain('未知')
+    expect(section.find('[data-usage="zero"]').attributes('aria-label')).toContain('0 Token')
+    expect(section.find('[data-usage="unknown"]').attributes('aria-label')).toContain('用量未知')
+    expect(tokenOption()?.series[0].data).toEqual([0, null])
+    expect(tokenOption()?.series[0].smooth).toBeGreaterThanOrEqual(0.5)
+    expect(tokenOption()?.series[0].lineStyle.shadowBlur).toBeGreaterThan(0)
+    expect(tokenOption()?.animation).toBe(true)
+  })
+
+  it('没有任何可确认的每日 Token 值时不把日均和峰值伪装成零', async () => {
+    const trend = tokenTrend()
+    trend.daily = trend.daily.map((item) => ({ ...item, tokens: null, known_calls: 0, unknown_calls: 1 }))
+    trend.unknown_calls = trend.daily.length
+    mocks.getTokenUsageTrend.mockResolvedValue(trend)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const section = card(wrapper, '每日 Token 用量')
+    expect(section.findAll('.token-kpi strong')[1].text()).toBe('未知')
+    expect(section.findAll('.token-kpi strong')[2].text()).toBe('未知')
+    expect(tokenOption()?.series[0].data).toEqual([null, null])
+  })
+
+  it('Token 日历热力格按真实日期生成并逐格延迟显现，点击后提供当日详情', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const section = card(wrapper, '每日 Token 用量')
+    const cells = section.findAll('.token-heat-cell')
+
+    expect(section.find('.token-heatmap').attributes('aria-label')).toContain('日历热力图')
+    expect(cells).toHaveLength(2)
+    expect(cells[0].attributes('data-date')).toBe('2026-10-15')
+    expect(cells[0].attributes('style')).toContain('--heat-delay: 0ms')
+    expect(cells[1].attributes('style')).toContain('--heat-delay: 18ms')
+    expect(cells[0].element.tagName).toBe('BUTTON')
+
+    await cells[0].trigger('click')
+    expect(section.find('.token-heat-selection').text()).toContain('2026-10-15')
+    expect(section.find('.token-heat-selection').text()).toContain('1,250 Token')
+  })
+
+  it('减少动态效果时关闭每日 Token 图表动画', async () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(card(wrapper, '每日 Token 用量').findAll('.token-heat-cell')).toHaveLength(2)
+    expect(tokenOption()?.animation).toBe(false)
+    expect(tokenOption()?.animationDurationUpdate).toBe(0)
+  })
+
+  it('切换每日 Token 图的时间范围后请求对应真实数据', async () => {
+    mocks.getTokenUsageTrend.mockResolvedValue(tokenTrend(7))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const section = card(wrapper, '每日 Token 用量')
+    await section.findAll('button.range-button')[0].trigger('click')
+    await flushPromises()
+
+    expect(mocks.getTokenUsageTrend).toHaveBeenLastCalledWith(7)
+    expect(section.findAll('button.range-button')[0].attributes('aria-pressed')).toBe('true')
+    expect(section.text()).toContain('近 7 天累计')
+  })
+
   it('首载不把未返回的接口伪装为正常、零值或空列表', async () => {
     sections.forEach(({ request }) => request.mockReturnValue(deferred().promise))
     const wrapper = mountPage()
@@ -533,7 +656,7 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(mocks.closeStream).toHaveBeenCalledOnce()
-    expect(mocks.dispose).toHaveBeenCalledOnce()
+    expect(mocks.dispose).toHaveBeenCalledTimes(2)
     expect(mocks.setOption).toHaveBeenCalledTimes(chartCalls)
     expect(mocks.getSecurityPosture).toHaveBeenCalledOnce()
   })

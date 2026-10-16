@@ -95,6 +95,113 @@
       </section>
     </div>
 
+    <!-- 平台级模型 Token 用量趋势 -->
+    <section class="card token-usage-card prism-glass-card" :data-state="tokenUsageState.status" :aria-busy="tokenUsageState.status === 'loading'">
+      <header class="card-head token-usage-head">
+        <div class="token-heading">
+          <h3><el-icon><TrendCharts /></el-icon>每日 Token 用量</h3>
+          <span class="muted sm">模型调用日志 · UTC 自然日</span>
+        </div>
+        <div class="token-controls" role="group" aria-label="Token 趋势时间范围">
+          <button
+            v-for="days in tokenUsageRanges"
+            :key="days"
+            type="button"
+            class="range-button"
+            :aria-pressed="tokenUsageDays === days"
+            :disabled="tokenUsageState.status === 'loading'"
+            @click="selectTokenUsageRange(days)"
+          >{{ days }} 天</button>
+          <button type="button" class="retry-button" :disabled="tokenUsageState.status === 'loading'" @click="loadTokenUsage()">{{ loadButtonText(tokenUsageState) }}</button>
+        </div>
+      </header>
+      <p v-if="tokenUsageState.status === 'loading'" class="section-state muted" role="status">正在加载每日 Token 用量…<span v-if="tokenUsageState.hasResult">显示上次成功数据，等待更新。</span></p>
+      <p v-if="tokenUsageState.error" class="section-state error" role="alert">Token 用量加载失败：{{ tokenUsageState.error }}<span v-if="tokenUsageState.hasResult" class="stale-note">上次成功数据已过期</span></p>
+      <p v-if="tokenUsageState.status === 'empty' && !tokenUsage" class="section-state muted" role="status">尚未取得 Token 用量数据。</p>
+      <div v-if="tokenUsage" class="token-usage-content">
+        <div :key="tokenUsageRevision" class="token-kpis">
+          <div class="token-kpi token-kpi-primary">
+            <span class="token-kpi-label">已记录 Token</span>
+            <strong>{{ formatTokens(animatedTotalTokens) }}</strong>
+            <span class="token-kpi-foot">近 {{ tokenUsage.days }} 天累计</span>
+          </div>
+          <div class="token-kpi">
+            <span class="token-kpi-label">有用量记录日均</span>
+            <strong>{{ averageKnownDayTokens === null ? '未知' : formatTokens(animatedAverageKnownDayTokens) }}</strong>
+            <span class="token-kpi-foot">仅计算已知用量日期</span>
+          </div>
+          <div class="token-kpi">
+            <span class="token-kpi-label">最高单日</span>
+            <strong>{{ peakTokenDay ? formatTokens(animatedPeakTokenCount) : '未知' }}</strong>
+            <span class="token-kpi-foot">{{ peakTokenDay?.date || '没有可确认的用量' }}</span>
+          </div>
+          <div class="token-kpi">
+            <span class="token-kpi-label">最新一天</span>
+            <strong>{{ latestTokenDay?.tokens == null ? '未知' : formatTokens(latestTokenDay.tokens) }}</strong>
+            <span class="token-kpi-foot">{{ latestTokenDay?.date || tokenUsage.end_date }}</span>
+          </div>
+        </div>
+        <div class="token-heatmap-panel" :class="`is-range-${tokenUsage.days}`">
+          <div class="token-heatmap-shell">
+            <div class="token-heatmap-weekdays" aria-hidden="true">
+              <span v-for="weekday in tokenWeekdayLabels" :key="weekday">{{ weekday }}</span>
+            </div>
+            <div class="token-heatmap" role="group" aria-label="每日 Token 用量日历热力图" :style="{ '--heat-columns': tokenHeatmapColumnCount }">
+            <template v-for="cell in tokenHeatmapCells" :key="`${tokenUsageRevision}:${cell.key}`">
+              <span v-if="cell.kind === 'spacer'" class="token-heat-spacer" aria-hidden="true"></span>
+              <button
+                v-else
+                type="button"
+                class="token-heat-cell"
+                :class="[`level-${cell.level}`, `wave-${tokenUsageRevision % 2 ? 'b' : 'a'}`]"
+                :data-date="cell.day.date"
+                :data-usage="cell.usage"
+                :aria-label="tokenHeatCellLabel(cell.day)"
+                :aria-pressed="selectedTokenDayDate === cell.day.date"
+                :title="tokenHeatCellLabel(cell.day)"
+                :style="{ '--heat-delay': `${Math.min(cell.dayIndex * 18, 540)}ms` }"
+                @click="selectTokenDay(cell.day.date)"
+              >
+                <span>{{ cell.day.date.slice(8) }}</span>
+              </button>
+            </template>
+            </div>
+          </div>
+          <div class="token-heat-legend" aria-label="热力颜色图例">
+            <span><i class="is-zero"></i>真实 0</span>
+            <span><i class="is-used"></i>有用量</span>
+            <span><i class="is-unknown"></i>未知</span>
+          </div>
+          <p v-if="selectedTokenDay" class="token-heat-selection" role="status" aria-live="polite">
+            {{ selectedTokenDay.date }} · {{ selectedTokenDay.tokens === null ? '用量未知' : `${formatTokens(selectedTokenDay.tokens)} Token` }} · 模型调用 {{ selectedTokenDay.calls }} 次 · 未知调用 {{ selectedTokenDay.unknown_calls }} 次
+          </p>
+        </div>
+        <h4 class="token-chart-label">每日用量波形（辅助趋势）</h4>
+        <div ref="tokenChartRef" class="token-chart" role="img" :aria-label="tokenChartSummary"></div>
+        <p v-if="tokenUsage.unknown_calls" class="token-usage-note" role="note">
+          有 {{ formatTokens(tokenUsage.unknown_calls) }} 次模型调用未返回 Token 用量；缺失日期按未知显示，累计数只包含已记录用量。
+        </p>
+        <p v-else-if="tokenUsageState.status === 'empty'" class="token-usage-note muted" role="status">这段时间没有模型调用记录，图表中的 0 表示真实空档。</p>
+        <details class="token-detail-disclosure">
+          <summary>查看每日明细</summary>
+          <div class="token-table-wrap">
+            <table class="token-table">
+              <thead><tr><th scope="col">UTC 日期</th><th scope="col">Token</th><th scope="col">调用次数</th><th scope="col">缺失用量</th></tr></thead>
+              <tbody>
+                <tr v-for="day in tokenUsage.daily" :key="day.date">
+                  <th scope="row">{{ day.date }}</th>
+                  <td>{{ day.tokens == null ? '未知' : formatTokens(day.tokens) }}</td>
+                  <td>{{ formatTokens(day.calls) }}</td>
+                  <td>{{ formatTokens(day.unknown_calls) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+      <div v-else-if="tokenUsageState.status === 'empty'" class="token-empty-state">{{ tokenUsageState.hasResult ? '当前时间范围没有已记录的模型用量' : '未取得 Token 用量数据' }}</div>
+    </section>
+
     <!-- 登录来源地图 + Agent 活跃 -->
     <div class="row-2 prism-stagger">
       <!-- 世界地图 -->
@@ -158,12 +265,12 @@
 
 <script setup lang="ts">
 import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Aim, Cpu, MapLocation, Monitor, WarningFilled } from '@element-plus/icons-vue'
+import { Aim, Cpu, MapLocation, Monitor, TrendCharts, WarningFilled } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
-import { GeoComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
-import { EffectScatterChart, ScatterChart } from 'echarts/charts'
+import { GeoComponent, GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { EffectScatterChart, LineChart, ScatterChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import worldJson from '@/assets/maps/world.json'
 import {
@@ -171,17 +278,20 @@ import {
   getLoginGeo,
   getSecurityPosture,
   getSystemStatus,
+  getTokenUsageTrend,
   type AgentActivity,
   type GeoPoint,
   type SecurityPosture,
   type SystemStatus,
+  type TokenUsageTrend,
 } from '@/api/adminOverview'
 import { subscribeAgentEvents } from '@/utils/agentEventStream'
 import type { AgentEvent } from '@/types/agentEvent'
 import { useUserStore } from '@/stores/user'
 import { formatAgentActivityUsage } from '@/utils/agentActivityPresentation'
+import { useCountUp } from '@/composables/useCountUp'
 
-echarts.use([GeoComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, CanvasRenderer])
+echarts.use([GeoComponent, GridComponent, TooltipComponent, VisualMapComponent, ScatterChart, EffectScatterChart, LineChart, CanvasRenderer])
 
 const router = useRouter()
 
@@ -209,6 +319,16 @@ const canViewServer = computed(() => {
 const posture = ref<SecurityPosture | null>(null)
 const geoPoints = ref<GeoPoint[]>([])
 const agents = ref<AgentActivity[]>([])
+const tokenUsage = ref<TokenUsageTrend | null>(null)
+const tokenUsageDays = ref(30)
+const tokenUsageRevision = ref(0)
+const selectedTokenDayDate = ref<string | null>(null)
+const tokenUsageRanges = [7, 30, 90] as const
+const tokenWeekdayLabels = ['日', '一', '二', '三', '四', '五', '六']
+type TokenUsageDay = TokenUsageTrend['daily'][number]
+type TokenHeatmapCell =
+  | { kind: 'spacer'; key: string }
+  | { kind: 'day'; key: string; day: TokenUsageDay; dayIndex: number; usage: 'unknown' | 'zero' | 'used'; level: number }
 interface LoadState {
   status: 'loading' | 'error' | 'empty' | 'success'
   error: string
@@ -222,11 +342,15 @@ const systemState = createLoadState()
 const postureState = createLoadState()
 const geoState = createLoadState()
 const agentsState = createLoadState()
+const tokenUsageState = createLoadState()
 const pendingRequests = new Set<LoadState>()
 const expandedUsageCode = ref<string | null>(null)
 const mapRef = ref<HTMLElement | null>(null)
+const tokenChartRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
+let tokenChart: echarts.EChartsType | null = null
 let timer: ReturnType<typeof setInterval> | null = null
+let tokenUsageTimer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
 const ACTIVITY_REFRESH_INTERVAL_MS = 30_000
 const eventStreamStatus = ref<'connecting' | 'connected' | 'reconnecting' | 'closed'>('connecting')
@@ -248,6 +372,52 @@ const postureLabel = computed(() => {
   return '安全态势：未知'
 })
 const workingCount = computed(() => agents.value.filter((a) => ['working', 'thinking', 'blocked'].includes(a.status)).length)
+const knownTokenDays = computed(() => (tokenUsage.value?.daily || []).filter((item) => item.tokens !== null))
+const averageKnownDayTokens = computed(() => {
+  if (!knownTokenDays.value.length) return null
+  return Math.round(knownTokenDays.value.reduce((sum, item) => sum + (item.tokens ?? 0), 0) / knownTokenDays.value.length)
+})
+const peakTokenDay = computed(() => knownTokenDays.value.reduce<TokenUsageTrend['daily'][number] | null>(
+  (peak, item) => !peak || (item.tokens ?? 0) > (peak.tokens ?? 0) ? item : peak,
+  null,
+))
+const latestTokenDay = computed(() => tokenUsage.value?.daily[tokenUsage.value.daily.length - 1] || null)
+const selectedTokenDay = computed(() => tokenUsage.value?.daily.find((item) => item.date === selectedTokenDayDate.value) ?? null)
+const tokenHeatmapCells = computed<TokenHeatmapCell[]>(() => {
+  const daily = tokenUsage.value?.daily ?? []
+  if (!daily.length) return []
+  const firstDate = Date.parse(`${daily[0].date}T00:00:00Z`)
+  const firstWeekday = Number.isFinite(firstDate) ? new Date(firstDate).getUTCDay() : 0
+  const maximum = Math.max(0, ...daily.flatMap((item) => item.tokens == null ? [] : [item.tokens]))
+  const spacers: TokenHeatmapCell[] = Array.from({ length: firstWeekday }, (_, index) => ({
+    kind: 'spacer',
+    key: `spacer-${index}`,
+  }))
+  const days: TokenHeatmapCell[] = daily.map((day, dayIndex) => {
+    const usage: 'unknown' | 'zero' | 'used' = day.tokens == null ? 'unknown' : day.tokens === 0 ? 'zero' : 'used'
+    const normalized = day.tokens && maximum > 0 ? Math.log1p(day.tokens) / Math.log1p(maximum) : 0
+    return {
+      kind: 'day',
+      key: day.date,
+      day,
+      dayIndex,
+      usage,
+      level: usage === 'used' ? Math.max(1, Math.ceil(normalized * 4)) : 0,
+    }
+  })
+  return [...spacers, ...days]
+})
+const tokenHeatmapColumnCount = computed(() => Math.max(1, Math.ceil(tokenHeatmapCells.value.length / 7)))
+const totalTokenCount = computed(() => tokenUsage.value?.total_tokens ?? 0)
+const averageTokenCount = computed(() => averageKnownDayTokens.value ?? 0)
+const peakTokenCount = computed(() => peakTokenDay.value?.tokens ?? 0)
+const animatedTotalTokens = useCountUp(totalTokenCount)
+const animatedAverageKnownDayTokens = useCountUp(averageTokenCount)
+const animatedPeakTokenCount = useCountUp(peakTokenCount)
+const tokenChartSummary = computed(() => {
+  if (!tokenUsage.value) return '每日 Token 用量趋势，尚无数据'
+  return `近 ${tokenUsage.value.days} 天每日 Token 用量，已记录 ${formatTokens(tokenUsage.value.total_tokens)} 个 Token，${tokenUsage.value.unknown_calls ? `另有 ${tokenUsage.value.unknown_calls} 次调用用量未知` : '用量记录完整'}`
+})
 const liveStatusText = computed(() => ({
   connecting: '正在连接', connected: '实时连接', reconnecting: '重连中', closed: '已断开',
 } as Record<string, string>)[eventStreamStatus.value])
@@ -274,6 +444,19 @@ function barClass(v?: number): string {
 }
 function formatMetric(value: unknown, suffix = ''): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${value}${suffix}` : '未知'
+}
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat('zh-CN').format(Math.round(value))
+}
+function compactTokens(value: number): string {
+  return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+function tokenHeatCellLabel(day: TokenUsageDay): string {
+  const usage = day.tokens == null ? '用量未知' : `${formatTokens(day.tokens)} Token`
+  return `${day.date}，${usage}，模型调用 ${day.calls} 次，未知调用 ${day.unknown_calls} 次；选择查看当日详情`
+}
+function selectTokenDay(date: string): void {
+  selectedTokenDayDate.value = selectedTokenDayDate.value === date ? null : date
 }
 function formatUptime(sec: number): string {
   const d = Math.floor(sec / 86400)
@@ -331,6 +514,81 @@ function renderMap(): void {
         zlevel: 2,
       },
     ],
+  }, true)
+}
+
+function renderTokenChart(): void {
+  if (disposed || !tokenChartRef.value || !tokenUsage.value) return
+  if (!tokenChart) tokenChart = echarts.init(tokenChartRef.value)
+  const daily = tokenUsage.value.daily
+  const finiteValues = daily.flatMap((item) => item.tokens === null ? [] : [item.tokens])
+  const maximum = Math.max(1, ...finiteValues)
+  const motionEnabled = typeof window === 'undefined'
+    || !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  tokenChart.setOption({
+    animation: motionEnabled,
+    animationDuration: motionEnabled ? 720 : 0,
+    animationDurationUpdate: motionEnabled ? 520 : 0,
+    backgroundColor: 'transparent',
+    grid: { left: 58, right: 22, top: 18, bottom: 38 },
+    tooltip: {
+      trigger: 'axis',
+      appendTo: 'body',
+      backgroundColor: 'rgba(20, 24, 39, .94)',
+      borderWidth: 0,
+      textStyle: { color: '#fff', fontSize: 12 },
+      formatter: (params: Array<{ dataIndex: number; value?: number | null }>) => {
+        const index = params[0]?.dataIndex ?? -1
+        const day = daily[index]
+        if (!day) return ''
+        const usage = day.tokens === null ? '用量未知' : `${formatTokens(day.tokens)} Token`
+        const missing = day.unknown_calls ? `<br/>缺失用量：${day.unknown_calls} 次调用` : ''
+        return `<b>${day.date}</b><br/>${usage}<br/>模型调用：${day.calls} 次${missing}`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: daily.map((item) => item.date.slice(5)),
+      axisLine: { lineStyle: { color: '#E4E7EF' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#7D8498', fontSize: 11, hideOverlap: true },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: maximum,
+      splitNumber: 4,
+      axisLabel: { color: '#7D8498', fontSize: 11, formatter: (value: number) => compactTokens(value) },
+      splitLine: { lineStyle: { color: '#EEF0F5', type: 'dashed' } },
+    },
+    series: [{
+      name: 'Token',
+      type: 'line',
+      smooth: 0.62,
+      connectNulls: false,
+      showSymbol: tokenUsage.value.days <= 7,
+      symbol: 'circle',
+      symbolSize: 6,
+      data: daily.map((item) => item.tokens),
+      lineStyle: { color: '#675BEE', width: 3, shadowColor: 'rgba(103,91,238,.34)', shadowBlur: 14 },
+      itemStyle: { color: '#675BEE', borderColor: '#fff', borderWidth: 2 },
+      areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0,
+          y: 0,
+          x2: 0,
+          y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(103,91,238,.34)' },
+            { offset: .55, color: 'rgba(91,164,242,.12)' },
+            { offset: 1, color: 'rgba(91,164,242,0)' },
+          ],
+        },
+      },
+      emphasis: { focus: 'series', scale: 1.35 },
+    }],
   }, true)
 }
 
@@ -410,6 +668,33 @@ async function loadAgents(manual = true): Promise<void> {
   }, manual)
 }
 
+async function loadTokenUsage(manual = true): Promise<void> {
+  await loadSection(tokenUsageState, () => getTokenUsageTrend(tokenUsageDays.value), (value) => {
+    tokenUsage.value = value ?? null
+    tokenUsageRevision.value += 1
+    if (selectedTokenDayDate.value && !value?.daily.some((item) => item.date === selectedTokenDayDate.value)) {
+      selectedTokenDayDate.value = null
+    }
+    return (value?.daily || []).some((item) => item.calls > 0)
+  }, manual)
+  // v-if 在数据接受后才挂载图表容器，需等 Vue 完成这一轮 DOM 更新再初始化 ECharts。
+  if (tokenUsage.value && !disposed) {
+    await nextTick()
+    try {
+      renderTokenChart()
+    } catch (error) {
+      tokenUsageState.status = 'error'
+      tokenUsageState.error = error instanceof Error ? error.message : '图表渲染失败'
+    }
+  }
+}
+
+function selectTokenUsageRange(days: number): void {
+  if (!tokenUsageRanges.includes(days as (typeof tokenUsageRanges)[number])) return
+  tokenUsageDays.value = days
+  void loadTokenUsage()
+}
+
 async function loadAll(): Promise<void> {
   await Promise.all([loadSystem(false), loadPosture(false), loadGeo(false), loadAgents(false)])
 }
@@ -430,18 +715,29 @@ function startPolling(): void {
   }, ACTIVITY_REFRESH_INTERVAL_MS)
 }
 
+function startTokenUsagePolling(): void {
+  if (tokenUsageTimer) return
+  tokenUsageTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') void loadTokenUsage(false)
+  }, 60_000)
+}
+
 function onVisibilityChange(): void {
   if (document.visibilityState !== 'visible') {
     if (timer) clearInterval(timer)
     timer = null
+    if (tokenUsageTimer) clearInterval(tokenUsageTimer)
+    tokenUsageTimer = null
     eventStream?.close()
     eventStream = null
     eventStreamStatus.value = 'closed'
     return
   }
   void loadAll()
+  void loadTokenUsage(false)
   startEventStream()
   startPolling()
+  startTokenUsagePolling()
 }
 
 function applyAgentEvent(event: AgentEvent): void {
@@ -459,15 +755,17 @@ function applyAgentEvent(event: AgentEvent): void {
   agent.activity_source = 'event_bus'
 }
 
-function onResize(): void { mapChart?.resize() }
+function onResize(): void { mapChart?.resize(); tokenChart?.resize() }
 
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('resize', onResize)
   if (document.visibilityState === 'visible') {
     void loadAll()
+    void loadTokenUsage(false)
     startEventStream()
     startPolling()
+    startTokenUsagePolling()
   }
 })
 onBeforeUnmount(() => {
@@ -475,12 +773,18 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
+  if (tokenUsageTimer) clearInterval(tokenUsageTimer)
   eventStream?.close()
   mapChart?.dispose()
   mapChart = null
+  tokenChart?.dispose()
+  tokenChart = null
 })
 
-useAgentPageRefresh({ pages: ['/admin/operations', '/admin/governance', '/admin/access', '/admin/security-center'], refresh: loadAll })
+useAgentPageRefresh({
+  pages: ['/admin/operations', '/admin/governance', '/admin/access', '/admin/security-center'],
+  refresh: async () => { await Promise.all([loadAll(), loadTokenUsage(false)]) },
+})
 </script>
 
 <style scoped lang="scss">
@@ -580,6 +884,124 @@ useAgentPageRefresh({ pages: ['/admin/operations', '/admin/governance', '/admin/
 }
 .ok-line { color: #2F8F5B; font-size: 13px; padding: 8px 0; }
 
+.token-usage-card { display: flex; flex-direction: column; }
+.token-usage-head { align-items: center; }
+.token-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px 12px; min-width: 0; }
+.token-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.range-button {
+  appearance: none;
+  padding: 5px 10px;
+  border: 1px solid var(--gray-200, #E7E9F0);
+  border-radius: 7px;
+  background: var(--gray-50, #F8F9FC);
+  color: var(--gray-600);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  &[aria-pressed='true'] { border-color: rgba(103,91,238,.35); background: rgba(103,91,238,.1); color: #5146D9; font-weight: 650; }
+  &:disabled { cursor: wait; opacity: .65; }
+  &:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 2px; }
+}
+.token-usage-content { display: flex; flex-direction: column; gap: 12px; }
+.token-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.token-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(224, 227, 234, .8);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(248,249,252,.96), rgba(255,255,255,.76));
+  .token-kpi-label { color: var(--gray-500); font-size: 11px; }
+  strong { margin-top: 4px; color: var(--gray-900); font-size: clamp(17px, 2vw, 24px); line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .token-kpi-foot { margin-top: 3px; color: var(--gray-400); font-size: 10.5px; }
+  animation: token-kpi-return var(--motion-duration-emphasis, 520ms) cubic-bezier(.2,.82,.25,1.12) var(--kpi-delay, 0ms) both;
+}
+.token-kpi:nth-child(1) { --kpi-delay: 0ms; }
+.token-kpi:nth-child(2) { --kpi-delay: 55ms; }
+.token-kpi:nth-child(3) { --kpi-delay: 110ms; }
+.token-kpi:nth-child(4) { --kpi-delay: 165ms; }
+@keyframes token-kpi-return {
+  0% { opacity: 0; transform: translateY(12px) scale(.94); }
+  72% { opacity: 1; transform: translateY(-3px) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.token-kpi-primary { border-color: rgba(103,91,238,.2); background: linear-gradient(135deg, rgba(103,91,238,.12), rgba(111,179,255,.07)); strong { color: #5146D9; } }
+.token-heatmap-panel { display: flex; flex-direction: column; gap: 9px; }
+.token-heatmap-shell { display: flex; align-items: flex-start; gap: 7px; max-width: 100%; overflow-x: auto; padding: 4px 2px 8px; }
+.token-heatmap-weekdays { display: grid; grid-template-rows: repeat(7, var(--heat-cell-size, 20px)); gap: 4px; color: var(--gray-500); font-size: 9px; line-height: var(--heat-cell-size, 20px); text-align: center; }
+.token-heatmap { display: grid; grid-auto-flow: column; grid-auto-columns: var(--heat-cell-size, 20px); grid-template-columns: repeat(var(--heat-columns), var(--heat-cell-size, 20px)); grid-template-rows: repeat(7, var(--heat-cell-size, 20px)); gap: 4px; min-width: max-content; }
+.is-range-7 { --heat-cell-size: 28px; }
+.is-range-30 { --heat-cell-size: 22px; }
+.is-range-90 { --heat-cell-size: 18px; }
+.token-heat-spacer { width: var(--heat-cell-size, 20px); height: var(--heat-cell-size, 20px); }
+.token-heat-cell {
+  position: relative;
+  display: grid;
+  width: var(--heat-cell-size, 20px);
+  height: var(--heat-cell-size, 20px);
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #45415D;
+  font: inherit;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  animation-name: token-heat-wave-a;
+  animation-duration: var(--motion-duration-emphasis, 520ms);
+  animation-timing-function: var(--motion-ease-standard, cubic-bezier(.2,.75,.25,1));
+  animation-delay: var(--heat-delay, 0ms);
+  animation-fill-mode: both;
+  transition: filter var(--motion-duration-fast, 160ms) ease, outline-color var(--motion-duration-fast, 160ms) ease;
+  &:focus-visible { z-index: 1; outline: 2px solid #5146D9; outline-offset: 2px; }
+  &:hover { filter: brightness(.94) saturate(1.12); }
+  &[data-usage='unknown'] { border-color: #C7CBD7; background: repeating-linear-gradient(135deg, #F2F3F7 0 3px, #DDE0E9 3px 5px); color: #52596D; }
+  &[data-usage='zero'] { border-color: #DADDE8; background: #F6F7FB; color: #666D80; }
+  &[data-usage='used'].level-1 { border-color: #D5D1FB; background: #E9E7FF; color: #49427F; }
+  &[data-usage='used'].level-2 { border-color: #B9B2FA; background: #C8C2FF; color: #39327F; }
+  &[data-usage='used'].level-3 { border-color: #8C82F0; background: #8479E6; color: #fff; }
+  &[data-usage='used'].level-4 { border-color: #5549CB; background: linear-gradient(135deg, #766CEB, #5144C8); color: #fff; box-shadow: 0 2px 7px rgba(81,68,200,.24); }
+  &[aria-pressed='true'] { outline: 2px solid #342B9A; outline-offset: 2px; }
+}
+.token-heat-cell.wave-b { animation-name: token-heat-wave-b; }
+@keyframes token-heat-wave-a {
+  0% { opacity: .15; transform: scale(.62); filter: saturate(.6); }
+  68% { opacity: 1; transform: scale(1.1); filter: saturate(1.18); }
+  100% { opacity: 1; transform: scale(1); filter: saturate(1); }
+}
+@keyframes token-heat-wave-b {
+  0% { opacity: .15; transform: scale(.62); filter: saturate(.6); }
+  68% { opacity: 1; transform: scale(1.1); filter: saturate(1.18); }
+  100% { opacity: 1; transform: scale(1); filter: saturate(1); }
+}
+.token-heat-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 13px; color: var(--gray-500); font-size: 10px; }
+.token-heat-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.token-heat-legend i { width: 12px; height: 12px; border: 1px solid #DADDE8; border-radius: 3px; }
+.token-heat-legend i.is-zero { background: #F6F7FB; }
+.token-heat-legend i.is-used { border-color: #8C82F0; background: linear-gradient(135deg, #C8C2FF, #5549CB); }
+.token-heat-legend i.is-unknown { border-color: #C7CBD7; background: repeating-linear-gradient(135deg, #F2F3F7 0 3px, #DDE0E9 3px 5px); }
+.token-heat-selection { margin: 0; padding: 8px 10px; border-radius: 7px; background: rgba(103,91,238,.07); color: var(--gray-700); font-size: 11px; font-variant-numeric: tabular-nums; }
+.token-chart-label { margin: 0; color: var(--gray-500); font-size: 10.5px; font-weight: 600; }
+.token-chart { width: 100%; height: 168px; min-height: 150px; }
+.token-usage-note { margin: -2px 0 0; color: #9B6A28; font-size: 11.5px; line-height: 1.5; }
+.token-detail-disclosure {
+  border-top: 1px solid var(--gray-100, #EEF0F5);
+  padding-top: 9px;
+  summary { width: fit-content; color: var(--brand-600); font-size: 11.5px; cursor: pointer; }
+  summary:focus-visible { outline: 2px solid var(--brand-300); outline-offset: 3px; border-radius: 3px; }
+}
+.token-table-wrap { margin-top: 8px; overflow-x: auto; }
+.token-table { width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: right;
+  th, td { padding: 7px 9px; border-bottom: 1px solid var(--gray-100, #EEF0F5); white-space: nowrap; }
+  thead th { color: var(--gray-500); font-weight: 600; }
+  tbody th { color: var(--gray-600); font-weight: 500; text-align: left; }
+  tbody td { color: var(--gray-700); font-variant-numeric: tabular-nums; }
+}
+.token-empty-state { padding: 26px 12px; color: var(--gray-500); font-size: 12.5px; text-align: center; }
+
 .map-card { display: flex; flex-direction: column; }
 .world-map { width: 100%; height: 320px; }
 .map-state { margin-top: -24px; padding-bottom: 8px; text-align: center; font-size: 12.5px; }
@@ -653,6 +1075,12 @@ useAgentPageRefresh({ pages: ['/admin/operations', '/admin/governance', '/admin/
   .card { padding: 16px 14px; }
   .card-head { align-items: flex-start; gap: 8px; }
   .card-head h3 { min-width: 0; }
+  .token-usage-head { flex-direction: column; align-items: stretch; }
+  .token-controls { justify-content: flex-start; }
+  .token-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .token-kpi { padding: 10px; }
+  .token-heatmap-shell { overflow-x: auto; }
+  .token-chart { height: 150px; min-height: 136px; }
   .live-status { white-space: normal; text-align: right; }
   .agent-item { align-items: flex-start; flex-wrap: wrap; gap: 8px 10px; }
   .a-info { flex: 1 1 calc(100% - 50px); }
@@ -666,6 +1094,10 @@ useAgentPageRefresh({ pages: ['/admin/operations', '/admin/governance', '/admin/
   }
   .a-calls { text-align: left; }
   .a-usage-detail { grid-column: 1 / -1; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-kpi, .token-heat-cell { animation: none !important; transform: none !important; }
+  .token-heat-cell { transition: none !important; }
 }
 
 </style>

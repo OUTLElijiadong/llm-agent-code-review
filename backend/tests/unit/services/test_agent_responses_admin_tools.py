@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
+from app.agents.discussion_bus import DiscussionBus
+from app.agents.events import DiscussionTurn
 from app.models.agent_governance import ApprovalItem, ToolCallLog
+from app.models.agent_mesh import AgentMeshMessage
+from app.models.agent_response_run import AgentResponseRun
 from app.models.audit_log import AuditLog
 from app.models.custom_agent import CustomAgentRelease, CustomAgentSkillBinding, CustomAgentVersion
 from app.models.rbac import Permission, Role, RolePermission, UserRole
@@ -26,6 +32,215 @@ class EmptyMcp:
         return False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["cancelled", "failed", "partial"])
+async def test_roundtable_terminal_outcomes_cannot_start_continuations(
+    db,
+    admin_user,
+    monkeypatch,
+    terminal_status: str,
+) -> None:
+    """只有成功结论可续会，取消/失败/部分结果不应因自动评价生成新圆桌。"""
+    # 本用例验证终态续会策略；项目范围/RBAC 由专门测试覆盖。
+    monkeypatch.setattr(
+        "app.ai.discussion_orchestrator._require_discussion_actor",
+        lambda *_args, **_kwargs: None,
+    )
+    bus = DiscussionBus()
+    session = bus.create_session(
+        f"roundtable-{terminal_status}", 51, "terminal.py",
+        owner_user_id=admin_user.id, project_id=51,
+    )
+    session.status = (
+        "cancelled"
+        if terminal_status == "cancelled"
+        else "failed"
+        if terminal_status == "failed"
+        else "concluded"
+    )
+    session.terminal_status = terminal_status
+    session.turns.append(DiscussionTurn(1, "xiaoling", "小菱（主持人）", "agent", "结论"))
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    executor = _executor(db, admin_user, f"run_{terminal_status}")
+    executor._continue_roundtable_discussion = AsyncMock()
+
+    result = await executor._control_roundtable_discussion(
+        ToolCall(
+            "continue-terminal",
+            "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "continue", "content": "请继续核验"},
+            "{}",
+        )
+    )
+
+    assert result.status == "error"
+    assert "成功结论" in result.error
+    executor._continue_roundtable_discussion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_successful_roundtable_continues_only_from_explicit_continue_action(
+    db,
+    admin_user,
+    monkeypatch,
+) -> None:
+    # 本用例验证“新用户明确要求”门槛；项目范围/RBAC 由专门测试覆盖。
+    monkeypatch.setattr(
+        "app.ai.discussion_orchestrator._require_discussion_actor",
+        lambda *_args, **_kwargs: None,
+    )
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-success", 52, "success.py", owner_user_id=admin_user.id, project_id=52,
+    )
+    session.status = "concluded"
+    session.terminal_status = "success"
+    session.turns.append(DiscussionTurn(1, "xiaoling", "小菱（主持人）", "agent", "结论"))
+    monkeypatch.setattr(DiscussionBus, "instance", lambda: bus)
+    session_key = "roundtable-followup-chat"
+    db.add(AgentResponseRun(
+        run_id="run_explicit_followup",
+        user_id=admin_user.id,
+        surface="admin",
+        session_key=session_key,
+        status="running",
+        checkpoint_json=json.dumps({"transcript": [{"role": "user", "content": "看看上一轮结论"}]}),
+        version=1,
+    ))
+    db.commit()
+    executor = _executor(db, admin_user, "run_explicit_followup", session_key=session_key)
+    executor._continue_roundtable_discussion = AsyncMock(
+        return_value=service_module.ToolExecutionResult.success({"session_id": "continued"})
+    )
+
+    # 旧的自动评价路径使用 user_input；它不能再隐式创建续会。
+    automatic = await executor._control_roundtable_discussion(
+        ToolCall(
+            "auto-evaluate",
+            "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "user_input", "content": "结论是否满足要求"},
+            "{}",
+        )
+    )
+    assert automatic.status == "error"
+    executor._continue_roundtable_discussion.assert_not_awaited()
+
+    monkeypatch.setattr(
+        service_module,
+        "_is_automatic_task_result_for_roundtable",
+        lambda *_args, **_kwargs: True,
+        raising=False,
+    )
+    auto_continue = await executor._control_roundtable_discussion(
+        ToolCall(
+            "auto-task-result-continue",
+            "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "continue", "content": "自动评价建议继续"},
+            "{}",
+        )
+    )
+    assert auto_continue.status == "error"
+    executor._continue_roundtable_discussion.assert_not_awaited()
+
+    monkeypatch.setattr(
+        service_module,
+        "_is_automatic_task_result_for_roundtable",
+        lambda *_args, **_kwargs: False,
+        raising=False,
+    )
+    not_explicit = await executor._control_roundtable_discussion(
+        ToolCall(
+            "non-explicit-continue",
+            "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "continue", "content": "继续检查"},
+            "{}",
+        )
+    )
+    assert not_explicit.status == "error"
+    assert "新的用户消息明确要求继续" in not_explicit.error
+    executor._continue_roundtable_discussion.assert_not_awaited()
+
+    run = db.query(AgentResponseRun).filter_by(run_id="run_explicit_followup").one()
+    run.checkpoint_json = json.dumps({
+        "transcript": [{"role": "user", "content": "请基于成功结论继续复核"}],
+    })
+    db.commit()
+    explicit = await executor._control_roundtable_discussion(
+        ToolCall(
+            "user-continue",
+            "control_roundtable_discussion",
+            {"session_id": session.session_id, "action": "continue", "content": "请基于成功结论继续复核"},
+            "{}",
+        )
+    )
+    assert explicit.status == "success"
+    executor._continue_roundtable_discussion.assert_awaited_once_with(session, "请基于成功结论继续复核")
+
+
+@pytest.mark.asyncio
+async def test_task_result_run_is_identified_as_automatic_roundtable_continuation(db, admin_user) -> None:
+    """圆桌 task.result 正在自动回投时，服务器能识别该自动运行来源。"""
+    from app.services.agent_responses_service import _is_automatic_task_result_for_roundtable
+
+    session_key = "roundtable-result-session"
+    session_id = "discussion-result-123"
+    db.add(AgentResponseRun(
+        run_id="automatic-result-run",
+        user_id=admin_user.id,
+        surface="admin",
+        session_key=session_key,
+        status="running",
+        checkpoint_json="{}",
+        version=1,
+    ))
+    db.add(AgentMeshMessage(
+        message_id="mesh-result-123",
+        user_id=admin_user.id,
+        idempotency_key="discussion-result:discussion-result-123",
+        trace_id=session_id,
+        sent_from="agent:orchestrator",
+        send_to=f"session:admin:{session_key}",
+        message_type="task.result",
+        subject="圆桌讨论结果",
+        payload_json=json.dumps({"discussion_session_id": session_id}),
+        status="processing",
+    ))
+    db.commit()
+
+    assert _is_automatic_task_result_for_roundtable(
+        db,
+        user_id=admin_user.id,
+        surface="admin",
+        session_key=session_key,
+        session_id=session_id,
+    ) is True
+    assert _is_automatic_task_result_for_roundtable(
+        db,
+        user_id=admin_user.id,
+        surface="admin",
+        session_key=session_key,
+        session_id="another-session",
+    ) is False
+    assert _is_automatic_task_result_for_roundtable(
+        db,
+        user_id=admin_user.id,
+        surface="admin",
+        session_key=session_key,
+        session_id="",
+        run_id="automatic-result-run",
+    ) is True
+
+    executor = _executor(db, admin_user, "automatic-result-run", session_key=session_key)
+    start = await executor._start_roundtable_discussion(ToolCall(
+        "auto-start-roundtable",
+        "start_roundtable_discussion",
+        {},
+        "{}",
+    ))
+    assert start.status == "error"
+    assert "task.result 只用于汇报" in start.error
+
+
 @pytest.fixture(autouse=True)
 def lightweight_orchestrator(monkeypatch):
     monkeypatch.setattr(
@@ -35,7 +250,14 @@ def lightweight_orchestrator(monkeypatch):
     )
 
 
-def _executor(db, user: User, run_id: str, events: list[dict[str, Any]] | None = None) -> PrismToolExecutor:
+def _executor(
+    db,
+    user: User,
+    run_id: str,
+    events: list[dict[str, Any]] | None = None,
+    *,
+    session_key: str = "",
+) -> PrismToolExecutor:
     async def sink(event):
         if events is not None:
             events.append(dict(event))
@@ -47,6 +269,7 @@ def _executor(db, user: User, run_id: str, events: list[dict[str, Any]] | None =
         run_id=run_id,
         mcp_provider=EmptyMcp(),
         event_sink=sink,
+        session_key=session_key,
     )
 
 

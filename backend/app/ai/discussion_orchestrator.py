@@ -79,6 +79,10 @@ _PROFILE_TO_AGENT_CODE: dict[str, str] = {
     "maintainability": "code_reviewer",
 }
 
+# 模型调用通过同步 HTTP 客户端运行在线程池中；该间隔仅用于向会话推送
+# 等待进度，不会延长或取消底层供应商请求。
+_MODEL_STAGE_HEARTBEAT_SECONDS = 5.0
+
 _VALID_DECISION_ACTIONS = {"speak", "silent"}
 _VALID_DECISION_STANCES = {
     "propose", "agree", "oppose", "question", "supplement", "neutral",
@@ -822,11 +826,15 @@ class DiscussionOrchestrator:
             publish_progress("summarizing", coverage["attempted_turns"], progress_total)
             # 此阶段总线拒绝新发言；主持人与结构化抽取使用同一不可变边界。
             summary_turns = tuple(all_turns)
-            summary_text, summary_meta = await loop.run_in_executor(
-                None, copy_context().run,
-                lambda: self._summarize(
-                    list(summary_turns), code, language, file_name, agent, stopped,
+            summary_text, summary_meta = await self._await_model_stage(
+                loop.run_in_executor(
+                    None, copy_context().run,
+                    lambda: self._summarize(
+                        list(summary_turns), code, language, file_name, agent, stopped,
+                    ),
                 ),
+                stage="host_summarizing",
+                message="小菱主持人正在汇总讨论共识",
             )
             await self._check_active()
             coverage["summary_coverage"] = dict(self._summary_coverage)
@@ -928,7 +936,7 @@ class DiscussionOrchestrator:
                 partial=final_partial,
             )
             # 对齐团队派发逻辑:结论回投发起会话,小菱自动续跑汇报,无需用户手动追问。
-            if self._origin_surface and self._origin_session_key:
+            if self._origin_surface and self._origin_session_key and final_status != "cancelled":
                 await loop.run_in_executor(
                     None,
                     lambda: _notify_origin_session(
@@ -962,7 +970,11 @@ class DiscussionOrchestrator:
         session = self._bus.get_session(session_id)
         if session:
             session.report_task_id = task_id
-        if status != "success":
+            if status == "cancelled" and session.terminal_status == "cancelled" and session.terminal_error:
+                error = session.terminal_error
+            session.terminal_status = status
+            session.terminal_error = error[:1000]
+        if status not in {"success", "cancelled"}:
             message = error or f"圆桌讨论已结束（{status}），没有生成完整成功报告。"
             self._bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=len(session.turns) + 1 if session else 0,
@@ -983,6 +995,37 @@ class DiscussionOrchestrator:
             from app.services.roundtable_followup_service import ensure_followup_worker
 
             ensure_followup_worker(self._bus, session_id, self._user_id)
+
+    async def _await_model_stage(self, awaitable, *, stage: str, message: str):
+        """等待模型阶段时周期广播进度；取消协程不宣称能杀死线程中的 HTTP 请求。"""
+
+        interval = max(0.05, float(_MODEL_STAGE_HEARTBEAT_SECONDS))
+        started = time.monotonic()
+
+        def heartbeat() -> None:
+            elapsed = max(1, int(time.monotonic() - started))
+            self._bus.publish_control(self._session_id, "phase", {
+                "stage": stage,
+                "message": f"{message}（已等待 {elapsed} 秒）",
+                "elapsed_seconds": elapsed,
+            })
+
+        heartbeat()
+        future = asyncio.ensure_future(awaitable)
+        try:
+            while True:
+                try:
+                    return await asyncio.wait_for(asyncio.shield(future), timeout=interval)
+                except asyncio.TimeoutError:
+                    heartbeat()
+        except asyncio.CancelledError:
+            # run_in_executor 中的同步 HTTP 调用无法由 asyncio 强制终止；读取最终异常，
+            # 避免后台线程完成后留下未检索异常，同时当前圆桌仍立即停止后续阶段。
+            future.add_done_callback(
+                lambda completed: completed.exception()
+                if not completed.cancelled() else None
+            )
+            raise
 
     # ── 发言逻辑 ──
 
@@ -1186,9 +1229,13 @@ class DiscussionOrchestrator:
         try:
             if not windows:
                 chunk_index = round_idx * 100 + speaker_idx
-                content, meta = await loop.run_in_executor(
-                    None, copy_context().run,
-                    lambda: call_speaker(user_prompt, chunk_index),
+                content, meta = await self._await_model_stage(
+                    loop.run_in_executor(
+                        None, copy_context().run,
+                        lambda: call_speaker(user_prompt, chunk_index),
+                    ),
+                    stage="agent_thinking",
+                    message=f"{profile.name} 正在审查代码",
                 )
                 if not isinstance(content, str) or not content.strip():
                     raise RuntimeError("模型返回空内容，未完成本轮审查")
@@ -1203,9 +1250,13 @@ class DiscussionOrchestrator:
                 )
                 prompt = speaker_prompt(history_for_prompt, window, scope)
                 chunk_index = round_idx * 10_000 + speaker_idx * 100 + index
-                content, meta = await loop.run_in_executor(
-                    None, copy_context().run,
-                    lambda prompt=prompt, chunk_index=chunk_index: call_speaker(prompt, chunk_index),
+                content, meta = await self._await_model_stage(
+                    loop.run_in_executor(
+                        None, copy_context().run,
+                        lambda prompt=prompt, chunk_index=chunk_index: call_speaker(prompt, chunk_index),
+                    ),
+                    stage="agent_thinking",
+                    message=f"{profile.name} 正在审查源码窗口 {index}/{len(windows)}",
                 )
                 if not isinstance(content, str) or not content.strip():
                     raise RuntimeError(f"源码窗口 {index}/{len(windows)} 返回空内容")
@@ -1627,7 +1678,10 @@ class DiscussionOrchestrator:
             self._bus.request_stop(self._session_id)
             if self._task_id:
                 self._bus.cancel_discussion_task(self._session_id)
-            self._bus.publish_control(self._session_id, "stopping", {})
+            self._bus.publish_control(self._session_id, "stopping", {
+                "status": "cancelled",
+                "message": "讨论正在终止，不会生成成功小结",
+            })
             if self._paused_event:
                 self._paused_event.set()
 

@@ -57,7 +57,7 @@ def interrupt_orphan_roundtable(db, row) -> None:
 def visible_roundtable_progress(db, row) -> dict:
     """兼容旧圆桌终态：仅凭同账号报告的覆盖账本展示部分完成。"""
     progress = dict(row.progress or {})
-    if row.status != "concluded" or progress.get("phase") != "failed" or not row.report_task_id:
+    if row.status not in {"concluded", "failed"} or progress.get("phase") != "failed" or not row.report_task_id:
         return progress
     from app.models.review_task import ReviewTask
 
@@ -77,7 +77,17 @@ class DiscussionSession:
     file_name: str
     owner_user_id: int = 0
     turns: list[DiscussionTurn] = field(default_factory=list)
-    status: str = "active"  # active | paused | concluded
+    status: str = "active"  # active | paused | concluded | partial | failed | cancelled
+    terminal_status: str = ""  # success | partial | failed | cancelled
+    terminal_error: str = ""
+    current_round: int = 0
+    total_rounds: int = 0
+    speaker_code: str = ""
+    speaker_name: str = ""
+    speaker_index: int = 0
+    total_speakers: int = 0
+    stage: str = "preparing"
+    stage_message: str = "圆桌正在准备"
     max_rounds: int = 3
     report_task_id: int = 0  # 讨论沉淀的审查报告 task_id(收尾时回填)
     closed_at: float = 0.0  # concluded 时间戳,供过期清理判断
@@ -274,7 +284,7 @@ class DiscussionBus:
             "type": "control", "session_id": session_id,
             "action": "progress", "payload": snapshot,
         }, ensure_ascii=False)]
-        if session.status == "concluded":
+        if session.status in {"concluded", "partial", "failed", "cancelled"}:
             frames.append(json_lib.dumps({
                 "type": "control", "session_id": session_id,
                 "action": "done",
@@ -306,19 +316,29 @@ class DiscussionBus:
     def close_session(self, session_id: str):
         session = self._sessions.get(session_id)
         if session:
-            session.status = "concluded"
+            if not session.terminal_status:
+                session.terminal_status = "success"
+            session.status = self._session_status_for_terminal(session.terminal_status)
             if not session.closed_at:
                 session.closed_at = time.time()
-                session.progress = {
-                    **session.progress,
-                    # 报告整理期间接收的消息尚未进入不可变的报告输入；
-                    # 正常完成后由主持人逐条回应，不能在关闭时跳过这些消息。
-                    "followup_start_seq": int(
-                        session.progress["finalizing_input_start_seq"]
-                        if "finalizing_input_start_seq" in session.progress
-                        else session.last_turn_seq
-                    ),
-                }
+                if session.terminal_status == "success":
+                    session.progress = {
+                        **session.progress,
+                        # 报告整理期间接收的消息尚未进入不可变的报告输入；
+                        # 正常完成后由主持人逐条回应，不能在关闭时跳过这些消息。
+                        "followup_start_seq": int(
+                            session.progress["finalizing_input_start_seq"]
+                            if "finalizing_input_start_seq" in session.progress
+                            else session.last_turn_seq
+                        ),
+                    }
+            session.progress = {
+                **session.progress,
+                "terminal_status": session.terminal_status,
+                "terminal_error": session.terminal_error,
+                "stage": session.stage,
+                "stage_message": session.stage_message,
+            }
             if self._persist:
                 self._update_session(session)
         # 编排循环已退出,pause/resume/user_input 回调随之失效,立即摘除
@@ -342,7 +362,7 @@ class DiscussionBus:
         now = time.time()
         expired = [
             sid for sid, s in self._sessions.items()
-            if s.status == "concluded"
+            if s.status in {"concluded", "partial", "failed", "cancelled"}
             and s.closed_at
             and now - s.closed_at > _CONCLUDED_SESSION_TTL
             and not self._queues.get(sid)
@@ -442,6 +462,7 @@ class DiscussionBus:
                 session_id=session_id,
                 owner_user_id=row.owner_user_id,
             ).order_by(RoundtableTurn.seq.desc()).limit(_REPLAY_LIMIT).all()
+            progress = visible_roundtable_progress(db, row)
             return DiscussionSession(
                 session_id=row.session_id,
                 task_id=int(row.task_id or 0),
@@ -459,17 +480,49 @@ class DiscussionBus:
                 origin_session_key=row.origin_session_key,
                 continued_from_session_id=row.continued_from_session_id,
                 agents=list(row.agents or []),
-                progress=visible_roundtable_progress(db, row),
+                progress=progress,
                 last_turn_seq=int(row.last_turn_seq or 0),
+                terminal_status=str(progress.get("terminal_status") or ""),
+                terminal_error=str(progress.get("terminal_error") or ""),
+                current_round=int(progress.get("round") or 0),
+                total_rounds=int(progress.get("total_rounds") or row.max_rounds or 0),
+                speaker_code=str(progress.get("speaker_code") or ""),
+                speaker_name=str(progress.get("speaker_name") or ""),
+                speaker_index=int(progress.get("speaker_index") or 0),
+                total_speakers=int(progress.get("total_speakers") or 0),
+                stage=str(progress.get("stage") or "preparing"),
+                stage_message=str(progress.get("stage_message") or "圆桌正在准备"),
             )
 
-    def request_stop(self, session_id: str):
+    def request_stop(self, session_id: str, reason: str = ""):
         """标记会话为终止 — 编排循环在下一次检查时退出。"""
         session = self._sessions.get(session_id)
         if session:
-            session.status = "concluded"
+            session.status = "cancelled"
+            session.terminal_status = "cancelled"
+            session.terminal_error = session.terminal_error or str(reason or "圆桌讨论已取消")[:1000]
+            session.stage = "cancelled"
+            session.stage_message = session.terminal_error
+            session.progress = {
+                **session.progress,
+                "phase": "cancelled",
+                "terminal_status": "cancelled",
+                "terminal_error": session.terminal_error,
+                "stage": session.stage,
+                "stage_message": session.stage_message,
+                "seq": int(session.progress.get("seq") or 0) + 1,
+            }
             if self._persist:
                 self._update_session(session)
+
+    @staticmethod
+    def _session_status_for_terminal(terminal_status: str) -> str:
+        return {
+            "success": "concluded",
+            "partial": "partial",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }.get(str(terminal_status or "").lower(), "concluded")
 
     def start_discussion_task(
         self,
@@ -546,12 +599,22 @@ class DiscussionBus:
             progress = dict(session.progress)
             data = payload or {}
             if action == "round_start":
+                session.current_round = int(data.get("round") or 0)
+                session.total_rounds = int(data.get("total_rounds") or session.max_rounds or 0)
+                session.stage = "round"
+                session.stage_message = f"第 {session.current_round} / {session.total_rounds} 轮"
                 progress["phase"] = "speaking"
                 progress["round"] = int(data.get("round") or progress.get("round") or 0)
                 progress["speaker_code"] = ""
             elif action == "speaker":
                 speakers = int(data.get("total_speakers") or len(session.agents) or 0)
                 speaker_index = int(data.get("speaker_index") or 1)
+                session.speaker_code = str(data.get("speaker_code") or "")[:80]
+                session.speaker_name = str(data.get("speaker_name") or "")[:120]
+                session.speaker_index = int(data.get("speaker_index") or 0)
+                session.total_speakers = speakers
+                session.stage = "agent_thinking"
+                session.stage_message = f"{session.speaker_name or 'Agent'} 正在组织发言"
                 progress["phase"] = "speaking"
                 progress["speaker_code"] = str(data.get("speaker_code") or "")
                 progress["completed"] = max(
@@ -568,12 +631,40 @@ class DiscussionBus:
                 ):
                     if source in data:
                         progress[target] = data[source]
+                if "stage" in data:
+                    session.stage = str(data.get("stage") or session.stage)[:80]
+                if "message" in data:
+                    session.stage_message = str(data.get("message") or session.stage_message)[:240]
+                if "round" in data:
+                    session.current_round = int(data.get("round") or 0)
+                if "total_rounds" in data:
+                    session.total_rounds = int(data.get("total_rounds") or 0)
+            elif action == "phase":
+                session.stage = str(data.get("stage") or session.stage)[:80]
+                session.stage_message = str(data.get("message") or session.stage_message)[:240]
+                if "round" in data:
+                    session.current_round = int(data.get("round") or 0)
+                if "total_rounds" in data:
+                    session.total_rounds = int(data.get("total_rounds") or 0)
             elif action == "paused":
+                session.status = "paused"
+                session.stage = "paused"
+                session.stage_message = "讨论已暂停"
                 progress["paused"] = True
             elif action == "resumed":
+                if session.status == "paused":
+                    session.status = "active"
+                session.stage = "resumed"
+                session.stage_message = "讨论已继续"
                 progress["paused"] = False
-            elif action == "done":
-                result = str(data.get("status") or "success")
+            elif action in {"done", "cancelled"}:
+                result = str(data.get("status") or ("cancelled" if action == "cancelled" else "success"))
+                session.terminal_status = result
+                session.terminal_error = str(data.get("error") or "")[:1000]
+                session.status = self._session_status_for_terminal(result)
+                session.report_task_id = int(data.get("task_id") or session.report_task_id or 0)
+                session.stage = result
+                session.stage_message = session.terminal_error or "圆桌讨论已结束"
                 progress["phase"] = {
                     "success": "completed", "cancelled": "cancelled",
                     "failed": "partial" if data.get("partial") is True else "failed",
@@ -582,11 +673,23 @@ class DiscussionBus:
                 if result == "success":
                     progress["completed"] = int(progress.get("total") or 0)
                 progress["speaker_code"] = ""
-            if action in {"round_start", "speaker", "progress", "paused", "resumed", "done"}:
+            if action in {"round_start", "speaker", "phase", "progress", "paused", "resumed", "done", "cancelled"}:
                 progress["seq"] = int(progress.get("seq") or 0) + 1
                 progress["completed_units"] = progress.get("completed", 0)
                 progress["total_units"] = progress.get("total", 0)
                 progress["current_round"] = progress.get("round", 0)
+                progress.update({
+                    "terminal_status": session.terminal_status,
+                    "terminal_error": session.terminal_error,
+                    "stage": session.stage,
+                    "stage_message": session.stage_message,
+                    "round": session.current_round or progress.get("round", 0),
+                    "total_rounds": session.total_rounds or session.max_rounds,
+                    "speaker_code": session.speaker_code or progress.get("speaker_code", ""),
+                    "speaker_name": session.speaker_name,
+                    "speaker_index": session.speaker_index,
+                    "total_speakers": session.total_speakers,
+                })
                 session.progress = progress
                 if self._persist:
                     self._update_session(session)
@@ -620,6 +723,25 @@ class DiscussionBus:
         self._queues.setdefault(session_id, []).append(q)
 
         session = self.get_session(session_id)
+        if session:
+            q.put_nowait(json_lib.dumps({
+                "type": "control", "session_id": session_id, "action": "snapshot",
+                "payload": {
+                    "status": session.status,
+                    "terminal_status": session.terminal_status,
+                    "round": session.current_round,
+                    "total_rounds": session.total_rounds or session.max_rounds,
+                    "speaker_code": session.speaker_code,
+                    "speaker_name": session.speaker_name,
+                    "speaker_index": session.speaker_index,
+                    "total_speakers": session.total_speakers,
+                    "stage": session.stage,
+                    "message": session.stage_message,
+                    "task_id": session.task_id,
+                    "report_task_id": session.report_task_id,
+                    "error": session.terminal_error,
+                },
+            }, ensure_ascii=False))
         if session and session.turns:
             recent_turns = session.turns[-_REPLAY_LIMIT:]
             q.replay_after_seq = max(0, int(recent_turns[0].seq) - 1)
@@ -640,15 +762,16 @@ class DiscussionBus:
             }, ensure_ascii=False))
 
         # 终态重连补进度、done 和截止时间；真实轮次已在进度快照里。
-        if session and session.status == "concluded":
+        if session and session.status in {"concluded", "partial", "failed", "cancelled"}:
             try:
-                deadline = self.followup_until(session)
+                deadline = self.followup_until(session) if session.terminal_status == "success" else 0
                 q.put_nowait(json_lib.dumps({
                     "type": "control", "session_id": session_id,
                     "action": "done",
                     "payload": {
                         "task_id": session.report_task_id,
-                        "status": session.progress.get("phase", "completed"),
+                        "status": session.terminal_status or session.progress.get("phase", "completed"),
+                        "error": session.terminal_error,
                         "followup_until": deadline,
                     },
                 }, ensure_ascii=False))

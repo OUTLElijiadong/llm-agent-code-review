@@ -143,6 +143,8 @@ export interface TaskCoverageOut {
   ai_dynamic_status?: string | null
   blackbox_status?: string | null
   reason?: string | null
+  coverage_status?: string | null
+  /** 沙箱验证结果的覆盖状态，后端列表实际使用 coverage_status。 */
   current_file?: string | null
   completed_files?: number | null
   total_files?: number | null

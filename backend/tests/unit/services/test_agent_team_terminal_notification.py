@@ -37,7 +37,7 @@ def _team_with_parent_call(db, *, surface="user", session_key="session-team-dedu
         user_id=owner_id,
         surface=parent_surface or surface,
         session_key=tool_session_key or session_key,
-        status=parent_status,
+        status="running",
         checkpoint_json=json.dumps({"transcript": [], "rounds": 1}),
         version=1,
     )
@@ -103,6 +103,8 @@ def _team_with_parent_call(db, *, surface="user", session_key="session-team-dedu
     }, db=db):
         created = agent_team_service.create_team_from_xiaoling(db, owner, payload)
 
+    # 真实执行顺序：子团队在父运行活动时创建，父运行之后才结束。
+    run.status = parent_status
     execution.status = tool_status
     execution.result_json = json.dumps({
         "status": tool_status,

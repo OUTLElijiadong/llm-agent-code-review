@@ -77,10 +77,10 @@ def test_security_project_rejects_no_effective_input(monkeypatch, scan_mode, con
 
 
 def _seed_execution_actor(db, user_id, project_id):
-    from app.models.user import User
+    from app.core.permission_codes import PermissionCode
     from app.models.project import Project
     from app.models.rbac import Permission, Role, RolePermission, UserRole
-    from app.core.permission_codes import PermissionCode
+    from app.models.user import User
     if db.get(User, user_id) is None:
         db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
     if db.get(Project, project_id) is None:
@@ -92,8 +92,12 @@ def _seed_execution_actor(db, user_id, project_id):
     if permission is None:
         permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
         db.add(permission)
-    db.add(role); db.flush()
-    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.add(role)
+    db.flush()
+    db.add_all([
+        UserRole(user_id=user_id, role_id=role.id),
+        RolePermission(role_id=role.id, permission_id=permission.id),
+    ])
     db.commit()
 
 
@@ -205,7 +209,7 @@ async def test_discussion_invalid_input_closes_with_error_without_model(live_rou
     arguments["code"] = code
     await orchestrator.start_discussion(**arguments)
     agent.call_raw.assert_not_called()
-    assert session.status == "concluded"
+    assert session.status == "failed"
     controls = [json.loads(queue.get_nowait()) for _ in range(queue.qsize())]
     assert any(item.get("payload", {}).get("error") for item in controls)
     with roundtable_store() as database:
@@ -392,7 +396,7 @@ async def test_cancellation_while_finalizer_runs_revokes_worker_before_late_resu
     with roundtable_store() as database:
         assert database.query(ReviewTask).one().status == "cancelled"
         assert database.query(ReviewIssue).count() == 0
-    assert session.status == "concluded"
+    assert session.status == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -432,7 +436,7 @@ async def test_rest_pending_to_websocket_keeps_preflight_version(
         frozen = load_task_inputs(database, task.id)[0]
         assert frozen.version_no == 1
         assert frozen.content == "value = 1\n"
-    assert bus.get_session("rest-to-ws").status == "concluded"
+    assert bus.get_session("rest-to-ws").status == "failed"
     assert agent.call_raw.call_count > 0
     assert all("value = 1" in call.kwargs["user_prompt"] for call in agent.call_raw.call_args_list)
     assert all("value = 2" not in call.kwargs["user_prompt"] for call in agent.call_raw.call_args_list)
@@ -519,7 +523,8 @@ def test_security_api_does_not_serialize_empty_input_as_success(db, monkeypatch,
 
     agent = SecuritySentinelAgent()
     owner = User(id=7, username="offline-api", password="local", role="admin", status=1)
-    db.add(owner); db.commit()
+    db.add(owner)
+    db.commit()
     agent.inject(db, user=owner)
     monkeypatch.setattr(security_api, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace(
         security_sentinel=agent,

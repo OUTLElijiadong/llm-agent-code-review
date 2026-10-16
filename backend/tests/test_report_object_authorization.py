@@ -154,7 +154,7 @@ def test_hidden_parent_project_hides_every_report_outlet_even_for_admin(scope, a
     assert scope["rendered"] == []
 
 
-@pytest.mark.parametrize("task_state", ("pending", "running", "failed", "cancelled", "deleted"))
+@pytest.mark.parametrize("task_state", ("pending", "running", "deleted"))
 def test_unavailable_standard_reports_are_hidden_on_every_outlet(scope, task_state):
     scope["task"].status = task_state
     scope["db"].commit()
@@ -162,6 +162,18 @@ def test_unavailable_standard_reports_are_hidden_on_every_outlet(scope, task_sta
         assert _read(scope, endpoint).status_code == 404, endpoint
     assert scope["client"].get("/reports").json()["data"]["total"] == 0
     assert scope["rendered"] == []
+
+
+@pytest.mark.parametrize("task_state", ("failed", "cancelled"))
+@pytest.mark.parametrize("actor", ("author", "admin"))
+def test_terminal_standard_reports_remain_readable(scope, task_state, actor):
+    scope["task"].status = task_state
+    scope["current"]["user"] = scope["users"][actor]
+    scope["db"].commit()
+    for endpoint in READ_ENDPOINTS:
+        response = _read(scope, endpoint)
+        assert response.status_code == 200, endpoint
+    assert scope["client"].get("/reports").json()["data"]["total"] == 1
 
 
 @pytest.mark.parametrize("actor", ("author", "admin", "owner", "member", "outsider"))

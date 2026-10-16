@@ -72,6 +72,9 @@ async def _probe(app_root: pathlib.Path) -> bool:
         def filter(self, *conditions):
             return self
 
+        def populate_existing(self):
+            return self
+
         def first(self):
             return row
 

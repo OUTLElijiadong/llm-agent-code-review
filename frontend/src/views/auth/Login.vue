@@ -15,6 +15,7 @@ const buildVersion = import.meta.env.VITE_APP_VERSION?.trim() ? APP_DISPLAY_VERS
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const loginSucceeded = ref(false)
 const loginError = ref('')
 const loginStatus = ref('输入账号与密码，进入对应角色的工作台。')
 
@@ -86,6 +87,7 @@ async function handleLogin(): Promise<void> {
   refreshCooldown()
   if (!formRef.value || loading.value || cooldownRemaining.value > 0) return
   loading.value = true
+  loginSucceeded.value = false
   loginError.value = ''
   loginStatus.value = '正在校验登录信息…'
   try {
@@ -96,10 +98,12 @@ async function handleLogin(): Promise<void> {
     }
     loginStatus.value = '正在验证账号，请稍候…'
     await userStore.login({ username: form.username, password: form.password })
+    loginSucceeded.value = true
     loginStatus.value = '登录成功，正在进入工作台…'
     ElMessage.success('登录成功')
     await router.replace(getRoleHomePath(userStore.profile?.role))
   } catch (error: unknown) {
+    loginSucceeded.value = false
     const failure = error as { code?: unknown; message?: unknown; retry_after_seconds?: unknown } | null
     loginError.value = typeof failure?.message === 'string' && failure.message.trim()
       ? failure.message
@@ -202,16 +206,27 @@ async function handleLogin(): Promise<void> {
             />
           </el-form-item>
 
-          <button
-            type="submit"
-            class="btn-login font-display"
-            :class="{ loading }"
-            :disabled="loading || cooldownRemaining > 0"
-          >
-            <span>{{ cooldownRemaining > 0 ? `等待 ${cooldownRemaining} 秒` : loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
-            <span v-if="loading" class="login-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-            <span v-else class="arrow font-mono" aria-hidden="true">→</span>
-          </button>
+          <div class="login-action-slot" :data-success="loginSucceeded ? 'true' : 'false'">
+            <button
+              type="submit"
+              class="btn-login font-display"
+              :class="{ loading, 'is-success': loginSucceeded }"
+              :data-shape="loginSucceeded ? 'orb' : 'full'"
+              :disabled="loading || cooldownRemaining > 0"
+              :aria-busy="loading"
+              :aria-label="loginSucceeded ? '登录成功，正在进入工作台' : undefined"
+            >
+              <span :class="{ 'login-sr-only': loginSucceeded }">{{ cooldownRemaining > 0 ? `等待 ${cooldownRemaining} 秒` : loginSucceeded ? '登录成功' : loading ? '正在登录…' : loginError ? '重新登录' : '进入棱镜' }}</span>
+              <span v-if="loginSucceeded" class="login-success-mark" aria-hidden="true">
+                <span class="login-success-orb"></span>
+                <span class="login-success-node">
+                  <svg viewBox="0 0 20 20" focusable="false"><path d="m4.5 10.2 3.4 3.4 7.6-7.4" /></svg>
+                </span>
+              </span>
+              <span v-else-if="loading" class="login-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span v-else class="arrow font-mono" aria-hidden="true">→</span>
+            </button>
+          </div>
         </el-form>
 
         <p class="login-status" role="status" aria-live="polite" aria-atomic="true">{{ statusText }}</p>
@@ -443,6 +458,47 @@ async function handleLogin(): Promise<void> {
   outline-offset: 4px;
 }
 
+.btn-login.is-success {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  gap: 0;
+  padding: 0;
+  border-radius: 50%;
+  border-color: rgba(80, 207, 169, .75);
+  background: linear-gradient(115deg, #176C69, #168F7C 55%, #2BAE8B);
+  box-shadow: 0 10px 28px rgba(22, 143, 124, .28), inset 0 1px 0 rgba(255, 255, 255, .26);
+}
+.btn-login.is-success::after { opacity: 0; }
+.login-action-slot { display: flex; width: 100%; min-height: 56px; align-items: center; justify-content: center; margin-top: 4px; }
+.login-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.login-success-mark { position: relative; display: inline-grid; width: 34px; height: 34px; place-items: center; flex: none; }
+.btn-login.is-success .login-success-mark { width: 44px; height: 44px; }
+.login-success-orb {
+  position: absolute;
+  inset: 1px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #E7FFF8 0 8%, #7CF4D1 28%, rgba(75, 222, 183, .18) 70%);
+  box-shadow: 0 0 16px rgba(111, 255, 212, .78), 0 0 34px rgba(111, 255, 212, .34);
+  animation: login-orb-arrive var(--motion-duration-emphasis, 520ms) var(--motion-ease-standard, cubic-bezier(.2,.75,.25,1)) both;
+}
+.login-success-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 50%;
+  background: rgba(13, 89, 79, .62);
+  animation: login-node-arrive var(--motion-duration-standard, 280ms) var(--motion-ease-standard, cubic-bezier(.2,.75,.25,1)) both;
+}
+.login-success-node svg { width: 16px; height: 16px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+@keyframes login-orb-arrive { from { opacity: .55; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes login-node-arrive { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: scale(1); } }
+
 .login-status {
   min-height: 20px;
   margin: 14px 0 0;
@@ -526,7 +582,8 @@ async function handleLogin(): Promise<void> {
   position: relative;
   overflow: hidden;
   transition: all 0.2s ease;
-  margin-top: 4px;
+  margin-top: 0;
+  transition: width var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease), height var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease), flex-basis var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease), border-radius var(--motion-duration-standard, 280ms) var(--motion-ease-standard, ease), background var(--motion-duration-standard, 280ms) ease, box-shadow var(--motion-duration-standard, 280ms) ease;
 
   &::after {
     content: '';
@@ -618,6 +675,8 @@ async function handleLogin(): Promise<void> {
   .login-dots span,
   .btn-login,
   .btn-login::after,
+  .login-success-orb,
+  .login-success-node,
   .prism-form :deep(*) {
     animation: none !important;
     transition: none !important;

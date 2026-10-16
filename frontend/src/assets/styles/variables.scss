@@ -307,6 +307,10 @@ $dim-security: #B85AC4;
   --transition-fast: 0.15s ease;
   --transition-base: 0.25s ease;
   --transition-slow: 0.4s ease;
+  --motion-duration-fast: 160ms;
+  --motion-duration-standard: 280ms;
+  --motion-duration-emphasis: 520ms;
+  --motion-ease-standard: cubic-bezier(.2, .75, .25, 1);
 
   /* 布局 */
   --header-height:           56px;
@@ -357,6 +361,14 @@ $dim-security: #B85AC4;
 @media (max-width: 480px) {
   :root {
     --layout-main-padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration-standard: 0ms;
+    --motion-duration-emphasis: 0ms;
   }
 }
 

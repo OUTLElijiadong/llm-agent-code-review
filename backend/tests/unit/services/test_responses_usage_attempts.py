@@ -229,3 +229,66 @@ async def test_native_sink_cancel_after_terminal_read_keeps_usage(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await _runtime(transport, logs.append).start("unit")
     assert len(logs) == 1 and logs[0]["usage"]["total_tokens"] == 11
+
+
+@pytest.mark.asyncio
+async def test_user_cancel_closes_native_http_stream(monkeypatch):
+    from app.services import agent_responses_service as service
+
+    class BlockingStream(httpx.AsyncByteStream):
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.closed = asyncio.Event()
+
+        async def __aiter__(self):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+                yield b"data: {}\n\n"
+            finally:
+                self.closed.set()
+
+        async def aclose(self):
+            self.closed.set()
+
+    stream = BlockingStream()
+    original = httpx.AsyncClient
+    monkeypatch.setattr(
+        service.httpx,
+        "AsyncClient",
+        lambda **kw: original(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200,
+                    stream=stream,
+                    headers={"content-type": "text/event-stream"},
+                )
+            ),
+            **kw,
+        ),
+    )
+    store = InMemoryCheckpointStore()
+    logs = []
+    transport = NativeResponsesTransport(ApiConfig(api_key="unit", base_url="https://unit.example/v1", model="unit"))
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=SimpleNamespace(),
+        checkpoint_store=store,
+        model="requested-model",
+        on_round=logs.append,
+    )
+    driver = asyncio.create_task(runtime.start("unit", run_id="run-native-stop"))
+    await asyncio.wait_for(stream.started.wait(), timeout=2)
+
+    canceller = DeepSeekResponsesRuntime(
+        transport=None,
+        tool_executor=None,
+        checkpoint_store=store,
+        model="",
+    )
+    await canceller.cancel("run-native-stop", reason="用户停止")
+    result = await asyncio.wait_for(driver, timeout=2)
+
+    assert result.status == "cancelled"
+    assert stream.closed.is_set()
+    assert len(logs) == 1 and logs[0]["status"] == "cancelled"
