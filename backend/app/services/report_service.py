@@ -38,6 +38,26 @@ _REPORT_BODY_WHITESPACE = (
     "\x85", "\u00a0", "\u1680", *(chr(codepoint) for codepoint in range(0x2000, 0x200B)),
     "\u2028", "\u2029", "\u202f", "\u205f", "\u3000",
 )
+_REPORT_BODY_WHITESPACE_CHARS = "".join(_REPORT_BODY_WHITESPACE)
+_REPORT_BODY_WHITESPACE_PATTERN = f"[{_REPORT_BODY_WHITESPACE_CHARS}]+"
+
+
+def _non_whitespace_report_body(report_body, database_dialect: str):
+    """Build a compact expression that detects bodies containing real text."""
+    if database_dialect == "sqlite":
+        # SQLite trim accepts a character set. Chained replace() calls expand into
+        # a deeply nested SQL expression and can overflow SQLite's parser stack.
+        return func.trim(report_body, _REPORT_BODY_WHITESPACE_CHARS)
+    if database_dialect in {"mysql", "mariadb"}:
+        return func.regexp_replace(report_body, _REPORT_BODY_WHITESPACE_PATTERN, "")
+    if database_dialect == "postgresql":
+        return func.regexp_replace(report_body, _REPORT_BODY_WHITESPACE_PATTERN, "", "g")
+
+    # Keep a portable fallback for engines without regex replacement.
+    normalized = report_body
+    for whitespace in _REPORT_BODY_WHITESPACE:
+        normalized = func.replace(normalized, whitespace, "")
+    return normalized
 
 
 def _task_coverage(task: ReviewTask) -> dict:
@@ -171,10 +191,8 @@ def list_reports(db: Session, user: User, project_id: int = None,
         q = q.filter(ReviewTask.review_type != "pentest")
 
     report_body = ReviewReport.content_json["report_md"].as_string()
-    non_whitespace_report_body = report_body
-    for whitespace in _REPORT_BODY_WHITESPACE:
-        non_whitespace_report_body = func.replace(non_whitespace_report_body, whitespace, "")
     database_dialect = db.get_bind().dialect.name
+    non_whitespace_report_body = _non_whitespace_report_body(report_body, database_dialect)
     if database_dialect == "sqlite":
         report_body_is_string = func.json_type(ReviewReport.content_json, "$.report_md") == "text"
     elif database_dialect in {"mysql", "mariadb"}:
