@@ -30,10 +30,12 @@ dest="/opt/prism-releases/$sha"
 
 # 继承实际活动生产的受保护 dotenv、证书挂载和账本，不读取其明文。
 cp --reflink=always -a "$base" "$dest"
-git -C "$dest" bundle verify "$bundle"
-git -C "$dest" fetch --no-tags "$bundle" "$bundle_ref"
-git -C "$dest" checkout --detach FETCH_HEAD
-[[ "$(git -C "$dest" rev-parse HEAD)" == "$sha" ]]
+# 复制保留源目录属主；显式信任这棵刚创建的隔离目录，避免 Git dubious-ownership 阻断。
+git_dest() { git -c "safe.directory=$dest" -C "$dest" "$@"; }
+git_dest bundle verify "$bundle"
+git_dest fetch --no-tags "$bundle" "$bundle_ref"
+git_dest checkout --detach FETCH_HEAD
+[[ "$(git_dest rev-parse HEAD)" == "$sha" ]]
 [[ "$(tr -d '[:space:]' < "$dest/VERSION")" == "$version" ]]
 [[ -f "$dest/deploy/.env" && -f "$dest/deploy/sandbox/.env" ]]
 chmod 600 "$dest/deploy/.env" "$dest/deploy/sandbox/.env"

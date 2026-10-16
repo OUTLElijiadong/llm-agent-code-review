@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-10-16T14:39:11Z",
+  "release": {
+    "version": "4.0.109",
+    "sha": "a4d70e8fedfe545a844deb4dc753565178020ea9",
+    "target": "all",
+    "deployed_at_utc": "2026-10-16T14:32:56Z",
+    "previous_version": "4.0.108",
+    "previous_sha": "1b9d00e92b35c268d017fe0b78fc520ed02fb21e"
+  },
+  "backup": {
+    "path": "/opt/prism-releases/a4d70e8fedfe545a844deb4dc753565178020ea9/backups/code_review_20261016T142250Z_a4d70e8fedfe.sql.gz",
+    "bytes": 979659816,
+    "sha256": "27cec1358bb84beceded8d17fd14b6c02a96f8b802a291b1f69cfd745c1eeb31",
+    "sha256_sidecar": "passed",
+    "gzip_integrity": "passed",
+    "isolated_restore": {
+      "container": "cr_testdb",
+      "status": "passed",
+      "table_count": 109,
+      "alembic_revision": "064_remote_pentest_chain"
+    }
+  },
+  "images": {
+    "backend": {
+      "tag": "prism-backend:a4d70e8fedfe545a844deb4dc753565178020ea9",
+      "image_id": "sha256:7a315abd1cf2a3ce9109983e2155990037b189aab2b805a7caa8badcf6800b45"
+    },
+    "frontend": {
+      "tag": "prism-frontend:a4d70e8fedfe545a844deb4dc753565178020ea9",
+      "image_id": "sha256:dc46919c9a97bf14c9ff5eb0b47a09478af6b2ccdc5b2d1a1c339d7c2705ae5e"
+    },
+    "decoy_tag": "prism-decoy:4.0.109"
+  },
+  "release_ledger": {
+    "current_sha": "a4d70e8fedfe545a844deb4dc753565178020ea9",
+    "current_version": "4.0.109",
+    "previous_sha": "1b9d00e92b35c268d017fe0b78fc520ed02fb21e",
+    "previous_version": "4.0.108",
+    "alembic_revision": "064_remote_pentest_chain",
+    "backend_image_id_matches": true,
+    "frontend_image_id_matches": true
+  },
+  "runtime": {
+    "healthz": {
+      "status": "ok",
+      "version": "4.0.109",
+      "release": "a4d70e8fedfe545a844deb4dc753565178020ea9"
+    },
+    "readyz": {
+      "status": "ready",
+      "version": "4.0.109",
+      "release": "a4d70e8fedfe545a844deb4dc753565178020ea9"
+    },
+    "http_home_status": 308,
+    "https_home_status": 200,
+    "static_assets": {
+      "admin_overview_js": 200,
+      "login_js": 200,
+      "agent_chat_drawer_js": 200
+    },
+    "containers": {
+      "backend": "healthy",
+      "frontend": "healthy",
+      "decoy": "healthy",
+      "mysql": "healthy",
+      "clamav": "healthy"
+    },
+    "ops_check": {
+      "status": "ok",
+      "release": "ok",
+      "containers": "ok",
+      "disk": "ok",
+      "memory": "ok",
+      "backup": "ok",
+      "alembic": "ok",
+      "https": "ok"
+    }
+  },
+  "browser_acceptance": {
+    "status": "not_run",
+    "reason": "The current session blocks Computer Use on this site; no GUI interaction was performed."
+  }
+}
