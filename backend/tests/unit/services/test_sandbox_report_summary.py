@@ -43,6 +43,12 @@ def test_no_failure_placeholder_is_zero_and_missing_section_unknown():
     assert summarize_sandbox_report('## 问题清单\n## 下一步建议')['total'] is None
 
 
+@pytest.mark.parametrize("heading", ["## 问题清单", "## 4. 问题清单", "## 4、问题清单"])
+def test_numbered_issue_heading_keeps_empty_and_findings_count_consistent(heading):
+    assert summarize_sandbox_report(f"{heading}\n- 暂无问题。\n")['total'] == 0
+    assert summarize_sandbox_report(f"{heading}\n### [高] 有证据的问题\n位置：x.py:1\n")['total'] == 1
+
+
 def test_list_findings_exclude_nested_fields():
     result = summarize_sandbox_report('## 问题清单\n- [严重] 发现A\n  - 位置：x\n- 未分级发现B\n')
     assert result['total'] == 2
@@ -50,11 +56,26 @@ def test_list_findings_exclude_nested_fields():
     assert result['unclassified'] == 1
 
 
+def test_mixed_root_list_and_heading_findings_are_both_counted():
+    report = ('## 问题清单\n- [低] 列表候选A\n### [高] 标题候选B\n'
+              '- 证据：source code\n')
+    result = summarize_sandbox_report(report)
+    assert result['total'] == 2
+    assert result['severity_counts']['低'] == 1
+    assert result['severity_counts']['高'] == 1
+
+
 def test_fenced_headings_and_other_sections_are_not_findings():
     result = summarize_sandbox_report('## 问题清单\n### 1. 发现A\n- 证据：\n~~~~python\n'
                                       '### 2. 假标题\n## 下一节\n- 假问题\n~~~~\n'
                                       '## 证据附录\n### 不属于问题清单\n')
     assert result['total'] == result['unclassified'] == 1
+
+
+def test_fenced_h2_is_not_selected_as_the_issue_list():
+    report = ('## 黑盒结果\n示例：\n```md\n## 问题清单\n### [高] 伪标题\n```\n'
+              '## 4. 问题清单\n- 暂无问题。\n## 下一步建议\n复核\n')
+    assert summarize_sandbox_report(report)['total'] == 0
 
 
 def test_severity_group_heading_is_not_an_extra_finding():
@@ -98,6 +119,24 @@ def test_publish_reuses_summary_for_new_and_republished_sandbox_reports(db):
     assert db.query(ReviewTask).count() == 1
 
 
+def test_publish_persists_ai_review_incomplete_status_and_failure_reason(db):
+    from app.services.sandbox_service import _publish_sandbox_report
+
+    environment = SimpleNamespace(owner_id=1, project_id=1, public_id='unit-ai-review-failure', started_at=None,
+                                  stopped_at=None)
+    conclusion = {
+        'passed': True,
+        'ai_review_status': 'incomplete',
+        'ai_review_failure_reason': '模型未配置',
+        'evidence': {'worker_result': {'exit_code': 0}},
+    }
+
+    published = _publish_sandbox_report(db, environment, conclusion, '## 总体结论\n执行通过')
+
+    report = db.query(ReviewReport).filter_by(task_id=published['report_task_id']).one()
+    assert report.content_json['ai_review'] == {'status': 'incomplete', 'failure_reason': '模型未配置'}
+
+
 def test_history_161_reads_four_report_entries_without_mutating_task(db, admin_user):
     from app.services import dashboard_service, report_service
     project = Project(user_id=admin_user.id, project_name='验收项目')
@@ -107,7 +146,11 @@ def test_history_161_reads_four_report_entries_without_mutating_task(db, admin_u
                       status='success', total_files=1, processed_files=1, total_issues=16)
     db.add(task)
     db.add(ReviewReport(task_id=161, user_id=admin_user.id,
-                        content_json={'source':'sandbox_test','report_md':report_with_four_findings()},
+                        content_json={
+                            'source': 'sandbox_test',
+                            'report_md': report_with_four_findings(),
+                            'ai_review': {'status': 'incomplete', 'failure_reason': '模型未配置'},
+                        },
                         create_time=datetime.now()))
     db.commit()
     db.refresh(task)
@@ -121,7 +164,11 @@ def test_history_161_reads_four_report_entries_without_mutating_task(db, admin_u
     report_detail = report_service.get_report_detail(db, admin_user, 161)
     assert report_detail['stats']['total_issues'] == 4
     assert report_detail['stats']['severity'] == {'未分级': 4}
+    assert report_detail['source']['ai_review'] == {
+        'status': 'incomplete', 'failure_reason': '模型未配置',
+    }
     assert report_service.list_reports(db, admin_user)['items'][0]['total_issues'] == 4
+    assert report_service.list_reports(db, admin_user)['items'][0]['source']['ai_review']['status'] == 'incomplete'
     assert report_service.get_domain_report_export(db, admin_user, task, 'json')['statistics']['total_issues'] == 4
     assert dashboard_service.get_summary(db, admin_user)['total_issues'] == 4
     assert not db.dirty

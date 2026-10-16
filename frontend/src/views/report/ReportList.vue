@@ -71,6 +71,13 @@
               <el-tag v-if="isUnverifiedSandboxReport(row)" type="warning" size="small" effect="plain">
                 {{ sandboxCoverageLabel(row.coverage?.verification_status) }}
               </el-tag>
+              <el-tag
+                v-if="row.source?.type === 'sandbox_test' && row.source.ai_review?.status !== 'complete'"
+                type="warning"
+                size="small"
+                effect="plain"
+                :title="row.source.ai_review?.failure_reason || '历史报告未保存 AI 审查状态'"
+              >AI 报告未完成或状态未知</el-tag>
             </div>
             <div class="rc-line2 font-mono">
               <span class="rc-project" :title="row.project_name">{{ row.project_name }}</span>

@@ -122,7 +122,9 @@ def test_report_publish_failure_is_explicit_and_logged(db, monkeypatch) -> None:
     owner = User(username="sbx_publish_failure_owner", password="x", role="user", status=1)
     db.add(owner)
     db.commit()
-    environment = SimpleNamespace(public_id="sbx_publish_failure", project_id=1, owner_id=owner.id, test_mode="whitebox")
+    environment = SimpleNamespace(
+        public_id="sbx_publish_failure", project_id=1, owner_id=owner.id, test_mode="whitebox"
+    )
     monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("private database details")))
     logged: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -137,6 +139,176 @@ def test_report_publish_failure_is_explicit_and_logged(db, monkeypatch) -> None:
     assert result["failure_code"] == "report_persistence_failed"
     assert "private database details" not in str(result)
     assert logged == [("sandbox report publication failed public_id={}", "sbx_publish_failure")]
+
+
+def test_remote_probe_exception_still_creates_failure_report(db, monkeypatch) -> None:
+    from contextlib import nullcontext
+    from datetime import datetime, timedelta
+
+    from sqlalchemy.orm import Session
+
+    from app.models.agent_capability import SandboxEnvironment
+    from app.models.user import User
+
+    owner = User(username="sbx_remote_exception_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_remote_probe_exception",
+        project_id=1,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="queued",
+        runtime="runsc",
+        image_ref="remote-only",
+        source_sha256="0" * 64,
+        resource_policy_json="{}",
+        agent_config_json='{"remote_only": true, "worker_mode": "blackbox"}',
+        execution_token="probe-lease",
+        remote_target_url="https://authorized.example.test/healthz",
+        expires_at=datetime.now() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+
+    monkeypatch.setattr(
+        sandbox_service,
+        "SessionLocal",
+        lambda: Session(bind=db.get_bind(), expire_on_commit=False),
+    )
+    monkeypatch.setattr(sandbox_service, "usage_context", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(sandbox_service, "_require_execution_lease", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_probe_remote_target",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("synthetic transport timeout")),
+    )
+    monkeypatch.setattr(
+        sandbox_service.strategy_learning_service,
+        "observe_sandbox_outcome",
+        lambda *_args, **_kwargs: None,
+    )
+
+    sandbox_service._execute_environment(
+        environment.id,
+        source_archive_base64="",
+        execution_token="probe-lease",
+    )
+
+    db.refresh(environment)
+    task = (
+        db.query(ReviewTask)
+        .filter(ReviewTask.task_name == "沙箱黑盒测试 · sbx_remote_probe_exception")
+        .one_or_none()
+    )
+    assert environment.status == "failed"
+    assert task is not None
+    assert task.status == "failed"
+    assert task.coverage["verification_status"] == "failed"
+    assert "执行异常" in task.coverage["reason"]
+    assert task.summary and "未完成验证" in task.summary
+
+
+def test_worker_execute_exception_still_creates_failure_report(db, monkeypatch) -> None:
+    import base64
+    import hashlib
+    import io
+    import zipfile
+    from contextlib import nullcontext
+    from datetime import datetime, timedelta
+
+    from sqlalchemy.orm import Session
+
+    from app.models.agent_capability import SandboxEnvironment, SandboxWorker
+    from app.models.user import User
+
+    owner = User(username="sbx_worker_exception_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    source_buffer = io.BytesIO()
+    with zipfile.ZipFile(source_buffer, "w") as source_zip:
+        source_zip.writestr("main.py", "print('ok')\n")
+    source_archive = source_buffer.getvalue()
+    worker = SandboxWorker(
+        code="sbx_worker_exception",
+        name="Worker exception test",
+        worker_type="local",
+        transport="unix",
+        endpoint="/tmp/unused-worker.sock",
+        supported_languages_json='["python"]',
+        supported_modes_json='["whitebox"]',
+        runtime="runsc",
+        status="healthy",
+        enabled=1,
+    )
+    db.add(worker)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_worker_execute_exception",
+        project_id=1,
+        owner_id=owner.id,
+        worker_id=worker.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="queued",
+        runtime="runsc",
+        image_ref="prism-sandbox-python:test",
+        source_sha256=hashlib.sha256(source_archive).hexdigest(),
+        source_archive_blob=source_archive,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        execution_token="worker-exception-lease",
+        expires_at=datetime.now() + timedelta(hours=1),
+    )
+    db.add(environment)
+    db.commit()
+
+    monkeypatch.setattr(
+        sandbox_service,
+        "SessionLocal",
+        lambda: Session(bind=db.get_bind(), expire_on_commit=False),
+    )
+    monkeypatch.setattr(sandbox_service, "usage_context", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(sandbox_service, "_require_execution_lease", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "_emit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "_generate_deployment_patch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sandbox_service, "_generate_agent_test_cases", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service,
+        "_call_worker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("synthetic worker timeout")),
+    )
+    monkeypatch.setattr(sandbox_service, "_stop_registered_worker_requests", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        sandbox_service.strategy_learning_service,
+        "observe_sandbox_outcome",
+        lambda *_args, **_kwargs: None,
+    )
+
+    sandbox_service._execute_environment(
+        environment.id,
+        source_archive_base64=base64.b64encode(source_archive).decode("ascii"),
+        execution_token="worker-exception-lease",
+    )
+
+    db.refresh(environment)
+    task = (
+        db.query(ReviewTask)
+        .filter(ReviewTask.task_name == "沙箱白盒测试 · sbx_worker_execute_exception")
+        .one_or_none()
+    )
+    assert environment.status == "failed"
+    assert task is not None
+    assert task.status == "failed"
+    assert task.coverage["verification_status"] == "failed"
+    assert "执行器" in task.coverage["reason"]
+    assert task.summary and "未完成验证" in task.summary
 
 
 def test_partial_sandbox_report_preserves_recorded_score_and_exposes_scope() -> None:

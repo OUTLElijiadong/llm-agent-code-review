@@ -85,6 +85,8 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     member_roles: dict[int, str] = {}
     agent_runs: dict[int, tuple] = {}
     if proj_ids:
+        from app.services import review_service
+
         agent_runs = _agent_run_stats(db, proj_ids)
         file_counts = dict(
             db.query(CodeFile.project_id, func.count(CodeFile.id))
@@ -101,7 +103,11 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
         }
         succ_tasks = (
             db.query(ReviewTask)
-            .filter(ReviewTask.project_id.in_(proj_ids), ReviewTask.status == "success")
+            .filter(
+                ReviewTask.project_id.in_(proj_ids),
+                ReviewTask.status == "success",
+                review_service.task_metadata_access_filter(db, user),
+            )
             .order_by(ReviewTask.create_time.desc())
             .all()
         )
@@ -255,13 +261,14 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
     active_file_count = file_count
     if file_count == 0 and source_archive is not None:
         file_count = source_archive.file_count
+    from app.services import review_service
+
     recent_tasks = db.query(ReviewTask).filter(
         ReviewTask.project_id == project_id,
         ReviewTask.status != "deleted",
+        review_service.task_metadata_access_filter(db, user),
     ).order_by(ReviewTask.create_time.desc()).limit(5).all()
     from app.core.permission_codes import PermissionCode
-    from app.services import review_service
-
     is_admin = rbac_service.is_admin_user(db, int(user.id))
     report_permission = rbac_service.check_permission(
         db, int(user.id), PermissionCode.REPORT_VIEW,

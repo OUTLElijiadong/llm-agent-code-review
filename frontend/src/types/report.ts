@@ -18,6 +18,10 @@ export interface ReportSource {
   stats_basis?: string
   detail_api?: string
   report_issue_summary?: TaskDetailOut['report_issue_summary']
+  ai_review?: {
+    status: 'complete' | 'incomplete'
+    failure_reason?: string | null
+  }
   [key: string]: unknown
 }
 
@@ -59,6 +63,11 @@ export interface ReportIssue {
   fixed_code?: string
   status: string
   create_time: string
+  /** 模型发现的人工复核状态；缺失表示历史数据未记录，不等于通过。 */
+  human_review_status?: 'pending' | 'evidence_requested' | 'accepted' | 'rejected' | 'not_required' | null
+  /** 源码引用质量；verified 仅表示引用可在源码中找到，不证明漏洞成立。 */
+  evidence_quality?: 'verified' | 'direct' | 'inferred' | 'unsupported' | null
+  aggregation_json?: Record<string, unknown> | null
   /** ===== T01 v3 新增字段 ===== */
   /** 由有效 CVSS v3.1 向量确定性计算的基础评分 */
   cvss_score?: number | null

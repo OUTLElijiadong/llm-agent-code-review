@@ -158,19 +158,21 @@ def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(revi
     owner_response = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
     member_response = client.get("/api/review/tasks/11", headers=headers(users["member"]))
 
-    for response in (owner_response, member_response):
-        assert response.status_code == 200
-        data = response.json()["data"]
-        assert data["can_view_report"] is False
-        assert data["summary"] is None
-        assert data["total_issues"] is None
-        assert data["severe_issues"] is None
-        assert data["high_issues"] is None
-        assert data["medium_issues"] is None
-        assert data["low_issues"] is None
-        assert data["score"] is None
-        assert data["score_breakdown"] is None
-        assert "UNIQUE_SECRET_DOMAIN_REPORT_BODY" not in response.text
+    assert owner_response.status_code == 200
+    owner_data = owner_response.json()["data"]
+    assert owner_data["can_view_report"] is False
+    assert owner_data["summary"] is None
+    assert owner_data["total_issues"] is None
+    assert owner_data["severe_issues"] is None
+    assert owner_data["high_issues"] is None
+    assert owner_data["medium_issues"] is None
+    assert owner_data["low_issues"] is None
+    assert owner_data["score"] is None
+    assert owner_data["score_breakdown"] is None
+    assert "UNIQUE_SECRET_DOMAIN_REPORT_BODY" not in owner_response.text
+    assert member_response.status_code == 404
+    assert "private-task" not in member_response.text
+    assert "UNIQUE_SECRET_DOMAIN_REPORT_BODY" not in member_response.text
     assert writes == []
 
 
@@ -198,13 +200,11 @@ def test_domain_report_body_requires_both_report_permission_and_owner_scope(revi
     owner_response = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
     member_response = client.get("/api/review/tasks/11", headers=headers(users["member"]))
 
-    assert owner_response.status_code == member_response.status_code == 200
+    assert owner_response.status_code == 200
+    assert member_response.status_code == 404
     owner_data = owner_response.json()["data"]
-    member_data = member_response.json()["data"]
     assert owner_data["can_view_report"] is True
     assert owner_data["summary"] == "AUTHORIZED_DOMAIN_REPORT_BODY"
-    assert member_data["can_view_report"] is False
-    assert member_data["summary"] is None
     assert "AUTHORIZED_DOMAIN_REPORT_BODY" not in member_response.text
     assert writes == []
 
@@ -260,12 +260,12 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     owner_project_detail = client.get("/api/projects/11", headers=headers(users["owner"]))
 
     assert all(response.status_code == 200 for response in (
-        member_list, owner_list, member_detail, owner_detail,
-        member_projects, owner_projects, member_project_detail, owner_project_detail,
+        member_list, owner_list, member_projects, owner_projects,
+        member_project_detail, owner_project_detail,
     ))
-    member_row = next(item for item in member_list.json()["data"]["items"] if item["id"] == task.id)
+    assert member_detail.status_code == 404
+    assert owner_detail.status_code == 200
     owner_row = next(item for item in owner_list.json()["data"]["items"] if item["id"] == task.id)
-    member_data = member_detail.json()["data"]
     owner_data = owner_detail.json()["data"]
     member_project_row = next(
         item for item in member_projects.json()["data"]["items"] if item["id"] == 11
@@ -273,28 +273,17 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     owner_project_row = next(
         item for item in owner_projects.json()["data"]["items"] if item["id"] == 11
     )
-    member_recent = member_project_detail.json()["data"]["recent_tasks"][0]
+    member_recent_tasks = member_project_detail.json()["data"]["recent_tasks"]
     owner_recent = owner_project_detail.json()["data"]["recent_tasks"][0]
 
-    for hidden in (member_row, member_data):
-        assert hidden["total_issues"] is None
-        assert hidden["severe_issues"] is None
-        assert hidden["high_issues"] is None
-        assert hidden["medium_issues"] is None
-        assert hidden["low_issues"] is None
-        assert hidden["score"] is None
-        assert hidden["score_breakdown"] is None
-        assert hidden["coverage"] is None
-        assert hidden.get("report_issue_summary") is None
-        assert hidden["can_view_report"] is False
-        assert "REPORT_METRIC_SECRET" not in str(hidden)
+    assert all(item["id"] != task.id for item in member_list.json()["data"]["items"])
+    assert member_list.json()["data"]["total"] == 0
+    assert member_recent_tasks == []
 
-    # 项目列表和项目详情的近期任务也必须遵守同一报告权限。
+    # 项目列表和项目详情不能通过最近任务时间或近期任务摘要泄露报告型任务。
     assert member_project_row["score"] is None
     assert member_project_row["coverage"] is None
-    assert member_recent["score"] is None
-    assert member_recent["coverage"] is None
-    assert member_recent["total_issues"] is None
+    assert member_project_row["last_review_at"] is None
     assert owner_project_row["score"] == 73
     if review_type == "sandbox_test":
         assert owner_project_row["coverage"]["verification_status"] == "partial"
@@ -313,7 +302,7 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         assert visible["score"] == 73
         assert visible["score_breakdown"] == {"private_metric": "REPORT_METRIC_SECRET"}
 
-    # report:view alone must not broaden the report endpoint's owner/admin object scope.
+    # report:view alone must not reveal another account's report-backed task metadata.
     db.add(RolePermission(role_id=1, permission_id=report_permission.id))
     db.commit()
     writes.clear()
@@ -321,24 +310,43 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     member_detail_with_report_permission = client.get("/api/review/tasks/11", headers=headers(users["member"]))
     member_project_with_report_permission = client.get("/api/projects/11", headers=headers(users["member"]))
     member_projects_with_report_permission = client.get("/api/projects", headers=headers(users["member"]))
-    for response, key in (
-        (member_with_report_permission, "items"),
-        (member_detail_with_report_permission, None),
-    ):
-        assert response.status_code == 200
-        payload = response.json()["data"]
-        hidden = next(item for item in payload[key] if item["id"] == task.id) if key else payload
-        assert hidden["can_view_report"] is False
-        assert hidden["total_issues"] is None
-        assert hidden["severe_issues"] is None
-        assert hidden["score"] is None
-        assert hidden.get("report_issue_summary") is None
+    assert member_with_report_permission.status_code == 200
+    assert member_with_report_permission.json()["data"]["total"] == 0
+    assert member_detail_with_report_permission.status_code == 404
     assert member_project_with_report_permission.status_code == 200
-    assert member_project_with_report_permission.json()["data"]["recent_tasks"][0]["score"] is None
-    assert member_project_with_report_permission.json()["data"]["recent_tasks"][0]["total_issues"] is None
-    assert next(item for item in member_projects_with_report_permission.json()["data"]["items"]
-                if item["id"] == 11)["score"] is None
+    assert member_project_with_report_permission.json()["data"]["recent_tasks"] == []
+    member_project_list_row = next(item for item in member_projects_with_report_permission.json()["data"]["items"]
+                                   if item["id"] == 11)
+    assert member_project_list_row["last_review_at"] is None
+    assert member_project_list_row["score"] is None
     assert writes == []
+
+
+@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest"])
+def test_running_domain_task_is_visible_to_owner_but_not_project_member(review_http, review_type):
+    client, users, _writes, db = review_http
+    admin = User(id=99, username="review_access_admin", password="isolated", role="admin", status=1)
+    admin_role = Role(id=99, name="管理员", code="admin", status="active", is_builtin=1)
+    db.add_all([admin, admin_role, UserRole(user_id=admin.id, role_id=admin_role.id)])
+    task = db.get(ReviewTask, 11)
+    task.review_type = review_type
+    task.status = "running"
+    db.commit()
+
+    owner_list = client.get("/api/review/tasks", headers=headers(users["owner"]))
+    member_list = client.get("/api/review/tasks", headers=headers(users["member"]))
+    owner_detail = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
+    member_detail = client.get("/api/review/tasks/11", headers=headers(users["member"]))
+    admin_list = client.get("/api/review/tasks", headers=headers(admin))
+    admin_detail = client.get("/api/review/tasks/11", headers=headers(admin))
+
+    assert owner_list.json()["data"]["total"] == 1
+    assert owner_detail.status_code == 200
+    assert member_list.json()["data"]["total"] == 0
+    assert member_detail.status_code == 404
+    assert "private-task-11" not in member_detail.text
+    assert admin_list.json()["data"]["total"] == 1
+    assert admin_detail.status_code == 200
 
 
 def test_standard_review_metrics_remain_visible_to_project_member(review_http):

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from loguru import logger
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_, true
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, BaseAgent
@@ -2334,6 +2334,40 @@ def _build_summary(profiles: tuple[ReviewAgentProfile, ...], file_count: int,
 _REPORT_BACKED_REVIEW_TYPES = frozenset({"sandbox_test", "pentest"})
 
 
+def can_view_task_metadata(
+    db: Session,
+    user: User,
+    task: ReviewTask,
+    *,
+    administrator: Optional[bool] = None,
+) -> bool:
+    """报告型任务的元数据只对发起人和管理员可见。
+
+    普通代码审查仍由项目成员关系控制；黑白盒与渗透任务不能因共享项目而
+    在其他账号的列表、详情或项目动态中暴露任务标题、状态和时间。
+    """
+    if task.review_type not in _REPORT_BACKED_REVIEW_TYPES:
+        return True
+    if administrator is None:
+        from app.services import rbac_service
+
+        administrator = rbac_service.is_admin_user(db, int(user.id))
+    return bool(administrator or int(task.user_id) == int(user.id))
+
+
+def task_metadata_access_filter(db: Session, user: User):
+    """SQL 条件版报告任务元数据可见策略，供列表在分页前过滤。"""
+    from app.services import rbac_service
+
+    if rbac_service.is_admin_user(db, int(user.id)):
+        return true()
+    return or_(
+        ReviewTask.review_type.is_(None),
+        ReviewTask.review_type.notin_(_REPORT_BACKED_REVIEW_TYPES),
+        ReviewTask.user_id == user.id,
+    )
+
+
 def _can_view_task_report(
     db: Session,
     user: User,
@@ -2409,6 +2443,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
     q = db.query(ReviewTask).filter(
         ReviewTask.status != "deleted",
         ReviewTask.project_id.in_(visible_ids),
+        task_metadata_access_filter(db, user),
     )
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
@@ -2505,7 +2540,8 @@ def _require_readable_task(db: Session, user: User, task_id: int) -> ReviewTask:
         except NotFoundError:
             pass
         else:
-            return task
+            if can_view_task_metadata(db, user, task):
+                return task
     raise NotFoundError(
         "审查任务不存在或当前账号无权访问",
         code=40400,

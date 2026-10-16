@@ -31,10 +31,10 @@ _REAL_CALL_FOR_TASK = module._call_raw_for_task
 
 
 def _seed_execution_actor(db, user_id, project_id):
-    from app.models.user import User
+    from app.core.permission_codes import PermissionCode
     from app.models.project import Project
     from app.models.rbac import Permission, Role, RolePermission, UserRole
-    from app.core.permission_codes import PermissionCode
+    from app.models.user import User
     if db.get(User, user_id) is None:
         db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
     if db.get(Project, project_id) is None:
@@ -46,8 +46,14 @@ def _seed_execution_actor(db, user_id, project_id):
     if permission is None:
         permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
         db.add(permission)
-    db.add(role); db.flush()
-    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.add(role)
+    db.flush()
+    db.add_all(
+        [
+            UserRole(user_id=user_id, role_id=role.id),
+            RolePermission(role_id=role.id, permission_id=permission.id),
+        ]
+    )
     db.commit()
 
 
@@ -1990,6 +1996,11 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert rows[1].cvss_source == "vector"
     assert rows[1].compliance_mapping == {"iso27001": ["A.8.3"]}
     assert rows[1].remediation == "服务端按资源所有者校验权限"
+    assert rows[1].status == "pending_review"
+    assert rows[1].human_review_status == "pending"
+    assert rows[1].evidence_quality == "verified"
+    assert rows[1].conflict_status == "none"
+    assert rows[1].aggregation_json["source_grounding"]["requires_human_review"] is True
     assert saved_task is not None
     assert saved_task.processed_files == 1
     assert saved_task.total_issues == 2

@@ -1872,7 +1872,7 @@ def _finalize_review(
                 description=it.description or "",
                 suggestion=it.suggestion or "",
                 fixed_code=it.fixed_code or "",
-                status="unfixed",
+                status="pending_review" if it.human_review_status == "pending" else "unfixed",
                 owasp=it.owasp,
                 cwe=it.cwe,
                 evidence=it.evidence,
@@ -1890,6 +1890,11 @@ def _finalize_review(
                 compliance_mapping=it.compliance_mapping if it.compliance_mapping else None,
                 remediation=it.remediation,
                 static_rule_hits=it.static_rule_hits,
+                evidence_quality=it.evidence_quality or None,
+                conflict_status=it.conflict_status or None,
+                human_review_status=it.human_review_status or None,
+                risk_score=it.risk_score,
+                aggregation_json=it.aggregation or None,
             ))
         if issue_rows:
             db.add_all(issue_rows)

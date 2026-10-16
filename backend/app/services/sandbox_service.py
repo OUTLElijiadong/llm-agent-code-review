@@ -4818,7 +4818,11 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
     remote = evidence.get("remote_blackbox")
     remote = remote if isinstance(remote, dict) else {}
     remote_status_code = remote.get("status_code")
-    if type(remote_status_code) is int and 200 <= remote_status_code < 300:
+    remote_execution = evidence.get("remote_blackbox_execution")
+    remote_execution = remote_execution if isinstance(remote_execution, dict) else {}
+    if remote_execution.get("status") in {"passed", "partial", "failed"}:
+        remote_state = str(remote_execution["status"])
+    elif type(remote_status_code) is int and 200 <= remote_status_code < 300:
         remote_state = "passed"
     elif type(remote_status_code) is int and 300 <= remote_status_code < 500:
         remote_state = "partial"
@@ -4832,6 +4836,7 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         or dynamic_state in {"failed", "receipt_missing"}
         or blackbox_state == "failed"
         or remote_state == "failed"
+        or isinstance(evidence.get("execution_failure"), dict)
     )
     if explicit_failure:
         verification_status = "failed"
@@ -4876,6 +4881,11 @@ def _sandbox_verification_failure_reason(
     blackbox: dict[str, Any],
 ) -> str:
     """Translate allowlisted runner receipts into a concise owner-visible failure reason."""
+    execution_failure = evidence.get("execution_failure")
+    if isinstance(execution_failure, dict):
+        if execution_failure.get("kind") == "remote_probe_exception":
+            return "受授权远程黑盒探测发生执行异常，本次未完成验证。"
+        return "沙箱执行器发生异常，本次未完成验证；请查看执行事件与回收状态。"
     failure_kind = str(blackbox.get("failure_kind") or "")
     failure_reason = str(blackbox.get("failure_reason") or "")
     if failure_kind == "application_startup":
@@ -5122,6 +5132,8 @@ def _extract_agent_test_failures(log_text: str) -> dict[str, str]:
 
 def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
     """以确定性执行事实覆盖模型可能写错的总体结论。"""
+    from app.services.sandbox_report_summary import _markdown_h2_sections, _matches_report_section
+
     passed = bool(conclusion.get("passed"))
     coverage = _sandbox_verification_coverage(conclusion)
     agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
@@ -5148,11 +5160,20 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         facts.append(f"动态用例 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。")
     facts.append("后续分析若与本段结构化事实冲突，以本段为准。")
     canonical = "## 总体结论\n\n" + " ".join(facts)
-    remainder = re.sub(
-        r"(?ms)^## 总体结论\s*.*?(?=^## |\Z)",
-        "",
-        str(report_md or ""),
-    ).lstrip()
+    source_report = str(report_md or "")
+    conclusion_sections = [
+        section for section in _markdown_h2_sections(source_report)
+        if _matches_report_section(str(section["title"]), "总体结论")
+    ]
+    remainder_parts: list[str] = []
+    cursor = 0
+    for section in conclusion_sections:
+        start = int(section["start"])
+        end = int(section["end"])
+        remainder_parts.append(source_report[cursor:start])
+        cursor = end
+    remainder_parts.append(source_report[cursor:])
+    remainder = "".join(remainder_parts).lstrip()
     evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
     decompilation = evidence.get("decompilation") if isinstance(evidence.get("decompilation"), dict) else None
     if decompilation:
@@ -5181,6 +5202,193 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
     return canonical + ("\n\n" + remainder if remainder else "")
 
 
+_TEST_REVIEW_REQUIRED_SECTIONS = (
+    "总体结论",
+    "白盒结果",
+    "黑盒结果",
+    "问题清单",
+    "攻击面待验证清单",
+    "下一步建议",
+    "证据附录",
+)
+
+
+def _unique_candidate_markdown(parts: list[str]) -> str:
+    """Remove exact duplicate finding blocks while preserving their first occurrence."""
+    from app.services.sandbox_report_summary import _is_field_heading
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        lines = part.splitlines()
+        preamble: list[str] = []
+        blocks: list[list[str]] = []
+        current: list[str] | None = None
+        fence_char: str | None = None
+        fence_length = 0
+        for line in lines:
+            fence = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if fence:
+                token, remainder = fence.group(1), fence.group(2)
+                if fence_char is None:
+                    if token[0] != "`" or "`" not in remainder:
+                        fence_char = token[0]
+                        fence_length = len(token)
+                elif token[0] == fence_char and len(token) >= fence_length and not remainder.strip():
+                    fence_char = None
+                    fence_length = 0
+                (current if current is not None else preamble).append(line)
+                continue
+            heading = re.match(r"^ {0,3}###[ \t]+(?!#)(.+?)\s*#*[ \t]*$", line)
+            if fence_char is None and heading and not _is_field_heading(heading.group(1)):
+                if current:
+                    blocks.append(current)
+                current = [line]
+            elif current is None:
+                preamble.append(line)
+            else:
+                current.append(line)
+        if current:
+            blocks.append(current)
+        fragments = ([preamble] if any(line.strip() for line in preamble) else []) + blocks
+        if not fragments:
+            fragments = [lines]
+        for fragment in fragments:
+            normalized = "\n".join(line.rstrip() for line in fragment).strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                output.append("\n".join(fragment).strip())
+    return "\n\n".join(output)
+
+
+def _has_complete_test_review_report(report_md: object) -> bool:
+    """Require every promised section to contain more than an empty placeholder."""
+    if not isinstance(report_md, str) or not report_md.strip():
+        return False
+    from app.services.sandbox_report_summary import _heading_text, _markdown_h2_sections, _outside_fenced_lines
+
+    sections: dict[str, list[str]] = {}
+    for section in _markdown_h2_sections(report_md):
+        title = _heading_text(str(section["title"])).rstrip(":：").strip()
+        if title not in _TEST_REVIEW_REQUIRED_SECTIONS:
+            continue
+        start, end = int(section["body_start"]), int(section["end"])
+        sections.setdefault(title, []).extend(_outside_fenced_lines(report_md[start:end]))
+
+    placeholder_only = re.compile(
+        r"^(?:x{1,3}|test|todo|tbd|n/?a|none|null|placeholder|填充|占位(?:符)?|"
+        r"待(?:填写|补充)[^。.!！…]*|待复核|待人工验证|生成中|模型未给出)"
+        r"(?:\s*[:：\-—]\s*.*)?[\s。.!！…]*$",
+        re.IGNORECASE,
+    )
+    punctuation_only = re.compile(r"^[\W_]+$", re.UNICODE)
+
+    def has_substantive_content(lines: list[str]) -> bool:
+        for line in lines:
+            normalized = re.sub(r"^\s*(?:(?:[-*+]\s+)|(?:\d+[.)、]\s*))+", "", line).strip()
+            normalized = re.sub(r"^\[[\sxX]*\]\s*", "", normalized).strip()
+            normalized = normalized.strip("`*_ \t\"'“”‘’[]()（）{}")
+            if (
+                not normalized
+                or punctuation_only.fullmatch(normalized)
+                or placeholder_only.fullmatch(normalized)
+            ):
+                continue
+            # Only obvious blanks and template tokens are rejected; model prose
+            # semantics are intentionally not judged here.
+            return True
+        return False
+
+    return all(
+        has_substantive_content(sections.get(name, []))
+        for name in _TEST_REVIEW_REQUIRED_SECTIONS
+    )
+
+
+def _separate_unverified_ai_findings(report_md: str) -> tuple[str, int | None]:
+    """Keep model findings visible as candidates, never as confirmed issue rows by default."""
+    from app.services.sandbox_report_summary import (
+        _markdown_h2_sections,
+        _matches_report_section,
+        _outside_fenced_lines,
+        summarize_sandbox_report,
+    )
+
+    sections = _markdown_h2_sections(report_md)
+    issue_sections = [
+        section for section in sections
+        if _matches_report_section(str(section["title"]), "问题清单")
+    ]
+    if not issue_sections:
+        return report_md, None
+    issue_bodies: list[str] = []
+    empty_line_pattern = re.compile(
+        r"(?:[-*+]\s*)?(?:无(?:问题|发现|漏洞)?|未发现(?:确定性执行失败|问题|漏洞)|"
+        r"没有发现(?:问题|漏洞)|暂无(?:问题|发现|漏洞))[。.!！\s]*",
+        re.I,
+    )
+    for section in issue_sections:
+        body = report_md[int(section["body_start"]):int(section["end"])].strip()
+        meaningful_lines = [line.strip() for line in _outside_fenced_lines(body) if line.strip()]
+        explicitly_empty = not meaningful_lines or all(empty_line_pattern.fullmatch(line) for line in meaningful_lines)
+        if explicitly_empty:
+            continue
+        issue_bodies.append(body)
+
+    existing_candidates = [
+        section for section in sections
+        if _matches_report_section(str(section["title"]), "AI 候选发现（未核实）")
+    ]
+    existing_bodies = [
+        report_md[int(section["body_start"]):int(section["end"])].strip()
+        for section in existing_candidates
+    ]
+    nonempty_existing_bodies = [body for body in existing_bodies if body]
+    if (
+        not issue_bodies
+        and not nonempty_existing_bodies
+        and len(issue_sections) == 1
+        and not existing_candidates
+    ):
+        return report_md, 0
+
+    candidate_body = _unique_candidate_markdown([*issue_bodies, *nonempty_existing_bodies])
+    if candidate_body:
+        candidate_summary = summarize_sandbox_report(f"## 问题清单\n{candidate_body}\n")
+        candidate_count = (
+            candidate_summary.get("total")
+            if isinstance(candidate_summary.get("total"), int)
+            else None
+        )
+        replacement = (
+            "## 问题清单\n\n"
+            "- 无问题。\n\n"
+            "模型推断不计入已确认问题数；待复核内容见下方候选区。\n\n"
+            "## AI 候选发现（未核实）\n\n"
+            "以下条目未由确定性执行回执或人工复现确认，不得视为已确认漏洞：\n\n"
+            f"{candidate_body}\n\n"
+        )
+    else:
+        candidate_count = 0
+        replacement = "## 问题清单\n\n- 无问题。\n\n"
+    ranges = [
+        (int(section["start"]), int(section["end"]), replacement if index == 0 else "")
+        for index, section in enumerate(issue_sections)
+    ]
+    ranges.extend((int(section["start"]), int(section["end"]), "") for section in existing_candidates)
+    output: list[str] = []
+    cursor = 0
+    for start, end, content in sorted(ranges):
+        if start < cursor:
+            continue
+        output.append(report_md[cursor:start])
+        output.append(content)
+        cursor = end
+    output.append(report_md[cursor:])
+    separated = "".join(output)
+    return separated, candidate_count
+
+
 def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     """模型不可用时生成可导出的确定性报告，禁止把缺少模型伪装成成功。"""
     passed = bool(conclusion.get("passed"))
@@ -5189,9 +5397,21 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
     failed_count = int(agent_tests.get("failed") or 0)
     coverage = _sandbox_verification_coverage(conclusion)
+    mode_label = {
+        "whitebox": "白盒",
+        "blackbox": "黑盒",
+        "combined": "黑白盒组合",
+    }.get(str(coverage.get("requested_mode") or ""), "沙箱")
     model_status = (
         f"模型增强：因不可重试错误（{conclusion['ai_model_stop_reason'].get('failure_kind', 'unknown')}）已停止。\n\n"
         if isinstance(conclusion.get("ai_model_stop_reason"), dict)
+        else ""
+    )
+    ai_review_failure_reason = str(conclusion.get("ai_review_failure_reason") or "").strip()
+    ai_review_status = (
+        f"多 Agent AI 审查：未完成；原因：{ai_review_failure_reason}。\n"
+        "本报告是确定性执行结果兜底，不代表 AI 审查已完成。\n\n"
+        if ai_review_failure_reason
         else ""
     )
     report = (
@@ -5203,10 +5423,79 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
         f"确定性执行：{coverage['deterministic_status']}；AI 动态用例：{coverage['ai_dynamic_status']}；"
         f"黑盒路由：{coverage['blackbox_status']}。\n\n"
         + model_status
+        + ai_review_status
         + "## 问题清单\n\n"
-        + ("- 反编译或白盒执行未通过，详见执行日志与结构化证据。\n" if not passed else "- 未发现确定性执行失败。\n")
+        + (f"- {mode_label}执行未通过；具体失败项以报告中的结构化证据为准。\n" if not passed else "- 未发现确定性执行失败。\n")
     )
     return _fact_gate_report(report, conclusion)
+
+
+def _persist_deterministic_test_review_fallback(
+    db: Session,
+    environment: SandboxEnvironment,
+    conclusion: dict[str, Any],
+    *,
+    failure_reason: str,
+    failure_kind: str | None = None,
+) -> dict[str, Any]:
+    """Model setup/runtime failure must still leave an exportable deterministic report."""
+    conclusion["ai_review_failure_reason"] = failure_reason
+    conclusion["ai_review_status"] = "incomplete"
+    report_md = _build_deterministic_test_report(conclusion)
+    artifact_id: int | None = None
+    try:
+        artifact = _persist_browser_artifact(
+            db,
+            environment,
+            artifact_type="review_report",
+            file_name=f"sandbox-review-report-{environment.public_id}.md",
+            mime_type="text/markdown",
+            content=report_md.encode("utf-8", errors="replace"),
+        )
+        artifact_id = int(artifact.id)
+    except Exception:  # noqa: BLE001 - the report-center write is still attempted
+        logger.exception("sandbox deterministic report artifact failed public_id={}", environment.public_id)
+        db.rollback()
+    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    report_persisted = bool(isinstance(published, dict) and published.get("report_persisted"))
+    summary: dict[str, Any] = {
+        "agent_code": "test_reviewer",
+        "artifact_id": artifact_id,
+        "roles_executed": 0,
+        "roles_total": 4,
+        "roles_manifest_valid": False,
+        "report_candidate_valid": False,
+        "review_mode": "deterministic_fallback",
+        "ai_review_complete": False,
+        "ai_review_failure_reason": failure_reason,
+        "roles": {},
+        "report_bytes": len(report_md.encode("utf-8")),
+        "report_task_id": published.get("report_task_id") if isinstance(published, dict) else None,
+        "issues": published.get("issues", 0) if isinstance(published, dict) else 0,
+        "report_persisted": report_persisted,
+    }
+    if not report_persisted:
+        summary["report_failure_code"] = (
+            published.get("failure_code", "report_persistence_failed")
+            if isinstance(published, dict)
+            else "report_persistence_failed"
+        )
+    if failure_kind:
+        summary["failure_kind"] = failure_kind
+    _append_event(
+        db,
+        environment,
+        "complete" if report_persisted else "failed",
+        "multi_agent_review",
+        (
+            f"确定性测试报告已生成并写入报告中心；{failure_reason}"
+            if report_persisted
+            else f"确定性测试报告已生成，但报告中心写入失败；{failure_reason}"
+        ),
+        summary,
+    )
+    db.commit()
+    return summary
 
 
 def _run_test_review_report(
@@ -5214,11 +5503,7 @@ def _run_test_review_report(
     environment: SandboxEnvironment,
     conclusion: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """黑白盒测试终态后,调用多Agent审查编排产出中文报告并落制品。
-
-    失败静默(只记事件不阻断):LLM 未配置/超时/任一角色异常都不影响测试结论。
-    返回写入 result_json 的摘要 dict,未执行或失败返回 None。
-    """
+    """黑白盒测试终态后生成中文报告；模型不可用时必须发布确定性报告兜底。"""
     try:
         from app.agents.base import AgentContext
         from app.agents.test_review_reporter_agent import _EXTRA_ROLE_PROMPTS, TestReviewReporterAgent
@@ -5229,6 +5514,7 @@ def _run_test_review_report(
         model_review_completed = False
         roles_manifest_valid = False
         report_candidate_valid = False
+        unverified_findings = 0
         review_failure_reason = "多 Agent AI 审查未完成"
         report_md = _build_deterministic_test_report(conclusion)
         if not agent._api_key:
@@ -5279,8 +5565,10 @@ def _run_test_review_report(
                 if result.success:
                     data = result.data if isinstance(result.data, dict) else {}
                     raw_candidate = data.get("report_md")
-                    report_candidate_valid = isinstance(raw_candidate, str) and bool(raw_candidate.strip())
+                    report_candidate_valid = _has_complete_test_review_report(raw_candidate)
                     candidate = _fact_gate_report(str(raw_candidate or ""), conclusion)
+                    if report_candidate_valid:
+                        candidate, unverified_findings = _separate_unverified_ai_findings(candidate)
                     roles = data.get("roles") if isinstance(data.get("roles"), dict) else {}
                     executed = data.get("roles_executed")
                     total = data.get("roles_total")
@@ -5306,11 +5594,11 @@ def _run_test_review_report(
                         report_md = candidate
                     else:
                         review_failure_reason = (
-                            "AI 报告内容为空"
+                            "AI 报告为空或缺少必需章节"
                             if not report_candidate_valid or not candidate.strip()
                             else "多 Agent 角色清单或执行结果未通过完整性校验"
                         )
-                        # 只有完整角色清单和非空报告候选均通过校验时才允许保存或发布模型报告。
+                        # 只有完整角色清单和七个非空报告章节均通过校验时才允许发布模型报告。
                         # 任何不完整返回都使用确定性内容，避免“AI 未完成”状态却泄出未验证报告。
                         report_md = _build_deterministic_test_report(conclusion)
                 else:
@@ -5336,6 +5624,13 @@ def _run_test_review_report(
                     )
                     if failure_kind in NON_RETRYABLE_MODEL_FAILURES:
                         db.commit()
+        if not model_review_completed:
+            conclusion["ai_review_failure_reason"] = review_failure_reason
+            conclusion["ai_review_status"] = "incomplete"
+            report_md = _build_deterministic_test_report(conclusion)
+        else:
+            conclusion.pop("ai_review_failure_reason", None)
+            conclusion["ai_review_status"] = "complete"
         artifact = _persist_browser_artifact(
             db,
             environment,
@@ -5370,6 +5665,8 @@ def _run_test_review_report(
             "roles": {k: {"ok": bool(v.get("ok"))} for k, v in roles.items() if isinstance(v, dict)},
             "report_bytes": len(report_md.encode("utf-8")),
         }
+        if model_review_completed:
+            summary["unverified_findings"] = unverified_findings
         published = _publish_sandbox_report(db, environment, conclusion, report_md)
         if published:
             summary["report_task_id"] = published.get("report_task_id")
@@ -5410,19 +5707,52 @@ def _run_test_review_report(
                 "failure_kind": failure_kind,
                 "message": "测试报告审查遇到不可重试模型错误；后续模型请求已停止",
             }
-            _append_event(
-                db,
-                environment,
-                "progress",
-                "multi_agent_review",
-                "测试报告审查遇到不可重试模型错误；保留确定性执行结论",
-                {"failure_kind": failure_kind},
-            )
-            db.commit()
-            return None
-        _append_event(db, environment, "progress", "multi_agent_review", f"多 Agent 测试审查异常: {str(exc)[:120]}")
+            reason = f"模型请求不可重试（{failure_kind}）"
+        else:
+            failure_kind = "review_runtime_error"
+            reason = "多 Agent 报告生成遇到运行异常"
+        _append_event(
+            db,
+            environment,
+            "progress",
+            "multi_agent_review",
+            f"{reason}；改用确定性报告兜底",
+            {"failure_kind": failure_kind},
+        )
         db.commit()
-        return None
+        return _persist_deterministic_test_review_fallback(
+            db,
+            environment,
+            conclusion,
+            failure_reason=reason,
+            failure_kind=failure_kind,
+        )
+
+
+def _run_test_review_report_with_authorization_fallback(
+    db: Session,
+    environment: SandboxEnvironment,
+    conclusion: dict[str, Any],
+    execution_token: str | None,
+) -> dict[str, Any] | None:
+    """Keep a completed runner result intact if authorization expires during reporting."""
+    try:
+        _require_execution_lease(db, environment.id, execution_token)
+        review_report = _run_test_review_report(db, environment, conclusion)
+        _require_execution_lease(db, environment.id, execution_token)
+        return review_report
+    except (ForbiddenError, NotFoundError):
+        db.rollback()
+        db.refresh(environment)
+        if environment.status != "finalizing":
+            raise
+        return _persist_deterministic_test_review_fallback(
+            db,
+            environment,
+            conclusion,
+            failure_reason="报告阶段执行授权已失效，AI 审查未完成",
+            failure_kind="execution_authorization_unavailable",
+        )
 
 
 def _publish_sandbox_report(
@@ -5434,7 +5764,7 @@ def _publish_sandbox_report(
     """把沙箱多 Agent 审查报告正式入库"审查报告"中心(ReviewTask+ReviewReport)。
 
     幂等:按 public_id 写入 task_name 查重,重复执行只更新不重复建。
-    失败静默,不阻断测试结论。
+    失败时返回可观测的持久化失败回执，不伪造报告已保存，也不覆盖测试执行结论。
     """
     try:
         from datetime import datetime
@@ -5459,6 +5789,11 @@ def _publish_sandbox_report(
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
         report_issue_summary = summarize_sandbox_report(report_md)
+        ai_review_status = str(conclusion.get("ai_review_status") or "unknown")
+        ai_review_metadata = {
+            "status": ai_review_status if ai_review_status in {"complete", "incomplete"} else "unknown",
+            "failure_reason": str(conclusion.get("ai_review_failure_reason") or "") or None,
+        }
         verification = _sandbox_verification_coverage(conclusion)
         verification_status = verification["verification_status"]
         failure_message = (
@@ -5555,6 +5890,7 @@ def _publish_sandbox_report(
                     "public_id": public_id,
                     "report_md": report_md,
                     "report_issue_summary": report_issue_summary,
+                    "ai_review": ai_review_metadata,
                     "evidence": conclusion.get("evidence", {}),
                 },
                 summary=report_md[:2000],
@@ -5568,6 +5904,7 @@ def _publish_sandbox_report(
                 "public_id": public_id,
                 "report_md": report_md,
                 "report_issue_summary": report_issue_summary,
+                "ai_review": ai_review_metadata,
                 "evidence": conclusion.get("evidence", {}),
             }
             report_row.summary = report_md[:2000]
@@ -7225,6 +7562,7 @@ def _execute_environment(
 ) -> None:
     db = SessionLocal()
     usage_scope = ExitStack()
+    failure_stage = "executor"
     try:
         environment = db.get(SandboxEnvironment, environment_id)
         if not environment or environment.status not in {"queued", "recovering"}:
@@ -7811,6 +8149,7 @@ def _execute_environment(
                         blackbox_result,
                     )
         if environment.remote_target_url:
+            failure_stage = "remote_blackbox"
             _append_event(db, environment, "progress", "remote_blackbox", "已在授权边界内调用远程 HTTP(S) 黑盒探测")
             _commit_execution(db, environment_id, execution_token)
             _require_execution_lease(db, environment_id, execution_token)
@@ -7821,6 +8160,7 @@ def _execute_environment(
                 evidence["blackbox_execution"] = remote_execution
             if not _remote_blackbox_passed(remote_execution):
                 target_status = "failed"
+            failure_stage = "finalization"
         passed = _execution_result_passed(
             purpose=environment.purpose,
             state=state,
@@ -7897,9 +8237,12 @@ def _execute_environment(
         # finalizing，调度器不会把尚未完成多 Agent 报告的结果误判为终态。
         _commit_execution(db, environment_id, execution_token)
         # 黑白盒链路结束后,由多Agent审查编排产出中文报告(失败只记录,不阻断)
-        _require_execution_lease(db, environment_id, execution_token)
-        review_report = _run_test_review_report(db, environment, conclusion)
-        _require_execution_lease(db, environment_id, execution_token)
+        review_report = _run_test_review_report_with_authorization_fallback(
+            db,
+            environment,
+            conclusion,
+            execution_token,
+        )
         if review_report is not None:
             conclusion["multi_agent_review"] = review_report
         final_result_json = _json(conclusion)
@@ -7959,8 +8302,49 @@ def _execute_environment(
                 cleanup_error = f"Sandbox Worker 配置不存在：worker_id={environment.worker_id}"
             conclusion = {
                 "passed": False,
-                "summary": "沙箱执行失败",
-                "evidence": {"error": failure[:1000]},
+                "summary": (
+                    "受授权远程黑盒探测异常，验证未完成"
+                    if failure_stage == "remote_blackbox"
+                    else "沙箱执行异常，验证未完成"
+                ),
+                "evidence": {
+                    "execution_failure": {
+                        "stage": failure_stage,
+                        "kind": (
+                            "remote_probe_exception"
+                            if failure_stage == "remote_blackbox"
+                            else "sandbox_executor_exception"
+                        ),
+                        "exception_type": type(exc).__name__,
+                    },
+                    "agent_test_generation": {
+                        "status": "skipped",
+                        "mode": str(environment.test_mode or ""),
+                        "count": 0,
+                        "reason": "执行异常导致本次动态测试未完成",
+                    },
+                    **(
+                        {
+                            "remote_blackbox_execution": {
+                                "status": "failed",
+                                "basis": "authorized_remote_http_probe",
+                                "failure_kind": "probe_exception",
+                            }
+                        }
+                        if failure_stage == "remote_blackbox"
+                        else {}
+                    ),
+                    **(
+                        {
+                            "blackbox_execution": {
+                                "status": "failed",
+                                "failure_kind": "executor_exception",
+                            }
+                        }
+                        if str(environment.test_mode or "") in {"blackbox", "combined"}
+                        else {}
+                    ),
+                },
                 "agent_code": environment.agent_code,
             }
             environment.result_json = _json(conclusion)
@@ -7983,6 +8367,25 @@ def _execute_environment(
                 environment.result_json = _json(conclusion)
                 _append_event(db, environment, "failed", "cleanup", "Worker 未确认全部资源终止，保留 stopping 状态")
             db.commit()
+            if not cancellation_requested:
+                try:
+                    review_summary = _persist_deterministic_test_review_fallback(
+                        db,
+                        environment,
+                        conclusion,
+                        failure_reason=(
+                            "受授权远程黑盒探测发生执行异常"
+                            if failure_stage == "remote_blackbox"
+                            else "沙箱执行器发生异常"
+                        ),
+                        failure_kind=str(conclusion["evidence"]["execution_failure"]["kind"]),
+                    )
+                    conclusion["multi_agent_review"] = review_summary
+                    environment.result_json = _json(conclusion)
+                    db.commit()
+                except Exception:  # noqa: BLE001 - keep the executor failure and expose report persistence failure
+                    db.rollback()
+                    logger.exception("sandbox executor failure report failed public_id={}", environment.public_id)
             if cleanup_confirmed and not cancellation_requested:
                 try:
                     strategy_learning_service.observe_sandbox_outcome(db, environment, conclusion)

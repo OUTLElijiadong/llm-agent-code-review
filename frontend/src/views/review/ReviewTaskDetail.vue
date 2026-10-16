@@ -98,7 +98,7 @@
         报告问题统计受权限保护
       </div>
       <p v-if="reportMetricsRestricted" class="report-access-note" role="note">
-        报告内容仅对任务发起账号及管理员开放。请切换到发起任务的账号查看；平台不会向其他账号展示报告正文、评分或问题明细。
+        当前账号无法查看报告正文、评分或问题明细。仅任务发起账号或管理员且具备报告查看权限时可访问；请核对账号身份或联系管理员开通权限。
       </p>
       <div v-else class="head-tally">
         <div class="tally-item">
