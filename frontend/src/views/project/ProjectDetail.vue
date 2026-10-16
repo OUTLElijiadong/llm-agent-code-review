@@ -562,10 +562,16 @@ async function fetchDetail(): Promise<void> {
 async function openSecurityScan(): Promise<void> {
   if (!canScan.value) return
   persistedAuditResult.value = null
-  if (userStore.hasPermission('security:view') && project.value?.source_archive?.audit_status === 'succeeded') {
+  if (userStore.hasPermission('security:view') && project.value?.source_archive) {
     try {
       const stored = await getAuditSourceArchiveResult(projectId)
-      persistedAuditResult.value = stored?.result ?? null
+      persistedAuditResult.value = stored?.result
+        ? {
+            ...stored.result,
+            execution_status: stored.result_status as SecurityScanOut['execution_status'],
+            previous_run_retained: stored.status === 'running',
+          }
+        : null
     } catch {
       /* 权限或网络错误已由 http 拦截器提示；仍允许用户打开重新扫描。 */
     }

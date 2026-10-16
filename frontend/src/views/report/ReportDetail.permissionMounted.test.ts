@@ -22,7 +22,7 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   useUserStore().profile = { id: 103, username: 'qa_report', role: 'user', status: 1 }
-  useUserStore().permissions = new Set(['report:view'])
+  useUserStore().permissions = new Set(['report:view', 'issue:view'])
   api.getReportDetail.mockResolvedValue(report)
   api.generateReport.mockResolvedValue('{}')
   api.exportReport.mockResolvedValue(new Blob(['{}'], { type: 'application/json' }))
@@ -52,20 +52,22 @@ async function exportJsonFromMenu() {
   await flushPromises()
 }
 
-it('仅查看权限实际点击HTML预览仍可用，不触发下载或无权问题请求', async () => {
+it('只有报告概览权限时不开放包含问题证据的HTML预览或下载', async () => {
+  useUserStore().permissions.delete('issue:view')
   await render()
   expect(button('打印')).toBeDefined()
   expect(button('导出报告')).toBeUndefined()
-  await wrapper.get('[data-testid="report-preview-button"]').trigger('click')
+  expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(false)
+  await state().handlePreview()
   await flushPromises()
-  expect(api.previewReport).toHaveBeenCalledExactlyOnceWith(42, 'detailed')
-  expect(document.querySelector('[data-testid="report-preview-fallback"]')?.getAttribute('sandbox')).toBe('')
+  expect(api.previewReport).not.toHaveBeenCalled()
   expect(api.generateReport).not.toHaveBeenCalled()
   expect(api.exportReport).not.toHaveBeenCalled()
   expect(issues.getTaskIssues).not.toHaveBeenCalled()
 })
 
 it('缺少问题明细权限时明确说明权限边界，报告概览仍可查看', async () => {
+  useUserStore().permissions.delete('issue:view')
   await render()
   expect(wrapper.get('[data-testid="report-issues-restricted"]').text()).toContain('当前账号没有问题明细查看权限')
   expect(wrapper.find('[data-testid="report-issues-retry"]').exists()).toBe(false)
@@ -139,8 +141,9 @@ it('真实Pinia撤回格式权限后按钮隐藏，原错误重试handler也不�
   expect(api.generateReport).not.toHaveBeenCalled()
 })
 
-it.each(['sandbox_test', 'pentest'])('来源未加载时无操作；%s已加载后只开放JSON交集', async (type) => {
+it.each(['sandbox_test', 'pentest'])('来源未加载时无操作；%s已加载后开放有权限的同源格式', async (type) => {
   for (const format of ['json', 'html', 'pdf', 'word']) useUserStore().permissions.add(`report:export:${format}`)
+  if (type === 'pentest') useUserStore().permissions.add('pentest:view')
   let resolve!: (value: typeof report) => void
   api.getReportDetail.mockReturnValueOnce(new Promise(value => { resolve = value }))
   await render()
@@ -153,10 +156,11 @@ it.each(['sandbox_test', 'pentest'])('来源未加载时无操作；%s已加载�
   resolve({ ...report, source: { type } })
   await flushPromises()
   expect(button('生成 JSON')).toBeDefined()
-  expect(button('生成 HTML')).toBeUndefined()
-  expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(false)
+  expect(button('生成 HTML')).toBeDefined()
+  expect(button('导出 PDF')).toBeDefined()
+  expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(true)
   await state().handleExport('html')
   await state().downloadWord()
-  expect(api.exportReport).not.toHaveBeenCalled()
-  if (type === 'sandbox_test') expect(wrapper.get('[data-testid="report-risk-level"]').text()).toContain('安全风险未评定')
+  expect(api.exportReport).toHaveBeenCalledTimes(2)
+  if (type === 'sandbox_test') expect(wrapper.get('[data-testid="report-domain-score-label"]').text()).toContain('领域评分')
 })

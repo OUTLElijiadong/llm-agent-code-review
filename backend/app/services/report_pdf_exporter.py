@@ -121,6 +121,11 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
             fontName=font_name, fontSize=10, leading=16,
             textColor=colors.whitesmoke,
         ),
+        "table_cell": ParagraphStyle(
+            "ReportTableCell", parent=base["Normal"],
+            fontName=font_name, fontSize=9, leading=13,
+            textColor=colors.HexColor("#374151"),
+        ),
         "code": ParagraphStyle(
             "ReportCode", parent=base["Code"],
             fontName="Courier", fontSize=9, leading=13,
@@ -317,6 +322,30 @@ def _build_score_breakdown_elements(
 ) -> List[Any]:
     """构建可人工核对的统一评分明细。"""
     breakdown = statistics.get("score_breakdown") or {}
+    if breakdown.get("score") is None:
+        rows = [
+            ("评分明细", "未评估", True),
+            ("评分来源", breakdown.get("score_source") or "未提供", True),
+        ]
+        table_data: List[List[Any]] = [[
+            Paragraph("字段", styles["table_header"]),
+            Paragraph("值", styles["table_header"]),
+        ]]
+        for label, value, _code_value in rows:
+            table_data.append([
+                Paragraph(escape(str(label)), styles["table_cell"]),
+                Paragraph(escape(str(value)), styles["table_cell"]),
+            ])
+        table = Table(table_data, colWidths=[45 * mm, 120 * mm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2937")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        return [Paragraph("评分明细", styles["heading"]), table, Spacer(1, 4 * mm)]
     weights = breakdown.get("weights") or {}
     counts = breakdown.get("counts") or {}
     deductions = breakdown.get("deductions") or {}
@@ -706,6 +735,12 @@ def export_to_pdf(
 
     # 6. 问题详情(按严重度分组)
     elements.extend(_build_issues_section(sorted_issues, styles, font_name))
+
+    security_report = context.get("source", {}).get("security_report", {})
+    security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None
+    if isinstance(security_markdown, str) and security_markdown.strip():
+        elements.append(Paragraph("安全审计专项结果", styles["heading"]))
+        _append_markdown_elements(elements, security_markdown, styles)
 
     # 构建 PDF
     doc.build(elements)

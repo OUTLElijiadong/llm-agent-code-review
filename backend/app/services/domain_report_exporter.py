@@ -1,0 +1,316 @@
+"""基于领域原始结果生成沙箱、渗透与远程评估报告。"""
+
+from __future__ import annotations
+
+import json
+from html import escape
+from io import BytesIO
+from typing import Any
+
+from docx import Document
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+from app.services.report_exporter import _sanitize_report_html
+from app.services.report_markdown import markdown_to_html
+from app.services.report_pdf_exporter import (
+    _append_markdown_elements,
+    _build_styles,
+    _ensure_chinese_font,
+)
+from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
+from app.services.report_word_exporter import _append_markdown_to_word
+
+
+def _value(value: Any, fallback: str = "未记录") -> str:
+    if value is None or value == "":
+        return fallback
+    if isinstance(value, (dict, list)):
+        return json.dumps(clean_report_payload(value), ensure_ascii=False, indent=2, default=str)
+    return clean_report_text(value)
+
+
+def _status_label(value: Any) -> str:
+    labels = {
+        "success": "执行完成",
+        "completed": "执行完成",
+        "partial": "部分完成",
+        "failed": "执行失败",
+        "cancelled": "已取消",
+        "stopped": "已停止",
+    }
+    return labels.get(str(value or ""), str(value or "状态未知"))
+
+
+def _coverage_lines(coverage: Any) -> list[str]:
+    if not isinstance(coverage, dict):
+        return ["覆盖范围：未记录"]
+    lines = [f"覆盖状态：{_status_label(coverage.get('verification_status') or coverage.get('coverage_status'))}"]
+    for key, label in (
+        ("scan_mode", "扫描模式"),
+        ("total_file_count", "目标文件数"),
+        ("scanned_file_count", "已扫描文件数"),
+        ("skipped_file_count", "跳过文件数"),
+        ("coverage_ratio", "文件覆盖比例"),
+        ("semantic_char_coverage_ratio", "语义字符覆盖比例"),
+    ):
+        if coverage.get(key) is not None:
+            lines.append(f"{label}：{_value(coverage[key])}")
+    unscanned = coverage.get("unscanned")
+    if isinstance(unscanned, list) and unscanned:
+        lines.append("未扫描或未验证范围：")
+        lines.extend(f"{index}. {_value(item)}" for index, item in enumerate(unscanned, 1))
+    elif coverage.get("coverage_status") == "complete" or coverage.get("verification_status") == "complete":
+        lines.append("未扫描或未验证范围：已记录范围内无遗漏")
+    else:
+        lines.append("未扫描或未验证范围：未记录，不能推断完整覆盖")
+    skipped = coverage.get("skipped")
+    if isinstance(skipped, list) and skipped:
+        lines.append("跳过项目：")
+        lines.extend(f"{index}. {_value(item)}" for index, item in enumerate(skipped, 1))
+    return lines
+
+
+def build_pentest_report_markdown(
+    domain_data: dict[str, Any],
+    *,
+    task_name: str,
+    project_name: str,
+    execution_status: str,
+    error_message: str | None,
+    coverage: dict[str, Any],
+) -> str:
+    """把授权渗透任务的真实阶段、发现、证据和建议写入可读报告。"""
+    scope = domain_data.get("scope") if isinstance(domain_data.get("scope"), dict) else {}
+    authorized_target = (
+        scope.get("remote_target_url")
+        or scope.get("sandbox_env_public_id")
+        or domain_data.get("target_type_label")
+    )
+    lines = [
+        "# 授权渗透测试报告",
+        "",
+        "## 任务信息",
+        f"项目：{project_name or '未关联项目'}",
+        f"任务：{task_name or domain_data.get('task_name') or '未命名任务'}",
+        f"执行状态：{_status_label(execution_status)}",
+        f"报告状态：{_status_label(domain_data.get('status'))}",
+        f"授权目标：{_value(authorized_target)}",
+        f"授权窗口：{_value(domain_data.get('window_start'))} 至 {_value(domain_data.get('window_end'))}",
+        "",
+        "## 覆盖范围",
+        *_coverage_lines(coverage),
+    ]
+    if scope.get("notes"):
+        lines.append(f"范围补充：{_value(scope['notes'])}")
+    if error_message:
+        lines.extend(["", "## 执行异常", _value(error_message)])
+
+    phases = domain_data.get("phases") if isinstance(domain_data.get("phases"), list) else []
+    lines.extend(["", "## 执行阶段"])
+    if not phases:
+        lines.append("没有保存可核对的阶段记录。")
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        lines.extend(
+            [
+                "",
+                f"### {_value(phase.get('phase_label') or phase.get('phase_key'), '未命名阶段')}",
+                f"状态：{_status_label(phase.get('status'))}",
+            ]
+        )
+        if phase.get("summary"):
+            lines.append(f"阶段结论：{_value(phase['summary'])}")
+        if phase.get("error_message"):
+            lines.append(f"阶段错误：{_value(phase['error_message'])}")
+        for line in phase.get("lines", []) if isinstance(phase.get("lines"), list) else []:
+            if isinstance(line, dict):
+                lines.append(f"推演线：{_value(line.get('hypothesis'))}；状态：{_status_label(line.get('status'))}")
+
+    findings = domain_data.get("findings") if isinstance(domain_data.get("findings"), list) else []
+    lines.extend(["", "## 发现清单", f"共记录 {len(findings)} 项。"])
+    if not findings:
+        lines.append("本次范围未保存可报告发现；这不等于已证明不存在风险。")
+    for index, finding in enumerate(findings, 1):
+        if not isinstance(finding, dict):
+            continue
+        lines.extend(
+            [
+                "",
+                f"### {index}. {_value(finding.get('title'), '未命名发现')}",
+                f"严重度：{_value(finding.get('severity'))}",
+                f"复核状态：{_value(finding.get('status'))}",
+                f"问题说明：{_value(finding.get('description'))}",
+            ]
+        )
+        if finding.get("repro_steps"):
+            lines.extend(["复现步骤：", _value(finding["repro_steps"])])
+        if finding.get("evidence"):
+            lines.extend(["证据：", "```json", _value(finding["evidence"]), "```"])
+        if finding.get("fix_advice"):
+            lines.extend(["修复建议：", _value(finding["fix_advice"])])
+    return "\n".join(lines).strip() + "\n"
+
+
+def build_sandbox_report_markdown(
+    domain_data: dict[str, Any],
+    *,
+    task_name: str,
+    project_name: str,
+) -> str:
+    """保留沙箱原始报告正文，并补齐任务、状态和覆盖元数据。"""
+    original = str(domain_data.get("report_md") or "").strip()
+    if not original:
+        raise ValueError("沙箱领域报告正文为空")
+    coverage = domain_data.get("coverage") if isinstance(domain_data.get("coverage"), dict) else {}
+    lines = [
+        "# 沙箱测试报告",
+        "",
+        "## 任务信息",
+        f"项目：{project_name or '未关联项目'}",
+        f"任务：{task_name or '未命名任务'}",
+        f"执行状态：{_status_label(domain_data.get('execution_status'))}",
+        f"验证状态：{_status_label(domain_data.get('verification_status') or coverage.get('verification_status'))}",
+        "",
+        "## 覆盖范围",
+        *_coverage_lines(coverage),
+    ]
+    if domain_data.get("error_message"):
+        lines.extend(["", "## 执行异常", _value(domain_data["error_message"])])
+    lines.extend(["", "## 原始测试报告", original])
+    remote = (
+        domain_data.get("evidence", {}).get("remote_blackbox")
+        if isinstance(domain_data.get("evidence"), dict)
+        else None
+    )
+    if isinstance(remote, dict):
+        lines.extend(
+            [
+                "",
+                "## 远程目标有限黑盒检查",
+                "本次最多进行有限次数的 HTTPS 根路径只读请求；未保存目标响应正文，也未进行完整主动渗透。",
+            ]
+        )
+        lines.append(f"授权目标：{_value(remote.get('target_origin'))}")
+        lines.append("请求方法：GET")
+        for key, label in (
+            ("resolved_ip", "解析地址"),
+            ("status_code", "HTTP 状态码"),
+            ("latency_ms", "响应耗时毫秒"),
+            ("redirect_location", "重定向目标"),
+            ("content_type", "内容类型"),
+            ("security_headers", "安全响应头"),
+            ("missing_security_headers", "缺失安全响应头"),
+            ("body_bytes_sampled", "读取响应字节数"),
+        ):
+            if remote.get(key) is not None:
+                lines.append(f"{label}：{_value(remote[key])}")
+    return "\n".join(lines).strip() + "\n"
+
+
+def build_remote_pentest_report_markdown(content: dict[str, Any]) -> str:
+    """把远程网站评估的授权快照、七阶段证据、限制和发现完整写入报告。"""
+    scope = content.get("scope") if isinstance(content.get("scope"), dict) else {}
+    methodology = content.get("methodology") if isinstance(content.get("methodology"), dict) else {}
+    lines = [
+        "# 远程网站安全评估报告",
+        "",
+        "## 任务信息",
+        f"任务：{_value(scope.get('task_name'))}",
+        f"目标：{_value(scope.get('target_url'))}",
+        f"状态：{_status_label(content.get('status'))}",
+        f"规则版本：{_value(scope.get('rules_version'))}",
+        f"授权窗口：{_value(scope.get('window_start'))} 至 {_value(scope.get('window_end'))}",
+        f"授权依据：{_value(scope.get('authorization_basis'))}",
+        f"范围补充：{_value(scope.get('scope_notes'))}",
+        "",
+        "## 方法与覆盖边界",
+        f"请求方式：{_value(methodology.get('request_method'))}",
+        f"请求上限：{_value(methodology.get('request_count_max'))}",
+        f"目标范围：{_value(methodology.get('target_scope'))}",
+        f"响应正文保存：{'是' if methodology.get('response_body_saved') else '否'}",
+        f"覆盖状态：{_value(methodology.get('coverage_note') or methodology.get('coverage_state'))}",
+    ]
+    limitations = methodology.get("limitations") if isinstance(methodology.get("limitations"), list) else []
+    if limitations:
+        lines.append("限制：")
+        lines.extend(f"{index}. {_value(item)}" for index, item in enumerate(limitations, 1))
+    lines.extend(["", "## 阶段记录"])
+    phases = content.get("phases") if isinstance(content.get("phases"), list) else []
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        lines.extend(
+            ["", f"### {_value(phase.get('label') or phase.get('key'))}", f"状态：{_status_label(phase.get('status'))}"]
+        )
+        if phase.get("summary"):
+            lines.append(f"阶段说明：{_value(phase['summary'])}")
+        if phase.get("evidence"):
+            lines.extend(["阶段证据：", "```json", _value(phase["evidence"]), "```"])
+        if phase.get("error_message"):
+            lines.append(f"阶段错误：{_value(phase['error_message'])}")
+    findings = content.get("findings") if isinstance(content.get("findings"), list) else []
+    lines.extend(["", "## 配置观察", f"共记录 {len(findings)} 项。"])
+    if not findings:
+        lines.append("本次有限检查未记录配置观察；这不等于目标已通过完整安全测试。")
+    for index, finding in enumerate(findings, 1):
+        if not isinstance(finding, dict):
+            continue
+        lines.extend(
+            [
+                "",
+                f"### {index}. {_value(finding.get('title'), '未命名观察')}",
+                f"严重度：{_value(finding.get('severity'))}",
+                f"状态：{_value(finding.get('status'))}",
+                f"说明：{_value(finding.get('description'))}",
+            ]
+        )
+        if finding.get("evidence"):
+            lines.extend(["证据：", "```json", _value(finding["evidence"]), "```"])
+        if finding.get("fix_advice"):
+            lines.append(f"修复建议：{_value(finding['fix_advice'])}")
+    failure = content.get("failure")
+    if isinstance(failure, dict):
+        lines.extend(
+            ["", "## 失败信息", f"错误代码：{_value(failure.get('code'))}", f"说明：{_value(failure.get('message'))}"]
+        )
+    return clean_report_markdown("\n".join(lines).strip() + "\n")
+
+
+def export_markdown_report(title: str, markdown: str, format: str) -> tuple[bytes, str]:
+    """将同一份报告正文转换为可读 HTML、PDF 或 Word。"""
+    if format == "html":
+        body = markdown_to_html(markdown)
+        html = (
+            '<main style="max-width:960px;margin:32px auto;padding:32px;'
+            'font:16px/1.7 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#172033">'
+            f"<h1>{escape(title)}</h1>{body}</main>"
+        )
+        return _sanitize_report_html(html).encode("utf-8"), "text/html"
+    if format == "pdf":
+        font = _ensure_chinese_font()
+        styles = _build_styles(font)
+        buffer = BytesIO()
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm,
+            leftMargin=18 * mm,
+            rightMargin=18 * mm,
+            title=title,
+        )
+        elements = [Paragraph(escape(title), styles["title"]), Spacer(1, 5 * mm)]
+        _append_markdown_elements(elements, markdown, styles)
+        document.build(elements)
+        return buffer.getvalue(), "application/pdf"
+    if format == "word":
+        document = Document()
+        document.add_heading(title, level=0)
+        _append_markdown_to_word(document, markdown)
+        buffer = BytesIO()
+        document.save(buffer)
+        return buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    raise ValueError(f"不支持的领域报告格式：{format}")

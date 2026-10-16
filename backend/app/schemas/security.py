@@ -154,11 +154,17 @@ class SecurityScanOut(BaseModel):
     findings: List[SecurityFindingOut] = Field(default_factory=list)
     threat_model: Optional[ThreatModelOut] = None
     discussion: Optional[SecurityDiscussionOut] = None
+    fullchain: Optional[dict] = None
+    audit_board: Optional[dict] = None
     compliance: dict = Field(default_factory=dict)
-    risk_score: int = Field(100, ge=0, le=100)
+    risk_score: Optional[int] = Field(None, ge=0, le=100)
     summary: str = ""
     file_count: int = 0
     duration_ms: int = 0
+    execution_status: Optional[Literal["success", "partial", "failed"]] = None
+    error_message: str = ""
+    report_task_id: Optional[int] = Field(None, gt=0)
+    report_task_ids: List[int] = Field(default_factory=list)
     source_archive_sha256: str = ""
     source_archive_bytes: int = 0
     source_archive_filename: str = ""

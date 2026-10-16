@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
+import type { AgentMeshMessage } from '@/api/agentMesh'
 import type { ResponseToolCall } from './responsesTimeline'
 import {
   agentMeshToolCalls,
   findAgentMeshTimeline,
+  isAgentMeshReceiptFromCancelledRun,
   settleAgentMeshTimeline,
   settleAgentMeshToolCalls,
 } from './agentMeshTimeline'
@@ -17,6 +19,19 @@ const receivingCall: ResponseToolCall = {
 }
 
 describe('Agent Mesh timeline settlement', () => {
+  it('识别已停止父级回合的迟到团队回执', () => {
+    const message: AgentMeshMessage = {
+      schema_version: '1.0', message_id: 'team-late-result', idempotency_key: 'team-late-result',
+      trace_id: 'team-trace', correlation_id: 'team:12', causation_id: '', sent_from: 'system:agent_team',
+      send_to: 'session:user:session-1', message_type: 'task.result', priority: 'normal', subject: '团队完成',
+      status: 'delivered', payload: {}, context: { parent_run_id: 'cancelled-run-1' }, artifacts: [], errors: [],
+      requires_ack: true, max_attempts: 1, attempt_count: 1, expires_at: '', create_time: '', update_time: '',
+    }
+
+    expect(isAgentMeshReceiptFromCancelledRun(message, new Set(['cancelled-run-1']))).toBe(true)
+    expect(isAgentMeshReceiptFromCancelledRun(message, new Set(['another-run']))).toBe(false)
+  })
+
   it.each([
     ['queued', 'queued'],
     ['delivered', 'delivered'],

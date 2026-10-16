@@ -85,10 +85,15 @@ export interface SecurityScanOut {
   threat_model: ThreatModelOut | null
   discussion: SecurityDiscussionOut | null
   compliance: Record<string, unknown>
-  risk_score: number
+  risk_score: number | null
   summary: string
   file_count: number
   duration_ms: number
+  execution_status?: 'success' | 'partial' | 'failed' | null
+  error_message?: string
+  previous_run_retained?: boolean
+  report_task_id?: number | null
+  report_task_ids?: number[]
   source_archive_sha256?: string
   source_archive_bytes?: number
   source_archive_filename?: string

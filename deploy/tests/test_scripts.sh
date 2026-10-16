@@ -28,6 +28,24 @@ assert_not_contains() {
   fi
 }
 
+# 产品版本使用三段式语义版本，且每段最多三位数。
+run_app_version_validation() {
+  local common_file="$PWD/lib/common.sh" version output_file
+  output_file="$(mktemp)"
+  for version in 0.0.0 4.1.2 4.1.999 999.999.999; do
+    bash -c 'source "$1"; validate_app_version "$2"' _ "$common_file" "$version" \
+      || { rm -f "$output_file"; printf '合法版本被拒绝: %s\n' "$version" >&2; exit 1; }
+  done
+  for version in 4.1.1000 1000.1.2 4.1000.2 01.2.3 4.1 4.1.2.3; do
+    if bash -c 'source "$1"; validate_app_version "$2"' _ "$common_file" "$version" > "$output_file" 2>&1; then
+      rm -f "$output_file"
+      printf '非法版本被接受: %s\n' "$version" >&2
+      exit 1
+    fi
+  done
+  rm -f "$output_file"
+}
+
 # 输出文件 SHA-256，兼容 GNU/Linux 和 macOS。
 # 参数: $1 文件。
 # 返回: 摘要计算成功时返回 0。
@@ -2180,6 +2198,7 @@ PYTHON_BASE_IMAGE='python:3.11-slim' PYTHON_BASE_IMAGE_DIGEST="$digest_placehold
   docker compose -f sandbox/docker-compose.build.yml config --quiet
 
 run_database_credential_validation "$test_root"
+run_app_version_validation
 run_frontend_tls_asset_validation "$test_root"
 run_checkpoint_reader_probe_tests
 run_release_binding_tests "$test_root"

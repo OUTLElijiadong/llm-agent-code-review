@@ -10,6 +10,7 @@
 - 内置模板载入
 """
 import io
+import json
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -222,6 +223,23 @@ def test_html_reference_filter_does_not_mutate_json_audit_evidence() -> None:
 
     assert issue["references_json"] == ["javascript:alert(1)", "https://example.com/safe"]
     assert export_to_dict(_make_task(), [issue], "摘要", 80)["issues"][0]["references_json"] == issue["references_json"]
+
+
+def test_report_context_removes_ai_markers_but_preserves_code() -> None:
+    issue = _make_issue(
+        title="**输入校验**问题",
+        description="*需要检查* 用户输入。",
+        suggestion="**先校验，再处理。**",
+        fixed_code="if value ** 2 > limit:\n    reject()",
+    )
+
+    payload = json.loads(export_to_json(_make_task(), [issue], "**总体结论**，*需要复核*。", 80))
+
+    assert payload["summary"] == "总体结论，需要复核。"
+    assert payload["issues"][0]["title"] == "输入校验问题"
+    assert payload["issues"][0]["description"] == "需要检查 用户输入。"
+    assert payload["issues"][0]["suggestion"] == "先校验，再处理。"
+    assert payload["issues"][0]["fixed_code"] == "if value ** 2 > limit:\n    reject()"
 
 
 def test_html_report_top_vulnerability_alias_and_ai_text_are_safe() -> None:

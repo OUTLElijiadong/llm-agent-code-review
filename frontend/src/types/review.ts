@@ -136,6 +136,7 @@ export interface TaskFileOut {
 }
 
 export interface TaskCoverageOut {
+  score_available?: boolean
   stage?: string | null
   verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null
   requested_mode?: string | null

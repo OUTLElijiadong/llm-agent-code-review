@@ -71,9 +71,9 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    # 本轮新增3个临时自动封禁API与 3 个溯源/防御面只读 API，均逐项核验唯一超级管理员守卫。
+    # 本轮新增的远程网站评估报告导出接口由下方远程权限矩阵逐项核验。
     # 本次新增管理员只读 Token 趋势端点，已在下方逐条验证 require_admin 守卫。
-    assert len(rows) == 364, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 365, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -83,11 +83,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 364
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 364
+    assert len(ROUTES) == 365
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 365
     assert len({row["source"] for row in ROUTES}) == 45
-    assert len(AUTHENTICATED_ROUTES) == 350
-    assert len(GUARDED_ROUTES) == 282
+    assert len(AUTHENTICATED_ROUTES) == 351
+    assert len(GUARDED_ROUTES) == 283
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -145,6 +145,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("GET", "/api/remote-pentest/tasks"): ["pentest:view"],
         ("GET", "/api/remote-pentest/tasks/{public_id}"): ["pentest:view"],
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"): ["pentest:view"],
+        ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"): ["pentest:view"],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]

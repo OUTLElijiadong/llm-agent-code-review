@@ -41,6 +41,7 @@ from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
 from app.services.report_markdown import markdown_to_html
+from app.services.report_text import clean_report_payload
 
 # ============ 模块常量 ============
 
@@ -523,13 +524,27 @@ def _build_report_context(
 
     compliance_summary = _build_compliance_summary(normalized_issues)
     top_vulnerabilities = _build_top_vulnerabilities(normalized_issues, top_n=10)
-    explicit_score = score if score is not None else task_info.get("score")
-    effective_score, score_breakdown = build_report_score_facts(
-        severity_count,
-        len(normalized_issues),
-        explicit_score,
+    score_available = not (
+        isinstance(task_info.get("coverage"), dict)
+        and task_info["coverage"].get("score_available") is False
     )
-    score_version = score_breakdown.get("version") or SCORING_VERSION
+    if score_available:
+        explicit_score = score if score is not None else task_info.get("score")
+        effective_score, score_breakdown = build_report_score_facts(
+            severity_count,
+            len(normalized_issues),
+            explicit_score,
+        )
+        score_version = score_breakdown.get("version") or SCORING_VERSION
+    else:
+        effective_score = None
+        score_version = SCORING_VERSION
+        score_breakdown = {
+            "version": score_version,
+            "score": None,
+            "risk_level": "未评估",
+            "score_source": "unavailable",
+        }
 
     # task_info 也是导出契约的一部分，不能继续暴露与 statistics 冲突的任务快照。
     task_info.update({
@@ -609,6 +624,9 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
     counts = basis["human_review_counts"]
     lines.extend([
         "评分口径：" + (
+            "本次未获得有效评分，不能据此判定风险等级。"
+            if basis["score_source"] == "unavailable"
+            else
             "空问题报告保留历史显式分数，不代表已验证无漏洞。"
             if basis["score_source"] == "task_explicit_empty_report"
             else "平台内部问题扣分，按报告问题的严重度计数计算，不是官方漏洞评分。"
@@ -677,7 +695,7 @@ def export_to_json(
         str: JSON 字符串,ensure_ascii=False 以正常显示中文,缩进 2 空格;
             结构包含 task_info / summary / score / issues / statistics。
     """
-    payload = export_to_dict(task, issues, summary, score, evidence)
+    payload = clean_report_payload(export_to_dict(task, issues, summary, score, evidence))
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
@@ -702,8 +720,8 @@ def export_to_html(
         str: 渲染后的 HTML 字符串;模板渲染异常时抛出 jinja2 异常。
     """
     context = _build_report_context(task, issues, summary, score, evidence)
-    # 仅收紧 HTML 中的可点击引用。JSON/PDF/Word 保留原始审计事实；对旧版
-    # 数据库模板也生效，避免只改当前文件模板而让历史模板继续生成危险链接。
+    # HTML 仅收紧可点击引用；上下文在构建时已清理 Markdown 表现符号，
+    # 对旧版数据库模板同样生效，避免不同模板导出风格不一致。
     for issue_list in (context["issues"], context["statistics"]["top_vulnerabilities"]):
         for issue in issue_list:
             references = issue.get("references_json")
@@ -741,7 +759,17 @@ def export_to_html(
         "compliance_summary": context["statistics"]["compliance_summary"],
     })
     template = _JINJA_ENV.from_string(template_content)
-    return _sanitize_report_html(template.render(**context))
+    rendered = template.render(**context)
+    source = context.get("source") if isinstance(context.get("source"), dict) else {}
+    security_report = source.get("security_report") if isinstance(source, dict) else None
+    security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None
+    if isinstance(security_markdown, str) and security_markdown.strip():
+        section = (
+            '<section class="security-report-snapshot"><h2>安全审计专项结果</h2>'
+            f'{markdown_to_html(security_markdown)}</section>'
+        )
+        rendered = rendered.replace("</body>", f"{section}</body>")
+    return _sanitize_report_html(rendered)
 
 
 def load_builtin_template(template_type: str) -> str:

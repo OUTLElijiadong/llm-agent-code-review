@@ -35,13 +35,28 @@
     <el-alert v-if="loadError" data-testid="report-load-error" class="no-print" :title="loadError" type="warning" :closable="false" show-icon>
       <el-button :loading="loading" @click="loadReport">重试读取报告</el-button>
     </el-alert>
-    <section v-if="report" class="card report-execution-status" data-testid="report-execution-status" role="note">
+    <section v-if="report && canViewReport" class="card report-execution-status" data-testid="report-execution-status" role="note">
       <strong>执行状态：{{ reportExecutionStatusLabel }}</strong>
       <p v-if="reportExecutionError">执行原因：{{ reportExecutionError }}</p>
       <p>验证覆盖：{{ reportCoverageLabel }}<span v-if="reportCoverageReason">；{{ reportCoverageReason }}</span></p>
     </section>
+    <section v-if="securityReport && canViewReport" class="card security-report-snapshot" data-testid="security-report-snapshot">
+      <header>
+        <div>
+          <strong>{{ securityReport.source === 'fullchain_audit' ? '全链路源码审计' : '安全审计补充报告' }}</strong>
+          <span class="security-report-status">{{ securityExecutionLabel }}</span>
+        </div>
+        <el-button v-if="securityReport.report_md" size="small" @click="showSecurityReport = !showSecurityReport">
+          {{ showSecurityReport ? '收起审计记录' : '展开审计记录' }}
+        </el-button>
+      </header>
+      <p>评分：{{ securityReport.score_available === false ? '未评估' : `${securityReport.risk_score ?? '未提供'}/100` }}</p>
+      <p>覆盖状态：{{ securityCoverageLabel }}。具体问题明细见下方问题清单；未扫描范围不计为安全通过。</p>
+      <div v-if="showSecurityReport && securityReport.report_md" class="security-report-body report-markdown" v-html="securityReportHtml" />
+    </section>
+    <section v-if="domainReportHtml && canViewReport" class="card domain-report-body report-markdown" data-testid="domain-report-body" v-html="domainReportHtml" />
     <!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ -->
-    <section v-if="report" class="report-toolbar no-print">
+    <section v-if="report && canViewReport" class="report-toolbar no-print">
       <div class="toolbar-left">
         <span class="toolbar-label font-mono">模板类型</span>
         <el-select v-model="templateType" size="small" style="width: 200px">
@@ -81,7 +96,7 @@
           >生成 Word</el-button>
         </el-button-group>
         <el-button
-          v-if="canViewReport && !isDomainReport"
+          v-if="canViewReport && canExportIssueDetails && !loadError"
           ref="previewButtonRef"
           size="small"
           :loading="previewing"
@@ -107,18 +122,18 @@
       </div>
     </section>
 
-    <section v-if="isSandboxReport" class="card" role="note">
+    <section v-if="isSandboxReport && canViewReport" class="card" role="note">
       <p>沙箱报告按“问题清单”的独立条目统计；条目数不代表已确认漏洞数，严重度仅采用报告明示标签。</p>
       <p v-if="report?.source?.report_issue_summary?.total == null">未保存可识别的问题清单，无法确定条目数；历史记录数保留在来源信息中。</p>
     </section>
 
-    <section v-if="isSandboxReport" class="card report-coverage-note" data-testid="sandbox-report-coverage" role="note">
+    <section v-if="isSandboxReport && canViewReport" class="card report-coverage-note" data-testid="sandbox-report-coverage" role="note">
       <strong>验证范围：{{ sandboxCoverageLabel }}</strong>
       <p v-if="sandboxCoverage?.reason">{{ sandboxCoverage.reason }}</p>
       <p v-if="sandboxCoverageStatus !== 'complete'">评分仅表示本次已记录范围的结果，不代表完整黑盒/白盒验证通过。</p>
     </section>
 
-    <section v-if="isSandboxReport" class="card report-coverage-note" data-testid="sandbox-ai-review-status" role="note">
+    <section v-if="isSandboxReport && canViewReport" class="card report-coverage-note" data-testid="sandbox-ai-review-status" role="note">
       <strong>多 Agent AI 报告：{{ sandboxAiReviewLabel }}</strong>
       <p v-if="report?.source?.ai_review?.failure_reason">{{ report.source.ai_review.failure_reason }}</p>
       <p v-else-if="sandboxAiReviewStatus === 'unknown'">历史报告未保存 AI 审查状态，不能据此确认多 Agent AI 审查已完成。</p>
@@ -126,15 +141,15 @@
     </section>
 
     <section
-      v-if="issuesLoadState === 'forbidden'"
+      v-if="canViewReport && issuesLoadState === 'forbidden'"
       class="card report-issues-note"
       data-testid="report-issues-restricted"
       role="note"
     >
-      当前账号没有问题明细查看权限。报告概览和已授权的报告内容仍可查看。
+      当前账号没有问题明细查看权限。报告概览仍可查看；生成、预览和导出包含问题证据的代码审查报告需要该权限。
     </section>
     <section
-      v-else-if="issuesLoadState === 'failed'"
+      v-else-if="canViewReport && issuesLoadState === 'failed'"
       class="card report-issues-note"
       data-testid="report-issues-load-error"
       role="alert"
@@ -144,7 +159,7 @@
     </section>
 
     <section
-      v-if="issuesLoadState === 'loaded' && issueVerificationNotice"
+      v-if="canViewReport && issuesLoadState === 'loaded' && issueVerificationNotice"
       class="card report-coverage-note issue-verification-note"
       data-testid="report-issue-verification"
       role="note"
@@ -153,13 +168,13 @@
       <p>问题总数、严重度分布、Top 10 和评分按报告记录统计，包含待核实条目；源码引用匹配只证明引用可定位，不证明漏洞条件或影响已成立。</p>
     </section>
 
-    <section v-if="exportErrorMessage" class="report-export-error no-print" role="alert">
+    <section v-if="canViewReport && exportErrorMessage" class="report-export-error no-print" role="alert">
       <strong>{{ exportErrorMessage }}</strong>
       <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
       <el-button v-if="retryExportFormat && canExport(retryExportFormat)" size="small" @click="retryExport">重试导出</el-button>
     </section>
 
-    <div v-if="report" class="report-paper">
+    <div v-if="report && canViewReport" class="report-paper">
       <!-- ============ 暗色封面 ============ -->
       <section class="cover">
         <header class="cover-head">
@@ -174,7 +189,7 @@
             <h2 class="cover-project font-display">{{ projectName }}</h2>
             <p class="cover-task font-mono">{{ taskName }} · {{ reviewType }}</p>
 
-            <div class="cover-tags">
+            <div v-if="!isDomainReport" class="cover-tags">
               <span class="cover-tag">项目语言：{{ projectLanguage }}</span>
               <span v-if="reviewedLanguages" class="cover-tag">审查语言：{{ reviewedLanguages }}</span>
               <span class="cover-tag">{{ totalFiles }} 文件</span>
@@ -186,9 +201,15 @@
                 class="cover-tag"
               >{{ agent.agent_name }} v{{ agent.agent_version }}</span>
             </div>
+            <div v-else class="cover-tags" data-testid="domain-report-tags">
+              <span class="cover-tag">{{ reviewType }}</span>
+              <span class="cover-tag">覆盖状态：{{ reportCoverageLabel }}</span>
+              <span class="cover-tag">报告条目：{{ totalIssues }}</span>
+              <span class="cover-tag">{{ formatDuration(durationMs) }}</span>
+            </div>
           </div>
 
-          <div class="cover-score">
+          <div v-if="scoreAvailable" class="cover-score">
             <div class="score-ring">
               <svg viewBox="0 0 120 120" width="160" height="160">
                 <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="6"/>
@@ -202,16 +223,24 @@
               </svg>
               <div class="ring-text">
                 <div class="ring-val font-display">{{ animatedScore }}</div>
-                <div class="ring-out font-mono">/ 100</div>
+            <div class="ring-out font-mono">{{ isDomainReport ? '测试评分' : '/ 100' }}</div>
               </div>
             </div>
             <div
+              v-if="!isDomainReport"
               class="risk-tag"
               data-testid="report-risk-level"
               :style="{ color: scoreFlatColor(score), borderColor: scoreFlatColor(score) }"
             >
               {{ riskLevel }}
             </div>
+            <div v-else class="risk-tag" data-testid="report-domain-score-label">
+              领域评分
+            </div>
+          </div>
+          <div v-else class="cover-score score-unavailable" data-testid="report-score-unavailable">
+            <strong>未评估</strong>
+            <span>本次报告没有有效评分，不能推断为零风险。</span>
           </div>
         </div>
 
@@ -240,7 +269,7 @@
           </div>
         </div>
 
-        <div v-if="!isSandboxReport" class="rg-card">
+        <div v-if="!isDomainReport" class="rg-card" data-testid="code-repair-progress">
           <div class="rg-title font-display">修复进度</div>
           <div class="fix-gauge">
             <svg viewBox="0 0 120 70" width="100%">
@@ -264,7 +293,7 @@
           </div>
         </div>
 
-        <div class="rg-card">
+        <div v-if="!isDomainReport" class="rg-card">
           <div class="rg-title font-display">代码规模</div>
           <div class="scale-rows">
             <div class="scale-row">
@@ -285,10 +314,27 @@
             </div>
           </div>
         </div>
+        <div v-else class="rg-card" data-testid="domain-report-metrics">
+          <div class="rg-title font-display">验证概况</div>
+          <div class="scale-rows">
+            <div class="scale-row">
+              <span class="font-mono scale-label">验证覆盖</span>
+              <span class="font-display scale-val">{{ reportCoverageLabel }}</span>
+            </div>
+            <div class="scale-row">
+              <span class="font-mono scale-label">报告条目</span>
+              <span class="font-display scale-val">{{ totalIssues }}</span>
+            </div>
+            <div class="scale-row">
+              <span class="font-mono scale-label">耗时</span>
+              <span class="font-display scale-val">{{ formatDuration(durationMs) }}</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ============ 8 维度雷达 ============ -->
-      <section class="card no-break">
+      <section v-if="!isDomainReport" class="card no-break" data-testid="code-dimension-radar">
         <header class="card-head">
           <h3 class="font-display">8 维度评分雷达</h3>
           <p class="card-desc">代码规范 / 命名 / 注释 / 维护 / 性能 / 异常 / Bug / 安全</p>
@@ -298,7 +344,7 @@
       </section>
 
       <!-- ============ 文件列表 ============ -->
-      <section class="card">
+      <section v-if="!isDomainReport" class="card" data-testid="code-review-files">
         <header class="card-head">
           <h3 class="font-display">审查文件 ({{ report.files.length }})</h3>
         </header>
@@ -656,16 +702,47 @@ const templateTypeOptions: Array<{ label: string; value: ReportTemplateType }> =
 
 const stats = computed<Record<string, unknown>>(() => report.value?.stats ?? {})
 const isDomainReport = computed(() => {
-  const sourceType = report.value?.source?.type
+  const sourceType = report.value?.source?.type || report.value?.task?.review_type
   return sourceType === 'sandbox_test' || sourceType === 'pentest'
 })
-const canViewReport = computed(() => !!report.value && !loading.value && !loadError.value && userStore.hasPermission('report:view'))
+const canViewSourceReport = computed(() => {
+  const source = report.value?.source
+  const sourceType = String(source?.type || report.value?.task?.review_type || '')
+  if (source?.security_report || ['security_scan', 'fullchain_audit'].includes(sourceType)) {
+    return userStore.hasPermission('security:view')
+  }
+  if (sourceType === 'pentest') return userStore.hasPermission('pentest:view')
+  return true
+})
+const canViewReport = computed(() => !!report.value
+  && userStore.hasPermission('report:view') && canViewSourceReport.value)
+const canExportIssueDetails = computed(() => {
+  const sourceType = String(report.value?.source?.type || report.value?.task?.review_type || '')
+  return isDomainReport.value
+    || ['security_scan', 'fullchain_audit'].includes(sourceType)
+    || userStore.hasPermission('issue:view')
+})
 function canExport(format: ReportFormat): boolean {
-  return canViewReport.value && userStore.hasPermission(`report:export:${format}`)
-    && (!isDomainReport.value || format === 'json')
+  return canViewReport.value && canExportIssueDetails.value && !loadError.value
+    && userStore.hasPermission(`report:export:${format}`)
 }
 const hasExportFormat = computed(() => (['json', 'html', 'pdf', 'word'] as ReportFormat[]).some(canExport))
-const isSandboxReport = computed(() => report.value?.source?.type === 'sandbox_test')
+const isSandboxReport = computed(() => (report.value?.source?.type || report.value?.task?.review_type) === 'sandbox_test')
+const securityReport = computed(() => canViewSourceReport.value ? report.value?.source?.security_report : undefined)
+const securityReportHtml = computed(() => securityReport.value?.report_md ? renderMarkdown(securityReport.value.report_md) : '')
+const domainReportHtml = computed(() => {
+  const markdown = report.value?.source?.domain_report_md
+  return canViewReport.value && typeof markdown === 'string' && markdown.trim() ? renderMarkdown(markdown) : ''
+})
+const securityExecutionLabel = computed(() => {
+  const labels: Record<string, string> = { success: '执行完成', partial: '部分完成', failed: '执行失败' }
+  return labels[securityReport.value?.execution_status ?? ''] ?? '状态未知'
+})
+const securityCoverageLabel = computed(() => {
+  const status = String(securityReport.value?.coverage?.coverage_status ?? securityReport.value?.coverage?.verification_status ?? 'unknown')
+  return ({ complete: '完整', partial: '部分', failed: '失败', unknown: '未知' }[status] ?? '未知')
+})
+const showSecurityReport = ref(false)
 const sandboxCoverage = computed(() => report.value?.task?.coverage as TaskCoverageOut | undefined)
 const sandboxCoverageStatus = computed(() => sandboxCoverage.value?.verification_status ?? 'unknown')
 const sandboxCoverageLabel = computed(() => {
@@ -745,6 +822,11 @@ const score = computed(() => {
   const value = Number(stats.value.score ?? 0)
   return Number.isFinite(value) ? value : 0
 })
+const scoreAvailable = computed(() => (
+  stats.value.score !== null
+  && stats.value.score !== undefined
+  && (report.value?.task?.coverage as TaskCoverageOut | undefined)?.score_available !== false
+))
 const sandboxAiReviewStatus = computed(() => report.value?.source?.ai_review?.status ?? 'unknown')
 const sandboxAiReviewLabel = computed(() => {
   if (sandboxAiReviewStatus.value === 'complete') return '完成'
@@ -824,7 +906,7 @@ const radarOption = computed<EChartsOption>(() => ({
   color: PRISM_DIM_COLORS,
 }))
 
-const riskLevel = computed(() => isSandboxReport.value ? '安全风险未评定（测试得分不代表风险）' : reviewRiskLevel(score.value))
+const riskLevel = computed(() => !scoreAvailable.value ? '未评估' : isSandboxReport.value ? '安全风险未评定（测试得分不代表风险）' : reviewRiskLevel(score.value))
 
 function formatDate(s?: string): string {
   if (!s) return '-'
@@ -911,6 +993,10 @@ function onPrint() {
  */
 async function loadIssues(): Promise<void> {
   issues.value = []
+  if (isDomainReport.value) {
+    issuesLoadState.value = 'loaded'
+    return
+  }
   if (!userStore.hasPermission('issue:view')) {
     issuesLoadState.value = 'forbidden'
     return
@@ -1158,13 +1244,7 @@ function preopenPreviewWindow(): Window | null {
  * 弹窗被拦截或在等待期间被关闭时，改用 sandbox iframe 页内预览。
  */
 async function handlePreview(): Promise<void> {
-  if (!canViewReport.value || previewing.value) return
-  if (isDomainReport.value) {
-    exportErrorMessage.value = '领域报告不支持 HTML 预览'
-    exportErrorNextAction.value = '请导出真实领域 JSON'
-    retryExportFormat.value = 'json'
-    return
-  }
+  if (!canViewReport.value || !canExportIssueDetails.value || loadError.value || previewing.value) return
   const popup = preopenPreviewWindow()
   pendingPreviewWindow = popup
 
@@ -1172,7 +1252,7 @@ async function handlePreview(): Promise<void> {
   previewFallbackVisible.value = false
   try {
     const html = await apiPreviewReport(taskId, templateType.value)
-    if (disposed || !canViewReport.value) {
+    if (disposed || !canViewReport.value || !canExportIssueDetails.value) {
       try { popup?.close() } catch { /* 不再使用已失效预览窗口 */ }
       return
     }

@@ -524,7 +524,45 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('服务端拒绝停止时不把本地运行误标记为已取消', async () => {
+  it('停止请求处理中收到关联团队回执时延后处理，确认取消后不再启动模型', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('查询后停止')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+    emit(0, { type: 'response.created', response: { id: 'run-stop-before-team-receipt', model: 'deepseek-v4-pro' } })
+    await flushPromises()
+
+    const cancellation = deferred<{ run_id: string; status: string; error: string; output_text: string }>()
+    responseApi.cancel.mockReturnValueOnce(cancellation.promise)
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await flushPromises()
+    const currentSessionId = streams.records[0].body.session_id as string
+
+    const receipt = {
+      schema_version: '1.0', message_id: 'late-team-result-after-stop', idempotency_key: 'late-team-result-after-stop',
+      trace_id: 'team-trace-after-stop', correlation_id: 'team:88', causation_id: '',
+      sent_from: 'system:agent_team', send_to: `session:user:${currentSessionId}`, message_type: 'task.result',
+      priority: 'normal', subject: '团队任务完成', status: 'delivered', payload: { team_id: 88 },
+      context: { team_id: 88, team_terminal: true, session_delivery: true, parent_run_id: 'run-stop-before-team-receipt' },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '', create_time: '', update_time: '',
+    }
+    const vm = wrapper.vm as any
+    expect(await vm.handleMeshMessage(receipt, currentSessionId)).toBe(false)
+    expect(streams.records).toHaveLength(1)
+
+    cancellation.resolve({
+      run_id: 'run-stop-before-team-receipt', status: 'cancelled', error: '', output_text: '',
+    })
+    await settleAll()
+    expect(streams.records).toHaveLength(1)
+    expect(wrapper.text()).toContain('父级响应已停止，不再自动续跑')
+    wrapper.unmount()
+  })
+
+  it('停止请求未确认时中断本地响应并抑制迟到团队回执续跑', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('继续处理')
     void wrapper.find('.send-btn').trigger('click')
@@ -543,13 +581,41 @@ describe('AgentChatDrawer Responses stream', () => {
     await wrapper.find('.cancel-confirm-stop').trigger('click')
     await settleAll()
 
-    expect(streams.records[0].aborted).toBe(false)
-    expect(messages.error).toHaveBeenCalledWith('停止请求未确认：取消服务暂时不可用')
+    expect(streams.records[0].aborted).toBe(true)
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('停止请求尚未确认'))
     expect(wrapper.find('.stop-btn').exists()).toBe(true)
-    expect(wrapper.find('.msg-error-card').text()).toContain('停止请求未确认')
+    expect(wrapper.find('.msg-error-card').text()).toContain('停止请求尚未确认')
     expect(wrapper.find('.msg-error-card').text()).toContain('稍后再次停止')
     expect(wrapper.find('.msg-error-card').text()).toContain('trace-cancel-1')
     expect(wrapper.text()).not.toContain('已停止任务，未执行剩余操作')
+
+    const currentSessionId = streams.records[0].body.session_id as string
+    const lateReceipt = {
+      schema_version: '1.0', message_id: 'late-team-result-after-unconfirmed-stop',
+      idempotency_key: 'late-team-result-after-unconfirmed-stop', trace_id: 'team-trace-unconfirmed-stop',
+      correlation_id: 'team:89', causation_id: '', sent_from: 'system:agent_team',
+      send_to: `session:user:${currentSessionId}`, message_type: 'task.result', priority: 'normal',
+      subject: '团队任务完成', status: 'delivered', payload: { team_id: 89 },
+      context: { team_id: 89, team_terminal: true, session_delivery: true, parent_run_id: 'run-active' },
+      artifacts: [], errors: [], requires_ack: true, max_attempts: 3, attempt_count: 1,
+      expires_at: '', create_time: '', update_time: '',
+    }
+    const vm = wrapper.vm as any
+    expect(await vm.handleMeshMessage(lateReceipt, currentSessionId)).toBe(true)
+    expect(streams.records).toHaveLength(1)
+
+    const backgroundReceipt = {
+      ...lateReceipt,
+      message_id: 'old-session-result-after-unconfirmed-stop',
+      idempotency_key: 'old-session-result-after-unconfirmed-stop',
+      send_to: 'session:user:previous-user-session',
+    }
+    expect(await vm.handleMeshMessage(backgroundReceipt, 'previous-user-session')).toBe(true)
+    expect(streams.records).toHaveLength(1)
+    expect(meshApi.acknowledge).toHaveBeenCalledWith(
+      'user', 'previous-user-session', backgroundReceipt.message_id, 'completed',
+      '停止请求尚未确认；团队回执仅保留审计，不触发新的模型运行',
+    )
     wrapper.unmount()
   })
   it('labels a fresh Xiaoling conversation with the Pro orchestrator model', async () => {

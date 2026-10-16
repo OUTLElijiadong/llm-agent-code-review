@@ -108,13 +108,31 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
         score = task.score
         return task, [], task.summary or "", score
 
+    # Generic report permission allows an overview, but a generated report may
+    # contain every issue's evidence and remediation. Keep those exports behind
+    # the same issue-detail permission as the issue API. Security and domain
+    # reports use their dedicated source permissions checked above.
+    if task.review_type not in {"security_scan", "fullchain_audit"} and not check_permission(
+        db, user.id, PermissionCode.ISSUE_VIEW,
+    ):
+        raise PermissionError(
+            f"无操作权限: 需要 {PermissionCode.ISSUE_VIEW}",
+            detail={"required_permission": PermissionCode.ISSUE_VIEW},
+        )
+
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    if task.review_type in {"security_scan", "fullchain_audit"} and coverage.get("score_available") is False:
+        score = None
+    else:
+        score = task.score or 0
+
     issues: List[ReviewIssue] = (
         db.query(ReviewIssue)
         .filter(ReviewIssue.task_id == task_id)
         .order_by(ReviewIssue.id.asc())
         .all()
     )
-    return task, issues, task.summary or "", task.score or 0
+    return task, issues, task.summary or "", score
 
 
 def _get_template_content(db: Session, template_type: str) -> str:
@@ -199,16 +217,29 @@ def _ensure_report_export_permissions(db: Session, user: User, format: str) -> N
 
 
 def _domain_export_response(db: Session, user: User, task: ReviewTask, format: str, *, download: bool = False):
-    """所有报告出口共用来源分流；不支持等价导出的格式由服务抛出业务错误。"""
+    """所有报告出口共用来源分流，并以同一领域正文生成各格式。"""
     payload = report_service.get_domain_report_export(db, user, task, format)
     if payload is None:
         return None
-    content = DomainReportExportOut(**payload).model_dump_json(indent=2)
-    if download:
-        return _build_download_response(
-            content.encode("utf-8"), "application/json", f"{task.review_type}_report_{task.id}.json",
-        )
-    return Response(content=content, media_type="application/json")
+    if format == "json":
+        from app.services.report_text import clean_report_payload
+
+        payload = clean_report_payload(payload)
+        content = DomainReportExportOut(**payload).model_dump_json(indent=2)
+        if download:
+            return _build_download_response(
+                content.encode("utf-8"), "application/json", f"{task.review_type}_report_{task.id}.json",
+            )
+        return Response(content=content, media_type="application/json")
+
+    from app.services.domain_report_exporter import export_markdown_report
+
+    title = str(payload.get("task_info", {}).get("task_name") or task.task_name or "安全评估报告")
+    content, media_type = export_markdown_report(title, payload["domain_markdown"], format)
+    if format == "html" and not download:
+        return HTMLResponse(content=content.decode("utf-8"))
+    extension = {"html": "html", "pdf": "pdf", "word": "docx"}[format]
+    return _build_download_response(content, media_type, f"{task.review_type}_report_{task.id}.{extension}")
 
 
 # ============ T12 报告生成与导出路由(字面路径优先) ============

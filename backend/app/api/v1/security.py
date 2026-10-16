@@ -2,6 +2,8 @@
 
 所有端点经 Orchestrator 委派给 SecuritySentinelAgent 执行。
 """
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
+from app.models.code_file import CodeFile
 from app.models.user import User
 from app.schemas.common import Resp
 from app.schemas.security import (
@@ -26,13 +29,62 @@ from app.schemas.security import (
     SecurityScanTaskIn,
 )
 from app.services import security_rule_catalog_service, security_service
+from app.services.project_member_service import require_project_execution
 from app.services.rbac_service import check_permission
+from app.services.security_report_service import infer_coverage_status, persist_security_report
 
 router = APIRouter()
 
 
 def _ctx(user: User) -> AgentContext:
     return AgentContext(user_id=user.id)
+
+
+def _report_execution_status(result, data: dict) -> str:
+    if result.success:
+        compliance = data.get("compliance") if isinstance(data.get("compliance"), dict) else {}
+        coverage_status = infer_coverage_status("success", compliance)
+        return "partial" if coverage_status != "complete" else "success"
+    has_partial_result = bool(
+        data.get("findings")
+        or data.get("threat_model")
+        or data.get("file_count")
+        or (isinstance(data.get("compliance"), dict) and data["compliance"].get("scanned_file_count"))
+    )
+    return "partial" if has_partial_result else "failed"
+
+
+def _persist_scan_result(
+    db: Session, user: User, *, project_id: int, report_kind: str,
+    task_name: str, result, data: dict | None = None,
+) -> dict:
+    if result.failure_kind == "empty_scan_input":
+        raise AiServiceError(result.error or "缺少可见且可扫描的非空输入", code=50220)
+    if result.failure_kind in {"authorization_revoked", "unauthorized", "permission_denied"}:
+        raise AiServiceError(result.error or "当前账号无权查看此扫描结果", code=40320)
+    payload = dict(data if data is not None else (result.data or {}))
+    status = _report_execution_status(result, payload)
+    coverage = payload.get("compliance") if isinstance(payload.get("compliance"), dict) else {}
+    coverage = dict(coverage)
+    if status != "success" and not coverage.get("unscanned"):
+        coverage["unscanned"] = [result.error or "执行未完成，未覆盖范围无法确认"]
+    task_id = persist_security_report(
+        db,
+        owner=user,
+        project_id=project_id,
+        report_kind=report_kind,
+        task_name=task_name,
+        execution_status=status,
+        result=payload,
+        error_message=str(result.error or ""),
+        coverage=coverage,
+    )
+    payload.update({
+        "execution_status": status,
+        "error_message": str(result.error or ""),
+        "report_task_id": task_id,
+    })
+    return payload
 
 
 @router.get(
@@ -76,15 +128,21 @@ def scan_file(
     user: User = Depends(get_current_user),
 ):
     """单文件深度安全扫描"""
+    file = db.get(CodeFile, payload.file_id)
+    if file is None or file.status != "active":
+        raise AiServiceError("代码文件不存在或已删除", code=40420)
+    require_project_execution(db, int(file.project_id), user)
     orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_file(
         file_id=payload.file_id,
         scan_depth=payload.scan_depth,
         ctx=_ctx(user),
     )
-    if not result.success:
-        raise AiServiceError(result.error or "安全扫描失败", code=50220)
-    return Resp(data=SecurityScanOut(**result.data))
+    data = _persist_scan_result(
+        db, user, project_id=int(file.project_id), report_kind="security_scan",
+        task_name=f"文件安全扫描 · {file.file_path or file.file_name}", result=result,
+    )
+    return Resp(data=SecurityScanOut(**data))
 
 
 @router.post(
@@ -118,6 +176,7 @@ def scan_project(
     user: User = Depends(get_current_user),
 ):
     """项目级威胁建模:跨文件数据流追踪"""
+    require_project_execution(db, payload.project_id, user)
     orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_project(
         project_id=payload.project_id,
@@ -126,9 +185,11 @@ def scan_project(
         scan_mode=payload.scan_mode,
         ctx=_ctx(user),
     )
-    if not result.success:
-        raise AiServiceError(result.error or "项目安全扫描失败", code=50220)
-    return Resp(data=SecurityScanOut(**result.data))
+    data = _persist_scan_result(
+        db, user, project_id=payload.project_id, report_kind="security_scan",
+        task_name="项目安全审计", result=result,
+    )
+    return Resp(data=SecurityScanOut(**data))
 
 
 @router.post(
@@ -147,6 +208,7 @@ def fullchain_audit(
     """
     from app.agents.fullchain_audit_agent import FullChainAuditOrchestrator
 
+    require_project_execution(db, payload.project_id, user)
     orch = get_request_orchestrator(db, user=user)
     orchestrator = FullChainAuditOrchestrator(orch.security_sentinel)
     result = orchestrator.run(
@@ -157,9 +219,11 @@ def fullchain_audit(
         enable_sandbox=payload.enable_sandbox,
         ctx=_ctx(user),
     )
-    if not result.success:
-        raise AiServiceError(result.error or "全链路审计失败", code=50220)
-    return Resp(data=result.data)
+    data = _persist_scan_result(
+        db, user, project_id=payload.project_id, report_kind="fullchain_audit",
+        task_name="全链路源码审计", result=result,
+    )
+    return Resp(data=SecurityScanOut(**data))
 
 
 @router.post(
@@ -180,9 +244,33 @@ def scan_all_projects(
         scan_mode=payload.scan_mode,
         ctx=_ctx(user),
     )
-    if not result.success:
-        raise AiServiceError(result.error or "全量项目安全扫描失败", code=50220)
-    return Resp(data=SecurityScanOut(**result.data))
+    if result.failure_kind == "empty_scan_input":
+        raise AiServiceError(result.error or "当前账号没有可见且可扫描的项目", code=50220)
+    aggregate = dict(result.data or {})
+    project_results = aggregate.pop("project_results", [])
+    report_task_ids: list[int] = []
+    if isinstance(project_results, list):
+        for item in project_results:
+            if not isinstance(item, dict) or not item.get("project_id"):
+                continue
+            if item.get("failure_kind") in {"authorization_revoked", "unauthorized", "permission_denied"}:
+                continue
+            child_result = SimpleNamespace(
+                success=item.get("execution_status") == "success",
+                failure_kind=item.get("failure_kind", ""),
+                error=item.get("error_message", ""),
+                data=item.get("data") if isinstance(item.get("data"), dict) else {},
+            )
+            report_data = _persist_scan_result(
+                db, user, project_id=int(item["project_id"]), report_kind="security_scan",
+                task_name=f"安全扫描 · {item.get('project_name') or item['project_id']}",
+                result=child_result,
+            )
+            report_task_ids.append(int(report_data["report_task_id"]))
+    aggregate["report_task_ids"] = report_task_ids
+    aggregate["execution_status"] = _report_execution_status(result, aggregate)
+    aggregate["error_message"] = str(result.error or "")
+    return Resp(data=SecurityScanOut(**aggregate))
 
 
 @router.get(

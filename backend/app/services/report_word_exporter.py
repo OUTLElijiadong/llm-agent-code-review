@@ -285,6 +285,17 @@ def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
 def _build_score_breakdown(doc: Any, statistics: Dict[str, Any]) -> None:
     """写入所有报告出口共用的 15/8/3/1 评分明细。"""
     breakdown = statistics.get("score_breakdown") or {}
+    if breakdown.get("score") is None:
+        doc.add_heading("评分明细", level=1)
+        table = doc.add_table(rows=3, cols=2)
+        table.style = "Table Grid"
+        for row_idx, (label, value) in enumerate((
+            ("字段", "值"), ("评分明细", "未评估"),
+            ("评分来源", str(breakdown.get("score_source") or "未提供")),
+        )):
+            _add_run(table.rows[row_idx].cells[0].paragraphs[0], label, bold=(row_idx == 0), size=10)
+            _add_run(table.rows[row_idx].cells[1].paragraphs[0], value, bold=(row_idx == 0), size=10)
+        return
     weights = breakdown.get("weights") or {}
     counts = breakdown.get("counts") or {}
     deductions = breakdown.get("deductions") or {}
@@ -652,6 +663,12 @@ def export_to_word(
 
     # 6. 问题详情(按严重度分组)
     _build_issues_section(doc, sorted_issues)
+
+    security_report = context.get("source", {}).get("security_report", {})
+    security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None
+    if isinstance(security_markdown, str) and security_markdown.strip():
+        doc.add_heading("安全审计专项结果", level=1)
+        _append_markdown_to_word(doc, security_markdown)
 
     # 导出字节流
     buffer = BytesIO()

@@ -89,7 +89,7 @@ Alembic 必须只有一个 head，且 `current=head`。不要把 `deploy/mysql/i
 
 ## 5. 日常精确 SHA 发布
 
-根目录 `VERSION` 是产品语义版本唯一来源，必须使用 `x.y.z` 格式。发布脚本会读取并校验它，将其作为 `APP_VERSION` 注入后端、作为 `VITE_APP_VERSION` 注入前端；Git 完整 SHA 继续作为不可变 `release`。修改版本后必须提交，再发布该精确提交，禁止只改页面文字。
+根目录 `VERSION` 是产品语义版本唯一来源，必须使用 `x.y.z` 格式，三段均为 `0–999` 的整数（除 `0` 外不允许前导零）。发布脚本会读取并校验它，将其作为 `APP_VERSION` 注入后端、作为 `VITE_APP_VERSION` 注入前端；Git 完整 SHA 继续作为不可变 `release`。修改版本后必须提交，再发布该精确提交，禁止只改页面文字。
 
 先在仓库层完成安全的 fetch/checkout，并确认当前 HEAD 就是计划版本；`deploy.sh` 本身不会修改 Git：
 

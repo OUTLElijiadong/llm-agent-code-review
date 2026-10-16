@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from fastapi import FastAPI
@@ -29,7 +31,10 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services import profile_service, report_exporter, review_service
+from app.services import domain_report_exporter, profile_service, report_exporter, review_service
+from app.services.domain_report_exporter import build_sandbox_report_markdown
+from app.services.report_text import clean_report_markdown, clean_report_text
+from app.services.security_report_service import persist_security_report
 
 REPORT_MD = "## 总体结论\n隔离合成报告\n## 问题清单\n- 发现甲\n- 发现乙\n- 发现丙\n"
 
@@ -67,8 +72,12 @@ def export_context():
 
 def _domain_fixture(db, owner, project, source, *, status="success"):
     task = ReviewTask(
-        user_id=owner.id, project_id=project.id, task_name=f"领域-{source}",
-        review_type=source, status=status, total_issues=3 if source == "sandbox_test" else 2,
+        user_id=owner.id,
+        project_id=project.id,
+        task_name=f"领域-{source}",
+        review_type=source,
+        status=status,
+        total_issues=3 if source == "sandbox_test" else 2,
         score=0 if status == "failed" else (100 if source == "sandbox_test" else 84),
         score_version="pentest-v1" if source == "pentest" else None,
         coverage={"verification_status": "complete"} if source == "sandbox_test" else None,
@@ -79,22 +88,38 @@ def _domain_fixture(db, owner, project, source, *, status="success"):
     content = {"source": source, "report_md": REPORT_MD, "public_id": f"sandbox-export-{task.id}"}
     if source == "pentest":
         engagement = PentestEngagement(
-            public_id=f"pentest-export-{task.id}", user_id=owner.id, project_id=project.id,
-            target_type="web", status="completed", report_task_id=task.id,
+            public_id=f"pentest-export-{task.id}",
+            user_id=owner.id,
+            project_id=project.id,
+            target_type="web",
+            status="completed",
+            report_task_id=task.id,
         )
         db.add(engagement)
         db.flush()
         content = {"source": "pentest", "engagement_public_id": engagement.public_id}
         for position, status in enumerate(["confirmed", "refuted"]):
-            db.add(PentestFinding(
-                engagement_id=engagement.id, finding_fingerprint=f"export-{task.id}-{position}",
-                title=f"真实领域发现-{position}", severity="高", category="注入", status=status,
-                description="合成领域证据", evidence_json='{"detail":"fixture-evidence"}',
-            ))
-    db.add(ReviewReport(
-        task_id=task.id, user_id=owner.id, score=task.score, content_json=content,
-        create_time=datetime.now(timezone.utc),
-    ))
+            db.add(
+                PentestFinding(
+                    engagement_id=engagement.id,
+                    finding_fingerprint=f"export-{task.id}-{position}",
+                    title=f"真实领域发现-{position}",
+                    severity="高",
+                    category="注入",
+                    status=status,
+                    description="合成领域证据",
+                    evidence_json='{"detail":"fixture-evidence"}',
+                )
+            )
+    db.add(
+        ReviewReport(
+            task_id=task.id,
+            user_id=owner.id,
+            score=task.score,
+            content_json=content,
+            create_time=datetime.now(timezone.utc),
+        )
+    )
     db.commit()
     assert review_service._task_agent_release_summaries(db, task.id) == []
     return task
@@ -102,23 +127,89 @@ def _domain_fixture(db, owner, project, source, *, status="success"):
 
 def _sandbox_artifact(db, owner, project, task):
     environment = SandboxEnvironment(
-        public_id=f"sandbox-export-{task.id}", owner_id=owner.id, project_id=project.id,
-        agent_code="test_verifier", status="stopped", source_sha256="a" * 64,
-        runtime="runsc", image_ref="synthetic", purpose="test", language="python",
-        resource_policy_json="{}", agent_config_json="{}",
+        public_id=f"sandbox-export-{task.id}",
+        owner_id=owner.id,
+        project_id=project.id,
+        agent_code="test_verifier",
+        status="stopped",
+        source_sha256="a" * 64,
+        runtime="runsc",
+        image_ref="synthetic",
+        purpose="test",
+        language="python",
+        resource_policy_json="{}",
+        agent_config_json="{}",
         expires_at=datetime.now(timezone.utc) + timedelta(days=1),
     )
     db.add(environment)
     db.flush()
     content = REPORT_MD.encode("utf-8")
     artifact = SandboxArtifact(
-        environment_id=environment.id, artifact_type="review_report", file_name="sandbox-report.md",
-        mime_type="text/markdown", byte_size=len(content), sha256=hashlib.sha256(content).hexdigest(),
-        storage_ref="inline", content_base64=base64.b64encode(content).decode("ascii"),
+        environment_id=environment.id,
+        artifact_type="review_report",
+        file_name="sandbox-report.md",
+        mime_type="text/markdown",
+        byte_size=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        storage_ref="inline",
+        content_base64=base64.b64encode(content).decode("ascii"),
     )
     db.add(artifact)
     db.commit()
     return environment, artifact
+
+
+def _security_report_fixture(db, owner, project, source):
+    return db.get(
+        ReviewTask,
+        persist_security_report(
+            db,
+            owner=owner,
+            project_id=project.id,
+            report_kind=source,
+            task_name=f"领域化-{source}",
+            execution_status="success",
+            result={
+                "summary": "已记录源码安全结论",
+                "risk_score": 44,
+                "file_count": 1,
+                "findings": [
+                    {
+                        "title": "报告内容校验标记",
+                        "category": "安全漏洞",
+                        "severity": "高",
+                        "file_path": "src/report.py",
+                        "line_number": 12,
+                        "evidence": "evidence-marker-value",
+                        "exploit_scenario": "攻击者可触发报告校验路径。",
+                        "fix_suggestion": "先校验输入，再调用敏感操作。",
+                        "verification": "plausible",
+                    }
+                ],
+                "fullchain": {
+                    "summary": "全链路阶段已生成",
+                    "plain_report": {"verdict": "需要人工复核"},
+                    "recon": {"framework_hints": ["FastAPI"], "hot_files": ["src/report.py"], "tainted_sink_count": 2},
+                    "verification": {
+                        "targets": 1,
+                        "verified": 0,
+                        "sandbox_used": False,
+                        "sandbox_script_report_status": "pending_independent_verification",
+                    },
+                    "board": {
+                        "facts": 2,
+                        "hypotheses": 1,
+                        "confirmed": 0,
+                        "refuted": 1,
+                        "intents": 1,
+                        "open_intents": 1,
+                    },
+                },
+                "audit_board": {"summary": "**协作记录** *已汇总*", "confirmed": []},
+            },
+            coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
+        ),
+    )
 
 
 @pytest.mark.parametrize("source,count", [("sandbox_test", 3), ("pentest", 2)])
@@ -141,7 +232,10 @@ def test_domain_json_export_matches_detail_without_standard_issue_fabrication(ex
     assert "issues" not in exported
     assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
     if source == "sandbox_test":
-        assert exported["domain_data"]["report_md"] == REPORT_MD
+        report_md = exported["domain_data"]["report_md"]
+        assert "总体结论" in report_md
+        assert "发现甲" in report_md and "发现乙" in report_md and "发现丙" in report_md
+        assert "**" not in report_md
     else:
         assert len(exported["domain_data"]["findings"]) == count
         assert exported["statistics"]["refuted"] == 1
@@ -150,12 +244,21 @@ def test_domain_json_export_matches_detail_without_standard_issue_fabrication(ex
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
-@pytest.mark.parametrize("endpoint,format", [
-    ("generate", "html"), ("generate", "pdf"), ("generate", "word"),
-    ("download", "html"), ("download", "pdf"), ("download", "word"),
-    ("legacy", "pdf"), ("legacy", "word"), ("preview", "html"),
-])
-def test_non_equivalent_domain_format_is_explicitly_rejected(export_context, source, endpoint, format):
+@pytest.mark.parametrize(
+    "endpoint,format",
+    [
+        ("generate", "html"),
+        ("generate", "pdf"),
+        ("generate", "word"),
+        ("download", "html"),
+        ("download", "pdf"),
+        ("download", "word"),
+        ("legacy", "pdf"),
+        ("legacy", "word"),
+        ("preview", "html"),
+    ],
+)
+def test_domain_report_formats_render_the_same_source_data(export_context, source, endpoint, format):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, source)
     if endpoint == "generate":
@@ -167,10 +270,171 @@ def test_non_equivalent_domain_format_is_explicitly_rejected(export_context, sou
     else:
         response = client.get(f"/api/reports/tasks/{task.id}")
 
-    assert response.status_code == 409
-    assert "领域" in response.json()["message"]
-    assert f"/api/reports/tasks/{task.id}/export?format=json" in response.json()["next_action"]
-    assert "content-disposition" not in response.headers
+    assert response.status_code == 200
+    if format == "html":
+        assert response.headers["content-type"].startswith("text/html")
+        assert task.task_name in response.text
+        if source == "sandbox_test":
+            assert "发现甲" in response.text
+        else:
+            assert "真实领域发现-0" in response.text
+    elif format == "pdf":
+        assert response.headers["content-type"].startswith("application/pdf")
+        assert response.content.startswith(b"%PDF")
+        assert "content-disposition" in response.headers
+    else:
+        assert response.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert "content-disposition" in response.headers
+        with ZipFile(BytesIO(response.content)) as document:
+            xml = document.read("word/document.xml").decode("utf-8")
+        assert task.task_name in xml
+        if source == "sandbox_test":
+            assert "发现甲" in xml
+        else:
+            assert "真实领域发现-0" in xml
+
+
+@pytest.mark.parametrize("source", ["security_scan", "fullchain_audit"])
+@pytest.mark.parametrize("endpoint", ["generate", "download"])
+@pytest.mark.parametrize("format", ["json", "html", "pdf", "word"])
+def test_security_and_fullchain_reports_export_the_saved_complete_body(
+    export_context, monkeypatch, source, endpoint, format
+):
+    client, db, owner, _other, project, _current = export_context
+    task = _security_report_fixture(db, owner, project, source)
+    pdf_text: list[str] = []
+    original_append = domain_report_exporter._append_markdown_elements
+
+    def capture_pdf_body(elements, markdown, styles):
+        original_append(elements, markdown, styles)
+        pdf_text.extend(element.getPlainText() for element in elements if hasattr(element, "getPlainText"))
+
+    monkeypatch.setattr(domain_report_exporter, "_append_markdown_elements", capture_pdf_body)
+    if endpoint == "generate":
+        response = client.post("/api/reports/generate", json={"task_id": task.id, "format": format})
+    else:
+        response = client.get(f"/api/reports/tasks/{task.id}/export?format={format}")
+
+    assert response.status_code == 200
+    if format == "json":
+        payload = response.json()
+        assert payload["source"]["type"] == source
+        assert "报告内容校验标记" in payload["domain_data"]["report_md"]
+        assert "侦察阶段" in payload["domain_data"]["report_md"]
+        assert "验证阶段" in payload["domain_data"]["report_md"]
+        assert "协作黑板统计" in payload["domain_data"]["report_md"]
+        assert "**" not in json.dumps(payload["domain_data"], ensure_ascii=False)
+        assert "*已汇总*" not in json.dumps(payload["domain_data"], ensure_ascii=False)
+    elif format == "html":
+        assert "报告内容校验标记" in response.text
+        assert "FastAPI" in response.text
+        assert "pending_independent_verification" in response.text
+    elif format == "pdf":
+        assert response.content.startswith(b"%PDF")
+        assert "attachment" in response.headers.get("content-disposition", "")
+        visible_pdf_text = "\n".join(pdf_text)
+        assert "报告内容校验标记" in visible_pdf_text
+        assert "FastAPI" in visible_pdf_text
+        assert "pending_independent_verification" in visible_pdf_text
+    else:
+        with ZipFile(BytesIO(response.content)) as document:
+            xml = document.read("word/document.xml").decode("utf-8")
+        assert "报告内容校验标记" in xml
+        assert "FastAPI" in xml
+        assert "pending_independent_verification" in xml
+
+
+def test_security_snapshot_source_mismatch_is_hidden_from_list_and_detail(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = _security_report_fixture(db, owner, project, "security_scan")
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.content_json = {**snapshot.content_json, "source": "fullchain_audit"}
+    db.commit()
+
+    listing = client.get("/api/reports?page=1&page_size=100")
+    detail = client.get(f"/api/reports/{task.id}")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert listing.status_code == 200
+    assert all(item["task_id"] != task.id for item in listing.json()["data"]["items"])
+    assert detail.status_code == exported.status_code == 409
+
+
+@pytest.mark.parametrize("report_body", [" \n  \t", "\u3000", "\u00a0", 123])
+def test_security_snapshot_with_invalid_body_is_hidden_from_list_and_detail(export_context, report_body):
+    client, db, owner, _other, project, _current = export_context
+    task = _security_report_fixture(db, owner, project, "security_scan")
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.content_json = {**snapshot.content_json, "report_md": report_body}
+    db.commit()
+
+    listing = client.get("/api/reports?page=1&page_size=100")
+    detail = client.get(f"/api/reports/{task.id}")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert listing.status_code == 200
+    assert all(item["task_id"] != task.id for item in listing.json()["data"]["items"])
+    assert detail.status_code == exported.status_code == 409
+
+
+def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():
+    report = (
+        "## 证据\n\n"
+        "参考 [NVD 公告](https://nvd.nist.gov/vuln/detail/CVE-2026-12345) 和 "
+        "[公告](https://example.org/advisory_(v2))，严重度为 *高*。\n\n"
+        "计算 `result = a*b*c` 与 `power = 2 ** 3 ** 4`。\n\n"
+        "```python\npattern = '*'\n```\n"
+    )
+
+    cleaned = clean_report_markdown(report)
+    plain_text = clean_report_text(report)
+
+    assert "NVD 公告（https://nvd.nist.gov/vuln/detail/CVE-2026-12345）" in cleaned
+    assert "公告（https://example.org/advisory_(v2)）" in cleaned
+    assert "严重度为 高。" in cleaned
+    assert "`result = a*b*c`" in cleaned
+    assert "`power = 2 ** 3 ** 4`" in cleaned
+    assert "公告（https://example.org/advisory_(v2)）" in plain_text
+    assert "result = a*b*c" in plain_text
+    assert "power = 2 ** 3 ** 4" in plain_text
+    assert "*高*" not in cleaned
+    assert "pattern = '*'" in cleaned
+
+
+def test_sandbox_source_markdown_is_cleaned_while_fenced_code_is_preserved(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test")
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.content_json = {
+        **snapshot.content_json,
+        "report_md": "## **报告结论**\n\n* **需要关注**\n\n```python\npattern = '*'\n```\n",
+    }
+    db.commit()
+
+    json_response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+    html_response = client.get(f"/api/reports/tasks/{task.id}/export?format=html")
+
+    assert json_response.status_code == html_response.status_code == 200
+    assert "**" not in json_response.text
+    assert "**" not in html_response.text
+    assert "pattern = '*'" in json_response.json()["domain_data"]["report_md"]
+    assert "报告结论" in html_response.text
+
+
+@pytest.mark.parametrize("source", ["security_scan", "fullchain_audit"])
+def test_security_and_fullchain_report_preview_uses_the_saved_report_body(export_context, source):
+    client, db, owner, _other, project, _current = export_context
+    task = _security_report_fixture(db, owner, project, source)
+
+    response = client.get(f"/api/reports/tasks/{task.id}")
+
+    assert response.status_code == 200
+    assert "报告内容校验标记" in response.text
+    assert "侦察阶段" in response.text
+    assert "验证阶段" in response.text
+    assert "协作黑板统计" in response.text
 
 
 def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknown_scope(export_context):
@@ -199,6 +463,45 @@ def test_generic_exporter_cannot_bypass_source_gate(source):
         report_exporter.export_to_dict({"id": 1, "review_type": source, "total_issues": 3}, [], REPORT_MD, 100)
 
 
+def test_sandbox_remote_blackbox_report_uses_real_persisted_evidence_fields():
+    markdown = build_sandbox_report_markdown(
+        {
+            "report_md": "测试报告正文",
+            "execution_status": "success",
+            "verification_status": "partial",
+            "coverage": {"verification_status": "partial"},
+            "evidence": {
+                "remote_blackbox": {
+                    "target_origin": "https://example.test/",
+                    "resolved_ip": "203.0.113.10",
+                    "status_code": 302,
+                    "latency_ms": 27,
+                    "redirect_location": "https://www.example.test/",
+                    "content_type": "text/html",
+                    "security_headers": {"strict-transport-security": "max-age=31536000"},
+                    "missing_security_headers": ["content-security-policy"],
+                    "body_bytes_sampled": 65536,
+                }
+            },
+        },
+        task_name="远程有限检查",
+        project_name="示例项目",
+    )
+
+    for expected in (
+        "授权目标：https://example.test/",
+        "请求方法：GET",
+        "203.0.113.10",
+        "HTTP 状态码：302",
+        "响应耗时毫秒：27",
+        "重定向目标：https://www.example.test/",
+        "strict-transport-security",
+        "content-security-policy",
+        "读取响应字节数：65536",
+    ):
+        assert expected in markdown
+
+
 def test_sandbox_export_links_to_integrity_checked_native_artifact(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")
@@ -222,9 +525,13 @@ def test_sandbox_report_artifact_requires_report_scope_and_view_permission(expor
     db.add(ProjectMember(project_id=project.id, user_id=other.id, role_in_project="reviewer"))
     normal_content = b'{"kind":"ordinary-result"}'
     normal_artifact = SandboxArtifact(
-        environment_id=environment.id, artifact_type="result", file_name="result.json",
-        mime_type="application/json", byte_size=len(normal_content),
-        sha256=hashlib.sha256(normal_content).hexdigest(), storage_ref="inline",
+        environment_id=environment.id,
+        artifact_type="result",
+        file_name="result.json",
+        mime_type="application/json",
+        byte_size=len(normal_content),
+        sha256=hashlib.sha256(normal_content).hexdigest(),
+        storage_ref="inline",
         content_base64=base64.b64encode(normal_content).decode("ascii"),
     )
     db.add(normal_artifact)
@@ -236,9 +543,7 @@ def test_sandbox_report_artifact_requires_report_scope_and_view_permission(expor
     peer_artifacts = peer_environment.json()["data"]["artifacts"]
     assert [item["artifact_type"] for item in peer_artifacts] == ["result"]
     assert peer_artifacts[0]["download_allowed"] is True
-    ordinary_download = client.get(
-        f"/api/sandboxes/{environment.public_id}/artifacts/{normal_artifact.id}"
-    )
+    ordinary_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{normal_artifact.id}")
     assert ordinary_download.status_code == 200
     assert ordinary_download.content == normal_content
 
@@ -249,10 +554,12 @@ def test_sandbox_report_artifact_requires_report_scope_and_view_permission(expor
     view_permission = Permission(code="report:view", name="查看审查报告", module="report", type="api")
     db.add_all([view_role, view_permission])
     db.flush()
-    db.add_all([
-        RolePermission(role_id=view_role.id, permission_id=view_permission.id),
-        UserRole(user_id=other.id, role_id=view_role.id),
-    ])
+    db.add_all(
+        [
+            RolePermission(role_id=view_role.id, permission_id=view_permission.id),
+            UserRole(user_id=other.id, role_id=view_role.id),
+        ]
+    )
     db.commit()
     still_peer_environment = client.get(f"/api/sandboxes/{environment.public_id}")
     assert still_peer_environment.status_code == 200
@@ -268,20 +575,19 @@ def test_sandbox_report_artifact_requires_report_scope_and_view_permission(expor
     db.commit()
     owner_environment = client.get(f"/api/sandboxes/{environment.public_id}")
     assert all(item["artifact_type"] != "review_report" for item in owner_environment.json()["data"]["artifacts"])
-    owner_without_view_download = client.get(
-        f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}"
-    )
+    owner_without_view_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
     assert owner_without_view_download.status_code == 403
 
     db.add(UserRole(user_id=other.id, role_id=view_role.id))
     db.commit()
     owner_with_view_environment = client.get(f"/api/sandboxes/{environment.public_id}")
-    report_item = next(item for item in owner_with_view_environment.json()["data"]["artifacts"]
-                       if item["artifact_type"] == "review_report")
-    assert report_item["download_allowed"] is True
-    owner_with_view_download = client.get(
-        f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}"
+    report_item = next(
+        item
+        for item in owner_with_view_environment.json()["data"]["artifacts"]
+        if item["artifact_type"] == "review_report"
     )
+    assert report_item["download_allowed"] is True
+    owner_with_view_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
     assert owner_with_view_download.status_code == 200
     assert owner_with_view_download.content.decode("utf-8") == REPORT_MD
 
@@ -406,8 +712,10 @@ def test_personal_language_distribution_intersects_visible_projects(db, role):
     db.add_all([owner, other])
     db.flush()
     for name, language, status, user_id in [
-        ("本人活动", "Python", "active", owner.id), ("本人归档", "Go", "archived", owner.id),
-        ("隔离测试", "Rust", "quarantined", owner.id), ("删除项目", "Java", "deleted", owner.id),
+        ("本人活动", "Python", "active", owner.id),
+        ("本人归档", "Go", "archived", owner.id),
+        ("隔离测试", "Rust", "quarantined", owner.id),
+        ("删除项目", "Java", "deleted", owner.id),
         ("他人项目", "JavaScript", "active", other.id),
     ]:
         project = Project(user_id=user_id, project_name=name, language=language, status=status)
@@ -463,7 +771,7 @@ def test_pentest_json_requires_existing_source_view_permission(export_context, d
     _grant_report_permissions(db, owner, role_code="reviewer", domain_view=domain_view)
 
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
-    assert response.status_code == (200 if domain_view else 403)
+    assert response.status_code == (200 if domain_view else 404)
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
@@ -519,17 +827,14 @@ def test_empty_real_pentest_export_remains_valid_and_preserves_score(export_cont
     assert response.json()["score"] == 84
 
 
-def test_domain_export_errors_keep_recovery_link_in_production_response(export_context, monkeypatch):
-    from app.core import error_handlers
-
+def test_domain_pdf_export_uses_real_source_report_in_production_response(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")
-    monkeypatch.setattr(error_handlers, "_is_prod", lambda: True)
 
     response = client.get(f"/api/reports/{task.id}/export/pdf")
-    assert response.status_code == 409
-    assert "detail" not in response.json()
-    assert f"/api/reports/tasks/{task.id}/export?format=json" in response.json()["next_action"]
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content.startswith(b"%PDF")
 
 
 def test_changing_domain_findings_cannot_export_inconsistent_count(export_context, monkeypatch):
@@ -556,8 +861,13 @@ def test_changing_domain_findings_cannot_export_inconsistent_count(export_contex
 def test_review_issue_exports_keep_standard_contract_and_match_report_detail(export_context, source, endpoint):
     client, db, owner, other, project, current = export_context
     task = ReviewTask(
-        user_id=owner.id, project_id=project.id, task_name=f"兼容-{source}",
-        review_type=source, status="success", total_issues=99, score=0,
+        user_id=owner.id,
+        project_id=project.id,
+        task_name=f"兼容-{source}",
+        review_type=source,
+        status="success",
+        total_issues=99,
+        score=0,
     )
     db.add(task)
     db.flush()
@@ -612,10 +922,16 @@ def test_failed_pentest_report_is_visible_and_running_sandbox_is_not(export_cont
 def test_ambiguous_pentest_association_is_explicitly_rejected(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "pentest")
-    db.add(PentestEngagement(
-        public_id=f"ambiguous-{task.id}", user_id=owner.id, project_id=project.id,
-        target_type="web", status="completed", report_task_id=task.id,
-    ))
+    db.add(
+        PentestEngagement(
+            public_id=f"ambiguous-{task.id}",
+            user_id=owner.id,
+            project_id=project.id,
+            target_type="web",
+            status="completed",
+            report_task_id=task.id,
+        )
+    )
     db.commit()
 
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")

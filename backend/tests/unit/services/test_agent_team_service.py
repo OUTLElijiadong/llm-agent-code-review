@@ -1733,6 +1733,61 @@ def test_cancel_response_teams_only_cancels_teams_from_the_stopped_run(db, team_
     assert db.get(AgentTeam, unrelated_team["team_id"]).status == "queued"
 
 
+def test_stopping_parent_run_suppresses_new_and_already_queued_team_receipts(db, team_user):
+    root = AgentResponseRun(
+        run_id="parent-run-no-auto-resume",
+        user_id=team_user.id,
+        surface="user",
+        session_key="session-a1",
+        status="running",
+        checkpoint_json="{}",
+        version=1,
+    )
+    db.add(root)
+    db.commit()
+
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        already_finished = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+        still_running = agent_team_service.create_team_from_xiaoling(
+            db, team_user, _payload(title="仍在运行的团队"),
+        )
+
+    finished_team = db.get(AgentTeam, already_finished["team_id"])
+    finished_team.status = "completed"
+    finished_team.completed_at = agent_team_service._now()
+    agent_team_service._persist_terminal_team_notification(
+        db, finished_team, now=agent_team_service._now(),
+    )
+    db.commit()
+    pending_receipt = db.query(AgentMeshMessage).filter_by(
+        correlation_id=f"team:{finished_team.id}",
+    ).one()
+    assert pending_receipt.status == "queued"
+
+    cancelled_count = agent_team_service.cancel_response_teams(
+        db,
+        team_user,
+        run_id=root.run_id,
+        surface="user",
+        session_key="session-a1",
+        reason="用户停止父级小菱运行",
+    )
+
+    assert cancelled_count == 1
+    assert db.get(AgentTeam, still_running["team_id"]).status == "cancelled"
+    root_receipts = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.correlation_id.in_((
+            f"team:{already_finished['team_id']}",
+            f"team:{still_running['team_id']}",
+        )),
+    ).all()
+    assert len(root_receipts) == 2
+    assert {row.status for row in root_receipts} == {"completed"}
+    assert all(json.loads(row.context_json)["suppressed_after_parent_cancel"] is True for row in root_receipts)
+    assert all(json.loads(row.context_json)["session_delivery"] is False for row in root_receipts)
+    assert all(json.loads(row.context_json)["parent_run_id"] == root.run_id for row in root_receipts)
+
+
 def test_create_team_is_blocked_after_parent_response_run_is_cancelled(db, team_user):
     root = AgentResponseRun(
         run_id="cancelled-parent-run",

@@ -344,6 +344,9 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
             task_metrics_access_filter(db, user),
+            ReviewTask.review_type.in_(
+                ("quick", "standard", "discuss", "security", "performance", "full", "sandbox_test", "pentest"),
+            ),
             # 领域任务/历史任务可能没有质量评分；过滤掉无效分数，避免
             # ScoreTrendItem 校验 500，也不在图表中伪造 0 分。
             ReviewTask.score.is_not(None),

@@ -117,6 +117,10 @@ def get_dashboard_summary(db: Session, user: Optional[User],
         if (
             task.status == "success"
             and score is not None
+            and not (
+                isinstance(task.coverage, dict)
+                and task.coverage.get("score_available") is False
+            )
             and task_id > latest_scored_task_by_project.get(pid, -1)
         ):
             score_by_project[pid] = score

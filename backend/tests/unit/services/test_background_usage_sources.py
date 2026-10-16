@@ -5,20 +5,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.agent_capability import SandboxEnvironment
 from app.models.agent_response_run import AgentResponseRun
 from app.models.ai_call_log import AiCallLog
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
+from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.services.ai_usage_context import current_attribution, model_attribution, record_usage_attempt, usage_context
 
 
 def _seed_execution_actor(db, user_id, project_id):
-    from app.models.user import User
+    from app.core.permission_codes import PermissionCode
     from app.models.project import Project
     from app.models.rbac import Permission, Role, RolePermission, UserRole
-    from app.core.permission_codes import PermissionCode
+    from app.models.user import User
+
     if db.get(User, user_id) is None:
         db.add(User(id=user_id, username=f"authorized-roundtable-{user_id}", password="local", role="user", status=1))
     if db.get(Project, project_id) is None:
@@ -30,10 +31,12 @@ def _seed_execution_actor(db, user_id, project_id):
     if permission is None:
         permission = Permission(code=PermissionCode.REVIEW_START, name="local review", module="review")
         db.add(permission)
-    db.add(role); db.flush()
-    db.add_all([UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.add(role)
+    db.flush()
+    db.add_all(
+        [UserRole(user_id=user_id, role_id=role.id), RolePermission(role_id=role.id, permission_id=permission.id)]
+    )
     db.commit()
-
 
 
 def _origin(db):
@@ -215,6 +218,22 @@ async def test_asgi_reentry_preserves_scope_through_auth_and_sync_model_endpoint
     actor = User(id=7, username="asgi-account", password="unit", role="admin", status=1)
     session.add(actor)
     session.commit()
+    project = Project(id=1, user_id=actor.id, project_name="usage-attribution", status="active")
+    session.add(project)
+    session.add(
+        CodeFile(
+            id=1,
+            project_id=project.id,
+            file_name="unit.py",
+            file_path="unit.py",
+            language="python",
+            content="value = 1\n",
+            version_no=1,
+            is_binary=0,
+            status="active",
+        )
+    )
+    session.commit()
     origin = _origin(session)
     tool = AgentToolExecution(
         request_id="asgi-tool",
@@ -286,7 +305,8 @@ def test_sandbox_worker_recovers_persisted_origin_and_resets_context(db, monkeyp
     from tests.unit.services.execution_test_rows import authorized_sandbox_environment
 
     origin = _origin(db)
-    row = authorized_sandbox_environment(db,
+    row = authorized_sandbox_environment(
+        db,
         public_id="unit-sandbox",
         project_id=1,
         owner_id=7,

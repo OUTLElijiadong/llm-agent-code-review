@@ -2007,6 +2007,24 @@ def prepare_message_run(
                 ),
             )
             raise AgentMeshStateError("团队终态回执过期或无效，已收敛且未触发模型")
+        team = db.query(AgentTeam).filter(
+            AgentTeam.id == int(terminal_snapshot["team_id"]),
+            AgentTeam.user_id == int(user.id),
+        ).first()
+        parent_run = db.get(AgentResponseRun, int(team.root_agent_run_id)) if team and team.root_agent_run_id else None
+        if parent_run is not None and parent_run.status == "cancelled":
+            ack_message(
+                db,
+                user,
+                message_id,
+                surface=surface,
+                session_key=session_key,
+                acknowledgement=AgentMeshAckIn(
+                    status="completed",
+                    summary="父级小菱响应已停止；团队结果仅保留审计，不自动启动新的模型运行。",
+                ),
+            )
+            raise AgentMeshStateError("父级小菱响应已停止，团队结果仅保留审计且未触发模型")
     if is_jarvis_auto_dispatch_blocked(row):
         ack_message(
             db,

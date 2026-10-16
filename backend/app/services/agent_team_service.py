@@ -2341,7 +2341,13 @@ def _add_terminal_mesh_message(
     _mesh_event(db, team=team, message_id=message_id, status=status, actor=send_to)
 
 
-def _persist_terminal_team_notification(db: Session, team: AgentTeam, *, now: datetime) -> None:
+def _persist_terminal_team_notification(
+    db: Session,
+    team: AgentTeam,
+    *,
+    now: datetime,
+    deliver_to_session: bool = True,
+) -> None:
     """团队进入任一终态时只向小菱会话投递一次汇总回执。
 
     单任务结果仍完整留在 Mesh 和团队时间线，但不逐条触发助手回复。终态回执包含
@@ -2417,6 +2423,7 @@ def _persist_terminal_team_notification(db: Session, team: AgentTeam, *, now: da
     }
     terminal_error = team.status != "completed"
     request_id = _request_message_id(team, latest_task)
+    parent_run = db.get(AgentResponseRun, int(team.root_agent_run_id)) if team.root_agent_run_id else None
     _add_terminal_mesh_message(
         db,
         team,
@@ -2431,6 +2438,7 @@ def _persist_terminal_team_notification(db: Session, team: AgentTeam, *, now: da
         context={
             "team_id": int(team.id),
             "run_id": team.trace_id,
+            "parent_run_id": str(parent_run.run_id) if parent_run and parent_run.run_id else "",
             "team_terminal": True,
             "session_delivery": True,
             "execution_generation": payload["execution_generation"],
@@ -2440,8 +2448,51 @@ def _persist_terminal_team_notification(db: Session, team: AgentTeam, *, now: da
         success=not terminal_error,
         causation_id=request_id,
         now=now,
-        deliver_to_session=True,
+        deliver_to_session=deliver_to_session,
     )
+
+
+def _suppress_parent_run_team_notifications(
+    db: Session,
+    teams: list[AgentTeam],
+    *,
+    now: datetime,
+) -> None:
+    """Keep team receipts auditable while preventing a stopped run from resuming Xiaoling."""
+    if not teams:
+        return
+    team_by_correlation = {f"team:{team.id}": team for team in teams}
+    rows = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == int(teams[0].user_id),
+        AgentMeshMessage.correlation_id.in_(team_by_correlation),
+        AgentMeshMessage.send_to == f"session:{teams[0].surface}:{teams[0].session_key}",
+        AgentMeshMessage.status.in_(
+            ("queued", "delivered", "acknowledged", "processing", "failed"),
+        ),
+    ).all()
+    for row in rows:
+        context = _unjson(row.context_json, {})
+        if not isinstance(context, dict) or not context.get("team_terminal"):
+            continue
+        previous_status = row.status
+        context["session_delivery"] = False
+        context["suppressed_after_parent_cancel"] = True
+        row.context_json = _json(context)
+        row.status = "completed"
+        row.requires_ack = 0
+        row.completed_at = row.completed_at or now
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.next_attempt_at = None
+        _mesh_event(
+            db,
+            team=team_by_correlation[row.correlation_id],
+            message_id=row.message_id,
+            status="completed",
+            actor="system:parent_run_cancelled",
+            detail={"previous_status": previous_status, "reason": "parent_run_cancelled"},
+        )
+    db.commit()
 
 
 def _persist_task_result_message(
@@ -3194,7 +3245,14 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
     return count
 
 
-def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户取消") -> dict[str, Any]:
+def cancel_team(
+    db: Session,
+    user: User,
+    team_id: int,
+    *,
+    reason: str = "用户取消",
+    deliver_terminal_notification: bool = True,
+) -> dict[str, Any]:
     team = _team_or_raise(db, user, team_id, lock=True)
     if team.status not in _TERMINAL_TEAM:
         old = team.status
@@ -3242,7 +3300,9 @@ def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户�
             actor_address=f"user:{user.id}",
             detail={"reason": reason},
         )
-        _persist_terminal_team_notification(db, team, now=now)
+        _persist_terminal_team_notification(
+            db, team, now=now, deliver_to_session=deliver_terminal_notification,
+        )
         db.commit()
         _cleanup_team_runtime_resources(db, team, reason="user_cancelled")
     return _team_out(db, team, include_events=True)
@@ -3521,14 +3581,21 @@ def cancel_response_teams(
             AgentTeam.surface == surface,
             AgentTeam.session_key == session_key,
             AgentTeam.root_agent_run_id == root_run_id,
-            AgentTeam.status.notin_(tuple(_TERMINAL_TEAM)),
         )
         .order_by(AgentTeam.id.asc())
         .all()
     )
-    for team in teams:
-        cancel_team(db, user, int(team.id), reason=reason)
-    return len(teams)
+    active_teams = [team for team in teams if team.status not in _TERMINAL_TEAM]
+    for team in active_teams:
+        cancel_team(
+            db,
+            user,
+            int(team.id),
+            reason=reason,
+            deliver_terminal_notification=False,
+        )
+    _suppress_parent_run_team_notifications(db, teams, now=_now())
+    return len(active_teams)
 
 
 def retry_team(

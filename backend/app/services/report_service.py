@@ -30,8 +30,14 @@ from app.services.project_member_service import (
     require_project_execution,
 )
 from app.services.report_exporter import build_report_score_facts
+from app.services.report_text import clean_report_markdown, clean_report_payload
 
 _REPORTABLE_TASK_STATUSES = ("success", "failed", "cancelled", "expired", "stopped")
+_REPORT_BODY_WHITESPACE = (
+    " ", "\t", "\n", "\r", "\f", "\v", "\x1c", "\x1d", "\x1e", "\x1f",
+    "\x85", "\u00a0", "\u1680", *(chr(codepoint) for codepoint in range(0x2000, 0x200B)),
+    "\u2028", "\u2029", "\u202f", "\u205f", "\u3000",
+)
 
 
 def _task_coverage(task: ReviewTask) -> dict:
@@ -42,6 +48,28 @@ def _task_coverage(task: ReviewTask) -> dict:
         "coverage_status": "unknown",
         "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
     }
+
+
+def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
+    if task.review_type not in {"security_scan", "fullchain_audit"}:
+        return None
+    report = db.query(ReviewReport).filter(
+        ReviewReport.task_id == int(task.id),
+        ReviewReport.user_id == int(task.user_id),
+    ).first()
+    content = report.content_json if report and isinstance(report.content_json, dict) else {}
+    if (
+        content.get("source") != task.review_type
+        or not isinstance(content.get("report_md"), str)
+        or not content["report_md"].strip()
+    ):
+        return None
+    return clean_report_payload(content)
+
+
+def _score_is_available(task: ReviewTask) -> bool:
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    return coverage.get("score_available") is not False
 
 
 def is_report_available(task: ReviewTask | None) -> bool:
@@ -58,6 +86,16 @@ def sandbox_verification_status(task: ReviewTask | None) -> str:
     return status if status in {"complete", "partial", "failed"} else "unknown"
 
 
+def _has_source_report_permission(db: Session, user: User, review_type: str | None) -> bool:
+    """报告来源权限与报告列表、详情和导出共用；管理员由 RBAC 统一绕过。"""
+    required = {
+        "security_scan": PermissionCode.SECURITY_VIEW,
+        "fullchain_audit": PermissionCode.SECURITY_VIEW,
+        "pentest": PermissionCode.PENTEST_VIEW,
+    }.get(str(review_type or ""))
+    return required is None or rbac_service.check_permission(db, int(user.id), required)
+
+
 def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[bool]:
     """私域摘要查询沿用报告可用性、查看权限与发起人/管理员范围。
 
@@ -66,14 +104,15 @@ def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[
     """
     if user is None:
         return true()
+    private_report_types = ("sandbox_test", "pentest", "security_scan", "fullchain_audit")
     public_metrics = or_(
-        ReviewTask.review_type.notin_(("sandbox_test", "pentest")),
+        ReviewTask.review_type.notin_(private_report_types),
         ReviewTask.review_type.is_(None),
     )
     if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
         return public_metrics
     available_domain_report = and_(
-        ReviewTask.review_type.in_(("sandbox_test", "pentest")),
+        ReviewTask.review_type.in_(private_report_types),
         ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES),
     )
     if not rbac_service.is_admin_user(db, int(user.id)):
@@ -87,6 +126,8 @@ def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTas
     if not is_report_available(task):
         raise NotFoundError("报告不存在", code=40400)
     if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
+        raise NotFoundError("报告不存在", code=40400)
+    if not _has_source_report_permission(db, user, task.review_type):
         raise NotFoundError("报告不存在", code=40400)
     try:
         require_project_access(db, task.project_id, user, need_write=False)
@@ -124,10 +165,50 @@ def list_reports(db: Session, user: User, project_id: int = None,
     if end_date:
         q = q.filter(ReviewTask.create_time <= end_date + " 23:59:59")
 
+    if not rbac_service.check_permission(db, int(user.id), PermissionCode.SECURITY_VIEW):
+        q = q.filter(ReviewTask.review_type.notin_(("security_scan", "fullchain_audit")))
+    if not rbac_service.check_permission(db, int(user.id), PermissionCode.PENTEST_VIEW):
+        q = q.filter(ReviewTask.review_type != "pentest")
+
+    report_body = ReviewReport.content_json["report_md"].as_string()
+    non_whitespace_report_body = report_body
+    for whitespace in _REPORT_BODY_WHITESPACE:
+        non_whitespace_report_body = func.replace(non_whitespace_report_body, whitespace, "")
+    database_dialect = db.get_bind().dialect.name
+    if database_dialect == "sqlite":
+        report_body_is_string = func.json_type(ReviewReport.content_json, "$.report_md") == "text"
+    elif database_dialect in {"mysql", "mariadb"}:
+        report_body_is_string = func.json_type(
+            func.json_extract(ReviewReport.content_json, "$.report_md")
+        ) == "STRING"
+    elif database_dialect == "postgresql":
+        report_body_is_string = func.json_typeof(ReviewReport.content_json["report_md"]) == "string"
+    else:
+        report_body_is_string = report_body.is_not(None)
+    valid_security_snapshot = db.query(ReviewReport.id).filter(
+        ReviewReport.task_id == ReviewTask.id,
+        ReviewReport.user_id == ReviewTask.user_id,
+        ReviewReport.content_json["source"].as_string() == ReviewTask.review_type,
+        report_body_is_string,
+        report_body.is_not(None),
+        non_whitespace_report_body != "",
+    ).correlate(ReviewTask).exists()
+    q = q.filter(
+        or_(
+            ReviewTask.review_type.notin_(("security_scan", "fullchain_audit")),
+            valid_security_snapshot,
+        )
+    )
+
     total = q.count()
     pagination = Pagination(page, page_size, total)
     rows = q.order_by(ReviewTask.create_time.desc()).offset(pagination.offset).limit(pagination.page_size).all()
     issue_stats = load_task_issue_stats(db, rows)
+    security_snapshots = {
+        row.id: snapshot
+        for row in rows
+        if (snapshot := _security_report_snapshot(db, row)) is not None
+    }
     project_ids = {row.project_id for row in rows if row.project_id is not None}
     projects_by_id = (
         {
@@ -159,6 +240,12 @@ def list_reports(db: Session, user: User, project_id: int = None,
             row,
             issue_stats[row.id],
         )
+        if not _score_is_available(row):
+            score = None
+        source = dict(issue_stats[row.id]["source"])
+        snapshot = security_snapshots.get(row.id)
+        if snapshot is not None:
+            source["security_report"] = snapshot
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
@@ -166,7 +253,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "total_issues": issue_count, "score": score, "status": row.status,
             "error_message": row.error_message if report_access[row.id] else None,
             "coverage": row.coverage if report_access[row.id] else None,
-            "source": issue_stats[row.id]["source"],
+            "source": source,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
     return pagination.to_dict(items)
@@ -193,10 +280,48 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         task,
         issue_stats,
     )
+    score_available = _score_is_available(task)
+    security_snapshot = _security_report_snapshot(db, task)
+    if task.review_type in {"security_scan", "fullchain_audit"} and security_snapshot is None:
+        raise ConflictError(
+            "安全审计报告快照缺失或来源不匹配，已停止展示", code=40942,
+            next_action=f"请重新生成 GET /api/reports/tasks/{task.id}/generate 的报告后再查看",
+        )
+    if not score_available:
+        score = None
+        score_breakdown = {"score": None, "risk_level": "未评估", "score_source": "unavailable"}
 
     from app.services.review_service import _task_agent_release_summaries
 
     capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
+    source = dict(issue_stats["source"])
+    if security_snapshot is not None:
+        source["security_report"] = security_snapshot
+    elif task.review_type == "sandbox_test":
+        snapshot = db.query(ReviewReport).filter(
+            ReviewReport.task_id == task.id,
+            ReviewReport.user_id == task.user_id,
+        ).first()
+        content = snapshot.content_json if snapshot and isinstance(snapshot.content_json, dict) else {}
+        if content.get("source") == "sandbox_test":
+            source["domain_report_md"] = clean_report_markdown(content.get("report_md"))
+            findings = content.get("findings")
+            source["domain_findings"] = clean_report_payload(
+                findings if isinstance(findings, list) else []
+            )
+    elif task.review_type == "pentest" and source.get("public_id"):
+        from app.services.domain_report_exporter import build_pentest_report_markdown
+        from app.services.pentest_service import get_engagement_detail
+
+        domain_data = get_engagement_detail(db, user, str(source["public_id"]))
+        source["domain_report_md"] = build_pentest_report_markdown(
+            domain_data,
+            task_name=task.task_name,
+            project_name=project.project_name if project else "",
+            execution_status=task.status,
+            error_message=task.error_message,
+            coverage=_task_coverage(task),
+        )
     return {
         "can_delete": (rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
                        and capabilities.get("can_execute", False)),
@@ -234,7 +359,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             "score_breakdown": score_breakdown,
             "risk_level": score_breakdown.get("risk_level"),
         },
-        "source": issue_stats["source"],
+        "source": source,
         "summary": task.summary,
         "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(db, task_id),
         "rules_snapshot": task.rules_snapshot or [],
@@ -249,21 +374,33 @@ def _count(value: object) -> int:
 
 
 def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: str) -> dict | None:
-    """领域导出使用真实原始数据，不能落入空 ReviewIssue 的标准报告模板。"""
-    if task.review_type not in {"sandbox_test", "pentest"}:
+    """来源型报告复用原始业务正文，不能落入空问题表的标准报告模板。"""
+    if task.review_type not in {"sandbox_test", "pentest", "security_scan", "fullchain_audit"}:
         return None
     detail = get_report_detail(db, user, task.id)
-    json_api = f"/api/reports/tasks/{task.id}/export?format=json"
-    if format != "json":
-        raise ConflictError(
-            f"该领域报告不支持等价的 {format.upper()} 导出，不能生成空标准报告",
-            code=40941,
-            detail={"source": detail["source"], "supported_formats": ["json"], "download_api": json_api},
-            next_action=f"请下载真实领域 JSON：GET {json_api}；沙箱原生报告下载地址见 native_exports",
-        )
-
+    from app.services.domain_report_exporter import (
+        build_pentest_report_markdown,
+        build_sandbox_report_markdown,
+    )
     native_exports = []
-    if task.review_type == "sandbox_test":
+    if task.review_type in {"security_scan", "fullchain_audit"}:
+        snapshot = db.query(ReviewReport).filter(
+            ReviewReport.task_id == task.id,
+            ReviewReport.user_id == task.user_id,
+        ).first()
+        content = snapshot.content_json if snapshot and isinstance(snapshot.content_json, dict) else {}
+        if (
+            content.get("source") != task.review_type
+            or not isinstance(content.get("report_md"), str)
+            or not content["report_md"].strip()
+        ):
+            raise ConflictError(
+                "安全审计报告正文缺失，无法等价导出", code=40942,
+                next_action=f"请在 GET /api/reports/{task.id} 查看来源并恢复原始报告快照",
+            )
+        domain_data = content
+        domain_markdown = content["report_md"]
+    elif task.review_type == "sandbox_test":
         snapshot = db.query(ReviewReport).filter(
             ReviewReport.task_id == task.id, ReviewReport.user_id == task.user_id,
         ).first()
@@ -283,6 +420,11 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
         if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
             domain_data["coverage"] = _task_coverage(task)
         native_exports = _sandbox_native_exports(db, user, task, content)
+        domain_markdown = build_sandbox_report_markdown(
+            domain_data,
+            task_name=task.task_name,
+            project_name=detail["project"].get("project_name", ""),
+        )
     else:
         from app.services.pentest_service import get_engagement_detail
         from app.services.rbac_service import check_permission
@@ -310,13 +452,24 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
         if len(domain_data["findings"]) != detail["stats"]["total_issues"]:
             raise ConflictError(
                 "领域发现正在变化，导出计数不一致", code=40943, retryable=True,
-                next_action=f"请等待领域任务结束后重试 GET {json_api}",
+                next_action=f"请等待领域任务结束后重试 GET /api/reports/tasks/{task.id}/export",
             )
+        domain_markdown = build_pentest_report_markdown(
+            domain_data,
+            task_name=task.task_name,
+            project_name=detail["project"].get("project_name", ""),
+            execution_status=task.status,
+            error_message=task.error_message,
+            coverage=_task_coverage(task),
+        )
 
     return {
         "source": detail["source"], "task_info": detail["task"], "project": detail["project"],
         "statistics": detail["stats"], "score": detail["task"]["score"],
-        "summary": detail["summary"] or "", "domain_data": domain_data, "native_exports": native_exports,
+        "summary": clean_report_markdown(detail["summary"] or ""),
+        "domain_data": clean_report_payload(domain_data),
+        "domain_markdown": domain_markdown,
+        "native_exports": native_exports,
     }
 
 

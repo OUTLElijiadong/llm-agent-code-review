@@ -26,11 +26,15 @@ def source_owner(db):
     db.flush()
     # 本组验证已授权来源的数据一致性；权限缺失/撤权另由真实 HTTP 矩阵覆盖。
     role = Role(name="来源报告读者", code="user", status="active", is_builtin=1)
-    permission = Permission(code="report:view", name="报告查看", module="report", type="api")
-    db.add_all([role, permission])
+    permissions = [
+        Permission(code="report:view", name="报告查看", module="report", type="api"),
+        Permission(code="security:view", name="安全报告查看", module="security", type="api"),
+        Permission(code="pentest:view", name="渗透报告查看", module="pentest", type="api"),
+    ]
+    db.add_all([role, *permissions])
     db.flush()
-    db.add_all([UserRole(user_id=owner.id, role_id=role.id),
-                RolePermission(role_id=role.id, permission_id=permission.id)])
+    db.add(UserRole(user_id=owner.id, role_id=role.id))
+    db.add_all([RolePermission(role_id=role.id, permission_id=permission.id) for permission in permissions])
     db.flush()
     return owner
 
@@ -591,7 +595,13 @@ def test_source_http_list_detail_dashboard_and_ownership(source_api_client, sour
     dashboard_response = client.get("/api/dashboard/summary")
     assert dashboard_response.status_code == 200
     assert listed["total_issues"] == detail["stats"]["total_issues"] == count
-    assert listed["source"] == detail["source"]
+    assert listed["source"]["type"] == detail["source"]["type"] == source
+    if source == "sandbox_test":
+        assert isinstance(detail["source"].get("domain_report_md"), str)
+        assert "domain_report_md" not in listed["source"]
+    elif source == "pentest":
+        assert isinstance(detail["source"].get("domain_report_md"), str)
+        assert listed["source"].get("public_id") == detail["source"].get("public_id")
     assert dashboard_response.json()["data"]["total_issues"] == count
     security_response = client.get("/api/security/dashboard-summary")
     assert security_response.status_code == 200

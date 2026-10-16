@@ -157,6 +157,7 @@ export function getAuditSourceArchive(
 /** 读取与当前隔离原包摘要绑定的最近一次持久化审计报告。 */
 export function getAuditSourceArchiveResult(projectId: number): Promise<{
   status: string
+  result_status: string
   started_at?: string | null
   completed_at?: string | null
   result: SecurityScanOut

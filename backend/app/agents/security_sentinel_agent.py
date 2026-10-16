@@ -1672,6 +1672,7 @@ class SecuritySentinelAgent(BaseAgent):
         all_endpoints: List[dict] = []
         all_code_links: List[dict] = []
         project_errors: List[dict] = []
+        project_results: List[dict] = []
         total_files = 0
         scanned_projects = 0
         finding_total_count = 0
@@ -1704,6 +1705,15 @@ class SecuritySentinelAgent(BaseAgent):
                 ctx=ctx,
                 scan_mode=scan_mode,
             )
+            project_data = result.data if isinstance(result.data, dict) else {}
+            project_results.append({
+                "project_id": int(project.id),
+                "project_name": str(project.project_name or f"项目 #{project.id}"),
+                "execution_status": "success" if result.success else "partial" if project_data else "failed",
+                "failure_kind": str(result.failure_kind or ""),
+                "error_message": str(result.error or "")[:500],
+                "data": project_data,
+            })
             if not result.success:
                 if len(project_errors) < 500:
                     project_errors.append({
@@ -1931,6 +1941,7 @@ class SecuritySentinelAgent(BaseAgent):
                 "summary": summary,
                 "file_count": total_files,
                 "duration_ms": duration_ms,
+                "project_results": project_results,
             },
             model=self._model,
             duration_ms=duration_ms,

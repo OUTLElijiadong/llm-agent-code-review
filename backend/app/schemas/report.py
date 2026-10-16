@@ -48,4 +48,5 @@ class DomainReportExportOut(BaseModel):
     score: Optional[int] = None
     summary: str
     domain_data: dict
+    domain_markdown: str = Field(default="", description="由原始领域数据生成的可读报告正文")
     native_exports: list[dict] = Field(default_factory=list)

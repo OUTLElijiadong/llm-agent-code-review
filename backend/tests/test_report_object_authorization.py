@@ -45,7 +45,7 @@ def scope(monkeypatch):
     db.add_all([*users.values(), *roles.values()])
     db.flush()
     permissions = {}
-    for code in ("report:view", "review:cancel", *(f"report:export:{fmt}" for fmt in FORMATS)):
+    for code in ("report:view", "issue:view", "review:cancel", *(f"report:export:{fmt}" for fmt in FORMATS)):
         permission = Permission(code=code, name=code, module="report", type="api")
         db.add(permission)
         db.flush()

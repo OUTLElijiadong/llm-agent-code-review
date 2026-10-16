@@ -41,7 +41,7 @@ def report_scope(db):
     role = Role(name="普通用户", code="user", status="active", is_builtin=1)
     db.add_all([owner, reviewer, outsider, role])
     db.flush()
-    for code in ("report:view", "report:export:json", "review:cancel"):
+    for code in ("report:view", "issue:view", "report:export:json", "review:cancel"):
         permission = Permission(code=code, name=code, module="report", type="api")
         db.add(permission)
         db.flush()

@@ -581,6 +581,15 @@ def test_source_archive_audit_state_rejects_live_run_and_recovers_stale_run(db) 
     assert stored["result"]["audit_run_id"] == second_run_id
     assert stored["result"]["summary"] == "done"
 
+    third_run_id = project_source_service.begin_source_archive_audit(db, project.id)
+    previous_result = project_source_service.get_source_archive_audit_result(db, user, project.id)
+    assert third_run_id and third_run_id != second_run_id
+    assert previous_result is not None
+    assert previous_result["status"] == "running"
+    assert previous_result["result_status"] == "succeeded"
+    assert previous_result["result"]["audit_run_id"] == second_run_id
+    assert previous_result["result"]["summary"] == "done"
+
 
 def test_mixed_archive_and_editable_files_fail_closed(db) -> None:
     user, project, _row, _raw = _stored_archive(db, username="mixed_source_owner")

@@ -19,7 +19,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 364
+    assert len(plan["routes"]) == 365
     assert len({row["endpoint"] for row in plan["routes"]}) == 45
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
@@ -54,9 +54,10 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks"),
         ("GET", "/api/remote-pentest/tasks/{public_id}"),
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
+        ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 350
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 282
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 351
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 283
     feedback_stats = [row for row in plan["routes"]
                       if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
     assert len(feedback_stats) == 1
@@ -105,6 +106,7 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks"): "pentest:view",
         ("GET", "/api/remote-pentest/tasks/{public_id}"): "pentest:view",
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"): "pentest:view",
+        ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"): "pentest:view",
     }
     for method, path in remote_guards:
         route = next(row for row in plan["routes"] if (row["method"], row["path"]) == (method, path))

@@ -5,6 +5,14 @@ export interface AgentMeshTimelineEntry {
   toolCalls?: ResponseToolCall[]
 }
 
+export function isAgentMeshReceiptFromCancelledRun(
+  message: AgentMeshMessage,
+  cancelledRunIds: ReadonlySet<string>,
+): boolean {
+  const parentRunId = typeof message.context?.parent_run_id === 'string' ? message.context.parent_run_id : ''
+  return Boolean(parentRunId && cancelledRunIds.has(parentRunId))
+}
+
 function statusOf(message: AgentMeshMessage): ResponseToolCallStatus {
   if (['failed', 'dead_letter', 'expired'].includes(message.status)) return 'failed'
   if (message.status === 'completed') return 'completed'

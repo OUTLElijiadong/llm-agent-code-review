@@ -510,6 +510,7 @@ def finish_source_archive_audit(
     payload.setdefault("source_archive_sha256", row.archive_sha256)
     payload.setdefault("source_archive_filename", row.original_filename)
     payload.setdefault("audit_run_id", audit_run_id)
+    payload["result_status"] = status
     row.audit_status = status
     row.audit_heartbeat_at = now
     row.audit_completed_at = now
@@ -547,10 +548,9 @@ def get_source_archive_audit_result(
         raise RuntimeError("隔离源码审计结果已损坏") from exc
     if result.get("source_archive_sha256") != row.archive_sha256:
         raise RuntimeError("隔离源码审计结果与当前原包摘要不一致")
-    if result.get("audit_run_id") != row.audit_run_id:
-        raise RuntimeError("隔离源码审计结果与当前运行代次不一致")
     return {
         "status": row.audit_status,
+        "result_status": str(result.get("result_status") or "unknown"),
         "started_at": row.audit_started_at,
         "completed_at": row.audit_completed_at,
         "result": result,

@@ -196,12 +196,17 @@ describe('同步安全扫描真实交互', () => {
   })
 
   it('下载报告使用已返回结果，不触发新扫描', async () => {
+    api.scanProject.mockResolvedValueOnce(scanResult({ summary: '**隔离测试返回的扫描摘要**' }))
     await renderModal({ autoStart: true })
     const createObjectURL = vi.fn(() => 'blob:isolated-test')
     const revokeObjectURL = vi.fn()
+    let downloadedBlob: Blob | undefined
     const NativeURL = URL
     vi.stubGlobal('URL', class extends NativeURL {
-      static createObjectURL = createObjectURL
+      static createObjectURL = (blob: Blob) => {
+        downloadedBlob = blob
+        return createObjectURL()
+      }
       static revokeObjectURL = revokeObjectURL
     })
     let downloadName = ''
@@ -209,10 +214,19 @@ describe('同步安全扫描真实交互', () => {
       downloadName = this.download
     })
     await button('下载报告').trigger('click')
-    expect(downloadName).toBe('prism_security_project_7.md')
+    expect(downloadName).toBe('prism_security_project_7.txt')
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:isolated-test')
     expect(api.scanProject).toHaveBeenCalledOnce()
+    expect(downloadedBlob).toBeInstanceOf(Blob)
+    const downloadedText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsText(downloadedBlob as Blob)
+    })
+    expect(downloadedText).toContain('隔离测试返回的扫描摘要')
+    expect(downloadedText).not.toContain('*')
   })
 
   it('证伪候选不混入有效发现统计，并在详情与下载报告保留复核理由', async () => {
@@ -263,9 +277,10 @@ describe('同步安全扫描真实交互', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     await button('下载报告').trigger('click')
     await vi.waitFor(() => expect(downloaded).toContain('比较的是哈希值'))
-    expect(downloaded).toContain('已证伪候选 (不计入有效发现及风险评分)')
+    expect(downloaded).toContain('已证伪候选（不计入有效发现及风险评分）')
     expect(downloaded).toContain('已证伪候选')
-    expect(downloaded).toContain('安全评分（越高越安全）: **92/100**')
+    expect(downloaded).toContain('安全评分（越高越安全）：92/100')
+    expect(downloaded).not.toContain('**')
     expect(downloaded).not.toContain('- 风险评分:')
     expect(api.scanProject).toHaveBeenCalledOnce()
   })

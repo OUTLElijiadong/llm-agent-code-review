@@ -57,7 +57,7 @@ assert_deploy_sources_clean "$repo_dir" || fatal "拒绝从脏构建上下文发
 version_file="$repo_dir/VERSION"
 [[ -f "$version_file" ]] || fatal "缺少根目录 VERSION，拒绝发布无法识别的版本"
 app_version="$(tr -d '[:space:]' < "$version_file")"
-[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fatal "VERSION 必须是 x.y.z 语义版本"
+validate_app_version "$app_version"
 target_sha="$(resolve_git_revision "$repo_dir" "$revision")" || fatal "无法解析 revision: $revision"
 head_sha="$(current_git_sha "$repo_dir")"
 [[ "$target_sha" == "$head_sha" ]] || fatal "revision=$target_sha 与当前 HEAD=$head_sha 不一致；请先安全 checkout 精确提交"

@@ -224,6 +224,37 @@ def test_team_results_are_delivered_once_as_a_terminal_summary(db, round_no):
     assert [task["status"] for task in team_detail["tasks"]] == ["completed", "completed"]
 
 
+def test_terminal_receipt_from_cancelled_parent_is_acknowledged_without_starting_model(db):
+    owner, parent_run, _execution, created = _team_with_parent_call(
+        db,
+        session_key="session-team-parent-cancelled",
+        parent_status="cancelled",
+    )
+    _complete_team(db, created)
+    receipt = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == owner.id,
+        AgentMeshMessage.send_to == "session:user:session-team-parent-cancelled",
+        AgentMeshMessage.context_json.contains('"team_terminal"'),
+    ).one()
+    assert json.loads(receipt.context_json)["parent_run_id"] == parent_run.run_id
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="父级小菱响应已停止"):
+        agent_mesh_service.prepare_message_run(
+            db,
+            owner,
+            receipt.message_id,
+            surface="user",
+            session_key="session-team-parent-cancelled",
+        )
+
+    db.refresh(receipt)
+    assert receipt.status == "completed"
+    assert db.query(AgentResponseRun).filter(
+        AgentResponseRun.user_id == owner.id,
+        AgentResponseRun.mesh_message_id == receipt.message_id,
+    ).count() == 0
+
+
 @pytest.mark.parametrize("parent_status", ["running", "waiting_approval", "waiting_input", "failed"])
 def test_partial_team_does_not_deliver_individual_success_before_terminal_state(db, parent_status):
     owner, run, _execution, created = _team_with_parent_call(

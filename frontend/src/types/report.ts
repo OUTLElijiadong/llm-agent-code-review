@@ -22,6 +22,20 @@ export interface ReportSource {
     status: 'complete' | 'incomplete'
     failure_reason?: string | null
   }
+  security_report?: {
+    schema_version?: string
+    source?: 'security_scan' | 'fullchain_audit'
+    execution_status?: 'success' | 'partial' | 'failed'
+    score_available?: boolean
+    risk_score?: number | null
+    coverage?: Record<string, unknown>
+    findings?: ReportIssue[]
+    threat_model?: Record<string, unknown>
+    discussion?: Record<string, unknown>
+    fullchain?: Record<string, unknown>
+    audit_board?: Record<string, unknown>
+    report_md?: string
+  }
   [key: string]: unknown
 }
 

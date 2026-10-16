@@ -7426,6 +7426,17 @@ def resume_interrupted_environments() -> int:
                     environment.error = "旧沙箱缺少持久化源码快照，无法在重启后安全恢复"
                     environment.stopped_at = _utcnow()
                 db.commit()
+                if environment is not None and environment.purpose == "test":
+                    try:
+                        _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+                    except Exception as report_exc:  # noqa: BLE001 - keep recovery failure terminal and observable
+                        db.rollback()
+                        environment = db.get(SandboxEnvironment, environment_id)
+                        if environment is not None:
+                            message = f"测试恢复失败报告发布失败：{str(report_exc)[:1000]}"
+                            environment.error = f"{environment.error or ''}; {message}".strip("; ")[:4000]
+                            _append_event(db, environment, "failed", "report", message)
+                            db.commit()
                 continue
             raw = bytes(environment.source_archive_blob)
             if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), environment.source_sha256):
@@ -7433,6 +7444,17 @@ def resume_interrupted_environments() -> int:
                 environment.error = "沙箱持久化源码快照完整性校验失败"
                 environment.stopped_at = _utcnow()
                 db.commit()
+                if environment.purpose == "test":
+                    try:
+                        _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+                    except Exception as report_exc:  # noqa: BLE001 - keep recovery failure terminal and observable
+                        db.rollback()
+                        environment = db.get(SandboxEnvironment, environment_id)
+                        if environment is not None:
+                            message = f"测试恢复失败报告发布失败：{str(report_exc)[:1000]}"
+                            environment.error = f"{environment.error or ''}; {message}".strip("; ")[:4000]
+                            _append_event(db, environment, "failed", "report", message)
+                            db.commit()
                 continue
             _append_event(db, environment, "progress", "recovery", "服务重启后已从不可变源码快照恢复执行")
             db.commit()
@@ -7441,12 +7463,46 @@ def resume_interrupted_environments() -> int:
         db.close()
 
     for environment_id, execution_token, public_id in dispatched:
-        threading.Thread(
+        thread = threading.Thread(
             target=_execute_environment,
             args=(environment_id, None, execution_token),
             name=f"sandbox-recovery-{public_id}",
             daemon=True,
-        ).start()
+        )
+        try:
+            thread.start()
+        except Exception as exc:  # noqa: BLE001 - a failed dispatch must become a visible terminal report
+            environment = db.get(SandboxEnvironment, environment_id)
+            if environment is None or not _execution_lease_valid(db, environment_id, execution_token):
+                continue
+            environment.status = "failed"
+            environment.error = f"服务重启后沙箱恢复线程启动失败：{str(exc)[:500]}"
+            environment.stopped_at = _utcnow()
+            environment.result_json = _json({
+                "passed": False,
+                "summary": "服务重启后沙箱恢复未启动，测试未执行",
+                "execution_status": "failed",
+                "coverage": {
+                    "coverage_status": "partial",
+                    "unscanned": ["恢复线程启动失败，全部测试范围未执行"],
+                    "errors": [environment.error],
+                },
+                "evidence": {"execution_failure": {"stage": "recovery_dispatch", "kind": type(exc).__name__}},
+            })
+            _append_event(db, environment, "failed", "recovery", "服务重启后沙箱恢复线程启动失败")
+            db.commit()
+            if environment.purpose == "test":
+                try:
+                    _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+                except Exception as report_exc:  # noqa: BLE001 - keep recovery failure terminal and observable
+                    db.rollback()
+                    environment = db.get(SandboxEnvironment, environment_id)
+                    if environment is not None:
+                        message = f"测试恢复失败报告发布失败：{str(report_exc)[:1000]}"
+                        environment.error = f"{environment.error or ''}; {message}".strip("; ")[:4000]
+                        _append_event(db, environment, "failed", "report", message)
+                        db.commit()
+    db.close()
     return len(dispatched)
 
 
@@ -7674,6 +7730,7 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
     heartbeat_count = 0
     recovered_count = 0
     cleanup_pending_count = 0
+    terminal_report_ids: list[int] = []
     now = _utcnow()
     for environment in active:
         last_event = (
@@ -7742,6 +7799,8 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
             reason = "沙箱心跳超时，Worker 已确认全部请求资源终止"
             _append_event(db, environment, "failed", "watchdog", reason)
             recovered_count += 1
+            if environment.purpose == "test":
+                terminal_report_ids.append(int(environment.id))
             observe_event("sandbox_stuck_recovered", labels={"status": environment.status})
 
         alert = (
@@ -7772,6 +7831,20 @@ def heartbeat_and_recover_sandboxes(db: Session) -> dict[str, int]:
         alert.title = title[:200]
         alert.detail_json = _json(alert_detail)
     db.commit()
+    for environment_id in terminal_report_ids:
+        environment = db.get(SandboxEnvironment, environment_id)
+        if environment is None:
+            continue
+        try:
+            _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+        except Exception as report_exc:  # noqa: BLE001 - watchdog terminal state must survive report errors
+            db.rollback()
+            environment = db.get(SandboxEnvironment, environment_id)
+            if environment is not None:
+                message = f"测试终态报告发布失败：{str(report_exc)[:1000]}"
+                environment.error = f"{environment.error or ''}; {message}".strip("; ")[:4000]
+                _append_event(db, environment, "failed", "report", message)
+                db.commit()
     return {
         "heartbeat": heartbeat_count,
         "recovered": recovered_count,

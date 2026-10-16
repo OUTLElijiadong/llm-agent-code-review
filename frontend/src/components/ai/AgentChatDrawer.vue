@@ -63,6 +63,7 @@ import { agentTeamFallbackKey, buildAgentTeamFallback, terminalTeamReceiptsForFa
 import {
   agentMeshToolCalls,
   findAgentMeshTimeline,
+  isAgentMeshReceiptFromCancelledRun,
   settleAgentMeshTimeline,
 } from '@/utils/agentMeshTimeline'
 import { useAgentChatScope } from '@/composables/useAgentChatScope'
@@ -212,6 +213,10 @@ let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
+const cancelledResponseRunIds = new Set<string>()
+const stopRequestedResponseRunIds = new Set<string>()
+const cancellingResponseRunIds = new Set<string>()
+const pendingCancelledRunReceipts = new Map<string, Map<string, AgentMeshMessage>>()
 const siteBrowser = useSiteBrowserBridge({ surface: 'user', sessionId: () => sessionId.value,
   runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '', router })
 const sessionRestoring = ref(true)
@@ -793,6 +798,7 @@ async function restoreSession(): Promise<void> {
       return
     }
     sessionRun.value = session.run
+    if (session.run?.status === 'cancelled' && session.run.run_id) cancelledResponseRunIds.add(session.run.run_id)
     if (session.run?.model) modelName.value = session.run.model
     // 服务端检查点没有逐条消息时间，不能用整轮更新时间冒充发送时间。
     const restoredTime = ''
@@ -857,9 +863,29 @@ async function restoreSession(): Promise<void> {
 
 async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: string): Promise<boolean> {
   const scopeCurrent = chatScope.capture()
-  if (targetSessionId !== sessionId.value) {
-    return runBackgroundMeshMessage(message, targetSessionId)
+  const parentRunId = typeof message.context?.parent_run_id === 'string' ? message.context.parent_run_id : ''
+  if (parentRunId && cancellingResponseRunIds.has(parentRunId)) {
+    const pending = pendingCancelledRunReceipts.get(parentRunId) ?? new Map<string, AgentMeshMessage>()
+    pending.set(message.message_id, message)
+    pendingCancelledRunReceipts.set(parentRunId, pending)
+    return false
   }
+  const parentWasCancelled = isAgentMeshReceiptFromCancelledRun(message, cancelledResponseRunIds)
+  const stopWasUnconfirmed = Boolean(parentRunId && stopRequestedResponseRunIds.has(parentRunId))
+  if (targetSessionId !== sessionId.value && (parentWasCancelled || stopWasUnconfirmed)) {
+    const acknowledgement = stopWasUnconfirmed
+      ? '停止请求尚未确认；团队回执仅保留审计，不触发新的模型运行'
+      : '父级响应已取消；团队回执仅保留审计，不触发新的模型运行'
+    try {
+      await acknowledgeAgentMeshMessage(
+        'user', targetSessionId, message.message_id, 'completed', acknowledgement,
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (targetSessionId !== sessionId.value) return runBackgroundMeshMessage(message, targetSessionId)
   if (!findAgentMeshTimeline(messages.value, message.message_id)) {
     messages.value.push({
       id: messageId(),
@@ -872,6 +898,23 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
   }
   await nextTick()
   if (!scopeCurrent()) return false
+  if (parentWasCancelled || stopWasUnconfirmed) {
+    const timelineMessage = stopWasUnconfirmed
+      ? '停止请求尚未确认，团队回执仅保留审计，不再自动续跑'
+      : '父级响应已停止，不再自动续跑'
+    const acknowledgement = stopWasUnconfirmed
+      ? '停止请求尚未确认；团队回执仅保留审计，不触发新的模型运行'
+      : '父级响应已取消；团队回执仅保留审计，不触发新的模型运行'
+    settleAgentMeshTimeline(messages.value, message.message_id, false, 'cancelled', timelineMessage)
+    try {
+      await acknowledgeAgentMeshMessage(
+        'user', targetSessionId, message.message_id, 'completed', acknowledgement,
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
   scrollToBottom()
   const succeeded = await runResponse({
     action: 'start',
@@ -890,6 +933,37 @@ async function handleMeshMessage(message: AgentMeshMessage, targetSessionId: str
   )
   if (succeeded) return true
   return appendTerminalTeamFallback(message, targetSessionId, scopeCurrent)
+}
+
+function rememberResponseStop(set: Set<string>, runId: string): void {
+  set.add(runId)
+  if (set.size > 200) {
+    const oldest = set.values().next().value
+    if (oldest) set.delete(oldest)
+  }
+}
+
+function isResponseRunResumeBlocked(runId: string): boolean {
+  return cancelledResponseRunIds.has(runId) || stopRequestedResponseRunIds.has(runId)
+}
+
+function settlePendingCancelledRunReceipts(runId: string, timelineMessage = '父级响应已停止，不再自动续跑'): void {
+  const receipts = pendingCancelledRunReceipts.get(runId)
+  if (!receipts) return
+  for (const receipt of receipts.values()) {
+    if (!findAgentMeshTimeline(messages.value, receipt.message_id)) {
+      messages.value.push({
+        id: messageId(),
+        role: 'assistant',
+        content: '',
+        time: dayjs().format('HH:mm'),
+        trace_id: receipt.trace_id,
+        toolCalls: agentMeshToolCalls([receipt], `session:user:${sessionId.value}`),
+      })
+    }
+    settleAgentMeshTimeline(messages.value, receipt.message_id, false, 'cancelled', timelineMessage)
+  }
+  pendingCancelledRunReceipts.delete(runId)
 }
 
 async function acknowledgeFallbackReceipt(message: AgentMeshMessage, targetSessionId: string, summary: string): Promise<void> {
@@ -1025,6 +1099,7 @@ async function runBackgroundMeshMessage(
   backgroundBusySessions.add(targetSessionId)
   switcherRef.value?.setBusy(targetSessionId, true)
   let waiting = false
+  let activeRunId = ''
   // 只有 completed 才算成功:failed/incomplete/error 时后端可能把消息重新入队,
   // 这里若返回 true 会被 mesh 桥标记 handled,同 message_id 的重投将被永久跳过。
   let succeeded = false
@@ -1037,6 +1112,14 @@ async function runBackgroundMeshMessage(
   }, {
     onEvent(event) {
       if (!scopeCurrent()) return
+      const eventRunId = event.type === 'response.created' && typeof event.response.id === 'string'
+        ? event.response.id
+        : 'run_id' in event && typeof event.run_id === 'string'
+          ? event.run_id
+          : ''
+      if (eventRunId) activeRunId = eventRunId
+      const guardedRunId = eventRunId || activeRunId
+      if (guardedRunId && isResponseRunResumeBlocked(guardedRunId)) return
       if (siteBrowser.handle(event)) return
       if (event.type === 'response.approval.required' || event.type === 'response.input.required') {
         waiting = true
@@ -1213,6 +1296,7 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     // 活动流持有最新状态,轮询快照可能落后于 SSE,不能在 loading 期间覆盖。
     if (!loading.value) {
       sessionRun.value = session.run
+      if (session.run?.status === 'cancelled' && session.run.run_id) cancelledResponseRunIds.add(session.run.run_id)
       if (session.run?.model) modelName.value = session.run.model
       const signature = JSON.stringify({
         run: session.run,
@@ -1440,10 +1524,17 @@ async function cancelResponse(reason = ''): Promise<void> {
   const key = `${requestedUserId}:${requestedSessionId}:${runId}`
   if (pendingCancelKey === key) return
   pendingCancelKey = key
+  cancellingResponseRunIds.add(runId)
   const isCurrent = () => !sessionPollStopped && requestedSessionId === sessionId.value
     && requestedUserId === userStore.profile?.id && sessionRun.value?.run_id === runId
   try {
     const result = await cancelAgentResponseRun('user', requestedSessionId, runId, reason)
+    if (requestedUserId !== userStore.profile?.id) return
+    if (result.status === 'cancelled') {
+      stopRequestedResponseRunIds.delete(runId)
+      rememberResponseStop(cancelledResponseRunIds, runId)
+      if (requestedSessionId === sessionId.value) settlePendingCancelledRunReceipts(runId)
+    }
     if (!isCurrent()) return
     sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
     activeResponse?.abort()
@@ -1469,9 +1560,20 @@ async function cancelResponse(reason = ''): Promise<void> {
     scrollToBottom()
     scheduleSessionPoll()
   } catch (error) {
+    if (requestedUserId !== userStore.profile?.id) return
+    // 用户已明确停止；即使取消接口回执不确定，也不允许关联团队回执再次启动模型。
+    rememberResponseStop(stopRequestedResponseRunIds, runId)
+    if (requestedSessionId === sessionId.value) {
+      settlePendingCancelledRunReceipts(runId, '停止请求尚未确认，团队回执仅保留审计，不再自动续跑')
+    }
     if (!isCurrent()) return
+    activeResponse?.abort()
+    activityStore.clear()
+    loading.value = false
+    showTyping.value = false
+    syncBusy()
     const info = actionableError(error, '停止请求未确认')
-    const content = info.message.includes('停止请求未确认') ? info.message : `停止请求未确认：${info.message}`
+    const content = `停止请求尚未确认，已阻止关联团队回执自动续跑。${info.message.includes('停止请求未确认') ? info.message : `请查看任务状态：${info.message}`}`
     ElMessage.error(content)
     appendErrorCard(content, false, {
       nextAction: info.nextAction || '当前任务状态尚未确认，可再次点击“停止响应”，或等待状态同步',
@@ -1479,6 +1581,7 @@ async function cancelResponse(reason = ''): Promise<void> {
     })
     scheduleSessionPoll()
   } finally {
+    cancellingResponseRunIds.delete(runId)
     if (pendingCancelKey === key) pendingCancelKey = ''
   }
 }

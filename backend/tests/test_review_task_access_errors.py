@@ -129,7 +129,7 @@ def test_project_read_infrastructure_failure_is_not_masked_as_not_found(review_h
     assert writes == []
 
 
-@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest"])
+@pytest.mark.parametrize("review_type", ["sandbox_test", "pentest", "security_scan", "fullchain_audit"])
 def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(review_http, review_type):
     client, users, writes, db = review_http
     task = db.get(ReviewTask, 11)

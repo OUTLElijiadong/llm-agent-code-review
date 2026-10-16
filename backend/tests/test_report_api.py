@@ -385,7 +385,7 @@ def test_generate_report_checks_format_specific_permission(
 
     def fake_check_permission(_db, user_id, requested_permission):
         checked.append((user_id, requested_permission))
-        return requested_permission == permission
+        return requested_permission in {permission, PermissionCode.ISSUE_VIEW}
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
 
@@ -395,7 +395,7 @@ def test_generate_report_checks_format_specific_permission(
     )
 
     assert response.status_code == 200
-    assert checked == [(1, permission)]
+    assert checked == [(1, permission), (1, PermissionCode.ISSUE_VIEW)]
 
 
 @pytest.mark.parametrize(
@@ -422,6 +422,46 @@ def test_generate_json_and_html_reject_without_matching_export_permission(
 
     assert response.status_code == 403
     assert response.json()["detail"]["required_permission"] == permission
+
+
+@pytest.mark.parametrize(
+    ("method", "path_kind", "report_format"),
+    [
+        ("post", "generate", fmt) for fmt in ("json", "html", "pdf", "word")
+    ] + [
+        ("get", "export", fmt) for fmt in ("json", "html", "pdf", "word")
+    ] + [
+        ("get", "preview", "html"),
+        ("get", "legacy", "pdf"),
+        ("get", "legacy", "word"),
+    ],
+)
+def test_standard_report_full_content_requires_issue_view_permission(
+    admin_client, monkeypatch, method, path_kind, report_format,
+):
+    """报告查看与格式导出权不能绕过问题明细权限读取漏洞证据。"""
+    client, _db, task_id = admin_client
+    monkeypatch.setattr(
+        "app.api.v1.reports.check_permission",
+        lambda _db, _user_id, permission: permission != PermissionCode.ISSUE_VIEW,
+    )
+    if path_kind == "generate":
+        response = client.post(
+            "/api/reports/generate",
+            json={"task_id": task_id, "format": report_format},
+        )
+    elif path_kind == "export":
+        response = client.get(
+            f"/api/reports/tasks/{task_id}/export",
+            params={"format": report_format},
+        )
+    elif path_kind == "preview":
+        response = client.get(f"/api/reports/tasks/{task_id}")
+    else:
+        response = client.get(f"/api/reports/{task_id}/export/{report_format}")
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["required_permission"] == PermissionCode.ISSUE_VIEW
 
 
 # ============ 报告预览测试 ============
@@ -671,7 +711,9 @@ def test_plain_owner_html_export_uses_format_specific_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_HTML}
+        return permission in {
+            PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_HTML, PermissionCode.ISSUE_VIEW,
+        }
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
 
@@ -691,6 +733,7 @@ def test_plain_owner_html_export_uses_format_specific_permission(
     assert checked == [
         (2, PermissionCode.REPORT_VIEW),
         (2, PermissionCode.REPORT_EXPORT_HTML),
+        (2, PermissionCode.ISSUE_VIEW),
         (2, PermissionCode.REPORT_VIEW),
         (2, PermissionCode.REPORT_EXPORT_PDF),
     ]
@@ -707,7 +750,9 @@ def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_WORD}
+        return permission in {
+            PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_WORD, PermissionCode.ISSUE_VIEW,
+        }
 
     def fake_export(task, issues, summary, score, template_type, evidence):
         captured.update(task=task, issues=issues, summary=summary, score=score)
@@ -724,6 +769,7 @@ def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
     assert checked == [
         (1, PermissionCode.REPORT_VIEW),
         (1, PermissionCode.REPORT_EXPORT_WORD),
+        (1, PermissionCode.ISSUE_VIEW),
     ]
 
 
@@ -737,7 +783,9 @@ def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_PDF}
+        return permission in {
+            PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_PDF, PermissionCode.ISSUE_VIEW,
+        }
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
     monkeypatch.setattr(
@@ -752,6 +800,7 @@ def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
     assert checked == [
         (1, PermissionCode.REPORT_VIEW),
         (1, PermissionCode.REPORT_EXPORT_PDF),
+        (1, PermissionCode.ISSUE_VIEW),
     ]
 
 
@@ -889,6 +938,7 @@ def test_template_manager_html_cannot_run_in_report_viewer_preview_or_export(adm
         lambda _db, user_id, code: user_id == viewer.id and code in {
             PermissionCode.REPORT_VIEW,
             PermissionCode.REPORT_EXPORT_HTML,
+            PermissionCode.ISSUE_VIEW,
         },
     )
 

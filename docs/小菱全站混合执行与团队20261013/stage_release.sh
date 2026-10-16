@@ -13,11 +13,13 @@ base="${7:-/opt/prism-releases/$base_sha}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_digest" =~ ^[0-9a-f]{64}$ ]]
 [[ "$expected_size" =~ ^[0-9]+$ ]]
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$bundle_ref" =~ ^refs/(heads|tags)/[A-Za-z0-9._/-]+$ ]]
 [[ "$bundle_ref" != *..* && "$bundle_ref" != *//* && "$bundle_ref" != */ ]]
 [[ "$base" == /* && "$base" != / ]]
+[[ -r "$base/deploy/lib/common.sh" ]]
+source "$base/deploy/lib/common.sh"
+validate_app_version "$version"
 
 bundle="/dev/shm/prism-v$version-$sha.bundle"
 dest="/opt/prism-releases/$sha"

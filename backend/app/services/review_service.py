@@ -2404,7 +2404,9 @@ def _build_summary(profiles: tuple[ReviewAgentProfile, ...], file_count: int,
     return f"本次采用{agent_summary}完成 {file_count} 个文件审查,发现 {issue_count} 个问题,综合评分 {score}。"
 
 
-_REPORT_BACKED_REVIEW_TYPES = frozenset({"sandbox_test", "pentest"})
+_REPORT_BACKED_REVIEW_TYPES = frozenset({
+    "sandbox_test", "pentest", "security_scan", "fullchain_audit",
+})
 
 
 def can_view_task_metadata(
@@ -2417,7 +2419,8 @@ def can_view_task_metadata(
     """报告型任务的元数据只对发起人和管理员可见。
 
     普通代码审查仍由项目成员关系控制；黑白盒与渗透任务不能因共享项目而
-    在其他账号的列表、详情或项目动态中暴露任务标题、状态和时间。
+    在其他账号的列表、详情或项目动态中暴露任务标题、状态和时间。安全扫描
+    与全链路审计同样按账号隔离，避免项目成员看到无权读取的报告卡片。
     """
     if task.review_type not in _REPORT_BACKED_REVIEW_TYPES:
         return True
@@ -2572,6 +2575,10 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
         hide_report_metrics = (
             row.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
         )
+        score_unavailable = (
+            isinstance(row.coverage, dict)
+            and row.coverage.get("score_available") is False
+        )
         summary = sandbox_stats.get(row.id, {}).get("source", {}).get("report_issue_summary")
         report_total = summary.get("total") if summary else None
         items.append({
@@ -2592,7 +2599,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "high_issues": None if hide_report_metrics else row.high_issues,
             "medium_issues": None if hide_report_metrics else row.medium_issues,
             "low_issues": None if hide_report_metrics else row.low_issues,
-            "score": None if hide_report_metrics else row.score,
+            "score": None if hide_report_metrics or score_unavailable else row.score,
             "duration_ms": row.duration_ms,
             "score_version": None if hide_report_metrics else row.score_version,
             "score_breakdown": None if hide_report_metrics else row.score_breakdown,
@@ -2646,6 +2653,10 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     hide_report_metrics = (
         task.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
     )
+    score_unavailable = (
+        isinstance(task.coverage, dict)
+        and task.coverage.get("score_available") is False
+    )
     report_issue_summary = None
     report_coverage = task.coverage if isinstance(task.coverage, dict) else None
     report_error_message = task.error_message
@@ -2679,7 +2690,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     # 沙箱/渗透测试任务把完整 Markdown 报告写入 summary；任务可见范围比报告
     # 查看范围更宽，因此不能随任务元数据一起返回报告正文。
     summary = task.summary
-    if task.review_type in {"sandbox_test", "pentest"} and not can_view_report:
+    if task.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report:
         summary = None
     from app.services.project_member_service import project_resource_capabilities
     capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
@@ -2700,7 +2711,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "high_issues": None if hide_report_metrics else task.high_issues,
         "medium_issues": None if hide_report_metrics else task.medium_issues,
         "low_issues": None if hide_report_metrics else task.low_issues,
-        "score": None if hide_report_metrics else task.score,
+        "score": None if hide_report_metrics or score_unavailable else task.score,
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
         "score_breakdown": None if hide_report_metrics else task.score_breakdown,
@@ -2710,9 +2721,19 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "create_time": task.create_time,
         # R4 修复:任务失败时返回错误原因,对齐 TaskDetailOut schema
         "error_message": None if hide_report_metrics else report_error_message,
-        "files": _task_file_summaries(db, task.id),
+        "files": [] if hide_report_metrics else _task_file_summaries(db, task.id),
         "agent_releases": _task_agent_release_summaries(db, task.id),
-        "aggregation_summary": _task_aggregation_summary(db, task.id),
+        "aggregation_summary": (
+            _task_aggregation_summary(db, task.id)
+            if not hide_report_metrics
+            else {
+                "aggregated": 0,
+                "independently_confirmed": 0,
+                "pending_human_review": 0,
+                "unresolved_conflicts": 0,
+                "insufficient_evidence": 0,
+            }
+        ),
     }
 
 

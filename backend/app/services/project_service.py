@@ -167,7 +167,15 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "can_delete": can_write,
             "can_execute": can_write or member_roles.get(row.id) == "reviewer",
             "last_review_at": last_task.create_time if last_task else None,
-            "score": last_task.score if metrics_visible else None,
+            "score": (
+                last_task.score
+                if metrics_visible
+                and not (
+                    isinstance(last_task.coverage, dict)
+                    and last_task.coverage.get("score_available") is False
+                )
+                else None
+            ),
             "coverage": last_task.coverage if metrics_visible else None,
             "create_time": row.create_time,
         })

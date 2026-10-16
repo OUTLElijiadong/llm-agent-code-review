@@ -14,6 +14,8 @@ import pytest
 from app.models.agent_capability import SandboxEnvironment, SandboxEvent, SandboxWorker
 from app.models.agent_governance import AgentAlert
 from app.models.project import Project
+from app.models.review_report import ReviewReport
+from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import sandbox_service
 from app.services.sandbox_service import (
@@ -427,8 +429,11 @@ def test_grounding_accepts_exports_from_packed_small_source_files() -> None:
 def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None:
     monkeypatch.setattr(sandbox_service.settings, "sandbox_stuck_after_seconds", 1)
     now = datetime.utcnow()
+    owner = User(username="watchdog_report_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
     project = Project(
-        user_id=1,
+        user_id=owner.id,
         project_name="缓存项目",
         description="",
         language="python",
@@ -455,7 +460,7 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
     environment = SandboxEnvironment(
         public_id="sbx_stuck_1",
         project_id=project.id,
-        owner_id=42,
+        owner_id=owner.id,
         worker_id=worker.id,
         agent_code="sandbox_deployer",
         purpose="test",
@@ -514,6 +519,58 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
         .one()
     )
     assert failed_event.stage == "watchdog"
+
+    report_task = db.query(ReviewTask).filter_by(
+        user_id=owner.id, review_type="sandbox_test", task_name="沙箱白盒测试 · sbx_stuck_1",
+    ).one()
+    report = db.query(ReviewReport).filter_by(task_id=report_task.id, user_id=owner.id).one()
+    assert report_task.status == "failed"
+    assert report_task.coverage["execution_status"] == "failed"
+    assert "心跳超时" in report.content_json["report_md"]
+    assert report.content_json["coverage"]["unscanned"]
+
+
+def test_startup_recovery_failure_publishes_account_owned_report(db, monkeypatch) -> None:
+    owner = User(username="startup_report_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    owner_id = owner.id
+    project = Project(user_id=owner.id, project_name="重启恢复", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_startup_missing_snapshot",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="running",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="a" * 64,
+        source_archive_blob=None,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        execution_token="old-lease",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        started_at=datetime.utcnow() - timedelta(minutes=1),
+    )
+    db.add(environment)
+    db.commit()
+    monkeypatch.setattr(sandbox_service, "SessionLocal", lambda: db)
+
+    assert sandbox_service.resume_interrupted_environments() == 0
+    assert environment.status == "failed"
+    task = db.query(ReviewTask).filter_by(
+        user_id=owner_id, review_type="sandbox_test",
+        task_name="沙箱黑盒测试 · sbx_startup_missing_snapshot",
+    ).one()
+    report = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner_id).one()
+    assert task.status == "failed"
+    assert task.coverage["unscanned"]
+    assert "缺少持久化源码快照" in report.content_json["report_md"]
 
 
 def test_heartbeat_recovery_keeps_environment_stopping_when_worker_cleanup_fails(db, monkeypatch) -> None:
@@ -787,5 +844,8 @@ def test_watchdog_confirms_cleanup_for_legacy_failed_row_and_clears_stale_error(
     assert result["cleanup_pending"] == 0
     assert environment.status == "failed"
     assert environment.stopped_at is not None
-    assert json.loads(environment.result_json) == {"cleanup_confirmed": True}
+    cleanup_result = json.loads(environment.result_json)
+    assert cleanup_result["cleanup_confirmed"] is True
+    assert cleanup_result["coverage"]["coverage_status"] == "unknown"
+    assert "Worker 已确认" in cleanup_result["error"]
     assert "Worker 已确认" in (environment.error or "")

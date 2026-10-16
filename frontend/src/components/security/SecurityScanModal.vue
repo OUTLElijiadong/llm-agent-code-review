@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
 import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
 import { useUserStore } from '@/stores/user'
-import { renderMarkdown } from '@/utils/markdown'
+import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 import type {
   ApiEndpointOut,
   CodeLinkOut,
@@ -44,7 +45,9 @@ const visible = computed({
 })
 
 const userStore = useUserStore()
+const router = useRouter()
 const canScan = computed(() => userStore.hasPermission('security:scan'))
+const canViewSavedReport = computed(() => userStore.hasPermission('report:view') && userStore.hasPermission('security:view'))
 
 // 扫描配置
 const scanDepth = ref<'quick' | 'standard' | 'deep'>('standard')
@@ -64,6 +67,10 @@ const resultOrigin = ref<'response' | 'saved'>('response')
 const pendingScope = ref('')
 let requestGeneration = 0
 let disposed = false
+
+const visibleSavedReportIds = computed(() => canViewSavedReport.value ? result.value?.report_task_ids ?? [] : [])
+const hasSavedReport = computed(() => canViewSavedReport.value
+  && Boolean(result.value?.report_task_id || visibleSavedReportIds.value.length))
 
 const dialogTitle = computed(() => {
   const map = {
@@ -88,7 +95,18 @@ const scopeLabel = computed(() => {
 const statusTitle = computed(() => {
   if (loading.value) return '请求已发起 · 等待服务端响应'
   if (errorMessage.value) return '扫描未完成'
-  if (result.value) return resultOrigin.value === 'saved' ? '已加载保存结果' : '已收到扫描结果'
+  if (result.value?.execution_status === 'failed') {
+    return hasSavedReport.value ? '扫描失败 · 已保存失败报告' : '扫描失败'
+  }
+  if (result.value?.execution_status === 'partial') {
+    return hasSavedReport.value ? '扫描部分完成 · 已保存报告' : '扫描部分完成'
+  }
+  if (result.value) {
+    if (resultOrigin.value === 'saved') return '已加载保存结果'
+    return hasSavedReport.value
+      ? '扫描完成 · 报告已保存'
+      : '已收到扫描结果'
+  }
   return '尚未提交扫描'
 })
 
@@ -147,14 +165,16 @@ const groupedByOwasp = computed(() => {
 })
 
 const scoreColor = computed(() => {
-  const s = result.value?.risk_score ?? 100
+  const s = result.value?.risk_score
+  if (s == null) return '#7B8292'
   if (s >= 80) return '#4FB87A'
   if (s >= 50) return '#D9A857'
   return '#DC4961'
 })
 
 const scoreIcon = computed(() => {
-  const s = result.value?.risk_score ?? 100
+  const s = result.value?.risk_score
+  if (s == null) return '—'
   if (s >= 80) return '🛡'
   if (s >= 50) return '⚠️'
   return '🚨'
@@ -198,7 +218,8 @@ async function runScan(): Promise<void> {
       })
     }
     if (disposed || generation !== requestGeneration) return
-    if (!response || !Array.isArray(response.findings) || !Number.isFinite(response.risk_score)) {
+    if (!response || !Array.isArray(response.findings)
+      || (response.risk_score !== null && !Number.isFinite(response.risk_score))) {
       throw new Error('扫描服务未返回有效结果，请核对服务状态后重试。')
     }
     result.value = response
@@ -223,128 +244,137 @@ async function runScan(): Promise<void> {
 function downloadReport(): void {
   if (!result.value) return
   const lines: string[] = []
-  lines.push(`# 棱镜 Prism · 安全审计报告`)
+  lines.push('棱镜 Prism · 安全审计报告')
   lines.push('')
-  lines.push(`- 扫描范围: ${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
-  lines.push(`- 安全评分（越高越安全）: **${result.value.risk_score}/100**`)
-  lines.push(`- 扫描文件数: ${result.value.file_count}`)
+  lines.push(`扫描范围：${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
+  lines.push(`安全评分（越高越安全）：${result.value.risk_score == null ? '未评估' : `${result.value.risk_score}/100`}`)
+  lines.push(`扫描文件数：${result.value.file_count}`)
   if (result.value.source_archive_sha256) {
-    lines.push(`- 源码归档 SHA-256: \`${result.value.source_archive_sha256}\``)
+    lines.push(`源码归档 SHA-256：${result.value.source_archive_sha256}`)
   }
-  lines.push(`- 耗时: ${(result.value.duration_ms / 1000).toFixed(2)}s`)
+  lines.push(`耗时：${(result.value.duration_ms / 1000).toFixed(2)} 秒`)
   lines.push('')
-  lines.push(`## 概要`)
-  lines.push(result.value.summary)
+  lines.push('概要')
+  lines.push(plainReportText(result.value.summary))
   lines.push('')
-  lines.push('## 复核概况')
-  lines.push(`未被证伪候选: ${sortedFindings.value.length}`)
-  lines.push(`已证伪候选 (不计入有效发现及风险评分): ${refutedFindings.value.length}`)
-  lines.push(`待人工确认或未复核: ${pendingReviewCount.value}`)
-  lines.push(`未提供复核状态: ${unknownReviewCount.value}`)
+  lines.push('复核概况')
+  lines.push(`未被证伪候选：${sortedFindings.value.length}`)
+  lines.push(`已证伪候选（不计入有效发现及风险评分）：${refutedFindings.value.length}`)
+  lines.push(`待人工确认或未复核：${pendingReviewCount.value}`)
+  lines.push(`未提供复核状态：${unknownReviewCount.value}`)
   lines.push('')
   const endpoints = result.value.threat_model?.api_endpoints ?? []
   if (endpoints.length) {
-    lines.push(`## 接口扫描 (${endpoints.length} 个)`)
+    lines.push(`接口扫描（${endpoints.length} 个）`)
     for (const endpoint of endpoints) {
       lines.push(
-        `- ${endpoint.method} ${endpoint.path} · ` +
-          `\`${endpoint.file_path}:${endpoint.line_number}\` · ${endpoint.auth_hint}`,
+        `${plainReportText(endpoint.method)} ${plainReportText(endpoint.path)} · ` +
+          `${endpoint.file_path}:${endpoint.line_number} · ${plainReportText(endpoint.auth_hint)}`,
       )
     }
     lines.push('')
   }
   const codeLinks = result.value.threat_model?.code_links ?? []
   if (codeLinks.length) {
-    lines.push(`## 代码联动关系 (${codeLinks.length} 条)`)
+    lines.push(`代码联动关系（${codeLinks.length} 条）`)
     for (const link of codeLinks) {
       lines.push(
-        `- [${link.severity}] ${link.relation} · ${link.risk_type}: ` +
-          `${link.from} → ${link.to}`,
+        `${plainReportText(link.severity)}；${plainReportText(link.relation)}；${plainReportText(link.risk_type)}：` +
+          `${plainReportText(link.from)} → ${plainReportText(link.to)}`,
       )
     }
     lines.push('')
   }
   if (result.value.discussion) {
-    lines.push('## 多 Agent 讨论结论')
-    lines.push(result.value.discussion.consensus)
+    lines.push('多 Agent 讨论结论')
+    lines.push(plainReportText(result.value.discussion.consensus))
     lines.push('')
     for (const turn of result.value.discussion.turns) {
-      lines.push(`- ${turn.agent_name}: ${turn.content}`)
+      lines.push(`${plainReportText(turn.agent_name)}：${plainReportText(turn.content)}`)
     }
     if (result.value.discussion.action_items.length) {
       lines.push('')
-      lines.push('### 行动项')
+      lines.push('行动项')
       for (const item of result.value.discussion.action_items) {
-        lines.push(`- ${item}`)
+        lines.push(plainReportText(item))
       }
     }
     lines.push('')
   }
   lines.push(
-    `## 严重度分布\n严重 ${severityCounts.value.严重} · ` +
+    `严重度分布\n严重 ${severityCounts.value.严重} · ` +
       `高 ${severityCounts.value.高} · ` +
       `中 ${severityCounts.value.中} · ` +
       `低 ${severityCounts.value.低}`,
   )
   lines.push('')
   for (const group of groupedByOwasp.value) {
-    lines.push(`## ${group.owasp}`)
+    lines.push(`漏洞分类：${plainReportText(group.owasp)}`)
     for (const f of group.items) {
-      lines.push(`### [${f.severity}] ${f.title}`)
-      lines.push(`- 位置: \`${f.file_path}\` · ${f.lines}`)
-      lines.push(`- 复核状态: ${verificationLabel(f)}`)
-      if (f.verification_reason) lines.push(`- 复核理由: ${f.verification_reason}`)
-      if (f.cwe) lines.push(`- CWE: ${f.cwe}`)
-      if (f.confidence < 1) lines.push(`- 置信度: ${(f.confidence * 100).toFixed(0)}%`)
+      lines.push(`${plainReportText(f.severity)}：${plainReportText(f.title)}`)
+      lines.push(`位置：${plainReportText(f.file_path)} · ${plainReportText(f.lines)}`)
+      lines.push(`复核状态：${verificationLabel(f)}`)
+      if (f.verification_reason) lines.push(`复核理由：${plainReportText(f.verification_reason)}`)
+      if (f.cwe) lines.push(`CWE：${plainReportText(f.cwe)}`)
+      if (f.confidence < 1) lines.push(`置信度：${(f.confidence * 100).toFixed(0)}%`)
       if (f.evidence) {
-        lines.push('- 证据:')
-        lines.push('```')
-        lines.push(f.evidence)
-        lines.push('```')
+        lines.push('证据：')
+        lines.push(plainReportText(f.evidence))
       }
       if (f.exploit_scenario) {
-        lines.push(`- 攻击场景: ${f.exploit_scenario}`)
+        lines.push(`攻击场景：${plainReportText(f.exploit_scenario)}`)
       }
       if (f.fix_suggestion) {
-        lines.push(`- 修复建议: ${f.fix_suggestion}`)
+        lines.push(`修复建议：${plainReportText(f.fix_suggestion)}`)
       }
       lines.push('')
     }
   }
   if (refutedFindings.value.length) {
-    lines.push('## 已证伪候选 (不计入有效发现及风险评分)')
+    lines.push('已证伪候选（不计入有效发现及风险评分）')
     for (const f of refutedFindings.value) {
-      lines.push(`### [${f.severity}] ${f.title}`)
-      lines.push(`- 复核状态: ${verificationLabel(f)}`)
-      lines.push(`- 位置: \`${f.file_path}\` · ${f.lines}`)
-      if (f.verification_reason) lines.push(`- 复核理由: ${f.verification_reason}`)
+      lines.push(`${plainReportText(f.severity)}：${plainReportText(f.title)}`)
+      lines.push(`复核状态：${verificationLabel(f)}`)
+      lines.push(`位置：${plainReportText(f.file_path)} · ${plainReportText(f.lines)}`)
+      if (f.verification_reason) lines.push(`复核理由：${plainReportText(f.verification_reason)}`)
       if (f.evidence) {
-        lines.push('- 原始证据:')
-        lines.push('```')
-        lines.push(f.evidence)
-        lines.push('```')
+        lines.push('原始证据：')
+        lines.push(plainReportText(f.evidence))
       }
       lines.push('')
     }
   }
   const flows = result.value.threat_model?.data_flows ?? []
   if (flows.length) {
-    lines.push(`## 跨文件数据流 (${flows.length} 条)`)
+    lines.push(`跨文件数据流（${flows.length} 条）`)
     for (const flow of flows) {
       const path = [flow.from, ...flow.via, flow.to].filter(Boolean).join(' → ')
-      lines.push(`- [${flow.severity}] ${flow.risk_type}: ${path}`)
+      lines.push(`${plainReportText(flow.severity)}；${plainReportText(flow.risk_type)}：${plainReportText(path)}`)
     }
   }
-  const md = lines.join('\n')
-  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+  const plainText = lines.join('\n')
+  const blob = new Blob([plainText], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `prism_security_${props.source}_${props.refId ?? 'all'}.md`
+  a.download = `prism_security_${props.source}_${props.refId ?? 'all'}.txt`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+function plainReportText(value: unknown): string {
+  return stripMarkdown(String(value ?? ''))
+}
+
+function openSavedReport(): void {
+  const taskId = result.value?.report_task_id
+  if (taskId) void router.push(`/reports/${taskId}`)
+}
+
+function openSavedReports(): void {
+  if (result.value?.report_task_ids?.length) void router.push('/reports')
 }
 
 function severityClass(sev: string): string {
@@ -483,6 +513,24 @@ onBeforeUnmount(() => {
         >
           下载报告
         </el-button>
+        <el-button
+          v-if="canViewSavedReport && result?.report_task_id"
+          size="small"
+          type="primary"
+          :icon="View"
+          @click="openSavedReport"
+        >
+          查看完整报告
+        </el-button>
+        <el-button
+          v-else-if="canViewSavedReport && visibleSavedReportIds.length"
+          size="small"
+          type="primary"
+          :icon="View"
+          @click="openSavedReports"
+        >
+          查看 {{ visibleSavedReportIds.length }} 份项目报告
+        </el-button>
       </div>
     </div>
 
@@ -491,7 +539,9 @@ onBeforeUnmount(() => {
       <div>
         <strong>{{ statusTitle }}</strong>
         <p v-if="loading">{{ pendingScope }}。当前接口不返回阶段进度或预计剩余时间，请等待响应。</p>
-        <p v-else-if="result && resultOrigin === 'response'">结果已返回本窗口；接口未提供独立保存回执，可下载报告保留本次结果。</p>
+        <p v-else-if="canViewSavedReport && result?.report_task_id">报告已保存到当前账号。可以离开弹窗后从完整报告继续查看，权限撤销后将不再显示。</p>
+        <p v-else-if="canViewSavedReport && visibleSavedReportIds.length">已按项目分别保存 {{ visibleSavedReportIds.length }} 份报告，可在报告中心逐份查看。</p>
+        <p v-else-if="result && resultOrigin === 'response'">结果已返回本窗口，可下载本次报告；当前结果没有生成独立报告记录。</p>
         <p v-else-if="result">展示项目提供的已持久化结果，重新扫描会发起新请求。</p>
         <p v-else-if="!errorMessage">确认范围与配置后开始，状态将随实际请求结果更新。</p>
       </div>
@@ -509,15 +559,31 @@ onBeforeUnmount(() => {
 
     <!-- 结果 -->
     <div v-else-if="result && !loading" class="sec-result">
+      <el-alert
+        v-if="result.execution_status === 'partial' || result.execution_status === 'failed'"
+        :title="result.execution_status === 'partial' ? '扫描只完成了部分范围' : '扫描未能完成'"
+        :description="result.error_message || '请查看覆盖范围和失败原因；本报告不会将未检查范围判定为安全。'"
+        :type="result.execution_status === 'partial' ? 'warning' : 'error'"
+        :closable="false"
+        show-icon
+        class="scan-result-status"
+      />
+      <el-alert
+        v-if="result.previous_run_retained"
+        title="当前审计正在重跑，以下内容是上一次已保存的报告"
+        type="info"
+        :closable="false"
+        show-icon
+      />
       <p v-if="!result.findings.length" class="scan-close-note">本次响应未返回安全发现，不代表完整覆盖或确认安全；请结合扫描范围与覆盖证据判断。</p>
       <!-- 评分 + 严重度 -->
       <div class="sec-score-bar">
         <div class="score-card">
           <div class="score-num font-display" :style="{ color: scoreColor }">
             <span class="score-icon">{{ scoreIcon }}</span>
-            {{ result.risk_score }}
+            {{ result.risk_score == null ? '未评估' : result.risk_score }}
           </div>
-          <div class="score-sub">风险评分 (越高越安全)</div>
+          <div class="score-sub">{{ result.risk_score == null ? '未提供有效评分' : '风险评分（越高越安全）' }}</div>
         </div>
         <div class="sev-grid">
           <div class="sev-cell sev-严重">

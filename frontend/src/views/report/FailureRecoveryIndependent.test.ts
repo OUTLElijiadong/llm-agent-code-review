@@ -21,7 +21,7 @@ function render(component: object, props: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.resetAllMocks(); pinia = createPinia(); setActivePinia(pinia)
   useUserStore().profile = { id: 104, username: 'isolated', role: 'user', status: 1 }
-  useUserStore().permissions = new Set(['report:view', 'report:export:json', 'project:create'])
+  useUserStore().permissions = new Set(['report:view', 'report:export:json', 'issue:view', 'project:create'])
   api.getReportDetail.mockResolvedValue({ project: { project_name: '合成项目' }, task: { task_name: '合成报告' }, stats: { total_issues: 0 }, files: [], rules_snapshot: [] })
   URL.createObjectURL = vi.fn(() => 'blob:independent-fixture'); URL.revokeObjectURL = vi.fn()
 })

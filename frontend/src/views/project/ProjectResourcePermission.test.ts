@@ -30,7 +30,10 @@ let pinia: ReturnType<typeof createPinia>
 function render(component: object) {
   wrapper = mount(component, { attachTo: document.body, global: { plugins: [ElementPlus, pinia], stubs: {
     AiPromptModal: { props: ['modelValue'], template: '<div class="ai-modal" :data-visible="modelValue" />' },
-    SecurityScanModal: { props: ['modelValue'], template: '<div class="scan-modal" :data-visible="modelValue" />' },
+    SecurityScanModal: {
+      props: ['modelValue', 'initialResult'],
+      template: '<div class="scan-modal" :data-visible="modelValue" :data-initial-summary="initialResult?.summary" :data-previous-run-retained="initialResult?.previous_run_retained" />',
+    },
     MonacoEditor: { props: ['readonly'], template: '<textarea class="editor-probe" :readonly="readonly" />' },
   } } })
   return wrapper
@@ -262,6 +265,22 @@ describe('项目详情资源角色与 RBAC 求交', () => {
     await button('🛡 安全审计').trigger('click'); await flushPromises()
     expect(wrapper.get('.scan-modal').attributes('data-visible')).toBe('true')
     expect(projectApi.getAuditSourceArchiveResult).not.toHaveBeenCalled()
+  })
+
+  it('有 security:view 权限时，失败/重跑中的隔离审计仍显示最近已保存报告', async () => {
+    useUserStore().permissions = new Set([...fullPermissions, 'security:scan', 'security:view'])
+    projectApi.getProjectDetail.mockResolvedValue({
+      ...project(false), source_archive: { audit_status: 'running', max_compression_ratio: 1 },
+    })
+    projectApi.getAuditSourceArchiveResult.mockResolvedValue({
+      status: 'running', result_status: 'failed',
+      result: { findings: [], summary: '上次失败原因已保存', file_count: 0, risk_score: null },
+    })
+    render(ProjectDetail); await flushPromises()
+    await button('🛡 安全审计').trigger('click'); await flushPromises()
+    expect(projectApi.getAuditSourceArchiveResult).toHaveBeenCalledExactlyOnceWith(162)
+    expect(wrapper.get('.scan-modal').attributes('data-initial-summary')).toBe('上次失败原因已保存')
+    expect(wrapper.get('.scan-modal').attributes('data-previous-run-retained')).toBe('true')
   })
 })
 

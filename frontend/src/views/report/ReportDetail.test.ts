@@ -228,8 +228,8 @@ describe('ReportDetail 报告口径', () => {
     expect(wrapper.text()).toContain('报告条目')
     expect(wrapper.text()).toContain('未分级')
     expect(wrapper.find('.fix-gauge').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="report-risk-level"]').text()).toContain('安全风险未评定')
-    expect(wrapper.get('[data-testid="report-risk-level"]').text()).not.toContain('低风险')
+    expect(wrapper.get('[data-testid="report-domain-score-label"]').text()).toContain('领域评分')
+    expect(wrapper.find('[data-testid="report-risk-level"]').exists()).toBe(false)
     expect(setupState(wrapper).severityRows).toHaveLength(1)
     wrapper.unmount()
   })
@@ -265,22 +265,66 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
-  it('领域报告只显示真实 JSON 出口并隐藏非等价导出和预览', async () => {
+  it('领域报告显示同源正文、预览和全部授权导出格式', async () => {
+    permissions.add('pentest:view')
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '渗透项目', language: 'unknown' },
       task: { task_name: '渗透报告', review_type: 'pentest', total_files: 0 },
       stats: { score: 0, total_issues: 2 }, files: [], rules_snapshot: [],
-      source: { type: 'pentest', stats_basis: 'pentest_findings' },
+      source: { type: 'pentest', stats_basis: 'pentest_findings', domain_report_md: '# 渗透报告\n\n真实发现与修复建议' },
     })
     const wrapper = mountPage()
     await flushPromises()
-    expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="domain-report-body"]').text()).toContain('真实发现与修复建议')
+    expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('生成 JSON')
+    expect(wrapper.text()).toContain('生成 HTML')
+    expect(wrapper.text()).toContain('生成 PDF')
+    expect(wrapper.text()).toContain('生成 Word')
+    expect(wrapper.text()).toContain('预览 HTML')
+    expect(wrapper.find('[data-testid="domain-report-metrics"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="code-repair-progress"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="code-dimension-radar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="code-review-files"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('缺少问题明细权限时保留报告概览，但不提供包含明细的预览或导出', async () => {
+    permissions.delete('issue:view')
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '权限测试项目', language: 'python' },
+      task: { task_name: '代码审查', review_type: 'security', total_files: 1 },
+      stats: { score: 72, total_issues: 1 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('报告概览仍可查看')
+    expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('生成 JSON')
     expect(wrapper.text()).not.toContain('生成 HTML')
     expect(wrapper.text()).not.toContain('生成 PDF')
     expect(wrapper.text()).not.toContain('生成 Word')
-    expect(wrapper.text()).not.toContain('预览 HTML')
+    wrapper.unmount()
+  })
+
+  it('无领域来源权限时不显示领域报告正文、卡片或导出入口', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '私有渗透项目' },
+      task: { task_name: '私有渗透报告', review_type: 'pentest' },
+      stats: {}, files: [], rules_snapshot: [],
+      source: { type: 'pentest', domain_report_md: '# 不得泄露的报告正文' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="domain-report-body"]').exists()).toBe(false)
+    expect(wrapper.find('.report-paper').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('不得泄露的报告正文')
+    expect(wrapper.text()).not.toContain('私有渗透报告')
     wrapper.unmount()
   })
 
@@ -636,7 +680,8 @@ describe('ReportDetail 格式权限', () => {
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.text()).toContain('打印')
-    expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="report-preview-button"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('生成、预览和导出包含问题证据的代码审查报告需要该权限')
     expect(wrapper.text()).not.toContain('生成 JSON')
     expect(wrapper.text()).not.toContain('导出报告')
     expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(false)
@@ -656,6 +701,7 @@ describe('ReportDetail 格式权限', () => {
   it('JSON 权限只开放 JSON 生成与导出', async () => {
     permissions.clear()
     permissions.add('report:view')
+    permissions.add('issue:view')
     permissions.add('report:export:json')
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
     const wrapper = mountPage()
@@ -669,7 +715,7 @@ describe('ReportDetail 格式权限', () => {
     wrapper.unmount()
   })
 
-  it('自动生成等待报告来源就绪，领域报告不会发送 HTML 请求', async () => {
+  it('自动生成等待领域报告来源就绪后生成 HTML 报告', async () => {
     route.query = { generate: '1' }
     let resolveReport!: (value: unknown) => void
     reportApi.getReportDetail.mockReturnValueOnce(new Promise(resolve => { resolveReport = resolve }))
@@ -678,7 +724,7 @@ describe('ReportDetail 格式权限', () => {
     expect(reportApi.generateReport).not.toHaveBeenCalled()
     resolveReport({ project: {}, task: {}, stats: {}, files: [], rules_snapshot: [], source: { type: 'sandbox_test' } })
     await flushPromises()
-    expect(reportApi.generateReport).not.toHaveBeenCalled()
+    expect(reportApi.generateReport).toHaveBeenCalledExactlyOnceWith(42, 'html', 'detailed')
     expect(router.replace).toHaveBeenCalledWith({ query: {} })
     wrapper.unmount()
   })
