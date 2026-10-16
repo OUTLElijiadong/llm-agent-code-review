@@ -356,7 +356,7 @@ describe('报告入口权限与可用状态', () => {
     review.getReviewTaskDetail.mockResolvedValue(taskResult({ review_type: 'sandbox_test', status: 'success', can_view_report: false }))
     await renderDetail()
     expect(wrapper.text()).not.toContain('报告 #21')
-    expect(wrapper.text()).toContain('报告内容仅对任务发起账号及管理员开放')
+    expect(wrapper.text()).toContain('当前账号无法查看报告正文、评分或问题明细')
   })
 
   it('创建人或管理员可见成功报告入口', async () => {
