@@ -38,7 +38,7 @@ vi.mock('@/stores/user', () => ({
 }))
 
 import AppSidebar from './AppSidebar.vue'
-import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA } from '@/constants/buildInfo'
+import { APP_BUILD_TIME_DISPLAY, APP_DISPLAY_VERSION, APP_RELEASE_SHA, APP_VERSION } from '@/constants/buildInfo'
 
 describe('AppSidebar ordinary member navigation', () => {
   beforeEach(() => {
@@ -61,6 +61,11 @@ describe('AppSidebar ordinary member navigation', () => {
       },
     })
   }
+
+  it('完整显示包含补丁号的三段正式版本', () => {
+    expect(APP_DISPLAY_VERSION).toBe(`v${APP_VERSION}`)
+    expect(APP_DISPLAY_VERSION).toMatch(/^v\d+\.\d+\.\d+$/)
+  })
 
   it('审查员从统一 Agent 工作台进入 Agent 管理与个人草稿', () => {
     harness.role = 'reviewer'
