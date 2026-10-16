@@ -5468,6 +5468,50 @@ def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
         f"- 排除项：{'; '.join(excluded) if excluded else '无已记录排除项'}。",
         f"- 错误：{'; '.join(list(dict.fromkeys(errors))) if errors else '无已记录错误'}。",
     ]
+    remote = evidence.get("remote_blackbox")
+    remote = remote if isinstance(remote, dict) else {}
+    remote_execution = evidence.get("remote_blackbox_execution")
+    remote_execution = remote_execution if isinstance(remote_execution, dict) else {}
+    if remote or remote_execution.get("basis") == "authorized_remote_http_probe":
+        target_origin = str(remote.get("target_origin") or "")
+        safe_origin = "未取得"
+        try:
+            parsed = urllib.parse.urlsplit(target_origin)
+            hostname = parsed.hostname or ""
+            if hostname:
+                host = f"[{hostname}]" if ":" in hostname else hostname
+                port = f":{parsed.port}" if parsed.port else ""
+                safe_origin = f"{parsed.scheme}://{host}{port}"
+        except ValueError:
+            safe_origin = "目标地址未能解析"
+        status_code = remote.get("status_code") or remote_execution.get("status_code")
+        status_text = f"HTTP {status_code}" if type(status_code) is int else "未取得 HTTP 状态码"
+        latency = remote.get("latency_ms")
+        latency_text = f"{latency} ms" if type(latency) is int else "未取得"
+        content_type = str(remote.get("content_type") or "未取得")[:160]
+        sampled = remote.get("body_bytes_sampled")
+        sampled_text = f"采样 {sampled} 字节" if type(sampled) is int else "未记录采样量"
+        expected_headers = (
+            "content-security-policy",
+            "strict-transport-security",
+            "x-content-type-options",
+            "referrer-policy",
+        )
+        header_values = remote.get("security_headers") if isinstance(remote.get("security_headers"), dict) else {}
+        present_headers = [name for name in expected_headers if header_values.get(name)]
+        missing_headers = remote.get("missing_security_headers")
+        if not isinstance(missing_headers, list):
+            missing_headers = [name for name in expected_headers if not header_values.get(name)]
+        lines += [
+            "",
+            "## 远程网站检查范围",
+            "",
+            f"- 目标源站：{safe_origin}（不在报告中复述路径或查询参数）",
+            f"- 请求方式：单次 HTTP GET；未跟随重定向。响应：{status_text}，耗时：{latency_text}，内容类型：{content_type}。",
+            f"- 响应正文：读取量为{sampled_text}，仅读取并记录字节数；未分析或保存正文内容。",
+            f"- 安全响应头：已返回 {', '.join(present_headers) if present_headers else '未确认'}；缺失 {', '.join(str(name) for name in missing_headers) if missing_headers else '未发现已登记缺失项'}。",
+            "- 覆盖边界：该步骤只验证目标入口的连通性、HTTP 响应和上述响应头；未爬取站点、未枚举登录后页面或业务路由，也不代表完成完整网站漏洞覆盖。",
+        ]
     return "\n".join(lines)
 
 

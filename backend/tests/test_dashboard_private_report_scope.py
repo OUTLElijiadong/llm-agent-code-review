@@ -110,12 +110,10 @@ def _get(scope, actor, path):
 def _assert_only_ordinary_metrics(scope, actor, domain_task, outlet="all"):
     if outlet in {"all", "summary"}:
         summary = _get(scope, actor, "/api/dashboard/summary")
-        assert summary["review_count"] == 2  # 任务元信息仍沿用项目成员可见范围。
+        assert summary["review_count"] == 1
         assert summary["total_issues"] == 1
         assert summary["severe_issues"] == 0
-        private_row = next(item for item in summary["recent_tasks"] if item["id"] == domain_task.id)
-        assert private_row["score"] is None
-        assert private_row["coverage"] is None
+        assert all(item["id"] != domain_task.id for item in summary["recent_tasks"])
         assert next(item for item in summary["recent_tasks"] if item["id"] == scope["ordinary"].id)["score"] == 88
     if outlet in {"all", "risk"}:
         risk = _get(scope, actor, "/api/dashboard/risk-distribution?days=0")

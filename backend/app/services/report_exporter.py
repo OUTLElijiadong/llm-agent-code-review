@@ -40,6 +40,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
+from app.services.report_markdown import markdown_to_html
 
 # ============ 模块常量 ============
 
@@ -709,6 +710,9 @@ def export_to_html(
             issue["references_json"] = [
                 ref for ref in references if _safe_html_reference_url(ref)
             ] if isinstance(references, list) else []
+            for source_key in ("description", "exploit_scenario", "suggestion", "remediation"):
+                issue[f"{source_key}_html"] = markdown_to_html(str(issue.get(source_key) or ""))
+    context["summary_html"] = markdown_to_html(context.get("summary") or "")
     # 008 迁移预置的模板使用 task / metrics / compliance_summary，后续内置
     # HTML 模板改为 task_info / statistics。保留旧变量别名，确保历史数据库中
     # 已保存的模板和用户基于旧契约创建的模板仍可导出。

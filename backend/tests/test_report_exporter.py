@@ -21,6 +21,7 @@ from docx import Document
 from jinja2.exceptions import SecurityError
 
 from app.schemas.review import IssueOut
+from app.services import report_pdf_exporter
 from app.services.report_exporter import (
     _build_compliance_summary,
     _build_report_context,
@@ -344,6 +345,55 @@ def test_terminal_report_state_and_coverage_survive_all_standard_exports():
     assert "cancelled" in word_text
     assert "用户停止审查" in word_text
     assert "vendor/generated.py" in word_text
+
+
+def test_standard_exports_render_markdown_summary_without_showing_syntax(monkeypatch):
+    summary = (
+        "## 总体结论\n\n"
+        "**发现两个高危问题**\n\n"
+        "- 影响：可能造成越权\n"
+        "- 修复：校验授权\n\n"
+        "```python\n*literal = 1\n```"
+    )
+    html = export_to_html(_make_task(), [], summary, 72, load_builtin_template("detailed"))
+    summary_box = html.split('<div class="summary-box">', 1)[1].split("</div>", 1)[0]
+    assert "<h2>总体结论</h2>" in summary_box
+    assert "<strong>发现两个高危问题</strong>" in summary_box
+    assert "##" not in summary_box
+    assert "**" not in summary_box
+    assert "<li>影响：可能造成越权</li>" in summary_box
+    assert "*literal = 1" in summary_box  # 代码符号属于原文，不能被 Markdown 解析吞掉。
+
+    captured_elements = []
+
+    class CapturedPdfDocument:
+        def __init__(self, buffer, **_kwargs):
+            self.buffer = buffer
+
+        def build(self, elements):
+            captured_elements.extend(elements)
+            self.buffer.write(b"%PDF-test")
+
+    monkeypatch.setattr(report_pdf_exporter, "SimpleDocTemplate", CapturedPdfDocument)
+    assert export_to_pdf(_make_task(), [], summary, 72).startswith(b"%PDF")
+    pdf_visible_text = "\n".join(
+        element.getPlainText() for element in captured_elements if hasattr(element, "getPlainText")
+    ).replace("\xa0", " ")
+    assert "总体结论" in pdf_visible_text
+    assert "发现两个高危问题" in pdf_visible_text
+    assert "影响：可能造成越权" in pdf_visible_text
+    assert "##" not in pdf_visible_text
+    assert "**" not in pdf_visible_text
+    assert "*literal = 1" in pdf_visible_text
+
+    word = export_to_word(_make_task(), [], summary, 72)
+    word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs)
+    assert "总体结论" in word_text
+    assert "发现两个高危问题" in word_text
+    assert "影响：可能造成越权" in word_text
+    assert "##" not in word_text
+    assert "**" not in word_text
+    assert "*literal = 1" in word_text
 
 
 def test_legacy_report_export_marks_missing_coverage_unknown():

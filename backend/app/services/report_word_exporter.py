@@ -22,10 +22,11 @@ from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
+from app.services.report_markdown import MarkdownSegment, markdown_to_blocks
 
 # ============ 模块常量 ============
 
@@ -108,6 +109,52 @@ def _add_run(paragraph, text: str, *, bold: bool = False, color: Optional[RGBCol
         run.font.color.rgb = color
     _set_run_chinese_font(run, font_name)
     return run
+
+
+def _append_markdown_runs(paragraph: Any, segments: tuple[MarkdownSegment, ...], *, size: int = 10) -> None:
+    for segment in segments:
+        run = _add_run(
+            paragraph,
+            segment.text,
+            bold=segment.bold,
+            font_name=_CODE_FONT if segment.code else _CHINESE_FONT,
+            size=9 if segment.code else size,
+        )
+        run.italic = segment.italic
+
+
+def _append_markdown_to_word(doc: Any, value: str | None) -> None:
+    """把 Markdown 语义映射到 Word 标题、列表、引用和代码段落。"""
+    for block in markdown_to_blocks(value):
+        if block.kind == "rule":
+            paragraph = doc.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(4)
+            continue
+        if block.kind == "heading":
+            paragraph = doc.add_heading(level=min(3, max(1, block.level)))
+            _append_markdown_runs(paragraph, block.segments, size=12 if block.level <= 2 else 11)
+            continue
+        if block.kind == "code":
+            paragraph = doc.add_paragraph(style="No Spacing")
+            paragraph.paragraph_format.left_indent = Inches(0.15)
+            code = block.segments[0].text if block.segments else ""
+            for index, line in enumerate(code.split("\n")):
+                if index:
+                    paragraph.add_run().add_break()
+                _add_run(paragraph, line, font_name=_CODE_FONT, size=9)
+            continue
+        if block.kind == "bullet":
+            paragraph = doc.add_paragraph(style="List Bullet")
+            paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
+        elif block.kind == "ordered":
+            paragraph = doc.add_paragraph(style="List Number")
+            paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
+        elif block.kind == "quote":
+            paragraph = doc.add_paragraph(style="Quote")
+            paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
+        else:
+            paragraph = doc.add_paragraph()
+        _append_markdown_runs(paragraph, block.segments)
 
 
 def _group_issues_by_severity(issues: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -445,7 +492,8 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
     if description:
         desc_para = doc.add_paragraph()
         _add_run(desc_para, "描述:", bold=True, size=10)
-        _add_run(desc_para, str(description), size=10)
+        _append_markdown_runs(desc_para, (MarkdownSegment(" "),))
+        _append_markdown_to_word(doc, str(description))
 
     evidence = issue.get("evidence") or ""
     if evidence:
@@ -457,20 +505,23 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
     if exploit_scenario:
         exploit_para = doc.add_paragraph()
         _add_run(exploit_para, "攻击场景:", bold=True, size=10)
-        _add_run(exploit_para, str(exploit_scenario), size=10)
+        _append_markdown_runs(exploit_para, (MarkdownSegment(" "),))
+        _append_markdown_to_word(doc, str(exploit_scenario))
 
     # 修复建议
     suggestion = issue.get("suggestion") or ""
     if suggestion:
         sug_para = doc.add_paragraph()
         _add_run(sug_para, "修复建议:", bold=True, size=10)
-        _add_run(sug_para, str(suggestion), size=10)
+        _append_markdown_runs(sug_para, (MarkdownSegment(" "),))
+        _append_markdown_to_word(doc, str(suggestion))
 
     remediation = issue.get("remediation") or ""
     if remediation:
         remediation_para = doc.add_paragraph()
         _add_run(remediation_para, "详细修复:", bold=True, size=10)
-        _add_run(remediation_para, str(remediation), size=10)
+        _append_markdown_runs(remediation_para, (MarkdownSegment(" "),))
+        _append_markdown_to_word(doc, str(remediation))
 
     # 修复代码(Courier New 字体)
     fixed_code = issue.get("fixed_code") or ""
@@ -588,8 +639,7 @@ def export_to_word(
     # 2. 总体评价
     if summary_text:
         doc.add_heading("总体评价", level=1)
-        summary_para = doc.add_paragraph()
-        _add_run(summary_para, str(summary_text), size=11)
+        _append_markdown_to_word(doc, str(summary_text))
 
     # 3. 反编译证据
     _build_decompilation_evidence(doc, context.get("evidence", {}))

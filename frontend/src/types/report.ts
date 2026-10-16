@@ -95,8 +95,9 @@ export interface ReportListItem {
   project_name: string
   total_issues: number
   score: number | null
-  status: 'success' | 'failed'
+  status: 'success' | 'failed' | 'cancelled' | 'expired' | 'stopped'
   create_time: string
+  error_message?: string | null
   coverage?: TaskCoverageOut | null
   source?: ReportSource
 }

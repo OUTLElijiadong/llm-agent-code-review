@@ -9,7 +9,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.review import TaskOut
-from app.services import dashboard_service, review_service
+from app.services import dashboard_service, report_service, review_service
 
 
 def seed(db):
@@ -182,7 +182,8 @@ def test_archive_counts_are_separate_from_active_code_files(db):
     assert archive.file_count == 4276
 
 
-def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db):
+def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db, monkeypatch):
+    monkeypatch.setattr(report_service.rbac_service, "check_permission", lambda *_args: True)
     owner, _, project, _ = seed(db)
     code = task(db, owner, project, status="success", score=0)
     sandbox = task(db, owner, project, status="success", score=100)
@@ -201,7 +202,8 @@ def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db):
     assert {r["id"]: r["review_type"] for r in result["recent_tasks"]}[code.id] == "standard"
 
 
-def test_sandbox_only_has_no_code_score_samples(db):
+def test_sandbox_only_has_no_code_score_samples(db, monkeypatch):
+    monkeypatch.setattr(report_service.rbac_service, "check_permission", lambda *_args: True)
     owner, _, project, _ = seed(db)
     sandbox = task(db, owner, project, status="success", score=100)
     sandbox.review_type = "sandbox_test"

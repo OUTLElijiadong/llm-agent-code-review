@@ -30,6 +30,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
+from app.services.report_markdown import markdown_to_blocks, reportlab_markup
 
 # ============ 模块常量 ============
 
@@ -127,6 +128,13 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
             backColor=colors.HexColor("#F0FDF4"),
             borderPadding=4, leftIndent=8, rightIndent=8,
         ),
+        "quote": ParagraphStyle(
+            "ReportQuote", parent=base["Normal"],
+            fontName=font_name, fontSize=10, leading=16,
+            textColor=colors.HexColor("#4B5563"),
+            leftIndent=12, borderColor=colors.HexColor("#CBD5E1"),
+            borderWidth=1, borderPadding=6, spaceBefore=3, spaceAfter=6,
+        ),
     }
     return styles
 
@@ -175,6 +183,43 @@ def _format_score(score: int) -> str:
         str: 格式化后的评分文本,如 "72/100 (中风险)"。
     """
     return f"{score}/100 ({score_risk_level(score)})"
+
+
+def _append_markdown_elements(
+    elements: List[Any],
+    value: str | None,
+    styles: Dict[str, ParagraphStyle],
+) -> None:
+    """将 Markdown 内容转换为 PDF 原生段落、列表和代码块。"""
+    for block in markdown_to_blocks(value):
+        if block.kind == "rule":
+            elements.append(Spacer(1, 3 * mm))
+            continue
+        if block.kind == "heading":
+            style = styles["heading"] if block.level <= 2 else styles["subheading"]
+            elements.append(Paragraph(reportlab_markup(block.segments), style))
+            continue
+        if block.kind == "code":
+            code = block.segments[0].text if block.segments else ""
+            code_markup = escape(code.expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
+            elements.append(Paragraph(_code_markup(code_markup), styles["code"]))
+            continue
+        markup = reportlab_markup(
+            block.segments,
+            code_non_ascii_font=_CHINESE_FONT_NAME,
+        )
+        if block.kind == "bullet":
+            markup = "• " + markup
+        elif block.kind == "ordered":
+            markup = f"{block.number or 1}. " + markup
+        if block.kind == "quote":
+            depth = max(1, block.list_depth)
+            quote_style = ParagraphStyle(
+                f"ReportQuote{depth}", parent=styles["quote"], leftIndent=12 * depth,
+            )
+            elements.append(Paragraph(markup, quote_style))
+        else:
+            elements.append(Paragraph(markup, styles["normal"]))
 
 
 # ============ PDF 文档构建 ============
@@ -493,9 +538,10 @@ def _build_issue_section(
     elements.append(Paragraph(_code_markup(escape(" | ".join(status_parts))), styles["code"]))
 
     # 问题描述
-    description = escape(str(issue.get("description") or ""))
+    description = str(issue.get("description") or "")
     if description:
-        elements.append(Paragraph(f"<b>描述:</b>{description}", styles["normal"]))
+        elements.append(Paragraph("<b>描述:</b>", styles["normal"]))
+        _append_markdown_elements(elements, description, styles)
 
     evidence = issue.get("evidence") or ""
     if evidence:
@@ -503,24 +549,21 @@ def _build_issue_section(
         elements.append(Paragraph("<b>证据:</b>", styles["normal"]))
         elements.append(Paragraph(_code_markup(evidence_text), styles["code"]))
 
-    exploit_scenario = escape(str(issue.get("exploit_scenario") or ""))
+    exploit_scenario = str(issue.get("exploit_scenario") or "")
     if exploit_scenario:
-        elements.append(Paragraph(
-            f"<b>攻击场景:</b>{exploit_scenario}",
-            styles["normal"],
-        ))
+        elements.append(Paragraph("<b>攻击场景:</b>", styles["normal"]))
+        _append_markdown_elements(elements, exploit_scenario, styles)
 
     # 修复建议
-    suggestion = escape(str(issue.get("suggestion") or ""))
+    suggestion = str(issue.get("suggestion") or "")
     if suggestion:
-        elements.append(Paragraph(f"<b>修复建议:</b>{suggestion}", styles["normal"]))
+        elements.append(Paragraph("<b>修复建议:</b>", styles["normal"]))
+        _append_markdown_elements(elements, suggestion, styles)
 
-    remediation = escape(str(issue.get("remediation") or ""))
+    remediation = str(issue.get("remediation") or "")
     if remediation:
-        elements.append(Paragraph(
-            f"<b>详细修复:</b>{remediation}",
-            styles["normal"],
-        ))
+        elements.append(Paragraph("<b>详细修复:</b>", styles["normal"]))
+        _append_markdown_elements(elements, remediation, styles)
 
     # 修复代码(Courier 字体)
     fixed_code = issue.get("fixed_code") or ""
@@ -645,7 +688,7 @@ def export_to_pdf(
     summary_text = context.get("summary") or ""
     if summary_text:
         elements.append(Paragraph("总体评价", styles["heading"]))
-        elements.append(Paragraph(escape(str(summary_text)), styles["normal"]))
+        _append_markdown_elements(elements, str(summary_text), styles)
         elements.append(Spacer(1, 4 * mm))
 
     # 3. 反编译证据

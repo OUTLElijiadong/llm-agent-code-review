@@ -84,6 +84,45 @@ def test_artifact_documents_include_agent_test_details() -> None:
     assert "test_a.py" in detail_doc[3].decode()
 
 
+def test_deterministic_fallback_report_discloses_remote_probe_facts_and_scope() -> None:
+    report = _build_deterministic_test_report({
+        "execution_status": "failed",
+        "passed": False,
+        "summary": "远程黑盒响应未通过",
+        "agent_tests": {"generated": 0, "passed_count": 0, "failed": 0},
+        "coverage": {"requested_mode": "blackbox"},
+        "evidence": {
+            "remote_blackbox": {
+                "target_origin": "https://example.test/",
+                "status_code": 302,
+                "latency_ms": 42,
+                "content_type": "text/html",
+                "redirect_location": "/login",
+                "body_bytes_sampled": 8192,
+                "missing_security_headers": ["content-security-policy", "referrer-policy"],
+                "security_headers": {
+                    "content-security-policy": "",
+                    "strict-transport-security": "max-age=31536000",
+                    "x-content-type-options": "nosniff",
+                    "referrer-policy": "",
+                },
+            },
+            "remote_blackbox_execution": {"status_code": 302, "status": "partial"},
+        },
+    })
+    assert "远程网站检查范围" in report
+    assert "https://example.test" in report
+    assert "HTTP 302" in report
+    assert "42 ms" in report
+    assert "text/html" in report
+    assert "未跟随重定向" in report
+    assert "content-security-policy" in report
+    assert "referrer-policy" in report
+    assert "未分析或保存正文内容" in report
+    assert "用于探测判断" not in report
+    assert "完整网站漏洞覆盖" in report
+
+
 def test_publish_sandbox_report_creates_review_task(db) -> None:
     from app.models.user import User
 

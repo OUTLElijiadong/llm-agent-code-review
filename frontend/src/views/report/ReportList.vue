@@ -85,6 +85,9 @@
               <span v-else>问题 {{ row.total_issues }}</span>
               <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
             </div>
+            <p v-if="reportStatusNote(row)" class="rc-status-note" :data-status="row.status">
+              {{ reportStatusNote(row) }}
+            </p>
           </div>
           <div v-if="row.score != null" class="rc-score" :title="sandboxScoreTitle(row)">
             <svg viewBox="0 0 36 36" class="rc-ring" aria-hidden="true">
@@ -221,18 +224,31 @@ function isUnverifiedSandboxReport(row: ReportListItem) {
 }
 
 function reportStatusLabel(row: ReportListItem) {
-  if (row.status === 'success') return isUnverifiedSandboxReport(row) ? '基础检查完成' : '通过'
   if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'partial') return '验证未完成'
   if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'unknown') return '结果未知'
-  return '未通过'
+  const labels: Record<string, string> = {
+    success: isUnverifiedSandboxReport(row) ? '基础检查完成' : '已完成',
+    failed: '执行失败',
+    cancelled: '已取消',
+    expired: '授权已过期',
+    stopped: '已停止',
+  }
+  return labels[row.status] || '执行未完成'
 }
 
 function reportStatusType(row: ReportListItem) {
-  if (row.status === 'success') return isUnverifiedSandboxReport(row) ? 'warning' : 'success'
   if (row.source?.type === 'sandbox_test' && ['partial', 'unknown'].includes(row.coverage?.verification_status || '')) {
     return 'warning'
   }
-  return 'danger'
+  if (row.status === 'success') return isUnverifiedSandboxReport(row) ? 'warning' : 'success'
+  return row.status === 'failed' ? 'danger' : 'warning'
+}
+
+function reportStatusNote(row: ReportListItem) {
+  const error = String(row.error_message || '').trim()
+  if (error) return `执行说明：${error}`
+  const coverageReason = String(row.coverage?.reason || '').trim()
+  return coverageReason ? `覆盖说明：${coverageReason}` : ''
 }
 
 function sandboxCoverageLabel(status?: string | null) {
@@ -461,6 +477,8 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews'], refresh: loadData })
 .rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rc-name { font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.rc-status-note { margin: 0; color: var(--color-warning-text, #8a5a00); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rc-status-note[data-status='failed'] { color: var(--color-danger, #b42318); }
 .rc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
 .rc-ring { width: 38px; height: 38px; }

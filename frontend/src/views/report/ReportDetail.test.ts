@@ -98,6 +98,26 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it('详情明确显示执行失败原因和未完成的验证覆盖', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: {
+        status: 'failed',
+        error_message: '远程执行器启动失败',
+        coverage: { verification_status: 'partial', reason: '没有发起网络请求' },
+      },
+      stats: {}, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const status = wrapper.get('[data-testid="report-execution-status"]')
+    expect(status.text()).toContain('执行失败')
+    expect(status.text()).toContain('远程执行器启动失败')
+    expect(status.text()).toContain('部分完成')
+    expect(status.text()).toContain('没有发起网络请求')
+    wrapper.unmount()
+  })
+
   it('常规代码报告显式区分待核实问题与已确认漏洞', async () => {
     reviewApi.getTaskIssues.mockResolvedValueOnce({
       items: [{ ...issue, human_review_status: 'pending', evidence_quality: 'unsupported' }],
@@ -261,6 +281,26 @@ describe('ReportDetail 报告口径', () => {
     expect(wrapper.text()).not.toContain('生成 PDF')
     expect(wrapper.text()).not.toContain('生成 Word')
     expect(wrapper.text()).not.toContain('预览 HTML')
+    wrapper.unmount()
+  })
+
+  it('失败报告详情显示真实终态、错误原因与覆盖范围', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '评估项目' },
+      task: {
+        task_name: '远程网站评估', review_type: 'remote_pentest', status: 'failed',
+        error_message: '后台执行器启动失败；未发出网络请求。',
+        coverage: { coverage_status: 'not_started', unscanned: ['根路径安全响应头检查'] },
+      },
+      stats: { total_issues: 0 }, summary: '报告已保存，未发出网络请求。', files: [], rules_snapshot: [],
+      source: { type: 'remote_pentest' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const execution = wrapper.get('[data-testid="report-execution-status"]')
+    expect(execution.text()).toContain('执行失败')
+    expect(execution.text()).toContain('未发出网络请求')
+    expect(execution.text()).toContain('根路径安全响应头检查')
     wrapper.unmount()
   })
 

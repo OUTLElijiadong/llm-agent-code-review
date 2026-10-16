@@ -70,7 +70,7 @@ describe('报告卡片列表', () => {
     const text = card.text()
     expect(text).toContain('渗透报告')
     expect(text).toContain('渗透测试')
-    expect(text).toContain('通过')
+    expect(text).toContain('已完成')
     expect(text).toContain('领域项目')
     expect(text).toContain('问题 3')
     expect(text).toContain('72')
@@ -95,7 +95,7 @@ describe('报告卡片列表', () => {
     await flushPromises()
 
     const card = wrapper.find('.report-card')
-    expect(card.text()).toContain('基础检查完成')
+    expect(card.text()).toContain('验证未完成')
     expect(card.text()).toContain('验证范围不完整')
     expect(card.text()).toContain('记录分数')
     expect(card.text()).toContain('100')
@@ -161,6 +161,25 @@ describe('报告卡片列表', () => {
     const card = wrapper.find('.report-card')
     expect(card.text()).toContain('未通过')
     expect(card.text()).not.toContain('验证未完成')
+  })
+
+  it.each([
+    { status: 'failed', label: '执行失败' },
+    { status: 'cancelled', label: '已取消' },
+    { status: 'expired', label: '授权已过期' },
+    { status: 'stopped', label: '已停止' },
+  ])('$status 状态明确显示执行终态和失败原因', async ({ status, label }) => {
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, status, error_message: '报告未覆盖：远程响应超时' }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain(label)
+    expect(card.text()).toContain('报告未覆盖：远程响应超时')
+    expect(card.text()).not.toContain('通过')
   })
 
   it('执行结果缺失时显示结果未知，不推断成断言失败', async () => {

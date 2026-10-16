@@ -222,6 +222,7 @@ def get_summary(db: Session, user: User) -> dict:
         .filter(
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
+            task_metrics_access_filter(db, user),
         )
         .scalar()
         or 0
@@ -255,6 +256,7 @@ def get_summary(db: Session, user: User) -> dict:
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
             Project.status != "deleted",
+            task_metrics_access_filter(db, user),
         )
         .order_by(ReviewTask.create_time.desc())
         .limit(5)

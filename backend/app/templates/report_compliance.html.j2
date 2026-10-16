@@ -36,7 +36,10 @@
     .score-warn { background: #f59e0b; }
     .score-risk { background: #ea580c; }
     .score-bad { background: #ef4444; }
-    .summary-box { background: #f5f3ff; border: 1px solid #ddd6fe; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    .summary-box { background: #f5f3ff; border: 1px solid #ddd6fe; padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+    .summary-box > :first-child { margin-top: 0; }
+    .summary-box > :last-child { margin-bottom: 0; }
+    .summary-box pre { overflow-x: auto; padding: 10px; border-radius: 4px; background: #f8fafc; }
     .standards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 14px 0; }
     .standard-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; background: #fafbfc; }
     .standard-card h3 { margin: 0 0 6px 0; color: #4338ca; }
@@ -134,7 +137,7 @@
 
     {% if summary %}
     <h2>审查摘要</h2>
-    <div class="summary-box">{{ summary }}</div>
+    <div class="summary-box">{{ summary_html | safe }}</div>
     {% endif %}
 
     {% if evidence and evidence.decompilation %}
@@ -312,9 +315,9 @@
       </div>
       {% endif %}
       <div class="field"><span class="field-label">处理状态:</span>{{ issue.status or "-" }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
-      <div class="field"><span class="field-label">问题描述:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.description or "-" }}</div></div>
+      <div class="field"><span class="field-label">问题描述:</span><div style="margin-top:4px;">{{ issue.description_html | safe }}</div></div>
       {% if issue.evidence %}<div class="field"><span class="field-label">证据:</span><pre><code>{{ issue.evidence }}</code></pre></div>{% endif %}
-      {% if issue.exploit_scenario %}<div class="field"><span class="field-label">攻击场景:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.exploit_scenario }}</div></div>{% endif %}
+      {% if issue.exploit_scenario %}<div class="field"><span class="field-label">攻击场景:</span><div style="margin-top:4px;">{{ issue.exploit_scenario_html | safe }}</div></div>{% endif %}
       {% if issue.compliance_mapping %}
       <div class="field">
         <span class="field-label">合规映射:</span>
@@ -326,10 +329,10 @@
       </div>
       {% endif %}
       {% if issue.suggestion %}
-      <div class="field"><span class="field-label">修复建议:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.suggestion }}</div></div>
+      <div class="field"><span class="field-label">修复建议:</span><div style="margin-top:4px;">{{ issue.suggestion_html | safe }}</div></div>
       {% endif %}
       {% if issue.remediation %}
-      <div class="field"><span class="field-label">详细修复方案:</span><div style="margin-top:4px;white-space:pre-wrap;">{{ issue.remediation }}</div></div>
+      <div class="field"><span class="field-label">详细修复方案:</span><div style="margin-top:4px;">{{ issue.remediation_html | safe }}</div></div>
       {% endif %}
       {% if issue.references_json %}<div class="field"><span class="field-label">参考:</span>{% for ref in issue.references_json %}{% if ref %}<div><a href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a></div>{% endif %}{% endfor %}</div>{% endif %}
     </div>

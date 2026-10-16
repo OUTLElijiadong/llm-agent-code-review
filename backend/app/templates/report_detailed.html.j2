@@ -30,7 +30,11 @@
     .score-warn { background: #f59e0b; }
     .score-risk { background: #ea580c; }
     .score-bad { background: #ef4444; }
-    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+    .summary-box > :first-child { margin-top: 0; }
+    .summary-box > :last-child { margin-bottom: 0; }
+    .summary-box pre { overflow-x: auto; padding: 10px; border-radius: 4px; background: #f8fafc; }
+    .summary-box li { margin: 4px 0; }
     .table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; -webkit-overflow-scrolling: touch; }
     .table-scroll table { min-width: 460px; }
     @media (max-width: 700px) {
@@ -127,7 +131,7 @@
 
     {% if summary %}
     <h2>总体评价</h2>
-    <div class="summary-box">{{ summary }}</div>
+    <div class="summary-box">{{ summary_html | safe }}</div>
     {% endif %}
 
     {% if evidence and evidence.decompilation %}
@@ -205,7 +209,7 @@
 
       <div class="field">
         <span class="field-label">问题描述:</span>
-        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.description or "-" }}</div>
+        <div class="field-value" style="margin-top:4px;">{{ issue.description_html | safe }}</div>
       </div>
 
       {% if issue.evidence %}
@@ -217,14 +221,14 @@
 
       {% if issue.exploit_scenario %}
       <div class="exploit-box">
-        <strong>攻击场景:</strong> {{ issue.exploit_scenario }}
+        <strong>攻击场景:</strong> {{ issue.exploit_scenario_html | safe }}
       </div>
       {% endif %}
 
       {% if issue.suggestion %}
       <div class="field">
         <span class="field-label">修复建议:</span>
-        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.suggestion }}</div>
+        <div class="field-value" style="margin-top:4px;">{{ issue.suggestion_html | safe }}</div>
       </div>
       {% endif %}
 
@@ -238,7 +242,7 @@
       {% if issue.remediation %}
       <div class="field">
         <span class="field-label">详细修复方案:</span>
-        <div class="field-value" style="margin-top:4px;white-space:pre-wrap;">{{ issue.remediation }}</div>
+        <div class="field-value" style="margin-top:4px;">{{ issue.remediation_html | safe }}</div>
       </div>
       {% endif %}
 

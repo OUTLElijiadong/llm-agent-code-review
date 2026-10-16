@@ -35,6 +35,11 @@
     <el-alert v-if="loadError" data-testid="report-load-error" class="no-print" :title="loadError" type="warning" :closable="false" show-icon>
       <el-button :loading="loading" @click="loadReport">重试读取报告</el-button>
     </el-alert>
+    <section v-if="report" class="card report-execution-status" data-testid="report-execution-status" role="note">
+      <strong>执行状态：{{ reportExecutionStatusLabel }}</strong>
+      <p v-if="reportExecutionError">执行原因：{{ reportExecutionError }}</p>
+      <p>验证覆盖：{{ reportCoverageLabel }}<span v-if="reportCoverageReason">；{{ reportCoverageReason }}</span></p>
+    </section>
     <!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ -->
     <section v-if="report" class="report-toolbar no-print">
       <div class="toolbar-left">
@@ -669,6 +674,44 @@ const sandboxCoverageLabel = computed(() => {
   if (sandboxCoverageStatus.value === 'failed') return '验证未通过'
   return '验证范围未知'
 })
+const reportExecutionStatusLabel = computed(() => {
+  const status = String(report.value?.task?.status || '').toLowerCase()
+  const labels: Record<string, string> = {
+    success: '执行完成',
+    failed: '执行失败',
+    cancelled: '已取消',
+    expired: '授权已过期',
+    stopped: '已停止',
+    running: '执行中',
+    pending: '等待执行',
+  }
+  return labels[status] || '状态未知'
+})
+const reportExecutionError = computed(() => String(report.value?.task?.error_message || '').trim())
+const reportCoverageLabel = computed(() => {
+  const status = String((report.value?.task?.coverage as TaskCoverageOut | undefined)?.verification_status || '')
+  const labels: Record<string, string> = {
+    complete: '记录范围内已完成',
+    partial: '部分完成',
+    failed: '验证未通过',
+    unknown: '未知',
+  }
+  return labels[status] || '未记录'
+})
+const reportCoverageReason = computed(() => {
+  const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
+  const parts = [String(coverage?.reason || '').trim()]
+  for (const [label, value] of [
+    ['未扫描', coverage?.unscanned],
+    ['跳过', coverage?.skipped],
+    ['排除', coverage?.excluded],
+    ['错误', coverage?.errors],
+  ] as const) {
+    const entries = Array.isArray(value) ? value.map(item => String(item).trim()).filter(Boolean) : []
+    if (entries.length) parts.push(`${label}：${entries.join('、')}`)
+  }
+  return parts.filter(Boolean).join('；')
+})
 
 // AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
 const summaryText = computed(() => stripMarkdown((report.value?.summary as string) ?? ''))
@@ -1259,6 +1302,17 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: () =>
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.report-execution-status {
+  border-left: 4px solid var(--color-warning, #d99b22);
+}
+
+.report-execution-status p {
+  margin: 6px 0 0;
+  color: var(--gray-600, #586174);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .report-coverage-note,

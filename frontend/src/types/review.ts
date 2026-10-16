@@ -151,6 +151,10 @@ export interface TaskCoverageOut {
   completed_chunks?: number | null
   total_chunks?: number | null
   error?: string | null
+  unscanned?: string[]
+  skipped?: string[]
+  excluded?: string[]
+  errors?: string[]
 }
 
 export interface TaskDetailOut {
