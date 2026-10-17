@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
-from scripts.reconcile_confirmed_cleanup_report import repair_rejection_reason
+SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "reconcile_confirmed_cleanup_report.py"
+SPEC = importlib.util.spec_from_file_location("reconcile_confirmed_cleanup_report_test", SCRIPT_PATH)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+repair_rejection_reason = MODULE.repair_rejection_reason
 
 
 def _candidate() -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace, SimpleNamespace]:
