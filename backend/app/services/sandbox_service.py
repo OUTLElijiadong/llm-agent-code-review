@@ -6147,6 +6147,13 @@ def _merge_terminal_report_conclusion(
     result["passed"] = bool(result.get("passed")) and status in {"succeeded", "success"}
     result["evidence"] = evidence
     result["coverage"] = coverage
+    cleanup_confirmed = (
+        result.get("cleanup_confirmed") is True
+        or evidence.get("cleanup_confirmed") is True
+        or "Worker 已确认资源终止" in str(environment_error or "")
+    )
+    if cleanup_confirmed and "资源回收待重试" in str(result.get("summary") or ""):
+        result["summary"] = "沙箱执行失败，Worker 已确认资源终止"
     if environment_error:
         result.setdefault("error", environment_error)
 

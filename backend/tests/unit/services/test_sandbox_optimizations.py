@@ -472,6 +472,13 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
         source_sha256="a" * 64,
         resource_policy_json="{}",
         agent_config_json="{}",
+        result_json=json.dumps({
+            "passed": False,
+            "summary": "沙箱执行失败，Worker 资源回收待重试",
+            "execution_status": "failed",
+            "cleanup_error": "Worker 404",
+            "coverage": {"coverage_status": "partial"},
+        }),
         expires_at=now + timedelta(hours=1),
         started_at=now - timedelta(seconds=1200),
         create_time=now - timedelta(seconds=1200),
@@ -527,6 +534,8 @@ def test_heartbeat_recovery_creates_sandbox_stuck_alert(db, monkeypatch) -> None
     assert report_task.status == "failed"
     assert report_task.coverage["execution_status"] == "failed"
     assert "心跳超时" in report.content_json["report_md"]
+    assert "Worker 已确认资源终止" in report.content_json["report_md"]
+    assert "Worker 资源回收待重试" not in report.content_json["report_md"]
     assert report.content_json["coverage"]["unscanned"]
 
 

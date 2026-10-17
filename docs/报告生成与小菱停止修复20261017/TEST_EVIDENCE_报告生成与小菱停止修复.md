@@ -3,9 +3,23 @@
 日期：2026-10-17
 工作树：`/Users/li/.codex/worktrees/prism-v4-0-109-release/基于大模型智能体的代码审查平台`
 分支：`codex/prism-v4-1-2-release`
-版本：`4.1.2`
+版本：`4.1.4`
 本轮最初增量开始时 HEAD：`ca009442d8d103403e8bb3919e600c234fdf74bb`
-候选 SHA：`3203ba31d029235aaa05f03cdf80a3d5422f03b7`。该 SHA 的业务回归/发布检查工作流 [39018904067](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39018904067) 与 CodeQL [39018904018](https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39018904018) 均成功。独立审查之后发现并修复了来源权限与聚合摘要不一致的问题；当前未提交工作树增量尚不包含在上述 CI 中，需提交并重跑最终 SHA 检查。
+最终候选 SHA 将在提交后补记。先前候选 `3203ba31d029235aaa05f03cdf80a3d5422f03b7` 的 CI/CodeQL 通过，但不包含后续来源权限修复、4.1.3 报告格式收尾或本次 4.1.4 历史摘要修复，因此不作为本次代码的 CI 证据。
+
+## 4.1.4 本地最终增量
+
+| 检查 | 命令/方式 | 结果 |
+|---|---|---|
+| 后端全量回归 | `backend/.venv/bin/pytest -q backend/tests --no-cov` | 7,332 passed、6 skipped，1467 warnings，488.99 秒，退出码 0 |
+| 维护脚本与摘要修复定向测试 | `backend/.venv/bin/pytest -q --no-cov backend/tests/unit/scripts/test_reconcile_confirmed_cleanup_report.py backend/tests/unit/services/test_sandbox_optimizations.py::test_heartbeat_recovery_creates_sandbox_stuck_alert backend/tests/unit/services/test_sandbox_optimizations.py::test_heartbeat_recovery_keeps_environment_stopping_when_worker_cleanup_fails` | 4 passed；新增修复先复现摘要冲突，再确认清理完成的终态摘要已纠正 |
+| 前端完整测试 | `npm run test`（`frontend/`） | 151 个测试文件、2,010 项通过；jsdom 有预期的导航未实现提示，不影响退出码 0 |
+| 前端静态检查与构建 | `npm run lint`、`npm run build` | ESLint 退出码 0；Vite 转换 3,760 个模块并构建成功 |
+| 部署脚本故障注入回归 | `bash deploy/tests/test_scripts.sh` | release binding 33 项，发布/回滚故障注入矩阵通过，退出码 0 |
+| Python 静态检查 | `backend/.venv/bin/ruff check`（改动服务、脚本与测试） | All checks passed |
+| 补丁检查 | `git diff --check` | 退出码 0 |
+
+GitHub 全量 CI、CodeQL 和生产部署状态将在最终 SHA 固定并完成后记录于本节。
 
 ## 本轮增量回归
 
