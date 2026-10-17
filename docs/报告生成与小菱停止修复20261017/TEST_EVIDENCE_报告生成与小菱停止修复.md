@@ -5,7 +5,8 @@
 分支：`codex/prism-v4-1-2-release`
 版本：`4.1.2`
 本轮增量开始时 HEAD：`6b8be74d8b56a0390884d73cc354f5d6c5199389`
-本轮候选提交 SHA：待提交后填写；该 SHA 的 CI 待触发。
+代码候选 SHA：`dff10078f7bf5ae9b5687c3821888cb217c07456`（分支 `codex/prism-v4-1-2-release`）。
+GitHub 完整 CI：业务回归/发布检查 39016007778 成功；CodeQL 39016007781 成功。
 
 ## 本轮增量回归
 
@@ -18,6 +19,10 @@
 | 修改过的 Python 文件 | `backend/.venv/bin/ruff check backend/app/services/pentest_service.py backend/app/services/sandbox_service.py backend/tests/unit/test_pentest_service.py backend/tests/unit/services/test_sandbox_report_publish.py backend/tests/unit/services/test_sandbox_multi_agent_review.py` | All checks passed |
 | 差异空白检查 | `git diff --check` | 退出码 0 |
 | 部署脚本回归 | `bash deploy/tests/test_scripts.sh` | Release binding 33 passed、部署故障注入矩阵全部通过、部署 shell 与运维测试通过，退出码 0 |
+| 候选 SHA 全量 CI：后端 | GitHub Actions 工作流 39016007778 | 7,327 passed，5 warnings，741.24 秒；覆盖率 84%；Ruff、字节码编译、依赖漏洞审计通过 |
+| 候选 SHA 全量 CI：前端 | GitHub Actions 工作流 39016007778 | 完整前端测试、ESLint、`vue-tsc` 和 Vite 生产构建成功 |
+| 候选 SHA 发布与执行器门禁 | GitHub Actions 工作流 39016007778 | 部署、执行器与故障注入回归成功 |
+| 候选 SHA CodeQL | GitHub Actions 工作流 39016007781 | Python 与 JavaScript/TypeScript 扫描均成功 |
 
 新增的沙箱回归先复现再修复：`test_repeated_stop_preserves_existing_full_sandbox_report` 在修复前稳定失败，证明重复停止会把完整 AI 报告降级成简化报告；当前实现只在已终态重复停止入口检查已有报告，报告存在时不重写。`test_new_terminal_failure_evidence_refreshes_existing_sandbox_report` 验证浏览器黑盒追加失败证据后仍会刷新任务状态和报告证据，并逐条检查多个旧附件与报告中心正文的 UTF-8 字节、大小及 SHA-256 一致；成功终态也校验附件与报告正文完全一致。`test_terminal_incomplete_ai_state_replaces_stale_complete_report` 覆盖数据库最新状态为 AI 未完成、旧报告却标记完成时的正文、元数据、任务摘要和附件同步。`test_unpersisted_complete_ai_report_is_replaced_by_persisted_deterministic_report` 覆盖 AI 报告首次入库失败后改用确定性报告并再次持久化，避免把用户打不开的 AI 报告标为完成。终态报告任务写入受环境行锁保护，任务、报告和现有附件使用锁定当前读，并在同一事务提交；测试库是 SQLite，仍需 MySQL 并发环境验证。
 
@@ -31,4 +36,4 @@
 - 前端：151 个测试文件、2002 项通过；ESLint、`vue-tsc` 与 Vite 构建通过。
 - 部署脚本回归此前有通过记录；本轮 `bash deploy/tests/test_scripts.sh` 复测也通过，包含 33 项 release binding 与部署故障注入矩阵。
 
-本轮最终候选仍需提交、固定 SHA，并等待该 SHA 的全量业务回归、发布检查和 CodeQL CI 成功。以上本地结果不构成生产部署或真实账号验收。
+代码候选 SHA 已固定并通过上述完整 CI。生产部署与真实账号验收尚未完成：线上 SSH 公钥认证拒绝，不能据此宣称正式上线。
