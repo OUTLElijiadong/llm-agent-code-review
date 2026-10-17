@@ -241,6 +241,42 @@ async def test_task_result_run_is_identified_as_automatic_roundtable_continuatio
     assert "task.result 只用于汇报" in start.error
 
 
+@pytest.mark.asyncio
+async def test_roundtable_tool_launches_without_waiting_for_panel_websocket(
+    db,
+    admin_user,
+    monkeypatch,
+) -> None:
+    """小菱工具启动后立即领取 pending 并启动后台编排，不依赖面板 WebSocket。"""
+    pending = object()
+    launches: list[object] = []
+    monkeypatch.setattr(service_module, "_is_automatic_task_result_for_roundtable", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "app.api.v1.discussion.start_discussion",
+        lambda **_kwargs: SimpleNamespace(data={
+            "session_id": "discussion-from-agent",
+            "ws_url": "/api/ws/discuss/discussion-from-agent",
+            "agents": [{"id": "reviewer"}],
+            "file_name": "service.py",
+        }),
+    )
+    monkeypatch.setattr("app.api.v1.ws_discussion.take_pending", lambda session_id: pending)
+    monkeypatch.setattr("app.api.v1.ws_discussion.launch_pending_discussion", launches.append)
+
+    executor = _executor(db, admin_user, "run_start_roundtable_without_panel")
+    result = await executor._start_roundtable_discussion(ToolCall(
+        "start-without-panel",
+        "start_roundtable_discussion",
+        {"project_id": 10, "file_id": 20, "review_type": "full"},
+        "{}",
+    ))
+
+    assert result.status == "success"
+    assert result.output["started_by"] == "user_agent"
+    assert result.output["session_id"] == "discussion-from-agent"
+    assert launches == [pending]
+
+
 @pytest.fixture(autouse=True)
 def lightweight_orchestrator(monkeypatch):
     monkeypatch.setattr(

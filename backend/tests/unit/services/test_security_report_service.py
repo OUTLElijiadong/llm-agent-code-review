@@ -11,7 +11,7 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.services import report_service
-from app.services.security_report_service import persist_security_report
+from app.services.security_report_service import infer_coverage_status, persist_security_report
 
 
 def _grant_security_report_view(db, user):
@@ -139,6 +139,46 @@ def test_failed_security_scan_still_persists_report_with_unknown_coverage(db):
     assert item["score"] is None
     assert "未评估" in report.content_json["report_md"]
     assert report.score == 0
+
+
+def test_successful_security_scan_without_coverage_evidence_is_unknown():
+    assert infer_coverage_status("success", {}) == "unknown"
+    assert infer_coverage_status("success", {"file_count": 12}) == "unknown"
+    assert infer_coverage_status(
+        "success", {"scanned_file_count": 12, "total_file_count": 12}
+    ) == "complete"
+    assert infer_coverage_status(
+        "success", {"coverage_status": "complete", "scanned_file_count": 12, "total_file_count": 13}
+    ) == "partial"
+
+
+def test_successful_security_scan_without_coverage_evidence_reports_unknown_scope(db):
+    owner = User(username="security_report_unknown_scope", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    project = Project(user_id=owner.id, project_name="未知覆盖范围", language="python", status="active")
+    db.add(project)
+    db.flush()
+
+    task_id = persist_security_report(
+        db,
+        owner=owner,
+        project_id=project.id,
+        report_kind="security_scan",
+        task_name="缺少覆盖证据的扫描",
+        execution_status="success",
+        result={"summary": "扫描调用返回成功", "findings": [], "file_count": 12},
+        coverage={},
+    )
+
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    assert task.coverage["verification_status"] == "unknown"
+    assert task.coverage["unscanned"] == ["存在未完成或未能确认的扫描范围"]
+    assert report.content_json["coverage"]["coverage_status"] == "unknown"
+    assert "覆盖范围：未知" in report.content_json["report_md"]
+    assert "存在未完成或未能确认的扫描范围" in report.content_json["report_md"]
 
 
 def test_security_report_removes_ai_markdown_and_rejects_non_finite_scores(db):

@@ -28,6 +28,11 @@ flowchart TD
 - `agent_team_service`：按父运行取消子团队，并保留审计事件。
 - `AgentChatDrawer`：忽略已取消运行的迟到回执，避免触发自动恢复。
 - `security_report_service`：将安全扫描和全链路审计的结构化结果写入现有报告表，记录 `execution_status`、`coverage_status` 和 `score_available`。
+- 覆盖归一化：只在上游明确声明完整、完成标志为真、覆盖比例达到 100%，或已扫描数与目标数一致时标记完整；缺少证据标记未知，已知缺口/计数冲突标记部分。
+- 渗透终态：失败、取消、过期不根据空发现计算分数；持久层非空整数列使用中性值，报告 JSON 和 `coverage.score_available=false` 明确表达未评估，并阻止列表和详情展示假分数/风险等级。
+- 远程评估取消：worker 尚未启动时，在同一事务内把取消状态、阶段跳过记录和部分报告一起持久化；worker 已运行时由现有终态收尾写报告。
+- 漏洞来源展示仅保留 CNVD/CNNVD，来源匹配必须依赖真实官方编号或详情链接；当前没有官方记录同步/匹配器，未命中项如实显示 OWASP 兜底。
+- 小菱工具启动圆桌后立即领取 pending 并启动后台任务；面板/WebSocket 用于呈现和恢复会话，不是启动依赖。供应商同步请求运行在线程池中，停止不能强杀其 HTTP 请求。
 - `review_service`、`project_service`、`report_service`：统一报告任务的账号可见性，并在详情、项目摘要和报告列表过滤字段。
 - `ReportDetail`、`SecurityScanModal`：按真实执行状态呈现报告，清理 Markdown 装饰符，不丢失证据代码。
 - 远程网站评估沿用 `remote_pentest` 自己的任务、归属校验与领域报告导出，不通过标准审查空报告兜底。

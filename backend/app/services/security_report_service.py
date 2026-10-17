@@ -69,10 +69,12 @@ def _safe_confidence(value: Any) -> float | None:
 
 def infer_coverage_status(execution_status: str, coverage: dict) -> str:
     stated = str(coverage.get("verification_status") or coverage.get("coverage_status") or "").lower()
-    if execution_status == "failed":
+    if execution_status == "failed" or stated == "failed":
         return "failed"
-    if execution_status == "partial" or stated in {"partial", "failed", "unknown"}:
-        return "partial" if stated != "failed" else "failed"
+    if execution_status == "partial" or stated == "partial":
+        return "partial"
+    if stated == "unknown":
+        return "unknown"
 
     # A successful HTTP/Agent result does not imply full scope coverage. Preserve
     # explicit omissions, truncation, bounded triage and failed sub-stages.
@@ -114,7 +116,48 @@ def infer_coverage_status(execution_status: str, coverage: dict) -> str:
         value = coverage.get(field)
         if isinstance(value, list) and value:
             return "partial"
-    return "complete" if execution_status == "success" and stated != "unknown" else "unknown"
+
+    # A success status only proves that the request returned. Require affirmative
+    # scope evidence before claiming that the full audit completed.
+    count_pairs = (
+        ("scanned_file_count", "total_file_count"),
+        ("scanned_project_count", "project_count"),
+    )
+    for scanned_key, total_key in count_pairs:
+        scanned = coverage.get(scanned_key)
+        total = coverage.get(total_key)
+        if (
+            isinstance(scanned, int) and not isinstance(scanned, bool)
+            and isinstance(total, int) and not isinstance(total, bool)
+            and total >= 0 and scanned != total
+        ):
+            return "partial"
+    if stated in {"complete", "completed", "verified"}:
+        return "complete"
+    completion_flags = (
+        "static_complete",
+        "semantic_complete",
+        "semantic_execution_complete",
+        "audit_complete",
+        "scan_complete",
+        "aggregate_inputs_complete",
+    )
+    if any(coverage.get(field) is True for field in completion_flags):
+        return "complete"
+    for scanned_key, total_key in count_pairs:
+        scanned = coverage.get(scanned_key)
+        total = coverage.get(total_key)
+        if (
+            isinstance(scanned, int) and not isinstance(scanned, bool)
+            and isinstance(total, int) and not isinstance(total, bool)
+            and total > 0 and scanned == total
+        ):
+            return "complete"
+    for field in ("coverage_ratio", "semantic_char_coverage_ratio", "semantic_archive_coverage_ratio"):
+        value = coverage.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 1:
+            return "complete"
+    return "unknown"
 
 
 def _report_markdown(
@@ -130,6 +173,8 @@ def _report_markdown(
     error_message: str,
 ) -> str:
     status_labels = {"success": "执行完成", "partial": "部分完成", "failed": "执行失败"}
+    coverage_status = str(coverage.get("verification_status") or coverage.get("coverage_status") or "unknown")
+    coverage_labels = {"complete": "完整", "partial": "部分", "failed": "未完成", "unknown": "未知"}
     lines = [
         "棱镜 Prism 安全审计报告",
         "",
@@ -145,6 +190,7 @@ def _report_markdown(
         summary or "服务未返回审计摘要；本报告仅保留已取得的结果与覆盖记录。",
         "",
         "验证覆盖",
+        f"覆盖范围：{coverage_labels.get(coverage_status, '未知')}",
     ]
     for key, label in (
         ("requested_mode", "请求模式"),

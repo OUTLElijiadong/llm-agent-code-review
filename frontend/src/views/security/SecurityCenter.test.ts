@@ -121,6 +121,7 @@ describe('国内参考规范展示边界', () => {
 
 describe('安全分类来源标识', () => {
   it('先列 CNVD 与 CNNVD，并分别保留各自官方入口', () => {
+    expect(CN_VULN_PORTALS.map(portal => portal.name)).toEqual(['CNVD', 'CNNVD'])
     expect(CN_VULN_PORTALS.slice(0, 2).map(portal => portal.name)).toEqual(['CNVD', 'CNNVD'])
     expect(CN_VULN_PORTALS.find(portal => portal.name === 'CNVD')?.url).toBe('https://www.cnvd.org.cn/')
     expect(CN_VULN_PORTALS.find(portal => portal.name === 'CNNVD')?.url).toBe('https://www.cnnvd.org.cn/')

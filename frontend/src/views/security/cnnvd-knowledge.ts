@@ -29,13 +29,6 @@ export const CN_VULN_PORTALS: CnPortal[] = [
     operator: '中国信息安全测评中心',
     note: '独立的漏洞情报来源。仅在记录包含 CNNVD 官方编号或官方详情链接时，才能标记为 CNNVD 命中。',
   },
-  {
-    name: 'NVDB',
-    fullName: '网络安全威胁和漏洞信息共享平台',
-    url: 'https://www.miit.gov.cn/',
-    operator: '工业和信息化部',
-    note: '电信和互联网行业漏洞信息汇聚共享平台。',
-  },
 ]
 
 /** 相关参考规范；展示引用不代表平台认证或完整条款覆盖。 */
