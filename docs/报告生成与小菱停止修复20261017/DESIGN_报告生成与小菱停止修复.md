@@ -34,6 +34,7 @@ flowchart TD
 - 漏洞来源展示仅保留 CNVD/CNNVD，来源匹配必须依赖真实官方编号或详情链接；当前没有官方记录同步/匹配器，未命中项如实显示 OWASP 兜底。
 - 小菱工具启动圆桌后立即领取 pending 并启动后台任务；面板/WebSocket 用于呈现和恢复会话，不是启动依赖。供应商同步请求运行在线程池中，停止不能强杀其 HTTP 请求。
 - `review_service`、`project_service`、`report_service`：统一报告任务的账号可见性，并在详情、项目摘要和报告列表过滤字段。
+- 报告来源权限：以 `report:view` 与来源权限共同生成可见报告类型集合；任务元数据过滤、聚合指标、项目近期任务、仪表盘摘要与报告详情共用此策略。安全扫描/全链路要求 `security:view`，渗透报告要求 `pentest:view`，沙箱沿用 `report:view`；无对应权限时在分页前排除任务卡片和统计。
 - `ReportDetail`、`SecurityScanModal`：按真实执行状态呈现报告，清理 Markdown 装饰符，不丢失证据代码。
 - 远程网站评估沿用 `remote_pentest` 自己的任务、归属校验与领域报告导出，不通过标准审查空报告兜底。
 

@@ -106,18 +106,35 @@ def sandbox_verification_status(task: ReviewTask | None) -> str:
     return status if status in {"complete", "partial", "failed"} else "unknown"
 
 
-def _has_source_report_permission(db: Session, user: User, review_type: str | None) -> bool:
+_REPORT_SOURCE_PERMISSION_BY_TYPE = {
+    "security_scan": PermissionCode.SECURITY_VIEW,
+    "fullchain_audit": PermissionCode.SECURITY_VIEW,
+    "pentest": PermissionCode.PENTEST_VIEW,
+}
+_REPORT_BACKED_REVIEW_TYPES = frozenset({
+    "sandbox_test", "pentest", "security_scan", "fullchain_audit",
+})
+
+
+def has_source_report_permission(db: Session, user: User, review_type: str | None) -> bool:
     """报告来源权限与报告列表、详情和导出共用；管理员由 RBAC 统一绕过。"""
-    required = {
-        "security_scan": PermissionCode.SECURITY_VIEW,
-        "fullchain_audit": PermissionCode.SECURITY_VIEW,
-        "pentest": PermissionCode.PENTEST_VIEW,
-    }.get(str(review_type or ""))
+    required = _REPORT_SOURCE_PERMISSION_BY_TYPE.get(str(review_type or ""))
     return required is None or rbac_service.check_permission(db, int(user.id), required)
 
 
+def visible_report_review_types(db: Session, user: User) -> frozenset[str]:
+    """返回同时满足通用报告权限和来源权限的报告任务类型。"""
+    if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
+        return frozenset()
+    return frozenset(
+        review_type
+        for review_type in _REPORT_BACKED_REVIEW_TYPES
+        if has_source_report_permission(db, user, review_type)
+    )
+
+
 def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[bool]:
-    """私域摘要查询沿用报告可用性、查看权限与发起人/管理员范围。
+    """私域摘要查询沿用报告可用性、通用/来源权限与发起人/管理员范围。
 
     项目可见性仍由调用者限定；普通代码审查指标保留项目成员共享。
     ``None`` 仅供已有内部全局统计调用，HTTP 必须传入当前认证账号。
@@ -129,10 +146,11 @@ def task_metrics_access_filter(db: Session, user: User | None) -> ColumnElement[
         ReviewTask.review_type.notin_(private_report_types),
         ReviewTask.review_type.is_(None),
     )
-    if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
+    visible_types = visible_report_review_types(db, user)
+    if not visible_types:
         return public_metrics
     available_domain_report = and_(
-        ReviewTask.review_type.in_(private_report_types),
+        ReviewTask.review_type.in_(visible_types),
         ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES),
     )
     if not rbac_service.is_admin_user(db, int(user.id)):
@@ -147,7 +165,7 @@ def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTas
         raise NotFoundError("报告不存在", code=40400)
     if task.user_id != user.id and not rbac_service.is_admin_user(db, int(user.id)):
         raise NotFoundError("报告不存在", code=40400)
-    if not _has_source_report_permission(db, user, task.review_type):
+    if not has_source_report_permission(db, user, task.review_type):
         raise NotFoundError("报告不存在", code=40400)
     try:
         require_project_access(db, task.project_id, user, need_write=False)

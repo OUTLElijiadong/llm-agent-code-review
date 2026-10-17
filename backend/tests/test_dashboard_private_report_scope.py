@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.v1 import dashboard, reports, security
 from app.core.database import Base, get_db
 from app.core.error_handlers import register_handlers
+from app.core.exceptions import NotFoundError
 from app.core.security import create_access_token
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -20,7 +21,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.user import User
-from app.services import dashboard_service, report_service, review_service
+from app.services import dashboard_service, project_service, report_service, review_service
 
 
 @pytest.fixture
@@ -31,14 +32,15 @@ def private_dashboard():
     users = {
         name: User(username=f"dashboard-scope-{name}", password="local-fixture", role=role, status=1)
         for name, role in (("owner", "user"), ("author", "reviewer"), ("member", "reviewer"),
-                           ("outsider", "reviewer"), ("admin", "admin"))
+                           ("outsider", "reviewer"), ("source_limited", "reviewer"),
+                           ("admin", "admin"))
     }
     roles = {code: Role(name=code, code=code, status="active", is_builtin=1)
              for code in ("user", "reviewer", "admin")}
     db.add_all([*users.values(), *roles.values()])
     db.flush()
     report_grant = None
-    for code in ("review:view", "security:view", "report:view", "report:export:json"):
+    for code in ("review:view", "security:view", "pentest:view", "report:view", "report:export:json"):
         permission = Permission(code=code, name=code, module=code.split(":")[0], type="api")
         db.add(permission)
         db.flush()
@@ -54,7 +56,7 @@ def private_dashboard():
     db.add(project)
     db.flush()
     memberships = {}
-    for name in ("author", "member"):
+    for name in ("author", "member", "source_limited"):
         membership = ProjectMember(project_id=project.id, user_id=users[name].id, role_in_project="reviewer")
         db.add(membership)
         memberships[name] = membership
@@ -170,6 +172,48 @@ def test_private_author_and_admin_keep_authorized_metrics(private_dashboard, sou
     safety = _get(private_dashboard, actor, "/api/security/dashboard-summary")
     assert safety["avg_risk_score"] == 14
     assert sum(item["total_issues"] for item in safety["source_summaries"]) == 4
+
+
+@pytest.mark.parametrize("source", ["pentest", "security_scan", "fullchain_audit"])
+def test_report_reader_without_source_permission_cannot_read_report_or_aggregate_card(
+    private_dashboard, source, monkeypatch,
+):
+    task = _domain(private_dashboard, source)
+    scope = private_dashboard
+    db = scope["db"]
+    user = scope["users"]["source_limited"]
+    original_check_permission = report_service.rbac_service.check_permission
+    source_permission = "pentest:view" if source == "pentest" else "security:view"
+
+    def source_scoped_permission_check(db_session, user_id, permission_code):
+        if int(user_id) == int(user.id) and permission_code == source_permission:
+            return False
+        return original_check_permission(db_session, user_id, permission_code)
+
+    monkeypatch.setattr(report_service.rbac_service, "check_permission", source_scoped_permission_check)
+
+    assert source not in report_service.visible_report_review_types(db, user)
+    assert not review_service.can_view_task_metadata(db, user, task)
+    assert not review_service.can_view_task_metrics(db, user, task)
+    assert db.query(ReviewTask.id).filter(
+        ReviewTask.id == task.id,
+        review_service.task_metadata_access_filter(db, user),
+    ).count() == 0
+    assert db.query(ReviewTask.id).filter(
+        ReviewTask.id == task.id,
+        report_service.task_metrics_access_filter(db, user),
+    ).count() == 0
+
+    report_list = _get(scope, "source_limited", "/api/reports")
+    assert report_list["total"] == 0
+    assert all(item["id"] != task.id for item in _get(
+        scope, "source_limited", "/api/dashboard/summary",
+    )["recent_tasks"])
+    project = project_service.get_project(db, user, scope["project"].id)
+    assert all(item["id"] != task.id for item in project["recent_tasks"])
+
+    with pytest.raises(NotFoundError):
+        report_service.get_readable_report_task(db, user, task.id)
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])

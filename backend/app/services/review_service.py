@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from loguru import logger
-from sqlalchemy import case, func, or_, true
+from sqlalchemy import and_, case, func, or_, true
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentContext, BaseAgent
@@ -2416,31 +2416,42 @@ def can_view_task_metadata(
     *,
     administrator: Optional[bool] = None,
 ) -> bool:
-    """报告型任务的元数据只对发起人和管理员可见。
+    """报告型任务元数据按通用/来源权限及发起人/管理员范围过滤。
 
-    普通代码审查仍由项目成员关系控制；黑白盒与渗透任务不能因共享项目而
-    在其他账号的列表、详情或项目动态中暴露任务标题、状态和时间。安全扫描
-    与全链路审计同样按账号隔离，避免项目成员看到无权读取的报告卡片。
+    普通代码审查仍由项目成员关系控制；报告型任务只有同时具备报告和来源
+    查看权限的发起人/管理员可见。黑白盒、渗透、安全扫描与全链路审计不能
+    通过项目列表或动态绕过对应报告详情的权限。
     """
     if task.review_type not in _REPORT_BACKED_REVIEW_TYPES:
         return True
-    if administrator is None:
-        from app.services import rbac_service
+    from app.services import rbac_service, report_service
 
+    if administrator is None:
         administrator = rbac_service.is_admin_user(db, int(user.id))
+    if task.review_type not in report_service.visible_report_review_types(db, user):
+        return False
     return bool(administrator or int(task.user_id) == int(user.id))
 
 
 def task_metadata_access_filter(db: Session, user: User):
     """SQL 条件版报告任务元数据可见策略，供列表在分页前过滤。"""
-    from app.services import rbac_service
+    from app.services import rbac_service, report_service
 
     if rbac_service.is_admin_user(db, int(user.id)):
         return true()
-    return or_(
+    public_task_metadata = or_(
         ReviewTask.review_type.is_(None),
         ReviewTask.review_type.notin_(_REPORT_BACKED_REVIEW_TYPES),
-        ReviewTask.user_id == user.id,
+    )
+    visible_report_types = report_service.visible_report_review_types(db, user)
+    if not visible_report_types:
+        return public_task_metadata
+    return or_(
+        public_task_metadata,
+        and_(
+            ReviewTask.review_type.in_(visible_report_types),
+            ReviewTask.user_id == user.id,
+        ),
     )
 
 
@@ -2465,6 +2476,7 @@ def _can_view_task_report(
     return bool(
         report_service.is_report_available(task)
         and report_permission
+        and report_service.has_source_report_permission(db, user, task.review_type)
         and (task.user_id == user.id or administrator)
     )
 
