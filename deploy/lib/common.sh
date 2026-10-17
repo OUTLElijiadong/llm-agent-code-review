@@ -410,7 +410,7 @@ validate_database_credentials() {
 # 返回: 配置有效时 0，否则终止脚本。
 validate_compose_environment() {
   local env_file="${DEPLOY_ENV_FILE:-.env}"
-  [[ -f "$env_file" ]] || fatal "缺少 deploy/$env_file，请从 .env.example 创建并填写安全值"
+  [[ -f "$env_file" ]] || fatal "缺少 deploy/${env_file}，请从 .env.example 创建并填写安全值"
   validate_database_credentials "$env_file"
   DEPLOY_ENV_FILE="$env_file" compose --env-file "$env_file" config --quiet \
     || fatal "docker compose 配置解析失败"

@@ -46,6 +46,24 @@ run_app_version_validation() {
   rm -f "$output_file"
 }
 
+# 缺少 dotenv 时，UTF-8 locale 下中文标点不能扩展成未绑定 Bash 变量。
+# 参数: $1 测试根目录。
+# 返回: 得到可读错误时返回 0。
+run_compose_environment_missing_file_locale() {
+  local workspace="$1/missing-env-locale" output_file="$1/missing-env-locale.log"
+  local common_file="$(pwd)/lib/common.sh"
+  mkdir -p "$workspace"
+  if (
+    cd "$workspace" &&
+    LC_ALL=en_US.UTF-8 DEPLOY_ENV_FILE=.missing bash -u -c \
+      'source "$1"; validate_compose_environment' _ "$common_file"
+  ) > "$output_file" 2>&1; then
+    printf '缺少 dotenv 时部署预检未失败关闭\n' >&2
+    exit 1
+  fi
+  assert_contains "$output_file" '缺少 deploy/.missing，请从 .env.example 创建并填写安全值'
+}
+
 # 输出文件 SHA-256，兼容 GNU/Linux 和 macOS。
 # 参数: $1 文件。
 # 返回: 摘要计算成功时返回 0。
@@ -2199,6 +2217,7 @@ PYTHON_BASE_IMAGE='python:3.11-slim' PYTHON_BASE_IMAGE_DIGEST="$digest_placehold
 
 run_database_credential_validation "$test_root"
 run_app_version_validation
+run_compose_environment_missing_file_locale "$test_root"
 run_frontend_tls_asset_validation "$test_root"
 run_checkpoint_reader_probe_tests
 run_release_binding_tests "$test_root"
