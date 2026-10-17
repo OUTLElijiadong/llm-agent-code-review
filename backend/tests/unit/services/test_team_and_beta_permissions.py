@@ -210,8 +210,9 @@ async def test_member_business_tools_blocked_and_unlisted_on_admin_surface(db, u
 
 
 def test_list_agents_hides_governance_contracts_for_user_surface(db, user):
-    """成员面 list_agents 隐藏治理契约(manager/operations/monitor 等), 管理面全量。"""
+    """成员面隐藏治理契约；只有真实管理员可访问管理面 Agent 目录。"""
     from app.services import agent_mesh_service
+    from app.models.user import User
 
     user_items = agent_mesh_service.list_agents(db, user, surface="user")["agents"] \
         if isinstance(agent_mesh_service.list_agents(db, user, surface="user"), dict) \
@@ -223,7 +224,13 @@ def test_list_agents_hides_governance_contracts_for_user_surface(db, user):
     for hidden in ("manager", "operations", "monitor", "orchestrator", "evolution"):
         assert hidden not in codes, f"成员面不应看到 {hidden}"
 
-    admin_payload = agent_mesh_service.list_agents(db, user, surface="admin")
+    with pytest.raises(agent_mesh_service.AgentMeshAccessError, match="仅管理员"):
+        agent_mesh_service.list_agents(db, user, surface="admin")
+
+    admin = User(username="admin", password="x", role="super_admin", status=1)
+    db.add(admin)
+    db.commit()
+    admin_payload = agent_mesh_service.list_agents(db, admin, surface="admin")
     admin_items = admin_payload.get("items") or admin_payload.get("agents") or []
     admin_codes = {str(item.get("address", "")).split(":")[-1] for item in admin_items}
     assert {"manager", "operations", "monitor"} <= admin_codes

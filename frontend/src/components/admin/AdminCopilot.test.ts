@@ -392,10 +392,10 @@ describe('AdminCopilot Responses stream', () => {
 
     // 首条为吉祥物欢迎语,其后才是恢复的历史消息
     expect(rows).toHaveLength(4)
-    expect(rows[0].text()).toContain('我是贾维斯')
+    expect(rows[0].text()).toContain('我是小菱')
     expect(rows[1].classes()).toContain('is-user')
     await expandTimeline(wrapper)
-    expect(rows[2].find('.xl-steps').text()).toContain('贾维斯的工作')
+    expect(rows[2].find('.xl-steps').text()).toContain('小菱的工作')
     expect(rows[2].find('.xl-steps').text()).toContain('查看管理数据')
     expect(rows[2].text()).toContain('做好了')
     expect(rows[3].find('.markdown-body').text()).toContain('共找到 3 个用户')
@@ -578,7 +578,7 @@ describe('AdminCopilot Responses stream', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.message-row')).toHaveLength(1)
-    expect(wrapper.text()).toContain('我是贾维斯')
+    expect(wrapper.text()).toContain('我是小菱')
     expect(wrapper.find('.quick-commands').exists()).toBe(false)
 
     await wrapper.find('textarea').setValue('检查生产状态')
@@ -1163,7 +1163,7 @@ it('首发断网但服务端已创建运行时恢复快照，不重复发起 sta
       messages: [{ role: 'user', content: '测试断网后的提交确认' }], events: [], pending: null })
     void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
     await flushPromises()
-    expect(sessionApi.get).toHaveBeenLastCalledWith('admin', payload.session_id)
+    expect(sessionApi.get).toHaveBeenCalledWith('admin', payload.session_id)
     expect(streams.records).toHaveLength(1)
     expect(messages.info).toHaveBeenCalledWith(expect.stringContaining('已恢复'))
   } finally { wrapper.unmount() }

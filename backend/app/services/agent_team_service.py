@@ -18,12 +18,13 @@ from app.agents.contracts import CONTRACTS
 from app.core.config import settings
 from app.core.observability import observe_event
 from app.models.agent_mesh import AgentMeshMessage, AgentMeshMessageEvent
+from app.models.agent_response_run import AgentResponseRun
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn, TemporaryAgentDefinition
-from app.services.ai_usage_context import current_attribution, model_attribution
+from app.services.ai_usage_context import current_attribution, model_attribution, run_attribution
 
 
 class AgentTeamError(ValueError):
@@ -1247,6 +1248,18 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
     payload = _normalize_verification_graph(payload)
     payload = _normalize_task_inputs(payload)
     _assert_surface(db, user, payload.surface)
+    # 小菱运行取消时，不允许并发工具调用在取消扫描之后再创建新的后台团队。
+    # 行锁使团队创建与运行终态写入串行化；取消方随后按 root_agent_run_id 收尾。
+    parent_run_id = current_attribution(int(user.id)).get("agent_run_id")
+    if parent_run_id:
+        parent_run = (
+            db.query(AgentResponseRun)
+            .filter(AgentResponseRun.id == parent_run_id, AgentResponseRun.user_id == int(user.id))
+            .with_for_update()
+            .first()
+        )
+        if parent_run is None or parent_run.status in {"cancelled", "completed", "failed", "incomplete"}:
+            raise AgentTeamValidationError("父级小菱运行已结束，不能再启动子 Agent 团队")
     queue_limit = int(getattr(settings, "agent_team_max_queue_length", 100))
     queued_count = (
         db.query(AgentTeamTask)
@@ -2661,6 +2674,37 @@ def cancel_team(db: Session, user: User, team_id: int, *, reason: str = "用户�
         db.commit()
         _cleanup_team_runtime_resources(db, team, reason="user_cancelled")
     return _team_out(db, team, include_events=True)
+
+
+def cancel_response_teams(
+    db: Session,
+    user: User,
+    *,
+    run_id: str,
+    surface: str,
+    session_key: str,
+    reason: str,
+) -> int:
+    """取消指定 Responses 根运行创建的全部未终止团队，并保留各自审计轨迹。"""
+    attribution = run_attribution(db, int(user.id), run_id)
+    root_run_id = int(attribution.get("root_agent_run_id") or 0)
+    if not root_run_id:
+        return 0
+    teams = (
+        db.query(AgentTeam)
+        .filter(
+            AgentTeam.user_id == int(user.id),
+            AgentTeam.surface == surface,
+            AgentTeam.session_key == session_key,
+            AgentTeam.root_agent_run_id == root_run_id,
+            AgentTeam.status.notin_(tuple(_TERMINAL_TEAM)),
+        )
+        .order_by(AgentTeam.id.asc())
+        .all()
+    )
+    for team in teams:
+        cancel_team(db, user, int(team.id), reason=reason)
+    return len(teams)
 
 
 def retry_team(

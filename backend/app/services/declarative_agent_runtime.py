@@ -196,7 +196,6 @@ class DeclarativeReviewAgentFactory:
             .filter(
                 CustomAgent.code == agent_code,
                 CustomAgent.is_enabled == 1,
-                CustomAgent.status == "published",
             )
             .first()
         )
@@ -209,7 +208,7 @@ class DeclarativeReviewAgentFactory:
             or int(release.agent_id) != int(asset.id)
             or int(release.agent_version_id) != int(version.id)
             or int(version.agent_id) != int(asset.id)
-            or release.status != "published"
+            or release.status not in {"published", "superseded"}
             or release.disabled_at is not None
             or version.status != "published"
         ):

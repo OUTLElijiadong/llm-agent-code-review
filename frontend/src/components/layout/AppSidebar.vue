@@ -267,7 +267,7 @@ function go(item: MenuItem): void {
   transition: width 0.2s ease, box-shadow 0.2s ease;
 
   &.is-collapsed {
-    width: 72px;
+    width: var(--sidebar-collapsed-width, 72px);
   }
 }
 

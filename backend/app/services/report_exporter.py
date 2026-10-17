@@ -33,10 +33,12 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import select_autoescape
 from jinja2.sandbox import SandboxedEnvironment
+from markupsafe import Markup
 
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
+from app.services.report_markdown import markdown_to_safe_html
 
 # ============ 模块常量 ============
 
@@ -74,7 +76,7 @@ _TASK_FIELDS: tuple = (
     "total_files", "processed_files", "total_issues",
     "severe_issues", "high_issues", "medium_issues", "low_issues",
     "score", "score_version", "score_breakdown", "summary", "model_name", "duration_ms",
-    "start_time", "end_time", "create_time",
+    "start_time", "end_time", "create_time", "error_message", "coverage",
 )
 
 # 模板目录路径(app/templates/)
@@ -176,6 +178,11 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized["name"] = task_name
     # project_name 不在 ReviewTask ORM 上,需调用方传入或补空
     normalized["project_name"] = _to_serializable(raw.get("project_name", "")) or ""
+    if not isinstance(normalized.get("coverage"), dict) or not normalized["coverage"]:
+        normalized["coverage"] = {
+            "coverage_status": "unknown",
+            "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+        }
     return normalized
 
 
@@ -555,6 +562,8 @@ def export_to_html(
             "severity_counts": legacy_severity_counts,
         },
         "compliance_summary": context["statistics"]["compliance_summary"],
+        # 仅将安全解析器生成的节点标记为可信 HTML；原始模型文本仍保持转义。
+        "summary_html": Markup(markdown_to_safe_html(context["summary"])),
     })
     template = _JINJA_ENV.from_string(template_content)
     return template.render(**context)

@@ -69,10 +69,12 @@ def test_discussion_clients_honor_named_assignments_and_personal_override(db, mo
     monkeypatch.setattr(discussion, "SessionLocal", lambda: db)
     monkeypatch.setattr(discussion, "resolve_api_config", lambda _db, user_id: cfg)
     primary, clients = discussion._build_discussion_agents(42, get_agent_profiles("full"))
-    assert primary.model == ("personal" if source == "user" else "review-model")
+    # 主持小菱使用主对话模型；审查专家各自使用角色模型分配。
+    assert primary.model == "personal"
     assert clients["security_sentinel"].model == ("personal" if source == "user" else "security-model")
+    assert clients["code_reviewer"].model == ("personal" if source == "user" else "review-model")
     assert primary.base_url == "https://example.invalid/v1"
-    assert clients["code_reviewer"] is primary
+    assert clients["code_reviewer"] is not primary
 
 
 @pytest.mark.parametrize("module_name,class_name", [

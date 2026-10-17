@@ -161,6 +161,11 @@ async def lifespan(app: FastAPI):
                 from loguru import logger as _logger
 
                 _logger.warning("[startup] 清扫 {} 个重启遗留的 running 渗透委托", _pentest_swept)
+            _terminal_reports = _pentest_service.sweep_missing_terminal_reports(_sweep_db)
+            if _terminal_reports:
+                from loguru import logger as _logger
+
+                _logger.warning("[startup] 补齐 {} 个终态渗透报告", _terminal_reports)
         except Exception:  # noqa: BLE001 - 清扫失败不阻断启动(下次重启再试)
             from loguru import logger as _logger
 

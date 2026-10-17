@@ -161,9 +161,9 @@ function pageActionTargetHint(args?: string | Record<string, unknown>): string |
   return undefined
 }
 
-const ASSISTANT_NAME = '贾维斯 · 全局运维'
-const MASCOT_NAME = '贾维斯'
-const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的全局运维助手!我和成员侧的小菱是两位不同的助手:我负责系统态势巡查、风险处置、审批运维与批量治理,代码审查和安全审计等成员业务请找小菱。点击「+」可开新对话,多个任务并行处理。`
+const ASSISTANT_NAME = '小菱 · 管理员助手'
+const MASCOT_NAME = '小菱'
+const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的管理员助手。我会按当前管理员账号权限处理系统态势、审批与运维工作；代码审查等能力以当前页面实际开放的工具为准。点击「+」可开新对话,多个任务并行处理。`
 const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
 const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const PANEL_POSITION_KEY = 'prism-floating-chat-position:admin'
@@ -284,7 +284,7 @@ async function handleAskMember({ teamId, name, address }: { teamId: number; name
 const router = useRouter()
 const userStore = useUserStore()
 const chatStorageKey = computed(() => agentChatStorageKey('admin', userStore.profile?.id))
-/** 管理端同样点亮全局彩框/虚拟鼠标:贾维斯替管理员操作页面时的实况反馈。 */
+/** 管理端同样点亮全局彩框/虚拟鼠标:小菱替管理员操作页面时的实况反馈。 */
 const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
@@ -367,7 +367,7 @@ const canSend = computed(() => (
 const meshBridge = createAgentMeshBridge({
   surface: 'admin',
   getSessionId: () => sessionId.value,
-  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '贾维斯运维对话',
+  getTitle: () => meshSessions.value.find((item) => item.id === sessionId.value)?.title ?? '管理员小菱对话',
   getSessions: () => meshSessions.value,
   getActiveRun: () => sessionRun.value,
   isBusy: isMeshSessionBusy,
@@ -393,7 +393,7 @@ const meshBridge = createAgentMeshBridge({
     }
   },
   // 会话被服务端归档(空会话定时清理/他端删除)后,让切换器重新收敛列表并剔除它
-  onSessionGone: () => { void switcherRef.value?.refreshFromAgentMesh() },
+  onSessionGone: (goneSessionId) => { void switcherRef.value?.removeGoneSession(goneSessionId) },
 })
 
 function welcomeEntry(): ChatEntry {
@@ -994,7 +994,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   }
 }
 
-/** 把拖拽的文件建成一个新项目并导入,然后让贾维斯接手引导下一步。 */
+/** 把拖拽的文件建成一个新项目并导入,然后由小菱引导下一步。 */
 async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void> {
   const scopeCurrent = chatScope.capture()
   setUploadProgress('正在验证文件…', 0, files.length)
@@ -1021,7 +1021,7 @@ async function uploadFilesAsProject(files: File[], imageCount = 0): Promise<void
   const projectName = `${base}-${suffix}`
   const language = inferProjectLanguage(readableFiles)
   setUploadProgress(`正在创建项目「${projectName}」…`, 0, readableFiles.length)
-  const created = await createProject({ project_name: projectName, description: `管理端贾维斯拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
+  const created = await createProject({ project_name: projectName, description: `管理员小菱拖拽上传导入(${readableFiles.map((f) => f.name).join(', ')})`, language })
   if (!scopeCurrent()) return
   const projectId = created.id
   let okCount = 0
@@ -1129,7 +1129,7 @@ function finishExistingTimelineToolCalls(runId: string | undefined, error: strin
 }
 
 async function retryRun(): Promise<void> {
-  if (!canRetryRun.value) return
+  if (!canRetryRun.value || retryChecking.value) return
   const pending = unconfirmedStart.value
   if (pending) {
     const generation = submissionGeneration
@@ -1822,7 +1822,7 @@ onMounted(() => {
       @drop.prevent="onDrop"
     >
       <div v-if="dragActive" class="drop-mask">
-        <div class="drop-mask-text">松开鼠标,把文件交给贾维斯建项目</div>
+        <div class="drop-mask-text">松开鼠标,把文件交给小菱建项目</div>
       </div>
       <header class="copilot-header" :class="{ 'is-running': ['thinking', 'working'].includes(mascotStatus) }">
         <button class="panel-drag-handle" type="button" aria-label="移动管理副驾驶窗口" title="拖拽移动窗口" @pointerdown="beginDrag">
@@ -1859,6 +1859,7 @@ onMounted(() => {
               :discover-remote="true"
               @select="handleSessionSelect"
               @sessions-changed="handleSwitcherReady"
+              @session-restored="meshBridge.reviveSession"
               @archive="handleSessionArchive"
             />
           </div>
@@ -1872,13 +1873,13 @@ onMounted(() => {
         {{ toolRunningPhrase(lastActiveToolName, MASCOT_NAME) }}
         <span v-if="runningElapsedLabel" class="progress-elapsed"> · 已运行 {{ runningElapsedLabel }}</span>
         <span v-if="sandboxProgress" class="progress-sandbox"> · {{ sandboxProgress }}</span>
-        <span class="progress-watch" title="贾维斯正在自动跟踪执行进度,无需手动刷新"> · 自动监控</span>
+        <span class="progress-watch" title="小菱正在自动跟踪执行进度,无需手动刷新"> · 自动监控</span>
       </div>
 
       <Transition name="mascot-float">
         <div v-if="sessionRestoring" class="session-restoring-hint" role="status">
           <span class="session-restoring-spinner" aria-hidden="true"></span>
-          <span>正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，贾维斯还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span></span>
+          <span>正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台运行，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span></span>
         </div>
       </Transition>
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
@@ -1887,7 +1888,7 @@ onMounted(() => {
             <div class="copilot-hero-orb">
               <AiOrb :size="88" state="idle" :pulse="false" />
             </div>
-            <p class="copilot-hero-title">我是贾维斯,你的全局运维助手</p>
+            <p class="copilot-hero-title">我是小菱,你的管理员助手</p>
             <p class="copilot-hero-sub">直接告诉我你想做什么,或从下面挑一个试试</p>
           </div>
         </Transition>
@@ -2098,13 +2099,13 @@ onMounted(() => {
           </div>
           <div class="typing-bubble" :class="{ 'is-city-open': thinkingCityOpen }">
             <AiOrb :size="28" state="thinking" :halo="false" />
-            <span class="typing-label">{{ showTyping ? '贾维斯正在想' : '子 Agent 正在协作' }}</span>
+            <span class="typing-label">{{ showTyping ? '小菱正在想' : '子 Agent 正在协作' }}</span>
             <i></i><i></i><i></i>
             <button
               class="thinking-city-toggle"
               type="button"
               :aria-expanded="thinkingCityOpen"
-              :title="thinkingCityOpen ? '收起思考城市' : '看看贾维斯的脑子里在想什么'"
+              :title="thinkingCityOpen ? '收起思考城市' : '看看小菱的思考过程'"
               @click="thinkingCityOpen = !thinkingCityOpen"
             >{{ thinkingCityOpen ? '收起' : '看看在想什么' }}</button>
           </div>
@@ -2147,7 +2148,7 @@ onMounted(() => {
             rows="1"
             maxlength="2000"
             @paste="onComposerPaste"
-            :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '贾维斯正在运行中…可点击 + 新建对话并行处理') : '输入管理指令;也可直接拖入代码文件帮你建项目'"
+            :placeholder="sessionRestoring ? '正在恢复小菱会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入管理指令;也可直接拖入代码文件帮你建项目'"
             aria-label="输入管理指令"
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"

@@ -339,8 +339,199 @@ describe('AgentSessionSwitcher Agent Mesh discovery', () => {
     await flushPromises()
 
     expect(meshApi.restore).toHaveBeenCalledWith('user', 'user-archived')
+    expect(wrapper.emitted('session-restored')).toEqual([['user-archived']])
     expect(lastSelect(wrapper)).toBe('user-archived')
     expect(loadAgentChatSessions('user:account:7', 'legacy', 'user').map((item) => item.id)).toContain('user-archived')
+    wrapper.unmount()
+  })
+
+  it('恢复成功时旧活动目录仍在请求中，会重查并选中恢复的会话', async () => {
+    let finishOldDiscovery!: (page: unknown) => void
+    const active = { session_id: 'user-active', surface: 'user', title: '当前对话', status: 'active', last_seen_at: '2026-09-23T00:00:00Z' }
+    const restored = { session_id: 'user-archived', surface: 'user', title: '已归档审查', status: 'active', last_seen_at: '2026-09-22T00:00:00Z' }
+    meshApi.list.mockImplementation((input: { status: string }) => {
+      if (input.status === 'archived') return Promise.resolve({
+        items: [{ ...restored, status: 'archived' }], total: 1,
+      })
+      if (meshApi.list.mock.calls.filter(([call]) => call.status === 'active').length === 1) {
+        return new Promise((resolve) => { finishOldDiscovery = resolve })
+      }
+      return Promise.resolve({ items: [active, restored], total: 2 })
+    })
+    const wrapper = mount(AgentSessionSwitcher, { props: {
+      surface: 'user', storageKey: 'user', accountKey: 101, legacyKey: 'legacy:101', idPrefix: 'user', discoverRemote: true,
+    } })
+    await flushPromises()
+    await wrapper.get('.session-current').trigger('click')
+    await wrapper.findAll('.session-status-tab')[1].trigger('click')
+    await flushPromises()
+
+    await wrapper.get('.session-restore').trigger('click')
+    await flushPromises()
+    expect(meshApi.restore).toHaveBeenCalledWith('user', 'user-archived')
+    expect(meshApi.list.mock.calls.filter(([call]) => call.status === 'active')).toHaveLength(1)
+
+    finishOldDiscovery({ items: [active], total: 1 })
+    await flushPromises()
+
+    expect(meshApi.list.mock.calls.filter(([call]) => call.status === 'active')).toHaveLength(2)
+    expect(lastSelect(wrapper)).toBe('user-archived')
+    expect(loadAgentChatSessions('user:account:101', 'legacy:101', 'user').map((item) => item.id)).toContain('user-archived')
+    wrapper.unmount()
+  })
+
+  it('恢复重查排队期间切换账号，不把旧会话选到新账号', async () => {
+    let finishOldDiscovery!: (page: unknown) => void
+    const restored = { session_id: 'user-old-archived', surface: 'user', title: '旧账号审查', status: 'active', last_seen_at: '2026-09-22T00:00:00Z' }
+    meshApi.list.mockImplementation((input: { status: string }) => {
+      if (input.status === 'archived') return Promise.resolve({ items: [{ ...restored, status: 'archived' }], total: 1 })
+      if (meshApi.list.mock.calls.filter(([call]) => call.status === 'active').length === 1) {
+        return new Promise((resolve) => { finishOldDiscovery = resolve })
+      }
+      return Promise.resolve({ items: [], total: 0 })
+    })
+    const wrapper = mount(AgentSessionSwitcher, { props: {
+      surface: 'user', storageKey: 'user', accountKey: 101, legacyKey: 'legacy:101', idPrefix: 'user', discoverRemote: true,
+    } })
+    await flushPromises()
+    await wrapper.get('.session-current').trigger('click')
+    await wrapper.findAll('.session-status-tab')[1].trigger('click')
+    await flushPromises()
+    await wrapper.get('.session-restore').trigger('click')
+    await flushPromises()
+
+    await wrapper.setProps({ accountKey: 202, legacyKey: 'legacy:202' })
+    await flushPromises()
+    const newAccountSelection = lastSelect(wrapper)
+    finishOldDiscovery({ items: [restored], total: 1 })
+    await flushPromises()
+
+    expect(lastSelect(wrapper)).toBe(newAccountSelection)
+    expect(window.localStorage.getItem('prism-agent-sessions:user:account:202')).not.toContain('旧账号审查')
+    wrapper.unmount()
+  })
+
+  it('恢复重查排队期间卸载组件，不再发起活动目录请求', async () => {
+    let finishOldDiscovery!: (page: unknown) => void
+    meshApi.list.mockImplementation((input: { status: string }) => {
+      if (input.status === 'archived') return Promise.resolve({
+        items: [{ session_id: 'user-archived', surface: 'user', title: '已归档审查', status: 'archived', last_seen_at: '2026-09-22T00:00:00Z' }],
+        total: 1,
+      })
+      return new Promise((resolve) => { finishOldDiscovery = resolve })
+    })
+    const wrapper = mount(AgentSessionSwitcher, { props: {
+      surface: 'user', storageKey: 'user', accountKey: 101, legacyKey: 'legacy:101', idPrefix: 'user', discoverRemote: true,
+    } })
+    await flushPromises()
+    await wrapper.get('.session-current').trigger('click')
+    await wrapper.findAll('.session-status-tab')[1].trigger('click')
+    await flushPromises()
+    await wrapper.get('.session-restore').trigger('click')
+    await flushPromises()
+
+    wrapper.unmount()
+    finishOldDiscovery({ items: [], total: 0 })
+    await flushPromises()
+
+    expect(meshApi.list.mock.calls.filter(([call]) => call.status === 'active')).toHaveLength(1)
+    expect(window.localStorage.getItem('prism-agent-sessions:user:account:101')).not.toContain('已归档审查')
+  })
+
+  it('服务端确认当前会话已归档时移出本地目录并切到可用会话', async () => {
+    seedIndex([
+      { id: 'user-gone', title: '另一标签已归档', createdAt: 2 },
+      { id: 'user-active', title: '当前可用会话', createdAt: 1 },
+    ])
+    saveActiveAgentChatSession('user', 'user-gone')
+    meshApi.list.mockResolvedValue({
+      items: [{ session_id: 'user-active', surface: 'user', title: '当前可用会话', status: 'active', last_seen_at: '2026-09-23T00:00:00Z' }],
+      total: 1, limit: 20, offset: 0,
+    })
+    const wrapper = mount(AgentSessionSwitcher, {
+      props: { surface: 'user', storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    // 恢复中的旧本地快照可能仍标为忙碌，服务器的归档确认应覆盖它。
+    ;(wrapper.vm as unknown as { setBusy(id: string, busy: boolean): void }).setBusy('user-gone', true)
+    expect(lastSelect(wrapper)).toBe('user-gone')
+
+    await (wrapper.vm as unknown as { removeGoneSession(id: string): Promise<void> }).removeGoneSession('user-gone')
+    await flushPromises()
+
+    expect(lastSelect(wrapper)).toBe('user-active')
+    expect(loadAgentChatSessions('user', 'legacy', 'user').map((item) => item.id)).toEqual(['user-active'])
+    expect(wrapper.get('.session-current').text()).toContain('当前可用会话')
+    wrapper.unmount()
+  })
+
+  it('没有服务端失效通知时仍保留运行中的当前会话', async () => {
+    seedIndex([{ id: 'user-running', title: '运行中的审查', createdAt: 1 }])
+    saveActiveAgentChatSession('user', 'user-running')
+    meshApi.list.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 })
+    const wrapper = mount(AgentSessionSwitcher, {
+      props: { surface: 'user', storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    ;(wrapper.vm as unknown as { setBusy(id: string, busy: boolean): void }).setBusy('user-running', true)
+
+    await (wrapper.vm as unknown as { refreshFromAgentMesh(): Promise<void> }).refreshFromAgentMesh()
+
+    expect(lastSelect(wrapper)).toBe('user-running')
+    expect(loadAgentChatSessions('user', 'legacy', 'user').map((item) => item.id)).toContain('user-running')
+    wrapper.unmount()
+  })
+
+  it('本窗口正常归档完成后不会被较早发出的目录响应重新加入', async () => {
+    seedIndex([
+      { id: 'user-archiving', title: '已完成审查', createdAt: 2 },
+      { id: 'user-active', title: '其他对话', createdAt: 1 },
+    ])
+    saveActiveAgentChatSession('user', 'user-archiving')
+    const active = { session_id: 'user-active', surface: 'user', title: '其他对话', status: 'active', last_seen_at: '2026-09-23T00:00:00Z' }
+    const archiving = { session_id: 'user-archiving', surface: 'user', title: '已完成审查', status: 'active', last_seen_at: '2026-09-23T00:01:00Z' }
+    meshApi.list.mockResolvedValue({ items: [archiving, active], total: 2, limit: 20, offset: 0 })
+    const wrapper = mount(AgentSessionSwitcher, {
+      props: { surface: 'user', storageKey: 'user', legacyKey: 'legacy', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+
+    let resolveStale!: (page: unknown) => void
+    meshApi.list.mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve }))
+    const staleRequest = (wrapper.vm as unknown as { refreshFromAgentMesh(): Promise<void> }).refreshFromAgentMesh()
+    ;(wrapper.vm as unknown as { removeSession(id: string): void }).removeSession('user-archiving')
+    meshApi.list.mockResolvedValue({ items: [active], total: 1, limit: 20, offset: 0 })
+    resolveStale({ items: [archiving, active], total: 2, limit: 20, offset: 0 })
+    await staleRequest
+    await flushPromises()
+
+    expect(lastSelect(wrapper)).toBe('user-active')
+    expect(loadAgentChatSessions('user', 'legacy', 'user').map((item) => item.id)).toEqual(['user-active'])
+    wrapper.unmount()
+  })
+
+  it('账号切换后迟到的归档恢复结果不通知新账号桥接层', async () => {
+    let finishRestore!: (value: unknown) => void
+    meshApi.restore.mockImplementationOnce(() => new Promise((resolve) => { finishRestore = resolve }))
+    meshApi.list.mockImplementation((input: { status: string }) => Promise.resolve(input.status === 'archived'
+      ? { items: [{ session_id: 'user-old-archived', surface: 'user', title: '旧账号对话', status: 'archived', last_seen_at: '2026-09-23T00:00:00Z' }], total: 1 }
+      : { items: [], total: 0 }))
+    const wrapper = mount(AgentSessionSwitcher, {
+      props: { surface: 'user', storageKey: 'user', accountKey: 101, legacyKey: 'legacy:101', idPrefix: 'user', discoverRemote: true },
+    })
+    await flushPromises()
+    await wrapper.get('.session-current').trigger('click')
+    await wrapper.findAll('.session-status-tab')[1].trigger('click')
+    await flushPromises()
+
+    const restoring = wrapper.get('.session-restore').trigger('click')
+    await wrapper.setProps({ accountKey: 202, legacyKey: 'legacy:202' })
+    finishRestore({ session_id: 'user-old-archived', status: 'active' })
+    await restoring
+    await flushPromises()
+
+    expect(wrapper.emitted('session-restored')).toBeUndefined()
+    expect(window.localStorage.getItem('prism-agent-sessions:user:account:202')).not.toContain('user-old-archived')
     wrapper.unmount()
   })
 })

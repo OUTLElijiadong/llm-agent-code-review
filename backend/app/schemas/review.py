@@ -36,6 +36,7 @@ class TaskOut(BaseModel):
     score: int
     score_version: Optional[str] = None
     score_breakdown: Optional[dict] = None
+    coverage: Optional[dict] = None
     duration_ms: int
     create_time: datetime
 

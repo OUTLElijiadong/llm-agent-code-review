@@ -45,6 +45,7 @@ const storageNamespace = computed(() => agentChatStorageKey(props.storageKey, pr
 const emit = defineEmits<{
   select: [sessionId: string]
   'sessions-changed': [metas: AgentChatSessionMeta[]]
+  'session-restored': [sessionId: string]
   /** 请求父组件把会话归档到服务端,再配合本地移除。 */
   archive: [sessionId: string]
 }>()
@@ -70,7 +71,14 @@ let archivedSearchTimer: number | undefined
 let archivedRequestSerial = 0
 let pendingHeartbeatId = ''
 let scopeGeneration = 0
+let discoveryEpoch = 0
 let disposed = false
+let queuedPreferredRefresh: { sessionId: string; isCurrent: () => boolean; resolve: () => void } | null = null
+
+function clearQueuedPreferredRefresh(): void {
+  queuedPreferredRefresh?.resolve()
+  queuedPreferredRefresh = null
+}
 
 function captureScope(): () => boolean {
   const generation = scopeGeneration
@@ -127,8 +135,16 @@ function createSession(): void {
   select(meta.id)
 }
 
-function dropSession(sessionId: string): void {
-  if (inferBusy(sessions.value.find((item) => item.id === sessionId) ?? { id: sessionId, title: '', createdAt: 0 })) return
+function dropSession(sessionId: string, confirmedGone = false): void {
+  if (!confirmedGone && inferBusy(sessions.value.find((item) => item.id === sessionId) ?? { id: sessionId, title: '', createdAt: 0 })) return
+  if (confirmedGone) {
+    const nextBusy = new Set(busyIds.value)
+    nextBusy.delete(sessionId)
+    busyIds.value = nextBusy
+    const nextRunState = new Map(remoteRunState.value)
+    nextRunState.delete(sessionId)
+    remoteRunState.value = nextRunState
+  }
   if (pendingHeartbeatId === sessionId) pendingHeartbeatId = ''
   const wasActive = sessionId === activeId.value
   removeAgentChatSession(storageNamespace.value, sessionId)
@@ -169,7 +185,15 @@ function confirmDelete(sessionId: string): void {
 /** 服务端归档成功后由父组件调用,完成本地移除与切换。 */
 function removeSession(sessionId: string): void {
   archivingId.value = ''
+  discoveryEpoch += 1
   dropSession(sessionId)
+}
+
+/** 后端已确认会话归档/失效，移出本地目录；本地陈旧忙碌状态不能把它留下。 */
+async function removeGoneSession(sessionId: string): Promise<void> {
+  discoveryEpoch += 1
+  if (sessions.value.some((item) => item.id === sessionId)) dropSession(sessionId, true)
+  await refreshFromAgentMesh()
 }
 
 /** 服务端归档失败时由父组件调用,清空归档中状态并保留会话。 */
@@ -249,7 +273,9 @@ function initializeSessions(): void {
 }
 
 watch(storageNamespace, () => {
+  clearQueuedPreferredRefresh()
   scopeGeneration += 1
+  discoveryEpoch += 1
   archivedRequestSerial += 1
   sessions.value = []
   archivedSessions.value = []
@@ -278,6 +304,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearQueuedPreferredRefresh()
   disposed = true
   scopeGeneration += 1
   if (discoveryTimer !== undefined) window.clearInterval(discoveryTimer)
@@ -309,14 +336,21 @@ function reload(): void {
  * 未被服务端发现的本地条目不会继续出现在切换器中，避免账户或 user/admin 数据串线。
  */
 async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
-  if (discoveryLoading.value) return
+  if (discoveryLoading.value) {
+    if (!preferredSessionId) return
+    return new Promise<void>((resolve) => {
+      clearQueuedPreferredRefresh()
+      queuedPreferredRefresh = { sessionId: preferredSessionId, isCurrent: captureScope(), resolve }
+    })
+  }
   const isCurrent = captureScope()
+  const requestEpoch = discoveryEpoch
   discoveryLoading.value = true
   const surface = props.surface ?? (props.storageKey.startsWith('admin') ? 'admin' : 'user')
   const previousActiveId = activeId.value
   try {
     const page = await listAgentMeshConversations({ surface, status: 'active', limit: 20, offset: 0 })
-    if (!isCurrent()) return
+    if (!isCurrent() || requestEpoch !== discoveryEpoch) return
     const discovered = page.items
       .filter((item) => item.surface === surface && item.status !== 'archived' && item.session_id)
       .map((item) => ({
@@ -382,7 +416,18 @@ async function refreshFromAgentMesh(preferredSessionId = ''): Promise<void> {
   } catch {
     // 发现接口短暂不可用时保留本地列表，下一次打开或轮询继续收敛。
   } finally {
-    if (isCurrent()) discoveryLoading.value = false
+    if (isCurrent()) {
+      discoveryLoading.value = false
+      const queued = queuedPreferredRefresh
+      queuedPreferredRefresh = null
+      if (queued?.isCurrent()) {
+        // 恢复可能在旧目录请求飞行时完成；带上恢复目标重查，而非用旧响应覆盖。
+        void refreshFromAgentMesh(queued.sessionId).then(queued.resolve, queued.resolve)
+      } else if (requestEpoch !== discoveryEpoch) {
+        // 失效通知可能在目录请求飞行中到达；丢弃旧响应后立即读一次新目录。
+        void refreshFromAgentMesh()
+      }
+    }
   }
 }
 
@@ -423,6 +468,8 @@ async function restoreArchivedSession(sessionId: string): Promise<void> {
   try {
     await restoreAgentMeshConversation(surface, sessionId)
     if (!isCurrent()) return
+    discoveryEpoch += 1
+    emit('session-restored', sessionId)
     archivedSessions.value = archivedSessions.value.filter((item) => item.id !== sessionId)
     historyStatus.value = 'active'
     searchQuery.value = ''
@@ -434,7 +481,7 @@ async function restoreArchivedSession(sessionId: string): Promise<void> {
   }
 }
 
-defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, refreshArchivedSessions, removeSession, restoreSessionAfterArchiveFailure })
+defineExpose({ setBusy, renameActive, createSession, ensureFreshOnOpen, reload, refreshFromAgentMesh, refreshArchivedSessions, removeSession, removeGoneSession, restoreSessionAfterArchiveFailure })
 </script>
 
 <template>

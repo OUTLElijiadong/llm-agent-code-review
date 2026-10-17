@@ -182,7 +182,8 @@ def test_archive_counts_are_separate_from_active_code_files(db):
     assert archive.file_count == 4276
 
 
-def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db):
+def test_average_code_score_excludes_sandbox_pentest_and_unknown_types(db, monkeypatch):
+    monkeypatch.setattr(dashboard_service.rbac_service, "check_permission", lambda *_args: True)
     owner, _, project, _ = seed(db)
     code = task(db, owner, project, status="success", score=0)
     sandbox = task(db, owner, project, status="success", score=100)

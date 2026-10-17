@@ -12,7 +12,7 @@ from app.agents.events import DiscussionTurn
 from app.core.permission_codes import ALL_PERMISSION_CODES
 from app.main import app
 from app.models.agent_governance import ApprovalItem
-from app.models.agent_response_run import AgentToolExecution
+from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
@@ -443,7 +443,11 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     monkeypatch.setattr(discussion_api.rule_service, "get_enabled_rules", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(discussion_api, "_gen_session_id", lambda: "disc_continued")
     launched = []
-    monkeypatch.setattr(ws_discussion, "launch_pending_discussion", lambda pending: launched.append(pending))
+    monkeypatch.setattr(
+        ws_discussion,
+        "launch_pending_discussion",
+        lambda pending: launched.append(pending) or object(),
+    )
 
     DiscussionBus._instance = None
     bus = DiscussionBus.instance()
@@ -477,13 +481,23 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
         session_key="chat-current",
         mcp_provider=EmptyMcp(),
     )
+    db.add(AgentResponseRun(
+        run_id="run-roundtable-continuation",
+        user_id=user.id,
+        surface="user",
+        session_key="chat-current",
+        status="running",
+        checkpoint_json='{"transcript":[{"role":"user","content":"请继续并重新核对管理员越权路径"}]}',
+        version=1,
+    ))
+    db.commit()
     call = ToolCall(
         "call-roundtable-continuation",
         "control_roundtable_discussion",
         {
             "session_id": original.session_id,
-            "action": "user_input",
-            "content": "重新核对管理员越权路径，并修正结论。",
+            "action": "continue",
+            "content": "重新核对管理员越权路径，并修正结论后继续。",
         },
         "{}",
     )
@@ -496,12 +510,14 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     assert completed.output["continued_from_session_id"] == original.session_id
     assert completed.output["previous_report_task_id"] == 731
     assert completed.output["accepted"] is True
+    assert completed.output["status"] == "pending"
     assert original.status == "concluded"
     assert original.report_task_id == 731
 
     continuation = bus.get_session("disc_continued")
     assert continuation is not None
-    assert continuation.status == "active"
+    # API 返回时只表示任务已入队；WS 可见性不再决定任务是否能启动。
+    assert continuation.status == "pending"
     assert continuation.report_task_id == 0
     assert continuation.owner_user_id == user.id
     assert continuation.project_id == project.id

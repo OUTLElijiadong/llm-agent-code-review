@@ -69,7 +69,7 @@ describe('报告卡片列表', () => {
     const text = card.text()
     expect(text).toContain('渗透报告')
     expect(text).toContain('渗透测试')
-    expect(text).toContain('通过')
+    expect(text).toContain('完成')
     expect(text).toContain('领域项目')
     expect(text).toContain('问题 3')
     expect(text).toContain('72')

@@ -34,6 +34,8 @@ export interface AgentMeshBridge {
   start: () => void
   stop: () => void
   syncNow: () => Promise<void>
+  /** 仅在服务端显式恢复成功后解除该会话的归档跳过标记。 */
+  reviveSession: (sessionId: string) => void
 }
 
 /** 从 axios reject 的对象里读出后端业务码(Resp 或 AxiosError 两种形态都兼容)。 */
@@ -43,6 +45,15 @@ function errorCode(reason: unknown): number | undefined {
   const direct = (reason as { code?: unknown }).code
   if (typeof direct === 'number') return direct
   return undefined
+}
+
+/** heartbeat 的 40921 还用于其他冲突，只有明确归档时才移出轮询目录。 */
+function isGoneHeartbeat(reason: unknown): boolean {
+  const code = errorCode(reason)
+  if (code === AGENT_MESH_SESSION_GONE_CODE) return true
+  if (code !== 40921 || !reason || typeof reason !== 'object') return false
+  const message = (reason as { message?: unknown }).message
+  return typeof message === 'string' && message.includes('会话已归档')
 }
 
 export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMeshBridge {
@@ -60,6 +71,10 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
     options.onSessionGone?.(sessionId)
   }
 
+  function reviveSession(sessionId: string): void {
+    if (sessionId) goneSessions.delete(sessionId)
+  }
+
   async function syncNow(): Promise<void> {
     if (stopped || syncingGeneration === generation) return
     const syncGeneration = generation
@@ -75,19 +90,28 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
     syncingGeneration = syncGeneration
     try {
       const activeRun = options.getActiveRun?.()
+      const failedHeartbeatSessions = new Set<string>()
       for (const session of sessions) {
         if (!isCurrentSync()) return
         // 已归档会话跳过 heartbeat:服务端本就不会复活它,徒增一次无效请求。
         if (goneSessions.has(session.id)) continue
         const isCurrent = session.id === currentSessionId
-        await heartbeatAgentMesh({
-          surface: options.surface,
-          session_id: session.id,
-          title: session.title.trim() || '新对话',
-          active_run_id: session.active_run_id ?? (isCurrent ? activeRun?.run_id : '') ?? '',
-          active_run_status: session.active_run_status ?? (isCurrent ? activeRun?.status : '') ?? '',
-        })
-        if (!isCurrentSync()) return
+        try {
+          await heartbeatAgentMesh({
+            surface: options.surface,
+            session_id: session.id,
+            title: session.title.trim() || '新对话',
+            active_run_id: session.active_run_id ?? (isCurrent ? activeRun?.run_id : '') ?? '',
+            active_run_status: session.active_run_status ?? (isCurrent ? activeRun?.status : '') ?? '',
+          }, true)
+          if (!isCurrentSync()) return
+        } catch (reason) {
+          if (!isCurrentSync()) return
+          if (isGoneHeartbeat(reason)) markGone(session.id)
+          else failedHeartbeatSessions.add(session.id)
+          // 单个后台会话失效或网络失败，不阻断其余会话的消息回收。
+          continue
+        }
       }
       // 优先认领当前会话的收件箱,避免历史会话的主动简报占满串行处理队列,
       // 导致用户正在看的对话迟迟收不到 JARVIS 简报/团队结论等消息。
@@ -97,6 +121,7 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
       for (const session of orderedSessions) {
         if (!isCurrentSync()) return
         if (goneSessions.has(session.id)) continue
+        if (failedHeartbeatSessions.has(session.id)) continue
         if (options.isBusy(session.id)) continue
         let inbox: AgentMeshMessage[]
         try {
@@ -148,7 +173,10 @@ export function createAgentMeshBridge(options: AgentMeshBridgeOptions): AgentMes
     syncingGeneration = undefined
     if (timer !== undefined) window.clearInterval(timer)
     timer = undefined
+    // 宿主在切换登录账号时复用 bridge 实例，绝不沿用旧账号的去重/失效标记。
+    handled.clear()
+    goneSessions.clear()
   }
 
-  return { start, stop, syncNow }
+  return { start, stop, syncNow, reviveSession }
 }

@@ -160,6 +160,19 @@ async function expandTimeline(_wrapper: VueWrapper): Promise<void> {
   // no-op:保留给历史用例的兼容入口
 }
 
+it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', async () => {
+  const wrapper = mountDrawer()
+  const panel = wrapper.get('.chat-drawer').element
+  Object.defineProperty(panel, 'offsetWidth', { configurable: true, value: 400 })
+  Object.defineProperty(panel, 'offsetHeight', { configurable: true, value: 620 })
+
+  await flushPromises()
+
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('left:')
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('top:')
+  wrapper.unmount()
+})
+
 describe('AgentChatDrawer Responses stream', () => {
   it('模型最终输出等于用户原话时仍补齐真正的助手结果', async () => {
     const wrapper = await mountReadyDrawer()
@@ -921,7 +934,7 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.find('.xl-steps').text()).toContain('文件不存在')
   })
 
-  it('运行中显示「停止响应」,点击后中止流并留下可重试的取消卡片', async () => {
+  it('运行中显示「停止响应」,服务端确认取消后不展示可触发重跑的错误卡片', async () => {
     const wrapper = await mountReadyDrawer()
     expect(wrapper.find('.stop-btn').exists()).toBe(false)
 
@@ -948,32 +961,17 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(streams.records[0].aborted).toBe(true)
     const bubbles = wrapper.findAll('.msg-row.assistant .markdown-body')
     expect(bubbles.some((bubble) => bubble.text().includes('我先看一下项目结构'))).toBe(true)
-    // 取消后错误卡片留在消息流,带重试与新建对话入口
-    const errorCard = wrapper.find('.msg-error-card')
-    expect(errorCard.exists()).toBe(true)
-    expect(errorCard.text()).toContain('已停止本次回答')
-    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(true)
+    // 手动停止是最终状态;不展示重试按钮,防止停止回合与重试入口混淆。
+    expect(wrapper.find('.msg-error-card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('已停止任务')
+    expect(wrapper.find('.msg-error-btn.is-retry').exists()).toBe(false)
     // 运行结束,停止按钮自动隐藏
     expect(wrapper.find('.stop-btn').exists()).toBe(false)
     expect(wrapper.find('.send-btn').exists()).toBe(true)
     expect(messages.error).not.toHaveBeenCalled()
 
-    // 点「重试」重新续跑(上下文包含部分输出,让模型知道说到哪了)
-    await wrapper.find('.msg-error-btn.is-retry').trigger('click')
-    await settleAll()
-    expect(streams.records[1].body).toMatchObject({
-      action: 'start',
-      surface: 'user',
-      messages: [
-        { role: 'user', content: '帮我分析这个项目' },
-        { role: 'assistant', content: '我先看一下项目结构' },
-        { role: 'assistant', content: expect.stringContaining('已停止任务') },
-      ],
-    })
-    emit(1, { type: 'response.output_text.delta', delta: '这次顺利完成了' })
-    emit(1, { type: 'response.completed', response: { id: 'run-stop-retry' } })
-    await finish(1)
-    expect(wrapper.text()).toContain('这次顺利完成了')
+    expect(streams.records).toHaveLength(1)
+    expect(responseApi.cancel).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 

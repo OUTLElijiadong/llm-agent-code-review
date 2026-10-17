@@ -113,6 +113,8 @@ class FakeDiscussionBus:
     ) -> None:
         """记录控制广播。"""
         self.controls.append((session_id, action, payload or {}))
+        if self.session is not None and action == "started":
+            self.session.status = str((payload or {}).get("status") or "active")
 
     def publish_turn(self, session_id: str, turn: Any) -> None:
         """记录用户发言广播。"""
@@ -141,7 +143,12 @@ class FakeDiscussionBus:
         self.discussion_tasks[session_id] = task
         return task
 
-    def request_stop(self, session_id: str) -> None:
+    def get_discussion_task(self, session_id: str) -> asyncio.Task | None:
+        """返回仍在运行的测试讨论任务。"""
+        task = self.discussion_tasks.get(session_id)
+        return task if task is not None and not task.done() else None
+
+    def request_stop(self, session_id: str, reason: str = "") -> None:
         """记录会话停止请求。"""
         self.cancelled_sessions.append(session_id)
 
@@ -375,7 +382,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
     import app.ai.discussion_orchestrator as orchestrator_module
 
     session_id = "pending-session"
-    bus = FakeDiscussionBus()
+    bus = FakeDiscussionBus(session=SimpleNamespace(status="pending"))
     _install_bus(monkeypatch, bus)
     module.register_pending(
         session_id,
@@ -413,7 +420,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
             "profiles": ("security",),
         },
     ]
-    assert bus.controls == []
+    assert bus.controls == [(session_id, "started", {"status": "active"})]
     assert bus.unsubscribed == [(session_id, bus.queue)]
 
 
@@ -427,7 +434,7 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
 
     session_id = "expired-owner-session"
     bus = DiscussionBus()
-    bus.create_session(session_id, task_id=0, file_name="expired.py", owner_user_id=21)
+    bus.create_session(session_id, task_id=0, file_name="expired.py", owner_user_id=21).status = "pending"
     monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
     monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
     session_checks = iter((True, False))
@@ -461,7 +468,95 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
     await asyncio.gather(task, return_exceptions=True)
     await asyncio.sleep(0)
 
-    assert bus.get_session(session_id).status == "concluded"
+    assert bus.get_session(session_id).status == "cancelled"
+    assert bus.get_discussion_task(session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_launch_pending_discussion_does_not_restart_a_terminal_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """重复的启动投递不能把用户已停止或结束的圆桌重新拉起。"""
+    from app.agents.discussion_bus import DiscussionBus
+
+    bus = DiscussionBus()
+    session = bus.create_session("terminal-no-restart", task_id=0, file_name="x.py")
+    session.status = "cancelled"
+    session.terminal_status = "cancelled"
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    pending = module.PendingDiscussion("terminal-no-restart", user_id=21)
+
+    assert module.launch_pending_discussion(pending) is None
+    assert bus.get_discussion_task("terminal-no-restart") is None
+
+
+@pytest.mark.asyncio
+async def test_bus_rejects_direct_terminal_task_restart():
+    """即使绕过 launcher，讨论总线也拒绝向终态 session 注册新模型任务。"""
+    from app.agents.discussion_bus import DiscussionBus
+
+    bus = DiscussionBus()
+    session = bus.create_session("direct-terminal-no-restart", task_id=0, file_name="x.py")
+    session.status = "cancelled"
+
+    async def never_run():
+        raise AssertionError("终态任务不应启动")
+
+    with pytest.raises(RuntimeError, match="终态圆桌不能"):
+        bus.start_discussion_task(session.session_id, never_run())
+    assert bus.get_discussion_task(session.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_pending_discussion_stops_when_parent_xiaoling_run_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """父级 Responses 被用户停止后，关联圆桌必须停止并保留 cancelled 终态。"""
+    import app.ai.discussion_orchestrator as orchestrator_module
+    from app.agents.discussion_bus import DiscussionBus
+
+    session_id = "parent-response-cancelled"
+    bus = DiscussionBus()
+    session = bus.create_session(session_id, task_id=0, file_name="cancelled.py", owner_user_id=21)
+    session.status = "pending"
+    monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
+    monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
+    checks = 0
+
+    def parent_cancelled(_user_id: int, _run_id: int) -> bool:
+        nonlocal checks
+        checks += 1
+        # 首次检查发生在启动前；第二次检查发生在 orchestrator 已启动后。
+        return checks >= 2
+
+    monkeypatch.setattr(module, "_is_parent_response_run_cancelled", parent_cancelled, raising=False)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class FakeOrchestrator:
+        async def start_discussion(self, **_kwargs: Any) -> None:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(orchestrator_module, "DiscussionOrchestrator", FakeOrchestrator)
+    pending = module.PendingDiscussion(
+        session_id,
+        user_id=21,
+        usage_origin={"agent_run_id": 123},
+    )
+
+    task = module.launch_pending_discussion(pending)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert checks >= 1
+    assert session.status == "cancelled"
+    assert session.terminal_status == "cancelled"
     assert bus.get_discussion_task(session_id) is None
 
 

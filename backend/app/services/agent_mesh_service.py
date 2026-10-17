@@ -23,7 +23,7 @@ from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 
 ONLINE_WINDOW = timedelta(seconds=90)
-_SESSION_TERMINAL = {"completed", "failed", "expired", "dead_letter"}
+_SESSION_TERMINAL = {"completed", "failed", "cancelled", "expired", "dead_letter"}
 _BLOCKED_JARVIS_MESSAGE_STATUSES = ("queued", "delivered", "acknowledged", "processing")
 _ACTIVE_RESPONSE_RUN_STATUSES = (
     "running",
@@ -823,10 +823,14 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     """
     from app.services.agent_mesh_dispatcher import dispatch_state
 
+    is_admin = _is_admin_surface(db, user)
+    if surface:
+        _assert_surface(db, user, surface)
+    effective_surface = surface or ("admin" if is_admin else "user")
     runtime_codes = _runtime_codes()
     items: list[dict[str, Any]] = []
     for code, contract in CONTRACTS.items():
-        if surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
+        if effective_surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
             continue
         kind = "runtime" if code in runtime_codes or contract.execution_mode in {
             "runtime", "runtime_service", "protected_runtime",
@@ -889,6 +893,8 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     )
     if surface in {"user", "admin"}:
         conversation_query = conversation_query.filter(AgentMeshConversation.surface == surface)
+    elif not is_admin:
+        conversation_query = conversation_query.filter(AgentMeshConversation.surface == "user")
     conversations = (
         conversation_query
         .order_by(AgentMeshConversation.last_seen_at.desc(), AgentMeshConversation.id.desc())
@@ -1535,9 +1541,25 @@ def pull_inbox(
     )
     now = _now()
     _expire_pending(db, rows, now)
+    cancelled_parent_ids = _cancelled_parent_run_ids(
+        db,
+        rows,
+        user_id=int(user.id),
+        surface=surface,
+        session_key=session_key,
+    )
     delivered: list[AgentMeshMessage] = []
     for row in rows:
         if row.status == "expired":
+            continue
+        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id in cancelled_parent_ids:
+            row.status = "cancelled"
+            row.completed_at = row.completed_at or now
+            row.lease_token = None
+            row.lease_expires_at = None
+            row.next_attempt_at = None
+            row.last_error = "父级小菱运行已取消，迟到结果未触发新的模型调用"
+            _event(db, row, "cancelled", target, {"reason": "parent_run_cancelled"})
             continue
         if row.status == "queued":
             row.status = "delivered"
@@ -1547,6 +1569,36 @@ def pull_inbox(
         delivered.append(row)
     db.commit()
     return [_message_out(row) for row in delivered]
+
+
+def _cancelled_parent_run_ids(
+    db: Session,
+    rows: list[AgentMeshMessage],
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+) -> set[int]:
+    """一次批量读取父运行终态，避免每条收件消息都触发独立查询。"""
+    root_ids = {
+        int(row.root_agent_run_id)
+        for row in rows
+        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id
+    }
+    if not root_ids:
+        return set()
+    return {
+        int(run_id)
+        for (run_id,) in db.query(AgentResponseRun.id)
+        .filter(
+            AgentResponseRun.id.in_(root_ids),
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == surface,
+            AgentResponseRun.session_key == session_key,
+            AgentResponseRun.status == "cancelled",
+        )
+        .all()
+    }
 
 
 def peek_inbox(
@@ -1616,11 +1668,15 @@ def ack_message(
     row = _owned_target_message(db, user, message_id, surface=surface, session_key=session_key)
     now = _now()
     requested = acknowledgement.status
+    # 取消是不可逆终态。原始 SSE 驱动循环可能稍后才返回；它的迟到失败/成功
+    # 回执不得把取消改回 queued，否则收件箱桥接会重新派发并再次消耗 Token。
+    if row.status == "cancelled":
+        return _message_out(row)
     allowed = {
-        "queued": {"acknowledged", "processing"},
-        "delivered": {"acknowledged", "processing", "completed", "failed"},
-        "acknowledged": {"processing", "completed", "failed"},
-        "processing": {"completed", "failed"},
+        "queued": {"acknowledged", "processing", "cancelled"},
+        "delivered": {"acknowledged", "processing", "completed", "failed", "cancelled"},
+        "acknowledged": {"processing", "completed", "failed", "cancelled"},
+        "processing": {"completed", "failed", "cancelled"},
     }
     if requested == row.status:
         return _message_out(row)
@@ -1641,6 +1697,14 @@ def ack_message(
         row.status = requested
         row.completed_at = now
         _event(db, row, requested, actor, {"summary": acknowledgement.summary})
+    elif requested == "cancelled":
+        row.status = requested
+        row.completed_at = now
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.next_attempt_at = None
+        row.last_error = acknowledgement.error or acknowledgement.summary or "用户停止了本次运行"
+        _event(db, row, requested, actor, {"reason": row.last_error})
     else:
         row.last_error = acknowledgement.error or acknowledgement.summary or "消息处理失败"
         _event(db, row, "failed", actor, {"error": row.last_error})
@@ -1820,6 +1884,7 @@ def finish_message_run(
     surface: str,
     session_key: str,
     success: bool,
+    cancelled: bool = False,
     summary: str = "",
     error: str = "",
 ) -> dict[str, Any]:
@@ -1831,7 +1896,7 @@ def finish_message_run(
         surface=surface,
         session_key=session_key,
         acknowledgement=AgentMeshAckIn(
-            status="completed" if success else "failed",
+            status="cancelled" if cancelled else "completed" if success else "failed",
             summary=summary[:2000],
             error=error[:2000],
         ),

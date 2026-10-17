@@ -30,12 +30,14 @@ from app.services.report_exporter import (
     load_builtin_template,
 )
 from app.services.report_pdf_exporter import (
+    _build_header_elements,
     _build_issue_section,
     _build_styles,
     _ensure_chinese_font,
     export_to_pdf,
 )
 from app.services.report_word_exporter import export_to_word
+from docx import Document
 
 # ============ 测试数据工厂 ============
 
@@ -178,6 +180,52 @@ def test_export_to_json_contains_task_info_and_score():
     raw = export_to_json(task, [], "摘要", 88)
     assert "JSON任务" in raw
     assert "88" in raw
+
+
+def test_terminal_report_state_and_coverage_survive_all_standard_exports():
+    task = _make_task(
+        status="cancelled",
+        error_message="用户停止审查",
+        processed_files=1,
+        total_files=3,
+        coverage={
+            "coverage_status": "partial",
+            "completed_files": 1,
+            "unscanned_files": 2,
+            "excluded_files": ["vendor/generated.py"],
+        },
+    )
+    json_payload = __import__("json").loads(export_to_json(task, [], "任务已取消", 0))
+    html = export_to_html(task, [], "任务已取消", 0, load_builtin_template("detailed"))
+    pdf = export_to_pdf(task, [], "任务已取消", 0)
+    word = export_to_word(task, [], "任务已取消", 0)
+
+    assert json_payload["task_info"]["status"] == "cancelled"
+    assert json_payload["task_info"]["error_message"] == "用户停止审查"
+    assert json_payload["task_info"]["coverage"]["unscanned_files"] == 2
+    assert "用户停止审查" in html
+    assert "vendor/generated.py" in html
+    pdf_header = "\n".join(
+        getattr(element, "text", "")
+        for element in _build_header_elements(
+            json_payload["task_info"], 0, _build_styles(_ensure_chinese_font())
+        )
+    )
+    assert "cancelled" in pdf_header
+    assert "用户停止审查" in pdf_header
+    assert "vendor/generated.py" in pdf_header
+    word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs)
+    assert "cancelled" in word_text
+    assert "用户停止审查" in word_text
+    assert "vendor/generated.py" in word_text
+
+
+def test_legacy_report_export_marks_missing_coverage_unknown():
+    import json
+
+    payload = json.loads(export_to_json(_make_task(status="failed"), [], "扫描失败", 0))
+    assert payload["task_info"]["coverage"]["coverage_status"] == "unknown"
+    assert "无法确认实际扫描范围" in payload["task_info"]["coverage"]["unscanned"][0]
 
 
 def test_export_to_json_preserves_chinese_chars():

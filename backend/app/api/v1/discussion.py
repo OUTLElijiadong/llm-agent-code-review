@@ -6,6 +6,7 @@ POST /discuss/start  — 启动讨论模式审查(preflight)
 from __future__ import annotations
 
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.common import Resp
+from app.schemas.discussion import RoundtableTemporaryExpert
 from app.services import rule_service
 from app.services.ai_usage_context import current_attribution
 from app.services.project_member_service import require_project_access
@@ -42,6 +44,7 @@ def start_discussion(
     origin_session_key: str = "",
     continued_from_session_id: str = "",
     continuation_context: str = "",
+    temporary_experts_json: str = "",
 ):
     """预检并注册讨论,返回 session_id 和基本信息。
 
@@ -64,8 +67,30 @@ def start_discussion(
         raise NotFoundError("文件不存在", code=40400)
     validate_review_input(code_file)
 
-    from app.ai.multi_agent import get_discussion_agent_profiles
+    from app.ai.multi_agent import ReviewAgentProfile, get_discussion_agent_profiles
     profiles = get_discussion_agent_profiles()
+    temporary_experts = []
+    if temporary_experts_json:
+        try:
+            raw_experts = json.loads(temporary_experts_json)
+            if not isinstance(raw_experts, list) or len(raw_experts) > 3:
+                raise ValueError("临时专家最多 3 位")
+            temporary_experts = [RoundtableTemporaryExpert.model_validate(item) for item in raw_experts]
+        except (TypeError, ValueError) as exc:
+            from app.core.exceptions import ValidationError
+            raise ValidationError(f"临时专家参数无效：{exc}", code=40001) from exc
+    temporary_profiles = tuple(
+        ReviewAgentProfile(
+            code=f"task_expert_{index + 1}",
+            name=expert.name,
+            focus=expert.focus,
+            issue_types=tuple(expert.issue_types),
+            instruction=expert.instruction,
+            is_custom=True,
+        )
+        for index, expert in enumerate(temporary_experts)
+    )
+    profiles = tuple(profiles) + temporary_profiles
     rules = rule_service.get_enabled_rules(
         db, user.id, language=(project.language or "").strip().lower(),
     )
@@ -85,7 +110,20 @@ def start_discussion(
         origin_surface=origin_surface,
         origin_session_key=origin_session_key,
         continued_from_session_id=continued_from_session_id,
+        participants=[
+            {"code": "orchestrator", "name": "小菱主持人", "role": "host", "temporary": False},
+            *[
+                {"code": p.code, "name": p.name, "role": "expert", "temporary": p.code.startswith("task_expert_")}
+                for p in profiles
+            ],
+        ],
     )
+    session = bus.get_session(session_id)
+    if session:
+        session.status = "pending"
+        session.stage = "pending"
+        session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
+        session.expected_turns = rounds * len(profiles)
 
     register_pending(
         session_id=session_id,
@@ -120,5 +158,9 @@ def start_discussion(
         "review_type": review_type,
         "continued_from_session_id": str(continued_from_session_id or "")[:64],
         "agents": agent_list,
+        "participants": session.participants if session else agent_list,
+        "status": "pending",
+        "completed_turns": 0,
+        "expected_turns": rounds * len(profiles),
         "rules_count": len(rules),
     })

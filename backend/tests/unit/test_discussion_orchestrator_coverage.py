@@ -232,6 +232,9 @@ def _make_orchestrator(bus: Optional[Any] = None) -> DiscussionOrchestrator:
     orchestrator._paused = False
     orchestrator._paused_event = None
     orchestrator._user_inputs = []
+    orchestrator._steering_inputs = []
+    orchestrator._steering_version = 0
+    orchestrator._steering_event = asyncio.Event()
     orchestrator._all_turns = []
     orchestrator._task_id = 0
     orchestrator._user_id = 0
@@ -411,6 +414,43 @@ async def test_speaker_turn_builds_context_and_returns_trimmed_content() -> None
     assert "忽略旧指示" not in call["user_prompt"]
     assert all(text in call["user_prompt"] for text in ("检查输入", "关注权限", "给出行号"))
     assert "选择发言或静音" in call["user_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_model_wait_publishes_phase_heartbeat_while_speaker_is_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """模型调用未返回时，后端仍须周期广播可见的阶段心跳。"""
+    orchestrator = _make_orchestrator()
+    monkeypatch.setattr(module, "_MODEL_STAGE_HEARTBEAT_SECONDS", 0.005, raising=False)
+
+    class SlowAgent:
+        model = "slow-test-model"
+
+        def call_raw(self, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+            threading.Event().wait(0.03)
+            return (
+                '{"action":"speak","stance":"propose","reply_to":null,"content":"发现测试问题"}',
+                {"model_name": self.model},
+            )
+
+    _, _, ok = await orchestrator._speaker_turn(
+        agent=SlowAgent(),
+        profile=SECURITY_AGENT,
+        code="print('heartbeat')",
+        language="python",
+        file_name="heartbeat.py",
+        all_turns=[],
+        user_inputs=[],
+        round_idx=0,
+        speaker_idx=0,
+    )
+
+    assert ok is True
+    phase_updates = [payload for _sid, action, payload in orchestrator._bus.controls if action == "phase"]
+    assert phase_updates
+    assert phase_updates[0]["stage"] == "agent_thinking"
+    assert SECURITY_AGENT.name in phase_updates[0]["message"]
 
 
 @pytest.mark.asyncio
@@ -739,10 +779,29 @@ async def test_handle_control_routes_user_pause_resume_and_stop() -> None:
     assert stop_event.is_set()
     assert control_bus.stop_requests == ["session-1"]
     assert [action for _, action, _ in control_bus.controls] == [
+        "steering_received",
         "paused",
         "resumed",
         "stopping",
     ]
+
+
+def test_user_input_during_host_summary_is_disclosed_without_second_model_call() -> None:
+    """总结请求已在途时收到插话，不重复发起模型调用，报告应明示并降为部分完成。"""
+    orchestrator = _make_orchestrator()
+    orchestrator._steering_inputs = [(1, "只看未授权访问路径")]
+    orchestrator._steering_version = 1
+    orchestrator._steering_event.set()
+    coverage = {"summary_status": "success", "errors": []}
+
+    summary = orchestrator._apply_late_summary_steering("已完成总结。", coverage)
+
+    assert "只看未授权访问路径" in summary
+    assert "没有重新生成总结" in summary
+    assert coverage["summary_status"] == "partial"
+    assert coverage["errors"]
+    assert not orchestrator._steering_event.is_set()
+    assert orchestrator._steering_inputs == []
 
 
 @pytest.mark.asyncio
@@ -1014,6 +1073,8 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
         _task_id: int,
         _user_id: int,
         _file_id: int,
+        *,
+        cancel_event: Optional[threading.Event] = None,
     ) -> list[Issue]:
         """返回两条不同严重度的结构化问题。
 
@@ -1405,13 +1466,14 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (
+        lambda _user_id, _profiles, _surface="user": (
             create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
         ),
     )
     monkeypatch.setattr(module, "build_discussion_environment", build_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
+    monkeypatch.setattr(module, "_ensure_running", lambda _task_id: None)
     monkeypatch.setattr(module, "new_trace_id", fixed_trace_id)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
         "status": "success" if "review" in finalized else "running", "error": "",
@@ -1491,6 +1553,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     orchestrator = _make_orchestrator(bus)
     created = threading.Event()
     cancelled_task_ids: list[int] = []
+    notified_sessions: list[str] = []
     finalized = False
 
     def create_task(**_kwargs: Any) -> int:
@@ -1511,13 +1574,18 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (RecordingAgent(), {"code_reviewer": RecordingAgent()}),
+        lambda _user_id, _profiles, _surface="user": (RecordingAgent(), {"code_reviewer": RecordingAgent()}),
     )
     monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {"status": "cancelled", "error": ""})
+    monkeypatch.setattr(
+        module,
+        "_notify_origin_session",
+        lambda **kwargs: notified_sessions.append(kwargs["discussion_session_id"]),
+    )
 
     run = asyncio.create_task(
         orchestrator.start_discussion(
@@ -1530,6 +1598,8 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
             project_id=12,
             file_id=34,
             max_rounds=1,
+            origin_surface="user",
+            origin_session_key="cancelled-chat",
         )
     )
     assert await asyncio.wait_for(asyncio.to_thread(created.wait, 1), timeout=2)
@@ -1540,8 +1610,10 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
 
     assert cancelled_task_ids == [77]
     assert finalized is False
-    assert session.status == "concluded"
+    assert session.status == "cancelled"
+    assert session.terminal_status == "cancelled"
     assert session.report_task_id == 77
+    assert notified_sessions == []
 
 
 @pytest.mark.asyncio
@@ -1623,7 +1695,7 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (
+        lambda _user_id, _profiles, _surface="user": (
             create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
         ),
     )
@@ -1647,7 +1719,8 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
 
     assert orchestrator._env is None
     assert orchestrator._task_id == 0
-    assert session.status == "concluded"
+    assert session.status == "failed"
+    assert session.terminal_status == "failed"
     assert session.report_task_id == 0
     assert len(session.turns) == 1
     assert "database unavailable" in session.turns[0].content

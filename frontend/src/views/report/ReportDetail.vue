@@ -33,6 +33,15 @@
     <el-alert v-if="loadError" data-testid="report-load-error" class="no-print" :title="loadError" type="warning" :closable="false" show-icon>
       <el-button :loading="loading" @click="loadReport">重试读取报告</el-button>
     </el-alert>
+    <el-alert
+      v-if="reportAccessRevoked"
+      data-testid="report-access-revoked"
+      class="no-print"
+      title="当前账号已无报告查看权限，报告内容已清除。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
     <!-- ============ T15 报告操作工具栏(模板类型 / 生成 / 预览 / 导出)============ -->
     <section v-if="report" class="report-toolbar no-print">
       <div class="toolbar-left">
@@ -105,13 +114,50 @@
       <p v-if="report?.source?.report_issue_summary?.total == null">未保存可识别的问题清单，无法确定条目数；历史记录数保留在来源信息中。</p>
     </section>
 
+    <el-alert
+      v-if="report && totalIssues > 0 && !canViewIssueDetails"
+      data-testid="report-issues-access-limited"
+      class="no-print"
+      title="当前账号没有漏洞详情查看权限，已隐藏逐条问题与修复建议。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+
+    <section
+      v-if="report && canViewIssueDetails && issuesLoadError"
+      class="report-issues-load-error no-print"
+      data-testid="report-issues-load-error"
+      role="alert"
+    >
+      <p>{{ issuesLoadError }}</p>
+      <el-button size="small" :loading="issuesLoading" :disabled="issuesLoading" @click="loadIssues">
+        重试读取问题明细
+      </el-button>
+    </section>
+
+    <section v-if="report" class="card report-execution-state" data-testid="report-execution-state">
+      <header class="card-head">
+        <h3 class="font-display">执行状态与覆盖范围</h3>
+        <div class="execution-tags">
+          <el-tag :type="executionStatusType" size="small">{{ executionStatusLabel }}</el-tag>
+          <el-tag :type="coverageStatusType" size="small">{{ coverageStatusLabel }}</el-tag>
+        </div>
+      </header>
+      <p v-if="report.task?.error_message" class="execution-error">{{ report.task.error_message }}</p>
+      <p v-if="coverageSummary" class="coverage-summary">{{ coverageSummary }}</p>
+      <ul v-if="coverageEntries.length" class="coverage-details">
+        <li v-for="(entry, index) in coverageEntries" :key="`${index}-${entry}`">{{ entry }}</li>
+      </ul>
+    </section>
+
     <section v-if="exportErrorMessage" class="report-export-error no-print" role="alert">
       <strong>{{ exportErrorMessage }}</strong>
       <span v-if="exportErrorNextAction">{{ exportErrorNextAction }}</span>
       <el-button v-if="retryExportFormat && canExport(retryExportFormat)" size="small" @click="retryExport">重试导出</el-button>
     </section>
 
-    <div v-if="report" class="report-paper">
+    <div v-if="report" class="report-paper" data-testid="report-paper">
       <!-- ============ 暗色封面 ============ -->
       <section class="cover">
         <header class="cover-head">
@@ -140,7 +186,7 @@
           </div>
 
           <div class="cover-score">
-            <div class="score-ring">
+            <div v-if="score != null" class="score-ring">
               <svg viewBox="0 0 120 120" width="160" height="160">
                 <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="6"/>
                 <circle
@@ -156,10 +202,11 @@
                 <div class="ring-out font-mono">/ 100</div>
               </div>
             </div>
+            <div v-else class="score-unavailable" data-testid="report-score-unavailable">未评分</div>
             <div
               class="risk-tag"
               data-testid="report-risk-level"
-              :style="{ color: scoreFlatColor(score), borderColor: scoreFlatColor(score) }"
+              :style="{ color: scoreFlatColor(score ?? 0), borderColor: scoreFlatColor(score ?? 0) }"
             >
               {{ riskLevel }}
             </div>
@@ -479,7 +526,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
@@ -513,6 +560,7 @@ const taskId = Number(route.params.id)
 
 const loading = ref(true)
 const loadError = ref('')
+const reportAccessRevoked = ref(false)
 let reportRequestVersion = 0
 let disposed = false
 const report = ref<ReportDetailOut | null>(null)
@@ -543,6 +591,8 @@ const retryExportFormat = ref<ReportFormat | null>(null)
 const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
 const issuesLoading = ref(false)
+/** 问题明细读取失败时明确提示，避免被误认为报告没有问题。 */
+const issuesLoadError = ref('')
 
 /** 只有后端确认由有效 v3.1 向量计算的分数才可作为 CVSS 展示。 */
 function deterministicCvssScore(issue: ReportIssue): number | undefined {
@@ -574,6 +624,48 @@ const isDomainReport = computed(() => {
   return sourceType === 'sandbox_test' || sourceType === 'pentest'
 })
 const canViewReport = computed(() => !!report.value && !loading.value && !loadError.value && userStore.hasPermission('report:view'))
+const canViewIssueDetails = computed(() => userStore.hasPermission('issue:view'))
+const taskStatus = computed(() => String(report.value?.task?.status ?? 'unknown'))
+const coverage = computed<Record<string, unknown>>(() => {
+  const value = report.value?.task?.coverage
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+})
+const executionStatusLabel = computed(() => ({
+  success: '已完成', partial: '部分覆盖', failed: '执行失败', cancelled: '已取消', expired: '已过期', stopped: '已停止',
+} as Record<string, string>)[taskStatus.value] || '状态未知')
+const executionStatusType = computed(() => taskStatus.value === 'success' ? 'success'
+  : taskStatus.value === 'partial' ? 'warning'
+    : ['cancelled', 'expired', 'stopped'].includes(taskStatus.value) ? 'info' : 'danger')
+const coverageStatusLabel = computed(() => ({
+  complete: '覆盖完整', partial: '覆盖不完整', unknown: '覆盖范围未知',
+} as Record<string, string>)[String(coverage.value.coverage_status ?? 'unknown')] || '覆盖范围未知')
+const coverageStatusType = computed(() => coverage.value.coverage_status === 'complete' ? 'success'
+  : coverage.value.coverage_status === 'partial' ? 'warning' : 'info')
+const coverageSummary = computed(() => {
+  const tested = Array.isArray(coverage.value.tested) ? coverage.value.tested.length : 0
+  const unscanned = Array.isArray(coverage.value.unscanned) ? coverage.value.unscanned.length : 0
+  const skipped = Array.isArray(coverage.value.skipped_phases) ? coverage.value.skipped_phases.length : 0
+  if (!tested && !unscanned && !skipped && !Array.isArray(coverage.value.phases)) {
+    return '本报告未保存可核验的逐项覆盖清单。'
+  }
+  return `已测 ${tested} 项；未覆盖 ${unscanned} 项；跳过阶段 ${skipped} 项。`
+})
+const coverageEntries = computed(() => {
+  const result: string[] = []
+  for (const [label, key] of [['已测', 'tested'], ['未覆盖', 'unscanned'], ['错误', 'errors']] as const) {
+    const entries = coverage.value[key]
+    if (Array.isArray(entries)) result.push(...entries.map(item => `${label}：${String(item)}`))
+  }
+  if (Array.isArray(coverage.value.skipped_phases)) {
+    result.push(...coverage.value.skipped_phases.map(item => `跳过阶段：${String(item)}`))
+  }
+  if (Array.isArray(coverage.value.phases)) {
+    result.push(...coverage.value.phases
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !['success', 'completed'].includes(String(item.status)))
+      .map(item => `阶段 ${String(item.label ?? item.phase ?? '')}：${String(item.status ?? '未知')}${item.error ? `；${String(item.error)}` : ''}`))
+  }
+  return result
+})
 function canExport(format: ReportFormat): boolean {
   return canViewReport.value && userStore.hasPermission(`report:export:${format}`)
     && (!isDomainReport.value || format === 'json')
@@ -602,10 +694,12 @@ const agentReleases = computed<Array<Record<string, unknown>>>(() => (
 ))
 
 const score = computed(() => {
-  const value = Number(stats.value.score ?? 0)
-  return Number.isFinite(value) ? value : 0
+  const raw = stats.value.score
+  if (raw === null || raw === undefined || raw === '') return null
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : null
 })
-const animatedScoreValue = useCountUp(score, 1500)
+const animatedScoreValue = useCountUp(computed(() => score.value ?? 0), 1500)
 const animatedScore = computed(() => Math.round(animatedScoreValue.value))
 const totalIssues  = computed(() => Number(stats.value.total_issues ?? 0))
 const severeCount  = computed(() => Number(stats.value.severe ?? 0))
@@ -677,7 +771,8 @@ const radarOption = computed<EChartsOption>(() => ({
   color: PRISM_DIM_COLORS,
 }))
 
-const riskLevel = computed(() => isSandboxReport.value ? '安全风险未评定（测试得分不代表风险）' : reviewRiskLevel(score.value))
+const riskLevel = computed(() => isSandboxReport.value ? '安全风险未评定（测试得分不代表风险）'
+  : score.value == null ? '未评级（覆盖不完整）' : reviewRiskLevel(score.value))
 
 function formatDate(s?: string): string {
   if (!s) return '-'
@@ -785,19 +880,65 @@ function onPrint() {
  * 后端报告详情不含 issues,需单独调用 review API 获取。
  */
 async function loadIssues(): Promise<void> {
-  if (!userStore.hasPermission('issue:view')) return
+  if (!userStore.hasPermission('issue:view')) {
+    issues.value = []
+    issuesLoadError.value = ''
+    issuesLoading.value = false
+    return
+  }
   issuesLoading.value = true
+  issuesLoadError.value = ''
   try {
     // 一次取足够多,Top10 与分布统计需要全量数据
     const data = await getTaskIssues(taskId, { page: 1, page_size: 1000 })
+    if (!userStore.hasPermission('issue:view')) return
     issues.value = (data.items as unknown as ReportIssue[]) ?? []
   } catch {
-    // v3 字段展示为增强信息,加载失败不阻塞主报告
+    // 保留统计报告，同时显式说明逐条问题和派生分析未能读取。
     issues.value = []
+    issuesLoadError.value = '问题明细读取失败。报告中的总数统计仍可查看，但逐条问题、严重度分布和修复建议尚未完整加载。'
   } finally {
     issuesLoading.value = false
   }
 }
+
+watch(canViewIssueDetails, (allowed) => {
+  if (!allowed) {
+    issues.value = []
+    issuesLoadError.value = ''
+    issuesLoading.value = false
+    return
+  }
+  if (report.value) void loadIssues()
+})
+
+watch(
+  () => userStore.hasPermission('report:view'),
+  (allowed) => {
+    if (!allowed) {
+      reportAccessRevoked.value = !!report.value
+      reportRequestVersion++
+      report.value = null
+      issues.value = []
+      issuesLoadError.value = ''
+      issuesLoading.value = false
+      previewFallbackVisible.value = false
+      previewFallbackHtml.value = ''
+      exportErrorMessage.value = ''
+      exportErrorNextAction.value = ''
+      retryExportFormat.value = null
+      try { pendingPreviewWindow?.close() } catch { /* 权限撤销后立即关闭预览窗口 */ }
+      pendingPreviewWindow = null
+      loading.value = false
+      loadError.value = ''
+      return
+    }
+    if (reportAccessRevoked.value) {
+      reportAccessRevoked.value = false
+      void Promise.all([loadReport(), loadIssues()])
+    }
+  },
+)
 
 // ===== T15 新增:v3 字段计算属性 =====
 
@@ -1177,6 +1318,21 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.report-issues-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 8px;
+  background: var(--el-color-warning-light-9);
+  color: var(--el-color-warning-dark-2);
+
+  p { margin: 0; }
+}
+
 /* ============ 报告纸 ============ */
 .report-paper {
   background: #fff;
@@ -1293,6 +1449,17 @@ onBeforeUnmount(() => {
   position: relative;
   width: 160px;
   height: 160px;
+}
+
+.score-unavailable {
+  min-width: 160px;
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 16px;
 }
 
 .ring-text {
@@ -1486,6 +1653,12 @@ onBeforeUnmount(() => {
     color: var(--gray-900);
   }
 }
+
+.report-execution-state .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.execution-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.execution-error { margin: 0 0 10px; color: var(--color-danger, #dc4961); overflow-wrap: anywhere; }
+.coverage-summary { margin: 0 0 8px; color: var(--gray-700); }
+.coverage-details { margin: 0; padding-left: 20px; color: var(--gray-700); line-height: 1.7; overflow-wrap: anywhere; }
 
 .card-desc {
   margin-top: 4px;

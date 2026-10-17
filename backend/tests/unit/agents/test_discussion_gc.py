@@ -1,5 +1,6 @@
 """讨论会话过期清理测试 — 防止 DiscussionBus/_pending/_session_owners 无限增长"""
 import asyncio
+import json
 import time
 
 import pytest
@@ -15,6 +16,62 @@ def _fresh_bus() -> DiscussionBus:
 
 
 class TestBusPurge:
+    @pytest.mark.asyncio
+    async def test_reconnect_snapshot_restores_live_round_speaker_and_stage(self):
+        bus = _fresh_bus()
+        session = bus.create_session("disc_snapshot", task_id=0, file_name="main.py", max_rounds=3)
+        bus.publish_control(session.session_id, "round_start", {"round": 2, "total_rounds": 3})
+        bus.publish_control(session.session_id, "speaker", {
+            "speaker_code": "security",
+            "speaker_name": "安全专家",
+            "speaker_index": 2,
+            "total_speakers": 5,
+        })
+        bus.publish_control(session.session_id, "phase", {
+            "stage": "agent_thinking",
+            "message": "安全专家正在组织发言",
+        })
+
+        queue = await bus.subscribe(session.session_id)
+        frames = [json.loads(await queue.get()) for _ in range(queue.qsize())]
+        snapshot = next(frame for frame in frames if frame.get("action") == "snapshot")
+
+        assert snapshot["payload"] == {
+            "status": "active",
+            "terminal_status": "",
+            "round": 2,
+            "total_rounds": 3,
+            "speaker_code": "security",
+            "speaker_name": "安全专家",
+            "speaker_index": 2,
+            "total_speakers": 5,
+            "stage": "agent_thinking",
+            "message": "安全专家正在组织发言",
+            "task_id": 0,
+            "report_task_id": 0,
+            "error": "",
+            "completed_turns": 0,
+            "expected_turns": 0,
+            "participants": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_cancelled_terminal_replay_preserves_cancelled_status(self):
+        bus = _fresh_bus()
+        session = bus.create_session("disc_cancelled_snapshot", task_id=91, file_name="main.py")
+        session.terminal_status = "cancelled"
+        session.terminal_error = "父级小菱运行已停止"
+        bus.request_stop(session.session_id)
+        bus.close_session(session.session_id)
+
+        queue = await bus.subscribe(session.session_id)
+        frames = [json.loads(await queue.get()) for _ in range(queue.qsize())]
+        done = next(frame for frame in frames if frame.get("action") == "done")
+
+        assert session.status == "cancelled"
+        assert done["payload"]["status"] == "cancelled"
+        assert done["payload"]["error"] == "父级小菱运行已停止"
+
     def test_continuation_session_keeps_lineage_without_mutating_closed_session(self):
         bus = _fresh_bus()
         closed = bus.create_session(
@@ -131,7 +188,7 @@ class TestBusPurge:
         await asyncio.sleep(0)
         assert cancelled.is_set()
         assert bus.get_discussion_task("disc_task") is None
-        assert bus.get_session("disc_task").status == "concluded"
+        assert bus.get_session("disc_task").status == "cancelled"
 
 
 class TestWsRegistryPurge:

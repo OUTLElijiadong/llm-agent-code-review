@@ -1,9 +1,8 @@
-"""控制面/体验面身份分离回归测试。
+"""跨页面统一小菱身份与控制面权限隔离回归测试。
 
 复现并锁定两类历史 bug:
-- bug①: 管理端(贾维斯)运行的工具事件被记到 chat_assistant(小菱)名下,
-  Agent 中心工位卡显示错身份;
-- bug②: 管理端人设复用小菱并携带成员侧审计指令(审计叙事混入运维面)。
+- 管理端和成员端必须显示同一小菱身份，但运行能力与审计权限仍由 surface 隔离;
+- 管理端提示词不得要求切换到另一个助手或声称拥有未注册的成员能力。
 """
 
 from __future__ import annotations
@@ -49,17 +48,18 @@ def admin(db):
 
 
 def test_surface_agent_identity_mapping():
-    """surface → (agent code, 称谓) 单一事实源。"""
-    assert surface_agent_identity("admin") == ("manager", "贾维斯")
+    """surface 变化不应改变用户可见的助手身份。"""
+    assert surface_agent_identity("admin") == ("chat_assistant", "小菱")
     assert surface_agent_identity("user") == ("chat_assistant", "小菱")
 
 
 def test_admin_instructions_are_jarvis_ops_not_xiaoling_audit(db, admin):
-    """管理端人设: 贾维斯全局运维定位, 不叫小菱, 不携带成员侧审计指令。"""
+    """管理端仍叫小菱；管理员职责和能力范围由权限工具限制。"""
     instructions = _instructions("admin", admin, is_super_admin=True)
-    assert "贾维斯" in instructions
+    assert "小菱" in instructions
+    assert "贾维斯" not in instructions
     assert "全局运维" in instructions
-    assert "小菱" in instructions  # 仅作为"成员侧找小菱"的引导出现
+    assert "不得要求切换账号" in instructions
     # 成员侧审计指令不得进入管理面人设
     assert "audit_security_for_project" not in instructions
     # 运维职责清单在场
@@ -81,8 +81,8 @@ def test_user_instructions_stay_xiaoling(db):
 
 
 @pytest.mark.asyncio
-async def test_admin_surface_tool_events_attributed_to_manager(db, admin, monkeypatch):
-    """bug①复现: 管理端工具事件必须归 manager(贾维斯), 不再冒充小菱。"""
+async def test_admin_surface_tool_events_keep_xiaoling_identity(db, admin, monkeypatch):
+    """管理端工具事件也归属统一的小菱身份。"""
     monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_a, **_k: _bare_orchestrator())
     executor = PrismToolExecutor(
         db,
@@ -104,8 +104,8 @@ async def test_admin_surface_tool_events_attributed_to_manager(db, admin, monkey
 
     assert len(emitted) == 1
     (args, kwargs) = emitted[0]
-    assert args[1] == "manager", "管理端事件被误记到小菱(chat_assistant)名下"
-    assert "贾维斯" in kwargs.get("message", "")
+    assert args[1] == "chat_assistant"
+    assert "小菱" in kwargs.get("message", "")
     assert kwargs.get("user_id") == int(admin.id)
 
 

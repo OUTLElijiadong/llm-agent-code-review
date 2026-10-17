@@ -6,12 +6,14 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import NotFoundError
+from app.core.permission_codes import PermissionCode
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.security import SecurityDashboardSummaryOut
@@ -22,6 +24,21 @@ from app.services import dashboard_service, report_service, review_service, secu
 def source_owner(db):
     owner = User(username="source-owner", password="x", role="user", status=1)
     db.add(owner)
+    db.flush()
+    role = db.query(Role).filter_by(code="user").one_or_none()
+    if role is None:
+        role = Role(name="普通用户", code="user", status="active", is_builtin=1)
+        db.add(role)
+        db.flush()
+    db.add(UserRole(user_id=owner.id, role_id=role.id))
+    for code in (PermissionCode.REPORT_VIEW, PermissionCode.PENTEST_VIEW):
+        permission = db.query(Permission).filter_by(code=code).one_or_none()
+        if permission is None:
+            permission = Permission(code=code, name=code, module="report", type="api")
+            db.add(permission)
+            db.flush()
+        if not db.query(RolePermission).filter_by(role_id=role.id, permission_id=permission.id).count():
+            db.add(RolePermission(role_id=role.id, permission_id=permission.id))
     db.flush()
     return owner
 
@@ -44,6 +61,10 @@ def _task(db, owner, project, source, *, count=0, score=0, status="success", cre
         total_issues=count,
         score=score,
         score_version="pentest-v1" if source == "pentest" else None,
+        coverage=(
+            {"coverage_status": "complete", "tested": ["synthetic fixture scope"], "unscanned": []}
+            if source in {"sandbox_test", "pentest"} else None
+        ),
         create_time=created or datetime.now(timezone.utc),
     )
     db.add(task)
@@ -262,13 +283,10 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
         _issues(db, task)
     db.commit()
 
-    if source == "sandbox_test":
-        assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == 2
-        assert _listed(db, source_owner, task)["status"] == "failed"
-    else:
-        with pytest.raises(NotFoundError):
-            report_service.get_report_detail(db, source_owner, task.id)
-        assert report_service.list_reports(db, source_owner)["total"] == 0
+    detail = report_service.get_report_detail(db, source_owner, task.id)
+    listed = _listed(db, source_owner, task)
+    assert detail["task"]["status"] == listed["status"] == "failed"
+    assert detail["stats"]["total_issues"] == listed["total_issues"] == 2
     summary = dashboard_service.get_summary(db, source_owner)
     assert summary["review_count"] == 0
     assert summary["avg_score"] == 0
@@ -295,7 +313,79 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
             report_service.get_report_detail(db, reader, task.id)
         assert report_service.list_reports(db, reader)["total"] == 0
     assert dashboard_service.get_summary(db, member)["total_issues"] == 2
+    assert dashboard_service.get_summary(db, member)["recent_tasks"] == []
+    assert dashboard_service.get_score_trend(db, member) == []
     assert dashboard_service.get_summary(db, outsider)["total_issues"] == 0
+
+
+def test_dashboard_hides_foreign_report_cards_and_scores_from_project_member(db, source_owner, source_project):
+    owner_task = _task(db, source_owner, source_project, "standard", score=88)
+    _issues(db, owner_task)
+    member = User(username="dashboard-private-member", password="x", role="user", status=1)
+    db.add(member)
+    db.flush()
+    db.add(ProjectMember(project_id=source_project.id, user_id=member.id))
+    db.commit()
+
+    summary = dashboard_service.get_summary(db, member)
+    assert summary["recent_tasks"] == []
+    assert dashboard_service.get_score_trend(db, member) == []
+
+
+def test_dashboard_hides_pentest_card_for_account_without_pentest_permission(db, source_owner, source_project):
+    reader = User(username="dashboard-no-pentest", password="x", role="user", status=1)
+    db.add(reader)
+    db.flush()
+    role = Role(name="仅报告读取", code="report-reader-only", status="active", is_builtin=0)
+    db.add(role)
+    db.flush()
+    permission = db.query(Permission).filter_by(code=PermissionCode.REPORT_VIEW).one_or_none()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REPORT_VIEW, name="报告查看", module="report", type="api")
+        db.add(permission)
+        db.flush()
+    db.add_all([
+        UserRole(user_id=reader.id, role_id=role.id),
+        RolePermission(role_id=role.id, permission_id=permission.id),
+        ProjectMember(project_id=source_project.id, user_id=reader.id),
+    ])
+    task = _task(db, reader, source_project, "pentest", score=84)
+    _pentest(db, task)
+    db.commit()
+
+    summary = dashboard_service.get_summary(db, reader)
+    assert summary["recent_tasks"] == []
+    assert dashboard_service.get_score_trend(db, reader) == []
+    assert all(item["task_id"] != task.id for item in report_service.list_reports(db, reader)["items"])
+
+
+@pytest.mark.parametrize("coverage_status,expected_score", [("complete", 84), ("partial", None), ("unknown", None)])
+@pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
+def test_domain_score_visibility_is_consistent_across_report_and_dashboard(
+    db, source_owner, source_project, source, coverage_status, expected_score,
+):
+    task = _task(db, source_owner, source_project, source, score=84)
+    task.coverage = (
+        {"coverage_status": coverage_status, "tested": ["known scope"], "unscanned": []}
+        if coverage_status != "unknown" else {}
+    )
+    if source == "pentest":
+        _pentest(db, task)
+    else:
+        _snapshot(db, task, public_id=f"sbx-{task.id}", report_md="## 范围\n合成覆盖数据")
+    db.commit()
+
+    listed = _listed(db, source_owner, task)
+    detail = report_service.get_report_detail(db, source_owner, task.id)
+    summary = dashboard_service.get_summary(db, source_owner)
+    trend = dashboard_service.get_score_trend(db, source_owner)
+    recent = next(item for item in summary["recent_tasks"] if item["id"] == task.id)
+
+    assert listed["score"] == detail["task"]["score"] == detail["stats"]["score"] == expected_score
+    assert recent["score"] == expected_score
+    assert ([item["task_id"] for item in trend] == [task.id]) == (expected_score is not None)
+    if expected_score is not None:
+        assert trend[0]["score"] == expected_score
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
@@ -468,7 +558,11 @@ def test_real_sandbox_publisher_report_and_dashboard_close_the_count_loop(
     published = _publish_sandbox_report(
         db,
         SimpleNamespace(public_id="sbx-published", owner_id=source_owner.id, project_id=source_project.id),
-        {"passed": passed, "agent_tests": {"generated": 2, "passed_count": 1}},
+        {
+            "passed": passed,
+            "agent_tests": {"generated": 2, "passed_count": 1},
+            "coverage": {"coverage_status": "complete", "tested": ["合成测试范围"], "unscanned": []},
+        },
         "## 总体结论\n合成结果\n## 问题清单\n- A\n- B\n- C\n",
     )
     task = db.get(ReviewTask, published["report_task_id"])
@@ -490,6 +584,7 @@ def test_real_pentest_publisher_and_domain_detail_agree(db, source_owner, source
     findings = db.query(PentestFinding).filter_by(engagement_id=engagement.id).all()
     published = _publish_pentest_report(
         db, engagement, findings, "合成渗透报告", {"严重": 1, "高": 1, "提示": 1}, {"高": 1}, 84, {}, {}, "高风险",
+        coverage={"coverage_status": "complete", "tested": ["合成授权目标"], "unscanned": []},
     )
     domain = get_engagement_detail(db, source_owner, engagement.public_id)
     detail = report_service.get_report_detail(db, source_owner, published.id)

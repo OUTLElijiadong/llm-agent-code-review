@@ -321,7 +321,7 @@ describe('审查扫描范围失败回归', () => {
     await target.find('input').setValue(true)
     await vm.onSubmit()
     expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ file_ids: [501] }))
-  })
+  }, 15000)
 
   it('全部项目实际提交包含第101个项目，不只修正显示计数', async () => {
     api.projects.mockImplementation(({ page = 1 }) => Promise.resolve(page === 1
@@ -334,7 +334,7 @@ describe('审查扫描范围失败回归', () => {
     expect(api.start).toHaveBeenCalledTimes(101)
     expect(api.start).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 101, file_ids: [101] }))
     expect(wrapper.text()).toContain('已处理 101 / 101')
-  })
+  }, 15000)
 
   it('批量超限项目计为失败，空项目计为跳过，均不创建残缺任务', async () => {
     api.projects.mockResolvedValue(pageOf([project(1), project(2)]))

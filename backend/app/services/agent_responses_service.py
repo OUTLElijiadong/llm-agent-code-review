@@ -12,10 +12,12 @@ import inspect
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Literal, Mapping, Optional, Sequence
 from urllib.parse import urlencode
+
+from pydantic import Field
 
 import httpx
 from sqlalchemy import update
@@ -41,9 +43,10 @@ from app.core.exceptions import AppError
 from app.core.observability import observe_event
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
-from app.models.agent_mesh import AgentMeshConversation
+from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage
 from app.models.agent_response_run import AgentResponseRun, AgentToolExecution
 from app.models.user import User
+from app.schemas.discussion import RoundtableTemporaryExpert
 from app.services import (
     admin_agent_tools,
     admin_capability_service,
@@ -117,6 +120,120 @@ _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", 
 _FULL_VALIDATION_POLL_SECONDS = 2.0
 
 
+def _is_automatic_task_result_for_roundtable(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    session_id: str = "",
+    run_id: str = "",
+) -> bool:
+    """识别当前小菱运行是否由该圆桌的 task.result 消息自动触发。"""
+
+    if user_id <= 0 or not surface or not session_key:
+        return False
+
+    message_ids: set[str] = set()
+    if run_id:
+        run = (
+            db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.run_id == str(run_id),
+                AgentResponseRun.user_id == int(user_id),
+                AgentResponseRun.surface == str(surface),
+                AgentResponseRun.session_key == str(session_key),
+            )
+            .one_or_none()
+        )
+        if run is not None and run.mesh_message_id:
+            message_ids.add(str(run.mesh_message_id))
+
+    query = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == int(user_id),
+        AgentMeshMessage.send_to == f"session:{surface}:{session_key}",
+        AgentMeshMessage.message_type == "task.result",
+        AgentMeshMessage.status == "processing",
+    )
+    if message_ids:
+        query = query.filter(AgentMeshMessage.message_id.in_(message_ids))
+    else:
+        query = query.order_by(AgentMeshMessage.id.desc()).limit(50)
+
+    for message in query.all():
+        try:
+            payload = json.loads(str(message.payload_json or "{}"))
+        except (TypeError, ValueError):
+            continue
+        result_session_id = str(payload.get("discussion_session_id") or "") if isinstance(payload, dict) else ""
+        if result_session_id and (not session_id or result_session_id == session_id):
+            return True
+    return False
+
+
+_ROUNDTABLE_CONTINUE_INTENT = re.compile(
+    r"(?:继续|接着(?:做|处理|审查|复核|讨论|上次|上一轮)?|再(?:跑|做|审查|复核)(?:一遍|一次)?)"
+)
+_ROUNDTABLE_CONTINUE_NEGATION = re.compile(r"(?:不要|别|不必|无需|暂不|先不).{0,4}(?:继续|接着)")
+
+
+def _has_explicit_human_roundtable_continue_request(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    run_id: str,
+) -> bool:
+    """只接受新的人类 Responses 输入明确要求继续，不以模型工具参数代替用户授权。"""
+
+    if user_id <= 0 or not surface or not session_key or not run_id:
+        return False
+    row = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.run_id == str(run_id),
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == str(surface),
+            AgentResponseRun.session_key == str(session_key),
+            AgentResponseRun.status == "running",
+        )
+        .one_or_none()
+    )
+    # AgentMesh 触发的运行（task.result、status.update、团队事件等）不是新的人类消息。
+    if row is None or row.mesh_message_id:
+        return False
+    try:
+        checkpoint = json.loads(str(row.checkpoint_json or "{}"))
+    except (TypeError, ValueError):
+        return False
+    transcript = checkpoint.get("transcript") if isinstance(checkpoint, dict) else None
+    if not isinstance(transcript, list):
+        return False
+    latest_user = next(
+        (item for item in reversed(transcript) if isinstance(item, dict) and item.get("role") == "user"),
+        None,
+    )
+    if latest_user is None:
+        return False
+    content = latest_user.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    else:
+        text = ""
+    return bool(
+        text.strip()
+        and not _ROUNDTABLE_CONTINUE_NEGATION.search(text)
+        and _ROUNDTABLE_CONTINUE_INTENT.search(text)
+    )
+
+
 class AgentSessionExpiredError(RuntimeError):
     """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
@@ -151,6 +268,11 @@ class StartRoundtableDiscussionArguments(FixedToolArguments):
     project_id: int
     file_id: int
     review_type: str = "full"
+    temporary_experts: list[RoundtableTemporaryExpert] = Field(
+        default_factory=list,
+        max_length=3,
+        description="按当前代码情境临时增加的专家，最多 3 位，仅属于本次圆桌，不写入永久 Agent 库",
+    )
 
 
 class GetRoundtableDiscussionArguments(FixedToolArguments):
@@ -163,7 +285,7 @@ class ControlRoundtableDiscussionArguments(FixedToolArguments):
     """控制当前用户圆桌讨论的固定参数。"""
 
     session_id: str
-    action: Literal["pause", "resume", "stop", "user_input"]
+    action: Literal["pause", "resume", "stop", "user_input", "continue"]
     content: str = ""
 
 
@@ -224,7 +346,7 @@ _DANGER_TOOLS = {
 # 普通管理员经能力目录看到并批准也会 403, 前置拒绝避免注定失败的审批。
 _SUPER_ADMIN_ONLY_CAPABILITIES = frozenset({"beta_codes.delete"})
 
-# 成员侧业务工具(控制面/体验面分离): 管理面(贾维斯)不广告、不执行。
+# 成员侧业务工具: 管理面工具目录仍不开放这些能力,由 RBAC 与 surface 共同限制。
 # 审计/审查/沙箱/下载/圆桌/渗透都是成员业务, 由小菱侧承担; 远程导入的
 # queue/get 保留双面(管理面导入仓库属运维导入场景, 导入后的审计引导到成员侧)。
 _MEMBER_BUSINESS_TOOLS = frozenset({
@@ -348,13 +470,7 @@ _NON_TERMINAL_RUN_STATUSES = {
 
 
 def surface_agent_identity(surface: str) -> tuple[str, str]:
-    """控制面/体验面身份分离(单一事实源)。
-
-    管理端 = 贾维斯(manager, 全局运维); 成员端 = 小菱(chat_assistant)。
-    AgentEventBus 事件归属、状态文案统一取这里, 防止管理端运行被记到小菱名下。
-    """
-    if surface == "admin":
-        return "manager", "贾维斯"
+    """跨页面保持同一小菱身份；权限与可用工具仍由 surface 独立约束。"""
     return "chat_assistant", "小菱"
 
 
@@ -478,17 +594,16 @@ class DatabaseCheckpointStore:
             self._db.commit()
             return
         self._assert_owner(row)
-        # 取消是不可覆盖终态:取消请求与原始驱动循环分属不同请求实例,
-        # 驱动循环可能稍后回写 waiting_approval/waiting_input。用条件 UPDATE
-        # 保证并发交错下取消仍最终获胜(先取消者先提交即赢)。
-        if row.status == CANCELLED and checkpoint.status != CANCELLED:
+        # completed 与 cancelled 都是不可覆盖终态。取消和模型结束可能并发；
+        # 以条件 UPDATE 保证先提交的终态获胜，迟到的取消不能覆盖 completed。
+        if row.status in {COMPLETED, CANCELLED}:
             return
         payload = json.dumps(checkpoint.to_dict(), ensure_ascii=False, default=str)
         updated = (
             self._db.query(AgentResponseRun)
             .filter(
                 AgentResponseRun.run_id == checkpoint.run_id,
-                AgentResponseRun.status != CANCELLED,
+                AgentResponseRun.status.notin_({COMPLETED, CANCELLED}),
             )
             .update(
                 {
@@ -501,7 +616,7 @@ class DatabaseCheckpointStore:
         )
         self._db.commit()
         if updated == 0:
-            # 并发取消已先落库;保持 cancelled 终态,放弃本次回写。
+            # completed/cancelled 并发终态已先落库;保持现有终态并放弃回写。
             return
 
     async def load(self, run_id: str) -> Optional[RunCheckpoint]:
@@ -513,6 +628,10 @@ class DatabaseCheckpointStore:
                 AgentResponseRun.surface == self._surface,
                 AgentResponseRun.session_key == self._session_key,
             )
+            # SessionLocal uses expire_on_commit=False. A cancellation request can
+            # keep an old RUNNING ORM instance after another request commits a
+            # terminal state, so refresh the identity-map entry from the database.
+            .populate_existing()
             .first()
         )
         if row is None:
@@ -1361,6 +1480,16 @@ class PrismToolExecutor:
     async def _start_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
         """复用用户 REST 预检后，在后台启动同一套圆桌编排器。"""
 
+        if _is_automatic_task_result_for_roundtable(
+            self._db,
+            user_id=int(self._user.id),
+            surface=self._surface,
+            session_key=self._session_key,
+            session_id="",
+            run_id=self._run_id,
+        ):
+            return ToolExecutionResult.failure("圆桌 task.result 只用于汇报，不能自动启动或续跑圆桌")
+
         from app.api.v1.discussion import start_discussion
         from app.api.v1.ws_discussion import launch_pending_discussion, take_pending
 
@@ -1372,13 +1501,19 @@ class PrismToolExecutor:
             user=self._user,
             origin_surface=self._surface,
             origin_session_key=self._session_key,
+            temporary_experts_json=json.dumps(
+                [expert.model_dump() for expert in call.arguments.get("temporary_experts", [])],
+                ensure_ascii=False,
+            ),
         )
         data = dict(response.data or {})
         session_id = str(data.get("session_id") or "")
         pending = take_pending(session_id)
         if not session_id or pending is None:
             return ToolExecutionResult.failure("圆桌讨论上下文创建失败")
-        launch_pending_discussion(pending)
+        launched = launch_pending_discussion(pending)
+        if launched is None:
+            return ToolExecutionResult.failure("圆桌会话已结束或已被停止，未重新启动；如需继续请发送新的明确指令")
         open_query = urlencode({
             "discuss_session": session_id,
             "discuss_ws": str(data.get("ws_url") or ""),
@@ -1551,7 +1686,7 @@ class PrismToolExecutor:
         })
 
     async def _control_roundtable_discussion(self, call: ToolCall) -> ToolExecutionResult:
-        """按会话归属发送暂停、恢复、停止或用户发言。"""
+        """按会话归属发送控制；仅成功终态且来自新用户回合时允许续会。"""
 
         from app.agents.discussion_bus import DiscussionBus
         from app.agents.events import DiscussionTurn
@@ -1565,12 +1700,39 @@ class PrismToolExecutor:
             return ToolExecutionResult.failure("圆桌讨论不存在或已过期")
         if not session.owner_user_id or int(session.owner_user_id) != int(self._user.id):
             return ToolExecutionResult.failure("无权控制该圆桌讨论")
-        if session.status == "concluded":
-            if action != "user_input":
-                return ToolExecutionResult.failure("圆桌讨论已经结束，只能提交纠正意见发起续会")
+        terminal_status = str(getattr(session, "terminal_status", "") or "").lower()
+        is_terminal = session.status in {"concluded", "partial", "failed", "cancelled"}
+        if is_terminal:
+            if action != "continue":
+                return ToolExecutionResult.failure(
+                    "圆桌已结束；只有用户在新的消息中明确要求继续，且上一轮成功时才能续会"
+                )
+            if terminal_status != "success" or session.status != "concluded":
+                return ToolExecutionResult.failure("只有成功结论可以发起续会；取消、失败或部分结果不可续会")
+            if _is_automatic_task_result_for_roundtable(
+                self._db,
+                user_id=int(self._user.id),
+                surface=self._surface,
+                session_key=self._session_key,
+                session_id=session_id,
+                run_id=self._run_id,
+            ):
+                return ToolExecutionResult.failure("自动 task.result 回合不能续会；请在新的用户消息中明确要求继续")
+            if not _has_explicit_human_roundtable_continue_request(
+                self._db,
+                user_id=int(self._user.id),
+                surface=self._surface,
+                session_key=self._session_key,
+                run_id=self._run_id,
+            ):
+                return ToolExecutionResult.failure(
+                    "续会必须由新的用户消息明确要求继续；自动事件和模型判断不能代替用户指令"
+                )
             if not content:
-                return ToolExecutionResult.failure("user_input 必须提供非空 content")
+                return ToolExecutionResult.failure("continue 必须提供非空 content")
             return await self._continue_roundtable_discussion(session, content)
+        if action == "continue":
+            return ToolExecutionResult.failure("圆桌仍在运行，不能创建续会")
         if action == "user_input":
             if not content:
                 return ToolExecutionResult.failure("user_input 必须提供非空 content")
@@ -1649,14 +1811,16 @@ class PrismToolExecutor:
         pending = take_pending(new_session_id)
         if not new_session_id or pending is None:
             return ToolExecutionResult.failure("圆桌续会上下文创建失败")
-        launch_pending_discussion(pending)
+        launched = launch_pending_discussion(pending)
+        if launched is None:
+            return ToolExecutionResult.failure("圆桌会话无法启动；请发送新的明确续会指令后重试")
         return ToolExecutionResult.success({
             "session_id": new_session_id,
             "continued_from_session_id": str(session.session_id),
             "previous_report_task_id": int(getattr(session, "report_task_id", 0) or 0),
-            "action": "user_input",
+            "action": "continue",
             "accepted": True,
-            "status": "active",
+            "status": str(data.get("status") or "pending"),
             "started_by": "user_agent",
             "message": "已基于上一轮结论创建独立续会，完成后将回投原小菱会话。",
             "open_path": f"/agents?discuss_session={new_session_id}",
@@ -1784,7 +1948,7 @@ class PrismToolExecutor:
             **extra,
         }
         # 同步广播到全局 AgentEventBus: Agent 中心工位卡因此能看到助手
-        # 「正在工作」; 按 surface 归属身份(管理端=贾维斯/manager, 成员端=小菱),
+        # 「正在工作」; 助手身份统一为小菱, surface 只区分权限与工具目录,
         # 事件按 user_id 隔离,只推给运行所属用户。
         if event_type == "response.tool.started":
             try:
@@ -2558,6 +2722,19 @@ class AgentResponsesService:
             transport=None, tool_executor=None, checkpoint_store=self._store, model="",
         )
         result = await runtime.cancel(run_id, reason=reason)
+        cancelled_teams = 0
+        if result.status == CANCELLED:
+            from app.services import agent_team_service
+
+            cancelled_teams = agent_team_service.cancel_response_teams(
+                self._db,
+                self._user,
+                run_id=run_id,
+                surface=self._surface,
+                session_key=self._session_key,
+                reason=reason.strip() or "父级小菱运行已停止",
+            )
+        result = replace(result, cancelled_teams=cancelled_teams)
         observe_event("xiaoling_cancel", labels={"surface": self._surface})
         if reason.strip():
             observe_event("xiaoling_cancel_reasoned", labels={"surface": self._surface})
@@ -2654,7 +2831,7 @@ class AgentResponsesService:
         # 视觉运行不做 pro→flash 回退,避免回退到不支持图片的模型。
         if vision_model:
             fallback_model = vision_model
-        agent_label = "manager" if self._surface == "admin" else "chat_assistant"
+        agent_label = "chat_assistant"
 
         def _write_ai_call_log(response: Mapping[str, Any]) -> None:
             """小菱每次 LLM 轮次落 AiCallLog,供 Agent 工作台按用户统计调用次数。
@@ -2962,19 +3139,17 @@ def _to_int(value: Any) -> Optional[int]:
 
 def _instructions(surface: str, user: Optional[User] = None, is_super_admin: bool = False) -> str:
     if surface == "admin":
-        # 控制面/体验面分离(参照 Microsoft Copilot Control System 模式):
-        # 管理端是独立的「贾维斯」全局运维身份, 与普通成员的小菱彻底分开;
-        # 定位是全局运维(态势/健康/审批/治理/服务器), 不承担代码审计叙事。
-        identity = "Prism 全局运维 Agent「贾维斯」"
+        # 同一小菱跨页面工作；管理端工具目录、RBAC 与审批边界仍独立生效。
+        identity = "Prism 智能代码审查平台助手「小菱」；当前处于管理员权限范围"
         capability_instruction = (
             "管理员界面任务必须先调用 admin_describe_capabilities 查询对应页面能力和精确参数，"
             "再调用 admin_execute_capability；不得猜测能力编码或参数。"
             "收到来自 agent:monitor 的 status.update「JARVIS 运维简报」时,只依据简报 evidence 中的真实证据汇报:"
             "先给结论与优先级排序,再建议只读核验动作和需要管理员点击批准的处置动作;"
             "绝不未经批准自动执行写操作,也不要声称已修复或已处理。"
-            "你是全局运维身份: 用户提到代码审查、安全审计、渗透测试等成员侧业务时,"
-            "说明这些由成员侧的小菱负责,引导用户到对应业务页面或切换成员账号,"
-            "不要主动替管理员发起项目安全审计。"
+            "你始终是小菱；管理员与普通用户看到的是同一个助手身份，但工具、数据和写操作严格按当前账号及页面权限执行。"
+            "用户提到代码审查、安全审计或渗透测试时，先核对当前管理端是否提供对应能力；"
+            "若没有，明确说明当前管理会话不支持该操作并给出业务页面入口，不得要求切换账号、借用其他账号或声称已执行。"
         )
         role_behavior = (
             "全局运维是你的核心职责：系统态势巡查(服务健康/安全态势/威胁信号/数据库健康)、"
@@ -3004,9 +3179,12 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "download_code_file 和 download_project_source 固定工具。"
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。start_roundtable_discussion 启动后立即结束本轮,"
+            "由小菱主持人按代码情境调用固定审查专家；只有确有不同专业视角时才可在 temporary_experts 中定义最多 3 位任务临时专家，"
+            "临时专家只加入本次圆桌 roster，不得创建或修改永久 Agent；"
             "告知用户等待期间可以继续对话;讨论结束后系统会把结论回投本会话,收到 task.result 后直接汇报共识、"
-            "报告入口和是否满足要求;结论不满足时用 control_roundtable_discussion 的 user_input 追加纠正意见，"
-            "系统会自动创建独立续会并沿用原回投会话，不得把旧会话伪装为运行中;"
+            "报告入口和是否满足要求;仅当用户在后续新消息中明确要求继续，且圆桌结论成功时，"
+            "才用 control_roundtable_discussion 的 continue 创建独立续会;"
+            "自动 task.result 只汇报，不得续会，取消/失败/部分结论均不可续会;不得把旧会话伪装为运行中;"
             "不得编造讨论进度或结论。"
             "上传源码后用户要求自动完成部署和黑白盒审查时，必须立即调用 "
             "run_full_project_validation；沙箱测试和部署是页面发现协议的例外：白盒、黑盒和组合测试直接使用 "
@@ -3533,7 +3711,7 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
         {
             "type": "function",
             "name": "start_roundtable_discussion",
-            "description": "为当前用户可访问的单个源码文件启动多 Agent 圆桌讨论；执行前需要批准",
+            "description": "由小菱主持人以当前账户配置的主模型，为当前用户可访问的源码文件启动圆桌；按需最多添加 3 位仅本次有效的临时专家，绝不写入永久 Agent 库。",
             "parameters": StartRoundtableDiscussionArguments.model_json_schema(),
         },
         {
@@ -3547,7 +3725,8 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
             "name": "control_roundtable_discussion",
             "description": (
                 "暂停、恢复、停止运行中的圆桌讨论或提交用户发言；"
-                "对已结束讨论提交 user_input 会自动创建独立续会；执行前需要批准"
+                "已结束讨论仅在新的明确用户继续请求且原结论成功时，使用 continue 创建独立续会；"
+                "自动 task.result、取消、失败或部分结果不得续会；执行前需要批准"
             ),
             "parameters": ControlRoundtableDiscussionArguments.model_json_schema(),
         },
@@ -3573,6 +3752,8 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
 
     if result.status == COMPLETED:
         event_type = "response.completed"
+    elif result.status == CANCELLED:
+        event_type = "response.cancelled"
     elif result.status == INCOMPLETE:
         event_type = "response.incomplete"
     else:
@@ -3587,6 +3768,7 @@ def terminal_event(result: RuntimeResult) -> Mapping[str, Any]:
             "output": _public_response_output(result.response.get("output")),
             "error": redact_agent_event_value(result.error) if result.error else None,
             "rounds": result.rounds,
+            "cancelled_teams": result.cancelled_teams,
         },
     }
 

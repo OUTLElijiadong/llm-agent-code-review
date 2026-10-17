@@ -671,7 +671,7 @@ def test_plain_owner_html_export_uses_format_specific_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission == PermissionCode.REPORT_EXPORT_HTML
+        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_HTML}
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
 
@@ -689,9 +689,39 @@ def test_plain_owner_html_export_uses_format_specific_permission(
     assert "<!DOCTYPE html>" in html_response.text
     assert pdf_response.status_code == 403
     assert checked == [
+        (2, PermissionCode.REPORT_VIEW),
         (2, PermissionCode.REPORT_EXPORT_HTML),
+        (2, PermissionCode.REPORT_VIEW),
         (2, PermissionCode.REPORT_EXPORT_PDF),
     ]
+
+
+@pytest.mark.parametrize("report_format", ["json", "html", "pdf", "word"])
+def test_report_export_requires_view_permission_even_when_format_permission_is_granted(
+    plain_client, monkeypatch, report_format,
+):
+    client, _db, task_id = plain_client
+    checked = []
+    format_permission = {
+        "json": PermissionCode.REPORT_EXPORT_JSON,
+        "html": PermissionCode.REPORT_EXPORT_HTML,
+        "pdf": PermissionCode.REPORT_EXPORT_PDF,
+        "word": PermissionCode.REPORT_EXPORT_WORD,
+    }[report_format]
+
+    def fake_check_permission(_db, user_id, permission):
+        checked.append((user_id, permission))
+        return permission == format_permission
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+    response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": report_format},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["required_permission"] == PermissionCode.REPORT_VIEW
+    assert checked == [(2, PermissionCode.REPORT_VIEW)]
 
 
 def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
@@ -705,7 +735,7 @@ def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission == PermissionCode.REPORT_EXPORT_WORD
+        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_WORD}
 
     def fake_export(task, issues, summary, score, template_type, evidence):
         captured.update(task=task, issues=issues, summary=summary, score=score)
@@ -719,7 +749,10 @@ def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
     assert response.status_code == 200
     assert response.content == b"NEW_WORD_EXPORTER"
     assert len(captured["issues"]) == 3
-    assert checked == [(1, PermissionCode.REPORT_EXPORT_WORD)]
+    assert checked == [
+        (1, PermissionCode.REPORT_VIEW),
+        (1, PermissionCode.REPORT_EXPORT_WORD),
+    ]
 
 
 def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
@@ -732,7 +765,7 @@ def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
 
     def fake_check_permission(_db, user_id, permission):
         checked.append((user_id, permission))
-        return permission == PermissionCode.REPORT_EXPORT_PDF
+        return permission in {PermissionCode.REPORT_VIEW, PermissionCode.REPORT_EXPORT_PDF}
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
     monkeypatch.setattr(
@@ -744,7 +777,10 @@ def test_legacy_pdf_route_delegates_to_new_exporter_and_checks_permission(
 
     assert response.status_code == 200
     assert response.content == b"NEW_PDF_EXPORTER"
-    assert checked == [(1, PermissionCode.REPORT_EXPORT_PDF)]
+    assert checked == [
+        (1, PermissionCode.REPORT_VIEW),
+        (1, PermissionCode.REPORT_EXPORT_PDF),
+    ]
 
 
 # ============ 补充测试 ============

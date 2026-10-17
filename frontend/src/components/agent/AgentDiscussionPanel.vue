@@ -22,7 +22,10 @@
                   · {{ currentSpeaker }} 决策中
                 </span>
                 <span v-else-if="phase === 'concluded'" class="speaker-info done">
-                  · 讨论已结束
+                  · {{ terminalLabel }}
+                </span>
+                <span v-else-if="stageMessage" class="speaker-info">
+                  · {{ stageMessage }}
                 </span>
               </div>
             </div>
@@ -60,7 +63,7 @@
               </el-button>
             </el-tooltip>
             <el-tooltip content="关闭" placement="bottom">
-              <el-button circle aria-label="关闭讨论" @click="onClose">
+              <el-button circle aria-label="关闭讨论" :disabled="phase === 'stopping'" @click="onClose">
                 <span class="btn-emoji">✕</span>
               </el-button>
             </el-tooltip>
@@ -79,6 +82,7 @@
             :style="{ '--chip-color': themeOf(a.code).color }"
           >
             {{ themeOf(a.code).icon }} {{ a.name }}
+            <span v-if="a.temporary" class="part-state temporary-state">临时</span>
             <span v-if="participantStateLabel(a.code)" class="part-state">
               {{ participantStateLabel(a.code) }}
             </span>
@@ -86,11 +90,27 @@
           <span class="part-chip user">🙋 你</span>
         </div>
 
+        <div
+          v-if="phase !== 'concluded'"
+          class="discussion-progress"
+          role="progressbar"
+          :aria-valuemin="0"
+          :aria-valuemax="expectedTurns"
+          :aria-valuenow="completedTurns"
+          :aria-label="`已完成 ${completedTurns} / ${expectedTurns} 个专家发言`"
+        >
+          <div class="progress-label">
+            <span>{{ phase === 'pending' ? '等待启动' : '专家发言进度' }}</span>
+            <strong>{{ completedTurns }} / {{ expectedTurns }}</strong>
+          </div>
+          <div class="progress-track"><span :style="{ width: `${progressPercent}%` }" /></div>
+        </div>
+
         <!-- 消息区 -->
         <div ref="msgContainer" class="room-body" @scroll="onScroll">
           <div v-if="lastError" class="error-bar">
             <span>⚠️ {{ lastError }}</span>
-            <el-button size="small" type="primary" plain @click="reconnect">重新连接</el-button>
+            <el-button size="small" type="primary" plain :disabled="phase === 'stopping'" @click="reconnect">重新连接</el-button>
           </div>
 
           <div v-if="turns.length === 0 && !lastError" class="empty-state">
@@ -156,7 +176,7 @@
         </div>
 
         <!-- 回到底部 -->
-        <button v-if="showScrollBtn" class="scroll-btn" @click="scrollToBottom(true)">↓ 最新</button>
+        <button v-if="showScrollBtn" class="scroll-btn" :disabled="phase === 'stopping'" @click="scrollToBottom(true)">↓ 最新</button>
 
         <!-- 输入区 -->
         <footer class="room-footer">
@@ -175,7 +195,7 @@
             <textarea
               v-model="userMessage"
               class="room-input"
-              :placeholder="canSend ? '插话参与讨论,所有 Agent 都会看到你的发言…(Enter 发送 / Shift+Enter 换行)' : '讨论已结束,无法发言'"
+              :placeholder="canSend ? '插话参与讨论，所有 Agent 都会看到你的发言（Enter 发送 / Shift+Enter 换行）' : phase === 'pending' ? '任务已排队，等待启动' : phase === 'stopping' ? '正在停止，暂不能发送消息' : '讨论已结束，无法发言'"
               rows="2"
               :disabled="!canSend"
               @keydown="onKeydown"
@@ -210,7 +230,7 @@ import {
 const props = defineProps<{
   sessionId: string
   wsUrl?: string
-  agents: Array<{ code: string; name: string }>
+  agents: Array<{ code: string; name: string; temporary?: boolean }>
   fileName?: string
 }>()
 
@@ -220,7 +240,8 @@ const router = useRouter()
 const reportTaskId = ref(0)
 
 type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
-type Phase = 'live' | 'concluded'
+type Phase = 'pending' | 'live' | 'stopping' | 'concluded'
+type TerminalStatus = 'success' | 'partial' | 'failed' | 'cancelled' | ''
 
 const turns = ref<DiscussionTurn[]>([])
 // 已渲染发言的稳定 key 集合 —— 用于去重。WS 断线自动重连后,后端 subscribe() 会把
@@ -231,10 +252,14 @@ function turnKey(t: DiscussionTurn): string {
   return `${t.turn_id}_${t.timestamp}`
 }
 const status = ref<ConnStatus>('connecting')
-const phase = ref<Phase>('live')
+const phase = ref<Phase>('pending')
+const terminalStatus = ref<TerminalStatus>('')
+const stageMessage = ref('')
 const lastError = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
+const completedTurns = ref(0)
+const expectedTurns = ref(0)
 const currentSpeaker = ref('')
 const currentSpeakerCode = ref('')
 const userMessage = ref('')
@@ -349,15 +374,35 @@ const quickPrompts = [
 ]
 
 const statusTag = computed(() => {
-  if (phase.value === 'concluded') return { type: 'info' as const, text: '已结束' }
+  if (phase.value === 'pending') return { type: 'warning' as const, text: '等待启动' }
+  if (phase.value === 'stopping') return { type: 'danger' as const, text: '停止中' }
+  if (phase.value === 'concluded') {
+    const labels: Record<Exclude<TerminalStatus, ''>, { type: 'success' | 'warning' | 'danger' | 'info'; text: string }> = {
+      success: { type: 'success', text: '已完成' },
+      partial: { type: 'warning', text: '部分完成' },
+      failed: { type: 'danger', text: '失败' },
+      cancelled: { type: 'info', text: '已取消' },
+    }
+    return labels[terminalStatus.value || 'success']
+  }
   if (status.value === 'connecting') return { type: 'warning' as const, text: '连接中' }
   if (status.value === 'connected') return { type: 'success' as const, text: isPaused.value ? '已暂停' : '进行中' }
   if (status.value === 'error') return { type: 'danger' as const, text: '连接错误' }
   return { type: 'danger' as const, text: '已断开' }
 })
+const terminalLabel = computed(() => ({
+  success: '讨论已完成',
+  partial: '讨论部分完成',
+  failed: '讨论失败',
+  cancelled: '讨论已取消',
+  '': '讨论已结束',
+}[terminalStatus.value]))
 
 const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
 const canSend = computed(() => status.value === 'connected' && phase.value === 'live')
+const progressPercent = computed(() => expectedTurns.value > 0
+  ? Math.min(100, Math.floor((completedTurns.value / expectedTurns.value) * 100))
+  : 0)
 
 const typingColor = computed(() => themeOf(currentSpeakerCode.value).color)
 const typingIcon = computed(() => themeOf(currentSpeakerCode.value).icon)
@@ -436,6 +481,41 @@ function connectWs() {
 
 function handleControl(msg: { action: string; payload: Record<string, unknown> }) {
   switch (msg.action) {
+    case 'snapshot': {
+      const payload = msg.payload
+      currentRound.value = Number(payload.round) || 0
+      totalRounds.value = Number(payload.total_rounds) || 0
+      currentSpeaker.value = String(payload.speaker_name || '')
+      currentSpeakerCode.value = String(payload.speaker_code || '')
+      stageMessage.value = String(payload.message || '')
+      completedTurns.value = Math.max(0, Number(payload.completed_turns) || 0)
+      expectedTurns.value = Math.max(0, Number(payload.expected_turns) || 0)
+      isPaused.value = payload.status === 'paused'
+      reportTaskId.value = Number(payload.report_task_id) || 0
+      const savedTerminal = String(payload.terminal_status || '') as TerminalStatus
+      if (['success', 'partial', 'failed', 'cancelled'].includes(savedTerminal)) {
+        terminalStatus.value = savedTerminal
+        phase.value = 'concluded'
+        currentSpeaker.value = ''
+        currentSpeakerCode.value = ''
+      } else {
+        terminalStatus.value = ''
+        phase.value = payload.status === 'pending' ? 'pending' : 'live'
+      }
+      break
+    }
+    case 'started':
+      phase.value = 'live'
+      stageMessage.value = String(msg.payload.message || '圆桌已启动，主持人正在安排讨论')
+      break
+    case 'progress':
+      completedTurns.value = Math.max(0, Number(msg.payload.completed_turns) || 0)
+      expectedTurns.value = Math.max(0, Number(msg.payload.expected_turns) || 0)
+      stageMessage.value = String(msg.payload.message || '')
+      break
+    case 'steering_received':
+      stageMessage.value = String(msg.payload.message || '已收到你的补充，小菱会先调整后续讨论')
+      break
     case 'round_start':
       currentRound.value = (msg.payload.round as number) || 0
       totalRounds.value = (msg.payload.total_rounds as number) || 0
@@ -443,7 +523,11 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
     case 'speaker':
       currentSpeaker.value = (msg.payload.speaker_name as string) || ''
       currentSpeakerCode.value = (msg.payload.speaker_code as string) || ''
+      stageMessage.value = String(currentSpeaker.value) + ' 正在决策'
       scrollToBottom()
+      break
+    case 'phase':
+      stageMessage.value = String(msg.payload.message || '')
       break
     case 'paused':
       isPaused.value = true
@@ -452,25 +536,35 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       isPaused.value = false
       break
     case 'stopping':
-      ElMessage.info('讨论正在终止,主持人将给出小结…')
+      phase.value = 'stopping'
+      terminalStatus.value = 'cancelled'
+      stageMessage.value = '讨论正在终止，不会生成成功小结'
+      ElMessage.info('正在停止圆桌讨论')
       break
     case 'done':
       phase.value = 'concluded'
       currentSpeaker.value = ''
       currentSpeakerCode.value = ''
       reportTaskId.value = (msg.payload?.task_id as number) || 0
+      terminalStatus.value = ['success', 'partial', 'failed', 'cancelled'].includes(String(msg.payload?.status || ''))
+        ? String(msg.payload.status) as TerminalStatus
+        : 'success'
+      stageMessage.value = String(msg.payload?.error || '')
       break
   }
 }
 
 function reconnect() {
+  if (phase.value === 'stopping') return
   turns.value = []
   seenKeys.clear()
   currentRound.value = 0
   totalRounds.value = 0
   currentSpeaker.value = ''
   currentSpeakerCode.value = ''
-  phase.value = 'live'
+  phase.value = 'pending'
+  terminalStatus.value = ''
+  stageMessage.value = ''
   isPaused.value = false
   connectWs()
 }
@@ -502,12 +596,16 @@ function togglePause() {
 async function onStop() {
   if (!canControl.value) return
   try {
-    await ElMessageBox.confirm('确定终止本次讨论吗?主持人会基于已有发言给出小结。', '终止讨论', {
+    await ElMessageBox.confirm('确定终止本次讨论吗？停止后不会生成成功小结，已完成发言会保留。', '终止讨论', {
       confirmButtonText: '终止',
       cancelButtonText: '取消',
       type: 'warning',
     })
   } catch { return }
+  phase.value = 'stopping'
+  currentSpeaker.value = ''
+  currentSpeakerCode.value = ''
+  stageMessage.value = '正在停止，等待当前模型请求退出'
   stream?.send('stop')
 }
 
@@ -650,8 +748,15 @@ connectWs()
   margin-left: 2px; padding-left: 6px; border-left: 1px solid #d8d8e2;
   font-size: 10px; color: #6b7280;
 }
+.part-state.temporary-state { color: #7c3aed; background: #f5f0ff; border: 0; padding: 1px 5px; border-radius: 8px; }
 .part-chip.orchestrator { border-color: #8B5CF6; border-left-color: #8B5CF6; color: #6D28D9; }
 .part-chip.user { border-color: #0EA5E9; border-left-color: #0EA5E9; color: #0369A1; }
+
+.discussion-progress { padding: 8px 20px 10px; background: #fff; border-bottom: 1px solid #ececf3; }
+.progress-label { display: flex; justify-content: space-between; align-items: center; color: #697086; font-size: 11px; margin-bottom: 5px; }
+.progress-label strong { color: #4438a8; font-variant-numeric: tabular-nums; }
+.progress-track { height: 5px; overflow: hidden; border-radius: 999px; background: #ececf4; }
+.progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7c65f5, #34b9c8); transition: width 240ms ease; }
 
 /* 消息区 */
 .room-body {

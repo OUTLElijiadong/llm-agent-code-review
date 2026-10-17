@@ -153,6 +153,30 @@ def test_finalization_never_revives_terminal_task(roundtable_store, monkeypatch,
         assert database.query(ReviewIssue).count() == 0
 
 
+def test_stop_signal_before_final_report_extraction_prevents_new_model_call(
+    roundtable_store, monkeypatch,
+):
+    task_id = create_roundtable()
+    cancellation = threading.Event()
+    cancellation.set()
+    extract = Mock(return_value=[])
+    monkeypatch.setattr(discussion, "_extract_issues", extract)
+    discussion._finalize_review(
+        task_id=task_id, user_id=3, file_id=11, file_name="before.py",
+        all_turns=[DiscussionTurn(turn_id=1, agent_code="general", agent_name="reviewer",
+                                  role="agent", content="valid speech")],
+        code="value = 1\n", language="python", deferred_logs=[],
+        agent=SimpleNamespace(model="isolated"), stopped=False,
+        consensus="summary", cancel_event=cancellation,
+    )
+    extract.assert_not_called()
+    with roundtable_store() as database:
+        task = database.get(ReviewTask, task_id)
+        assert task is not None
+        assert task.status == "cancelled"
+        assert task.coverage["stage"] == "cancelled"
+
+
 @pytest.fixture
 def live_roundtable(roundtable_store, monkeypatch):
     bus = DiscussionBus()
@@ -181,7 +205,7 @@ async def test_discussion_invalid_input_closes_with_error_without_model(live_rou
     arguments["code"] = code
     await orchestrator.start_discussion(**arguments)
     agent.call_raw.assert_not_called()
-    assert session.status == "concluded"
+    assert session.status == "failed"
     controls = [json.loads(queue.get_nowait()) for _ in range(queue.qsize())]
     assert any(item.get("payload", {}).get("error") for item in controls)
     with roundtable_store() as database:
@@ -368,7 +392,7 @@ async def test_cancellation_while_finalizer_runs_revokes_worker_before_late_resu
     with roundtable_store() as database:
         assert database.query(ReviewTask).one().status == "cancelled"
         assert database.query(ReviewIssue).count() == 0
-    assert session.status == "concluded"
+    assert session.status == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -412,7 +436,7 @@ async def test_rest_pending_to_websocket_keeps_preflight_version(
         frozen = load_task_inputs(database, task.id)[0]
         assert frozen.version_no == 1
         assert frozen.content == "value = 1\n"
-    assert bus.get_session("rest-to-ws").status == "concluded"
+    assert bus.get_session("rest-to-ws").status == "failed"
     assert agent.call_raw.call_count > 0
     assert all("value = 1" in call.kwargs["user_prompt"] for call in agent.call_raw.call_args_list)
     assert all("value = 2" not in call.kwargs["user_prompt"] for call in agent.call_raw.call_args_list)

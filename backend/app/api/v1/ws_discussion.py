@@ -182,24 +182,63 @@ def _is_session_version_active(user_id: int, token_version: int) -> bool:
         db.close()
 
 
+def _is_parent_response_run_cancelled(user_id: int, agent_run_id: int) -> bool:
+    """仅当归属用户的父级 Responses 运行明确进入 cancelled 时返回 True。"""
+
+    if user_id <= 0 or agent_run_id <= 0:
+        return False
+    from app.models.agent_response_run import AgentResponseRun
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(AgentResponseRun.status)
+            .filter(
+                AgentResponseRun.id == int(agent_run_id),
+                AgentResponseRun.user_id == int(user_id),
+            )
+            .one_or_none()
+        )
+        return bool(row and str(row[0]).lower() == "cancelled")
+    except Exception:
+        # 瞬时数据库错误不能误杀仍在执行的圆桌；后续轮询会再检查。
+        return False
+    finally:
+        db.close()
+
+
 async def _run_pending_discussion(pending: PendingDiscussion) -> None:
-    """运行圆桌编排，并在创建它的登录版本失效时终止后台任务。"""
+    """运行圆桌编排，并监视登录失效及发起它的父级 Responses 取消。"""
 
     from app.ai.discussion_orchestrator import DiscussionOrchestrator
 
     bus = DiscussionBus.instance()
+    session = bus.get_session(pending.session_id)
+    if session and session.status == "pending":
+        bus.publish_control(pending.session_id, "started", {"status": "active"})
     user_id = int(pending.kwargs.get("user_id") or 0)
+    usage_origin = pending.kwargs.get("usage_origin") or {}
+    parent_run_id = int(usage_origin.get("agent_run_id") or 0)
     if pending.session_token_version is not None:
         active = await asyncio.to_thread(
             _is_session_version_active,
             user_id,
             pending.session_token_version,
         )
-        if not active:
-            bus.request_stop(pending.session_id)
-            bus.publish_control(pending.session_id, "cancelled", {"task_id": 0})
-            bus.close_session(pending.session_id)
-            return
+    else:
+        active = True
+    parent_cancelled = bool(
+        parent_run_id
+        and await asyncio.to_thread(_is_parent_response_run_cancelled, user_id, parent_run_id)
+    )
+    if not active or parent_cancelled:
+        error = "发起圆桌的小菱运行已取消" if parent_cancelled else "登录会话已失效"
+        bus.request_stop(pending.session_id, reason=error)
+        bus.publish_control(pending.session_id, "cancelled", {
+            "task_id": 0, "status": "cancelled", "error": error,
+        })
+        bus.close_session(pending.session_id)
+        return
 
     orchestrator_task = asyncio.create_task(
         DiscussionOrchestrator().start_discussion(
@@ -210,20 +249,25 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
     )
     monitor_task: asyncio.Task | None = None
     try:
-        if pending.session_token_version is None:
+        if pending.session_token_version is None and not parent_run_id:
             await orchestrator_task
             return
 
-        async def monitor_session() -> None:
+        async def monitor_session() -> str:
             while True:
                 await asyncio.sleep(_SESSION_CHECK_INTERVAL)
-                active = await asyncio.to_thread(
-                    _is_session_version_active,
-                    user_id,
-                    pending.session_token_version,
-                )
-                if not active:
-                    return
+                if pending.session_token_version is not None:
+                    active_now = await asyncio.to_thread(
+                        _is_session_version_active,
+                        user_id,
+                        pending.session_token_version,
+                    )
+                    if not active_now:
+                        return "session_expired"
+                if parent_run_id and await asyncio.to_thread(
+                    _is_parent_response_run_cancelled, user_id, parent_run_id,
+                ):
+                    return "parent_cancelled"
 
         monitor_task = asyncio.create_task(
             monitor_session(),
@@ -234,10 +278,19 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             return_when=asyncio.FIRST_COMPLETED,
         )
         if monitor_task in done and not orchestrator_task.done():
-            logger.info(
-                f"[Discussion] 登录版本失效，取消旧设备圆桌 session={pending.session_id}"
+            invalidation = monitor_task.result()
+            error = (
+                "发起圆桌的小菱运行已取消"
+                if invalidation == "parent_cancelled"
+                else "登录会话已失效"
             )
-            bus.request_stop(pending.session_id)
+            logger.info(
+                f"[Discussion] 取消关联圆桌 reason={invalidation} session={pending.session_id}"
+            )
+            bus.request_stop(pending.session_id, reason=error)
+            bus.publish_control(pending.session_id, "cancelled", {
+                "task_id": 0, "status": "cancelled", "error": error,
+            })
             orchestrator_task.cancel()
         await orchestrator_task
     finally:
@@ -251,10 +304,21 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
-def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task:
+def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None:
     """按 session_id 唯一登记并启动待处理圆桌任务。"""
 
     bus = DiscussionBus.instance()
+    session = bus.get_session(pending.session_id)
+    current = bus.get_discussion_task(pending.session_id)
+    if current is not None:
+        return current
+    if session is None or session.status != "pending":
+        logger.info(
+            "[WS] 拒绝自动启动非 pending 圆桌 session=%s status=%s",
+            pending.session_id,
+            getattr(session, "status", "missing"),
+        )
+        return None
     return bus.start_discussion_task(
         pending.session_id,
         _run_pending_discussion(pending),

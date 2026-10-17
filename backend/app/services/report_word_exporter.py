@@ -21,11 +21,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.opc.constants import RELATIONSHIP_TYPE
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 from docx.shared import Pt, RGBColor
 
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
+from app.services.report_markdown import parse_markdown_blocks
 
 # ============ 模块常量 ============
 
@@ -110,6 +113,98 @@ def _add_run(paragraph, text: str, *, bold: bool = False, color: Optional[RGBCol
     return run
 
 
+def _add_hyperlink(paragraph, text: str, href: str) -> None:
+    """Add an external hyperlink; href has already passed the safe URL parser."""
+    relationship_id = paragraph.part.relate_to(
+        href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True,
+    )
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), relationship_id)
+    run = OxmlElement("w:r")
+    properties = OxmlElement("w:rPr")
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "2563EB")
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    properties.extend((color, underline))
+    run.append(properties)
+    text_node = OxmlElement("w:t")
+    text_node.text = text
+    run.append(text_node)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+
+
+def _add_summary_markdown(doc: Document, markdown: str) -> None:
+    """Render supported Markdown as native Word headings, lists, and formatted runs."""
+    for block in parse_markdown_blocks(markdown):
+        kind = block["type"]
+        if kind == "heading":
+            level = max(1, min(4, int(block.get("level") or 2)))
+            paragraph = doc.add_paragraph(style=f"Heading {level}")
+            runs = block["runs"]
+        elif kind == "paragraph":
+            paragraph = doc.add_paragraph()
+            runs = block["runs"]
+        elif kind in {"unordered_list", "ordered_list"}:
+            style = "List Bullet" if kind == "unordered_list" else "List Number"
+            for item in block["items"]:
+                paragraph = doc.add_paragraph(style=style)
+                _append_summary_runs(paragraph, item)
+            continue
+        elif kind == "table":
+            rows = block.get("rows") or []
+            if not rows:
+                continue
+            table = doc.add_table(rows=len(rows), cols=max(len(row) for row in rows))
+            table.style = "Table Grid"
+            for row_index, row in enumerate(rows):
+                for column_index, cell_runs in enumerate(row):
+                    cell = table.cell(row_index, column_index)
+                    paragraph = cell.paragraphs[0]
+                    _append_summary_runs(paragraph, cell_runs)
+                    if row_index == 0:
+                        for run in paragraph.runs:
+                            run.bold = True
+                        shading = OxmlElement("w:shd")
+                        shading.set(qn("w:fill"), "E8EEF8")
+                        cell._tc.get_or_add_tcPr().append(shading)
+            doc.add_paragraph()
+            continue
+        elif kind == "quote":
+            paragraph = doc.add_paragraph(style="Quote")
+            runs = block["runs"]
+        elif kind == "code":
+            paragraph = doc.add_paragraph(style="No Spacing")
+            run = _add_run(paragraph, str(block.get("text") or ""), font_name=_CODE_FONT, size=9)
+            run.font.color.rgb = RGBColor(0x37, 0x47, 0x51)
+            continue
+        elif kind == "rule":
+            paragraph = doc.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(6)
+            continue
+        else:
+            continue
+        _append_summary_runs(paragraph, runs)
+
+
+def _append_summary_runs(paragraph, runs: List[Dict[str, Any]]) -> None:
+    for item in runs:
+        text = str(item.get("text") or "")
+        href = item.get("href")
+        if href:
+            _add_hyperlink(paragraph, text, str(href))
+            continue
+        run = _add_run(
+            paragraph,
+            text,
+            bold=bool(item.get("bold")),
+            font_name=_CODE_FONT if item.get("code") else _CHINESE_FONT,
+            size=9 if item.get("code") else 11,
+        )
+        run.italic = bool(item.get("italic"))
+
+
 def _group_issues_by_severity(issues: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """按严重度分组 issue(严重 > 高 > 中 > 低 > 其他)。
 
@@ -177,6 +272,18 @@ def _build_header(doc: Any, task_info: Dict[str, Any], score: int) -> None:
     score_para = doc.add_paragraph()
     _add_run(score_para, "综合评分: ", bold=True)
     _add_run(score_para, _format_score(score), bold=True, color=RGBColor(0x11, 0x18, 0x27))
+
+    status_para = doc.add_paragraph()
+    _add_run(status_para, "执行状态: ", bold=True)
+    _add_run(status_para, str(task_info.get("status") or "unknown"))
+    if task_info.get("error_message"):
+        error_para = doc.add_paragraph()
+        _add_run(error_para, "错误: ", bold=True)
+        _add_run(error_para, str(task_info["error_message"]))
+    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
+    coverage_para = doc.add_paragraph()
+    _add_run(coverage_para, "扫描范围与覆盖情况: ", bold=True)
+    _add_run(coverage_para, json.dumps(coverage, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
@@ -572,8 +679,7 @@ def export_to_word(
     # 2. 总体评价
     if summary_text:
         doc.add_heading("总体评价", level=1)
-        summary_para = doc.add_paragraph()
-        _add_run(summary_para, str(summary_text), size=11)
+        _add_summary_markdown(doc, str(summary_text))
 
     # 3. 反编译证据
     _build_decompilation_evidence(doc, context.get("evidence", {}))

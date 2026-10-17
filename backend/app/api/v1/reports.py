@@ -170,6 +170,15 @@ def _ensure_report_export_permission(db: Session, user: User, format: str) -> No
         )
 
 
+def _ensure_report_view_permission(db: Session, user: User) -> None:
+    """导出不能绕过报告查看权限。"""
+    if not check_permission(db, user.id, PermissionCode.REPORT_VIEW):
+        raise PermissionError(
+            f"无操作权限: 需要 {PermissionCode.REPORT_VIEW}",
+            detail={"required_permission": PermissionCode.REPORT_VIEW},
+        )
+
+
 def _domain_export_response(db: Session, user: User, task: ReviewTask, format: str, *, download: bool = False):
     """所有报告出口共用来源分流；不支持等价导出的格式由服务抛出业务错误。"""
     payload = report_service.get_domain_report_export(db, user, task, format)
@@ -284,6 +293,7 @@ def _require_report_export_permission(
     user: User = Depends(get_current_user),
 ) -> User:
     """按实际导出格式校验权限，避免使用不存在的 report:export。"""
+    _ensure_report_view_permission(db, user)
     _ensure_report_export_permission(db, user, format)
     return user
 
@@ -518,6 +528,7 @@ def get_report(task_id: int, db: Session = Depends(get_db),
 def export_word(task_id: int, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     """兼容旧 Word 地址，委托统一报告导出器。"""
+    _ensure_report_view_permission(db, user)
     _ensure_report_export_permission(db, user, "word")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
     domain_response = _domain_export_response(db, user, task, "word", download=True)
@@ -536,6 +547,7 @@ def export_word(task_id: int, db: Session = Depends(get_db),
 def export_pdf(task_id: int, db: Session = Depends(get_db),
                user: User = Depends(get_current_user)):
     """兼容旧 PDF 地址，委托统一报告导出器。"""
+    _ensure_report_view_permission(db, user)
     _ensure_report_export_permission(db, user, "pdf")
     task, issues, summary, score = _get_task_with_issues(db, task_id, user)
     domain_response = _domain_export_response(db, user, task, "pdf", download=True)

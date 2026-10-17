@@ -240,6 +240,12 @@ def revise_agent(
     _assert_owner(db, asset.owner_id, actor)
     model_config = _normalize_model_config(model_config)
     payload = _agent_payload(prompt, review_focus, model_config)
+    source = (
+        db.query(CustomAgentVersion)
+        .filter(CustomAgentVersion.agent_id == asset.id)
+        .order_by(CustomAgentVersion.version_number.desc())
+        .first()
+    )
     version = CustomAgentVersion(
         agent_id=asset.id,
         version_number=_next_version(db, CustomAgentVersion, CustomAgentVersion.agent_id, asset.id),
@@ -255,7 +261,16 @@ def revise_agent(
         revision_note=note or None,
     )
     db.add(version)
-    asset.status = "draft"
+    db.flush()
+    if source:
+        for binding in _bindings(db, source.id):
+            db.add(CustomAgentSkillBinding(
+                agent_version_id=version.id,
+                skill_version_id=binding.skill_version_id,
+                position=binding.position,
+                config_json=binding.config_json,
+            ))
+    asset.status = "published" if asset.current_published_version_id and asset.is_enabled else "draft"
     _audit(db, actor, "agent_studio_revise", "custom_agent", asset.id, f"create v{version.version_number}")
     db.commit()
     db.refresh(version)
@@ -593,7 +608,7 @@ def submit_agent_version(db: Session, actor: User, agent_version_id: int, note: 
             skill_version.status = "pending_approval"
     version.status = "pending_approval"
     version.submitted_at = _utcnow()
-    asset.status = "pending_approval"
+    asset.status = "published" if asset.current_published_version_id and asset.is_enabled else "pending_approval"
     approval = ApprovalItem(
         title=f"发布自定义 Agent: {asset.name} v{version.version_number}",
         agent_code=asset.code,
@@ -738,7 +753,29 @@ def _sync_governance_profile(
     )
 
 
+def assert_release_approval_target(db: Session, approval: ApprovalItem) -> None:
+    """发布包审批单必须精确指向申请人拥有的 Agent 版本。"""
+    payload = _load(approval.request_json, {})
+    if not isinstance(payload, dict):
+        raise ConflictError("Agent 发布审批目标与申请内容不一致", code=40901)
+    version_id = payload.get("agent_version_id")
+    owner_id = payload.get("owner_id")
+    if type(version_id) is not int or version_id <= 0 or type(owner_id) is not int or owner_id <= 0:
+        raise ConflictError("Agent 发布审批目标与申请内容不一致", code=40901)
+    version = db.get(CustomAgentVersion, version_id)
+    asset = db.get(CustomAgent, version.agent_id) if version else None
+    if (
+        approval.action != "agent_package.publish"
+        or asset is None
+        or approval.resource != f"custom_agent_version:{version_id}"
+        or approval.agent_code != asset.code
+        or owner_id != asset.owner_id
+    ):
+        raise ConflictError("Agent 发布审批目标与申请内容不一致", code=40901)
+
+
 def publish_for_approval(db: Session, approval: ApprovalItem) -> CustomAgentRelease:
+    assert_release_approval_target(db, approval)
     existing = db.query(CustomAgentRelease).filter(CustomAgentRelease.approval_id == approval.id).first()
     if existing:
         return existing
@@ -813,6 +850,7 @@ def admin_revise_pending(
         raise NotFoundError("Agent 发布审批不存在", code=40400)
     if approval.status != "pending":
         raise ValidationError("只能修订待审批发布包", code=40001)
+    assert_release_approval_target(db, approval)
     payload = _load(approval.request_json, {})
     old = db.get(CustomAgentVersion, int(payload.get("agent_version_id") or 0))
     reject_for_approval(db, approval)
@@ -849,7 +887,7 @@ def admin_revise_pending(
                 config_json=binding.config_json,
             )
         )
-    asset.status = "draft"
+    asset.status = "published" if asset.current_published_version_id and asset.is_enabled else "draft"
     _audit(db, admin, "agent_admin_revise", "custom_agent", asset.id, f"revise to v{revised.version_number}")
     db.commit()
     db.refresh(revised)

@@ -46,6 +46,93 @@ describe('AgentTeamTrace', () => {
     expect(wrapper.find('.agent-team-toggle').attributes('aria-expanded')).toBe('true')
   })
 
+  it('只按真实 depends_on 绘制依赖边，并标出无前置任务的根节点', async () => {
+    const wrapper = mount(AgentTeamTrace, { props: { team } })
+    await wrapper.get('.agent-team-toggle').trigger('click')
+
+    const edges = wrapper.findAll('[data-dependency-edge]')
+    expect(edges).toHaveLength(1)
+    expect(edges[0].attributes('data-dependency-edge')).toBe('read->verify')
+    expect(wrapper.find('[data-task-root="read"]').text()).toContain('根节点')
+    expect(wrapper.find('.agent-team-dependency-map').attributes('role')).toBe('img')
+  })
+
+  it('键盘可聚焦根节点追溯按钮，并仅高亮沿真实依赖边可达的后续任务', async () => {
+    const tracedTeam = {
+      ...team,
+      tasks: [
+        ...team.tasks,
+        { ...team.tasks[1], task_id: 13, task_key: 'publish', title: '发布结果', depends_on: ['verify'] },
+        { ...team.tasks[0], task_id: 14, task_key: 'metrics', title: '独立指标', depends_on: [] },
+      ],
+    }
+    const wrapper = mount(AgentTeamTrace, { props: { team: tracedTeam }, attachTo: document.body })
+    await wrapper.get('.agent-team-toggle').trigger('click')
+    const traceButton = wrapper.get('[aria-label="从根节点 读取项目 追溯后续任务"]')
+
+    expect(traceButton.element.tagName).toBe('BUTTON')
+    ;(traceButton.element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(traceButton.element)
+    expect(traceButton.attributes('aria-pressed')).toBe('false')
+    await traceButton.trigger('click')
+
+    expect(traceButton.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-task-node="read"]').classes()).toContain('is-traced')
+    expect(wrapper.get('[data-task-node="verify"]').classes()).toContain('is-traced')
+    expect(wrapper.get('[data-task-node="publish"]').classes()).toContain('is-traced')
+    expect(wrapper.get('[data-task-node="metrics"]').classes()).toContain('is-dimmed')
+    expect(wrapper.get('[data-dependency-edge="read->verify"]').classes()).toContain('is-traced')
+    expect(wrapper.get('[data-dependency-edge="verify->publish"]').classes()).toContain('is-traced')
+    expect(wrapper.findAll('[data-dependency-edge="read->publish"]')).toHaveLength(0)
+    expect(wrapper.find('[aria-label="清除根节点追溯"]').exists()).toBe(true)
+
+    await wrapper.get('[aria-label="清除根节点追溯"]').trigger('click')
+    expect(wrapper.get('[data-task-node="metrics"]').classes()).not.toContain('is-dimmed')
+    wrapper.unmount()
+    document.body.innerHTML = ''
+  })
+
+  it('依赖星图连线先于节点按序显现，逐步动效不改变真实边', async () => {
+    const wrapper = mount(AgentTeamTrace, { props: { team } })
+    await wrapper.get('.agent-team-toggle').trigger('click')
+    const edge = wrapper.get('[data-dependency-edge="read->verify"]')
+    const root = wrapper.get('[data-task-node="read"]')
+
+    expect(edge.attributes('style')).toContain('--trace-delay: 0ms')
+    expect(root.attributes('style')).toContain('--trace-delay: 32ms')
+    expect(edge.classes()).toContain('agent-team-dependency-edge')
+    expect(root.classes()).toContain('agent-team-dependency-node')
+  })
+
+  it('依赖链无法由 depends_on 完整读取时显示空态且不猜边', async () => {
+    const unreadableTeam = {
+      ...team,
+      tasks: [{ ...team.tasks[0], depends_on: ['missing-key'] }],
+    }
+    const wrapper = mount(AgentTeamTrace, { props: { team: unreadableTeam } })
+    await wrapper.get('.agent-team-toggle').trigger('click')
+
+    expect(wrapper.find('.agent-team-dependency-map').exists()).toBe(false)
+    expect(wrapper.find('[role="status"].agent-team-dependency-empty').text()).toContain('依赖链路暂不可读')
+    expect(wrapper.findAll('[data-dependency-edge]')).toHaveLength(0)
+  })
+
+  it('展开控件有键盘焦点语义，内容在卡片流内展开并让后续内容位移', async () => {
+    const wrapper = mount(AgentTeamTrace, { props: { team }, attachTo: document.body })
+    const toggle = wrapper.get('.agent-team-toggle')
+    expect(toggle.element.tagName).toBe('BUTTON')
+    expect(toggle.attributes('aria-controls')).toBe(`agent-team-trace-body-${team.team_id}`)
+    ;(toggle.element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(toggle.element)
+    await toggle.trigger('click')
+
+    expect(wrapper.get('.agent-team-trace-body').attributes('id')).toBe(`agent-team-trace-body-${team.team_id}`)
+    expect(wrapper.get('.agent-team-trace-body').attributes('data-layout')).toBe('in-flow')
+    expect(wrapper.get('.agent-team-trace-body').element.parentElement?.parentElement).toBe(wrapper.get('.agent-team-trace').element)
+    wrapper.unmount()
+    document.body.innerHTML = ''
+  })
+
   it('在窄屏内容中保持可换行且显示错误状态', () => {
     const wrapper = mount(AgentTeamTrace, { props: { team, error: '同步暂时中断' } })
     expect(wrapper.find('.agent-team-error').text()).toBe('同步暂时中断')

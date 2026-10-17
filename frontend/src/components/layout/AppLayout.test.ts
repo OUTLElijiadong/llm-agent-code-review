@@ -12,6 +12,12 @@ describe('用户布局底部操作区避让小菱入口', () => {
     expect(main).toContain('overflow-y: auto')
   })
 
+  it('宽内容在全局主滚动区可横向访问，不会被主布局静默裁切', () => {
+    const main = styles.match(/\.app-layout-main\s*\{([^}]+)\}/)?.[1] ?? ''
+    expect(main).toContain('overflow-x: auto')
+    expect(main).not.toContain('overflow-x: hidden')
+  })
+
   it.each([768, 420])('宽度不超过%dpx时只缩横向间距，不覆盖底部安全区', (width) => {
     const media = styles.split(`@media (max-width: ${width}px)`)[1]?.split('@media')[0] ?? ''
     const main = media.match(/\.app-layout-main\s*\{([^}]+)\}/)?.[1] ?? ''

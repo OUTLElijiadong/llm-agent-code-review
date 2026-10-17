@@ -13,8 +13,10 @@ class ReportListItem(BaseModel):
     task_name: Optional[str] = None
     project_name: str = ""
     total_issues: int
-    score: int
+    score: Optional[int] = None
     status: str
+    error_message: Optional[str] = None
+    coverage: dict = Field(default_factory=dict, description="扫描覆盖、未扫描、跳过与排除范围")
     create_time: datetime
     source: dict = Field(default_factory=dict, description="来源、统计依据及既有领域详情接口")
 
@@ -39,7 +41,7 @@ class DomainReportExportOut(BaseModel):
     project: dict
     task_info: dict
     statistics: dict
-    score: int
+    score: Optional[int] = None
     summary: str
     domain_data: dict
     native_exports: list[dict] = Field(default_factory=list)

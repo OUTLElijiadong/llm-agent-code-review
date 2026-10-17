@@ -127,6 +127,14 @@ ADMIN_CAPABILITIES: tuple[AdminCapabilitySpec, ...] = (
         "/api/admin/overview/agents-activity",
         permission="agent:view",
     ),
+    _cap(
+        "overview.token_usage",
+        "/admin/overview",
+        "查询每日 Token 用量趋势",
+        "GET",
+        "/api/admin/overview/token-usage",
+        permission="server_ops:view",
+    ),
     # Agent 治理
     _cap(
         "governance.overview",

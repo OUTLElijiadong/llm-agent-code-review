@@ -71,7 +71,7 @@ def route_inventory():
                 "line": inspect.getsourcelines(endpoint)[1],
             })
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
-    assert len(rows) == 332, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 333, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -81,11 +81,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 332
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 332
+    assert len(ROUTES) == 333
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 333
     assert len({row["source"] for row in ROUTES}) == 42
-    assert len(AUTHENTICATED_ROUTES) == 318
-    assert len(GUARDED_ROUTES) == 251
+    assert len(AUTHENTICATED_ROUTES) == 319
+    assert len(GUARDED_ROUTES) == 252
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -109,6 +109,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/agent-mesh/inbox/pull"): ["agent:chat"],
         ("POST", "/api/feedback/{feedback_id}/read"): ["require_admin"],
         ("POST", "/api/forum/posts/{post_id}/views"): [],
+        ("GET", "/api/admin/overview/token-usage"): ["require_admin"],
     }
     for route_key, expected_guards in expected_new_routes.items():
         matches = [row for row in ROUTES if (row["method"], row["path"]) == route_key]
@@ -225,11 +226,11 @@ def test_ordinary_admin_cannot_bypass_unique_super_admin_routes(matrix_env, rout
 
 
 @pytest.mark.parametrize("format", ["json", "html", "word", "pdf"])
-def test_report_export_format_permissions_are_independent(matrix_env, format):
+def test_report_export_requires_view_permission_before_format_permission(matrix_env, format):
     ids = matrix_env["resources"]["none"]
     response = _request(matrix_env, "no_permission", "GET", f"/api/reports/tasks/{ids['task']}/export?format={format}")
     assert response.status_code == 403, response.text
-    assert response.json()["detail"]["required_permission"] == f"report:export:{format}"
+    assert response.json()["detail"]["required_permission"] == "report:view"
 
 
 @pytest.mark.parametrize("format", ["word", "pdf"])

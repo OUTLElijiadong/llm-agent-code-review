@@ -65,6 +65,68 @@ it('仅查看权限实际点击HTML预览仍可用，不触发下载或无权问
   expect(issues.getTaskIssues).not.toHaveBeenCalled()
 })
 
+it('报告查看权限撤销后立即清除已加载正文，并明确标注问题详情不可见', async () => {
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    summary: '不可继续显示的报告内容',
+    stats: { score: 100, total_issues: 2 },
+  })
+  await render()
+  expect(wrapper.text()).toContain('不可继续显示的报告内容')
+  expect(wrapper.get('[data-testid="report-issues-access-limited"]').text())
+    .toContain('已隐藏逐条问题与修复建议')
+
+  useUserStore().permissions.delete('report:view')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="report-paper"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="report-access-revoked"]').exists()).toBe(true)
+  expect(wrapper.text()).not.toContain('不可继续显示的报告内容')
+})
+
+it('问题明细读取失败时明确提示不完整并支持重试', async () => {
+  useUserStore().permissions.add('issue:view')
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    stats: { score: 100, total_issues: 2 },
+  })
+  issues.getTaskIssues
+    .mockRejectedValueOnce(new Error('temporary issue service error'))
+    .mockResolvedValueOnce({ items: [], total: 2 })
+
+  await render()
+
+  expect(wrapper.get('[data-testid="report-issues-load-error"]').text())
+    .toContain('逐条问题、严重度分布和修复建议尚未完整加载')
+  expect(wrapper.find('[data-testid="report-issues-access-limited"]').exists()).toBe(false)
+
+  await button('重试读取问题明细')!.trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="report-issues-load-error"]').exists()).toBe(false)
+  expect(issues.getTaskIssues).toHaveBeenCalledTimes(2)
+})
+
+it('问题详情权限撤销后立即清除已读取的问题数据', async () => {
+  useUserStore().permissions.add('issue:view')
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    stats: { score: 100, total_issues: 1 },
+  })
+  issues.getTaskIssues.mockResolvedValueOnce({ items: [{ id: 9, title: '权限撤销后不可见' }], total: 1 })
+
+  await render()
+  expect((state().issues as unknown as Array<{ title: string }>)[0]?.title).toBe('权限撤销后不可见')
+
+  useUserStore().permissions.delete('issue:view')
+  await flushPromises()
+
+  expect(state().issues).toEqual([])
+  expect(wrapper.find('[data-testid="report-issues-load-error"]').exists()).toBe(false)
+  expect(wrapper.get('[data-testid="report-issues-access-limited"]').text())
+    .toContain('已隐藏逐条问题与修复建议')
+})
+
 it('JSON独立权限通过真实生成按钮与ElementPlus下拉菜单完成对应调用', async () => {
   useUserStore().permissions.add('report:export:json')
   await render()

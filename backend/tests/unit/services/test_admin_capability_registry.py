@@ -27,6 +27,7 @@ FRONTEND_API_CAPABILITY = {
     "adminOverview:getSecurityPosture": "overview.security",
     "adminOverview:getLoginGeo": "overview.geo",
     "adminOverview:getAgentsActivity": "overview.agent_activity",
+    "adminOverview:getTokenUsageTrend": "overview.token_usage",
     "adminGovernance:getGovernanceOverview": "governance.overview",
     "adminGovernance:listGovernanceAgents": "governance.agents.list",
     "adminGovernance:listAgentMemory": "knowledge.memory.list",
@@ -185,7 +186,7 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。
-    assert len(ADMIN_CAPABILITIES) == 126
+    assert len(ADMIN_CAPABILITIES) == 127
     assert len(CAPABILITY_BY_CODE) == len(ADMIN_CAPABILITIES)
     for spec in ADMIN_CAPABILITIES:
         contract = operation_contract(spec, openapi)

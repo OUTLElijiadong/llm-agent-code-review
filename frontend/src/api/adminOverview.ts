@@ -62,6 +62,26 @@ export interface AgentActivity {
   activity_source?: 'event_bus' | 'tool_log' | 'none' | string
 }
 
+/** 管理端平台级每日模型 Token 汇总。tokens 为 null 表示该日只有缺失用量的调用。 */
+export interface DailyTokenUsage {
+  date: string
+  tokens: number | null
+  calls: number
+  known_calls: number
+  unknown_calls: number
+}
+
+export interface TokenUsageTrend {
+  timezone: 'UTC'
+  days: number
+  start_date: string
+  end_date: string
+  total_tokens: number
+  known_calls: number
+  unknown_calls: number
+  daily: DailyTokenUsage[]
+}
+
 export function getSystemStatus(): Promise<SystemStatus> {
   return get<SystemStatus>('/admin/overview/system')
 }
@@ -76,4 +96,8 @@ export function getLoginGeo(): Promise<GeoPoint[]> {
 
 export function getAgentsActivity(): Promise<AgentActivity[]> {
   return get<AgentActivity[]>('/admin/overview/agents-activity')
+}
+
+export function getTokenUsageTrend(days = 30): Promise<TokenUsageTrend> {
+  return get<TokenUsageTrend>('/admin/overview/token-usage', { days })
 }

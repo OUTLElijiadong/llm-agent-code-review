@@ -5,6 +5,7 @@ import { Download, Lock, RefreshRight, View } from '@element-plus/icons-vue'
 import { scanAllProjects, scanFile, scanProject, scanTask } from '@/api/security'
 import { useUserStore } from '@/stores/user'
 import { renderMarkdown } from '@/utils/markdown'
+import { OWASP_FALLBACK_NOTICE } from '@/views/security/cnnvd-knowledge'
 import type {
   ApiEndpointOut,
   CodeLinkOut,
@@ -211,6 +212,8 @@ function downloadReport(): void {
   if (!result.value) return
   const lines: string[] = []
   lines.push(`# 棱镜 Prism · 安全审计报告`)
+  lines.push('')
+  lines.push(`> ${OWASP_FALLBACK_NOTICE}`)
   lines.push('')
   lines.push(`- 扫描范围: ${scopeLabel.value} ${props.refName ? `(${props.refName})` : ''}`)
   lines.push(`- 风险评分: **${result.value.risk_score}/100**`)
@@ -627,10 +630,13 @@ onBeforeUnmount(() => {
           <span class="block-title">安全发现</span>
           <span class="block-count font-mono">{{ sortedFindings.length }}</span>
         </header>
+        <p class="owasp-fallback-note">{{ OWASP_FALLBACK_NOTICE }}</p>
         <div class="findings-grid">
           <aside class="findings-list">
             <template v-for="group in groupedByOwasp" :key="group.owasp">
-              <div class="group-head">{{ group.owasp || '其他' }}</div>
+              <div class="group-head">
+                {{ group.owasp ? `OWASP fallback · ${group.owasp}` : '未提供 OWASP 分类' }}
+              </div>
               <button
                 v-for="f in group.items"
                 :key="`${f.file_path}-${f.line_number}-${f.title}`"
@@ -667,7 +673,7 @@ onBeforeUnmount(() => {
               </div>
               <div class="view-tags">
                 <el-tag v-if="sortedFindings[activeFindingIdx].owasp" size="small" type="danger">
-                  {{ sortedFindings[activeFindingIdx].owasp }}
+                  OWASP fallback · {{ sortedFindings[activeFindingIdx].owasp }}
                 </el-tag>
                 <el-tag v-if="sortedFindings[activeFindingIdx].cwe" size="small" type="info">
                   {{ sortedFindings[activeFindingIdx].cwe }}
@@ -1004,6 +1010,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   margin: 12px 0 8px;
+}
+.owasp-fallback-note {
+  margin: 0 0 8px;
+  color: var(--gray-500);
+  font-size: 11px;
+  line-height: 1.5;
 }
 .block-title { font-size: 13px; font-weight: 600; color: var(--gray-800); }
 .block-count {

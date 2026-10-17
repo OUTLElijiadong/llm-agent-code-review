@@ -33,11 +33,11 @@ def test_raw_missing_usage_stays_unknown(monkeypatch):
     assert (meta["prompt_tokens"], meta["completion_tokens"], meta["total_tokens"]) == (None, None, None)
 
 
-def _run(db, user_id=7, key="root-run", **fields):
+def _run(db, user_id=7, key="root-run", status="completed", **fields):
     from app.models.agent_response_run import AgentResponseRun
 
     row = AgentResponseRun(
-        user_id=user_id, run_id=key, surface="user", session_key=key, status="completed", checkpoint_json="{}", **fields
+        user_id=user_id, run_id=key, surface="user", session_key=key, status=status, checkpoint_json="{}", **fields
     )
     db.add(row)
     db.commit()
@@ -163,7 +163,8 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
     from app.services.ai_usage_context import current_attribution
     from app.services.deepseek_responses_runtime import ToolCall
 
-    root = _run(db)
+    root = _run(db, status="running")
+    monkeypatch.setattr("app.services.rbac_service.check_permission", lambda *_args: True)
     user = User(id=7, username="usage-owner", password="x", role="user", status=1)
     db.add(user)
     db.commit()
@@ -176,7 +177,7 @@ async def test_tool_team_claim_dispatch_and_result_keep_exact_origin(db, monkeyp
         ToolCall(call_id="usage-call", name="create_agent_team", arguments={}, raw_arguments="{}"),
         lambda: agent_team_service.create_team(db, user, _team_payload()),
     )
-    assert created.status == "success"
+    assert created.status == "success", created.error
     team = db.query(AgentTeam).one()
     tool = db.query(AgentToolExecution).filter_by(call_id="usage-call").one()
     assert (team.root_agent_run_id, team.agent_run_id, team.tool_execution_id) == (root.id, root.id, tool.id)

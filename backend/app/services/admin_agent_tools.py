@@ -19,12 +19,14 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult
 from app.agents.event_bus import emit_event
 from app.agents.events import AgentEventType
+from app.core.exceptions import ConflictError
 from app.core.permission_codes import PermissionCode
 from app.models.agent_governance import ApprovalItem
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion, CustomSkill, CustomSkillVersion
 from app.models.user import User
 from app.services import (
     agent_governance_service,
+    agent_studio_service,
     approval_service,
     audit_service,
     observability_service,
@@ -377,6 +379,10 @@ def preview_agent_release_decision(
         return AgentResult(success=False, error=f"Agent 发布审批 {approval_id} 不存在")
     if row.status != "pending":
         return AgentResult(success=False, error=f"Agent 发布审批 {approval_id} 当前状态为 {row.status}，不能重复处理")
+    try:
+        agent_studio_service.assert_release_approval_target(db, row)
+    except ConflictError as exc:
+        return AgentResult(success=False, error=str(exc))
     return AgentResult(
         success=True,
         data={
@@ -417,6 +423,11 @@ def admin_decide_agent_release(
     if row.status != "pending":
         db.rollback()
         return AgentResult(success=False, error=f"Agent 发布审批 {approval_id} 当前状态为 {row.status}，不能重复处理")
+    try:
+        agent_studio_service.assert_release_approval_target(db, row)
+    except ConflictError as exc:
+        db.rollback()
+        return AgentResult(success=False, error=str(exc))
     actual_snapshot = _release_target_snapshot(db, row)
     if not expected_snapshot or actual_snapshot != expected_snapshot:
         db.rollback()
@@ -428,6 +439,7 @@ def admin_decide_agent_release(
             approval_id,
             approve=decision == "approve",
             note=note,
+            expected_action="agent_package.publish",
         )
         release = (
             (db.query(CustomAgentRelease).filter(CustomAgentRelease.approval_id == approval_id).first())

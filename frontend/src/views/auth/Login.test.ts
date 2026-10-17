@@ -85,6 +85,28 @@ describe('登录真实反馈', () => {
     expect(wrapper.get('[role="status"]').text()).toContain('登录成功')
   })
 
+  it('登录成功时显示光球与节点对勾，状态对读屏可读', async () => {
+    const router = await renderLogin()
+    let finishNavigation!: () => void
+    vi.spyOn(router, 'replace').mockReturnValue(new Promise<void>((resolve) => { finishNavigation = resolve }))
+    await fillCredentials()
+    await wrapper.get('form').trigger('submit')
+    await vi.waitFor(() => expect(wrapper.get('.btn-login').classes()).toContain('is-success'))
+
+    const button = wrapper.get('.btn-login')
+    expect(button.text()).toContain('登录成功')
+    expect(button.attributes('data-shape')).toBe('orb')
+    expect(button.classes()).toContain('is-success')
+    expect(wrapper.get('.login-action-slot').attributes('data-success')).toBe('true')
+    expect(button.find('.login-success-mark').attributes('aria-hidden')).toBe('true')
+    expect(button.find('.login-success-node svg').attributes('focusable')).toBe('false')
+    expect(wrapper.get('[role="status"]').text()).toContain('登录成功')
+    expect(button.attributes('aria-busy')).toBe('true')
+
+    finishNavigation()
+    await flushPromises()
+  })
+
   it('校验与请求期间重复提交只登录一次，忙态有可读文字', async () => {
     let finishLogin!: () => void
     user.login.mockReturnValue(new Promise<void>((resolve) => { finishLogin = resolve }))

@@ -123,6 +123,6 @@ class AgentMeshHeartbeatIn(_StrictModel):
 
 
 class AgentMeshAckIn(_StrictModel):
-    status: Literal["acknowledged", "processing", "completed", "failed"]
+    status: Literal["acknowledged", "processing", "completed", "failed", "cancelled"]
     summary: str = Field(default="", max_length=2000)
     error: str = Field(default="", max_length=2000)

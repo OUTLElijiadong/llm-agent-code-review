@@ -16,6 +16,7 @@ from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, Agent
 from app.models.agent_response_run import AgentResponseRun
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services import agent_mesh_service
+from app.services.ai_usage_context import usage_context
 
 
 @pytest.fixture()
@@ -113,6 +114,16 @@ def test_list_agents_marks_governed_runtime_agents_as_team_members(db, user) -> 
         assert item is not None
         if item["dispatch_state"] == "approval_required":
             assert item.get("team_dispatch_state") == "team_governed"
+
+
+def test_regular_user_cannot_discover_admin_agent_catalog(db) -> None:
+    user = SimpleNamespace(id=71, role="user", username="member")
+    with pytest.raises(agent_mesh_service.AgentMeshAccessError, match="仅管理员账户"):
+        agent_mesh_service.list_agents(db, user, surface="admin")
+
+    result = agent_mesh_service.list_agents(db, user)
+    assert all(item["surface"] != "admin" for item in result["items"])
+    assert all(item["address"] != "agent:manager" for item in result["items"])
 
 
 def test_send_message_is_owner_scoped_idempotent_and_traceable(db, user) -> None:
@@ -233,6 +244,108 @@ def test_inbox_delivery_ack_and_terminal_state_are_ordered(db, user) -> None:
         "processing",
         "completed",
     ]
+
+
+def test_cancelled_inbox_message_cannot_be_requeued_by_late_response(db, user) -> None:
+    """停止中的迟到失败回执不得把任务消息重新排队并再次消耗 Token。"""
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        message=_message(),
+    )
+    agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    )
+    agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="processing"),
+    )
+
+    cancelled = agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="cancelled", summary="用户停止了本次运行"),
+    )
+    late_failure = agent_mesh_service.finish_message_run(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        success=False,
+        error="迟到的响应中断",
+    )
+
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert cancelled["status"] == late_failure["status"] == row.status == "cancelled"
+    assert row.next_attempt_at is None
+    assert row.lease_token is None and row.lease_expires_at is None
+    assert agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    ) == []
+
+
+def test_late_team_result_from_cancelled_parent_is_dropped_without_new_run(db, user) -> None:
+    """已取消父运行的迟到 task.result 不得被 inbox 转成新模型响应。"""
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    parent = AgentResponseRun(
+        run_id="run-parent-cancelled",
+        user_id=int(user.id),
+        surface="user",
+        session_key="session-b1",
+        status="cancelled",
+        checkpoint_json="{}",
+        version=1,
+    )
+    db.add(parent)
+    db.commit()
+
+    with usage_context(int(user.id), {"root_agent_run_id": parent.id, "agent_run_id": parent.id}):
+        result = agent_mesh_service.send_message(
+            db,
+            user,
+            surface="user",
+            session_key="session-a1",
+            message=_message(
+                idempotency_key="late-result-after-stop",
+                sent_from="session:user:session-a1",
+                send_to="session:user:session-b1",
+                message_type="task.result",
+                subject="迟到的团队结果",
+            ),
+        )
+
+    assert result["status"] == "queued"
+    assert agent_mesh_service.pull_inbox(
+        db,
+        user,
+        surface="user",
+        session_key="session-b1",
+        limit=10,
+    ) == []
+    row = db.query(AgentMeshMessage).filter_by(message_id=result["message_id"]).one()
+    assert row.status == "cancelled"
+    assert "未触发新的模型调用" in row.last_error
 
 
 def test_disabled_jarvis_message_is_completed_without_preparing_model_run(db, user, monkeypatch) -> None:

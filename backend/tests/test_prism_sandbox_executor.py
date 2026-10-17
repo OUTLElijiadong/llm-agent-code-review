@@ -1089,7 +1089,11 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
                         "payload": {"exit_code": 0},
                     },
                 ],
-                "result": {"exit_code": 0, "summary": "ok"},
+                "result": {
+                    "exit_code": 0,
+                    "summary": "ok",
+                    "logs": {"text": "PRISM_VERIFY whitebox ok"},
+                },
             }
         }
 
@@ -1662,6 +1666,7 @@ def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(d
         lambda url, **_kwargs: SimpleNamespace(original_url=url, ip_address="1.1.1.1"),
     )
     monkeypatch.setattr(sandbox_service, "_select_browser_worker", lambda _db: worker)
+    monkeypatch.setattr(sandbox_service, "_run_test_review_report", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         sandbox_service,
         "_call_worker",
@@ -1694,6 +1699,7 @@ def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(d
         "test_report",
         "browser_screenshot",
         "browser_evidence",
+        "review_report",
     ]
     assert result["passed"] is True
     assert len(result["artifacts"]) == 2

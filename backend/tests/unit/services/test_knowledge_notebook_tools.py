@@ -58,7 +58,7 @@ def test_recall_knowledge_calls_unified_retrieve(db, super_admin_user, monkeypat
     assert result.status == "success"
     assert result.output["count"] == 1
     assert result.output["hits"][0]["title"] == "服务器运维手册"
-    assert captured["agent_code"] == "manager"
+    assert captured["agent_code"] == "chat_assistant"
     assert captured["user_id"] == int(super_admin_user.id)
 
 

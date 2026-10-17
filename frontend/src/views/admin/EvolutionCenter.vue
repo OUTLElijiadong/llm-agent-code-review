@@ -261,7 +261,7 @@
     </el-card>
 
     <!-- 提案详情抽屉 -->
-    <el-drawer v-model="detailVisible" title="进化提案详情" size="46%">
+    <el-drawer v-model="detailVisible" class="evolution-detail-drawer" title="进化提案详情" size="46%">
       <div v-if="detail" class="detail">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="提案">{{ detail.title }}</el-descriptions-item>
@@ -844,6 +844,17 @@ onMounted(reloadAll)
 
 @media (max-width: 900px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+:global(.evolution-detail-drawer.el-drawer) {
+  width: min(46vw, 760px) !important;
+}
+
+@media (max-width: 640px) {
+  :global(.evolution-detail-drawer.el-drawer) {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+  }
 }
 
 /* 首载统计骨架:呼吸条替代误导性 0 */

@@ -61,29 +61,32 @@
             <div class="rc-line1">
               <b class="rc-name" :title="row.task_name || `审查 #${row.task_id}`">{{ row.task_name || `审查 #${row.task_id}` }}</b>
               <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">{{ reviewTypeLabel(row.source.type) }}</el-tag>
-              <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
-                {{ row.status === 'success' ? '通过' : '未通过' }}
+              <el-tag :type="statusTagType(row.status)" size="small">
+                {{ statusLabel(row.status) }}
               </el-tag>
             </div>
             <div class="rc-line2 font-mono">
               <span class="rc-project" :title="row.project_name">{{ row.project_name }}</span>
               <span v-if="row.source?.type === 'sandbox_test'">{{ row.source.report_issue_summary?.total ?? '—' }} 条报告条目</span>
               <span v-else>问题 {{ row.total_issues }}</span>
+              <span v-if="coverageLabel(row.coverage)" class="rc-coverage">{{ coverageLabel(row.coverage) }}</span>
               <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
             </div>
           </div>
-          <div class="rc-score" :title="`综合评分 ${row.score}`">
+          <div v-if="row.error_message" class="rc-error">{{ row.error_message }}</div>
+          <div v-if="row.score != null" class="rc-score" :title="`综合评分 ${row.score}`">
             <svg viewBox="0 0 36 36" class="rc-ring" aria-hidden="true">
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
                 cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
-                :stroke="row.score >= 80 ? '#40a35f' : row.score >= 60 ? '#d9a857' : '#dc4961'"
+                :stroke="row.score >= 80 ? 'var(--color-success)' : row.score >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'"
                 :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
                 stroke-dashoffset="25"
               />
             </svg>
             <span :class="scoreClass(row.score)">{{ row.score }}</span>
           </div>
+          <div v-else class="rc-score rc-score-unavailable" aria-label="未评分">未评分</div>
           <div class="rc-actions" @click.stop>
             <el-tooltip content="查看详情" placement="top">
               <el-button link type="primary" size="small" :icon="ViewIcon" aria-label="查看详情" @click.stop="goDetail(row.task_id)" />
@@ -177,6 +180,27 @@ function isDomainReport(row: ReportListItem): boolean {
 
 function canExport(format: ReportFormat): boolean {
   return userStore.hasPermission(`report:export:${format}`)
+}
+
+function statusLabel(status: ReportListItem['status']): string {
+  return ({
+    success: '完成', partial: '部分覆盖', failed: '失败', cancelled: '已取消', expired: '已过期', stopped: '已停止',
+  } as Record<string, string>)[status] || '状态未知'
+}
+
+function statusTagType(status: ReportListItem['status']): string {
+  if (status === 'success') return 'success'
+  if (status === 'partial') return 'warning'
+  if (status === 'cancelled' || status === 'expired' || status === 'stopped') return 'info'
+  return 'danger'
+}
+
+function coverageLabel(coverage?: Record<string, unknown>): string {
+  const state = coverage?.coverage_status
+  if (state === 'complete') return '覆盖完整'
+  if (state === 'partial') return '覆盖不完整'
+  if (state === 'unknown') return '覆盖范围未知'
+  return ''
 }
 
 function scoreClass(score: number) {
@@ -345,14 +369,17 @@ onMounted(() => {
   border-color: var(--brand-300, #a8c4fa);
 }
 .rc-band { width: 4px; height: 38px; border-radius: 999px; }
-.rc-band[data-status='success'] { background: #40a35f; }
+.rc-band[data-status='success'] { background: var(--color-success, #4fb87a); }
 .rc-band[data-status='failed'] { background: var(--sev-severe, #dc4961); }
 .rc-main { display: grid; gap: 5px; min-width: 0; }
 .rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rc-name { font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
+.rc-coverage { color: var(--color-warning, #d9a857); }
+.rc-error { color: var(--color-danger, #dc4961); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .rc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
+.rc-score-unavailable { color: var(--gray-500); font-size: 12px; }
 .rc-ring { width: 38px; height: 38px; }
 .rc-score span { font-size: 12.5px; font-weight: 700; }
 .rc-actions { display: flex; gap: 4px; align-items: center; }
@@ -401,9 +428,9 @@ onMounted(() => {
   margin-top: 16px;
 }
 
-.score-high { color: #67c23a; font-weight: 600; }
-.score-medium { color: #e6a23c; font-weight: 600; }
-.score-low { color: #f56c6c; font-weight: 600; }
+.score-high { color: var(--color-success, #4fb87a); font-weight: 600; }
+.score-medium { color: var(--color-warning, #d9a857); font-weight: 600; }
+.score-low { color: var(--color-danger, #dc4961); font-weight: 600; }
 
 .danger-item { color: var(--el-color-danger); }
 </style>

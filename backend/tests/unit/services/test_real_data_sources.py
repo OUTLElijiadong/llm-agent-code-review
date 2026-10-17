@@ -10,8 +10,9 @@ from app.models.user import User
 from app.services import dashboard_service
 
 
-def test_dashboard_recent_tasks_use_persisted_project_and_task_fields(db):
+def test_dashboard_recent_tasks_use_persisted_project_and_task_fields(db, monkeypatch):
     """仪表盘最近活动必须来自数据库任务与项目字段"""
+    monkeypatch.setattr(dashboard_service.rbac_service, "check_permission", lambda *_args: True)
     user = User(
         id=101,
         username="real-user",

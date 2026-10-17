@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 from app.agents.event_bus import AgentEventBus
 from app.agents.events import AgentEvent, AgentEventType
-from app.api.v1.admin_overview import _agent_activity, _login_geo
+from app.api.v1.admin_overview import _agent_activity, _daily_token_usage, _login_geo
 from app.models.agent_governance import AgentProfile, ToolCallLog
+from app.models.ai_call_log import AiCallLog
 from app.models.audit_log import AuditLog
 
 
@@ -72,3 +73,102 @@ def test_login_geo_uses_successful_real_logins_only(db, monkeypatch):
         ("203.0.113.10", 2),
         ("198.51.100.20", 1),
     ]
+
+
+def test_daily_token_usage_uses_utc_days_and_keeps_missing_usage_unknown(db):
+    now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+    db.add_all([
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=6,
+            completion_tokens=6,
+            total_tokens=8,
+            status="success",
+            create_time=datetime(2026, 10, 16, 1, tzinfo=timezone.utc),
+        ),
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=None,
+            completion_tokens=None,
+            total_tokens=None,
+            status="failed",
+            create_time=datetime(2026, 10, 16, 23, tzinfo=timezone.utc),
+        ),
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=4,
+            completion_tokens=3,
+            total_tokens=5,
+            status="success",
+            create_time=datetime(2026, 10, 15, 4, tzinfo=timezone.utc),
+        ),
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=2,
+            completion_tokens=None,
+            total_tokens=None,
+            status="failed",
+            create_time=datetime(2026, 10, 15, 5, tzinfo=timezone.utc),
+        ),
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=None,
+            completion_tokens=3,
+            total_tokens=None,
+            status="failed",
+            create_time=datetime(2026, 10, 15, 6, tzinfo=timezone.utc),
+        ),
+        AiCallLog(
+            user_id=1,
+            model_name="test-model",
+            prompt_tokens=500,
+            completion_tokens=500,
+            total_tokens=1000,
+            status="success",
+            create_time=datetime(2026, 10, 13, 23, 59, tzinfo=timezone.utc),
+        ),
+    ])
+    db.commit()
+
+    result = _daily_token_usage(db, days=3, now=now)
+
+    assert result["timezone"] == "UTC"
+    assert result["start_date"] == "2026-10-14"
+    assert result["end_date"] == "2026-10-16"
+    assert result["total_tokens"] == 19
+    assert result["known_calls"] == 2
+    assert result["unknown_calls"] == 3
+    assert result["daily"] == [
+        {"date": "2026-10-14", "tokens": 0, "calls": 0, "known_calls": 0, "unknown_calls": 0},
+        {"date": "2026-10-15", "tokens": 7, "calls": 3, "known_calls": 1, "unknown_calls": 2},
+        {"date": "2026-10-16", "tokens": 12, "calls": 2, "known_calls": 1, "unknown_calls": 1},
+    ]
+
+
+def test_daily_token_usage_marks_only_unknown_days_as_null(db):
+    now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+    db.add(AiCallLog(
+        user_id=1,
+        model_name="test-model",
+        prompt_tokens=None,
+        completion_tokens=None,
+        total_tokens=None,
+        status="failed",
+        create_time=datetime(2026, 10, 16, 8, tzinfo=timezone.utc),
+    ))
+    db.commit()
+
+    result = _daily_token_usage(db, days=7, now=now)
+
+    assert result["daily"][-1] == {
+        "date": "2026-10-16",
+        "tokens": None,
+        "calls": 1,
+        "known_calls": 0,
+        "unknown_calls": 1,
+    }

@@ -30,7 +30,12 @@
     .score-warn { background: #f59e0b; }
     .score-risk { background: #ea580c; }
     .score-bad { background: #ef4444; }
-    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; white-space: pre-wrap; }
+    .summary-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+    .summary-box p { margin: 0 0 8px; white-space: pre-wrap; }
+    .summary-box p:last-child { margin-bottom: 0; }
+    .summary-box ul, .summary-box ol { margin: 6px 0 8px; padding-left: 24px; }
+    .summary-box blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid #93c5fd; color: #475569; }
+    .summary-box pre { overflow-x: auto; white-space: pre-wrap; }
     .overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0 24px 0; }
     .stat-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px; text-align: center; }
     .stat-num { font-size: 22px; font-weight: 700; color: #111827; }
@@ -78,6 +83,12 @@
     <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
     <div class="meta">审查模型:{{ task_info.model_name or "-" }} · 耗时:{{ task_info.duration_ms or 0 }} ms</div>
     <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
+    <div class="meta"><strong>执行状态:</strong> {{ task_info.status or "未知" }}</div>
+    {% if task_info.error_message %}<div class="summary-box"><strong>执行错误:</strong> {{ task_info.error_message }}</div>{% endif %}
+    {% if task_info.coverage %}
+    <h2>扫描范围与覆盖情况</h2>
+    <pre class="summary-box">{{ task_info.coverage | tojson(indent=2) }}</pre>
+    {% endif %}
     <div class="meta">
       综合评分:
       {% if score >= 80 %}
@@ -109,7 +120,7 @@
 
     {% if summary %}
     <h2>总体评价</h2>
-    <div class="summary-box">{{ summary }}</div>
+    <div class="summary-box">{{ summary_html }}</div>
     {% endif %}
 
     {% if evidence and evidence.decompilation %}
