@@ -295,12 +295,14 @@ describe('ReportDetail 报告口径', () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: { project_name: '渗透项目', language: 'unknown' },
       task: { task_name: '渗透报告', review_type: 'pentest', total_files: 0 },
-      stats: { score: 0, total_issues: 2 }, files: [], rules_snapshot: [],
+      stats: { score: 0, total_issues: 2 }, summary: '重复的领域报告摘要', files: [], rules_snapshot: [],
       source: { type: 'pentest', stats_basis: 'pentest_findings', domain_report_md: '# 渗透报告\n\n真实发现与修复建议' },
     })
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.get('[data-testid="domain-report-body"]').text()).toContain('真实发现与修复建议')
+    expect(wrapper.find('.ai-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('重复的领域报告摘要')
     expect(wrapper.find('[data-testid="report-export-word"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="report-export-pdf"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('生成 JSON')

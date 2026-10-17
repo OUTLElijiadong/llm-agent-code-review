@@ -386,7 +386,18 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         ).first()
         content = snapshot.content_json if snapshot and isinstance(snapshot.content_json, dict) else {}
         if content.get("source") == "sandbox_test":
-            source["domain_report_md"] = clean_report_markdown(content.get("report_md"))
+            from app.services.domain_report_exporter import build_sandbox_report_markdown
+
+            domain_data = dict(content)
+            domain_data.setdefault("execution_status", task.status)
+            domain_data.setdefault("error_message", task.error_message)
+            if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
+                domain_data["coverage"] = _task_coverage(task)
+            source["domain_report_md"] = build_sandbox_report_markdown(
+                domain_data,
+                task_name=task.task_name,
+                project_name=project.project_name if project else "",
+            )
             findings = content.get("findings")
             source["domain_findings"] = clean_report_payload(
                 findings if isinstance(findings, list) else []

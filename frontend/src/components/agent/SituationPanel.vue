@@ -189,12 +189,13 @@ const peakBucket = computed(() => {
 
 .metric-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-content: start;
 }
 
 .metric {
+  min-width: 0;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -212,6 +213,7 @@ const peakBucket = computed(() => {
   .metric-label {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.6);
+    line-height: 1.35;
   }
 
   &.metric-busy .metric-num { color: #3DBCD9; }
@@ -300,6 +302,6 @@ const peakBucket = computed(() => {
   .situation {
     grid-template-columns: 1fr;
   }
-  .metric-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

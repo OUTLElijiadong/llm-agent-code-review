@@ -22,8 +22,8 @@ async function mockReport(page: Page) {
         review_type: 'multi_agent', total_files: 1, duration_ms: 5200,
         status: 'success', create_time: '2026-09-23T12:00:00',
       },
-      stats: { score: 93, total_issues: 0, severe: 0, high: 0, medium: 0, low: 0, fixed: 0 },
-      files: [{ file_id: 783, file_name: 'SecurityConfig.java', language: 'java', issue_count: 0, severe_count: 0, score: 93 }],
+      stats: { score: 93, total_issues: 1, severe: 0, high: 1, medium: 0, low: 0, fixed: 0 },
+      files: [{ file_id: 783, file_name: 'SecurityConfig.java', language: 'java', issue_count: 1, severe_count: 0, score: 93 }],
       rules_snapshot: [], source: { type: 'full' }, summary: '鉴权与权限审查完成。',
     }
     else if (pathname === '/api/review/tasks/181/issues') data = {
@@ -35,6 +35,7 @@ async function mockReport(page: Page) {
         cvss_score: 9.1, cvss_vector: 'AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
         cvss_version: '3.1', cvss_source: 'vector',
       }],
+      total: 1,
     }
     await route.fulfill({ json: { code: 0, message: 'ok', data } })
   })

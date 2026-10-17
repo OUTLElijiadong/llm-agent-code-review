@@ -178,6 +178,28 @@ def test_fact_gate_ignores_fenced_pseudo_h2_when_replacing_model_conclusion() ->
     assert "伪造的示例章节" not in gated
 
 
+def test_fact_gate_localizes_statuses_and_does_not_duplicate_terminal_punctuation() -> None:
+    gated = sandbox_service._fact_gate_report(
+        "## 总体结论\n旧结论。\n## 执行摘要\n仅用于保留章节。\n",
+        {
+            "passed": True,
+            "summary": "确定性黑盒测试通过。",
+            "evidence": {
+                "deterministic_test_execution": {"status": "passed", "requested_mode": "blackbox"},
+                "agent_test_generation": {"status": "skipped", "mode": "blackbox"},
+                "blackbox_execution": {"status": "passed"},
+            },
+        },
+    )
+
+    assert "确定性执行结论：确定性黑盒测试通过。" in gated
+    assert "确定性检查=已通过，AI 动态用例=未执行，黑盒路由=已通过" in gated
+    assert "系统验证门禁：部分通过" in gated
+    assert "。." not in gated
+    assert "passed" not in gated
+    assert "skipped" not in gated
+
+
 @pytest.mark.parametrize(
     "placeholder",
     [

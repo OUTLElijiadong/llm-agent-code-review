@@ -42,8 +42,13 @@ for (const width of [375, 768, 1280]) {
       await mockPage(page)
       await page.goto(`${testInfo.project.use.baseURL}/dashboard`)
       await expect(page.locator('.stat-grid .stat')).toHaveCount(6)
+      const assistantTrigger = page.getByRole('button', { name: '打开小菱助手', exact: true })
       const trigger = page.getByRole('button', { name: '打开圆桌讨论', exact: true })
       for (let round = 1; round <= 3; round++) {
+        // 圆桌入口实际挂载在小菱抽屉内；抽屉关闭时入口会回到隐藏的未分配槽位。
+        await assistantTrigger.click()
+        await expect(page.locator('.chat-drawer')).toBeVisible()
+        await expect(trigger).toBeVisible()
         await trigger.click()
         await expect(page.locator('.roundtable-choice')).toHaveCount(12)
         const geometry = await page.locator('.roundtable-choices').evaluate((popup) => {
@@ -100,6 +105,10 @@ for (const width of [375, 768, 1280]) {
             dialog.dataset.testid = 'higher-layer-dialog'
             Object.assign(dialog.style, { position: 'fixed', inset: '0', zIndex: '5001', background: 'rgba(0,0,0,.2)' })
             dialog.innerHTML = '<button type="button">更高层模态操作</button>'
+            // 模拟真实高层模态自己的 Escape 策略，避免事件继续冒泡到小菱抽屉快捷键。
+            dialog.addEventListener('keydown', (event) => {
+              if (event.key === 'Escape') event.stopPropagation()
+            })
             document.body.append(dialog)
             dialog.querySelector('button')!.focus()
           })
@@ -127,8 +136,14 @@ for (const width of [375, 768, 1280]) {
         await page.locator('[data-testid="closed-overlay"]').evaluate(overlay => overlay.remove())
 
         // 外部真正点击小菱会关闭旧菜单；菜单不在后台残留。
+        const triggerHit = await trigger.evaluate((button) => {
+          const rect = button.getBoundingClientRect()
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+          return { hit: hit === button || button.contains(hit), topmost: hit?.outerHTML.slice(0, 160) }
+        })
+        expect(triggerHit, `圆桌入口被其他图层遮挡：${triggerHit.topmost}`).toMatchObject({ hit: true })
         await trigger.click()
-        await page.getByRole('button', { name: '打开小菱助手', exact: true }).click()
+        await assistantTrigger.click()
         await expect(page.locator('.roundtable-choices')).toHaveCount(0)
         await expect(page.locator('.chat-drawer')).toBeVisible()
         // 打开页头菜单时它在聊天浮窗上方，并可真正命中。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from html import escape
 from io import BytesIO
 from typing import Any
@@ -34,13 +35,59 @@ def _value(value: Any, fallback: str = "未记录") -> str:
 def _status_label(value: Any) -> str:
     labels = {
         "success": "执行完成",
+        "succeeded": "执行完成",
         "completed": "执行完成",
+        "complete": "执行完成",
+        "passed": "已通过",
         "partial": "部分完成",
         "failed": "执行失败",
+        "skipped": "未执行",
+        "unknown": "未知",
+        "not_required": "不适用",
+        "receipt_missing": "缺少有效回执",
         "cancelled": "已取消",
         "stopped": "已停止",
+        "expired": "已过期",
+        "running": "执行中",
+        "pending": "等待执行",
     }
     return labels.get(str(value or ""), str(value or "状态未知"))
+
+
+def _localize_sandbox_report_statuses(markdown: str) -> str:
+    """只翻译报告正文中的状态字段，不改写代码块或技术证据。"""
+    fields = (
+        "确定性执行结论", "确定性执行", "确定性检查", "AI 动态用例", "黑盒路由",
+        "系统验证门禁", "最终状态", "验证状态",
+    )
+    field_pattern = "|".join(re.escape(field) for field in fields)
+    status_pattern = (
+        r"succeeded|success|passed|completed|complete|partial|failed|skipped|unknown|"
+        r"not_required|receipt_missing|running|pending|stopped|expired|cancelled"
+    )
+    expression = re.compile(
+        rf"(?P<prefix>(?:{field_pattern})\s*[=:：]\s*)"
+        rf"(?P<status>{status_pattern})(?=$|[\s，,。；;])",
+        re.I,
+    )
+    lines: list[str] = []
+    fence_char: str | None = None
+    fence_length = 0
+    for line in markdown.splitlines(keepends=True):
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+        if marker:
+            token, remainder = marker.group(1), marker.group(2)
+            if fence_char is None:
+                if token[0] != "`" or "`" not in remainder:
+                    fence_char, fence_length = token[0], len(token)
+            elif token[0] == fence_char and len(token) >= fence_length and not remainder.strip():
+                fence_char, fence_length = None, 0
+            lines.append(line)
+            continue
+        if fence_char is None:
+            line = expression.sub(lambda match: f"{match.group('prefix')}{_status_label(match.group('status'))}", line)
+        lines.append(line)
+    return "".join(lines)
 
 
 def _coverage_lines(coverage: Any) -> list[str]:
@@ -161,9 +208,14 @@ def build_sandbox_report_markdown(
     project_name: str,
 ) -> str:
     """保留沙箱原始报告正文，并补齐任务、状态和覆盖元数据。"""
-    original = str(domain_data.get("report_md") or "").strip()
+    original = _localize_sandbox_report_statuses(
+        clean_report_markdown(str(domain_data.get("report_md") or "").strip())
+    )
     if not original:
-        raise ValueError("沙箱领域报告正文为空")
+        original = (
+            "原始测试报告正文缺失，无法还原逐项测试内容与结果。"
+            "以下仅展示任务状态和结构化覆盖信息，不代表已验证具体测试项。"
+        )
     coverage = domain_data.get("coverage") if isinstance(domain_data.get("coverage"), dict) else {}
     lines = [
         "# 沙箱测试报告",

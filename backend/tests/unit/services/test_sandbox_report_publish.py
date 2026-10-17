@@ -300,7 +300,7 @@ def test_deterministic_sandbox_report_discloses_terminal_status_scope_and_errors
         }
     )
 
-    assert "stopped" in report
+    assert "已停止" in report
     assert "/health" in report
     assert "登录后接口" in report
     assert "third_party/" in report
@@ -852,7 +852,7 @@ def test_browser_coverage_keeps_full_nonbrowser_scope_and_caps_browser_history()
 
 def test_missing_terminal_sandbox_coverage_is_explicitly_unknown() -> None:
     report = _sandbox_execution_disclosure({"passed": False, "execution_status": "expired"})
-    assert "expired" in report
+    assert "已过期" in report
     assert "执行器未提供可核验的逐项范围" in report
     assert "终止时尚未执行的剩余测试项" in report
 

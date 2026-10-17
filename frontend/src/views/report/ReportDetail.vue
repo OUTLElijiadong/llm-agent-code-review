@@ -258,7 +258,7 @@
           </div>
         </div>
 
-        <p v-if="report.summary" class="cover-summary">{{ summaryText }}</p>
+        <p v-if="report.summary && !domainReportHtml" class="cover-summary">{{ summaryText }}</p>
       </section>
 
       <!-- ============ 严重度 + 修复进度 + 评分历史 ============ -->
@@ -554,7 +554,7 @@
       </section>
 
       <!-- ============ AI 总结 ============ -->
-      <section v-if="report.summary" class="card ai-card no-break">
+      <section v-if="report.summary && !domainReportHtml" class="card ai-card no-break">
         <header class="card-head">
           <h3 class="font-display">
             <span class="prism-mark sm"></span>AI 智能体总结建议
@@ -1595,10 +1595,12 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
 
   h1 {
     margin: 0;
-    flex: 1;
+    flex: 1 1 180px;
+    min-width: 0;
     font-size: 22px;
     font-weight: 600;
     color: var(--gray-900);
@@ -1608,6 +1610,10 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
 .head-actions {
   display: flex;
   gap: 8px;
+  flex: 0 1 560px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ============ 报告纸 ============ */

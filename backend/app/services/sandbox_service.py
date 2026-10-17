@@ -5198,6 +5198,38 @@ def _extract_agent_test_failures(log_text: str) -> dict[str, str]:
     return details
 
 
+_REPORT_STATUS_LABELS = {
+    "passed": "已通过",
+    "success": "已通过",
+    "succeeded": "已完成",
+    "complete": "已完成",
+    "completed": "已完成",
+    "partial": "部分完成",
+    "failed": "未通过",
+    "skipped": "未执行",
+    "unknown": "未知",
+    "not_required": "不适用",
+    "receipt_missing": "缺少有效回执",
+    "running": "执行中",
+    "pending": "等待执行",
+    "stopped": "已停止",
+    "expired": "已过期",
+    "cancelled": "已取消",
+}
+
+
+def _report_status_label(value: Any) -> str:
+    raw = str(value or "unknown").strip().lower()
+    return _REPORT_STATUS_LABELS.get(raw, raw or "未知")
+
+
+def _report_sentence(value: Any, fallback: str = "未记录") -> str:
+    text = str(value or fallback).strip()
+    if not text:
+        text = fallback
+    return text if text.endswith(("。", "！", "？", ".", "!", "?")) else f"{text}。"
+
+
 def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
     """以确定性执行事实覆盖模型可能写错的总体结论。"""
     from app.services.sandbox_report_summary import _markdown_h2_sections, _matches_report_section
@@ -5217,13 +5249,18 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
     else:
         gate = "未通过"
         gate_label = "系统验证门禁"
-    facts = [f"**{gate_label}：{gate}。**", f"确定性执行结论：{str(conclusion.get('summary') or ('通过' if passed else '未通过'))}。"]
+    facts = [
+        f"**{gate_label}：{gate}。**",
+        f"确定性执行结论：{_report_sentence(conclusion.get('summary'), '通过' if passed else '未通过')}",
+    ]
     facts.append(
-        f"覆盖状态：确定性检查={coverage['deterministic_status']}，"
-        f"AI 动态用例={coverage['ai_dynamic_status']}，黑盒路由={coverage['blackbox_status']}。"
+        "覆盖状态：确定性检查="
+        f"{_report_status_label(coverage['deterministic_status'])}，"
+        f"AI 动态用例={_report_status_label(coverage['ai_dynamic_status'])}，"
+        f"黑盒路由={_report_status_label(coverage['blackbox_status'])}。"
     )
     if coverage.get("reason"):
-        facts.append(f"范围说明：{coverage['reason']}。")
+        facts.append(f"范围说明：{_report_sentence(coverage['reason'])}")
     if generated:
         facts.append(f"动态用例 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。")
     facts.append("后续分析若与本段结构化事实冲突，以本段为准。")
@@ -5485,12 +5522,13 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     )
     report = (
         "## 总体结论\n\n"
-        f"系统验证门禁：{coverage['verification_status']}。\n\n"
+        f"系统验证门禁：{_report_status_label(coverage['verification_status'])}。\n\n"
         "## 执行摘要\n\n"
         f"Worker 结论：{str(conclusion.get('summary') or ('测试通过' if passed else '测试未通过'))}。\n"
         f"动态用例：生成 {generated} 个，通过 {passed_count} 个，失败 {failed_count} 个。\n"
-        f"确定性执行：{coverage['deterministic_status']}；AI 动态用例：{coverage['ai_dynamic_status']}；"
-        f"黑盒路由：{coverage['blackbox_status']}。\n\n"
+        f"确定性执行：{_report_status_label(coverage['deterministic_status'])}；"
+        f"AI 动态用例：{_report_status_label(coverage['ai_dynamic_status'])}；"
+        f"黑盒路由：{_report_status_label(coverage['blackbox_status'])}。\n\n"
         + model_status
         + ai_review_status
         + "## 问题清单\n\n"
@@ -5501,7 +5539,10 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
 
 def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
     """Report the actual terminal state and the tested, skipped, excluded, and unknown scope."""
-    status = str(conclusion.get("execution_status") or ("succeeded" if conclusion.get("passed") else "failed"))
+    raw_status = str(
+        conclusion.get("execution_status") or ("success" if conclusion.get("passed") else "failed")
+    ).strip().lower()
+    status = _report_status_label(raw_status)
     coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
     evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
 
@@ -5523,7 +5564,7 @@ def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
     for error in (conclusion.get("error"), evidence.get("error"), evidence.get("cleanup_error")):
         if error:
             errors.append(str(error))
-    if status in {"stopped", "expired", "cancelled"} and not unscanned:
+    if raw_status in {"stopped", "expired", "cancelled"} and not unscanned:
         unscanned = ["终止时尚未执行的剩余测试项；具体清单未由执行器返回"]
 
     lines = [

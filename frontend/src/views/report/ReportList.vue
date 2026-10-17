@@ -85,7 +85,13 @@
               <span v-else>问题 {{ row.total_issues }}</span>
               <span>{{ formatDateTime(row.create_time, 'YYYY-MM-DD HH:mm') }}</span>
             </div>
-            <p v-if="reportStatusNote(row)" class="rc-status-note" :data-status="row.status">
+            <p
+              v-if="reportStatusNote(row)"
+              class="rc-status-note"
+              :data-status="row.status"
+              :title="reportStatusNote(row)"
+              :aria-label="reportStatusNote(row)"
+            >
               {{ reportStatusNote(row) }}
             </p>
           </div>
@@ -561,7 +567,18 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews'], refresh: loadData })
 .rc-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rc-name { font-size: 13.5px; font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-line2 { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--gray-500); }
-.rc-status-note { margin: 0; color: var(--color-warning-text, #8a5a00); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rc-status-note {
+  margin: 0;
+  color: var(--color-warning-text, #8a5a00);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 .rc-status-note[data-status='failed'] { color: var(--color-danger, #b42318); }
 .rc-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }

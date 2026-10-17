@@ -598,6 +598,49 @@ def test_sandbox_remote_blackbox_report_uses_real_persisted_evidence_fields():
         assert expected in markdown
 
 
+def test_sandbox_report_localizes_status_prose_but_preserves_code_evidence():
+    markdown = build_sandbox_report_markdown(
+        {
+            "report_md": (
+                "确定性执行结论：passed\n"
+                "AI 动态用例=skipped\n"
+                "```text\n"
+                "确定性执行结论: passed\n"
+                "```"
+            ),
+            "execution_status": "success",
+            "verification_status": "partial",
+            "coverage": {"verification_status": "partial"},
+        },
+        task_name="状态本地化回归",
+        project_name="合成项目",
+    )
+
+    assert "确定性执行结论：已通过" in markdown
+    assert "AI 动态用例=未执行" in markdown
+    assert "```text\n确定性执行结论: passed\n```" in markdown
+    assert "执行状态：执行完成" in markdown
+    assert "验证状态：部分完成" in markdown
+
+
+def test_sandbox_report_detail_discloses_missing_original_body_without_failing():
+    markdown = build_sandbox_report_markdown(
+        {
+            "report_md": "",
+            "execution_status": "success",
+            "verification_status": "unknown",
+            "coverage": {"verification_status": "unknown", "unscanned": ["原始报告未留存"]},
+        },
+        task_name="历史正文缺失",
+        project_name="合成项目",
+    )
+
+    assert "原始测试报告正文缺失" in markdown
+    assert "不代表已验证具体测试项" in markdown
+    assert "执行状态：执行完成" in markdown
+    assert "原始报告未留存" in markdown
+
+
 def test_sandbox_export_links_to_integrity_checked_native_artifact(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")

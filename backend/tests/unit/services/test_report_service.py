@@ -2,8 +2,12 @@
 from sqlalchemy import event
 
 from app.models.code_file import CodeFile
+from app.models.custom_agent import (
+    ReviewTaskAgentRelease,  # noqa: F401 - registers the related report tables for metadata.create_all
+)
 from app.models.project import Project
 from app.models.review_issue import ReviewIssue
+from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.services.report_service import get_report_detail, list_reports
@@ -212,6 +216,56 @@ def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, ad
     assert detail["stats"]["score_breakdown"]["score"] == 100
     assert detail["stats"]["score_breakdown"]["score_source"] == "task_explicit_empty_report"
     assert detail["stats"]["risk_level"] == "低风险"
+
+
+def test_sandbox_report_detail_localizes_legacy_statuses_without_mutating_snapshot(db, admin_user):
+    """详情页应使用与导出相同的可读状态，不直接暴露旧快照中的英文状态码。"""
+    project = _make_project(db, admin_user)
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="黑盒验证报告",
+        review_type="sandbox_test",
+        status="success",
+        total_files=1,
+        processed_files=1,
+        total_issues=0,
+        score=100,
+        coverage={
+            "coverage_status": "partial",
+            "verification_status": "partial",
+            "deterministic_status": "passed",
+            "ai_dynamic_status": "skipped",
+            "blackbox_status": "passed",
+            "reason": "动态用例未执行",
+        },
+    )
+    db.add(task)
+    db.flush()
+    original_markdown = (
+        "## 总体结论\n\n"
+        "确定性执行结论：passed\n\n"
+        "覆盖状态：确定性检查=passed，AI 动态用例=skipped，黑盒路由=passed。\n"
+    )
+    snapshot = ReviewReport(
+        task_id=task.id,
+        user_id=admin_user.id,
+        content_json={"source": "sandbox_test", "report_md": original_markdown},
+        create_time=task.create_time,
+    )
+    db.add(snapshot)
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+
+    markdown = detail["source"]["domain_report_md"]
+    assert "确定性执行结论：已通过" in markdown
+    assert "AI 动态用例=未执行" in markdown
+    assert "黑盒路由=已通过" in markdown
+    assert "passed" not in markdown
+    assert "skipped" not in markdown
+    db.refresh(snapshot)
+    assert snapshot.content_json["report_md"] == original_markdown
 
 
 def test_report_list_fetches_projects_in_one_batch_query(db, admin_user, monkeypatch):

@@ -207,6 +207,20 @@ describe('报告卡片列表', () => {
     expect(warning?.attributes('title')).toBe('模型未配置')
   })
 
+  it('长错误说明保持可访问全文，同时为列表提供限高样式', async () => {
+    const error = `扫描覆盖不完整：${'测试代理返回无效内容；'.repeat(60)}`
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, status: 'failed', error_message: error }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const note = wrapper.get('.rc-status-note')
+    expect(note.attributes('title')).toBe(`执行说明：${error}`)
+    expect(note.attributes('aria-label')).toBe(`执行说明：${error}`)
+  })
+
   it('远程目标 4xx 的局部验证标为未完成，不误报成确认测试失败', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{
