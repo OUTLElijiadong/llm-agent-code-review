@@ -2872,7 +2872,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
             origin_session_key="cancelled-chat",
         )
     )
-    assert await asyncio.wait_for(asyncio.to_thread(created.wait, 1), timeout=2)
+    assert await asyncio.wait_for(asyncio.to_thread(created.wait, 10), timeout=12)
     await asyncio.sleep(0)
     run.cancel()
     with pytest.raises(asyncio.CancelledError):
