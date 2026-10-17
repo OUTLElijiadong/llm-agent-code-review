@@ -431,6 +431,59 @@ def test_cancelled_inbox_message_cannot_be_requeued_by_late_response(db, user) -
     ) == []
 
 
+def test_discussion_result_from_cancelled_parent_is_not_auto_resumed(db, user) -> None:
+    """已停止的小菱收到迟到的圆桌回执时，只收敛账本，不再启动模型。"""
+    agent_mesh_service.heartbeat(
+        db, user, surface="user", session_key="session-a1", title="圆桌来源会话",
+    )
+    parent_run = AgentResponseRun(
+        run_id="roundtable-parent-cancelled",
+        user_id=user.id,
+        surface="user",
+        session_key="session-a1",
+        status="cancelled",
+        checkpoint_json="{}",
+    )
+    db.add(parent_run)
+    db.commit()
+
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        message=_message(
+            idempotency_key="roundtable-result-cancelled-parent",
+            sent_from="agent:orchestrator",
+            send_to="session:user:session-a1",
+            message_type="task.result",
+            subject="圆桌讨论结果",
+            payload={"discussion_result": True, "summary": "迟到的圆桌结果"},
+            context={
+                "discussion_result": True,
+                "parent_run_id": parent_run.run_id,
+                "run_id": "roundtable-session-1",
+            },
+        ),
+        trusted_source=True,
+    )
+    agent_mesh_service.pull_inbox(
+        db, user, surface="user", session_key="session-a1", limit=10,
+    )
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="父级小菱响应已停止"):
+        agent_mesh_service.prepare_message_run(
+            db, user, created["message_id"], surface="user", session_key="session-a1",
+        )
+
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert row.status == "completed"
+    assert row.next_attempt_at is None
+    assert db.query(AgentResponseRun).filter_by(
+        mesh_message_id=created["message_id"],
+    ).count() == 0
+
+
 def test_disabled_jarvis_message_is_completed_without_preparing_model_run(db, user, monkeypatch) -> None:
     for key in ("session-admin-a", "session-admin-b"):
         agent_mesh_service.heartbeat(db, user, surface="admin", session_key=key, title=key)

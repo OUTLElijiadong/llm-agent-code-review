@@ -417,7 +417,7 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
                 next_action=f"请在 GET /api/reports/{task.id} 查看来源并恢复原始报告快照",
             )
         domain_data = content
-        domain_markdown = content["report_md"]
+        domain_markdown = clean_report_markdown(content["report_md"])
     elif task.review_type == "sandbox_test":
         snapshot = db.query(ReviewReport).filter(
             ReviewReport.task_id == task.id, ReviewReport.user_id == task.user_id,

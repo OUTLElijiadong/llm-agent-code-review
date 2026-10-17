@@ -823,10 +823,29 @@ class DiscussionBus:
             return True
         if (
             session.status == "active"
-            and session.progress.get("phase") in {"summarizing", "extracting", "reporting"}
+            and session.progress.get("phase") == "summarizing"
         ):
-            # 这一阶段的报告使用固定证据快照。迟到消息先入账，报告成功
-            # 后再由主持人用完整账本回答；不假称已并入当前报告。
+            # 主持汇总尚未封存时，小菱可以接管并将原文标为未核验补充。
+            if "finalizing_input_start_seq" not in session.progress:
+                session.progress = {
+                    **session.progress,
+                    "finalizing_input_start_seq": session.last_turn_seq,
+                }
+                if self._persist:
+                    self._update_session(session)
+            self.publish_turn(session_id, DiscussionTurn(
+                turn_id=-1, agent_code="user", agent_name="你",
+                role="user", content=cleaned,
+            ))
+            callback = self._control_callbacks.get(session_id)
+            if callback:
+                callback("user_input", {"content": cleaned, "turn_id": -1})
+            return True
+        if (
+            session.status == "active"
+            and session.progress.get("phase") in {"extracting", "reporting"}
+        ):
+            # 报告输入边界已经封存；保存为报告完成后的追问，不回写当前报告。
             if "finalizing_input_start_seq" not in session.progress:
                 session.progress = {
                     **session.progress,

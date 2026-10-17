@@ -1986,6 +1986,38 @@ def prepare_message_run(
     terminal_snapshot = None
     terminal_match = re.fullmatch(r"team-(\d+)-terminal-(\d+)-result", row.message_id)
     row_context = _load(row.context_json, {})
+    discussion_result = (
+        row.sent_from == "agent:orchestrator"
+        and row.message_type in {"task.result", "task.error"}
+        and isinstance(row_context, dict)
+        and row_context.get("discussion_result") is True
+    )
+    if discussion_result:
+        parent_run_id = str(row_context.get("parent_run_id") or "").strip()
+        parent_run = None
+        if parent_run_id:
+            parent_run = (
+                db.query(AgentResponseRun)
+                .filter(
+                    AgentResponseRun.user_id == int(user.id),
+                    AgentResponseRun.run_id == parent_run_id,
+                )
+                .populate_existing()
+                .one_or_none()
+            )
+        if parent_run is not None and parent_run.status == "cancelled":
+            ack_message(
+                db,
+                user,
+                message_id,
+                surface=surface,
+                session_key=session_key,
+                acknowledgement=AgentMeshAckIn(
+                    status="completed",
+                    summary="父级小菱响应已停止；圆桌结果仅留存记录，不自动启动模型。",
+                ),
+            )
+            raise AgentMeshStateError("父级小菱响应已停止，圆桌结果仅留存记录且未触发模型")
     terminal_candidate = row.sent_from == "system:agent_team" and (
         terminal_match is not None
         or isinstance(row_context, dict) and row_context.get("team_terminal") is True

@@ -132,7 +132,7 @@ def test_finalizing_session_saves_user_input_for_followup(stage: str) -> None:
     bus.publish_control("disc_finalizing", "progress", {"phase": stage})
 
     assert bus.accept_user_input("disc_finalizing", "收尾阶段迟到的问题") is True
-    assert accepted == []
+    assert accepted == (["收尾阶段迟到的问题"] if stage == "summarizing" else [])
     assert [turn.content for turn in session.turns] == ["收尾阶段迟到的问题"]
     assert session.progress["finalizing_input_start_seq"] == 0
     session.report_task_id = 42

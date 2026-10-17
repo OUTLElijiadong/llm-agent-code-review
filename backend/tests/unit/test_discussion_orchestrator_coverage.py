@@ -10,6 +10,7 @@ import json
 import re
 import threading
 from datetime import datetime, timezone
+from threading import Event
 from typing import Any, Optional
 
 import pytest
@@ -224,6 +225,7 @@ class RecordingControlBus:
             None: 创建空记录列表。
         """
         self.controls: list[tuple[str, str, dict[str, Any]]] = []
+        self.turns: list[tuple[str, Any]] = []
         self.stop_requests: list[str] = []
 
     def publish_control(self, session_id: str, action: str, payload: dict[str, Any]) -> None:
@@ -238,6 +240,10 @@ class RecordingControlBus:
             None: 控制消息仅保存在内存中。
         """
         self.controls.append((session_id, action, payload))
+
+    def publish_turn(self, session_id: str, turn: Any) -> None:
+        """记录主持人通过控制总线发送的即时回应。"""
+        self.turns.append((session_id, turn))
 
     def request_stop(self, session_id: str) -> None:
         """记录终止会话请求。
@@ -1105,9 +1111,11 @@ async def test_handle_control_routes_user_pause_resume_and_stop() -> None:
 
     orchestrator._handle_control("user_input", {"content": "优先检查权限", "turn_id": 7})
     assert orchestrator._user_inputs == ["优先检查权限"]
-    assert len(orchestrator._all_turns) == 1
+    assert len(orchestrator._all_turns) == 2
     assert orchestrator._all_turns[0].role == "user"
     assert orchestrator._all_turns[0].content == "优先检查权限"
+    assert orchestrator._all_turns[1].agent_name == "小菱（主持人）"
+    assert "小菱已收到" in orchestrator._all_turns[1].content
     assert initial_event.is_set()
     assert orchestrator._env.messages[0].role == "user"
     assert orchestrator._env.messages[0].metadata["turn_id"] == 7
@@ -1326,6 +1334,38 @@ def test_extract_issues_propagates_llm_failure() -> None:
             2,
             3,
         )
+
+
+def test_extract_issues_does_not_retry_after_task_is_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已发出的抽取请求返回截断后，若任务已停止则不能再发重试请求。"""
+    checks = 0
+    requests = 0
+
+    def ensure_running(_task_id: int) -> None:
+        nonlocal checks
+        checks += 1
+        if checks > 2:
+            raise RuntimeError("review task is cancelled")
+
+    def truncated_call(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal requests
+        requests += 1
+        raise DeepSeekOutputTruncatedError(
+            "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+        )
+
+    monkeypatch.setattr(module, "_ensure_running", ensure_running)
+    monkeypatch.setattr(module, "_call_raw_for_task", truncated_call)
+
+    with pytest.raises(RuntimeError, match="review task is cancelled"):
+        module._extract_issues(
+            [_turn(1)], "x = 1", "python", "cancelled.py", RecordingAgent(),
+            object(), 1, 2, 3, task_guard=lambda: ensure_running(1),
+        )
+
+    assert requests == 1
 
 
 def test_extract_issues_recovers_from_default_4096_output_limit(
@@ -1932,6 +1972,7 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
         _user_id: int,
         _file_id: int,
         progress_callback: Any = None,
+        task_guard: Any = None,
     ) -> list[Issue]:
         """返回两条不同严重度的结构化问题。
 
@@ -2101,6 +2142,48 @@ def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
     assert saved.coverage["summary_coverage"]["source_window_ids"] == ["C0001", "C0002"]
     assert saved.coverage["summary_coverage"]["history_projection"]["status"] == "success"
     assert saved.coverage["summary_coverage"]["history_projection"]["model_calls"] == 3
+
+
+def test_finalize_review_skips_model_extraction_after_moderator_takeover(
+    db: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """用户插话后只保留小菱总结，不再另发问题抽取模型请求。"""
+    task = ReviewTask(
+        user_id=4, project_id=5, task_name="主持接管后的部分报告",
+        review_type="discuss", status="running", total_files=1, processed_files=0,
+    )
+    _seed_execution_actor(db, task.user_id, task.project_id)
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+
+    def unexpected_extraction(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise AssertionError("主持接管后不应再发结构化抽取模型请求")
+
+    monkeypatch.setattr(module, "_extract_issues", unexpected_extraction)
+    monkeypatch.setattr(module, "_normalize_discussion_issues", lambda *_args, **_kwargs: [])
+
+    module._finalize_review(
+        task_id=task.id, user_id=4, file_id=6, file_name="takeover.py",
+        all_turns=[_turn(1, content="专家已完成的发言")],
+        code="x = 1", language="python", deferred_logs=[],
+        agent=RecordingAgent(), stopped=False, consensus="小菱已归纳已完成内容",
+        coverage={
+            "expected_turns": 3, "attempted_turns": 1, "successful_turns": 1,
+            "failed_turns": 0, "valid_speeches": 1, "summary_status": "success",
+            "moderator_takeover": True, "pending_user_inputs": 1,
+            "errors": ["汇总期间收到新的用户补充；未再次调用模型"],
+        },
+    )
+
+    saved = db.get(ReviewTask, task.id)
+    assert saved.status == "failed"
+    assert saved.coverage["stage"] == "partial"
+    assert saved.coverage["extraction_status"] == "skipped_moderator_takeover"
+    assert saved.coverage["pending_user_inputs"] == 1
+    assert saved.coverage["score_available"] is False
+    assert saved.processed_files == 0
+    assert "小菱已归纳已完成内容" == saved.summary
 
 
 def test_finalize_review_persists_failed_host_compression_as_partial(
@@ -2466,7 +2549,7 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (
+        lambda _user_id, _profiles, _host_surface="user": (
             create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
         ),
     )
@@ -2540,10 +2623,10 @@ async def test_start_discussion_runs_full_isolated_lifecycle(
 
 
 @pytest.mark.asyncio
-async def test_late_user_input_after_last_speaker_gets_visible_agent_reply(
+async def test_late_user_input_after_last_speaker_hands_control_to_xiaoling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """末位 Agent 生成中到达的消息不能在轮末清空；应触发可见补答。"""
+    """插话后停止新增专家模型调用，由小菱接管并把用户消息交给主持总结。"""
     bus = DiscussionBus()
     session = bus.create_session(
         "roundtable-late-input", task_id=0, file_name="late.py",
@@ -2588,21 +2671,21 @@ async def test_late_user_input_after_last_speaker_gets_visible_agent_reply(
     )
 
     assert session.status == "concluded"
-    assert seen_inputs == [[], ["最后一位专家请回答权限边界"]]
+    assert seen_inputs == [[]]
     assert any(turn.role == "user" and "权限边界" in turn.content for turn in session.turns)
-    assert any(turn.agent_code == "general" and turn.content == "已回答权限边界"
+    assert any(turn.agent_code == "orchestrator" and "小菱已收到" in turn.content
                for turn in session.turns)
-    assert finalized["coverage"]["expected_turns"] == 2
-    assert finalized["coverage"]["attempted_turns"] == 2
+    assert finalized["coverage"]["expected_turns"] == 1
+    assert finalized["coverage"]["attempted_turns"] == 1
     assert any(turn.role == "user" and "权限边界" in turn.content
                for turn in finalized["all_turns"])
 
 
 @pytest.mark.asyncio
-async def test_continuous_late_inputs_get_explicit_partial_status(
+async def test_user_input_during_expert_call_prevents_rescue_model_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """两次补答中仍不断发言时，最后一条必须有明确可见状态且报告不算完整。"""
+    """插话后不再启动专家补答，避免无视用户接管请求继续消耗模型调用。"""
     bus = DiscussionBus()
     session = bus.create_session(
         "roundtable-late-burst", task_id=0, file_name="burst.py",
@@ -2630,8 +2713,8 @@ async def test_continuous_late_inputs_get_explicit_partial_status(
     monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
     monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
     monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
-        "status": "failed" if finalized else "running", "error": "部分结果",
-        "coverage": {"stage": "partial"} if finalized else {},
+        "status": "success" if finalized else "running", "error": "",
+        "coverage": {"stage": "success"} if finalized else {},
     })
     monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
@@ -2647,13 +2730,79 @@ async def test_continuous_late_inputs_get_explicit_partial_status(
         user_id=42, project_id=12, file_id=34, max_rounds=1,
     )
 
-    assert len(seen_inputs) == 3
-    assert seen_inputs[-1] == ["连续补充 2"]
-    assert any(turn.agent_code == "orchestrator" and "1 条专家尚未处理" in turn.content
+    assert len(seen_inputs) == 1
+    assert any(turn.agent_code == "orchestrator" and "小菱已收到" in turn.content
                for turn in session.turns)
+    assert finalized["coverage"].get("pending_user_inputs", 0) == 0
+    assert not finalized["coverage"].get("errors")
+    assert session.progress["phase"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_user_input_during_host_summary_is_preserved_without_another_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """汇总已启动时收到的补充必须进报告，并明确未触发额外模型调用。"""
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-summary-input", task_id=0, file_name="summary.py",
+        owner_user_id=42, max_rounds=1,
+    )
+    orchestrator = _make_orchestrator(bus)
+    agent = RecordingAgent()
+    finalized: dict[str, Any] = {}
+    summary_started = Event()
+    summary_release = Event()
+
+    async def speaker(**_kwargs: Any) -> tuple[module.SpeakerDecision, dict[str, Any], bool]:
+        return module.SpeakerDecision("speak", "propose", None, "已检查原始问题"), {}, True
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    def summarize(*_args: Any) -> tuple[str, dict[str, Any]]:
+        summary_started.set()
+        assert summary_release.wait(timeout=2)
+        return "原审查结论", {"model_name": "host"}
+
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (
+        agent, {"code_reviewer": agent},
+    ))
+    monkeypatch.setattr(module, "build_discussion_environment", lambda **_kwargs: RecordingEnvironment())
+    monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
+    monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "success" if finalized else "running", "error": "",
+        "coverage": {"stage": "complete"} if finalized else {},
+    })
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
+    monkeypatch.setattr(orchestrator, "_summarize", summarize)
+    monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
+    EventBusProvider.current = RecordingEventBus()
+
+    discussion_task = asyncio.create_task(orchestrator.start_discussion(
+        session_id="roundtable-summary-input", profiles=(GENERAL_AGENT,),
+        code="x = 1", language="python", file_name="summary.py",
+        user_id=42, project_id=12, file_id=34, max_rounds=1,
+    ))
+    assert await asyncio.to_thread(summary_started.wait, 2)
+    try:
+        assert bus.accept_user_input(
+            "roundtable-summary-input", "补充关注停止后是否还会继续调用模型",
+        )
+    finally:
+        summary_release.set()
+    await discussion_task
+
+    assert finalized["consensus"].startswith("原审查结论")
+    assert "汇总期间收到的用户补充" in finalized["consensus"]
+    assert "停止后是否还会继续调用模型" in finalized["consensus"]
+    assert "未经过额外专家核验" in finalized["consensus"]
     assert finalized["coverage"]["pending_user_inputs"] == 1
-    assert finalized["coverage"]["errors"]
-    assert session.progress["phase"] == "partial"
+    assert any("停止后是否还会继续调用模型" in turn.content
+               for turn in finalized["all_turns"] if turn.role == "user")
+    assert len([turn for turn in session.turns if turn.role == "user"]) == 1
 
 
 @pytest.mark.asyncio
@@ -2693,7 +2842,9 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (RecordingAgent(), {"code_reviewer": RecordingAgent()}),
+        lambda _user_id, _profiles, _host_surface="user": (
+            RecordingAgent(), {"code_reviewer": RecordingAgent()},
+        ),
     )
     monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
     monkeypatch.setattr(module, "_create_review_task", create_task)
@@ -2814,7 +2965,7 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
 
     monkeypatch.setattr(
         module, "_build_discussion_agents",
-        lambda _user_id, _profiles: (
+        lambda _user_id, _profiles, _host_surface="user": (
             create_agent(), {"code_reviewer": create_agent(), "security_sentinel": create_agent()},
         ),
     )

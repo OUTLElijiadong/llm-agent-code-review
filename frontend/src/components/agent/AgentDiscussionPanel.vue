@@ -891,9 +891,9 @@ function togglePause() {
 async function onStop() {
   if (!canControl.value) return
   try {
-    await ElMessageBox.confirm('确定终止本次讨论吗?主持人会基于已有发言给出小结。', '终止讨论', {
+    await ElMessageBox.confirm('确定终止本次讨论吗？页面会立即进入已取消状态，之后不会启动新的模型调用；已经发送到模型服务的请求可能无法撤回，会在服务端自然结束。已完成内容会保留为记录。', '终止讨论', {
       confirmButtonText: '终止',
-      cancelButtonText: '取消',
+      cancelButtonText: '继续讨论',
       type: 'warning',
     })
   } catch { return }

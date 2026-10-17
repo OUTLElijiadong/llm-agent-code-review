@@ -22,6 +22,8 @@ class AgentMeshContextIn(_StrictModel):
     project_id: Optional[int] = Field(default=None, gt=0)
     file_id: Optional[int] = Field(default=None, gt=0)
     run_id: str = Field(default="", max_length=80)
+    discussion_result: bool = False
+    parent_run_id: str = Field(default="", max_length=80)
     # 监督式调度闭环（T4）的可选监督元数据。
     # 仅作为信封透传字段；范围/依赖关系校验由 agent_mesh_service.send_message 负责，
     # 这里不引入新约束，避免破坏已有信封兼容性。

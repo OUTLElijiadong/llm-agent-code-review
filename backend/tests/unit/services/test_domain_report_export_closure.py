@@ -437,6 +437,28 @@ def test_security_and_fullchain_report_preview_uses_the_saved_report_body(export
     assert "协作黑板统计" in response.text
 
 
+@pytest.mark.parametrize("source", ["security_scan", "fullchain_audit"])
+def test_security_json_export_cleans_domain_markdown(export_context, source):
+    client, db, owner, _other, project, _current = export_context
+    task = _security_report_fixture(db, owner, project, source)
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.content_json = {
+        **snapshot.content_json,
+        "report_md": "## **审计结论**\n\n* **修复建议**：补充权限校验。\n",
+    }
+    db.commit()
+
+    response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "审计结论" in payload["domain_markdown"]
+    assert "修复建议" in payload["domain_markdown"]
+    assert "**" not in payload["domain_markdown"]
+    assert "* **" not in payload["domain_markdown"]
+    assert "**" not in json.dumps(payload["domain_data"], ensure_ascii=False)
+
+
 def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknown_scope(export_context):
     client, db, _owner, _other, project, _current = export_context
     task = _domain_fixture(db, _owner, project, "sandbox_test")
