@@ -33,6 +33,7 @@ from typing import Any, Iterable
 import httpx
 import jwt
 from loguru import logger
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from app.agents.event_bus import emit_event
@@ -548,6 +549,7 @@ def _persist_artifacts(
 ) -> list[SandboxArtifact]:
     if execution_token is not None and not _execution_lease_valid(db, environment.id, execution_token):
         raise RuntimeError("沙箱执行租约已失效")
+    environment = _lock_sandbox_environment_for_artifact_write(db, environment, execution_token)
     db.query(SandboxArtifact).filter(SandboxArtifact.environment_id == environment.id).delete(
         synchronize_session=False,
     )
@@ -761,6 +763,7 @@ def _persist_browser_artifact(
 ) -> SandboxArtifact:
     """追加浏览器证据；不得删除同一环境已有的白盒/黑盒制品。"""
     _require_execution_lease(db, environment.id, execution_token)
+    environment = _lock_sandbox_environment_for_artifact_write(db, environment, execution_token)
 
     row = SandboxArtifact(
         environment_id=environment.id,
@@ -775,6 +778,71 @@ def _persist_browser_artifact(
     db.add(row)
     db.flush()
     return row
+
+
+def _lock_sandbox_environment_for_artifact_write(
+    db: Session,
+    environment: SandboxEnvironment,
+    execution_token: str | None,
+) -> SandboxEnvironment:
+    """Acquire the environment row before any artifact locks or writes."""
+    locked_environment = (
+        db.query(SandboxEnvironment)
+        .filter(SandboxEnvironment.id == environment.id)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+    if locked_environment is None:
+        raise RuntimeError("沙箱环境已不存在，不能保存执行制品")
+    if execution_token is not None and str(locked_environment.execution_token or "") != execution_token:
+        raise RuntimeError("沙箱执行租约已失效")
+    return locked_environment
+
+
+def _persist_terminal_report_artifact(
+    db: Session,
+    environment: SandboxEnvironment,
+    content: bytes,
+) -> SandboxArtifact:
+    """Keep every visible report artifact aligned with the canonical report-center body."""
+    filename = f"sandbox-review-report-{environment.public_id}.md"
+    digest = hashlib.sha256(content).hexdigest()
+    encoded = base64.b64encode(content).decode("ascii")
+    rows = (
+        db.query(SandboxArtifact)
+        .filter(
+            SandboxArtifact.environment_id == environment.id,
+            SandboxArtifact.artifact_type == "review_report",
+        )
+        .order_by(SandboxArtifact.id)
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+    if not rows:
+        row = SandboxArtifact(
+            environment_id=environment.id,
+            artifact_type="review_report",
+            file_name=filename,
+            mime_type="text/markdown",
+            byte_size=len(content),
+            sha256=digest,
+            storage_ref=f"database://sandbox-artifact/{environment.public_id}-review_report",
+            content_base64=encoded,
+        )
+        db.add(row)
+        db.flush()
+        return row
+    for row in rows:
+        row.file_name = filename
+        row.mime_type = "text/markdown"
+        row.byte_size = len(content)
+        row.sha256 = digest
+        row.storage_ref = f"database://sandbox-artifact/{environment.public_id}-review_report"
+        row.content_base64 = encoded
+    db.flush()
+    return rows[0]
 
 
 def _run_auto_smoke_test(db: Session, environment: SandboxEnvironment) -> dict[str, Any]:
@@ -5527,25 +5595,17 @@ def _persist_deterministic_test_review_fallback(
     conclusion["ai_review_failure_reason"] = failure_reason
     conclusion["ai_review_status"] = "incomplete"
     report_md = _build_deterministic_test_report(conclusion)
-    artifact_id: int | None = None
-    try:
-        artifact = _persist_browser_artifact(
-            db,
-            environment,
-            artifact_type="review_report",
-            file_name=f"sandbox-review-report-{environment.public_id}.md",
-            mime_type="text/markdown",
-            content=report_md.encode("utf-8", errors="replace"),
-        )
-        artifact_id = int(artifact.id)
-    except Exception:  # noqa: BLE001 - the report-center write is still attempted
-        logger.exception("sandbox deterministic report artifact failed public_id={}", environment.public_id)
-        db.rollback()
-    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        conclusion,
+        report_md,
+        _sync_terminal_artifact=True,
+    )
     report_persisted = bool(isinstance(published, dict) and published.get("report_persisted"))
     summary: dict[str, Any] = {
         "agent_code": "test_reviewer",
-        "artifact_id": artifact_id,
+        "artifact_id": published.get("artifact_id") if isinstance(published, dict) else None,
         "roles_executed": 0,
         "roles_total": 4,
         "roles_manifest_valid": False,
@@ -5716,14 +5776,6 @@ def _run_test_review_report(
         else:
             conclusion.pop("ai_review_failure_reason", None)
             conclusion["ai_review_status"] = "complete"
-        artifact = _persist_browser_artifact(
-            db,
-            environment,
-            artifact_type="review_report",
-            file_name=f"sandbox-review-report-{environment.public_id}.md",
-            mime_type="text/markdown",
-            content=report_md.encode("utf-8", errors="replace"),
-        )
         roles_executed = sum(
             1 for role in roles.values()
             if isinstance(role, dict) and role.get("ok") is True
@@ -5739,7 +5791,6 @@ def _run_test_review_report(
         )
         summary = {
             "agent_code": "test_reviewer",
-            "artifact_id": artifact.id,
             "roles_executed": roles_executed,
             "roles_total": roles_total,
             "roles_manifest_valid": roles_manifest_valid,
@@ -5752,8 +5803,15 @@ def _run_test_review_report(
         }
         if model_review_completed:
             summary["unverified_findings"] = unverified_findings
-        published = _publish_sandbox_report(db, environment, conclusion, report_md)
+        published = _publish_sandbox_report(
+            db,
+            environment,
+            conclusion,
+            report_md,
+            _sync_terminal_artifact=True,
+        )
         if published:
+            summary["artifact_id"] = published.get("artifact_id")
             summary["report_task_id"] = published.get("report_task_id")
             summary["issues"] = published.get("issues", 0)
             summary["report_persisted"] = bool(published.get("report_persisted"))
@@ -5763,6 +5821,50 @@ def _run_test_review_report(
             summary["report_persisted"] = False
             summary["report_failure_code"] = "report_persistence_failed"
         report_saved = summary["report_persisted"]
+        if model_review_completed and not report_saved:
+            # A complete model response is not a usable report until it is stored
+            # where the account can open it. Persist a deterministic report instead
+            # and keep the environment's terminal metadata aligned with that body.
+            ai_report_failure_code = summary.get("report_failure_code", "report_persistence_failed")
+            review_failure_reason = "AI 报告未能写入报告中心；已改用确定性执行报告"
+            conclusion["ai_review_status"] = "incomplete"
+            conclusion["ai_review_failure_reason"] = review_failure_reason
+            report_md = _build_deterministic_test_report(conclusion)
+            model_review_completed = False
+            summary.update(
+                {
+                    "ai_review_complete": False,
+                    "ai_review_generated": True,
+                    "ai_review_failure_reason": review_failure_reason,
+                    "review_mode": "deterministic_fallback",
+                    "report_bytes": len(report_md.encode("utf-8")),
+                    "ai_report_failure_code": ai_report_failure_code,
+                }
+            )
+            summary.pop("unverified_findings", None)
+            fallback_published = _publish_sandbox_report(
+                db,
+                environment,
+                conclusion,
+                report_md,
+                _sync_terminal_artifact=True,
+                _authoritative_ai_review=True,
+            )
+            if isinstance(fallback_published, dict):
+                summary["artifact_id"] = fallback_published.get("artifact_id")
+                summary["report_task_id"] = fallback_published.get("report_task_id")
+                summary["issues"] = fallback_published.get("issues", 0)
+                report_saved = bool(fallback_published.get("report_persisted"))
+                summary["report_persisted"] = report_saved
+                if report_saved:
+                    summary.pop("report_failure_code", None)
+                else:
+                    summary["report_failure_code"] = fallback_published.get(
+                        "failure_code", "report_persistence_failed"
+                    )
+            else:
+                summary["report_persisted"] = False
+                summary["report_failure_code"] = "report_persistence_failed"
         _append_event(
             db,
             environment,
@@ -5840,11 +5942,233 @@ def _run_test_review_report_with_authorization_fallback(
         )
 
 
+def _sandbox_report_task_names(environment: "SandboxEnvironment") -> list[str]:
+    public_id = str(getattr(environment, "public_id", "") or "")
+    mode_labels = {
+        "whitebox": "沙箱白盒测试",
+        "blackbox": "沙箱黑盒测试",
+        "combined": "沙箱黑白盒组合测试",
+    }
+    names = [f"{label} · {public_id}" for label in mode_labels.values()]
+    names.append(
+        f"{mode_labels.get(str(getattr(environment, 'test_mode', '') or ''), '沙箱测试（模式未知）')} · {public_id}"
+    )
+    names.append(f"沙箱黑白盒测试 · {public_id}")
+    return list(dict.fromkeys(names))
+
+
+def _merge_ai_review_metadata(
+    previous: object,
+    incoming: object,
+) -> tuple[dict[str, Any], bool]:
+    """Keep persisted AI review state monotonic and prevent fallback reports from downgrading it."""
+    previous = previous if isinstance(previous, dict) else {}
+    incoming = incoming if isinstance(incoming, dict) else {}
+    previous_status = previous.get("status") if previous.get("status") in {"complete", "incomplete"} else "unknown"
+    incoming_status = incoming.get("status") if incoming.get("status") in {"complete", "incomplete"} else "unknown"
+    rank = {"unknown": 0, "incomplete": 1, "complete": 2}
+    preserve_previous_report = rank[previous_status] > rank[incoming_status]
+    status = previous_status if preserve_previous_report else incoming_status
+    failure_reason = None
+    if status == "incomplete":
+        reason_source = previous if preserve_previous_report else incoming
+        failure_reason = str(reason_source.get("failure_reason") or "").strip() or None
+    return {"status": status, "failure_reason": failure_reason}, preserve_previous_report
+
+
+def _sandbox_report_is_persisted(db: Session, environment: "SandboxEnvironment") -> bool:
+    from app.models.review_report import ReviewReport
+    from app.models.review_task import ReviewTask
+
+    task = (
+        db.query(ReviewTask)
+        .filter(
+            ReviewTask.task_name.in_(_sandbox_report_task_names(environment)),
+            ReviewTask.review_type == "sandbox_test",
+        )
+        .first()
+    )
+    return bool(task and db.query(ReviewReport.id).filter(ReviewReport.task_id == task.id).first())
+
+
+def _existing_sandbox_report_content(db: Session, environment: "SandboxEnvironment") -> dict[str, Any]:
+    from app.models.review_report import ReviewReport
+    from app.models.review_task import ReviewTask
+
+    task = (
+        db.query(ReviewTask)
+        .filter(
+            ReviewTask.task_name.in_(_sandbox_report_task_names(environment)),
+            ReviewTask.review_type == "sandbox_test",
+        )
+        .first()
+    )
+    if task is None:
+        return {}
+    report = (
+        db.query(ReviewReport)
+        .filter(ReviewReport.task_id == task.id)
+        .first()
+    )
+    content = report.content_json if report and isinstance(report.content_json, dict) else {}
+    return dict(content)
+
+
+def _merge_report_facts(
+    previous: object,
+    current: object,
+    *,
+    list_keys: set[str],
+    preserve_previous: bool = False,
+) -> dict[str, Any]:
+    old = previous if isinstance(previous, dict) else {}
+    new = current if isinstance(current, dict) else {}
+    merged = {**new, **old} if preserve_previous else {**old, **new}
+    for key in list_keys:
+        old_items = old.get(key) if isinstance(old.get(key), list) else []
+        new_items = new.get(key) if isinstance(new.get(key), list) else []
+        if old_items or new_items:
+            unique_items: list[Any] = []
+            for item in [*old_items, *new_items]:
+                if item not in unique_items:
+                    unique_items.append(item)
+            if key == "browser_blackbox_runs":
+                unique_items = unique_items[-20:]
+            merged[key] = unique_items
+    return merged
+
+
+def _append_bounded_browser_coverage(tested: object, request_id: str) -> list[Any]:
+    values = tested if isinstance(tested, list) else []
+    unique_values: list[Any] = []
+    for item in values:
+        if item not in unique_values:
+            unique_values.append(item)
+    prefix = "授权目标浏览器黑盒探测 ("
+    browser_runs = [
+        item for item in unique_values
+        if isinstance(item, str) and item.startswith(prefix)
+    ]
+    other_coverage = [
+        item for item in unique_values
+        if not (isinstance(item, str) and item.startswith(prefix))
+    ]
+    return [*other_coverage, *browser_runs[-19:], f"{prefix}{request_id})"]
+
+
+def _terminal_report_supplement(conclusion: dict[str, Any]) -> str:
+    status = str(conclusion.get("execution_status") or "unknown")
+    status_labels = {
+        "succeeded": "已通过",
+        "success": "已通过",
+        "failed": "未通过",
+        "blocked": "受阻",
+        "stopped": "已停止",
+        "cancelled": "已取消",
+        "expired": "已过期",
+    }
+    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    browser_runs = evidence.get("browser_blackbox_runs")
+    browser_run = browser_runs[-1] if isinstance(browser_runs, list) and browser_runs else {}
+    has_browser_result = isinstance(browser_run, dict) and bool(browser_run)
+    verification = _sandbox_verification_coverage(conclusion)
+    heading = "## 后续浏览器验证结果" if has_browser_result else "## 后续执行状态更新"
+    lines = [
+        heading,
+        f"执行状态：{status_labels.get(status, status)}。",
+        f"验证完整性：{verification['verification_status']}。",
+    ]
+    if has_browser_result:
+        route = str(browser_run.get("route") or "未提供")
+        browser_status = str(browser_run.get("status") or "unknown")
+        browser_label = {"passed": "通过", "failed": "未通过", "partial": "部分完成"}.get(
+            browser_status, browser_status
+        )
+        status_code = browser_run.get("status_code")
+        response = f"，HTTP {status_code}" if type(status_code) is int else ""
+        lines.append(f"浏览器探测：{route}，{browser_label}{response}。")
+    for label, key in (
+        ("已验证范围", "tested"),
+        ("未覆盖范围", "unscanned"),
+        ("跳过项目", "skipped"),
+        ("排除项目", "excluded"),
+    ):
+        values = coverage.get(key)
+        if isinstance(values, list) and values:
+            lines.append(f"{label}：{'、'.join(str(value) for value in values)}。")
+    error = str(conclusion.get("error") or evidence.get("error") or "").strip()
+    if error:
+        lines.append(f"失败说明：{error[:500]}")
+    return "\n".join(lines)
+
+
+def _merge_terminal_report_markdown(existing: object, fallback: str, conclusion: dict[str, Any]) -> str:
+    if not isinstance(existing, str) or not existing.strip():
+        return fallback
+    report = existing.strip()
+    marker = re.search(r"\n\n## 后续验证更新（Prism 系统）\n", report)
+    if marker:
+        report = report[:marker.start()].rstrip()
+    supplement = _terminal_report_supplement(conclusion).split("\n", 1)
+    heading = "## 后续验证更新（Prism 系统）"
+    body = supplement[1] if len(supplement) > 1 else ""
+    return f"{report}\n\n{heading}\n{body}"
+
+
+def _merge_terminal_report_conclusion(
+    existing_content: dict[str, Any],
+    conclusion: object,
+    *,
+    status: str,
+    environment_error: str | None,
+) -> dict[str, Any]:
+    result = dict(conclusion) if isinstance(conclusion, dict) else {}
+    evidence = _merge_report_facts(
+        existing_content.get("evidence"),
+        result.get("evidence"),
+        list_keys={"browser_blackbox_runs"},
+    )
+    coverage = _merge_report_facts(
+        existing_content.get("coverage"),
+        result.get("coverage"),
+        list_keys={"tested", "unscanned", "unscanned_paths", "unscanned_tests", "errors", "skipped", "excluded"},
+    )
+    previous_ai_review = existing_content.get("ai_review")
+    if (
+        "ai_review_status" not in result
+        and isinstance(previous_ai_review, dict)
+        and previous_ai_review.get("status") in {"complete", "incomplete"}
+    ):
+        result["ai_review_status"] = previous_ai_review["status"]
+        if previous_ai_review.get("failure_reason"):
+            result["ai_review_failure_reason"] = previous_ai_review["failure_reason"]
+    result["execution_status"] = status
+    result["passed"] = bool(result.get("passed")) and status in {"succeeded", "success"}
+    result["evidence"] = evidence
+    result["coverage"] = coverage
+    if environment_error:
+        result.setdefault("error", environment_error)
+
+    coverage.setdefault("coverage_status", "unknown" if not coverage else "partial")
+    if status in {"stopped", "expired", "cancelled", "failed", "blocked"}:
+        if not any(coverage.get(key) for key in ("unscanned", "unscanned_paths", "unscanned_tests")):
+            coverage["unscanned"] = ["终态前尚未执行的测试项；执行器未提供逐项清单"]
+    if status in {"failed", "blocked"} and environment_error:
+        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
+        coverage["errors"] = list(dict.fromkeys([*errors, environment_error]))
+    return result
+
+
 def _publish_sandbox_report(
     db: Session,
     environment: "SandboxEnvironment",
     conclusion: dict[str, Any],
     report_md: str,
+    *,
+    _attempt: int = 1,
+    _sync_terminal_artifact: bool = False,
+    _authoritative_ai_review: bool = False,
 ) -> dict[str, Any]:
     """把沙箱多 Agent 审查报告正式入库"审查报告"中心(ReviewTask+ReviewReport)。
 
@@ -5857,6 +6181,23 @@ def _publish_sandbox_report(
 
         from app.models.review_report import ReviewReport
         from app.models.review_task import ReviewTask
+
+        environment_id = int(getattr(environment, "id", 0) or 0)
+        if environment_id:
+            locked_environment = (
+                db.query(SandboxEnvironment)
+                .filter(SandboxEnvironment.id == environment_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
+            if locked_environment is None:
+                raise RuntimeError("沙箱环境已不存在，不能发布测试报告")
+            environment = locked_environment
+            if _authoritative_ai_review and str(environment.status or "") in TERMINAL_STATES:
+                persisted_conclusion = _loads(environment.result_json, {})
+                if isinstance(persisted_conclusion, dict):
+                    conclusion = persisted_conclusion
 
         owner_id = int(getattr(environment, "owner_id", 0) or 0)
         project_id = int(getattr(environment, "project_id", 0) or 0)
@@ -5881,13 +6222,11 @@ def _publish_sandbox_report(
         }
         mode_label = mode_labels.get(str(getattr(environment, "test_mode", "") or ""), "沙箱测试（模式未知）")
         task_name = f"{mode_label} · {public_id}"
-        legacy_names = [f"沙箱黑白盒测试 · {public_id}"]
-        legacy_names.extend(f"{label} · {public_id}" for label in mode_labels.values())
         from app.services.sandbox_report_summary import summarize_sandbox_report
 
         report_issue_summary = summarize_sandbox_report(report_md)
         ai_review_status = str(conclusion.get("ai_review_status") or "unknown")
-        ai_review_metadata = {
+        incoming_ai_review_metadata = {
             "status": ai_review_status if ai_review_status in {"complete", "incomplete"} else "unknown",
             "failure_reason": str(conclusion.get("ai_review_failure_reason") or "") or None,
         }
@@ -5910,12 +6249,16 @@ def _publish_sandbox_report(
         # 旧列不可为空；未知与报告来源另存结构化摘要，详情不把该占位零当真实结论。
         issue_count = report_issue_summary["total"] or 0
         severity_counts = report_issue_summary["severity_counts"]
+        # The environment row is locked before the task, report row, or report
+        # artifacts; every publication path follows this same lock order.
         task = (
             db.query(ReviewTask)
             .filter(
-                ReviewTask.task_name.in_(legacy_names + [task_name]),
+                ReviewTask.task_name.in_(_sandbox_report_task_names(environment)),
                 ReviewTask.review_type == "sandbox_test",
             )
+            .populate_existing()
+            .with_for_update()
             .first()
         )
         now = datetime.now(_tz.utc).replace(tzinfo=None)
@@ -5980,7 +6323,61 @@ def _publish_sandbox_report(
             for field in ATTRIBUTION_FIELDS:
                 setattr(task, field, origin.get(field))
         db.flush()
-        report_row = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
+        report_row = (
+            db.query(ReviewReport)
+            .filter(ReviewReport.task_id == task.id)
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+        existing_content = (
+            report_row.content_json if report_row is not None and isinstance(report_row.content_json, dict) else {}
+        )
+        if _authoritative_ai_review:
+            # Terminal publication has just refreshed the locked environment row;
+            # its persisted AI status is the source of truth, even if an earlier
+            # report contains a more optimistic result from a stale attempt.
+            ai_review_metadata = incoming_ai_review_metadata
+            preserve_previous_ai_report = False
+        else:
+            ai_review_metadata, preserve_previous_ai_report = _merge_ai_review_metadata(
+                existing_content.get("ai_review"),
+                incoming_ai_review_metadata,
+            )
+        conclusion["ai_review_status"] = ai_review_metadata["status"]
+        if ai_review_metadata["failure_reason"]:
+            conclusion["ai_review_failure_reason"] = ai_review_metadata["failure_reason"]
+        else:
+            conclusion.pop("ai_review_failure_reason", None)
+        if preserve_previous_ai_report:
+            previous_report_md = existing_content.get("report_md")
+            if isinstance(previous_report_md, str) and previous_report_md.strip():
+                if _sync_terminal_artifact:
+                    report_md = _merge_terminal_report_markdown(
+                        previous_report_md,
+                        _build_deterministic_test_report(conclusion),
+                        conclusion,
+                    )
+                else:
+                    report_md = previous_report_md
+        elif _authoritative_ai_review and ai_review_metadata["status"] != "complete":
+            # A terminal database snapshot that explicitly marks AI review as
+            # incomplete must not display an older successful AI report as if it
+            # belonged to this run. Publish the deterministic, clearly labeled
+            # execution report for this terminal snapshot instead.
+            report_md = _build_deterministic_test_report(conclusion)
+
+        # The locked report row may carry the canonical, more complete report. Derive
+        # every summary and exported artifact from that same final body.
+        report_issue_summary = summarize_sandbox_report(report_md)
+        issue_count = report_issue_summary["total"] or 0
+        severity_counts = report_issue_summary["severity_counts"]
+        task.total_issues = issue_count
+        task.severe_issues = severity_counts["严重"]
+        task.high_issues = severity_counts["高"]
+        task.medium_issues = severity_counts["中"]
+        task.low_issues = severity_counts["低"]
+        task.summary = report_md
         if report_row is None:
             report_row = ReviewReport(
                 task_id=task.id,
@@ -6003,6 +6400,7 @@ def _publish_sandbox_report(
             db.add(report_row)
         else:
             report_row.content_json = {
+                **existing_content,
                 "source": "sandbox_test",
                 "public_id": public_id,
                 "report_md": report_md,
@@ -6015,12 +6413,36 @@ def _publish_sandbox_report(
             }
             report_row.summary = report_md[:2000]
             report_row.score = report_score
+        artifact = None
+        if _sync_terminal_artifact:
+            artifact = _persist_terminal_report_artifact(
+                db,
+                environment,
+                report_md.encode("utf-8", errors="replace"),
+            )
         db.commit()
-        return {"report_task_id": task.id, "issues": issue_count, "report_persisted": True}
-    except Exception:  # noqa: BLE001 - 入库失败不阻断测试执行，但必须可观测
+        return {
+            "report_task_id": task.id,
+            "issues": issue_count,
+            "report_persisted": True,
+            **({"artifact_id": artifact.id} if artifact is not None else {}),
+        }
+    except Exception as exc:  # noqa: BLE001 - 入库失败不阻断测试执行，但必须可观测
         public_id = str(getattr(environment, "public_id", "unknown"))[:64]
-        logger.exception("sandbox report publication failed public_id={}", public_id)
         db.rollback()
+        if isinstance(exc, DBAPIError) and _attempt < 3:
+            # 短暂数据库断连或锁冲突时，以幂等任务名和 report_task_id 重试发布。
+            time.sleep(0.05 * _attempt)
+            return _publish_sandbox_report(
+                db,
+                environment,
+                conclusion,
+                report_md,
+                _attempt=_attempt + 1,
+                _sync_terminal_artifact=_sync_terminal_artifact,
+                _authoritative_ai_review=_authoritative_ai_review,
+            )
+        logger.exception("sandbox report publication failed public_id={}", public_id)
         return {
             "report_task_id": None,
             "issues": 0,
@@ -6036,77 +6458,140 @@ def _publish_terminal_sandbox_report(
     execution_status: str | None = None,
 ) -> dict[str, Any] | None:
     """Publish an honest, deterministic report for a terminal test environment."""
+    incoming_status = str(execution_status or environment.status or "failed")
+    incoming_error = environment.error
+    incoming_result = _loads(environment.result_json, {})
+    if not isinstance(incoming_result, dict):
+        incoming_result = {}
+    with db.no_autoflush:
+        locked_environment = (
+            db.query(SandboxEnvironment)
+            .filter(SandboxEnvironment.id == environment.id)
+            .populate_existing()
+            .with_for_update()
+            .first()
+        )
+    if locked_environment is not None:
+        environment = locked_environment
     if environment.purpose != "test":
         return None
 
-    status = str(execution_status or environment.status or "failed")
+    persisted_status = str(environment.status or "")
+    status = persisted_status if persisted_status in TERMINAL_STATES else incoming_status
     if status not in TERMINAL_STATES:
         return None
 
-    conclusion = _loads(environment.result_json, {})
-    if not isinstance(conclusion, dict):
-        conclusion = {}
-    conclusion["execution_status"] = status
-    conclusion["passed"] = bool(conclusion.get("passed")) and status in {"succeeded", "success"}
-    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
-    conclusion["evidence"] = evidence
-    if environment.error:
-        conclusion.setdefault("error", environment.error)
-
-    coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
-    coverage = dict(coverage)
-    coverage.setdefault("coverage_status", "unknown" if not coverage else "partial")
-    if status in {"stopped", "expired", "cancelled", "failed", "blocked"}:
-        if not any(coverage.get(key) for key in ("unscanned", "unscanned_paths", "unscanned_tests")):
-            coverage["unscanned"] = ["终态前尚未执行的测试项；执行器未提供逐项清单"]
-    if status in {"failed", "blocked"} and environment.error:
-        errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
-        coverage["errors"] = list(dict.fromkeys([*errors, environment.error]))
-    conclusion["coverage"] = coverage
+    existing_content = _existing_sandbox_report_content(db, environment)
+    current_result = _loads(environment.result_json, {})
+    if not isinstance(current_result, dict):
+        current_result = {}
+    # Once the database has a terminal result, its scalar facts remain authoritative
+    # even when a delayed callback carries the same status label. New callback evidence
+    # is merged below without allowing a stale snapshot to rewrite the final outcome.
+    prefer_incoming = persisted_status not in TERMINAL_STATES
+    base_result, update_result = (
+        (current_result, incoming_result) if prefer_incoming else (incoming_result, current_result)
+    )
+    conclusion = {**base_result, **update_result}
+    if not prefer_incoming:
+        # A delayed callback may also carry a stale top-level error inside
+        # result_json. Treat the persisted terminal snapshot as authoritative,
+        # including the absence of an error, so success reports cannot inherit
+        # an obsolete failure explanation.
+        if "error" in current_result:
+            conclusion["error"] = current_result["error"]
+        else:
+            conclusion.pop("error", None)
+    conclusion["evidence"] = _merge_report_facts(
+        current_result.get("evidence"),
+        incoming_result.get("evidence"),
+        list_keys={"browser_blackbox_runs"},
+        preserve_previous=not prefer_incoming,
+    )
+    conclusion["coverage"] = _merge_report_facts(
+        current_result.get("coverage"),
+        incoming_result.get("coverage"),
+        list_keys={"tested", "unscanned", "unscanned_paths", "unscanned_tests", "errors", "skipped", "excluded"},
+        preserve_previous=not prefer_incoming,
+    )
+    if not prefer_incoming:
+        current_ai_status = current_result.get("ai_review_status")
+        previous_ai_review = existing_content.get("ai_review")
+        if current_ai_status in {"complete", "incomplete"}:
+            conclusion["ai_review_status"] = current_ai_status
+            if current_result.get("ai_review_failure_reason"):
+                conclusion["ai_review_failure_reason"] = current_result["ai_review_failure_reason"]
+            else:
+                conclusion.pop("ai_review_failure_reason", None)
+        elif isinstance(previous_ai_review, dict) and previous_ai_review.get("status") in {"complete", "incomplete"}:
+            conclusion["ai_review_status"] = previous_ai_review["status"]
+            if previous_ai_review.get("failure_reason"):
+                conclusion["ai_review_failure_reason"] = previous_ai_review["failure_reason"]
+            else:
+                conclusion.pop("ai_review_failure_reason", None)
+        else:
+            conclusion.pop("ai_review_status", None)
+            conclusion.pop("ai_review_failure_reason", None)
+    environment.status = status
+    if persisted_status not in TERMINAL_STATES and incoming_error:
+        environment.error = incoming_error
+    conclusion = _merge_terminal_report_conclusion(
+        existing_content,
+        conclusion,
+        status=status,
+        environment_error=environment.error,
+    )
     environment.result_json = _json(conclusion)
     # Persist the terminal execution facts before the optional report and artifact writes.
     db.commit()
 
-    report_md = _build_deterministic_test_report(conclusion)
-    artifact_bytes = report_md.encode("utf-8", errors="replace")
-    digest = hashlib.sha256(artifact_bytes).hexdigest()
-    artifact = (
-        db.query(SandboxArtifact)
-        .filter(
-            SandboxArtifact.environment_id == environment.id,
-            SandboxArtifact.artifact_type == "review_report",
-            SandboxArtifact.sha256 == digest,
-            SandboxArtifact.byte_size == len(artifact_bytes),
+    def refresh_locked_report_context() -> tuple[SandboxEnvironment, dict[str, Any], dict[str, Any]]:
+        locked_environment = (
+            db.query(SandboxEnvironment)
+            .filter(SandboxEnvironment.id == environment.id)
+            .populate_existing()
+            .with_for_update()
+            .first()
         )
-        .first()
-    )
-    artifact_error: str | None = None
-    if artifact is None:
-        try:
-            artifact = _persist_browser_artifact(
-                db,
-                environment,
-                artifact_type="review_report",
-                file_name=f"sandbox-review-report-{environment.public_id}.md",
-                mime_type="text/markdown",
-                content=artifact_bytes,
-            )
-        except Exception as exc:  # noqa: BLE001 - report-center persistence remains the primary receipt
-            artifact_error = str(exc)[:500]
-            db.rollback()
-            logger.exception("sandbox terminal report artifact failed public_id={}", environment.public_id)
-            environment = db.get(SandboxEnvironment, environment.id) or environment
+        current_environment = locked_environment or environment
+        current_content = _existing_sandbox_report_content(db, current_environment)
+        current_status = str(current_environment.status or "")
+        if current_status not in TERMINAL_STATES:
+            current_status = status
+        current_conclusion = _merge_terminal_report_conclusion(
+            current_content,
+            _loads(current_environment.result_json, {}),
+            status=current_status,
+            environment_error=current_environment.error,
+        )
+        current_environment.result_json = _json(current_conclusion)
+        return current_environment, current_content, current_conclusion
 
-    published = _publish_sandbox_report(db, environment, conclusion, report_md)
+    # Start each transaction with a locking read. The first read serializes terminal
+    # result_json merges before their independent commit; this second read begins the
+    # report transaction and refreshes callback facts that may have arrived meanwhile.
+    environment, existing_content, conclusion = refresh_locked_report_context()
+    status = str(conclusion.get("execution_status") or status)
+
+    fallback_report_md = _build_deterministic_test_report(conclusion)
+    report_md = _merge_terminal_report_markdown(
+        existing_content.get("report_md"), fallback_report_md, conclusion
+    )
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        conclusion,
+        report_md,
+        _sync_terminal_artifact=True,
+        _authoritative_ai_review=True,
+    )
     persisted = bool(published.get("report_persisted"))
     if persisted:
         event_summary = {
             "report_task_id": published.get("report_task_id"),
             "execution_status": status,
-            "artifact_id": artifact.id if artifact is not None else None,
+            "artifact_id": published.get("artifact_id"),
         }
-        if artifact_error:
-            event_summary["artifact_failure"] = artifact_error
         _append_event(db, environment, "complete", "report", "终态测试报告已保存到报告中心", event_summary)
     else:
         failure_code = str(published.get("failure_code") or "report_persistence_failed")
@@ -6770,8 +7255,7 @@ def run_browser_blackbox(
     conclusion["browser_blackbox_runs"] = [*runs[-19:], evidence]
     coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
     coverage = dict(coverage)
-    tested = coverage.get("tested") if isinstance(coverage.get("tested"), list) else []
-    coverage["tested"] = [*tested, f"授权目标浏览器黑盒探测 ({request_id})"]
+    coverage["tested"] = _append_bounded_browser_coverage(coverage.get("tested"), request_id)
     if evidence.get("passed") is not True:
         error = str(evidence.get("error") or "浏览器黑盒探测未通过")[:500]
         errors = coverage.get("errors") if isinstance(coverage.get("errors"), list) else []
@@ -8911,7 +9395,9 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
-        if row.purpose == "test":
+        # A repeated stop carries no new execution evidence. Keep an already-published
+        # full report intact; still publish the fallback when report persistence is missing.
+        if row.purpose == "test" and not _sandbox_report_is_persisted(db, row):
             try:
                 _publish_terminal_sandbox_report(db, row, execution_status=row.status)
             except Exception as exc:  # noqa: BLE001 - preserve the already-terminal execution state

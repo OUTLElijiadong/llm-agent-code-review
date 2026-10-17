@@ -81,7 +81,10 @@
           </div>
           <div
             class="room-progress-track"
-            :class="{ indeterminate: progressTotal <= 0 && phase !== 'concluded' }"
+            :class="{
+              indeterminate: progressTotal <= 0 && phase !== 'concluded',
+              'stage-active': isStageActive,
+            }"
             role="progressbar"
             :aria-valuenow="progressTotal > 0 ? progressCompleted : undefined"
             :aria-valuemax="progressTotal > 0 ? progressTotal : undefined"
@@ -329,9 +332,11 @@ const userMessage = ref('')
 const sendingMessage = ref(false)
 let pendingMessage = ''
 const isPaused = ref(false)
+const isStopping = ref(false)
 const showScrollBtn = ref(false)
 const msgContainer = ref<HTMLElement>()
 let stream: ReturnType<typeof subscribeDiscussion> | null = null
+let stopSentForConnection = false
 let autoScroll = true
 
 const AGENT_THEME: Record<string, { icon: string; color: string }> = {
@@ -439,6 +444,9 @@ const quickPrompts = [
 ]
 
 const statusTag = computed(() => {
+  if (isStopping.value && phase.value !== 'concluded') {
+    return { type: 'warning' as const, text: '正在停止' }
+  }
   if (phase.value === 'concluded') {
     const labels: Record<Exclude<TerminalStatus, ''>, { type: 'success' | 'warning' | 'danger' | 'info'; text: string }> = {
       success: { type: 'success', text: '已完成' },
@@ -468,14 +476,14 @@ const terminalLabel = computed(() => ({
   '': '讨论已结束',
 }[terminalStatus.value]))
 
-const canControl = computed(() => status.value === 'connected' && phase.value === 'live')
+const canControl = computed(() => status.value === 'connected' && phase.value === 'live' && !isStopping.value)
 const hasCompletedReport = computed(() => !['failed', 'cancelled', 'interrupted', 'partial'].includes(terminalStatus.value)
   && (terminalStatus.value === 'success' || terminalStatus.value === 'completed'
     || serverProgress.value?.phase === 'completed'))
 const isFollowupOpen = computed(() => phase.value === 'concluded'
   && hasCompletedReport.value && followupUntil.value > nowSeconds.value)
 const canSend = computed(() => status.value === 'connected'
-  && (phase.value === 'live' || isFollowupOpen.value))
+  && !isStopping.value && (phase.value === 'live' || isFollowupOpen.value))
 const followupCountdown = computed(() => {
   const remaining = Math.max(0, Math.ceil(followupUntil.value - nowSeconds.value))
   return `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
@@ -527,6 +535,7 @@ const progressPercent = computed(() => {
   return completed ? actual : Math.min(actual, 95)
 })
 const progressLabel = computed(() => {
+  if (isStopping.value && phase.value !== 'concluded') return '正在停止圆桌讨论'
   if (phase.value === 'concluded' && serverProgress.value?.phase === 'partial') {
     return '圆桌部分完成，审查覆盖不完整'
   }
@@ -550,6 +559,8 @@ const progressLabel = computed(() => {
   if (currentSpeaker.value) return '发言进度'
   return progressTotal.value > 0 ? '发言进度' : '准备圆桌讨论'
 })
+const isStageActive = computed(() => phase.value === 'live' && status.value === 'connected'
+  && !isPaused.value && !isStopping.value)
 
 const typingColor = computed(() => themeOf(currentSpeakerCode.value).color)
 const typingIcon = computed(() => themeOf(currentSpeakerCode.value).icon)
@@ -640,6 +651,7 @@ function syncLatest(baselineSeq = latestSeq()): Promise<void> {
         if (page.status === 'concluded') {
           const wasLive = phase.value === 'live'
           phase.value = 'concluded'
+          isStopping.value = false
           const finalStage = String(page.progress?.phase || '')
           terminalStatus.value = normalizeTerminalStatus(finalStage)
           reportTaskId.value = Number(page.report_task_id) || reportTaskId.value
@@ -701,6 +713,7 @@ async function loadEarlier(): Promise<void> {
 
 function connectWs() {
   lastError.value = ''
+  stopSentForConnection = false
   stream?.close()
   stream = subscribeDiscussion(
     props.sessionId,
@@ -735,7 +748,11 @@ function connectWs() {
       wsUrl: props.wsUrl,
       onStatus: (s) => {
         status.value = s
-        if (s === 'connected') lastError.value = ''
+        if (s === 'connected') {
+          lastError.value = ''
+          // WebSocket 客户端会在断线后复用同一条订阅自动重连；停止请求需按新连接重发。
+          stopSentForConnection = false
+        }
         if (s === 'connected' || s === 'disconnected') void syncLatest()
       },
       onError: (m) => { lastError.value = m },
@@ -769,6 +786,7 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       const progressTerminal = normalizeTerminalStatus(msg.payload.phase)
       if (progressTerminal) {
         phase.value = 'concluded'
+        isStopping.value = false
         terminalStatus.value = progressTerminal
         currentSpeaker.value = ''
         currentSpeakerCode.value = ''
@@ -788,11 +806,16 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       if (savedTerminal) {
         terminalStatus.value = savedTerminal
         phase.value = 'concluded'
+        isStopping.value = false
         currentSpeaker.value = ''
         currentSpeakerCode.value = ''
       } else {
         terminalStatus.value = ''
         phase.value = 'live'
+        if (isStopping.value && !stopSentForConnection) {
+          stopSentForConnection = Boolean(stream?.send('stop'))
+          if (!stopSentForConnection) lastError.value = '连接恢复后，停止请求仍未送达，请重试'
+        }
       }
       break
     }
@@ -816,13 +839,17 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       isPaused.value = false
       break
     case 'stopping':
-      terminalStatus.value = 'cancelled'
+      isStopping.value = true
       stageMessage.value = '讨论正在终止，不会生成成功小结'
       ElMessage.info('正在停止圆桌讨论')
       break
     case 'done':
-      phase.value = 'concluded'
-      terminalStatus.value = normalizeTerminalStatus(msg.payload?.status) || 'success'
+      {
+        const wasStopping = isStopping.value
+        phase.value = 'concluded'
+        isStopping.value = false
+        terminalStatus.value = normalizeTerminalStatus(msg.payload?.status) || (wasStopping ? 'cancelled' : 'success')
+      }
       followupUntil.value = Number(msg.payload?.followup_until) || followupUntil.value
       currentSpeaker.value = ''
       currentSpeakerCode.value = ''
@@ -891,13 +918,19 @@ function togglePause() {
 async function onStop() {
   if (!canControl.value) return
   try {
-    await ElMessageBox.confirm('确定终止本次讨论吗？页面会立即进入已取消状态，之后不会启动新的模型调用；已经发送到模型服务的请求可能无法撤回，会在服务端自然结束。已完成内容会保留为记录。', '终止讨论', {
+    await ElMessageBox.confirm('确定终止本次讨论吗？确认后将请求服务端停止后续阶段。已经发送到模型服务的请求可能无法撤回，会在服务端自然结束；等服务端确认后，页面才会显示最终取消状态。已完成内容会保留为记录。', '终止讨论', {
       confirmButtonText: '终止',
       cancelButtonText: '继续讨论',
       type: 'warning',
     })
   } catch { return }
-  stream?.send('stop')
+  isStopping.value = true
+  stageMessage.value = '正在请求服务端停止后续阶段'
+  stopSentForConnection = Boolean(stream?.send('stop'))
+  if (!stopSentForConnection) {
+    isStopping.value = false
+    lastError.value = '停止请求未送达，请确认连接后重试'
+  }
 }
 
 async function onClose() {
@@ -1037,8 +1070,10 @@ connectWs()
 .room-progress-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.4; }
 .room-progress-track { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, 0.2); }
 .room-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8fc8ff, #b8afff); transition: width 0.25s ease; }
+.room-progress-track.stage-active::after { content: ''; display: block; width: 30%; height: 100%; margin-top: -5px; border-radius: inherit; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent); animation: discuss-progress-sheen 1.8s ease-in-out infinite; pointer-events: none; }
 .room-progress-track.indeterminate > span { width: 36% !important; animation: discuss-progress 1.4s ease-in-out infinite alternate; }
 @keyframes discuss-progress { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
+@keyframes discuss-progress-sheen { from { transform: translateX(-120%); } to { transform: translateX(420%); } }
 
 .followup-progress {
   display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 12px;
@@ -1235,6 +1270,7 @@ connectWs()
 
 @media (prefers-reduced-motion: reduce) {
   .room-progress-track > span { transition: none; animation: none !important; }
+  .room-progress-track.stage-active::after { animation: none; display: none; }
   .followup-progress-track > span { animation: none !important; }
 }
 </style>

@@ -103,6 +103,48 @@ describe('报告卡片列表', () => {
     expect(card.find('.rc-score').attributes('title')).not.toContain('综合评分')
   })
 
+  it.each([
+    { type: 'security_scan', coverage: { coverage_status: 'partial', reason: '部分文件未能扫描' } },
+    { type: 'fullchain_audit', coverage: { verification_status: 'partial', reason: '语义分析阶段未完成' } },
+    { type: 'pentest', coverage: { coverage_status: 'partial', reason: '部分验证阶段未执行' } },
+  ])('$type 部分覆盖的成功任务显示覆盖不完整，而不是全部完成', async ({ type, coverage }) => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: '存在未覆盖范围的报告',
+        source: { type, security_report: { coverage } },
+        coverage,
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('覆盖不完整')
+    expect(card.text()).toContain(coverage.reason)
+    expect(card.text()).not.toContain('已完成')
+  })
+
+  it('执行任务成功但覆盖验证失败时，不显示为成功报告', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        task_name: '沙箱验证未通过',
+        source: { type: 'sandbox_test' },
+        coverage: { verification_status: 'failed', reason: '动态断言失败' },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('验证未通过')
+    expect(card.text()).toContain('动态断言失败')
+    expect(card.text()).not.toContain('已完成')
+  })
+
   it('AI 报告未完成或历史状态未知时，在列表标出提示', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{

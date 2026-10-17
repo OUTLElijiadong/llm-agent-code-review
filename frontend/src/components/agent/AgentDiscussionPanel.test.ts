@@ -6,9 +6,13 @@ import type { DiscussionTurn, WsMessage } from '@/utils/discussionStream'
 
 const streamMock = vi.hoisted(() => ({ subscribe: vi.fn() }))
 const discussionApi = vi.hoisted(() => ({ detail: vi.fn() }))
+const messageBox = vi.hoisted(() => ({ confirm: vi.fn() }))
+const messages = vi.hoisted(() => ({ info: vi.fn() }))
 vi.mock('@/utils/discussionStream', () => ({ subscribeDiscussion: streamMock.subscribe }))
 vi.mock('@/api/discussion', () => ({ getDiscussionSession: discussionApi.detail }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: messageBox }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import AgentDiscussionPanel from './AgentDiscussionPanel.vue'
 
@@ -66,6 +70,8 @@ function followupAnswer(questionSeq: number, seq: number): DiscussionTurn {
 
 beforeEach(() => {
   discussionApi.detail.mockReset().mockResolvedValue({ turns: [], has_earlier: false, next_before_seq: null })
+  messageBox.confirm.mockReset().mockResolvedValue(true)
+  messages.info.mockReset()
   streamMock.subscribe.mockReset()
   streamMock.subscribe.mockImplementation((_id, onMessage, opts) => {
     receive = onMessage
@@ -338,6 +344,7 @@ it('按真实服务端步骤显示圆桌进度，并区分汇总和报告阶段'
   await flushPromises()
 
   const bar = wrapper.get('[role="progressbar"]')
+  expect(wrapper.get('.room-progress-track').classes()).toContain('stage-active')
   expect(bar.attributes('aria-valuenow')).toBe('2')
   expect(bar.attributes('aria-valuemax')).toBe('12')
   expect(wrapper.get('.room-progress').text()).toContain('2 / 12')
@@ -349,6 +356,62 @@ it('按真实服务端步骤显示圆桌进度，并区分汇总和报告阶段'
   expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('11')
   expect(wrapper.get('.room-progress').text()).toContain('生成报告')
   expect(wrapper.get('.room-input').attributes('placeholder')).toContain('消息会保存')
+  wrapper.unmount()
+})
+
+it('确认停止后立即锁定圆桌操作，直到服务端确认取消才显示终态', async () => {
+  const wrapper = mountPanel()
+  connected('connected')
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
+  await flushPromises()
+  expect(messageBox.confirm).toHaveBeenCalled()
+  expect(send).toHaveBeenCalledWith('stop')
+  expect(wrapper.text()).toContain('正在停止')
+  expect(wrapper.get('button[aria-label="终止讨论"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('button[aria-label="暂停讨论"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('.header-sub').text()).not.toContain('讨论已取消')
+
+  control('done', { status: 'cancelled' })
+  await flushPromises()
+  expect(wrapper.get('.header-sub').text()).toContain('讨论已取消')
+  expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
+it('停止请求发送失败时恢复操作并明确提示，不伪装成正在停止', async () => {
+  const wrapper = mountPanel()
+  connected('connected')
+  await flushPromises()
+  send.mockReturnValueOnce(false)
+
+  await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('正在停止')
+  expect(wrapper.text()).toContain('停止请求未送达')
+  expect(wrapper.get('button[aria-label="终止讨论"]').attributes('disabled')).toBeUndefined()
+  wrapper.unmount()
+})
+
+it('停止期间 WebSocket 重连后服务端仍报告活动时，会在新连接重发停止请求', async () => {
+  const wrapper = mountPanel()
+  connected('connected')
+  await flushPromises()
+
+  await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
+  await flushPromises()
+  expect(send).toHaveBeenCalledTimes(1)
+
+  connected('disconnected')
+  connected('connected')
+  control('snapshot', { status: 'active' })
+  await flushPromises()
+
+  expect(send).toHaveBeenCalledTimes(2)
+  expect(send).toHaveBeenLastCalledWith('stop')
+  expect(wrapper.text()).toContain('正在停止')
   wrapper.unmount()
 })
 

@@ -34,10 +34,10 @@ PLAYBOOK_PATH = _ROOT / "app" / "ai" / "agent_knowledge" / "sandbox_test_review_
 SEED_PATH = _ROOT / "scripts" / "seed_agent_playbooks.py"
 
 
-def _successful_report_publication(report: str, published: list[str]) -> dict[str, bool]:
+def _successful_report_publication(report: str, published: list[str]) -> dict[str, Any]:
     """测试夹具显式模拟报告已持久化，避免把 None 误当成成功回执。"""
     published.append(report)
-    return {"report_persisted": True}
+    return {"report_persisted": True, "artifact_id": 77}
 
 
 def _complete_report_candidate(issue_section: str = "无问题。") -> str:
@@ -103,7 +103,7 @@ def test_nonretryable_model_failure_uses_deterministic_review_report(monkeypatch
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda *_args, **_kwargs: {"report_persisted": True},
+        lambda *_args, **_kwargs: {"report_persisted": True, "artifact_id": 77},
     )
     db = SimpleNamespace(commit=lambda: None)
     environment = SimpleNamespace(owner_id=1, public_id="sbx_nonretryable_review")
@@ -272,7 +272,7 @@ def test_report_completion_requires_consistent_successful_role_manifest(
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, report: _successful_report_publication(report, published),
+        lambda _db, _environment, _conclusion, report, **_kwargs: _successful_report_publication(report, published),
     )
 
     summary = sandbox_service._run_test_review_report(
@@ -288,8 +288,8 @@ def test_report_completion_requires_consistent_successful_role_manifest(
     assert summary["ai_review_complete"] is expected_complete
     assert summary["roles_manifest_valid"] is expected_complete
     assert summary["report_candidate_valid"] is True
-    assert len(persisted) == 1
-    persisted_content = persisted[0]["content"].decode("utf-8")
+    assert persisted == [], "报告附件应由报告中心事务统一写入，不得提前 flush"
+    persisted_content = published[0]
     assert len(published) == 1
     if expected_complete:
         assert summary["review_mode"] == "multi_agent"
@@ -302,6 +302,67 @@ def test_report_completion_requires_consistent_successful_role_manifest(
         assert ("多 Agent 角色清单或执行结果未通过完整性校验" in completion[4]) is expect_manifest_note
         assert persisted_content == "DETERMINISTIC FALLBACK"
         assert published[0] == "DETERMINISTIC FALLBACK"
+
+
+def test_unpersisted_complete_ai_report_is_replaced_by_persisted_deterministic_report(monkeypatch) -> None:
+    published: list[tuple[str, dict[str, Any]]] = []
+    publish_options: list[dict[str, Any]] = []
+    events: list[tuple] = []
+    roles = {
+        "whitebox": {"ok": True},
+        "blackbox": {"ok": True},
+        "verify": {"ok": True},
+        "report": {"ok": True},
+    }
+
+    class ReviewAgent:
+        _api_key = "configured"
+
+        def review(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "report_md": _complete_report_candidate(),
+                    "roles": roles,
+                    "roles_executed": 4,
+                    "roles_total": 4,
+                },
+            )
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
+    monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
+    publish_attempts = 0
+
+    def publish(_db, _environment, conclusion, report, **_kwargs):
+        nonlocal publish_attempts
+        publish_attempts += 1
+        published.append((report, dict(conclusion)))
+        publish_options.append(dict(_kwargs))
+        if publish_attempts == 1:
+            return {"report_persisted": False, "failure_code": "report_persistence_failed"}
+        return {"report_persisted": True, "report_task_id": 124, "artifact_id": 90, "issues": 0}
+
+    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", publish)
+    conclusion = {"passed": True, "summary": "执行通过", "evidence": {}}
+    summary = sandbox_service._run_test_review_report(
+        SimpleNamespace(commit=lambda: None),
+        SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_ai_report_retry", test_mode="combined"),
+        conclusion,
+    )
+
+    assert publish_attempts == 2
+    assert publish_options[1]["_authoritative_ai_review"] is True
+    assert "## 白盒结果" in published[0][0]
+    assert "多 Agent AI 审查：未完成；原因：AI 报告未能写入报告中心；已改用确定性执行报告。" in published[1][0]
+    assert published[1][1]["ai_review_status"] == "incomplete"
+    assert summary["ai_review_generated"] is True
+    assert summary["ai_review_complete"] is False
+    assert summary["review_mode"] == "deterministic_fallback"
+    assert summary["report_persisted"] is True
+    assert summary["report_task_id"] == 124
+    completion = next(event for event in events if event[2] == "complete")
+    assert "确定性测试报告已生成并写入报告中心" in completion[4]
 
 
 def test_empty_report_candidate_falls_back_with_explicit_reason(monkeypatch) -> None:
@@ -342,7 +403,7 @@ def test_empty_report_candidate_falls_back_with_explicit_reason(monkeypatch) -> 
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, report: _successful_report_publication(report, published),
+        lambda _db, _environment, _conclusion, report, **_kwargs: _successful_report_publication(report, published),
     )
 
     summary = sandbox_service._run_test_review_report(
@@ -357,7 +418,7 @@ def test_empty_report_candidate_falls_back_with_explicit_reason(monkeypatch) -> 
     assert summary["report_candidate_valid"] is False
     assert summary["ai_review_complete"] is False
     assert "AI 报告为空或缺少必需章节" in completion[4]
-    assert persisted[0]["content"] == b"DETERMINISTIC FALLBACK"
+    assert persisted == [], "确定性报告附件应由统一发布事务写入"
     assert published == ["DETERMINISTIC FALLBACK"]
 
 
@@ -391,7 +452,7 @@ def test_usage_accounting_error_preserves_deterministic_review_report(monkeypatc
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda *_args, **_kwargs: {"report_persisted": True},
+        lambda *_args, **_kwargs: {"report_persisted": True, "artifact_id": 78},
     )
     db = SimpleNamespace(commit=lambda: None)
     environment = SimpleNamespace(owner_id=1, project_id=1, public_id="sbx_usage_accounting_review")
@@ -404,8 +465,7 @@ def test_usage_accounting_error_preserves_deterministic_review_report(monkeypatc
 
     assert calls == 1
     assert result["artifact_id"] == 78
-    assert len(persisted) == 1
-    assert persisted[0]["content"] == b"DETERMINISTIC FALLBACK"
+    assert persisted == [], "报告附件必须和报告中心记录在同一事务中写入"
 
 
 @pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
@@ -430,7 +490,7 @@ def test_reporter_nonretryable_result_is_committed_for_recovery(monkeypatch, fai
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda *_args, **_kwargs: {"report_persisted": True},
+        lambda *_args, **_kwargs: {"report_persisted": True, "artifact_id": 79},
     )
     db = SimpleNamespace(commit=lambda: commits.append(True))
 
@@ -478,7 +538,7 @@ def test_reporter_setup_failure_publishes_deterministic_fallback(monkeypatch) ->
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, report: _successful_report_publication(report, published),
+        lambda _db, _environment, _conclusion, report, **_kwargs: _successful_report_publication(report, published),
     )
     commits: list[bool] = []
     db = SimpleNamespace(commit=lambda: commits.append(True))
@@ -489,7 +549,7 @@ def test_reporter_setup_failure_publishes_deterministic_fallback(monkeypatch) ->
     assert result is not None
     assert result["review_mode"] == "deterministic_fallback"
     assert result["report_persisted"] is True
-    assert persisted[0]["content"] == b"DETERMINISTIC FALLBACK"
+    assert persisted == [], "报告附件应在报告中心事务中统一创建"
     assert published == ["DETERMINISTIC FALLBACK"]
     assert conclusion["ai_model_stop_reason"]["failure_kind"] == "billing_error"
     assert any(event[3] == "multi_agent_review" and event[5].get("failure_kind") == "billing_error" for event in events)
@@ -523,11 +583,15 @@ def test_model_report_findings_are_separated_as_unverified_candidates(monkeypatc
     monkeypatch.setattr(sandbox_service, "configure_subagent", lambda *_args: ReviewAgent())
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
     monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
-    monkeypatch.setattr(sandbox_service, "_persist_browser_artifact", lambda *_args, **_kwargs: SimpleNamespace(id=91))
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda *_args, **_kwargs: pytest.fail("报告附件不得提前写入"),
+    )
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, output: _successful_report_publication(output, published),
+        lambda _db, _environment, _conclusion, output, **_kwargs: _successful_report_publication(output, published),
     )
 
     summary = sandbox_service._run_test_review_report(
@@ -859,7 +923,7 @@ def test_missing_model_key_reason_is_saved_in_report_body_and_metadata(monkeypat
         lambda _db, _environment, **kwargs: SimpleNamespace(id=93, **kwargs),
     )
 
-    def publish(_db, _environment, conclusion, report):
+    def publish(_db, _environment, conclusion, report, **_kwargs):
         published.append((report, dict(conclusion)))
         return {"report_persisted": True, "report_task_id": 123, "issues": 0}
 
@@ -945,11 +1009,15 @@ def test_incomplete_model_report_uses_deterministic_fallback(monkeypatch) -> Non
     monkeypatch.setattr(sandbox_service, "_append_event", lambda *args, **_kwargs: events.append(args))
     monkeypatch.setattr(sandbox_service, "_execution_model_guard", lambda *_args: lambda: None)
     monkeypatch.setattr(sandbox_service, "_build_deterministic_test_report", lambda _c: "DETERMINISTIC FALLBACK")
-    monkeypatch.setattr(sandbox_service, "_persist_browser_artifact", lambda *_args, **_kwargs: SimpleNamespace(id=92))
+    monkeypatch.setattr(
+        sandbox_service,
+        "_persist_browser_artifact",
+        lambda *_args, **_kwargs: pytest.fail("报告附件不得提前写入"),
+    )
     monkeypatch.setattr(
         sandbox_service,
         "_publish_sandbox_report",
-        lambda _db, _environment, _conclusion, output: _successful_report_publication(output, published),
+        lambda _db, _environment, _conclusion, output, **_kwargs: _successful_report_publication(output, published),
     )
 
     summary = sandbox_service._run_test_review_report(

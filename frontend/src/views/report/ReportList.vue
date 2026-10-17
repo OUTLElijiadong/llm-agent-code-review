@@ -68,8 +68,8 @@
               <el-tag :type="reportStatusType(row)" size="small">
                 {{ reportStatusLabel(row) }}
               </el-tag>
-              <el-tag v-if="isUnverifiedSandboxReport(row)" type="warning" size="small" effect="plain">
-                {{ sandboxCoverageLabel(row.coverage?.verification_status) }}
+              <el-tag v-if="hasIncompleteCoverage(row)" type="warning" size="small" effect="plain">
+                {{ reportCoverageLabel(row) }}
               </el-tag>
               <el-tag
                 v-if="row.source?.type === 'sandbox_test' && row.source.ai_review?.status !== 'complete'"
@@ -101,7 +101,7 @@
             </svg>
             <span :class="scoreClass(row.score)">{{ row.score }}</span>
             <small v-if="row.source?.type === 'sandbox_test'" class="rc-score-caption">
-              {{ row.coverage?.verification_status === 'complete' ? '测试评分' : '记录分数' }}
+              {{ coverageStatus(row) === 'complete' ? '测试评分' : '记录分数' }}
             </small>
           </div>
           <div v-else class="rc-score rc-score--unknown" :title="sandboxCoverageLabel(row.coverage?.verification_status)">
@@ -219,13 +219,39 @@ function scoreClass(score: number) {
   return 'score-low'
 }
 
+function coverageStatus(row: ReportListItem): string {
+  const sourceCoverage = row.source?.security_report?.coverage
+  const sourceState = sourceCoverage && typeof sourceCoverage === 'object'
+    ? String(sourceCoverage.verification_status || sourceCoverage.coverage_status || '')
+    : ''
+  return String(row.coverage?.verification_status || row.coverage?.coverage_status || sourceState
+    || (row.source?.type === 'sandbox_test' ? 'unknown' : ''))
+}
+
+function hasIncompleteCoverage(row: ReportListItem): boolean {
+  return ['partial', 'unknown', 'failed'].includes(coverageStatus(row))
+}
+
 function isUnverifiedSandboxReport(row: ReportListItem) {
-  return row.source?.type === 'sandbox_test' && row.coverage?.verification_status !== 'complete'
+  return row.source?.type === 'sandbox_test' && coverageStatus(row) !== 'complete'
+}
+
+function reportCoverageLabel(row: ReportListItem): string {
+  const state = coverageStatus(row)
+  if (row.source?.type === 'sandbox_test') return sandboxCoverageLabel(state)
+  if (state === 'partial') return '覆盖范围不完整'
+  if (state === 'failed') return '覆盖验证未通过'
+  return '覆盖范围未知'
 }
 
 function reportStatusLabel(row: ReportListItem) {
-  if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'partial') return '验证未完成'
-  if (row.source?.type === 'sandbox_test' && row.coverage?.verification_status === 'unknown') return '结果未知'
+  const coverage = coverageStatus(row)
+  if (row.source?.type === 'sandbox_test' && coverage === 'partial') return '验证未完成'
+  if (row.source?.type === 'sandbox_test' && coverage === 'unknown') return '结果未知'
+  if (row.source?.type === 'sandbox_test' && coverage === 'failed') return '验证未通过'
+  if (row.status === 'success' && coverage === 'partial') return '覆盖不完整'
+  if (row.status === 'success' && coverage === 'unknown') return '覆盖未知'
+  if (row.status === 'success' && coverage === 'failed') return '覆盖验证未通过'
   const labels: Record<string, string> = {
     success: isUnverifiedSandboxReport(row) ? '基础检查完成' : '已完成',
     failed: '执行失败',
@@ -237,9 +263,12 @@ function reportStatusLabel(row: ReportListItem) {
 }
 
 function reportStatusType(row: ReportListItem) {
-  if (row.source?.type === 'sandbox_test' && ['partial', 'unknown'].includes(row.coverage?.verification_status || '')) {
+  const coverage = coverageStatus(row)
+  if (row.status === 'success' && ['partial', 'unknown'].includes(coverage)) {
     return 'warning'
   }
+  if (row.status === 'success' && coverage === 'failed') return 'danger'
+  if (row.source?.type === 'sandbox_test' && ['partial', 'unknown'].includes(coverage)) return 'warning'
   if (row.status === 'success') return isUnverifiedSandboxReport(row) ? 'warning' : 'success'
   return row.status === 'failed' ? 'danger' : 'warning'
 }
@@ -247,7 +276,10 @@ function reportStatusType(row: ReportListItem) {
 function reportStatusNote(row: ReportListItem) {
   const error = String(row.error_message || '').trim()
   if (error) return `执行说明：${error}`
-  const coverageReason = String(row.coverage?.reason || '').trim()
+  const sourceCoverage = row.source?.security_report?.coverage
+  const sourceReason = sourceCoverage && typeof sourceCoverage === 'object'
+    ? String(sourceCoverage.reason || '') : ''
+  const coverageReason = String(row.coverage?.reason || sourceReason).trim()
   return coverageReason ? `覆盖说明：${coverageReason}` : ''
 }
 
@@ -259,7 +291,7 @@ function sandboxCoverageLabel(status?: string | null) {
 
 function sandboxScoreTitle(row: ReportListItem) {
   if (row.source?.type !== 'sandbox_test') return `代码质量评分 ${row.score}`
-  const state = row.coverage?.verification_status
+  const state = coverageStatus(row)
   return state === 'complete'
     ? `已完成验证范围内的测试评分 ${row.score}`
     : `记录分数 ${row.score}；${sandboxCoverageLabel(state)}，不代表完整测试通过`

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import os
 import socket
 import subprocess
@@ -12,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.models.agent_capability import SandboxArtifact, SandboxEnvironment
 from app.models.project import Project
@@ -21,12 +25,14 @@ from app.models.user import User
 from app.services import sandbox_service
 from app.services.sandbox_service import (
     _DEPLOY_VERIFY_RUNNER,
+    _append_bounded_browser_coverage,
     _artifact_documents,
     _build_deterministic_test_report,
     _execution_result_passed,
     _extract_agent_test_failures,
     _extract_agent_tests_result,
     _extract_blackbox_result,
+    _merge_report_facts,
     _publish_sandbox_report,
     _publish_terminal_sandbox_report,
     _reconcile_blackbox_agent_assertions,
@@ -188,6 +194,70 @@ def test_report_publish_failure_is_explicit_and_logged(db, monkeypatch) -> None:
     assert logged == [("sandbox report publication failed public_id={}", "sbx_publish_failure")]
 
 
+def test_report_publish_retries_transient_database_failure(db, monkeypatch) -> None:
+    owner = User(username="sbx_publish_retry_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="sandbox publish retry", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_publish_retry",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="whitebox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="d" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json='{"passed":true,"summary":"测试完成"}',
+    )
+    db.add(environment)
+    db.commit()
+    commit = db.commit
+    calls = 0
+
+    def commit_after_transient_error():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OperationalError("commit", {}, RuntimeError("database temporarily unavailable"))
+        commit()
+
+    monkeypatch.setattr(db, "commit", commit_after_transient_error)
+
+    report_md = "## 总体结论\n通过"
+    result = _publish_sandbox_report(
+        db,
+        environment,
+        {"passed": True, "execution_status": "succeeded"},
+        report_md,
+        _sync_terminal_artifact=True,
+    )
+
+    assert result["report_persisted"] is True
+    assert result["report_task_id"] > 0
+    assert calls == 2
+    report = db.query(ReviewReport).filter_by(task_id=result["report_task_id"]).one()
+    assert db.query(ReviewReport).filter_by(task_id=result["report_task_id"]).count() == 1
+    task = db.get(ReviewTask, result["report_task_id"])
+    artifact = db.query(SandboxArtifact).filter_by(
+        environment_id=environment.id, artifact_type="review_report"
+    ).one()
+    report_bytes = report.content_json["report_md"].encode("utf-8")
+    assert report_bytes == report_md.encode("utf-8")
+    assert task.summary == report.content_json["report_md"]
+    assert base64.b64decode(artifact.content_base64, validate=True) == report_bytes
+    assert artifact.byte_size == len(report_bytes)
+    assert artifact.sha256 == hashlib.sha256(report_bytes).hexdigest()
+
+
 def test_deterministic_sandbox_report_discloses_terminal_status_scope_and_errors() -> None:
     report = _build_deterministic_test_report(
         {
@@ -270,7 +340,15 @@ def test_stopped_sandbox_terminal_state_gets_report_center_and_artifact(db) -> N
     db.add(environment)
     db.commit()
 
-    published = _publish_terminal_sandbox_report(db, environment, execution_status="stopped")
+    environment.status = "failed"
+    environment.error = "stale callback error"
+    environment.result_json = (
+        '{"passed":false,"summary":"stale callback",'
+        '"evidence":{"stale_callback":true}}'
+    )
+    # A delayed callback may carry an older terminal label; the persisted environment
+    # state is the current source of truth for the report.
+    published = _publish_terminal_sandbox_report(db, environment, execution_status="failed")
     assert published and published["report_persisted"] is True
     task = db.get(ReviewTask, published["report_task_id"])
     report = db.query(ReviewReport).filter_by(task_id=task.id).one()
@@ -283,11 +361,447 @@ def test_stopped_sandbox_terminal_state_gets_report_center_and_artifact(db) -> N
     assert "stopped" in report.content_json["report_md"]
     assert "user requested stop" in report.content_json["report_md"]
     assert stored_environment.status == "stopped"
+    assert stored_environment.error == "user requested stop"
+    assert json.loads(stored_environment.result_json)["evidence"]["stale_callback"] is True
     # Terminal report artifact creation is best effort because artifact writes retain the
     # production execution-authorization check; report-center persistence is still verified.
     assert db.query(SandboxArtifact).filter_by(
         environment_id=environment.id, artifact_type="review_report"
     ).count() in {0, 1}
+
+
+def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> None:
+    owner = User(username="sbx_same_status_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="same status callback", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_same_status_report",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="a" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json=(
+            '{"passed":true,"summary":"persisted latest outcome",'
+            '"ai_review_status":"complete",'
+            '"coverage":{"tested":["/health"]},'
+            '"evidence":{"persisted_receipt":"latest"}}'
+        ),
+    )
+    db.add(environment)
+    db.commit()
+
+    original_ai_report = _publish_sandbox_report(
+        db,
+        environment,
+        {
+            "passed": True,
+            "execution_status": "succeeded",
+            "summary": "persisted latest outcome",
+            "ai_review_status": "complete",
+            "coverage": {"tested": ["/health"]},
+            "evidence": {"persisted_receipt": "latest"},
+        },
+        "## 多角色审查意见\n已完成 AI 审查并核实执行证据。\n",
+    )
+    assert original_ai_report["report_persisted"] is True
+
+    # Same terminal status does not mean the callback carries the latest snapshot.
+    environment.error = "stale callback failure"
+    environment.result_json = (
+        '{"passed":false,"summary":"stale same-status callback",'
+        '"error":"stale callback result_json failure",'
+        '"ai_review_status":"incomplete",'
+        '"ai_review_failure_reason":"stale callback review failure",'
+        '"coverage":{"tested":["/stale"]},'
+        '"evidence":{"callback_only":"preserve"}}'
+    )
+    published = _publish_terminal_sandbox_report(db, environment, execution_status="succeeded")
+    assert published and published["report_persisted"] is True
+    task = db.get(ReviewTask, published["report_task_id"])
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+    stored_environment = db.get(SandboxEnvironment, environment.id)
+    stored_result = json.loads(stored_environment.result_json)
+
+    assert task.status == "success"
+    assert task.score == 100
+    assert "已完成 AI 审查并核实执行证据。" in report.content_json["report_md"]
+    assert "## 后续验证更新（Prism 系统）" in report.content_json["report_md"]
+    assert "stale same-status callback" not in report.content_json["report_md"]
+    assert "stale callback failure" not in report.content_json["report_md"]
+    assert "stale callback result_json failure" not in report.content_json["report_md"]
+    assert "stale callback review failure" not in report.content_json["report_md"]
+    assert "失败说明：" not in report.content_json["report_md"]
+    assert report.content_json["execution_status"] == "succeeded"
+    assert report.content_json["ai_review"]["status"] == "complete"
+    assert report.content_json["ai_review"]["failure_reason"] is None
+    assert report.content_json["evidence"]["persisted_receipt"] == "latest"
+    assert report.content_json["evidence"]["callback_only"] == "preserve"
+    assert task.summary == report.content_json["report_md"]
+    assert stored_result["passed"] is True
+    assert stored_result["summary"] == "persisted latest outcome"
+    assert "error" not in stored_result
+    assert stored_result["ai_review_status"] == "complete"
+    assert "ai_review_failure_reason" not in stored_result
+    assert stored_environment.error is None
+    assert stored_result["coverage"]["tested"] == ["/health", "/stale"]
+    artifact = db.query(SandboxArtifact).filter_by(
+        environment_id=environment.id, artifact_type="review_report"
+    ).one()
+    report_bytes = report.content_json["report_md"].encode("utf-8")
+    assert base64.b64decode(artifact.content_base64, validate=True) == report_bytes
+    assert artifact.byte_size == len(report_bytes)
+    assert artifact.sha256 == hashlib.sha256(report_bytes).hexdigest()
+
+
+def test_ai_review_metadata_merge_is_monotonic() -> None:
+    assert sandbox_service._merge_ai_review_metadata(
+        {"status": "complete", "failure_reason": None},
+        {"status": "incomplete", "failure_reason": "stale"},
+    ) == ({"status": "complete", "failure_reason": None}, True)
+    assert sandbox_service._merge_ai_review_metadata(
+        {"status": "incomplete", "failure_reason": "prior failure"},
+        {"status": "complete", "failure_reason": "stale"},
+    ) == ({"status": "complete", "failure_reason": None}, False)
+    assert sandbox_service._merge_ai_review_metadata(
+        {"status": "incomplete", "failure_reason": "prior failure"},
+        {"status": "unknown", "failure_reason": None},
+    ) == ({"status": "incomplete", "failure_reason": "prior failure"}, True)
+
+
+def test_repeated_stop_preserves_existing_full_sandbox_report(db) -> None:
+    owner = User(username="sbx_repeat_stop_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="repeat stop", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_repeat_stop_report",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="c" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        started_at=datetime.utcnow() - timedelta(minutes=2),
+        stopped_at=datetime.utcnow(),
+        result_json='{"passed":true,"summary":"完整测试结果"}',
+    )
+    db.add(environment)
+    db.commit()
+
+    original_report = (
+        "## 测试结论\n所有约定用例均已完成。\n\n"
+        "## 发现的问题\n未发现可复现问题。\n\n"
+        "## 验证范围\n覆盖登录、权限和核心业务流程。\n"
+    )
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        {
+            "passed": True,
+            "execution_status": "succeeded",
+            "summary": "完整测试结果",
+            "coverage": {"verification_status": "complete", "tested": ["登录", "权限", "核心业务流程"]},
+            "evidence": {"successful_cases": 12},
+        },
+        original_report,
+    )
+    task = db.get(ReviewTask, published["report_task_id"])
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+    original_content = dict(report.content_json)
+    original_summary = task.summary
+
+    sandbox_service.stop_environment(db, owner, environment.public_id)
+
+    db.refresh(task)
+    db.refresh(report)
+    assert task.summary == original_summary
+    assert report.content_json == original_content
+    assert report.content_json["report_md"] == original_report
+
+
+def test_new_terminal_failure_evidence_refreshes_existing_sandbox_report(db) -> None:
+    owner = User(username="sbx_new_failure_evidence_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="new failure evidence", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_new_failure_evidence",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="d" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json='{"passed":true,"summary":"测试完成"}',
+    )
+    db.add(environment)
+    db.commit()
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        {
+            "passed": True,
+            "execution_status": "succeeded",
+            "summary": "测试完成",
+            "ai_review_status": "complete",
+            "agent_tests": {"generated": 1, "passed_count": 1},
+            "coverage": {"tested": ["账号归属检查"]},
+            "evidence": {"deterministic_test_execution": {"status": "passed", "case_count": 3}},
+        },
+        "## 多角色审查意见\nAI 已确认核心鉴权流程存在越权风险，需按用户身份校验资源归属。\n\n"
+        "## 问题清单\n### [高] 资源访问缺少归属校验\n证据：跨账号访问返回了受限数据。\n",
+    )
+    task = db.get(ReviewTask, published["report_task_id"])
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+    ai_analysis = "AI 已确认核心鉴权流程存在越权风险，需按用户身份校验资源归属。"
+
+    environment.status = "failed"
+    environment.error = "浏览器黑盒断言失败"
+    environment.result_json = (
+        '{"passed":false,"summary":"浏览器黑盒断言失败",'
+        '"coverage":{"tested":["/healthz"],"unscanned":["登录后路由"]},'
+        '"evidence":{"browser_blackbox_runs":[{"status":"failed","route":"/healthz"}]}}'
+    )
+    stale_report_bytes = b"stale report content"
+    for _ in range(2):
+        db.add(
+            SandboxArtifact(
+                environment_id=environment.id,
+                artifact_type="review_report",
+                file_name="old-report.md",
+                mime_type="text/markdown",
+                byte_size=len(stale_report_bytes),
+                sha256=hashlib.sha256(stale_report_bytes).hexdigest(),
+                storage_ref=f"database://sandbox-artifact/{environment.public_id}-review_report",
+                content_base64=base64.b64encode(stale_report_bytes).decode("ascii"),
+            )
+        )
+    db.commit()
+
+    refreshed = _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+
+    db.refresh(task)
+    db.refresh(report)
+    assert refreshed["report_persisted"] is True
+    assert task.status == "failed"
+    assert task.coverage["execution_status"] == "failed"
+    assert report.content_json["execution_status"] == "failed"
+    assert report.content_json["evidence"]["browser_blackbox_runs"][0]["route"] == "/healthz"
+    assert "浏览器黑盒断言失败" in report.content_json["report_md"]
+    assert ai_analysis in report.content_json["report_md"]
+    assert report.content_json["ai_review"]["status"] == "complete"
+    assert report.content_json["report_issue_summary"]["total"] == 1
+    assert report.content_json["evidence"]["deterministic_test_execution"]["case_count"] == 3
+    assert report.content_json["coverage"]["tested"] == ["账号归属检查", "/healthz"]
+    artifacts = (
+        db.query(SandboxArtifact)
+        .filter_by(environment_id=environment.id, artifact_type="review_report")
+        .all()
+    )
+    report_bytes = report.content_json["report_md"].encode("utf-8")
+    assert len(artifacts) == 2
+    for artifact in artifacts:
+        assert base64.b64decode(artifact.content_base64, validate=True) == report_bytes
+        assert artifact.byte_size == len(report_bytes)
+        assert artifact.sha256 == hashlib.sha256(report_bytes).hexdigest()
+
+    repeated = _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+
+    db.refresh(report)
+    artifacts = (
+        db.query(SandboxArtifact)
+        .filter_by(environment_id=environment.id, artifact_type="review_report")
+        .all()
+    )
+    assert repeated["report_persisted"] is True
+    assert report.content_json["report_md"].count("## 后续验证更新（Prism 系统）") == 1
+    assert len(report.content_json["evidence"]["browser_blackbox_runs"]) == 1
+    for artifact in artifacts:
+        artifact_bytes = base64.b64decode(artifact.content_base64, validate=True)
+        assert artifact_bytes == report.content_json["report_md"].encode("utf-8")
+
+
+def test_new_terminal_success_evidence_preserves_existing_ai_sandbox_report(db) -> None:
+    owner = User(username="sbx_new_success_evidence_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="new success evidence", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_new_success_evidence",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="e" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json='{"passed":true,"summary":"测试完成"}',
+    )
+    db.add(environment)
+    db.commit()
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        {"passed": True, "execution_status": "succeeded", "ai_review_status": "complete"},
+        "## 审查结论\nAI 审查确认未发现高危问题，认证与授权路径均有充分验证。\n",
+    )
+    task = db.get(ReviewTask, published["report_task_id"])
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+
+    environment.result_json = (
+        '{"passed":true,"execution_status":"succeeded",'
+        '"coverage":{"tested":["/healthz"]},'
+        '"evidence":{"browser_blackbox_runs":[{"status":"passed","route":"/healthz"}]}}'
+    )
+    db.commit()
+
+    refreshed = _publish_terminal_sandbox_report(db, environment, execution_status="succeeded")
+
+    db.refresh(report)
+    assert refreshed["report_persisted"] is True
+    assert "AI 审查确认未发现高危问题" in report.content_json["report_md"]
+    assert "## 后续验证更新（Prism 系统）" in report.content_json["report_md"]
+    artifact = (
+        db.query(SandboxArtifact)
+        .filter_by(environment_id=environment.id, artifact_type="review_report")
+        .one()
+    )
+    assert base64.b64decode(artifact.content_base64, validate=True) == report.content_json["report_md"].encode("utf-8")
+    assert report.content_json["evidence"]["browser_blackbox_runs"][0]["status"] == "passed"
+    assert report.content_json["ai_review"]["status"] == "complete"
+
+
+def test_terminal_incomplete_ai_state_replaces_stale_complete_report(db) -> None:
+    owner = User(username="sbx_terminal_ai_incomplete_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="terminal AI incomplete", language="python", status="active")
+    db.add(project)
+    db.flush()
+    environment = SandboxEnvironment(
+        public_id="sbx_terminal_ai_incomplete",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="python",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="f" * 64,
+        resource_policy_json="{}",
+        agent_config_json="{}",
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json='{"passed":true,"execution_status":"succeeded"}',
+    )
+    db.add(environment)
+    db.commit()
+
+    published = _publish_sandbox_report(
+        db,
+        environment,
+        {"passed": True, "execution_status": "succeeded", "ai_review_status": "complete"},
+        "## 审查结论\n旧报告错误地将 AI 审查标记为完成。\n",
+    )
+    task = db.get(ReviewTask, published["report_task_id"])
+    report = db.query(ReviewReport).filter_by(task_id=task.id).one()
+
+    environment.result_json = (
+        '{"passed":true,"execution_status":"succeeded",'
+        '"ai_review_status":"incomplete",'
+        '"ai_review_failure_reason":"核验节点未完成",'
+        '"coverage":{"tested":["/healthz"]}}'
+    )
+    db.commit()
+
+    refreshed = _publish_terminal_sandbox_report(db, environment, execution_status="succeeded")
+
+    db.refresh(task)
+    db.refresh(report)
+    assert refreshed and refreshed["report_persisted"] is True
+    assert report.content_json["ai_review"] == {
+        "status": "incomplete",
+        "failure_reason": "核验节点未完成",
+    }
+    report_md = report.content_json["report_md"]
+    assert "多 Agent AI 审查：未完成；原因：核验节点未完成。" in report_md
+    assert "本报告是确定性执行结果兜底，不代表 AI 审查已完成。" in report_md
+    assert "旧报告错误地将 AI 审查标记为完成" not in report_md
+    assert task.summary == report_md
+    artifact = db.query(SandboxArtifact).filter_by(
+        environment_id=environment.id, artifact_type="review_report"
+    ).one()
+    report_bytes = report_md.encode("utf-8")
+    assert base64.b64decode(artifact.content_base64, validate=True) == report_bytes
+    assert artifact.byte_size == len(report_bytes)
+    assert artifact.sha256 == hashlib.sha256(report_bytes).hexdigest()
+
+
+def test_report_evidence_merge_deduplicates_and_caps_browser_history() -> None:
+    previous_runs = [{"run": index} for index in range(15)]
+    current_runs = [{"run": index} for index in range(10, 30)]
+
+    merged = _merge_report_facts(
+        {"browser_blackbox_runs": previous_runs},
+        {"browser_blackbox_runs": current_runs},
+        list_keys={"browser_blackbox_runs"},
+    )
+
+    assert len(merged["browser_blackbox_runs"]) == 20
+    assert merged["browser_blackbox_runs"] == [{"run": index} for index in range(10, 30)]
+
+
+def test_browser_coverage_keeps_full_nonbrowser_scope_and_caps_browser_history() -> None:
+    tested = ["登录流程", {"scope": "管理员路径"}, "权限边界"] + [
+        f"授权目标浏览器黑盒探测 (bbx-{index})" for index in range(30)
+    ]
+
+    merged = _append_bounded_browser_coverage(tested, "bbx-latest")
+
+    assert merged[:3] == ["登录流程", {"scope": "管理员路径"}, "权限边界"]
+    assert len(merged) == 23
+    assert merged[-20:] == [f"授权目标浏览器黑盒探测 (bbx-{index})" for index in range(11, 30)] + [
+        "授权目标浏览器黑盒探测 (bbx-latest)"
+    ]
 
 
 def test_missing_terminal_sandbox_coverage_is_explicitly_unknown() -> None:
