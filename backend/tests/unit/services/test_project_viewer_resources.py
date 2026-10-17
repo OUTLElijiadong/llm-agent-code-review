@@ -3,6 +3,7 @@
 import pytest
 
 from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.permission_codes import PermissionCode
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.review_issue import ReviewIssue
@@ -89,7 +90,13 @@ def test_viewer_project_visibility_does_not_grant_others_private_report(db, monk
 
 def test_missing_global_report_delete_permission_keeps_cap_false(db, monkeypatch):
     _, actor, _, task, _ = seed(db, "reviewer", authored=True)
-    monkeypatch.setattr(rbac_service, "check_permission", lambda *_args: False)
+    # The actor can open the report, but has no global delete grant. This test
+    # checks the action flag independently from report-list visibility.
+    monkeypatch.setattr(
+        rbac_service,
+        "check_permission",
+        lambda _db, _user_id, permission: permission == PermissionCode.REPORT_VIEW,
+    )
     assert report_service.list_reports(db, actor)["items"][0]["can_delete"] is False
     assert report_service.get_report_detail(db, actor, task.id)["can_delete"] is False
 

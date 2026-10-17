@@ -543,7 +543,11 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     monkeypatch.setattr(discussion_api.rule_service, "get_enabled_rules", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(discussion_api, "_gen_session_id", lambda: "disc_continued")
     launched = []
-    monkeypatch.setattr(ws_discussion, "launch_pending_discussion", lambda pending: launched.append(pending))
+    monkeypatch.setattr(
+        ws_discussion,
+        "launch_pending_discussion",
+        lambda pending: launched.append(pending) or object(),
+    )
 
     DiscussionBus._instance = None
     bus = DiscussionBus.instance()
@@ -611,12 +615,14 @@ async def test_concluded_roundtable_user_input_starts_owned_continuation(
     assert completed.output["continued_from_session_id"] == original.session_id
     assert completed.output["previous_report_task_id"] == 731
     assert completed.output["accepted"] is True
+    assert completed.output["status"] == "pending"
     assert original.status == "concluded"
     assert original.report_task_id == 731
 
     continuation = bus.get_session("disc_continued")
     assert continuation is not None
-    assert continuation.status == "active"
+    # API 返回时只表示任务已入队；WS 可见性不再决定任务是否能启动。
+    assert continuation.status == "pending"
     assert continuation.report_task_id == 0
     assert continuation.owner_user_id == user.id
     assert continuation.project_id == project.id

@@ -5,6 +5,7 @@ import { ArrowRight, FolderOpened, Lock } from '@element-plus/icons-vue'
 import { getSecurityDashboard } from '@/api/security'
 import type { SecurityDashboardSummaryOut, TrendPointOut } from '@/types/security'
 import { useUserStore } from '@/stores/user'
+import { OWASP_FALLBACK_NOTICE } from '@/views/security/cnnvd-knowledge'
 
 interface Props {
   days?: number
@@ -272,7 +273,7 @@ onMounted(loadDashboard)
       <!-- 中:OWASP 热点 -->
       <div class="mid-col">
         <div class="col-title">OWASP 热点</div>
-        <p class="hotspot-version-note">历史问题保留审查时采用的 OWASP 版本；不同年份编号不宜直接横向比较。</p>
+        <p class="col-note hotspot-version-note">{{ OWASP_FALLBACK_NOTICE }} 历史问题保留审查时采用的 OWASP 版本；不同年份编号不宜直接横向比较。</p>
         <ul v-if="data.owasp_hotspots.length" class="hotspot-list">
           <li
             v-for="(h, idx) in data.owasp_hotspots"
@@ -284,7 +285,7 @@ onMounted(loadDashboard)
             <span class="hot-count font-mono">{{ h.count }}</span>
           </li>
         </ul>
-        <div v-else class="col-empty">暂无 OWASP 命中</div>
+        <div v-else class="col-empty">暂无 OWASP 分类统计</div>
       </div>
 
       <!-- 右:高风险项目 -->
@@ -533,6 +534,13 @@ onMounted(loadDashboard)
   background: var(--gray-50);
   border-radius: 6px;
   text-align: center;
+}
+
+.col-note {
+  margin: -3px 0 8px;
+  color: var(--gray-500);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 /* OWASP 热点 */

@@ -109,6 +109,17 @@ function resetComponentMocks(): void {
 beforeEach(resetComponentMocks)
 
 describe('SecurityPostureCard', () => {
+  it('将 OWASP 热点标为回退分类并说明未接入官方匹配', async () => {
+    mocks.getDashboard.mockResolvedValue(baseSummary)
+    const wrapper = mountCard()
+    await flushPromises()
+
+    expect(wrapper.find('.mid-col .col-note').text()).toContain('OWASP 标签仅作回退分类')
+    expect(wrapper.find('.mid-col .col-note').text()).toContain('当前未接入 CNVD/CNNVD 官方匹配')
+    expect(wrapper.find('.mid-col .col-note').text()).toContain('无官方命中证据')
+    expect(wrapper.find('.mid-col').text()).not.toContain('OWASP 命中')
+  })
+
   it('exposes loading state until the dashboard request settles', async () => {
     /** 验证 onMounted 请求期间和完成后的 loading 指令状态。 */
     const request = deferred<SecurityDashboardSummaryOut>()
@@ -254,7 +265,7 @@ describe('SecurityPostureCard', () => {
     const wrapper = mountCard()
     await flushPromises()
     expect(wrapper.find('.score-num').attributes('style')).toContain('rgb(217, 168, 87)')
-    expect(wrapper.text()).toContain('暂无 OWASP 命中')
+    expect(wrapper.text()).toContain('暂无 OWASP 分类统计')
     expect(wrapper.text()).toContain('所有项目都健康')
     expect(wrapper.find('.sparkline').exists()).toBe(false)
 

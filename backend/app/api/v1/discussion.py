@@ -136,6 +136,7 @@ def start_discussion(
     origin_session_key: str = "",
     continued_from_session_id: str = "",
     continuation_context: str = "",
+    temporary_experts_json: str = "",
 ):
     """预检并注册讨论,返回 session_id 和基本信息。
 
@@ -190,6 +191,12 @@ def start_discussion(
         continued_from_session_id=continued_from_session_id,
         agents=agent_list,
     )
+    session = bus.get_session(session_id)
+    if session:
+        session.status = "pending"
+        session.stage = "pending"
+        session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
+        session.expected_turns = rounds * len(profiles)
 
     register_pending(
         session_id=session_id,
@@ -219,5 +226,9 @@ def start_discussion(
         "review_type": review_type,
         "continued_from_session_id": str(continued_from_session_id or "")[:64],
         "agents": agent_list,
+        "participants": session.participants if session else agent_list,
+        "status": "pending",
+        "completed_turns": 0,
+        "expected_turns": rounds * len(profiles),
         "rules_count": len(rules),
     })

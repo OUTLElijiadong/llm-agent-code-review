@@ -104,12 +104,14 @@ export interface ReportIssue {
 /** 报告列表项(与后端 ReportListItem 对齐) */
 export interface ReportListItem {
   task_id: number
+  /** 服务端依据账号归属、报告权限和来源权限计算；缺失时领域报告前端拒绝显示。 */
+  can_view_report?: boolean
   can_delete?: boolean
   task_name?: string
   project_name: string
   total_issues: number
   score: number | null
-  status: 'success' | 'failed' | 'cancelled' | 'expired' | 'stopped'
+  status: 'success' | 'partial' | 'failed' | 'cancelled' | 'expired' | 'stopped'
   create_time: string
   error_message?: string | null
   coverage?: TaskCoverageOut | null

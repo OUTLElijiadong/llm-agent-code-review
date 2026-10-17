@@ -308,7 +308,7 @@ def test_ordinary_admin_cannot_bypass_unique_super_admin_routes(matrix_env, rout
 
 
 @pytest.mark.parametrize("format", ["json", "html", "word", "pdf"])
-def test_report_export_format_permissions_are_independent(matrix_env, format):
+def test_report_export_requires_view_permission_before_format_permission(matrix_env, format):
     ids = matrix_env["resources"]["none"]
     db, user, role = matrix_env["db"], matrix_env["users"]["no_permission"], matrix_env["view_only_role"]
     assignment = UserRole(user_id=user.id, role_id=role.id)

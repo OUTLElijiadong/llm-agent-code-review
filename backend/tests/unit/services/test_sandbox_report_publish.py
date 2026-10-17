@@ -418,11 +418,21 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
         resource_policy_json="{}",
         agent_config_json="{}",
         expires_at=datetime.utcnow() + timedelta(hours=1),
-        result_json=(
-            '{"passed":true,"summary":"persisted latest outcome",'
-            '"ai_review_status":"complete",'
-            '"coverage":{"tested":["/health"]},'
-            '"evidence":{"persisted_receipt":"latest"}}'
+        result_json=json.dumps(
+            {
+                "passed": True,
+                "summary": "persisted latest outcome",
+                "ai_review_status": "complete",
+                "agent_tests": {"generated": 1, "passed_count": 1, "failed": 0},
+                "coverage": {"coverage_status": "complete", "tested": ["/health"], "unscanned": []},
+                "evidence": {
+                    "persisted_receipt": "latest",
+                    "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+                    "agent_test_generation": {"status": "generated", "mode": "blackbox", "count": 1},
+                    "agent_tests": {"generated": 1, "passed_count": 1, "failed": 0},
+                    "blackbox_execution": {"status": "passed", "route": "/health", "status_code": 200},
+                },
+            }
         ),
     )
     db.add(environment)
@@ -436,12 +446,22 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
             "execution_status": "succeeded",
             "summary": "persisted latest outcome",
             "ai_review_status": "complete",
-            "coverage": {"tested": ["/health"]},
-            "evidence": {"persisted_receipt": "latest"},
+            "agent_tests": {"generated": 1, "passed_count": 1, "failed": 0},
+            "coverage": {"coverage_status": "complete", "tested": ["/health"], "unscanned": []},
+            "evidence": {
+                "persisted_receipt": "latest",
+                "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+                "agent_test_generation": {"status": "generated", "mode": "blackbox", "count": 1},
+                "agent_tests": {"generated": 1, "passed_count": 1, "failed": 0},
+                "blackbox_execution": {"status": "passed", "route": "/health", "status_code": 200},
+            },
         },
         "## 多角色审查意见\n已完成 AI 审查并核实执行证据。\n",
     )
     assert original_ai_report["report_persisted"] is True
+    original_task = db.get(ReviewTask, original_ai_report["report_task_id"])
+    assert original_task.score == 100
+    assert original_task.coverage["coverage_status"] == "complete"
 
     # Same terminal status does not mean the callback carries the latest snapshot.
     environment.error = "stale callback failure"

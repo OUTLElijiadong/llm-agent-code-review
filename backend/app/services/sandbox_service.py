@@ -6289,9 +6289,9 @@ def _publish_sandbox_report(
         agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
         generated = int(agent_tests.get("generated") or 0)
         passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
-        if passed:
+        if passed and coverage.get("coverage_status") == "complete":
             report_score = 100
-        elif generated:
+        elif generated and coverage.get("coverage_status") == "complete":
             report_score = round(60 * passed_count / generated)
         else:
             report_score = 0
@@ -7396,6 +7396,60 @@ def _append_event(
     return event
 
 
+def _record_sandbox_terminal_failure(
+    db: Session,
+    environment: SandboxEnvironment,
+    message: str,
+    *,
+    stage: str,
+    failure_kind: str,
+) -> None:
+    """Persist a dispatch failure without reviving a concurrently stopped environment."""
+    if (
+        environment.status not in ACTIVE_STATES
+        or not _execution_lease_valid(db, int(environment.id), str(environment.execution_token or ""))
+    ):
+        db.rollback()
+        return
+
+    environment.status = "failed"
+    environment.error = message[:500]
+    environment.stopped_at = _utcnow()
+    environment.result_json = _json({
+        "passed": False,
+        "summary": "沙箱执行线程未启动，测试范围未执行",
+        "execution_status": "failed",
+        "coverage": {
+            "coverage_status": "partial",
+            "unscanned": ["执行线程启动失败，全部测试范围未执行"],
+            "errors": [environment.error],
+        },
+        "evidence": {"execution_failure": {"stage": stage, "kind": failure_kind}},
+    })
+    _append_event(
+        db,
+        environment,
+        "failed",
+        stage,
+        environment.error,
+        {"failure_kind": failure_kind},
+    )
+    db.commit()
+
+    if environment.purpose != "test":
+        return
+    try:
+        _publish_terminal_sandbox_report(db, environment, execution_status="failed")
+    except Exception as report_exc:  # noqa: BLE001 - keep dispatch failure terminal and observable
+        db.rollback()
+        environment = db.get(SandboxEnvironment, int(environment.id))
+        if environment is not None:
+            report_error = f"沙箱启动失败报告发布失败：{str(report_exc)[:1000]}"
+            environment.error = f"{environment.error or ''}; {report_error}".strip("; ")[:4000]
+            _append_event(db, environment, "failed", "report", report_error)
+            db.commit()
+
+
 def _restore_nonretryable_model_stop_reason(
     db: Session,
     environment: SandboxEnvironment,
@@ -7887,7 +7941,16 @@ def _create_environment_locked(
         name=f"sandbox-{public_id}",
         daemon=True,
     )
-    thread.start()
+    try:
+        thread.start()
+    except Exception as exc:  # noqa: BLE001 - 已持久化任务必须转成可见失败报告
+        _record_sandbox_terminal_failure(
+            db,
+            environment,
+            f"沙箱执行线程启动失败：{str(exc)[:500]}",
+            stage="dispatch",
+            failure_kind=type(exc).__name__,
+        )
     return environment
 
 

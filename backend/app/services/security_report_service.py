@@ -353,6 +353,10 @@ def _report_markdown(
                     value = verification[key]
                     if isinstance(value, bool):
                         value = "是" if value else "否"
+                    elif key == "sandbox_script_report_status":
+                        value = {
+                            "pending_independent_verification": "待独立核验",
+                        }.get(str(value), value)
                     lines.append(f"{label}：{_plain_report_text(value, 300)}")
             if verification.get("sandbox_error"):
                 lines.append(f"沙箱执行问题：{_plain_report_text(verification['sandbox_error'], 1000)}")

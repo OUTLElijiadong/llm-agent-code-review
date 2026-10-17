@@ -77,7 +77,7 @@ for (const width of [1440, 768, 430, 390, 360, 320]) {
 
 for (const width of [1440, 768, 430, 390, 360, 320]) {
   test(`审查任务卡片跨权限网格不跳列，中文标题与标签底边对齐：${width}px`, async ({ page }, testInfo) => {
-    const geometries: Array<{ checkX: number; bandX: number; mainX: number; scoreX: number; titleBottom: number; typeTop: number; typeBottom: number; statusBottom: number }> = []
+    const geometries: Array<{ checkX: number; bandX: number; mainX: number; scoreX: number; titleBottom: number; typeTop: number; typeRight: number; typeBottom: number; statusX: number; statusBottom: number }> = []
     for (const canCancel of [false, true]) {
       const target = canCancel ? await page.context().newPage() : page
       await target.setViewportSize({ width, height: 1000 })
@@ -93,7 +93,9 @@ for (const width of [1440, 768, 430, 390, 360, 320]) {
           scoreX: rect('.tc-score').x,
           titleBottom: rect('.tc-name').bottom,
           typeTop: rect('.tc-line1 .el-tag').top,
+          typeRight: rect('.tc-line1 .el-tag').right,
           typeBottom: rect('.tc-line1 .el-tag').bottom,
+          statusX: rect('.tc-line1 .el-tag:last-child').x,
           statusBottom: rect('.tc-line1 .el-tag:last-child').bottom,
         }
       }))
@@ -103,7 +105,8 @@ for (const width of [1440, 768, 430, 390, 360, 320]) {
       expect(geometries[1][key]).toBeCloseTo(geometries[0][key], 0)
     }
     for (const geometry of geometries) {
-      expect(Math.abs(geometry.typeBottom - geometry.statusBottom)).toBeLessThanOrEqual(1)
+      expect(geometry.statusX, `${width}px 下状态标签不能换行到类型标签下方`).toBeGreaterThanOrEqual(geometry.typeRight)
+      expect(Math.abs(geometry.typeBottom - geometry.statusBottom), `${width}px 下类型和状态标签应保持同一行底边对齐`).toBeLessThanOrEqual(1)
       if (width > 760) expect(Math.abs(geometry.titleBottom - geometry.typeBottom)).toBeLessThanOrEqual(1)
       else expect(geometry.titleBottom).toBeLessThan(geometry.typeTop)
     }
@@ -170,6 +173,26 @@ test('代码中心项目卡明确提示可浏览代码文件且键盘可达', as
   await card.focus()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/code\/1$/)
+})
+
+test('主内容区的超宽详情可横向滚动访问，不会被布局容器裁掉', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSession(page)
+  await page.goto('/code')
+  await expect(page.locator('.project-card')).toHaveCount(2)
+
+  const scroll = await page.locator('.app-layout-main').evaluate((main) => {
+    const wideDetail = document.createElement('div')
+    wideDetail.dataset.testid = 'wide-detail-fixture'
+    wideDetail.style.cssText = 'width: 720px; height: 8px; flex: none'
+    main.append(wideDetail)
+    const before = { client: main.clientWidth, scroll: main.scrollWidth }
+    main.scrollLeft = main.scrollWidth
+    return { ...before, left: main.scrollLeft }
+  })
+
+  expect(scroll.scroll).toBeGreaterThan(scroll.client)
+  expect(scroll.left).toBeGreaterThan(0)
 })
 
 test('代码中心失败原因与重试按钮同时可见，重试后恢复项目卡片', async ({ page }) => {

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class ReportListItem(BaseModel):
     """报告列表项"""
+    can_view_report: bool = False
     can_delete: bool = False
     task_id: int
     task_name: Optional[str] = None

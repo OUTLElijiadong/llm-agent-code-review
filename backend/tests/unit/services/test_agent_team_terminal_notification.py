@@ -224,7 +224,7 @@ def test_team_results_are_delivered_once_as_a_terminal_summary(db, round_no):
     assert [task["status"] for task in team_detail["tasks"]] == ["completed", "completed"]
 
 
-def test_terminal_receipt_from_cancelled_parent_is_acknowledged_without_starting_model(db):
+def test_terminal_receipt_from_cancelled_parent_stays_cancelled_without_starting_model(db):
     owner, parent_run, _execution, created = _team_with_parent_call(
         db,
         session_key="session-team-parent-cancelled",
@@ -238,7 +238,9 @@ def test_terminal_receipt_from_cancelled_parent_is_acknowledged_without_starting
     ).one()
     assert json.loads(receipt.context_json)["parent_run_id"] == parent_run.run_id
 
-    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="父级小菱响应已停止"):
+    # pull_inbox has already made the cancellation terminal. A late team result
+    # must not reopen or acknowledge it as a new response turn.
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="消息当前状态 cancelled"):
         agent_mesh_service.prepare_message_run(
             db,
             owner,
@@ -248,7 +250,7 @@ def test_terminal_receipt_from_cancelled_parent_is_acknowledged_without_starting
         )
 
     db.refresh(receipt)
-    assert receipt.status == "completed"
+    assert receipt.status == "cancelled"
     assert db.query(AgentResponseRun).filter(
         AgentResponseRun.user_id == owner.id,
         AgentResponseRun.mesh_message_id == receipt.message_id,

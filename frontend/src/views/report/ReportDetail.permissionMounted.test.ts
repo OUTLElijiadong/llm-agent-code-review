@@ -16,7 +16,7 @@ import ReportDetail from './ReportDetail.vue'
 let wrapper: VueWrapper
 let pinia: ReturnType<typeof createPinia>
 const report = { project: { project_name: '隔离验收报告' }, task: { name: '报告', total_files: 1 },
-  stats: { score: 100, total_issues: 0 }, files: [], rules_snapshot: [], source: { type: 'full' } }
+  stats: { score: 100, total_issues: 0 }, summary: '账号专属报告摘要', files: [], rules_snapshot: [], source: { type: 'full' } }
 
 beforeEach(() => {
   pinia = createPinia()
@@ -72,6 +72,38 @@ it('缺少问题明细权限时明确说明权限边界，报告概览仍可查�
   expect(wrapper.get('[data-testid="report-issues-restricted"]').text()).toContain('当前账号没有问题明细查看权限')
   expect(wrapper.find('[data-testid="report-issues-retry"]').exists()).toBe(false)
   expect(issues.getTaskIssues).not.toHaveBeenCalled()
+})
+
+it('报告查看权限撤销后立即清除报告内容', async () => {
+  await render()
+  expect(wrapper.text()).toContain('账号专属报告摘要')
+
+  useUserStore().permissions.delete('report:view')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="report-access-revoked"]').exists()).toBe(true)
+  expect(wrapper.find('.report-paper').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('账号专属报告摘要')
+  expect(wrapper.find('[data-testid="report-issues-restricted"]').exists()).toBe(false)
+})
+
+it('问题明细权限撤销后清空已读明细并保留概览权限提示', async () => {
+  issues.getTaskIssues.mockResolvedValueOnce({
+    items: [{
+      id: 91, task_id: 42, issue_type: 'security', severity: 'critical', title: '其他权限下不可见的漏洞',
+      description: '敏感问题说明', status: 'open', create_time: '2026-09-05T00:00:00Z',
+      cvss_source: 'vector', cvss_version: '3.1', cvss_vector: 'AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', cvss_score: 9.8,
+    }],
+    total: 1,
+  })
+  await render()
+  expect(wrapper.text()).toContain('其他权限下不可见的漏洞')
+
+  useUserStore().permissions.delete('issue:view')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="report-issues-restricted"]').exists()).toBe(true)
+  expect(wrapper.text()).not.toContain('其他权限下不可见的漏洞')
 })
 
 it('问题明细接口失败时保留主报告并提供可点击重试', async () => {

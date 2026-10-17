@@ -35,10 +35,23 @@
     <el-alert v-if="loadError" data-testid="report-load-error" class="no-print" :title="loadError" type="warning" :closable="false" show-icon>
       <el-button :loading="loading" @click="loadReport">重试读取报告</el-button>
     </el-alert>
+    <el-alert
+      v-if="reportAccessRevoked"
+      data-testid="report-access-revoked"
+      class="no-print"
+      title="当前账号已无权查看此报告，已清除报告内容。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
     <section v-if="report && canViewReport" class="card report-execution-status" data-testid="report-execution-status" role="note">
       <strong>执行状态：{{ reportExecutionStatusLabel }}</strong>
       <p v-if="reportExecutionError">执行原因：{{ reportExecutionError }}</p>
       <p>验证覆盖：{{ reportCoverageLabel }}<span v-if="reportCoverageReason">；{{ reportCoverageReason }}</span></p>
+      <p v-if="coverageSummary">覆盖明细：{{ coverageSummary }}</p>
+      <ul v-if="coverageEntries.length" class="coverage-details">
+        <li v-for="(entry, index) in coverageEntries" :key="`${index}-${entry}`">{{ entry }}</li>
+      </ul>
       <p v-if="reportDurationNote">耗时说明：{{ reportDurationNote }}</p>
     </section>
     <section v-if="securityReport && canViewReport" class="card security-report-snapshot" data-testid="security-report-snapshot">
@@ -586,7 +599,7 @@
 
 <script setup lang="ts">
 import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
-import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
@@ -623,8 +636,12 @@ const taskId = Number(route.params.id)
 const loading = ref(true)
 const loadError = ref('')
 let reportRequestVersion = 0
+let issueRequestVersion = 0
+let accessGeneration = 0
 let disposed = false
 const report = ref<ReportDetailOut | null>(null)
+const reportAccessRevoked = ref(false)
+const selectedRemediationId = ref<number | null>(null)
 
 // ===== T15 新增:报告生成 / 预览 / 导出状态 =====
 /** 当前选择的模板类型(simple/detailed/compliance),影响生成/预览/导出 */
@@ -651,6 +668,12 @@ const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
 const issuesLoading = ref(false)
 const issuesLoadState = ref<'loading' | 'loaded' | 'forbidden' | 'failed'>('loading')
+function captureAccessScope(): () => boolean {
+  const generation = accessGeneration
+  const account = `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
+  return () => !disposed && generation === accessGeneration
+    && account === `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
+}
 const issueVerificationNotice = computed(() => {
   const pending = issues.value.filter(isIssuePendingReview).length
   const unrecorded = issues.value.filter(issue => !issue.human_review_status).length
@@ -706,15 +729,17 @@ const isDomainReport = computed(() => {
   const sourceType = report.value?.source?.type || report.value?.task?.review_type
   return sourceType === 'sandbox_test' || sourceType === 'pentest'
 })
-const canViewSourceReport = computed(() => {
-  const source = report.value?.source
-  const sourceType = String(source?.type || report.value?.task?.review_type || '')
+function canAccessSourceReport(candidate: ReportDetailOut | null): boolean {
+  if (!candidate) return true
+  const source = candidate.source
+  const sourceType = String(source?.type || candidate.task?.review_type || '')
   if (source?.security_report || ['security_scan', 'fullchain_audit'].includes(sourceType)) {
     return userStore.hasPermission('security:view')
   }
   if (sourceType === 'pentest') return userStore.hasPermission('pentest:view')
   return true
-})
+}
+const canViewSourceReport = computed(() => canAccessSourceReport(report.value))
 const canViewReport = computed(() => !!report.value
   && userStore.hasPermission('report:view') && canViewSourceReport.value)
 const canExportIssueDetails = computed(() => {
@@ -745,7 +770,8 @@ const securityCoverageLabel = computed(() => {
 })
 const showSecurityReport = ref(false)
 const sandboxCoverage = computed(() => report.value?.task?.coverage as TaskCoverageOut | undefined)
-const sandboxCoverageStatus = computed(() => sandboxCoverage.value?.verification_status ?? 'unknown')
+const sandboxCoverageStatus = computed(() => sandboxCoverage.value?.verification_status
+  ?? sandboxCoverage.value?.coverage_status ?? 'unknown')
 const sandboxCoverageLabel = computed(() => {
   if (sandboxCoverageStatus.value === 'complete') return '已记录范围内验证完成'
   if (sandboxCoverageStatus.value === 'partial') return '验证范围不完整'
@@ -782,7 +808,7 @@ const reportCoverageReason = computed(() => {
   const parts = [String(coverage?.reason || '').trim()]
   for (const [label, value] of [
     ['未扫描', coverage?.unscanned],
-    ['跳过', coverage?.skipped],
+    ['跳过', coverage?.skipped ?? coverage?.skipped_phases],
     ['排除', coverage?.excluded],
     ['错误', coverage?.errors],
   ] as const) {
@@ -790,6 +816,46 @@ const reportCoverageReason = computed(() => {
     if (entries.length) parts.push(`${label}：${entries.join('、')}`)
   }
   return parts.filter(Boolean).join('；')
+})
+const coverageSummary = computed(() => {
+  const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
+  if (!coverage) return ''
+  const tested = Array.isArray(coverage.tested) ? coverage.tested.length : 0
+  const unscanned = Array.isArray(coverage.unscanned) ? coverage.unscanned.length : 0
+  const skipped = Array.isArray(coverage.skipped_phases) ? coverage.skipped_phases.length
+    : Array.isArray(coverage.skipped) ? coverage.skipped.length : 0
+  if (tested + unscanned + skipped === 0 && !Array.isArray(coverage.phases)) return ''
+  return `已记录覆盖项 ${tested} 项；未扫描 ${unscanned} 项；跳过 ${skipped} 项。该统计仅反映回执中记录的范围。`
+})
+const coverageEntries = computed(() => {
+  const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
+  if (!coverage) return []
+  const result: string[] = []
+  const labelValue = (item: unknown): string => {
+    if (typeof item === 'string') return item.trim()
+    if (!item || typeof item !== 'object') return String(item ?? '').trim()
+    const value = item as Record<string, unknown>
+    return String(value.label || value.name || value.path || value.phase || value.reason || '').trim()
+  }
+  for (const [label, values] of [
+    ['未扫描', coverage.unscanned],
+    ['排除', coverage.excluded],
+    ['跳过', coverage.skipped_phases ?? coverage.skipped],
+    ['错误', coverage.errors],
+  ] as const) {
+    if (Array.isArray(values)) {
+      result.push(...values.map(labelValue).filter(Boolean).map(value => `${label}：${value}`))
+    }
+  }
+  if (Array.isArray(coverage.phases)) {
+    for (const phase of coverage.phases) {
+      const status = String(phase.status || '').toLowerCase()
+      if (['complete', 'completed', 'success', 'passed'].includes(status)) continue
+      const name = labelValue(phase)
+      if (name) result.push(`阶段未完成：${name}${status ? `（${status}）` : ''}`)
+    }
+  }
+  return [...new Set(result)]
 })
 
 // AI 总结:封面用纯文本(剥离 markdown 符号),AI 总结卡片用消毒后的 markdown 渲染
@@ -937,26 +1003,28 @@ function ruleLabel(rule: Record<string, unknown>): string {
 
 async function loadReport() {
   if (!userStore.hasPermission('report:view')) {
-    report.value = null
-    loading.value = false
+    clearReportForAccessRevocation()
     loadError.value = '当前账号没有报告查看权限，请返回列表。'
     return
   }
   const version = ++reportRequestVersion
+  const account = `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
   loading.value = true
   try {
     const result = await getReportDetail(taskId)
     if (disposed || version !== reportRequestVersion) return
+    if (account !== `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
+      || !userStore.hasPermission('report:view')) return
+    if (!canAccessSourceReport(result)) {
+      clearReportForAccessRevocation()
+      return
+    }
     report.value = result
+    reportAccessRevoked.value = false
     loadError.value = ''
   } catch (error) {
     if (disposed || version !== reportRequestVersion) return
-    if (mustDiscardReadSnapshot(error)) {
-      report.value = null
-      issues.value = []
-      previewFallbackVisible.value = false
-      previewFallbackHtml.value = ''
-    }
+    if (mustDiscardReadSnapshot(error)) clearReportForAccessRevocation()
     loadError.value = `报告读取失败：${readableError(error)}。${report.value ? '保留上次成功的只读快照；重新读取成功后恢复报告操作。' : '可重试读取报告，或返回列表核对。'}`
   } finally {
     if (!disposed && version === reportRequestVersion) loading.value = false
@@ -998,6 +1066,16 @@ function onPrint() {
  * 后端报告详情不含 issues,需单独调用 review API 获取。
  */
 async function loadIssues(): Promise<void> {
+  const requestVersion = ++issueRequestVersion
+  const account = `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
+  const requestIsCurrent = () => !disposed
+    && requestVersion === issueRequestVersion
+    && account === `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
+  issues.value = []
+  if (!canViewReport.value) {
+    issuesLoadState.value = 'forbidden'
+    return
+  }
   issues.value = []
   if (isDomainReport.value) {
     issuesLoadState.value = 'loaded'
@@ -1013,6 +1091,7 @@ async function loadIssues(): Promise<void> {
     // 明细统计（CVSS/Top10）必须覆盖接口返回的全部未关闭条目，不能把首 1000 条当成全量。
     const pageSize = 1000
     const firstPage = await getTaskIssues(taskId, { page: 1, page_size: pageSize })
+    if (!requestIsCurrent() || !userStore.hasPermission('issue:view') || !canViewReport.value) return
     const total = Number(firstPage.total)
     if (!Number.isSafeInteger(total) || total < 0) throw new Error('invalid issue total')
     const allIssues = [...((firstPage.items as unknown as ReportIssue[]) ?? [])]
@@ -1020,6 +1099,7 @@ async function loadIssues(): Promise<void> {
     while (allIssues.length < total) {
       page += 1
       const next = await getTaskIssues(taskId, { page, page_size: pageSize })
+      if (!requestIsCurrent() || !userStore.hasPermission('issue:view') || !canViewReport.value) return
       const items = (next.items as unknown as ReportIssue[]) ?? []
       if (items.length === 0 || next.total !== total) throw new Error('incomplete issue pages')
       allIssues.push(...items)
@@ -1028,13 +1108,102 @@ async function loadIssues(): Promise<void> {
     issues.value = allIssues
     issuesLoadState.value = 'loaded'
   } catch {
+    if (!requestIsCurrent()) return
     // 主报告继续可见，但明细加载失败不能伪装为“零问题”。
     issues.value = []
     issuesLoadState.value = 'failed'
   } finally {
-    issuesLoading.value = false
+    if (requestIsCurrent()) issuesLoading.value = false
   }
 }
+
+async function loadReportAndIssues(): Promise<void> {
+  await loadReport()
+  if (canViewReport.value) await loadIssues()
+}
+
+function clearReportForAccessRevocation(): void {
+  reportAccessRevoked.value = true
+  accessGeneration++
+  reportRequestVersion++
+  issueRequestVersion++
+  report.value = null
+  issues.value = []
+  issuesLoadState.value = 'forbidden'
+  issuesLoading.value = false
+  previewFallbackVisible.value = false
+  previewFallbackHtml.value = ''
+  exportErrorMessage.value = ''
+  exportErrorNextAction.value = ''
+  retryExportFormat.value = null
+  generatingFormat.value = null
+  exportingFormat.value = null
+  previewing.value = false
+  try { pendingPreviewWindow?.close() } catch { /* 权限撤销后立即关闭预览窗口 */ }
+  pendingPreviewWindow = null
+  loading.value = false
+  loadError.value = ''
+}
+
+watch(() => [
+  userStore.token,
+  userStore.profile?.id,
+  userStore.hasPermission('report:view'),
+  userStore.hasPermission('issue:view'),
+  userStore.hasPermission('security:view'),
+  userStore.hasPermission('pentest:view'),
+], (current, previous) => {
+  if (disposed) return
+  const accountChanged = current[0] !== previous[0] || current[1] !== previous[1]
+  if (accountChanged) {
+    accessGeneration++
+    reportRequestVersion++
+    issueRequestVersion++
+    report.value = null
+    issues.value = []
+    issuesLoadState.value = 'loading'
+    issuesLoading.value = false
+    loading.value = false
+    reportAccessRevoked.value = false
+    loadError.value = ''
+    previewFallbackVisible.value = false
+    previewFallbackHtml.value = ''
+    exportErrorMessage.value = ''
+    exportErrorNextAction.value = ''
+    retryExportFormat.value = null
+    generatingFormat.value = null
+    exportingFormat.value = null
+    previewing.value = false
+    try { pendingPreviewWindow?.close() } catch { /* 切换账号后不保留旧账号预览 */ }
+    pendingPreviewWindow = null
+    if (userStore.token && userStore.profile && userStore.hasPermission('report:view')) {
+      void loadReportAndIssues()
+    } else {
+      issuesLoadState.value = 'forbidden'
+      loadError.value = '当前账号没有报告查看权限，请返回列表。'
+    }
+    return
+  }
+
+  if (!userStore.hasPermission('report:view') || !canAccessSourceReport(report.value)) {
+    if (report.value || !userStore.hasPermission('report:view')) clearReportForAccessRevocation()
+    return
+  }
+  if (reportAccessRevoked.value) {
+    reportAccessRevoked.value = false
+    void loadReportAndIssues()
+    return
+  }
+  if (!userStore.hasPermission('issue:view') && !isDomainReport.value) {
+    issueRequestVersion++
+    issues.value = []
+    issuesLoading.value = false
+    issuesLoadState.value = 'forbidden'
+    selectedRemediationId.value = null
+    return
+  }
+  if (userStore.hasPermission('issue:view') && canViewReport.value) void loadIssues()
+}, { flush: 'sync' })
 
 // ===== T15 新增:v3 字段计算属性 =====
 
@@ -1111,8 +1280,6 @@ const top10Issues = computed<ReportIssue[]>(() => {
 })
 
 /** 选中展示修复方案的 issue(默认 Top1,可点击切换) */
-const selectedRemediationId = ref<number | null>(null)
-
 /** 当前展示修复方案的 issue 对象 */
 const selectedRemediationIssue = computed<ReportIssue | null>(() => {
   if (!top10Issues.value.length) return null
@@ -1163,10 +1330,11 @@ function cvssSeverityColor(score?: number | null): string {
  */
 async function handleGenerate(format: ReportFormat): Promise<void> {
   if (!canExport(format) || generatingFormat.value !== null) return
+  const isCurrentScope = captureAccessScope()
   generatingFormat.value = format
   try {
     const result = await apiGenerateReport(taskId, format, templateType.value)
-    if (disposed || !canExport(format)) return
+    if (!isCurrentScope() || !canViewReport.value || !canExport(format)) return
     if (result instanceof Blob) {
       // pdf / word
       const ext = format === 'pdf' ? 'pdf' : 'docx'
@@ -1182,9 +1350,9 @@ async function handleGenerate(format: ReportFormat): Promise<void> {
       ElMessage.success(`${format.toUpperCase()} 报告生成成功`)
     }
   } catch (error) {
-    if (!disposed) showExportError(error, format, '生成')
+    if (isCurrentScope()) showExportError(error, format, '生成')
   } finally {
-    generatingFormat.value = null
+    if (isCurrentScope()) generatingFormat.value = null
   }
 }
 
@@ -1251,6 +1419,7 @@ function preopenPreviewWindow(): Window | null {
  */
 async function handlePreview(): Promise<void> {
   if (!canViewReport.value || !canExportIssueDetails.value || loadError.value || previewing.value) return
+  const isCurrentScope = captureAccessScope()
   const popup = preopenPreviewWindow()
   pendingPreviewWindow = popup
 
@@ -1258,7 +1427,7 @@ async function handlePreview(): Promise<void> {
   previewFallbackVisible.value = false
   try {
     const html = await apiPreviewReport(taskId, templateType.value)
-    if (disposed || !canViewReport.value || !canExportIssueDetails.value) {
+    if (!isCurrentScope() || !canViewReport.value || !canExportIssueDetails.value) {
       try { popup?.close() } catch { /* 不再使用已失效预览窗口 */ }
       return
     }
@@ -1279,7 +1448,7 @@ async function handlePreview(): Promise<void> {
     previewFallbackHtml.value = html
     previewFallbackVisible.value = true
     await nextTick()
-    if (disposed || !canViewReport.value) {
+    if (!isCurrentScope() || !canViewReport.value) {
       previewFallbackVisible.value = false
       previewFallbackHtml.value = ''
       return
@@ -1289,7 +1458,7 @@ async function handlePreview(): Promise<void> {
     if (popup && !popup.closed) {
       try { popup.close() } catch { /* 忽略浏览器关闭窗口限制 */ }
     }
-    if (!disposed) {
+    if (isCurrentScope()) {
       exportErrorMessage.value = `预览报告失败：${readableError(error)}`
       exportErrorNextAction.value = '请核对报告状态后手动重新预览。'
       retryExportFormat.value = null
@@ -1297,7 +1466,7 @@ async function handlePreview(): Promise<void> {
     }
   } finally {
     if (pendingPreviewWindow === popup) pendingPreviewWindow = null
-    previewing.value = false
+    if (isCurrentScope()) previewing.value = false
   }
 }
 
@@ -1307,22 +1476,23 @@ async function handlePreview(): Promise<void> {
  */
 async function handleExport(format: ReportFormat): Promise<void> {
   if (!canExport(format) || exportingFormat.value !== null) return
+  const isCurrentScope = captureAccessScope()
   exportingFormat.value = format
   exportErrorMessage.value = ''
   exportErrorNextAction.value = ''
   retryExportFormat.value = null
   try {
     const blob = await apiExportReport(taskId, format, templateType.value)
-    if (disposed || !canExport(format)) return
+    if (!isCurrentScope() || !canViewReport.value || !canExport(format)) return
     const extMap: Record<ReportFormat, string> = {
       json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
     }
     downloadBlob(blob, `review_report_${taskId}.${extMap[format]}`)
     ElMessage.success(`${format.toUpperCase()} 报告导出成功`)
   } catch (error) {
-    if (!disposed) showExportError(error, format, '导出')
+    if (isCurrentScope()) showExportError(error, format, '导出')
   } finally {
-    exportingFormat.value = null
+    if (isCurrentScope()) exportingFormat.value = null
   }
 }
 
@@ -1365,7 +1535,7 @@ async function selectRemediation(id: number): Promise<void> {
 onMounted(async () => {
   const shouldGenerate = route.query.generate === '1'
   if (shouldGenerate) void router.replace({ query: {} })
-  await Promise.all([loadReport(), loadIssues()])
+  await loadReportAndIssues()
   // 报告列表"生成报告"按钮跳转携带 ?generate=1,此处消费该 query 自动触发生成
   if (shouldGenerate && canExport('html')) {
     await handleGenerate('html')
@@ -1374,13 +1544,14 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  accessGeneration++
   reportRequestVersion++
   try { pendingPreviewWindow?.close() } catch { /* 浏览器可能已关闭该窗口 */ }
   pendingPreviewWindow = null
   for (const url of [...previewUrlTimers.keys()]) releasePreviewUrl(url)
 })
 
-useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: () => Promise.all([loadReport(), loadIssues()]) })
+useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadReportAndIssues })
 </script>
 
 <style scoped lang="scss">

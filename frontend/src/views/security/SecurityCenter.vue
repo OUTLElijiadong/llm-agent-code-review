@@ -246,7 +246,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
           </div>
 
           <div v-if="dashboardData.owasp_hotspots.length" class="ov-hotspots">
-            <span class="ov-hot-title">项目 OWASP fallback · 未匹配 CNVD/CNNVD 官方记录</span>
+            <span class="ov-hot-title">项目 OWASP fallback · 尚无 CNVD/CNNVD 官方匹配证据</span>
             <div class="ov-hot-list">
               <span
                 v-for="(h, i) in dashboardData.owasp_hotspots.slice(0, 5)"
@@ -270,9 +270,9 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
         <p class="block-sub">CNVD 与 CNNVD 是两个独立来源，门户与记录编号分别标识；有官方记录证据时优先按对应来源展示。</p>
       </header>
       <div class="cn-source-status" data-testid="cn-source-status" role="status">
-        <strong>匹配优先级：CNVD / CNNVD 官方记录优先 → OWASP fallback / 未匹配</strong>
+        <strong>匹配优先级：CNVD / CNNVD 官方记录优先 → OWASP fallback（尚无官方匹配证据）</strong>
         <p>只有发现项包含对应来源的官方记录编号或官方详情链接，才能标记为 CNVD 或 CNNVD 命中；不根据标题、CWE 或关键词猜测来源。</p>
-        <p><b>当前状态：未实现实时官方数据同步。</b> 安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号或官方详情链接。因此，当前项目 OWASP 热点按 OWASP fallback / 未匹配展示；这表示本平台没有匹配证据，不表示两库中不存在相关记录。</p>
+        <p><b>当前状态：未实现实时官方数据同步或匹配。</b> 安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号或官方详情链接。因此，当前项目 OWASP 热点按 OWASP fallback 展示；本平台没有官方匹配证据，不表示两库中不存在相关记录。</p>
       </div>
       <div class="cn-portal-grid">
         <a
@@ -307,9 +307,9 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
     <!-- ========== OWASP Top 10 参考分类 ========== -->
     <section class="block">
       <header class="block-head">
-        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}（未匹配中国漏洞库时的回退分类）</h3>
+        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}（官方匹配未接入时的回退分类）</h3>
         <p class="block-sub">
-          这是 OWASP 官方风险分类参考，不等同于 CNVD/CNNVD 记录或认证；发现项没有对应官方记录编号/链接时才标记为 OWASP fallback / 未匹配。点击查看中文说明与防范示例。
+          这是 OWASP 官方风险分类参考，不等同于 CNVD/CNNVD 记录或认证；当前未接入 CNVD/CNNVD 官方匹配，因此 OWASP 标签不代表官方漏洞库命中。点击查看中文说明与防范示例。
           CWE {{ SECURITY_CATALOG_METADATA.cwe_version }} · 官方弱点 {{ SECURITY_CATALOG_METADATA.cwe_weakness_count }} 项 ·
           核验于 {{ SECURITY_CATALOG_METADATA.verified_at }}。
           <a :href="SECURITY_CATALOG_METADATA.owasp_source_url" target="_blank" rel="noopener noreferrer">OWASP 官方来源</a>

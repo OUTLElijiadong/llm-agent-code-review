@@ -1427,7 +1427,7 @@ function finishExistingTimelineToolCalls(runId: string | undefined, error: strin
 }
 
 async function retryRun(): Promise<void> {
-  if (!canRetryRun.value) return
+  if (!canRetryRun.value || retryChecking.value) return
   const pending = unconfirmedStart.value
   if (pending) {
     const generation = submissionGeneration

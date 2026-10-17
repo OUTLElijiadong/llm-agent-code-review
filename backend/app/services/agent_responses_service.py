@@ -50,6 +50,7 @@ from app.models.agent_response_run import (
     AgentToolExecution,
 )
 from app.models.user import User
+from app.schemas.discussion import RoundtableTemporaryExpert
 from app.services import (
     admin_agent_tools,
     admin_capability_service,
@@ -272,6 +273,120 @@ def _has_explicit_human_roundtable_continue_request(
     )
 
 
+def _is_automatic_task_result_for_roundtable(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    session_id: str = "",
+    run_id: str = "",
+) -> bool:
+    """识别当前小菱运行是否由该圆桌的 task.result 消息自动触发。"""
+
+    if user_id <= 0 or not surface or not session_key:
+        return False
+
+    message_ids: set[str] = set()
+    if run_id:
+        run = (
+            db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.run_id == str(run_id),
+                AgentResponseRun.user_id == int(user_id),
+                AgentResponseRun.surface == str(surface),
+                AgentResponseRun.session_key == str(session_key),
+            )
+            .one_or_none()
+        )
+        if run is not None and run.mesh_message_id:
+            message_ids.add(str(run.mesh_message_id))
+
+    query = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.user_id == int(user_id),
+        AgentMeshMessage.send_to == f"session:{surface}:{session_key}",
+        AgentMeshMessage.message_type == "task.result",
+        AgentMeshMessage.status == "processing",
+    )
+    if message_ids:
+        query = query.filter(AgentMeshMessage.message_id.in_(message_ids))
+    else:
+        query = query.order_by(AgentMeshMessage.id.desc()).limit(50)
+
+    for message in query.all():
+        try:
+            payload = json.loads(str(message.payload_json or "{}"))
+        except (TypeError, ValueError):
+            continue
+        result_session_id = str(payload.get("discussion_session_id") or "") if isinstance(payload, dict) else ""
+        if result_session_id and (not session_id or result_session_id == session_id):
+            return True
+    return False
+
+
+_ROUNDTABLE_CONTINUE_INTENT = re.compile(
+    r"(?:继续|接着(?:做|处理|审查|复核|讨论|上次|上一轮)?|再(?:跑|做|审查|复核)(?:一遍|一次)?)"
+)
+_ROUNDTABLE_CONTINUE_NEGATION = re.compile(r"(?:不要|别|不必|无需|暂不|先不).{0,4}(?:继续|接着)")
+
+
+def _has_explicit_human_roundtable_continue_request(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+    run_id: str,
+) -> bool:
+    """只接受新的人类 Responses 输入明确要求继续，不以模型工具参数代替用户授权。"""
+
+    if user_id <= 0 or not surface or not session_key or not run_id:
+        return False
+    row = (
+        db.query(AgentResponseRun)
+        .filter(
+            AgentResponseRun.run_id == str(run_id),
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == str(surface),
+            AgentResponseRun.session_key == str(session_key),
+            AgentResponseRun.status == "running",
+        )
+        .one_or_none()
+    )
+    # AgentMesh 触发的运行（task.result、status.update、团队事件等）不是新的人类消息。
+    if row is None or row.mesh_message_id:
+        return False
+    try:
+        checkpoint = json.loads(str(row.checkpoint_json or "{}"))
+    except (TypeError, ValueError):
+        return False
+    transcript = checkpoint.get("transcript") if isinstance(checkpoint, dict) else None
+    if not isinstance(transcript, list):
+        return False
+    latest_user = next(
+        (item for item in reversed(transcript) if isinstance(item, dict) and item.get("role") == "user"),
+        None,
+    )
+    if latest_user is None:
+        return False
+    content = latest_user.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    else:
+        text = ""
+    return bool(
+        text.strip()
+        and not _ROUNDTABLE_CONTINUE_NEGATION.search(text)
+        and _ROUNDTABLE_CONTINUE_INTENT.search(text)
+    )
+
+
 class AgentSessionExpiredError(RuntimeError):
     """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
@@ -306,6 +421,11 @@ class StartRoundtableDiscussionArguments(FixedToolArguments):
     project_id: int
     file_id: int
     review_type: str = "full"
+    temporary_experts: list[RoundtableTemporaryExpert] = Field(
+        default_factory=list,
+        max_length=3,
+        description="按当前代码情境临时增加的专家，最多 3 位，仅属于本次圆桌，不写入永久 Agent 库",
+    )
 
 
 class GetRoundtableDiscussionArguments(FixedToolArguments):
@@ -2117,13 +2237,19 @@ class PrismToolExecutor:
             user=self._user,
             origin_surface=self._surface,
             origin_session_key=self._session_key,
+            temporary_experts_json=json.dumps(
+                [expert.model_dump() for expert in call.arguments.get("temporary_experts", [])],
+                ensure_ascii=False,
+            ),
         )
         data = dict(response.data or {})
         session_id = str(data.get("session_id") or "")
         pending = take_pending(session_id)
         if not session_id or pending is None:
             return ToolExecutionResult.failure("圆桌讨论上下文创建失败")
-        launch_pending_discussion(pending)
+        launched = launch_pending_discussion(pending)
+        if launched is None:
+            return ToolExecutionResult.failure("圆桌会话已结束或已被停止，未重新启动；如需继续请发送新的明确指令")
         open_query = urlencode({
             "discuss_session": session_id,
             "discuss_ws": str(data.get("ws_url") or ""),
@@ -2540,7 +2666,7 @@ class PrismToolExecutor:
             "previous_report_task_id": int(getattr(session, "report_task_id", 0) or 0),
             "action": "continue",
             "accepted": True,
-            "status": "active",
+            "status": str(data.get("status") or "pending"),
             "started_by": "user_agent",
             "message": "已基于上一轮结论创建独立续会，完成后将回投原小菱会话。",
             "open_path": f"/agents?discuss_session={new_session_id}",
@@ -4124,6 +4250,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "download_code_file 和 download_project_source 固定工具。"
             "圆桌讨论必须使用 start_roundtable_discussion、get_roundtable_discussion "
             "和 control_roundtable_discussion 固定工具。start_roundtable_discussion 启动后立即结束本轮,"
+            "由小菱主持人按代码情境调用固定审查专家；只有确有不同专业视角时才可在 "
+            "temporary_experts 中定义最多 3 位任务临时专家，"
+            "临时专家只加入本次圆桌 roster，不得创建或修改永久 Agent；"
             "告知用户等待期间可以继续对话;讨论结束后系统会把结论回投本会话,收到 task.result 后直接汇报共识、"
             "报告入口和是否满足要求;仅当用户在后续新消息中明确要求继续，且圆桌结论成功时，"
             "才用 control_roundtable_discussion 的 continue 创建独立续会;"
@@ -4997,7 +5126,10 @@ def _user_capability_schemas() -> list[Dict[str, Any]]:
         {
             "type": "function",
             "name": "start_roundtable_discussion",
-            "description": "为当前用户可访问的单个源码文件启动多 Agent 圆桌讨论；执行前需要批准",
+            "description": (
+                "由小菱主持人以当前账户配置的主模型，为当前用户可访问的源码文件启动圆桌；"
+                "按需最多添加 3 位仅本次有效的临时专家，绝不写入永久 Agent 库。"
+            ),
             "parameters": StartRoundtableDiscussionArguments.model_json_schema(),
         },
         {

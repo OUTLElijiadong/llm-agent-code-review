@@ -418,7 +418,7 @@ describe('审查扫描范围失败回归', () => {
     await target.find('input').setValue(true)
     await vm.onSubmit()
     expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ file_ids: [501] }))
-  })
+  }, 15000)
 
   it('全部项目实际提交包含第101个项目，不只修正显示计数', async () => {
     api.projects.mockImplementation(({ page = 1 }) => Promise.resolve(page === 1

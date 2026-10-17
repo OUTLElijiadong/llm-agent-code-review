@@ -13,18 +13,25 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
 from sqlalchemy import false as sa_false
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, load_only
 
 from app.core.config import settings
+from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_source_archive import ProjectSourceArchive
 from app.models.review_task import ReviewTask
 from app.models.user import User
+from app.services import rbac_service
 from app.services.project_member_service import get_visible_project_ids
-from app.services.report_service import load_task_issue_stats, task_metrics_access_filter
+from app.services.report_service import (
+    display_report_score,
+    load_task_issue_stats,
+    task_metrics_access_filter,
+    visible_report_review_types,
+)
 
 # ── 仪表盘聚合缓存 ──────────────────────────────────────────────────────────
 # 工作台一次加载并发请求 summary/risk-distribution/issue-type-statistics 三个接口,
@@ -124,6 +131,29 @@ def _valid_task_ids(db: Session, user: User):
         ReviewTask.status != "deleted",
         ReviewTask.project_id.in_(visible_ids),
     )
+
+
+def _readable_report_query(db: Session, user: User):
+    """只选择当前账号能打开的报告任务，供首页最近报告卡使用。"""
+    visible_ids = _visible_project_ids(db, user)
+    query = db.query(ReviewTask).filter(
+        ReviewTask.project_id.in_(visible_ids),
+        ReviewTask.status.in_(("success", "partial", "failed", "cancelled", "expired", "stopped")),
+    )
+    if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
+        return query.filter(sa_false())
+    if not rbac_service.is_admin_user(db, int(user.id)):
+        query = query.filter(ReviewTask.user_id == int(user.id))
+    # Domain reports additionally require their source-specific permission.
+    # Keep this list-card query aligned with report detail/list access; metric
+    # aggregation below intentionally uses task_metrics_access_filter instead.
+    report_backed_types = ("sandbox_test", "pentest", "security_scan", "fullchain_audit")
+    visible_types = visible_report_review_types(db, user)
+    return query.filter(or_(
+        ReviewTask.review_type.is_(None),
+        ReviewTask.review_type.notin_(report_backed_types),
+        ReviewTask.review_type.in_(visible_types) if visible_types else sa_false(),
+    ))
 
 
 # 问题统计只需要这些列;避免把 summary/rules_snapshot/score_breakdown 等
@@ -247,22 +277,22 @@ def get_summary(db: Session, user: User) -> dict:
     avg_score = round(float(score_value or 0), 1)
 
     recent_q = (
-        db.query(
-            ReviewTask, Project.project_name,
-            case((task_metrics_access_filter(db, user), ReviewTask.score), else_=None).label("visible_score"),
-        )
+        _readable_report_query(db, user)
+        .with_entities(ReviewTask, Project.project_name)
         .join(Project, Project.id == ReviewTask.project_id)
         .filter(
             ReviewTask.status == "success",
-            ReviewTask.project_id.in_(visible_ids),
             Project.status != "deleted",
-            task_metrics_access_filter(db, user),
         )
         .order_by(ReviewTask.create_time.desc())
         .limit(5)
     )
     recent_tasks = []
-    for task, project_name, visible_score in recent_q.all():
+    for task, project_name in recent_q.all():
+        visible_score = (
+            display_report_score(task, task.score)
+            if task.score is not None and 0 <= task.score <= 100 else None
+        )
         recent_tasks.append({
             "id": task.id,
             "task_name": task.task_name or f"审查任务 #{task.id}",
@@ -271,7 +301,7 @@ def get_summary(db: Session, user: User) -> dict:
             "status": task.status,
             "review_type": task.review_type,
             "score": visible_score if visible_score is not None and 0 <= visible_score <= 100 else None,
-            "coverage": task.coverage if visible_score is not None else None,
+            "coverage": task.coverage if isinstance(task.coverage, dict) else None,
             "create_time": task.create_time.isoformat() if task.create_time else None,
         })
 
@@ -337,28 +367,40 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
     Returns:
         list[dict]: [{task_id, score, create_time}, ...]
     """
+    # Score trends are project metrics, not report cards. Preserve the existing
+    # shared ordinary-review metric policy while filtering domain task metrics
+    # through their report/source permissions and owner/admin scope.
     visible_ids = _visible_project_ids(db, user)
-    base_q = (
-        db.query(ReviewTask)
-        .filter(
-            ReviewTask.status == "success",
-            ReviewTask.project_id.in_(visible_ids),
-            task_metrics_access_filter(db, user),
-            ReviewTask.review_type.in_(
-                ("quick", "standard", "discuss", "security", "performance", "full", "sandbox_test", "pentest"),
-            ),
-            # 领域任务/历史任务可能没有质量评分；过滤掉无效分数，避免
-            # ScoreTrendItem 校验 500，也不在图表中伪造 0 分。
-            ReviewTask.score.is_not(None),
-            ReviewTask.score.between(0, 100),
-        )
-        .order_by(ReviewTask.create_time.desc())
-        .limit(limit)
-    )
-    rows = base_q.all()
+    base_q = db.query(ReviewTask).filter(
+        ReviewTask.status == "success",
+        ReviewTask.project_id.in_(visible_ids),
+        task_metrics_access_filter(db, user),
+        ReviewTask.review_type.in_(
+            ("quick", "standard", "discuss", "security", "performance", "full",
+             "sandbox_test", "pentest", "security_scan", "fullchain_audit")
+        ),
+        ReviewTask.score.is_not(None),
+        ReviewTask.score.between(0, 100),
+    ).order_by(ReviewTask.create_time.desc())
+    rows = []
+    offset = 0
+    batch_size = max(20, min(200, int(limit) * 4))
+    while len(rows) < limit:
+        batch = base_q.offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+        offset += len(batch)
+        for task in batch:
+            score = display_report_score(task, task.score)
+            if score is None:
+                continue
+            rows.append((task, score))
+            if len(rows) >= limit:
+                break
     return [
-        {"task_id": r.id, "score": r.score, "create_time": r.create_time.isoformat() if r.create_time else None}
-        for r in reversed(rows)
+        {"task_id": task.id, "score": score,
+         "create_time": task.create_time.isoformat() if task.create_time else None}
+        for task, score in reversed(rows)
     ]
 
 

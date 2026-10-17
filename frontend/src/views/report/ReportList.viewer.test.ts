@@ -9,7 +9,7 @@ vi.mock('@/router', () => ({ default: { push: api.push } }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: api.push }) }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 import ReportList from './ReportList.vue'
-const row = { task_id: 8, task_name: '本地只读报告样本', project_name: '本地项目', total_issues: 0, score: 100, status: 'success', create_time: '2026-10-04', can_delete: true }
+const row = { task_id: 8, task_name: '本地只读报告样本', project_name: '本地项目', total_issues: 0, score: 100, status: 'success', create_time: '2026-10-04', can_view_report: true, can_delete: true }
 let user: ReturnType<typeof useUserStore>
 const wrappers: ReturnType<typeof shallowMount>[] = []
 beforeEach(() => {

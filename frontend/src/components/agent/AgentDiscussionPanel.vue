@@ -66,7 +66,7 @@
               </el-button>
             </el-tooltip>
             <el-tooltip content="关闭" placement="bottom">
-              <el-button circle aria-label="关闭讨论" @click="onClose">
+              <el-button circle aria-label="关闭讨论" :disabled="phase === 'stopping'" @click="onClose">
                 <span class="btn-emoji">✕</span>
               </el-button>
             </el-tooltip>
@@ -118,11 +118,28 @@
             :style="{ '--chip-color': themeOf(a.code).color }"
           >
             {{ themeOf(a.code).icon }} {{ a.name }}
+            <span v-if="a.temporary" class="part-state temporary-state">临时</span>
             <span v-if="participantStateLabel(a.code)" class="part-state">
               {{ participantStateLabel(a.code) }}
             </span>
           </span>
           <span class="part-chip user">🙋 你</span>
+        </div>
+
+        <div
+          v-if="phase !== 'concluded'"
+          class="discussion-progress"
+          role="progressbar"
+          :aria-valuemin="0"
+          :aria-valuemax="expectedTurns"
+          :aria-valuenow="completedTurns"
+          :aria-label="`已完成 ${completedTurns} / ${expectedTurns} 个专家发言`"
+        >
+          <div class="progress-label">
+            <span>{{ phase === 'pending' ? '等待启动' : '专家发言进度' }}</span>
+            <strong>{{ completedTurns }} / {{ expectedTurns }}</strong>
+          </div>
+          <div class="progress-track"><span :style="{ width: `${progressPercent}%` }" /></div>
         </div>
 
         <!-- 消息区 -->
@@ -136,7 +153,7 @@
           </div>
           <div v-if="lastError" class="error-bar">
             <span>⚠️ {{ lastError }}</span>
-            <el-button size="small" type="primary" plain @click="reconnect">重新连接</el-button>
+            <el-button size="small" type="primary" plain :disabled="phase === 'stopping'" @click="reconnect">重新连接</el-button>
           </div>
 
           <div v-if="turns.length === 0 && !lastError" class="empty-state">
@@ -209,7 +226,7 @@
         </div>
 
         <!-- 回到底部 -->
-        <button v-if="showScrollBtn" class="scroll-btn" @click="scrollToBottom(true)">↓ 最新</button>
+        <button v-if="showScrollBtn" class="scroll-btn" :disabled="phase === 'stopping'" @click="scrollToBottom(true)">↓ 最新</button>
 
         <!-- 输入区 -->
         <footer class="room-footer">
@@ -264,7 +281,7 @@ import { getDiscussionSession, type DiscussionProgress } from '@/api/discussion'
 const props = defineProps<{
   sessionId: string
   wsUrl?: string
-  agents: Array<{ code: string; name: string }>
+  agents: Array<{ code: string; name: string; temporary?: boolean }>
   fileName?: string
   initialProgress?: DiscussionProgress | null
   initialStatus?: string
@@ -281,7 +298,7 @@ const router = useRouter()
 const reportTaskId = ref(props.initialReportTaskId || 0)
 
 type ConnStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
-type Phase = 'live' | 'concluded'
+type Phase = 'pending' | 'live' | 'stopping' | 'concluded'
 type TerminalStatus = 'success' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted' | ''
 
 function normalizeTerminalStatus(value: unknown): TerminalStatus {
@@ -310,13 +327,18 @@ let disposed = false
 const status = ref<ConnStatus>('connecting')
 const terminalStatus = ref<TerminalStatus>(normalizeTerminalStatus(props.initialStatus))
 const phase = ref<Phase>(
-  ['concluded', 'success', 'completed', 'partial', 'failed', 'cancelled', 'interrupted'].includes(props.initialStatus || '')
-    ? 'concluded' : 'live',
+  normalizeTerminalStatus(props.initialStatus) || props.initialStatus === 'concluded'
+    ? 'concluded'
+    : props.initialStatus === 'pending' || props.initialProgress?.phase === 'pending'
+      ? 'pending'
+      : props.initialStatus === 'stopping' ? 'stopping' : 'live',
 )
 const stageMessage = ref('')
 const lastError = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
+const completedTurns = ref(0)
+const expectedTurns = ref(0)
 const currentSpeaker = ref('')
 const currentSpeakerCode = ref('')
 const serverProgress = ref<DiscussionProgress | null>(props.initialProgress ?? null)
@@ -444,6 +466,8 @@ const quickPrompts = [
 ]
 
 const statusTag = computed(() => {
+  if (phase.value === 'pending') return { type: 'warning' as const, text: '等待启动' }
+  if (phase.value === 'stopping') return { type: 'warning' as const, text: '正在停止' }
   if (isStopping.value && phase.value !== 'concluded') {
     return { type: 'warning' as const, text: '正在停止' }
   }
@@ -505,6 +529,8 @@ const followupProgressNote = computed(() => status.value === 'connected'
   ? '已收到的问题会按顺序回复，可能需要数分钟'
   : '连接恢复后将同步回复；已保存的问题仍在后台处理')
 const inputPlaceholder = computed(() => {
+  if (phase.value === 'pending') return '任务已排队，等待圆桌启动'
+  if (phase.value === 'stopping' || isStopping.value) return '正在停止，暂不能发送消息'
   if (phase.value === 'live'
     && ['summarizing', 'extracting', 'reporting'].includes(serverProgress.value?.phase || '')) {
     return '报告正在整理；消息会保存，完成后由主持人按顺序回复…'
@@ -517,12 +543,13 @@ const inputPlaceholder = computed(() => {
 const progressTotal = computed(() => {
   const serverTotal = Number(serverProgress.value?.total_units)
   if (Number.isFinite(serverTotal) && serverTotal > 0) return serverTotal
+  if (expectedTurns.value > 0) return expectedTurns.value
   return totalRounds.value > 0 ? totalRounds.value * props.agents.length : 0
 })
 const progressCompleted = computed(() => {
   const serverCompleted = Number(serverProgress.value?.completed_units)
   const raw = serverProgress.value && Number.isFinite(serverCompleted)
-    ? serverCompleted : observedSpeakers.value
+    ? serverCompleted : Math.max(completedTurns.value, observedSpeakers.value)
   return Math.max(0, Math.min(progressTotal.value, raw))
 })
 const progressPercent = computed(() => {
@@ -535,7 +562,8 @@ const progressPercent = computed(() => {
   return completed ? actual : Math.min(actual, 95)
 })
 const progressLabel = computed(() => {
-  if (isStopping.value && phase.value !== 'concluded') return '正在停止圆桌讨论'
+  if (phase.value === 'pending') return '等待圆桌启动'
+  if ((phase.value === 'stopping' || isStopping.value) && phase.value !== 'concluded') return '正在停止圆桌讨论'
   if (phase.value === 'concluded' && serverProgress.value?.phase === 'partial') {
     return '圆桌部分完成，审查覆盖不完整'
   }
@@ -768,6 +796,8 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       if (Number.isFinite(seq)) lastProgressSeq = seq
       const completed = Number(msg.payload.completed_units)
       const total = Number(msg.payload.total_units)
+      completedTurns.value = Math.max(0, Number(msg.payload.completed_turns ?? completed) || 0)
+      expectedTurns.value = Math.max(0, Number(msg.payload.expected_turns ?? total) || 0)
       serverProgress.value = {
         phase: String(msg.payload.phase || 'pending'),
         completed_units: Number.isFinite(completed) ? completed : 0,
@@ -782,6 +812,11 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
         followupStartSeq.value = Number(msg.payload.followup_start_seq)
       }
       if (serverProgress.value.current_round > 0) currentRound.value = serverProgress.value.current_round
+      if (['speaking', 'summarizing', 'extracting', 'reporting'].includes(serverProgress.value.phase)) {
+        phase.value = 'live'
+      } else if (serverProgress.value.phase === 'pending' && !isStopping.value) {
+        phase.value = 'pending'
+      }
       if (Number(msg.payload.turn_count) > latestSeq()) void syncLatest()
       const progressTerminal = normalizeTerminalStatus(msg.payload.phase)
       if (progressTerminal) {
@@ -800,6 +835,8 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       currentSpeaker.value = String(payload.speaker_name || '')
       currentSpeakerCode.value = String(payload.speaker_code || '')
       stageMessage.value = String(payload.message || payload.error || '')
+      completedTurns.value = Math.max(0, Number(payload.completed_turns) || 0)
+      expectedTurns.value = Math.max(0, Number(payload.expected_turns) || 0)
       isPaused.value = payload.status === 'paused'
       reportTaskId.value = Number(payload.report_task_id) || reportTaskId.value
       const savedTerminal = normalizeTerminalStatus(payload.terminal_status || payload.status)
@@ -811,7 +848,7 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
         currentSpeakerCode.value = ''
       } else {
         terminalStatus.value = ''
-        phase.value = 'live'
+        phase.value = payload.status === 'pending' ? 'pending' : isStopping.value ? 'stopping' : 'live'
         if (isStopping.value && !stopSentForConnection) {
           stopSentForConnection = Boolean(stream?.send('stop'))
           if (!stopSentForConnection) lastError.value = '连接恢复后，停止请求仍未送达，请重试'
@@ -819,6 +856,13 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       }
       break
     }
+    case 'started':
+      phase.value = 'live'
+      stageMessage.value = String(msg.payload.message || '圆桌已启动，主持人正在安排讨论')
+      break
+    case 'steering_received':
+      stageMessage.value = String(msg.payload.message || '已收到你的补充，小菱会先调整后续讨论')
+      break
     case 'round_start':
       currentRound.value = (msg.payload.round as number) || 0
       totalRounds.value = (msg.payload.total_rounds as number) || 0
@@ -840,6 +884,7 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       break
     case 'stopping':
       isStopping.value = true
+      phase.value = 'stopping'
       stageMessage.value = '讨论正在终止，不会生成成功小结'
       ElMessage.info('正在停止圆桌讨论')
       break
@@ -925,10 +970,12 @@ async function onStop() {
     })
   } catch { return }
   isStopping.value = true
+  phase.value = 'stopping'
   stageMessage.value = '正在请求服务端停止后续阶段'
   stopSentForConnection = Boolean(stream?.send('stop'))
   if (!stopSentForConnection) {
     isStopping.value = false
+    phase.value = 'live'
     lastError.value = '停止请求未送达，请确认连接后重试'
   }
 }
@@ -1111,8 +1158,15 @@ connectWs()
   margin-left: 2px; padding-left: 6px; border-left: 1px solid #d8d8e2;
   font-size: 10px; color: #6b7280;
 }
+.part-state.temporary-state { color: #7c3aed; background: #f5f0ff; border: 0; padding: 1px 5px; border-radius: 8px; }
 .part-chip.orchestrator { border-color: #8B5CF6; border-left-color: #8B5CF6; color: #6D28D9; }
 .part-chip.user { border-color: #0EA5E9; border-left-color: #0EA5E9; color: #0369A1; }
+
+.discussion-progress { padding: 8px 20px 10px; background: #fff; border-bottom: 1px solid #ececf3; }
+.progress-label { display: flex; justify-content: space-between; align-items: center; color: #697086; font-size: 11px; margin-bottom: 5px; }
+.progress-label strong { color: #4438a8; font-variant-numeric: tabular-nums; }
+.progress-track { height: 5px; overflow: hidden; border-radius: 999px; background: #ececf4; }
+.progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7c65f5, #34b9c8); transition: width 240ms ease; }
 
 /* 消息区 */
 .room-body {

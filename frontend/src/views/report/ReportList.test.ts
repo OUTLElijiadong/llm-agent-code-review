@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   reports: vi.fn(), projects: vi.fn(), export: vi.fn(), delete: vi.fn(), confirm: vi.fn(),
+  permissions: new Set<string>(),
 }))
 const router = vi.hoisted(() => ({ push: vi.fn() }))
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }))
@@ -11,14 +12,15 @@ vi.mock('@/api/project', () => ({ getProjects: api.projects }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 vi.mock('vue-router', () => ({ useRouter: () => router }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({
-  hasPermission: (permission: string) => permission.startsWith('report:export:') || permission === 'review:start',
+  hasPermission: (permission: string) => api.permissions.has(permission)
+    || permission.startsWith('report:export:'),
 }) }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
 import ReportList from './ReportList.vue'
 
 const report = {
-  task_id: 42, task_name: '渗透报告', project_name: '领域项目', total_issues: 3, score: 72,
+  task_id: 42, can_view_report: true, task_name: '渗透报告', project_name: '领域项目', total_issues: 3, score: 72,
   status: 'success', create_time: '2026-09-05T00:00:00Z',
   source: { type: 'pentest', stats_basis: 'pentest_findings', detail_api: '/api/pentest/engagements/demo' },
 }
@@ -43,6 +45,10 @@ function mountPage(): VueWrapper {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  api.permissions.clear()
+  for (const permission of ['report:view', 'issue:view', 'security:view', 'pentest:view', 'review:start']) {
+    api.permissions.add(permission)
+  }
   api.reports.mockResolvedValue({ items: [report], total: 1, page: 1, page_size: 20, pages: 1 })
   api.projects.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
   api.export.mockResolvedValue(new Blob(['{}'], { type: 'application/json' }))
@@ -60,6 +66,46 @@ let wrapper: VueWrapper | undefined
 afterEach(() => wrapper?.unmount())
 
 describe('报告卡片列表', () => {
+  it('缺少报告权限时不请求列表或展示卡片', async () => {
+    api.permissions.delete('report:view')
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(api.reports).not.toHaveBeenCalled()
+    expect(api.projects).not.toHaveBeenCalled()
+    expect(wrapper.find('.report-card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('当前账号没有报告查看权限')
+  })
+
+  it('服务端未明确授权的条目不渲染卡片或泄露分页总数', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, can_view_report: false, task_name: '其他账号的渗透报告' }],
+      total: 38, page: 1, page_size: 20, pages: 2,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('其他账号的渗透报告')
+    expect(wrapper.text()).not.toContain('38')
+  })
+
+  it.each([
+    { source: { type: 'pentest' }, permission: 'pentest:view' },
+    { source: { type: 'security_scan', security_report: {} }, permission: 'security:view' },
+  ])('来源权限 $permission 撤销后隐藏对应报告卡片', async ({ source, permission }) => {
+    api.permissions.delete(permission)
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, can_view_report: true, source }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('渗透报告')
+  })
+
   it('卡片化展示:主行任务名+审查类型徽章+结论,次行项目/问题数/时间,右侧评分色环', async () => {
     wrapper = mountPage()
     await flushPromises()

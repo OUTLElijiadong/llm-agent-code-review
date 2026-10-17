@@ -109,10 +109,10 @@
           </div>
           <div class="rc-actions" @click.stop>
             <el-tooltip content="查看详情" placement="top">
-              <el-button link type="primary" size="small" :icon="ViewIcon" aria-label="查看详情" @click.stop="goDetail(row.task_id)" />
+              <el-button link type="primary" size="small" :icon="ViewIcon" aria-label="查看详情" @click.stop="goDetail(row)" />
             </el-tooltip>
             <el-tooltip content="生成报告" placement="top">
-              <el-button link type="primary" size="small" :icon="MagicStick" aria-label="生成报告" @click.stop="goGenerate(row.task_id)" />
+              <el-button link type="primary" size="small" :icon="MagicStick" aria-label="生成报告" @click.stop="goGenerate(row)" />
             </el-tooltip>
             <el-dropdown trigger="click" @command="(cmd: string) => handleRowCommand(row, cmd)">
               <el-button
@@ -209,6 +209,17 @@ function isDomainReport(row: ReportListItem): boolean {
   return row.source?.type === 'sandbox_test' || row.source?.type === 'pentest'
 }
 
+/** 服务端基于所有权与来源权限给出显式结论；缺失或 false 一律不展示。 */
+function canDisplayReport(row: ReportListItem): boolean {
+  if (row.can_view_report !== true || !userStore.hasPermission('report:view')) return false
+  const sourceType = String(row.source?.type || '')
+  if (row.source?.security_report || ['security_scan', 'fullchain_audit'].includes(sourceType)) {
+    return userStore.hasPermission('security:view')
+  }
+  if (sourceType === 'pentest') return userStore.hasPermission('pentest:view')
+  return true
+}
+
 function canExport(format: ReportFormat): boolean {
   return userStore.hasPermission(`report:export:${format}`)
 }
@@ -299,6 +310,14 @@ function sandboxScoreTitle(row: ReportListItem) {
 
 async function loadData() {
   if (disposed) return
+  if (!userStore.hasPermission('report:view')) {
+    loadRequestGeneration++
+    reports.value = []
+    total.value = 0
+    loading.value = false
+    loadErrorMessage.value = '当前账号没有报告查看权限。'
+    return
+  }
   const current = captureAccount()
   const requestGeneration = ++loadRequestGeneration
   loading.value = true
@@ -316,8 +335,10 @@ async function loadData() {
 
     const data = await getReports(params)
     if (!current() || requestGeneration !== loadRequestGeneration) return
-    reports.value = data.items
-    total.value = data.total
+    const visibleItems = data.items.filter(canDisplayReport)
+    reports.value = visibleItems
+    // 若服务端返回未授权或缺少权限结论的卡片，避免其总数泄露到分页器。
+    total.value = visibleItems.length === data.items.length ? data.total : visibleItems.length
   } catch {
     if (!current() || requestGeneration !== loadRequestGeneration) return
     reports.value = []
@@ -337,11 +358,13 @@ async function loadProjects() {
 }
 
 function onRowClick(row: ReportListItem) {
+  if (!canDisplayReport(row)) return
   router.push(`/reports/${row.task_id}`)
 }
 
-function goDetail(taskId: number) {
-  router.push(`/reports/${taskId}`)
+function goDetail(row: ReportListItem) {
+  if (!canDisplayReport(row)) return
+  router.push(`/reports/${row.task_id}`)
 }
 
 /**
@@ -349,8 +372,9 @@ function goDetail(taskId: number) {
  * 详情页 onMounted 时检测并调用 handleGenerate 自动生成 HTML 报告)。
  * @param taskId - 审查任务 ID
  */
-function goGenerate(taskId: number): void {
-  router.push({ path: `/reports/${taskId}`, query: { generate: '1' } })
+function goGenerate(row: ReportListItem): void {
+  if (!canDisplayReport(row)) return
+  router.push({ path: `/reports/${row.task_id}`, query: { generate: '1' } })
 }
 
 /**
@@ -375,7 +399,7 @@ function downloadBlob(blob: Blob, filename: string): void {
  * @param format - 导出格式 json/html/pdf/word
  */
 async function handleExport(row: ReportListItem, format: ReportFormat): Promise<void> {
-  if (!canExport(format)) return
+  if (!canDisplayReport(row) || !canExport(format)) return
   if (exportingTaskId.value !== null) return
   const current = captureAccount()
   if (isDomainReport(row) && format !== 'json') {
@@ -389,7 +413,7 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
   retryExportFormat.value = null
   try {
     const blob = await exportReport(row.task_id, format, 'detailed')
-    if (!current() || !canExport(format)) return
+    if (!current() || !canDisplayReport(row) || !canExport(format)) return
     const extMap: Record<ReportFormat, string> = {
       json: 'json', html: 'html', pdf: 'pdf', word: 'docx',
     }
@@ -423,10 +447,10 @@ function retryExport(): void {
  * @param row - 报告行数据
  */
 async function handleDelete(row: ReportListItem) {
-  if (!canDeleteReport.value || row.can_delete !== true || disposed) return
+  if (!canDisplayReport(row) || !canDeleteReport.value || row.can_delete !== true || disposed) return
   const accountCurrent = captureAccount()
   const generation = deleteGeneration
-  const current = () => accountCurrent() && generation === deleteGeneration && canDeleteReport.value && row.can_delete === true
+  const current = () => accountCurrent() && generation === deleteGeneration && canDisplayReport(row) && canDeleteReport.value && row.can_delete === true
     && !reports.value.some(report => report.task_id === row.task_id && report.can_delete !== true)
   const ok = await confirmDanger({ target: `删除报告「${taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)}」` })
   if (!ok || !current()) return
@@ -442,6 +466,30 @@ async function handleDelete(row: ReportListItem) {
 
 watch(canDeleteReport, () => { deleteGeneration++ }, { flush: 'sync' })
 watch(() => reports.value.map(row => `${row.task_id}:${row.can_delete}`).join('|'), () => { deleteGeneration++ }, { flush: 'sync' })
+watch(() => [
+  userStore.hasPermission('report:view'),
+  userStore.hasPermission('security:view'),
+  userStore.hasPermission('pentest:view'),
+], () => {
+  const visible = reports.value.filter(canDisplayReport)
+  if (visible.length !== reports.value.length) {
+    reports.value = visible
+    total.value = visible.length
+  }
+  if (!userStore.hasPermission('report:view')) {
+    loadRequestGeneration++
+    reports.value = []
+    total.value = 0
+    loading.value = false
+    loadErrorMessage.value = '当前账号没有报告查看权限。'
+    return
+  }
+  if (userStore.token && userStore.profile) {
+    loadErrorMessage.value = ''
+    void loadData()
+    void loadProjects()
+  }
+}, { flush: 'sync' })
 watch(() => [userStore.token, userStore.profile?.id], () => {
   lifecycleGeneration++
   deleteGeneration++
@@ -474,8 +522,12 @@ function handleRowCommand(row: ReportListItem, cmd: string): void {
 }
 
 onMounted(() => {
-  loadProjects()
-  loadData()
+  if (userStore.hasPermission('report:view')) {
+    loadProjects()
+    loadData()
+  } else {
+    loadErrorMessage.value = '当前账号没有报告查看权限。'
+  }
 })
 
 useAgentPageRefresh({ pages: ['/reports', '/reviews'], refresh: loadData })

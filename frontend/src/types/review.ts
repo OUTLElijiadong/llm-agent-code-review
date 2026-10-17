@@ -145,6 +145,10 @@ export interface TaskCoverageOut {
   blackbox_status?: string | null
   reason?: string | null
   coverage_status?: string | null
+  /** 服务端报告的覆盖对象，未知结构保留为开放字段，不映射成完整通过。 */
+  tested?: unknown[]
+  skipped_phases?: unknown[]
+  phases?: Array<Record<string, unknown>>
   /** 沙箱验证结果的覆盖状态，后端列表实际使用 coverage_status。 */
   current_file?: string | null
   completed_files?: number | null

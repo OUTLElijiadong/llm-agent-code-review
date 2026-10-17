@@ -1392,6 +1392,38 @@ def test_remote_only_blackbox_never_selects_or_dispatches_a_worker(db, monkeypat
     assert _DormantThread.created[0].started is True
 
 
+def test_dispatch_thread_start_failure_is_terminal_and_publishes_failed_test_report(db, monkeypatch) -> None:
+    archive = _archive({"main.py": "print('dispatch failure')\n"})
+    actor = _patch_environment_creation(db, monkeypatch, archive)
+    _persist_execution_worker(db)
+    report_publisher = MagicMock()
+    monkeypatch.setattr(sandbox_service, "_publish_terminal_sandbox_report", report_publisher)
+
+    class FailingStartThread(_DormantThread):
+        def start(self) -> None:
+            raise RuntimeError("thread scheduler unavailable")
+
+    monkeypatch.setattr(sandbox_service.threading, "Thread", FailingStartThread)
+    environment = sandbox_service.create_environment(
+        db,
+        actor,
+        {
+            "project_id": 91,
+            "purpose": "test",
+            "language": "python",
+            "test_mode": "whitebox",
+        },
+    )
+
+    result = json.loads(environment.result_json)
+    assert environment.status == "failed"
+    assert "线程启动失败" in environment.error
+    assert result["execution_status"] == "failed"
+    assert result["coverage"]["coverage_status"] == "partial"
+    assert "测试范围未执行" in result["coverage"]["unscanned"][0]
+    report_publisher.assert_called_once_with(db, environment, execution_status="failed")
+
+
 def test_remote_combined_selects_whitebox_worker(db, monkeypatch) -> None:
     archive = _archive({"main.py": "print('combined')\n"})
     actor = _patch_environment_creation(db, monkeypatch, archive)
@@ -1576,7 +1608,11 @@ def test_fast_terminal_execute_response_persists_worker_events_before_conclusion
                         "payload": {"exit_code": 0},
                     },
                 ],
-                "result": {"exit_code": 0, "summary": "ok"},
+                "result": {
+                    "exit_code": 0,
+                    "summary": "ok",
+                    "logs": {"text": "PRISM_VERIFY whitebox ok"},
+                },
             }
         }
 
@@ -2354,6 +2390,7 @@ def test_browser_blackbox_appends_evidence_without_deleting_existing_artifacts(
         lambda url, **_kwargs: SimpleNamespace(original_url=url, ip_address="1.1.1.1"),
     )
     monkeypatch.setattr(sandbox_service, "_select_browser_worker", lambda _db: worker)
+    monkeypatch.setattr(sandbox_service, "_run_test_review_report", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         sandbox_service,
         "_call_worker",

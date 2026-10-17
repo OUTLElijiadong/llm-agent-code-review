@@ -840,6 +840,10 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     """
     from app.services.agent_mesh_dispatcher import dispatch_state
 
+    is_admin = _is_admin_surface(db, user)
+    if surface:
+        _assert_surface(db, user, surface)
+    effective_surface = surface or ("admin" if is_admin else "user")
     runtime_codes = _runtime_codes()
     items: list[dict[str, Any]] = []
     for code, contract in CONTRACTS.items():
@@ -847,7 +851,7 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
         # 调度引擎，均不得进入子 Agent 候选目录或被团队递归调用。
         if code in _NON_DELEGABLE_ROOT_CODES:
             continue
-        if surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
+        if effective_surface == "user" and code in _USER_SURFACE_HIDDEN_CODES:
             continue
         if code == "operations":
             is_super_admin = (
@@ -858,7 +862,7 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
                 from app.services import rbac_service
 
                 is_super_admin = rbac_service.is_super_admin_user(db, int(user.id))
-            if surface != "admin" or not is_super_admin:
+            if effective_surface != "admin" or not is_super_admin:
                 continue
         kind = "runtime" if code in runtime_codes or contract.execution_mode in {
             "runtime", "runtime_service", "protected_runtime",
@@ -920,6 +924,8 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     )
     if surface in {"user", "admin"}:
         conversation_query = conversation_query.filter(AgentMeshConversation.surface == surface)
+    elif not is_admin:
+        conversation_query = conversation_query.filter(AgentMeshConversation.surface == "user")
     conversations = (
         conversation_query
         .order_by(AgentMeshConversation.last_seen_at.desc(), AgentMeshConversation.id.desc())
@@ -1732,9 +1738,25 @@ def pull_inbox(
     )
     now = _now()
     _expire_pending(db, rows, now)
+    cancelled_parent_ids = _cancelled_parent_run_ids(
+        db,
+        rows,
+        user_id=int(user.id),
+        surface=surface,
+        session_key=session_key,
+    )
     delivered: list[AgentMeshMessage] = []
     for row in rows:
         if row.status == "expired":
+            continue
+        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id in cancelled_parent_ids:
+            row.status = "cancelled"
+            row.completed_at = row.completed_at or now
+            row.lease_token = None
+            row.lease_expires_at = None
+            row.next_attempt_at = None
+            row.last_error = "父级小菱运行已取消，迟到结果未触发新的模型调用"
+            _event(db, row, "cancelled", target, {"reason": "parent_run_cancelled"})
             continue
         if row.status == "queued":
             row.status = "delivered"
@@ -1744,6 +1766,36 @@ def pull_inbox(
         delivered.append(row)
     db.commit()
     return [_message_out(row) for row in delivered]
+
+
+def _cancelled_parent_run_ids(
+    db: Session,
+    rows: list[AgentMeshMessage],
+    *,
+    user_id: int,
+    surface: str,
+    session_key: str,
+) -> set[int]:
+    """一次批量读取父运行终态，避免每条收件消息都触发独立查询。"""
+    root_ids = {
+        int(row.root_agent_run_id)
+        for row in rows
+        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id
+    }
+    if not root_ids:
+        return set()
+    return {
+        int(run_id)
+        for (run_id,) in db.query(AgentResponseRun.id)
+        .filter(
+            AgentResponseRun.id.in_(root_ids),
+            AgentResponseRun.user_id == int(user_id),
+            AgentResponseRun.surface == surface,
+            AgentResponseRun.session_key == session_key,
+            AgentResponseRun.status == "cancelled",
+        )
+        .all()
+    }
 
 
 def peek_inbox(

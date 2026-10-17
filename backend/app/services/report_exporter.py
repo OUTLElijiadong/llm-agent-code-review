@@ -36,11 +36,12 @@ from urllib.parse import urlsplit
 from bleach.sanitizer import Cleaner
 from jinja2 import select_autoescape
 from jinja2.sandbox import SandboxedEnvironment
+from markupsafe import Markup
 
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
-from app.services.report_markdown import markdown_to_html
+from app.services.report_markdown import markdown_to_html, markdown_to_safe_html
 from app.services.report_text import clean_report_payload
 
 # ============ 模块常量 ============
@@ -757,6 +758,8 @@ def export_to_html(
             "severity_counts": legacy_severity_counts,
         },
         "compliance_summary": context["statistics"]["compliance_summary"],
+        # 仅将安全解析器生成的节点标记为可信 HTML；原始模型文本仍保持转义。
+        "summary_html": Markup(markdown_to_safe_html(context["summary"])),
     })
     template = _JINJA_ENV.from_string(template_content)
     rendered = template.render(**context)

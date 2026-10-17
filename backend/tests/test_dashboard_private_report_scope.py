@@ -117,7 +117,9 @@ def _assert_only_ordinary_metrics(scope, actor, domain_task, outlet="all"):
         assert summary["total_issues"] == 1
         assert summary["severe_issues"] == 0
         assert all(item["id"] != domain_task.id for item in summary["recent_tasks"])
-        assert next(item for item in summary["recent_tasks"] if item["id"] == scope["ordinary"].id)["score"] == 88
+        # Recent-task cards are report links, so shared project metrics do not
+        # grant a non-owner permission to open the ordinary task report.
+        assert summary["recent_tasks"] == []
     if outlet in {"all", "risk"}:
         risk = _get(scope, actor, "/api/dashboard/risk-distribution?days=0")
         assert {item["severity"]: item["count"] for item in risk} == {"严重": 0, "高": 0, "中": 1, "低": 0}
@@ -164,11 +166,13 @@ def test_private_author_and_admin_keep_authorized_metrics(private_dashboard, sou
     assert summary["total_issues"] == 4
     assert summary["severe_issues"] == 3
     recent_task = next(item for item in summary["recent_tasks"] if item["id"] == task.id)
-    assert recent_task["score"] == 14
+    assert recent_task["score"] is None
     if source == "sandbox_test":
         assert recent_task["coverage"]["verification_status"] == "partial"
+    # Domain metrics can be aggregated only within their authorized source
+    # scope, and an unknown/partial coverage score remains undisplayed.
     assert {item["task_id"] for item in _get(private_dashboard, actor, "/api/dashboard/score-trend")} == {
-        task.id, private_dashboard["ordinary"].id,
+        private_dashboard["ordinary"].id,
     }
     safety = _get(private_dashboard, actor, "/api/security/dashboard-summary")
     assert safety["avg_risk_score"] == 14

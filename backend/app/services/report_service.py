@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, func, or_, true
+from sqlalchemy import and_, false, func, or_, true
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -32,7 +32,6 @@ from app.services.project_member_service import (
 from app.services.report_exporter import build_report_score_facts
 from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
 
-_REPORTABLE_TASK_STATUSES = ("success", "failed", "cancelled", "expired", "stopped")
 _REPORT_BODY_WHITESPACE = (
     " ", "\t", "\n", "\r", "\f", "\v", "\x1c", "\x1d", "\x1e", "\x1f",
     "\x85", "\u00a0", "\u1680", *(chr(codepoint) for codepoint in range(0x2000, 0x200B)),
@@ -59,16 +58,6 @@ def _non_whitespace_report_body(report_body, database_dialect: str):
     for whitespace in _REPORT_BODY_WHITESPACE:
         normalized = func.replace(normalized, whitespace, "")
     return normalized
-
-
-def _task_coverage(task: ReviewTask) -> dict:
-    coverage = task.coverage if isinstance(task.coverage, dict) else {}
-    if coverage:
-        return coverage
-    return {
-        "coverage_status": "unknown",
-        "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
-    }
 
 
 def _report_duration_ms(task: ReviewTask) -> int | None:
@@ -100,6 +89,34 @@ def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     return coverage.get("score_available") is not False
+
+
+# 部分覆盖仍是可交付结果：报告必须展示已完成内容，并明确列出未覆盖范围。
+_REPORTABLE_TASK_STATUSES = ("success", "partial", "failed", "cancelled", "expired", "stopped")
+
+
+def _task_coverage(task: ReviewTask) -> dict:
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    if coverage:
+        # Verification completion does not prove that the full assessment
+        # scope was covered. Keep the coverage status explicit for old or
+        # partial payloads so a hidden score has a readable explanation.
+        if coverage.get("coverage_status") not in {"complete", "partial", "failed", "unknown"}:
+            return {**coverage, "coverage_status": "unknown"}
+        return coverage
+    return {
+        "coverage_status": "unknown",
+        "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+    }
+
+
+def display_report_score(task: ReviewTask, score: int | None) -> int | None:
+    """领域报告只有明确记录为完整覆盖时才展示评分。"""
+    if score is None:
+        return None
+    if task.review_type not in {"sandbox_test", "pentest"}:
+        return score
+    return score if _task_coverage(task).get("coverage_status") == "complete" else None
 
 
 def is_report_available(task: ReviewTask | None) -> bool:
@@ -202,9 +219,16 @@ def list_reports(db: Session, user: User, project_id: int = None,
         dict: 分页响应
     """
     q = db.query(ReviewTask).filter(ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES))
+    # API 路由已有 REPORT_VIEW 门禁；服务层仍需独立 fail-closed，避免其他
+    # 调用方绕过路由后把无权限任务计入总数或分页卡片。
+    report_permission = rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW)
+    administrator = rbac_service.is_admin_user(db, int(user.id))
+    if not report_permission:
+        q = q.filter(false())
     visible_ids, _ = get_visible_project_ids(db, user)
+    visible_project_ids = {int(project_id) for project_id in visible_ids}
     q = q.filter(ReviewTask.project_id.in_(visible_ids))
-    if not rbac_service.is_admin_user(db, int(user.id)):
+    if not administrator:
         q = q.filter(ReviewTask.user_id == user.id)
     if project_id:
         q = q.filter(ReviewTask.project_id == project_id)
@@ -267,18 +291,23 @@ def list_reports(db: Session, user: User, project_id: int = None,
 
     capabilities = project_resource_capabilities(db, user, project_ids, projects=projects_by_id.values())
     can_delete = rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
-    administrator = rbac_service.is_admin_user(db, int(user.id))
-    report_permission = rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW)
+    source_permissions = {
+        review_type: has_source_report_permission(db, user, review_type)
+        for review_type in _REPORT_BACKED_REVIEW_TYPES
+    }
     report_access = {
         row.id: (
-            row.review_type not in {"sandbox_test", "pentest"}
-            or (
-                report_permission
-                and (administrator or int(row.user_id) == int(user.id))
-            )
+            report_permission
+            and (administrator or int(row.user_id) == int(user.id))
+            and row.project_id in visible_project_ids
+            and source_permissions.get(row.review_type, True)
         )
         for row in rows
     }
+    # 查询已在 count 和分页前按 REPORT_VIEW、项目可见范围、发起人/管理员
+    # 范围及 SECURITY_VIEW/PENTEST_VIEW 过滤。这里再按同一授权范围 fail-closed
+    # 剔除行，确保无权报告不会成为列表卡片。
+    rows = [row for row in rows if report_access[row.id]]
     items = []
     for row in rows:
         project = projects_by_id.get(row.project_id)
@@ -286,19 +315,22 @@ def list_reports(db: Session, user: User, project_id: int = None,
             row,
             issue_stats[row.id],
         )
+        score = display_report_score(row, score)
         if not _score_is_available(row):
             score = None
-        source = dict(issue_stats[row.id]["source"])
-        snapshot = security_snapshots.get(row.id)
+        can_view_report = report_access[row.id]
+        source = dict(issue_stats[row.id]["source"]) if can_view_report else {}
+        snapshot = security_snapshots.get(row.id) if can_view_report else None
         if snapshot is not None:
             source["security_report"] = snapshot
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
             "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
+            "can_view_report": can_view_report,
             "total_issues": issue_count, "score": score, "status": row.status,
-            "error_message": clean_report_text(row.error_message) if report_access[row.id] else None,
-            "coverage": clean_report_payload(row.coverage) if report_access[row.id] and row.coverage else None,
+            "error_message": clean_report_text(row.error_message) if can_view_report else None,
+            "coverage": clean_report_payload(row.coverage) if can_view_report and row.coverage else None,
             "source": source,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
@@ -326,7 +358,8 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         task,
         issue_stats,
     )
-    score_available = _score_is_available(task)
+    score = display_report_score(task, score)
+    score_available = score is not None and _score_is_available(task)
     security_snapshot = _security_report_snapshot(db, task)
     if task.review_type in {"security_scan", "fullchain_audit"} and security_snapshot is None:
         raise ConflictError(

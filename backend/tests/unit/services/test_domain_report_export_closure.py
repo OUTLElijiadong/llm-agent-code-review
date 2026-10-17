@@ -217,6 +217,10 @@ def _security_report_fixture(db, owner, project, source):
 def test_domain_json_export_matches_detail_without_standard_issue_fabrication(export_context, source, count, endpoint):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, source)
+    if source == "sandbox_test":
+        # This fixture represents a verified full-coverage sandbox run.
+        task.coverage = {"coverage_status": "complete", "verification_status": "complete"}
+        db.commit()
     if endpoint == "generate":
         response = client.post("/api/reports/generate", json={"task_id": task.id, "format": "json"})
     else:
@@ -227,7 +231,8 @@ def test_domain_json_export_matches_detail_without_standard_issue_fabrication(ex
 
     assert exported["statistics"]["total_issues"] == detail["stats"]["total_issues"] == count
     assert exported["task_info"]["total_issues"] == count
-    assert exported["score"] == task.score
+    expected_score = task.score if source == "sandbox_test" else None
+    assert exported["score"] == detail["task"]["score"] == expected_score
     assert exported["source"]["type"] == source
     assert "issues" not in exported
     assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
@@ -325,25 +330,30 @@ def test_security_and_fullchain_reports_export_the_saved_complete_body(
         assert "侦察阶段" in payload["domain_data"]["report_md"]
         assert "验证阶段" in payload["domain_data"]["report_md"]
         assert "协作黑板统计" in payload["domain_data"]["report_md"]
+        assert "待独立核验" in payload["domain_data"]["report_md"]
+        assert "pending_independent_verification" not in payload["domain_data"]["report_md"]
         assert "**" not in json.dumps(payload["domain_data"], ensure_ascii=False)
         assert "*已汇总*" not in json.dumps(payload["domain_data"], ensure_ascii=False)
     elif format == "html":
         assert "报告内容校验标记" in response.text
         assert "FastAPI" in response.text
-        assert "pending_independent_verification" in response.text
+        assert "待独立核验" in response.text
+        assert "pending_independent_verification" not in response.text
     elif format == "pdf":
         assert response.content.startswith(b"%PDF")
         assert "attachment" in response.headers.get("content-disposition", "")
         visible_pdf_text = "\n".join(pdf_text)
         assert "报告内容校验标记" in visible_pdf_text
         assert "FastAPI" in visible_pdf_text
-        assert "pending_independent_verification" in visible_pdf_text
+        assert "待独立核验" in visible_pdf_text
+        assert "pending_independent_verification" not in visible_pdf_text
     else:
         with ZipFile(BytesIO(response.content)) as document:
             xml = document.read("word/document.xml").decode("utf-8")
         assert "报告内容校验标记" in xml
         assert "FastAPI" in xml
-        assert "pending_independent_verification" in xml
+        assert "待独立核验" in xml
+        assert "pending_independent_verification" not in xml
 
 
 def test_security_snapshot_source_mismatch_is_hidden_from_list_and_detail(export_context):
@@ -531,12 +541,15 @@ def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknow
     listing = client.get("/api/reports?page=1&page_size=100")
 
     assert detail.status_code == exported.status_code == listing.status_code == 200
-    assert detail.json()["data"]["task"]["score"] == task.score
-    assert detail.json()["data"]["task"]["score_breakdown"]["verification_status"] == "unknown"
-    assert detail.json()["data"]["stats"]["score"] == task.score
-    assert exported.json()["score"] == task.score
+    # The historical database score remains stored, but unknown coverage must not
+    # present that score as a verified result in any user-facing report surface.
+    assert task.score == 100
+    assert detail.json()["data"]["task"]["score"] is None
+    assert detail.json()["data"]["task"]["coverage"]["coverage_status"] == "unknown"
+    assert detail.json()["data"]["stats"]["score"] is None
+    assert exported.json()["score"] is None
     listed = next(item for item in listing.json()["data"]["items"] if item["task_id"] == task.id)
-    assert listed["score"] == task.score
+    assert listed["score"] is None
     assert listed["coverage"] is None
 
 
@@ -697,7 +710,7 @@ def test_missing_domain_evidence_is_not_an_empty_successful_export(export_contex
     assert response.json()["message"]
 
 
-def test_failed_sandbox_json_preserves_zero_score_and_report_body(export_context):
+def test_failed_sandbox_json_hides_score_when_coverage_is_unknown(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test", status="failed")
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
@@ -705,7 +718,8 @@ def test_failed_sandbox_json_preserves_zero_score_and_report_body(export_context
     assert response.status_code == 200
     assert response.json()["statistics"]["total_issues"] == 3
     assert response.json()["task_info"]["status"] == "failed"
-    assert response.json()["score"] == 0
+    assert response.json()["score"] is None
+    assert response.json()["domain_data"]["coverage"]["coverage_status"] == "unknown"
 
 
 @pytest.mark.parametrize("status", ["failed", "cancelled", "expired"])
@@ -896,7 +910,7 @@ def test_pentest_export_rejects_cross_owner_or_project_link(export_context, fiel
     assert "domain_data" not in response.json()
 
 
-def test_empty_real_pentest_export_remains_valid_and_preserves_score(export_context):
+def test_empty_real_pentest_export_remains_valid_without_unknown_coverage_score(export_context):
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "pentest")
     engagement = db.query(PentestEngagement).filter_by(report_task_id=task.id).one()
@@ -907,7 +921,7 @@ def test_empty_real_pentest_export_remains_valid_and_preserves_score(export_cont
     assert response.status_code == 200
     assert response.json()["statistics"]["total_issues"] == 0
     assert response.json()["domain_data"]["findings"] == []
-    assert response.json()["score"] == 84
+    assert response.json()["score"] is None
 
 
 def test_domain_pdf_export_uses_real_source_report_in_production_response(export_context):

@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import inspect
 import json as json_lib
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -89,6 +90,9 @@ class DiscussionSession:
     stage: str = "preparing"
     stage_message: str = "圆桌正在准备"
     max_rounds: int = 3
+    expected_turns: int = 0
+    completed_turns: int = 0
+    participants: list[dict] = field(default_factory=list)
     report_task_id: int = 0  # 讨论沉淀的审查报告 task_id(收尾时回填)
     closed_at: float = 0.0  # concluded 时间戳,供过期清理判断
     # 续会必须从真实原始审查上下文重新创建任务，不能复用旧 report_task。
@@ -102,6 +106,9 @@ class DiscussionSession:
     agents: list[dict] = field(default_factory=list)
     progress: dict = field(default_factory=dict)
     last_turn_seq: int = 0
+    # 线程池中的结构化抽取可能跨越 asyncio 任务取消边界；事件用于让
+    # 抽取器在发起下一次模型请求前观察停止状态。
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
 # 结束后的会话保留时长(秒): 期间刷新页面仍可回放全部发言,超时后随下次
@@ -463,6 +470,9 @@ class DiscussionBus:
                 owner_user_id=row.owner_user_id,
             ).order_by(RoundtableTurn.seq.desc()).limit(_REPLAY_LIMIT).all()
             progress = visible_roundtable_progress(db, row)
+            cancel_event = threading.Event()
+            if row.status == "cancelled":
+                cancel_event.set()
             return DiscussionSession(
                 session_id=row.session_id,
                 task_id=int(row.task_id or 0),
@@ -484,6 +494,7 @@ class DiscussionBus:
                 last_turn_seq=int(row.last_turn_seq or 0),
                 terminal_status=str(progress.get("terminal_status") or ""),
                 terminal_error=str(progress.get("terminal_error") or ""),
+                cancel_event=cancel_event,
                 current_round=int(progress.get("round") or 0),
                 total_rounds=int(progress.get("total_rounds") or row.max_rounds or 0),
                 speaker_code=str(progress.get("speaker_code") or ""),
@@ -498,6 +509,7 @@ class DiscussionBus:
         """标记会话为终止 — 编排循环在下一次检查时退出。"""
         session = self._sessions.get(session_id)
         if session:
+            session.cancel_event.set()
             session.status = "cancelled"
             session.terminal_status = "cancelled"
             session.terminal_error = session.terminal_error or str(reason or "圆桌讨论已取消")[:1000]
@@ -536,6 +548,12 @@ class DiscussionBus:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             return current
+
+        session = self._sessions.get(session_id)
+        if session is not None and session.status in {"concluded", "partial", "failed", "cancelled"}:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise RuntimeError("终态圆桌不能由后台事件重新启动；请创建新的用户续会")
 
         task = asyncio.create_task(awaitable, name=f"discussion:{session_id}")
         self._discussion_tasks[session_id] = task
@@ -598,7 +616,13 @@ class DiscussionBus:
         if session:
             progress = dict(session.progress)
             data = payload or {}
-            if action == "round_start":
+            if action == "started":
+                if session.status == "pending":
+                    session.status = "active"
+                session.stage = "preparing"
+                session.stage_message = "圆桌正在准备"
+                progress["phase"] = "preparing"
+            elif action == "round_start":
                 session.current_round = int(data.get("round") or 0)
                 session.total_rounds = int(data.get("total_rounds") or session.max_rounds or 0)
                 session.stage = "round"
@@ -673,7 +697,9 @@ class DiscussionBus:
                 if result == "success":
                     progress["completed"] = int(progress.get("total") or 0)
                 progress["speaker_code"] = ""
-            if action in {"round_start", "speaker", "phase", "progress", "paused", "resumed", "done", "cancelled"}:
+            if action in {
+                "started", "round_start", "speaker", "phase", "progress", "paused", "resumed", "done", "cancelled"
+            }:
                 progress["seq"] = int(progress.get("seq") or 0) + 1
                 progress["completed_units"] = progress.get("completed", 0)
                 progress["total_units"] = progress.get("total", 0)
@@ -701,7 +727,7 @@ class DiscussionBus:
         }, ensure_ascii=False)
 
         progress_msg = None
-        if session and action in {"round_start", "speaker", "paused", "resumed", "done"}:
+        if session and action in {"started", "round_start", "speaker", "paused", "resumed", "done"}:
             progress_msg = json_lib.dumps({
                 "type": "control", "session_id": session_id,
                 "action": "progress", "payload": dict(session.progress),

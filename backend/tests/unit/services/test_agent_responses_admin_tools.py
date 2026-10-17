@@ -261,7 +261,11 @@ async def test_roundtable_tool_launches_without_waiting_for_panel_websocket(
         }),
     )
     monkeypatch.setattr("app.api.v1.ws_discussion.take_pending", lambda session_id: pending)
-    monkeypatch.setattr("app.api.v1.ws_discussion.launch_pending_discussion", launches.append)
+    def launch(pending_item):
+        launches.append(pending_item)
+        return object()
+
+    monkeypatch.setattr("app.api.v1.ws_discussion.launch_pending_discussion", launch)
 
     executor = _executor(db, admin_user, "run_start_roundtable_without_panel")
     result = await executor._start_roundtable_discussion(ToolCall(

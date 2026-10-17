@@ -81,12 +81,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  // Keep wide tables and dense desktop views reachable instead of clipping their right edge.
+  overflow-x: auto;
   padding: var(--layout-main-padding);
   padding-bottom: max(var(--layout-main-padding), var(--assistant-action-clearance));
   background: transparent;
   scroll-padding-top: var(--layout-main-padding);
   scroll-padding-bottom: var(--assistant-action-clearance);
+}
+
+.app-layout-main {
+  scrollbar-gutter: stable;
 }
 
 .sidebar-mask {

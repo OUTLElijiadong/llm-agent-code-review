@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import NotFoundError
+from app.core.permission_codes import PermissionCode
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -57,6 +58,10 @@ def _task(db, owner, project, source, *, count=0, score=0, status="success", cre
         total_issues=count,
         score=score,
         score_version="pentest-v1" if source == "pentest" else None,
+        coverage=(
+            {"coverage_status": "complete", "tested": ["synthetic fixture scope"], "unscanned": []}
+            if source in {"sandbox_test", "pentest"} else None
+        ),
         create_time=created or datetime.now(timezone.utc),
     )
     db.add(task)
@@ -123,7 +128,9 @@ def _pentest(db, task, *, created=None):
 
 
 def _listed(db, owner, task):
-    return next(item for item in report_service.list_reports(db, owner)["items"] if item["task_id"] == task.id)
+    item = next(item for item in report_service.list_reports(db, owner)["items"] if item["task_id"] == task.id)
+    assert item["can_view_report"] is True
+    return item
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss"])
@@ -310,6 +317,104 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
     assert dashboard_service.get_summary(db, outsider)["total_issues"] == 0
 
 
+def test_dashboard_hides_foreign_report_cards_but_keeps_project_member_score(db, source_owner, source_project):
+    owner_task = _task(db, source_owner, source_project, "standard", score=88)
+    _issues(db, owner_task)
+    member = User(username="dashboard-private-member", password="x", role="user", status=1)
+    db.add(member)
+    db.flush()
+    db.add(ProjectMember(project_id=source_project.id, user_id=member.id))
+    db.commit()
+
+    summary = dashboard_service.get_summary(db, member)
+    assert summary["recent_tasks"] == []
+    trend = dashboard_service.get_score_trend(db, member)
+    assert [(row["task_id"], row["score"]) for row in trend] == [(owner_task.id, 88)]
+
+
+def test_dashboard_hides_pentest_card_for_account_without_pentest_permission(db, source_owner, source_project):
+    reader = User(username="dashboard-no-pentest", password="x", role="user", status=1)
+    db.add(reader)
+    db.flush()
+    role = Role(name="仅报告读取", code="report-reader-only", status="active", is_builtin=0)
+    db.add(role)
+    db.flush()
+    permission = db.query(Permission).filter_by(code=PermissionCode.REPORT_VIEW).one_or_none()
+    if permission is None:
+        permission = Permission(code=PermissionCode.REPORT_VIEW, name="报告查看", module="report", type="api")
+        db.add(permission)
+        db.flush()
+    db.add_all([
+        UserRole(user_id=reader.id, role_id=role.id),
+        RolePermission(role_id=role.id, permission_id=permission.id),
+        ProjectMember(project_id=source_project.id, user_id=reader.id),
+    ])
+    task = _task(db, reader, source_project, "pentest", score=84)
+    _pentest(db, task)
+    db.commit()
+
+    summary = dashboard_service.get_summary(db, reader)
+    assert summary["recent_tasks"] == []
+    assert dashboard_service.get_score_trend(db, reader) == []
+    reports = report_service.list_reports(db, reader)
+    assert reports["total"] == 0
+    assert reports["items"] == []
+
+
+def test_report_list_fails_closed_without_report_permission_and_hides_sensitive_fields(db):
+    reader = User(username="report-no-permission", password="x", role="reviewer", status=1)
+    role = Role(name="无报告权限审查员", code="reviewer", status="active", is_builtin=0)
+    db.add_all([reader, role])
+    db.flush()
+    db.add(UserRole(user_id=reader.id, role_id=role.id))
+    project = Project(user_id=reader.id, project_name="无权限报告", status="active")
+    db.add(project)
+    db.flush()
+    task = _task(db, reader, project, "sandbox_test", count=1, score=80, status="failed")
+    task.error_message = "敏感执行错误"
+    task.coverage = {"tested": ["敏感目标"], "unscanned": ["敏感未扫描范围"]}
+    _snapshot(db, task, public_id="private-sandbox-id", report_md="私有报告正文")
+    db.commit()
+
+    result = report_service.list_reports(db, reader)
+
+    # 权限在 count 与分页前应用；无权任务不形成卡片，也不泄露 source/error/coverage。
+    assert result["total"] == 0
+    assert result["items"] == []
+    assert "敏感执行错误" not in repr(result)
+    assert "敏感目标" not in repr(result)
+    assert "private-sandbox-id" not in repr(result)
+
+
+@pytest.mark.parametrize("coverage_status,expected_score", [("complete", 84), ("partial", None), ("unknown", None)])
+@pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
+def test_domain_score_visibility_is_consistent_across_report_and_dashboard(
+    db, source_owner, source_project, source, coverage_status, expected_score,
+):
+    task = _task(db, source_owner, source_project, source, score=84)
+    task.coverage = (
+        {"coverage_status": coverage_status, "tested": ["known scope"], "unscanned": []}
+        if coverage_status != "unknown" else {}
+    )
+    if source == "pentest":
+        _pentest(db, task)
+    else:
+        _snapshot(db, task, public_id=f"sbx-{task.id}", report_md="## 范围\n合成覆盖数据")
+    db.commit()
+
+    listed = _listed(db, source_owner, task)
+    detail = report_service.get_report_detail(db, source_owner, task.id)
+    summary = dashboard_service.get_summary(db, source_owner)
+    trend = dashboard_service.get_score_trend(db, source_owner)
+    recent = next(item for item in summary["recent_tasks"] if item["id"] == task.id)
+
+    assert listed["score"] == detail["task"]["score"] == detail["stats"]["score"] == expected_score
+    assert recent["score"] == expected_score
+    assert ([item["task_id"] for item in trend] == [task.id]) == (expected_score is not None)
+    if expected_score is not None:
+        assert trend[0]["score"] == expected_score
+
+
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
 def test_deleted_task_and_member_of_deleted_project_are_excluded(db, source_owner, source_project, source):
     task = _task(db, source_owner, source_project, source, count=2)
@@ -480,7 +585,11 @@ def test_real_sandbox_publisher_report_and_dashboard_close_the_count_loop(
     published = _publish_sandbox_report(
         db,
         SimpleNamespace(public_id="sbx-published", owner_id=source_owner.id, project_id=source_project.id),
-        {"passed": passed, "agent_tests": {"generated": 2, "passed_count": 1}},
+        {
+            "passed": passed,
+            "agent_tests": {"generated": 2, "passed_count": 1},
+            "coverage": {"coverage_status": "complete", "tested": ["合成测试范围"], "unscanned": []},
+        },
         "## 总体结论\n合成结果\n## 问题清单\n- A\n- B\n- C\n",
     )
     task = db.get(ReviewTask, published["report_task_id"])
@@ -502,6 +611,7 @@ def test_real_pentest_publisher_and_domain_detail_agree(db, source_owner, source
     findings = db.query(PentestFinding).filter_by(engagement_id=engagement.id).all()
     published = _publish_pentest_report(
         db, engagement, findings, "合成渗透报告", {"严重": 1, "高": 1, "提示": 1}, {"高": 1}, 84, {}, {}, "高风险",
+        coverage={"coverage_status": "complete", "tested": ["合成授权目标"], "unscanned": []},
     )
     domain = get_engagement_detail(db, source_owner, engagement.public_id)
     detail = report_service.get_report_detail(db, source_owner, published.id)
@@ -589,6 +699,7 @@ def test_source_http_list_detail_dashboard_and_ownership(source_api_client, sour
     response = client.get("/api/reports")
     assert response.status_code == 200
     listed = response.json()["data"]["items"][0]
+    assert listed["can_view_report"] is True
     detail_response = client.get(f"/api/reports/{task.id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()["data"]

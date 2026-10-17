@@ -5,6 +5,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { getSecurityRuleCatalog } from '@/api/security'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 import type { SecurityRuleCatalogOut } from '@/types/security'
+import { OWASP_FALLBACK_NOTICE } from './cnnvd-knowledge'
 
 const loading = ref(false)
 const catalog = ref<SecurityRuleCatalogOut | null>(null)
@@ -116,6 +117,7 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
           </a>
         </span>
       </div>
+      <p class="owasp-mapping-note">CWE/OWASP 是规则分类参考；{{ OWASP_FALLBACK_NOTICE }}</p>
 
       <el-card shadow="never">
         <div class="catalog-toolbar">
@@ -153,6 +155,12 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
 
 <style scoped lang="scss">
 .catalog-page { display: grid; gap: 16px; }
+.owasp-mapping-note {
+  margin: -8px 0 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .catalog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .catalog-head h2 { margin: 0 0 6px; font-size: 20px; }
 .catalog-head p { margin: 0; color: var(--gray-600); }

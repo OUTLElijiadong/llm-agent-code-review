@@ -136,7 +136,8 @@ describe('安全分类来源标识', () => {
     expect(sourceStatus.text()).toContain('未实现实时官方数据同步')
     expect(sourceStatus.text()).toContain('记录编号')
     expect(sourceStatus.text()).toContain('官方详情链接')
-    expect(sourceStatus.text()).toContain('OWASP fallback / 未匹配')
+    expect(sourceStatus.text()).toContain('OWASP fallback')
+    expect(sourceStatus.text()).toContain('没有官方匹配证据')
     expect(sourceStatus.text()).toContain('不根据标题、CWE 或关键词猜测来源')
     expect(page.text()).not.toContain('CNNVD 26 类')
     expect(page.find('.cn-mapping-table').exists()).toBe(false)
@@ -148,7 +149,7 @@ describe('安全分类来源标识', () => {
     page.unmount()
   })
 
-  it('项目 OWASP 热点明确标为未匹配中国漏洞库的回退分类', async () => {
+  it('项目 OWASP 热点明确标为尚未接入官方匹配的回退分类', async () => {
     mocks.dashboard.mockResolvedValueOnce({
       ...dashboard,
       scanned_project_count: 1,
@@ -158,7 +159,7 @@ describe('安全分类来源标识', () => {
     await flushPromises()
 
     expect(page.get('.ov-hot-title').text()).toContain('OWASP fallback')
-    expect(page.get('.ov-hot-title').text()).toContain('未匹配 CNVD/CNNVD 官方记录')
+    expect(page.get('.ov-hot-title').text()).toContain('尚无 CNVD/CNNVD 官方匹配证据')
     expect(page.get('.ov-hot-name').text()).toBe('A01:2025')
     page.unmount()
   })

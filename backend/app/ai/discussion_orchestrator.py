@@ -32,7 +32,7 @@ import traceback
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
@@ -485,12 +485,16 @@ class DiscussionOrchestrator:
         self._paused = False
         self._paused_event = asyncio.Event()
         self._user_inputs: list[str] = []
+        self._steering_inputs: list[tuple[int, str]] = []
+        self._steering_version = 0
+        self._steering_event = asyncio.Event()
         self._user_id = user_id
         self._file_id = file_id
         self._task_id = 0
         self._origin_surface = str(origin_surface or "")[:24]
         self._origin_session_key = str(origin_session_key or "")[:128]
         self._continued_from_session_id = str(continued_from_session_id or "")[:64]
+        self._roster_profiles = tuple(profiles)
         self._trace_id = new_trace_id()
         all_turns: list[DiscussionTurn] = []
         self._all_turns = all_turns
@@ -744,7 +748,6 @@ class DiscussionOrchestrator:
                             else f"{profile.name} 完成第 {round_idx+1} 轮发言"
                         ),
                     )
-
                     turn_counter += 1
                     turn = DiscussionTurn(
                         turn_id=turn_counter,
@@ -980,6 +983,7 @@ class DiscussionOrchestrator:
                                 consensus=summary_text,
                                 coverage=coverage,
                                 progress_callback=publish_progress_from_worker,
+                                cancel_event=session.cancel_event,
                             ),
                         )
                         report_task_id = await asyncio.shield(finalize_future)
@@ -1024,6 +1028,136 @@ class DiscussionOrchestrator:
                 )
             if cancelled_during_finalization:
                 raise asyncio.CancelledError
+
+    async def _replan_remaining(
+        self,
+        *,
+        remaining_plan: list[tuple[int, int, ReviewAgentProfile]],
+        profiles: tuple[ReviewAgentProfile, ...],
+        agent: DeepSeekAgent,
+        all_turns: list[DiscussionTurn],
+        code: str,
+        language: str,
+        file_name: str,
+        coverage: dict,
+        deferred_logs: list[dict],
+        turn_counter: int,
+    ) -> list[tuple[int, int, ReviewAgentProfile]]:
+        """用户插话后由小菱主持人重排剩余轮次；只允许重排/删减本次 roster 中的计划。"""
+
+        if not self._steering_event.is_set() or not self._steering_inputs:
+            return remaining_plan
+        version = self._steering_version
+        steering = [text for item_version, text in self._steering_inputs if item_version <= version]
+        turn_ids = {
+            f"{round_idx + 1}:{profile.code}": (round_idx, speaker_idx, profile)
+            for round_idx, speaker_idx, profile in remaining_plan
+        }
+        candidates = [
+            {"turn_id": turn_id, "round": turn[0] + 1, "agent": turn[2].name, "focus": turn[2].focus}
+            for turn_id, turn in turn_ids.items()
+        ]
+        system_prompt = (
+            "你是本次代码审查圆桌的唯一主持人小菱。用户刚刚插话，必须据此决定剩余专家的优先顺序；"
+            "只能从给定 remaining_turns 中选择并排序，不得新增专家、伪造进度或修改固定 roster。"
+            "可以省略与新方向无关的剩余发言。只输出 JSON："
+            '{"remaining_turn_ids":["轮次:agent_code"],"host_message":"用中文说明你如何调整后续重点"}。'
+        )
+        user_prompt = (
+            f"文件：{file_name}（{language}）\n用户新指示：\n"
+            + "\n".join(f"- {item}" for item in steering)
+            + "\n\n参会 roster：\n"
+            + "\n".join(f"- {p.code}: {p.name}，{p.focus}" for p in profiles)
+            + "\n\n待安排的剩余任务：\n"
+            + json.dumps(candidates, ensure_ascii=False)
+            + "\n\n此前讨论摘要：\n"
+            + self._build_history(all_turns)[-6000:]
+        )
+        self._bus.publish_control(self._session_id, "phase", {
+            "stage": "host_replanning",
+            "message": "小菱正在根据你的插话重新安排剩余专家",
+        })
+        loop = asyncio.get_running_loop()
+        try:
+            raw, meta = await self._await_model_stage(
+                loop.run_in_executor(
+                    None, copy_context().run,
+                    lambda: _call_raw_for_task(
+                        agent,
+                        self._task_id,
+                        self._user_id,
+                        usage_file_id=self._file_id,
+                        usage_chunk_index=8000 + version,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        agent_label="orchestrator",
+                        json_mode=True,
+                    ),
+                ),
+                stage="host_replanning",
+                message="小菱正在重新规划讨论",
+            )
+            await self._check_active()
+            data = json.loads(_strip_json_fence(str(raw or "")))
+            requested = data.get("remaining_turn_ids") if isinstance(data, dict) else None
+            if not isinstance(requested, list) or any(not isinstance(item, str) for item in requested):
+                raise ValueError("主持人规划格式无效")
+            if len(set(requested)) != len(requested) or any(item not in turn_ids for item in requested):
+                raise ValueError("主持人规划包含重复或不属于本次 roster 的任务")
+            remaining_plan = [turn_ids[item] for item in requested]
+            host_message = str(data.get("host_message") or "").strip()[:1200]
+            if meta:
+                deferred_logs.append({
+                    "meta": meta,
+                    "status": "success",
+                    "chunk_index": 8000 + version,
+                    "agent_label": "orchestrator",
+                })
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # 主持模型规划失败时保留已登记的剩余专家顺序，仍把用户插话留在共享历史中。
+            logger.warning(f"[Discussion] 主持人重规划失败，保留原剩余计划: {exc}")
+            host_message = "我已收到你的补充。主持规划暂不可用，我会按原 roster 继续，并把该要求纳入后续判断。"
+            remaining_plan = list(turn_ids.values())
+
+        if self._steering_version == version:
+            self._steering_inputs = [item for item in self._steering_inputs if item[0] > version]
+        if self._steering_inputs:
+            self._steering_event.set()
+        else:
+            self._steering_event.clear()
+
+        if host_message:
+            next_turn_id = max(
+                turn_counter,
+                max((turn.turn_id for turn in all_turns if turn.turn_id >= 0), default=0),
+            ) + 1
+            host_turn = DiscussionTurn(
+                turn_id=next_turn_id,
+                agent_code="orchestrator",
+                agent_name="小菱主持人",
+                role="agent",
+                content=host_message,
+            )
+            all_turns.append(host_turn)
+            self._bus.publish_turn(self._session_id, host_turn)
+            self._publish_to_env(speaker="orchestrator", content=host_message, turn_id=next_turn_id)
+
+        coverage["expected_turns"] = int(coverage["attempted_turns"]) + len(remaining_plan)
+        session = self._bus.get_session(self._session_id)
+        if session:
+            session.expected_turns = coverage["expected_turns"]
+        self._bus.publish_control(self._session_id, "progress", {
+            "completed_turns": coverage["attempted_turns"],
+            "expected_turns": coverage["expected_turns"],
+            "stage": "plan_updated",
+            "message": (
+                f"小菱已重排后续方向；已完成 {coverage['attempted_turns']} / "
+                f"{coverage['expected_turns']} 个专家发言"
+            ),
+        })
+        return remaining_plan
 
     async def _check_active(self) -> None:
         """同时校验讨论会话和持久化任务，停止、删除后不再继续发言。"""
@@ -1704,7 +1838,6 @@ class DiscussionOrchestrator:
     _session_id: str = ""
     _paused: bool = False
     _paused_event: Optional[asyncio.Event] = None
-    _user_inputs: list[str] = []
     _all_turns: list[DiscussionTurn] = []
     _task_id: int = 0
     _user_id: int = 0
@@ -1722,14 +1855,23 @@ class DiscussionOrchestrator:
         if action == "user_input":
             content = payload.get("content", "")
             logger.info(f"[Discussion] 用户发言: {content[:60]}...")
-            self._user_inputs.append(content)
+            normalized = str(content or "").strip()[:4000]
+            if normalized:
+                self._user_inputs.append(normalized)
+                self._steering_version += 1
+                self._steering_inputs.append((self._steering_version, normalized))
+                self._steering_event.set()
+                self._bus.publish_control(self._session_id, "steering_received", {
+                    "version": self._steering_version,
+                    "message": "已收到你的补充；当前模型调用结束后，小菱会先重排后续讨论",
+                })
             if content:
                 self._all_turns.append(DiscussionTurn(
                     turn_id=int(payload.get("turn_id") or -1),
                     agent_code="user",
                     agent_name="你",
                     role="user",
-                    content=content,
+                    content=normalized,
                     action="speak",
                     stance="neutral",
                 ))
@@ -1775,15 +1917,34 @@ class DiscussionOrchestrator:
                 self._paused_event.set()
         elif action == "stop":
             self._paused = False
-            self._bus.request_stop(self._session_id)
             if self._task_id:
                 self._bus.cancel_discussion_task(self._session_id)
+            else:
+                self._bus.request_stop(self._session_id)
             self._bus.publish_control(self._session_id, "stopping", {
                 "status": "cancelled",
-                "message": "讨论已停止；仅保留已保存内容，不会继续发起模型调用",
+                "message": "已停止后续模型阶段；已发出的请求无法撤回，可能仍产生用量",
             })
             if self._paused_event:
                 self._paused_event.set()
+
+    def _apply_late_summary_steering(self, summary_text: str, coverage: dict) -> str:
+        """把总结调用期间到达的用户要求写入报告并降级状态，不额外重跑模型。"""
+        if not self._steering_event.is_set() or not self._steering_inputs:
+            return summary_text
+        instructions = [text for _, text in self._steering_inputs if str(text).strip()]
+        if not instructions:
+            return summary_text
+        suffix = "\n\n【汇总期间收到的补充要求】\n" + "\n".join(f"- {item}" for item in instructions)
+        suffix += (
+            "\n该补充在主持人汇总模型调用期间到达。为避免重复消耗模型调用，本轮没有重新生成总结；"
+            "上方结论尚未按这项要求重新核验，因此报告标记为部分完成。"
+        )
+        coverage["summary_status"] = "partial"
+        coverage.setdefault("errors", []).append("用户在主持人汇总期间补充要求；未重复调用模型，需按补充内容复核")
+        self._steering_inputs = []
+        self._steering_event.clear()
+        return f"{summary_text.rstrip()}{suffix}"
 
     async def _wait_if_paused(self, session_id: str):
         while self._paused:
@@ -1943,6 +2104,7 @@ def _finalize_review(
     deferred_logs: list[dict], agent: DeepSeekAgent, stopped: bool,
     consensus: str = "", coverage: Optional[dict] = None,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    cancel_event: Optional[Event] = None,
 ) -> int:
     """讨论结束: 补写 AiCallLog + 抽取结构化问题 + 收尾 ReviewTask。返回 task_id。"""
     db = SessionLocal()
@@ -1973,24 +2135,31 @@ def _finalize_review(
         extraction_progress.update(completed=completed, total=total)
         report_progress("extracting", progress_base + completed, progress_base + total + 1)
 
+    def ensure_task_running() -> None:
+        # The task guard above performs an independent DB read and closes its
+        # session. Do not call it after writes have been staged in this unit of
+        # work, because closing the shared test/session scope could roll them
+        # back. The in-memory stop signal is safe to inspect immediately before
+        # commit and closes the user-stop race without another DB transaction.
+        if cancel_event is not None and cancel_event.is_set():
+            raise _DiscussionInactive("cancelled")
+        _ensure_running(task_id)
+
     try:
         task = db.query(ReviewTask).filter_by(id=task_id).populate_existing().one_or_none()
         if task is None or task.status != "running":
             return task_id
         db.rollback()
-        if stopped:
+        if stopped or (cancel_event is not None and cancel_event.is_set()):
             return _cancel_review_task(task_id)
         _require_discussion_actor(db, user_id, int(task.project_id))
         if not metrics.get("valid_speeches"):
             raise RuntimeError("圆桌讨论没有产生有效审查发言，不能生成成功报告")
-        _ensure_running(task_id)
+        ensure_task_running()
         if metrics.get("moderator_takeover"):
             extracted_issues = []
             metrics["extraction_status"] = "skipped_moderator_takeover"
         else:
-            def ensure_task_running() -> None:
-                _ensure_running(task_id)
-
             extracted_issues = _extract_issues(
                 all_turns, code, language, file_name, agent, db,
                 task_id, user_id, file_id, progress_callback=on_extraction_progress,
@@ -2012,6 +2181,8 @@ def _finalize_review(
         if task is None or task.status != "running":
             db.rollback()
             return task_id
+        if cancel_event is not None and cancel_event.is_set():
+            raise _DiscussionInactive("cancelled")
         _require_discussion_actor(db, user_id, int(task.project_id))
         # 1) 补写讨论期间的全部 LLM 调用日志(真实数据)
         for log_info in deferred_logs:
@@ -2106,12 +2277,20 @@ def _finalize_review(
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         # 问题记录与任务成功状态必须原子提交，避免生成半份报告。
+        if cancel_event is not None and cancel_event.is_set():
+            raise _DiscussionInactive("cancelled")
         db.commit()
         report_progress(
             "reporting", progress_base + extraction_progress["total"] + 1,
             progress_base + extraction_progress["total"] + 1,
         )
         return task_id
+    except _DiscussionInactive as exc:
+        db.rollback()
+        if exc.status == "cancelled":
+            _cancel_review_task(task_id)
+            return task_id
+        raise
     except Exception as exc:
         logger.error(f"[Discussion] _finalize_review 异常: {traceback.format_exc()}")
         db.rollback()

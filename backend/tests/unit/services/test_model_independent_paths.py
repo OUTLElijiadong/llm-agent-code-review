@@ -70,6 +70,7 @@ def test_discussion_clients_honor_named_assignments_and_personal_override(db, mo
     monkeypatch.setattr(discussion, "SessionLocal", lambda: db)
     monkeypatch.setattr(discussion, "resolve_api_config", lambda _db, user_id: cfg)
     primary, clients = discussion._build_discussion_agents(42, get_agent_profiles("full"))
+    # 主持小菱使用主对话模型；审查专家各自使用角色模型分配。
     assert primary.model == "personal"
     assert clients["security_sentinel"].model == ("personal" if source == "user" else "security-model")
     assert clients["code_reviewer"].model == ("personal" if source == "user" else "review-model")
@@ -109,7 +110,6 @@ def test_independent_instances_share_config_without_changing_other_requests(
 
 
 def test_deployment_service_consumes_config_before_missing_key_fallback(db, monkeypatch):
-
     from app.agents.deployment_coordinator_agent import DeploymentCoordinatorAgent
     from app.services.sandbox_service import _generate_deployment_patch
     from tests.unit.services.test_agent_test_cases import _zip_with
@@ -126,8 +126,9 @@ def test_deployment_service_consumes_config_before_missing_key_fallback(db, monk
         return {"launch_script": "exec python main.py", "notes": "isolated"}
     monkeypatch.setattr(DeploymentCoordinatorAgent, "plan", plan)
     from tests.unit.services.execution_test_rows import authorized_sandbox_environment
-    environment = authorized_sandbox_environment(db, id=1, public_id="isolated", project_id=1, owner_id=42,
-                                                test_mode="blackbox")
+    environment = authorized_sandbox_environment(
+        db, id=1, public_id="isolated", project_id=1, owner_id=42, test_mode="blackbox",
+    )
     result = _generate_deployment_patch(db, environment, _zip_with({"main.py": "pass"}), "python")
     assert result["launch_script"] == "exec python main.py"
     assert seen == ["sandbox-model"]

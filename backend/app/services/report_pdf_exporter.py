@@ -26,11 +26,11 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import export_to_dict
-from app.services.report_markdown import markdown_to_blocks, reportlab_markup
+from app.services.report_markdown import markdown_to_blocks, parse_markdown_blocks, reportlab_markup
 
 # ============ 模块常量 ============
 
@@ -142,6 +142,78 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
         ),
     }
     return styles
+
+
+def _summary_inline_markup(runs: List[Dict[str, Any]]) -> str:
+    """Render the supported inline Markdown subset using ReportLab-safe tags."""
+    parts: List[str] = []
+    for run in runs:
+        text = escape(str(run.get("text") or "")).replace("\n", "<br/>")
+        if run.get("code"):
+            text = f'<font name="Courier">{text}</font>'
+        if run.get("italic"):
+            text = f"<i>{text}</i>"
+        if run.get("bold"):
+            text = f"<b>{text}</b>"
+        href = run.get("href")
+        if href:
+            safe_href = escape(str(href), {"\"": "&quot;"})
+            text = f'<link href="{safe_href}" color="#2563EB">{text}</link>'
+        parts.append(text)
+    return "".join(parts)
+
+
+def _build_summary_markdown_elements(markdown: str, styles: Dict[str, ParagraphStyle]) -> List[Any]:
+    """Convert model Markdown into readable PDF flowables without leaking markers."""
+    elements: List[Any] = []
+    for block in parse_markdown_blocks(markdown):
+        kind = block["type"]
+        if kind == "heading":
+            level = int(block.get("level") or 2)
+            style = styles["heading"] if level <= 2 else styles["subheading"]
+            elements.append(Paragraph(_summary_inline_markup(block["runs"]), style))
+        elif kind == "paragraph":
+            elements.append(Paragraph(_summary_inline_markup(block["runs"]), styles["normal"]))
+        elif kind in {"unordered_list", "ordered_list"}:
+            for index, item in enumerate(block["items"], start=1):
+                bullet = "•" if kind == "unordered_list" else f"{index}."
+                elements.append(Paragraph(
+                    _summary_inline_markup(item), styles["normal"], bulletText=bullet,
+                ))
+        elif kind == "table":
+            rows = block.get("rows") or []
+            if rows:
+                data = [
+                    [
+                        Paragraph(
+                            _summary_inline_markup(cell),
+                            styles["table_header"] if row_index == 0 else styles["normal"],
+                        )
+                        for cell in row
+                    ]
+                    for row_index, row in enumerate(rows)
+                ]
+                table = Table(data, repeatRows=1, hAlign="LEFT")
+                table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#334155")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                elements.append(table)
+                elements.append(Spacer(1, 3 * mm))
+        elif kind == "quote":
+            elements.append(Paragraph(_summary_inline_markup(block["runs"]), styles["quote"]))
+        elif kind == "code":
+            code_text = escape(str(block.get("text") or "")).replace("\n", "<br/>")
+            elements.append(Paragraph(code_text or " ", styles["code"]))
+        elif kind == "rule":
+            elements.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#CBD5E1")))
+    return elements
 
 
 def _severity_color(severity: Optional[str]) -> colors.Color:
@@ -717,7 +789,7 @@ def export_to_pdf(
     summary_text = context.get("summary") or ""
     if summary_text:
         elements.append(Paragraph("总体评价", styles["heading"]))
-        _append_markdown_elements(elements, str(summary_text), styles)
+        elements.extend(_build_summary_markdown_elements(str(summary_text), styles))
         elements.append(Spacer(1, 4 * mm))
 
     # 3. 反编译证据
@@ -740,7 +812,7 @@ def export_to_pdf(
     security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None
     if isinstance(security_markdown, str) and security_markdown.strip():
         elements.append(Paragraph("安全审计专项结果", styles["heading"]))
-        _append_markdown_elements(elements, security_markdown, styles)
+        elements.extend(_build_summary_markdown_elements(security_markdown, styles))
 
     # 构建 PDF
     doc.build(elements)

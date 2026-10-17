@@ -247,6 +247,11 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
     from app.ai.discussion_orchestrator import DiscussionOrchestrator
 
     bus = DiscussionBus.instance()
+    session = bus.get_session(pending.session_id)
+    if not session or session.status != "pending" or session.cancel_event.is_set():
+        logger.info("[WS] 丢弃已终止或不存在的待启动圆桌 session=%s", pending.session_id)
+        return
+    bus.publish_control(pending.session_id, "started", {"status": "active"})
     user_id = int(pending.kwargs.get("user_id") or 0)
     project_id = int(pending.kwargs.get("project_id") or 0)
     usage_origin = pending.kwargs.get("usage_origin") or {}
@@ -265,6 +270,13 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             "task_id": 0, "status": "cancelled", "error": error,
         })
         bus.close_session(pending.session_id)
+        return
+
+    # 权限/父任务检查期间用户可能已停止该会话；在创建编排器前再读一次，
+    # 避免一个迟到的 pending 启动任务重新进入模型流程。
+    session = bus.get_session(pending.session_id)
+    if not session or session.status != "active" or session.cancel_event.is_set():
+        logger.info("[WS] 启动前会话已终止，跳过圆桌编排 session=%s", pending.session_id)
         return
 
     orchestrator_task = asyncio.create_task(
@@ -327,10 +339,21 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
-def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task:
+def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None:
     """按 session_id 唯一登记并启动待处理圆桌任务。"""
 
     bus = DiscussionBus.instance()
+    session = bus.get_session(pending.session_id)
+    current = bus.get_discussion_task(pending.session_id)
+    if current is not None:
+        return current
+    if session is None or session.status != "pending" or session.cancel_event.is_set():
+        logger.info(
+            "[WS] 拒绝自动启动非 pending 圆桌 session=%s status=%s",
+            pending.session_id,
+            getattr(session, "status", "missing"),
+        )
+        return None
     return bus.start_discussion_task(
         pending.session_id,
         _run_pending_discussion(pending),

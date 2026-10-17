@@ -79,6 +79,23 @@ describe('同步安全扫描真实交互', () => {
     expect(messages.success).not.toHaveBeenCalledWith('未检出安全风险')
   })
 
+  it('扫描结果中的 OWASP 分类明确标为 fallback，且不伪称官方命中', async () => {
+    api.scanProject.mockResolvedValue(scanResult({
+      findings: [{
+        title: '测试发现', category: 'security', owasp: 'A03:2025', cwe: 'CWE-89', severity: '高',
+        file_path: 'src/example.py', lines: '12', line_number: 12, end_line: 12, evidence: 'evidence',
+        exploit_scenario: '', fix_suggestion: '', references: [], confidence: 0.9, source: 'regex',
+      }],
+    }))
+    await renderModal({ autoStart: true })
+
+    expect(wrapper.find('.owasp-fallback-note').text()).toContain('OWASP 标签仅作回退分类')
+    expect(wrapper.find('.owasp-fallback-note').text()).toContain('未接入 CNVD/CNNVD 官方匹配')
+    expect(wrapper.find('.group-head').text()).toContain('OWASP fallback · A03:2025')
+    expect(wrapper.find('.view-tags').text()).toContain('OWASP fallback · A03:2025')
+    expect(wrapper.text()).not.toContain('CNNVD 命中')
+  })
+
   it('等待状态不显示假阶段/百分比，配置锁定且重复操作不重复发请求', async () => {
     const pending = deferredResult()
     api.scanProject.mockReturnValue(pending.promise)

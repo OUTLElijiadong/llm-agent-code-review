@@ -31,6 +31,9 @@ export const CN_VULN_PORTALS: CnPortal[] = [
   },
 ]
 
+/** OWASP 仅在缺少可验证的 CNVD/CNNVD 记录关联时作为分类回退，不表示官方库未收录。 */
+export const OWASP_FALLBACK_NOTICE = 'OWASP 标签仅作回退分类；当前未接入 CNVD/CNNVD 官方匹配，无官方命中证据。'
+
 /** 相关参考规范；展示引用不代表平台认证或完整条款覆盖。 */
 export interface CnStandard {
   code: string
@@ -42,7 +45,7 @@ export const CN_SECURITY_STANDARDS: CnStandard[] = [
   {
     code: 'GB/T 30279-2020',
     name: '信息安全技术 网络安全漏洞分类分级指南',
-    note: '国家标准中的参考规范；平台内部扣分不等于该标准分级。引用不代表 CNVD/CNNVD 记录匹配；不代表认证或全部条款已覆盖。',
+    note: '国家标准中的参考规范；平台内部扣分不等于该标准分级。引用不代表 CNVD/CNNVD 记录匹配，也不代表认证或全部条款已覆盖。',
   },
   {
     code: 'GB/T 34943-2017',

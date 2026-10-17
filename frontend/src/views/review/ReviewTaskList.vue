@@ -571,7 +571,7 @@ useAgentPageRefresh({ pages: ['/reviews'], refresh: loadData })
   .tc-line1 {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 8px;
+    gap: 4px 4px;
     align-items: flex-end;
   }
   .tc-name {

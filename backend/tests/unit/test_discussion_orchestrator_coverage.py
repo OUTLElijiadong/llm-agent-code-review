@@ -273,6 +273,9 @@ def _make_orchestrator(bus: Optional[Any] = None) -> DiscussionOrchestrator:
     orchestrator._paused = False
     orchestrator._paused_event = None
     orchestrator._user_inputs = []
+    orchestrator._steering_inputs = []
+    orchestrator._steering_version = 0
+    orchestrator._steering_event = asyncio.Event()
     orchestrator._all_turns = []
     orchestrator._task_id = 0
     orchestrator._user_id = 0
@@ -1137,10 +1140,29 @@ async def test_handle_control_routes_user_pause_resume_and_stop() -> None:
     assert stop_event.is_set()
     assert control_bus.stop_requests == ["session-1"]
     assert [action for _, action, _ in control_bus.controls] == [
+        "steering_received",
         "paused",
         "resumed",
         "stopping",
     ]
+
+
+def test_user_input_during_host_summary_is_disclosed_without_second_model_call() -> None:
+    """总结请求已在途时收到插话，不重复发起模型调用，报告应明示并降为部分完成。"""
+    orchestrator = _make_orchestrator()
+    orchestrator._steering_inputs = [(1, "只看未授权访问路径")]
+    orchestrator._steering_version = 1
+    orchestrator._steering_event.set()
+    coverage = {"summary_status": "success", "errors": []}
+
+    summary = orchestrator._apply_late_summary_steering("已完成总结。", coverage)
+
+    assert "只看未授权访问路径" in summary
+    assert "没有重新生成总结" in summary
+    assert coverage["summary_status"] == "partial"
+    assert coverage["errors"]
+    assert not orchestrator._steering_event.is_set()
+    assert orchestrator._steering_inputs == []
 
 
 @pytest.mark.asyncio

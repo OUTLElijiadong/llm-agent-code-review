@@ -739,6 +739,34 @@ def test_plain_owner_html_export_uses_format_specific_permission(
     ]
 
 
+@pytest.mark.parametrize("report_format", ["json", "html", "pdf", "word"])
+def test_report_export_requires_view_permission_even_when_format_permission_is_granted(
+    plain_client, monkeypatch, report_format,
+):
+    client, _db, task_id = plain_client
+    checked = []
+    format_permission = {
+        "json": PermissionCode.REPORT_EXPORT_JSON,
+        "html": PermissionCode.REPORT_EXPORT_HTML,
+        "pdf": PermissionCode.REPORT_EXPORT_PDF,
+        "word": PermissionCode.REPORT_EXPORT_WORD,
+    }[report_format]
+
+    def fake_check_permission(_db, user_id, permission):
+        checked.append((user_id, permission))
+        return permission == format_permission
+
+    monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+    response = client.get(
+        f"/api/reports/tasks/{task_id}/export",
+        params={"format": report_format},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["required_permission"] == PermissionCode.REPORT_VIEW
+    assert checked == [(2, PermissionCode.REPORT_VIEW)]
+
+
 def test_legacy_word_route_delegates_to_new_exporter_and_checks_permission(
     admin_client,
     monkeypatch,
