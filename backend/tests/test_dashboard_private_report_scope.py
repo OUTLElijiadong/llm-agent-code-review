@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.v1 import dashboard, reports, security
+from app.api.v1 import dashboard, reports, review, security
 from app.core.database import Base, get_db
 from app.core.error_handlers import register_handlers
 from app.core.exceptions import NotFoundError
@@ -73,6 +73,7 @@ def private_dashboard():
     app.include_router(dashboard.router, prefix="/api/dashboard")
     app.include_router(security.router, prefix="/api/security")
     app.include_router(reports.router, prefix="/api/reports")
+    app.include_router(review.router, prefix="/api/review")
     app.dependency_overrides[get_db] = lambda: db
     try:
         with TestClient(app) as client:
@@ -206,6 +207,14 @@ def test_report_reader_without_source_permission_cannot_read_report_or_aggregate
 
     report_list = _get(scope, "source_limited", "/api/reports")
     assert report_list["total"] == 0
+    token = create_access_token(user.id, user.role, user.token_version or 0)
+    headers = {"Authorization": f"Bearer {token}"}
+    review_list = scope["client"].get("/api/review/tasks", headers=headers)
+    review_detail = scope["client"].get(f"/api/review/tasks/{task.id}", headers=headers)
+    assert review_list.status_code == 200
+    assert all(item["id"] != task.id for item in review_list.json()["data"]["items"])
+    assert review_detail.status_code == 404
+    assert "PRIVATE_REPORT_BODY" not in review_detail.text
     assert all(item["id"] != task.id for item in _get(
         scope, "source_limited", "/api/dashboard/summary",
     )["recent_tasks"])

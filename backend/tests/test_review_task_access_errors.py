@@ -33,7 +33,9 @@ def review_http():
     users['disabled'].status = 0
     role = Role(id=1, name='普通用户', code='user', status='active', is_builtin=1)
     db.add_all([*users.values(), role])
-    for index, code in enumerate(('review:view', 'issue:view', 'project:view'), 1):
+    for index, code in enumerate((
+        'review:view', 'issue:view', 'project:view', 'security:view', 'pentest:view',
+    ), 1):
         db.add(Permission(id=index, code=code, name=code, module=code.split(':')[0], type='api'))
         db.add(RolePermission(role_id=role.id, permission_id=index))
     for name in ('owner', 'member', 'outsider', 'disabled'):
@@ -130,7 +132,7 @@ def test_project_read_infrastructure_failure_is_not_masked_as_not_found(review_h
 
 
 @pytest.mark.parametrize("review_type", ["sandbox_test", "pentest", "security_scan", "fullchain_audit"])
-def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(review_http, review_type):
+def test_domain_report_task_is_hidden_without_report_permission(review_http, review_type):
     client, users, writes, db = review_http
     task = db.get(ReviewTask, 11)
     task.review_type = review_type
@@ -158,17 +160,9 @@ def test_domain_report_body_is_hidden_from_task_detail_without_report_scope(revi
     owner_response = client.get("/api/review/tasks/11", headers=headers(users["owner"]))
     member_response = client.get("/api/review/tasks/11", headers=headers(users["member"]))
 
-    assert owner_response.status_code == 200
-    owner_data = owner_response.json()["data"]
-    assert owner_data["can_view_report"] is False
-    assert owner_data["summary"] is None
-    assert owner_data["total_issues"] is None
-    assert owner_data["severe_issues"] is None
-    assert owner_data["high_issues"] is None
-    assert owner_data["medium_issues"] is None
-    assert owner_data["low_issues"] is None
-    assert owner_data["score"] is None
-    assert owner_data["score_breakdown"] is None
+    # 用户具有来源查看权限，但没有通用报告权限；整个报告型任务必须隐藏。
+    assert owner_response.status_code == 404
+    assert "private-task" not in owner_response.text
     assert "UNIQUE_SECRET_DOMAIN_REPORT_BODY" not in owner_response.text
     assert member_response.status_code == 404
     assert "private-task" not in member_response.text
@@ -191,7 +185,7 @@ def test_domain_report_body_requires_both_report_permission_and_owner_scope(revi
             score=0,
             create_time=datetime.now(timezone.utc),
         ))
-    report_permission = Permission(id=4, code="report:view", name="查看报告", module="report", type="api")
+    report_permission = Permission(id=6, code="report:view", name="查看报告", module="report", type="api")
     db.add(report_permission)
     db.add(RolePermission(role_id=1, permission_id=report_permission.id))
     db.commit()
@@ -237,14 +231,14 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         ))
 
     report_role = Role(id=2, name="审查员", code="reviewer", status="active", is_builtin=0)
-    report_permission = Permission(id=4, code="report:view", name="查看报告", module="report", type="api")
+    report_permission = Permission(id=6, code="report:view", name="查看报告", module="report", type="api")
     db.add_all([report_role, report_permission])
     db.flush()
     db.query(UserRole).filter(UserRole.user_id == users["owner"].id).delete()
     users["owner"].role = report_role.code
     db.add_all([
         RolePermission(role_id=report_role.id, permission_id=permission_id)
-        for permission_id in (1, 2, 3, report_permission.id)
+        for permission_id in (1, 2, 3, 4, 5, report_permission.id)
     ])
     db.add(UserRole(user_id=users["owner"].id, role_id=report_role.id))
     db.commit()
@@ -328,6 +322,9 @@ def test_running_domain_task_is_visible_to_owner_but_not_project_member(review_h
     admin = User(id=99, username="review_access_admin", password="isolated", role="admin", status=1)
     admin_role = Role(id=99, name="管理员", code="admin", status="active", is_builtin=1)
     db.add_all([admin, admin_role, UserRole(user_id=admin.id, role_id=admin_role.id)])
+    report_permission = Permission(id=6, code="report:view", name="查看报告", module="report", type="api")
+    db.add(report_permission)
+    db.add(RolePermission(role_id=1, permission_id=report_permission.id))
     task = db.get(ReviewTask, 11)
     task.review_type = review_type
     task.status = "running"

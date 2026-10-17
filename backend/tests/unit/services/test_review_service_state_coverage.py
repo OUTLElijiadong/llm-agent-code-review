@@ -13,6 +13,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.project import Project
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
@@ -591,6 +592,17 @@ def test_review_coverage_snapshot_distinguishes_skipped_failed_and_unscanned_fil
 def test_task_queries_cover_visibility_details_filters_and_file_fallback(db: Any) -> None:
     """任务列表、详情、问题过滤和旧任务文件回退应返回一致数据。"""
     user = _make_user(db)
+    role = Role(id=1, name="测试用户", code=user.role, status="active", is_builtin=1)
+    report_permission = Permission(
+        id=1, code="report:view", name="查看报告", module="report", type="api",
+    )
+    db.add_all([
+        role,
+        report_permission,
+        UserRole(user_id=user.id, role_id=role.id),
+        RolePermission(role_id=role.id, permission_id=report_permission.id),
+    ])
+    db.commit()
     project = _make_project(db, user.id)
     code_file = _make_file(db, project.id)
     task = _make_task(db, user.id, project.id, status="success")
@@ -632,9 +644,9 @@ def test_task_queries_cover_visibility_details_filters_and_file_fallback(db: Any
     assert page["total"] == 2
     assert {item["id"] for item in page["items"]} == {task.id, linked_task.id}
     listed_task = next(item for item in page["items"] if item["id"] == task.id)
-    # 沙箱报告覆盖范围属于受限报告元数据；普通项目成员没有 REPORT_VIEW 时应脱敏。
-    assert listed_task["can_view_report"] is False
-    assert listed_task["coverage"] is None
+    # 该测试用户持有报告权限，因此可以读取沙箱任务覆盖范围。
+    assert listed_task["can_view_report"] is True
+    assert listed_task["coverage"] == task.coverage
     assert all(item["project_name"] == project.project_name for item in page["items"])
     assert detail["files"][0]["file_id"] == code_file.id
     assert default_issues["total"] == 1
