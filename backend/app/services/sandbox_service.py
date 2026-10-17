@@ -6262,13 +6262,22 @@ def _publish_sandbox_report(
             .first()
         )
         now = datetime.now(_tz.utc).replace(tzinfo=None)
-        started_at = getattr(environment, "started_at", None) or now
         stopped_at = getattr(environment, "stopped_at", None) or now
-        if getattr(started_at, "tzinfo", None) is not None:
-            started_at = started_at.replace(tzinfo=None)
         if getattr(stopped_at, "tzinfo", None) is not None:
             stopped_at = stopped_at.replace(tzinfo=None)
-        duration_ms = max(0, int((stopped_at - started_at).total_seconds() * 1000))
+        measured_duration = conclusion.get("duration_ms")
+        duration_is_measured = (
+            isinstance(measured_duration, int)
+            and not isinstance(measured_duration, bool)
+            and measured_duration >= 0
+        )
+        duration_ms = int(measured_duration) if duration_is_measured else 0
+        started_at = (
+            stopped_at - timedelta(milliseconds=duration_ms)
+            if duration_is_measured
+            else None
+        )
+        coverage["duration_source"] = "measured_execution" if duration_is_measured else "unknown"
         # 评分由确定性用例通过率决定，禁止把“runner 正常退出”误当成“测试全部通过”。
         agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
         generated = int(agent_tests.get("generated") or 0)
@@ -8344,6 +8353,7 @@ def _execute_environment(
     db = SessionLocal()
     usage_scope = ExitStack()
     failure_stage = "executor"
+    execution_started_monotonic: float | None = None
     try:
         environment = db.get(SandboxEnvironment, environment_id)
         if not environment or environment.status not in {"queued", "recovering"}:
@@ -8351,6 +8361,7 @@ def _execute_environment(
         if execution_token is not None and str(environment.execution_token or "") != execution_token:
             return
         _require_execution_lease(db, environment_id, execution_token)
+        execution_started_monotonic = time.monotonic()
         usage_scope.enter_context(usage_context(int(environment.owner_id), model_attribution(environment), db=db))
         if source_archive_base64 is None:
             if environment.source_archive_blob is None:
@@ -9002,6 +9013,7 @@ def _execute_environment(
         conclusion = {
             "passed": passed,
             "summary": summary,
+            "duration_ms": max(0, int((time.monotonic() - execution_started_monotonic) * 1000)),
             "evidence": evidence,
             "agent_code": environment.agent_code,
             "source_provenance": _source_provenance(environment, worker_receipt),
@@ -9099,6 +9111,11 @@ def _execute_environment(
                     "受授权远程黑盒探测异常，验证未完成"
                     if failure_stage == "remote_blackbox"
                     else "沙箱执行异常，验证未完成"
+                ),
+                **(
+                    {"duration_ms": max(0, int((time.monotonic() - execution_started_monotonic) * 1000))}
+                    if execution_started_monotonic is not None
+                    else {}
                 ),
                 "evidence": {
                     "execution_failure": {

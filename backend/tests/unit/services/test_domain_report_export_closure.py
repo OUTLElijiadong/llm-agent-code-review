@@ -403,6 +403,22 @@ def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():
     assert "pattern = '*'" in cleaned
 
 
+def test_report_cleanup_hides_internal_worker_urls_and_httpx_help_links():
+    report = (
+        "执行异常：Client error '400 Bad Request' for url 'http://sandbox/execute' "
+        "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400; "
+        "Client error '404 Not Found' for url 'http://sandbox/stop' "
+        "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404。"
+    )
+
+    cleaned = clean_report_markdown(report)
+
+    assert "沙箱执行接口返回 HTTP 400 Bad Request" in cleaned
+    assert "沙箱停止接口返回 HTTP 404 Not Found" in cleaned
+    assert "http://sandbox" not in cleaned
+    assert "developer.mozilla.org" not in cleaned
+
+
 def test_sandbox_source_markdown_is_cleaned_while_fenced_code_is_preserved(export_context):
     client, db, owner, _other, project, _current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")
@@ -421,6 +437,51 @@ def test_sandbox_source_markdown_is_cleaned_while_fenced_code_is_preserved(expor
     assert "**" not in html_response.text
     assert "pattern = '*'" in json_response.json()["domain_data"]["report_md"]
     assert "报告结论" in html_response.text
+
+
+def test_sandbox_report_detail_cleans_historical_worker_errors_and_unreliable_duration(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test", status="failed")
+    task.start_time = datetime.now(timezone.utc) - timedelta(days=11)
+    task.end_time = datetime.now(timezone.utc)
+    task.duration_ms = 11 * 24 * 60 * 60 * 1000
+    task.error_message = (
+        "Client error '400 Bad Request' for url 'http://sandbox/execute' "
+        "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400"
+    )
+    task.coverage = {"verification_status": "failed", "errors": [task.error_message]}
+    task.summary = task.error_message
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.content_json = {**snapshot.content_json, "report_md": task.error_message}
+    db.commit()
+
+    response = client.get(f"/api/reports/{task.id}")
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["task"]["duration_ms"] is None
+    assert "沙箱执行接口返回 HTTP 400 Bad Request" in body["task"]["error_message"]
+    assert "http://sandbox" not in response.text
+    assert "developer.mozilla.org" not in response.text
+    assert body["source"]["duration_note"] == "历史环境总运行时间不能代表本次测试耗时；单次耗时未可靠记录。"
+
+
+def test_sandbox_report_detail_exposes_measured_execution_duration(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test", status="success")
+    task.duration_ms = 1234
+    task.coverage = {
+        "verification_status": "complete",
+        "duration_source": "measured_execution",
+    }
+    db.commit()
+
+    response = client.get(f"/api/reports/{task.id}")
+
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["task"]["duration_ms"] == 1234
+    assert "duration_note" not in body["source"]
 
 
 @pytest.mark.parametrize("source", ["security_scan", "fullchain_audit"])

@@ -39,6 +39,7 @@
       <strong>执行状态：{{ reportExecutionStatusLabel }}</strong>
       <p v-if="reportExecutionError">执行原因：{{ reportExecutionError }}</p>
       <p>验证覆盖：{{ reportCoverageLabel }}<span v-if="reportCoverageReason">；{{ reportCoverageReason }}</span></p>
+      <p v-if="reportDurationNote">耗时说明：{{ reportDurationNote }}</p>
     </section>
     <section v-if="securityReport && canViewReport" class="card security-report-snapshot" data-testid="security-report-snapshot">
       <header>
@@ -765,6 +766,7 @@ const reportExecutionStatusLabel = computed(() => {
   return labels[status] || '状态未知'
 })
 const reportExecutionError = computed(() => String(report.value?.task?.error_message || '').trim())
+const reportDurationNote = computed(() => String(report.value?.source?.duration_note || '').trim())
 const reportCoverageLabel = computed(() => {
   const status = String((report.value?.task?.coverage as TaskCoverageOut | undefined)?.verification_status || '')
   const labels: Record<string, string> = {
@@ -812,7 +814,10 @@ const reviewedLanguages = computed(() => [...new Set(
     .filter(Boolean),
 )].join('、'))
 const totalFiles  = computed(() => Number(report.value?.task?.total_files ?? 0))
-const durationMs  = computed(() => Number(report.value?.task?.duration_ms ?? 0))
+const durationMs  = computed<number | null>(() => {
+  const value = report.value?.task?.duration_ms
+  return value == null || !Number.isFinite(Number(value)) ? null : Number(value)
+})
 const ruleCount   = computed(() => report.value?.rules_snapshot?.length ?? 0)
 const agentReleases = computed<Array<Record<string, unknown>>>(() => (
   (report.value?.task?.agent_releases as Array<Record<string, unknown>>) ?? []
@@ -913,8 +918,9 @@ function formatDate(s?: string): string {
   return formatDateTime(parseUtcTimestamp(s), 'YYYY-MM-DD HH:mm')
 }
 
-function formatDuration(ms: number): string {
-  if (!ms) return '—'
+function formatDuration(ms: number | null): string {
+  if (ms == null) return '未可靠记录'
+  if (!ms) return '0ms'
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`

@@ -9,7 +9,7 @@ import os
 import socket
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -140,12 +140,14 @@ def test_publish_sandbox_report_creates_review_task(db) -> None:
         project_id=1,
         owner_id=owner.id,
         test_mode="blackbox",
+        started_at=datetime.now(timezone.utc) - timedelta(days=11),
+        stopped_at=datetime.now(timezone.utc),
     )
     report_md = "## 总体结论\nok\n## 问题清单\n- SQL 注入(建议验证)\n- 越权(建议验证)\n"
     result = _publish_sandbox_report(
         db,
         environment,
-        {"passed": False, "summary": "黑盒未通过", "evidence": {
+        {"passed": False, "summary": "黑盒未通过", "duration_ms": 1234, "evidence": {
             "deterministic_test_execution": {"requested_mode": "blackbox", "status": "failed"},
             "blackbox_execution": {
                 "status": "failed", "route": "/", "status_code": 404,
@@ -160,6 +162,9 @@ def test_publish_sandbox_report_creates_review_task(db) -> None:
     assert task.review_type == "sandbox_test"
     assert task.score == 0
     assert task.coverage["verification_status"] == "failed"
+    assert task.coverage["duration_source"] == "measured_execution"
+    assert task.duration_ms == 1234
+    assert task.start_time == task.end_time - timedelta(milliseconds=1234)
     assert "HTTP 404" in task.error_message
     assert "未找到可用应用路由" in task.coverage["reason"]
     assert task.total_issues == 2
@@ -167,6 +172,27 @@ def test_publish_sandbox_report_creates_review_task(db) -> None:
     result2 = _publish_sandbox_report(db, environment, {"passed": False}, report_md)
     assert result2["report_task_id"] == result["report_task_id"]
     assert db.query(ReviewTask).filter(ReviewTask.task_name == "沙箱黑盒测试 · sbx_pub").count() == 1
+
+
+def test_publish_sandbox_report_does_not_use_long_lived_environment_as_task_duration(db) -> None:
+    owner = User(username="sbx_unknown_duration_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.commit()
+    environment = SimpleNamespace(
+        public_id="sbx_unknown_duration",
+        project_id=1,
+        owner_id=owner.id,
+        test_mode="whitebox",
+        started_at=datetime.now(timezone.utc) - timedelta(days=11),
+        stopped_at=datetime.now(timezone.utc),
+    )
+
+    result = _publish_sandbox_report(db, environment, {"passed": False}, "## 执行结果\n未完成")
+
+    task = db.get(ReviewTask, result["report_task_id"])
+    assert task.duration_ms == 0
+    assert task.start_time is None
+    assert task.coverage["duration_source"] == "unknown"
 
 
 def test_report_publish_failure_is_explicit_and_logged(db, monkeypatch) -> None:

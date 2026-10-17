@@ -9,6 +9,42 @@ _CODE_KEYS = {"code", "source_code", "snippet", "patch", "diff", "raw_code", "fi
 _FENCED_CODE = re.compile(r"(?P<fence>`{3,}|~{3,})[^\n]*\n[\s\S]*?\n(?P=fence)")
 _INLINE_CODE = re.compile(r"(?<!`)(?P<ticks>`+)(?!`)(?P<body>[^\n]*?)(?<!`)(?P=ticks)(?!`)")
 _MASK_TOKEN = re.compile(r"\ue000(\d+)\ue001")
+_SANDBOX_WORKER_ERROR = re.compile(
+    r"Client error ['\"](?P<status>\d{3} [^'\"]+)['\"] for url ['\"]"
+    r"https?://sandbox(?::\d+)?(?P<path>/[^'\"]*)['\"]",
+    re.IGNORECASE,
+)
+_HTTPX_HELP_LINK = re.compile(
+    r"\s*For more information check:\s*https?://developer\.mozilla\.org/\S*",
+    re.IGNORECASE,
+)
+_SANDBOX_WORKER_URL = re.compile(
+    r"https?://sandbox(?::\d+)?(?P<path>/[^\s'\"),，。；]*)?",
+    re.IGNORECASE,
+)
+
+
+def _sandbox_worker_label(path: str) -> str:
+    route = path.strip("/").split("/", 1)[0].lower()
+    labels = {
+        "execute": "沙箱执行接口",
+        "stop": "沙箱停止接口",
+        "cleanup": "沙箱资源回收接口",
+        "health": "沙箱健康检查接口",
+    }
+    return labels.get(route, "沙箱内部接口")
+
+
+def _clean_execution_noise(text: str) -> str:
+    def replace_httpx_error(match: re.Match[str]) -> str:
+        return f"{_sandbox_worker_label(match.group('path'))}返回 HTTP {match.group('status')}"
+
+    text = _SANDBOX_WORKER_ERROR.sub(replace_httpx_error, text)
+    text = _HTTPX_HELP_LINK.sub("", text)
+    return _SANDBOX_WORKER_URL.sub(
+        lambda match: _sandbox_worker_label(match.group("path") or ""),
+        text,
+    )
 
 
 def _store_masked_value(value: str, slots: dict[str, str]) -> str:
@@ -182,6 +218,7 @@ def clean_report_text(value: Any, limit: int = 20000, *, keep_headings: bool = F
     """清理人类可读文本中的 Markdown 装饰，保留原有文字与裸星号。"""
     text = str(value or "").strip()[:limit]
     prose, slots = _protect_markdown_code(text, keep_fences=False)
+    prose = _clean_execution_noise(prose)
     prose = _protect_markdown_link_targets(prose, slots)
     prose = re.sub(r"(?<!\\)(\*\*|__|~~)(.+?)\1", r"\2", prose)
     prose = re.sub(r"(?<!\*)\*(?!\s)([^*\n]*?\S)\*(?!\*)", r"\1", prose)
@@ -195,6 +232,7 @@ def clean_report_markdown(value: Any, limit: int = 200000) -> str:
     """清理报告正文的格式标记；代码围栏内的证据原样保留。"""
     text = str(value or "").strip()[:limit]
     prose, slots = _protect_markdown_code(text, keep_fences=True)
+    prose = _clean_execution_noise(prose)
     prose = _protect_markdown_link_targets(prose, slots)
     prose = re.sub(r"(?<!\\)(\*\*|__|~~)(.+?)\1", r"\2", prose)
     prose = re.sub(r"(?<!\*)\*(?!\s)([^*\n]*?\S)\*(?!\*)", r"\1", prose)

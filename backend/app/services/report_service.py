@@ -30,7 +30,7 @@ from app.services.project_member_service import (
     require_project_execution,
 )
 from app.services.report_exporter import build_report_score_facts
-from app.services.report_text import clean_report_markdown, clean_report_payload
+from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
 
 _REPORTABLE_TASK_STATUSES = ("success", "failed", "cancelled", "expired", "stopped")
 _REPORT_BODY_WHITESPACE = (
@@ -40,6 +40,7 @@ _REPORT_BODY_WHITESPACE = (
 )
 _REPORT_BODY_WHITESPACE_CHARS = "".join(_REPORT_BODY_WHITESPACE)
 _REPORT_BODY_WHITESPACE_PATTERN = f"[{_REPORT_BODY_WHITESPACE_CHARS}]+"
+_UNRELIABLE_SANDBOX_DURATION_NOTE = "历史环境总运行时间不能代表本次测试耗时；单次耗时未可靠记录。"
 
 
 def _non_whitespace_report_body(report_body, database_dialect: str):
@@ -68,6 +69,15 @@ def _task_coverage(task: ReviewTask) -> dict:
         "coverage_status": "unknown",
         "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
     }
+
+
+def _report_duration_ms(task: ReviewTask) -> int | None:
+    if task.review_type == "sandbox_test":
+        coverage = task.coverage if isinstance(task.coverage, dict) else {}
+        if coverage.get("duration_source") != "measured_execution":
+            return None
+    duration = int(task.duration_ms or 0)
+    return duration if duration > 0 else None
 
 
 def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
@@ -287,8 +297,8 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "project_name": project.project_name if project else "",
             "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
             "total_issues": issue_count, "score": score, "status": row.status,
-            "error_message": row.error_message if report_access[row.id] else None,
-            "coverage": row.coverage if report_access[row.id] else None,
+            "error_message": clean_report_text(row.error_message) if report_access[row.id] else None,
+            "coverage": clean_report_payload(row.coverage) if report_access[row.id] and row.coverage else None,
             "source": source,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
@@ -331,6 +341,9 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
 
     capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
     source = dict(issue_stats["source"])
+    duration_ms = _report_duration_ms(task)
+    if task.review_type == "sandbox_test" and duration_ms is None:
+        source["duration_note"] = _UNRELIABLE_SANDBOX_DURATION_NOTE
     if security_snapshot is not None:
         source["security_report"] = security_snapshot
     elif task.review_type == "sandbox_test":
@@ -356,7 +369,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             project_name=project.project_name if project else "",
             execution_status=task.status,
             error_message=task.error_message,
-            coverage=_task_coverage(task),
+            coverage=clean_report_payload(_task_coverage(task)),
         )
     return {
         "can_delete": (rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
@@ -368,14 +381,14 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "review_type": task.review_type,
                  "total_files": task.total_files,
                  "processed_files": task.processed_files,
-                 "duration_ms": task.duration_ms,
+                 "duration_ms": duration_ms,
                  "total_issues": issue_count,
                  "score": score,
                  "score_version": score_breakdown.get("version"),
                  "score_breakdown": score_breakdown,
                  "status": task.status,
-                 "error_message": task.error_message,
-                 "coverage": _task_coverage(task),
+                 "error_message": clean_report_text(task.error_message),
+                 "coverage": clean_report_payload(_task_coverage(task)),
                  "create_time": task.create_time.isoformat() if task.create_time else None,
                  "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
@@ -396,7 +409,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             "risk_level": score_breakdown.get("risk_level"),
         },
         "source": source,
-        "summary": task.summary,
+        "summary": clean_report_markdown(task.summary),
         "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(db, task_id),
         "rules_snapshot": task.rules_snapshot or [],
     }

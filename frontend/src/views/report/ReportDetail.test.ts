@@ -118,6 +118,31 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('历史沙箱报告耗时无法确认时明确显示未知，不展示环境存活时长', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '沙箱项目' },
+      task: {
+        task_name: '白盒测试', review_type: 'sandbox_test', status: 'failed',
+        duration_ms: null,
+        coverage: { verification_status: 'failed' },
+      },
+      stats: { total_issues: 0 },
+      files: [], rules_snapshot: [],
+      source: {
+        duration_note: '历史环境总运行时间不能代表本次测试耗时；单次耗时未可靠记录。',
+        domain_report_md: '## 执行结果\\n测试未完成',
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="report-execution-status"]').text())
+      .toContain('历史环境总运行时间不能代表本次测试耗时')
+    expect(wrapper.text()).toContain('未可靠记录')
+    expect(wrapper.text()).not.toContain('15795m21s')
+    wrapper.unmount()
+  })
+
   it('常规代码报告显式区分待核实问题与已确认漏洞', async () => {
     reviewApi.getTaskIssues.mockResolvedValueOnce({
       items: [{ ...issue, human_review_status: 'pending', evidence_quality: 'unsupported' }],
