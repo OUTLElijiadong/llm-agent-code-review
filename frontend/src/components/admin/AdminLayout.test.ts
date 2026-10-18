@@ -27,6 +27,8 @@ describe('管理员底部操作区避让副驾入口', () => {
     expect(content).toContain('padding-bottom: max(36px, var(--assistant-action-clearance))')
     expect(content).toContain('scroll-padding-bottom: var(--assistant-action-clearance)')
     expect(content).toContain('overflow-y: auto')
+    expect(content).toContain('overflow-x: auto')
+    expect(content).not.toContain('overflow-x: hidden')
   })
 
   it.each([920, 480])('宽度不超过%dpx时保持底部安全区，只调整顶边与横向间距', (width) => {

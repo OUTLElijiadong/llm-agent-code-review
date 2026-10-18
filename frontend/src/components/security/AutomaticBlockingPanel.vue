@@ -331,16 +331,16 @@ defineExpose({ refresh: () => busy.value ? Promise.resolve(false) : refresh() })
         </div>
         <div class="enable-field ai-field">
           <div class="switch-heading"><span><strong>小菱主动研判</strong><small>对可信日志候选进行异常研判</small></span><label class="switch-control" for="blocking-ai-enabled"><input id="blocking-ai-enabled" v-model="draft.ai_anomaly_enabled" type="checkbox" :disabled="controlDisabled || !verified || !draft.enabled" aria-describedby="ai-switch-help"><span class="switch-track" aria-hidden="true" /><span class="sr-only">启用小菱主动研判异常</span></label></div>
-          <p id="ai-switch-help" class="field-help">{{ aiDisabledReason || '最多封禁 2 分钟；每天最多 24 次模型研判。' }}</p>
+          <p id="ai-switch-help" class="field-help">{{ aiDisabledReason || '每次小菱研判封禁不超过 120 秒；每日最多 24 次模型研判。规则封禁时长另见下方配置。' }}</p>
         </div>
       </div>
 
       <div class="policy-fields">
-        <label class="number-field" for="blocking-duration"><span>封禁时长</span><div><input id="blocking-duration" v-model.number="draft.duration_seconds" type="number" min="60" max="3600" step="1" required :disabled="controlDisabled" aria-describedby="blocking-duration-help"><em>秒</em></div><small id="blocking-duration-help">60 – 3600 秒</small></label>
+        <label class="number-field" for="blocking-duration"><span>规则封禁时长</span><div><input id="blocking-duration" v-model.number="draft.duration_seconds" type="number" min="60" max="3600" step="1" required :disabled="controlDisabled" aria-describedby="blocking-duration-help"><em>秒</em></div><small id="blocking-duration-help">60–3600 秒；规则封禁最长 60 分钟。小菱研判封禁另受 120 秒上限约束。</small></label>
         <label class="toggle-field" for="blocking-escalate"><span>重复攻击自动延长</span><div>
           <input id="blocking-escalate" v-model="draft.auto_escalate" type="checkbox" :disabled="controlDisabled" aria-describedby="blocking-escalate-help">
           <em>{{ draft.auto_escalate ? '已开启' : '已关闭' }}</em>
-        </div><small id="blocking-escalate-help">同一来源 24 小时内再次触发时，租约按 4 倍递增，最长 6 小时；关闭时每次都用上面的固定时长。</small></label>
+        </div><small id="blocking-escalate-help">同一来源 24 小时内再次触发时，租约按 4 倍递增，但总时长不超过 3600 秒（60 分钟）；关闭时每次使用上方固定时长。</small></label>
         <label class="number-field" for="blocking-window"><span>规则观察窗口</span><div><input id="blocking-window" v-model.number="draft.window_seconds" type="number" min="60" max="900" step="1" required :disabled="controlDisabled" aria-describedby="blocking-window-help"><em>秒</em></div><small id="blocking-window-help">60 – 900 秒</small></label>
         <label class="number-field" for="blocking-ssh"><span>SSH 失败阈值</span><div><input id="blocking-ssh" v-model.number="draft.ssh_threshold" type="number" min="20" max="200" step="1" required :disabled="controlDisabled" aria-describedby="blocking-ssh-help"><em>次</em></div><small id="blocking-ssh-help">20 – 200 次</small></label>
         <label class="number-field" for="blocking-web"><span>Web 探测阈值</span><div><input id="blocking-web" v-model.number="draft.web_threshold" type="number" min="30" max="500" step="1" required :disabled="controlDisabled" aria-describedby="blocking-web-help"><em>次</em></div><small id="blocking-web-help">30 – 500 次</small></label>
@@ -357,10 +357,10 @@ defineExpose({ refresh: () => busy.value ? Promise.resolve(false) : refresh() })
       <details class="blocking-details rules-details">
         <summary><ArrowRight aria-hidden="true" /><span>规则与保护范围</span><small>查看规则条件</small></summary>
         <ul class="rule-notes">
-          <li><strong>SSH：</strong>短窗口内重复出现 Failed password，达到阈值后才进入封禁评估。规则封禁最长 15 分钟。</li>
+          <li><strong>SSH：</strong>短窗口内重复出现 Failed password，达到阈值后才进入封禁评估。规则封禁按上方时长执行，硬上限为 3600 秒（60 分钟）。</li>
           <li><strong>Web：</strong>敏感路径探测达到阈值，且涉及多个不同目标才进入封禁评估；普通 403 不触发封禁。</li>
           <li><strong>作用范围：</strong>宿主机入站（INPUT）与 Prism Docker 的 80/443 流量。</li>
-          <li><strong>小菱研判：</strong>需启用规则自动封禁，仅研判可信日志候选，封禁最多 2 分钟；每天最多 24 次模型研判。</li>
+          <li><strong>小菱研判：</strong>需启用规则自动封禁，仅研判可信日志候选；每次封禁最多 120 秒，每天最多 24 次模型研判。</li>
           <li><strong>研判门槛：</strong>SSH 认证失败至少 10 次，或 Web 探测至少 10 次且涉及 3 个敏感目标。实际封禁前由执行器重新核验证据与保护名单，不能任意封 IP、网段或永久封禁。</li>
           <li><strong>执行依据：</strong>命中或研判建议均不代表生效，以执行器回执显示结果。</li>
         </ul>

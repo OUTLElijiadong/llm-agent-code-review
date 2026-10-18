@@ -23,6 +23,7 @@ vi.mock('@/stores/user', () => ({
 }))
 
 import ProactivePageGuide from './ProactivePageGuide.vue'
+import source from './ProactivePageGuide.vue?raw'
 
 async function mountGuide(path: string, surface: 'user' | 'admin'): Promise<{ wrapper: ReturnType<typeof mount>; router: Router }> {
   const router = createRouter({
@@ -61,6 +62,14 @@ describe('ProactivePageGuide', () => {
     auth.superAdmin = false
   })
   afterEach(() => { sessionStorage.clear(); localStorage.clear(); vi.restoreAllMocks() })
+
+  it('引导在页面流中占位，不以固定浮层遮挡页面操作', () => {
+    const styles = source.split('<style scoped>')[1]?.split('</style>')[0] ?? ''
+    const guide = styles.match(/\.proactive-guide\s*\{([^}]+)\}/)?.[1] ?? ''
+    expect(guide).toContain('position: relative')
+    expect(guide).toContain('margin: 0 auto 16px')
+    expect(guide).not.toContain('position: fixed')
+  })
 
   it('进入有建议的页面时弹出引导', async () => {
     const { wrapper } = await mountGuide('/projects', 'user')

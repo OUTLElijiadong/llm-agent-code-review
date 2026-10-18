@@ -41,6 +41,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
     <div class="app-layout-right">
       <AppHeader @toggle-sidebar="toggleSidebar" />
       <main class="app-layout-main">
+        <ProactivePageGuide surface="user" />
         <router-view v-slot="{ Component, route }">
           <transition name="content-route" mode="out-in">
             <component :is="Component" :key="route.path" />
@@ -48,7 +49,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', closeSidebarOnEscape
         </router-view>
       </main>
     </div>
-    <ProactivePageGuide surface="user" />
     <XiaolingGreeter />
   </div>
 </template>

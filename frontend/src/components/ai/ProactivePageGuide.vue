@@ -95,14 +95,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .proactive-guide {
-  position: fixed;
-  right: 24px;
-  bottom: 96px;
+  position: relative;
   z-index: var(--layer-guide);
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: 420px;
+  width: min(100%, 720px);
+  max-width: 100%;
+  margin: 0 auto 16px;
   padding: 12px 14px 12px 16px;
   border: 1px solid rgba(91, 88, 232, 0.22);
   border-radius: 10px;
@@ -110,7 +110,7 @@ onBeforeUnmount(() => {
   box-shadow: var(--panel-shadow, 0 14px 36px rgba(31, 35, 41, 0.16));
   backdrop-filter: blur(16px) saturate(1.12);
   -webkit-backdrop-filter: blur(16px) saturate(1.12);
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .proactive-guide::before {
@@ -134,6 +134,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .guide-title {
@@ -200,14 +201,12 @@ onBeforeUnmount(() => {
 
 @media (max-width: 560px) {
   .proactive-guide {
-    right: 12px;
-    bottom: 84px;
-    left: 12px;
-    max-width: none;
+    width: 100%;
+    flex-wrap: wrap;
     padding-left: 12px;
   }
 
-  .guide-body { min-width: 0; }
+  .guide-body { flex: 1 1 calc(100% - 44px); }
   .guide-act { margin-left: 32px; }
 }
 </style>

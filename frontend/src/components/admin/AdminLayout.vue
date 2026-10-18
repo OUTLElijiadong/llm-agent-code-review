@@ -166,6 +166,7 @@ async function logout(): Promise<void> {
       </header>
 
       <main ref="contentRef" class="admin-content">
+        <ProactivePageGuide surface="admin" />
         <router-view v-slot="{ Component, route: childRoute }">
           <transition name="admin-route" mode="out-in">
             <component :is="Component" :key="childRoute.path" />
@@ -173,7 +174,6 @@ async function logout(): Promise<void> {
         </router-view>
       </main>
     </section>
-    <ProactivePageGuide surface="admin" />
   </div>
 </template>
 
@@ -383,7 +383,8 @@ async function logout(): Promise<void> {
   min-height: 0;
   padding: 24px 28px 36px;
   padding-bottom: max(36px, var(--assistant-action-clearance));
-  overflow-x: hidden;
+  // 宽表格在窄视口可横向滚动，不裁掉最右侧操作列。
+  overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   overflow-anchor: none;
