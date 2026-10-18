@@ -4,8 +4,11 @@ from __future__ import annotations
 import re
 
 _LEVELS = {"严重": "严重", "危急": "严重", "critical": "严重", "高": "高", "高危": "高",
-           "high": "高", "中": "中", "中危": "中", "medium": "中", "低": "低", "低危": "低", "low": "低"}
+           "high": "高", "中": "中", "中危": "中", "中优先级": "中", "medium": "中",
+           "低": "低", "低危": "低", "低优先级": "低", "low": "低"}
 _LEVEL_PATTERN = "|".join(sorted(_LEVELS, key=len, reverse=True))
+_NON_SEVERITY_GROUPS = {"提示", "提示级", "待复核", "未分级"}
+_ISSUE_ID = re.compile(r"^\s*(?:[-*+]\s*)?([A-Z]{1,3}-\d+)\s+(.+?)\s*$")
 _FIELD = re.compile(
     r"^(?:漏洞位置|位置|证据|描述|影响|修复建议|建议|POC|复现|vulnerable code|严重程度|严重度)\s*[:：/ ]", re.I,
 )
@@ -568,16 +571,19 @@ def summarize_sandbox_report(report_md: object) -> dict:
             headings.append((index, len(match.group(1)), match.group(2)))
     entries = []
     severity_groups: list[tuple[int, int, int, str]] = []
+    issue_group_ranges: list[tuple[int, int]] = []
     for offset, (index, level, title) in enumerate(headings):
         normalized_title = _heading_text(title).rstrip(":：").lower()
-        if normalized_title not in _LEVELS:
+        if normalized_title not in _LEVELS and normalized_title not in _NON_SEVERITY_GROUPS:
             continue
         end = len(section)
         for child in headings[offset + 1:]:
             if child[1] <= level:
                 end = child[0]
                 break
-        severity_groups.append((index, end, level, _LEVELS[normalized_title]))
+        issue_group_ranges.append((index, end))
+        if normalized_title in _LEVELS:
+            severity_groups.append((index, end, level, _LEVELS[normalized_title]))
 
     def inherited_severity(index: int, item_level: int | None = None) -> str | None:
         candidates = [
@@ -602,16 +608,35 @@ def summarize_sandbox_report(report_md: object) -> dict:
             # 字段子标题属于当前发现；真正含子发现的分组标题不重复计数。
             if any(not _is_field_heading(child[2]) for child in descendants):
                 continue
-            if normalized_title in _LEVELS or _EMPTY.fullmatch(title.strip()):
+            if (normalized_title in _LEVELS or normalized_title in _NON_SEVERITY_GROUPS
+                    or _EMPTY.fullmatch(title.strip())):
                 continue
             entries.append((title, section[index + 1:end], inherited_severity(index, level)))
             heading_entry_ranges.append((index, end))
+        # Some reports group plain-text findings under headings such as
+        # "中优先级" or "待复核" and label each item M-1/L-1/R-1 rather than
+        # using Markdown bullets or subheadings. Count those explicit items,
+        # not the group headings themselves.
+        issue_id_ranges: list[tuple[int, int]] = []
+        for index, line in enumerate(section):
+            match = _ISSUE_ID.match(line)
+            if not match or not any(start < index < end for start, end in issue_group_ranges):
+                continue
+            body_end = len(section)
+            for next_index in range(index + 1, len(section)):
+                if _ISSUE_ID.match(section[next_index]) or re.match(r"^#{3,6}\s+", section[next_index]):
+                    body_end = next_index
+                    break
+            entries.append((match.group(0).strip(), section[index + 1:body_end], inherited_severity(index)))
+            issue_id_ranges.append((index, body_end))
+            heading_entry_ranges.append((index, body_end))
         # Some model reports mix titled findings and root-level list findings.
         # Count only list items outside a finding heading's body; bullets inside
         # a heading remain evidence/fields for that finding.
         for index, line in enumerate(section):
             match = re.match(r"^(?:[-*+] |\d+[.)]\s+)(.+)", line)
-            if not match or any(start < index < end for start, end in heading_entry_ranges):
+            if (not match or any(start <= index < end for start, end in issue_id_ranges)
+                    or any(start < index < end for start, end in heading_entry_ranges)):
                 continue
             title = match.group(1).replace("**", "").strip()
             if not _FIELD.match(title) and not _EMPTY.fullmatch(title):

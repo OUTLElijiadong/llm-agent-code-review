@@ -3,6 +3,7 @@
 from io import BytesIO
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import Table
@@ -170,6 +171,19 @@ def test_domain_report_exports_keep_markdown_tables_as_native_tables():
         "长证据内容用于确认 PDF 和 Word 会自动换行，而不是把表格竖线当作正文输出。",
         "已记录",
     ]
+
+
+def test_domain_word_export_uses_compact_title_for_long_task_names():
+    title = "沙箱黑白盒测试 · sbx_3b317e05c0fa45128c20e31d"
+    word, content_type = export_markdown_report(title, DOMAIN_TABLE_REPORT, "word")
+
+    assert content_type.endswith("wordprocessingml.document")
+    document = Document(BytesIO(word))
+    title_paragraph = document.paragraphs[0]
+    assert title_paragraph.text == title
+    assert title_paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert title_paragraph.runs
+    assert all(run.font.size is not None and run.font.size.pt == 18 for run in title_paragraph.runs)
 
 
 def test_domain_coverage_names_requested_mode_and_does_not_claim_all_ranges_were_scanned():

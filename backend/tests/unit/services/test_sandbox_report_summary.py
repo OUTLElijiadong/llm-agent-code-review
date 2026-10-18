@@ -294,6 +294,62 @@ def test_severity_group_heading_is_not_an_extra_finding():
     assert result['unclassified'] == 0
 
 
+def test_priority_groups_and_inline_issue_ids_match_production_whitebox_report():
+    report = (
+        '## 问题清单（按严重度）\n'
+        '### 中优先级\n'
+        'M-1 未发现项目自带测试文件，白盒实质为 AI 生成用例自测\n'
+        '- 证据：recon_facts.test_files.found = 0。\n'
+        'M-2 静态侦察结果全空，白盒编译检查无有效证据\n'
+        '- 证据：entrypoints 为空。\n'
+        '### 提示级\n'
+        'L-1 反编译被跳过，未提供跳过原因\n'
+        '- 证据：decompilation.reason 为空。\n'
+        'L-2 执行耗时极短，与完整白盒预期不符\n'
+        '- 证据：执行约 2.33 秒。\n'
+        '### 待复核\n'
+        'R-1 deterministic_test_execution 与 agent_tests 是否指向同一批文件\n'
+        '- 复检状态：建议回查归档原始证据。\n'
+        'R-2 hardcoded_secrets 字段类型不一致\n'
+        '- 复检状态：建议回查归档原始证据。\n'
+    )
+
+    result = summarize_sandbox_report(report)
+
+    assert result['total'] == 6
+    assert result['severity_counts'] == {'严重': 0, '高': 0, '中': 2, '低': 0}
+    assert result['unclassified'] == 4
+
+
+def test_plain_severity_groups_and_numbered_items_match_production_blackbox_report():
+    report = (
+        '## 问题清单（按严重度）\n'
+        '### 高\n'
+        '1. 整体执行以超时失败告终（退出码 124）\n'
+        '- 证据：worker_result.exit_code=124。\n'
+        '2. 黑盒路由探测未发现任何返回 2xx 的应用路由\n'
+        '- 证据：8 条路径全部返回 HTTP 404。\n'
+        '3.- 位置：侦察阶段（recon_facts / PRISM_FACTS）\n'
+        '- 证据：recon_facts 为空对象。\n'
+        '### 中\n'
+        '4. 项目未暴露可识别的入口点与测试框架，测试发现阶段失效\n'
+        '- 证据：entrypoints 为空。\n'
+        '5. 动态断言与确定性路由探测结论冲突\n'
+        '- 证据：agent_assertions_passed=true、route_passed=false。\n'
+        '### 提示\n'
+        '6. 响应头基线未采集\n'
+        '- 证据：无响应头记录。\n'
+        '7. _prism_poc.sh 不存在，PoC 阶段被跳过\n'
+        '- 证据：执行日志记录脚本不存在。\n'
+    )
+
+    result = summarize_sandbox_report(report)
+
+    assert result['total'] == 6
+    assert result['severity_counts'] == {'严重': 0, '高': 2, '中': 2, '低': 0}
+    assert result['unclassified'] == 2
+
+
 def test_field_subheadings_belong_to_parent_finding():
     report = '## 问题清单\n' + '\n'.join(
         f'### {i}. 发现\n#### 漏洞位置\n代码位置\n#### vulnerable code\n代码证据\n'

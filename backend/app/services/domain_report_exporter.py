@@ -9,6 +9,8 @@ from io import BytesIO
 from typing import Any
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, RGBColor
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
@@ -21,7 +23,7 @@ from app.services.report_pdf_exporter import (
     _ensure_chinese_font,
 )
 from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
-from app.services.report_word_exporter import _append_markdown_to_word
+from app.services.report_word_exporter import _append_markdown_to_word, _set_run_chinese_font
 
 
 def _value(value: Any, fallback: str = "未记录") -> str:
@@ -381,7 +383,15 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
         return buffer.getvalue(), "application/pdf"
     if format == "word":
         document = Document()
-        document.add_heading(title, level=0)
+        title_paragraph = document.add_paragraph()
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_paragraph.paragraph_format.space_after = Pt(16)
+        title_paragraph.paragraph_format.keep_with_next = True
+        title_run = title_paragraph.add_run(title)
+        title_run.bold = True
+        title_run.font.size = Pt(18)
+        title_run.font.color.rgb = RGBColor(0x17, 0x20, 0x33)
+        _set_run_chinese_font(title_run, "SimSun")
         _append_markdown_to_word(document, markdown)
         buffer = BytesIO()
         document.save(buffer)
