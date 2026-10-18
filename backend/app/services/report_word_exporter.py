@@ -52,8 +52,8 @@ _SEVERITY_RGB: Dict[str, RGBColor] = {
 # 严重度展示顺序(严重 > 高 > 中 > 低 > 其他)
 _SEVERITY_ORDER: Tuple[str, ...] = ("严重", "高", "中", "低")
 
-# 中文字体名称(SimSun 是 Word 常用中文字体)
-_CHINESE_FONT: str = "SimSun"
+# 中文字体名称(Noto Sans SC 在本机与服务端字体集内可用，支持简体中文)
+_CHINESE_FONT: str = "Noto Sans SC"
 
 # 代码字体名称(Courier New 等宽字体,适合展示代码)
 _CODE_FONT: str = "Courier New"
@@ -136,7 +136,12 @@ def _append_markdown_runs(paragraph: Any, segments: tuple[MarkdownSegment, ...],
 
 def _append_markdown_to_word(doc: Any, value: str | None) -> None:
     """把 Markdown 语义映射到 Word 标题、列表、表格、引用和代码段落。"""
+    ordered_depth: int | None = None
+    ordered_index = 0
     for block in markdown_to_blocks(value):
+        if block.kind != "ordered":
+            ordered_depth = None
+            ordered_index = 0
         if block.kind == "rule":
             paragraph = doc.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(4)
@@ -178,8 +183,12 @@ def _append_markdown_to_word(doc: Any, value: str | None) -> None:
             paragraph = doc.add_paragraph(style="List Bullet")
             paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
         elif block.kind == "ordered":
-            paragraph = doc.add_paragraph(style="List Number")
+            ordered_index = ordered_index + 1 if ordered_depth == block.list_depth else 1
+            ordered_depth = block.list_depth
+            paragraph = doc.add_paragraph()
             paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
+            paragraph.paragraph_format.first_line_indent = Inches(-0.2)
+            _add_run(paragraph, f"{ordered_index}. ", size=10)
         elif block.kind == "quote":
             paragraph = doc.add_paragraph(style="Quote")
             paragraph.paragraph_format.left_indent = Inches(0.25 * max(1, block.list_depth))
@@ -290,7 +299,7 @@ def _group_issues_by_severity(issues: List[Dict[str, Any]]) -> Dict[str, List[Di
     return grouped
 
 
-def _format_score(score: int) -> str:
+def _format_score(score: Optional[int]) -> str:
     """格式化评分展示文本(含风险等级)。
 
     Args:
@@ -299,6 +308,8 @@ def _format_score(score: int) -> str:
     Returns:
         str: 格式化后的评分文本,如 "72/100 (中风险)"。
     """
+    if score is None:
+        return "未评估"
     return f"{score}/100 ({score_risk_level(score)})"
 
 
@@ -646,6 +657,7 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
     fixed_code = issue.get("fixed_code") or ""
     if fixed_code:
         code_label_para = doc.add_paragraph()
+        code_label_para.paragraph_format.keep_with_next = True
         _add_run(code_label_para, "修复代码:", bold=True, size=10)
         # 代码内容使用 Courier New 等宽字体
         code_para = doc.add_paragraph()

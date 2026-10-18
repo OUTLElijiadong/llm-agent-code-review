@@ -201,13 +201,17 @@ class TestWsRegistryPurge:
         try:
             assert ws_discussion.take_pending("disc_preflight_expired") is None
             session = bus.get_session("disc_preflight_expired", owner_user_id=7)
-            assert session.status == "concluded"
-            assert session.progress["phase"] == "interrupted"
+            assert session.status == "failed"
+            assert session.terminal_status == "failed"
+            assert session.progress["phase"] == "failed"
+            assert "未消耗讨论模型调用" in session.terminal_error
             assert "disc_preflight_expired" not in ws_discussion._session_owners
         finally:
-            ws_discussion._pending.pop("disc_preflight_expired", None)
-            ws_discussion._session_owners.pop("disc_preflight_expired", None)
-            ws_discussion._owner_registered_at.pop("disc_preflight_expired", None)
+            with ws_discussion._pending_lock:
+                ws_discussion._pending.pop("disc_preflight_expired", None)
+                ws_discussion._session_owners.pop("disc_preflight_expired", None)
+                ws_discussion._owner_registered_at.pop("disc_preflight_expired", None)
+                ws_discussion._schedule_next_pending_expiry_locked()
 
     def test_stale_pending_purged_on_register(self):
         from app.api.v1 import ws_discussion
@@ -231,6 +235,8 @@ class TestWsRegistryPurge:
                 ws_discussion._pending.pop(sid, None)
                 ws_discussion._session_owners.pop(sid, None)
                 ws_discussion._owner_registered_at.pop(sid, None)
+            with ws_discussion._pending_lock:
+                ws_discussion._schedule_next_pending_expiry_locked()
 
     def test_owner_kept_while_bus_session_alive(self):
         from app.api.v1 import ws_discussion
@@ -239,7 +245,7 @@ class TestWsRegistryPurge:
         ws_discussion.register_pending("disc_alive", user_id=9)
         # 模拟 WS 连接消费掉 pending 且编排器已建会话
         ws_discussion._pending.pop("disc_alive", None)
-        bus.create_session("disc_alive", task_id=1, file_name="a.py")
+        bus.create_session("disc_alive", task_id=1, file_name="a.py", owner_user_id=9)
         ws_discussion._owner_registered_at["disc_alive"] = (
             time.time() - ws_discussion._STALE_TTL - 1
         )
@@ -252,3 +258,5 @@ class TestWsRegistryPurge:
                 ws_discussion._pending.pop(sid, None)
                 ws_discussion._session_owners.pop(sid, None)
                 ws_discussion._owner_registered_at.pop(sid, None)
+            with ws_discussion._pending_lock:
+                ws_discussion._schedule_next_pending_expiry_locked()

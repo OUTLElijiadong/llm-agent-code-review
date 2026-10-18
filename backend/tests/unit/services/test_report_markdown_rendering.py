@@ -248,3 +248,13 @@ def test_domain_coverage_names_requested_mode_and_does_not_claim_all_ranges_were
     assert "远程黑盒验证：未纳入本次验证" in joined
     assert "回执未列出具体未扫描项" in joined
     assert "已记录范围内无遗漏" not in joined
+
+
+def test_domain_coverage_keeps_coverage_and_verification_status_distinct():
+    joined = "\n".join(_coverage_lines({
+        "coverage_status": "partial",
+        "verification_status": "complete",
+    }))
+
+    assert "覆盖状态：部分覆盖" in joined
+    assert "验证状态：核验已完成" in joined

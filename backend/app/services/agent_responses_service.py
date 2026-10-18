@@ -48,6 +48,7 @@ from app.models.agent_response_run import (
     AgentResponseRun,
     AgentResponseTranscriptMessage,
     AgentToolExecution,
+    response_run_stop_requested,
 )
 from app.models.user import User
 from app.schemas.discussion import RoundtableTemporaryExpert
@@ -828,6 +829,20 @@ class DatabaseCheckpointStore:
         return json.dumps(value, ensure_ascii=False, default=str)
 
     @staticmethod
+    def _mark_stopped(checkpoint: RunCheckpoint, payload: Mapping[str, Any]) -> None:
+        """把持久停止意图应用到当前驱动对象，阻止调用方继续启动模型/工具。"""
+        reason = str(payload.get("stop_reason") or checkpoint.cancel_reason or "").strip()[:500]
+        checkpoint.status = CANCELLED
+        checkpoint.pending = None
+        checkpoint.error = ""
+        checkpoint.cancel_reason = reason
+        suffix = "已停止任务，未执行剩余操作；如需继续可重新发起。"
+        checkpoint.output_text = (
+            f"用户取消了本次运行（原因：{reason}）。{suffix}"
+            if reason else f"用户取消了本次运行。{suffix}"
+        )
+
+    @staticmethod
     def _transcript_digest(transcript: Sequence[Mapping[str, Any]]) -> str:
         encoded = json.dumps(
             [dict(item) for item in transcript], ensure_ascii=False,
@@ -938,6 +953,24 @@ class DatabaseCheckpointStore:
         if not self._lock_active_conversation():
             self._db.rollback()
             return False
+        attribution = current_attribution(self._user_id)
+        root_run_id = int(attribution.get("root_agent_run_id") or 0)
+        if root_run_id:
+            parent_run = (
+                self._db.query(AgentResponseRun)
+                .filter(
+                    AgentResponseRun.id == root_run_id,
+                    AgentResponseRun.user_id == self._user_id,
+                    AgentResponseRun.surface == self._surface,
+                    AgentResponseRun.session_key == self._session_key,
+                )
+                .populate_existing()
+                .with_for_update()
+                .one_or_none()
+            )
+            if response_run_stop_requested(parent_run):
+                self._db.rollback()
+                return False
         active = (
             self._db.query(AgentResponseRun.id)
             .filter(
@@ -1000,12 +1033,30 @@ class DatabaseCheckpointStore:
             self._db.commit()
             return
         self._assert_owner(row)
+        try:
+            stored_payload = json.loads(row.checkpoint_json or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise InvalidRunStateError(f"运行 {row.run_id} 的检查点损坏") from exc
+        stop_requested = (
+            isinstance(stored_payload, dict)
+            and stored_payload.get("stop_requested") is True
+        )
         # completed 与 cancelled 都是不可覆盖终态。取消和模型结束可能并发；
         # 以条件 UPDATE 保证先提交的终态获胜，迟到的取消不能覆盖 completed。
         if row.status in {COMPLETED, CANCELLED}:
+            if row.status == CANCELLED:
+                self._mark_stopped(checkpoint, stored_payload)
+            self._db.rollback()
             return
+        if stop_requested:
+            # 用户停止意图优先于迟到的模型/工具完成回写。必须提交 CANCELLED
+            # 并释放 FOR UPDATE 锁；静默返回会让旧驱动继续请求模型且阻塞取消方。
+            self._mark_stopped(checkpoint, stored_payload)
         start, end = self._extend_run_transcript(row, checkpoint)
-        payload = self._checkpoint_payload(checkpoint, start=start, end=end)
+        payload_value = json.loads(self._checkpoint_payload(checkpoint, start=start, end=end))
+        if stop_requested or checkpoint.status == CANCELLED:
+            payload_value["stop_requested"] = True
+        payload = json.dumps(payload_value, ensure_ascii=False, default=str)
         self._db.flush()
         updated = (
             self._db.query(AgentResponseRun)
@@ -1079,6 +1130,57 @@ class DatabaseCheckpointStore:
         if not self._lock_active_conversation():
             self._db.rollback()
             return None
+        row = (
+            self._db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.run_id == run_id,
+                AgentResponseRun.user_id == self._user_id,
+                AgentResponseRun.surface == self._surface,
+                AgentResponseRun.session_key == self._session_key,
+                AgentResponseRun.status == expected_status,
+            )
+            .with_for_update()
+            .populate_existing()
+            .one_or_none()
+        )
+        if row is None:
+            self._db.rollback()
+            return None
+        try:
+            stored = json.loads(row.checkpoint_json or "{}")
+            if not isinstance(stored, Mapping):
+                raise InvalidRunStateError(f"运行 {run_id} 的检查点格式错误")
+        except InvalidRunStateError:
+            self._db.rollback()
+            raise
+        except (TypeError, json.JSONDecodeError) as exc:
+            self._db.rollback()
+            raise InvalidRunStateError(f"运行 {run_id} 的检查点损坏") from exc
+        if stored.get("stop_requested") is True:
+            # retry/approve/answer 与停止并发时，停止标记必须先赢；不能再用
+            # 序列化后的普通检查点覆盖 stop_requested 后重新启动模型。
+            try:
+                stopped = self._checkpoint_from_payload(stored)
+                self._mark_stopped(stopped, stored)
+                reference = self._transcript_ref(stored)
+                start, end = (
+                    reference[:2]
+                    if reference is not None
+                    else self._legacy_run_transcript_range(stopped)
+                )
+            except InvalidRunStateError:
+                self._db.rollback()
+                raise
+            stopped_payload = json.loads(self._checkpoint_payload(stopped, start=start, end=end))
+            stopped_payload.update({
+                "stop_requested": True,
+                "recovery_requested": False,
+            })
+            row.status = CANCELLED
+            row.checkpoint_json = json.dumps(stopped_payload, ensure_ascii=False, default=str)
+            row.version = int(row.version or 0) + 1
+            self._db.commit()
+            return None
         claimed_at = datetime.now(timezone.utc)
         result = self._db.execute(
             update(AgentResponseRun)
@@ -1088,6 +1190,7 @@ class DatabaseCheckpointStore:
                 AgentResponseRun.surface == self._surface,
                 AgentResponseRun.session_key == self._session_key,
                 AgentResponseRun.status == expected_status,
+                AgentResponseRun.checkpoint_json.notlike('%"stop_requested": true%'),
             )
             .values(
                 status=claimed_status,
@@ -1099,17 +1202,12 @@ class DatabaseCheckpointStore:
         if result.rowcount != 1:
             self._db.rollback()
             return None
-        row = (
-            self._db.query(AgentResponseRun)
-            .filter(
-                AgentResponseRun.run_id == run_id,
-                AgentResponseRun.user_id == self._user_id,
-                AgentResponseRun.surface == self._surface,
-                AgentResponseRun.session_key == self._session_key,
-            )
-            .populate_existing()
-            .one()
-        )
+        row = self._db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id == run_id,
+            AgentResponseRun.user_id == self._user_id,
+            AgentResponseRun.surface == self._surface,
+            AgentResponseRun.session_key == self._session_key,
+        ).populate_existing().one()
         try:
             stored = json.loads(row.checkpoint_json)
             if not isinstance(stored, Mapping):
@@ -3694,12 +3792,68 @@ class AgentResponsesService:
         有原因时额外累计一次带维度的事件计数。
         """
         # 取消只修改本会话检查点，不依赖模型配置、MCP 或图片是否仍完整。
+        attribution = run_attribution(self._db, int(self._user.id), run_id)
+        root_run_id = int(attribution.get("root_agent_run_id") or 0)
+        if not root_run_id:
+            root = (
+                self._db.query(AgentResponseRun.id)
+                .filter(
+                    AgentResponseRun.run_id == run_id,
+                    AgentResponseRun.user_id == int(self._user.id),
+                    AgentResponseRun.surface == self._surface,
+                    AgentResponseRun.session_key == self._session_key,
+                )
+                .one_or_none()
+            )
+            root_run_id = int(root[0]) if root else 0
+        stop_intent_registered = False
+        if root_run_id:
+            root = (
+                self._db.query(AgentResponseRun)
+                .filter(
+                    AgentResponseRun.id == root_run_id,
+                    AgentResponseRun.user_id == int(self._user.id),
+                    AgentResponseRun.surface == self._surface,
+                    AgentResponseRun.session_key == self._session_key,
+                )
+                .populate_existing()
+                .with_for_update()
+                .one_or_none()
+            )
+            if root is not None:
+                try:
+                    payload = json.loads(root.checkpoint_json or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                payload["stop_requested"] = True
+                payload["stop_reason"] = reason.strip()[:500]
+                root.checkpoint_json = json.dumps(payload, ensure_ascii=False, default=str)
+                root.version = int(root.version or 0) + 1
+                self._db.commit()
+                stop_intent_registered = True
         runtime = DeepSeekResponsesRuntime(
             transport=None, tool_executor=None, checkpoint_store=self._store, model="",
         )
-        result = await runtime.cancel(run_id, reason=reason)
         cancelled_teams = 0
-        if result.status == CANCELLED:
+        try:
+            result = await runtime.cancel(run_id, reason=reason)
+        finally:
+            # 根运行停止意图一旦持久化，团队取消必须进入可靠收尾；不能因为
+            # 运行时取消抛错就留下仍可继续运行、计费的子 Agent 团队。
+            if stop_intent_registered:
+                from app.services import agent_team_service
+
+                cancelled_teams = agent_team_service.cancel_response_teams(
+                    self._db,
+                    self._user,
+                    run_id=run_id,
+                    surface=self._surface,
+                    session_key=self._session_key,
+                    reason=reason.strip() or "父级小菱运行已停止",
+                )
+        if result.status == CANCELLED and not cancelled_teams:
             from app.services import agent_team_service
 
             cancelled_teams = agent_team_service.cancel_response_teams(

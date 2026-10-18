@@ -277,7 +277,12 @@ def start_discussion(
         )
     profiles = tuple(profiles)
     agent_list = [
-        {"code": p.code, "name": p.name, "focus": p.focus}
+        {
+            "code": p.code,
+            "name": p.name,
+            "focus": p.focus,
+            "temporary": p.code.startswith("temporary_"),
+        }
         for p in profiles
     ]
     rules = rule_service.get_enabled_rules(
@@ -308,6 +313,28 @@ def start_discussion(
         session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
         session.expected_turns = rounds * len(profiles)
         session.participants = agent_list
+        session.progress = {
+            **session.progress,
+            "phase": "pending",
+            "stage": "pending",
+            "stage_message": session.stage_message,
+            "completed_units": 0,
+            "total_units": session.expected_turns,
+            "expected_turns": session.expected_turns,
+        }
+        # create_session 初始账本会先落入默认 active；在返回 session_id 前，
+        # 持久化预检态，确保服务重启后的清理逻辑不会误认为已启动。
+        persisted = db.query(RoundtableSession).filter_by(
+            session_id=session_id,
+            owner_user_id=int(user.id),
+        ).one_or_none()
+        if persisted is None:
+            raise RuntimeError("圆桌预检会话未能写入当前账号账本")
+        persisted.status = "pending"
+        persisted.progress = dict(session.progress)
+        persisted.agents = agent_list
+        persisted.updated_at = datetime.now(timezone.utc)
+        db.commit()
 
     register_pending(
         session_id=session_id,

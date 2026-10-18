@@ -92,11 +92,15 @@ def _score_is_available(task: ReviewTask) -> bool:
     explicit = coverage.get("score_available")
     if task.status != "success":
         return False
-    coverage_status = str(
-        coverage.get("coverage_status") or coverage.get("verification_status") or ""
-    ).lower()
-    if coverage_status in {"partial", "failed", "unknown"}:
+    declared_statuses = {
+        str(coverage.get(field) or "").strip().lower()
+        for field in ("coverage_status", "verification_status")
+        if coverage.get(field) is not None
+    }
+    complete_statuses = {"complete", "completed", "verified"}
+    if not declared_statuses or not declared_statuses <= complete_statuses:
         return False
+    coverage_status = "complete"
     if task.review_type == "sandbox_test":
         # Dynamic test pass rate is execution evidence, not a code-quality or
         # vulnerability-risk score. Hide it for both new and historical rows.
@@ -541,9 +545,9 @@ def list_reports(db: Session, user: User, project_id: int = None,
             source["security_report"] = snapshot
         coverage = None
         if can_view_report:
-            if row.review_type == "sandbox_test" and (row.coverage or source.get("test_mode")):
+            if row.review_type == "sandbox_test":
                 coverage = _task_coverage(row, source.get("test_mode"))
-            elif row.coverage:
+            else:
                 coverage = _task_coverage(row)
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
@@ -1019,8 +1023,8 @@ def _build_task_score_facts(
         }, severity_count
     score, score_breakdown = build_report_score_facts(
         severity_count,
-        issue_count,
-        task.score,
+        max(0, issue_count - int(issue_stats.get("refuted", 0) or 0)),
+        task.score if issue_count == 0 else None,
     )
     return issue_count, score, score_breakdown, severity_count
 

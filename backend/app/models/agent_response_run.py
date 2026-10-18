@@ -1,11 +1,26 @@
 """Responses Agent 的可恢复运行检查点。"""
 
+import json
+
 from sqlalchemy import BigInteger, Column, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.database import Base
 from app.models.base import IdMixin, TimestampMixin
 from app.models.usage_attribution import UsageAttributionMixin
+
+
+def response_run_stop_requested(row: "AgentResponseRun | None") -> bool:
+    """判断运行是否被用户停止，包含已完成竞态下持久化的停止意图。"""
+    if row is None:
+        return False
+    if str(getattr(row, "status", "")) == "cancelled":
+        return True
+    try:
+        checkpoint = json.loads(getattr(row, "checkpoint_json", "") or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(checkpoint, dict) and checkpoint.get("stop_requested") is True
 
 
 class AgentResponseRun(Base, UsageAttributionMixin, IdMixin, TimestampMixin):

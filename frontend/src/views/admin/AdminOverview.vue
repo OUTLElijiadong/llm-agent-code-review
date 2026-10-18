@@ -137,7 +137,7 @@
           </div>
           <div class="token-kpi">
             <span class="token-kpi-label">最新一天</span>
-            <strong>{{ latestTokenDay?.tokens == null ? '未知' : formatTokens(latestTokenDay.tokens) }}</strong>
+            <strong>{{ latestTokenDay?.tokens == null ? '未知' : formatTokens(animatedLatestTokenCount) }}</strong>
             <span class="token-kpi-foot">{{ latestTokenDay?.date || tokenUsage.end_date }}</span>
           </div>
         </div>
@@ -412,9 +412,11 @@ const tokenHeatmapColumnCount = computed(() => Math.max(1, Math.ceil(tokenHeatma
 const totalTokenCount = computed(() => tokenUsage.value?.total_tokens ?? 0)
 const averageTokenCount = computed(() => averageKnownDayTokens.value ?? 0)
 const peakTokenCount = computed(() => peakTokenDay.value?.tokens ?? 0)
-const animatedTotalTokens = useCountUp(totalTokenCount)
-const animatedAverageKnownDayTokens = useCountUp(averageTokenCount)
-const animatedPeakTokenCount = useCountUp(peakTokenCount)
+const latestTokenCount = computed(() => latestTokenDay.value?.tokens ?? 0)
+const animatedTotalTokens = useCountUp(totalTokenCount, 650, true)
+const animatedAverageKnownDayTokens = useCountUp(averageTokenCount, 650, true)
+const animatedPeakTokenCount = useCountUp(peakTokenCount, 650, true)
+const animatedLatestTokenCount = useCountUp(latestTokenCount, 650, true)
 const tokenChartSummary = computed(() => {
   if (!tokenUsage.value) return '每日 Token 用量趋势，尚无数据'
   return `近 ${tokenUsage.value.days} 天每日 Token 用量，已记录 ${formatTokens(tokenUsage.value.total_tokens)} 个 Token，${tokenUsage.value.unknown_calls ? `另有 ${tokenUsage.value.unknown_calls} 次调用用量未知` : '用量记录完整'}`

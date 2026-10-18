@@ -50,6 +50,24 @@ def find_interrupted_agent_runs() -> list[AgentRunRecovery]:
                 continue
             if not isinstance(checkpoint, dict) or checkpoint.get("recovery_requested") is not True:
                 continue
+            if checkpoint.get("stop_requested") is True:
+                reason = str(checkpoint.get("stop_reason") or checkpoint.get("cancel_reason") or "").strip()[:500]
+                checkpoint.update({
+                    "status": "cancelled",
+                    "pending": None,
+                    "recovery_requested": False,
+                    "cancel_reason": reason,
+                    "error": "",
+                    "output_text": (
+                        f"用户取消了本次运行（原因：{reason}）。已停止任务，未执行剩余操作；如需继续可重新发起。"
+                        if reason else "用户取消了本次运行。已停止任务，未执行剩余操作；如需继续可重新发起。"
+                    ),
+                })
+                row.status = "cancelled"
+                row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+                row.version = int(row.version or 0) + 1
+                db.commit()
+                continue
             if _is_blocked_jarvis_recovery(db, row):
                 checkpoint["recovery_requested"] = False
                 checkpoint["error"] = "后台成本保护已阻止 JARVIS 自动恢复;请管理员明确发起核验"
@@ -80,7 +98,11 @@ def find_interrupted_agent_runs() -> list[AgentRunRecovery]:
                 checkpoint = json.loads(row.checkpoint_json or "{}")
             except (TypeError, json.JSONDecodeError):
                 continue
-            if not isinstance(checkpoint, dict) or checkpoint.get("recovery_requested") is True:
+            if (
+                not isinstance(checkpoint, dict)
+                or checkpoint.get("recovery_requested") is True
+                or checkpoint.get("stop_requested") is True
+            ):
                 continue
             recoveries.append(AgentRunRecovery(
                 run_id=identity[0],
@@ -228,6 +250,27 @@ def _resume_agent_run(recovery: AgentRunRecovery) -> None:
             logger.error("[recovery] 小菱运行 {} 的用户不存在，无法恢复", recovery.run_id)
             return
         row = _load_recovery_run(db, recovery)
+        if row is not None:
+            checkpoint = _load_checkpoint(row)
+            if checkpoint is not None and checkpoint.get("stop_requested") is True:
+                reason = str(checkpoint.get("stop_reason") or checkpoint.get("cancel_reason") or "").strip()[:500]
+                checkpoint.update({
+                    "status": "cancelled",
+                    "pending": None,
+                    "recovery_requested": False,
+                    "cancel_reason": reason,
+                    "error": "",
+                    "output_text": (
+                        f"用户取消了本次运行（原因：{reason}）。已停止任务，未执行剩余操作；如需继续可重新发起。"
+                        if reason else "用户取消了本次运行。已停止任务，未执行剩余操作；如需继续可重新发起。"
+                    ),
+                })
+                row.status = "cancelled"
+                row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+                row.version = int(row.version or 0) + 1
+                db.commit()
+                logger.info("[recovery] 小菱运行 {} 已收到停止意图，跳过自动恢复", recovery.run_id)
+                return
         if row is not None and row.status in {"completed", "failed"}:
             checkpoint = _load_checkpoint(row)
             if checkpoint is not None and checkpoint.get("recovery_requested") is not True:

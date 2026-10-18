@@ -70,7 +70,7 @@ def test_security_scan_persists_readable_owner_scoped_report_and_partial_coverag
                 "owasp": "A03:2021-Injection",
             }],
             "risk_score": 58,
-            "summary": "发现一项需要修复的命令注入风险。",
+            "summary": "发现一项需要修复的命令注入风险。安全评分 58/100。",
             "file_count": 1,
             "duration_ms": 1200,
             "compliance": {"scan_complete": False, "total_file_count": 2, "scanned_file_count": 1},
@@ -84,18 +84,24 @@ def test_security_scan_persists_readable_owner_scoped_report_and_partial_coverag
     report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
     issue = db.query(ReviewIssue).filter_by(task_id=task_id).one()
     task_file = db.query(ReviewTaskFile).filter_by(task_id=task_id, file_id=code_file.id).one()
-    assert task.status == "success"
+    assert task.status == "partial"
     assert task.review_type == "security_scan"
     assert task.coverage["verification_status"] == "partial"
+    assert task.coverage["score_available"] is False
     assert task.coverage["unscanned"] == ["src/other.py: 语义分析未执行"]
     assert report.content_json["execution_status"] == "partial"
+    assert report.content_json["score_available"] is False
+    assert report.content_json["risk_score"] is None
     assert report.content_json["findings"][0]["title"] == issue.title == "未授权命令执行"
     assert "验证覆盖" in report.content_json["report_md"]
+    assert "风险评分：未评估" in report.content_json["report_md"]
+    assert "58/100" not in report.content_json["report_md"]
     assert "src/other.py" in report.content_json["report_md"]
     assert "*" not in report.content_json["report_md"]
     assert task_file.file_snapshot["file_path"] == "src/app.py"
 
     detail = report_service.get_report_detail(db, owner, task_id)
+    assert detail["task"]["score"] is None
     assert detail["source"]["type"] == "security_scan"
     assert detail["source"]["security_report"]["threat_model"]["data_flows"]
     assert any(item["file_path"] == "src/app.py" for item in detail["files"])
@@ -129,6 +135,8 @@ def test_failed_security_scan_still_persists_report_with_unknown_coverage(db):
     assert task.status == "failed"
     assert task.error_message == "模型服务连接失败"
     assert report.content_json["coverage"]["verification_status"] == "failed"
+    assert task.coverage["score_available"] is False
+    assert report.content_json["score_available"] is False
     assert "完整源码审计范围未执行" in report.content_json["report_md"]
 
     detail = report_service.get_report_detail(db, owner, task_id)
@@ -150,6 +158,15 @@ def test_successful_security_scan_without_coverage_evidence_is_unknown():
     assert infer_coverage_status(
         "success", {"coverage_status": "complete", "scanned_file_count": 12, "total_file_count": 13}
     ) == "partial"
+    assert infer_coverage_status(
+        "success", {"coverage_status": "complete", "verification_status": "partial"}
+    ) == "partial"
+    assert infer_coverage_status(
+        "success", {"coverage_status": "unknown", "verification_status": "complete"}
+    ) == "unknown"
+    assert infer_coverage_status(
+        "success", {"coverage_status": "complete", "verification_status": "failed"}
+    ) == "failed"
 
 
 def test_successful_security_scan_without_coverage_evidence_reports_unknown_scope(db):
@@ -168,7 +185,7 @@ def test_successful_security_scan_without_coverage_evidence_reports_unknown_scop
         report_kind="security_scan",
         task_name="缺少覆盖证据的扫描",
         execution_status="success",
-        result={"summary": "扫描调用返回成功", "findings": [], "file_count": 12},
+        result={"summary": "扫描调用返回成功", "findings": [], "file_count": 12, "risk_score": 99},
         coverage={},
     )
 
@@ -177,7 +194,10 @@ def test_successful_security_scan_without_coverage_evidence_reports_unknown_scop
     assert task.coverage["verification_status"] == "unknown"
     assert task.coverage["unscanned"] == ["存在未完成或未能确认的扫描范围"]
     assert report.content_json["coverage"]["coverage_status"] == "unknown"
+    assert report.content_json["score_available"] is False
+    assert report.content_json["risk_score"] is None
     assert "覆盖范围：未知" in report.content_json["report_md"]
+    assert "风险评分：未评估" in report.content_json["report_md"]
     assert "存在未完成或未能确认的扫描范围" in report.content_json["report_md"]
 
 
@@ -239,3 +259,73 @@ def test_security_report_removes_ai_markdown_and_rejects_non_finite_scores(db):
     assert "*" not in report.content_json["findings"][0]["file_path"]
     assert "未授权访问" in issue.title
     assert "攻击者可访问受限接口。" == issue.description
+
+
+def test_security_report_with_ungraded_finding_does_not_publish_source_score(db):
+    owner = User(username="security_report_ungraded", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    project = Project(user_id=owner.id, project_name="未分级问题", language="python", status="active")
+    db.add(project)
+    db.flush()
+
+    task_id = persist_security_report(
+        db,
+        owner=owner,
+        project_id=project.id,
+        report_kind="security_scan",
+        task_name="包含未分级发现的完整扫描",
+        execution_status="success",
+        result={
+            "summary": "扫描完整，但发现尚未完成分级。",
+            "risk_score": 100,
+            "findings": [{"title": "待分级的风险", "severity": "未分级", "file_path": "src/app.py"}],
+            "file_count": 1,
+        },
+        coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
+    )
+
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    assert task.coverage["score_available"] is False
+    assert task.coverage["score_unavailable_reason"] == "ungraded_findings"
+    assert report.content_json["risk_score"] is None
+    assert report.content_json["findings"][0]["severity"] == "未分级"
+    assert "风险评分：未评估" in report.content_json["report_md"]
+
+
+def test_security_report_score_matches_final_issue_severity_basis(db):
+    owner = User(username="security_report_score_basis", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    project = Project(user_id=owner.id, project_name="统一评分", language="python", status="active")
+    db.add(project)
+    db.flush()
+
+    task_id = persist_security_report(
+        db,
+        owner=owner,
+        project_id=project.id,
+        report_kind="security_scan",
+        task_name="评分来源一致性",
+        execution_status="success",
+        result={
+            "summary": "已完成扫描。安全评分 100/100。",
+            "risk_score": 100,
+            "findings": [{"title": "高风险发现", "severity": "高", "file_path": "src/app.py"}],
+            "file_count": 1,
+        },
+        coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
+    )
+
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    detail = report_service.get_report_detail(db, owner, task_id)
+    assert task.score == 92
+    assert report.score == report.content_json["risk_score"] == detail["task"]["score"] == 92
+    assert report.content_json["source_risk_score"] == 100
+    assert "风险评分：92/100" in report.content_json["report_md"]
+    assert "来源评分：100/100" in report.content_json["report_md"]
+    assert "安全评分 100/100" not in report.content_json["summary"]

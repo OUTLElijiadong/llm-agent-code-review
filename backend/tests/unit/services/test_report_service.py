@@ -28,9 +28,16 @@ from app.services.report_service import (
         ("cancelled", None, 82, None),
         ("partial", {"coverage_status": "partial", "score_available": True}, 100, None),
         ("success", {"coverage_status": "partial", "score_available": True}, 82, None),
+        ("success", {"coverage_status": "unknown", "score_available": True}, 82, None),
+        (
+            "success",
+            {"coverage_status": "complete", "verification_status": "failed", "score_available": True},
+            82,
+            None,
+        ),
         ("success", {"coverage_status": "complete", "score_available": True}, 82, 82),
-        # Older successful tasks without a coverage snapshot keep their recorded score.
-        ("success", None, 100, 100),
+        # Missing legacy coverage is unknown; it cannot support a completeness claim.
+        ("success", None, 100, None),
     ],
 )
 def test_report_score_is_hidden_when_execution_or_coverage_is_incomplete(status, coverage, score, expected):
@@ -169,6 +176,7 @@ def test_report_detail_uses_final_issue_set_for_all_score_facts(db, admin_user):
         medium_issues=0,
         low_issues=0,
         score=5,
+        coverage={"coverage_status": "complete", "score_available": True},
         score_version="legacy-v0",
         score_breakdown={"score": 5, "risk_level": "低风险"},
     )
@@ -220,8 +228,8 @@ def test_report_detail_uses_final_issue_set_for_all_score_facts(db, admin_user):
     assert listed["score"] == detail["stats"]["score"] == 77
 
 
-def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, admin_user):
-    """无问题历史任务的显式 100 分必须保持 100，不能被默认值覆盖。"""
+def test_report_detail_preserves_explicit_score_for_complete_empty_historical_task(db, admin_user):
+    """完整覆盖的无问题历史任务保留显式分数，不被默认值覆盖。"""
     project = _make_project(db, admin_user)
     task = ReviewTask(
         user_id=admin_user.id,
@@ -230,6 +238,7 @@ def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, ad
         status="success",
         total_issues=0,
         score=100,
+        coverage={"coverage_status": "complete", "score_available": True},
     )
     db.add(task)
     db.commit()
@@ -242,6 +251,63 @@ def test_report_detail_preserves_explicit_score_for_empty_historical_task(db, ad
     assert detail["stats"]["score_breakdown"]["score"] == 100
     assert detail["stats"]["score_breakdown"]["score_source"] == "task_explicit_empty_report"
     assert detail["stats"]["risk_level"] == "低风险"
+
+
+def test_refuted_issue_remains_counted_but_does_not_affect_report_score(db, admin_user):
+    project = _make_project(db, admin_user)
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="已排除问题",
+        status="success",
+        total_issues=1,
+        severe_issues=1,
+        score=45,
+        coverage={"coverage_status": "complete", "score_available": True},
+    )
+    db.add(task)
+    db.commit()
+    db.add(ReviewIssue(
+        task_id=task.id,
+        issue_type="安全漏洞",
+        severity="严重",
+        title="误报",
+        description="人工确认不构成问题",
+        status="refuted",
+    ))
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
+
+    assert detail["stats"]["total_issues"] == 1
+    assert detail["stats"]["refuted"] == 1
+    assert detail["stats"]["severe"] == 0
+    assert detail["stats"]["score"] == 100
+    assert listed["score"] == detail["stats"]["score"]
+
+
+def test_legacy_report_without_coverage_hides_score_and_explains_unknown_scope(db, admin_user):
+    project = _make_project(db, admin_user)
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="缺失覆盖快照的历史任务",
+        status="success",
+        total_issues=0,
+        score=100,
+    )
+    db.add(task)
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
+
+    assert detail["task"]["score"] is None
+    assert detail["stats"]["score"] is None
+    assert detail["task"]["coverage"]["coverage_status"] == "unknown"
+    assert listed["score"] is None
+    assert listed["coverage"]["coverage_status"] == "unknown"
 
 
 def test_sandbox_report_detail_localizes_legacy_statuses_without_mutating_snapshot(db, admin_user):

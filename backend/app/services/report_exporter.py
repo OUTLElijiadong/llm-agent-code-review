@@ -274,11 +274,28 @@ def _normalize_task(task: Any) -> Dict[str, Any]:
     normalized["name"] = task_name
     # project_name 不在 ReviewTask ORM 上,需调用方传入或补空
     normalized["project_name"] = _to_serializable(raw.get("project_name", "")) or ""
-    if not isinstance(normalized.get("coverage"), dict) or not normalized["coverage"]:
-        normalized["coverage"] = {
+    coverage = normalized.get("coverage")
+    if not isinstance(coverage, dict) or not coverage:
+        coverage = {
             "coverage_status": "unknown",
             "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
         }
+    else:
+        complete_statuses = {"complete", "completed", "verified"}
+        declared_coverage = str(coverage.get("coverage_status") or "").strip().lower()
+        declared_verification = str(coverage.get("verification_status") or "").strip().lower()
+        if declared_coverage not in complete_statuses | {"partial", "failed", "unknown"}:
+            if declared_verification in complete_statuses:
+                declared_coverage = "complete"
+            elif declared_verification in {"partial", "failed", "unknown"}:
+                declared_coverage = declared_verification
+            else:
+                declared_coverage = "unknown"
+        # 覆盖范围和验证终态是两个独立事实，不能用后者覆盖前者。
+        coverage["coverage_status"] = declared_coverage
+        if declared_coverage == "unknown" and not coverage.get("unscanned"):
+            coverage["unscanned"] = ["历史任务未保存覆盖清单，无法确认实际扫描范围"]
+    normalized["coverage"] = coverage
     return normalized
 
 
@@ -296,7 +313,7 @@ def build_report_score_facts(
     severity_count: Dict[str, int],
     issue_count: int,
     explicit_score: Any = None,
-) -> tuple[int, Dict[str, Any]]:
+) -> tuple[Optional[int], Dict[str, Any]]:
     """构造所有报告出口共享的评分事实。
 
     最终 ReviewIssue 非空时，评分严格按 15/8/3/1 从问题集重算。空问题
@@ -304,7 +321,21 @@ def build_report_score_facts(
     ``score_source`` 与 ``compatibility_override`` 明确标识，避免伪造扣分。
     """
     breakdown: Dict[str, Any] = compute_score_breakdown(severity_count)
-    if max(0, int(issue_count or 0)) > 0:
+    normalized_issue_count = max(0, int(issue_count or 0))
+    ungraded_issue_count = max(
+        0,
+        normalized_issue_count - sum(int(value or 0) for value in breakdown["counts"].values()),
+    )
+    if ungraded_issue_count:
+        breakdown.update({
+            "score": None,
+            "risk_level": "未评估",
+            "score_source": "unavailable",
+            "score_unavailable_reason": "ungraded_findings",
+            "ungraded_issue_count": ungraded_issue_count,
+        })
+        return None, breakdown
+    if normalized_issue_count > 0:
         breakdown["score_source"] = "review_issues"
         return int(breakdown["score"]), breakdown
 
@@ -497,16 +528,17 @@ def _build_report_context(
         ("pending", "evidence_requested", "accepted", "rejected", "not_required", "unrecorded"), 0,
     )
     for item in normalized_issues:
-        severity = item.get("severity")
-        if severity in severity_count:
-            severity_count[severity] += 1
-        else:
-            severity_count["其他"] += 1
-        issue_type = item.get("issue_type") or "未分类"
-        type_count[issue_type] = type_count.get(issue_type, 0) + 1
-        cwe = item.get("cwe")
-        if cwe:
-            cwe_count[cwe] = cwe_count.get(cwe, 0) + 1
+        if item.get("status") != "refuted":
+            severity = item.get("severity")
+            if severity in severity_count:
+                severity_count[severity] += 1
+            else:
+                severity_count["其他"] += 1
+            issue_type = item.get("issue_type") or "未分类"
+            type_count[issue_type] = type_count.get(issue_type, 0) + 1
+            cwe = item.get("cwe")
+            if cwe:
+                cwe_count[cwe] = cwe_count.get(cwe, 0) + 1
         if item.get("status") == "fixed":
             fixed_count += 1
         if item.get("aggregation_version"):
@@ -523,21 +555,39 @@ def _build_report_context(
         review_status_key = review_status if review_status in human_review_counts else "unrecorded"
         human_review_counts[review_status_key] += 1
 
-    compliance_summary = _build_compliance_summary(normalized_issues)
-    top_vulnerabilities = _build_top_vulnerabilities(normalized_issues, top_n=10)
-    score_available = not (
-        isinstance(task_info.get("coverage"), dict)
-        and task_info["coverage"].get("score_available") is False
+    active_issues = [item for item in normalized_issues if item.get("status") != "refuted"]
+    compliance_summary = _build_compliance_summary(active_issues)
+    top_vulnerabilities = _build_top_vulnerabilities(active_issues, top_n=10)
+    refuted_issue_count = len(normalized_issues) - len(active_issues)
+    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
+    complete_statuses = {"complete", "completed", "verified"}
+    coverage_complete = (
+        str(coverage.get("coverage_status") or "").strip().lower() in complete_statuses
+        and str(coverage.get("verification_status") or "complete").strip().lower() in complete_statuses
     )
-    if score_available:
-        explicit_score = score if score is not None else task_info.get("score")
+    execution_successful = task_info.get("status") == "success"
+    if not execution_successful:
+        unavailable_reason = "execution_not_successful"
+    elif not coverage_complete:
+        unavailable_reason = "coverage_not_complete"
+    elif coverage.get("score_available") is False:
+        unavailable_reason = str(coverage.get("score_unavailable_reason") or "score_unavailable")
+    else:
+        unavailable_reason = ""
+    if not unavailable_reason:
+        active_issue_count = sum(item.get("status") != "refuted" for item in normalized_issues)
+        explicit_score = (
+            (score if score is not None else task_info.get("score"))
+            if not normalized_issues else None
+        )
         effective_score, score_breakdown = build_report_score_facts(
             severity_count,
-            len(normalized_issues),
+            active_issue_count,
             explicit_score,
         )
-        score_version = score_breakdown.get("version") or SCORING_VERSION
-    else:
+        if effective_score is None:
+            unavailable_reason = str(score_breakdown.get("score_unavailable_reason") or "score_unavailable")
+    if unavailable_reason:
         effective_score = None
         score_version = SCORING_VERSION
         score_breakdown = {
@@ -545,7 +595,10 @@ def _build_report_context(
             "score": None,
             "risk_level": "未评估",
             "score_source": "unavailable",
+            "score_unavailable_reason": unavailable_reason,
         }
+    else:
+        score_version = score_breakdown.get("version") or SCORING_VERSION
 
     # task_info 也是导出契约的一部分，不能继续暴露与 statistics 冲突的任务快照。
     task_info.update({
@@ -561,6 +614,8 @@ def _build_report_context(
 
     statistics: Dict[str, Any] = {
         "total_issues": len(normalized_issues),
+        "active_issue_count": len(active_issues),
+        "refuted_issue_count": refuted_issue_count,
         "fixed_count": fixed_count,
         "severity_count": severity_count,
         "type_count": type_count,
@@ -577,7 +632,7 @@ def _build_report_context(
         "assessment_basis": {
             "version": "assessment-disclosure-v1",
             "score_source": score_breakdown["score_source"],
-            "issue_scope": "all_reported_review_issues",
+            "issue_scope": "reported_review_issues_excluding_refuted_from_risk_aggregates",
             "human_review_counts": human_review_counts,
             "confidence_semantics": "model_estimate_not_vulnerability_verification",
             "confirmation_count_semantics": "retained_source_count_not_vulnerability_verification",
@@ -595,6 +650,7 @@ def _build_report_context(
         "summary": summary or "",
         "score": effective_score,
         "issues": sorted_issues,
+        "active_issues": [item for item in sorted_issues if item.get("status") != "refuted"],
         "statistics": statistics,
         "evidence": _to_serializable(evidence or {}),
         "files": _to_serializable(files if isinstance(files, list) else []),
@@ -682,6 +738,7 @@ _FINDING_STATUS_LABELS = {
     "unfixed": "未修复",
     "fixed": "已修复",
     "ignored": "已忽略",
+    "refuted": "已证伪",
     "pending_review": "待复核",
 }
 _HUMAN_REVIEW_STATUS_LABELS = {
@@ -814,40 +871,66 @@ def _scope_scalar_text(key: str, value: Any) -> str:
         return "是" if value else "否"
     if isinstance(value, str):
         if key == "status":
-            return report_status_label(value)
-        return _SCOPE_STATUS_LABELS.get(key, {}).get(value.lower(), value)
+            text = report_status_label(value)
+        else:
+            text = _SCOPE_STATUS_LABELS.get(key, {}).get(value.lower(), value)
+        if len(text) > _MAX_SCOPE_TEXT_LENGTH:
+            return text[:_MAX_SCOPE_TEXT_LENGTH - 8].rstrip() + "……（已截断）"
+        return text
     return str(value)
 
 
+_MAX_SCOPE_TEXT_LENGTH = 500
+_MAX_SCOPE_LIST_ITEMS = 20
+_MAX_SCOPE_LINES = 200
+_MAX_SCOPE_DEPTH = 8
+
+
 def _format_scope_facts(value: Any, namespace: str) -> List[str]:
-    """递归展平来源与覆盖对象，保留字段和值但避免在可读报告中输出原始 JSON。"""
+    """展平报告读者需要的字段，隐藏未映射内部元数据并限制输出体积。"""
     if not isinstance(value, dict) or not value:
         return []
 
     lines: List[str] = []
+    omitted_count = 0
 
-    def visit(current: Dict[str, Any], prefix: str = "") -> None:
-        for key, item in current.items():
+    def visit(current: Dict[str, Any], prefix: str = "", depth: int = 0) -> None:
+        nonlocal omitted_count
+        if depth >= _MAX_SCOPE_DEPTH:
+            omitted_count += len(current)
+            return
+
+        for index, (key, item) in enumerate(current.items()):
+            if len(lines) >= _MAX_SCOPE_LINES:
+                omitted_count += len(current) - index
+                return
             label = _SCOPE_FIELD_LABELS.get(key)
             if label is None:
-                label = f"来源字段（{key}）" if namespace == "source" else f"其他字段（{key}）"
+                omitted_count += 1
+                continue
             field_name = f"{prefix}{label}"
             if isinstance(item, dict):
                 if item:
-                    visit(item, field_name)
+                    visit(item, field_name, depth + 1)
                 else:
                     lines.append(f"{field_name}：无记录")
             elif isinstance(item, list):
                 if item and all(isinstance(entry, dict) for entry in item):
-                    for index, entry in enumerate(item, start=1):
-                        visit(entry, f"{field_name}第{index}项")
+                    for entry_index, entry in enumerate(item[:_MAX_SCOPE_LIST_ITEMS], start=1):
+                        visit(entry, f"{field_name}第{entry_index}项", depth + 1)
+                    omitted_count += max(0, len(item) - _MAX_SCOPE_LIST_ITEMS)
                 else:
-                    values = "、".join(_scope_scalar_text(key, entry) for entry in item)
+                    visible_items = item[:_MAX_SCOPE_LIST_ITEMS]
+                    values = "、".join(_scope_scalar_text(key, entry) for entry in visible_items)
                     lines.append(f"{field_name}：{values or '无记录'}")
+                    omitted_count += max(0, len(item) - _MAX_SCOPE_LIST_ITEMS)
             else:
                 lines.append(f"{field_name}：{_scope_scalar_text(key, item)}")
 
     visit(value)
+    if omitted_count:
+        label = "来源" if namespace == "source" else "覆盖"
+        lines.append(f"未展开的{label}内部元数据：{omitted_count} 项（不影响上方已映射字段）")
     return lines
 
 
@@ -870,11 +953,21 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
     else:
         lines.append("覆盖记录：未记录，不能据此判定完整覆盖。")
 
+    stats = context["statistics"]
+    if stats.get("refuted_issue_count"):
+        lines.append(
+            f"问题记录：共 {stats['total_issues']} 项，其中已证伪 {stats['refuted_issue_count']} 项；"
+            "已证伪项保留在明细中，不纳入风险汇总与评分。"
+        )
+
     basis = context["statistics"]["assessment_basis"]
     counts = basis["human_review_counts"]
     lines.extend([
         "评分口径：" + (
-            "本次未获得有效评分，不能据此判定风险等级。"
+            "存在未分级问题，无法按现有严重度权重可靠评分。"
+            if basis["score_source"] == "unavailable"
+            and context["statistics"]["score_breakdown"].get("score_unavailable_reason") == "ungraded_findings"
+            else "本次未获得有效评分，不能据此判定风险等级。"
             if basis["score_source"] == "unavailable"
             else
             "空问题报告保留历史显式分数，不代表已验证无漏洞。"

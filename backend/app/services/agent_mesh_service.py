@@ -16,7 +16,7 @@ from app.agents.contracts import CONTRACTS, collaboration_allowed
 from app.agents.registry import AgentRegistry
 from app.core.config import settings
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
-from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
 from app.models.agent_team import AgentTeam, AgentTeamEvent
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
@@ -1738,7 +1738,7 @@ def pull_inbox(
     )
     now = _now()
     _expire_pending(db, rows, now)
-    cancelled_parent_ids = _cancelled_parent_run_ids(
+    stopped_parent_ids = _stopped_parent_run_ids(
         db,
         rows,
         user_id=int(user.id),
@@ -1749,14 +1749,14 @@ def pull_inbox(
     for row in rows:
         if row.status == "expired":
             continue
-        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id in cancelled_parent_ids:
+        if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id in stopped_parent_ids:
             row.status = "cancelled"
             row.completed_at = row.completed_at or now
             row.lease_token = None
             row.lease_expires_at = None
             row.next_attempt_at = None
-            row.last_error = "父级小菱运行已取消，迟到结果未触发新的模型调用"
-            _event(db, row, "cancelled", target, {"reason": "parent_run_cancelled"})
+            row.last_error = "父级小菱运行已停止，迟到结果未触发新的模型调用"
+            _event(db, row, "cancelled", target, {"reason": "parent_run_stopped"})
             continue
         if row.status == "queued":
             row.status = "delivered"
@@ -1768,7 +1768,7 @@ def pull_inbox(
     return [_message_out(row) for row in delivered]
 
 
-def _cancelled_parent_run_ids(
+def _stopped_parent_run_ids(
     db: Session,
     rows: list[AgentMeshMessage],
     *,
@@ -1776,7 +1776,7 @@ def _cancelled_parent_run_ids(
     surface: str,
     session_key: str,
 ) -> set[int]:
-    """一次批量读取父运行终态，避免每条收件消息都触发独立查询。"""
+    """一次批量读取父运行停止意图，避免每条收件消息都触发独立查询。"""
     root_ids = {
         int(row.root_agent_run_id)
         for row in rows
@@ -1784,17 +1784,21 @@ def _cancelled_parent_run_ids(
     }
     if not root_ids:
         return set()
-    return {
-        int(run_id)
-        for (run_id,) in db.query(AgentResponseRun.id)
+    rows_by_id = (
+        db.query(AgentResponseRun)
         .filter(
             AgentResponseRun.id.in_(root_ids),
             AgentResponseRun.user_id == int(user_id),
             AgentResponseRun.surface == surface,
             AgentResponseRun.session_key == session_key,
-            AgentResponseRun.status == "cancelled",
         )
+        .populate_existing()
         .all()
+    )
+    return {
+        int(row.id)
+        for row in rows_by_id
+        if response_run_stop_requested(row)
     }
 
 
@@ -2038,6 +2042,31 @@ def prepare_message_run(
     terminal_snapshot = None
     terminal_match = re.fullmatch(r"team-(\d+)-terminal-(\d+)-result", row.message_id)
     row_context = _load(row.context_json, {})
+    if row.message_type in {"task.result", "task.error"} and row.root_agent_run_id:
+        parent_run = (
+            db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.id == int(row.root_agent_run_id),
+                AgentResponseRun.user_id == int(user.id),
+                AgentResponseRun.surface == surface,
+                AgentResponseRun.session_key == session_key,
+            )
+            .populate_existing()
+            .one_or_none()
+        )
+        if response_run_stop_requested(parent_run):
+            ack_message(
+                db,
+                user,
+                message_id,
+                surface=surface,
+                session_key=session_key,
+                acknowledgement=AgentMeshAckIn(
+                    status="completed",
+                    summary="父级小菱响应已停止；结果仅留存记录，不自动启动模型。",
+                ),
+            )
+            raise AgentMeshStateError("父级小菱响应已停止，结果仅留存记录且未触发模型")
     discussion_result = (
         row.sent_from == "agent:orchestrator"
         and row.message_type in {"task.result", "task.error"}
@@ -2053,11 +2082,13 @@ def prepare_message_run(
                 .filter(
                     AgentResponseRun.user_id == int(user.id),
                     AgentResponseRun.run_id == parent_run_id,
+                    AgentResponseRun.surface == surface,
+                    AgentResponseRun.session_key == session_key,
                 )
                 .populate_existing()
                 .one_or_none()
             )
-        if parent_run is not None and parent_run.status == "cancelled":
+        if response_run_stop_requested(parent_run):
             ack_message(
                 db,
                 user,
@@ -2095,8 +2126,19 @@ def prepare_message_run(
             AgentTeam.id == int(terminal_snapshot["team_id"]),
             AgentTeam.user_id == int(user.id),
         ).first()
-        parent_run = db.get(AgentResponseRun, int(team.root_agent_run_id)) if team and team.root_agent_run_id else None
-        if parent_run is not None and parent_run.status == "cancelled":
+        parent_run = (
+            db.query(AgentResponseRun)
+            .filter(
+                AgentResponseRun.id == int(team.root_agent_run_id),
+                AgentResponseRun.user_id == int(user.id),
+                AgentResponseRun.surface == surface,
+                AgentResponseRun.session_key == session_key,
+            )
+            .populate_existing()
+            .one_or_none()
+            if team and team.root_agent_run_id else None
+        )
+        if response_run_stop_requested(parent_run):
             ack_message(
                 db,
                 user,

@@ -21,7 +21,7 @@ from app.agents.contracts import CONTRACTS
 from app.core.config import settings
 from app.core.observability import observe_event
 from app.models.agent_mesh import AgentMeshMessage, AgentMeshMessageEvent
-from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project_source_revision import ProjectSourceRevision
@@ -1429,7 +1429,11 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
             .with_for_update()
             .first()
         )
-        if parent_run is None or parent_run.status != "running":
+        if (
+            parent_run is None
+            or parent_run.status != "running"
+            or response_run_stop_requested(parent_run)
+        ):
             raise AgentTeamValidationError("父级小菱运行已结束，不能再启动子 Agent 团队")
     queue_limit = int(getattr(settings, "agent_team_max_queue_length", 100))
     queued_count = (
@@ -2424,6 +2428,8 @@ def _persist_terminal_team_notification(
     terminal_error = team.status != "completed"
     request_id = _request_message_id(team, latest_task)
     parent_run = db.get(AgentResponseRun, int(team.root_agent_run_id)) if team.root_agent_run_id else None
+    parent_stopped = response_run_stop_requested(parent_run)
+    should_deliver_to_session = deliver_to_session and not parent_stopped
     _add_terminal_mesh_message(
         db,
         team,
@@ -2440,7 +2446,8 @@ def _persist_terminal_team_notification(
             "run_id": team.trace_id,
             "parent_run_id": str(parent_run.run_id) if parent_run and parent_run.run_id else "",
             "team_terminal": True,
-            "session_delivery": True,
+            "session_delivery": should_deliver_to_session,
+            **({"suppressed_after_parent_stop": True} if parent_stopped else {}),
             "execution_generation": payload["execution_generation"],
         },
         artifacts=[],
@@ -2448,7 +2455,7 @@ def _persist_terminal_team_notification(
         success=not terminal_error,
         causation_id=request_id,
         now=now,
-        deliver_to_session=deliver_to_session,
+        deliver_to_session=should_deliver_to_session,
     )
 
 
@@ -2477,6 +2484,7 @@ def _suppress_parent_run_team_notifications(
         previous_status = row.status
         context["session_delivery"] = False
         context["suppressed_after_parent_cancel"] = True
+        context["suppressed_after_parent_stop"] = True
         row.context_json = _json(context)
         row.status = "completed"
         row.requires_ack = 0

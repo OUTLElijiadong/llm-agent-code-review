@@ -224,7 +224,7 @@ it('已落库追问逐条显示待答和不定进度，主持人按原问题 seq
   expect(wrapper.get('.followup-progress').text()).toContain('2 条待答')
   expect(wrapper.get('.followup-progress [role="progressbar"]').attributes('aria-valuetext'))
     .toBe('2 条追问等待主持人回复')
-  expect(wrapper.get('.typing-row').text()).toContain('主持人 · 正在处理 2 条追问')
+  expect(wrapper.get('.typing-row').text()).toContain('小菱 · 正在处理 2 条追问')
   expect(wrapper.get('.room-progress').text()).toContain('13 / 13')
 
   receive({ type: 'discuss', session_id: 'disc-1', turn: followupAnswer(14, 16) })

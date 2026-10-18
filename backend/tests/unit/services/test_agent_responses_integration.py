@@ -517,6 +517,34 @@ async def test_session_history_fast_paths_reject_valid_json_tampering(db) -> Non
         api_module._public_session_history_messages(db, run)
 
 
+def test_stale_recovery_converts_persisted_stop_intent_to_cancelled(db) -> None:
+    row = AgentResponseRun(
+        run_id="run_stale_stop_intent",
+        user_id=7,
+        surface="user",
+        session_key="session-stale-stop",
+        status="running",
+        checkpoint_json=json.dumps({
+            "status": "running",
+            "stop_requested": True,
+            "stop_reason": "停止后不再续跑",
+            "recovery_requested": False,
+        }, ensure_ascii=False),
+        version=1,
+    )
+    db.add(row)
+    db.commit()
+
+    api_module._recover_stale_active_run(db, row, force=True)
+
+    db.refresh(row)
+    stopped = json.loads(row.checkpoint_json)
+    assert row.status == stopped["status"] == "cancelled"
+    assert stopped["stop_requested"] is True
+    assert stopped["recovery_requested"] is False
+    assert stopped["cancel_reason"] == "停止后不再续跑"
+
+
 @pytest.mark.asyncio
 async def test_database_checkpoint_store_cancelled_is_terminal_against_write_back(db) -> None:
     _activate_conversation(db, user_id=7, surface="user", session_key="session-cancel-race")
@@ -786,6 +814,84 @@ async def test_database_checkpoint_store_claim_is_compare_and_swap(db) -> None:
     row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
     assert row.status == "running"
     assert json.loads(row.checkpoint_json)["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_database_checkpoint_store_claim_turns_stop_intent_into_terminal_cancel(db) -> None:
+    _activate_conversation(db, user_id=7, surface="admin", session_key="session-claim-stop")
+    store = DatabaseCheckpointStore(db, user_id=7, surface="admin", session_key="session-claim-stop")
+    checkpoint = RunCheckpoint(
+        run_id="run_claim_stop",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "停止后不得重试"}],
+        tools=[],
+        status="failed",
+    )
+    assert await store.create(checkpoint) is True
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    payload = json.loads(row.checkpoint_json)
+    payload.update({"stop_requested": True, "stop_reason": "用户手动停止", "recovery_requested": True})
+    row.checkpoint_json = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+
+    claimed = await store.claim(
+        checkpoint.run_id,
+        expected_status="failed",
+        claimed_status="running",
+    )
+
+    assert claimed is None
+    db.refresh(row)
+    stopped = json.loads(row.checkpoint_json)
+    assert row.status == stopped["status"] == "cancelled"
+    assert stopped["stop_requested"] is True
+    assert stopped["recovery_requested"] is False
+    assert stopped["cancel_reason"] == "用户手动停止"
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_start_model_round_after_durable_stop_marker(db) -> None:
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-stop-before-model")
+    store = DatabaseCheckpointStore(
+        db, user_id=7, surface="user", session_key="session-stop-before-model",
+    )
+    checkpoint = RunCheckpoint(
+        run_id="run_stop_before_model",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "查询论坛帖子"}],
+        tools=[],
+        status="running",
+    )
+    assert await store.create(checkpoint) is True
+    row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+    payload = json.loads(row.checkpoint_json)
+    payload.update({"stop_requested": True, "stop_reason": "用户已停止"})
+    row.checkpoint_json = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+
+    class CountingTransport:
+        def __init__(self):
+            self.calls = 0
+
+        async def create_response(self, _payload):
+            self.calls += 1
+            return {"status": "completed", "output": []}
+
+    transport = CountingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=SimpleNamespace(),
+        checkpoint_store=store,
+        model="deepseek-v4-flash",
+    )
+
+    result = await runtime._drive(checkpoint)
+
+    assert result.status == "cancelled"
+    assert transport.calls == 0
+    db.refresh(row)
+    assert row.status == "cancelled"
+    assert json.loads(row.checkpoint_json)["stop_requested"] is True
 
 
 @pytest.mark.asyncio

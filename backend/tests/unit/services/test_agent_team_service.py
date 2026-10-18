@@ -19,7 +19,7 @@ from app.models.project import Project
 from app.models.project_source_revision import ProjectSourceRevision
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
-from app.services import agent_responses_service, agent_team_service, sandbox_service
+from app.services import agent_mesh_service, agent_responses_service, agent_team_service, sandbox_service
 from app.services.ai_usage_context import usage_context
 from app.services.declarative_agent_runtime import DeclarativeReviewAgentFactory
 
@@ -1804,6 +1804,71 @@ def test_create_team_is_blocked_after_parent_response_run_is_cancelled(db, team_
     with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
         with pytest.raises(agent_team_service.AgentTeamValidationError, match="父级小菱运行已结束"):
             agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+
+
+@pytest.mark.asyncio
+async def test_late_stop_after_response_completion_blocks_team_auto_resume(db, team_user, monkeypatch):
+    """停止与主回答完成竞态时，仍须停掉后台团队并压住自动续跑。"""
+    agent_mesh_service.heartbeat(
+        db, team_user, surface="user", session_key="session-a1", title="竞态停止测试",
+    )
+    root = AgentResponseRun(
+        run_id="completed-parent-with-active-team",
+        user_id=team_user.id,
+        surface="user",
+        session_key="session-a1",
+        status="running",
+        checkpoint_json=json.dumps({"run_id": "completed-parent-with-active-team", "status": "running"}),
+        version=1,
+    )
+    db.add(root)
+    db.commit()
+    with usage_context(team_user.id, {"agent_run_id": root.id, "root_agent_run_id": root.id}):
+        created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+
+    root.status = "completed"
+    root.checkpoint_json = json.dumps({
+        "run_id": root.run_id,
+        "status": "completed",
+        "output_text": "主回答已经完成",
+    })
+    db.commit()
+
+    class CompletedRuntime:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def cancel(self, run_id, reason=""):
+            return agent_responses_service.RuntimeResult(
+                run_id=run_id,
+                status="completed",
+                output_text="主回答已经完成",
+            )
+
+    monkeypatch.setattr(agent_responses_service, "DeepSeekResponsesRuntime", CompletedRuntime)
+    result = await agent_responses_service.AgentResponsesService(
+        db, team_user, surface="user", session_key="session-a1",
+    ).cancel(run_id=root.run_id, reason="用户停止")
+
+    assert result.status == "completed"
+    db.refresh(root)
+    assert root.status == "completed"
+    assert json.loads(root.checkpoint_json)["stop_requested"] is True
+    assert db.get(agent_team_service.AgentTeam, created["team_id"]).status == "cancelled"
+    assert agent_mesh_service.pull_inbox(
+        db, team_user, surface="user", session_key="session-a1", limit=10,
+    ) == []
+
+    child_store = agent_responses_service.DatabaseCheckpointStore(
+        db, user_id=team_user.id, surface="user", session_key="session-a1",
+    )
+    with usage_context(team_user.id, {"root_agent_run_id": root.id}):
+        assert await child_store.create(agent_responses_service.RunCheckpoint(
+            run_id="late-auto-resume-child",
+            model="deepseek-v4-flash",
+            transcript=[{"role": "user", "content": "迟到的团队回执"}],
+            tools=[],
+        )) is False
 
 
 def test_expired_lease_stops_persisted_runtime_resource_before_requeue(db, team_user, monkeypatch):

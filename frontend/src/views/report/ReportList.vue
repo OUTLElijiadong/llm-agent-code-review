@@ -119,16 +119,20 @@
             <el-tooltip content="生成报告" placement="top">
               <el-button link type="primary" size="small" :icon="MagicStick" aria-label="生成报告" @click.stop="goGenerate(row)" />
             </el-tooltip>
-            <el-dropdown trigger="click" @command="(cmd: string) => handleRowCommand(row, cmd)">
+            <el-dropdown
+              v-if="hasRowMenuActions(row)"
+              trigger="click"
+              @command="(cmd: string) => handleRowCommand(row, cmd)"
+            >
               <el-button
                 link
                 type="primary"
                 size="small"
                 :loading="exportingTaskId === row.task_id"
-                aria-label="导出报告"
+                :aria-label="canExportReport(row) ? '导出报告' : '报告操作'"
                 @click.stop
               >
-                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                {{ canExportReport(row) ? '导出' : '操作' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -242,6 +246,15 @@ function canExport(format: ReportFormat): boolean {
   return userStore.hasPermission(`report:export:${format}`)
 }
 
+function canExportReport(row: ReportListItem): boolean {
+  if (canExport('json')) return true
+  return !isDomainReport(row) && (canExport('html') || canExport('pdf') || canExport('word'))
+}
+
+function hasRowMenuActions(row: ReportListItem): boolean {
+  return canExportReport(row) || (canDeleteReport.value && row.can_delete === true)
+}
+
 function scoreClass(score: number) {
   if (score >= 80) return 'score-high'
   if (score >= 60) return 'score-medium'
@@ -353,10 +366,17 @@ async function loadData() {
 
     const data = await getReports(params)
     if (!current() || requestGeneration !== loadRequestGeneration) return
-    const visibleItems = data.items.filter(canDisplayReport)
-    reports.value = visibleItems
-    // 若服务端返回未授权或缺少权限结论的卡片，避免其总数泄露到分页器。
-    total.value = visibleItems.length === data.items.length ? data.total : visibleItems.length
+    const containsUnauthorizedItem = data.items.some(row => !canDisplayReport(row))
+    if (containsUnauthorizedItem) {
+      // 服务端列表契约应在分页与计数前完成授权过滤。收到混合权限页时
+      // 整页 fail-closed，避免卡片泄露，也避免用当前页条数伪造总页数。
+      reports.value = []
+      total.value = 0
+      loadErrorMessage.value = '报告列表授权信息不一致，请重新加载。'
+      return
+    }
+    reports.value = data.items
+    total.value = data.total
   } catch {
     if (!current() || requestGeneration !== loadRequestGeneration) return
     reports.value = []

@@ -198,7 +198,7 @@
 
     <h2>CVSS 评分分布</h2>
     {% set ns = namespace(critical=0, high=0, medium=0, low=0, none=0) %}
-    {% for issue in issues %}
+    {% for issue in active_issues %}
       {% if issue.cvss_score is not none %}
         {% if issue.cvss_score >= 9.0 %}{% set ns.critical = ns.critical + 1 %}
         {% elif issue.cvss_score >= 7.0 %}{% set ns.high = ns.high + 1 %}

@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 
 import pytest
 from docx import Document
+from docx.oxml.ns import qn
 from jinja2.exceptions import SecurityError
 
 from app.schemas.review import IssueOut
@@ -44,6 +45,7 @@ from app.services.report_pdf_exporter import (
     _ensure_chinese_font,
     export_to_pdf,
 )
+from app.services.report_word_exporter import _format_score as format_word_score
 from app.services.report_word_exporter import export_to_word
 
 
@@ -52,6 +54,7 @@ from app.services.report_word_exporter import export_to_word
     [
         (report_status_label, "unexpected-task-state", "状态未识别"),
         (finding_status_label, "unexpected-finding-state", "状态未识别"),
+        (finding_status_label, "refuted", "已证伪"),
         (human_review_status_label, "unexpected-review-state", "状态未识别"),
         (report_status_label, None, "未记录"),
         (finding_status_label, "", "未记录"),
@@ -87,6 +90,7 @@ def _make_task(**overrides: Any) -> Dict[str, Any]:
         "medium_issues": 1,
         "low_issues": 1,
         "score": 72,
+        "coverage": {"coverage_status": "complete", "score_available": True},
         "summary": "发现多处安全漏洞,建议尽快修复。",
         "model_name": "deepseek-v3",
         "duration_ms": 5600,
@@ -503,6 +507,8 @@ def test_scope_coverage_is_human_readable_in_html_word_and_pdf_exports(monkeypat
     for rendered in (*htmls, word_text, pdf_text):
         assert "部分覆盖" in rendered
         assert "未通过" in rendered
+        assert "覆盖状态：部分覆盖" in rendered
+        assert "验证状态：未通过" in rendered
         assert "已完成文件数：2" in rendered
         assert "未扫描文件名称：src/later.py、src/queued.py" in rendered
         assert "排除文件第1项文件名：vendor/jquery.js" in rendered
@@ -520,6 +526,84 @@ def test_scope_coverage_is_human_readable_in_html_word_and_pdf_exports(monkeypat
         assert "来源明细第1项来源：llm:reviewer" in rendered
         assert "来源明细第1项置信度：0.95" in rendered
         assert '"source":' not in rendered
+
+
+def test_scope_exports_hide_internal_metadata_and_bound_large_payloads(monkeypatch):
+    """大扫描元数据只保留已映射事实，不把内部字段扩成报告正文。"""
+    task = _make_task(
+        coverage={
+            "coverage_status": "partial",
+            "scan_metadata": {
+                "duration_seconds": 13,
+                "provider_payload": {"secret_marker": "INTERNAL_SECRET_1", "files": ["private.py"]},
+                **{f"internal_field_{index}": f"INTERNAL_SECRET_{index}" for index in range(1_896)},
+            },
+        },
+    )
+
+    context = export_to_dict(task, [], "", 72)
+    scope_text = "\n".join(context["scope_lines"])
+    assert "扫描元数据持续秒数：13" in scope_text
+    assert "未展开的覆盖内部元数据：1897 项" in scope_text
+    assert "INTERNAL_SECRET" not in scope_text
+    assert "private.py" not in scope_text
+    assert len(scope_text) < 2_000
+
+    html = export_to_html(task, [], "", 72, load_builtin_template("detailed"))
+    word = export_to_word(task, [], "", 72)
+    pdf_paragraphs: list[str] = []
+    original_paragraph = report_pdf_exporter.Paragraph
+
+    def record_pdf_paragraph(text, style, *args, **kwargs):
+        pdf_paragraphs.append(str(text))
+        return original_paragraph(text, style, *args, **kwargs)
+
+    monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
+    assert export_to_pdf(task, [], "", 72).startswith(b"%PDF")
+    for rendered in (
+        html,
+        "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs),
+        "\n".join(pdf_paragraphs),
+    ):
+        assert "未展开的覆盖内部元数据" in rendered
+        assert "INTERNAL_SECRET" not in rendered
+        assert "private.py" not in rendered
+
+
+def test_report_word_export_uses_available_chinese_font_for_styles_and_runs():
+    """服务报告 Word 的样式与正文 run 都应设置可用的东亚字体。"""
+    document = Document(io.BytesIO(export_to_word(_make_task(), [], "中文摘要", 72)))
+    normal_style = document.styles["Normal"]
+    assert normal_style.font.name == "Noto Sans SC"
+    assert normal_style.element.rPr.rFonts.get(qn("w:eastAsia")) == "Noto Sans SC"
+
+    with zipfile.ZipFile(io.BytesIO(export_to_word(_make_task(), [], "中文摘要", 72))) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert 'w:eastAsia="Noto Sans SC"' in document_xml
+
+
+def test_report_word_export_keeps_code_label_with_code_block():
+    """修复代码的小标题不可孤立在分页底部。"""
+    issue = _make_issue(fixed_code="cursor.execute(sql, params)")
+    document = Document(io.BytesIO(export_to_word(_make_task(), [issue], "摘要", 72)))
+    code_label = next(paragraph for paragraph in document.paragraphs if paragraph.text == "修复代码:")
+    assert code_label.paragraph_format.keep_with_next is True
+
+
+def test_word_numbered_remediation_lists_restart_for_each_issue():
+    """每条问题各自的编号修复步骤应从 1 开始。"""
+    issues = [
+        _make_issue(id=index, title=f"问题 {index}", severity="高", remediation="1. 第一步\n2. 第二步")
+        for index in (1, 2)
+    ]
+    document = Document(io.BytesIO(export_to_word(_make_task(), issues, "摘要", 72)))
+    numbered_steps = [
+        paragraph.text
+        for paragraph in document.paragraphs
+        if paragraph.text in {"1. 第一步", "2. 第二步"}
+    ]
+
+    assert numbered_steps == ["1. 第一步", "2. 第二步", "1. 第一步", "2. 第二步"]
 
 
 def test_standard_exports_render_markdown_summary_without_showing_syntax(monkeypatch):
@@ -574,9 +658,129 @@ def test_standard_exports_render_markdown_summary_without_showing_syntax(monkeyp
 def test_legacy_report_export_marks_missing_coverage_unknown():
     import json
 
-    payload = json.loads(export_to_json(_make_task(status="failed"), [], "扫描失败", 0))
+    payload = json.loads(export_to_json(
+        _make_task(status="failed", coverage={}), [], "扫描失败", 0,
+    ))
     assert payload["task_info"]["coverage"]["coverage_status"] == "unknown"
     assert "无法确认实际扫描范围" in payload["task_info"]["coverage"]["unscanned"][0]
+
+
+@pytest.mark.parametrize("coverage_status", ["partial", "failed", "unknown"])
+def test_report_exports_hide_explicit_scores_when_coverage_is_not_complete(coverage_status):
+    task = _make_task(
+        score=100,
+        coverage={"coverage_status": coverage_status, "score_available": True},
+    )
+
+    result = export_to_dict(task, [], "仍保留已取得的报告内容", 100)
+
+    assert result["score"] is None
+    assert result["task_info"]["score"] is None
+    assert result["statistics"]["score_breakdown"]["score"] is None
+    assert result["statistics"]["score_breakdown"]["score_source"] == "unavailable"
+    assert result["statistics"]["risk_level"] == "未评估"
+
+
+def test_report_with_ungraded_issue_does_not_receive_unearned_100_score():
+    result = export_to_dict(
+        _make_task(score=100),
+        [_make_issue(severity="未分级")],
+        "问题严重度尚未确定",
+        100,
+    )
+
+    assert result["statistics"]["severity_count"]["其他"] == 1
+    assert result["score"] is None
+    assert result["task_info"]["score"] is None
+    assert result["statistics"]["score_breakdown"]["score_source"] == "unavailable"
+    assert result["statistics"]["score_breakdown"]["score_unavailable_reason"] == "ungraded_findings"
+    assert "存在未分级问题" in "\n".join(result["scope_lines"])
+
+
+def test_refuted_issue_is_excluded_from_score_but_remains_in_report_count():
+    refuted = _make_issue(
+        severity="严重",
+        status="refuted",
+        cvss_score=9.8,
+        cwe="CWE-89",
+        compliance_mapping={"owasp_top_10": ["A03:2021"]},
+    )
+    result = export_to_dict(
+        _make_task(score=45),
+        [refuted],
+        "人工复核已排除该问题",
+        45,
+    )
+
+    assert result["statistics"]["total_issues"] == 1
+    assert result["statistics"]["severity_count"]["严重"] == 0
+    assert result["score"] == 100
+    assert result["statistics"]["score_breakdown"]["counts"]["严重"] == 0
+    assert result["statistics"]["active_issue_count"] == 0
+    assert result["statistics"]["refuted_issue_count"] == 1
+    assert result["statistics"]["type_count"] == {}
+    assert result["statistics"]["cwe_count"] == {}
+    assert result["statistics"]["top_vulnerabilities"] == []
+    assert all(
+        standard["total_findings"] == 0
+        for standard in result["statistics"]["compliance_summary"].values()
+    )
+    assert "已证伪项保留在明细中，不纳入风险汇总与评分。" in "\n".join(result["scope_lines"])
+
+
+def test_refuted_finding_status_is_readable_in_html_word_and_pdf(monkeypatch):
+    issue = _make_issue(severity="严重", status="refuted")
+    task = _make_task()
+    html = export_to_html(task, [issue], "人工复核已排除", 100, load_builtin_template("simple"))
+    word = export_to_word(task, [issue], "人工复核已排除", 100)
+    pdf_paragraphs: list[str] = []
+    original_paragraph = report_pdf_exporter.Paragraph
+
+    def record_pdf_paragraph(text, style, *args, **kwargs):
+        pdf_paragraphs.append(str(text))
+        return original_paragraph(text, style, *args, **kwargs)
+
+    monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
+    assert export_to_pdf(task, [issue], "人工复核已排除", 100).startswith(b"%PDF")
+    word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs)
+    pdf_text = "\n".join(pdf_paragraphs)
+
+    assert "已证伪" in html
+    assert "已证伪" in word_text
+    assert "已证伪" in pdf_text
+
+
+def test_inconsistent_coverage_and_verification_statuses_remain_separate_and_hide_score():
+    result = export_to_dict(
+        _make_task(coverage={
+            "coverage_status": "partial",
+            "verification_status": "complete",
+            "score_available": True,
+        }),
+        [],
+        "范围只完成一部分",
+        100,
+    )
+
+    assert result["task_info"]["coverage"]["coverage_status"] == "partial"
+    assert result["task_info"]["coverage"]["verification_status"] == "complete"
+    assert result["score"] is None
+    assert "覆盖状态：部分覆盖" in "\n".join(result["scope_lines"])
+    assert "验证状态：已核验通过" in "\n".join(result["scope_lines"])
+
+
+def test_pdf_and_word_score_formatters_show_unavailable_as_unassessed():
+    assert report_pdf_exporter._format_score(None) == "未评估"
+    assert format_word_score(None) == "未评估"
+
+
+def test_report_without_coverage_snapshot_does_not_publish_a_score():
+    result = export_to_dict(_make_task(score=88, coverage={}), [], "历史报告", 88)
+
+    assert result["task_info"]["coverage"]["coverage_status"] == "unknown"
+    assert result["score"] is None
+    assert result["task_info"]["score"] is None
+    assert result["statistics"]["score_breakdown"]["score_source"] == "unavailable"
 
 
 def test_export_to_json_preserves_chinese_chars():
@@ -701,7 +905,7 @@ def test_report_discloses_review_candidates_and_rejections_without_changing_scor
     assert result["statistics"]["score_breakdown"]["total_deduction"] == 28
     basis = result["statistics"]["assessment_basis"]
     assert basis["score_source"] == "review_issues"
-    assert basis["issue_scope"] == "all_reported_review_issues"
+    assert basis["issue_scope"] == "reported_review_issues_excluding_refuted_from_risk_aggregates"
     assert basis["human_review_counts"] == {
         "pending": 1, "evidence_requested": 1, "accepted": 1,
         "rejected": 1, "not_required": 0, "unrecorded": 1,

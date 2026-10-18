@@ -227,6 +227,30 @@ def test_startup_scan_picks_up_terminal_run_with_unfinished_mesh_receipt(db, mon
     )]
 
 
+def test_startup_scan_never_resumes_run_with_persisted_stop_intent(db, monkeypatch):
+    _user, run, _message, _status, _raise_error = _seed_recoverable_run(db)
+    checkpoint = json.loads(run.checkpoint_json)
+    checkpoint.update({
+        "stop_requested": True,
+        "stop_reason": "用户要求停止",
+        "recovery_requested": True,
+    })
+    run.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    db.commit()
+    Session = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(background_task_recovery, "SessionLocal", Session)
+
+    recoveries = background_task_recovery.find_interrupted_agent_runs()
+
+    db.refresh(run)
+    stopped = json.loads(run.checkpoint_json)
+    assert recoveries == []
+    assert run.status == stopped["status"] == "cancelled"
+    assert stopped["stop_requested"] is True
+    assert stopped["recovery_requested"] is False
+    assert stopped["cancel_reason"] == "用户要求停止"
+
+
 def test_terminal_failed_run_releases_mesh_message_after_receipt_retry(db, monkeypatch):
     user, _run, _message, _status, _raise_error = _seed_recoverable_run(db)
     Session = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)

@@ -12,8 +12,7 @@ vi.mock('@/api/project', () => ({ getProjects: api.projects }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 vi.mock('vue-router', () => ({ useRouter: () => router }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({
-  hasPermission: (permission: string) => api.permissions.has(permission)
-    || permission.startsWith('report:export:'),
+  hasPermission: (permission: string) => api.permissions.has(permission),
 }) }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
 
@@ -47,7 +46,10 @@ function mountPage(): VueWrapper {
 beforeEach(() => {
   vi.resetAllMocks()
   api.permissions.clear()
-  for (const permission of ['report:view', 'issue:view', 'security:view', 'pentest:view', 'review:start']) {
+  for (const permission of [
+    'report:view', 'issue:view', 'security:view', 'pentest:view', 'review:start',
+    'report:export:json', 'report:export:html', 'report:export:pdf', 'report:export:word',
+  ]) {
     api.permissions.add(permission)
   }
   api.reports.mockResolvedValue({ items: [report], total: 1, page: 1, page_size: 20, pages: 1 })
@@ -89,6 +91,55 @@ describe('报告卡片列表', () => {
     expect(wrapper.find('.report-card').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('其他账号的渗透报告')
     expect(wrapper.text()).not.toContain('38')
+  })
+
+  it('服务端返回混合权限页时整页关闭，不伪造当前页总数', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [
+        { ...report, task_id: 41, task_name: '已授权报告' },
+        { ...report, task_id: 42, can_view_report: false, task_name: '其他账号报告' },
+      ],
+      total: 38, page: 1, page_size: 20, pages: 2,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('已授权报告')
+    expect(wrapper.text()).not.toContain('其他账号报告')
+    expect(wrapper.text()).not.toContain('38')
+    expect(wrapper.text()).toContain('报告列表授权信息不一致')
+    expect(wrapper.find('el-pagination-stub').exists()).toBe(false)
+  })
+
+  it('没有导出或删除权限时不显示空的行操作菜单', async () => {
+    for (const permission of ['report:export:json', 'report:export:html', 'report:export:pdf', 'report:export:word']) {
+      api.permissions.delete(permission)
+    }
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, can_delete: false }], total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('button[aria-label="导出报告"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="报告操作"]').exists()).toBe(false)
+  })
+
+  it('只允许删除时将行菜单标记为操作，不误称导出', async () => {
+    for (const permission of ['report:export:json', 'report:export:html', 'report:export:pdf', 'report:export:word']) {
+      api.permissions.delete(permission)
+    }
+    api.permissions.add('review:cancel')
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, can_delete: true }], total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('button[aria-label="导出报告"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="报告操作"]').exists()).toBe(true)
+    expect(wrapper.find('.rc-actions').text()).toContain('操作')
   })
 
   it('普通代码审查缺少问题查看权限时隐藏卡片并清理总数', async () => {

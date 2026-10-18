@@ -40,6 +40,7 @@ def _status_label(value: Any) -> str:
         "succeeded": "执行完成",
         "completed": "执行完成",
         "complete": "执行完成",
+        "verified": "已核验通过",
         "passed": "已通过",
         "partial": "部分完成",
         "failed": "执行失败",
@@ -54,6 +55,25 @@ def _status_label(value: Any) -> str:
         "pending": "等待执行",
     }
     return labels.get(str(value or ""), str(value or "状态未知"))
+
+
+def _verification_status_label(value: Any) -> str:
+    labels = {
+        "complete": "核验已完成",
+        "completed": "核验已完成",
+        "verified": "核验通过",
+        "passed": "核验通过",
+        "partial": "部分核验",
+        "failed": "未通过",
+        "unknown": "未知",
+        "pending": "等待核验",
+        "running": "核验中",
+        "cancelled": "已取消",
+        "stopped": "已停止",
+        "expired": "已过期",
+        "receipt_missing": "缺少有效回执",
+    }
+    return labels.get(str(value or ""), _status_label(value))
 
 
 def _localize_sandbox_report_statuses(markdown: str) -> str:
@@ -95,7 +115,28 @@ def _localize_sandbox_report_statuses(markdown: str) -> str:
 def _coverage_lines(coverage: Any) -> list[str]:
     if not isinstance(coverage, dict):
         return ["覆盖范围：未记录"]
-    lines = [f"覆盖状态：{_status_label(coverage.get('verification_status') or coverage.get('coverage_status'))}"]
+    coverage_status = coverage.get("coverage_status")
+    verification_status = coverage.get("verification_status")
+    coverage_labels = {
+        "complete": "完整覆盖",
+        "completed": "完整覆盖",
+        "verified": "完整覆盖",
+        "partial": "部分覆盖",
+        "incomplete": "覆盖不完整",
+        "failed": "覆盖失败",
+        "unknown": "未知",
+        "cancelled": "已取消",
+    }
+    lines = []
+    if coverage_status is not None:
+        lines.append(f"覆盖状态：{coverage_labels.get(str(coverage_status), _status_label(coverage_status))}")
+    elif verification_status is not None:
+        # 旧报告只有验证状态时，以其作为覆盖状态的唯一可用事实。
+        lines.append(f"覆盖状态：{coverage_labels.get(str(verification_status), _status_label(verification_status))}")
+    else:
+        lines.append("覆盖状态：未知")
+    if verification_status is not None:
+        lines.append(f"验证状态：{_verification_status_label(verification_status)}")
     requested_mode = str(coverage.get("requested_mode") or "").strip().lower()
     if requested_mode:
         mode_labels = {"whitebox": "白盒", "blackbox": "黑盒", "combined": "黑白盒", "deploy": "部署检查"}
@@ -239,7 +280,9 @@ def build_sandbox_report_markdown(
         f"项目：{project_name or '未关联项目'}",
         f"任务：{task_name or '未命名任务'}",
         f"执行状态：{_status_label(domain_data.get('execution_status'))}",
-        f"验证状态：{_status_label(domain_data.get('verification_status') or coverage.get('verification_status'))}",
+        "验证状态：" + _verification_status_label(
+            domain_data.get("verification_status") or coverage.get("verification_status")
+        ),
         "",
         "## 覆盖范围",
         *_coverage_lines(coverage),

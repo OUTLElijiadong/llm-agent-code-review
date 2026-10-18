@@ -82,6 +82,9 @@ _PROFILE_TO_AGENT_CODE: dict[str, str] = {
 # 模型调用通过同步 HTTP 客户端运行在线程池中；该间隔仅用于向会话推送
 # 等待进度，不会延长或取消底层供应商请求。
 _MODEL_STAGE_HEARTBEAT_SECONDS = 5.0
+MAX_DISCUSSION_USER_INPUT_CHARS = 20_000
+MAX_PENDING_STEERING_CHARS = 40_000
+REPLANNING_CONTEXT_BUDGET_CHARS = 8_000
 
 _VALID_DECISION_ACTIONS = {"speak", "silent"}
 _VALID_DECISION_STANCES = {
@@ -270,7 +273,7 @@ def _notify_origin_session(
                 .populate_existing()
                 .one_or_none()
             )
-            if parent_run is None or parent_run.status == "cancelled":
+            if parent_run is None or agent_mesh_service.response_run_stop_requested(parent_run):
                 logger.info(
                     f"[Discussion] 父级小菱已停止，跳过结果回投 session={session_key}"
                 )
@@ -641,7 +644,7 @@ class DiscussionOrchestrator:
             bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=0,
                 agent_code="orchestrator",
-                agent_name="主持人",
+                agent_name="小菱（主持人）",
                 role="agent",
                 content=opening_text,
             ))
@@ -824,7 +827,7 @@ class DiscussionOrchestrator:
                 )
                 turn_counter += 1
                 bus.publish_turn(session_id, DiscussionTurn(
-                    turn_id=turn_counter, agent_code="orchestrator", agent_name="主持人",
+                    turn_id=turn_counter, agent_code="orchestrator", agent_name="小菱（主持人）",
                     role="agent", content=status_text,
                 ))
                 if remaining_user_inputs:
@@ -885,7 +888,7 @@ class DiscussionOrchestrator:
             bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=turn_counter + 1,
                 agent_code="orchestrator",
-                agent_name="主持人",
+                agent_name="小菱（主持人）",
                 role="agent",
                 content=summary_text,
             ))
@@ -1030,7 +1033,7 @@ class DiscussionOrchestrator:
             + "\n\n待安排的剩余任务：\n"
             + json.dumps(candidates, ensure_ascii=False)
             + "\n\n此前讨论摘要：\n"
-            + self._build_history(all_turns)[-6000:]
+            + self._build_traceable_replanning_context(all_turns)
         )
         self._bus.publish_control(self._session_id, "phase", {
             "stage": "host_replanning",
@@ -1142,7 +1145,7 @@ class DiscussionOrchestrator:
             message = error or f"圆桌讨论已结束（{status}），没有生成完整成功报告。"
             self._bus.publish_turn(session_id, DiscussionTurn(
                 turn_id=len(session.turns) + 1 if session else 0,
-                agent_code="orchestrator", agent_name="主持人", role="agent", content=message,
+                agent_code="orchestrator", agent_name="小菱（主持人）", role="agent", content=message,
             ))
             self._emit(AgentEventType.FAILED, "orchestrator", message)
         payload = {
@@ -1236,6 +1239,7 @@ class DiscussionOrchestrator:
             f"文件: {file_name}({language})\n"
             f"你的专业领域: {profile.focus}\n"
             f"你的重点问题类型: {' / '.join(profile.issue_types)}\n\n"
+            f"本轮审查要求（必须遵守）:\n{profile.instruction}\n\n"
             f"决策规则:\n"
             f"1. 先自主选择发言或静音。存在独立发现、新证据、不同判断或需要回应用户时"
             f"选择 speak;现有观点已完整覆盖且没有新增价值时选择 silent;\n"
@@ -1502,6 +1506,106 @@ class DiscussionOrchestrator:
                 f"\n### {role_label}{metadata}\n{t.content}",
             )
         return "\n".join(parts)
+
+    @staticmethod
+    def _build_traceable_replanning_context(
+        turns: list[DiscussionTurn],
+        *,
+        max_chars: int = REPLANNING_CONTEXT_BUDGET_CHARS,
+    ) -> str:
+        """为小菱重排轮次构造有预算、可按原始时间线回查的上下文。
+
+        完整发言保留在圆桌账本中。T<n> 标记其在本次时间线中的位置；
+        省略段与正文缩写均显式说明，不把截尾伪装为完整历史。
+
+        Args:
+            turns: 按时间顺序排列的圆桌原始发言。
+            max_chars: 输出上下文的最大字符数。
+
+        Returns:
+            str: 有界的上下文及原始发言回查标记。
+        """
+        if max_chars <= 0:
+            return ""
+        if not turns:
+            return "（暂无历史发言）"
+
+        header = "圆桌时间线压缩视图；完整原文保存在本次会话记录。T<n> 按顺序回查。"
+        recent_start = max(0, len(turns) - 6)
+        records: list[tuple[int, str, str, int]] = []
+        for index, turn in enumerate(turns, start=1):
+            role = "用户" if turn.role == "user" else "Agent"
+            action = getattr(turn, "action", "speak")
+            stance = getattr(turn, "stance", "neutral")
+            speaker = str(turn.agent_name or turn.agent_code or role).replace("\n", " ")[:80]
+            content = str(turn.content or "").replace("\r", " ").replace("\n", " ")
+            label = (
+                f"[T{index}|turn_id={getattr(turn, 'turn_id', None)}|{role}:{speaker}|"
+                f"{action}/{stance}|原文{len(content)}字]"
+            )
+            priority = (4 if index - 1 >= recent_start else 1) + (2 if turn.role == "user" else 0)
+            records.append((index, label, content, priority))
+
+        selected = {index for index, *_rest in records}
+
+        def omitted_lines() -> list[str]:
+            omitted = [index for index, *_rest in records if index not in selected]
+            if not omitted:
+                return []
+            ranges: list[tuple[int, int]] = []
+            start = previous = omitted[0]
+            for index in omitted[1:]:
+                if index != previous + 1:
+                    ranges.append((start, previous))
+                    start = index
+                previous = index
+            ranges.append((start, previous))
+            return [
+                f"[T{start}-T{end} 共{end - start + 1}段已压缩；可按完整时间线回查]"
+                for start, end in ranges
+            ]
+
+        def fixed_size() -> int:
+            retained = [record for record in records if record[0] in selected]
+            markers = omitted_lines()
+            return (
+                len(header)
+                + sum(len(record[1]) + 1 for record in retained)
+                + sum(len(marker) for marker in markers)
+                + len(retained) + len(markers)
+            )
+
+        def compression_marker(content: str) -> str:
+            return f"…[正文已压缩，原文{len(content)}字；按标签回查]"
+
+        while selected:
+            retained = [record for record in records if record[0] in selected]
+            reserved = sum(
+                len(compression_marker(content))
+                for _index, _label, content, _priority in retained if content
+            )
+            if fixed_size() + reserved <= max_chars:
+                break
+            removable = min(retained, key=lambda record: (record[3], record[0]))
+            selected.remove(removable[0])
+
+        retained = [record for record in records if record[0] in selected]
+        markers = omitted_lines()
+        marker_size = sum(
+            len(compression_marker(content))
+            for _index, _label, content, _priority in retained if content
+        )
+        available = max(0, max_chars - fixed_size() - marker_size)
+        total_weight = sum(record[3] for record in retained)
+        lines = [header, *markers]
+        for _index, label, content, weight in retained:
+            allowance = int(available * weight / total_weight) if total_weight else 0
+            excerpt = content[:allowance]
+            if len(excerpt) < len(content):
+                excerpt += compression_marker(content)
+            lines.append(f"{label} {excerpt}".rstrip())
+        context = "\n".join(lines)
+        return context if len(context) <= max_chars else "圆桌时间线已压缩"[:max_chars]
 
     def _summarize(self, turns: list[DiscussionTurn], code: str,
                    language: str, file_name: str, agent: DeepSeekAgent,
@@ -1829,7 +1933,28 @@ class DiscussionOrchestrator:
         if action == "user_input":
             content = payload.get("content", "")
             logger.info(f"[Discussion] 用户发言: {content[:60]}...")
-            normalized = str(content or "").strip()[:4000]
+            normalized = str(content or "").strip()
+            if len(normalized) > MAX_DISCUSSION_USER_INPUT_CHARS:
+                self._bus.publish_control(self._session_id, "input_rejected", {
+                    "actual_chars": len(normalized),
+                    "max_chars": MAX_DISCUSSION_USER_INPUT_CHARS,
+                    "message": (
+                        f"这条插话有 {len(normalized):,} 个字符，超过单条上限 "
+                        f"{MAX_DISCUSSION_USER_INPUT_CHARS:,}；内容未截断也未接收，请拆分后重发。"
+                    ),
+                })
+                return
+            pending_chars = sum(len(text) for _, text in self._steering_inputs)
+            if pending_chars + len(normalized) > MAX_PENDING_STEERING_CHARS:
+                self._bus.publish_control(self._session_id, "input_rejected", {
+                    "actual_chars": pending_chars + len(normalized),
+                    "max_chars": MAX_PENDING_STEERING_CHARS,
+                    "message": (
+                        f"当前待主持人处理的插话总长将超过 {MAX_PENDING_STEERING_CHARS:,} 个字符；"
+                        "本条未截断也未接收，请等待小菱处理现有要求后再发。"
+                    ),
+                })
+                return
             if normalized:
                 self._user_inputs.append(normalized)
                 self._steering_version += 1

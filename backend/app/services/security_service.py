@@ -27,6 +27,21 @@ from app.services.report_service import load_task_issue_stats, task_metrics_acce
 _SEVERITY_KEYS = ("严重", "高", "中", "低")
 
 
+def _has_complete_task_score(task: ReviewTask) -> bool:
+    """仅让成功且有完整覆盖证据的任务评分进入安全态势聚合。"""
+    if task.status != "success" or task.score is None:
+        return False
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    coverage_statuses = {
+        str(coverage.get(field) or "").strip().lower()
+        for field in ("coverage_status", "verification_status")
+        if coverage.get(field) is not None
+    }
+    if not coverage_statuses or not coverage_statuses <= {"complete", "completed", "verified"}:
+        return False
+    return coverage.get("score_available") is not False
+
+
 def _project_ids_for_user(db: Session, user: Optional[User]) -> tuple[list[int], str]:
     """返回当前用户可见的项目 ID 列表 + 范围标识(基于 project_member 关系)
 
@@ -115,12 +130,7 @@ def get_dashboard_summary(db: Session, user: Optional[User],
         task_ids_by_project[pid].append(task_id)
         # 任务 id 单调递增；只保留每个项目最新一条有效评分。
         if (
-            task.status == "success"
-            and score is not None
-            and not (
-                isinstance(task.coverage, dict)
-                and task.coverage.get("score_available") is False
-            )
+            _has_complete_task_score(task)
             and task_id > latest_scored_task_by_project.get(pid, -1)
         ):
             score_by_project[pid] = score

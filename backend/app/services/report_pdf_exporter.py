@@ -267,7 +267,7 @@ def _group_issues_by_severity(issues: List[Dict[str, Any]]) -> Dict[str, List[Di
     return grouped
 
 
-def _format_score(score: int) -> str:
+def _format_score(score: Optional[int]) -> str:
     """格式化评分展示文本(含风险等级)。
 
     Args:
@@ -276,6 +276,8 @@ def _format_score(score: int) -> str:
     Returns:
         str: 格式化后的评分文本,如 "72/100 (中风险)"。
     """
+    if score is None:
+        return "未评估"
     return f"{score}/100 ({score_risk_level(score)})"
 
 

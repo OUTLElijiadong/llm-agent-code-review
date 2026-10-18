@@ -127,6 +127,7 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
     is_admin = rbac_service.is_admin_user(db, int(user.id))
     from app.core.permission_codes import PermissionCode
     from app.services import review_service
+    from app.services.report_service import display_report_score
 
     report_permission = rbac_service.check_permission(
         db, int(user.id), PermissionCode.REPORT_VIEW,
@@ -168,13 +169,8 @@ def list_projects(db: Session, user: User, keyword: str = "", language: str = ""
             "can_execute": can_write or member_roles.get(row.id) == "reviewer",
             "last_review_at": last_task.create_time if last_task else None,
             "score": (
-                last_task.score
-                if metrics_visible
-                and not (
-                    isinstance(last_task.coverage, dict)
-                    and last_task.coverage.get("score_available") is False
-                )
-                else None
+                display_report_score(last_task, last_task.score)
+                if metrics_visible else None
             ),
             "coverage": last_task.coverage if metrics_visible else None,
             "create_time": row.create_time,
@@ -296,7 +292,7 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
         if task_metrics_visible[task.id]
         and task.review_type in {"sandbox_test", "pentest"}
     ]
-    from app.services.report_service import load_task_issue_stats
+    from app.services.report_service import display_report_score, load_task_issue_stats
 
     domain_issue_stats = load_task_issue_stats(db, visible_domain_tasks)
 
@@ -338,7 +334,10 @@ def get_project(db: Session, user: User, project_id: int) -> dict:
             {
                 "id": t.id,
                 "review_type": t.review_type,
-                "score": t.score if task_metrics_visible[t.id] else None,
+                "score": (
+                    display_report_score(t, t.score)
+                    if task_metrics_visible[t.id] else None
+                ),
                 "coverage": t.coverage if task_metrics_visible[t.id] else None,
                 "total_issues": (
                     domain_issue_stats[t.id]["total_issues"]

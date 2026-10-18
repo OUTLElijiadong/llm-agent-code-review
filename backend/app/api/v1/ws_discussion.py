@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json as json_lib
+import threading
 import time
 from urllib.parse import parse_qs
 
@@ -51,6 +52,9 @@ class PendingDiscussion:
 
 
 _pending: dict[str, PendingDiscussion] = {}
+_pending_lock = threading.RLock()
+_pending_expiry_timer: threading.Timer | None = None
+_pending_expiry_generation = 0
 # session_id → 发起讨论的用户 id,用于 WebSocket 连接时的归属校验。
 _session_owners: dict[str, int] = {}
 # session_id → 归属记录注册时间,供过期清理判断(与 _session_owners 同生共死)。
@@ -60,62 +64,144 @@ _owner_registered_at: dict[str, float] = {}
 # 归属记录,超过此时长即视为废弃 — 防止两个模块级 dict 随讨论次数无限增长。
 _STALE_TTL = 3600.0
 _SESSION_CHECK_INTERVAL = 1.0
+_MAX_DISCUSSION_USER_INPUT_CHARS = 20_000
 
 
-def _expire_pending(session_id: str) -> None:
-    """使过期预检会话进入可解释终态，避免永久显示进行中。"""
-    pending = _pending.pop(session_id, None)
-    if pending is None:
+def _finish_expired_pending(bus: DiscussionBus, session_id: str, owner_user_id: int) -> bool:
+    """把未在 TTL 内启动的预检会话记为失败终态，不消耗讨论模型调用。"""
+    session = bus.get_session(session_id, owner_user_id=owner_user_id)
+    if session is None or session.status in {"concluded", "partial", "failed", "cancelled", "interrupted"}:
+        return True
+    task = bus.get_discussion_task(session_id)
+    if task is not None and not task.done():
+        return False
+    if session.status != "pending" and session.progress.get("phase") != "pending":
+        return False
+    message = "圆桌等待 WebSocket 启动超时，任务未执行，也未消耗讨论模型调用。"
+    bus.publish_control(session_id, "done", {
+        "task_id": 0,
+        "status": "failed",
+        "error": message,
+    })
+    bus.close_session(session_id)
+    return True
+
+
+def _schedule_next_pending_expiry_locked() -> None:
+    """用单一 daemon 定时器收敛最早过期项，避免每个待启动会话各占一线程。"""
+    global _pending_expiry_timer, _pending_expiry_generation
+    if _pending_expiry_timer is not None:
+        _pending_expiry_timer.cancel()
+        _pending_expiry_timer = None
+    _pending_expiry_generation += 1
+    if not _pending:
         return
-    owner = int(pending.kwargs.get("user_id") or 0)
-    bus = DiscussionBus.instance()
-    session = bus.get_session(session_id, owner_user_id=owner) if owner else None
-    if session is not None and session.status in {"active", "paused"}:
-        bus.publish_control(session_id, "done", {"status": "interrupted"})
-        bus.close_session(session_id)
-    _session_owners.pop(session_id, None)
-    _owner_registered_at.pop(session_id, None)
+    expires_at = min(pending.created_at + _STALE_TTL for pending in _pending.values())
+    timer = threading.Timer(
+        max(0.05, expires_at - time.time()),
+        _expire_pending_at_deadline,
+        args=(_pending_expiry_generation,),
+    )
+    timer.daemon = True
+    _pending_expiry_timer = timer
+    timer.start()
+
+
+def _expire_pending_at_deadline(generation: int) -> None:
+    """到期后扫描并收敛 pending；代次令被取消的旧定时器不能影响新状态。"""
+    global _pending_expiry_timer
+    with _pending_lock:
+        if generation != _pending_expiry_generation:
+            return
+        _pending_expiry_timer = None
+    purge_stale_pending()
 
 
 def purge_stale_pending():
-    """机会性清理过期预检；列表读取也调用，使状态按时更新。"""
+    """收敛过期预检会话，并清理进程内归属表和重启后遗留的数据库 pending。"""
     now = time.time()
-    for sid in [s for s, p in _pending.items() if now - p.created_at > _STALE_TTL]:
-        _expire_pending(sid)
     bus = DiscussionBus.instance()
-    for sid in [
-        s for s, ts in _owner_registered_at.items()
-        if now - ts > _STALE_TTL and s not in _pending and bus.get_session(s) is None
-    ]:
-        _session_owners.pop(sid, None)
-        _owner_registered_at.pop(sid, None)
+    with _pending_lock:
+        stale = [
+            (sid, pending) for sid, pending in _pending.items()
+            if now - pending.created_at >= _STALE_TTL
+        ]
+        for sid, pending in stale:
+            owner = int(pending.kwargs.get("user_id") or 0)
+            may_remove_owner = _finish_expired_pending(bus, sid, owner) if owner else True
+            _pending.pop(sid, None)
+            if may_remove_owner:
+                _session_owners.pop(sid, None)
+                _owner_registered_at.pop(sid, None)
+
+    # pending 状态也必须在进程重启后收敛。普通 active/paused 会话由总线恢复逻辑
+    # 标为 interrupted；只有 pending 且超过 TTL 的预检会话在此标为 failed。
+    if bus._persist:
+        try:
+            from app.agents.discussion_bus import utc_timestamp
+            from app.models.roundtable import RoundtableSession
+
+            with bus._session_maker()() as db:
+                persisted_pending = db.query(RoundtableSession).filter(
+                    RoundtableSession.status == "pending",
+                ).all()
+                stale_ids = [
+                    (row.session_id, int(row.owner_user_id))
+                    for row in persisted_pending
+                    if utc_timestamp(row.updated_at or row.created_at) <= now - _STALE_TTL
+                ]
+            for sid, owner in stale_ids:
+                may_remove_owner = _finish_expired_pending(bus, sid, owner)
+                with _pending_lock:
+                    _pending.pop(sid, None)
+                    if may_remove_owner:
+                        _session_owners.pop(sid, None)
+                        _owner_registered_at.pop(sid, None)
+        except Exception:
+            logger.exception("[WS] 收敛持久化过期 pending 圆桌失败")
+
+    with _pending_lock:
+        stale_owners = [
+            sid for sid, registered_at in _owner_registered_at.items()
+            if now - registered_at > _STALE_TTL and sid not in _pending
+            and bus.get_session(sid, owner_user_id=_session_owners.get(sid)) is None
+        ]
+        for sid in stale_owners:
+            _session_owners.pop(sid, None)
+            _owner_registered_at.pop(sid, None)
+        _schedule_next_pending_expiry_locked()
 
 
 def register_pending(session_id: str, **kwargs):
     purge_stale_pending()
-    _pending[session_id] = PendingDiscussion(session_id, **kwargs)
-    owner = kwargs.get("user_id")
-    if owner is not None:
-        _session_owners[session_id] = int(owner)
-        _owner_registered_at[session_id] = time.time()
+    with _pending_lock:
+        pending = PendingDiscussion(session_id, **kwargs)
+        _pending[session_id] = pending
+        owner = kwargs.get("user_id")
+        if owner is not None:
+            _session_owners[session_id] = int(owner)
+            _owner_registered_at[session_id] = time.time()
+        _schedule_next_pending_expiry_locked()
 
 
 def take_pending(session_id: str) -> PendingDiscussion | None:
     """原子领取待启动上下文，供 WebSocket 或用户 Agent 二选一启动。"""
-    pending = _pending.get(session_id)
-    if pending is not None and time.time() - pending.created_at > _STALE_TTL:
-        _expire_pending(session_id)
-        return None
-    return _pending.pop(session_id, None)
+    purge_stale_pending()
+    with _pending_lock:
+        pending = _pending.pop(session_id, None)
+        _schedule_next_pending_expiry_locked()
+        return pending
 
 
 def cancel_pending(session_id: str, owner_user_id: int) -> bool:
     """按所有者撤销尚未被 WebSocket 消费的启动上下文。"""
-    pending = _pending.get(session_id)
-    if pending is None or int(pending.kwargs.get("user_id") or 0) != int(owner_user_id):
-        return False
-    _pending.pop(session_id, None)
-    return True
+    with _pending_lock:
+        pending = _pending.get(session_id)
+        if pending is None or int(pending.kwargs.get("user_id") or 0) != int(owner_user_id):
+            return False
+        _pending.pop(session_id, None)
+        _schedule_next_pending_expiry_locked()
+        return True
 
 
 def _load_active_user(user_id: int):
@@ -352,6 +438,16 @@ def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None
     """按 session_id 唯一登记并启动待处理圆桌任务。"""
 
     bus = DiscussionBus.instance()
+    if time.time() - pending.created_at >= _STALE_TTL:
+        owner = int(pending.kwargs.get("user_id") or 0)
+        if owner:
+            _finish_expired_pending(bus, pending.session_id, owner)
+        with _pending_lock:
+            _pending.pop(pending.session_id, None)
+            _session_owners.pop(pending.session_id, None)
+            _owner_registered_at.pop(pending.session_id, None)
+            _schedule_next_pending_expiry_locked()
+        return None
     session = bus.get_session(pending.session_id)
     current = bus.get_discussion_task(pending.session_id)
     if current is not None:
@@ -371,6 +467,7 @@ def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None
 
 async def ws_discuss(websocket: WebSocket, session_id: str):
     """WebSocket 讨论连接"""
+    purge_stale_pending()
     client = websocket.client.host if websocket.client else "unknown"
     logger.info(f"[WS] 讨论连接请求 session={session_id} client={client}")
     # 优先从子协议读取 token；query token 仅用于兼容旧前端。
@@ -396,6 +493,7 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         # 浏览器可直接按旧 WS 地址重连，不依赖先访问圆桌 REST 列表。
         with SessionLocal() as db:
             bus.enable_persistence(sessionmaker(bind=db.get_bind(), expire_on_commit=False))
+        purge_stale_pending()
         session = bus.get_session(session_id, owner_user_id=int(user.id))
     owner_user_id = 0
     if pending:
@@ -573,10 +671,15 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
                             "type": "control", "action": "input_rejected",
                             "payload": {"reason": "消息不能为空"},
                         }, ensure_ascii=False))
-                    elif len(content) > 50000:
+                    elif len(content.strip()) > _MAX_DISCUSSION_USER_INPUT_CHARS:
                         await websocket.send_text(json_lib.dumps({
                             "type": "control", "action": "input_rejected",
-                            "payload": {"reason": "单条消息超过 50000 字符，请拆分后发送"},
+                            "payload": {
+                                "reason": (
+                                    f"这条插话有 {len(content.strip()):,} 个字符，超过单条上限 "
+                                    f"{_MAX_DISCUSSION_USER_INPUT_CHARS:,}；内容未截断也未接收，请拆分后重发。"
+                                ),
+                            },
                         }, ensure_ascii=False))
                     elif bus.accept_user_input(session_id, content):
                         accepted_session = bus.get_session(session_id, owner_user_id=int(user.id))

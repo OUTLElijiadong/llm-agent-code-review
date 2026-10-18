@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.ai.scoring import compute_score_breakdown
 from app.core.exceptions import NotFoundError
 from app.models.code_file import CodeFile
 from app.models.project import Project
@@ -22,6 +24,10 @@ from app.services.project_member_service import require_project_access
 from app.services.report_text import clean_report_payload, clean_report_text
 
 _SEVERITIES = ("严重", "高", "中", "低")
+_EMBEDDED_SCORE_RE = re.compile(
+    r"(?:安全评分|综合安全评分|风险评分)\s*[:：]?\s*\d+(?:\.\d+)?\s*/\s*100"
+    r"(?:\s*[（(][^）)]*[）)])?[。.]?"
+)
 
 
 def _json_copy(value: Any) -> Any:
@@ -68,13 +74,21 @@ def _safe_confidence(value: Any) -> float | None:
 
 
 def infer_coverage_status(execution_status: str, coverage: dict) -> str:
-    stated = str(coverage.get("verification_status") or coverage.get("coverage_status") or "").lower()
-    if execution_status == "failed" or stated == "failed":
+    declared_statuses = {
+        str(coverage.get(field) or "").strip().lower()
+        for field in ("verification_status", "coverage_status")
+        if coverage.get(field) is not None
+    }
+    if execution_status == "failed" or "failed" in declared_statuses:
         return "failed"
-    if execution_status == "partial" or stated == "partial":
+    if execution_status == "partial" or "partial" in declared_statuses:
         return "partial"
-    if stated == "unknown":
+    if "unknown" in declared_statuses:
         return "unknown"
+    complete_statuses = {"complete", "completed", "verified"}
+    if declared_statuses and not declared_statuses <= complete_statuses:
+        return "unknown"
+    stated = next(iter(declared_statuses), "")
 
     # A successful HTTP/Agent result does not imply full scope coverage. Preserve
     # explicit omissions, truncation, bounded triage and failed sub-stages.
@@ -183,6 +197,13 @@ def _report_markdown(
         f"任务：{task_name}",
         f"执行状态：{status_labels.get(execution_status, '状态未知')}",
         f"风险评分：{score}/100" if score is not None else "风险评分：未评估",
+        *(
+            [
+                f"来源评分：{result['source_risk_score']}/100（与按问题严重度计算的报告评分不同，保留来源值供核对）"
+            ]
+            if score is not None and result.get("source_risk_score") is not None
+            else []
+        ),
         f"扫描文件数：{max(0, _safe_int(result.get('file_count')))}",
         f"报告生成时间：{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC",
         "",
@@ -192,6 +213,17 @@ def _report_markdown(
         "验证覆盖",
         f"覆盖范围：{coverage_labels.get(coverage_status, '未知')}",
     ]
+    score_reason_labels = {
+        "execution_not_successful": "执行未完整成功",
+        "coverage_not_complete": "扫描覆盖范围不完整或未知",
+        "ungraded_findings": "存在未分级发现",
+    }
+    if coverage.get("score_available") is False:
+        reason = score_reason_labels.get(
+            str(coverage.get("score_unavailable_reason") or ""),
+            "当前证据不足以计算评分",
+        )
+        lines.append(f"评分状态：未评估（{reason}）")
     for key, label in (
         ("requested_mode", "请求模式"),
         ("scan_mode", "实际扫描模式"),
@@ -442,9 +474,8 @@ def persist_security_report(
         score_number = float(score_value) if not isinstance(score_value, bool) else math.nan
     except (TypeError, ValueError, OverflowError):
         score_number = math.nan
-    score_available = isinstance(score_value, (int, float)) and math.isfinite(score_number)
-    score = max(0, min(100, int(score_number))) if score_available else None
-    payload["risk_score"] = score
+    source_score_available = isinstance(score_value, (int, float)) and math.isfinite(score_number)
+    source_score = max(0, min(100, int(score_number))) if source_score_available else None
     payload["summary"] = _plain_report_text(payload.get("summary"))
     findings = []
     for finding in raw_findings:
@@ -475,13 +506,46 @@ def persist_security_report(
         severity = str(finding.get("severity") or "")
         if severity in severity_counts and finding.get("verification") != "refuted":
             severity_counts[severity] += 1
+    has_ungraded_findings = any(
+        finding.get("verification") != "refuted"
+        and str(finding.get("severity") or "") not in _SEVERITIES
+        for finding in findings
+    )
+    score_unavailable_reason = None
+    if execution_status != "success":
+        score_unavailable_reason = "execution_not_successful"
+    elif verification_status != "complete":
+        score_unavailable_reason = "coverage_not_complete"
+    elif normalized_coverage.get("score_available") is False:
+        score_unavailable_reason = str(
+            normalized_coverage.get("score_unavailable_reason") or "score_unavailable"
+        )
+    elif has_ungraded_findings:
+        score_unavailable_reason = "ungraded_findings"
+    score_available = score_unavailable_reason is None
+    score = int(compute_score_breakdown(severity_counts)["score"]) if score_available else None
+    if score_available and source_score is not None and source_score != score:
+        payload["source_risk_score"] = source_score
+    else:
+        payload.pop("source_risk_score", None)
+    payload["summary"] = _EMBEDDED_SCORE_RE.sub("", payload["summary"]).strip()
+    normalized_coverage["score_available"] = score_available
+    if score_unavailable_reason:
+        normalized_coverage["score_unavailable_reason"] = score_unavailable_reason
+    else:
+        normalized_coverage.pop("score_unavailable_reason", None)
+    payload["risk_score"] = score
     now = datetime.utcnow()
     task = ReviewTask(
         user_id=int(owner.id),
         project_id=int(project_id),
         task_name=_plain_report_text(task_name, 100) or "安全审计",
         review_type=report_kind,
-        status="failed" if execution_status == "failed" else "success",
+        status={
+            "success": "success",
+            "partial": "partial",
+            "failed": "failed",
+        }[execution_status],
         total_files=max(0, _safe_int(payload.get("file_count") or normalized_coverage.get("total_file_count"))),
         processed_files=max(0, _safe_int(payload.get("file_count") or normalized_coverage.get("scanned_file_count"))),
         total_issues=len(findings),
@@ -505,7 +569,7 @@ def persist_security_report(
         coverage={
             **normalized_coverage,
             "execution_status": execution_status,
-            "score_available": score is not None,
+            "score_available": score_available,
         },
         rules_snapshot=[],
     )
@@ -599,6 +663,7 @@ def persist_security_report(
     report_content = {
         "source": report_kind,
         "schema_version": "security-audit-report-v1",
+        "summary": task.summary,
         "execution_status": execution_status,
         "score_available": score is not None,
         "risk_score": score,
@@ -619,6 +684,8 @@ def persist_security_report(
         "compliance": compliance,
         "report_md": report_body,
     }
+    if payload.get("source_risk_score") is not None:
+        report_content["source_risk_score"] = payload["source_risk_score"]
     db.add(
         ReviewReport(
             task_id=task.id,

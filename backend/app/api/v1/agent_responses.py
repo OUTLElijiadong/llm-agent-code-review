@@ -460,6 +460,24 @@ def _recover_stale_active_run(
         checkpoint = {}
     if not isinstance(checkpoint, dict):
         checkpoint = {}
+    if checkpoint.get("stop_requested") is True:
+        reason = str(checkpoint.get("stop_reason") or checkpoint.get("cancel_reason") or "").strip()[:500]
+        checkpoint.update({
+            "status": "cancelled",
+            "pending": None,
+            "recovery_requested": False,
+            "cancel_reason": reason,
+            "error": "",
+            "output_text": (
+                f"用户取消了本次运行（原因：{reason}）。已停止任务，未执行剩余操作；如需继续可重新发起。"
+                if reason else "用户取消了本次运行。已停止任务，未执行剩余操作；如需继续可重新发起。"
+            ),
+        })
+        row.status = "cancelled"
+        row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+        row.version = int(row.version or 0) + 1
+        db.commit()
+        return
     if row.status in {"waiting_approval", "waiting_input"}:
         return
     waiting_status = _TRANSITION_TO_WAITING.get(row.status)

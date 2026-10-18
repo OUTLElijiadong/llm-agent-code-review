@@ -1394,6 +1394,11 @@ class DeepSeekResponsesRuntime:
 
             checkpoint.rounds += 1
             await self._store.save(checkpoint)
+            # DatabaseCheckpointStore may observe a stop intent committed by a
+            # different request while saving. Do not open a paid model request
+            # after that durable cancellation boundary.
+            if checkpoint.status == CANCELLED:
+                return self._result(checkpoint, events=events)
 
             async def _run_model_round() -> tuple[Dict[str, Any], List[Mapping[str, Any]]]:
                 try:
@@ -1500,6 +1505,8 @@ class DeepSeekResponsesRuntime:
                     checkpoint.model = self._fallback_model
                     payload["model"] = checkpoint.model
                     await self._store.save(checkpoint)
+                    if checkpoint.status == CANCELLED:
+                        return self._result(checkpoint, events=events)
                     try:
                         round_result = await _run_model_round_or_cancel()
                         if isinstance(round_result, RuntimeResult):

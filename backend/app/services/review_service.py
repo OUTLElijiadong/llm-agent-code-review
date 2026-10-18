@@ -2569,6 +2569,8 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
         )
         for row in rows
     }
+    from app.services.report_service import display_report_score
+
     # 不读取无权查看的报告内容，避免列表为渲染计数而加载受限 Markdown。
     sandbox_tasks = [
         row for row in rows
@@ -2587,10 +2589,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
         hide_report_metrics = (
             row.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
         )
-        score_unavailable = (
-            isinstance(row.coverage, dict)
-            and row.coverage.get("score_available") is False
-        )
+        display_score = display_report_score(row, row.score)
         summary = sandbox_stats.get(row.id, {}).get("source", {}).get("report_issue_summary")
         report_total = summary.get("total") if summary else None
         items.append({
@@ -2611,7 +2610,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "high_issues": None if hide_report_metrics else row.high_issues,
             "medium_issues": None if hide_report_metrics else row.medium_issues,
             "low_issues": None if hide_report_metrics else row.low_issues,
-            "score": None if hide_report_metrics or score_unavailable else row.score,
+            "score": None if hide_report_metrics else display_score,
             "duration_ms": row.duration_ms,
             "score_version": None if hide_report_metrics else row.score_version,
             "score_breakdown": None if hide_report_metrics else row.score_breakdown,
@@ -2665,10 +2664,9 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
     hide_report_metrics = (
         task.review_type in _REPORT_BACKED_REVIEW_TYPES and not can_view_report
     )
-    score_unavailable = (
-        isinstance(task.coverage, dict)
-        and task.coverage.get("score_available") is False
-    )
+    from app.services.report_service import display_report_score
+
+    display_score = display_report_score(task, task.score)
     report_issue_summary = None
     report_coverage = task.coverage if isinstance(task.coverage, dict) else None
     report_error_message = task.error_message
@@ -2723,7 +2721,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "high_issues": None if hide_report_metrics else task.high_issues,
         "medium_issues": None if hide_report_metrics else task.medium_issues,
         "low_issues": None if hide_report_metrics else task.low_issues,
-        "score": None if hide_report_metrics or score_unavailable else task.score,
+        "score": None if hide_report_metrics else display_score,
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
         "score_breakdown": None if hide_report_metrics else task.score_breakdown,

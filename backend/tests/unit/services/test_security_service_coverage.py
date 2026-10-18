@@ -22,7 +22,13 @@ def _project(db: Any, user_id: int, name: str) -> Project:
     return project
 
 
-def _task(db: Any, project_id: int, score: int, status: str = "success") -> ReviewTask:
+def _task(
+    db: Any,
+    project_id: int,
+    score: int,
+    status: str = "success",
+    coverage: dict[str, Any] | None = None,
+) -> ReviewTask:
     """创建审查任务；参数含项目、评分和状态，返回已持久化 ReviewTask。"""
     task = ReviewTask(
         user_id=1,
@@ -30,6 +36,10 @@ def _task(db: Any, project_id: int, score: int, status: str = "success") -> Revi
         review_type="standard",
         status=status,
         score=score,
+        coverage=coverage if coverage is not None else {
+            "coverage_status": "complete",
+            "score_available": True,
+        },
     )
     db.add(task)
     db.commit()
@@ -167,6 +177,68 @@ def test_dashboard_aggregates_visible_security_data_and_latest_scores(
     assert summary["top_risky_projects"][0]["risk_score"] == 40
     assert summary["trend"][-1]["severe"] == 1
     assert summary["trend"][-1]["high"] == 2
+
+
+def test_dashboard_uses_only_latest_complete_scored_task_per_project(
+    db: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_with_prior_score = _project(db, 7, "has-prior-complete-score")
+    project_without_complete_score = _project(db, 8, "only-incomplete-score")
+    project_with_failed_score = _project(db, 9, "only-failed-coverage-score")
+    project_with_conflicting_coverage = _project(db, 10, "conflicting-coverage-status")
+    _task(db, project_with_prior_score.id, 73)
+    _task(
+        db,
+        project_with_prior_score.id,
+        100,
+        coverage={"coverage_status": "partial", "score_available": True},
+    )
+    _task(
+        db,
+        project_without_complete_score.id,
+        100,
+        coverage={"coverage_status": "unknown", "score_available": True},
+    )
+    _task(
+        db,
+        project_with_failed_score.id,
+        100,
+        coverage={"coverage_status": "failed", "score_available": True},
+    )
+    _task(
+        db,
+        project_with_failed_score.id,
+        100,
+        coverage={"coverage_status": "complete", "score_available": False},
+    )
+    _task(
+        db,
+        project_with_conflicting_coverage.id,
+        100,
+        coverage={
+            "coverage_status": "complete",
+            "verification_status": "failed",
+            "score_available": True,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_project_ids_for_user",
+        MagicMock(return_value=(
+            [
+                project_with_prior_score.id,
+                project_without_complete_score.id,
+                project_with_failed_score.id,
+                project_with_conflicting_coverage.id,
+            ],
+            "self",
+        )),
+    )
+
+    summary = module.get_dashboard_summary(db, SimpleNamespace(id=7), days=7)
+
+    assert summary["avg_risk_score"] == 73
 
 
 def test_last_task_id_and_trend_cover_boundaries() -> None:

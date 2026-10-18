@@ -8,7 +8,7 @@
             <span class="header-icon">🗣️</span>
             <div class="header-titles">
               <div class="header-title">
-                <span class="header-heading">Agent 圆桌讨论</span>
+                <span class="header-heading">Agent 圆桌讨论 · 主持：小菱</span>
                 <span v-if="fileName" class="file-chip">{{ fileName }}</span>
               </div>
               <div class="header-sub">
@@ -100,7 +100,7 @@
 
         <div v-if="pendingFollowupCount > 0 || followupCountIncomplete" class="followup-progress" role="status" aria-live="polite">
           <span class="followup-progress-label">
-            <template v-if="pendingFollowupCount > 0">主持人处理追问 · {{ followupCountIncomplete ? '至少 ' : '' }}{{ pendingFollowupCount }} 条待答</template>
+            <template v-if="pendingFollowupCount > 0">小菱处理追问 · {{ followupCountIncomplete ? '至少 ' : '' }}{{ pendingFollowupCount }} 条待答</template>
             <template v-else>正在核对较早的追问记录</template>
           </span>
           <span class="followup-progress-note">{{ followupProgressNote }}</span>
@@ -112,7 +112,7 @@
         <!-- 参会者 -->
         <div class="participants">
           <span class="part-label">参会:</span>
-          <span class="part-chip orchestrator">🎤 主持人</span>
+          <span class="part-chip orchestrator">🎤 小菱（主持人）</span>
           <span
             v-for="a in agents"
             :key="a.code"
@@ -219,10 +219,10 @@
               </div>
             </div>
           </div>
-          <div v-else-if="pendingFollowupCount > 0" class="msg-row orchestrator typing-row" aria-label="主持人正在处理追问">
+          <div v-else-if="pendingFollowupCount > 0" class="msg-row orchestrator typing-row" aria-label="小菱正在处理追问">
             <div class="msg-avatar" :style="{ background: AGENT_THEME.orchestrator.color }">🎤</div>
             <div class="msg-main">
-              <div class="msg-meta"><span class="msg-name" :style="{ color: AGENT_THEME.orchestrator.color }">主持人 · 正在处理 {{ pendingFollowupCount }} 条追问</span></div>
+              <div class="msg-meta"><span class="msg-name" :style="{ color: AGENT_THEME.orchestrator.color }">小菱 · 正在处理 {{ pendingFollowupCount }} 条追问</span></div>
               <div class="msg-bubble typing"><span class="dot" /><span class="dot" /><span class="dot" /></div>
             </div>
           </div>
@@ -258,6 +258,9 @@
               :disabled="!canSend || sendingMessage || !userMessage.trim()"
               @click="sendMessage"
             >发送</el-button>
+          </div>
+          <div class="input-hint" :class="{ over: inputCharCount > MAX_USER_INPUT_CHARS }" aria-live="polite">
+            {{ inputCharCount.toLocaleString() }} / {{ MAX_USER_INPUT_CHARS.toLocaleString() }} 字符；超限内容不会截断或发送
           </div>
         </footer>
       </div>
@@ -295,6 +298,8 @@ const props = defineProps<{
   initialHasEarlier?: boolean
   initialNextBeforeSeq?: number | null
 }>()
+
+const MAX_USER_INPUT_CHARS = 20_000
 
 const emit = defineEmits<{ close: []; settled: [] }>()
 
@@ -513,6 +518,7 @@ const isFollowupOpen = computed(() => phase.value === 'concluded'
   && hasCompletedReport.value && followupUntil.value > nowSeconds.value)
 const canSend = computed(() => status.value === 'connected'
   && !isStopping.value && (phase.value === 'live' || isFollowupOpen.value))
+const inputCharCount = computed(() => Array.from(userMessage.value).length)
 const followupCountdown = computed(() => {
   const remaining = Math.max(0, Math.ceil(followupUntil.value - nowSeconds.value))
   return `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`
@@ -892,7 +898,7 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
     case 'stopping':
       isStopping.value = true
       phase.value = 'stopping'
-      stageMessage.value = '讨论正在终止，不会生成成功小结'
+      stageMessage.value = '后续讨论已停止；已发出的模型请求无法撤回，可能仍产生用量'
       ElMessage.info('正在停止圆桌讨论')
       break
     case 'done':
@@ -936,6 +942,11 @@ function reconnect() {
 function sendMessage() {
   const text = userMessage.value.trim()
   if (!text || !canSend.value || sendingMessage.value) return
+  const charCount = Array.from(text).length
+  if (charCount > MAX_USER_INPUT_CHARS) {
+    ElMessage.warning(`这条插话有 ${charCount.toLocaleString()} 个字符，超过 ${MAX_USER_INPUT_CHARS.toLocaleString()} 字上限；内容未截断，请拆分后重发`)
+    return
+  }
   pendingMessage = text
   sendingMessage.value = true
   if (!stream?.send('user_input', { content: text })) {
@@ -1329,6 +1340,8 @@ connectWs()
 
 /* 输入区 */
 .room-footer { border-top: 1px solid var(--color-border-light, #e8e8ef); padding: 12px 20px; flex-shrink: 0; background: #fff; }
+.input-hint { padding: 4px 5px 0; text-align: right; color: #8a8fa1; font-size: 11px; }
+.input-hint.over { color: #c53b4b; }
 .quick-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .quick-label { font-size: 12px; color: var(--color-text-secondary, #888); }
 .input-row { display: flex; gap: 10px; align-items: flex-end; }

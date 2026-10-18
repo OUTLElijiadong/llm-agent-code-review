@@ -831,13 +831,13 @@ function stopPolling() {
 
 function schedulePollIfRunning() {
   stopPolling()
-  if (disposed || refreshing.value || detailError.value || issuesError.value || !['pending', 'running'].includes(task.value?.status || '')) return
+  if (disposed || refreshing.value || detailError.value || !['pending', 'running'].includes(task.value?.status || '')) return
   const generation = viewGeneration
   pollTimer = setTimeout(async () => {
     pollTimer = null
     await loadTaskDetail()
     if (disposed || generation !== viewGeneration) return
-    if (!detailError.value) await doLoadIssues()
+    if (!detailError.value && !issuesAccessRevoked) await doLoadIssues()
     if (disposed || generation !== viewGeneration) return
     schedulePollIfRunning()
   }, POLL_INTERVAL)

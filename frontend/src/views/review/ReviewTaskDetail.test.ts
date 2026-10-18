@@ -654,6 +654,23 @@ describe('审查详情真实执行状态', () => {
     expect(wrapper.find('.issues-error').exists()).toBe(false)
   })
 
+  it('问题列表访问被撤销后仍刷新任务进度，且不重复请求受限列表', async () => {
+    review.getTaskIssues.mockRejectedValueOnce({ code: 40303, message: '无权查看问题明细' })
+    await renderDetail()
+    review.getReviewTaskDetail.mockResolvedValue(taskResult({
+      processed_files: 5,
+      coverage: { stage: 'analyzing', current_file: 'next.ts', completed_files: 5, total_files: 8 },
+    }))
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(review.getReviewTaskDetail).toHaveBeenCalledTimes(2)
+    expect(review.getTaskIssues).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.issues-error[role="alert"]').text()).toContain('无权查看问题明细')
+    expect(wrapper.text()).toContain('5 / 8')
+  })
+
   it('忙态重试只发一次读取，卸载后的迟到响应不会重启轮询', async () => {
     review.getReviewTaskDetail.mockRejectedValueOnce(new Error('连接失败'))
     await renderDetail()

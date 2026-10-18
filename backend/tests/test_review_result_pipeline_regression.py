@@ -724,3 +724,4 @@ def test_scoring_breakdown_is_versioned_and_compute_score_stays_compatible() -> 
     assert score_risk_level(60) == "中风险"
     assert score_risk_level(40) == "高风险"
     assert score_risk_level(39) == "极高风险"
+    assert score_risk_level(None) == "未评估"

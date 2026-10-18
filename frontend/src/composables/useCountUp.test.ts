@@ -27,6 +27,38 @@ describe('useCountUp', () => {
     wrapper.unmount()
   })
 
+  it('can animate the first asynchronously loaded value when explicitly enabled', async () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
+    vi.spyOn(performance, 'now').mockReturnValue(100)
+    let pendingFrame: FrameRequestCallback | undefined
+    const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      pendingFrame = callback
+      return 1
+    })
+    const source = ref(0)
+    const Component = defineComponent({
+      setup() {
+        return { display: useCountUp(source, 650, true) }
+      },
+      template: '<span>{{ display }}</span>',
+    })
+    const wrapper = mount(Component)
+
+    source.value = 64
+    await nextTick()
+
+    expect(wrapper.text()).toBe('0')
+    expect(request).toHaveBeenCalledOnce()
+    pendingFrame?.(425)
+    await nextTick()
+    expect(wrapper.text()).toBe('56')
+
+    pendingFrame?.(750)
+    await nextTick()
+    expect(wrapper.text()).toBe('64')
+    wrapper.unmount()
+  })
+
   it('lands immediately when reduced motion is requested', async () => {
     vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
     const request = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(41)

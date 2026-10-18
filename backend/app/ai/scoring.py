@@ -10,7 +10,9 @@ DEDUCT = {"严重": 15, "高": 8, "中": 3, "低": 1}
 def score_risk_level(score: int | float | None) -> str:
     """将综合评分映射为所有报告出口共用的四档风险等级。"""
 
-    value = float(score or 0)
+    if score is None:
+        return "未评估"
+    value = float(score)
     if value >= 80:
         return "低风险"
     if value >= 60:
