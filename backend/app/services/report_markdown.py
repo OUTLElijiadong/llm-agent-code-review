@@ -52,7 +52,13 @@ def _inline_segments(tokens: Iterable) -> tuple[MarkdownSegment, ...]:
         elif token.type == "code_inline":
             segments.append(MarkdownSegment(token.content, bold=bold, italic=italic, code=True))
         elif token.type in {"text", "html_inline", "image"} and token.content:
-            segments.append(MarkdownSegment(token.content, bold=bold, italic=italic))
+            # Markdown-It leaves unmatched emphasis delimiters as plain text.
+            # They are formatting debris in generated reports, so never leak
+            # them into PDF/Word as literal AI-style asterisks. Inline code is
+            # handled separately and remains byte-for-byte intact.
+            text = _strip_dangling_emphasis_markers(token.content)
+            if text:
+                segments.append(MarkdownSegment(text, bold=bold, italic=italic))
         elif token.type in {"softbreak", "hardbreak"}:
             segments.append(MarkdownSegment("\n", bold=bold, italic=italic))
         elif token.type == "s_open":
@@ -130,7 +136,8 @@ def reportlab_markup(
     """生成只含安全文字和固定样式标签的 ReportLab 段落内容。"""
     result: list[str] = []
     for segment in segments:
-        value = "<br/>".join(escape(part) for part in segment.text.split("\n"))
+        wrapped_text = _wrap_long_ascii_tokens(segment.text)
+        value = "<br/>".join(escape(part) for part in wrapped_text.split("\n"))
         if segment.code:
             if code_non_ascii_font:
                 value = "".join(
@@ -144,6 +151,24 @@ def reportlab_markup(
             value = f"<b>{value}</b>"
         result.append(value)
     return "".join(result)
+
+
+_LONG_ASCII_TOKEN = re.compile(r"[A-Za-z0-9_./:-]{25,}")
+
+
+def _wrap_long_ascii_tokens(value: str, limit: int = 24) -> str:
+    """Add PDF line breaks to long identifiers and URLs with no wrap points."""
+    def wrap(match: re.Match[str]) -> str:
+        token = match.group(0)
+        return "\n".join(token[index:index + limit] for index in range(0, len(token), limit))
+
+    return _LONG_ASCII_TOKEN.sub(wrap, value)
+
+
+def _strip_dangling_emphasis_markers(value: str) -> str:
+    """Remove unmatched bold delimiters without changing literal star syntax."""
+    value = re.sub(r"(^|\s)\*{2,}(?=\S)", r"\1", value)
+    return re.sub(r"(?<=\S)\*{2,}(?=$|\s)", "", value)
 
 
 def _split_ascii(value: str) -> list[str]:

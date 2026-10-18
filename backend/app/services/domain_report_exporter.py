@@ -377,7 +377,7 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
             rightMargin=18 * mm,
             title=title,
         )
-        elements = [Paragraph(escape(title), styles["title"]), Spacer(1, 5 * mm)]
+        elements = [Paragraph(_pdf_title_markup(title), styles["title"]), Spacer(1, 5 * mm)]
         _append_markdown_elements(elements, markdown, styles)
         document.build(elements)
         return buffer.getvalue(), "application/pdf"
@@ -397,3 +397,18 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
         document.save(buffer)
         return buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     raise ValueError(f"不支持的领域报告格式：{format}")
+
+
+def _pdf_title_markup(title: str) -> str:
+    """将带任务编号的长标题拆成可读、可换行的 PDF 标题。"""
+    label, separator, public_id = title.rpartition(" · ")
+    if separator and len(public_id) >= 20 and re.fullmatch(r"[A-Za-z0-9_-]+", public_id):
+        id_lines = "<br/>".join(
+            escape(public_id[index:index + 18])
+            for index in range(0, len(public_id), 18)
+        )
+        return (
+            f"{escape(label)}<br/>"
+            f'<font size="9" color="#64748B">任务编号：{id_lines}</font>'
+        )
+    return escape(title)

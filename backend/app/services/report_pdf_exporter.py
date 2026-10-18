@@ -25,7 +25,15 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    HRFlowable,
+    KeepTogether,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import (
@@ -277,7 +285,14 @@ def _append_markdown_elements(
     styles: Dict[str, ParagraphStyle],
 ) -> None:
     """将 Markdown 内容转换为 PDF 原生段落、列表和代码块。"""
-    for block in markdown_to_blocks(value):
+    blocks = markdown_to_blocks(value)
+    keep_final_quote = (
+        len(blocks) >= 2
+        and blocks[-1].kind == "quote"
+        and blocks[-2].kind in {"paragraph", "bullet", "ordered"}
+    )
+    initial_element_count = len(elements)
+    for block in blocks:
         if block.kind == "rule":
             elements.append(Spacer(1, 3 * mm))
             continue
@@ -340,6 +355,11 @@ def _append_markdown_elements(
             elements.append(Paragraph(markup, quote_style))
         else:
             elements.append(Paragraph(markup, styles["normal"]))
+
+    if keep_final_quote and len(elements) >= initial_element_count + 2:
+        previous, caveat = elements[-2:]
+        if isinstance(previous, Paragraph) and isinstance(caveat, Paragraph):
+            elements[-2:] = [KeepTogether([previous, caveat])]
 
 
 # ============ PDF 文档构建 ============

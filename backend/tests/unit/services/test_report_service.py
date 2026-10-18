@@ -1,4 +1,7 @@
 """报告服务回归测试。"""
+from types import SimpleNamespace
+
+import pytest
 from sqlalchemy import event
 
 from app.models.code_file import CodeFile
@@ -10,7 +13,30 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
-from app.services.report_service import _sandbox_requested_mode, get_report_detail, list_reports
+from app.services.report_service import (
+    _sandbox_requested_mode,
+    display_report_score,
+    get_report_detail,
+    list_reports,
+)
+
+
+@pytest.mark.parametrize(
+    ("status", "coverage", "score", "expected"),
+    [
+        ("failed", None, 0, None),
+        ("cancelled", None, 82, None),
+        ("partial", {"coverage_status": "partial", "score_available": True}, 100, None),
+        ("success", {"coverage_status": "partial", "score_available": True}, 82, None),
+        ("success", {"coverage_status": "complete", "score_available": True}, 82, 82),
+        # Older successful tasks without a coverage snapshot keep their recorded score.
+        ("success", None, 100, 100),
+    ],
+)
+def test_report_score_is_hidden_when_execution_or_coverage_is_incomplete(status, coverage, score, expected):
+    task = SimpleNamespace(status=status, coverage=coverage, review_type="standard")
+
+    assert display_report_score(task, score) == expected
 
 
 def _make_project(db, admin_user):

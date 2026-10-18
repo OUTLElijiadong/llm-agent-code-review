@@ -90,6 +90,13 @@ def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     explicit = coverage.get("score_available")
+    if task.status != "success":
+        return False
+    coverage_status = str(
+        coverage.get("coverage_status") or coverage.get("verification_status") or ""
+    ).lower()
+    if coverage_status in {"partial", "failed", "unknown"}:
+        return False
     if task.review_type == "sandbox_test":
         # Dynamic test pass rate is execution evidence, not a code-quality or
         # vulnerability-risk score. Hide it for both new and historical rows.
@@ -97,7 +104,7 @@ def _score_is_available(task: ReviewTask) -> bool:
     if task.review_type == "pentest":
         # Domain rows historically used a non-null integer column, often 0 as a
         # placeholder. Only an explicit source receipt can make that value real.
-        return explicit is True
+        return explicit is True and coverage_status == "complete"
     return explicit is not False
 
 
@@ -202,8 +209,6 @@ def display_report_score(task: ReviewTask, score: int | None) -> int | None:
     """Display only scores with an explicit basis; coverage remains a separate fact."""
     if score is None:
         return None
-    if task.review_type not in {"sandbox_test", "pentest"}:
-        return score
     return score if _score_is_available(task) else None
 
 

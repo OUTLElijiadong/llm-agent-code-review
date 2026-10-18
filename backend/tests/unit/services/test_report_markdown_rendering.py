@@ -6,11 +6,12 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import Table
+from reportlab.platypus import KeepTogether, Table
 
+from app.services import domain_report_exporter
 from app.services.domain_report_exporter import _coverage_lines, export_markdown_report
 from app.services.report_exporter import export_to_html, load_builtin_template
-from app.services.report_markdown import markdown_to_blocks
+from app.services.report_markdown import MarkdownSegment, markdown_to_blocks, reportlab_markup
 from app.services.report_pdf_exporter import (
     _append_markdown_elements,
     _build_styles,
@@ -184,6 +185,47 @@ def test_domain_word_export_uses_compact_title_for_long_task_names():
     assert title_paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
     assert title_paragraph.runs
     assert all(run.font.size is not None and run.font.size.pt == 18 for run in title_paragraph.runs)
+
+
+def test_pdf_title_puts_long_task_id_on_a_separate_wrappable_line():
+    title = "沙箱黑白盒测试 · sbx_3b317e05c0fa45128c20e31d"
+
+    markup = domain_report_exporter._pdf_title_markup(title)
+
+    assert "沙箱黑白盒测试" in markup
+    assert "任务编号" in markup
+    assert "<br/>" in markup
+
+
+def test_pdf_markdown_removes_unmatched_emphasis_markers_and_wraps_long_ids():
+    styles = _build_styles(_ensure_chinese_font())
+    elements = []
+    _append_markdown_elements(
+        elements,
+        "**3.- 位置：侦察阶段\n\n任务：沙箱测试 · sbx_3b317e05c0fa45128c20e31d\n\n表达式 a*b 和 glob *.py",
+        styles,
+    )
+
+    rendered_text = "\n".join(element.getPlainText() for element in elements if hasattr(element, "getPlainText"))
+    markup = reportlab_markup((MarkdownSegment("任务编号：sbx_3b317e05c0fa45128c20e31d"),))
+
+    assert "**" not in rendered_text
+    assert "a*b" in rendered_text
+    assert "*.py" in rendered_text
+    assert "<br/>" in markup
+
+
+def test_pdf_final_caveat_stays_with_the_previous_evidence_item():
+    styles = _build_styles(_ensure_chinese_font())
+    elements = []
+
+    _append_markdown_elements(
+        elements,
+        "- 最后一项证据仍待复核。\n\n> 说明：本次未采集响应头，不能据此确认相关问题。",
+        styles,
+    )
+
+    assert isinstance(elements[-1], KeepTogether)
 
 
 def test_domain_coverage_names_requested_mode_and_does_not_claim_all_ranges_were_scanned():

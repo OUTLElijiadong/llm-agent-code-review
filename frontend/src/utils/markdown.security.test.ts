@@ -19,6 +19,17 @@ it('继续移除无权限导航并保留代码示例，摘要剥离排版标记'
   expect(stripMarkdown('## 标题\n**说明**')).toBe('标题\n说明')
 })
 
+it('移除 AI 报告中未配对的强调星号，并保留合法星号语法', () => {
+  const html = renderMarkdown('**3.- 位置：侦察阶段\n\n任务编号：sbx_3b317e05c0fa45128c20e31d\n\na*b 和 *.py\n\n`a*b`')
+  const root = document.createElement('div')
+  root.innerHTML = html
+
+  expect(root.textContent).toContain('3.- 位置：侦察阶段')
+  expect(root.textContent).not.toContain('**')
+  expect(root.textContent).toContain('a*b 和 *.py')
+  expect(root.querySelector('code')?.textContent).toBe('a*b')
+})
+
 it.each([
   '[危险](javascript:alert%281%29)',
   '[危险](data:text/html;base64,PHN2Zz4=)',

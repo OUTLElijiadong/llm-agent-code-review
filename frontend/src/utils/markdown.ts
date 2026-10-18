@@ -12,6 +12,24 @@ const md = new MarkdownIt({
   breaks: true,
 })
 
+/**
+ * Markdown-It preserves unmatched emphasis markers as text. Generated reports
+ * must not expose those formatting artifacts, while code spans and code blocks
+ * remain literal evidence.
+ */
+type MarkdownToken = { type: string; content: string; children?: MarkdownToken[] | null }
+
+function removeDanglingAsterisks(tokens: MarkdownToken[]): void {
+  for (const token of tokens) {
+    if (token.type === 'text') {
+      token.content = token.content
+        .replace(/(^|\s)\*{2,}(?=\S)/g, '$1')
+        .replace(/(?<=\S)\*{2,}(?=$|\s)/g, '')
+    }
+    if (token.children?.length) removeDanglingAsterisks(token.children)
+  }
+}
+
 export interface MarkdownRenderOptions {
   /** 返回 false 时移除整个站内链接及其文字,避免渲染不可用入口。 */
   linkAllowed?: (href: string) => boolean
@@ -23,6 +41,7 @@ export interface MarkdownRenderOptions {
 function renderWithLinkFilter(source: string, linkAllowed: (href: string) => boolean): string {
   const env: Record<string, unknown> = {}
   const tokens = md.parse(source, env)
+  removeDanglingAsterisks(tokens)
   const filterTokens = (items: typeof tokens): typeof tokens => {
     const filtered = [] as typeof tokens
     let hiddenLinkDepth = 0
@@ -60,7 +79,12 @@ export function renderMarkdown(source: string, options?: MarkdownRenderOptions):
   const normalizedSource = source ?? ''
   const html = options?.linkAllowed
     ? renderWithLinkFilter(normalizedSource, options.linkAllowed)
-    : md.render(normalizedSource)
+    : (() => {
+        const env: Record<string, unknown> = {}
+        const tokens = md.parse(normalizedSource, env)
+        removeDanglingAsterisks(tokens)
+        return md.renderer.render(tokens, md.options, env)
+      })()
   return DOMPurify.sanitize(html)
 }
 
@@ -72,7 +96,7 @@ export function renderMarkdown(source: string, options?: MarkdownRenderOptions):
  * @returns 纯文本
  */
 export function stripMarkdown(source: string): string {
-  const html = md.render(source ?? '')
+  const html = renderMarkdown(source ?? '')
   const text = DOMPurify.sanitize(html, { ALLOWED_TAGS: [], KEEP_CONTENT: true })
   return text.replace(/\s+\n/g, '\n').trim()
 }
