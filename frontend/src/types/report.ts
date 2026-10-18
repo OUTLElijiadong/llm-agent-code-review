@@ -15,6 +15,7 @@ import type { TaskCoverageOut, TaskDetailOut } from './review'
 
 export interface ReportSource {
   type?: string
+  test_mode?: 'whitebox' | 'blackbox' | 'combined'
   stats_basis?: string
   detail_api?: string
   report_issue_summary?: TaskDetailOut['report_issue_summary']

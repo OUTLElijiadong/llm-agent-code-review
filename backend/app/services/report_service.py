@@ -40,6 +40,7 @@ _REPORT_BODY_WHITESPACE = (
 _REPORT_BODY_WHITESPACE_CHARS = "".join(_REPORT_BODY_WHITESPACE)
 _REPORT_BODY_WHITESPACE_PATTERN = f"[{_REPORT_BODY_WHITESPACE_CHARS}]+"
 _UNRELIABLE_SANDBOX_DURATION_NOTE = "历史环境总运行时间不能代表本次测试耗时；单次耗时未可靠记录。"
+_SANDBOX_SCORE_UNAVAILABLE_REASON = "沙箱测试执行与覆盖证据不是代码质量或漏洞风险评分，当前没有可核验的评分依据。"
 
 
 def _non_whitespace_report_body(report_body, database_dialect: str):
@@ -89,7 +90,11 @@ def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     explicit = coverage.get("score_available")
-    if task.review_type in {"sandbox_test", "pentest"}:
+    if task.review_type == "sandbox_test":
+        # Dynamic test pass rate is execution evidence, not a code-quality or
+        # vulnerability-risk score. Hide it for both new and historical rows.
+        return False
+    if task.review_type == "pentest":
         # Domain rows historically used a non-null integer column, often 0 as a
         # placeholder. Only an explicit source receipt can make that value real.
         return explicit is True
@@ -100,19 +105,97 @@ def _score_is_available(task: ReviewTask) -> bool:
 _REPORTABLE_TASK_STATUSES = ("success", "partial", "failed", "cancelled", "expired", "stopped")
 
 
-def _task_coverage(task: ReviewTask) -> dict:
+def _sandbox_coverage_for_display(coverage: dict) -> dict:
+    result = dict(coverage)
+    sample = result.pop("score_sample", None)
+    result.update({
+        "score_available": False,
+        "score_basis": None,
+        "score_sample": None,
+        "score_unavailable_reason": _SANDBOX_SCORE_UNAVAILABLE_REASON,
+    })
+    if isinstance(sample, dict):
+        # Keep the measured counts without presenting them as a score basis.
+        result.setdefault("dynamic_test_counts", sample)
+    return result
+
+
+def _task_coverage(task: ReviewTask, requested_mode: str | None = None) -> dict:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     if coverage:
         # Verification completion does not prove that the full assessment
         # scope was covered. Keep the coverage status explicit for old or
         # partial payloads so a hidden score has a readable explanation.
-        if coverage.get("coverage_status") not in {"complete", "partial", "failed", "unknown"}:
-            return {**coverage, "coverage_status": "unknown"}
-        return coverage
-    return {
-        "coverage_status": "unknown",
-        "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
-    }
+        result = dict(coverage)
+        if result.get("coverage_status") not in {"complete", "partial", "failed", "unknown"}:
+            result["coverage_status"] = "unknown"
+    else:
+        result = {
+            "coverage_status": "unknown",
+            "unscanned": ["历史任务未保存覆盖清单，无法确认实际扫描范围"],
+        }
+    if task.review_type == "sandbox_test":
+        result = _sandbox_coverage_for_display(result)
+        if requested_mode in {"whitebox", "blackbox", "combined"}:
+            result["requested_mode"] = requested_mode
+        return result
+    return result
+
+
+def _sandbox_domain_data_for_display(task: ReviewTask, content: dict) -> dict:
+    """Preserve sandbox evidence while removing legacy pass-rate score claims."""
+    result = dict(content)
+    requested_mode = _sandbox_requested_mode(task, content)
+    raw_coverage = content.get("coverage")
+    coverage = (
+        _sandbox_coverage_for_display(raw_coverage)
+        if isinstance(raw_coverage, dict)
+        else _task_coverage(task, requested_mode)
+    )
+    if requested_mode in {"whitebox", "blackbox", "combined"}:
+        coverage["requested_mode"] = requested_mode
+    result["coverage"] = coverage
+    result.update({
+        "score": None,
+        "score_available": False,
+        "score_basis": None,
+        "score_sample": None,
+    })
+    if isinstance(content.get("report_md"), str):
+        from app.services.sandbox_report_summary import scope_sandbox_report_markdown, summarize_sandbox_report
+
+        result["report_md"] = scope_sandbox_report_markdown(content["report_md"], requested_mode)
+        result["report_issue_summary"] = summarize_sandbox_report(result["report_md"])
+    from app.services.sandbox_report_summary import scope_sandbox_findings
+
+    if isinstance(content.get("findings"), list):
+        result["findings"] = scope_sandbox_findings(content["findings"], requested_mode)
+    return result
+
+
+def _sandbox_requested_mode(task: ReviewTask, content: dict | None = None) -> str | None:
+    """Resolve the requested sandbox mode from immutable report/task coverage facts."""
+    report_coverage = content.get("coverage") if isinstance(content, dict) else None
+    report_coverage = report_coverage if isinstance(report_coverage, dict) else {}
+    task_coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    evidence = content.get("evidence") if isinstance(content, dict) else None
+    evidence = evidence if isinstance(evidence, dict) else {}
+    deterministic = evidence.get("deterministic_test_execution")
+    deterministic = deterministic if isinstance(deterministic, dict) else {}
+    generation = evidence.get("agent_test_generation")
+    generation = generation if isinstance(generation, dict) else {}
+    for candidate in (
+        report_coverage.get("requested_mode"),
+        report_coverage.get("test_mode"),
+        task_coverage.get("requested_mode"),
+        task_coverage.get("test_mode"),
+        content.get("test_mode") if isinstance(content, dict) else None,
+        deterministic.get("requested_mode"),
+        generation.get("mode"),
+    ):
+        if isinstance(candidate, str) and candidate.strip().lower() in {"whitebox", "blackbox", "combined"}:
+            return candidate.strip().lower()
+    return None
 
 
 def display_report_score(task: ReviewTask, score: int | None) -> int | None:
@@ -451,6 +534,12 @@ def list_reports(db: Session, user: User, project_id: int = None,
         snapshot = security_snapshots.get(row.id) if can_view_report else None
         if snapshot is not None:
             source["security_report"] = snapshot
+        coverage = None
+        if can_view_report:
+            if row.review_type == "sandbox_test" and (row.coverage or source.get("test_mode")):
+                coverage = _task_coverage(row, source.get("test_mode"))
+            elif row.coverage:
+                coverage = _task_coverage(row)
         items.append({
             "id": row.id, "task_id": row.id, "task_name": row.task_name,
             "project_name": project.project_name if project else "",
@@ -458,7 +547,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "can_view_report": can_view_report,
             "total_issues": issue_count, "score": score, "status": row.status,
             "error_message": clean_report_text(row.error_message) if can_view_report else None,
-            "coverage": clean_report_payload(row.coverage) if can_view_report and row.coverage else None,
+            "coverage": clean_report_payload(coverage) if coverage is not None else None,
             "source": source,
             "create_time": row.create_time.isoformat() if row.create_time else None,
         })
@@ -503,6 +592,8 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     capabilities = project_resource_capabilities(db, user, [task.project_id]).get(task.project_id, {})
     source = dict(issue_stats["source"])
     duration_ms = _report_duration_ms(task)
+    report_summary = task.summary
+    report_coverage = _task_coverage(task)
     if task.review_type == "sandbox_test" and duration_ms is None:
         source["duration_note"] = _UNRELIABLE_SANDBOX_DURATION_NOTE
     if security_snapshot is not None:
@@ -517,17 +608,17 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             )
         from app.services.domain_report_exporter import build_sandbox_report_markdown
 
-        domain_data = dict(content)
+        domain_data = _sandbox_domain_data_for_display(task, content)
         domain_data.setdefault("execution_status", task.status)
         domain_data.setdefault("error_message", task.error_message)
-        if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
-            domain_data["coverage"] = _task_coverage(task)
+        report_summary = domain_data.get("report_md") or task.summary
+        report_coverage = domain_data["coverage"]
         source["domain_report_md"] = build_sandbox_report_markdown(
             domain_data,
             task_name=task.task_name,
             project_name=project.project_name if project else "",
         )
-        findings = content.get("findings")
+        findings = domain_data.get("findings")
         source["domain_findings"] = clean_report_payload(
             findings if isinstance(findings, list) else []
         )
@@ -548,7 +639,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             project_name=project.project_name if project else "",
             execution_status=task.status,
             error_message=task.error_message,
-            coverage=clean_report_payload(_task_coverage(task)),
+            coverage=clean_report_payload(report_coverage),
         )
     return {
         "can_delete": (rbac_service.check_permission(db, int(user.id), PermissionCode.REVIEW_CANCEL)
@@ -567,7 +658,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "score_breakdown": score_breakdown,
                  "status": task.status,
                  "error_message": clean_report_text(task.error_message),
-                 "coverage": clean_report_payload(_task_coverage(task)),
+                 "coverage": clean_report_payload(report_coverage),
                  "create_time": task.create_time.isoformat() if task.create_time else None,
                  "agent_releases": _task_agent_release_summaries(db, task_id)},
         "stats": {
@@ -588,7 +679,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             "risk_level": score_breakdown.get("risk_level"),
         },
         "source": source,
-        "summary": clean_report_markdown(task.summary),
+        "summary": clean_report_markdown(report_summary),
         "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(db, task_id),
         "rules_snapshot": task.rules_snapshot or [],
     }
@@ -642,12 +733,11 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
                 "沙箱领域原始报告缺失，无法等价导出", code=40942,
                 next_action=f"请在 GET /api/reports/{task.id} 查看来源，恢复原始制品或重新生成报告",
             )
-        domain_data = dict(content)
+        domain_data = _sandbox_domain_data_for_display(task, content)
         domain_data.setdefault("execution_status", task.status)
         domain_data.setdefault("error_message", task.error_message)
-        if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
-            domain_data["coverage"] = _task_coverage(task)
-        native_exports = _sandbox_native_exports(db, user, task, content)
+        if domain_data.get("report_md") == content["report_md"]:
+            native_exports = _sandbox_native_exports(db, user, task, content)
         domain_markdown = build_sandbox_report_markdown(
             domain_data,
             task_name=task.task_name,
@@ -812,9 +902,16 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
             continue
         total = _count(task.total_issues)
         if task.review_type == "sandbox_test":
-            from app.services.sandbox_report_summary import summarize_sandbox_report
+            from app.services.sandbox_report_summary import scope_sandbox_report_markdown, summarize_sandbox_report
 
-            summary = summarize_sandbox_report(content.get("report_md"))
+            # Preserve the requested mode in the list response so old task cards do not
+            # claim that the mode is missing when the report snapshot records it.
+            requested_mode = _sandbox_requested_mode(task, content)
+            if requested_mode:
+                item["source"]["test_mode"] = requested_mode
+
+            report_md = scope_sandbox_report_markdown(content.get("report_md"), requested_mode)
+            summary = summarize_sandbox_report(report_md)
             item["source"]["report_issue_summary"] = summary
             ai_review = content.get("ai_review")
             if isinstance(ai_review, dict) and ai_review.get("status") in {"complete", "incomplete"}:

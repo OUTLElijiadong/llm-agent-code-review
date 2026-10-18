@@ -79,7 +79,7 @@ describe('同步安全扫描真实交互', () => {
     expect(messages.success).not.toHaveBeenCalledWith('未检出安全风险')
   })
 
-  it('扫描结果中的 OWASP 分类明确标为 fallback，且不伪称官方命中', async () => {
+  it('扫描结果中的 OWASP 分类标为临时参考，且不伪称官方命中或无官方记录', async () => {
     api.scanProject.mockResolvedValue(scanResult({
       findings: [{
         title: '测试发现', category: 'security', owasp: 'A03:2025', cwe: 'CWE-89', severity: '高',
@@ -89,10 +89,11 @@ describe('同步安全扫描真实交互', () => {
     }))
     await renderModal({ autoStart: true })
 
-    expect(wrapper.find('.owasp-fallback-note').text()).toContain('OWASP 标签仅作回退分类')
-    expect(wrapper.find('.owasp-fallback-note').text()).toContain('未接入 CNVD/CNNVD 官方匹配')
-    expect(wrapper.find('.group-head').text()).toContain('OWASP fallback · A03:2025')
-    expect(wrapper.find('.view-tags').text()).toContain('OWASP fallback · A03:2025')
+    expect(wrapper.find('.vulnerability-source-note').text()).toContain('CNVD/CNNVD 官方漏洞库当前未查询')
+    expect(wrapper.find('.vulnerability-source-note').text()).toContain('未查询不代表官方库无匹配')
+    expect(wrapper.find('.group-head').text()).toContain('OWASP 临时参考 · A03:2025')
+    expect(wrapper.find('.view-tags').text()).toContain('OWASP 临时参考 · A03:2025')
+    expect(wrapper.find('.view-tags').text()).not.toContain('fallback')
     expect(wrapper.text()).not.toContain('CNNVD 命中')
   })
 

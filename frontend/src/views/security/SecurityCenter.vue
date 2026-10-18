@@ -280,7 +280,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
         <p class="block-sub">CNVD 与 CNNVD 是两个独立来源，门户与记录编号分别标识；有官方记录证据时优先按对应来源展示。</p>
       </header>
       <div class="cn-source-status" data-testid="cn-source-status" role="status">
-        <strong>匹配优先级：CNVD → CNNVD；仅两库均查询成功且无匹配时才确认 OWASP fallback。</strong>
+        <strong>匹配优先级：CNVD → CNNVD；只有两库均成功查询且无匹配时，才确认 OWASP 回退分类。</strong>
         <p>只有发现项包含对应来源的官方记录编号或官方详情链接，才能标记为 CNVD 或 CNNVD 命中；不根据标题、CWE 或关键词猜测来源。</p>
         <p><b>状态语义：</b>只有 CNVD 与 CNNVD 都成功查询、并明确返回无匹配时，才将 OWASP 分类标成已确认回退；来源未接入、未查询或不可用时，结果必须保持未知，OWASP 仅作临时参考。</p>
         <p><b>当前状态：未实现官方数据同步或逐项匹配。</b>安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号、查询结果或数据版本。当前项目热点标为未核验临时参考，不代表两库中不存在相关记录。CNNVD 官方 XML 数据获取需登录；本平台当前没有已接入的官方数据源。</p>
@@ -318,7 +318,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
     <!-- ========== OWASP Top 10 参考分类 ========== -->
     <section class="block">
       <header class="block-head">
-        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}（官方匹配未接入时的回退分类）</h3>
+        <h3 class="block-title">OWASP Top 10 · {{ SECURITY_CATALOG_METADATA.owasp_version }}（官方匹配未完成时的临时参考分类）</h3>
         <p class="block-sub">
           这是 OWASP 官方风险分类参考，不等同于 CNVD/CNNVD 记录或认证；当前未接入 CNVD/CNNVD 官方匹配，因此 OWASP 标签不代表官方漏洞库命中。点击查看中文说明与防范示例。
           CWE {{ SECURITY_CATALOG_METADATA.cwe_version }} · 官方弱点 {{ SECURITY_CATALOG_METADATA.cwe_weakness_count }} 项 ·

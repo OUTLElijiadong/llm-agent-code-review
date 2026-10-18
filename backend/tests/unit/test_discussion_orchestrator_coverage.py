@@ -510,6 +510,43 @@ async def test_speaker_turn_rejects_malformed_structured_response() -> None:
     assert len(agent.calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_speaker_turn_does_not_retry_after_stop_during_truncated_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """专家响应被截断后若用户已停止，不得发出更大预算的第二次请求。"""
+    running_checks = 0
+    requests = 0
+
+    def ensure_running(_task_id: int) -> None:
+        nonlocal running_checks
+        running_checks += 1
+        if running_checks > 1:
+            raise module._DiscussionInactive("cancelled")
+
+    def truncated_call(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal requests
+        requests += 1
+        raise DeepSeekOutputTruncatedError(
+            "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+        )
+
+    monkeypatch.setattr(module, "_ensure_running", ensure_running)
+    monkeypatch.setattr(module, "_call_raw_for_task", truncated_call)
+    orchestrator = _make_orchestrator()
+    orchestrator._task_id = 71
+
+    with pytest.raises(module._DiscussionInactive, match="cancelled"):
+        await orchestrator._speaker_turn(
+            agent=RecordingAgent(), profile=SECURITY_AGENT, code="value = input()",
+            language="python", file_name="cancelled.py", all_turns=[],
+            user_inputs=[], round_idx=1, speaker_idx=1,
+        )
+
+    assert running_checks == 2
+    assert requests == 1
+
+
 def test_discussion_turn_serializes_decision_metadata() -> None:
     """讨论帧应携带自主决策、立场、回应对象和轮次。
 
@@ -841,6 +878,41 @@ def test_summarize_retries_length_without_losing_full_result() -> None:
     assert summary.endswith("结" * 2200)
     assert meta is not None
     assert [call["max_tokens"] for call in agent.calls] == [16_384, 32_768]
+
+
+def test_summarize_does_not_retry_after_stop_during_truncated_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主持首轮输出被截断后若任务已停止，不得继续发起扩容重试。"""
+    running_checks = 0
+    requests = 0
+
+    def ensure_running(_task_id: int) -> None:
+        nonlocal running_checks
+        running_checks += 1
+        if running_checks > 1:
+            raise module._DiscussionInactive("cancelled")
+
+    def truncated_call(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal requests
+        requests += 1
+        raise DeepSeekOutputTruncatedError(
+            "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+        )
+
+    monkeypatch.setattr(module, "_ensure_running", ensure_running)
+    monkeypatch.setattr(module, "_call_raw_for_task", truncated_call)
+    orchestrator = _make_orchestrator()
+    orchestrator._task_id = 72
+
+    with pytest.raises(module._DiscussionInactive, match="cancelled"):
+        orchestrator._summarize(
+            [_turn(1, content="第 7 行有证据")], "x = 1", "python", "cancelled.py",
+            RecordingAgent(),
+        )
+
+    assert running_checks == 2
+    assert requests == 1
 
 
 def test_summarize_marks_truncated_consensus_as_incomplete() -> None:
@@ -1550,6 +1622,41 @@ def test_history_compression_rejects_unverifiable_quote() -> None:
             file_id=13, target_tokens=2000,
         )
     assert records[0][1].endswith("第 7 行")
+
+
+def test_history_compression_does_not_retry_after_stop_during_truncated_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史压缩请求返回截断且任务已停止时，不再递归或预算重试。"""
+    running_checks = 0
+    requests = 0
+
+    def ensure_running(_task_id: int) -> None:
+        nonlocal running_checks
+        running_checks += 1
+        if running_checks > 1:
+            raise module._DiscussionInactive("cancelled")
+
+    def truncated_call(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, Any]]:
+        nonlocal requests
+        requests += 1
+        raise DeepSeekOutputTruncatedError(
+            "DeepSeek 输出被截断 (finish_reason=length)", finish_reason="length",
+        )
+
+    monkeypatch.setattr(module, "_ensure_running", ensure_running)
+    monkeypatch.setattr(module, "_call_raw_for_task", truncated_call)
+    records = [("S0001-T1", "可核验的普通证据。" + "背景证据。" * 1000)]
+
+    with pytest.raises(module._DiscussionInactive, match="cancelled"):
+        module._compress_roundtable_history(
+            records, agent=RecordingAgent(), task_id=73, user_id=12,
+            file_id=13, target_tokens=500,
+            task_guard=lambda: module._ensure_running(73),
+        )
+
+    assert running_checks == 2
+    assert requests == 1
 
 
 def test_history_compression_keeps_user_constraints_when_ids_and_quotes_are_valid() -> None:

@@ -1309,6 +1309,10 @@ class DiscussionOrchestrator:
                             _roundtable_history_records(all_turns),
                             agent=agent, task_id=self._task_id, user_id=self._user_id,
                             file_id=self._file_id, target_tokens=history_budget,
+                            task_guard=(
+                                (lambda: _ensure_running(self._task_id))
+                                if self._task_id else None
+                            ),
                         ),
                     )
                     history_for_prompt = (
@@ -1370,9 +1374,9 @@ class DiscussionOrchestrator:
             ), None, False
 
         def call_speaker(prompt: str, chunk_index: int):
-            if self._task_id:
-                _ensure_running(self._task_id)
             for index, budget in enumerate(output_budgets):
+                if self._task_id:
+                    _ensure_running(self._task_id)
                 budget_error = _roundtable_input_budget_error(
                     system, prompt, max_output_tokens=budget,
                 )
@@ -1447,6 +1451,10 @@ class DiscussionOrchestrator:
                     records, agent=agent, task_id=self._task_id, user_id=self._user_id,
                     file_id=self._file_id,
                     target_tokens=min(16_000, max(2_048, settings.deepseek_context_window_tokens // 4)),
+                    task_guard=(
+                        (lambda: _ensure_running(self._task_id))
+                        if self._task_id else None
+                    ),
                 ),
             )
             spoke = any(decision.action == "speak" for decision in window_decisions)
@@ -1560,8 +1568,6 @@ class DiscussionOrchestrator:
         retry_budget = min(first_budget * 2, ceiling)
         budgets = [first_budget] + ([retry_budget] if retry_budget > first_budget else [])
         try:
-            if self._task_id:
-                _ensure_running(self._task_id)
             budget_error = _roundtable_input_budget_error(
                 system_prompt, user_prompt, max_output_tokens=budgets[-1],
             )
@@ -1593,6 +1599,10 @@ class DiscussionOrchestrator:
                             agent=agent, task_id=self._task_id, user_id=self._user_id,
                             file_id=self._file_id, target_tokens=history_budget,
                             attempt_callback=record_history_projection,
+                            task_guard=(
+                                (lambda: _ensure_running(self._task_id))
+                                if self._task_id else None
+                            ),
                         )
                     except Exception as exc:
                         history_projection.update(
@@ -1650,6 +1660,10 @@ class DiscussionOrchestrator:
                     records, agent=agent, task_id=self._task_id, user_id=self._user_id,
                     file_id=self._file_id, target_tokens=code_budget,
                     attempt_callback=record_code_projection,
+                    task_guard=(
+                        (lambda: _ensure_running(self._task_id))
+                        if self._task_id else None
+                    ),
                 )
                 # _compress_roundtable_history 返回前已校验所有来源 ID 及原文引文。
                 self._summary_coverage.update(
@@ -1659,6 +1673,8 @@ class DiscussionOrchestrator:
                     history_for_prompt, code_projection, projected_code=True,
                 )
             for budget in budgets:
+                if self._task_id:
+                    _ensure_running(self._task_id)
                 try:
                     budget_error = _roundtable_input_budget_error(
                         system_prompt, user_prompt, max_output_tokens=budget,
@@ -2329,6 +2345,7 @@ def _compress_roundtable_history(
     file_id: int,
     target_tokens: int,
     attempt_callback: Optional[Callable[[str], None]] = None,
+    task_guard: Optional[Callable[[], None]] = None,
 ) -> str:
     """按来源分块做有引文校验的语义摘要；原始发言保持在会话记录中。"""
     if target_tokens <= 0:
@@ -2438,6 +2455,8 @@ def _compress_roundtable_history(
         )
         last_error: Exception | None = None
         for budget in budgets:
+            if task_guard is not None:
+                task_guard()
             budget_error = _roundtable_input_budget_error(
                 level_prompt, payload, max_output_tokens=budget,
             )
@@ -2512,6 +2531,8 @@ def _compress_roundtable_history(
         current_group: list[tuple[str, str]] = []
         current_tokens = 0
         for entry in projected_entries:
+            if task_guard is not None:
+                task_guard()
             cost = estimate_tokens(entry)
             if current_group and current_tokens + cost > input_limit:
                 next_entries.extend(summarize(current_group, level=level))
@@ -2659,7 +2680,10 @@ def _extract_issues(
                 history = _compress_roundtable_history(
                     records, agent=agent, task_id=task_id, user_id=user_id,
                     file_id=file_id, target_tokens=history_budget,
+                    task_guard=task_guard,
                 )
+            except _DiscussionInactive:
+                raise
             except Exception as exc:
                 raise RuntimeError(f"结构化问题抽取失败：{exc}") from exc
             user_prompt = prompt_for(history)

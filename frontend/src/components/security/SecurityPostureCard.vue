@@ -5,7 +5,7 @@ import { ArrowRight, FolderOpened, Lock } from '@element-plus/icons-vue'
 import { getSecurityDashboard } from '@/api/security'
 import type { SecurityDashboardSummaryOut, TrendPointOut } from '@/types/security'
 import { useUserStore } from '@/stores/user'
-import { OWASP_FALLBACK_NOTICE } from '@/views/security/cnnvd-knowledge'
+import { OFFICIAL_VULNERABILITY_SOURCE_NOTICE } from '@/views/security/cnnvd-knowledge'
 
 interface Props {
   days?: number
@@ -273,7 +273,7 @@ onMounted(loadDashboard)
       <!-- 中:OWASP 热点 -->
       <div class="mid-col">
         <div class="col-title">OWASP 热点</div>
-        <p class="col-note hotspot-version-note">{{ OWASP_FALLBACK_NOTICE }} 历史问题保留审查时采用的 OWASP 版本；不同年份编号不宜直接横向比较。</p>
+        <p class="col-note hotspot-version-note">{{ OFFICIAL_VULNERABILITY_SOURCE_NOTICE }} 历史问题保留审查时采用的 OWASP 版本；不同年份编号不宜直接横向比较。</p>
         <ul v-if="data.owasp_hotspots.length" class="hotspot-list">
           <li
             v-for="(h, idx) in data.owasp_hotspots"

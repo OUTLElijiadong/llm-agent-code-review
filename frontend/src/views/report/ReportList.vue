@@ -64,7 +64,9 @@
           <div class="rc-main">
             <div class="rc-line1">
               <b class="rc-name" :title="taskDisplayTitle(row.task_name, `审查 #${row.task_id}`)">{{ taskDisplayTitle(row.task_name, `审查 #${row.task_id}`) }}</b>
-              <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">{{ reviewTypeLabel(row.source.type) }}</el-tag>
+              <el-tag v-if="row.source?.type" size="small" type="info" effect="plain">
+                {{ reviewTypeLabel(row.source.type, row.source.test_mode) }}
+              </el-tag>
               <el-tag :type="reportStatusType(row)" size="small">
                 {{ reportStatusLabel(row) }}
               </el-tag>
@@ -106,9 +108,6 @@
               />
             </svg>
             <span :class="scoreClass(displayScore(row)!)">{{ displayScore(row) }}</span>
-            <small v-if="row.source?.type === 'sandbox_test'" class="rc-score-caption">
-              {{ row.coverage?.score_basis === 'agent_dynamic_test_pass_rate' ? '动态用例评分' : '测试结果评分' }}
-            </small>
           </div>
           <div v-else class="rc-score rc-score--unknown" :title="sandboxCoverageLabel(row.coverage?.verification_status)">
             {{ row.source?.type === 'sandbox_test' || row.source?.type === 'pentest' ? '暂无可核验评分' : '—' }}
@@ -228,6 +227,8 @@ function canDisplayReport(row: ReportListItem): boolean {
 }
 
 function displayScore(row: ReportListItem): number | null {
+  // Dynamic sandbox tests report execution evidence, not a quality/risk score.
+  if (row.source?.type === 'sandbox_test') return null
   const coverageAvailable = row.coverage?.score_available
   const sourceScoreAvailable = row.source?.security_report?.score_available
   if (coverageAvailable === false || sourceScoreAvailable === false) return null
@@ -322,12 +323,7 @@ function sandboxScoreTitle(row: ReportListItem) {
   if (score === null) {
     return String(row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
   }
-  if (row.source?.type !== 'sandbox_test') return `代码质量评分 ${score}`
-  const state = coverageStatus(row)
-  const basis = row.coverage?.score_basis === 'agent_dynamic_test_pass_rate'
-    ? `动态用例通过率 ${score}/100`
-    : `测试结果评分 ${score}/100`
-  return state === 'complete' ? `${basis}；覆盖范围完整` : `${basis}；${sandboxCoverageLabel(state)}，只代表已有用例结果`
+  return `代码质量评分 ${score}`
 }
 
 async function loadData() {
@@ -600,7 +596,6 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews'], refresh: loadData })
 .rc-score { display: grid; place-items: center; gap: 2px; min-width: 56px; }
 .rc-ring { width: 38px; height: 38px; }
 .rc-score span { font-size: 12.5px; font-weight: 700; }
-.rc-score .rc-score-caption { color: var(--gray-500, #7d8798); font-size: 10px; line-height: 1.2; white-space: nowrap; }
 .rc-actions { display: flex; gap: 4px; align-items: center; }
 
 @media (prefers-reduced-motion: reduce) {

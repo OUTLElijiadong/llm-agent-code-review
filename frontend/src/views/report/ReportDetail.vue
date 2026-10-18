@@ -202,7 +202,7 @@
           <div class="cover-meta">
             <div class="cover-label font-mono">PROJECT</div>
             <h2 class="cover-project font-display">{{ projectName }}</h2>
-            <p class="cover-task font-mono">{{ taskName }} · {{ reviewType }}</p>
+            <p class="cover-task font-mono">{{ coverTaskLabel }}</p>
 
             <div v-if="!isDomainReport" class="cover-tags">
               <span class="cover-tag">项目语言：{{ projectLanguage }}</span>
@@ -1071,6 +1071,23 @@ const reviewType  = computed(() => reviewTypeLabel(
   report.value?.task?.review_type as string,
   String((report.value?.task?.coverage as TaskCoverageOut | undefined)?.requested_mode || ''),
 ))
+const coverTaskLabel = computed(() => {
+  const task = report.value?.task
+  let displayName = taskName.value
+  if (task?.review_type === 'sandbox_test') {
+    const modeLabels: Record<string, string> = {
+      whitebox: '沙箱白盒测试',
+      blackbox: '沙箱黑盒测试',
+      combined: '沙箱黑白盒组合测试',
+    }
+    const mode = String((task.coverage as TaskCoverageOut | undefined)?.requested_mode || '')
+    const modeLabel = modeLabels[mode]
+    if (modeLabel && displayName.startsWith('沙箱黑白盒测试')) {
+      displayName = displayName.replace(/^沙箱黑白盒测试/, modeLabel)
+    }
+  }
+  return displayName.includes(reviewType.value) ? displayName : `${displayName} · ${reviewType.value}`
+})
 const projectLanguage = computed(() => String(report.value?.project?.language ?? '').trim() || '未标注')
 const reviewedLanguages = computed(() => [...new Set(
   (report.value?.files ?? [])

@@ -5019,54 +5019,13 @@ def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
 
 
 def _sandbox_result_score(conclusion: dict[str, Any]) -> dict[str, Any]:
-    """Calculate a result score only from a complete, count-consistent dynamic-test receipt.
-
-    Coverage is reported separately. A measurable subset may have a result score
-    while the overall test coverage remains partial; runner exit status alone is
-    never a score basis.
-    """
-    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
-    generation = evidence.get("agent_test_generation")
-    dynamic = evidence.get("agent_tests")
-    if not isinstance(generation, dict) or generation.get("status") != "generated" or not isinstance(dynamic, dict):
-        return {
-            "score": None,
-            "score_available": False,
-            "score_basis": None,
-            "sample": None,
-            "unavailable_reason": "没有已生成且可核对的动态用例结果回执",
-        }
-
-    generated = dynamic.get("generated")
-    passed = dynamic.get("passed_count", dynamic.get("passed"))
-    failed = dynamic.get("failed")
-    generated_by_plan = generation.get("count")
-    counts_are_integers = all(type(value) is int and value >= 0 for value in (generated, passed, failed))
-    plan_matches = generated_by_plan is None or (
-        type(generated_by_plan) is int and generated_by_plan == generated
-    )
-    if (
-        not counts_are_integers
-        or generated <= 0
-        or passed + failed != generated
-        or not plan_matches
-        or dynamic.get("missing")
-        or dynamic.get("unexpected")
-    ):
-        return {
-            "score": None,
-            "score_available": False,
-            "score_basis": None,
-            "sample": None,
-            "unavailable_reason": "动态用例结果数量不完整或与生成回执不一致，无法计算评分",
-        }
-
+    """Keep sandbox execution evidence separate from code and risk scoring."""
     return {
-        "score": round(100 * passed / generated),
-        "score_available": True,
-        "score_basis": "agent_dynamic_test_pass_rate",
-        "sample": {"generated": generated, "passed": passed, "failed": failed},
-        "unavailable_reason": None,
+        "score": None,
+        "score_available": False,
+        "score_basis": None,
+        "sample": None,
+        "unavailable_reason": "沙箱测试执行与覆盖证据不是代码质量或漏洞风险评分，当前没有可核验的评分依据。",
     }
 
 
@@ -6390,7 +6349,7 @@ def _publish_sandbox_report(
         # compatibility; score_available is authoritative at every report outlet.
         report_score = score_result["score"] if score_result["score_available"] else 0
         report_score_breakdown = {
-            "version": "sandbox-dynamic-tests-v1",
+            "version": "sandbox-execution-unscored-v2",
             "score": score_result["score"],
             "score_available": score_result["score_available"],
             "score_source": score_result["score_basis"],
@@ -6414,7 +6373,7 @@ def _publish_sandbox_report(
                 medium_issues=severity_counts["中"],
                 low_issues=severity_counts["低"],
                 score=report_score,
-                score_version="sandbox-dynamic-tests-v1",
+                score_version="sandbox-execution-unscored-v2",
                 score_breakdown=report_score_breakdown,
                 summary=report_md,
                 error_message=failure_message,
@@ -6434,7 +6393,7 @@ def _publish_sandbox_report(
             task.medium_issues = severity_counts["中"]
             task.low_issues = severity_counts["低"]
             task.score = report_score
-            task.score_version = "sandbox-dynamic-tests-v1"
+            task.score_version = "sandbox-execution-unscored-v2"
             task.score_breakdown = report_score_breakdown
             task.summary = report_md
             task.error_message = failure_message

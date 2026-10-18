@@ -133,11 +133,11 @@ describe('安全分类来源标识', () => {
 
     const sourceStatus = page.get('[data-testid="cn-source-status"]')
     expect(sourceStatus.text()).toContain('CNVD → CNNVD')
-    expect(sourceStatus.text()).toContain('仅两库均查询成功且无匹配时才确认 OWASP fallback')
+    expect(sourceStatus.text()).toContain('只有两库均成功查询且无匹配时，才确认 OWASP 回退分类')
     expect(sourceStatus.text()).toContain('未实现官方数据同步或逐项匹配')
     expect(sourceStatus.text()).toContain('记录编号')
     expect(sourceStatus.text()).toContain('官方详情链接')
-    expect(sourceStatus.text()).toContain('OWASP fallback')
+    expect(sourceStatus.text()).toContain('OWASP 回退分类')
     expect(sourceStatus.text()).toContain('来源未接入、未查询或不可用时，结果必须保持未知')
     expect(sourceStatus.text()).toContain('不代表两库中不存在相关记录')
     expect(sourceStatus.text()).toContain('不根据标题、CWE 或关键词猜测来源')
@@ -148,6 +148,8 @@ describe('安全分类来源标识', () => {
     const sectionTitles = page.findAll('.block-title').map(title => title.text())
     expect(sectionTitles.findIndex(title => title.includes('中国漏洞库来源')))
       .toBeLessThan(sectionTitles.findIndex(title => title.includes('OWASP Top 10')))
+    expect(sectionTitles.find(title => title.includes('OWASP Top 10'))).toContain('临时参考分类')
+    expect(sectionTitles.find(title => title.includes('OWASP Top 10'))).not.toContain('回退分类')
     page.unmount()
   })
 
@@ -161,7 +163,8 @@ describe('安全分类来源标识', () => {
     await flushPromises()
 
     expect(page.get('.ov-hot-title').text()).toContain('OWASP 临时参考')
-    expect(page.get('.ov-hot-title').text()).toContain('CNVD/CNNVD 尚未核验')
+    expect(page.get('.ov-hot-title').text()).toContain('CNVD：尚未接入')
+    expect(page.get('.ov-hot-title').text()).toContain('CNNVD：尚未接入')
     expect(page.get('.ov-hot-title').text()).not.toContain('确认未命中')
     expect(page.get('.ov-hot-name').text()).toBe('A01:2025')
     page.unmount()

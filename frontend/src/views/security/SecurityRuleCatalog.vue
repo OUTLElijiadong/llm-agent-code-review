@@ -5,7 +5,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { getSecurityRuleCatalog } from '@/api/security'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 import type { SecurityRuleCatalogOut } from '@/types/security'
-import { OWASP_FALLBACK_NOTICE } from './cnnvd-knowledge'
+import { OFFICIAL_VULNERABILITY_SOURCE_NOTICE } from './cnnvd-knowledge'
 
 const loading = ref(false)
 const catalog = ref<SecurityRuleCatalogOut | null>(null)
@@ -117,7 +117,7 @@ onBeforeUnmount(() => { disposed = true; requestVersion++ })
           </a>
         </span>
       </div>
-      <p class="owasp-mapping-note">CWE/OWASP 是规则分类参考；{{ OWASP_FALLBACK_NOTICE }}</p>
+      <p class="owasp-mapping-note">CWE/OWASP 是规则分类参考；{{ OFFICIAL_VULNERABILITY_SOURCE_NOTICE }}</p>
 
       <el-card shadow="never">
         <div class="catalog-toolbar">

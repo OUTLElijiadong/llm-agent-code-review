@@ -10,7 +10,7 @@ from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
-from app.services.report_service import get_report_detail, list_reports
+from app.services.report_service import _sandbox_requested_mode, get_report_detail, list_reports
 
 
 def _make_project(db, admin_user):
@@ -266,6 +266,83 @@ def test_sandbox_report_detail_localizes_legacy_statuses_without_mutating_snapsh
     assert "skipped" not in markdown
     db.refresh(snapshot)
     assert snapshot.content_json["report_md"] == original_markdown
+
+
+def test_blackbox_report_detail_omits_unrequested_whitebox_findings_without_mutating_snapshot(db, admin_user):
+    """历史黑盒报告不得把未请求的白盒证据缺失算成发现。"""
+    project = _make_project(db, admin_user)
+    report_md = (
+        "## 总体结论\n\n黑盒路由未通过。\n\n"
+        "## 白盒结果\n\n结论：未通过（无有效白盒证据）。\n\n"
+        "## 发现\n\n### [高] 无任何白盒证据，白盒维度不可判定为通过。\n\n"
+        "## 黑盒结果\n\n结论：未通过（路由探测失败）。\n\n"
+        "## 问题清单（按严重度）\n\n### 高\n"
+        "1. 黑盒路由探测未发现 2xx 路由。\n"
+        "2. 无任何白盒证据，白盒维度不可判定为通过。\n"
+        "  证据：本次请求模式为 blackbox。\n"
+    )
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="沙箱黑白盒测试 · sbx_legacy",
+        review_type="sandbox_test",
+        status="failed",
+        total_issues=2,
+        score=100,
+        coverage={"requested_mode": "blackbox", "verification_status": "failed"},
+    )
+    db.add(task)
+    db.flush()
+    snapshot = ReviewReport(
+        task_id=task.id,
+        user_id=admin_user.id,
+        content_json={
+            "source": "sandbox_test",
+            "report_md": report_md,
+            "coverage": {"requested_mode": "blackbox", "verification_status": "failed"},
+        },
+        create_time=task.create_time,
+    )
+    db.add(snapshot)
+    db.commit()
+
+    detail = get_report_detail(db, admin_user, task.id)
+    displayed = detail["source"]["domain_report_md"]
+    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
+    from app.services.report_service import get_domain_report_export
+
+    exported = get_domain_report_export(db, admin_user, task, "json")
+
+    assert "黑盒路由探测未发现 2xx 路由" in displayed
+    assert "白盒验证未纳入范围" in displayed
+    assert "无任何白盒证据" not in displayed
+    assert "黑盒路由探测未发现 2xx 路由" in exported["domain_markdown"]
+    assert "无任何白盒证据" not in exported["domain_markdown"]
+    assert detail["stats"]["total_issues"] == 1
+    assert detail["task"]["score"] is None
+    assert listed["source"]["test_mode"] == "blackbox"
+    assert listed["total_issues"] == detail["stats"]["total_issues"] == exported["statistics"]["total_issues"] == 1
+    db.refresh(snapshot)
+    assert snapshot.content_json["report_md"] == report_md
+
+
+def test_legacy_sandbox_mode_resolves_from_deterministic_execution_evidence(db, admin_user):
+    task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=1,
+        task_name="旧格式黑盒任务",
+        review_type="sandbox_test",
+        status="failed",
+        total_files=0,
+        processed_files=0,
+        coverage={"requested_mode": None},
+    )
+    content = {
+        "coverage": {"requested_mode": None},
+        "evidence": {"deterministic_test_execution": {"requested_mode": "blackbox"}},
+    }
+
+    assert _sandbox_requested_mode(task, content) == "blackbox"
 
 
 def test_report_list_fetches_projects_in_one_batch_query(db, admin_user, monkeypatch):

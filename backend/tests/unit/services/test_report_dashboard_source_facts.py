@@ -297,8 +297,10 @@ def test_domain_snapshot_count_is_not_replaced_by_empty_review_issues(
     listed = _listed(db, source_owner, task)
 
     assert detail["task"]["total_issues"] == detail["stats"]["total_issues"] == listed["total_issues"] == expected_count
-    assert detail["task"]["score"] == listed["score"] == score
-    assert detail["stats"]["score_breakdown"]["score_source"] == source
+    expected_score = None if source == "sandbox_test" else score
+    assert detail["task"]["score"] == listed["score"] == expected_score
+    expected_score_source = "unavailable" if source == "sandbox_test" else source
+    assert detail["stats"]["score_breakdown"]["score_source"] == expected_score_source
     assert "weights" not in detail["stats"]["score_breakdown"]
     assert detail["files"] == []
     assert detail["source"]["type"] == listed["source"]["type"] == source
@@ -318,11 +320,54 @@ def test_sandbox_has_unclassified_findings_not_invented_severity(db, source_owne
     risk = {item["severity"]: item["count"] for item in dashboard_service.get_risk_distribution(db, source_owner)}
 
     assert detail["stats"]["severity"] == {"未分级": 3}
-    assert detail["stats"]["risk_level"] is None
+    assert detail["stats"]["risk_level"] == "未评估"
     assert detail["stats"]["severe"] == detail["stats"]["low"] == 0
     assert detail["source"]["detail_api"] == "/api/sandboxes/sbx-source"
     assert risk == {"严重": 0, "高": 0, "中": 0, "低": 0, "未分级": 3}
     assert dashboard_service.get_issue_type_statistics(db, source_owner) == [{"issue_type": "沙箱测试", "count": 3}]
+
+
+@pytest.mark.parametrize("source", ["task", "report"])
+@pytest.mark.parametrize("mode", ["whitebox", "blackbox", "combined"])
+def test_sandbox_report_list_preserves_recorded_test_mode(db, source_owner, source_project, source, mode):
+    task = _task(db, source_owner, source_project, "sandbox_test", count=1, score=75)
+    _snapshot(db, task, public_id="sbx-mode", report_md="## 测试结果\n\n已记录模式。")
+    if source == "task":
+        task.coverage = {**task.coverage, "requested_mode": mode}
+    else:
+        snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=task.user_id).one()
+        snapshot.content_json = {**snapshot.content_json, "coverage": {"requested_mode": mode}}
+    db.commit()
+
+    listed = _listed(db, source_owner, task)
+
+    assert listed["source"]["test_mode"] == mode
+
+
+def test_sandbox_report_list_keeps_missing_mode_explicitly_unknown(db, source_owner, source_project):
+    task = _task(db, source_owner, source_project, "sandbox_test", count=1, score=75)
+    _snapshot(db, task, public_id="sbx-mode-unknown", report_md="## 测试结果\n\n历史记录未保存模式。")
+    db.commit()
+
+    listed = _listed(db, source_owner, task)
+
+    assert "test_mode" not in listed["source"]
+
+
+@pytest.mark.parametrize("invalid_mode", ["not-a-mode", {"mode": "blackbox"}, ["blackbox"], 7])
+def test_sandbox_report_list_ignores_invalid_recorded_mode_and_uses_next_valid_source(
+    db, source_owner, source_project, invalid_mode,
+):
+    task = _task(db, source_owner, source_project, "sandbox_test", count=1, score=75)
+    _snapshot(db, task, public_id="sbx-mode-invalid", report_md="## 测试结果\n\n模式来源存在异常。")
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=task.user_id).one()
+    snapshot.content_json = {**snapshot.content_json, "coverage": {"requested_mode": invalid_mode}}
+    task.coverage = {**task.coverage, "test_mode": "blackbox"}
+    db.commit()
+
+    listed = _listed(db, source_owner, task)
+
+    assert listed["source"]["test_mode"] == "blackbox"
 
 
 def test_pentest_uses_domain_findings_but_preserves_confirmed_only_score(db, source_owner, source_project):
@@ -374,9 +419,9 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
     # 讨论和领域测试保留各自评分，不混入明确代码审查类型的均分。
     assert summary["code_review_count"] == 1
     assert summary["avg_score"] == 89
-    assert {item["score"] for item in summary["recent_tasks"]} == {84, 89, 100}
+    assert {item["score"] for item in summary["recent_tasks"]} == {84, 89, None}
     assert {item["task_id"]: item["score"] for item in dashboard_service.get_score_trend(db, source_owner)} == {
-        task.id: task.score for task in tasks
+        tasks[0].id: 89, tasks[1].id: 89, tasks[3].id: 84,
     }
     assert sum(item["count"] for item in dashboard_service.get_risk_distribution(db, source_owner)) == 10
     assert sum(item["count"] for item in dashboard_service.get_issue_type_statistics(db, source_owner)) == 10
@@ -407,7 +452,8 @@ def test_empty_source_keeps_explicit_score(db, source_owner, source_project, sou
     detail = report_service.get_report_detail(db, source_owner, task.id)
 
     assert detail["stats"]["total_issues"] == _listed(db, source_owner, task)["total_issues"] == 0
-    assert detail["stats"]["score"] == _listed(db, source_owner, task)["score"] == score
+    expected_score = None if source == "sandbox_test" else score
+    assert detail["stats"]["score"] == _listed(db, source_owner, task)["score"] == expected_score
     assert dashboard_service.get_summary(db, source_owner)["total_issues"] == 0
 
 
@@ -537,6 +583,8 @@ def test_report_list_fails_closed_without_report_permission_and_hides_sensitive_
 def test_domain_score_visibility_is_consistent_across_report_and_dashboard(
     db, source_owner, source_project, source, coverage_status, expected_score,
 ):
+    if source == "sandbox_test":
+        expected_score = None
     task = _task(db, source_owner, source_project, source, score=84)
     task.coverage = (
         {

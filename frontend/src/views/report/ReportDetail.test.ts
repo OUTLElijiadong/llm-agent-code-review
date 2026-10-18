@@ -176,6 +176,23 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('历史沙箱通用任务名按实际模式展示且不重复审查类型', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '历史测试项目' },
+      task: {
+        task_name: '沙箱黑白盒测试 · sbx_legacy',
+        review_type: 'sandbox_test',
+        coverage: { requested_mode: 'blackbox' },
+      },
+      stats: {}, files: [], rules_snapshot: [], source: { type: 'sandbox_test' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('.cover-task').text()).toBe('沙箱黑盒测试 · sbx_legacy')
+    wrapper.unmount()
+  })
+
   it.each([
     { count: 2, total: 6, displayed: '33.3%' },
     { count: 1, total: 3, displayed: '33.3%' },

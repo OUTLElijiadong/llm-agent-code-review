@@ -484,8 +484,12 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
     )
     assert original_ai_report["report_persisted"] is True
     original_task = db.get(ReviewTask, original_ai_report["report_task_id"])
-    assert original_task.score == 100
+    # The database column is non-nullable; zero remains a storage placeholder.
+    # User-facing report payloads must treat it as unavailable.
+    assert original_task.score == 0
     assert original_task.coverage["coverage_status"] == "complete"
+    assert original_task.coverage["score_available"] is False
+    assert original_task.coverage["score_basis"] is None
 
     # Same terminal status does not mean the callback carries the latest snapshot.
     environment.error = "stale callback failure"
@@ -505,7 +509,7 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
     stored_result = json.loads(stored_environment.result_json)
 
     assert task.status == "success"
-    assert task.score == 100
+    assert task.score == 0
     assert "已完成 AI 审查并核实执行证据。" in report.content_json["report_md"]
     assert "## 后续验证更新（Prism 系统）" in report.content_json["report_md"]
     assert "stale same-status callback" not in report.content_json["report_md"]
@@ -1120,16 +1124,16 @@ def test_partial_sandbox_report_preserves_recorded_score_and_exposes_scope() -> 
 
 
 @pytest.mark.parametrize(
-    ("agent_tests", "generation", "expected_score", "available"),
+    ("agent_tests", "generation"),
     [
-        ({"generated": 2, "passed_count": 1, "failed": 1}, {"status": "generated", "count": 2}, 50, True),
-        ({"generated": 1, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 1}, 100, True),
-        ({"generated": 0, "passed_count": 0, "failed": 0}, {"status": "skipped"}, None, False),
-        ({"generated": 2, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 2}, None, False),
+        ({"generated": 2, "passed_count": 1, "failed": 1}, {"status": "generated", "count": 2}),
+        ({"generated": 1, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 1}),
+        ({"generated": 0, "passed_count": 0, "failed": 0}, {"status": "skipped"}),
+        ({"generated": 2, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 2}),
     ],
 )
-def test_sandbox_result_score_uses_complete_dynamic_test_receipts_not_runner_success(
-    agent_tests, generation, expected_score, available
+def test_dynamic_test_receipts_are_not_misrepresented_as_code_or_vulnerability_score(
+    agent_tests, generation
 ):
     result = _sandbox_result_score({
         "passed": True,
@@ -1139,15 +1143,11 @@ def test_sandbox_result_score_uses_complete_dynamic_test_receipts_not_runner_suc
         },
     })
 
-    assert result["score"] == expected_score
-    assert result["score_available"] is available
-    if available:
-        assert result["score_basis"] == "agent_dynamic_test_pass_rate"
-        assert result["sample"] == {
-            "generated": agent_tests["generated"],
-            "passed": agent_tests["passed_count"],
-            "failed": agent_tests["failed"],
-        }
+    assert result["score"] is None
+    assert result["score_available"] is False
+    assert result["score_basis"] is None
+    assert result["sample"] is None
+    assert "不是代码质量或漏洞风险评分" in result["unavailable_reason"]
 
 
 def test_sandbox_verification_coverage_distinguishes_complete_partial_and_failed() -> None:

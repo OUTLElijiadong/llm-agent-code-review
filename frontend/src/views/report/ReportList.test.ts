@@ -162,18 +162,39 @@ describe('报告卡片列表', () => {
     expect(card.text()).not.toContain('100')
   })
 
-  it('动态用例结果分数与总体覆盖状态分别展示，完整回执中的 0 分保留', async () => {
+  it.each([
+    { mode: 'whitebox' as const, label: '沙箱白盒测试' },
+    { mode: 'blackbox' as const, label: '沙箱黑盒测试' },
+    { mode: 'combined' as const, label: '沙箱黑白盒组合测试' },
+  ])('沙箱报告列表准确展示已记录的 $mode 模式', async ({ mode, label }) => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        source: { type: 'sandbox_test', test_mode: mode },
+        coverage: { verification_status: 'partial', requested_mode: mode },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').text()).toContain(label)
+    expect(wrapper.find('.report-card').text()).not.toContain('模式未记录')
+  })
+
+  it('历史动态用例通过率不作为沙箱代码质量或漏洞风险评分展示', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{
         ...report,
         source: { type: 'sandbox_test' },
-        score: 0,
+        score: 100,
         coverage: {
-          verification_status: 'partial',
+          verification_status: 'complete',
+          coverage_status: 'complete',
           score_available: true,
           score_basis: 'agent_dynamic_test_pass_rate',
-          score_sample: { generated: 1, passed: 0, failed: 1 },
-          reason: '黑盒断言未执行',
+          score_sample: { generated: 1, passed: 1, failed: 0 },
+          reason: '历史动态用例通过率',
         },
       }],
       total: 1, page: 1, page_size: 20, pages: 1,
@@ -182,11 +203,9 @@ describe('报告卡片列表', () => {
     await flushPromises()
 
     const card = wrapper.find('.report-card')
-    expect(card.text()).toContain('验证范围不完整')
-    expect(card.text()).toContain('动态用例评分')
-    expect(card.text()).toMatch(/\b0\b/)
-    expect(card.find('.rc-score').attributes('title')).toContain('动态用例通过率 0/100')
-    expect(card.find('.rc-score').attributes('title')).toContain('只代表已有用例结果')
+    expect(card.text()).toContain('暂无可核验评分')
+    expect(card.text()).not.toContain('动态用例评分')
+    expect(card.text()).not.toContain('100')
   })
 
   it.each([

@@ -259,7 +259,8 @@ def test_domain_json_export_matches_detail_without_standard_issue_fabrication(ex
 
     assert exported["statistics"]["total_issues"] == detail["stats"]["total_issues"] == count
     assert exported["task_info"]["total_issues"] == count
-    expected_score = task.score if source == "sandbox_test" else None
+    # Sandbox execution receipts never stand in for code quality or risk scores.
+    expected_score = None
     assert exported["score"] == detail["task"]["score"] == expected_score
     assert exported["source"]["type"] == source
     assert "issues" not in exported
@@ -439,15 +440,15 @@ def test_domain_reports_without_readable_source_are_hidden_from_every_outlet(exp
 
 
 @pytest.mark.parametrize(
-    ("coverage", "stored_score", "expected_score"),
+    ("coverage", "stored_score"),
     [
-        ({"coverage_status": "partial", "score_available": False}, 0, None),
-        ({"coverage_status": "partial", "score_available": True}, 50, 50),
-        ({"coverage_status": "complete", "score_available": True}, 0, 0),
+        ({"coverage_status": "partial", "score_available": False}, 0),
+        ({"coverage_status": "partial", "score_available": True}, 50),
+        ({"coverage_status": "complete", "score_available": True}, 100),
     ],
 )
-def test_sandbox_score_availability_is_separate_from_coverage_and_zero_is_valid(
-    export_context, coverage, stored_score, expected_score
+def test_legacy_sandbox_pass_rate_is_not_exposed_as_quality_or_risk_score(
+    export_context, coverage, stored_score
 ):
     client, db, owner, _other, project, _current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")
@@ -457,7 +458,11 @@ def test_sandbox_score_availability_is_separate_from_coverage_and_zero_is_valid(
     snapshot.score = stored_score
     snapshot.content_json = {
         **snapshot.content_json,
-        "coverage": task.coverage,
+        "coverage": {
+            **task.coverage,
+            "score_basis": "agent_dynamic_test_pass_rate",
+            "score_sample": {"generated": 1, "passed": 1, "failed": 0},
+        },
         "score_available": coverage["score_available"],
     }
     db.commit()
@@ -467,10 +472,16 @@ def test_sandbox_score_availability_is_separate_from_coverage_and_zero_is_valid(
     detail = client.get(f"/api/reports/{task.id}").json()["data"]
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
 
-    assert row["score"] == expected_score
-    assert detail["task"]["score"] == expected_score
-    assert exported["score"] == expected_score
+    assert row["score"] is None
+    assert detail["task"]["score"] is None
+    assert exported["score"] is None
     assert detail["task"]["coverage"]["coverage_status"] == coverage["coverage_status"]
+    assert detail["task"]["coverage"]["score_available"] is False
+    assert detail["task"]["coverage"]["score_basis"] is None
+    assert detail["task"]["coverage"]["score_sample"] is None
+    assert "不是代码质量或漏洞风险评分" in detail["task"]["coverage"]["score_unavailable_reason"]
+    assert exported["domain_data"]["coverage"]["score_available"] is False
+    assert exported["domain_data"]["coverage"]["score_basis"] is None
 
 
 def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():
@@ -635,6 +646,68 @@ def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknow
     listed = next(item for item in listing.json()["data"]["items"] if item["task_id"] == task.id)
     assert listed["score"] is None
     assert listed["coverage"] is None
+
+
+def test_legacy_nested_mode_scopes_detail_list_and_json_export_without_mutating_snapshot(export_context, monkeypatch):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test")
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    raw_report = (
+        "## 总体结论\n黑盒探测发现 /debug 暴露内部信息（白盒未执行）。\n"
+        "## 白盒结果\n白盒测试未执行，因此缺少白盒证据。\n"
+        "## 问题清单\n### [高] 测试覆盖缺口\n"
+        "证据：白盒测试未执行，因此缺少白盒证据。\n"
+    )
+    snapshot.content_json = {
+        "source": "sandbox_test",
+        "report_md": raw_report,
+        "public_id": f"sandbox-export-{task.id}",
+        "coverage": {"requested_mode": None, "verification_status": "partial"},
+        "evidence": {"deterministic_test_execution": {"requested_mode": "blackbox"}},
+        "findings": [
+            {"title": "测试覆盖缺口", "severity": "高", "description": "白盒测试未执行，因此缺少白盒证据。"},
+            {"title": "黑盒 /debug 暴露内部信息", "severity": "高", "description": "可匿名读取（白盒未执行）。"},
+        ],
+    }
+    db.commit()
+    native_export_calls = []
+    monkeypatch.setattr(
+        "app.services.report_service._sandbox_native_exports",
+        lambda *_args: native_export_calls.append(True) or [{"download_api": "/raw-original"}],
+    )
+
+    detail = client.get(f"/api/reports/{task.id}")
+    listing = client.get("/api/reports?page=1&page_size=100")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert detail.status_code == listing.status_code == exported.status_code == 200
+    detail_payload = detail.json()["data"]
+    listed = next(item for item in listing.json()["data"]["items"] if item["task_id"] == task.id)
+    export_payload = exported.json()
+    assert detail_payload["task"]["coverage"]["requested_mode"] == "blackbox"
+    assert listed["coverage"]["requested_mode"] == "blackbox"
+    assert export_payload["domain_data"]["coverage"]["requested_mode"] == "blackbox"
+    for displayed in (
+        detail_payload["source"]["domain_report_md"],
+        export_payload["domain_markdown"],
+    ):
+        assert "黑盒探测发现 /debug 暴露内部信息" in displayed
+        assert "白盒测试未执行，因此缺少白盒证据" not in displayed
+        assert "### [高] 测试覆盖缺口" not in displayed
+    assert len(detail_payload["source"]["domain_findings"]) == 1
+    assert len(export_payload["domain_data"]["findings"]) == 1
+    assert "白盒未执行" not in detail_payload["source"]["domain_findings"][0]["description"]
+    assert export_payload["native_exports"] == []
+    assert native_export_calls == []
+    assert (
+        detail_payload["stats"]["total_issues"]
+        == listed["total_issues"]
+        == export_payload["statistics"]["total_issues"]
+        == 0
+    )
+    db.refresh(snapshot)
+    assert snapshot.content_json["report_md"] == raw_report
+    assert snapshot.content_json["coverage"]["requested_mode"] is None
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
