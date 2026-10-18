@@ -33,7 +33,7 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.services import domain_report_exporter, profile_service, report_exporter, review_service
 from app.services.domain_report_exporter import build_sandbox_report_markdown
-from app.services.report_text import clean_report_markdown, clean_report_text
+from app.services.report_text import clean_report_markdown, clean_report_payload, clean_report_text
 from app.services.security_report_service import persist_security_report
 
 REPORT_MD = "## 总体结论\n隔离合成报告\n## 问题清单\n- 发现甲\n- 发现乙\n- 发现丙\n"
@@ -484,6 +484,37 @@ def test_legacy_sandbox_pass_rate_is_not_exposed_as_quality_or_risk_score(
     assert exported["domain_data"]["coverage"]["score_basis"] is None
 
 
+def test_unavailable_score_is_not_claimed_in_report_summary_or_json_export(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = ReviewTask(
+        user_id=owner.id,
+        project_id=project.id,
+        task_name="覆盖未知的历史代码审查",
+        review_type="full",
+        status="success",
+        total_files=1,
+        processed_files=1,
+        total_issues=0,
+        score=64,
+        coverage={"coverage_status": "unknown"},
+        summary="完成代码审查，发现 6 个问题，综合评分 64。",
+    )
+    db.add(task)
+    db.commit()
+
+    detail = client.get(f"/api/reports/{task.id}").json()["data"]
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
+
+    assert detail["task"]["score"] is None
+    assert "综合评分未评估" in detail["summary"]
+    assert "综合评分 64" not in detail["summary"]
+    assert exported["score"] is None
+    assert "综合评分未评估" in exported["summary"]
+    assert "综合评分 64" not in exported["summary"]
+    assert "综合评分未评估" in exported["task_info"]["summary"]
+    assert "综合评分 64" not in exported["task_info"]["summary"]
+
+
 def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():
     report = (
         "## 证据\n\n"
@@ -516,6 +547,20 @@ def test_report_cleanup_removes_unclosed_bold_prefix_without_changing_fenced_cod
     assert "**3.-" not in cleaned
     assert "3.- 位置：侦察阶段" in cleaned
     assert "**literal evidence**" in cleaned
+
+
+def test_report_cleanup_renders_redaction_sentinel_as_readable_text_even_in_evidence_code():
+    report = (
+        '脱敏字段："***"；行内值 `"***"`。\n\n'
+        '```text\nhardcoded_secrets: "***"\n```\n'
+    )
+
+    cleaned = clean_report_markdown(report)
+    payload = clean_report_payload({"hardcoded_secrets": "***"})
+
+    assert "***" not in cleaned
+    assert cleaned.count("已脱敏") == 3
+    assert payload["hardcoded_secrets"] == "已脱敏"
 
 
 def test_report_cleanup_hides_internal_worker_urls_and_httpx_help_links():

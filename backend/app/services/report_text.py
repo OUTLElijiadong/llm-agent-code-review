@@ -8,6 +8,7 @@ from typing import Any
 _CODE_KEYS = {"code", "source_code", "snippet", "patch", "diff", "raw_code", "fixed_code"}
 _FENCED_CODE = re.compile(r"(?P<fence>`{3,}|~{3,})[^\n]*\n[\s\S]*?\n(?P=fence)")
 _INLINE_CODE = re.compile(r"(?<!`)(?P<ticks>`+)(?!`)(?P<body>[^\n]*?)(?<!`)(?P=ticks)(?!`)")
+_REDACTION_MARKER = re.compile(r"(?P<quote>['\"])\*{3,}(?P=quote)")
 _MASK_TOKEN = re.compile(r"\ue000(\d+)\ue001")
 _SANDBOX_WORKER_ERROR = re.compile(
     r"Client error ['\"](?P<status>\d{3} [^'\"]+)['\"] for url ['\"]"
@@ -214,9 +215,14 @@ def _restore_masked_values(text: str, slots: dict[str, str]) -> str:
     return _MASK_TOKEN.sub(lambda match: slots.get(match.group(0), match.group(0)), text)
 
 
+def _normalize_redaction_markers(text: str) -> str:
+    """Render the source redaction sentinel as a readable label, not Markdown-like stars."""
+    return _REDACTION_MARKER.sub(lambda match: f"{match.group('quote')}已脱敏{match.group('quote')}", text)
+
+
 def clean_report_text(value: Any, limit: int = 20000, *, keep_headings: bool = False) -> str:
     """清理人类可读文本中的 Markdown 装饰，保留原有文字与裸星号。"""
-    text = str(value or "").strip()[:limit]
+    text = _normalize_redaction_markers(str(value or "").strip()[:limit])
     prose, slots = _protect_markdown_code(text, keep_fences=False)
     prose = _clean_execution_noise(prose)
     prose = _protect_markdown_link_targets(prose, slots)
@@ -230,7 +236,7 @@ def clean_report_text(value: Any, limit: int = 20000, *, keep_headings: bool = F
 
 def clean_report_markdown(value: Any, limit: int = 200000) -> str:
     """清理报告正文的格式标记；代码围栏内的证据原样保留。"""
-    text = str(value or "").strip()[:limit]
+    text = _normalize_redaction_markers(str(value or "").strip()[:limit])
     prose, slots = _protect_markdown_code(text, keep_fences=True)
     prose = _clean_execution_noise(prose)
     prose = _protect_markdown_link_targets(prose, slots)
@@ -253,5 +259,7 @@ def clean_report_payload(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, tuple):
         return [clean_report_payload(item, key=key) for item in value]
     if isinstance(value, str) and key not in _CODE_KEYS:
+        if key == "hardcoded_secrets" and re.fullmatch(r"\*{3,}", value.strip()):
+            return "已脱敏"
         return clean_report_markdown(value)
     return value

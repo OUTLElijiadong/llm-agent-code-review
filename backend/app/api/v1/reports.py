@@ -128,7 +128,8 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
         .order_by(ReviewIssue.id.asc())
         .all()
     )
-    return task, issues, task.summary or "", score
+    summary = report_service.display_report_summary(task.summary, score_available=score is not None)
+    return task, issues, summary, score
 
 
 def _get_template_content(db: Session, template_type: str) -> str:
@@ -153,6 +154,7 @@ def _report_export_task(db: Session, user: User, task: ReviewTask) -> dict:
         "files": detail["files"],
         "source": detail["source"],
         "agent_releases": detail["task"].get("agent_releases", []),
+        "summary": detail["summary"],
     }
 
 

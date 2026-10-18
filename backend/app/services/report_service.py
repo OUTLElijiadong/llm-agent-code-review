@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, false, func, or_, select, true
@@ -41,6 +42,21 @@ _REPORT_BODY_WHITESPACE_CHARS = "".join(_REPORT_BODY_WHITESPACE)
 _REPORT_BODY_WHITESPACE_PATTERN = f"[{_REPORT_BODY_WHITESPACE_CHARS}]+"
 _UNRELIABLE_SANDBOX_DURATION_NOTE = "历史环境总运行时间不能代表本次测试耗时；单次耗时未可靠记录。"
 _SANDBOX_SCORE_UNAVAILABLE_REASON = "沙箱测试执行与覆盖证据不是代码质量或漏洞风险评分，当前没有可核验的评分依据。"
+_UNAVAILABLE_SCORE_CLAIM = re.compile(
+    r"(?P<label>(?:综合|代码质量|代码|风险|总)?评分)\s*(?:为|是|[:：])?\s*"
+    r"\d{1,3}(?:\.\d+)?(?:\s*/\s*100)?\s*(?:分)?"
+)
+
+
+def display_report_summary(summary: str | None, *, score_available: bool) -> str:
+    """Hide legacy prose scores whenever the canonical report score is unavailable."""
+    text = summary or ""
+    if score_available:
+        return text
+    return _UNAVAILABLE_SCORE_CLAIM.sub(
+        lambda match: f"{match.group('label')}未评估",
+        text,
+    )
 
 
 def _non_whitespace_report_body(report_body, database_dialect: str):
@@ -690,7 +706,9 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
             "risk_level": score_breakdown.get("risk_level"),
         },
         "source": source,
-        "summary": clean_report_markdown(report_summary),
+        "summary": clean_report_markdown(
+            display_report_summary(report_summary, score_available=score_available)
+        ),
         "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(db, task_id),
         "rules_snapshot": task.rules_snapshot or [],
     }
