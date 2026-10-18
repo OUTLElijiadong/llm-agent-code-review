@@ -94,6 +94,9 @@
             <span :style="{ width: `${progressPercent}%` }" />
           </div>
         </div>
+        <div v-if="stopNotice" class="stop-notice" role="status" aria-live="polite">
+          {{ stopNotice }}
+        </div>
 
         <div v-if="pendingFollowupCount > 0 || followupCountIncomplete" class="followup-progress" role="status" aria-live="polite">
           <span class="followup-progress-label">
@@ -265,6 +268,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { stopDiscussion } from '@/api/discussion'
 
 import { renderMarkdown } from '@/utils/markdown'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -335,6 +339,7 @@ const phase = ref<Phase>(
 )
 const stageMessage = ref('')
 const lastError = ref('')
+const stopNotice = ref('')
 const currentRound = ref(0)
 const totalRounds = ref(0)
 const completedTurns = ref(0)
@@ -789,6 +794,8 @@ function connectWs() {
 }
 
 function handleControl(msg: { action: string; payload: Record<string, unknown> }) {
+  // 终态一旦由已鉴权 REST 或服务端事件确认，迟到的旧进度快照不得让圆桌复活。
+  if (phase.value === 'concluded' && terminalStatus.value) return
   switch (msg.action) {
     case 'progress': {
       const seq = Number(msg.payload.seq)
@@ -972,7 +979,43 @@ async function onStop() {
   isStopping.value = true
   phase.value = 'stopping'
   stageMessage.value = '正在请求服务端停止后续阶段'
-  stopSentForConnection = Boolean(stream?.send('stop'))
+  try {
+    const result = await stopDiscussion(props.sessionId)
+    stopSentForConnection = true
+    const progressBeforeStop = serverProgress.value
+    const confirmedTerminalStatus = normalizeTerminalStatus(result.status)
+    terminalStatus.value = confirmedTerminalStatus
+      || (result.status === 'concluded' ? 'success' : terminalStatus.value)
+    if (result.terminal) {
+      isStopping.value = false
+      phase.value = 'concluded'
+      stopNotice.value = result.provider_request_may_finish
+        ? '服务端已停止后续阶段；已经发出的模型请求可能仍会完成并计入用量'
+        : ''
+      serverProgress.value = {
+        completed_units: progressBeforeStop?.completed_units ?? completedTurns.value,
+        total_units: progressBeforeStop?.total_units ?? expectedTurns.value,
+        current_round: progressBeforeStop?.current_round ?? currentRound.value,
+        seq: progressBeforeStop?.seq ?? lastProgressSeq,
+        speaker_code: progressBeforeStop?.speaker_code,
+        followup_start_seq: progressBeforeStop?.followup_start_seq ?? followupStartSeq.value ?? undefined,
+        phase: result.status,
+      }
+      stageMessage.value = '圆桌讨论已停止'
+      await syncLatest()
+    } else {
+      lastError.value = '停止请求已到达服务端，正在等待终态确认'
+    }
+  } catch {
+    stopSentForConnection = Boolean(stream?.send('stop'))
+    if (!stopSentForConnection) {
+      isStopping.value = false
+      phase.value = 'live'
+      lastError.value = '停止请求未送达，请恢复网络后重试'
+      return
+    }
+    lastError.value = '已通过实时连接发送停止请求，等待服务端确认'
+  }
   if (!stopSentForConnection) {
     isStopping.value = false
     phase.value = 'live'
@@ -1119,6 +1162,7 @@ connectWs()
 .room-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8fc8ff, #b8afff); transition: width 0.25s ease; }
 .room-progress-track.stage-active::after { content: ''; display: block; width: 30%; height: 100%; margin-top: -5px; border-radius: inherit; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent); animation: discuss-progress-sheen 1.8s ease-in-out infinite; pointer-events: none; }
 .room-progress-track.indeterminate > span { width: 36% !important; animation: discuss-progress 1.4s ease-in-out infinite alternate; }
+.stop-notice { margin: 8px 20px 0; padding: 8px 10px; border: 1px solid rgba(230, 162, 60, 0.34); border-radius: 8px; background: rgba(230, 162, 60, 0.12); color: #805b19; font-size: 12px; line-height: 1.5; }
 @keyframes discuss-progress { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
 @keyframes discuss-progress-sheen { from { transform: translateX(-120%); } to { transform: translateX(420%); } }
 
@@ -1312,6 +1356,7 @@ connectWs()
   .header-actions .el-button { min-width: 40px; min-height: 40px; margin-left: 0; }
   .header-actions .report-btn { margin-right: auto; }
   .room-progress { padding: 9px 12px 11px; }
+  .stop-notice { margin: 8px 12px 0; }
   .followup-progress { grid-template-columns: 1fr; padding: 7px 12px; gap: 2px; }
   .followup-progress-note { text-align: left; }
   .participants { padding: 8px 12px; max-height: 160px; overflow-y: auto; }

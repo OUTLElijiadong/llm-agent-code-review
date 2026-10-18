@@ -5,19 +5,22 @@ POST /discuss/start  — 启动讨论模式审查(preflight)
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.discussion_bus import DiscussionBus, utc_timestamp, visible_roundtable_progress
-from app.api.v1.ws_discussion import purge_stale_pending, register_pending
+from app.api.v1.ws_discussion import cancel_pending, purge_stale_pending, register_pending
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.exceptions import NotFoundError
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.review_task import ReviewTask
 from app.models.roundtable import RoundtableSession, RoundtableTurn
 from app.models.user import User
 from app.schemas.common import Resp
@@ -119,6 +122,83 @@ def get_discussion(
     result["has_earlier"] = len(page) > limit
     result["next_before_seq"] = page[limit - 1].seq if len(page) > limit else None
     return Resp(data=result)
+
+
+@router.post("/discuss/sessions/{session_id}/stop", response_model=Resp[dict])
+async def stop_discussion(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """通过已鉴权 REST 通道可靠停止本账号圆桌，断开的 WebSocket 不影响停止。"""
+    bus = _bus_for_db(db)
+    row = db.query(RoundtableSession).filter(
+        RoundtableSession.session_id == session_id,
+        RoundtableSession.owner_user_id == int(user.id),
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("圆桌讨论不存在", code=40400)
+
+    session = bus.get_session(session_id, owner_user_id=int(user.id))
+    if session is None:
+        raise NotFoundError("圆桌讨论不存在", code=40400)
+
+    terminal_states = {"concluded", "partial", "failed", "cancelled", "interrupted"}
+    stop_requested = False
+    if session.status not in terminal_states:
+        cancel_pending(session_id, int(user.id))
+        task = bus.get_discussion_task(session_id)
+        if task is not None:
+            bus.cancel_discussion_task(session_id)
+            stop_requested = True
+            await asyncio.wait({task}, timeout=2.0)
+        else:
+            bus.request_stop(session_id, reason="圆桌讨论已由用户停止")
+            if session.report_task_id:
+                report = db.query(ReviewTask).filter(
+                    ReviewTask.id == int(session.report_task_id),
+                    ReviewTask.user_id == int(user.id),
+                    ReviewTask.status == "running",
+                ).with_for_update().one_or_none()
+                if report is not None:
+                    report.status = "cancelled"
+                    report.summary = (
+                        "执行状态：已取消\n"
+                        "结论：圆桌讨论被停止，未形成完整审查结论。\n"
+                        "已验证内容：仅限停止前已完成并保留的发言和执行记录。\n"
+                        "未完成范围：尚未完成的专家轮次、问题抽取与主持人总结。\n"
+                        "结果说明：未报告不代表没有问题，不能将本任务视为审查通过。"
+                    )
+                    report.coverage = {
+                        **(report.coverage or {}),
+                        "stage": "cancelled",
+                        "score_available": False,
+                    }
+                    report.end_time = datetime.now(timezone.utc)
+                    db.commit()
+            bus.publish_control(session_id, "cancelled", {
+                "task_id": int(session.report_task_id or 0),
+                "status": "cancelled",
+                "error": "圆桌讨论已由用户停止",
+            })
+            bus.publish_control(session_id, "done", {
+                "task_id": int(session.report_task_id or 0),
+                "status": "cancelled",
+                "error": "圆桌讨论已由用户停止",
+            })
+            bus.close_session(session_id)
+            stop_requested = True
+
+    db.refresh(row)
+    session = bus.get_session(session_id, owner_user_id=int(user.id))
+    status = str(session.status if session is not None else row.status)
+    return Resp(data={
+        "session_id": session_id,
+        "status": status,
+        "stop_requested": stop_requested,
+        "terminal": status in terminal_states,
+        "provider_request_may_finish": bool(stop_requested),
+    })
 
 
 def _gen_session_id() -> str:

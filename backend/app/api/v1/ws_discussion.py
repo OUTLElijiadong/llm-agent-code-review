@@ -109,6 +109,15 @@ def take_pending(session_id: str) -> PendingDiscussion | None:
     return _pending.pop(session_id, None)
 
 
+def cancel_pending(session_id: str, owner_user_id: int) -> bool:
+    """按所有者撤销尚未被 WebSocket 消费的启动上下文。"""
+    pending = _pending.get(session_id)
+    if pending is None or int(pending.kwargs.get("user_id") or 0) != int(owner_user_id):
+        return False
+    _pending.pop(session_id, None)
+    return True
+
+
 def _load_active_user(user_id: int):
     """用独立短连接校验用户存在且启用(WebSocket 无 Depends(get_db) 可用)。"""
     from app.core.database import SessionLocal

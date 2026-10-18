@@ -71,3 +71,16 @@ export function getDiscussionSession(sessionId: string, limit = 100, beforeSeq?:
   return get<DiscussionSessionDetail>(`/discuss/sessions/${encodeURIComponent(sessionId)}`,
     { limit, ...(beforeSeq ? { before_seq: beforeSeq } : {}) })
 }
+
+export interface StopDiscussionResult {
+  session_id: string
+  status: string
+  stop_requested: boolean
+  terminal: boolean
+  provider_request_may_finish: boolean
+}
+
+/** 服务端确认的所有者范围停止；WebSocket 断线时仍可调用。 */
+export function stopDiscussion(sessionId: string) {
+  return post<StopDiscussionResult>(`/discuss/sessions/${encodeURIComponent(sessionId)}/stop`)
+}

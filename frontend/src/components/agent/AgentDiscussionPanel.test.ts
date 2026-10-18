@@ -5,11 +5,14 @@ import { nextTick } from 'vue'
 import type { DiscussionTurn, WsMessage } from '@/utils/discussionStream'
 
 const streamMock = vi.hoisted(() => ({ subscribe: vi.fn() }))
-const discussionApi = vi.hoisted(() => ({ detail: vi.fn() }))
+const discussionApi = vi.hoisted(() => ({ detail: vi.fn(), stop: vi.fn() }))
 const messageBox = vi.hoisted(() => ({ confirm: vi.fn() }))
 const messages = vi.hoisted(() => ({ info: vi.fn() }))
 vi.mock('@/utils/discussionStream', () => ({ subscribeDiscussion: streamMock.subscribe }))
-vi.mock('@/api/discussion', () => ({ getDiscussionSession: discussionApi.detail }))
+vi.mock('@/api/discussion', () => ({
+  getDiscussionSession: discussionApi.detail,
+  stopDiscussion: discussionApi.stop,
+}))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: messageBox }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: messages }))
@@ -70,6 +73,10 @@ function followupAnswer(questionSeq: number, seq: number): DiscussionTurn {
 
 beforeEach(() => {
   discussionApi.detail.mockReset().mockResolvedValue({ turns: [], has_earlier: false, next_before_seq: null })
+  discussionApi.stop.mockReset().mockResolvedValue({
+    session_id: 'disc-1', status: 'cancelled', stop_requested: true,
+    terminal: true, provider_request_may_finish: true,
+  })
   messageBox.confirm.mockReset().mockResolvedValue(true)
   messages.info.mockReset()
   streamMock.subscribe.mockReset()
@@ -359,7 +366,7 @@ it('按真实服务端步骤显示圆桌进度，并区分汇总和报告阶段'
   wrapper.unmount()
 })
 
-it('确认停止后立即锁定圆桌操作，直到服务端确认取消才显示终态', async () => {
+it('通过已鉴权 REST 停止并等到服务端终态，不依赖 WebSocket 是否连接', async () => {
   const wrapper = mountPanel()
   connected('connected')
   await flushPromises()
@@ -367,16 +374,14 @@ it('确认停止后立即锁定圆桌操作，直到服务端确认取消才显�
   await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
   await flushPromises()
   expect(messageBox.confirm).toHaveBeenCalled()
-  expect(send).toHaveBeenCalledWith('stop')
-  expect(wrapper.text()).toContain('正在停止')
+  expect(discussionApi.stop).toHaveBeenCalledWith('disc-1')
+  expect(send).not.toHaveBeenCalledWith('stop')
+  expect(wrapper.text()).toContain('讨论已取消')
   expect(wrapper.get('button[aria-label="终止讨论"]').attributes('disabled')).toBeDefined()
   expect(wrapper.get('button[aria-label="暂停讨论"]').attributes('disabled')).toBeDefined()
   expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
-  expect(wrapper.get('.header-sub').text()).not.toContain('讨论已取消')
-
-  control('done', { status: 'cancelled' })
-  await flushPromises()
   expect(wrapper.get('.header-sub').text()).toContain('讨论已取消')
+  expect(wrapper.text()).toContain('已经发出的模型请求可能仍会完成')
   expect(wrapper.get('.room-input').attributes('disabled')).toBeDefined()
   wrapper.unmount()
 })
@@ -385,6 +390,7 @@ it('停止请求发送失败时恢复操作并明确提示，不伪装成正在�
   const wrapper = mountPanel()
   connected('connected')
   await flushPromises()
+  discussionApi.stop.mockRejectedValueOnce(new Error('network down'))
   send.mockReturnValueOnce(false)
 
   await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
@@ -395,23 +401,24 @@ it('停止请求发送失败时恢复操作并明确提示，不伪装成正在�
   wrapper.unmount()
 })
 
-it('停止期间 WebSocket 重连后服务端仍报告活动时，会在新连接重发停止请求', async () => {
+it('停止终态确认后，迟到的活动快照和 WebSocket 重连都不能让圆桌复活', async () => {
   const wrapper = mountPanel()
   connected('connected')
   await flushPromises()
 
   await wrapper.get('button[aria-label="终止讨论"]').trigger('click')
   await flushPromises()
-  expect(send).toHaveBeenCalledTimes(1)
+  expect(discussionApi.stop).toHaveBeenCalledTimes(1)
+  expect(wrapper.get('.header-sub').text()).toContain('讨论已取消')
 
   connected('disconnected')
   connected('connected')
   control('snapshot', { status: 'active' })
   await flushPromises()
 
-  expect(send).toHaveBeenCalledTimes(2)
-  expect(send).toHaveBeenLastCalledWith('stop')
-  expect(wrapper.text()).toContain('正在停止')
+  expect(send).not.toHaveBeenCalledWith('stop')
+  expect(wrapper.get('.header-sub').text()).toContain('讨论已取消')
+  expect(wrapper.text()).not.toContain('进行中')
   wrapper.unmount()
 })
 

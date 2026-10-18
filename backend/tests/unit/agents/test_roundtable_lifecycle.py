@@ -1,5 +1,6 @@
 """圆桌会话进度、重放与输入接受的回归测试。"""
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -120,6 +121,92 @@ def test_old_failed_session_uses_same_owner_report_coverage_for_partial_display(
     with factory() as db:
         listing = list_discussions(limit=20, offset=0, db=db, user=owner).data
         assert listing["items"][0]["progress"]["phase"] == "failed"
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rest_stop_cancels_persisted_roundtable_and_report_for_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REST 停止须持久取消圆桌与报告，且不能被其他账号调用。"""
+    import app.core.database as database
+    from app.api.v1.discussion import stop_discussion
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    ReviewTask.__table__.create(engine)
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    bus = DiscussionBus(persist=True, session_factory=factory)
+    monkeypatch.setattr(DiscussionBus, "instance", classmethod(lambda cls: bus))
+    with factory.begin() as db:
+        report = ReviewTask(
+            user_id=7, project_id=14, review_type="discuss", status="running",
+            coverage={"stage": "running"},
+        )
+        db.add(report)
+        db.flush()
+        report_id = report.id
+    session = bus.create_session("disc_rest_stop", report_id, "main.py", owner_user_id=7)
+    session.report_task_id = report_id
+    bus._update_session(session)
+
+    with factory() as db:
+        result = await stop_discussion(
+            "disc_rest_stop", db=db, user=SimpleNamespace(id=7),
+        )
+        assert result.data["status"] == "cancelled"
+        assert result.data["terminal"] is True
+        assert result.data["stop_requested"] is True
+        assert result.data["provider_request_may_finish"] is True
+        with pytest.raises(NotFoundError):
+            await stop_discussion(
+                "disc_rest_stop", db=db, user=SimpleNamespace(id=8),
+            )
+
+    with factory() as db:
+        assert db.get(RoundtableSession, "disc_rest_stop").status == "cancelled"
+        cancelled_report = db.get(ReviewTask, report_id)
+        assert cancelled_report.status == "cancelled"
+        assert cancelled_report.coverage["stage"] == "cancelled"
+        assert cancelled_report.coverage["score_available"] is False
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rest_stop_cancels_registered_async_roundtable_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REST 停止须取消本进程中的 Agent 编排任务，终态不能被重启。"""
+    import app.core.database as database
+    from app.api.v1.discussion import stop_discussion
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    bus = DiscussionBus(persist=True, session_factory=factory)
+    monkeypatch.setattr(DiscussionBus, "instance", classmethod(lambda cls: bus))
+    bus.create_session("disc_task_stop", 0, "main.py", owner_user_id=7)
+    blocker = asyncio.Event()
+    task = bus.start_discussion_task("disc_task_stop", blocker.wait())
+
+    with factory() as db:
+        result = await stop_discussion(
+            "disc_task_stop", db=db, user=SimpleNamespace(id=7),
+        )
+
+    assert result.data["status"] == "cancelled"
+    assert result.data["terminal"] is True
+    assert task.cancelled()
+    with pytest.raises(RuntimeError, match="终态圆桌不能由后台事件重新启动"):
+        bus.start_discussion_task("disc_task_stop", blocker.wait())
     engine.dispose()
 
 
