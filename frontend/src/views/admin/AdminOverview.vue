@@ -349,6 +349,7 @@ const mapRef = ref<HTMLElement | null>(null)
 const tokenChartRef = ref<HTMLElement | null>(null)
 let mapChart: echarts.EChartsType | null = null
 let tokenChart: echarts.EChartsType | null = null
+let tokenChartResizeObserver: ResizeObserver | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let tokenUsageTimer: ReturnType<typeof setInterval> | null = null
 let eventStream: { close: () => void } | null = null
@@ -590,6 +591,19 @@ function renderTokenChart(): void {
       emphasis: { focus: 'series', scale: 1.35 },
     }],
   }, true)
+  observeTokenChartContainer()
+}
+
+function observeTokenChartContainer(): void {
+  const container = tokenChartRef.value
+  if (!container || tokenChartResizeObserver || typeof ResizeObserver === 'undefined') return
+  tokenChartResizeObserver = new ResizeObserver(() => {
+    if (disposed || !tokenChart) return
+    window.requestAnimationFrame(() => {
+      if (!disposed && tokenChartRef.value === container) tokenChart?.resize()
+    })
+  })
+  tokenChartResizeObserver.observe(container)
 }
 
 function loadButtonText(state: LoadState): string {
@@ -775,6 +789,8 @@ onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
   if (tokenUsageTimer) clearInterval(tokenUsageTimer)
   eventStream?.close()
+  tokenChartResizeObserver?.disconnect()
+  tokenChartResizeObserver = null
   mapChart?.dispose()
   mapChart = null
   tokenChart?.dispose()

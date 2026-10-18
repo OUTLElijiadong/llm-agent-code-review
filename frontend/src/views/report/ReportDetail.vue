@@ -48,6 +48,7 @@
       <strong>执行状态：{{ reportExecutionStatusLabel }}</strong>
       <p v-if="reportExecutionError">执行原因：{{ reportExecutionError }}</p>
       <p>验证覆盖：{{ reportCoverageLabel }}<span v-if="reportCoverageReason">；{{ reportCoverageReason }}</span></p>
+      <p v-if="reportCoverageDetails" data-testid="report-coverage-details">验证项：{{ reportCoverageDetails }}</p>
       <p v-if="coverageSummary">覆盖明细：{{ coverageSummary }}</p>
       <ul v-if="coverageEntries.length" class="coverage-details">
         <li v-for="(entry, index) in coverageEntries" :key="`${index}-${entry}`">{{ entry }}</li>
@@ -772,8 +773,44 @@ const showSecurityReport = ref(false)
 const sandboxCoverage = computed(() => report.value?.task?.coverage as TaskCoverageOut | undefined)
 const sandboxCoverageStatus = computed(() => sandboxCoverage.value?.verification_status
   ?? sandboxCoverage.value?.coverage_status ?? 'unknown')
+const coverageStepLabel = (value?: string | null) => {
+  const labels: Record<string, string> = {
+    passed: '已通过', complete: '已完成', completed: '已完成', success: '已完成',
+    partial: '部分完成', failed: '失败', skipped: '未执行', not_required: '未纳入本次验证',
+    unknown: '未知', receipt_missing: '缺少有效回执', pending: '等待执行', running: '执行中',
+  }
+  const status = String(value || '').toLowerCase()
+  return labels[status] || status || '未记录'
+}
+const reportCoverageDetails = computed(() => {
+  const coverage = sandboxCoverage.value
+  if (!coverage) return ''
+  const modeLabels: Record<string, string> = {
+    whitebox: '白盒', blackbox: '黑盒', combined: '黑白盒', deploy: '部署检查',
+  }
+  const details: string[] = []
+  const mode = String(coverage.requested_mode || '').toLowerCase()
+  if (mode) details.push(`请求模式：${modeLabels[mode] || mode}`)
+  for (const [key, label] of [
+    ['deterministic_status', '确定性检查'],
+    ['ai_dynamic_status', 'AI 动态用例'],
+    ['blackbox_status', '黑盒验证'],
+    ['remote_blackbox_status', '远程黑盒验证'],
+  ] as const) {
+    const status = coverage[key]
+    if (status) details.push(`${label}：${coverageStepLabel(status)}`)
+  }
+  return details.join('；')
+})
 const sandboxCoverageLabel = computed(() => {
-  if (sandboxCoverageStatus.value === 'complete') return '已记录范围内验证完成'
+  if (sandboxCoverageStatus.value === 'complete') {
+    if (sandboxCoverage.value?.requested_mode === 'whitebox'
+      && sandboxCoverage.value.blackbox_status === 'not_required'
+      && sandboxCoverage.value.remote_blackbox_status === 'not_required') {
+      return '白盒验证完成；未执行黑盒或远程黑盒测试'
+    }
+    return '本次请求的验证步骤已完成'
+  }
   if (sandboxCoverageStatus.value === 'partial') return '验证范围不完整'
   if (sandboxCoverageStatus.value === 'failed') return '验证未通过'
   return '验证范围未知'
@@ -796,10 +833,17 @@ const reportDurationNote = computed(() => String(report.value?.source?.duration_
 const reportCoverageLabel = computed(() => {
   const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
   const status = String(coverage?.verification_status || coverage?.coverage_status || '').toLowerCase()
+  if (status === 'complete' || status === 'completed' || status === 'success') {
+    if (coverage?.requested_mode === 'whitebox'
+      && coverage.blackbox_status === 'not_required'
+      && coverage.remote_blackbox_status === 'not_required') {
+      return '白盒验证完成；未执行黑盒或远程黑盒测试'
+    }
+  }
   const labels: Record<string, string> = {
-    complete: '记录范围内已完成',
-    completed: '记录范围内已完成',
-    success: '记录范围内已完成',
+    complete: '本次请求的验证步骤已完成',
+    completed: '本次请求的验证步骤已完成',
+    success: '本次请求的验证步骤已完成',
     partial: '部分完成',
     failed: '验证未通过',
     incomplete: '覆盖不完整',
@@ -1603,6 +1647,43 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.report-paper,
+.domain-report-body,
+.security-report-snapshot {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.report-markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+
+  :deep(table) {
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  :deep(th),
+  :deep(td) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  :deep(pre) {
+    max-width: 100%;
+    overflow: auto;
+  }
+
+  :deep(code) {
+    overflow-wrap: anywhere;
+  }
 }
 
 .report-execution-status {

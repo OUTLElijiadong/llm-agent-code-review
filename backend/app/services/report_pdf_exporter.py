@@ -281,6 +281,40 @@ def _append_markdown_elements(
         if block.kind == "rule":
             elements.append(Spacer(1, 3 * mm))
             continue
+        if block.kind == "table":
+            if not block.rows:
+                continue
+            data = []
+            for row_index, row in enumerate(block.rows):
+                cells = []
+                for cell in row:
+                    markup = reportlab_markup(cell, code_non_ascii_font=_CHINESE_FONT_NAME)
+                    if row_index == 0:
+                        markup = f"<b>{markup}</b>"
+                    style = styles["table_header"] if row_index == 0 else styles["table_cell"]
+                    cells.append(Paragraph(markup or " ", style))
+                data.append(cells)
+            available_width = A4[0] - 36 * mm
+            table = Table(
+                data,
+                colWidths=[available_width / len(data[0])] * len(data[0]),
+                repeatRows=1,
+                hAlign="LEFT",
+                splitByRow=1,
+            )
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#334155")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 3 * mm))
+            continue
         if block.kind == "heading":
             style = styles["heading"] if block.level <= 2 else styles["subheading"]
             elements.append(Paragraph(reportlab_markup(block.segments), style))

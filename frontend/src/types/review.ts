@@ -146,6 +146,7 @@ export interface TaskCoverageOut {
   deterministic_status?: string | null
   ai_dynamic_status?: string | null
   blackbox_status?: string | null
+  remote_blackbox_status?: string | null
   reason?: string | null
   coverage_status?: string | null
   /** 服务端报告的覆盖对象，未知结构保留为开放字段，不映射成完整通过。 */

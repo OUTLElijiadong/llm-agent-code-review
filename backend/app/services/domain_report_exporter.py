@@ -94,6 +94,19 @@ def _coverage_lines(coverage: Any) -> list[str]:
     if not isinstance(coverage, dict):
         return ["覆盖范围：未记录"]
     lines = [f"覆盖状态：{_status_label(coverage.get('verification_status') or coverage.get('coverage_status'))}"]
+    requested_mode = str(coverage.get("requested_mode") or "").strip().lower()
+    if requested_mode:
+        mode_labels = {"whitebox": "白盒", "blackbox": "黑盒", "combined": "黑白盒", "deploy": "部署检查"}
+        lines.append(f"验证模式：{mode_labels.get(requested_mode, requested_mode)}")
+    for key, label in (
+        ("deterministic_status", "确定性检查"),
+        ("ai_dynamic_status", "AI 动态用例"),
+        ("blackbox_status", "黑盒验证"),
+        ("remote_blackbox_status", "远程黑盒验证"),
+    ):
+        if coverage.get(key) is not None:
+            status_label = "未纳入本次验证" if coverage[key] == "not_required" else _status_label(coverage[key])
+            lines.append(f"{label}：{status_label}")
     for key, label in (
         ("scan_mode", "扫描模式"),
         ("total_file_count", "目标文件数"),
@@ -108,10 +121,10 @@ def _coverage_lines(coverage: Any) -> list[str]:
     if isinstance(unscanned, list) and unscanned:
         lines.append("未扫描或未验证范围：")
         lines.extend(f"{index}. {_value(item)}" for index, item in enumerate(unscanned, 1))
-    elif coverage.get("coverage_status") == "complete" or coverage.get("verification_status") == "complete":
-        lines.append("未扫描或未验证范围：已记录范围内无遗漏")
     else:
-        lines.append("未扫描或未验证范围：未记录，不能推断完整覆盖")
+        lines.append("未扫描或未验证范围：回执未列出具体未扫描项")
+    if requested_mode:
+        lines.append("覆盖状态只适用于上述请求模式及已记录阶段；其他模式不自动视为已执行")
     skipped = coverage.get("skipped")
     if isinstance(skipped, list) and skipped:
         lines.append("跳过项目：")
@@ -336,7 +349,12 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
     if format == "html":
         body = markdown_to_html(markdown)
         html = (
-            '<main style="max-width:960px;margin:32px auto;padding:32px;'
+            '<style>.report-summary-table{width:100%;table-layout:fixed;border-collapse:collapse;}'
+            '.report-summary-table th,.report-summary-table td{border:1px solid #d1d5db;padding:8px;'
+            'text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word;}'
+            '.report-summary-table th{background:#e8eef8;}</style>'
+            '<main style="box-sizing:border-box;width:100%;max-width:960px;margin:32px auto;padding:32px;'
+            'overflow-wrap:anywhere;'
             'font:16px/1.7 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#172033">'
             f"<h1>{escape(title)}</h1>{body}</main>"
         )

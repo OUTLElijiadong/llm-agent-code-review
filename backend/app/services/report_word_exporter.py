@@ -135,11 +135,31 @@ def _append_markdown_runs(paragraph: Any, segments: tuple[MarkdownSegment, ...],
 
 
 def _append_markdown_to_word(doc: Any, value: str | None) -> None:
-    """把 Markdown 语义映射到 Word 标题、列表、引用和代码段落。"""
+    """把 Markdown 语义映射到 Word 标题、列表、表格、引用和代码段落。"""
     for block in markdown_to_blocks(value):
         if block.kind == "rule":
             paragraph = doc.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(4)
+            continue
+        if block.kind == "table":
+            if not block.rows:
+                continue
+            table = doc.add_table(rows=len(block.rows), cols=max(len(row) for row in block.rows))
+            table.style = "Table Grid"
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            table.autofit = True
+            for row_index, row in enumerate(block.rows):
+                for column_index, cell_segments in enumerate(row):
+                    cell = table.cell(row_index, column_index)
+                    paragraph = cell.paragraphs[0]
+                    _append_markdown_runs(paragraph, cell_segments, size=9)
+                    if row_index == 0:
+                        for run in paragraph.runs:
+                            run.bold = True
+                        shading = OxmlElement("w:shd")
+                        shading.set(qn("w:fill"), "E8EEF8")
+                        cell._tc.get_or_add_tcPr().append(shading)
+            doc.add_paragraph()
             continue
         if block.kind == "heading":
             paragraph = doc.add_heading(level=min(3, max(1, block.level)))

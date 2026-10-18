@@ -132,6 +132,28 @@ it('沙箱报告显示服务端记录的验证覆盖状态和原因', async () =
   expect(coverage.text()).toContain('不代表完整黑盒/白盒验证通过')
 })
 
+it('白盒回执完整时明确说明黑盒未执行，不把请求范围外测试写成已覆盖', async () => {
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    task: { coverage: {
+      verification_status: 'complete', coverage_status: 'complete', requested_mode: 'whitebox',
+      deterministic_status: 'passed', ai_dynamic_status: 'skipped',
+      blackbox_status: 'not_required', remote_blackbox_status: 'not_required',
+    } },
+    source: { type: 'sandbox_test' },
+  })
+  await render()
+
+  expect(wrapper.get('[data-testid="report-execution-status"]').text())
+    .toContain('白盒验证完成；未执行黑盒或远程黑盒测试')
+  const details = wrapper.get('[data-testid="report-coverage-details"]').text()
+  expect(details).toContain('请求模式：白盒')
+  expect(details).toContain('确定性检查：已通过')
+  expect(details).toContain('AI 动态用例：未执行')
+  expect(details).toContain('黑盒验证：未纳入本次验证')
+  expect(details).toContain('远程黑盒验证：未纳入本次验证')
+})
+
 it('报告封面区分项目主语言与本次审查文件语言', async () => {
   api.getReportDetail.mockResolvedValueOnce({
     ...report,

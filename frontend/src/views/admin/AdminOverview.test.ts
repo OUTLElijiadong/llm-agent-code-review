@@ -149,6 +149,7 @@ beforeEach(() => {
 
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
@@ -250,6 +251,19 @@ describe('AdminOverview 真实状态与分区反馈', () => {
     expect(mocks.getTokenUsageTrend).toHaveBeenLastCalledWith(7)
     expect(section.findAll('button.range-button')[0].attributes('aria-pressed')).toBe('true')
     expect(section.text()).toContain('近 7 天累计')
+  })
+
+  it('Token 图跟随卡片自身尺寸变化重排，并在离开页面时停止观察', async () => {
+    const observe = vi.spyOn(ResizeObserver.prototype, 'observe')
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect')
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const chartElement = card(wrapper, '每日 Token 用量').find('.token-chart').element
+    expect(observe).toHaveBeenCalledWith(chartElement)
+
+    wrapper.unmount()
+    expect(disconnect).toHaveBeenCalled()
   })
 
   it('首载不把未返回的接口伪装为正常、零值或空列表', async () => {
