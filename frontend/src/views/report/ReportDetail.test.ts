@@ -477,10 +477,15 @@ describe('ReportDetail 报告口径', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(1, 42, { page: 1, page_size: 1000 })
-    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(2, 42, { page: 2, page_size: 1000 })
+    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(1, 42, { page: 1, page_size: 1000, status: 'all' })
+    expect(reviewApi.getTaskIssues).toHaveBeenNthCalledWith(2, 42, { page: 2, page_size: 1000, status: 'all' })
     expect(setupState(wrapper).issues).toHaveLength(1001)
-    expect(setupState(wrapper).issues.at(-1).title).toBe('最后一页问题')
+    expect(wrapper.findAll('[data-testid^="report-issue-item-"]')).toHaveLength(20)
+    expect(wrapper.text()).not.toContain('最后一页问题')
+    setupState(wrapper).setIssueDisplayPage(51)
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid^="report-issue-item-"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('最后一页问题')
     wrapper.unmount()
   })
 

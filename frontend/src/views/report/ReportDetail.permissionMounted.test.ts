@@ -106,6 +106,47 @@ it('问题明细权限撤销后清空已读明细并保留概览权限提示', a
   expect(wrapper.text()).not.toContain('其他权限下不可见的漏洞')
 })
 
+it('完整展示所有问题的证据与修复建议，包括没有 CVSS 评分的条目', async () => {
+  api.getReportDetail.mockResolvedValueOnce({
+    ...report,
+    stats: { score: 64, total_issues: 2 },
+  })
+  issues.getTaskIssues.mockResolvedValueOnce({
+    items: [
+      {
+        id: 92, task_id: 42, issue_type: 'security', severity: 'medium', title: '未评分的鉴权缺陷',
+        description: '**管理员路由缺少角色校验。**\n当前用户可直接访问管理接口。\n<img src=x onerror=alert(1)>',
+        suggestion: '在接口入口校验管理员角色。', remediation: '复用服务端统一的权限依赖。',
+        file_name: 'backend/routes/admin.py', line_number: 42, status: 'open',
+        create_time: '2026-10-18T00:00:00Z', human_review_status: 'pending', evidence_quality: 'verified',
+      },
+      {
+        id: 93, task_id: 42, issue_type: 'bug', severity: 'low', title: '边界值未处理',
+        description: '空集合会触发异常。', status: 'fixed', create_time: '2026-10-18T00:00:00Z',
+        human_review_status: 'accepted', evidence_quality: 'direct',
+      },
+    ],
+    total: 2,
+  })
+
+  await render()
+
+  const details = wrapper.get('[data-testid="report-issues-list"]')
+  expect(details.text()).toContain('问题明细（2）')
+  expect(details.text()).toContain('未评分的鉴权缺陷')
+  expect(details.text()).toContain('管理员路由缺少角色校验。')
+  expect(details.text()).toContain('backend/routes/admin.py:42')
+  expect(details.text()).toContain('待人工核实')
+  expect(details.text()).toContain('源码引用可定位')
+  expect(details.text()).toContain('复用服务端统一的权限依赖。')
+  expect(details.text()).toContain('边界值未处理')
+  expect(details.text()).toContain('已修复')
+  expect(details.text()).not.toContain('**')
+  expect(details.find('img').exists()).toBe(false)
+  expect(details.findAll('[data-testid^="report-issue-item-"]')).toHaveLength(2)
+  expect(issues.getTaskIssues).toHaveBeenCalledWith(42, { page: 1, page_size: 1000, status: 'all' })
+})
+
 it('问题明细接口失败时保留主报告并提供可点击重试', async () => {
   useUserStore().permissions.add('issue:view')
   issues.getTaskIssues.mockRejectedValueOnce(new Error('temporary failure'))

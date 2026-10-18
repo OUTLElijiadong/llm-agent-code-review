@@ -407,6 +407,78 @@
         </div>
       </section>
 
+      <section
+        v-if="canViewReport && issuesLoadState === 'loaded' && issues.length > 0"
+        class="card report-issue-details"
+        data-testid="report-issues-list"
+        aria-labelledby="report-issues-heading"
+      >
+        <header class="card-head">
+          <h3 id="report-issues-heading" class="font-display">问题明细（{{ issues.length }}）</h3>
+          <p class="card-desc">逐条列出本报告记录的问题，包括未评分和待核实条目；严重度与复核状态沿用服务端记录。每页展示 {{ issueDisplayPageSize }} 条，避免长报告一次渲染过多内容。</p>
+        </header>
+        <div v-if="issues.length > issueDisplayPageSize" class="report-issues-navigation" data-testid="report-issues-navigation">
+          <span>显示第 {{ issueDisplayRangeStart }}–{{ issueDisplayRangeEnd }} 条，共 {{ issues.length }} 条</span>
+          <el-pagination
+            data-testid="report-issues-pagination"
+            layout="prev, pager, next"
+            :pager-count="5"
+            :current-page="issueDisplayPage"
+            :page-size="issueDisplayPageSize"
+            :total="issues.length"
+            :disabled="issuesLoading"
+            @current-change="setIssueDisplayPage"
+          />
+        </div>
+        <ol class="report-issue-list">
+          <li
+            v-for="(issue, index) in displayedIssues"
+            :key="issue.id"
+            class="report-issue-item"
+            :data-testid="`report-issue-item-${issue.id}`"
+          >
+            <article>
+              <header class="report-issue-item-head">
+                <div class="report-issue-title-group">
+                  <span class="report-issue-index">问题 {{ issueDisplayRangeStart + index }}</span>
+                  <h4>{{ issue.title || issue.issue_type || '未命名问题' }}</h4>
+                </div>
+                <div class="report-issue-badges">
+                  <span class="report-issue-severity">{{ severityDisplayLabel(issue.severity) || '未标记严重度' }}</span>
+                  <span class="report-issue-state">{{ issueStatusLabel(issue.status) }}</span>
+                  <span class="report-issue-state">{{ deterministicCvssScore(issue) == null ? 'CVSS 未评分' : `CVSS ${deterministicCvssScore(issue)?.toFixed(1)}` }}</span>
+                </div>
+              </header>
+              <dl class="report-issue-meta">
+                <div><dt>类型</dt><dd>{{ issue.issue_type || '未分类' }}</dd></div>
+                <div v-if="issue.file_name"><dt>位置</dt><dd class="font-mono">{{ issue.file_name }}{{ issue.line_number != null ? `:${issue.line_number}` : '' }}{{ issue.end_line != null && issue.end_line !== issue.line_number ? `–${issue.end_line}` : '' }}</dd></div>
+                <div v-if="issue.cwe"><dt>CWE</dt><dd>{{ issue.cwe }}</dd></div>
+                <div><dt>证据状态</dt><dd>{{ evidenceQualityLabel(issue.evidence_quality) }}</dd></div>
+                <div><dt>人工复核</dt><dd>{{ issueReviewStatusLabel(issue) }}</dd></div>
+              </dl>
+              <div class="report-issue-content">
+                <section class="report-issue-field">
+                  <h5>问题说明</h5>
+                  <div class="report-issue-markdown" v-html="renderIssueMarkdown(issue.description, '未提供问题说明')" />
+                </section>
+                <section v-if="issue.suggestion" class="report-issue-field">
+                  <h5>建议</h5>
+                  <div class="report-issue-markdown" v-html="renderIssueMarkdown(issue.suggestion)" />
+                </section>
+                <section v-if="issue.remediation" class="report-issue-field">
+                  <h5>修复方案</h5>
+                  <div class="report-issue-markdown" v-html="renderIssueMarkdown(issue.remediation)" />
+                </section>
+                <section v-if="issue.fixed_code" class="report-issue-field">
+                  <h5>修复代码</h5>
+                  <pre class="report-issue-code">{{ issue.fixed_code }}</pre>
+                </section>
+              </div>
+            </article>
+          </li>
+        </ol>
+      </section>
+
       <!-- ============ T15 v3 字段:CVSS 评分分布 ============ -->
       <section v-if="issues.length > 0" class="card v3-card no-break" v-loading="issuesLoading">
         <header class="card-head">
@@ -626,6 +698,7 @@ import { APP_DISPLAY_VERSION } from '@/constants/buildInfo'
 import { goBack } from '@/utils/navigation'
 import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 import { reviewRiskLevel, reviewScoreColor } from '@/utils/reviewScore'
+import { severityDisplayLabel } from '@/constants/severity'
 import { useCountUp } from '@/composables/useCountUp'
 import { taskDisplayTitle } from '@/utils/taskDisplayTitle'
 
@@ -669,6 +742,20 @@ const issues = ref<ReportIssue[]>([])
 /** issues 是否正在加载 */
 const issuesLoading = ref(false)
 const issuesLoadState = ref<'loading' | 'loaded' | 'forbidden' | 'failed'>('loading')
+const issueDisplayPage = ref(1)
+const issueDisplayPageSize = 20
+const displayedIssues = computed(() => {
+  const start = (issueDisplayPage.value - 1) * issueDisplayPageSize
+  return issues.value.slice(start, start + issueDisplayPageSize)
+})
+const issueDisplayRangeStart = computed(() => issues.value.length
+  ? (issueDisplayPage.value - 1) * issueDisplayPageSize + 1
+  : 0)
+const issueDisplayRangeEnd = computed(() => Math.min(issueDisplayPage.value * issueDisplayPageSize, issues.value.length))
+function setIssueDisplayPage(page: number): void {
+  const lastPage = Math.max(1, Math.ceil(issues.value.length / issueDisplayPageSize))
+  issueDisplayPage.value = Math.min(Math.max(1, page), lastPage)
+}
 function captureAccessScope(): () => boolean {
   const generation = accessGeneration
   const account = `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
@@ -699,6 +786,29 @@ function issueReviewStatusLabel(issue: ReportIssue): string {
   return issue.human_review_status
     ? labels[issue.human_review_status] || '复核状态未知'
     : '复核状态未记录'
+}
+
+function issueStatusLabel(status?: string | null): string {
+  const labels: Record<string, string> = {
+    open: '未修复', unfixed: '未修复', fixed: '已修复', ignored: '已忽略',
+    pending_review: '待复查', pending: '待处理', closed: '已关闭',
+  }
+  return labels[String(status || '').toLowerCase()] || status || '状态未记录'
+}
+
+function evidenceQualityLabel(quality?: ReportIssue['evidence_quality']): string {
+  const labels: Record<string, string> = {
+    verified: '源码引用可定位',
+    direct: '存在直接证据',
+    inferred: '推断线索',
+    unsupported: '暂无支持证据',
+  }
+  return quality ? labels[quality] || '证据状态未知' : '未记录'
+}
+
+function renderIssueMarkdown(value?: string | null, fallback = ''): string {
+  const content = typeof value === 'string' ? value.trim() : ''
+  return renderMarkdown(content || fallback)
 }
 
 /** 只有后端确认由有效 v3.1 向量计算的分数才可作为 CVSS 展示。 */
@@ -1160,6 +1270,7 @@ async function loadIssues(): Promise<void> {
     && requestVersion === issueRequestVersion
     && account === `${String(userStore.profile?.id ?? '')}:${String(userStore.token ?? '')}`
   issues.value = []
+  issueDisplayPage.value = 1
   if (!canViewReport.value) {
     issuesLoadState.value = 'forbidden'
     return
@@ -1176,9 +1287,9 @@ async function loadIssues(): Promise<void> {
   issuesLoading.value = true
   issuesLoadState.value = 'loading'
   try {
-    // 明细统计（CVSS/Top10）必须覆盖接口返回的全部未关闭条目，不能把首 1000 条当成全量。
+    // 报告明细覆盖所有状态，不能把已修复/已忽略的问题漏出报告；也不能把首 1000 条当成全量。
     const pageSize = 1000
-    const firstPage = await getTaskIssues(taskId, { page: 1, page_size: pageSize })
+    const firstPage = await getTaskIssues(taskId, { page: 1, page_size: pageSize, status: 'all' })
     if (!requestIsCurrent() || !userStore.hasPermission('issue:view') || !canViewReport.value) return
     const total = Number(firstPage.total)
     if (!Number.isSafeInteger(total) || total < 0) throw new Error('invalid issue total')
@@ -1186,7 +1297,7 @@ async function loadIssues(): Promise<void> {
     let page = 1
     while (allIssues.length < total) {
       page += 1
-      const next = await getTaskIssues(taskId, { page, page_size: pageSize })
+      const next = await getTaskIssues(taskId, { page, page_size: pageSize, status: 'all' })
       if (!requestIsCurrent() || !userStore.hasPermission('issue:view') || !canViewReport.value) return
       const items = (next.items as unknown as ReportIssue[]) ?? []
       if (items.length === 0 || next.total !== total) throw new Error('incomplete issue pages')
@@ -1194,11 +1305,13 @@ async function loadIssues(): Promise<void> {
     }
     if (allIssues.length !== total) throw new Error('inconsistent issue total')
     issues.value = allIssues
+    issueDisplayPage.value = 1
     issuesLoadState.value = 'loaded'
   } catch {
     if (!requestIsCurrent()) return
     // 主报告继续可见，但明细加载失败不能伪装为“零问题”。
     issues.value = []
+    issueDisplayPage.value = 1
     issuesLoadState.value = 'failed'
   } finally {
     if (requestIsCurrent()) issuesLoading.value = false
@@ -1217,6 +1330,7 @@ function clearReportForAccessRevocation(): void {
   issueRequestVersion++
   report.value = null
   issues.value = []
+  issueDisplayPage.value = 1
   issuesLoadState.value = 'forbidden'
   issuesLoading.value = false
   previewFallbackVisible.value = false
@@ -1249,6 +1363,7 @@ watch(() => [
     issueRequestVersion++
     report.value = null
     issues.value = []
+    issueDisplayPage.value = 1
     issuesLoadState.value = 'loading'
     issuesLoading.value = false
     loading.value = false
@@ -1285,6 +1400,7 @@ watch(() => [
   if (!userStore.hasPermission('issue:view') && !isDomainReport.value) {
     issueRequestVersion++
     issues.value = []
+    issueDisplayPage.value = 1
     issuesLoading.value = false
     issuesLoadState.value = 'forbidden'
     selectedRemediationId.value = null
@@ -2055,6 +2171,159 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   margin-top: 4px;
   font-size: 12px;
   color: var(--gray-500);
+}
+
+.report-issue-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-issues-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  color: var(--gray-600);
+  font-size: 12px;
+
+  :deep(.el-pagination) { margin-left: auto; }
+}
+
+.report-issue-item {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--gray-100);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.report-issue-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.report-issue-title-group {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+
+  h4 {
+    margin: 0;
+    color: var(--gray-900);
+    font-size: 15px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+}
+
+.report-issue-index {
+  flex: none;
+  color: var(--gray-500);
+  font-size: 11px;
+}
+
+.report-issue-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.report-issue-severity,
+.report-issue-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+  color: var(--gray-700);
+  background: var(--gray-50);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.report-issue-severity {
+  border-color: #e8c5c5;
+  color: #a63b42;
+  background: #fff8f7;
+}
+
+.report-issue-meta {
+  display: flex;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--gray-100);
+  border-bottom: 1px solid var(--gray-100);
+
+  div { display: flex; gap: 6px; min-width: 0; }
+  dt { color: var(--gray-500); }
+  dd { margin: 0; color: var(--gray-800); overflow-wrap: anywhere; }
+}
+
+.report-issue-content {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.report-issue-field {
+  min-width: 0;
+
+  h5 {
+    margin: 0 0 5px;
+    color: var(--gray-600);
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+.report-issue-markdown {
+  min-width: 0;
+  color: var(--gray-800);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+
+  :deep(p) { margin: 0 0 8px; }
+  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(ul), :deep(ol) { padding-left: 20px; margin: 4px 0; }
+  :deep(li) { margin: 3px 0; }
+  :deep(code) { padding: 1px 5px; border-radius: 4px; background: var(--gray-100); }
+  :deep(pre) { max-width: 100%; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+}
+
+.report-issue-code {
+  max-width: 100%;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--gray-100);
+  border-radius: 8px;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  font-family: var(--font-mono, 'SFMono-Regular', Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .report-issue-item { padding: 14px; }
+  .report-issue-title-group { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .report-issues-navigation { align-items: flex-start; flex-direction: column; }
+  .report-issues-navigation :deep(.el-pagination) { margin-left: 0; }
 }
 
 /* ============ 表格 ============ */
