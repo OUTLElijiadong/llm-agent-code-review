@@ -17,7 +17,7 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.security import SecurityDashboardSummaryOut
-from app.services import dashboard_service, report_service, review_service, security_service
+from app.services import dashboard_service, pentest_service, report_service, review_service, security_service
 
 
 @pytest.fixture
@@ -134,6 +134,55 @@ def _pentest(db, task, *, created=None, include_findings=True):
         ))
     db.flush()
     return engagement
+
+
+def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, source_owner, source_project):
+    """授权审查员可见委托卡片，但不得获得发起人报告入口。"""
+    task = _task(db, source_owner, source_project, "pentest")
+    engagement = _pentest(db, task, include_findings=False)
+    incomplete_task = _task(db, source_owner, source_project, "pentest")
+    incomplete_engagement = _pentest(db, incomplete_task, include_findings=False)
+    incomplete_snapshot = db.query(ReviewReport).filter_by(task_id=incomplete_task.id).one()
+    incomplete_snapshot.content_json = {**incomplete_snapshot.content_json, "report_md": " \n"}
+
+    reviewer = User(username="pentest-reviewer", password="x", role="reviewer", status=1)
+    reviewer_role = Role(code="reviewer", name="渗透授权审查员", status="active", is_builtin=1)
+    permission_codes = (
+        PermissionCode.PENTEST_VIEW,
+        PermissionCode.PENTEST_AUTHORIZE,
+        PermissionCode.REPORT_VIEW,
+    )
+    permissions = []
+    for code in permission_codes:
+        permission = db.query(Permission).filter_by(code=code).one_or_none()
+        if permission is None:
+            permission = Permission(code=code, name=code, module="pentest", type="api")
+            db.add(permission)
+            db.flush()
+        permissions.append(permission)
+    db.add_all([reviewer, reviewer_role])
+    db.flush()
+    db.add(UserRole(user_id=reviewer.id, role_id=reviewer_role.id))
+    db.add_all([
+        RolePermission(role_id=reviewer_role.id, permission_id=permission.id)
+        for permission in permissions
+    ])
+    db.commit()
+
+    reviewer_result = pentest_service.list_engagements(db, reviewer, scope="all")
+    reviewer_row = next(item for item in reviewer_result["items"] if item["public_id"] == engagement.public_id)
+    owner_result = pentest_service.list_engagements(db, source_owner, scope="own")
+    owner_row = next(item for item in owner_result["items"] if item["public_id"] == engagement.public_id)
+    incomplete_owner_row = next(
+        item for item in owner_result["items"] if item["public_id"] == incomplete_engagement.public_id
+    )
+
+    assert reviewer_row["can_view_report"] is False
+    assert reviewer_row["report_task_id"] is None
+    assert owner_row["can_view_report"] is True
+    assert owner_row["report_task_id"] == task.id
+    assert incomplete_owner_row["can_view_report"] is False
+    assert incomplete_owner_row["report_task_id"] is None
 
 
 def _listed(db, owner, task):

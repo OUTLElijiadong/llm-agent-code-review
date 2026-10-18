@@ -189,6 +189,53 @@ def _pentest_report_engagement(db: Session, task: ReviewTask) -> PentestEngageme
     return engagements[0]
 
 
+def readable_pentest_engagement_ids(db: Session, user: User, engagement_ids: list[int]) -> set[int]:
+    """批量返回当前账号实际可读且关联快照完整的渗透委托报告入口。"""
+    if not engagement_ids:
+        return set()
+    if (
+        not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW)
+        or not has_source_report_permission(db, user, "pentest")
+    ):
+        return set()
+
+    visible_project_ids, _ = get_visible_project_ids(db, user)
+    if not visible_project_ids:
+        return set()
+
+    query = db.query(PentestEngagement.id, ReviewReport.content_json).join(
+        ReviewTask,
+        and_(
+            ReviewTask.id == PentestEngagement.report_task_id,
+            ReviewTask.user_id == PentestEngagement.user_id,
+            ReviewTask.project_id == PentestEngagement.project_id,
+            ReviewTask.review_type == "pentest",
+            ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES),
+        ),
+    ).join(
+        ReviewReport,
+        and_(
+            ReviewReport.task_id == ReviewTask.id,
+            ReviewReport.user_id == ReviewTask.user_id,
+            ReviewReport.content_json["source"].as_string() == "pentest",
+            ReviewReport.content_json["engagement_public_id"].as_string() == PentestEngagement.public_id,
+        ),
+    ).filter(
+        PentestEngagement.id.in_(engagement_ids),
+        PentestEngagement.project_id.in_(visible_project_ids),
+    )
+    if not rbac_service.is_admin_user(db, int(user.id)):
+        query = query.filter(PentestEngagement.user_id == int(user.id))
+    readable_ids: set[int] = set()
+    for engagement_id, content in query.all():
+        if not isinstance(content, dict):
+            continue
+        report_md = content.get("report_md")
+        if isinstance(report_md, str) and report_md.strip():
+            readable_ids.add(int(engagement_id))
+    return readable_ids
+
+
 def visible_report_review_types(db: Session, user: User) -> frozenset[str]:
     """返回同时满足通用报告权限和来源权限的报告任务类型。"""
     if not rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW):
