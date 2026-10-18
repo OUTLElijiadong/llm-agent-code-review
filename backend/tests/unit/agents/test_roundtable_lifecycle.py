@@ -210,6 +210,67 @@ async def test_rest_stop_cancels_registered_async_roundtable_task(
     engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_cancelled_roundtable_ignores_late_events_and_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """停止提交取消终态后，迟到的成功/进度/发言不得复活会话。"""
+    import app.core.database as database
+
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    RoundtableSession.__table__.create(engine)
+    RoundtableTurn.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    bus = DiscussionBus(persist=True, session_factory=factory)
+    session = bus.create_session("disc_late_after_stop", 0, "main.py", owner_user_id=7)
+    bus.publish_control(session.session_id, "started", {})
+    bus.publish_control(session.session_id, "progress", {"phase": "speaking", "stage": "agent_thinking"})
+
+    bus.request_stop(session.session_id, reason="用户停止")
+    bus.publish_control(session.session_id, "cancelled", {"status": "cancelled", "error": "用户停止"})
+    queue = await bus.subscribe(session.session_id)
+    while not queue.empty():
+        queue.get_nowait()
+    queued_before_late_events = queue.qsize()
+
+    bus.publish_control(session.session_id, "done", {"status": "success", "task_id": 999})
+    bus.publish_control(session.session_id, "progress", {"phase": "speaking", "stage": "agent_thinking"})
+    bus.publish_control(session.session_id, "resumed", {})
+    bus.publish_turn(session.session_id, _turn(1))
+
+    assert session.status == "cancelled"
+    assert session.terminal_status == "cancelled"
+    assert session.progress["phase"] == "cancelled"
+    assert session.report_task_id == 0
+    assert session.turns == []
+    assert queue.qsize() == queued_before_late_events
+    with factory() as db:
+        persisted = db.get(RoundtableSession, session.session_id)
+        assert persisted.status == "cancelled"
+        assert persisted.progress["phase"] == "cancelled"
+        assert persisted.report_task_id == 0
+        assert db.query(RoundtableTurn).filter_by(session_id=session.session_id).count() == 0
+    engine.dispose()
+
+
+def test_repeated_stop_does_not_replace_successful_terminal_state() -> None:
+    """取消操作只能结束活动会话，不能把已成功完成的会话改成 cancelled。"""
+    bus = DiscussionBus()
+    session = bus.create_session("disc_success_then_stop", 0, "main.py", owner_user_id=7)
+    bus.publish_control(session.session_id, "done", {"status": "success", "task_id": 42})
+    bus.close_session(session.session_id)
+
+    bus.request_stop(session.session_id, reason="迟到的停止请求")
+
+    assert session.status == "concluded"
+    assert session.terminal_status == "success"
+    assert session.progress["phase"] == "completed"
+    assert session.report_task_id == 42
+
+
 @pytest.mark.parametrize("stage", ["summarizing", "extracting", "reporting"])
 def test_finalizing_session_saves_user_input_for_followup(stage: str) -> None:
     bus = DiscussionBus()

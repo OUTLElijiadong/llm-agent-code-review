@@ -137,6 +137,9 @@ export interface TaskFileOut {
 
 export interface TaskCoverageOut {
   score_available?: boolean
+  score_basis?: string | null
+  score_sample?: Record<string, number> | null
+  score_unavailable_reason?: string | null
   stage?: string | null
   verification_status?: 'complete' | 'partial' | 'failed' | 'unknown' | null
   requested_mode?: string | null

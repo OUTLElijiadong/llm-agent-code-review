@@ -116,6 +116,9 @@ class DiscussionSession:
 _CONCLUDED_SESSION_TTL = 3600.0
 _FOLLOWUP_WINDOW_SECONDS = 300.0
 _REPLAY_LIMIT = 100
+_TERMINAL_SESSION_STATUSES = frozenset({
+    "concluded", "partial", "failed", "cancelled", "interrupted",
+})
 
 
 class DiscussionSubscriptionQueue(asyncio.Queue[str]):
@@ -509,6 +512,10 @@ class DiscussionBus:
         """标记会话为终止 — 编排循环在下一次检查时退出。"""
         session = self._sessions.get(session_id)
         if session:
+            # 终态只允许单向提交；重复停止或迟到停止不能把已成功/失败
+            # 的会话改写为 cancelled。
+            if session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status:
+                return
             session.cancel_event.set()
             session.status = "cancelled"
             session.terminal_status = "cancelled"
@@ -589,6 +596,33 @@ class DiscussionBus:
         """推送一条发言到所有 WebSocket 订阅者"""
         session = self._sessions.get(session_id)
         if session:
+            followup_start_seq = int(session.progress.get("followup_start_seq") or 0)
+            pending_followup_ids = {
+                turn.seq for turn in session.turns
+                if turn.seq > followup_start_seq and turn.role == "user"
+            } - {
+                turn.turn_id for turn in session.turns
+                if turn.agent_code == "orchestrator" and turn.round_index == -1
+            }
+            followup_turn = (
+                session.status == "concluded"
+                and session.terminal_status == "success"
+                and (
+                    (turn.role == "user" and self.can_accept_followup(session))
+                    or (
+                        turn.role == "agent"
+                        and turn.agent_code == "orchestrator"
+                        and turn.reply_to == "user"
+                        and turn.round_index == -1
+                        and turn.turn_id in pending_followup_ids
+                    )
+                )
+            )
+            if (
+                (session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status)
+                and not followup_turn
+            ):
+                return
             if self._persist:
                 self._persist_turn(session, turn)
             else:
@@ -614,8 +648,43 @@ class DiscussionBus:
         """推送控制消息 (暂停/恢复/轮次信息)"""
         session = self._sessions.get(session_id)
         if session:
-            progress = dict(session.progress)
             data = payload or {}
+            if session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status:
+                # stop_discussion 会先提交 request_stop，再发 cancelled/done 通知。
+                # 允许同一个终态的幂等通知到达订阅者，但绝不再应用其状态，
+                # 也拒绝迟到的 success/progress/started/resumed 等事件。
+                if (
+                    action not in {"done", "cancelled"}
+                    or not session.terminal_status
+                    or str(data.get("status") or ("cancelled" if action == "cancelled" else "success"))
+                    != session.terminal_status
+                ):
+                    return
+                terminal_payload = {
+                    **data,
+                    "status": session.terminal_status,
+                    "task_id": session.report_task_id,
+                    "error": session.terminal_error,
+                }
+                msg = json_lib.dumps({
+                    "type": "control", "session_id": session_id,
+                    "action": action, "payload": terminal_payload,
+                }, ensure_ascii=False)
+                progress_msg = json_lib.dumps({
+                    "type": "control", "session_id": session_id,
+                    "action": "progress", "payload": dict(session.progress),
+                }, ensure_ascii=False) if action == "done" else None
+                for q in list(self._queues.get(session_id, [])):
+                    try:
+                        q.put_nowait(msg)
+                        if progress_msg is not None:
+                            q.put_nowait(progress_msg)
+                    except asyncio.QueueFull:
+                        if isinstance(q, DiscussionSubscriptionQueue):
+                            q.needs_resync = True
+                return
+
+            progress = dict(session.progress)
             if action == "started":
                 if session.status == "pending":
                     session.status = "active"

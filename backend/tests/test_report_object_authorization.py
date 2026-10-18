@@ -271,6 +271,22 @@ def test_export_permission_without_report_view_cannot_read_report_content(scope)
     assert scope["rendered"] == []
 
 
+def test_standard_report_without_issue_permission_is_hidden_from_all_outlets(scope):
+    """报告摘要也可能包含敏感问题证据；列表、详情和导出共用问题查看权限。"""
+    scope["db"].delete(scope["permissions"]["issue:view"])
+    scope["db"].commit()
+
+    listing = scope["client"].get("/reports")
+    assert listing.status_code == 200
+    assert listing.json()["data"]["total"] == 0
+    assert listing.json()["data"]["items"] == []
+    for endpoint in READ_ENDPOINTS:
+        response = _read(scope, endpoint)
+        assert response.status_code == 404, endpoint
+        assert response.json()["message"] == "报告不存在", endpoint
+    assert scope["rendered"] == []
+
+
 def test_report_delete_requires_cancel_permission(scope):
     scope["db"].delete(scope["permissions"]["review:cancel"])
     scope["db"].commit()

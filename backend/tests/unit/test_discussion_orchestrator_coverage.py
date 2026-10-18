@@ -9,6 +9,7 @@ import asyncio
 import json
 import re
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Event
 from typing import Any, Optional
@@ -20,7 +21,7 @@ from app.agents.events import AgentEvent, AgentEventType, DiscussionTurn
 from app.ai import discussion_orchestrator as module
 from app.ai.deepseek_agent import DeepSeekOutputTruncatedError
 from app.ai.discussion_orchestrator import DiscussionOrchestrator
-from app.ai.multi_agent import GENERAL_AGENT, SECURITY_AGENT
+from app.ai.multi_agent import GENERAL_AGENT, SECURITY_AGENT, ReviewAgentProfile
 from app.ai.result_parser import Issue
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -29,6 +30,48 @@ from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 
 _REAL_CALL_FOR_TASK = module._call_raw_for_task
+
+
+def test_build_discussion_agents_uses_review_model_config_for_task_temporary_experts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """任务临时专家使用可用的审查子 Agent 配置，并保留各自会话级客户端键。"""
+    @dataclass(frozen=True)
+    class Config:
+        model: str
+        source: str = "platform"
+
+    class FakeSession:
+        def close(self) -> None:
+            return None
+
+    class FakeAgent:
+        def __init__(self, api_config: Config) -> None:
+            self.api_config = api_config
+
+    configured_agents: list[str] = []
+    monkeypatch.setattr(module, "SessionLocal", FakeSession)
+    monkeypatch.setattr(module, "resolve_api_config", lambda *_args: Config("base-model"))
+
+    def resolve_subagent(_db: Any, config: Config, *, agent_name: str) -> Config:
+        configured_agents.append(agent_name)
+        return Config(f"model:{agent_name}")
+
+    monkeypatch.setattr(module, "resolve_subagent_config", resolve_subagent)
+    monkeypatch.setattr(module, "resolve_agent_model", lambda *_args, **_kwargs: "host-model")
+    monkeypatch.setattr(module, "DeepSeekAgent", FakeAgent)
+    temporary = ReviewAgentProfile(
+        code="temporary_1", name="依赖审查员", focus="依赖风险",
+        issue_types=("安全漏洞",), instruction="核对依赖链", is_custom=True,
+    )
+
+    host, clients = module._build_discussion_agents(42, (GENERAL_AGENT, temporary))
+
+    assert host.api_config.model == "host-model"
+    assert set(clients) == {"code_reviewer", "temporary_1"}
+    assert clients["temporary_1"].api_config.model == "model:code_reviewer"
+    assert len(configured_agents) == 2
+    assert set(configured_agents) == {"code_reviewer"}
 
 
 def _seed_execution_actor(db, user_id, project_id):
@@ -2701,6 +2744,79 @@ async def test_late_user_input_after_last_speaker_hands_control_to_xiaoling(
     assert finalized["coverage"]["attempted_turns"] == 1
     assert any(turn.role == "user" and "权限边界" in turn.content
                for turn in finalized["all_turns"])
+
+
+@pytest.mark.asyncio
+async def test_user_steering_is_replanned_by_xiaoling_before_next_expert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """插话后必须由小菱主持规划剩余 roster，再启动被规划的专家。"""
+    bus = DiscussionBus()
+    bus.create_session(
+        "roundtable-host-replan", task_id=0, file_name="replan.py",
+        owner_user_id=42, max_rounds=1,
+    )
+    orchestrator = _make_orchestrator(bus)
+    host_agent = RecordingAgent()
+    speaker_agent = RecordingAgent()
+    sequence: list[str] = []
+    replans: list[dict[str, Any]] = []
+    finalized: dict[str, Any] = {}
+
+    async def speaker(**kwargs: Any) -> tuple[module.SpeakerDecision, dict[str, Any], bool]:
+        profile = kwargs["profile"]
+        sequence.append(profile.code)
+        if profile.code == "general":
+            assert bus.accept_user_input("roundtable-host-replan", "只追查访问控制缺陷")
+        return module.SpeakerDecision("speak", "propose", None, f"{profile.code} 检查完成"), {}, True
+
+    async def replan(**kwargs: Any) -> list[tuple[int, int, Any]]:
+        sequence.append("xiaoling_plan")
+        replans.append(kwargs)
+        assert kwargs["agent"] is host_agent
+        assert orchestrator._steering_version == 1
+        assert orchestrator._steering_inputs == [(1, "只追查访问控制缺陷")]
+        assert kwargs["remaining_plan"]
+        selected = next(
+            item for item in kwargs["remaining_plan"]
+            if item[0] == 0 and item[2].code == "security"
+        )
+        orchestrator._steering_inputs = []
+        orchestrator._steering_event.clear()
+        return [selected]
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (
+        host_agent, {"code_reviewer": speaker_agent, "security_sentinel": speaker_agent},
+    ))
+    monkeypatch.setattr(module, "build_discussion_environment", lambda **_kwargs: RecordingEnvironment())
+    monkeypatch.setattr(module, "_create_review_task", lambda **_kwargs: 77)
+    monkeypatch.setattr(module, "_finalize_review", lambda **kwargs: finalized.update(kwargs) or 77)
+    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {
+        "status": "success" if finalized else "running", "error": "",
+        "coverage": {"stage": "success"} if finalized else {},
+    })
+    monkeypatch.setattr(module.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(orchestrator, "_speaker_turn", speaker)
+    monkeypatch.setattr(orchestrator, "_replan_remaining", replan)
+    monkeypatch.setattr(orchestrator, "_summarize", lambda *_args: (
+        "小菱已汇总", {"model_name": "host"},
+    ))
+    monkeypatch.setattr(module, "AgentEventBus", EventBusProvider)
+    EventBusProvider.current = RecordingEventBus()
+
+    await orchestrator.start_discussion(
+        session_id="roundtable-host-replan",
+        profiles=(GENERAL_AGENT, SECURITY_AGENT),
+        code="x = 1", language="python", file_name="replan.py",
+        user_id=42, project_id=12, file_id=34, max_rounds=1,
+    )
+
+    assert sequence == ["general", "xiaoling_plan", "security"]
+    assert finalized["coverage"]["attempted_turns"] == 2
+    assert finalized["coverage"]["expected_turns"] == 2
 
 
 @pytest.mark.asyncio

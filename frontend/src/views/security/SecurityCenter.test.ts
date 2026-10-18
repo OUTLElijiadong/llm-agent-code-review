@@ -132,12 +132,14 @@ describe('安全分类来源标识', () => {
     await flushPromises()
 
     const sourceStatus = page.get('[data-testid="cn-source-status"]')
-    expect(sourceStatus.text()).toContain('CNVD / CNNVD 官方记录优先')
-    expect(sourceStatus.text()).toContain('未实现实时官方数据同步')
+    expect(sourceStatus.text()).toContain('CNVD → CNNVD')
+    expect(sourceStatus.text()).toContain('仅两库均查询成功且无匹配时才确认 OWASP fallback')
+    expect(sourceStatus.text()).toContain('未实现官方数据同步或逐项匹配')
     expect(sourceStatus.text()).toContain('记录编号')
     expect(sourceStatus.text()).toContain('官方详情链接')
     expect(sourceStatus.text()).toContain('OWASP fallback')
-    expect(sourceStatus.text()).toContain('没有官方匹配证据')
+    expect(sourceStatus.text()).toContain('来源未接入、未查询或不可用时，结果必须保持未知')
+    expect(sourceStatus.text()).toContain('不代表两库中不存在相关记录')
     expect(sourceStatus.text()).toContain('不根据标题、CWE 或关键词猜测来源')
     expect(page.text()).not.toContain('CNNVD 26 类')
     expect(page.find('.cn-mapping-table').exists()).toBe(false)
@@ -149,7 +151,7 @@ describe('安全分类来源标识', () => {
     page.unmount()
   })
 
-  it('项目 OWASP 热点明确标为尚未接入官方匹配的回退分类', async () => {
+  it('官方漏洞库尚未接入时将 OWASP 热点标为未核验临时参考', async () => {
     mocks.dashboard.mockResolvedValueOnce({
       ...dashboard,
       scanned_project_count: 1,
@@ -158,8 +160,9 @@ describe('安全分类来源标识', () => {
     const page = mountPage()
     await flushPromises()
 
-    expect(page.get('.ov-hot-title').text()).toContain('OWASP fallback')
-    expect(page.get('.ov-hot-title').text()).toContain('尚无 CNVD/CNNVD 官方匹配证据')
+    expect(page.get('.ov-hot-title').text()).toContain('OWASP 临时参考')
+    expect(page.get('.ov-hot-title').text()).toContain('CNVD/CNNVD 尚未核验')
+    expect(page.get('.ov-hot-title').text()).not.toContain('确认未命中')
     expect(page.get('.ov-hot-name').text()).toBe('A01:2025')
     page.unmount()
   })

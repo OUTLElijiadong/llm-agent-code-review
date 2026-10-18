@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.models.pentest import PentestEngagement, PentestFinding
 from app.models.project import Project
@@ -29,6 +29,7 @@ def source_owner(db):
     role = Role(name="来源报告读者", code="user", status="active", is_builtin=1)
     permissions = [
         Permission(code="report:view", name="报告查看", module="report", type="api"),
+        Permission(code=PermissionCode.ISSUE_VIEW, name="问题查看", module="issue", type="api"),
         Permission(code="security:view", name="安全报告查看", module="security", type="api"),
         Permission(code="pentest:view", name="渗透报告查看", module="pentest", type="api"),
     ]
@@ -59,7 +60,12 @@ def _task(db, owner, project, source, *, count=0, score=0, status="success", cre
         score=score,
         score_version="pentest-v1" if source == "pentest" else None,
         coverage=(
-            {"coverage_status": "complete", "tested": ["synthetic fixture scope"], "unscanned": []}
+            {
+                "coverage_status": "complete",
+                "score_available": True,
+                "tested": ["synthetic fixture scope"],
+                "unscanned": [],
+            }
             if source in {"sandbox_test", "pentest"} else None
         ),
         create_time=created or datetime.now(timezone.utc),
@@ -70,6 +76,8 @@ def _task(db, owner, project, source, *, count=0, score=0, status="success", cre
 
 
 def _snapshot(db, task, **content):
+    if task.review_type in {"sandbox_test", "pentest"}:
+        content.setdefault("report_md", "## 合成来源报告\n\n测试夹具中的有效来源快照。")
     snapshot = ReviewReport(
         task_id=task.id,
         user_id=task.user_id,
@@ -95,7 +103,7 @@ def _issues(db, task, *, created=None):
     db.flush()
 
 
-def _pentest(db, task, *, created=None):
+def _pentest(db, task, *, created=None, include_findings=True):
     engagement = PentestEngagement(
         public_id=f"pt-source-{task.id}",
         user_id=task.user_id,
@@ -107,13 +115,14 @@ def _pentest(db, task, *, created=None):
     db.add(engagement)
     db.flush()
     _snapshot(db, task, engagement_public_id=engagement.public_id)
-    for position, (severity, kind, status) in enumerate([
+    findings = [
         ("高", "注入", "confirmed"),
         ("严重", "鉴权", "candidate"),
         ("提示", "配置", "inconclusive"),
         ("严重", "已排除", "refuted"),
         ("高", "已排除", "refuted"),
-    ]):
+    ] if include_findings else []
+    for position, (severity, kind, status) in enumerate(findings):
         db.add(PentestFinding(
             engagement_id=engagement.id,
             finding_fingerprint=f"source-{task.id}-{position}",
@@ -158,13 +167,18 @@ def test_domain_snapshot_count_is_not_replaced_by_empty_review_issues(
     db, source_owner, source_project, source, count, score,
 ):
     task = _task(db, source_owner, source_project, source, count=count, score=score)
-    _snapshot(db, task, report_md="领域报告历史快照")
+    if source == "pentest":
+        _pentest(db, task)
+        expected_count = 5
+    else:
+        _snapshot(db, task, report_md="领域报告历史快照")
+        expected_count = count
     db.commit()
 
     detail = report_service.get_report_detail(db, source_owner, task.id)
     listed = _listed(db, source_owner, task)
 
-    assert detail["task"]["total_issues"] == detail["stats"]["total_issues"] == listed["total_issues"] == count
+    assert detail["task"]["total_issues"] == detail["stats"]["total_issues"] == listed["total_issues"] == expected_count
     assert detail["task"]["score"] == listed["score"] == score
     assert detail["stats"]["score_breakdown"]["score_source"] == source
     assert "weights" not in detail["stats"]["score_breakdown"]
@@ -172,7 +186,7 @@ def test_domain_snapshot_count_is_not_replaced_by_empty_review_issues(
     assert detail["source"]["type"] == listed["source"]["type"] == source
     assert ReportDetailOut(**detail).model_dump()["source"] == detail["source"]
     assert ReportListItem(**listed).model_dump()["source"] == listed["source"]
-    assert dashboard_service.get_summary(db, source_owner)["total_issues"] == count
+    assert dashboard_service.get_summary(db, source_owner)["total_issues"] == expected_count
     assert task.total_issues == count
     assert db.query(ReviewIssue).filter_by(task_id=task.id).count() == 0
 
@@ -267,6 +281,10 @@ def test_score_trend_omits_successful_tasks_without_a_valid_score(db, source_own
 @pytest.mark.parametrize("score", [0, 100])
 def test_empty_source_keeps_explicit_score(db, source_owner, source_project, source, score):
     task = _task(db, source_owner, source_project, source, score=score)
+    if source == "sandbox_test":
+        _snapshot(db, task)
+    elif source == "pentest":
+        _pentest(db, task, include_findings=False)
     db.commit()
     detail = report_service.get_report_detail(db, source_owner, task.id)
 
@@ -280,16 +298,21 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
     task = _task(db, source_owner, source_project, source, count=2, score=0, status="failed")
     if source in {"standard", "discuss"}:
         _issues(db, task)
+    elif source == "sandbox_test":
+        _snapshot(db, task)
+    elif source == "pentest":
+        _pentest(db, task)
     db.commit()
 
-    assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == 2
+    expected_count = 5 if source == "pentest" else 2
+    assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == expected_count
     assert _listed(db, source_owner, task)["status"] == "failed"
     assert report_service.list_reports(db, source_owner)["total"] == 1
     summary = dashboard_service.get_summary(db, source_owner)
     assert summary["review_count"] == 0
     assert summary["avg_score"] == 0
     assert summary["recent_tasks"] == []
-    assert summary["total_issues"] == 2
+    assert summary["total_issues"] == expected_count
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
@@ -297,6 +320,10 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
     task = _task(db, source_owner, source_project, source, count=2)
     if source in {"standard", "discuss"}:
         _issues(db, task)
+    elif source == "sandbox_test":
+        _snapshot(db, task)
+    elif source == "pentest":
+        _pentest(db, task)
     member = User(username="source-member", password="x", role="user", status=1)
     outsider = User(username="source-outsider", password="x", role="user", status=1)
     db.add_all([member, outsider])
@@ -305,7 +332,8 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
     db.commit()
 
     for reader in [source_owner, admin_user]:
-        assert report_service.get_report_detail(db, reader, task.id)["stats"]["total_issues"] == 2
+        expected_count = 5 if source == "pentest" else 2
+        assert report_service.get_report_detail(db, reader, task.id)["stats"]["total_issues"] == expected_count
     for reader in [member, outsider]:
         with pytest.raises(NotFoundError):
             report_service.get_report_detail(db, reader, task.id)
@@ -393,7 +421,12 @@ def test_domain_score_visibility_is_consistent_across_report_and_dashboard(
 ):
     task = _task(db, source_owner, source_project, source, score=84)
     task.coverage = (
-        {"coverage_status": coverage_status, "tested": ["known scope"], "unscanned": []}
+        {
+            "coverage_status": coverage_status,
+            "score_available": coverage_status == "complete",
+            "tested": ["known scope"],
+            "unscanned": [],
+        }
         if coverage_status != "unknown" else {}
     )
     if source == "pentest":
@@ -465,10 +498,10 @@ def test_pentest_foreign_link_does_not_leak_findings_or_source(db, source_owner,
     snapshot.user_id = engagement.user_id
     db.commit()
 
-    detail = report_service.get_report_detail(db, source_owner, task.id)
-    assert detail["stats"]["total_issues"] == 2
-    assert detail["source"].get("detail_api") is None
-    assert "注入" not in detail["stats"]["by_type"]
+    assert report_service.list_reports(db, source_owner)["items"] == []
+    with pytest.raises(ConflictError):
+        report_service.get_report_detail(db, source_owner, task.id)
+    # 仪表盘保留任务自身的聚合计数，但不泄露外部委托的发现明细。
     assert dashboard_service.get_summary(db, source_owner)["total_issues"] == 2
 
 
@@ -576,9 +609,9 @@ def test_security_source_summaries_preserve_result_window_and_visibility(db, sou
     assert hidden["source_summaries"] == []
 
 
-@pytest.mark.parametrize("passed,score", [(True, 100), (False, 30)])
+@pytest.mark.parametrize("passed,expected_status", [(True, "success"), (False, "failed")])
 def test_real_sandbox_publisher_report_and_dashboard_close_the_count_loop(
-    db, source_owner, source_project, passed, score,
+    db, source_owner, source_project, passed, expected_status,
 ):
     from app.services.sandbox_service import _publish_sandbox_report
 
@@ -596,9 +629,10 @@ def test_real_sandbox_publisher_report_and_dashboard_close_the_count_loop(
     detail = report_service.get_report_detail(db, source_owner, task.id)
 
     assert detail["stats"]["total_issues"] == _listed(db, source_owner, task)["total_issues"] == 3
-    assert detail["stats"]["score"] == _listed(db, source_owner, task)["score"] == score
+    # 本用例未提供动态用例生成和执行回执，不能从 passed 字段推导评分。
+    assert detail["stats"]["score"] is _listed(db, source_owner, task)["score"] is None
     assert dashboard_service.get_summary(db, source_owner)["total_issues"] == 3
-    assert task.status == ("success" if passed else "failed")
+    assert task.status == expected_status
 
 
 def test_real_pentest_publisher_and_domain_detail_agree(db, source_owner, source_project):
@@ -622,11 +656,9 @@ def test_real_pentest_publisher_and_domain_detail_agree(db, source_owner, source
     assert dashboard_service.get_summary(db, source_owner)["total_issues"] == 5
     engagement.report_task_id = None
     db.commit()
-    historical = report_service.get_report_detail(db, source_owner, published.id)
-    assert historical["stats"]["total_issues"] == 5
-    assert historical["stats"]["severity"] == detail["stats"]["severity"]
-    assert historical["stats"]["refuted"] == 2
-    assert historical["stats"]["score"] == 84
+    assert report_service.list_reports(db, source_owner)["items"] == []
+    with pytest.raises(ConflictError):
+        report_service.get_report_detail(db, source_owner, published.id)
 
 
 @pytest.fixture
@@ -735,10 +767,9 @@ def test_invalid_domain_snapshot_does_not_override_task_facts(db, source_owner, 
     snapshot.content_json = bad_content
     db.commit()
 
-    detail = report_service.get_report_detail(db, source_owner, task.id)
-    assert detail["stats"]["total_issues"] == 3
-    assert detail["stats"]["score"] == 0
-    assert detail["source"].get("public_id") is None
+    assert report_service.list_reports(db, source_owner)["items"] == []
+    with pytest.raises(ConflictError):
+        report_service.get_report_detail(db, source_owner, task.id)
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])

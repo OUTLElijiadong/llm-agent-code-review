@@ -105,7 +105,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     task = report_service.get_readable_report_task(db, user, task_id)
 
     if task.review_type in {"sandbox_test", "pentest"}:
-        score = task.score
+        score = task.score if report_service._score_is_available(task) else None
         return task, [], task.summary or "", score
 
     # Generic report permission allows an overview, but a generated report may
@@ -120,11 +120,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
             detail={"required_permission": PermissionCode.ISSUE_VIEW},
         )
 
-    coverage = task.coverage if isinstance(task.coverage, dict) else {}
-    if task.review_type in {"security_scan", "fullchain_audit"} and coverage.get("score_available") is False:
-        score = None
-    else:
-        score = task.score or 0
+    score = task.score if report_service._score_is_available(task) else None
 
     issues: List[ReviewIssue] = (
         db.query(ReviewIssue)

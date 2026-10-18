@@ -80,7 +80,16 @@ def _domain_fixture(db, owner, project, source, *, status="success"):
         total_issues=3 if source == "sandbox_test" else 2,
         score=0 if status == "failed" else (100 if source == "sandbox_test" else 84),
         score_version="pentest-v1" if source == "pentest" else None,
-        coverage={"verification_status": "complete"} if source == "sandbox_test" else None,
+        coverage=(
+            {
+                "verification_status": "complete" if status == "success" else "failed",
+                "score_available": status == "success",
+                "score_basis": "fixture_source_receipt" if status == "success" else None,
+                **({"coverage_status": "complete"} if status == "success" else {}),
+            }
+            if source == "sandbox_test"
+            else None
+        ),
         summary=REPORT_MD,
     )
     db.add(task)
@@ -219,7 +228,12 @@ def test_domain_json_export_matches_detail_without_standard_issue_fabrication(ex
     task = _domain_fixture(db, owner, project, source)
     if source == "sandbox_test":
         # This fixture represents a verified full-coverage sandbox run.
-        task.coverage = {"coverage_status": "complete", "verification_status": "complete"}
+        task.coverage = {
+            "coverage_status": "complete",
+            "verification_status": "complete",
+            "score_available": True,
+            "score_basis": "fixture_source_receipt",
+        }
         db.commit()
     if endpoint == "generate":
         response = client.post("/api/reports/generate", json={"task_id": task.id, "format": "json"})
@@ -387,6 +401,62 @@ def test_security_snapshot_with_invalid_body_is_hidden_from_list_and_detail(expo
     assert listing.status_code == 200
     assert all(item["task_id"] != task.id for item in listing.json()["data"]["items"])
     assert detail.status_code == exported.status_code == 409
+
+
+@pytest.mark.parametrize("source", ["sandbox_test", "pentest"])
+def test_domain_reports_without_readable_source_are_hidden_from_every_outlet(export_context, source):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, source)
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    if source == "sandbox_test":
+        snapshot.content_json = {**snapshot.content_json, "report_md": " \n\t"}
+    else:
+        db.query(PentestEngagement).filter_by(report_task_id=task.id).delete()
+    db.commit()
+
+    listing = client.get("/api/reports?page=1&page_size=100")
+    detail = client.get(f"/api/reports/{task.id}")
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
+
+    assert listing.status_code == 200
+    assert listing.json()["data"]["total"] == 0
+    assert all(item["task_id"] != task.id for item in listing.json()["data"]["items"])
+    assert detail.status_code == exported.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("coverage", "stored_score", "expected_score"),
+    [
+        ({"coverage_status": "partial", "score_available": False}, 0, None),
+        ({"coverage_status": "partial", "score_available": True}, 50, 50),
+        ({"coverage_status": "complete", "score_available": True}, 0, 0),
+    ],
+)
+def test_sandbox_score_availability_is_separate_from_coverage_and_zero_is_valid(
+    export_context, coverage, stored_score, expected_score
+):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test")
+    task.score = stored_score
+    task.coverage = {"verification_status": coverage["coverage_status"], **coverage}
+    snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+    snapshot.score = stored_score
+    snapshot.content_json = {
+        **snapshot.content_json,
+        "coverage": task.coverage,
+        "score_available": coverage["score_available"],
+    }
+    db.commit()
+
+    listing = client.get("/api/reports?page=1&page_size=100").json()["data"]
+    row = next(item for item in listing["items"] if item["task_id"] == task.id)
+    detail = client.get(f"/api/reports/{task.id}").json()["data"]
+    exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
+
+    assert row["score"] == expected_score
+    assert detail["task"]["score"] == expected_score
+    assert exported["score"] == expected_score
+    assert detail["task"]["coverage"]["coverage_status"] == coverage["coverage_status"]
 
 
 def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():

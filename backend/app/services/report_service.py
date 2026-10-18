@@ -88,7 +88,12 @@ def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
 
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
-    return coverage.get("score_available") is not False
+    explicit = coverage.get("score_available")
+    if task.review_type in {"sandbox_test", "pentest"}:
+        # Domain rows historically used a non-null integer column, often 0 as a
+        # placeholder. Only an explicit source receipt can make that value real.
+        return explicit is True
+    return explicit is not False
 
 
 # 部分覆盖仍是可交付结果：报告必须展示已完成内容，并明确列出未覆盖范围。
@@ -111,12 +116,12 @@ def _task_coverage(task: ReviewTask) -> dict:
 
 
 def display_report_score(task: ReviewTask, score: int | None) -> int | None:
-    """领域报告只有明确记录为完整覆盖时才展示评分。"""
+    """Display only scores with an explicit basis; coverage remains a separate fact."""
     if score is None:
         return None
     if task.review_type not in {"sandbox_test", "pentest"}:
         return score
-    return score if _task_coverage(task).get("coverage_status") == "complete" else None
+    return score if _score_is_available(task) else None
 
 
 def is_report_available(task: ReviewTask | None) -> bool:
@@ -147,6 +152,41 @@ def has_source_report_permission(db: Session, user: User, review_type: str | Non
     """报告来源权限与报告列表、详情和导出共用；管理员由 RBAC 统一绕过。"""
     required = _REPORT_SOURCE_PERMISSION_BY_TYPE.get(str(review_type or ""))
     return required is None or rbac_service.check_permission(db, int(user.id), required)
+
+
+def _standard_report_permission_filter(db: Session, user: User) -> bool:
+    """Standard reports can include issue evidence and need the matching read permission."""
+    return rbac_service.check_permission(db, int(user.id), PermissionCode.ISSUE_VIEW)
+
+
+def _sandbox_report_snapshot(db: Session, task: ReviewTask) -> ReviewReport | None:
+    report = db.query(ReviewReport).filter(
+        ReviewReport.task_id == int(task.id),
+        ReviewReport.user_id == int(task.user_id),
+    ).first()
+    content = report.content_json if report and isinstance(report.content_json, dict) else {}
+    body = content.get("report_md")
+    if content.get("source") != "sandbox_test" or not isinstance(body, str) or not body.strip():
+        return None
+    return report
+
+
+def _pentest_report_engagement(db: Session, task: ReviewTask) -> PentestEngagement | None:
+    report = db.query(ReviewReport).filter(
+        ReviewReport.task_id == int(task.id),
+        ReviewReport.user_id == int(task.user_id),
+    ).first()
+    content = report.content_json if report and isinstance(report.content_json, dict) else {}
+    if content.get("source") != "pentest":
+        return None
+    engagements = db.query(PentestEngagement).filter(
+        PentestEngagement.report_task_id == int(task.id),
+        PentestEngagement.user_id == int(task.user_id),
+        PentestEngagement.project_id == int(task.project_id),
+    ).all()
+    if len(engagements) != 1 or content.get("engagement_public_id") != engagements[0].public_id:
+        return None
+    return engagements[0]
 
 
 def visible_report_review_types(db: Session, user: User) -> frozenset[str]:
@@ -194,6 +234,9 @@ def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTas
         raise NotFoundError("报告不存在", code=40400)
     if not has_source_report_permission(db, user, task.review_type):
         raise NotFoundError("报告不存在", code=40400)
+    is_source_report = task.review_type in _REPORT_BACKED_REVIEW_TYPES
+    if not is_source_report and not _standard_report_permission_filter(db, user):
+        raise NotFoundError("报告不存在", code=40400)
     try:
         require_project_access(db, task.project_id, user, need_write=False)
     except NotFoundError:
@@ -222,6 +265,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
     # API 路由已有 REPORT_VIEW 门禁；服务层仍需独立 fail-closed，避免其他
     # 调用方绕过路由后把无权限任务计入总数或分页卡片。
     report_permission = rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW)
+    issue_permission = _standard_report_permission_filter(db, user)
     administrator = rbac_service.is_admin_user(db, int(user.id))
     if not report_permission:
         q = q.filter(false())
@@ -241,6 +285,8 @@ def list_reports(db: Session, user: User, project_id: int = None,
         q = q.filter(ReviewTask.review_type.notin_(("security_scan", "fullchain_audit")))
     if not rbac_service.check_permission(db, int(user.id), PermissionCode.PENTEST_VIEW):
         q = q.filter(ReviewTask.review_type != "pentest")
+    if not issue_permission:
+        q = q.filter(ReviewTask.review_type.in_(tuple(_REPORT_BACKED_REVIEW_TYPES)))
 
     report_body = ReviewReport.content_json["report_md"].as_string()
     database_dialect = db.get_bind().dialect.name
@@ -255,7 +301,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
         report_body_is_string = func.json_typeof(ReviewReport.content_json["report_md"]) == "string"
     else:
         report_body_is_string = report_body.is_not(None)
-    valid_security_snapshot = db.query(ReviewReport.id).filter(
+    valid_markdown_snapshot = db.query(ReviewReport.id).filter(
         ReviewReport.task_id == ReviewTask.id,
         ReviewReport.user_id == ReviewTask.user_id,
         ReviewReport.content_json["source"].as_string() == ReviewTask.review_type,
@@ -265,10 +311,31 @@ def list_reports(db: Session, user: User, project_id: int = None,
     ).correlate(ReviewTask).exists()
     q = q.filter(
         or_(
-            ReviewTask.review_type.notin_(("security_scan", "fullchain_audit")),
-            valid_security_snapshot,
+            ReviewTask.review_type.notin_(("security_scan", "fullchain_audit", "sandbox_test")),
+            valid_markdown_snapshot,
         )
     )
+
+    pentest_engagement_count = db.query(func.count(PentestEngagement.id)).filter(
+        PentestEngagement.report_task_id == ReviewTask.id,
+        PentestEngagement.user_id == ReviewTask.user_id,
+        PentestEngagement.project_id == ReviewTask.project_id,
+    ).correlate(ReviewTask).scalar_subquery()
+    valid_pentest_snapshot = db.query(PentestEngagement.id).join(
+        ReviewReport,
+        and_(
+            ReviewReport.task_id == ReviewTask.id,
+            ReviewReport.user_id == ReviewTask.user_id,
+            ReviewReport.content_json["source"].as_string() == "pentest",
+            ReviewReport.content_json["engagement_public_id"].as_string() == PentestEngagement.public_id,
+        ),
+    ).filter(
+        PentestEngagement.report_task_id == ReviewTask.id,
+        PentestEngagement.user_id == ReviewTask.user_id,
+        PentestEngagement.project_id == ReviewTask.project_id,
+        pentest_engagement_count == 1,
+    ).correlate(ReviewTask).exists()
+    q = q.filter(or_(ReviewTask.review_type != "pentest", valid_pentest_snapshot))
 
     total = q.count()
     pagination = Pagination(page, page_size, total)
@@ -298,6 +365,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
     report_access = {
         row.id: (
             report_permission
+            and (issue_permission or row.review_type in _REPORT_BACKED_REVIEW_TYPES)
             and (administrator or int(row.user_id) == int(user.id))
             and row.project_id in visible_project_ids
             and source_permissions.get(row.review_type, True)
@@ -380,33 +448,40 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     if security_snapshot is not None:
         source["security_report"] = security_snapshot
     elif task.review_type == "sandbox_test":
-        snapshot = db.query(ReviewReport).filter(
-            ReviewReport.task_id == task.id,
-            ReviewReport.user_id == task.user_id,
-        ).first()
+        snapshot = _sandbox_report_snapshot(db, task)
         content = snapshot.content_json if snapshot and isinstance(snapshot.content_json, dict) else {}
-        if content.get("source") == "sandbox_test":
-            from app.services.domain_report_exporter import build_sandbox_report_markdown
+        if snapshot is None:
+            raise ConflictError(
+                "沙箱领域报告正文缺失或来源不匹配，已停止展示", code=40942,
+                next_action=f"请重新生成 GET /api/reports/tasks/{task.id}/generate 的报告后再查看",
+            )
+        from app.services.domain_report_exporter import build_sandbox_report_markdown
 
-            domain_data = dict(content)
-            domain_data.setdefault("execution_status", task.status)
-            domain_data.setdefault("error_message", task.error_message)
-            if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
-                domain_data["coverage"] = _task_coverage(task)
-            source["domain_report_md"] = build_sandbox_report_markdown(
-                domain_data,
-                task_name=task.task_name,
-                project_name=project.project_name if project else "",
+        domain_data = dict(content)
+        domain_data.setdefault("execution_status", task.status)
+        domain_data.setdefault("error_message", task.error_message)
+        if not isinstance(domain_data.get("coverage"), dict) or not domain_data["coverage"]:
+            domain_data["coverage"] = _task_coverage(task)
+        source["domain_report_md"] = build_sandbox_report_markdown(
+            domain_data,
+            task_name=task.task_name,
+            project_name=project.project_name if project else "",
+        )
+        findings = content.get("findings")
+        source["domain_findings"] = clean_report_payload(
+            findings if isinstance(findings, list) else []
+        )
+    elif task.review_type == "pentest":
+        engagement = _pentest_report_engagement(db, task)
+        if engagement is None:
+            raise ConflictError(
+                "渗透领域发现与当前报告的关联缺失或不唯一，已停止展示", code=40942,
+                next_action=f"请在 GET /api/reports/{task.id} 查看来源并恢复原始关联",
             )
-            findings = content.get("findings")
-            source["domain_findings"] = clean_report_payload(
-                findings if isinstance(findings, list) else []
-            )
-    elif task.review_type == "pentest" and source.get("public_id"):
         from app.services.domain_report_exporter import build_pentest_report_markdown
         from app.services.pentest_service import get_engagement_detail
 
-        domain_data = get_engagement_detail(db, user, str(source["public_id"]))
+        domain_data = get_engagement_detail(db, user, engagement.public_id)
         source["domain_report_md"] = build_pentest_report_markdown(
             domain_data,
             task_name=task.task_name,

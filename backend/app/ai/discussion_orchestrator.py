@@ -182,13 +182,21 @@ def _build_discussion_agents(user_id: int, profiles, host_surface: str = "user")
     db = SessionLocal()
     try:
         config = resolve_api_config(db, user_id)
-        names = {"code_reviewer"} | {
-            _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code) for profile in profiles
-        }
-        clients = {
-            name: DeepSeekAgent(api_config=resolve_subagent_config(db, config, agent_name=name))
-            for name in names
-        }
+        clients = {}
+        for profile in profiles:
+            target_code = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
+            if target_code in clients:
+                continue
+            # 临时画像只有本次圆桌的身份与指令，不应查找/创建持久 Agent 模型分配；
+            # 复用已有 code_reviewer 子 Agent 配置，但各临时成员仍各有独立客户端与日志标签。
+            config_name = "code_reviewer" if profile.is_custom else target_code
+            clients[target_code] = DeepSeekAgent(
+                api_config=resolve_subagent_config(db, config, agent_name=config_name),
+            )
+        if "code_reviewer" not in clients:
+            clients["code_reviewer"] = DeepSeekAgent(
+                api_config=resolve_subagent_config(db, config, agent_name="code_reviewer"),
+            )
         host_model = resolve_agent_model(db, surface=host_surface, config=config)
         host_config = replace(config, model=host_model)
         return DeepSeekAgent(api_config=host_config), clients
@@ -667,190 +675,141 @@ class DiscussionOrchestrator:
 
             consumed_user_input_count = 0
             moderator_takeover = False
-            for round_idx in range(max_rounds):
+            remaining_plan = [
+                (round_idx, speaker_idx, profile)
+                for round_idx in range(max_rounds)
+                for speaker_idx, profile in enumerate(profiles)
+            ]
+            while remaining_plan or self._steering_event.is_set():
                 await self._wait_if_paused(session_id)
                 await self._check_active()
 
+                if self._steering_event.is_set():
+                    input_snapshot_count = len(self._user_inputs)
+                    remaining_plan = await self._replan_remaining(
+                        remaining_plan=remaining_plan,
+                        profiles=profiles,
+                        agent=agent,
+                        all_turns=all_turns,
+                        code=code,
+                        language=language,
+                        file_name=file_name,
+                        coverage=coverage,
+                        deferred_logs=deferred_logs,
+                        turn_counter=turn_counter,
+                    )
+                    consumed_user_input_count = input_snapshot_count
+                    turn_counter = max(
+                        turn_counter,
+                        max((turn.turn_id for turn in all_turns if turn.turn_id >= 0), default=0),
+                    )
+                    coverage["expected_turns"] = coverage["attempted_turns"] + len(remaining_plan)
+                    progress_total = coverage["expected_turns"] + 3
+                    session.expected_turns = coverage["expected_turns"]
+                    if not remaining_plan and not self._steering_event.is_set():
+                        moderator_takeover = True
+                    if not remaining_plan:
+                        continue
+
+                if not remaining_plan:
+                    break
+
+                await self._wait_if_paused(session_id)
+                await self._check_active()
+                round_idx, speaker_idx, profile = remaining_plan.pop(0)
+                target_code = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
                 bus.publish_control(session_id, "round_start", {
                     "round": round_idx + 1,
                     "total_rounds": max_rounds,
                 })
-
-                # ── 逐一轮流发言 (类聊天室) ──
-                for speaker_idx, profile in enumerate(profiles):
-                    await self._wait_if_paused(session_id)
-                    await self._check_active()
-                    if self._user_input_event.is_set() and coverage["valid_speeches"]:
-                        moderator_takeover = True
-                        break
-
-                    target_code = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
-                    bus.publish_control(session_id, "speaker", {
-                        "speaker_code": profile.code,
-                        "speaker_name": profile.name,
-                        "speaker_index": speaker_idx + 1,
-                        "total_speakers": len(profiles),
-                    })
-                    self._emit(AgentEventType.THINKING, target_code,
-                               f"{profile.name} 正在组织第 {round_idx+1} 轮发言")
-
-                    logger.info(
-                        f"[Discussion] R{round_idx+1} 轮到 {profile.name}"
-                        f"({speaker_idx+1}/{len(profiles)}) 发言",
-                    )
-
-                    coverage["attempted_turns"] += 1
-                    input_snapshot_count = len(self._user_inputs)
-                    self._speaker_call_active = True
-                    try:
-                        decision, meta, ok = await self._speaker_turn(
-                            agent=speaker_agents[target_code],
-                            profile=profile,
-                            code=code,
-                            language=language,
-                            file_name=file_name,
-                            all_turns=all_turns,
-                            user_inputs=self._user_inputs[consumed_user_input_count:input_snapshot_count],
-                            round_idx=round_idx,
-                            speaker_idx=speaker_idx,
-                            remaining_turns=coverage["expected_turns"] - coverage["attempted_turns"],
-                        )
-                    finally:
-                        self._speaker_call_active = False
-                    await self._check_active()
-                    # 模型生成期间抵达的用户输入留待下一位 Agent；不得在轮末清空。
-                    consumed_user_input_count = input_snapshot_count
-                    coverage["successful_turns" if ok else "failed_turns"] += 1
-                    if ok and decision.action == "speak" and decision.content.strip():
-                        coverage["valid_speeches"] += 1
-                        self._has_expert_speech = True
-                    elif ok:
-                        coverage["silent_turns"] += 1
-                    else:
-                        coverage["errors"].append(f"{profile.name} 第 {round_idx + 1} 轮发言失败")
-                    if meta:
-                        metered_calls = meta if isinstance(meta, list) else [
-                            (round_idx * 100 + speaker_idx, meta)
-                        ]
-                        for chunk_index, call_meta in metered_calls:
-                            deferred_logs.append({
-                                "meta": call_meta,
-                                "status": "success" if ok else "failed",
-                                "chunk_index": chunk_index,
-                                "agent_label": profile.code,
-                            })
-                    self._emit(
-                        AgentEventType.COMPLETE if ok else AgentEventType.FAILED,
-                        target_code,
-                        (
-                            f"{profile.name} 第 {round_idx+1} 轮选择静音"
-                            if decision.action == "silent" and ok
-                            else f"{profile.name} 完成第 {round_idx+1} 轮发言"
-                        ),
-                    )
-                    turn_counter += 1
-                    turn = DiscussionTurn(
-                        turn_id=turn_counter,
-                        agent_code=profile.code,
-                        agent_name=profile.name,
-                        role="agent",
-                        content=decision.content,
-                        action=decision.action,
-                        stance=decision.stance,
-                        reply_to=decision.reply_to,
-                        round_index=round_idx + 1,
-                    )
-                    if ok:
-                        all_turns.append(turn)
-                    bus.publish_turn(session_id, turn)
-                    # v2.4 B1: Agent 发言 publish 到 MetaGPT Environment
-                    self._publish_to_env(
-                        speaker=profile.code,
-                        content=turn.content,
-                        turn_id=turn_counter,
-                    )
-                    publish_progress(
-                        "speaking", coverage["attempted_turns"], progress_total,
-                        current_round=round_idx + 1, speaker_code=profile.code,
-                    )
-                    if self._user_input_event.is_set():
-                        moderator_takeover = True
-                        break
-
-                if moderator_takeover:
-                    break
-
-
-
-            # 最后一位专家生成期间抵达的消息已被接收，但未进入该次模型输入。
-            # 最多追加两次专家补答；持续发言则明确告知剩余消息需续会。
-            rescue_count = 0
-            rescue_answered = True
-            while (
-                not moderator_takeover
-                and len(self._user_inputs) > consumed_user_input_count
-                and rescue_count < 2
-            ):
-                await self._wait_if_paused(session_id)
-                await self._check_active()
-                rescue_count += 1
-                profile = next((item for item in profiles if item.code == "general"), profiles[-1])
-                target_code = _PROFILE_TO_AGENT_CODE.get(profile.code, profile.code)
-                input_snapshot_count = len(self._user_inputs)
-                coverage["expected_turns"] += 1
-                coverage["attempted_turns"] += 1
-                progress_total += 1
-                self._emit(AgentEventType.THINKING, target_code, f"{profile.name} 正在回应最新用户消息")
-                decision, meta, ok = await self._speaker_turn(
-                    agent=speaker_agents[target_code], profile=profile,
-                    code=code, language=language, file_name=file_name,
-                    all_turns=all_turns,
-                    user_inputs=self._user_inputs[consumed_user_input_count:input_snapshot_count],
-                    round_idx=max_rounds - 1,
-                    speaker_idx=len(profiles) + rescue_count,
-                    remaining_turns=0,
+                bus.publish_control(session_id, "speaker", {
+                    "speaker_code": profile.code,
+                    "speaker_name": profile.name,
+                    "speaker_index": speaker_idx + 1,
+                    "total_speakers": len(profiles),
+                })
+                self._emit(AgentEventType.THINKING, target_code,
+                           f"{profile.name} 正在组织第 {round_idx + 1} 轮发言")
+                logger.info(
+                    f"[Discussion] R{round_idx + 1} 轮到 {profile.name}"
+                    f"({speaker_idx + 1}/{len(profiles)}) 发言",
                 )
+
+                coverage["attempted_turns"] += 1
+                input_snapshot_count = len(self._user_inputs)
+                self._speaker_call_active = True
+                try:
+                    decision, meta, ok = await self._speaker_turn(
+                        agent=speaker_agents[target_code],
+                        profile=profile,
+                        code=code,
+                        language=language,
+                        file_name=file_name,
+                        all_turns=all_turns,
+                        user_inputs=self._user_inputs[consumed_user_input_count:input_snapshot_count],
+                        round_idx=round_idx,
+                        speaker_idx=speaker_idx,
+                        remaining_turns=coverage["expected_turns"] - coverage["attempted_turns"],
+                    )
+                finally:
+                    self._speaker_call_active = False
                 await self._check_active()
+                # 调用开始后收到的插话留给小菱规划，不能在本次模型调用中途伪称已处理。
                 consumed_user_input_count = input_snapshot_count
                 coverage["successful_turns" if ok else "failed_turns"] += 1
                 if ok and decision.action == "speak" and decision.content.strip():
                     coverage["valid_speeches"] += 1
+                    self._has_expert_speech = True
                 elif ok:
                     coverage["silent_turns"] += 1
-                    rescue_answered = False
                 else:
-                    coverage["errors"].append(f"{profile.name} 用户消息补答失败")
-                    rescue_answered = False
+                    coverage["errors"].append(f"{profile.name} 第 {round_idx + 1} 轮发言失败")
                 if meta:
                     metered_calls = meta if isinstance(meta, list) else [
-                        ((max_rounds - 1) * 100 + len(profiles) + rescue_count, meta)
+                        (round_idx * 100 + speaker_idx, meta)
                     ]
                     for chunk_index, call_meta in metered_calls:
                         deferred_logs.append({
-                            "meta": call_meta, "status": "success" if ok else "failed",
-                            "chunk_index": chunk_index, "agent_label": profile.code,
+                            "meta": call_meta,
+                            "status": "success" if ok else "failed",
+                            "chunk_index": chunk_index,
+                            "agent_label": profile.code,
                         })
+                self._emit(
+                    AgentEventType.COMPLETE if ok else AgentEventType.FAILED,
+                    target_code,
+                    (
+                        f"{profile.name} 第 {round_idx + 1} 轮选择静音"
+                        if decision.action == "silent" and ok
+                        else f"{profile.name} 完成第 {round_idx + 1} 轮发言"
+                    ),
+                )
                 turn_counter += 1
                 turn = DiscussionTurn(
-                    turn_id=turn_counter, agent_code=profile.code, agent_name=profile.name,
-                    role="agent", content=decision.content, action=decision.action,
-                    stance=decision.stance, reply_to=decision.reply_to,
-                    round_index=max_rounds,
+                    turn_id=turn_counter,
+                    agent_code=profile.code,
+                    agent_name=profile.name,
+                    role="agent",
+                    content=decision.content,
+                    action=decision.action,
+                    stance=decision.stance,
+                    reply_to=decision.reply_to,
+                    round_index=round_idx + 1,
                 )
                 if ok:
                     all_turns.append(turn)
                 bus.publish_turn(session_id, turn)
                 self._publish_to_env(speaker=profile.code, content=turn.content, turn_id=turn_counter)
-                self._emit(
-                    AgentEventType.COMPLETE if ok else AgentEventType.FAILED,
-                    target_code,
-                    f"{profile.name} 已回应最新用户消息" if ok else f"{profile.name} 用户消息补答失败",
-                )
                 publish_progress(
                     "speaking", coverage["attempted_turns"], progress_total,
-                    current_round=max_rounds, speaker_code=profile.code,
+                    current_round=round_idx + 1, speaker_code=profile.code,
                 )
 
+            if moderator_takeover:
+                coverage["moderator_takeover"] = True
+                coverage["pending_user_inputs"] = 0
+            rescue_count = 0
+            rescue_answered = True
             remaining_user_inputs = len(self._user_inputs) - consumed_user_input_count
             if moderator_takeover:
                 coverage["moderator_takeover"] = True
@@ -1174,12 +1133,11 @@ class DiscussionOrchestrator:
     ) -> None:
         """复用发言和 done 控制帧发布可见失败原因，再关闭会话。"""
         session = self._bus.get_session(session_id)
-        if session:
-            session.report_task_id = task_id
-            if status == "cancelled" and session.terminal_status == "cancelled" and session.terminal_error:
-                error = session.terminal_error
-            session.terminal_status = status
-            session.terminal_error = error[:1000]
+        if (
+            session and status == "cancelled"
+            and session.terminal_status == "cancelled" and session.terminal_error
+        ):
+            error = session.terminal_error
         if status not in {"success", "cancelled"}:
             message = error or f"圆桌讨论已结束（{status}），没有生成完整成功报告。"
             self._bus.publish_turn(session_id, DiscussionTurn(
@@ -1879,12 +1837,12 @@ class DiscussionOrchestrator:
                     self._user_input_event.set()
                 if not self._moderator_takeover_notified:
                     host_message = (
-                        "小菱已收到你的补充。当前正在生成的专家回合结束后，我会接管并回应；后续专家调用已暂停。"
+                        "小菱已收到你的补充。当前专家回合结束后，我会先重排余下专家与检查重点，再安排后续讨论。"
                         if self._speaker_call_active else
                         (
-                            "小菱已收到你的补充。我会把这条关注点带入首轮专家审查，再由我主持汇总。"
+                            "小菱已收到你的补充。我会把这条关注点纳入讨论计划，再安排首轮专家审查。"
                             if not self._has_expert_speech else
-                            "小菱已收到你的补充。本轮不再发起新的专家调用，接下来由我整理并回应。"
+                            "小菱已收到你的补充。我会重排余下议程，安排相关专家优先核对，再由我汇总回应。"
                         )
                     )
                     host_turn = DiscussionTurn(

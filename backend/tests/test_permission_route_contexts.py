@@ -19,13 +19,14 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 365
+    assert len(plan["routes"]) == 366
     assert len({row["endpoint"] for row in plan["routes"]}) == 45
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("POST", "/api/auth/login"),
         ("POST", "/v1/responses"),
         ("POST", "/api/discuss/start"),
+        ("POST", "/api/discuss/sessions/{session_id}/stop"),
         ("POST", "/api/agent-teams/{team_id}/retry/preview"),
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -56,8 +57,15 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
         ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 351
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 352
     assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 283
+    stop_route = next(
+        row for row in plan["routes"]
+        if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"
+    )
+    assert stop_route["anonymous"] == "ready"
+    assert stop_route["no_permission"] == "blocked"
+    assert "app.core.dependencies.get_current_user" in stop_route["dependency_order"]
     feedback_stats = [row for row in plan["routes"]
                       if row["method"] == "GET" and row["path"] == "/api/feedback/stats"]
     assert len(feedback_stats) == 1

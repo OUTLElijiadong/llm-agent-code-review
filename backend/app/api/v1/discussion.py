@@ -6,6 +6,7 @@ POST /discuss/start  — 启动讨论模式审查(preflight)
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -17,13 +18,14 @@ from app.agents.discussion_bus import DiscussionBus, utc_timestamp, visible_roun
 from app.api.v1.ws_discussion import cancel_pending, purge_stale_pending, register_pending
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.review_task import ReviewTask
 from app.models.roundtable import RoundtableSession, RoundtableTurn
 from app.models.user import User
 from app.schemas.common import Resp
+from app.schemas.discussion import RoundtableTemporaryExpert
 from app.services import rule_service
 from app.services.ai_usage_context import current_attribution
 from app.services.project_member_service import require_project_execution
@@ -245,7 +247,35 @@ def start_discussion(
     validate_review_input(code_file)
 
     from app.ai.multi_agent import get_discussion_agent_profiles
-    profiles = get_discussion_agent_profiles()
+    profiles = list(get_discussion_agent_profiles())
+    if temporary_experts_json:
+        if len(temporary_experts_json) > 8192:
+            raise ValidationError("圆桌临时专家参数过长", code=40001)
+        try:
+            raw_temporary_experts = json.loads(temporary_experts_json)
+            if not isinstance(raw_temporary_experts, list) or len(raw_temporary_experts) > 3:
+                raise ValueError("最多添加 3 位临时专家")
+            temporary_experts = [
+                RoundtableTemporaryExpert.model_validate(item)
+                for item in raw_temporary_experts
+            ]
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"圆桌临时专家参数无效: {exc}", code=40001) from exc
+
+        from app.ai.multi_agent import ReviewAgentProfile
+
+        profiles.extend(
+            ReviewAgentProfile(
+                code=f"temporary_{index}",
+                name=expert.name,
+                focus=expert.focus,
+                issue_types=tuple(expert.issue_types) or ("其他",),
+                instruction=expert.instruction,
+                is_custom=True,
+            )
+            for index, expert in enumerate(temporary_experts, start=1)
+        )
+    profiles = tuple(profiles)
     agent_list = [
         {"code": p.code, "name": p.name, "focus": p.focus}
         for p in profiles
@@ -277,6 +307,7 @@ def start_discussion(
         session.stage = "pending"
         session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
         session.expected_turns = rounds * len(profiles)
+        session.participants = agent_list
 
     register_pending(
         session_id=session_id,

@@ -716,6 +716,10 @@ def test_plain_owner_html_export_uses_format_specific_permission(
         }
 
     monkeypatch.setattr("app.api.v1.reports.check_permission", fake_check_permission)
+    monkeypatch.setattr(
+        "app.services.report_service.rbac_service.check_permission",
+        lambda _db, _user_id, permission: permission == PermissionCode.ISSUE_VIEW,
+    )
 
     html_response = client.get(
         f"/api/reports/tasks/{task_id}/export",
@@ -968,6 +972,10 @@ def test_template_manager_html_cannot_run_in_report_viewer_preview_or_export(adm
             PermissionCode.REPORT_EXPORT_HTML,
             PermissionCode.ISSUE_VIEW,
         },
+    )
+    monkeypatch.setattr(
+        "app.services.report_service.rbac_service.check_permission",
+        lambda _db, user_id, code: user_id == viewer.id and code == PermissionCode.ISSUE_VIEW,
     )
 
     denied_update = client.put(f"/api/reports/templates/{template.id}", json={"description": "deny"})

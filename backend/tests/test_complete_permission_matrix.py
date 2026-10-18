@@ -73,7 +73,7 @@ def route_inventory():
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
     # 本轮新增的远程网站评估报告导出接口由下方远程权限矩阵逐项核验。
     # 本次新增管理员只读 Token 趋势端点，已在下方逐条验证 require_admin 守卫。
-    assert len(rows) == 365, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 366, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -83,10 +83,10 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 365
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 365
+    assert len(ROUTES) == 366
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 366
     assert len({row["source"] for row in ROUTES}) == 45
-    assert len(AUTHENTICATED_ROUTES) == 351
+    assert len(AUTHENTICATED_ROUTES) == 352
     assert len(GUARDED_ROUTES) == 283
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
@@ -118,6 +118,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/forum/posts/{post_id}/views"): [],
         ("GET", "/api/discuss/sessions"): [],
         ("GET", "/api/discuss/sessions/{session_id}"): [],
+        ("POST", "/api/discuss/sessions/{session_id}/stop"): [],
         ("POST", "/api/sandboxes/remote-target-authorization"): [],
         ("GET", "/api/admin/observability/alerts/page"): ["require_admin"],
         ("GET", "/api/admin/overview/token-usage"): ["require_admin"],

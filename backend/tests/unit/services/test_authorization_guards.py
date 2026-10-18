@@ -233,6 +233,73 @@ def test_discussion_start_requires_project_owner(db, monkeypatch):
     assert not registered
 
 
+def test_discussion_start_adds_task_temporary_experts_without_persisting_them(
+    db, monkeypatch,
+):
+    """小菱经 REST 启动圆桌时，任务临时专家必须加入本次 roster。"""
+    import json
+
+    from app.agents.discussion_bus import DiscussionBus
+
+    owner = _user(db, "disc-temporary-owner")
+    _grant_review_start(db, owner)
+    project = _project(db, owner)
+    code_file = _code_file(db, project)
+    registered = []
+    bus = DiscussionBus()
+    monkeypatch.setattr("app.api.v1.discussion._bus_for_db", lambda _db: bus)
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+
+    response = start_discussion(
+        project_id=project.id,
+        file_id=code_file.id,
+        review_type="full",
+        db=db,
+        user=owner,
+        temporary_experts_json=json.dumps([{
+            "name": "依赖链审查员",
+            "focus": "核查供应链和依赖边界",
+            "issue_types": ["安全漏洞"],
+            "instruction": "重点找可利用的传递依赖风险",
+        }], ensure_ascii=False),
+    )
+
+    profiles = registered[0]["profiles"]
+    assert len(profiles) == 6
+    temporary = profiles[-1]
+    assert temporary.name == "依赖链审查员"
+    assert temporary.focus == "核查供应链和依赖边界"
+    assert temporary.instruction == "重点找可利用的传递依赖风险"
+    assert temporary.code.startswith("temporary_")
+    assert response.data["agents"][-1]["name"] == "依赖链审查员"
+    assert bus.get_session(response.data["session_id"]).participants[-1]["name"] == "依赖链审查员"
+    assert all(profile.code in {"general", "security", "reliability", "performance", "maintainability"}
+               for profile in registered[0]["profiles"][:-1])
+    assert "temporary_experts" not in response.data
+
+
+def test_discussion_start_rejects_invalid_task_temporary_experts(db, monkeypatch):
+    """错误的临时 roster 不能静默忽略后按固定专家继续启动。"""
+    owner = _user(db, "disc-invalid-temporary-owner")
+    _grant_review_start(db, owner)
+    project = _project(db, owner)
+    code_file = _code_file(db, project)
+    registered = []
+    monkeypatch.setattr("app.api.v1.discussion.register_pending", lambda **kwargs: registered.append(kwargs))
+
+    with pytest.raises(ValidationError, match="临时专家"):
+        start_discussion(
+            project_id=project.id,
+            file_id=code_file.id,
+            review_type="full",
+            db=db,
+            user=owner,
+            temporary_experts_json='[{"name":"missing-fields"}]',
+        )
+
+    assert not registered
+
+
 @pytest.mark.parametrize("content,binary", [("", 0), (" \t\n\u3000", 0), ("encoded", 1)])
 def test_discussion_preflight_rejects_empty_scan_before_registration(db, monkeypatch, content, binary):
     owner = _user(db, "empty-disc-owner")

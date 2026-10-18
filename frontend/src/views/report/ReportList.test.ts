@@ -22,6 +22,7 @@ import ReportList from './ReportList.vue'
 const report = {
   task_id: 42, can_view_report: true, task_name: '渗透报告', project_name: '领域项目', total_issues: 3, score: 72,
   status: 'success', create_time: '2026-09-05T00:00:00Z',
+  coverage: { coverage_status: 'complete', score_available: true },
   source: { type: 'pentest', stats_basis: 'pentest_findings', detail_api: '/api/pentest/engagements/demo' },
 }
 
@@ -90,6 +91,20 @@ describe('报告卡片列表', () => {
     expect(wrapper.text()).not.toContain('38')
   })
 
+  it('普通代码审查缺少问题查看权限时隐藏卡片并清理总数', async () => {
+    api.permissions.delete('issue:view')
+    api.reports.mockResolvedValueOnce({
+      items: [{ ...report, source: { type: 'full' }, task_name: '无权查看的问题报告' }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('.report-card').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('无权查看的问题报告')
+    expect(wrapper.text()).not.toContain('1 条')
+  })
+
   it.each([
     { source: { type: 'pentest' }, permission: 'pentest:view' },
     { source: { type: 'security_scan', security_report: {} }, permission: 'security:view' },
@@ -123,7 +138,7 @@ describe('报告卡片列表', () => {
     expect(text).toContain('2026-09-05')
   })
 
-  it('局部验证保留记录分数但不伪装成完整通过或综合评分', async () => {
+  it('缺少明确评分回执时不把历史占位分数展示成真实评分', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{
         ...report,
@@ -143,10 +158,35 @@ describe('报告卡片列表', () => {
     const card = wrapper.find('.report-card')
     expect(card.text()).toContain('验证未完成')
     expect(card.text()).toContain('验证范围不完整')
-    expect(card.text()).toContain('记录分数')
-    expect(card.text()).toContain('100')
-    expect(card.find('.rc-score').attributes('title')).toContain('不代表完整测试通过')
-    expect(card.find('.rc-score').attributes('title')).not.toContain('综合评分')
+    expect(card.text()).toContain('暂无可核验评分')
+    expect(card.text()).not.toContain('100')
+  })
+
+  it('动态用例结果分数与总体覆盖状态分别展示，完整回执中的 0 分保留', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        source: { type: 'sandbox_test' },
+        score: 0,
+        coverage: {
+          verification_status: 'partial',
+          score_available: true,
+          score_basis: 'agent_dynamic_test_pass_rate',
+          score_sample: { generated: 1, passed: 0, failed: 1 },
+          reason: '黑盒断言未执行',
+        },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+
+    const card = wrapper.find('.report-card')
+    expect(card.text()).toContain('验证范围不完整')
+    expect(card.text()).toContain('动态用例评分')
+    expect(card.text()).toMatch(/\b0\b/)
+    expect(card.find('.rc-score').attributes('title')).toContain('动态用例通过率 0/100')
+    expect(card.find('.rc-score').attributes('title')).toContain('只代表已有用例结果')
   })
 
   it.each([

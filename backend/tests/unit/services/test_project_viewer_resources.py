@@ -95,7 +95,10 @@ def test_missing_global_report_delete_permission_keeps_cap_false(db, monkeypatch
     monkeypatch.setattr(
         rbac_service,
         "check_permission",
-        lambda _db, _user_id, permission: permission == PermissionCode.REPORT_VIEW,
+        lambda _db, _user_id, permission: permission in {
+            PermissionCode.REPORT_VIEW,
+            PermissionCode.ISSUE_VIEW,
+        },
     )
     assert report_service.list_reports(db, actor)["items"][0]["can_delete"] is False
     assert report_service.get_report_detail(db, actor, task.id)["can_delete"] is False

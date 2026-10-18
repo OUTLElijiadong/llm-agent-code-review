@@ -159,7 +159,7 @@ async function logout(): Promise<void> {
           <div
             id="admin-copilot-trigger-slot"
             class="admin-copilot-trigger-slot"
-            :class="{ 'is-page-header-trigger': route.path === '/admin/security-center' }"
+            :class="{ 'is-page-header-trigger': route.path.startsWith('/admin') }"
             aria-label="小菱入口"
           ></div>
         </div>

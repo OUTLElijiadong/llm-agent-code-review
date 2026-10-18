@@ -13,6 +13,7 @@ import type {
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
 import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS } from './cnnvd-knowledge'
+import { resolveVulnerabilitySource } from './vulnerability-source'
 import { useUserStore } from '@/stores/user'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
@@ -33,6 +34,15 @@ let disposed = false
 const selectedOwasp = ref<OwaspDoc | null>(null)
 const detailVisible = ref(false)
 const securityScanVisible = ref(false)
+
+const owaspHotspotSourceResolution = computed(() => resolveVulnerabilitySource({
+  records: [],
+  lookups: {
+    cnvd: { status: 'not_configured' },
+    cnnvd: { status: 'not_configured' },
+  },
+  owasp: dashboardData.value?.owasp_hotspots[0]?.owasp ?? '',
+}))
 
 const secretCount = computed(() => checklist.value?.secret_patterns.length ?? '—')
 const staticCount = computed(() => checklist.value?.static_rules.length ?? '—')
@@ -246,7 +256,7 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
           </div>
 
           <div v-if="dashboardData.owasp_hotspots.length" class="ov-hotspots">
-            <span class="ov-hot-title">项目 OWASP fallback · 尚无 CNVD/CNNVD 官方匹配证据</span>
+            <span class="ov-hot-title">{{ owaspHotspotSourceResolution.displayLabel }} · {{ owaspHotspotSourceResolution.message }}</span>
             <div class="ov-hot-list">
               <span
                 v-for="(h, i) in dashboardData.owasp_hotspots.slice(0, 5)"
@@ -270,9 +280,10 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
         <p class="block-sub">CNVD 与 CNNVD 是两个独立来源，门户与记录编号分别标识；有官方记录证据时优先按对应来源展示。</p>
       </header>
       <div class="cn-source-status" data-testid="cn-source-status" role="status">
-        <strong>匹配优先级：CNVD / CNNVD 官方记录优先 → OWASP fallback（尚无官方匹配证据）</strong>
+        <strong>匹配优先级：CNVD → CNNVD；仅两库均查询成功且无匹配时才确认 OWASP fallback。</strong>
         <p>只有发现项包含对应来源的官方记录编号或官方详情链接，才能标记为 CNVD 或 CNNVD 命中；不根据标题、CWE 或关键词猜测来源。</p>
-        <p><b>当前状态：未实现实时官方数据同步或匹配。</b> 安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号或官方详情链接。因此，当前项目 OWASP 热点按 OWASP fallback 展示；本平台没有官方匹配证据，不表示两库中不存在相关记录。</p>
+        <p><b>状态语义：</b>只有 CNVD 与 CNNVD 都成功查询、并明确返回无匹配时，才将 OWASP 分类标成已确认回退；来源未接入、未查询或不可用时，结果必须保持未知，OWASP 仅作临时参考。</p>
+        <p><b>当前状态：未实现官方数据同步或逐项匹配。</b>安全概览接口只提供 OWASP 分类统计，没有 CNVD/CNNVD 记录编号、查询结果或数据版本。当前项目热点标为未核验临时参考，不代表两库中不存在相关记录。CNNVD 官方 XML 数据获取需登录；本平台当前没有已接入的官方数据源。</p>
       </div>
       <div class="cn-portal-grid">
         <a

@@ -39,6 +39,7 @@ from app.services.sandbox_service import (
     _remote_blackbox_execution,
     _remote_blackbox_passed,
     _sandbox_execution_disclosure,
+    _sandbox_result_score,
     _sandbox_verification_coverage,
     _worker_execution_passed,
     _worker_status_is_terminal,
@@ -1093,6 +1094,37 @@ def test_partial_sandbox_report_preserves_recorded_score_and_exposes_scope() -> 
     assert failed[2]["verification_status"] == "failed"
     task.coverage = {"verification_status": "complete"}
     assert _build_task_score_facts(task, {"severity": {}, "total_issues": 0})[1] == 100
+
+
+@pytest.mark.parametrize(
+    ("agent_tests", "generation", "expected_score", "available"),
+    [
+        ({"generated": 2, "passed_count": 1, "failed": 1}, {"status": "generated", "count": 2}, 50, True),
+        ({"generated": 1, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 1}, 100, True),
+        ({"generated": 0, "passed_count": 0, "failed": 0}, {"status": "skipped"}, None, False),
+        ({"generated": 2, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 2}, None, False),
+    ],
+)
+def test_sandbox_result_score_uses_complete_dynamic_test_receipts_not_runner_success(
+    agent_tests, generation, expected_score, available
+):
+    result = _sandbox_result_score({
+        "passed": True,
+        "evidence": {
+            "agent_test_generation": generation,
+            "agent_tests": agent_tests,
+        },
+    })
+
+    assert result["score"] == expected_score
+    assert result["score_available"] is available
+    if available:
+        assert result["score_basis"] == "agent_dynamic_test_pass_rate"
+        assert result["sample"] == {
+            "generated": agent_tests["generated"],
+            "passed": agent_tests["passed_count"],
+            "failed": agent_tests["failed"],
+        }
 
 
 def test_sandbox_verification_coverage_distinguishes_complete_partial_and_failed() -> None:

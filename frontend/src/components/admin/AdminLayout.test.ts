@@ -92,7 +92,7 @@ it('管理员布局保留管理菜单，并单独显示论坛和支持入口', a
   }
 })
 
-it('安全中心在页头预留小菱入口，离开该页面恢复其他管理页布局', async () => {
+it('所有管理页都在页头预留小菱入口', async () => {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/admin/:pathMatch(.*)*', component: { template: '<main />' } }],
@@ -124,7 +124,11 @@ it('安全中心在页头预留小菱入口，离开该页面恢复其他管理�
 
     await router.push('/admin/operations')
     await flushPromises()
-    expect(slot.classes()).not.toContain('is-page-header-trigger')
+    expect(slot.classes()).toContain('is-page-header-trigger')
+
+    await router.push('/admin/governance')
+    await flushPromises()
+    expect(slot.classes()).toContain('is-page-header-trigger')
   } finally {
     wrapper.unmount()
   }

@@ -289,8 +289,9 @@ it('管理端按游标加载更早消息，不把当前页误当全部历史', a
 
 it.each([
   { width: 390, path: '/admin/overview' },
+  { width: 1280, path: '/admin/operations' },
   { width: 1280, path: '/admin/security-center' },
-])('$width px从非管理页切入管理页时先保留浮动入口，页头槽位挂载后自动迁移', async ({ width, path }) => {
+])('$width px从非管理页切入管理页时先保留入口，页头槽位挂载后自动迁移', async ({ width, path }) => {
   const originalWidth = window.innerWidth
   const router = createRouter({
     history: createMemoryHistory(),
@@ -423,7 +424,7 @@ describe('安全中心小菱页头入口', () => {
     }
   })
 
-  it('桌面在安全中心与其他管理页间切换只迁移入口，保留运行状态和未读回复', async () => {
+  it('桌面在管理页间切换保持页头入口，保留运行状态和未读回复', async () => {
     const fixture = await mountSecurityCenter(1280)
     try {
       await openCopilot(fixture.copilot)
@@ -441,10 +442,8 @@ describe('安全中心小菱页头入口', () => {
       expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
       await fixture.router.push('/admin/operations')
       await flushPromises()
-      const floating = document.body.querySelector(':scope > .copilot-trigger')
-      expect(floating?.classList.contains('is-floating-trigger')).toBe(true)
-      expect(floating?.querySelector('.unread-dot')).not.toBeNull()
-      expect(slot.find('.copilot-trigger').exists()).toBe(false)
+      expect(slot.find('.copilot-trigger.is-busy .unread-dot').exists()).toBe(true)
+      expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
       expect(streams.records[0].aborted).toBe(false)
 
       await fixture.router.push('/admin/security-center')

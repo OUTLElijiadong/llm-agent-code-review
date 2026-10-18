@@ -95,23 +95,23 @@
               {{ reportStatusNote(row) }}
             </p>
           </div>
-          <div v-if="row.score != null" class="rc-score" :title="sandboxScoreTitle(row)">
+          <div v-if="displayScore(row) !== null" class="rc-score" :title="sandboxScoreTitle(row)">
             <svg viewBox="0 0 36 36" class="rc-ring" aria-hidden="true">
               <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--gray-100, #eef0f4)" stroke-width="3.5" />
               <circle
                 cx="18" cy="18" r="15.9" fill="none" stroke-width="3.5" stroke-linecap="round"
-                :stroke="row.score >= 80 ? 'var(--color-success)' : row.score >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'"
-                :stroke-dasharray="`${Math.max(0, Math.min(100, row.score))} 100`"
+                :stroke="displayScore(row)! >= 80 ? 'var(--color-success)' : displayScore(row)! >= 60 ? 'var(--color-warning)' : 'var(--color-danger)'"
+                :stroke-dasharray="`${Math.max(0, Math.min(100, displayScore(row)!))} 100`"
                 stroke-dashoffset="25"
               />
             </svg>
-            <span :class="scoreClass(row.score)">{{ row.score }}</span>
+            <span :class="scoreClass(displayScore(row)!)">{{ displayScore(row) }}</span>
             <small v-if="row.source?.type === 'sandbox_test'" class="rc-score-caption">
-              {{ coverageStatus(row) === 'complete' ? '测试评分' : '记录分数' }}
+              {{ row.coverage?.score_basis === 'agent_dynamic_test_pass_rate' ? '动态用例评分' : '测试结果评分' }}
             </small>
           </div>
           <div v-else class="rc-score rc-score--unknown" :title="sandboxCoverageLabel(row.coverage?.verification_status)">
-            {{ row.source?.type === 'sandbox_test' ? '暂不评分' : '—' }}
+            {{ row.source?.type === 'sandbox_test' || row.source?.type === 'pentest' ? '暂无可核验评分' : '—' }}
           </div>
           <div class="rc-actions" @click.stop>
             <el-tooltip content="查看详情" placement="top">
@@ -223,7 +223,18 @@ function canDisplayReport(row: ReportListItem): boolean {
     return userStore.hasPermission('security:view')
   }
   if (sourceType === 'pentest') return userStore.hasPermission('pentest:view')
-  return true
+  if (sourceType === 'sandbox_test') return true
+  return userStore.hasPermission('issue:view')
+}
+
+function displayScore(row: ReportListItem): number | null {
+  const coverageAvailable = row.coverage?.score_available
+  const sourceScoreAvailable = row.source?.security_report?.score_available
+  if (coverageAvailable === false || sourceScoreAvailable === false) return null
+  if (['sandbox_test', 'pentest'].includes(String(row.source?.type || '')) && coverageAvailable !== true) {
+    return null
+  }
+  return typeof row.score === 'number' && Number.isFinite(row.score) ? row.score : null
 }
 
 function canExport(format: ReportFormat): boolean {
@@ -307,11 +318,16 @@ function sandboxCoverageLabel(status?: string | null) {
 }
 
 function sandboxScoreTitle(row: ReportListItem) {
-  if (row.source?.type !== 'sandbox_test') return `代码质量评分 ${row.score}`
+  const score = displayScore(row)
+  if (score === null) {
+    return String(row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
+  }
+  if (row.source?.type !== 'sandbox_test') return `代码质量评分 ${score}`
   const state = coverageStatus(row)
-  return state === 'complete'
-    ? `已完成验证范围内的测试评分 ${row.score}`
-    : `记录分数 ${row.score}；${sandboxCoverageLabel(state)}，不代表完整测试通过`
+  const basis = row.coverage?.score_basis === 'agent_dynamic_test_pass_rate'
+    ? `动态用例通过率 ${score}/100`
+    : `测试结果评分 ${score}/100`
+  return state === 'complete' ? `${basis}；覆盖范围完整` : `${basis}；${sandboxCoverageLabel(state)}，只代表已有用例结果`
 }
 
 async function loadData() {

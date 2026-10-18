@@ -158,13 +158,11 @@ const COMPACT_DESKTOP_ACTION_GUTTER = 360
 
 const router = useRouter()
 const visible = ref(false)
-const mobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 520)
 const adminHeaderTriggerSlotPresent = ref(false)
 let adminHeaderTriggerObserver: MutationObserver | undefined
 const currentPath = computed(() => router?.currentRoute?.value?.path || window.location.pathname)
 const shouldUseAdminHeaderTrigger = computed(() => (
   currentPath.value.startsWith('/admin')
-  && (mobileViewport.value || currentPath.value === '/admin/security-center')
 ))
 const useAdminHeaderTrigger = computed(() => (
   shouldUseAdminHeaderTrigger.value && adminHeaderTriggerSlotPresent.value
@@ -237,14 +235,13 @@ function restorePanelPosition(): void {
 }
 
 function handlePanelViewportResize(): void {
-  mobileViewport.value = window.innerWidth <= 520
   syncAdminHeaderTriggerSlotPresence()
   if (!visible.value) return
   restorePanelPosition()
 }
 
 /**
- * 手机管理页和安全中心复用页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
+ * 管理页统一复用页头槽位;路由 out-in 切换期间槽位会暂时卸载,此时保留 body 浮动入口。
  * MutationObserver 在 AdminLayout 挂载后再迁移 Teleport,避免 Vue 对缺失目标只告警一次后不重试。
  */
 function syncAdminHeaderTriggerSlotPresence(): void {

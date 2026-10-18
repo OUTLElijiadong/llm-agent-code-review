@@ -5017,6 +5017,58 @@ def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
     return failed_count == 0 and passed_count == generated
 
 
+def _sandbox_result_score(conclusion: dict[str, Any]) -> dict[str, Any]:
+    """Calculate a result score only from a complete, count-consistent dynamic-test receipt.
+
+    Coverage is reported separately. A measurable subset may have a result score
+    while the overall test coverage remains partial; runner exit status alone is
+    never a score basis.
+    """
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    generation = evidence.get("agent_test_generation")
+    dynamic = evidence.get("agent_tests")
+    if not isinstance(generation, dict) or generation.get("status") != "generated" or not isinstance(dynamic, dict):
+        return {
+            "score": None,
+            "score_available": False,
+            "score_basis": None,
+            "sample": None,
+            "unavailable_reason": "没有已生成且可核对的动态用例结果回执",
+        }
+
+    generated = dynamic.get("generated")
+    passed = dynamic.get("passed_count", dynamic.get("passed"))
+    failed = dynamic.get("failed")
+    generated_by_plan = generation.get("count")
+    counts_are_integers = all(type(value) is int and value >= 0 for value in (generated, passed, failed))
+    plan_matches = generated_by_plan is None or (
+        type(generated_by_plan) is int and generated_by_plan == generated
+    )
+    if (
+        not counts_are_integers
+        or generated <= 0
+        or passed + failed != generated
+        or not plan_matches
+        or dynamic.get("missing")
+        or dynamic.get("unexpected")
+    ):
+        return {
+            "score": None,
+            "score_available": False,
+            "score_basis": None,
+            "sample": None,
+            "unavailable_reason": "动态用例结果数量不完整或与生成回执不一致，无法计算评分",
+        }
+
+    return {
+        "score": round(100 * passed / generated),
+        "score_available": True,
+        "score_basis": "agent_dynamic_test_pass_rate",
+        "sample": {"generated": generated, "passed": passed, "failed": failed},
+        "unavailable_reason": None,
+    }
+
+
 def _reconcile_blackbox_agent_assertions(
     result: dict[str, Any] | None,
     *,
@@ -6326,16 +6378,25 @@ def _publish_sandbox_report(
             else None
         )
         coverage["duration_source"] = "measured_execution" if duration_is_measured else "unknown"
-        # 评分由确定性用例通过率决定，禁止把“runner 正常退出”误当成“测试全部通过”。
-        agent_tests = conclusion.get("agent_tests") if isinstance(conclusion.get("agent_tests"), dict) else {}
-        generated = int(agent_tests.get("generated") or 0)
-        passed_count = int(agent_tests.get("passed_count") or agent_tests.get("passed") or 0)
-        if passed and coverage.get("coverage_status") == "complete":
-            report_score = 100
-        elif generated and coverage.get("coverage_status") == "complete":
-            report_score = round(60 * passed_count / generated)
-        else:
-            report_score = 0
+        score_result = _sandbox_result_score(conclusion)
+        coverage.update({
+            "score_available": score_result["score_available"],
+            "score_basis": score_result["score_basis"],
+            "score_sample": score_result["sample"],
+            "score_unavailable_reason": score_result["unavailable_reason"],
+        })
+        # The legacy integer column cannot store NULL. Keep 0 only as storage
+        # compatibility; score_available is authoritative at every report outlet.
+        report_score = score_result["score"] if score_result["score_available"] else 0
+        report_score_breakdown = {
+            "version": "sandbox-dynamic-tests-v1",
+            "score": score_result["score"],
+            "score_available": score_result["score_available"],
+            "score_source": score_result["score_basis"],
+            "sample": score_result["sample"],
+            "coverage_status": coverage.get("coverage_status", "unknown"),
+            "unavailable_reason": score_result["unavailable_reason"],
+        }
         if task is None:
             task = ReviewTask(
                 user_id=owner_id,
@@ -6352,6 +6413,8 @@ def _publish_sandbox_report(
                 medium_issues=severity_counts["中"],
                 low_issues=severity_counts["低"],
                 score=report_score,
+                score_version="sandbox-dynamic-tests-v1",
+                score_breakdown=report_score_breakdown,
                 summary=report_md,
                 error_message=failure_message,
                 start_time=started_at,
@@ -6370,6 +6433,8 @@ def _publish_sandbox_report(
             task.medium_issues = severity_counts["中"]
             task.low_issues = severity_counts["低"]
             task.score = report_score
+            task.score_version = "sandbox-dynamic-tests-v1"
+            task.score_breakdown = report_score_breakdown
             task.summary = report_md
             task.error_message = failure_message
             task.start_time = started_at
@@ -6449,6 +6514,10 @@ def _publish_sandbox_report(
                     "execution_status": execution_status,
                     "error_message": failure_message,
                     "coverage": coverage,
+                    "score": score_result["score"],
+                    "score_available": score_result["score_available"],
+                    "score_basis": score_result["score_basis"],
+                    "score_sample": score_result["sample"],
                 },
                 summary=report_md[:2000],
                 score=report_score,
@@ -6467,6 +6536,10 @@ def _publish_sandbox_report(
                 "execution_status": execution_status,
                 "error_message": failure_message,
                 "coverage": coverage,
+                "score": score_result["score"],
+                "score_available": score_result["score_available"],
+                "score_basis": score_result["score_basis"],
+                "score_sample": score_result["sample"],
             }
             report_row.summary = report_md[:2000]
             report_row.score = report_score

@@ -54,8 +54,15 @@ def test_runner_rejects_unsafe_base_url_before_output_or_network(tmp_path, url):
 def test_plan_matches_actual_routes_and_rejects_changed_source(tmp_path):
     plan = runner_module.build_plan()
     runner_module.validate_plan(plan, PATH.parents[1])
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 351
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 352
     assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 283
+    stop_route = next(
+        row for row in plan["routes"]
+        if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"
+    )
+    assert stop_route["anonymous"] == "ready"
+    assert stop_route["no_permission"] == "blocked"
+    assert "app.core.dependencies.get_current_user" in stop_route["dependency_order"]
     blocking_routes = [row for row in plan["routes"] if "automatic-blocking" in row["path"]]
     assert len(blocking_routes) == 3
     assert all(

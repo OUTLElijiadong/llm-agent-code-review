@@ -18,7 +18,7 @@ beforeEach(() => {
   user = useUserStore()
   user.token = 'local-report-author'
   user.profile = { id: 11, username: 'local', role: 'user', status: 1 }
-  user.permissions = new Set(['report:view', 'review:cancel'])
+  user.permissions = new Set(['report:view', 'issue:view', 'review:cancel'])
   api.list.mockResolvedValue({ items: [{ ...row }], total: 1 })
   api.projects.mockResolvedValue({ items: [] })
   api.confirm.mockResolvedValue(true)
