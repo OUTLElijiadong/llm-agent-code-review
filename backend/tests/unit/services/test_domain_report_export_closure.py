@@ -508,6 +508,16 @@ def test_report_cleanup_preserves_link_targets_and_single_character_emphasis():
     assert "pattern = '*'" in cleaned
 
 
+def test_report_cleanup_removes_unclosed_bold_prefix_without_changing_fenced_code():
+    report = "**3.- 位置：侦察阶段\n- 证据：entrypoints 为空\n\n```text\n**literal evidence**\n```\n"
+
+    cleaned = clean_report_markdown(report)
+
+    assert "**3.-" not in cleaned
+    assert "3.- 位置：侦察阶段" in cleaned
+    assert "**literal evidence**" in cleaned
+
+
 def test_report_cleanup_hides_internal_worker_urls_and_httpx_help_links():
     report = (
         "执行异常：Client error '400 Bad Request' for url 'http://sandbox/execute' "
@@ -530,7 +540,11 @@ def test_sandbox_source_markdown_is_cleaned_while_fenced_code_is_preserved(expor
     snapshot = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
     snapshot.content_json = {
         **snapshot.content_json,
-        "report_md": "## **报告结论**\n\n* **需要关注**\n\n```python\npattern = '*'\n```\n",
+        "report_md": (
+            "## **报告结论**\n\n* **需要关注**\n\n"
+            "**3.- 位置：侦察阶段\n- 证据：entrypoints 为空\n\n"
+            "```python\npattern = '*'\n```\n"
+        ),
     }
     db.commit()
 
@@ -541,6 +555,9 @@ def test_sandbox_source_markdown_is_cleaned_while_fenced_code_is_preserved(expor
     assert "**" not in json_response.text
     assert "**" not in html_response.text
     assert "pattern = '*'" in json_response.json()["domain_data"]["report_md"]
+    assert "3.- 位置：侦察阶段" in json_response.json()["source"]["domain_report_md"]
+    assert "**" not in json_response.json()["source"]["domain_report_md"]
+    assert "**" not in json_response.json()["domain_markdown"]
     assert "报告结论" in html_response.text
 
 

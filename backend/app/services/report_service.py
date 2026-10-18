@@ -793,11 +793,12 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
         )
 
     return {
-        "source": detail["source"], "task_info": detail["task"], "project": detail["project"],
+        "source": clean_report_payload(detail["source"]),
+        "task_info": detail["task"], "project": detail["project"],
         "statistics": detail["stats"], "score": detail["task"]["score"],
         "summary": clean_report_markdown(detail["summary"] or ""),
         "domain_data": clean_report_payload(domain_data),
-        "domain_markdown": domain_markdown,
+        "domain_markdown": clean_report_markdown(domain_markdown),
         "native_exports": native_exports,
     }
 

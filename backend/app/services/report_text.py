@@ -236,6 +236,10 @@ def clean_report_markdown(value: Any, limit: int = 200000) -> str:
     prose = _protect_markdown_link_targets(prose, slots)
     prose = re.sub(r"(?<!\\)(\*\*|__|~~)(.+?)\1", r"\2", prose)
     prose = re.sub(r"(?<!\*)\*(?!\s)([^*\n]*?\S)\*(?!\*)", r"\1", prose)
+    # Historical agent output sometimes opens bold text at the start of a line
+    # without a matching closing marker (for example, "**3.- Location").
+    # Remove only that unmatched decorative prefix; fenced code is masked above.
+    prose = re.sub(r"(?m)^(\s{0,3})\*\*(?=\S)", r"\1", prose)
     prose = re.sub(r"(?m)^(\s{0,3})\*(\s+)", r"\1-\2", prose)
     return _restore_masked_values(prose.replace("`", ""), slots).strip() + ("\n" if text.endswith("\n") else "")
 
