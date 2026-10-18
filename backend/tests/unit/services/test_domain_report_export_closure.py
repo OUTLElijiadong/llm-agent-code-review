@@ -494,21 +494,31 @@ def test_unavailable_score_is_not_claimed_in_report_summary_or_json_export(expor
         status="success",
         total_files=1,
         processed_files=1,
-        total_issues=0,
+        total_issues=1,
         score=64,
         coverage={"coverage_status": "unknown"},
-        summary="完成代码审查，发现 6 个问题，综合评分 64。",
+        summary="完成代码审查，发现 1 个问题，综合评分 64。",
     )
     db.add(task)
+    db.commit()
+    db.add(ReviewIssue(
+        task_id=task.id,
+        file_name="review_sample.py",
+        severity="高",
+        issue_type="安全漏洞",
+        description="历史评分覆盖范围未知",
+    ))
     db.commit()
 
     detail = client.get(f"/api/reports/{task.id}").json()["data"]
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
 
     assert detail["task"]["score"] is None
+    assert detail["files"][0]["score"] is None
     assert "综合评分未评估" in detail["summary"]
     assert "综合评分 64" not in detail["summary"]
     assert exported["score"] is None
+    assert exported["files"][0]["score"] is None
     assert "综合评分未评估" in exported["summary"]
     assert "综合评分 64" not in exported["summary"]
     assert "综合评分未评估" in exported["task_info"]["summary"]

@@ -709,7 +709,11 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         "summary": clean_report_markdown(
             display_report_summary(report_summary, score_available=score_available)
         ),
-        "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(db, task_id),
+        "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(
+            db,
+            task_id,
+            score_available=score_available,
+        ),
         "rules_snapshot": task.rules_snapshot or [],
     }
 
@@ -1050,7 +1054,12 @@ def _build_task_score_facts(
     return issue_count, score, score_breakdown, severity_count
 
 
-def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
+def _build_file_summaries(
+    db: Session,
+    task_id: int,
+    *,
+    score_available: bool = True,
+) -> list[dict]:
     """汇总报告涉及的文件及其问题统计。
 
     Args:
@@ -1101,6 +1110,7 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
             code_file, counts.get(key), file_id=link.file_id,
             file_snapshot=link.file_snapshot,
             version_no=link.version_no, content_sha256=link.content_sha256,
+            score_available=score_available,
         ))
 
     fallback_ids = [key[1] for key in counts if key not in emitted_keys and key[0] == "id"]
@@ -1110,7 +1120,11 @@ def _build_file_summaries(db: Session, task_id: int) -> list[dict]:
     for key, item in counts.items():
         if key in emitted_keys:
             continue
-        summaries.append(_file_summary(fallback_files.get(key[1]), item))
+        summaries.append(_file_summary(
+            fallback_files.get(key[1]),
+            item,
+            score_available=score_available,
+        ))
     return summaries
 
 
@@ -1118,6 +1132,7 @@ def _file_summary(
     code_file: CodeFile | None, counts: dict | None, *,
     file_id: int | None = None, file_snapshot: dict | None = None,
     version_no: int | None = None, content_sha256: str | None = None,
+    score_available: bool = True,
 ) -> dict:
     """构造单个报告文件摘要。
 
@@ -1145,7 +1160,7 @@ def _file_summary(
         "language": snapshot.get("language") or (code_file.language if code_file else ""),
         "issue_count": sum(severity.values()),
         "severe_count": severity.get("严重", 0),
-        "score": compute_score(severity),
+        "score": compute_score(severity) if score_available else None,
     }
 
 
