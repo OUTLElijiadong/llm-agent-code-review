@@ -461,8 +461,9 @@ def _artifact_documents(
         "main{max-width:960px;margin:32px auto;padding:0 20px}h1{font-size:24px}"
         "section{margin:16px 0;padding:18px;background:#fff;border:1px solid #dfe3e8;border-radius:6px}"
         "dl{display:grid;grid-template-columns:160px 1fr;gap:8px}dt{color:#667085}"
-        "dd{margin:0;word-break:break-all}pre{overflow:auto;padding:14px;background:#111827;color:#f9fafb;"
-        "white-space:pre-wrap}.ok{color:#08783e}.failed{color:#b42318}\n"
+        "dd{margin:0;word-break:break-all}pre{max-width:100%;box-sizing:border-box;overflow:auto;padding:14px;"
+        "background:#111827;color:#f9fafb;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}"
+        ".ok{color:#08783e}.failed{color:#b42318}\n"
         "</style></head><body><main><h1>Prism 沙箱执行报告</h1><section>"
         f'<h2 class="{status_class}">{escaped_summary}</h2><dl>'
         f"<dt>任务</dt><dd>{escaped_id}</dd><dt>Agent</dt><dd>{html.escape(environment.agent_code)}</dd>"

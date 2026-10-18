@@ -26,6 +26,8 @@ flowchart LR
   V --> W[按 20 条分页渲染]
   W --> Z[Markdown 安全渲染与逐项展示]
   X[权限撤销或读取失败] --> Y[清除问题明细并显示边界]
+  AA[沙箱执行日志 HTML] --> AB[pre 保留原始日志格式]
+  AB --> AC[长连续字符串在内容宽度内自动换行]
 ```
 
 ## 模块职责
@@ -39,6 +41,7 @@ flowchart LR
 - `report_service.py`：按报告查看权限、来源权限、项目范围、发起人/管理员对象范围和有效报告快照批量判定渗透委托报告可见性。
 - `pentest_service.py` 与 `PentestEngagementOut`：序列化 `can_view_report`；无权时不向响应返回 `report_task_id`。
 - `PentestList.vue`、`PentestDetail.vue`：只有服务端确认当前账号可读时才渲染报告入口。
+- `sandbox_service.py`：HTML 执行日志使用 `pre-wrap` 保留换行，并通过 `overflow-wrap:anywhere`、`word-break:break-word` 和宽度约束显示超长连续字符串，不丢弃日志内容。
 
 ## 失败处理
 

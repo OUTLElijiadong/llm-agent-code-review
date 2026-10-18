@@ -91,6 +91,29 @@ def test_artifact_documents_include_agent_test_details() -> None:
     assert "test_a.py" in detail_doc[3].decode()
 
 
+def test_sandbox_html_report_wraps_unbroken_execution_log() -> None:
+    environment = SimpleNamespace(
+        public_id="sbx_long_log",
+        agent_code="test_verifier",
+        source_sha256="a" * 64,
+        runtime="runsc",
+    )
+    long_log_token = "A" * 512
+    documents = _artifact_documents(
+        environment,
+        {
+            "passed": False,
+            "summary": "测试未通过",
+            "evidence": {"worker_result": {"logs": {"text": long_log_token}}},
+        },
+    )
+    html_report = next(document[3].decode("utf-8") for document in documents if document[0] == "html")
+
+    assert long_log_token in html_report
+    assert "white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;" in html_report
+    assert "max-width:100%;box-sizing:border-box;" in html_report
+
+
 def test_deterministic_fallback_report_discloses_remote_probe_facts_and_scope() -> None:
     report = _build_deterministic_test_report({
         "execution_status": "failed",
