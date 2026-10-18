@@ -39,6 +39,20 @@ from app.services.security_report_service import persist_security_report
 REPORT_MD = "## 总体结论\n隔离合成报告\n## 问题清单\n- 发现甲\n- 发现乙\n- 发现丙\n"
 
 
+def test_domain_html_report_wraps_long_code_blocks():
+    long_log_line = "execution-log-" + ("x" * 512)
+
+    html, content_type = domain_report_exporter.export_markdown_report(
+        "代码审查报告", f"## 执行日志\n\n```text\n{long_log_line}\n```", "html"
+    )
+
+    rendered = html.decode("utf-8")
+    assert content_type == "text/html"
+    assert long_log_line in rendered
+    assert "pre{max-width:100%;box-sizing:border-box;overflow-x:auto;white-space:pre-wrap;" in rendered
+    assert "overflow-wrap:anywhere;word-break:break-word;}" in rendered
+
+
 @pytest.fixture
 def export_context():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
