@@ -895,6 +895,65 @@ async def test_runtime_does_not_start_model_round_after_durable_stop_marker(db) 
 
 
 @pytest.mark.asyncio
+async def test_runtime_stops_inflight_model_round_when_durable_stop_marker_arrives(db) -> None:
+    _activate_conversation(db, user_id=7, surface="user", session_key="session-stop-inflight")
+    store = DatabaseCheckpointStore(
+        db, user_id=7, surface="user", session_key="session-stop-inflight",
+    )
+    checkpoint = RunCheckpoint(
+        run_id="run_stop_inflight",
+        model="deepseek-v4-flash",
+        transcript=[{"role": "user", "content": "持续消耗 token 的任务"}],
+        tools=[],
+        status="running",
+    )
+    assert await store.create(checkpoint) is True
+
+    class BlockingTransport:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.cancelled = False
+
+        async def create_response(self, _payload):
+            self.started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    transport = BlockingTransport()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=SimpleNamespace(),
+        checkpoint_store=store,
+        model="deepseek-v4-flash",
+    )
+    running = asyncio.create_task(runtime._drive(checkpoint))
+    try:
+        await asyncio.wait_for(transport.started.wait(), timeout=2)
+        row = db.query(AgentResponseRun).filter_by(run_id=checkpoint.run_id).one()
+        payload = json.loads(row.checkpoint_json)
+        payload.update({"stop_requested": True, "stop_reason": "用户强制停止"})
+        row.checkpoint_json = json.dumps(payload, ensure_ascii=False)
+        db.commit()
+
+        result = await asyncio.wait_for(asyncio.shield(running), timeout=2)
+
+        assert result.status == "cancelled"
+        assert transport.cancelled is True
+        db.refresh(row)
+        persisted = json.loads(row.checkpoint_json)
+        assert row.status == "cancelled"
+        assert persisted["stop_requested"] is True
+        assert persisted["cancel_reason"] == "用户强制停止"
+    finally:
+        if not running.done():
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_database_checkpoint_store_rejects_create_after_conversation_archived(db) -> None:
     conversation = _activate_conversation(
         db,

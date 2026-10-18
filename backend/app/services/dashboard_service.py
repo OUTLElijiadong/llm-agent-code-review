@@ -262,9 +262,18 @@ def get_summary(db: Session, user: User) -> dict:
     total_issues = sum(item["total_issues"] for item in issue_stats)
     severe_issues = sum(item["severity"].get("严重", 0) for item in issue_stats)
 
-    # Test pass rates must not be aggregated as code quality scores.
-    score_value, code_review_count = (
-        db.query(func.avg(ReviewTask.score), func.count(ReviewTask.id))
+    # Test pass rates must not be aggregated as code quality scores. Apply the
+    # same coverage gate used by report cards and score trends so legacy scores
+    # without a verifiable basis cannot inflate the dashboard average.
+    score_task_query = (
+        db.query(ReviewTask)
+        .options(load_only(
+            ReviewTask.id,
+            ReviewTask.status,
+            ReviewTask.review_type,
+            ReviewTask.score,
+            ReviewTask.coverage,
+        ))
         .filter(
             ReviewTask.status == "success",
             ReviewTask.project_id.in_(visible_ids),
@@ -272,9 +281,18 @@ def get_summary(db: Session, user: User) -> dict:
             ReviewTask.score.is_not(None),
             ReviewTask.score.between(0, 100),
         )
-        .one()
     )
-    avg_score = round(float(score_value or 0), 1)
+    score_total = 0
+    code_review_count = 0
+    # Stream a bounded number of ORM rows at a time; the dashboard may cover a
+    # long history, so do not materialize every scored task in memory.
+    for task in score_task_query.yield_per(500):
+        visible_score = display_report_score(task, task.score)
+        if visible_score is None:
+            continue
+        score_total += visible_score
+        code_review_count += 1
+    avg_score = round(score_total / code_review_count, 1) if code_review_count else 0.0
 
     recent_q = (
         _readable_report_query(db, user)

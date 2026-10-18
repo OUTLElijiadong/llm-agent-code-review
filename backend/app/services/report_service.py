@@ -335,8 +335,10 @@ def readable_pentest_engagement_ids(db: Session, user: User, engagement_ids: lis
     for engagement_id, content in query.all():
         if not isinstance(content, dict):
             continue
-        report_md = content.get("report_md")
-        if isinstance(report_md, str) and report_md.strip():
+        # 渗透报告的正文由 PentestFinding 领域记录实时生成；快照只负责把
+        # ReviewTask 与唯一委托绑定起来，不要求重复存一份 report_md。
+        # 只有安全扫描/全链审计等来源型快照才以 report_md 作为正文完整性门槛。
+        if content.get("source") == "pentest" and isinstance(content.get("engagement_public_id"), str):
             readable_ids.add(int(engagement_id))
     return readable_ids
 

@@ -266,6 +266,7 @@ class RunCheckpoint:
     context_metadata: Dict[str, Any] = field(default_factory=dict)
     error: str = ""
     cancel_reason: str = ""
+    stop_requested: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -282,6 +283,7 @@ class RunCheckpoint:
             "context_metadata": copy.deepcopy(self.context_metadata),
             "error": self.error,
             "cancel_reason": self.cancel_reason,
+            "stop_requested": self.stop_requested,
         }
 
     @classmethod
@@ -301,6 +303,7 @@ class RunCheckpoint:
             context_metadata=copy.deepcopy(dict(value.get("context_metadata") or {})),
             error=str(value.get("error") or ""),
             cancel_reason=str(value.get("cancel_reason") or ""),
+            stop_requested=value.get("stop_requested") is True,
         )
 
 
@@ -767,6 +770,11 @@ class DeepSeekResponsesRuntime:
             raise RunNotFoundError(f"运行 {checkpoint.run_id} 不存在或检查点已失效")
         if latest.status == CANCELLED:
             return self._result(latest)
+        if latest.stop_requested:
+            return await self._mark_cancelled(
+                checkpoint,
+                reason=latest.cancel_reason,
+            )
         return None
 
     async def _mark_cancelled(self, checkpoint: RunCheckpoint, *, reason: str = "") -> RuntimeResult:
@@ -780,6 +788,7 @@ class DeepSeekResponsesRuntime:
         checkpoint.pending = None
         checkpoint.error = ""
         checkpoint.cancel_reason = reason
+        checkpoint.stop_requested = True
         # 取消是终态,输出文本无条件收敛为取消结论(含原因与回滚提示),
         # 避免取消前已有的部分输出掩盖取消原因。
         suffix = "已停止任务，未执行剩余操作；如需继续可重新发起。"

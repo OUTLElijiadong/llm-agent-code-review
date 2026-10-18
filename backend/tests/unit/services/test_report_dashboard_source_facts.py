@@ -158,10 +158,16 @@ def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, sour
     db.add(duplicate_link)
     valid_task = _task(db, source_owner, source_project, "pentest")
     valid_engagement = _pentest(db, valid_task, include_findings=False)
+    valid_snapshot = db.query(ReviewReport).filter_by(task_id=valid_task.id).one()
+    # 渗透报告由领域发现生成，不要求快照重复保存 Markdown 正文。
+    valid_snapshot.content_json = {**valid_snapshot.content_json, "report_md": " \n"}
     incomplete_task = _task(db, source_owner, source_project, "pentest")
     incomplete_engagement = _pentest(db, incomplete_task, include_findings=False)
     incomplete_snapshot = db.query(ReviewReport).filter_by(task_id=incomplete_task.id).one()
-    incomplete_snapshot.content_json = {**incomplete_snapshot.content_json, "report_md": " \n"}
+    incomplete_snapshot.content_json = {
+        **incomplete_snapshot.content_json,
+        "engagement_public_id": "wrong-engagement-link",
+    }
 
     reviewer = User(username="pentest-reviewer", password="x", role="reviewer", status=1)
     reviewer_role = Role(code="reviewer", name="渗透授权审查员", status="active", is_builtin=1)
@@ -263,6 +269,7 @@ def _listed(db, owner, task):
 @pytest.mark.parametrize("source", ["standard", "discuss"])
 def test_review_sources_keep_final_issue_scoring(db, source_owner, source_project, source):
     task = _task(db, source_owner, source_project, source, count=99, score=89)
+    task.coverage = {"coverage_status": "complete", "score_available": True}
     _issues(db, task)
     db.commit()
 
@@ -401,6 +408,7 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
     for source, count, score in cases:
         task = _task(db, source_owner, source_project, source, count=count, score=score)
         if source in {"standard", "discuss"}:
+            task.coverage = {"coverage_status": "complete", "score_available": True}
             _issues(db, task)
         elif source == "pentest":
             _pentest(db, task)
@@ -430,6 +438,7 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
 def test_score_trend_omits_successful_tasks_without_a_valid_score(db, source_owner, source_project):
     """越界的历史评分不能让评分趋势接口返回 500 或伪造异常分数。"""
     scored = _task(db, source_owner, source_project, "standard", count=0, score=87)
+    scored.coverage = {"coverage_status": "complete", "score_available": True}
     unscored = _task(db, source_owner, source_project, "sandbox_test", count=4, score=101)
     _snapshot(db, unscored, public_id="sbx-unscored", report_md="## 问题清单\n- A\n")
     db.commit()
@@ -440,11 +449,25 @@ def test_score_trend_omits_successful_tasks_without_a_valid_score(db, source_own
     assert trend[0]["score"] == 87
 
 
+def test_dashboard_score_average_omits_unverified_historical_scores(db, source_owner, source_project):
+    """缺少覆盖证明的旧分数不能混入工作台均分与有效样本数。"""
+    task = _task(db, source_owner, source_project, "standard", count=0, score=87)
+    db.commit()
+
+    summary = dashboard_service.get_summary(db, source_owner)
+
+    assert summary["avg_score"] == 0
+    assert summary["code_review_count"] == 0
+    assert next(item for item in summary["recent_tasks"] if item["id"] == task.id)["score"] is None
+
+
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
 @pytest.mark.parametrize("score", [0, 100])
 def test_empty_source_keeps_explicit_score(db, source_owner, source_project, source, score):
     task = _task(db, source_owner, source_project, source, score=score)
-    if source == "sandbox_test":
+    if source in {"standard", "discuss"}:
+        task.coverage = {"coverage_status": "complete", "score_available": True}
+    elif source == "sandbox_test":
         _snapshot(db, task)
     elif source == "pentest":
         _pentest(db, task, include_findings=False)
@@ -511,6 +534,7 @@ def test_task_owner_and_project_member_scopes_are_not_expanded(db, source_owner,
 
 def test_dashboard_hides_foreign_report_cards_but_keeps_project_member_score(db, source_owner, source_project):
     owner_task = _task(db, source_owner, source_project, "standard", score=88)
+    owner_task.coverage = {"coverage_status": "complete", "score_available": True}
     _issues(db, owner_task)
     member = User(username="dashboard-private-member", password="x", role="user", status=1)
     db.add(member)
@@ -693,8 +717,10 @@ def test_no_records_return_zero_counts_and_missing_report(db, source_owner):
 
 
 def test_security_dashboard_keeps_latest_successful_zero_score(db, source_owner, source_project):
-    _task(db, source_owner, source_project, "standard", score=90)
+    prior = _task(db, source_owner, source_project, "standard", score=90)
+    prior.coverage = {"coverage_status": "complete", "score_available": True}
     zero = _task(db, source_owner, source_project, "standard", score=0)
+    zero.coverage = {"coverage_status": "complete", "score_available": True}
     _issues(db, zero)
     _task(db, source_owner, source_project, "standard", score=99, status="failed")
     db.commit()
@@ -887,6 +913,7 @@ def test_source_http_list_detail_dashboard_and_ownership(source_api_client, sour
     client, db, owner, other, project, current = source_api_client
     task = _task(db, owner, project, source, count=count, score=0)
     if source in {"standard", "discuss"}:
+        task.coverage = {"coverage_status": "complete", "score_available": True}
         _issues(db, task)
     elif source == "pentest":
         _pentest(db, task)

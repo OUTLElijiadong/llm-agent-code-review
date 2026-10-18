@@ -645,7 +645,8 @@ def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknow
     assert exported.json()["score"] is None
     listed = next(item for item in listing.json()["data"]["items"] if item["task_id"] == task.id)
     assert listed["score"] is None
-    assert listed["coverage"] is None
+    assert listed["coverage"]["coverage_status"] == "unknown"
+    assert listed["coverage"]["score_available"] is False
 
 
 def test_legacy_nested_mode_scopes_detail_list_and_json_export_without_mutating_snapshot(export_context, monkeypatch):
@@ -777,7 +778,7 @@ def test_sandbox_report_localizes_status_prose_but_preserves_code_evidence():
     assert "AI 动态用例=未执行" in markdown
     assert "```text\n确定性执行结论: passed\n```" in markdown
     assert "执行状态：执行完成" in markdown
-    assert "验证状态：部分完成" in markdown
+    assert "验证状态：部分核验" in markdown
 
 
 def test_sandbox_report_detail_discloses_missing_original_body_without_failing():

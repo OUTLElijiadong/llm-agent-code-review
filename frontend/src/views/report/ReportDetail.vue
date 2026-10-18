@@ -1812,6 +1812,9 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   :deep(pre) {
     max-width: 100%;
     overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   :deep(code) {
