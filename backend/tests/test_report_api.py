@@ -333,7 +333,7 @@ def test_generate_html_report_success(admin_client):
     assert "<!DOCTYPE html>" in html
     assert "SQL注入审查" in html or "SQL 注入漏洞" in html
     assert "finding-aggregation-v1" in html
-    assert "人工复核 pending" in html
+    assert "人工复核 待人工复核" in html
 
 
 def test_generate_pdf_report_success(admin_client):

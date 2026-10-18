@@ -488,12 +488,15 @@ describe('AgentChatDrawer Responses stream', () => {
     emit(0, { type: 'response.created', response: { id: 'run-pending-cancel', model: 'deepseek-v4-pro' } })
     let resolveCancel!: (value: unknown) => void
     responseApi.cancel.mockImplementationOnce(() => new Promise((resolve) => { resolveCancel = resolve }))
-    for (let i = 0; i < 2; i++) {
-      await wrapper.find('.stop-btn').trigger('click')
-      await settleAll()
-      await wrapper.find('.cancel-confirm-stop').trigger('click')
-      await settleAll()
-    }
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+    expect((wrapper.find('.stop-btn').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.find('.stop-btn').text()).toContain('正在确认停止')
+    expect(wrapper.find('.stop-unconfirmed').text()).toContain('等待服务端确认')
+    await wrapper.find('.stop-btn').trigger('click')
+    expect(wrapper.find('.cancel-confirm-panel').exists()).toBe(false)
     expect(responseApi.cancel).toHaveBeenCalledOnce()
     await wrapper.find('.session-current').trigger('click')
     await wrapper.find('.session-new').trigger('click')
@@ -562,7 +565,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('停止请求未确认时中断本地响应并抑制迟到团队回执续跑', async () => {
+  it('停止请求未确认时保留运行流和重试入口，并抑制迟到团队回执续跑', async () => {
     const wrapper = await mountReadyDrawer()
     await wrapper.find('.chat-input').setValue('继续处理')
     void wrapper.find('.send-btn').trigger('click')
@@ -581,12 +584,12 @@ describe('AgentChatDrawer Responses stream', () => {
     await wrapper.find('.cancel-confirm-stop').trigger('click')
     await settleAll()
 
-    expect(streams.records[0].aborted).toBe(true)
-    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('停止请求尚未确认'))
+    expect(streams.records[0].aborted).toBe(false)
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('停止未确认，任务仍可能运行'))
     expect(wrapper.find('.stop-btn').exists()).toBe(true)
-    expect(wrapper.find('.msg-error-card').text()).toContain('停止请求尚未确认')
-    expect(wrapper.find('.msg-error-card').text()).toContain('稍后再次停止')
-    expect(wrapper.find('.msg-error-card').text()).toContain('trace-cancel-1')
+    expect(wrapper.find('.stop-btn').text()).toContain('重试停止')
+    expect(wrapper.find('.stop-unconfirmed').text()).toContain('任务仍可能运行')
+    expect((wrapper.vm as any).loading).toBe(true)
     expect(wrapper.text()).not.toContain('已停止任务，未执行剩余操作')
 
     const currentSessionId = streams.records[0].body.session_id as string
@@ -616,6 +619,49 @@ describe('AgentChatDrawer Responses stream', () => {
       'user', 'previous-user-session', backgroundReceipt.message_id, 'completed',
       '停止请求尚未确认；团队回执仅保留审计，不触发新的模型运行',
     )
+
+    responseApi.cancel.mockResolvedValueOnce({
+      run_id: 'run-active', status: 'cancelled', error: '', output_text: '', cancelled_teams: 1,
+    })
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+    expect(responseApi.cancel).toHaveBeenCalledTimes(2)
+    expect(streams.records[0].aborted).toBe(true)
+    expect(wrapper.text()).not.toContain('任务仍可能运行')
+    expect(wrapper.find('.stop-btn').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('response.created 到达前也用客户端运行标识安全停止，不发无目标取消', async () => {
+    const wrapper = await mountReadyDrawer()
+    await wrapper.find('.chat-input').setValue('快速停止')
+    void wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    const startRunId = streams.records[0].body.run_id as string
+    expect(startRunId).toMatch(/^run_[a-f0-9-]{36}$/)
+    expect((wrapper.vm as any).sessionRun.run_id).toBe(startRunId)
+    expect((wrapper.vm as any).sessionRun.status).toBe('running')
+    responseApi.cancel.mockRejectedValueOnce(new Error('运行检查点尚未就绪'))
+
+    await wrapper.find('.stop-btn').trigger('click')
+    await settleAll()
+    await wrapper.find('.cancel-confirm-stop').trigger('click')
+    await settleAll()
+
+    expect(responseApi.cancel).toHaveBeenCalledWith(
+      'user', streams.records[0].body.session_id, startRunId, '',
+    )
+    expect(streams.records[0].aborted).toBe(false)
+    expect((wrapper.vm as any).sessionRun.run_id).toBe(startRunId)
+    expect((wrapper.vm as any).sessionRun.status).toBe('running')
+    expect(wrapper.find('.stop-btn').text()).toContain('重试停止')
+
+    emit(0, { type: 'response.created', response: { id: startRunId, model: 'deepseek-v4-pro' } })
+    await flushPromises()
+    expect((wrapper.vm as any).sessionRun.run_id).toBe(startRunId)
     wrapper.unmount()
   })
   it('labels a fresh Xiaoling conversation with the Pro orchestrator model', async () => {
@@ -1972,6 +2018,7 @@ it('仅图片可发送，接口失败保留图片用于重试且不落本地存�
   await failStream(0, new Error('网络断开'))
   expect(wrapper.find('.msg-error-card').text()).toContain('网络断开')
   expect(JSON.stringify(localStorage)).not.toContain('data:image/png;base64,')
+  await settleAll()
   await wrapper.find('.msg-error-btn.is-retry').trigger('click')
   await flushPromises()
   expect((streams.records[1].body.messages as Array<{images?: string[]}>).at(-1)?.images).toEqual(history.at(-1)?.images)

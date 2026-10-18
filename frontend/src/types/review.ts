@@ -153,6 +153,17 @@ export interface TaskCoverageOut {
   current_file?: string | null
   completed_files?: number | null
   total_files?: number | null
+  unscanned_files?: number | string[] | null
+  unscanned_file_names?: unknown[]
+  excluded_files?: unknown[]
+  failed_files?: unknown[]
+  cancelled_files?: unknown[]
+  skipped_files?: unknown[]
+  completed_phases?: unknown[]
+  unscanned_phases?: unknown[]
+  completed_file_count?: number | null
+  total_file_count?: number | null
+  included_file_count?: number | null
   completed_chunks?: number | null
   total_chunks?: number | null
   error?: string | null

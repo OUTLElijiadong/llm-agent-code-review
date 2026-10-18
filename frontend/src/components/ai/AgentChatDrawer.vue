@@ -225,6 +225,20 @@ const sessionLastPolledAt = ref('')
 const reconnectHint = ref(false)
 let reconnectHintTimer: number | undefined
 const cancelPromptVisible = ref(false)
+const cancelUnconfirmedRunId = ref('')
+const pendingCancelKey = ref('')
+const currentCancelKey = computed(() => {
+  const runId = sessionRun.value?.run_id
+  if (!runId || !sessionId.value) return ''
+  return `${userStore.profile?.id}:${sessionId.value}:${runId}`
+})
+const cancelRequestPending = computed(() => Boolean(
+  currentCancelKey.value && pendingCancelKey.value === currentCancelKey.value,
+))
+const cancelRequestUnconfirmed = computed(() => Boolean(
+  sessionRun.value?.run_id && cancelUnconfirmedRunId.value === sessionRun.value.run_id,
+))
+const runStatusSyncPending = ref(false)
 const agentTeams = ref<AgentTeamDetail[]>([])
 const cachedAgentTeams = ref<AgentTeamSummary[]>([])
 const agentTeamLoading = ref(false)
@@ -419,12 +433,14 @@ const canStartRun = computed(() => (
   !loading.value
   && !uploading.value
   && !sessionRestoring.value
+  && !runStatusSyncPending.value
   && !sessionBusy.value
 ))
 const canSend = computed(() => (inputText.value.trim().length > 0 || pendingImages.value.length > 0) && !readingImages.value && canStartRun.value)
-/** 小菱流式运行中:显示「停止响应」按钮,点击即中止当前流。 */
+/** 小菱服务端运行中:显示取消入口;仅在服务端确认后才关闭当前 SSE。 */
 const canStopResponse = computed(() => (
-  loading.value || isAgentResponseSessionActive(sessionRun.value?.status)
+  Boolean(sessionRun.value?.run_id)
+  && (loading.value || isAgentResponseSessionActive(sessionRun.value?.status))
 ))
 
 const meshBridge = createAgentMeshBridge({
@@ -517,6 +533,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   sessionPollFailures = 0
   cancelPromptVisible.value = false
   sessionRun.value = null
+  runStatusSyncPending.value = false
   modelName.value = ORCHESTRATOR_MODEL
   agentTeams.value = []
   cachedAgentTeams.value = []
@@ -1289,6 +1306,10 @@ async function pollSessionSnapshot(generation: number): Promise<void> {
     const session = await getAgentResponseSession('user', sessionId.value, true)
     if (!scopeCurrent() || sessionPollStopped || generation !== sessionPollGeneration || requestedUserId !== userStore.profile?.id) return
     sessionPollError.value = ''
+    runStatusSyncPending.value = false
+    if (!session.run || session.run.run_id !== cancelUnconfirmedRunId.value) {
+      cancelUnconfirmedRunId.value = ''
+    }
     sessionPollFailures = 0
     sessionLastPolledAt.value = dayjs().format('HH:mm:ss')
     await refreshAgentTeam(generation)
@@ -1508,11 +1529,10 @@ async function handleSessionArchive(sessionId: string): Promise<void> {
  * 停止响应:先弹原因确认;确认后读取服务端实际终态并给出对应反馈。
  */
 function requestStopResponse(): void {
-  if (!canStopResponse.value) return
+  if (!canStopResponse.value || cancelRequestPending.value) return
   cancelPromptVisible.value = true
 }
 
-let pendingCancelKey = ''
 async function cancelResponse(reason = ''): Promise<void> {
   const runId = sessionRun.value?.run_id
   const requestedSessionId = sessionId.value
@@ -1522,8 +1542,9 @@ async function cancelResponse(reason = ''): Promise<void> {
     return
   }
   const key = `${requestedUserId}:${requestedSessionId}:${runId}`
-  if (pendingCancelKey === key) return
-  pendingCancelKey = key
+  if (pendingCancelKey.value === key) return
+  pendingCancelKey.value = key
+  cancelUnconfirmedRunId.value = ''
   cancellingResponseRunIds.add(runId)
   const isCurrent = () => !sessionPollStopped && requestedSessionId === sessionId.value
     && requestedUserId === userStore.profile?.id && sessionRun.value?.run_id === runId
@@ -1536,6 +1557,7 @@ async function cancelResponse(reason = ''): Promise<void> {
       if (requestedSessionId === sessionId.value) settlePendingCancelledRunReceipts(runId)
     }
     if (!isCurrent()) return
+    cancelUnconfirmedRunId.value = ''
     sessionRun.value = { ...sessionRun.value!, status: result.status, error: result.error || '', output_text: result.output_text }
     activeResponse?.abort()
     activityStore.clear()
@@ -1567,22 +1589,22 @@ async function cancelResponse(reason = ''): Promise<void> {
       settlePendingCancelledRunReceipts(runId, '停止请求尚未确认，团队回执仅保留审计，不再自动续跑')
     }
     if (!isCurrent()) return
-    activeResponse?.abort()
-    activityStore.clear()
-    loading.value = false
-    showTyping.value = false
-    syncBusy()
     const info = actionableError(error, '停止请求未确认')
-    const content = `停止请求尚未确认，已阻止关联团队回执自动续跑。${info.message.includes('停止请求未确认') ? info.message : `请查看任务状态：${info.message}`}`
-    ElMessage.error(content)
-    appendErrorCard(content, false, {
-      nextAction: info.nextAction || '当前任务状态尚未确认，可再次点击“停止响应”，或等待状态同步',
-      requestId: info.requestId,
-    })
-    scheduleSessionPoll()
+    if (isAgentResponseSessionActive(sessionRun.value?.status)) {
+      // 取消回执失败时不能 abort 原 SSE:断流只会停止浏览器订阅,后台协程仍会继续。
+      // 保留运行/停止状态,让用户可重试;绝不显示已停止。
+      cancelUnconfirmedRunId.value = runId
+      const content = `停止未确认，任务仍可能运行。${info.message.includes('停止请求未确认') ? info.message : `取消原因：${info.message}`}`
+      ElMessage.error(content)
+      if (!loading.value) scheduleSessionPoll(true)
+    } else {
+      // 取消响应可能晚于本轮自然完成。按当前真实终态展示,不伪报取消成功。
+      cancelUnconfirmedRunId.value = ''
+      ElMessage.warning(`停止请求未确认，但运行已进入终态：${sessionRun.value?.status || '状态未知'}`)
+    }
   } finally {
     cancellingResponseRunIds.delete(runId)
-    if (pendingCancelKey === key) pendingCancelKey = ''
+    if (pendingCancelKey.value === key) pendingCancelKey.value = ''
   }
 }
 
@@ -1678,8 +1700,32 @@ async function retryRun(): Promise<void> {
   })
 }
 
+function createAgentResponseRunId(): string {
+  return `run_${crypto.randomUUID()}`
+}
+
 async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   const scopeCurrent = chatScope.capture()
+  // start 的 run_id 由客户端先生成并提交，避免 response.created 到达前没有可取消目标。
+  // 后端字段已兼容可选 run_id；续跑/审批仍沿用原 run_id。
+  const action = typeof payload.action === 'string' ? payload.action : 'start'
+  const requestedRunId = action === 'start'
+    ? (typeof payload.run_id === 'string' && payload.run_id ? payload.run_id : createAgentResponseRunId())
+    : (typeof payload.run_id === 'string' && payload.run_id ? payload.run_id : sessionRun.value?.run_id ?? '')
+  const requestPayload = action === 'start'
+    ? { ...payload, run_id: requestedRunId }
+    : payload
+  if (action === 'start' && requestedRunId) {
+    cancelUnconfirmedRunId.value = ''
+    sessionRun.value = {
+      run_id: requestedRunId,
+      status: 'running',
+      model: modelName.value,
+      rounds: 0,
+      error: '',
+      updated_at: new Date().toISOString(),
+    }
+  }
   invalidateSessionPoll()
   clearLiveTeamPoll()
   loading.value = true
@@ -1688,7 +1734,8 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
   let textTarget: ChatMessage | null = null
   let timelineTarget: ChatMessage | null = null
   const runToolCalls: ResponseToolCall[] = []
-  let activeRunId = sessionRun.value?.run_id
+  let activeRunId = requestedRunId || sessionRun.value?.run_id
+  let receivedResponseCreated = false
   let protocolError = ''
 
   const syncTimeline = (includeAudit = false): ChatMessage | null => {
@@ -1731,14 +1778,16 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     textTarget.navigations = directives.length ? directives : undefined
   }
 
-  const handle = streamResponses(payload, {
+  const handle = streamResponses(requestPayload, {
     onEvent(event) {
       if (!scopeCurrent()) return
       if (siteBrowser.handle(event)) return
       if (event.type === 'response.created') {
+        receivedResponseCreated = true
         const model = event.response.model
         if (typeof model === 'string' && model) modelName.value = model
-        const runId = typeof event.response.id === 'string' ? event.response.id : sessionRun.value?.run_id ?? ''
+        const runId = typeof event.response.id === 'string' && event.response.id
+          ? event.response.id : sessionRun.value?.run_id ?? activeRunId ?? ''
         activeRunId = runId || activeRunId
         sessionRun.value = {
           run_id: runId,
@@ -1835,6 +1884,9 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         clearLiveTeamPoll()
         showTyping.value = false
         lastActiveToolName.value = ''
+        if (cancelUnconfirmedRunId.value && cancelUnconfirmedRunId.value === activeRunId) {
+          cancelUnconfirmedRunId.value = ''
+        }
         // 流进入终态:兜底熄灭彩框/虚拟鼠标(单工具结束事件已按 call_id 精确清除)
         activityStore.clear()
         if (sessionRun.value) {
@@ -1895,6 +1947,13 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       appendErrorCard('已停止本次回答,你可以点「重试」继续,或新建对话', true)
       return false
     }
+    if (action === 'start' && !receivedResponseCreated && requestedRunId
+      && sessionRun.value?.run_id === requestedRunId) {
+      // 尚未收到服务端创建事件时不能把客户端预置状态伪装成确定运行中。
+      // 先阻止重发并立即读服务端快照;若实际已启动,恢复成可停止的真实运行状态。
+      sessionRun.value = null
+      runStatusSyncPending.value = true
+    }
     const info = actionableError(error, '小菱这次没连上,请再试一次')
     ElMessage.error(info.message)
     appendErrorCard(info.message, info.retryable, {
@@ -1912,7 +1971,7 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
       await nextTick()
       if (scopeCurrent()) {
         scrollToBottom()
-        scheduleSessionPoll()
+        scheduleSessionPoll(runStatusSyncPending.value)
       }
     }
   }
@@ -3272,6 +3331,30 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               aria-label="选择源码文件"
               @change="onFileInput"
             />
+            <p
+              v-if="runStatusSyncPending"
+              class="stop-unconfirmed is-pending"
+              role="status"
+              aria-live="polite"
+            >
+              连接中断，正在核对服务端任务状态；确认前不会重复发起，也不会误报已停止。
+            </p>
+            <p
+              v-else-if="cancelRequestUnconfirmed"
+              class="stop-unconfirmed"
+              role="status"
+              aria-live="polite"
+            >
+              停止未确认，任务仍可能运行；可重试停止，团队回执不会自动触发新的模型运行。
+            </p>
+            <p
+              v-else-if="cancelRequestPending"
+              class="stop-unconfirmed is-pending"
+              role="status"
+              aria-live="polite"
+            >
+              正在等待服务端确认停止…
+            </p>
             <textarea
               ref="chatInputRef"
               v-model="inputText"
@@ -3297,11 +3380,12 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 v-if="canStopResponse"
                 class="stop-btn"
                 type="button"
-                title="停止小菱本次回答"
+                :disabled="cancelRequestPending"
+                :title="cancelRequestPending ? '正在等待服务端确认停止' : cancelRequestUnconfirmed ? '停止尚未确认，可重试' : '停止小菱本次回答'"
                 @click="requestStopResponse"
               >
                 <span class="stop-btn-icon" aria-hidden="true"></span>
-                停止响应
+                {{ cancelRequestPending ? '正在确认停止…' : cancelRequestUnconfirmed ? '重试停止' : '停止响应' }}
               </button>
               <button
                 v-else
@@ -4559,6 +4643,18 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 }
 
 .stop-btn:hover { background: var(--sev-severe); border-color: var(--sev-severe); }
+.stop-btn:disabled { opacity: 0.65; cursor: wait; }
+
+.stop-unconfirmed {
+  width: 100%;
+  align-self: stretch;
+  margin: 0;
+  color: var(--sev-severe);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.stop-unconfirmed.is-pending { color: var(--text-secondary); }
 
 .stop-btn-icon {
   width: 9px;

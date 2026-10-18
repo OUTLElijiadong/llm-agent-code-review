@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import json
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,7 +26,17 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 from app.ai.scoring import score_risk_level
-from app.services.report_exporter import export_to_dict
+from app.services.report_exporter import (
+    conflict_status_label,
+    cvss_source_label,
+    decompilation_status_label,
+    discovery_source_label,
+    evidence_quality_label,
+    export_to_dict,
+    finding_status_label,
+    human_review_status_label,
+    report_status_label,
+)
 from app.services.report_markdown import MarkdownSegment, markdown_to_blocks, parse_markdown_blocks
 
 # ============ 模块常量 ============
@@ -311,15 +320,11 @@ def _build_header(doc: Any, task_info: Dict[str, Any], score: int) -> None:
 
     status_para = doc.add_paragraph()
     _add_run(status_para, "执行状态: ", bold=True)
-    _add_run(status_para, str(task_info.get("status") or "unknown"))
+    _add_run(status_para, report_status_label(task_info.get("status")))
     if task_info.get("error_message"):
         error_para = doc.add_paragraph()
         _add_run(error_para, "错误: ", bold=True)
         _add_run(error_para, str(task_info["error_message"]))
-    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
-    coverage_para = doc.add_paragraph()
-    _add_run(coverage_para, "扫描范围与覆盖情况: ", bold=True)
-    _add_run(coverage_para, json.dumps(coverage, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def _build_summary_table(doc: Any, statistics: Dict[str, Any]) -> None:
@@ -463,7 +468,7 @@ def _build_decompilation_evidence(doc: Any, evidence: Dict[str, Any]) -> None:
     else:
         input_artifact_sha256s = str(raw_input_hashes or "-")
     rows = [
-        ("状态", decompilation.get("status") or "-"),
+        ("状态", decompilation_status_label(decompilation.get("status"))),
         ("工具", f"{decompilation.get('tool') or '-'} {decompilation.get('tool_version') or ''}".strip()),
         ("输入清单 SHA-256", decompilation.get("input_sha256") or "-"),
         ("原始制品 SHA-256", input_artifact_sha256s),
@@ -521,24 +526,24 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
 
     cvss_parts = []
     if issue.get("cvss_score") is not None:
-        cvss_parts.append(f"评分: {issue.get('cvss_score')}")
+        cvss_parts.append(f"CVSS 评分：{issue.get('cvss_score')}")
     if issue.get("cvss_vector"):
-        cvss_parts.append(f"向量: {issue.get('cvss_vector')}")
+        cvss_parts.append(f"评分向量：{issue.get('cvss_vector')}")
     if issue.get("cvss_version"):
-        cvss_parts.append(f"版本: {issue.get('cvss_version')}")
+        cvss_parts.append(f"向量版本：{issue.get('cvss_version')}")
     if issue.get("cvss_source"):
-        cvss_parts.append(f"来源: {issue.get('cvss_source')}")
+        cvss_parts.append(f"评分来源: {cvss_source_label(issue.get('cvss_source'))}")
     if cvss_parts:
         cvss_para = doc.add_paragraph()
         _add_run(cvss_para, "CVSS: ", bold=True, size=10)
-        _add_run(cvss_para, " | ".join(cvss_parts), font_name=_CODE_FONT, size=9)
+        _add_run(cvss_para, "；".join(cvss_parts), size=9)
 
     source_para = doc.add_paragraph()
     _add_run(source_para, "来源与确认: ", bold=True, size=10)
     _add_run(
         source_para,
-        "发现来源: {0} | 确认数: {1} | 指纹: {2}".format(
-            issue.get("source") or "-",
+        "发现来源: {0}；独立确认数: {1}；问题指纹: {2}".format(
+            discovery_source_label(issue.get("source")),
             issue.get("confirmation_count") or 0,
             issue.get("finding_fingerprint") or "-",
         ),
@@ -546,25 +551,24 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         size=9,
     )
     if issue.get("source_details"):
+        from app.services.report_exporter import _format_scope_facts
+
         details_para = doc.add_paragraph()
         _add_run(details_para, "来源明细: ", bold=True, size=10)
-        _add_run(
-            details_para,
-            json.dumps(issue.get("source_details"), ensure_ascii=False, default=str),
-            size=9,
-        )
+        details = _format_scope_facts({"source_details": issue["source_details"]}, "source")
+        _add_run(details_para, "；".join(details), size=9)
 
     if issue.get("aggregation_version"):
         trust_para = doc.add_paragraph()
         _add_run(trust_para, "可信聚合: ", bold=True, size=10)
         _add_run(
             trust_para,
-            "版本: {0} | 风险分: {1} | 证据等级: {2} | 冲突: {3} | 人工复核: {4}".format(
+            "版本: {0}；风险分: {1}；证据等级: {2}；冲突: {3}；人工复核: {4}".format(
                 issue.get("aggregation_version") or "-",
                 issue.get("risk_score") if issue.get("risk_score") is not None else "-",
-                issue.get("evidence_quality") or "-",
-                issue.get("conflict_status") or "-",
-                issue.get("human_review_status") or "-",
+                evidence_quality_label(issue.get("evidence_quality")),
+                conflict_status_label(issue.get("conflict_status")),
+                human_review_status_label(issue.get("human_review_status")),
             ),
             size=9,
         )
@@ -573,8 +577,8 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
     _add_run(status_para, "处理状态: ", bold=True, size=10)
     _add_run(
         status_para,
-        "状态: {0} | 处理人: {1} | 处理时间: {2} | 更新时间: {3}".format(
-            issue.get("status") or "-",
+        "状态: {0}；处理人: {1}；处理时间: {2}；更新时间: {3}".format(
+            finding_status_label(issue.get("status")),
             issue.get("handled_by") or "-",
             issue.get("handled_at") or "-",
             issue.get("update_time") or "-",
@@ -637,7 +641,6 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         _add_run(
             refs_para,
             "\n".join(str(reference) for reference in references if reference),
-            font_name=_CODE_FONT,
             size=9,
         )
 

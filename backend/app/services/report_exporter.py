@@ -604,23 +604,272 @@ def _build_report_context(
     return context
 
 
+_SCOPE_FIELD_LABELS = {
+    "coverage_status": "覆盖状态",
+    "verification_status": "验证状态",
+    "stage": "执行阶段",
+    "completed_files": "已完成文件数",
+    "processed_files": "已处理文件数",
+    "total_files": "总文件数",
+    "total_file_count": "总文件数",
+    "scanned_files": "已扫描文件",
+    "scanned_file_count": "已扫描文件数",
+    "unscanned_files": "未扫描文件",
+    "unscanned_file_names": "未扫描文件名称",
+    "excluded_files": "排除文件",
+    "failed_files": "失败文件",
+    "cancelled_files": "因停止未处理文件",
+    "unscanned_phases": "未执行阶段",
+    "completed_phases": "已完成阶段",
+    "errors": "错误",
+    "error": "错误",
+    "reason": "原因",
+    "requested_mode": "请求模式",
+    "verification_scope": "核验范围",
+    "tested": "已测试项目",
+    "unscanned": "未覆盖项目",
+    "scan_metadata": "扫描元数据",
+    "duration_seconds": "持续秒数",
+    "file_name": "文件名",
+    "file_path": "文件路径",
+    "phase": "阶段",
+    "status": "状态",
+    "count": "数量",
+    "name": "名称",
+    "url": "目标地址",
+    "method": "请求方法",
+    "status_code": "状态码",
+    "message": "说明",
+    "details": "详情",
+    "request_id": "请求编号",
+    "type": "来源类型",
+    "source": "来源",
+    "source_details": "来源明细",
+    "confidence": "置信度",
+    "stats_basis": "统计依据",
+    "source_id": "来源编号",
+    "source_type": "来源类型",
+    "source_name": "来源名称",
+    "scope": "数据范围",
+    "window": "时间范围",
+    "timezone": "时区",
+    "provider": "供应商",
+}
+
+_REPORT_STATUS_LABELS = {
+    "pending": "等待执行",
+    "queued": "排队中",
+    "running": "执行中",
+    "complete": "执行完成",
+    "success": "执行完成",
+    "completed": "执行完成",
+    "succeeded": "执行完成",
+    "partial": "部分完成",
+    "not_started": "尚未开始",
+    "waiting_dependency": "等待前置任务",
+    "verifying": "核验中",
+    "failed": "执行失败",
+    "error": "执行失败",
+    "cancelled": "已取消",
+    "canceled": "已取消",
+    "stopped": "已停止",
+    "expired": "已过期",
+    "incomplete": "未完成",
+    "unknown": "未知",
+}
+
+_FINDING_STATUS_LABELS = {
+    "unfixed": "未修复",
+    "fixed": "已修复",
+    "ignored": "已忽略",
+    "pending_review": "待复核",
+}
+_HUMAN_REVIEW_STATUS_LABELS = {
+    "not_required": "无需人工复核",
+    "pending": "待人工复核",
+    "accepted": "已接受",
+    "rejected": "已驳回",
+    "evidence_requested": "待补充证据",
+}
+_EVIDENCE_QUALITY_LABELS = {
+    "verified": "证据引用已核对",
+    "direct": "直接证据",
+    "inferred": "推断依据",
+    "unsupported": "证据不足",
+}
+_CONFLICT_STATUS_LABELS = {
+    "none": "无冲突",
+    "unresolved": "待处理冲突",
+    "resolved": "冲突已解决",
+}
+_DECOMPILATION_STATUS_LABELS = {
+    "skipped": "未执行",
+    "planned": "等待执行",
+    "succeeded": "执行成功",
+    "failed": "执行失败",
+    "unsupported": "不支持该输入类型",
+}
+_SOURCE_LABELS = {
+    "llm": "模型",
+    "static": "静态规则",
+    "regex": "正则规则",
+    "llm+static": "模型 + 静态规则",
+    "static+llm": "静态规则 + 模型",
+    "llm+regex": "模型 + 正则规则",
+    "regex+llm": "正则规则 + 模型",
+}
+_CVSS_SOURCE_LABELS = {"vector": "向量计算", "model": "模型评估", "unavailable": "不可用"}
+
+
+def _mapped_report_value(value: Any, labels: Dict[str, str], *, unknown: str = "状态未识别") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return "未记录"
+    return labels.get(raw, unknown)
+
+_SCOPE_STATUS_LABELS = {
+    "status": _REPORT_STATUS_LABELS,
+    "coverage_status": {
+        "complete": "完整覆盖",
+        "completed": "完整覆盖",
+        "partial": "部分覆盖",
+        "incomplete": "覆盖不完整",
+        "unknown": "未知",
+        "failed": "失败",
+        "cancelled": "已取消",
+    },
+    "verification_status": {
+        "complete": "已核验通过",
+        "completed": "已核验通过",
+        "verified": "已核验通过",
+        "partial": "部分核验",
+        "failed": "未通过",
+        "unknown": "未知",
+        "pending": "等待核验",
+        "cancelled": "已取消",
+    },
+    "stage": {
+        "complete": "已完成",
+        "completed": "已完成",
+        "success": "已完成",
+        "partial": "部分完成",
+        "failed": "失败",
+        "cancelled": "已取消",
+        "unknown": "未知",
+    },
+    "human_review_status": _HUMAN_REVIEW_STATUS_LABELS,
+    "evidence_quality": _EVIDENCE_QUALITY_LABELS,
+    "conflict_status": _CONFLICT_STATUS_LABELS,
+    "decompilation_status": _DECOMPILATION_STATUS_LABELS,
+    "source": _SOURCE_LABELS,
+    "cvss_source": _CVSS_SOURCE_LABELS,
+}
+
+
+def report_status_label(status: Any) -> str:
+    """将内部任务状态映射为报告中的中文说明，未知值不伪装成已完成。"""
+    return _mapped_report_value(status, _REPORT_STATUS_LABELS)
+
+
+def finding_status_label(status: Any) -> str:
+    """将问题处理状态映射为报告可读的中文标签。"""
+    return _mapped_report_value(status, _FINDING_STATUS_LABELS)
+
+
+def human_review_status_label(status: Any) -> str:
+    """将人工复核状态映射为报告可读的中文标签。"""
+    return _mapped_report_value(status, _HUMAN_REVIEW_STATUS_LABELS)
+
+
+def evidence_quality_label(status: Any) -> str:
+    """将证据质量枚举映射为中文，并保留其与漏洞验证结论的边界。"""
+    return _mapped_report_value(status, _EVIDENCE_QUALITY_LABELS)
+
+
+def conflict_status_label(status: Any) -> str:
+    """将证据冲突状态映射为中文标签。"""
+    return _mapped_report_value(status, _CONFLICT_STATUS_LABELS)
+
+
+def decompilation_status_label(status: Any) -> str:
+    """将反编译状态映射为中文标签。"""
+    return _mapped_report_value(status, _DECOMPILATION_STATUS_LABELS)
+
+
+def discovery_source_label(source: Any) -> str:
+    """将问题发现来源映射为中文标签。"""
+    return _mapped_report_value(source, _SOURCE_LABELS, unknown="来源未识别")
+
+
+def cvss_source_label(source: Any) -> str:
+    """将 CVSS 评分来源映射为中文标签。"""
+    return _mapped_report_value(source, _CVSS_SOURCE_LABELS, unknown="来源未识别")
+
+
+def _scope_scalar_text(key: str, value: Any) -> str:
+    """把覆盖元数据的单值转成适合报告阅读的文本。"""
+    if value is None:
+        return "未记录"
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, str):
+        if key == "status":
+            return report_status_label(value)
+        return _SCOPE_STATUS_LABELS.get(key, {}).get(value.lower(), value)
+    return str(value)
+
+
+def _format_scope_facts(value: Any, namespace: str) -> List[str]:
+    """递归展平来源与覆盖对象，保留字段和值但避免在可读报告中输出原始 JSON。"""
+    if not isinstance(value, dict) or not value:
+        return []
+
+    lines: List[str] = []
+
+    def visit(current: Dict[str, Any], prefix: str = "") -> None:
+        for key, item in current.items():
+            label = _SCOPE_FIELD_LABELS.get(key)
+            if label is None:
+                label = f"来源字段（{key}）" if namespace == "source" else f"其他字段（{key}）"
+            field_name = f"{prefix}{label}"
+            if isinstance(item, dict):
+                if item:
+                    visit(item, field_name)
+                else:
+                    lines.append(f"{field_name}：无记录")
+            elif isinstance(item, list):
+                if item and all(isinstance(entry, dict) for entry in item):
+                    for index, entry in enumerate(item, start=1):
+                        visit(entry, f"{field_name}第{index}项")
+                else:
+                    values = "、".join(_scope_scalar_text(key, entry) for entry in item)
+                    lines.append(f"{field_name}：{values or '无记录'}")
+            else:
+                lines.append(f"{field_name}：{_scope_scalar_text(key, item)}")
+
+    visit(value)
+    return lines
+
+
 def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
     """各格式共用范围说明；历史缺失保持未知，处理数量不冒充语义覆盖率。"""
     task = context["task_info"]
     lines = [
-        f"任务状态：{task.get('status') or '未记录'}；文件处理进度："
+        f"任务状态：{report_status_label(task.get('status'))}；文件处理进度："
         f"{task.get('processed_files') or 0}/{task.get('total_files') or 0}（不等同于语义覆盖率）",
-        "统计来源：" + json.dumps(context["source"], ensure_ascii=False, default=str),
-        "覆盖记录：" + (
-            "未记录，不能据此判定完整覆盖；"
-            + json.dumps(task["coverage"], ensure_ascii=False, default=str)
-            if isinstance(task.get("coverage"), dict)
-            and task["coverage"].get("coverage_status") == "unknown"
-            else json.dumps(task["coverage"], ensure_ascii=False, default=str)
-            if isinstance(task.get("coverage"), dict) and task["coverage"]
-            else "未记录，不能据此判定完整覆盖"
-        ),
     ]
+    source_lines = _format_scope_facts(context.get("source"), "source")
+    lines.extend(["统计来源：" + source_lines[0], *source_lines[1:]] if source_lines else ["统计来源：未记录"])
+
+    coverage = task.get("coverage")
+    coverage_lines = _format_scope_facts(coverage, "coverage")
+    if coverage_lines:
+        lines.extend(["覆盖记录：" + coverage_lines[0], *coverage_lines[1:]])
+        if coverage.get("coverage_status") == "unknown":
+            lines.append("覆盖完整性：未知，未记录，不能据此判定完整覆盖。")
+    else:
+        lines.append("覆盖记录：未记录，不能据此判定完整覆盖。")
+
     basis = context["statistics"]["assessment_basis"]
     counts = basis["human_review_counts"]
     lines.extend([
@@ -641,7 +890,11 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
         "不能据此声明已同步最新库或获得权威认证。",
     ])
     if task.get("agent_releases"):
-        lines.append("审查 Agent 版本：" + json.dumps(task["agent_releases"], ensure_ascii=False, default=str))
+        release_lines = _format_scope_facts(task["agent_releases"], "coverage")
+        if release_lines:
+            lines.extend(["审查 Agent 版本：" + release_lines[0], *release_lines[1:]])
+        else:
+            lines.append("审查 Agent 版本：未记录")
     for file in context["files"]:
         lines.append(
             f"文件：{file.get('file_path') or file.get('file_name') or '未命名'}；"
@@ -762,7 +1015,37 @@ def export_to_html(
         "summary_html": Markup(markdown_to_safe_html(context["summary"])),
     })
     template = _JINJA_ENV.from_string(template_content)
-    rendered = template.render(**context)
+    html_context = dict(context)
+    html_context["task_info"] = {
+        **context["task_info"],
+        "status_label": report_status_label(context["task_info"].get("status")),
+    }
+    evidence = context.get("evidence") if isinstance(context.get("evidence"), dict) else {}
+    decompilation = evidence.get("decompilation")
+    if isinstance(decompilation, dict):
+        html_context["evidence"] = {
+            **evidence,
+            "decompilation": {
+                **decompilation,
+                "status_label": decompilation_status_label(decompilation.get("status")),
+            },
+        }
+    html_context["issues"] = [
+        {
+            **issue,
+            "status_label": finding_status_label(issue.get("status")),
+            "human_review_status_label": human_review_status_label(issue.get("human_review_status")),
+            "evidence_quality_label": evidence_quality_label(issue.get("evidence_quality")),
+            "conflict_status_label": conflict_status_label(issue.get("conflict_status")),
+            "source_label": discovery_source_label(issue.get("source")),
+            "cvss_source_label": cvss_source_label(issue.get("cvss_source")),
+            "source_detail_lines": _format_scope_facts(
+                {"source_details": issue.get("source_details")}, "source",
+            ) if issue.get("source_details") else [],
+        }
+        for issue in context["issues"]
+    ]
+    rendered = template.render(**html_context)
     source = context.get("source") if isinstance(context.get("source"), dict) else {}
     security_report = source.get("security_report") if isinstance(source, dict) else None
     security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None

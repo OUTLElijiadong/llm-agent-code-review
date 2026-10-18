@@ -372,6 +372,36 @@ describe('ReportDetail 报告口径', () => {
     expect(execution.text()).toContain('执行失败')
     expect(execution.text()).toContain('未发出网络请求')
     expect(execution.text()).toContain('根路径安全响应头检查')
+    expect(execution.text()).toContain('未开始执行')
+    wrapper.unmount()
+  })
+
+  it('代码审查详情正确汇总文件覆盖并列出未扫描、排除与失败文件', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '覆盖验证项目' },
+      task: {
+        task_name: '代码审查', review_type: 'security', status: 'success',
+        coverage: {
+          coverage_status: 'partial',
+          completed_files: 2,
+          total_files: 5,
+          unscanned_files: 1,
+          unscanned_file_names: ['src/queued.py'],
+          excluded_files: [{ file_name: 'vendor/lib.js', reason: '第三方依赖' }],
+          failed_files: ['src/broken.py'],
+        },
+      },
+      stats: { total_issues: 0 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const execution = wrapper.get('[data-testid="report-execution-status"]')
+    expect(execution.text()).toContain('部分完成')
+    expect(execution.text()).toContain('文件处理 2/5')
+    expect(execution.text()).toContain('未扫描文件：src/queued.py')
+    expect(execution.text()).toContain('排除文件：vendor/lib.js（第三方依赖）')
+    expect(execution.text()).toContain('失败文件：src/broken.py')
     wrapper.unmount()
   })
 

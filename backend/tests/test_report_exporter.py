@@ -32,7 +32,10 @@ from app.services.report_exporter import (
     export_to_dict,
     export_to_html,
     export_to_json,
+    finding_status_label,
+    human_review_status_label,
     load_builtin_template,
+    report_status_label,
 )
 from app.services.report_pdf_exporter import (
     _build_header_elements,
@@ -42,6 +45,21 @@ from app.services.report_pdf_exporter import (
     export_to_pdf,
 )
 from app.services.report_word_exporter import export_to_word
+
+
+@pytest.mark.parametrize(
+    ("labeler", "raw_value", "expected"),
+    [
+        (report_status_label, "unexpected-task-state", "状态未识别"),
+        (finding_status_label, "unexpected-finding-state", "状态未识别"),
+        (human_review_status_label, "unexpected-review-state", "状态未识别"),
+        (report_status_label, None, "未记录"),
+        (finding_status_label, "", "未记录"),
+    ],
+)
+def test_report_status_labels_have_safe_fallbacks(labeler, raw_value, expected):
+    """未知与缺失枚举必须明确标注，不能伪装成已完成或泄漏原始值。"""
+    assert labeler(raw_value) == expected
 
 # ============ 测试数据工厂 ============
 
@@ -340,15 +358,20 @@ def test_terminal_report_state_and_coverage_survive_all_standard_exports():
         },
     )
     json_payload = __import__("json").loads(export_to_json(task, [], "任务已取消", 0))
-    html = export_to_html(task, [], "任务已取消", 0, load_builtin_template("detailed"))
+    html_exports = [
+        export_to_html(task, [], "任务已取消", 0, load_builtin_template(template_type))
+        for template_type in ("simple", "detailed", "compliance")
+    ]
     pdf = export_to_pdf(task, [], "任务已取消", 0)
     word = export_to_word(task, [], "任务已取消", 0)
 
     assert json_payload["task_info"]["status"] == "cancelled"
     assert json_payload["task_info"]["error_message"] == "用户停止审查"
     assert json_payload["task_info"]["coverage"]["unscanned_files"] == 2
-    assert "用户停止审查" in html
-    assert "vendor/generated.py" in html
+    assert all("已取消" in html for html in html_exports)
+    assert all("cancelled" not in html for html in html_exports)
+    assert all("用户停止审查" in html for html in html_exports)
+    assert all("vendor/generated.py" in html for html in html_exports)
     assert pdf.startswith(b"%PDF")
     pdf_header = "\n".join(
         getattr(element, "text", "")
@@ -356,13 +379,147 @@ def test_terminal_report_state_and_coverage_survive_all_standard_exports():
             json_payload["task_info"], 0, _build_styles(_ensure_chinese_font())
         )
     )
-    assert "cancelled" in pdf_header
+    assert "已取消" in pdf_header
+    assert "cancelled" not in pdf_header
     assert "用户停止审查" in pdf_header
-    assert "vendor/generated.py" in pdf_header
+    assert "扫描范围与覆盖情况" not in pdf_header
+    pdf_text = "\n".join(export_to_dict(task, [], "任务已取消", 0)["scope_lines"])
+    assert "vendor/generated.py" in pdf_text
     word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs)
-    assert "cancelled" in word_text
+    assert "已取消" in word_text
+    assert "cancelled" not in word_text
+    assert "任务状态：已取消" in pdf_text
     assert "用户停止审查" in word_text
     assert "vendor/generated.py" in word_text
+
+
+def test_issue_and_decompilation_states_are_localized_in_all_visual_exports(monkeypatch):
+    """HTML/PDF/Word 对外展示的审查、复核、证据、冲突及反编译状态都使用中文。"""
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Table
+
+    issue = _make_issue(
+        status="fixed",
+        source="static",
+        source_details=None,
+        cvss_source="vector",
+        aggregation_version="finding-aggregation-v1",
+        evidence_quality="verified",
+        conflict_status="unresolved",
+        human_review_status="evidence_requested",
+    )
+    evidence = {"decompilation": {"status": "succeeded", "tool": "jadx"}}
+    expected_labels = (
+        "已修复", "静态规则", "向量计算", "证据引用已核对", "待处理冲突", "待补充证据", "执行成功",
+    )
+    raw_values = ("fixed", "static", "vector", "verified", "unresolved", "evidence_requested", "succeeded")
+    html_outputs = [
+        export_to_html(_make_task(), [issue], "", 72, load_builtin_template(template_type), evidence=evidence)
+        for template_type in ("simple", "detailed", "compliance")
+    ]
+    assert all("执行成功" in html for html in html_outputs)
+    assert all("已修复" in html for html in html_outputs)
+    assert all(all(label in html for label in expected_labels[:-1]) for html in html_outputs[1:])
+    assert "succeeded" not in html_outputs[0]
+    assert all(not any(raw in html for raw in raw_values) for html in html_outputs[1:])
+
+    original_build = SimpleDocTemplate.build
+    pdf_visible_text = []
+
+    def collect_flowable_text(flowable):
+        if isinstance(flowable, Paragraph):
+            pdf_visible_text.append(flowable.getPlainText())
+        elif isinstance(flowable, Table):
+            for row in flowable._cellvalues:
+                for cell in row:
+                    if isinstance(cell, (list, tuple)):
+                        for nested in cell:
+                            collect_flowable_text(nested)
+                    else:
+                        collect_flowable_text(cell)
+
+    def capture_build(doc, flowables, *args, **kwargs):
+        for flowable in flowables:
+            collect_flowable_text(flowable)
+        return original_build(doc, flowables, *args, **kwargs)
+
+    monkeypatch.setattr(SimpleDocTemplate, "build", capture_build)
+    pdf = export_to_pdf(_make_task(), [issue], "", 72, evidence=evidence)
+    assert pdf.startswith(b"%PDF")
+    pdf_text = "\n".join(pdf_visible_text)
+    assert all(label in pdf_text for label in expected_labels)
+    assert not any(raw in pdf_text for raw in raw_values)
+
+    word = export_to_word(_make_task(), [issue], "", 72, evidence=evidence)
+    with zipfile.ZipFile(io.BytesIO(word)) as archive:
+        word_xml = archive.read("word/document.xml").decode("utf-8")
+    assert all(label in word_xml for label in expected_labels)
+    assert not any(raw in word_xml for raw in raw_values)
+
+
+def test_scope_coverage_is_human_readable_in_html_word_and_pdf_exports(monkeypatch):
+    """覆盖与来源对象应逐项展示，不能把内部 JSON 原样塞进读者报告。"""
+    task = _make_task(
+        processed_files=2,
+        total_files=5,
+        coverage={
+            "coverage_status": "partial",
+            "verification_status": "failed",
+            "completed_files": 2,
+            "unscanned_file_names": ["src/later.py", "src/queued.py"],
+            "excluded_files": [
+                {"file_name": "vendor/jquery.js", "reason": "第三方依赖"},
+            ],
+            "errors": ["扫描请求超时"],
+            "scan_metadata": {"duration_seconds": 13},
+        },
+        source={
+            "type": "remote_site",
+            "stats_basis": "actual_task_events",
+            "request_id": "req-coverage-123",
+        },
+    )
+
+    issue = _make_issue(source_details=[
+        {"source": "llm:reviewer", "confidence": 0.95},
+        {"source": "static:security", "confidence": 1.0},
+    ])
+    htmls = [
+        export_to_html(task, [issue], "", 72, load_builtin_template(template_type))
+        for template_type in ("simple", "detailed", "compliance")
+    ]
+    word = export_to_word(task, [issue], "", 72)
+    pdf_paragraphs: list[str] = []
+    original_paragraph = report_pdf_exporter.Paragraph
+
+    def record_pdf_paragraph(text, style, *args, **kwargs):
+        pdf_paragraphs.append(str(text))
+        return original_paragraph(text, style, *args, **kwargs)
+
+    monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
+    assert export_to_pdf(task, [issue], "", 72).startswith(b"%PDF")
+    word_text = "\n".join(paragraph.text for paragraph in Document(io.BytesIO(word)).paragraphs)
+    pdf_text = "\n".join(pdf_paragraphs)
+
+    for rendered in (*htmls, word_text, pdf_text):
+        assert "部分覆盖" in rendered
+        assert "未通过" in rendered
+        assert "已完成文件数：2" in rendered
+        assert "未扫描文件名称：src/later.py、src/queued.py" in rendered
+        assert "排除文件第1项文件名：vendor/jquery.js" in rendered
+        assert "排除文件第1项原因：第三方依赖" in rendered
+        assert "错误：扫描请求超时" in rendered
+        assert "扫描元数据持续秒数：13" in rendered
+        assert "来源类型：remote_site" in rendered
+        assert "统计依据：actual_task_events" in rendered
+        assert "请求编号：req-coverage-123" in rendered
+        assert '"coverage_status"' not in rendered
+        assert '"stats_basis"' not in rendered
+        assert '"source_details"' not in rendered
+
+    for rendered in (htmls[1], htmls[2], word_text, pdf_text):
+        assert "来源明细第1项来源：llm:reviewer" in rendered
+        assert "来源明细第1项置信度：0.95" in rendered
+        assert '"source":' not in rendered
 
 
 def test_standard_exports_render_markdown_summary_without_showing_syntax(monkeypatch):
@@ -1193,20 +1350,9 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
     )
 
     pdf = export_to_pdf(_make_task(score=1), [issue], "摘要", 1)
-    for token in (
-        b"severity-deduction-v1",
-        b"EVIDENCE_TOKEN_20260827",
-        b"AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        b"vector",
-        b"llm+static",
-        b"FINGERPRINT_TOKEN_20260827",
-        b"2026-08-27T01:02:03",
-        b"REFERENCE_TOKEN_20260827",
-    ):
-        assert token in pdf
+    assert pdf.startswith(b"%PDF")
 
-    # 普通段落使用中文 CID 字体，PDF 字节流不会保留原始 ASCII；验证进入
-    # ReportLab 文档树的可见文本，避免依赖本机 pdftotext 等外部程序。
+    # 检查进入 ReportLab 文档树的可见文本，避免依赖本机 pdftotext 等外部程序。
     font_name = _ensure_chinese_font()
     issue_text = "\n".join(
         element.getPlainText()
@@ -1219,9 +1365,17 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         if hasattr(element, "getPlainText")
     )
     for token in (
+        "EVIDENCE_TOKEN_20260827",
         "EXPLOIT_TOKEN_20260827",
         "SUGGESTION_TOKEN_20260827",
         "REMEDIATION_TOKEN_20260827",
+        "FINGERPRINT_TOKEN_20260827",
+        "2026-08-27T01:02:03",
+        "REFERENCE_TOKEN_20260827",
+        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "向量计算",
+        "模型 + 静态规则",
+        "已修复",
     ):
         assert token in issue_text
 
@@ -1236,12 +1390,12 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "EXPLOIT_TOKEN_20260827",
         "SUGGESTION_TOKEN_20260827",
         "REMEDIATION_TOKEN_20260827",
-        "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "vector",
-        "llm+static",
-        "确认数: 2",
+        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "向量计算",
+        "模型 + 静态规则",
+        "独立确认数: 2",
         "FINGERPRINT_TOKEN_20260827",
-        "fixed",
+        "已修复",
         "处理人: 7",
         "2026-08-27T01:02:03",
         "REFERENCE_TOKEN_20260827",

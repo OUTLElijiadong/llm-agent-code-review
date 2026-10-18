@@ -794,64 +794,108 @@ const reportExecutionStatusLabel = computed(() => {
 const reportExecutionError = computed(() => String(report.value?.task?.error_message || '').trim())
 const reportDurationNote = computed(() => String(report.value?.source?.duration_note || '').trim())
 const reportCoverageLabel = computed(() => {
-  const status = String((report.value?.task?.coverage as TaskCoverageOut | undefined)?.verification_status || '')
+  const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
+  const status = String(coverage?.verification_status || coverage?.coverage_status || '').toLowerCase()
   const labels: Record<string, string> = {
     complete: '记录范围内已完成',
+    completed: '记录范围内已完成',
+    success: '记录范围内已完成',
     partial: '部分完成',
     failed: '验证未通过',
+    incomplete: '覆盖不完整',
+    not_started: '未开始执行',
+    not_applicable: '不适用',
+    pending: '等待执行',
     unknown: '未知',
   }
   return labels[status] || '未记录'
 })
+const coverageEntryText = (item: unknown): string => {
+  if (typeof item === 'string') return item.trim()
+  if (!item || typeof item !== 'object') return String(item ?? '').trim()
+  const value = item as Record<string, unknown>
+  const primary = [value.label, value.file_name, value.file_path, value.name, value.path, value.phase, value.url]
+    .map(item => String(item ?? '').trim()).filter(Boolean)
+  const annotations = [value.reason, value.error, value.status, value.status_code]
+    .map(item => String(item ?? '').trim()).filter(Boolean)
+  const uniquePrimary = [...new Set(primary)]
+  const uniqueAnnotations = [...new Set(annotations)]
+  if (uniquePrimary.length && uniqueAnnotations.length) {
+    return `${uniquePrimary.join('；')}（${uniqueAnnotations.join('；')}）`
+  }
+  return [...uniquePrimary, ...uniqueAnnotations].join('；')
+}
 const reportCoverageReason = computed(() => {
   const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
-  const parts = [String(coverage?.reason || '').trim()]
-  for (const [label, value] of [
-    ['未扫描', coverage?.unscanned],
-    ['跳过', coverage?.skipped ?? coverage?.skipped_phases],
-    ['排除', coverage?.excluded],
-    ['错误', coverage?.errors],
-  ] as const) {
-    const entries = Array.isArray(value) ? value.map(item => String(item).trim()).filter(Boolean) : []
-    if (entries.length) parts.push(`${label}：${entries.join('、')}`)
-  }
-  return parts.filter(Boolean).join('；')
+  return [coverage?.reason, coverage?.error].map(value => String(value || '').trim()).filter(Boolean).join('；')
 })
 const coverageSummary = computed(() => {
   const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
   if (!coverage) return ''
+  const parts: string[] = []
+  const completedFiles = coverage.completed_files ?? coverage.completed_file_count ?? coverage.included_file_count
+  const totalFiles = coverage.total_files ?? coverage.total_file_count
+  if (completedFiles !== undefined || totalFiles !== undefined) {
+    parts.push(`文件处理 ${completedFiles ?? '未记录'}/${totalFiles ?? '未记录'}`)
+  }
+  if (coverage.completed_chunks !== undefined || coverage.total_chunks !== undefined) {
+    parts.push(`代码片段处理 ${coverage.completed_chunks ?? '未记录'}/${coverage.total_chunks ?? '未记录'}`)
+  }
   const tested = Array.isArray(coverage.tested) ? coverage.tested.length : 0
-  const unscanned = Array.isArray(coverage.unscanned) ? coverage.unscanned.length : 0
-  const skipped = Array.isArray(coverage.skipped_phases) ? coverage.skipped_phases.length
-    : Array.isArray(coverage.skipped) ? coverage.skipped.length : 0
-  if (tested + unscanned + skipped === 0 && !Array.isArray(coverage.phases)) return ''
-  return `已记录覆盖项 ${tested} 项；未扫描 ${unscanned} 项；跳过 ${skipped} 项。该统计仅反映回执中记录的范围。`
+  const unscanned = Math.max(
+    typeof coverage.unscanned_files === 'number' ? coverage.unscanned_files : 0,
+    Array.isArray(coverage.unscanned) ? coverage.unscanned.length : 0,
+    Array.isArray(coverage.unscanned_file_names) ? coverage.unscanned_file_names.length : 0,
+    Array.isArray(coverage.unscanned_phases) ? coverage.unscanned_phases.length : 0,
+  )
+  const skipped = Math.max(
+    Array.isArray(coverage.skipped_phases) ? coverage.skipped_phases.length : 0,
+    Array.isArray(coverage.skipped_files) ? coverage.skipped_files.length : 0,
+    Array.isArray(coverage.skipped) ? coverage.skipped.length : 0,
+  )
+  if (tested || coverage.tested !== undefined) parts.push(`已记录覆盖项 ${tested} 项`)
+  if (unscanned || coverage.unscanned_files !== undefined || coverage.unscanned !== undefined) {
+    parts.push(`未扫描 ${unscanned} 项`)
+  }
+  if (skipped || coverage.skipped !== undefined || coverage.skipped_phases !== undefined) parts.push(`跳过 ${skipped} 项`)
+  if (Array.isArray(coverage.completed_phases)) parts.push(`已完成阶段 ${coverage.completed_phases.length} 项`)
+  if (Array.isArray(coverage.phases)) parts.push(`阶段 ${coverage.phases.length} 项`)
+  return parts.length ? `${parts.join('；')}。该统计仅反映回执中记录的范围。` : ''
 })
 const coverageEntries = computed(() => {
   const coverage = report.value?.task?.coverage as TaskCoverageOut | undefined
   if (!coverage) return []
   const result: string[] = []
-  const labelValue = (item: unknown): string => {
-    if (typeof item === 'string') return item.trim()
-    if (!item || typeof item !== 'object') return String(item ?? '').trim()
-    const value = item as Record<string, unknown>
-    return String(value.label || value.name || value.path || value.phase || value.reason || '').trim()
-  }
-  for (const [label, values] of [
-    ['未扫描', coverage.unscanned],
-    ['排除', coverage.excluded],
-    ['跳过', coverage.skipped_phases ?? coverage.skipped],
-    ['错误', coverage.errors],
-  ] as const) {
-    if (Array.isArray(values)) {
-      result.push(...values.map(labelValue).filter(Boolean).map(value => `${label}：${value}`))
+  const coverageGroups: Array<[string, (unknown[] | undefined)[]]> = [
+    ['已测试', [coverage.tested]],
+    ['未扫描', [coverage.unscanned]],
+    ['未扫描文件', [
+      coverage.unscanned_file_names,
+      Array.isArray(coverage.unscanned_files) ? coverage.unscanned_files : undefined,
+    ]],
+    ['未执行阶段', [coverage.unscanned_phases]],
+    ['排除', [coverage.excluded]],
+    ['排除文件', [coverage.excluded_files]],
+    ['跳过阶段', [coverage.skipped_phases]],
+    ['跳过文件', [coverage.skipped_files]],
+    ['跳过', [coverage.skipped]],
+    ['失败文件', [coverage.failed_files]],
+    ['错误', [coverage.errors]],
+    ['停止前未处理', [coverage.cancelled_files]],
+    ['已完成阶段', [coverage.completed_phases]],
+  ]
+  for (const [label, groups] of coverageGroups) {
+    for (const entries of groups) {
+      if (Array.isArray(entries)) {
+        result.push(...entries.map(coverageEntryText).filter(Boolean).map(value => `${label}：${value}`))
+      }
     }
   }
   if (Array.isArray(coverage.phases)) {
     for (const phase of coverage.phases) {
       const status = String(phase.status || '').toLowerCase()
       if (['complete', 'completed', 'success', 'passed'].includes(status)) continue
-      const name = labelValue(phase)
+      const name = coverageEntryText(phase)
       if (name) result.push(`阶段未完成：${name}${status ? `（${status}）` : ''}`)
     }
   }

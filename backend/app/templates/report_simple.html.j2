@@ -65,12 +65,8 @@
     <div class="meta">任务名称:{{ task_info.task_name or "未命名任务" }}</div>
     <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
     <div class="meta">审查模型:{{ task_info.model_name or "-" }} · 生成时间:{{ task_info.create_time or "-" }}</div>
-    <div class="meta"><strong>执行状态:</strong> {{ task_info.status or "未知" }}</div>
+    <div class="meta"><strong>执行状态:</strong> {{ task_info.status_label }}</div>
     {% if task_info.error_message %}<div class="summary-box"><strong>执行错误:</strong> {{ task_info.error_message }}</div>{% endif %}
-    {% if task_info.coverage %}
-    <h2>扫描范围与覆盖情况</h2>
-    <pre class="summary-box">{{ task_info.coverage | tojson(indent=2) }}</pre>
-    {% endif %}
     <div class="meta">
       综合评分:
       {% if score is none %}
@@ -121,7 +117,7 @@
     {% set decomp = evidence.decompilation %}
     <h2>反编译证据</h2>
     <div class="summary-box">
-      <div><strong>状态:</strong> {{ decomp.status or "-" }}</div>
+      <div><strong>状态:</strong> {{ decomp.status_label }}</div>
       <div><strong>工具:</strong> {{ decomp.tool or "-" }} {{ decomp.tool_version or "" }}</div>
       <div><strong>输入清单 SHA-256:</strong> <code>{{ decomp.input_sha256 or "-" }}</code></div>
       {% if decomp.input_artifact_sha256s %}<div><strong>原始制品 SHA-256:</strong> <code>{{ decomp.input_artifact_sha256s | join(", ") }}</code></div>{% endif %}
@@ -150,6 +146,7 @@
           <th style="width:48px;">#</th>
           <th style="width:90px;">严重度</th>
           <th style="width:120px;">类型</th>
+          <th style="width:100px;">处理状态</th>
           <th>标题</th>
           <th style="width:160px;">文件</th>
           <th style="width:70px;">行号</th>
@@ -161,6 +158,7 @@
           <td>{{ loop.index }}</td>
           <td><span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span></td>
           <td>{{ issue.issue_type or "-" }}</td>
+          <td>{{ issue.status_label }}</td>
           <td>{{ issue.title or issue.description[:40] }}</td>
           <td>{{ issue.file_name or "-" }}</td>
           <td>{{ issue.line_number or "-" }}</td>

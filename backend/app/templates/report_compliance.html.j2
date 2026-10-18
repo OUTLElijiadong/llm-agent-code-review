@@ -95,12 +95,8 @@
     <div class="meta">任务:{{ task_info.task_name or "未命名任务" }}</div>
     <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
     <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
-    <div class="meta"><strong>执行状态:</strong> {{ task_info.status or "未知" }}</div>
+    <div class="meta"><strong>执行状态:</strong> {{ task_info.status_label }}</div>
     {% if task_info.error_message %}<div class="summary-box"><strong>执行错误:</strong> {{ task_info.error_message }}</div>{% endif %}
-    {% if task_info.coverage %}
-    <h2>扫描范围与覆盖情况</h2>
-    <pre class="summary-box">{{ task_info.coverage | tojson(indent=2) }}</pre>
-    {% endif %}
     <div class="meta">
       综合评分:
       {% if score is none %}
@@ -151,7 +147,7 @@
     {% set decomp = evidence.decompilation %}
     <h2>反编译证据</h2>
     <div class="summary-box">
-      <div><strong>状态:</strong> {{ decomp.status or "-" }}</div>
+      <div><strong>状态:</strong> {{ decomp.status_label }}</div>
       <div><strong>工具:</strong> {{ decomp.tool or "-" }} {{ decomp.tool_version or "" }}</div>
       <div><strong>输入清单 SHA-256:</strong> <code>{{ decomp.input_sha256 or "-" }}</code></div>
       {% if decomp.input_artifact_sha256s %}<div><strong>原始制品 SHA-256:</strong> <code>{{ decomp.input_artifact_sha256s | join(", ") }}</code></div>{% endif %}
@@ -307,21 +303,21 @@
         {% endif %}</span>
         {% if issue.cvss_vector %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">{{ issue.cvss_vector }}</span>{% endif %}
         {% if issue.cvss_version %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">v{{ issue.cvss_version }}</span>{% endif %}
-        {% if issue.cvss_source %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">来源:{{ issue.cvss_source }}</span>{% endif %}
+        {% if issue.cvss_source %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">来源:{{ issue.cvss_source_label }}</span>{% endif %}
         <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
       </div>
       {% endif %}
-      <div class="field"><span class="field-label">发现来源:</span>{{ issue.source or "-" }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
+      <div class="field"><span class="field-label">发现来源:</span>{{ issue.source_label }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>
-      {% if issue.source_details %}<div class="field"><span class="field-label">来源明细:</span><code>{{ issue.source_details }}</code></div>{% endif %}
+      {% if issue.source_detail_lines %}<div class="field"><span class="field-label">来源明细:</span><ul>{% for line in issue.source_detail_lines %}<li>{{ line }}</li>{% endfor %}</ul></div>{% endif %}
       {% if issue.aggregation_version %}
       <div class="field"><span class="field-label">可信聚合:</span>
         {{ issue.aggregation_version }} · 风险分 {{ issue.risk_score if issue.risk_score is not none else "-" }} ·
-        证据 {{ issue.evidence_quality or "-" }} · 冲突 {{ issue.conflict_status or "-" }} ·
-        人工复核 {{ issue.human_review_status or "-" }}
+        证据 {{ issue.evidence_quality_label }} · 冲突 {{ issue.conflict_status_label }} ·
+        人工复核 {{ issue.human_review_status_label }}
       </div>
       {% endif %}
-      <div class="field"><span class="field-label">处理状态:</span>{{ issue.status or "-" }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
+      <div class="field"><span class="field-label">处理状态:</span>{{ issue.status_label }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
       <div class="field"><span class="field-label">问题描述:</span><div style="margin-top:4px;">{{ issue.description_html | safe }}</div></div>
       {% if issue.evidence %}<div class="field"><span class="field-label">证据:</span><pre><code>{{ issue.evidence }}</code></pre></div>{% endif %}
       {% if issue.exploit_scenario %}<div class="field"><span class="field-label">攻击场景:</span><div style="margin-top:4px;">{{ issue.exploit_scenario_html | safe }}</div></div>{% endif %}

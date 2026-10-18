@@ -54,6 +54,25 @@ def _report_execution_status(result, data: dict) -> str:
     return "partial" if has_partial_result else "failed"
 
 
+def _scan_result_data_or_raise(result, *, failure_message: str) -> dict:
+    """Return usable partial output on failure without weakening auth or empty-scan errors."""
+    if result.failure_kind in {"authorization_revoked", "unauthorized", "permission_denied"}:
+        raise AiServiceError(result.error or "当前账号无权查看此扫描结果", code=40320)
+    if result.failure_kind == "empty_scan_input":
+        raise AiServiceError(result.error or failure_message, code=50220)
+
+    data = result.data if isinstance(result.data, dict) else {}
+    if _report_execution_status(result, data) != "partial":
+        raise AiServiceError(result.error or failure_message, code=50220)
+
+    partial = dict(data)
+    partial.update({
+        "execution_status": "partial",
+        "error_message": str(result.error or failure_message),
+    })
+    return partial
+
+
 def _persist_scan_result(
     db: Session, user: User, *, project_id: int, report_kind: str,
     task_name: str, result, data: dict | None = None,
@@ -160,9 +179,11 @@ def scan_task(
     result = orch.security_sentinel.scan_task(
         task_id=payload.task_id, ctx=_ctx(user),
     )
-    if not result.success:
-        raise AiServiceError(result.error or "安全复审失败", code=50220)
-    return Resp(data=SecurityScanOut(**result.data))
+    data = (
+        result.data if result.success and isinstance(result.data, dict)
+        else _scan_result_data_or_raise(result, failure_message="安全复审失败")
+    )
+    return Resp(data=SecurityScanOut(**data))
 
 
 @router.post(
@@ -286,9 +307,11 @@ def list_findings(
     """查询某个任务下已落库的安全 finding(等价于 scan-task)"""
     orch = get_request_orchestrator(db, user=user)
     result = orch.security_sentinel.scan_task(task_id=task_id, ctx=_ctx(user))
-    if not result.success:
-        raise AiServiceError(result.error or "查询安全发现失败", code=50220)
-    return Resp(data=SecurityScanOut(**result.data))
+    data = (
+        result.data if result.success and isinstance(result.data, dict)
+        else _scan_result_data_or_raise(result, failure_message="查询安全发现失败")
+    )
+    return Resp(data=SecurityScanOut(**data))
 
 
 @router.get(

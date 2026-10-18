@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import json
 import re
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,7 +28,17 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.ai.scoring import score_risk_level
-from app.services.report_exporter import export_to_dict
+from app.services.report_exporter import (
+    conflict_status_label,
+    cvss_source_label,
+    decompilation_status_label,
+    discovery_source_label,
+    evidence_quality_label,
+    export_to_dict,
+    finding_status_label,
+    human_review_status_label,
+    report_status_label,
+)
 from app.services.report_markdown import markdown_to_blocks, parse_markdown_blocks, reportlab_markup
 
 # ============ 模块常量 ============
@@ -332,12 +341,9 @@ def _build_header_elements(
     elements.append(Paragraph(f"审查模型:{model_name}", styles["normal"]))
     elements.append(Paragraph(f"生成时间:{create_time}", styles["normal"]))
     elements.append(Paragraph(f"综合评分:<b>{_format_score(score)}</b>", styles["normal"]))
-    elements.append(Paragraph(f"执行状态:{escape(str(task_info.get('status') or 'unknown'))}", styles["normal"]))
+    elements.append(Paragraph(f"执行状态:{escape(report_status_label(task_info.get('status')))}", styles["normal"]))
     if task_info.get("error_message"):
         elements.append(Paragraph(f"错误:{escape(str(task_info['error_message']))}", styles["normal"]))
-    coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
-    coverage_text = escape(json.dumps(coverage, ensure_ascii=False, indent=2, sort_keys=True)).replace("\n", "<br/>")
-    elements.append(Paragraph(f"扫描范围与覆盖情况:<br/>{coverage_text}", styles["normal"]))
     elements.append(Spacer(1, 4 * mm))
     return elements
 
@@ -519,7 +525,7 @@ def _build_decompilation_evidence_elements(
     else:
         input_artifact_sha256s = str(raw_input_hashes or "-")
     rows = [
-        ("状态", decompilation.get("status") or "-"),
+        ("状态", decompilation_status_label(decompilation.get("status"))),
         ("工具", f"{decompilation.get('tool') or '-'} {decompilation.get('tool_version') or ''}".strip()),
         ("输入清单 SHA-256", decompilation.get("input_sha256") or "-"),
         ("原始制品 SHA-256", input_artifact_sha256s),
@@ -598,45 +604,45 @@ def _build_issue_section(
 
     cvss_parts = []
     if issue.get("cvss_score") is not None:
-        cvss_parts.append(f"score={issue.get('cvss_score')}")
+        cvss_parts.append(f"CVSS 评分：{issue.get('cvss_score')}")
     if issue.get("cvss_vector"):
-        cvss_parts.append(f"vector={issue.get('cvss_vector')}")
+        cvss_parts.append(f"评分向量：{issue.get('cvss_vector')}")
     if issue.get("cvss_version"):
-        cvss_parts.append(f"version={issue.get('cvss_version')}")
+        cvss_parts.append(f"向量版本：{issue.get('cvss_version')}")
     if issue.get("cvss_source"):
-        cvss_parts.append(f"source={issue.get('cvss_source')}")
+        cvss_parts.append(f"评分来源：{cvss_source_label(issue.get('cvss_source'))}")
     if cvss_parts:
         elements.append(Paragraph("<b>CVSS:</b>", styles["normal"]))
-        elements.append(Paragraph(_code_markup(escape(" | ".join(cvss_parts))), styles["code"]))
+        elements.append(Paragraph(escape("；".join(cvss_parts), {"&": "&amp;"}), styles["normal"]))
 
-    source_parts = [f"source={issue.get('source') or '-'}"]
-    source_parts.append(f"confirmation_count={issue.get('confirmation_count') or 0}")
-    source_parts.append(f"fingerprint={issue.get('finding_fingerprint') or '-'}")
+    source_parts = [f"发现来源：{discovery_source_label(issue.get('source'))}"]
+    source_parts.append(f"独立确认数：{issue.get('confirmation_count') or 0}")
     elements.append(Paragraph("<b>来源与确认:</b>", styles["normal"]))
-    elements.append(Paragraph(_code_markup(escape(" | ".join(source_parts))), styles["code"]))
+    elements.append(Paragraph(escape("；".join(source_parts), {"&": "&amp;"}), styles["normal"]))
+    fingerprint = escape(str(issue.get("finding_fingerprint") or "-"))
+    elements.append(Paragraph(f"<b>问题指纹:</b> {_code_markup(fingerprint)}", styles["normal"]))
     source_details = issue.get("source_details")
     if source_details:
-        details_text = json.dumps(source_details, ensure_ascii=False, default=str)
-        elements.append(Paragraph(
-            f"<b>来源明细:</b>{escape(details_text)}",
-            styles["normal"],
-        ))
+        from app.services.report_exporter import _format_scope_facts
+
+        details_lines = _format_scope_facts({"source_details": source_details}, "source")
+        elements.extend(Paragraph(escape(line), styles["normal"]) for line in details_lines)
 
     if issue.get("aggregation_version"):
-        trust_parts = [f"version={issue.get('aggregation_version')}"]
-        trust_parts.append(f"risk_score={issue.get('risk_score') if issue.get('risk_score') is not None else '-'}")
-        trust_parts.append(f"evidence_quality={issue.get('evidence_quality') or '-'}")
-        trust_parts.append(f"conflict={issue.get('conflict_status') or '-'}")
-        trust_parts.append(f"human_review={issue.get('human_review_status') or '-'}")
+        trust_parts = [f"聚合版本：{issue.get('aggregation_version')}"]
+        trust_parts.append(f"风险分：{issue.get('risk_score') if issue.get('risk_score') is not None else '-'}")
+        trust_parts.append(f"证据等级：{evidence_quality_label(issue.get('evidence_quality'))}")
+        trust_parts.append(f"冲突状态：{conflict_status_label(issue.get('conflict_status'))}")
+        trust_parts.append(f"人工复核：{human_review_status_label(issue.get('human_review_status'))}")
         elements.append(Paragraph("<b>可信聚合:</b>", styles["normal"]))
-        elements.append(Paragraph(_code_markup(escape(" | ".join(trust_parts))), styles["code"]))
+        elements.append(Paragraph(escape("；".join(trust_parts), {"&": "&amp;"}), styles["normal"]))
 
-    status_parts = [f"status={issue.get('status') or '-'}"]
-    status_parts.append(f"handled_by={issue.get('handled_by') or '-'}")
-    status_parts.append(f"handled_at={issue.get('handled_at') or '-'}")
-    status_parts.append(f"updated_at={issue.get('update_time') or '-'}")
+    status_parts = [f"状态：{finding_status_label(issue.get('status'))}"]
+    status_parts.append(f"处理人：{issue.get('handled_by') or '-'}")
+    status_parts.append(f"处理时间：{issue.get('handled_at') or '-'}")
+    status_parts.append(f"更新时间：{issue.get('update_time') or '-'}")
     elements.append(Paragraph("<b>处理状态:</b>", styles["normal"]))
-    elements.append(Paragraph(_code_markup(escape(" | ".join(status_parts))), styles["code"]))
+    elements.append(Paragraph(escape("；".join(status_parts), {"&": "&amp;"}), styles["normal"]))
 
     # 问题描述
     description = str(issue.get("description") or "")

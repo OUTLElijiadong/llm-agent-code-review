@@ -118,10 +118,11 @@ def test_html_templates_preserve_frozen_scope_and_unknown_coverage(admin_client,
     assert "a" * 64 in response.text
     assert "不等同于语义覆盖率" in response.text
     if coverage is None:
-        assert "coverage_status" in response.text and "unknown" in response.text
+        assert "覆盖状态" in response.text and "未知" in response.text
         assert "未记录，不能据此判定完整覆盖" in response.text
     else:
-        assert coverage["stage"] in response.text
+        expected_stage = {"complete": "已完成", "failed": "失败"}[coverage["stage"]]
+        assert f"阶段：{expected_stage}" in response.text
     assert 'class="table-scroll"' in response.text
 
 

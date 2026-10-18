@@ -89,12 +89,8 @@
     <div class="meta">项目:{{ task_info.project_name or "-" }} · 审查类型:{{ task_info.review_type or "-" }}</div>
     <div class="meta">审查模型:{{ task_info.model_name or "-" }} · 耗时:{{ task_info.duration_ms or 0 }} ms</div>
     <div class="meta">生成时间:{{ task_info.create_time or "-" }}</div>
-    <div class="meta"><strong>执行状态:</strong> {{ task_info.status or "未知" }}</div>
+    <div class="meta"><strong>执行状态:</strong> {{ task_info.status_label }}</div>
     {% if task_info.error_message %}<div class="summary-box"><strong>执行错误:</strong> {{ task_info.error_message }}</div>{% endif %}
-    {% if task_info.coverage %}
-    <h2>扫描范围与覆盖情况</h2>
-    <pre class="summary-box">{{ task_info.coverage | tojson(indent=2) }}</pre>
-    {% endif %}
     <div class="meta">
       综合评分:
       {% if score is none %}
@@ -145,7 +141,7 @@
     {% set decomp = evidence.decompilation %}
     <h2>反编译证据</h2>
     <div class="summary-box">
-      <div><strong>状态:</strong> {{ decomp.status or "-" }}</div>
+      <div><strong>状态:</strong> {{ decomp.status_label }}</div>
       <div><strong>工具:</strong> {{ decomp.tool or "-" }} {{ decomp.tool_version or "" }}</div>
       <div><strong>输入清单 SHA-256:</strong> <code>{{ decomp.input_sha256 or "-" }}</code></div>
       {% if decomp.input_artifact_sha256s %}<div><strong>原始制品 SHA-256:</strong> <code>{{ decomp.input_artifact_sha256s | join(", ") }}</code></div>{% endif %}
@@ -197,22 +193,22 @@
         {% if issue.owasp %}<span class="tag">OWASP: {{ issue.owasp }}</span>{% endif %}
         {% if issue.cvss_score is not none %}<span class="tag">CVSS: {{ issue.cvss_score }}</span>{% endif %}
         {% if issue.cvss_version %}<span class="tag">版本: {{ issue.cvss_version }}</span>{% endif %}
-        {% if issue.cvss_source %}<span class="tag">评分来源: {{ issue.cvss_source }}</span>{% endif %}
+        {% if issue.cvss_source %}<span class="tag">评分来源: {{ issue.cvss_source_label }}</span>{% endif %}
       </div>
       {% if issue.cvss_vector %}<div class="field"><span class="field-label">CVSS 向量:</span><code>{{ issue.cvss_vector }}</code></div>{% endif %}
       {% endif %}
 
-      <div class="field"><span class="field-label">发现来源:</span>{{ issue.source or "-" }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
+      <div class="field"><span class="field-label">发现来源:</span>{{ issue.source_label }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>
-      {% if issue.source_details %}<div class="field"><span class="field-label">来源明细:</span><code>{{ issue.source_details }}</code></div>{% endif %}
+      {% if issue.source_detail_lines %}<div class="field"><span class="field-label">来源明细:</span><ul>{% for line in issue.source_detail_lines %}<li>{{ line }}</li>{% endfor %}</ul></div>{% endif %}
       {% if issue.aggregation_version %}
       <div class="field"><span class="field-label">可信聚合:</span>
         {{ issue.aggregation_version }} · 风险分 {{ issue.risk_score if issue.risk_score is not none else "-" }} ·
-        证据 {{ issue.evidence_quality or "-" }} · 冲突 {{ issue.conflict_status or "-" }} ·
-        人工复核 {{ issue.human_review_status or "-" }}
+        证据 {{ issue.evidence_quality_label }} · 冲突 {{ issue.conflict_status_label }} ·
+        人工复核 {{ issue.human_review_status_label }}
       </div>
       {% endif %}
-      <div class="field"><span class="field-label">处理状态:</span>{{ issue.status or "-" }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
+      <div class="field"><span class="field-label">处理状态:</span>{{ issue.status_label }} · 处理人: {{ issue.handled_by or "-" }} · 处理时间: {{ issue.handled_at or "-" }} · 更新时间: {{ issue.update_time or "-" }}</div>
 
       <div class="field">
         <span class="field-label">问题描述:</span>
