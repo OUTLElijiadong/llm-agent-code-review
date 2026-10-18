@@ -17,7 +17,14 @@ from app.models.review_task import ReviewTask
 from app.models.user import User
 from app.schemas.report import ReportDetailOut, ReportListItem
 from app.schemas.security import SecurityDashboardSummaryOut
-from app.services import dashboard_service, pentest_service, report_service, review_service, security_service
+from app.services import (
+    dashboard_service,
+    pentest_service,
+    rbac_service,
+    report_service,
+    review_service,
+    security_service,
+)
 
 
 @pytest.fixture
@@ -140,6 +147,17 @@ def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, sour
     """授权审查员可见委托卡片，但不得获得发起人报告入口。"""
     task = _task(db, source_owner, source_project, "pentest")
     engagement = _pentest(db, task, include_findings=False)
+    duplicate_link = PentestEngagement(
+        public_id="pt-duplicate-report-link",
+        user_id=source_owner.id,
+        project_id=source_project.id,
+        target_type="web",
+        status="completed",
+        report_task_id=task.id,
+    )
+    db.add(duplicate_link)
+    valid_task = _task(db, source_owner, source_project, "pentest")
+    valid_engagement = _pentest(db, valid_task, include_findings=False)
     incomplete_task = _task(db, source_owner, source_project, "pentest")
     incomplete_engagement = _pentest(db, incomplete_task, include_findings=False)
     incomplete_snapshot = db.query(ReviewReport).filter_by(task_id=incomplete_task.id).one()
@@ -163,16 +181,38 @@ def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, sour
     db.add_all([reviewer, reviewer_role])
     db.flush()
     db.add(UserRole(user_id=reviewer.id, role_id=reviewer_role.id))
+    db.add(ProjectMember(project_id=source_project.id, user_id=reviewer.id))
     db.add_all([
         RolePermission(role_id=reviewer_role.id, permission_id=permission.id)
         for permission in permissions
     ])
+
+    restricted_reader = User(username="pentest-reader-restricted", password="x", role="reviewer", status=1)
+    db.add(restricted_reader)
+    db.flush()
+    db.add_all([
+        UserRole(user_id=restricted_reader.id, role_id=reviewer_role.id),
+        ProjectMember(project_id=source_project.id, user_id=restricted_reader.id),
+    ])
+
+    admin = User(username="pentest-report-admin", password="x", role="admin", status=1)
+    db.add(admin)
+    db.flush()
+    admin_role = db.query(Role).filter_by(code="admin").one_or_none()
+    if admin_role is None:
+        admin_role = Role(code="admin", name="系统管理员", status="active", is_builtin=1)
+        db.add(admin_role)
+        db.flush()
+    db.add(UserRole(user_id=admin.id, role_id=admin_role.id))
     db.commit()
 
     reviewer_result = pentest_service.list_engagements(db, reviewer, scope="all")
     reviewer_row = next(item for item in reviewer_result["items"] if item["public_id"] == engagement.public_id)
     owner_result = pentest_service.list_engagements(db, source_owner, scope="own")
-    owner_row = next(item for item in owner_result["items"] if item["public_id"] == engagement.public_id)
+    owner_row = next(item for item in owner_result["items"] if item["public_id"] == valid_engagement.public_id)
+    duplicate_owner_row = next(
+        item for item in owner_result["items"] if item["public_id"] == engagement.public_id
+    )
     incomplete_owner_row = next(
         item for item in owner_result["items"] if item["public_id"] == incomplete_engagement.public_id
     )
@@ -180,9 +220,38 @@ def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, sour
     assert reviewer_row["can_view_report"] is False
     assert reviewer_row["report_task_id"] is None
     assert owner_row["can_view_report"] is True
-    assert owner_row["report_task_id"] == task.id
+    assert owner_row["report_task_id"] == valid_task.id
+    assert duplicate_owner_row["can_view_report"] is False
+    assert duplicate_owner_row["report_task_id"] is None
     assert incomplete_owner_row["can_view_report"] is False
     assert incomplete_owner_row["report_task_id"] is None
+    report_view = next(permission for permission in permissions if permission.code == PermissionCode.REPORT_VIEW)
+    pentest_view = next(permission for permission in permissions if permission.code == PermissionCode.PENTEST_VIEW)
+    db.delete(db.query(RolePermission).filter_by(
+        role_id=reviewer_role.id,
+        permission_id=report_view.id,
+    ).one())
+    db.flush()
+    assert rbac_service.check_permission(db, restricted_reader.id, PermissionCode.PENTEST_VIEW) is True
+    assert rbac_service.check_permission(db, restricted_reader.id, PermissionCode.REPORT_VIEW) is False
+    assert report_service.readable_pentest_engagement_ids(
+        db, restricted_reader, [int(valid_engagement.id)]
+    ) == set()
+
+    db.add(RolePermission(role_id=reviewer_role.id, permission_id=report_view.id))
+    db.delete(db.query(RolePermission).filter_by(
+        role_id=reviewer_role.id,
+        permission_id=pentest_view.id,
+    ).one())
+    db.flush()
+    assert rbac_service.check_permission(db, restricted_reader.id, PermissionCode.REPORT_VIEW) is True
+    assert rbac_service.check_permission(db, restricted_reader.id, PermissionCode.PENTEST_VIEW) is False
+    assert report_service.readable_pentest_engagement_ids(
+        db, restricted_reader, [int(valid_engagement.id)]
+    ) == set()
+    assert report_service.readable_pentest_engagement_ids(db, admin, [int(valid_engagement.id)]) == {
+        int(valid_engagement.id)
+    }
 
 
 def _listed(db, owner, task):

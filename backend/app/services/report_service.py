@@ -6,8 +6,8 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, false, func, or_, true
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, false, func, or_, select, true
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.ai.scoring import compute_score
@@ -203,6 +203,18 @@ def readable_pentest_engagement_ids(db: Session, user: User, engagement_ids: lis
     if not visible_project_ids:
         return set()
 
+    linked_engagement = aliased(PentestEngagement)
+    unique_report_link_count = (
+        select(func.count(linked_engagement.id))
+        .where(
+            linked_engagement.report_task_id == ReviewTask.id,
+            linked_engagement.user_id == ReviewTask.user_id,
+            linked_engagement.project_id == ReviewTask.project_id,
+        )
+        .correlate(ReviewTask)
+        .scalar_subquery()
+    )
+
     query = db.query(PentestEngagement.id, ReviewReport.content_json).join(
         ReviewTask,
         and_(
@@ -223,6 +235,7 @@ def readable_pentest_engagement_ids(db: Session, user: User, engagement_ids: lis
     ).filter(
         PentestEngagement.id.in_(engagement_ids),
         PentestEngagement.project_id.in_(visible_project_ids),
+        unique_report_link_count == 1,
     )
     if not rbac_service.is_admin_user(db, int(user.id)):
         query = query.filter(PentestEngagement.user_id == int(user.id))
