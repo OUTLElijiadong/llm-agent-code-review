@@ -385,6 +385,8 @@ def _report_markdown(
                     value = verification[key]
                     if isinstance(value, bool):
                         value = "是" if value else "否"
+                    elif isinstance(value, (int, float)):
+                        value = str(value)
                     elif key == "sandbox_script_report_status":
                         value = {
                             "pending_independent_verification": "待独立核验",

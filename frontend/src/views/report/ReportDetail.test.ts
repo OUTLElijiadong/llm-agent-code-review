@@ -291,6 +291,27 @@ describe('ReportDetail 报告口径', () => {
     expect(status.text()).toContain('多 Agent AI 报告：未完成（已提供确定性报告）')
     expect(status.text()).toContain('模型未配置')
     expect(wrapper.get('[data-testid="sandbox-report-coverage"]').text()).toContain('黑盒路由未配置')
+    expect(wrapper.get('[data-testid="sandbox-report-coverage"]').text()).toContain('评分仅表示本次已记录范围的结果')
+    wrapper.unmount()
+  })
+
+  it('沙箱没有有效评分时不显示局部评分说明，并明确标为未评估', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: { project_name: '沙箱项目' },
+      task: {
+        task_name: '未评分的黑盒测试',
+        review_type: 'sandbox_test',
+        coverage: { verification_status: 'partial', reason: '未运行黑盒路由验证', score_available: false },
+      },
+      stats: { score: null, total_issues: 0 },
+      files: [],
+      rules_snapshot: [],
+      source: { type: 'sandbox_test' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="report-score-unavailable"]').text()).toContain('未评估')
+    expect(wrapper.get('[data-testid="sandbox-report-coverage"]').text()).not.toContain('评分仅表示本次已记录范围的结果')
     wrapper.unmount()
   })
 

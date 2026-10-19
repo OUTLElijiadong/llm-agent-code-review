@@ -136,7 +136,7 @@ class FullChainAuditOrchestrator:
                     or len(quote) < min(8, len(piece.strip())) or quote not in piece
                     or not summary or estimate_tokens(summary) > 512):
                 raise RuntimeError(
-                    f"高危候选 {finding_index} 来源 {source_id} 摘要或原文引文未核验: {result.error}"
+                    f"高危候选 {finding_index} 来源 {source_id} 摘要或原文引文未核验"
                 )
             summaries.append(f"{source_id} 原文引文={quote!r} 摘要={summary}")
         compacted = (
@@ -171,7 +171,10 @@ class FullChainAuditOrchestrator:
                 try:
                     surface.file_profiles.append(profile_php_file(path, content))
                 except Exception as e:
-                    logger.debug(f"[fullchain][recon] 画像失败 {path}: {e}")
+                    logger.debug(
+                        "[fullchain][recon] 攻击面画像失败（异常类型：{}）",
+                        type(e).__name__,
+                    )
             # 框架指纹(轻量)
             lower = path.lower()
             for fw, key in (("Laravel", "laravel"), ("ThinkPHP", "thinkphp"),
@@ -301,9 +304,24 @@ class FullChainAuditOrchestrator:
                                 }
                                 batch[idx]["sandbox_script_report"] = report
                                 sandbox_script_reports.append(report)
-                except Exception as e:
-                    sandbox_errors.append(f"第 {start + 1}-{start + len(batch)} 条: {e}")
-                    logger.warning(f"[fullchain][verification] 沙箱验证降级: {e}")
+                except AppError as e:
+                    if e.http_status < 500:
+                        raise
+                    sandbox_errors.append(
+                        f"第 {start + 1}-{start + len(batch)} 条沙箱验证未完成"
+                    )
+                    logger.warning(
+                        "[fullchain][verification] 沙箱验证降级（异常类型：{}）",
+                        type(e).__name__,
+                    )
+                except Exception as e:  # noqa: BLE001 - sandbox is an optional evidence source
+                    sandbox_errors.append(
+                        f"第 {start + 1}-{start + len(batch)} 条沙箱验证未完成"
+                    )
+                    logger.warning(
+                        "[fullchain][verification] 沙箱验证降级（异常类型：{}）",
+                        type(e).__name__,
+                    )
 
         # —— LLM 推理验证(始终执行, 给每条高危结论出 PoC 思路与判定) ——
         llm_verdicts = self._llm_verify(targets, ctx=ctx)
@@ -362,7 +380,7 @@ class FullChainAuditOrchestrator:
                 prefix + content + suffix, ctx=ctx, thinking=False, max_tokens=2048,
             )
             if not result.success or not isinstance(result.data, dict):
-                raise RuntimeError(f"高危候选 {i + 1}/{len(targets)} 未完成模型验证: {result.error}")
+                raise RuntimeError(f"高危候选 {i + 1}/{len(targets)} 未完成模型验证")
             verdict = str(result.data.get("verdict") or "")
             if verdict not in {"confirmed", "plausible", "refuted"}:
                 raise RuntimeError(f"高危候选 {i + 1}/{len(targets)} 模型验证缺少合法结论")
@@ -487,7 +505,7 @@ class FullChainAuditOrchestrator:
                 prefix + content + suffix, ctx=ctx, thinking=False, max_tokens=4096,
             )
             if not result.success or not result.data:
-                raise RuntimeError(f"PoC index={i} 脚本生成失败: {result.error}")
+                raise RuntimeError(f"PoC index={i} 脚本生成未完成")
             script = str(result.data).strip()
             if script.startswith("```"):
                 lines = script.splitlines()
@@ -641,6 +659,50 @@ class FullChainAuditOrchestrator:
             "duration_ms": duration_ms,
         }
 
+    @staticmethod
+    def _verification_failure_result(analysis: AgentResult, duration_ms: int) -> AgentResult:
+        """Keep completed source-analysis evidence when the later verification stage fails."""
+        message = "全链路审计未完整完成：源码分析结果已保留，但漏洞验证阶段未完成。"
+        payload = dict(analysis.data) if isinstance(analysis.data, dict) else {}
+        payload["findings"] = [
+            dict(item) for item in payload.get("findings", []) if isinstance(item, dict)
+        ]
+        payload["summary"] = (
+            "源码分析阶段已完成；后续漏洞验证阶段中断。以下发现来自源码分析，"
+            "尚未经漏洞验证阶段确认。"
+        )
+        payload["duration_ms"] = duration_ms
+        compliance = dict(payload.get("compliance")) if isinstance(payload.get("compliance"), dict) else {}
+        unscanned = compliance.get("unscanned")
+        if not isinstance(unscanned, list):
+            unscanned = []
+        compliance.update({
+            "scan_complete": False,
+            "coverage_status": "partial",
+            "verification_status": "partial",
+            "unscanned": [item for item in unscanned if isinstance(item, str) and item.strip()]
+            + ["全链漏洞验证阶段未完成；源码分析发现未经后续验证确认"],
+        })
+        payload["compliance"] = compliance
+        payload["verification_status"] = "partial"
+        fullchain = dict(payload.get("fullchain")) if isinstance(payload.get("fullchain"), dict) else {}
+        fullchain["summary"] = payload["summary"]
+        fullchain["verification"] = {
+            "targets": sum(
+                item.get("severity") in {"严重", "高"} for item in payload["findings"]
+            ),
+            "verified": 0,
+        }
+        payload["fullchain"] = fullchain
+        return AgentResult(
+            success=False,
+            error=message,
+            model=analysis.model,
+            duration_ms=duration_ms,
+            failure_kind="partial_coverage",
+            data=payload,
+        )
+
     # =====================================================================
     # 主编排入口
     # =====================================================================
@@ -697,8 +759,20 @@ class FullChainAuditOrchestrator:
                 project, actor, (analysis.data or {}).get("findings") or [],
                 board, ctx, enable_sandbox=enable_sandbox,
             )
+        except AppError as exc:
+            if exc.http_status < 500:
+                raise
+            logger.error(
+                "[fullchain] 漏洞验证发生内部错误（异常类型：{}）",
+                type(exc).__name__,
+            )
+            return self._verification_failure_result(analysis, int((time.time() - t0) * 1000))
         except Exception as exc:  # noqa: BLE001 - 不允许漏评高危后仍报告审计完成
-            return AgentResult(success=False, error=f"全链漏洞验证不完整: {exc}", failure_kind="partial_coverage")
+            logger.error(
+                "[fullchain] 漏洞验证发生内部错误（异常类型：{}）",
+                type(exc).__name__,
+            )
+            return self._verification_failure_result(analysis, int((time.time() - t0) * 1000))
         try:
             self._sentinel._require_current_execution(project_id, actor)
         except AppError:

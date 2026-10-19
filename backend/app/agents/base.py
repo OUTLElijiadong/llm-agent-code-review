@@ -100,7 +100,11 @@ class BaseAgent:
                 user_id=ctx.user_id if ctx else None,
             )
         except Exception as e:
-            logger.warning(f"[{self.name}] emit 事件失败: {e}")
+            logger.warning(
+                "[{}] emit 事件失败（异常类型：{}）",
+                self.name,
+                type(e).__name__,
+            )
 
     def _project_input(
         self,
@@ -422,20 +426,23 @@ class BaseAgent:
                     last_error = f"服务异常({resp.status_code})"
                     last_failure_kind = "upstream_error"
                 else:
-                    last_error = f"调用失败({resp.status_code}): {resp.text[:200]}"
+                    # Provider bodies may echo credentials, prompts, or private
+                    # request context. Keep the HTTP status without persisting
+                    # or broadcasting the response body.
+                    last_error = f"调用失败({resp.status_code})"
                     last_failure_kind = "http_error"
                     retryable = False
 
-            except httpx.TimeoutException as e:
-                last_error = str(e) or "模型请求超时"
+            except httpx.TimeoutException:
+                last_error = "模型请求超时"
                 last_failure_kind = "timeout"
                 duration_ms = int((time.time() - t0) * 1000)
-            except httpx.TransportError as e:
-                last_error = str(e) or "模型网络传输失败"
+            except httpx.TransportError:
+                last_error = "模型网络传输失败"
                 last_failure_kind = "transport_error"
                 duration_ms = int((time.time() - t0) * 1000)
             except Exception as e:
-                last_error = str(e)
+                last_error = f"模型响应处理异常（类型：{type(e).__name__}）"
                 last_failure_kind = "invalid_response"
                 duration_ms = int((time.time() - t0) * 1000)
                 retryable = False
@@ -629,7 +636,11 @@ class BaseAgent:
             db.add(rec)
             db.flush()
         except Exception as e:
-            logger.debug(f"[{self.name}] _log_call 写入 AiCallLog 失败: {e}")
+            logger.debug(
+                "[%s] _log_call 写入 AiCallLog 失败（异常类型：%s）",
+                self.name,
+                type(e).__name__,
+            )
 
     # ── AgentSkill 自进化与总调度升级:Skill 挂载接口 ──
 

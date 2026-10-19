@@ -476,13 +476,22 @@ describe('报告卡片列表', () => {
 })
 
 describe('报告列表领域导出', () => {
-  it('领域报告只显示真实 JSON 出口，不展示非等价 HTML/PDF/Word', async () => {
+  it('领域报告列表提供服务端支持的四种等价导出格式', async () => {
     wrapper = mountPage()
     await flushPromises()
     expect(wrapper.text()).toContain('导出 JSON')
-    expect(wrapper.text()).not.toContain('导出 HTML')
-    expect(wrapper.text()).not.toContain('导出 PDF')
-    expect(wrapper.text()).not.toContain('导出 Word')
+    expect(wrapper.text()).toContain('导出 HTML')
+    expect(wrapper.text()).toContain('导出 PDF')
+    expect(wrapper.text()).toContain('导出 Word')
+  })
+
+  it.each(['json', 'html', 'pdf', 'word'] as const)('领域报告按用户选择导出 %s', async format => {
+    wrapper = mountPage()
+    await flushPromises()
+
+    await (wrapper.vm as any).handleExport(report, format)
+
+    expect(api.export).toHaveBeenCalledExactlyOnceWith(42, format, 'detailed')
   })
 
   it('领域 JSON 可达并反馈成功，列表导出按钮在请求期间防重复', async () => {
@@ -516,15 +525,20 @@ describe('报告列表领域导出', () => {
     expect(filename).not.toContain('review_type=')
   })
 
-  it('错误 JSON 不触发下载，显示message和next_action并提供重试入口', async () => {
-    api.export.mockRejectedValueOnce({ code: 40941, message: '领域报告不支持 PDF', next_action: '请导出真实领域 JSON' })
+  it('领域 PDF 导出失败保留原格式重试，不触发错误下载', async () => {
+    api.export.mockRejectedValueOnce({ code: 50301, message: 'PDF 服务暂不可用', next_action: '稍后重试 PDF 导出' })
     wrapper = mountPage()
     await flushPromises()
     const vm = wrapper.vm as any
     await vm.handleExport(report, 'pdf')
-    expect(wrapper.text()).toContain('领域报告不支持 PDF')
-    expect(wrapper.text()).toContain('请导出真实领域 JSON')
-    expect(wrapper.findAll('button').some(button => button.text().includes('重试导出'))).toBe(true)
+    expect(wrapper.text()).toContain('PDF 服务暂不可用')
+    expect(wrapper.text()).toContain('稍后重试 PDF 导出')
+    const retry = wrapper.findAll('button').find(button => button.text().includes('重试导出'))
+    expect(retry).toBeDefined()
+    api.export.mockRejectedValueOnce({ code: 50301, message: 'PDF 服务暂不可用', next_action: '稍后重试 PDF 导出' })
+    await retry?.trigger('click')
+    await flushPromises()
+    expect(api.export).toHaveBeenNthCalledWith(2, 42, 'pdf', 'detailed')
     expect(window.URL.createObjectURL).not.toHaveBeenCalled()
   })
 })

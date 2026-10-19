@@ -1,15 +1,40 @@
-import pytest
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from app.core.exceptions import NotFoundError
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.agents.base import AgentResult
+from app.agents.fullchain_audit_agent import FullChainAuditOrchestrator, ReconReport
+from app.agents.security_sentinel_agent import SecuritySentinelAgent
+from app.api.v1 import security as security_api
+from app.core.database import Base, get_db
+from app.core.dependencies import get_current_user
+from app.core.error_handlers import register_handlers
+from app.core.exceptions import (
+    NotFoundError,
+)
+from app.core.exceptions import (
+    PermissionError as AppPermissionError,
+)
 from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
+from app.models.project_source_archive import ProjectSourceArchive
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_issue import ReviewIssue
 from app.models.review_report import ReviewReport
 from app.models.review_task import ReviewTask
 from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
+from app.schemas.security import (
+    FullChainAuditIn,
+    SecurityScanAllProjectsIn,
+    SecurityScanFileIn,
+)
 from app.services import report_service
 from app.services.security_report_service import infer_coverage_status, persist_security_report
 
@@ -109,6 +134,212 @@ def test_security_scan_persists_readable_owner_scoped_report_and_partial_coverag
         report_service.get_report_detail(db, other, task_id)
 
 
+def test_project_scan_conflict_preserves_409_and_does_not_persist_report(tmp_path, monkeypatch):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'security_scan_conflict.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    owner = User(username="security_scan_conflict_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    role = db.query(Role).filter_by(code="user").one()
+    permission = db.query(Permission).filter_by(code=PermissionCode.SECURITY_SCAN).one_or_none()
+    if permission is None:
+        permission = Permission(
+            code=PermissionCode.SECURITY_SCAN,
+            name=PermissionCode.SECURITY_SCAN,
+            module="security",
+            type="api",
+        )
+        db.add(permission)
+        db.flush()
+    db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    project = Project(user_id=owner.id, project_name="冲突审计项目", language="python", status="active")
+    db.add(project)
+    db.flush()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    archive = ProjectSourceArchive(
+        project_id=project.id,
+        owner_id=owner.id,
+        original_filename="source.zip",
+        media_type="application/zip",
+        archive_sha256="a" * 64,
+        compressed_size=1,
+        expanded_size=1,
+        file_count=1,
+        max_member_size=1,
+        max_compression_ratio=1.0,
+        storage_status="active",
+        malware_status="clean",
+        audit_status="running",
+        audit_started_at=now,
+        audit_heartbeat_at=now,
+        scan_summary_json="{}",
+        archive_blob=b"x",
+    )
+    db.add(archive)
+    db.commit()
+
+    agent = SecuritySentinelAgent()
+    agent._db = db
+    agent._user = owner
+    monkeypatch.setattr(
+        security_api,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(security_sentinel=agent),
+    )
+
+    app = FastAPI()
+    register_handlers(app)
+    app.include_router(security_api.router, prefix="/api/security")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: owner
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/security/scan-project",
+                json={"project_id": project.id},
+            )
+
+        assert response.status_code == 409
+        assert response.json()["code"] == 40902
+        assert "已有白盒审计正在运行" in response.json()["message"]
+        db.refresh(archive)
+        assert archive.audit_status == "running"
+        assert db.query(ReviewTask).count() == 0
+        assert db.query(ReviewReport).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_fullchain_verification_failure_persists_completed_analysis_as_partial_report(tmp_path, monkeypatch):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'fullchain_verification_failure.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    owner = User(username="fullchain_partial_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    role = db.query(Role).filter_by(code="user").one()
+    permission = db.query(Permission).filter_by(code=PermissionCode.SECURITY_SCAN).one_or_none()
+    if permission is None:
+        permission = Permission(
+            code=PermissionCode.SECURITY_SCAN,
+            name=PermissionCode.SECURITY_SCAN,
+            module="security",
+            type="api",
+        )
+        db.add(permission)
+        db.flush()
+    db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    project = Project(user_id=owner.id, project_name="全链验证中断项目", language="python", status="active")
+    db.add(project)
+    db.flush()
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="app.py",
+        file_path="src/app.py",
+        language="python",
+        size_bytes=24,
+        line_count=1,
+        version_no=1,
+        content="run(user_input)",
+        status="active",
+    )
+    db.add(code_file)
+    db.commit()
+
+    agent = SecuritySentinelAgent()
+    agent._db = db
+    agent._user = owner
+    agent._authz_project = lambda *_args: None
+    agent._execution_context = lambda *_args: None
+    agent._require_current_execution = lambda *_args: None
+    monkeypatch.setattr(
+        security_api,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(security_sentinel=agent),
+    )
+    finding = {
+        "title": "命令执行入口未校验",
+        "category": "安全漏洞",
+        "severity": "高",
+        "file_path": "src/app.py",
+        "line_number": 1,
+        "evidence": "run(user_input)",
+        "exploit_scenario": "外部输入可能进入命令执行函数。",
+        "fix_suggestion": "校验输入并使用安全参数化调用。",
+        "cwe": "CWE-78",
+        "owasp": "A03:2021-Injection",
+    }
+    monkeypatch.setattr(
+        FullChainAuditOrchestrator,
+        "_recon",
+        lambda *_args: SimpleNamespace(surface=SimpleNamespace(file_profiles=[])),
+    )
+    monkeypatch.setattr(
+        FullChainAuditOrchestrator,
+        "_analysis",
+        lambda *_args: AgentResult(
+            success=True,
+            data={
+                "findings": [finding],
+                "summary": "分析阶段发现命令执行风险。",
+                "file_count": 1,
+                "compliance": {"scan_complete": True, "coverage_status": "complete"},
+            },
+        ),
+    )
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+    monkeypatch.setattr(
+        FullChainAuditOrchestrator,
+        "_verification",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(provider_secret)),
+    )
+
+    app = FastAPI()
+    register_handlers(app)
+    app.include_router(security_api.router, prefix="/api/security")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: owner
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/security/fullchain-audit",
+                json={"project_id": project.id, "enable_sandbox": False},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["execution_status"] == "partial"
+        assert provider_secret not in response.text
+        task = db.query(ReviewTask).filter_by(project_id=project.id, review_type="fullchain_audit").one()
+        report = db.query(ReviewReport).filter_by(task_id=task.id, user_id=owner.id).one()
+        issue = db.query(ReviewIssue).filter_by(task_id=task.id).one()
+        assert task.status == "partial"
+        assert task.total_issues == 1
+        assert task.coverage["verification_status"] == "partial"
+        assert task.coverage["score_available"] is False
+        assert task.coverage["unscanned"]
+        assert issue.title == "命令执行入口未校验"
+        assert report.content_json["execution_status"] == "partial"
+        assert report.content_json["findings"][0]["title"] == issue.title
+        assert "覆盖范围：部分" in report.content_json["report_md"]
+        assert "验证目标数：1" in report.content_json["report_md"]
+        assert "独立验证完成数：0" in report.content_json["report_md"]
+        assert "命令执行入口未校验" in report.content_json["report_md"]
+        assert provider_secret not in report.content_json["report_md"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_failed_security_scan_still_persists_report_with_unknown_coverage(db):
     owner = User(username="security_report_failed", password="x", role="user", status=1)
     db.add(owner)
@@ -147,6 +378,178 @@ def test_failed_security_scan_still_persists_report_with_unknown_coverage(db):
     assert item["score"] is None
     assert "未评估" in report.content_json["report_md"]
     assert report.score == 0
+
+
+def test_scan_file_runtime_failure_persists_real_safe_report(db, monkeypatch):
+    owner = User(username="security_scan_runtime_failure", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="运行异常报告", language="python", status="active")
+    db.add(project)
+    db.flush()
+    code_file = CodeFile(
+        project_id=project.id,
+        file_name="app.py",
+        file_path="src/app.py",
+        language="python",
+        size_bytes=8,
+        line_count=1,
+        version_no=1,
+        content="value=1\n",
+        status="active",
+    )
+    db.add(code_file)
+    db.commit()
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+
+    def crash_scan(**_kwargs):
+        raise RuntimeError(provider_secret)
+
+    monkeypatch.setattr(security_api, "require_project_execution", lambda *_args: None)
+    monkeypatch.setattr(
+        security_api,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            security_sentinel=SimpleNamespace(scan_file=crash_scan),
+        ),
+    )
+
+    response = security_api.scan_file(
+        SecurityScanFileIn(file_id=code_file.id),
+        db=db,
+        user=owner,
+    )
+
+    task_id = response.data.report_task_id
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    assert task.status == "failed"
+    assert task.coverage["verification_status"] == "failed"
+    assert report.content_json["execution_status"] == "failed"
+    assert report.content_json["coverage"]["verification_status"] == "failed"
+    assert provider_secret not in task.error_message
+    assert provider_secret not in task.summary
+    assert provider_secret not in report.content_json["report_md"]
+    assert "本次结果无法给出" in report.content_json["report_md"]
+
+
+def test_scan_all_projects_runtime_failure_persists_per_project_report(db, monkeypatch):
+    owner = User(username="security_scan_all_runtime_failure", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="全量扫描异常项目", language="python", status="active")
+    db.add(project)
+    db.commit()
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+    agent = SecuritySentinelAgent()
+    agent.inject(db, user=owner)
+    monkeypatch.setattr(agent, "_emit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent, "_build_multi_agent_discussion", lambda *_args, **_kwargs: {})
+
+    def crash_project_scan(*_args, **_kwargs):
+        raise RuntimeError(provider_secret)
+
+    monkeypatch.setattr(agent, "_scan_project_impl", crash_project_scan)
+    monkeypatch.setattr(
+        security_api,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(security_sentinel=agent),
+    )
+
+    response = security_api.scan_all_projects(
+        SecurityScanAllProjectsIn(),
+        db=db,
+        user=owner,
+    )
+
+    assert len(response.data.report_task_ids) == 1
+    task_id = response.data.report_task_ids[0]
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    assert task.status == "failed"
+    assert task.project_id == project.id
+    assert task.coverage["verification_status"] == "failed"
+    assert report.content_json["execution_status"] == "failed"
+    assert provider_secret not in task.error_message
+    assert provider_secret not in task.summary
+    assert provider_secret not in report.content_json["report_md"]
+    assert "本次结果不完整" in report.content_json["report_md"]
+
+
+def test_fullchain_permission_revocation_during_model_call_does_not_persist_report(db, monkeypatch):
+    owner = User(username="fullchain_permission_revoked", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="权限撤销项目", language="python", status="active")
+    db.add(project)
+    db.flush()
+    db.add(CodeFile(
+        project_id=project.id,
+        file_name="app.py",
+        file_path="src/app.py",
+        language="python",
+        size_bytes=8,
+        line_count=1,
+        version_no=1,
+        content="value=1\n",
+        status="active",
+    ))
+    db.commit()
+
+    agent = SecuritySentinelAgent()
+    agent.inject(db, user=owner)
+    permission_check_stages = []
+    current_stage = "pipeline"
+    before_model_call_invoked = False
+    model_request_sent = False
+    denial = AppPermissionError("项目执行权已撤销")
+
+    def revoke_on_model_call(_project_id, _actor=None):
+        permission_check_stages.append(current_stage)
+        if current_stage == "before_model_call":
+            raise denial
+
+    def call_model(_prompt, *, ctx=None, **_kwargs):
+        nonlocal before_model_call_invoked, current_stage, model_request_sent
+        callback = (ctx.extra or {}).get("before_model_call") if ctx else None
+        if callable(callback):
+            before_model_call_invoked = True
+            current_stage = "before_model_call"
+            callback()
+        model_request_sent = True
+        return AgentResult(success=True, data={"verdict": "plausible", "poc": "只读复核"})
+
+    monkeypatch.setattr(agent, "_require_current_execution", revoke_on_model_call)
+    monkeypatch.setattr(agent, "call_json", call_model)
+    monkeypatch.setattr(security_api, "require_project_execution", lambda *_args: None)
+    monkeypatch.setattr(
+        security_api,
+        "get_request_orchestrator",
+        lambda *_args, **_kwargs: SimpleNamespace(security_sentinel=agent),
+    )
+    monkeypatch.setattr(FullChainAuditOrchestrator, "_recon", lambda *_args: ReconReport())
+    monkeypatch.setattr(
+        FullChainAuditOrchestrator,
+        "_analysis",
+        lambda *_args: AgentResult(success=True, data={
+            "findings": [{"severity": "高", "confidence": 0.9, "evidence": "evidence"}],
+        }),
+    )
+
+    with pytest.raises(AppPermissionError) as exc_info:
+        security_api.fullchain_audit(
+            FullChainAuditIn(project_id=project.id),
+            db=db,
+            user=owner,
+        )
+
+    assert exc_info.value is denial
+    assert permission_check_stages[-1] == "before_model_call"
+    assert permission_check_stages.count("before_model_call") == 1
+    assert before_model_call_invoked is True
+    assert model_request_sent is False
+    assert db.query(ReviewTask).count() == 0
+    assert db.query(ReviewReport).count() == 0
 
 
 def test_successful_security_scan_without_coverage_evidence_is_unknown():

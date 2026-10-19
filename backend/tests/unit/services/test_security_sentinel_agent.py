@@ -10,6 +10,7 @@ import zipfile
 from unittest.mock import MagicMock
 
 import pytest
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.agents.base import AgentResult
@@ -20,6 +21,7 @@ from app.agents.security_sentinel_agent import (
     _ProjectAuditPart,
     _SemanticAuditBudget,
 )
+from app.core.exceptions import PermissionError as AppPermissionError
 from app.models.code_file import CodeFile
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -1288,7 +1290,7 @@ def test_quarantined_scan_static_exception_persists_failed_terminal_state(db, mo
     )
 
     assert result.success is False
-    assert result.error == "项目白盒审计执行失败"
+    assert "项目白盒审计执行失败" in result.error
     db.expire_all()
     stored = db.query(ProjectSourceArchive).filter_by(project_id=project.id).one()
     stored_payload = json.loads(stored.audit_result_json)
@@ -1297,6 +1299,51 @@ def test_quarantined_scan_static_exception_persists_failed_terminal_state(db, mo
     assert stored.audit_completed_at is not None
     assert stored_payload["error"] == "项目白盒审计执行失败"
     assert stored_payload["source_archive_sha256"] == expected_sha256
+
+
+def test_scan_project_runtime_exception_does_not_log_provider_details(db, monkeypatch):
+    owner, project, _archive_row, _raw = _persist_quarantined_project(
+        db,
+        username="archive_audit_redacted_exception",
+    )
+    agent = SecuritySentinelAgent()
+    agent.inject(db, user=owner)
+    monkeypatch.setattr(agent, "_emit", lambda *_args, **_kwargs: None)
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+    log_output = io.StringIO()
+    sink_id = logger.add(log_output, level="ERROR", format="{message}")
+
+    def fail_static_analysis(_file):
+        raise RuntimeError(provider_secret)
+
+    monkeypatch.setattr(agent, "_regex_findings", lambda _file: [])
+    monkeypatch.setattr(agent, "_static_findings", fail_static_analysis)
+    monkeypatch.setattr(agent, "_extract_api_endpoints", lambda _file: [])
+    try:
+        result = agent.scan_project(project.id, trace_dataflow=False, scan_mode="static_full")
+    finally:
+        logger.remove(sink_id)
+
+    assert result.success is False
+    assert "项目白盒审计执行失败" in result.error
+    assert provider_secret not in log_output.getvalue()
+    assert "RuntimeError" in log_output.getvalue()
+
+
+def test_scan_project_preserves_permission_errors_from_execution_callbacks(monkeypatch):
+    agent = SecuritySentinelAgent()
+    agent.inject(MagicMock(), user=_make_user())
+    denied = AppPermissionError("项目访问权已撤销")
+
+    def fail_after_permission_revocation(*_args, **_kwargs):
+        raise denied
+
+    monkeypatch.setattr(agent, "_scan_project_impl", fail_after_permission_revocation)
+
+    with pytest.raises(AppPermissionError) as exc_info:
+        agent.scan_project(project_id=7)
+
+    assert exc_info.value is denied
 
 
 def test_project_reviewer_can_run_read_only_quarantined_scan_project(db, monkeypatch):

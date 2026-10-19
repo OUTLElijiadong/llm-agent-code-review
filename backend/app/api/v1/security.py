@@ -4,14 +4,16 @@
 """
 from types import SimpleNamespace
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.agents import AgentContext
+from app.agents import AgentContext, AgentResult
 from app.agents.orchestrator import get_orchestrator, get_request_orchestrator
 from app.ai.exceptions import AiServiceError
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import AppError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.code_file import CodeFile
@@ -71,6 +73,51 @@ def _scan_result_data_or_raise(result, *, failure_message: str) -> dict:
         "error_message": str(result.error or failure_message),
     })
     return partial
+
+
+def _execute_reportable_scan(operation) -> AgentResult:
+    """Convert unexpected scan exceptions into a safe failure result for report persistence."""
+    try:
+        return operation()
+    except AppError as exc:
+        if exc.http_status < 500:
+            raise
+        # Do not log the exception text or traceback: provider errors may contain
+        # credentials, request bodies, or private endpoint details.
+        logger.error("[security] 扫描执行异常；已转换为安全失败结果（异常类型：{}）", type(exc).__name__)
+        message = "扫描执行发生内部错误；本次结果无法给出，请联系管理员核查日志。"
+        return _failed_scan_result(message)
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.error("[security] 扫描执行异常；已转换为安全失败结果（异常类型：HTTPException）")
+        message = "扫描执行发生内部错误；本次结果无法给出，请联系管理员核查日志。"
+        return _failed_scan_result(message)
+    except Exception as exc:  # noqa: BLE001 - retain a report for provider/runtime failures
+        # Exception strings and tracebacks can expose provider credentials or
+        # request data. Keep only the class name in operational logs.
+        logger.error("[security] 扫描执行异常；已转换为安全失败结果（异常类型：{}）", type(exc).__name__)
+        message = "扫描执行发生内部错误；本次结果无法给出，请联系管理员核查日志。"
+        return _failed_scan_result(message)
+
+
+def _failed_scan_result(message: str) -> AgentResult:
+    """Build a non-sensitive failure snapshot for ordinary runtime errors."""
+    return AgentResult(
+        success=False,
+        error=message,
+        failure_kind="execution_exception",
+        data={
+            "findings": [],
+            "summary": message,
+            "file_count": 0,
+            "compliance": {
+                "scan_complete": False,
+                "coverage_status": "failed",
+                "unscanned": ["扫描在完成前发生内部错误，剩余范围未确认"],
+            },
+        },
+    )
 
 
 def _persist_scan_result(
@@ -152,14 +199,17 @@ def scan_file(
         raise AiServiceError("代码文件不存在或已删除", code=40420)
     require_project_execution(db, int(file.project_id), user)
     orch = get_request_orchestrator(db, user=user)
-    result = orch.security_sentinel.scan_file(
-        file_id=payload.file_id,
-        scan_depth=payload.scan_depth,
-        ctx=_ctx(user),
+    task_name = f"文件安全扫描 · {file.file_path or file.file_name}"
+    result = _execute_reportable_scan(
+        lambda: orch.security_sentinel.scan_file(
+            file_id=payload.file_id,
+            scan_depth=payload.scan_depth,
+            ctx=_ctx(user),
+        )
     )
     data = _persist_scan_result(
         db, user, project_id=int(file.project_id), report_kind="security_scan",
-        task_name=f"文件安全扫描 · {file.file_path or file.file_name}", result=result,
+        task_name=task_name, result=result,
     )
     return Resp(data=SecurityScanOut(**data))
 
@@ -199,12 +249,14 @@ def scan_project(
     """项目级威胁建模:跨文件数据流追踪"""
     require_project_execution(db, payload.project_id, user)
     orch = get_request_orchestrator(db, user=user)
-    result = orch.security_sentinel.scan_project(
-        project_id=payload.project_id,
-        top_n=payload.top_n,
-        trace_dataflow=payload.trace_dataflow,
-        scan_mode=payload.scan_mode,
-        ctx=_ctx(user),
+    result = _execute_reportable_scan(
+        lambda: orch.security_sentinel.scan_project(
+            project_id=payload.project_id,
+            top_n=payload.top_n,
+            trace_dataflow=payload.trace_dataflow,
+            scan_mode=payload.scan_mode,
+            ctx=_ctx(user),
+        )
     )
     data = _persist_scan_result(
         db, user, project_id=payload.project_id, report_kind="security_scan",
@@ -232,13 +284,15 @@ def fullchain_audit(
     require_project_execution(db, payload.project_id, user)
     orch = get_request_orchestrator(db, user=user)
     orchestrator = FullChainAuditOrchestrator(orch.security_sentinel)
-    result = orchestrator.run(
-        project_id=payload.project_id,
-        actor=user,
-        top_n=payload.top_n,
-        trace_dataflow=payload.trace_dataflow,
-        enable_sandbox=payload.enable_sandbox,
-        ctx=_ctx(user),
+    result = _execute_reportable_scan(
+        lambda: orchestrator.run(
+            project_id=payload.project_id,
+            actor=user,
+            top_n=payload.top_n,
+            trace_dataflow=payload.trace_dataflow,
+            enable_sandbox=payload.enable_sandbox,
+            ctx=_ctx(user),
+        )
     )
     data = _persist_scan_result(
         db, user, project_id=payload.project_id, report_kind="fullchain_audit",

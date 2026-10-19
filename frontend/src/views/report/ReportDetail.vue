@@ -145,7 +145,7 @@
     <section v-if="isSandboxReport && canViewReport" class="card report-coverage-note" data-testid="sandbox-report-coverage" role="note">
       <strong>验证范围：{{ sandboxCoverageLabel }}</strong>
       <p v-if="sandboxCoverage?.reason">{{ sandboxCoverage.reason }}</p>
-      <p v-if="sandboxCoverageStatus !== 'complete'">评分仅表示本次已记录范围的结果，不代表完整黑盒/白盒验证通过。</p>
+      <p v-if="scoreAvailable && sandboxCoverageStatus !== 'complete'">评分仅表示本次已记录范围的结果，不代表完整黑盒/白盒验证通过。</p>
     </section>
 
     <section v-if="isSandboxReport && canViewReport" class="card report-coverage-note" data-testid="sandbox-ai-review-status" role="note">

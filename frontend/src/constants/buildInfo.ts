@@ -1,4 +1,4 @@
-const rawVersion = (import.meta.env.VITE_APP_VERSION || '4.1.10').trim().replace(/^v/i, '')
+const rawVersion = (import.meta.env.VITE_APP_VERSION || '4.1.11').trim().replace(/^v/i, '')
 const rawBuildTime = (import.meta.env.VITE_APP_BUILD_TIME || '').trim()
 
 export const APP_VERSION = rawVersion

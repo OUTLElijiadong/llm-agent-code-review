@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 import pytest
+from loguru import logger
 
 from app.agents import event_bus as module
 from app.agents.base import AgentContext, BaseAgent
@@ -216,6 +217,62 @@ def test_base_agent_events_keep_current_user_ownership(
 
     assert captured[0]["user_id"] == 42
     assert captured[0]["trace_id"] == "owned-trace"
+
+
+def test_base_agent_redacts_provider_error_from_logs_events_and_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider_secret = "api_key=do-not-expose https://private.invalid/credential"
+    usage_attempts: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    logs: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, *args, **kwargs):
+            return SimpleNamespace(status_code=400, text=provider_secret, json=lambda: {})
+
+    monkeypatch.setattr("app.agents.base.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.agents.base.pin_public_http_url",
+        lambda url: __import__(
+            "app.utils.public_http",
+            fromlist=["PinnedPublicUrl"],
+        ).PinnedPublicUrl(
+            url,
+            "https://93.184.216.34/chat/completions",
+            "api.deepseek.com",
+            "api.deepseek.com",
+            "93.184.216.34",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.ai_usage_context.record_usage_attempt",
+        lambda **kwargs: usage_attempts.append(kwargs) or len(usage_attempts),
+    )
+    agent = BaseAgent()
+    agent._max_retries = 0
+    monkeypatch.setattr(agent, "_emit", lambda *_args, **kwargs: events.append(kwargs.get("payload", {})))
+    sink_id = logger.add(lambda message: logs.append(str(message)), level="WARNING")
+    try:
+        result = agent.call("test", ctx=AgentContext(user_id=7))
+    finally:
+        logger.remove(sink_id)
+
+    assert result.success is False
+    assert result.failure_kind == "http_error"
+    assert result.error.endswith("调用失败(400)")
+    assert usage_attempts[0]["error"] == "调用失败(400)"
+    assert provider_secret not in result.error
+    assert provider_secret not in str(usage_attempts)
+    assert provider_secret not in str(events)
+    assert provider_secret not in "".join(logs)
 
 
 def test_base_agent_never_exposes_reasoning_content(monkeypatch: pytest.MonkeyPatch) -> None:

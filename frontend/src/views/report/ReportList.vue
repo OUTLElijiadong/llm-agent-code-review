@@ -137,9 +137,9 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item v-if="canExport('json')" command="export:json">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('html') && !isDomainReport(row)" command="export:html">导出 HTML</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('pdf') && !isDomainReport(row)" command="export:pdf">导出 PDF</el-dropdown-item>
-                  <el-dropdown-item v-if="canExport('word') && !isDomainReport(row)" command="export:word">导出 Word</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('html')" command="export:html">导出 HTML</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('pdf')" command="export:pdf">导出 PDF</el-dropdown-item>
+                  <el-dropdown-item v-if="canExport('word')" command="export:word">导出 Word</el-dropdown-item>
                   <el-dropdown-item v-if="canDeleteReport && row.can_delete === true" command="delete" divided>
                     <span class="danger-item">删除报告</span>
                   </el-dropdown-item>
@@ -247,8 +247,7 @@ function canExport(format: ReportFormat): boolean {
 }
 
 function canExportReport(row: ReportListItem): boolean {
-  if (canExport('json')) return true
-  return !isDomainReport(row) && (canExport('html') || canExport('pdf') || canExport('word'))
+  return ['json', 'html', 'pdf', 'word'].some(format => canExport(format as ReportFormat))
 }
 
 function hasRowMenuActions(row: ReportListItem): boolean {
@@ -440,10 +439,6 @@ async function handleExport(row: ReportListItem, format: ReportFormat): Promise<
   if (!canDisplayReport(row) || !canExport(format)) return
   if (exportingTaskId.value !== null) return
   const current = captureAccount()
-  if (isDomainReport(row) && format !== 'json') {
-    showExportError({ message: `领域报告不支持 ${format.toUpperCase()}`, next_action: '请导出真实领域 JSON' }, format, row)
-    return
-  }
   exportingTaskId.value = row.task_id
   exportErrorMessage.value = ''
   exportErrorNextAction.value = ''
@@ -470,7 +465,7 @@ function showExportError(error: unknown, format: ReportFormat, row?: ReportListI
   exportErrorMessage.value = payload?.message || `${format.toUpperCase()} 报告导出失败`
   exportErrorNextAction.value = payload?.next_action || '请检查报告状态后重试'
   retryExportRow.value = row ?? null
-  retryExportFormat.value = row && isDomainReport(row) ? 'json' : (row ? format : null)
+  retryExportFormat.value = row ? format : null
   ElMessage.error(exportErrorMessage.value)
 }
 

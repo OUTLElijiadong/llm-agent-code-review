@@ -38,7 +38,7 @@ from app.constants.security_catalog import (
     owasp_reference,
 )
 from app.core.config import settings
-from app.core.exceptions import AppError, ConflictError, ForbiddenError, PermissionError, ValidationError
+from app.core.exceptions import AppError, ForbiddenError, PermissionError, ValidationError
 from app.core.permission_codes import PermissionCode
 from app.models.code_file import CodeFile
 from app.models.project import Project
@@ -689,6 +689,30 @@ class SecuritySentinelAgent(BaseAgent):
         """执行项目级白盒审计，并确保异常不会遗留 running 状态。"""
         started_at = time.time()
         audit_state: dict[str, str] = {}
+
+        def finish_interrupted_archive() -> None:
+            audit_run_id = audit_state.get("audit_run_id", "")
+            if self._db is None or not audit_run_id:
+                return
+            try:
+                self._db.rollback()
+                project_source_service.finish_source_archive_audit(
+                    self._db,
+                    project_id,
+                    "failed",
+                    {
+                        "error": "项目白盒审计执行失败",
+                        "duration_ms": int((time.time() - started_at) * 1000),
+                    },
+                    audit_run_id=audit_run_id,
+                )
+            except Exception as cleanup_exc:
+                self._db.rollback()
+                logger.error(
+                    "[security_sentinel] 写入隔离归档失败状态异常（类型：{}）",
+                    type(cleanup_exc).__name__,
+                )
+
         try:
             with source_archive_workload():
                 return self._scan_project_impl(
@@ -699,38 +723,45 @@ class SecuritySentinelAgent(BaseAgent):
                     scan_mode=scan_mode,
                     audit_state=audit_state,
                 )
-        except ConflictError as exc:
-            return AgentResult(
-                success=False,
-                error=str(exc),
-                model=self._model,
-                duration_ms=int((time.time() - started_at) * 1000),
+        except AppError as exc:
+            finish_interrupted_archive()
+            if exc.http_status < 500:
+                raise
+            logger.error(
+                "[security_sentinel] 项目 #{} 白盒审计异常（类型：{}）",
+                project_id,
+                type(exc).__name__,
             )
-        except Exception:
-            logger.exception("[security_sentinel] 项目 #%s 白盒审计异常", project_id)
-            audit_run_id = audit_state.get("audit_run_id", "")
-            if self._db is not None and audit_run_id:
-                try:
-                    self._db.rollback()
-                    project_source_service.finish_source_archive_audit(
-                        self._db,
-                        project_id,
-                        "failed",
-                        {
-                            "error": "项目白盒审计执行失败",
-                            "duration_ms": int((time.time() - started_at) * 1000),
-                        },
-                        audit_run_id=audit_run_id,
-                    )
-                except Exception:
-                    self._db.rollback()
-                    logger.exception("[security_sentinel] 写入隔离归档失败状态异常")
-            return AgentResult(
-                success=False,
-                error="项目白盒审计执行失败",
-                model=self._model,
-                duration_ms=int((time.time() - started_at) * 1000),
+            return self._failed_project_scan_result(int((time.time() - started_at) * 1000))
+        except Exception as exc:
+            logger.error(
+                "[security_sentinel] 项目 #{} 白盒审计异常（类型：{}）",
+                project_id,
+                type(exc).__name__,
             )
+            finish_interrupted_archive()
+            return self._failed_project_scan_result(int((time.time() - started_at) * 1000))
+
+    def _failed_project_scan_result(self, duration_ms: int) -> AgentResult:
+        message = "项目白盒审计执行失败；本次结果不完整，请联系管理员核查日志。"
+        return AgentResult(
+            success=False,
+            error=message,
+            failure_kind="execution_exception",
+            data={
+                "findings": [],
+                "summary": message,
+                "file_count": 0,
+                "compliance": {
+                    "scan_complete": False,
+                    "coverage_status": "failed",
+                    "unscanned": ["项目扫描在完成前发生内部错误，剩余范围未确认"],
+                },
+                "duration_ms": duration_ms,
+            },
+            model=self._model,
+            duration_ms=duration_ms,
+        )
 
     def _scan_project_impl(self, project_id: int, top_n: int = 50,
                            trace_dataflow: bool = True,
@@ -1185,8 +1216,11 @@ class SecuritySentinelAgent(BaseAgent):
                     ),
                     payload={"phase": "adversarial_verify", **verification},
                 )
-            except Exception:
-                logger.exception("[security_sentinel] 对抗复检异常,标记覆盖不完整")
+            except Exception as exc:
+                logger.error(
+                    "[security_sentinel] 对抗复检异常,标记覆盖不完整（类型：{}）",
+                    type(exc).__name__,
+                )
                 verification["failure_kind"] = "verification_failed"
 
         effective_findings = [
@@ -2874,13 +2908,11 @@ class SecuritySentinelAgent(BaseAgent):
             thinking=False,
         )
         if not result.success or not isinstance(result.data, dict):
-            error = result.error or "LLM 返回了无效的项目审计结果"
+            error = "项目源码批次分析未完成"
             failure_kind = result.failure_kind
             if result.success and not isinstance(result.data, dict):
                 failure_kind = "invalid_schema"
-            logger.warning(
-                f"[security_sentinel] 项目源码批次 LLM 调用失败: {error}"
-            )
+            logger.warning("[security_sentinel] 项目源码批次 LLM 调用失败")
             return _AuditChunkResult(
                 success=False,
                 error=error,
@@ -2896,7 +2928,7 @@ class SecuritySentinelAgent(BaseAgent):
             for key in required_lists
         ):
             error = "LLM 返回的项目审计 JSON 不符合列表结构契约"
-            logger.warning(f"[security_sentinel] {error}")
+            logger.warning("[security_sentinel] 项目源码批次结果结构无效")
             return _AuditChunkResult(
                 success=False,
                 error=error,
@@ -2975,7 +3007,7 @@ class SecuritySentinelAgent(BaseAgent):
             for raw in findings
         ):
             error = "LLM 返回的项目审计 finding 不符合定位与证据契约"
-            logger.warning(f"[security_sentinel] {error}")
+            logger.warning("[security_sentinel] 项目源码批次 finding 契约无效")
             return _AuditChunkResult(success=False, error=error, failure_kind="invalid_schema")
 
         for raw in findings:
@@ -3055,7 +3087,7 @@ class SecuritySentinelAgent(BaseAgent):
                 "LLM 返回的项目审计包含无法严格验证的条目: "
                 f"{out.invalid_item_count} 条"
             )
-            logger.warning(f"[security_sentinel] {error}")
+            logger.warning("[security_sentinel] 项目源码批次存在无法定位的条目")
             out.success = False
             out.error = error
             out.failure_kind = "invalid_item"
@@ -3071,7 +3103,7 @@ class SecuritySentinelAgent(BaseAgent):
         )
         result = self.call_json(user_msg, ctx=ctx)
         if not result.success:
-            logger.warning(f"[security_sentinel] LLM 调用失败: {result.error}")
+            logger.warning("[security_sentinel] 代码片段 LLM 调用失败")
             return None
         if not isinstance(result.data, dict):
             logger.warning("[security_sentinel] LLM 返回非 JSON 对象")
@@ -3189,8 +3221,11 @@ class SecuritySentinelAgent(BaseAgent):
                                     retry_reserver=budget.reserve if budget is not None else None,
                                     deadline_monotonic=budget.deadline if budget is not None else None,
                                 )
-                            except Exception:
-                                logger.exception("[security_sentinel] 数据流来源组合调用失败")
+                            except Exception as exc:
+                                logger.error(
+                                    "[security_sentinel] 数据流来源组合调用失败（类型：{}）",
+                                    type(exc).__name__,
+                                )
                                 result = None
                             failure_kind = (
                                 result.failure_kind if result is not None and not result.success
@@ -3679,8 +3714,11 @@ class SecuritySentinelAgent(BaseAgent):
                 progress["model_calls"] += 1
                 try:
                     result = self.call_json(prompt, ctx=ctx, thinking=False)
-                except Exception:
-                    logger.exception("[security_sentinel] 对抗复检模型调用异常")
+                except Exception as exc:
+                    logger.error(
+                        "[security_sentinel] 对抗复检模型调用异常（类型：{}）",
+                        type(exc).__name__,
+                    )
                     result = None
                 failure_kind = (
                     result.failure_kind if result is not None and not result.success

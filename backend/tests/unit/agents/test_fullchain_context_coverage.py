@@ -6,10 +6,12 @@ import re
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from app.agents.audit_board import AuditBoard
 from app.agents.base import AgentResult
 from app.agents.fullchain_audit_agent import FullChainAuditOrchestrator, ReconReport
+from app.core.exceptions import PermissionError as AppPermissionError
 
 
 class _Sentinel:
@@ -100,6 +102,101 @@ def test_fullchain_model_failure_does_not_return_partial_verdicts() -> None:
         assert "未完成模型验证" in str(exc)
     else:
         raise AssertionError("漏评高危必须失败关闭")
+
+
+def test_fullchain_verification_exception_does_not_expose_provider_details(monkeypatch) -> None:
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+    project = SimpleNamespace(id=7, project_name="sample", status="active")
+    sentinel = _Sentinel()
+    sentinel._db = SimpleNamespace(
+        get=lambda *_args: project,
+        query=lambda *_args: SimpleNamespace(
+            filter=lambda *_args: SimpleNamespace(all=lambda: [SimpleNamespace(id=1)]),
+        ),
+    )
+    sentinel._authz_project = lambda *_args: None
+    sentinel._execution_context = lambda *_args: None
+    sentinel._require_current_execution = lambda *_args: None
+    orchestrator = FullChainAuditOrchestrator(sentinel)
+    monkeypatch.setattr(orchestrator, "_recon", lambda *_args: {})
+    monkeypatch.setattr(
+        orchestrator,
+        "_analysis",
+        lambda *_args: AgentResult(success=True, data={"findings": []}),
+    )
+
+    def fail_verification(*_args, **_kwargs):
+        raise RuntimeError(provider_secret)
+
+    monkeypatch.setattr(orchestrator, "_verification", fail_verification)
+    result = orchestrator.run(project_id=7, actor=SimpleNamespace(id=1))
+
+    assert result.success is False
+    assert result.failure_kind == "partial_coverage"
+    assert "验证阶段未完成" in result.error
+    assert result.data["findings"] == []
+    assert result.data["compliance"]["coverage_status"] == "partial"
+    assert result.data["compliance"]["unscanned"]
+    assert provider_secret not in result.error
+
+
+def test_fullchain_sandbox_failure_redacts_report_and_log(monkeypatch) -> None:
+    provider_secret = "provider=https://private.invalid key=do-not-expose"
+    sentinel = _Sentinel()
+    orchestrator = FullChainAuditOrchestrator(sentinel)
+    findings = [{"severity": "高", "confidence": 0.9, "evidence": "证据"}]
+    log_output: list[str] = []
+    sink_id = logger.add(lambda message: log_output.append(str(message)), level="WARNING")
+    monkeypatch.setattr(
+        orchestrator,
+        "_sandbox_verify",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(provider_secret)),
+    )
+    monkeypatch.setattr(orchestrator, "_llm_verify", lambda *_args, **_kwargs: {0: {"verdict": "plausible"}})
+    try:
+        verification = orchestrator._verification(
+            SimpleNamespace(project_name="项目"), SimpleNamespace(),
+            findings, AuditBoard(), None, enable_sandbox=True,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    report = orchestrator._report(
+        SimpleNamespace(project_name="项目"), ReconReport(),
+        AgentResult(success=True, data={"findings": findings}),
+        verification, AuditBoard(), 1,
+    )
+    assert verification["sandbox_error"] == "第 1-1 条沙箱验证未完成"
+    assert provider_secret not in str(verification)
+    assert provider_secret not in str(report)
+    assert provider_secret not in "".join(log_output)
+
+
+def test_fullchain_sandbox_permission_denial_stops_before_llm_verification(monkeypatch) -> None:
+    sentinel = _Sentinel()
+    orchestrator = FullChainAuditOrchestrator(sentinel)
+    denial = AppPermissionError("当前账号无权继续执行")
+    findings = [{"severity": "高", "confidence": 0.9, "evidence": "证据"}]
+    llm_called = False
+
+    def reject_sandbox(*_args, **_kwargs):
+        raise denial
+
+    def mark_llm_called(*_args, **_kwargs):
+        nonlocal llm_called
+        llm_called = True
+        return {}
+
+    monkeypatch.setattr(orchestrator, "_sandbox_verify", reject_sandbox)
+    monkeypatch.setattr(orchestrator, "_llm_verify", mark_llm_called)
+    with pytest.raises(AppPermissionError) as exc_info:
+        orchestrator._verification(
+            SimpleNamespace(project_name="项目"), SimpleNamespace(),
+            findings, AuditBoard(), None, enable_sandbox=True,
+        )
+
+    assert exc_info.value is denial
+    assert llm_called is False
 
 
 def test_fullchain_splits_oversize_finding_and_preserves_all_source_parts(monkeypatch) -> None:
