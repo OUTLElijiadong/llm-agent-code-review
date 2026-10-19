@@ -201,7 +201,7 @@ def test_pdf_title_puts_long_task_id_on_a_separate_wrappable_line():
     assert "sbx_3b317e05c0fa<br/>" not in markup
 
 
-def test_pdf_markdown_removes_unmatched_emphasis_markers_and_wraps_long_ids():
+def test_pdf_markdown_keeps_project_names_and_sandbox_ids_readable():
     styles = _build_styles(_ensure_chinese_font())
     elements = []
     _append_markdown_elements(
@@ -211,12 +211,19 @@ def test_pdf_markdown_removes_unmatched_emphasis_markers_and_wraps_long_ids():
     )
 
     rendered_text = "\n".join(element.getPlainText() for element in elements if hasattr(element, "getPlainText"))
-    markup = reportlab_markup((MarkdownSegment("任务编号：sbx_3b317e05c0fa45128c20e31d"),))
+    project_name = "Local-File-Inclusion-Demo"
+    sandbox_id = "sbx_3b317e05c0fa45128c20e31d"
+    markup = reportlab_markup((MarkdownSegment(f"项目：{project_name} 任务编号：{sandbox_id}"),))
+    long_digest_markup = reportlab_markup((MarkdownSegment(f"sha256:{'a' * 64}"),))
 
     assert "**" not in rendered_text
     assert "a*b" in rendered_text
     assert "*.py" in rendered_text
-    assert "<br/>" in markup
+    assert project_name in markup
+    assert sandbox_id in markup
+    assert "Local-File-Inclusion-Dem<br/>o" not in markup
+    assert "sbx_3b317e05c0fa<br/>45128c20e31d" not in markup
+    assert "<br/>" in long_digest_markup
 
 
 def test_pdf_final_caveat_stays_with_the_previous_evidence_item():

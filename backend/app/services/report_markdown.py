@@ -153,16 +153,14 @@ def reportlab_markup(
     return "".join(result)
 
 
-_LONG_ASCII_TOKEN = re.compile(r"[A-Za-z0-9_./:-]{25,}")
-
-
-def _wrap_long_ascii_tokens(value: str, limit: int = 24) -> str:
+def _wrap_long_ascii_tokens(value: str, limit: int = 40) -> str:
     """Add PDF line breaks to long identifiers and URLs with no wrap points."""
     def wrap(match: re.Match[str]) -> str:
         token = match.group(0)
         return "\n".join(token[index:index + limit] for index in range(0, len(token), limit))
 
-    return _LONG_ASCII_TOKEN.sub(wrap, value)
+    token_pattern = re.compile(rf"[A-Za-z0-9_./:-]{{{limit + 1},}}")
+    return token_pattern.sub(wrap, value)
 
 
 def _strip_dangling_emphasis_markers(value: str) -> str:

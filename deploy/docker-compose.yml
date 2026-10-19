@@ -137,7 +137,7 @@ services:
     environment:
       APP_ENV: prod
       APP_RELEASE: ${APP_RELEASE:-local}
-      APP_VERSION: ${APP_VERSION:-4.1.13}
+      APP_VERSION: ${APP_VERSION:-4.1.15}
       BACKEND_RELEASE: ${BACKEND_RELEASE:-local}
       FRONTEND_RELEASE: ${FRONTEND_RELEASE:-local}
       DB_HOST: mysql
@@ -191,7 +191,7 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
       args:
-        VITE_APP_VERSION: ${APP_VERSION:-4.1.13}
+        VITE_APP_VERSION: ${APP_VERSION:-4.1.15}
         VITE_APP_RELEASE_SHA: ${APP_RELEASE:-local}
         VITE_APP_BUILD_TIME: ${APP_BUILD_TIME:-unknown}
     container_name: cr_frontend
