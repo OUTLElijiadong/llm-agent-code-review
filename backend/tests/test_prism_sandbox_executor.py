@@ -120,6 +120,11 @@ def test_worker_requires_and_revalidates_exact_local_http_scope() -> None:
     )
     assert decoded == archive
     assert normalized["http_scope"] == root_scope
+    non_root_scope = [{"method": "GET", "path": "/about.php", "query": {"page": "about.php"}, "expected_statuses": [200]}]
+    non_root_normalized, _, _ = executor._validate_execute(
+        _payload(archive, test_mode="blackbox", http_scope=non_root_scope)
+    )
+    assert non_root_normalized["http_scope"] == non_root_scope
 
     for overrides in (
         {"test_mode": "blackbox"},
@@ -148,6 +153,19 @@ def test_worker_requires_and_revalidates_exact_local_http_scope() -> None:
     ):
         with pytest.raises(ValueError):
             executor._validate_execute(_payload(archive, **overrides))
+
+
+def test_service_revalidates_non_root_http_scope_without_adding_a_probe() -> None:
+    scope = [{
+        "method": "GET",
+        "path": "/vulnerable.php",
+        "query": {"page": "about.php"},
+        "expected_statuses": [200],
+    }]
+
+    assert sandbox_service._normalize_sandbox_http_scope(scope, required=True) == scope
+    with pytest.raises(sandbox_service.ValidationError, match="1–20 项"):
+        sandbox_service._normalize_sandbox_http_scope([], required=True)
 
 
 def test_http_scope_changes_worker_digest_and_is_passed_as_fixed_runner_plan(
@@ -454,7 +472,7 @@ def test_exact_http_scope_runner_skips_agent_blackbox_and_only_requests_allowlis
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
         "PRISM_HTTP_SCOPE_B64": base64.b64encode(
-            b"GET\t/\t404\nGET\t/healthz?name=allowed\t204\n"
+            b"GET\t/healthz?name=allowed\t204\n"
         ).decode("ascii"),
     })
 
@@ -469,9 +487,8 @@ def test_exact_http_scope_runner_skips_agent_blackbox_and_only_requests_allowlis
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert request_log.read_text(encoding="utf-8").splitlines() == ["/:False", "/healthz?name=allowed:False"]
+    assert request_log.read_text(encoding="utf-8").splitlines() == ["/healthz?name=allowed:False"]
     scope = [
-        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [404]},
         {"method": "GET", "path": "/healthz", "query": {"name": "allowed"}, "expected_statuses": [204]},
     ]
     receipt = sandbox_service._extract_blackbox_result(
@@ -482,8 +499,10 @@ def test_exact_http_scope_runner_skips_agent_blackbox_and_only_requests_allowlis
     assert receipt["status"] == "passed"
     assert receipt["route_passed"] is True
     assert receipt["agent_assertions_passed"] is None
-    assert [request["target"] for request in receipt["requests"]] == ["/", "/healthz?name=allowed"]
-    assert receipt["request_count"] == 2
+    assert receipt["route"] == "/healthz?name=allowed"
+    assert receipt["status_code"] == 204
+    assert [request["target"] for request in receipt["requests"]] == ["/healthz?name=allowed"]
+    assert receipt["request_count"] == 1
     assert not (tmp_path / "agent_was_run").exists()
     assert not launch_marker.exists()
 

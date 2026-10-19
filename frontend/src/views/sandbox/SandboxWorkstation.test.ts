@@ -238,10 +238,13 @@ describe('SandboxWorkstation Agent output ordering', () => {
     vm.form.test_mode = 'blackbox'
     await nextTick()
 
+    expect(vm.submitDisabled).toBe(true)
+    vm.httpScopeRows[0].path = '/about.php'
+    await nextTick()
     expect(vm.submitDisabled).toBe(false)
     await vm.submit()
     expect(api.createSandbox).toHaveBeenCalledWith(expect.objectContaining({
-      http_scope: [{ method: 'GET', path: '/', query: {}, expected_statuses: [200] }],
+      http_scope: [{ method: 'GET', path: '/about.php', query: {}, expected_statuses: [200] }],
     }))
 
     api.createSandbox.mockClear()

@@ -1182,8 +1182,6 @@ def _validate_executor_http_scope(value: Any) -> list[dict[str, Any]]:
             "query": dict(sorted(normalized_query.items())),
             "expected_statuses": list(statuses),
         })
-    if ("/", ()) not in targets:
-        raise ValueError("HTTP 白名单必须包含不带查询参数的 GET / 探活条目")
     return normalized
 
 

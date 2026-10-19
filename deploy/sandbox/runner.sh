@@ -1024,9 +1024,9 @@ run_scoped_blackbox() {
   fi
   scope_count="$(wc -l <"$scope_plan" | tr -d ' ')"
   case "$scope_count" in ''|*[!0-9]*) scope_count=0 ;; esac
-  if [ "$scope_count" -lt 1 ] || [ "$scope_count" -gt 20 ] || ! grep -Eq '^GET[[:space:]]/[[:space:]](-|[0-9,]+)$' "$scope_plan"; then
+  if [ "$scope_count" -lt 1 ] || [ "$scope_count" -gt 20 ]; then
     rm -f "$scope_plan"
-    printf '%s\n' '精确 HTTP 白名单条目数量或根路径探活条目无效，已失败关闭' >&2
+    printf '%s\n' '精确 HTTP 白名单条目数量无效，已失败关闭' >&2
     printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
     return 1
   fi
@@ -1163,10 +1163,14 @@ run_scoped_blackbox() {
   all_passed=true
   all_assertions_configured=true
   root_status=0
+  root_configured=false
+  summary_target="${scope_targets[0]}"
+  summary_status=0
   for ((scope_index = 0; scope_index < scope_count; scope_index += 1)); do
     scope_method="${scope_methods[$scope_index]}"
     scope_target="${scope_targets[$scope_index]}"
     scope_statuses="${scope_statuses_list[$scope_index]}"
+    if [ "$scope_target" = / ]; then root_configured=true; fi
     request_started="$(scope_now_ms)"
     request_summary=""
     if request_summary="$(timeout --signal=TERM --kill-after=1s 7s bash -c '
@@ -1218,6 +1222,7 @@ run_scoped_blackbox() {
       assertion_status="no_response"
       request_passed=false
     fi
+    if [ "$scope_index" -eq 0 ]; then summary_status="$response_status"; fi
     [ "$request_passed" = true ] || all_passed=false
     if [ -n "$requests_json" ]; then requests_json+=","; fi
     truncated=false
@@ -1239,15 +1244,19 @@ run_scoped_blackbox() {
       "$scope_target" "$response_status" "$response_bytes" "$elapsed_ms" "$assertion_status" "$request_passed"
   done
   [ "$completed_count" -eq "$scope_count" ] || all_passed=false
+  if [ "$root_configured" = true ]; then
+    summary_target="/"
+    summary_status="$root_status"
+  fi
   stop_scoped_app
   trap - EXIT INT TERM
   if [ "$all_passed" = true ]; then
-    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":true,"route":"/","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
-      "$root_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":true,"route":"%s","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
+      "$summary_target" "$summary_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
     return 0
   fi
-  printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
-    "$root_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
+  printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"%s","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
+    "$summary_target" "$summary_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
   return 1
 }
 

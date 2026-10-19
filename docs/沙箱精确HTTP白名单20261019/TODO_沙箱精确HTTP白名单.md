@@ -1,15 +1,19 @@
 # 沙箱精确 HTTP 白名单待办
 
-## 仍需完成的产品与发布闭环
+## 仍需完成
 
-1. 在目标生产平台确认 CPU 架构与受控 `runsc` runtime；为目标架构重建五种运行时镜像，复核 runner SHA-256，并绑定实际镜像 digest，不复用本机 `linux/arm64` 构建结果作为生产证明。
-2. 按已授权的正式发布流程部署前端、后端、Worker 与镜像配置；记录版本、备份/回滚点、迁移状态、健康检查和实际运行镜像摘要。本轮尚未执行生产发布。
-3. 在已登录的真实账号产品 UI 中点击导入固定源码提交 `purva-patel/Local-File-Inclusion-Demo@0e0e47093ac866b9a579a0c3fb61a3a6410355a`，运行一次本地黑盒。来源归档 SHA-256：`7b4464ed4a3eca25f4f59536b3fc9d69e768050437e852f699b189dcfa48fd0d`。
-4. 请求范围固定为 `GET /`、`GET /vulnerable.php?page=about.php`、`GET /vulnerable.php?page=README_FILES.txt`、`GET /vulnerable.php?page=nonexistent.php`；不访问 `/etc/passwd`、其他系统路径、目录穿越值或外部站点，不打开浏览器执行源站脚本。README 中列出的系统文件探测指令不在授权范围内。
-5. 从产品数据库/API 和真实浏览器核对启动探活、实际 HTTP 回执、部分覆盖标记、报告正文和排版、当前账号归属、刷新后状态；确认不能把四条状态码烟测说成完整漏洞审计。
+1. 按正式发布流程发布一次修订版，采用三段式版本号 `4.1.12`。从活动发布树 `974ba0d68bd1ea3baa29bc50b6a7fdb383418070` 继续，保留现有回滚版本和数据库备份；构建前后端，重建并固定 Python/Node/Java/Go/PHP 五种运行时镜像，再同步 Worker 与活动 systemd 发布树。发布验收需核对活动 `ops-check`、健康接口、Runner SHA、五个 profile digest 和报告路由。4.1.12 修订已提交为固定候选并通过前端 27 项、后端 106 项针对性回归与前端生产构建；生产镜像构建和部署仍待完成。
+2. 重新运行指定 PHP LFI 靶场需要新的单次运行授权。用户此前授权的一次生产执行已使用并以失败结束；不得自动重跑。取得授权后只运行一次，核对路径白名单、真实 HTTP 请求、任务终态、报告和资源回收。
 
-## 当前已知边界
+## 已核对的生产基线
 
-- 固定提交已被静态查看且 runner 容器烟测成功，但尚未通过 Prism UI 导入或形成平台持久化任务与报告。
-- 固定提交的根目录 `README.md` 不是可访问的 HTTP 页面；目前安全清单为 `templates/includes/README_FILES.txt`。缺失文件请求返回 HTTP 200，且响应正文不落盘，因此没有证明错误文案语义。
-- 生产镜像架构、生产 `runsc` 执行、正式发布和真实账号报告权限尚未验证。
+- 活动生产目录 `/opt/prism-releases/974ba0d68bd1ea3baa29bc50b6a7fdb383418070` 当前为 `4.1.11`；从该目录运行 `ops-check.sh` 返回 `status=ok`、`can_continue=true`。
+- `/opt/code-review` 是旧 checkout，HEAD、`.env` 与旧账本仍指向 `f114033bb76af393e5ef595ca8b824ebde0de62a`。不得用它判断活动服务故障或直接重建默认生产环境。
+- 活动五种 profile 镜像均与 `profiles.json` 固定摘要一致，runner SHA 为 `b441df2dc23e274a68b41a7a1befed8a0979429598c07c2d04cd2e7994d9a9a1`。本修订 runner SHA 为 `fa6afdd11e17c45feef91cc73b2903b25cd1583e9a391e8ac3a7ae50cc7e2ad1`，正式发布时五种镜像都必须重建。
+
+## 已完成证据
+
+- 生产版本 `4.1.11` / commit `974ba0d68bd1ea3baa29bc50b6a7fdb383418070` 已部署。
+- UI 创建任务 `sbx_b12572a3c508401f9d305c16`，实际发出四条精确 GET 请求；其中三条返回 HTTP 200，根路径无响应。该证据确认强制根路径规则过严。
+- Worker 确认容器与任务目录已清理。产品报告、结构化 JSON、执行日志、JUnit、SARIF 和 HTML 已生成；AI 动态测试与模型审查均按白名单策略跳过。
+- 未发生重试、未请求系统敏感文件、未访问远程目标，响应正文未保存。

@@ -4986,22 +4986,24 @@ def _extract_exact_http_scope_result(
             "request_passed": request_passed,
         })
     passed = result.get("passed")
+    summary_target = "/" if root_status is not None else normalized_requests[0]["target"]
+    summary_status = root_status if root_status is not None else normalized_requests[0]["status_code"]
     if (
         passed is not every_request_passed
         or result.get("route_passed") is not every_request_passed
         or result.get("response_count") != response_count
         or result.get("all_status_assertions_configured") is not expected_all_assertions
-        or (root_status is None and expected_all_assertions)
         or type(result.get("status_code")) is not int
-        or result.get("status_code") != (root_status or 0)
+        or result.get("status_code") != summary_status
+        or result.get("route") != summary_target
     ):
         return None
     return {
         "status": "passed" if passed else "failed",
         "passed": passed,
         "route_passed": passed,
-        "route": "/",
-        "status_code": root_status or 0,
+        "route": summary_target,
+        "status_code": summary_status,
         "basis": "exact_http_allowlist",
         "scope_enforced": True,
         "agent_assertions_passed": None,
@@ -8033,8 +8035,6 @@ def _normalize_sandbox_http_scope(value: Any, *, required: bool) -> list[dict[st
     targets = [(item.path, tuple(sorted(item.query.items()))) for item in items]
     if len(set(targets)) != len(targets):
         raise ValidationError("HTTP 路径白名单不能包含重复请求目标", code=40001)
-    if ("/", ()) not in targets:
-        raise ValidationError("HTTP 路径白名单必须包含不带查询参数的 GET / 探活条目", code=40001)
     return [
         {
             "method": item.method,

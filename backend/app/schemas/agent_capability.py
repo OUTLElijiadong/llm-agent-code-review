@@ -167,8 +167,6 @@ class SandboxCreateIn(BaseModel):
         targets = [(item.path, tuple(sorted(item.query.items()))) for item in self.http_scope]
         if len(set(targets)) != len(targets):
             raise ValueError("HTTP 白名单不能包含重复请求目标")
-        if ("/", ()) not in targets:
-            raise ValueError("HTTP 白名单必须包含不带查询参数的 GET / 探活条目")
         return self
 
     @field_validator("remote_target_authorized")

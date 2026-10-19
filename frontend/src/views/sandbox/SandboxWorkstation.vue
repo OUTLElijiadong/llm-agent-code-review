@@ -111,7 +111,7 @@ interface HttpScopeRow {
   queryText: string
   expectedStatusesText: string
 }
-const httpScopeRows = ref<HttpScopeRow[]>([{ path: '/', queryText: '', expectedStatusesText: '200' }])
+const httpScopeRows = ref<HttpScopeRow[]>([{ path: '', queryText: '', expectedStatusesText: '200' }])
 
 const languageOptions: Array<{ value: SandboxLanguage; label: string }> = [
   { value: 'python', label: 'Python' },
@@ -240,9 +240,6 @@ function normalizeHttpScope(): { items: SandboxHttpRequestScope[]; error: string
   } catch (error) {
     return { items: [], error: error instanceof Error ? error.message : '请求范围格式不正确' }
   }
-  if (!items.some((item) => item.path === '/' && Object.keys(item.query).length === 0)) {
-    return { items: [], error: '必须保留 GET / 作为应用探活路径' }
-  }
   return { items, error: '' }
 }
 
@@ -254,7 +251,7 @@ function addHttpScopeRow(): void {
 }
 
 function removeHttpScopeRow(index: number): void {
-  if (index === 0) return
+  if (httpScopeRows.value.length <= 1) return
   httpScopeRows.value.splice(index, 1)
 }
 const availableWorkers = computed(() => workers.value.filter((worker) => (
@@ -787,11 +784,11 @@ onBeforeUnmount(() => {
               <b>本地 HTTP 请求白名单</b>
               <span>{{ httpScopeRows.length }} / 20</span>
             </div>
-            <p class="field-hint">后端和沙箱执行器会强制仅由黑盒探测器发送下列 GET 请求到本机应用。应用就绪检查只建立 TCP 连接，不发送 HTTP 请求。必须保留根路径 GET /。查询参数只允许未编码的安全字符。不跟随跳转、不保存响应正文。日志被截断时本次执行按失败处理。空状态码只记录可达性，不判断业务正确性。</p>
+            <p class="field-hint">后端和沙箱执行器会强制仅由黑盒探测器发送下列 GET 请求到本机应用，至少配置一条真实入口路径。应用就绪检查只建立 TCP 连接，不发送隐藏 HTTP 请求；根路径只有在应用确实提供入口时才添加。查询参数只允许未编码的安全字符。不跟随跳转、不保存响应正文。日志被截断时本次执行按失败处理。空状态码只记录可达性，不判断业务正确性。</p>
             <div v-for="(row, index) in httpScopeRows" :key="index" class="http-scope-row">
               <label class="scope-path-field">
-                <span>精确路径{{ index === 0 ? ' · 必需探活' : '' }}</span>
-                <input v-model="row.path" type="text" :readonly="index === 0" :aria-label="`请求 ${index + 1} 路径`" placeholder="/about.php">
+                <span>精确路径 · 必填</span>
+                <input v-model="row.path" type="text" :aria-label="`请求 ${index + 1} 路径`" placeholder="/about.php">
               </label>
               <label>
                 <span>精确查询参数</span>
@@ -801,7 +798,7 @@ onBeforeUnmount(() => {
                 <span>预期状态码</span>
                 <input v-model="row.expectedStatusesText" type="text" :aria-label="`请求 ${index + 1} 预期状态码`" placeholder="200 或 200,404">
               </label>
-              <button v-if="index > 0" type="button" class="scope-remove" :aria-label="`移除请求 ${index + 1}`" @click="removeHttpScopeRow(index)">移除</button>
+              <button v-if="httpScopeRows.length > 1" type="button" class="scope-remove" :aria-label="`移除请求 ${index + 1}`" @click="removeHttpScopeRow(index)">移除</button>
             </div>
             <p v-if="httpScopeValidation.error" class="scope-validation-error" role="alert">{{ httpScopeValidation.error }}</p>
             <button type="button" class="scope-add" :disabled="httpScopeRows.length >= 20" @click="addHttpScopeRow">添加精确 GET 路径</button>

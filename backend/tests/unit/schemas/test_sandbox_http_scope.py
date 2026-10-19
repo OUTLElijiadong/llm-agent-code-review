@@ -22,14 +22,14 @@ def _payload(**overrides):
     return value
 
 
-def test_local_blackbox_requires_rooted_exact_get_scope() -> None:
+def test_local_blackbox_requires_nonempty_exact_get_scope_and_root_is_optional() -> None:
     with pytest.raises(ValidationError, match="必须提供精确 HTTP 路径白名单"):
         SandboxCreateIn.model_validate(_payload(http_scope=None))
 
-    with pytest.raises(ValidationError, match="必须包含不带查询参数的 GET /"):
-        SandboxCreateIn.model_validate(_payload(http_scope=[
-            {"method": "GET", "path": "/about.php", "query": {}, "expected_statuses": [200]},
-        ]))
+    value = SandboxCreateIn.model_validate(_payload(http_scope=[
+        {"method": "GET", "path": "/about.php", "query": {}, "expected_statuses": [200]},
+    ]))
+    assert [item.path for item in value.http_scope or []] == ["/about.php"]
 
 
 @pytest.mark.parametrize(
@@ -82,7 +82,6 @@ def test_scope_is_forbidden_on_remote_whitebox_and_deploy_requests() -> None:
 
 def test_scope_accepts_exact_paths_query_values_and_expected_status_assertions() -> None:
     value = SandboxCreateIn.model_validate(_payload(http_scope=[
-        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]},
         {
             "method": "GET",
             "path": "/about.php",
@@ -92,8 +91,8 @@ def test_scope_accepts_exact_paths_query_values_and_expected_status_assertions()
         {"method": "GET", "path": "/missing.php", "query": {}, "expected_statuses": [404]},
     ]))
 
-    assert [item.path for item in value.http_scope or []] == ["/", "/about.php", "/missing.php"]
-    assert (value.http_scope or [])[1].query == {"page": "1", "name": "Ada-Lovelace"}
+    assert [item.path for item in value.http_scope or []] == ["/about.php", "/missing.php"]
+    assert (value.http_scope or [])[0].query == {"page": "1", "name": "Ada-Lovelace"}
 
 
 def test_scope_limits_encoded_query_string_size() -> None:
