@@ -20,8 +20,9 @@ export interface ReportSource {
   detail_api?: string
   report_issue_summary?: TaskDetailOut['report_issue_summary']
   ai_review?: {
-    status: 'complete' | 'incomplete'
+    status: 'complete' | 'incomplete' | 'skipped' | 'unknown'
     failure_reason?: string | null
+    skip_reason?: string | null
   }
   security_report?: {
     schema_version?: string

@@ -315,6 +315,23 @@ describe('ReportDetail 报告口径', () => {
     wrapper.unmount()
   })
 
+  it('策略跳过的多 Agent AI 审查显示为已跳过并保留原因', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: { review_type: 'sandbox_test' }, stats: {}, files: [], rules_snapshot: [],
+      source: {
+        type: 'sandbox_test',
+        ai_review: { status: 'skipped', skip_reason: '精确 HTTP 白名单任务按策略不启动多 Agent AI 评审。' },
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const status = wrapper.get('[data-testid="sandbox-ai-review-status"]')
+    expect(status.text()).toContain('多 Agent AI 报告：按任务策略跳过')
+    expect(status.text()).toContain('精确 HTTP 白名单任务按策略不启动多 Agent AI 评审。')
+    expect(status.text()).not.toContain('状态未知')
+    wrapper.unmount()
+  })
+
   it('旧沙箱报告未保存 AI 状态时标为未知，不声称报告审查完成', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: {}, task: { review_type: 'sandbox_test' }, stats: {}, files: [], rules_snapshot: [],

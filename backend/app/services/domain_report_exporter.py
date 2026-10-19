@@ -428,13 +428,24 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
         document = Document()
         title_paragraph = document.add_paragraph()
         title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_paragraph.paragraph_format.space_after = Pt(16)
+        title_paragraph.paragraph_format.space_after = Pt(3)
         title_paragraph.paragraph_format.keep_with_next = True
-        title_run = title_paragraph.add_run(title)
+        title_label, public_id = _split_report_title(title)
+        title_run = title_paragraph.add_run(title_label)
         title_run.bold = True
         title_run.font.size = Pt(18)
         title_run.font.color.rgb = RGBColor(0x17, 0x20, 0x33)
         _set_run_chinese_font(title_run, "SimSun")
+        if public_id:
+            identifier_paragraph = document.add_paragraph()
+            identifier_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            identifier_paragraph.paragraph_format.space_after = Pt(10)
+            identifier_run = identifier_paragraph.add_run(f"任务编号：{public_id}")
+            identifier_run.font.size = Pt(9)
+            identifier_run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+            _set_run_chinese_font(identifier_run, "SimSun")
+        else:
+            title_paragraph.paragraph_format.space_after = Pt(16)
         _append_markdown_to_word(document, markdown)
         buffer = BytesIO()
         document.save(buffer)
@@ -444,14 +455,18 @@ def export_markdown_report(title: str, markdown: str, format: str) -> tuple[byte
 
 def _pdf_title_markup(title: str) -> str:
     """将带任务编号的长标题拆成可读、可换行的 PDF 标题。"""
-    label, separator, public_id = title.rpartition(" · ")
-    if separator and len(public_id) >= 20 and re.fullmatch(r"[A-Za-z0-9_-]+", public_id):
-        id_lines = "<br/>".join(
-            escape(public_id[index:index + 18])
-            for index in range(0, len(public_id), 18)
-        )
+    label, public_id = _split_report_title(title)
+    if public_id:
         return (
             f"{escape(label)}<br/>"
-            f'<font size="9" color="#64748B">任务编号：{id_lines}</font>'
+            f'<font size="9" color="#64748B">任务编号：{escape(public_id)}</font>'
         )
     return escape(title)
+
+
+def _split_report_title(title: str) -> tuple[str, str | None]:
+    """Keep a long machine identifier out of the human-readable report title."""
+    label, separator, public_id = title.rpartition(" · ")
+    if separator and len(public_id) >= 20 and re.fullmatch(r"[A-Za-z0-9_-]+", public_id):
+        return label, public_id
+    return title, None

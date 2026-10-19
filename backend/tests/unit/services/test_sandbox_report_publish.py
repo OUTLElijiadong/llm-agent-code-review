@@ -552,6 +552,14 @@ def test_ai_review_metadata_merge_is_monotonic() -> None:
         {"status": "incomplete", "failure_reason": "prior failure"},
         {"status": "unknown", "failure_reason": None},
     ) == ({"status": "incomplete", "failure_reason": "prior failure"}, True)
+    assert sandbox_service._merge_ai_review_metadata(
+        {"status": "skipped", "skip_reason": "按精确 HTTP 白名单策略跳过"},
+        {"status": "unknown"},
+    ) == ({
+        "status": "skipped",
+        "failure_reason": None,
+        "skip_reason": "按精确 HTTP 白名单策略跳过",
+    }, True)
 
 
 def test_repeated_stop_preserves_existing_full_sandbox_report(db) -> None:

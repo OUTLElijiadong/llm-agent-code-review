@@ -948,11 +948,14 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
             summary = summarize_sandbox_report(report_md)
             item["source"]["report_issue_summary"] = summary
             ai_review = content.get("ai_review")
-            if isinstance(ai_review, dict) and ai_review.get("status") in {"complete", "incomplete"}:
-                item["source"]["ai_review"] = {
+            if isinstance(ai_review, dict) and ai_review.get("status") in {"complete", "incomplete", "skipped"}:
+                ai_review_summary = {
                     "status": ai_review["status"],
                     "failure_reason": str(ai_review.get("failure_reason") or "") or None,
                 }
+                if ai_review["status"] == "skipped":
+                    ai_review_summary["skip_reason"] = str(ai_review.get("skip_reason") or "") or None
+                item["source"]["ai_review"] = ai_review_summary
             if summary["total"] is None:
                 # 不回填或把旧快照归零；该分支只能证明历史记录数，不能证明发现条目数。
                 item["source"]["stats_basis"] = "legacy_task_snapshot"

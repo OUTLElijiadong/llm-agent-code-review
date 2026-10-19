@@ -945,12 +945,35 @@ def test_source_http_list_detail_dashboard_and_ownership(source_api_client, sour
     assert safety["avg_risk_score"] == 0
     assert safety["source_summaries"][0]["total_issues"] == count
     assert safety["issue_scope"] == "review_issue_security"
-
     current["user"] = other
     assert client.get(f"/api/reports/{task.id}").status_code == 404
     assert client.get("/api/reports").json()["data"]["items"] == []
     assert client.get("/api/dashboard/summary").json()["data"]["total_issues"] == 0
     assert client.get("/api/security/dashboard-summary").status_code == 403
+
+
+def test_skipped_ai_review_status_and_reason_are_preserved_in_list_and_detail(
+    source_api_client,
+):
+    client, db, owner, _other, project, _current = source_api_client
+    task = _task(db, owner, project, "sandbox_test")
+    skip_reason = "精确 HTTP 白名单任务按策略不启动多 Agent AI 评审。"
+    _snapshot(
+        db,
+        task,
+        ai_review={"status": "skipped", "failure_reason": None, "skip_reason": skip_reason},
+    )
+    db.commit()
+
+    listed = client.get("/api/reports").json()["data"]["items"][0]
+    detail = client.get(f"/api/reports/{task.id}").json()["data"]
+    expected = {
+        "status": "skipped",
+        "failure_reason": None,
+        "skip_reason": skip_reason,
+    }
+    assert listed["source"]["ai_review"] == expected
+    assert detail["source"]["ai_review"] == expected
 
 
 @pytest.mark.parametrize("bad_content", [None, [], "invalid", {"source": "other", "public_id": "foreign"}])

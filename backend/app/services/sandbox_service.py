@@ -6378,8 +6378,16 @@ def _merge_ai_review_metadata(
     failure_reason = None
     if status in {"incomplete", "skipped"}:
         reason_source = previous if preserve_previous_report else incoming
-        failure_reason = str(reason_source.get("failure_reason") or "").strip() or None
-    return {"status": status, "failure_reason": failure_reason}, preserve_previous_report
+        if status == "incomplete":
+            failure_reason = str(reason_source.get("failure_reason") or "").strip() or None
+    skip_reason = None
+    if status == "skipped":
+        reason_source = previous if preserve_previous_report else incoming
+        skip_reason = str(reason_source.get("skip_reason") or "").strip() or None
+    metadata = {"status": status, "failure_reason": failure_reason}
+    if status == "skipped":
+        metadata["skip_reason"] = skip_reason
+    return metadata, preserve_previous_report
 
 
 def _sandbox_report_is_persisted(db: Session, environment: "SandboxEnvironment") -> bool:
@@ -6596,6 +6604,8 @@ def _merge_terminal_report_conclusion(
         result["ai_review_status"] = previous_ai_review["status"]
         if previous_ai_review.get("failure_reason"):
             result["ai_review_failure_reason"] = previous_ai_review["failure_reason"]
+        if previous_ai_review.get("skip_reason"):
+            result["ai_review_skip_reason"] = previous_ai_review["skip_reason"]
     result["execution_status"] = status
     result["passed"] = bool(result.get("passed")) and status in {"succeeded", "success"}
     result["evidence"] = evidence
@@ -6690,6 +6700,8 @@ def _publish_sandbox_report(
             "status": ai_review_status if ai_review_status in {"complete", "incomplete", "skipped"} else "unknown",
             "failure_reason": str(conclusion.get("ai_review_failure_reason") or "") or None,
         }
+        if incoming_ai_review_metadata["status"] == "skipped":
+            incoming_ai_review_metadata["skip_reason"] = str(conclusion.get("ai_review_skip_reason") or "") or None
         verification = _sandbox_verification_coverage(conclusion)
         verification_status = verification["verification_status"]
         raw_coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
@@ -6831,6 +6843,10 @@ def _publish_sandbox_report(
             conclusion["ai_review_failure_reason"] = ai_review_metadata["failure_reason"]
         else:
             conclusion.pop("ai_review_failure_reason", None)
+        if ai_review_metadata.get("skip_reason"):
+            conclusion["ai_review_skip_reason"] = ai_review_metadata["skip_reason"]
+        else:
+            conclusion.pop("ai_review_skip_reason", None)
         if preserve_previous_ai_report:
             previous_report_md = existing_content.get("report_md")
             if isinstance(previous_report_md, str) and previous_report_md.strip():
@@ -7013,15 +7029,24 @@ def _publish_terminal_sandbox_report(
                 conclusion["ai_review_failure_reason"] = current_result["ai_review_failure_reason"]
             else:
                 conclusion.pop("ai_review_failure_reason", None)
+            if current_result.get("ai_review_skip_reason"):
+                conclusion["ai_review_skip_reason"] = current_result["ai_review_skip_reason"]
+            else:
+                conclusion.pop("ai_review_skip_reason", None)
         elif isinstance(previous_ai_review, dict) and previous_ai_review.get("status") in {"complete", "incomplete", "skipped"}:
             conclusion["ai_review_status"] = previous_ai_review["status"]
             if previous_ai_review.get("failure_reason"):
                 conclusion["ai_review_failure_reason"] = previous_ai_review["failure_reason"]
             else:
                 conclusion.pop("ai_review_failure_reason", None)
+            if previous_ai_review.get("skip_reason"):
+                conclusion["ai_review_skip_reason"] = previous_ai_review["skip_reason"]
+            else:
+                conclusion.pop("ai_review_skip_reason", None)
         else:
             conclusion.pop("ai_review_status", None)
             conclusion.pop("ai_review_failure_reason", None)
+            conclusion.pop("ai_review_skip_reason", None)
     environment.status = status
     if persisted_status not in TERMINAL_STATES and incoming_error:
         environment.error = incoming_error

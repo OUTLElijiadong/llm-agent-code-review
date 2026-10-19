@@ -181,10 +181,12 @@ def test_domain_word_export_uses_compact_title_for_long_task_names():
     assert content_type.endswith("wordprocessingml.document")
     document = Document(BytesIO(word))
     title_paragraph = document.paragraphs[0]
-    assert title_paragraph.text == title
+    assert title_paragraph.text == "沙箱黑白盒测试"
     assert title_paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
     assert title_paragraph.runs
     assert all(run.font.size is not None and run.font.size.pt == 18 for run in title_paragraph.runs)
+    assert document.paragraphs[1].text == "任务编号：sbx_3b317e05c0fa45128c20e31d"
+    assert document.paragraphs[1].alignment == WD_ALIGN_PARAGRAPH.CENTER
 
 
 def test_pdf_title_puts_long_task_id_on_a_separate_wrappable_line():
@@ -195,6 +197,8 @@ def test_pdf_title_puts_long_task_id_on_a_separate_wrappable_line():
     assert "沙箱黑白盒测试" in markup
     assert "任务编号" in markup
     assert "<br/>" in markup
+    assert "sbx_3b317e05c0fa45128c20e31d" in markup
+    assert "sbx_3b317e05c0fa<br/>" not in markup
 
 
 def test_pdf_markdown_removes_unmatched_emphasis_markers_and_wraps_long_ids():

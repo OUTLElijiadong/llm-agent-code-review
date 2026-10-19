@@ -74,12 +74,12 @@
                 {{ reportCoverageLabel(row) }}
               </el-tag>
               <el-tag
-                v-if="row.source?.type === 'sandbox_test' && row.source.ai_review?.status !== 'complete'"
-                type="warning"
+                v-if="sandboxAiReviewStatus(row) !== 'complete'"
+                :type="sandboxAiReviewStatus(row) === 'skipped' ? 'info' : 'warning'"
                 size="small"
                 effect="plain"
-                :title="row.source.ai_review?.failure_reason || '历史报告未保存 AI 审查状态'"
-              >AI 报告未完成或状态未知</el-tag>
+                :title="sandboxAiReviewTitle(row)"
+              >{{ sandboxAiReviewLabel(row) }}</el-tag>
             </div>
             <div class="rc-line2 font-mono">
               <span class="rc-project" :title="row.project_name">{{ row.project_name }}</span>
@@ -324,6 +324,23 @@ function sandboxCoverageLabel(status?: string | null) {
   if (status === 'partial') return '验证范围不完整'
   if (status === 'failed') return '验证未通过'
   return '验证范围未知'
+}
+
+function sandboxAiReviewStatus(row: ReportListItem): string {
+  return row.source?.type === 'sandbox_test' ? String(row.source.ai_review?.status || 'unknown') : 'complete'
+}
+
+function sandboxAiReviewLabel(row: ReportListItem): string {
+  const status = sandboxAiReviewStatus(row)
+  if (status === 'skipped') return 'AI 审查已跳过'
+  if (status === 'incomplete') return 'AI 审查未完成'
+  return 'AI 审查状态未知'
+}
+
+function sandboxAiReviewTitle(row: ReportListItem): string {
+  const review = row.source?.ai_review
+  if (review?.status === 'skipped') return review.skip_reason || '本次任务按策略跳过多 Agent AI 审查'
+  return review?.failure_reason || '历史报告未保存 AI 审查状态'
 }
 
 function sandboxScoreTitle(row: ReportListItem) {

@@ -151,6 +151,7 @@
     <section v-if="isSandboxReport && canViewReport" class="card report-coverage-note" data-testid="sandbox-ai-review-status" role="note">
       <strong>多 Agent AI 报告：{{ sandboxAiReviewLabel }}</strong>
       <p v-if="report?.source?.ai_review?.failure_reason">{{ report.source.ai_review.failure_reason }}</p>
+      <p v-else-if="sandboxAiReviewStatus === 'skipped'">{{ report?.source?.ai_review?.skip_reason || '本次任务按执行策略跳过了多 Agent AI 审查。' }}；这不表示该审查已运行。</p>
       <p v-else-if="sandboxAiReviewStatus === 'unknown'">历史报告未保存 AI 审查状态，不能据此确认多 Agent AI 审查已完成。</p>
       <p v-else-if="sandboxAiReviewStatus === 'complete'">报告结构和 Agent 执行清单已通过完整性校验；其中模型发现仍按“未核实候选”展示。</p>
     </section>
@@ -1117,6 +1118,7 @@ const sandboxAiReviewStatus = computed(() => report.value?.source?.ai_review?.st
 const sandboxAiReviewLabel = computed(() => {
   if (sandboxAiReviewStatus.value === 'complete') return '完成'
   if (sandboxAiReviewStatus.value === 'incomplete') return '未完成（已提供确定性报告）'
+  if (sandboxAiReviewStatus.value === 'skipped') return '按任务策略跳过'
   return '状态未知'
 })
 const animatedScoreValue = useCountUp(score, 1500)

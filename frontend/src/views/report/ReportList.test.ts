@@ -301,7 +301,7 @@ describe('报告卡片列表', () => {
     expect(card.text()).not.toContain('已完成')
   })
 
-  it('AI 报告未完成或历史状态未知时，在列表标出提示', async () => {
+  it('AI 审查未完成时，在列表标出明确提示', async () => {
     api.reports.mockResolvedValueOnce({
       items: [{
         ...report,
@@ -312,9 +312,29 @@ describe('报告卡片列表', () => {
     wrapper = mountPage()
     await flushPromises()
     const card = wrapper.find('.report-card')
-    const warning = card.findAll('span').find(item => item.text().includes('AI 报告未完成或状态未知'))
+    const warning = card.findAll('span').find(item => item.text().includes('AI 审查未完成'))
     expect(warning).toBeTruthy()
     expect(warning?.attributes('title')).toBe('模型未配置')
+  })
+
+  it('策略跳过的 AI 审查在列表使用信息状态，而非警告或未知状态', async () => {
+    api.reports.mockResolvedValueOnce({
+      items: [{
+        ...report,
+        source: {
+          type: 'sandbox_test',
+          ai_review: { status: 'skipped', skip_reason: '精确 HTTP 白名单任务按策略不启动多 Agent AI 评审。' },
+        },
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    wrapper = mountPage()
+    await flushPromises()
+    const card = wrapper.find('.report-card')
+    const tag = card.findAll('span').find(item => item.text().includes('AI 审查已跳过'))
+    expect(tag).toBeTruthy()
+    expect(tag?.attributes('title')).toContain('按策略')
+    expect(card.text()).not.toContain('状态未知')
   })
 
   it('长错误说明保持可访问全文，同时为列表提供限高样式', async () => {
