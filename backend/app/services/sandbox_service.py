@@ -5770,29 +5770,92 @@ def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
                 values.append(str(raw))
         return list(dict.fromkeys(values))
 
+    def _http_assertion_label(item: dict[str, Any]) -> str:
+        if item.get("assertion_not_configured"):
+            if item.get("assertion_status") == "no_response":
+                return "未配置状态断言，且未收到响应"
+            return "未配置状态断言，回包仅作记录"
+        assertion_status = item.get("assertion_status")
+        if assertion_status == "matched":
+            return "状态断言通过"
+        if assertion_status == "mismatch":
+            return "状态断言未通过"
+        if assertion_status == "no_response":
+            return "状态断言未通过"
+        return "状态断言状态未知"
+
     tested = _items("tested", "tested_paths", "completed_tests")
     unscanned = _items("unscanned", "unscanned_paths", "unscanned_tests")
     skipped = _items("skipped", "skipped_tests")
     excluded = _items("excluded", "excluded_paths", "excluded_files")
     errors = _items("errors")
+    blackbox_execution = evidence.get("blackbox_execution")
+    blackbox_execution = blackbox_execution if isinstance(blackbox_execution, dict) else {}
+    exact_http_scope = (
+        blackbox_execution.get("basis") == "exact_http_allowlist"
+        and blackbox_execution.get("scope_enforced") is True
+    )
+    http_requests = blackbox_execution.get("requests")
+    http_requests = http_requests if isinstance(http_requests, list) else []
+    generation = evidence.get("agent_test_generation")
+    generation = generation if isinstance(generation, dict) else {}
+    if exact_http_scope:
+        tested = []
+        for item in http_requests:
+            if not isinstance(item, dict):
+                continue
+            method = str(item.get("method") or "GET").upper()
+            target = str(item.get("target") or "")
+            if not target:
+                continue
+            status_code = item.get("status_code")
+            if type(status_code) is int and 100 <= status_code <= 599:
+                outcome = f"HTTP {status_code}"
+            else:
+                outcome = "未收到 HTTP 响应"
+            assertion = _http_assertion_label(item)
+            tested.append(f"{method} {target}（{outcome}，{assertion}）")
+        unscanned = [
+            item
+            for item in unscanned
+            if "执行器未报告未扫描项" not in item and "无已记录未扫描项" not in item
+        ]
+        scope_gap = "精确白名单以外的 HTTP 路径与路由发现未执行"
+        if scope_gap not in unscanned:
+            unscanned.append(scope_gap)
+        if generation.get("status") == "skipped":
+            skipped = [
+                item
+                for item in skipped
+                if item not in {"无已记录跳过项", "未提供跳过项记录"}
+            ]
+        ai_dynamic_skipped = any("AI 动态测试" in item for item in skipped)
+        if generation.get("status") == "skipped" and not ai_dynamic_skipped:
+            reason = str(generation.get("reason") or "").strip()
+            skipped.append(
+                "AI 动态测试未执行"
+                + (f"（{reason}）" if reason else "（精确 HTTP 白名单模式按策略跳过）")
+            )
     for error in (conclusion.get("error"), evidence.get("error"), evidence.get("cleanup_error")):
         if error:
             errors.append(str(error))
     if raw_status in {"stopped", "expired", "cancelled"} and not unscanned:
         unscanned = ["终止时尚未执行的剩余测试项；具体清单未由执行器返回"]
 
+    tested_summary = "; ".join(tested) if tested else "执行器未提供可核验的逐项范围"
+    if exact_http_scope and not tested:
+        tested_summary = "未收到可核验的 HTTP 请求回执；没有可确认的已测试路径"
+
     lines = [
         "## 执行状态与覆盖范围",
         "",
         f"- 最终状态：{status}。只有执行器明确返回成功且未被停止/过期时才报告测试通过。",
-        f"- 已测试范围：{'; '.join(tested) if tested else '执行器未提供可核验的逐项范围'}。",
+        f"- 已测试范围：{tested_summary}。",
         f"- 未扫描范围：{'; '.join(unscanned) if unscanned else '执行器未报告未扫描项；不据此推断范围完整'}。",
-        f"- 跳过项：{'; '.join(skipped) if skipped else '无已记录跳过项'}。",
+        f"- 跳过项：{'; '.join(skipped) if skipped else '未提供跳过项记录'}。",
         f"- 排除项：{'; '.join(excluded) if excluded else '无已记录排除项'}。",
         f"- 错误：{'; '.join(list(dict.fromkeys(errors))) if errors else '无已记录错误'}。",
     ]
-    blackbox_execution = evidence.get("blackbox_execution")
-    blackbox_execution = blackbox_execution if isinstance(blackbox_execution, dict) else {}
     if blackbox_execution.get("basis") == "exact_http_allowlist":
         requests = blackbox_execution.get("requests")
         requests = requests if isinstance(requests, list) else []
@@ -5809,11 +5872,7 @@ def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
                     continue
                 status_code = item.get("status_code")
                 status_text = f"HTTP {status_code}" if type(status_code) is int and status_code else "未收到 HTTP 响应"
-                assertion = (
-                    "未配置状态断言，仅记录回包"
-                    if item.get("assertion_not_configured")
-                    else _report_status_label("passed" if item.get("assertion_status") == "matched" else "failed")
-                )
+                assertion = _http_assertion_label(item)
                 truncated_note = "（达到 64 KiB 读取上限）" if item.get("response_truncated") else ""
                 lines.append(
                     f"  - `GET {item.get('target', '/')}`：{status_text}；"
@@ -6338,6 +6397,46 @@ def _sandbox_report_is_persisted(db: Session, environment: "SandboxEnvironment")
     return bool(task and db.query(ReviewReport.id).filter(ReviewReport.task_id == task.id).first())
 
 
+def _sandbox_report_needs_exact_scope_refresh(db: Session, environment: "SandboxEnvironment") -> bool:
+    """Refresh only persisted exact-scope reports whose summary contradicts their HTTP evidence."""
+    result = _loads(environment.result_json, {})
+    result = result if isinstance(result, dict) else {}
+    evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+    blackbox = evidence.get("blackbox_execution")
+    blackbox = blackbox if isinstance(blackbox, dict) else {}
+    config = _loads(environment.agent_config_json, {})
+    config = config if isinstance(config, dict) else {}
+    expected_http_scope = config.get("http_scope")
+    if (
+        blackbox.get("basis") != "exact_http_allowlist"
+        or blackbox.get("scope_enforced") is not True
+        or config.get("http_scope_enforced") is not True
+        or not isinstance(expected_http_scope, list)
+        or not expected_http_scope
+    ):
+        return False
+
+    # Revalidate the persisted receipt against the original server-side allowlist
+    # before using it to rewrite a report. A malformed or incomplete receipt must
+    # never qualify for this read-only repair path.
+    validated_receipt = _extract_exact_http_scope_result(
+        {**blackbox, "executed": True},
+        expected_http_scope,
+    )
+    if validated_receipt is None or validated_receipt != blackbox:
+        return False
+
+    content = _existing_sandbox_report_content(db, environment)
+    report_md = str(content.get("report_md") or "")
+    if not report_md.strip():
+        return True
+    if "执行器未提供可核验的逐项范围" in report_md or "执行器未报告未扫描项" in report_md:
+        return True
+    generation = evidence.get("agent_test_generation")
+    generation = generation if isinstance(generation, dict) else {}
+    return generation.get("status") == "skipped" and "无已记录跳过项" in report_md
+
+
 def _existing_sandbox_report_content(db: Session, environment: "SandboxEnvironment") -> dict[str, Any]:
     from app.models.review_report import ReviewReport
     from app.models.review_task import ReviewTask
@@ -6451,6 +6550,13 @@ def _terminal_report_supplement(conclusion: dict[str, Any]) -> str:
 
 
 def _merge_terminal_report_markdown(existing: object, fallback: str, conclusion: dict[str, Any]) -> str:
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    blackbox = evidence.get("blackbox_execution")
+    blackbox = blackbox if isinstance(blackbox, dict) else {}
+    if blackbox.get("basis") == "exact_http_allowlist" and blackbox.get("scope_enforced") is True:
+        # Exact-scope reports are deterministic; replace them from the persisted result so stale
+        # summaries cannot survive a report refresh or contradict the request receipt.
+        return fallback
     if not isinstance(existing, str) or not existing.strip():
         return fallback
     report = existing.strip()
@@ -9925,9 +10031,12 @@ def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]
     if not _can_manage(db, actor, row):
         raise ForbiddenError("只有创建者或超级管理员可关闭沙箱", code=40300)
     if row.status in TERMINAL_STATES:
-        # A repeated stop carries no new execution evidence. Keep an already-published
-        # full report intact; still publish the fallback when report persistence is missing.
-        if row.purpose == "test" and not _sandbox_report_is_persisted(db, row):
+        # A repeated stop never touches the worker. It may publish a missing report or
+        # repair a stale exact-scope summary using only the persisted execution receipt.
+        if row.purpose == "test" and (
+            not _sandbox_report_is_persisted(db, row)
+            or _sandbox_report_needs_exact_scope_refresh(db, row)
+        ):
             try:
                 _publish_terminal_sandbox_report(db, row, execution_status=row.status)
             except Exception as exc:  # noqa: BLE001 - preserve the already-terminal execution state

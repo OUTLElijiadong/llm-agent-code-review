@@ -70,3 +70,13 @@
 - 4.1.12 本地验证：前端单测 27 项通过；后端沙箱 HTTP scope 与 executor 测试 106 项通过（1 条 Python `crypt` 弃用警告）；前端生产构建、Python AST、runner `bash -n`、五个 Compose profile 的 runner SHA 一致性、Compose 配置和 `git diff --check` 通过。生产端另完成前端构建和发布脚本健康检查。
 - Safari 真实产品页显示生产版本 `4.1.12` 和提交 SHA。当前配置已选择项目 `Local-File-Inclusion-Demo`（固定提交 `0e0e47093ac866b9a579a0c3fb61a3a6410355a`）、PHP、黑盒模式、无数据库、测试目标、远程目标为空；已配置且前后端强制执行三条本机 GET 白名单：`/vulnerable.php?page=about.php`、`/vulnerable.php?page=README_FILES.txt`、`/vulnerable.php?page=nonexistent.php`，每条期望 HTTP 200。根路径未加入，未配置其他请求。
 - 此刻上述新任务尚未提交或运行；当前动作确认待用户答复。不得把 4.1.11 的失败任务改写为成功，也不得把本次配置当作已产生 HTTP 请求或报告。
+
+## 4.1.12 受限靶场生产实测补记（2026-10-19）
+
+后续实测覆盖并取代上节末尾“新任务尚未提交或运行”的状态描述，不改写历史任务事实：
+
+- 用户在真实生产页面确认运行一次。任务 `sbx_7d1ffc7ba9cb40c1bca743d3`，项目 `Local-File-Inclusion-Demo`，固定提交 `0e0e47093ac866b9a579a0c3fb61a3a6410355a0`，来源指纹前缀 `205662d83cb7a121`。生产版本 `4.1.12`，SHA `80bac2cc56640d65477926f1820c2abbe90046ae`。
+- 严格执行三条 loopback GET 白名单：`/vulnerable.php?page=about.php` → HTTP 200、4,182 字节、130 ms；`/vulnerable.php?page=README_FILES.txt` → HTTP 200、4,736 字节、118 ms；`/vulnerable.php?page=nonexistent.php` → HTTP 200、3,639 字节、117 ms。三条状态断言通过；没有请求 `/`，没有外网请求，没有保存响应正文，未重试。
+- 页面任务状态为“部分通过”：确定性请求检查通过，AI 动态测试与白名单外路由发现未执行。这只证明三条请求按预期返回 HTTP 状态，不证明 LFI 漏洞语义或完整漏洞覆盖。
+- 下载报告路径：`/Users/li/Downloads/sandbox-review-report-sbx_7d1ffc7ba9cb40c1bca743d3.md`。报告下方列出三条真实请求；摘要却称“执行器未提供可核验的逐项范围”“未报告未扫描项”“无已记录跳过项”，与详细证据矛盾。该问题已复现并进入报告摘要修复任务，候选代码尚未部署；4.1.12 已保存报告仍保留原内容。
+- 生产只读巡检 `2026-10-19T14:34:26Z`：状态 `degraded`，可继续；磁盘 85% 为唯一告警，相关文件系统约有 28 GiB 可用，超过部署 12 GiB 硬门槛。服务、备份、Alembic 和 HTTPS 检查通过。未执行清理。

@@ -5,7 +5,7 @@ COPY package*.json ./
 # npm 默认 registry 在国内/跨境拉包慢甚至卡死,统一走 npmmirror(可被 --build-arg 覆盖)
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
-ARG VITE_APP_VERSION=4.1.12
+ARG VITE_APP_VERSION=4.1.13
 ARG VITE_APP_RELEASE_SHA=local
 ARG VITE_APP_BUILD_TIME=unknown
 ENV VITE_APP_VERSION=${VITE_APP_VERSION}

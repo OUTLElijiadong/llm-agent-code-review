@@ -1348,8 +1348,213 @@ def test_exact_http_scope_is_reported_as_partial_with_explicit_coverage_gap() ->
     report = _sandbox_execution_disclosure({"passed": True, "evidence": result["evidence"]})
     assert "## 精确 HTTP 请求范围" in report
     assert "`GET /`：HTTP 200" in report
+    assert "已测试范围：GET /（HTTP 200，状态断言通过）" in report
+    assert "未扫描范围：精确白名单以外的 HTTP 路径与路由发现未执行" in report
+    assert "跳过项：AI 动态测试未执行（精确 HTTP 白名单模式按策略跳过）" in report
+    assert "执行器未提供可核验的逐项范围" not in report
+    assert "未提供跳过项记录" not in report
     assert "不保存或输出 HTTP 响应正文" in report
     assert "未执行白名单之外的路径发现" in report
+
+
+def test_exact_http_scope_report_derives_tested_skipped_and_unscanned_from_receipt() -> None:
+    report = _sandbox_execution_disclosure({
+        "passed": True,
+        "evidence": {
+            "blackbox_execution": {
+                "basis": "exact_http_allowlist",
+                "scope_enforced": True,
+                "requests": [
+                    {
+                        "method": "GET",
+                        "target": "/vulnerable.php?page=about.php",
+                        "status_code": 200,
+                        "assertion_not_configured": False,
+                        "assertion_status": "matched",
+                    },
+                    {
+                        "method": "GET",
+                        "target": "/missing.php",
+                        "status_code": 0,
+                        "assertion_not_configured": False,
+                        "assertion_status": "no_response",
+                    },
+                ],
+            },
+            "agent_test_generation": {
+                "status": "skipped",
+                "reason": "白名单模式不注入 AI 测试脚本",
+            },
+        },
+    })
+
+    assert "已测试范围：GET /vulnerable.php?page=about.php（HTTP 200，状态断言通过）" in report
+    assert "GET /missing.php（未收到 HTTP 响应，状态断言未通过）" in report
+    assert "未扫描范围：精确白名单以外的 HTTP 路径与路由发现未执行" in report
+    assert "跳过项：AI 动态测试未执行（白名单模式不注入 AI 测试脚本）" in report
+    assert "执行器未提供可核验的逐项范围" not in report
+
+
+def test_exact_http_scope_without_request_receipts_does_not_claim_paths_were_tested() -> None:
+    report = _sandbox_execution_disclosure({
+        "passed": False,
+        "evidence": {
+            "blackbox_execution": {
+                "basis": "exact_http_allowlist",
+                "scope_enforced": True,
+                "requests": [],
+            },
+        },
+    })
+
+    assert "已测试范围：未收到可核验的 HTTP 请求回执；没有可确认的已测试路径" in report
+    assert "未扫描范围：精确白名单以外的 HTTP 路径与路由发现未执行" in report
+    assert "实际请求：应用未就绪，白名单请求未执行" in report
+
+
+def test_repeated_stop_repairs_legacy_exact_scope_report_from_persisted_receipt(db) -> None:
+    owner = User(username="sbx_exact_scope_refresh_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    project = Project(user_id=owner.id, project_name="exact scope report refresh", language="php", status="active")
+    db.add(project)
+    db.flush()
+    evidence = {
+        "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+        "agent_test_generation": {
+            "status": "skipped",
+            "mode": "blackbox",
+            "reason": "精确 HTTP 白名单任务按策略跳过",
+        },
+        "blackbox_execution": {
+            "status": "passed",
+            "passed": True,
+            "route_passed": True,
+            "route": "/vulnerable.php?page=about.php",
+            "status_code": 200,
+            "basis": "exact_http_allowlist",
+            "scope_enforced": True,
+            "requests": [{
+                "method": "GET",
+                "target": "/vulnerable.php?page=about.php",
+                "status_code": 200,
+                "response_bytes": 4_182,
+                "response_truncated": False,
+                "elapsed_ms": 130,
+                "expected_statuses": [200],
+                "assertion_not_configured": False,
+                "assertion_status": "matched",
+                "request_passed": True,
+            }],
+            "request_count": 1,
+            "response_count": 1,
+            "all_status_assertions_configured": True,
+            "agent_assertions_passed": None,
+            "response_bodies_saved": False,
+        },
+    }
+    environment = SandboxEnvironment(
+        public_id="sbx_exact_scope_report_refresh",
+        project_id=project.id,
+        owner_id=owner.id,
+        agent_code="test_verifier",
+        purpose="test",
+        language="php",
+        test_mode="blackbox",
+        status="succeeded",
+        runtime="runsc",
+        image_ref="synthetic",
+        source_sha256="e" * 64,
+        resource_policy_json="{}",
+        agent_config_json=json.dumps({
+            "http_scope_enforced": True,
+            "http_scope": [{
+                "method": "GET",
+                "path": "/vulnerable.php",
+                "query": {"page": "about.php"},
+                "expected_statuses": [200],
+            }],
+        }),
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+        result_json=json.dumps({
+            "passed": True,
+            "execution_status": "succeeded",
+            "summary": "确定性黑盒测试通过；AI 动态补充未执行",
+            "evidence": evidence,
+        }),
+    )
+    db.add(environment)
+    db.commit()
+    stale_report = (
+        "## 执行状态与覆盖范围\n"
+        "- 已测试范围：执行器未提供可核验的逐项范围。\n"
+        "- 未扫描范围：执行器未报告未扫描项。\n"
+        "- 跳过项：无已记录跳过项。\n"
+    )
+    initial = _publish_sandbox_report(
+        db,
+        environment,
+        json.loads(environment.result_json),
+        stale_report,
+    )
+    report = db.query(ReviewReport).filter_by(task_id=initial["report_task_id"]).one()
+    assert "执行器未提供可核验的逐项范围" in report.content_json["report_md"]
+
+    sandbox_service.stop_environment(db, owner, environment.public_id)
+
+    db.refresh(report)
+    repaired = report.content_json["report_md"]
+    assert "已测试范围：GET /vulnerable.php?page=about.php（HTTP 200，状态断言通过）" in repaired
+    assert "未扫描范围：精确白名单以外的 HTTP 路径与路由发现未执行" in repaired
+    assert "跳过项：AI 动态测试未执行（精确 HTTP 白名单任务按策略跳过）" in repaired
+    assert "执行器未提供可核验的逐项范围" not in repaired
+    assert "无已记录跳过项" not in repaired
+
+
+def test_exact_scope_report_refresh_rejects_request_outside_saved_allowlist() -> None:
+    result = {
+        "evidence": {
+            "blackbox_execution": {
+                "status": "passed",
+                "passed": True,
+                "route_passed": True,
+                "route": "/unexpected.php",
+                "status_code": 200,
+                "basis": "exact_http_allowlist",
+                "scope_enforced": True,
+                "requests": [{
+                    "method": "GET",
+                    "target": "/unexpected.php",
+                    "status_code": 200,
+                    "response_bytes": 1,
+                    "response_truncated": False,
+                    "elapsed_ms": 1,
+                    "expected_statuses": [200],
+                    "assertion_not_configured": False,
+                    "assertion_status": "matched",
+                    "request_passed": True,
+                }],
+                "request_count": 1,
+                "response_count": 1,
+                "all_status_assertions_configured": True,
+                "response_bodies_saved": False,
+            },
+        },
+    }
+    environment = SimpleNamespace(
+        result_json=json.dumps(result),
+        agent_config_json=json.dumps({
+            "http_scope_enforced": True,
+            "http_scope": [{
+                "method": "GET",
+                "path": "/allowed.php",
+                "query": {},
+                "expected_statuses": [200],
+            }],
+        }),
+    )
+
+    assert not sandbox_service._sandbox_report_needs_exact_scope_refresh(object(), environment)
 
 
 def test_exact_http_scope_report_skips_all_ai_calls_and_publishes_deterministic_content(monkeypatch) -> None:
