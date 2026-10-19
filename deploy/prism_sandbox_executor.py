@@ -33,7 +33,6 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-
 DEPLOY_DIR = Path(__file__).resolve().parent
 SOCKET_PATH = Path(os.environ.get("SANDBOX_EXECUTOR_SOCKET", "/var/lib/prism-sandbox/agent.sock"))
 TOKEN = os.environ.get("SANDBOX_EXECUTOR_TOKEN", "")
@@ -89,8 +88,10 @@ EXECUTE_KEYS = frozenset(
         "source_sha256",
         "ttl_seconds",
         "image_digest",
+        "http_scope",
     }
 )
+HTTP_SCOPE_PATH_RE = re.compile(r"/(?!/)[A-Za-z0-9._~!$&+,;=@/-]*$")
 # 沙箱测试数据库:仅独立测试库(绝不指向生产库);缺失则沙箱保持无数据库。
 SANDBOX_TEST_DB_NETWORK = os.environ.get("SANDBOX_TEST_DB_NETWORK", "sandbox_test_net")
 SANDBOX_TEST_DB_HOST = os.environ.get("SANDBOX_TEST_DB_HOST", "cr_testdb")
@@ -914,7 +915,16 @@ def _resolve_testdb_ip() -> str:
 
 
 def _build_docker_create_args(
-    *, request_id: str, purpose: str, test_mode: str, db_type: str, profile: Profile, runtime: str, image: ResolvedImage, source_dir: Path,
+    *,
+    request_id: str,
+    purpose: str,
+    test_mode: str,
+    db_type: str,
+    profile: Profile,
+    runtime: str,
+    image: ResolvedImage,
+    source_dir: Path,
+    http_scope: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     if purpose not in PURPOSES or profile.language not in LANGUAGES:
         raise ValueError("沙箱用途或语言不合法")
@@ -1015,6 +1025,15 @@ def _build_docker_create_args(
             "--env", f"PRISM_DB_PASSWORD={SANDBOX_TEST_DB_PASSWORD}",
             "--env", f"PRISM_DB_NAME={SANDBOX_TEST_DB_NAME}",
         ])
+    if http_scope is not None:
+        request_lines = []
+        for item in http_scope:
+            query = urllib.parse.urlencode(sorted(item["query"].items()))
+            target = item["path"] + (f"?{query}" if query else "")
+            statuses = ",".join(str(code) for code in item["expected_statuses"]) or "-"
+            request_lines.append(f"GET\t{target}\t{statuses}")
+        encoded_scope = base64.b64encode(("\n".join(request_lines) + "\n").encode("ascii")).decode("ascii")
+        args.extend(["--env", f"PRISM_HTTP_SCOPE_B64={encoded_scope}"])
     args.append(image.run_ref)
     return args
 
@@ -1100,11 +1119,72 @@ def _normalize_execute(payload: dict[str, Any]) -> tuple[dict[str, Any], Profile
     allowed_modes = {"whitebox"} if purpose == "deploy" else {"whitebox", "blackbox", "combined"}
     if test_mode not in allowed_modes:
         raise ValueError("当前 purpose 不支持该固定测试模式")
+    db_type = str(payload.get("db_type") or "none").strip().lower()
+    if db_type not in {"none", "sqlite", "mysql"}:
+        raise ValueError("沙箱数据库类型不受支持")
     normalized = dict(payload)
     normalized.update({"request_id": request_id, "purpose": purpose, "language": language, "test_mode": test_mode})
+    local_bounded = purpose == "test" and test_mode == "blackbox"
+    if local_bounded:
+        if db_type == "mysql":
+            raise ValueError("精确 HTTP 白名单模式禁止连接非 loopback 测试数据库网络")
+        normalized["http_scope"] = _validate_executor_http_scope(payload.get("http_scope"))
+    elif "http_scope" in payload:
+        raise ValueError("HTTP 白名单只允许用于本地黑盒测试")
     profiles = _load_profiles()
     _validate_archive_envelope(normalized)
     return normalized, profiles[language]
+
+
+def _validate_executor_http_scope(value: Any) -> list[dict[str, Any]]:
+    """Worker 独立复核本地黑盒 HTTP 请求计划，不信任后端之外的调用方。"""
+    if not isinstance(value, list) or not 1 <= len(value) <= 20:
+        raise ValueError("本地黑盒测试必须提供 1–20 项 HTTP 白名单")
+    normalized: list[dict[str, Any]] = []
+    targets: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
+    for raw in value:
+        if not isinstance(raw, dict) or set(raw) != {"method", "path", "query", "expected_statuses"}:
+            raise ValueError("HTTP 白名单条目字段不符合固定协议")
+        method = raw.get("method")
+        path = raw.get("path")
+        query = raw.get("query")
+        statuses = raw.get("expected_statuses")
+        if method != "GET" or not isinstance(path, str) or len(path) > 512 or not HTTP_SCOPE_PATH_RE.fullmatch(path):
+            raise ValueError("HTTP 白名单仅允许精确 GET 路径")
+        if "//" in path:
+            raise ValueError("HTTP 白名单路径含双斜线")
+        if "\\" in path or any(segment in {".", ".."} for segment in path.split("/")):
+            raise ValueError("HTTP 白名单路径不能包含目录穿越")
+        if not isinstance(query, dict) or len(query) > 10 or not isinstance(statuses, list) or len(statuses) > 20:
+            raise ValueError("HTTP 白名单查询参数或预期状态码不合法")
+        normalized_query: dict[str, str] = {}
+        for key, item in query.items():
+            if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_.~-]{1,80}", key):
+                raise ValueError("HTTP 查询参数名称不合法")
+            if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9_.~-]{0,512}", item):
+                raise ValueError("HTTP 查询参数值超出限制")
+            if item in {".", ".."}:
+                raise ValueError("HTTP 查询参数值不能是目录穿越段")
+            normalized_query[key] = item
+        if len(urllib.parse.urlencode(normalized_query).encode("ascii")) > 2048:
+            raise ValueError("编码后的 HTTP 查询参数总长度超出限制")
+        if any(type(code) is not int or not 100 <= code <= 599 for code in statuses):
+            raise ValueError("预期 HTTP 状态码必须在 100–599 之间")
+        if len(set(statuses)) != len(statuses):
+            raise ValueError("预期 HTTP 状态码不能重复")
+        target_key = (path, tuple(sorted(normalized_query.items())))
+        if target_key in targets:
+            raise ValueError("HTTP 白名单存在重复请求目标")
+        targets.add(target_key)
+        normalized.append({
+            "method": "GET",
+            "path": path,
+            "query": dict(sorted(normalized_query.items())),
+            "expected_statuses": list(statuses),
+        })
+    if ("/", ()) not in targets:
+        raise ValueError("HTTP 白名单必须包含不带查询参数的 GET / 探活条目")
+    return normalized
 
 
 def _validate_execute(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes, Profile]:
@@ -1214,6 +1294,7 @@ def submit_job(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             runtime=runtime,
             image=image,
             source_dir=source_dir,
+            http_scope=normalized.get("http_scope"),
         )
         created = _run_command(args, timeout=60)
         container_id = created["stdout"].strip()

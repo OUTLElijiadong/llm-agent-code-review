@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import signal
@@ -16,7 +17,6 @@ import pytest
 
 from app.services.sandbox_service import (
     _DEPLOY_VERIFY_RUNNER,
-    _extract_agent_tests_result,
     _extract_blackbox_result,
 )
 
@@ -25,6 +25,26 @@ def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _http_scope(*requests: tuple[str, tuple[int, ...]]) -> tuple[list[dict[str, object]], str]:
+    """Encode the runner's exact GET plan and return its expected receipt contract."""
+    scope = [
+        {"method": "GET", "path": path, "query": {}, "expected_statuses": list(statuses)}
+        for path, statuses in requests
+    ]
+    lines = [
+        f"GET\t{item['path']}\t{','.join(str(code) for code in item['expected_statuses']) or '-'}"
+        for item in scope
+    ]
+    encoded = base64.b64encode(("\n".join(lines) + "\n").encode("ascii")).decode("ascii")
+    return scope, encoded
+
+
+def _add_http_scope(env: dict[str, str], *requests: tuple[str, tuple[int, ...]]) -> list[dict[str, object]]:
+    scope, encoded = _http_scope(*requests)
+    env["PRISM_HTTP_SCOPE_B64"] = encoded
+    return scope
 
 
 def _fake_php_server(tmp_path: Path) -> Path:
@@ -86,15 +106,26 @@ def _write_bWAPP_layout(root: Path) -> None:
 
 
 def _run_worker_php_blackbox(
-    source: Path, work: Path, fake_bin: Path, *, root_status: int | None = None, index_status: int | None = None
+    source: Path, work: Path, fake_bin: Path, *, root_status: int | None = None, index_status: int | None = None,
+    http_scope: list[dict[str, object]] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     runner = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
+    scope, encoded_scope = _http_scope(("/", (200,)))
+    if http_scope is not None:
+        scope = http_scope
+        lines = []
+        for item in scope:
+            path = str(item["path"])
+            statuses = item.get("expected_statuses", [])
+            lines.append(f"GET\t{path}\t{','.join(str(code) for code in statuses) or '-'}")
+        encoded_scope = base64.b64encode(("\n".join(lines) + "\n").encode("ascii")).decode("ascii")
     env = {
         **os.environ,
         "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
         "PRISM_ACTION": "test",
         "PRISM_LANGUAGE": "php",
         "PRISM_TEST_MODE": "blackbox",
+        "PRISM_HTTP_SCOPE_B64": encoded_scope,
         "PRISM_PREVIEW_PORT": str(_free_port()),
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(work),
@@ -143,23 +174,25 @@ def test_worker_php_blackbox_falls_back_to_safe_php_entrypoint_when_root_is_404(
     app = source / "bWAPP-master" / "app"
     (app / "login.php").write_text("<?php echo 'login'; ?>", encoding="utf-8")
 
+    scope, _ = _http_scope(("/", (404,)), ("/login.php", (200,)))
     result = _run_worker_php_blackbox(
         source,
         tmp_path / "workspace",
         _fake_php_server(tmp_path),
         root_status=404,
         index_status=302,
+        http_scope=scope,
     )
     output = result.stdout + result.stderr
 
     assert result.returncode == 0, output
-    assert "blackbox loopback status=404" in output
-    assert "blackbox route /login.php -> HTTP 200" in output
-    receipt = _extract_blackbox_result(output)
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["status"] == "passed"
-    assert receipt["route"] == "/login.php"
-    assert receipt["route_origin"] == "php_entrypoint"
+    assert receipt["requests"][0]["target"] == "/"
+    assert receipt["requests"][0]["status_code"] == 404
+    assert receipt["requests"][1]["target"] == "/login.php"
+    assert receipt["requests"][1]["status_code"] == 200
 
 
 def test_worker_php_blackbox_fails_closed_for_ambiguous_document_roots(tmp_path: Path) -> None:
@@ -171,10 +204,12 @@ def test_worker_php_blackbox_fails_closed_for_ambiguous_document_roots(tmp_path:
     result = _run_worker_php_blackbox(source, tmp_path / "workspace", _fake_php_server(tmp_path))
     output = result.stdout + result.stderr
     assert result.returncode == 1, output
-    receipt = _extract_blackbox_result(output)
+    scope, _ = _http_scope(("/", (200,)))
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["failure_kind"] == "application_startup", output
-    assert "PHP document root is ambiguous" in output
+    assert receipt["request_count"] == 0
+    assert "scoped application exited before readiness" in output
 
 
 @pytest.mark.parametrize("layout", ["empty", "too_deep"])
@@ -191,11 +226,13 @@ def test_worker_php_blackbox_fails_closed_when_document_root_is_missing(
     result = _run_worker_php_blackbox(source, tmp_path / "workspace", _fake_php_server(tmp_path))
     output = result.stdout + result.stderr
     assert result.returncode == 1, output
-    receipt = _extract_blackbox_result(output)
+    scope, _ = _http_scope(("/", (200,)))
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["status"] == "failed"
     assert receipt["failure_kind"] == "application_startup"
-    assert "PHP document root not found within supported depth (8)" in output
+    assert receipt["request_count"] == 0
+    assert "scoped application exited before readiness" in output
     assert '"status_code":0' in output
 
 
@@ -389,7 +426,7 @@ def test_embedded_blackbox_bounds_connected_socket_without_http_status(tmp_path:
 
 
 def test_real_runner_separates_route_success_from_agent_assertion_failure(tmp_path: Path) -> None:
-    """HTTP 路由可达但 AI 黑盒断言失败时，回执必须归因为动态断言失败。"""
+    """精确白名单逐项执行状态断言；不执行源码包中的黑盒脚本。"""
     source = tmp_path / "source"
     source.mkdir()
     (source / "wsgi.py").write_text(
@@ -415,6 +452,7 @@ def test_real_runner_separates_route_success_from_agent_assertion_failure(tmp_pa
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(workspace),
     }
+    scope = _add_http_scope(env, ("/", (404,)), ("/healthz", (200,)))
     result = subprocess.run(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -426,11 +464,14 @@ def test_real_runner_separates_route_success_from_agent_assertion_failure(tmp_pa
     )
 
     assert result.returncode != 0
-    receipt = _extract_blackbox_result(result.stdout + result.stderr)
+    output = result.stdout + result.stderr
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
-    assert receipt["route_passed"] is True
+    assert receipt["route_passed"] is False
     assert receipt["status"] == "failed"
-    assert receipt["failure_kind"] == "dynamic_assertion"
+    assert receipt["agent_assertions_passed"] is None
+    assert [item["status_code"] for item in receipt["requests"]] == [404, 204]
+    assert "expected failure" not in output
 
 
 @pytest.mark.parametrize(
@@ -459,6 +500,7 @@ def test_real_runner_reports_application_startup_failure_with_diagnostics(
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(workspace),
     }
+    scope = _add_http_scope(env, ("/", (200,)))
 
     result = subprocess.run(
         ["bash", str(runner)],
@@ -472,9 +514,9 @@ def test_real_runner_reports_application_startup_failure_with_diagnostics(
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "blackbox application exited before readiness" in output
-    assert "controlled startup output" in output
-    receipt = _extract_blackbox_result(output)
+    assert "blackbox scoped application exited before readiness" in output
+    assert "controlled startup output" not in output
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["status"] == "failed"
     assert receipt["route_passed"] is False
@@ -504,7 +546,9 @@ def test_real_runner_reports_readiness_timeout_with_structured_failure(tmp_path:
         "PRISM_PREVIEW_PORT": str(_free_port()),
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(workspace),
+        "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "1",
     }
+    scope = _add_http_scope(env, ("/", (200,)))
 
     result = subprocess.run(
         ["bash", str(runner)],
@@ -518,8 +562,8 @@ def test_real_runner_reports_readiness_timeout_with_structured_failure(tmp_path:
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "application did not become ready" in output
-    receipt = _extract_blackbox_result(output)
+    assert "scoped application readiness timed out" in output
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["status"] == "failed"
     assert receipt["route_passed"] is False
@@ -572,7 +616,13 @@ def test_node_readiness_timeout_stops_application_child_processes(
     )
     fake_npm.chmod(0o755)
     fake_sleep = fake_bin / "sleep"
-    fake_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    if runner_kind == "trusted-runner":
+        # Keep real readiness intervals here so the asynchronously started npm
+        # child has time to create its PID marker before the short timeout fires.
+        fake_sleep.write_text("#!/bin/sh\nexec /bin/sleep \"$@\"\n", encoding="utf-8")
+    else:
+        # The embedded compatibility runner has a separate, long timeout path.
+        fake_sleep.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fake_sleep.chmod(0o755)
 
     if runner_kind == "trusted-runner":
@@ -587,7 +637,9 @@ def test_node_readiness_timeout_stops_application_child_processes(
             "PRISM_PREVIEW_PORT": str(_free_port()),
             "PRISM_SOURCE_DIR": str(source),
             "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "3",
         }
+        scope = _add_http_scope(env, ("/", (200,)))
         command = ["bash", str(runner)]
     else:
         from app.services.sandbox_service import _DEPLOY_VERIFY_RUNNER
@@ -618,6 +670,10 @@ def test_node_readiness_timeout_stops_application_child_processes(
     try:
         output = result.stdout + result.stderr
         assert result.returncode != 0, output
+        if runner_kind == "trusted-runner":
+            receipt = _extract_blackbox_result(output, expected_http_scope=scope)
+            assert receipt is not None and receipt["status"] == "failed"
+            assert receipt["status_code"] == 0
         assert any(
             marker in output
             for marker in (
@@ -625,6 +681,11 @@ def test_node_readiness_timeout_stops_application_child_processes(
                 "did not become ready",
                 "未在回环端口就绪",
                 "PRISM_VERIFY blackbox fail",
+                "scoped application readiness timed out",
+                "application_readiness_timeout",
+                "scoped application exited before readiness",
+                "application_exited_before_ready",
+                "status=0 bytes=0",
             )
         ), output
         assert pid is not None, output
@@ -699,6 +760,7 @@ def test_runner_signal_stops_application_child_processes(
         "PRISM_TEST_CHILD_PID": str(child_pid),
         "PRISM_TEST_TICKS": str(ticks),
     }
+    _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -734,7 +796,7 @@ def test_runner_signal_stops_application_child_processes(
 
 
 def test_real_runner_route_failure_force_stops_sigterm_ignoring_app(tmp_path: Path) -> None:
-    """无成功路由时，忽略 TERM 的本地应用也必须在沙箱时限前被强制回收。"""
+    """精确状态断言失败后，忽略 TERM 的本地应用也必须被强制回收。"""
     source = tmp_path / "source"
     source.mkdir()
     ticks = tmp_path / "ticks.log"
@@ -770,6 +832,7 @@ def test_real_runner_route_failure_force_stops_sigterm_ignoring_app(tmp_path: Pa
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
         "PRISM_TEST_TICKS": str(ticks),
     }
+    scope = _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -789,20 +852,14 @@ def test_real_runner_route_failure_force_stops_sigterm_ignoring_app(tmp_path: Pa
 
     output = stdout + stderr
     assert process.returncode != 0, output
-    receipt = _extract_blackbox_result(output)
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None, output
     assert receipt["status"] == "failed"
     assert receipt["route_passed"] is False
-    assert receipt["agent_assertions_passed"] is True
-    assert "no discovered application route returned HTTP 2xx" in output
+    assert receipt["agent_assertions_passed"] is None
+    assert receipt["requests"][0]["status_code"] == 404
     assert '"passed":false' in output
-    agent_result = _extract_agent_tests_result(output)
-    assert agent_result is not None
-    assert agent_result["files"].get("blackbox.py") == "pass"
-    assert (
-        agent_result["file_results"]["blackbox.py"].get("output")
-        == "controlled agent blackbox assertion passed\n"
-    )
+    assert "controlled agent blackbox assertion passed" not in output
     assert time.monotonic() - started_at < 8, output
     assert ticks.exists(), output
     first_size = ticks.stat().st_size
@@ -811,7 +868,7 @@ def test_real_runner_route_failure_force_stops_sigterm_ignoring_app(tmp_path: Pa
 
 
 def test_real_runner_does_not_treat_implicit_root_health_as_business_route(tmp_path: Path) -> None:
-    """注释中的路由和普通 get('PATH_INFO') 取值不能伪装成已发现的业务路由。"""
+    """只访问显式白名单中的根路由，不因隐式健康响应扩展探测范围。"""
     source = tmp_path / "source"
     source.mkdir()
     (source / "wsgi.py").write_text(
@@ -835,6 +892,7 @@ def test_real_runner_does_not_treat_implicit_root_health_as_business_route(tmp_p
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
     }
+    scope = _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -847,17 +905,16 @@ def test_real_runner_does_not_treat_implicit_root_health_as_business_route(tmp_p
     stdout, stderr = process.communicate(timeout=12)
     output = stdout + stderr
 
-    assert process.returncode != 0, output
-    receipt = _extract_blackbox_result(output)
+    assert process.returncode == 0, output
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None, output
-    assert receipt["status"] == "failed"
-    assert receipt["route_passed"] is False
-    assert "no discovered application route returned HTTP 2xx" in output, output
-    assert '"passed":false' in output
+    assert receipt["status"] == "passed"
+    assert receipt["requests"][0]["target"] == "/"
+    assert '"request_count":1' in output
 
 
 def test_real_runner_does_not_treat_route_text_inside_string_as_business_route(tmp_path: Path) -> None:
-    """普通字符串中提到路由，不等于应用注册了该路由。"""
+    """源码字符串中的路由文本不会改变固定白名单请求计划。"""
     source = tmp_path / "source"
     source.mkdir()
     (source / "wsgi.py").write_text(
@@ -882,6 +939,7 @@ def test_real_runner_does_not_treat_route_text_inside_string_as_business_route(t
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
     }
+    scope = _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -894,13 +952,11 @@ def test_real_runner_does_not_treat_route_text_inside_string_as_business_route(t
     stdout, stderr = process.communicate(timeout=12)
     output = stdout + stderr
 
-    assert process.returncode != 0, output
-    receipt = _extract_blackbox_result(output)
+    assert process.returncode == 0, output
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None, output
-    assert receipt["status"] == "failed"
-    assert receipt["route_passed"] is False
-    assert "no discovered application route returned HTTP 2xx" in output, output
-    assert "no discovered application route returned HTTP 2xx" in output, output
+    assert receipt["status"] == "passed"
+    assert [item["target"] for item in receipt["requests"]] == ["/"]
 
 
 def test_embedded_blackbox_returns_structured_receipt_when_app_cannot_start(tmp_path: Path) -> None:
@@ -972,7 +1028,7 @@ def test_embedded_blackbox_does_not_treat_route_text_inside_string_as_route(tmp_
 
 
 def test_real_runner_bounds_readiness_when_app_accepts_but_never_sends_http_status(tmp_path: Path) -> None:
-    """应用接受 TCP 后不返回 HTTP 首行时，就绪探测必须按阶段时限退出。"""
+    """TCP 就绪但白名单 HTTP 请求无状态行时，必须形成失败回执并清理进程。"""
     source = tmp_path / "source"
     source.mkdir()
     (source / "wsgi.py").write_text(
@@ -993,8 +1049,9 @@ def test_real_runner_bounds_readiness_when_app_accepts_but_never_sends_http_stat
         "PRISM_PREVIEW_PORT": str(_free_port()),
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
-        "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "1",
+        "PRISM_BLACKBOX_STARTUP_TIMEOUT_SECONDS": "5",
     }
+    scope = _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -1009,16 +1066,17 @@ def test_real_runner_bounds_readiness_when_app_accepts_but_never_sends_http_stat
     output = stdout + stderr
 
     assert process.returncode != 0, output
-    receipt = _extract_blackbox_result(output)
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None, output
     assert receipt["status"] == "failed"
-    assert receipt["failure_kind"] == "application_startup"
-    assert "application_readiness_timeout" in output
+    assert receipt["requests"][0]["status_code"] == 0
+    assert receipt["requests"][0]["assertion_status"] == "no_response"
+    assert '"request_count":1' in output
     assert time.monotonic() - started_at < 9, output
 
 
 def test_real_runner_times_out_hanging_agent_blackbox_and_cleans_app(tmp_path: Path) -> None:
-    """挂起的 Agent 黑盒断言应被限时终止，随后清理应用进程组并返回失败回执。"""
+    """白名单模式不运行挂起的 Agent 脚本，并在确定性 HTTP 检查后回收应用进程。"""
     source = tmp_path / "source"
     source.mkdir()
     ticks = tmp_path / "ticks.log"
@@ -1035,9 +1093,8 @@ def test_real_runner_times_out_hanging_agent_blackbox_and_cleans_app(tmp_path: P
         "        time.sleep(0.05)\n"
         "threading.Thread(target=write_ticks, daemon=True).start()\n"
         "def application(environ, start_response):\n"
-        "    is_business = environ['PATH_INFO'] == '/business'\n"
-        "    start_response('200 OK' if is_business else '404 Not Found', [('Content-Type', 'text/plain')])\n"
-        "    return [b'business' if is_business else b'health']\n",
+        "    start_response('200 OK', [('Content-Type', 'text/plain')])\n"
+        "    return [b'ok']\n",
         encoding="utf-8",
     )
     agent_tests = source / "_agent_tests"
@@ -1062,6 +1119,7 @@ def test_real_runner_times_out_hanging_agent_blackbox_and_cleans_app(tmp_path: P
         "PRISM_TEST_TICKS": str(ticks),
         "PRISM_AGENT_TEST_TIMEOUT_SECONDS": "1",
     }
+    scope = _add_http_scope(env, ("/", (200,)))
     process = subprocess.Popen(
         ["bash", str(runner)],
         cwd=tmp_path,
@@ -1075,17 +1133,14 @@ def test_real_runner_times_out_hanging_agent_blackbox_and_cleans_app(tmp_path: P
     stdout, stderr = process.communicate(timeout=12)
     output = stdout + stderr
 
-    assert process.returncode != 0, output
-    receipt = _extract_blackbox_result(output)
+    assert process.returncode == 0, output
+    receipt = _extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None, output
-    assert receipt["status"] == "failed"
-    assert receipt["route_passed"] is True, output
-    assert receipt["route"] == "/business", output
-    assert receipt["route_origin"] == "source_route", output
-    assert receipt["agent_assertions_passed"] is False
-    agent_result = _extract_agent_tests_result(output)
-    assert agent_result is not None
-    assert agent_result["file_results"]["blackbox.py"]["failure_kind"] == "timeout"
+    assert receipt["status"] == "passed"
+    assert receipt["requests"][0]["target"] == "/"
+    assert receipt["agent_assertions_passed"] is None
+    assert "agent blackbox started" not in output
+    assert "PRISM_AGENT_TESTS_BEGIN" not in output
     assert time.monotonic() - started_at < 9, output
     assert ticks.exists(), output
     first_size = ticks.stat().st_size

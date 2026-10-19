@@ -229,6 +229,66 @@ describe('SandboxWorkstation Agent output ordering', () => {
     wrapper.unmount()
   })
 
+  it('sends the exact local HTTP scope for blackbox and blocks invalid targets before submit', async () => {
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.form.project_id = 7
+    vm.form.purpose = 'test'
+    vm.form.test_mode = 'blackbox'
+    await nextTick()
+
+    expect(vm.submitDisabled).toBe(false)
+    await vm.submit()
+    expect(api.createSandbox).toHaveBeenCalledWith(expect.objectContaining({
+      http_scope: [{ method: 'GET', path: '/', query: {}, expected_statuses: [200] }],
+    }))
+
+    api.createSandbox.mockClear()
+    vm.httpScopeRows[0].queryText = 'file=%2525252e%2525252e'
+    await nextTick()
+    expect(vm.submitDisabled).toBe(true)
+    await vm.submit()
+    expect(api.createSandbox).not.toHaveBeenCalled()
+
+    vm.httpScopeRows[0].queryText = ''
+    vm.httpScopeRows[0].path = '/../../etc/passwd'
+    await nextTick()
+    expect(vm.submitDisabled).toBe(true)
+    await vm.submit()
+    expect(api.createSandbox).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('renders scoped HTTP evidence as a readable table without dumping raw receipt JSON', async () => {
+    const scoped = {
+      ...environment,
+      result: {
+        passed: true,
+        evidence: {
+          blackbox_execution: {
+            basis: 'exact_http_allowlist', scope_enforced: true,
+            requests: [{
+              method: 'GET', target: '/about.php?page=1', status_code: 200,
+              response_bytes: 24, response_truncated: false, elapsed_ms: 6,
+              assertion_not_configured: false, assertion_status: 'matched',
+            }],
+          },
+        },
+      },
+    }
+    api.listSandboxes.mockResolvedValue([scoped])
+    api.getSandbox.mockResolvedValue(scoped)
+    const wrapper = shallowMount(SandboxWorkstation, mountOptions)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="http-scope-evidence"]').text()).toContain('GET /about.php?page=1')
+    expect(wrapper.text()).toContain('HTTP 200')
+    expect(wrapper.text()).toContain('响应正文未保存')
+    expect(wrapper.find('.evidence-output').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows a finalizing result as pending report generation instead of a failed conclusion', async () => {
     const finalizing = {
       ...environment,

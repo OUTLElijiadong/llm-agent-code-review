@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,19 @@ from app.agents.test_case_generator_agent import _grounding_feedback
 from app.services import sandbox_service
 
 RUNNER_PATH = Path(__file__).resolve().parents[4] / "deploy" / "sandbox" / "runner.sh"
+
+
+def _http_scope(*requests: tuple[str, tuple[int, ...]]) -> tuple[list[dict[str, object]], str]:
+    scope = [
+        {"method": "GET", "path": path, "query": {}, "expected_statuses": list(statuses)}
+        for path, statuses in requests
+    ]
+    lines = [
+        f"GET\t{item['path']}\t{','.join(str(code) for code in item['expected_statuses']) or '-'}"
+        for item in scope
+    ]
+    encoded = base64.b64encode(("\n".join(lines) + "\n").encode("ascii")).decode("ascii")
+    return scope, encoded
 
 
 def _source_quotes(message: str) -> list[dict[str, object]]:
@@ -447,18 +461,18 @@ def test_real_java_whitebox_runner_compiles_and_runs_generated_test_with_project
 
 
 @pytest.mark.parametrize(
-    ("project_type", "expected_body", "expected_pass"),
+    ("project_type", "expected_status", "expected_pass"),
     [
-        ("commonjs", "ok", True),
-        ("module", "ok", True),
-        ("module", "different", False),
+        ("commonjs", 200, True),
+        ("module", 200, True),
+        ("module", 201, False),
     ],
-    ids=["cjs-project-pass", "esm-project-pass", "esm-project-assertion-fails"],
+    ids=["cjs-scoped-http-pass", "esm-scoped-http-pass", "esm-scoped-status-mismatch"],
 )
-def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects(
-    tmp_path, project_type, expected_body, expected_pass
+def test_real_node_blackbox_runner_enforces_scope_and_skips_archived_agent_script(
+    tmp_path, project_type, expected_status, expected_pass
 ) -> None:
-    """黑盒回环断言 .mjs 必须由 runner 找到并实际执行，而不能退化为 route-only。"""
+    """本地黑盒按白名单状态断言执行，并保证归档中的 Agent 脚本没有运行。"""
     import os
     import socket
     import subprocess
@@ -499,16 +513,16 @@ def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects
     (source / "server.js").write_text(app_source, encoding="utf-8")
     tests_dir = source / "_agent_tests"
     tests_dir.mkdir()
+    marker = tmp_path / "agent-blackbox-ran"
     (tests_dir / "blackbox.mjs").write_text(
-        "import assert from 'node:assert/strict';\n"
-        "const response = await fetch(`http://127.0.0.1:${process.env.PRISM_PREVIEW_PORT}/healthz`);\n"
-        "assert.equal(response.status, 200);\n"
-        f"assert.equal(await response.text(), {json.dumps(expected_body)});\n",
+        "import fs from 'node:fs';\n"
+        f"fs.writeFileSync({json.dumps(str(marker))}, 'executed');\n",
         encoding="utf-8",
     )
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
+    scope, encoded_scope = _http_scope(("/", (200,)), ("/healthz", (expected_status,)))
     env = os.environ.copy()
     env.update(
         {
@@ -518,6 +532,7 @@ def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects
             "PRISM_PREVIEW_PORT": str(port),
             "PRISM_SOURCE_DIR": str(source),
             "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+            "PRISM_HTTP_SCOPE_B64": encoded_scope,
         }
     )
     completed = subprocess.run(
@@ -532,13 +547,14 @@ def test_real_node_blackbox_runner_executes_blackbox_mjs_in_cjs_and_esm_projects
 
     output = completed.stdout + completed.stderr
     assert (completed.returncode == 0) is expected_pass, output
-    receipt = sandbox_service._extract_blackbox_result(output)
+    receipt = sandbox_service._extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["status"] == ("passed" if expected_pass else "failed")
-    assert receipt["agent_assertions_passed"] is expected_pass
-    agent_tests = sandbox_service._extract_agent_tests_result(output)
-    assert agent_tests is not None
-    assert agent_tests["files"]["blackbox.mjs"] == ("pass" if expected_pass else "fail")
+    assert receipt["agent_assertions_passed"] is None
+    assert [item["target"] for item in receipt["requests"]] == ["/", "/healthz"]
+    assert receipt["requests"][1]["status_code"] == 200
+    assert not marker.exists()
+    assert "blackbox.mjs" not in output
 
 
 @pytest.mark.parametrize("mode", ["blackbox", "whitebox", "combined"])
@@ -652,6 +668,11 @@ def test_real_node_runner_prepares_dependencies_before_tests_and_startup(
             "PRISM_FAKE_NPM_CI_EXIT": str(install_exit),
         }
     )
+    if mode == "blackbox":
+        # Exact-scope blackbox starts the already-prepared application but does not run installers.
+        marker.touch()
+        scope, encoded_scope = _http_scope(("/", (404,)), ("/healthz", (200,)))
+        env["PRISM_HTTP_SCOPE_B64"] = encoded_scope
     completed = subprocess.run(
         ["bash", str(RUNNER_PATH)],
         cwd=tmp_path,
@@ -664,16 +685,22 @@ def test_real_node_runner_prepares_dependencies_before_tests_and_startup(
 
     output = completed.stdout + completed.stderr
     npm_calls = npm_log.read_text(encoding="utf-8").splitlines()
+    if mode == "blackbox":
+        assert completed.returncode == 0, output
+        assert marker.is_file()
+        assert npm_calls == ["start"]
+        blackbox = sandbox_service._extract_blackbox_result(output, expected_http_scope=scope)
+        assert blackbox is not None and blackbox["status"] == "passed"
+        assert blackbox["agent_assertions_passed"] is None
+        assert [request["target"] for request in blackbox["requests"]] == ["/", "/healthz"]
+        assert "npm ci" not in output
+        assert "PRISM_AGENT_TESTS_BEGIN" not in output
+        return
     if install_exit == 0:
         assert completed.returncode == 0, output
         assert marker.is_file()
         assert npm_calls.count("ci") == 1
         assert npm_calls.index("ci") < npm_calls.index("test") if mode != "blackbox" else True
-        if mode == "blackbox":
-            assert npm_calls.index("ci") < npm_calls.index("start")
-            blackbox = sandbox_service._extract_blackbox_result(output)
-            assert blackbox is not None and blackbox["status"] == "passed"
-            assert blackbox["agent_assertions_passed"] is True
         if mode in {"whitebox", "combined"}:
             assert npm_calls.index("ci") < npm_calls.index("test")
             assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
@@ -910,24 +937,30 @@ def test_real_runner_prepares_dependencies_before_injected_whitebox_verify(tmp_p
 def test_real_runner_prepares_dependencies_before_injected_blackbox_verify(
     tmp_path, mode, install_exit
 ) -> None:
-    """独立 deploy 黑盒和 combined 的受控验证都先预备依赖，失败不能进入注入脚本。"""
+    """精确黑盒跳过注入验证脚本；combined 仍按现有白盒/黑盒流程准备离线依赖。"""
     import os
     import subprocess
 
     source = tmp_path / "source"
     source.mkdir()
     (source / "package.json").write_text(
-        '{"name":"verify-fixture","version":"1.0.0","scripts":{}}', encoding="utf-8"
+        '{"name":"verify-fixture","version":"1.0.0","scripts":{"start":"node server.js"}}', encoding="utf-8"
     )
     (source / "package-lock.json").write_text(
         '{"name":"verify-fixture","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"verify-fixture","version":"1.0.0"}}}',
         encoding="utf-8",
     )
     (source / "app.js").write_text("module.exports = true;\n", encoding="utf-8")
+    (source / "server.js").write_text(
+        "const http = require('node:http');\n"
+        "http.createServer((_req, res) => { res.writeHead(200); res.end('ok'); })\n"
+        "  .listen(Number(process.env.PORT), '127.0.0.1');\n",
+        encoding="utf-8",
+    )
     (source / "_prism_verify.sh").write_text(
         "#!/bin/sh\n"
-        "test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43\n"
         "printf '%s\\n' \"$1\" >> \"$PRISM_TEST_COMMAND_LOG\"\n"
+        "test -f \"$PRISM_TEST_DEPENDENCY_MARKER\" || exit 43\n"
         "case \"$1\" in\n"
         "  whitebox) printf '%s\\n' 'PRISM_WHITEBOX_DONE {\"executed\":true,\"passed\":true}' ;;\n"
         "  blackbox) printf '%s\\n' 'PRISM_BLACKBOX_DONE "
@@ -943,9 +976,12 @@ def test_real_runner_prepares_dependencies_before_injected_blackbox_verify(
     fake_npm.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$1\" >> \"$PRISM_TEST_NPM_LOG\"\n"
-        "test \"$1\" = ci || exit 64\n"
-        "if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi\n"
-        ": > \"$PRISM_TEST_DEPENDENCY_MARKER\"\n",
+        "case \"$1\" in\n"
+        "  ci) if [ \"$PRISM_FAKE_INSTALL_EXIT\" -ne 0 ]; then exit \"$PRISM_FAKE_INSTALL_EXIT\"; fi; "
+        ": > \"$PRISM_TEST_DEPENDENCY_MARKER\" ;;\n"
+        "  start) exec node server.js ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
         encoding="utf-8",
     )
     fake_npm.chmod(0o755)
@@ -968,6 +1004,9 @@ def test_real_runner_prepares_dependencies_before_injected_blackbox_verify(
             "PRISM_FAKE_INSTALL_EXIT": str(install_exit),
         }
     )
+    if mode == "blackbox":
+        scope, encoded_scope = _http_scope(("/", (200,)))
+        env["PRISM_HTTP_SCOPE_B64"] = encoded_scope
     completed = subprocess.run(
         ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env, text=True,
         capture_output=True, timeout=30, check=False,
@@ -976,11 +1015,21 @@ def test_real_runner_prepares_dependencies_before_injected_blackbox_verify(
     commands = command_log.read_text(encoding="utf-8").splitlines() if command_log.exists() else []
     npm_calls = npm_log.read_text(encoding="utf-8").splitlines()
 
+    if mode == "blackbox":
+        assert completed.returncode == 0, output
+        assert npm_calls == ["start"]
+        assert commands == []
+        blackbox = sandbox_service._extract_blackbox_result(output, expected_http_scope=scope)
+        assert blackbox is not None and blackbox["status"] == "passed"
+        assert blackbox["agent_assertions_passed"] is None
+        assert "PRISM_VERIFY" not in output
+        return
+
     if install_exit == 0:
         assert completed.returncode == 0, output
         assert marker.is_file()
         assert npm_calls == ["ci"]
-        assert commands == (["blackbox"] if mode == "blackbox" else ["whitebox", "blackbox"])
+        assert commands == ["whitebox", "blackbox"]
         if mode == "combined":
             assert 'PRISM_WHITEBOX_DONE {"executed":true,"passed":true}' in output
         blackbox = sandbox_service._extract_blackbox_result(output)

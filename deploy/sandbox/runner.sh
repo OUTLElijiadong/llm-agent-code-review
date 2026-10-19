@@ -3,6 +3,20 @@ set -eu
 
 # This script is part of the trusted runner image. Request payloads cannot
 # replace it or append commands to it.
+if [ "${PRISM_ACTION:-}" = test ] && [ "${PRISM_TEST_MODE:-}" = blackbox ] \
+  && [ -n "${PRISM_HTTP_SCOPE_B64:-}" ] && [ "${PRISM_HTTP_SCOPE_SANITIZED:-}" != 1 ]; then
+  scope_handoff="$(mktemp /tmp/prism-http-scope-handoff.XXXXXX)" || exit 64
+  if ! printf '%s' "$PRISM_HTTP_SCOPE_B64" | base64 -d >"$scope_handoff" 2>/dev/null; then
+    rm -f "$scope_handoff"
+    exit 64
+  fi
+  export PRISM_HTTP_SCOPE_FILE="$scope_handoff"
+  export PRISM_HTTP_SCOPE_SANITIZED=1
+  unset PRISM_HTTP_SCOPE_B64
+  # Replace the process that received the encoded plan before any target code
+  # starts, so it cannot recover the original environment through /proc.
+  exec /bin/bash "$0" "$@"
+fi
 readonly action="${PRISM_ACTION:-}"
 readonly language="${PRISM_LANGUAGE:-}"
 readonly test_mode="${PRISM_TEST_MODE:-whitebox}"
@@ -33,6 +47,7 @@ runner_reserve_seconds=$((test_timeout_seconds / 10))
 [ "$runner_reserve_seconds" -le 10 ] || runner_reserve_seconds=10
 runner_deadline=$((SECONDS + test_timeout_seconds - runner_reserve_seconds))
 RUN_BOUNDED_TIMED_OUT=0
+runner_scoped_mode=0
 
 remaining_runner_seconds() {
   remaining_seconds=$((runner_deadline - SECONDS))
@@ -480,7 +495,7 @@ run_test() {
   fi
   # deploy 后自动测试链注入 _prism_verify.sh 时优先执行它(固定后端脚本,非任意命令)。
   # 反编译前置必须先完成,避免注入脚本绕过 Android 证据门禁。
-  if [ -f ./_prism_verify.sh ]; then
+  if [ -f ./_prism_verify.sh ] && [ -z "${PRISM_HTTP_SCOPE_B64:-}" ]; then
     bash ./_prism_verify.sh whitebox
     return $?
   fi
@@ -609,7 +624,10 @@ run_test() {
       fi
       ;;
   esac
-  if ! run_agent_tests; then
+  if [ -n "${PRISM_HTTP_SCOPE_B64:-}" ]; then
+    printf '%s\n' 'whitebox: skipping persisted/AI-generated agent tests in exact HTTP scope mode'
+    printf '%s\n' 'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":0,"passed":0,"failed":0,"passed_count":0,"files":{},"file_results":{}} PRISM_AGENT_TESTS_END'
+  elif ! run_agent_tests; then
     test_failed=1
   fi
   collect_facts
@@ -757,8 +775,11 @@ php_doc_root() {
 
 run_deploy() {
   # 后端部署核验 agent 生成的补全启动脚本优先(受控注入,固定由本 runner 调用)
-  if [ -f ./_prism_launch.sh ]; then
+  if [ -f ./_prism_launch.sh ] && [ "$runner_scoped_mode" -ne 1 ]; then
     exec sh ./_prism_launch.sh
+  fi
+  if [ -f ./_prism_launch.sh ] && [ "$runner_scoped_mode" -eq 1 ]; then
+    printf '%s\n' 'exact HTTP scope: skipping persisted/AI-generated launch patch; using fixed runtime startup' >&2
   fi
   export HOST=127.0.0.1
   export PORT="$preview_port"
@@ -985,7 +1006,267 @@ discover_route_candidates() {
   } | awk 'substr($0, 1, 1) == "/" && !seen[$0]++ {print $0}' | head -n 80
 }
 
+scope_now_ms() {
+  if scope_ms="$(date +%s%3N 2>/dev/null)" && [[ "$scope_ms" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$scope_ms"
+  else
+    printf '%s000' "$SECONDS"
+  fi
+}
+
+run_scoped_blackbox() {
+  scope_plan="${PRISM_HTTP_SCOPE_FILE:-}"
+  if [ -z "$scope_plan" ] || [ ! -f "$scope_plan" ] || [ -L "$scope_plan" ]; then
+    rm -f "$scope_plan"
+    printf '%s\n' '精确 HTTP 白名单缺失或编码无效，已失败关闭' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+    return 1
+  fi
+  scope_count="$(wc -l <"$scope_plan" | tr -d ' ')"
+  case "$scope_count" in ''|*[!0-9]*) scope_count=0 ;; esac
+  if [ "$scope_count" -lt 1 ] || [ "$scope_count" -gt 20 ] || ! grep -Eq '^GET[[:space:]]/[[:space:]](-|[0-9,]+)$' "$scope_plan"; then
+    rm -f "$scope_plan"
+    printf '%s\n' '精确 HTTP 白名单条目数量或根路径探活条目无效，已失败关闭' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+    return 1
+  fi
+  local -a scope_methods=() scope_targets=() scope_statuses_list=()
+  validated_scope_count=0
+  while IFS=$'\t' read -r scope_method scope_target scope_statuses; do
+    scope_path="${scope_target%%\?*}"
+    if [ "$scope_method" != GET ] || ! printf '%s' "$scope_target" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@/?-]*$' \
+      || ! printf '%s' "$scope_path" | grep -Eq '^/[A-Za-z0-9._~!$&+,;=@/-]*$' \
+      || [[ "$scope_target" == //* ]] || [[ "$scope_target" == *#* ]] || [[ "$scope_target" == *\\* ]] \
+      || [[ "$scope_target" == *$'\r'* ]] || [[ "$scope_target" == *$'\n'* ]] \
+      || [[ "$scope_target" =~ (^|/)\.\.?(/|\?|$) ]] \
+      || { [ "$scope_statuses" != - ] && ! printf '%s' "$scope_statuses" | grep -Eq '^[1-5][0-9][0-9](,[1-5][0-9][0-9])*$'; }; then
+      rm -f "$scope_plan"
+      printf '%s\n' '精确 HTTP 白名单含无效目标，已失败关闭' >&2
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+      return 1
+    fi
+    if [[ "$scope_target" == *\?* ]]; then
+      scope_query="${scope_target#*\?}"
+      [[ -n "$scope_query" && "$scope_query" != *\?* ]] || {
+        rm -f "$scope_plan"
+        printf '%s\n' '精确 HTTP 白名单查询串无效，已失败关闭' >&2
+        printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+        return 1
+      }
+      IFS='&' read -r -a scope_query_pairs <<< "$scope_query"
+      scope_query_keys=()
+      scope_query_key_count=0
+      for scope_pair in "${scope_query_pairs[@]}"; do
+        scope_key="${scope_pair%%=*}"
+        scope_value="${scope_pair#*=}"
+        duplicate_query_key=0
+        if [ "$scope_query_key_count" -gt 0 ]; then
+          for ((scope_query_index = 0; scope_query_index < scope_query_key_count; scope_query_index += 1)); do
+            [ "${scope_query_keys[$scope_query_index]}" != "$scope_key" ] || duplicate_query_key=1
+          done
+        fi
+        if [[ "$scope_pair" != *=* ]] || ! [[ "$scope_key" =~ ^[A-Za-z0-9_.~-]{1,80}$ ]] \
+          || ! [[ "$scope_value" =~ ^[A-Za-z0-9_.~-]*$ ]] || [ "${#scope_value}" -gt 512 ] \
+          || [ "$scope_value" = . ] || [ "$scope_value" = .. ] \
+          || [ "$duplicate_query_key" -eq 1 ]; then
+          rm -f "$scope_plan"
+          printf '%s\n' '精确 HTTP 白名单查询参数超出安全字符限制，已失败关闭' >&2
+          printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+          return 1
+        fi
+        scope_query_keys[$scope_query_key_count]="$scope_key"
+        scope_query_key_count=$((scope_query_key_count + 1))
+      done
+      [ "${#scope_query_pairs[@]}" -le 10 ] || {
+        rm -f "$scope_plan"
+        printf '%s\n' '精确 HTTP 白名单查询参数超过数量上限，已失败关闭' >&2
+        printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+        return 1
+      }
+    fi
+    duplicate_scope_target=0
+    if [ "$validated_scope_count" -gt 0 ]; then
+      for ((seen_scope_index = 0; seen_scope_index < validated_scope_count; seen_scope_index += 1)); do
+        [ "${scope_targets[$seen_scope_index]}" != "$scope_target" ] || duplicate_scope_target=1
+      done
+    fi
+    if [ "$duplicate_scope_target" -eq 1 ]; then
+      rm -f "$scope_plan"
+      printf '%s\n' '精确 HTTP 白名单存在重复目标，已失败关闭' >&2
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+      return 1
+    fi
+    scope_methods+=("$scope_method")
+    scope_targets+=("$scope_target")
+    scope_statuses_list+=("$scope_statuses")
+    validated_scope_count=$((validated_scope_count + 1))
+  done <"$scope_plan"
+  rm -f "$scope_plan"
+  # The application under test is untrusted; it must not be able to read the
+  # exact request plan and use it to make additional loopback requests.
+  unset PRISM_HTTP_SCOPE_FILE
+  unset PRISM_HTTP_SCOPE_SANITIZED
+  unset PRISM_HTTP_SCOPE_B64
+  # Runner-only, unexported marker: keep the target from seeing it while
+  # ensuring run_deploy skips any persisted or AI-generated launch patch.
+  runner_scoped_mode=1
+
+  app_pid=""
+  stop_scoped_app() {
+    [ -n "${app_pid:-}" ] || return 0
+    kill -TERM "-$app_pid" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "-$app_pid" >/dev/null 2>&1 || true
+    wait "$app_pid" >/dev/null 2>&1 || true
+    app_pid=""
+  }
+  trap 'stop_scoped_app; exit 130' INT
+  trap 'stop_scoped_app; exit 143' TERM
+  trap 'stop_scoped_app' EXIT
+  set -m
+  run_deploy >"$blackbox_app_log" 2>&1 &
+  app_pid="$!"
+  set +m
+  stable=0
+  attempts=0
+  startup_deadline=$((SECONDS + startup_timeout_seconds))
+  [ "$runner_deadline" -lt "$startup_deadline" ] && startup_deadline="$runner_deadline"
+  printf 'blackbox stage=scoped_application_readiness started elapsed=%ss\n' "$SECONDS"
+  while [ "$attempts" -lt "$startup_timeout_seconds" ] && [ "$SECONDS" -lt "$startup_deadline" ]; do
+    if bash -c '
+      port="$1"
+      exec 3<>"/dev/tcp/127.0.0.1/$port"
+      exec 3>&-
+      exec 3<&-
+    ' prism-scoped-readiness "$preview_port" 2>/dev/null; then
+      stable=$((stable + 1))
+      [ "$stable" -ge 3 ] && break
+    else
+      stable=0
+    fi
+    if ! kill -0 "$app_pid" >/dev/null 2>&1; then
+      printf '%s\n' 'blackbox scoped application exited before readiness' >&2
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"application_startup","failure_reason":"application_exited_before_ready"}\n'
+      return 1
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+  done
+  if [ "$stable" -lt 3 ]; then
+    printf '%s\n' 'blackbox scoped application readiness timed out' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"application_startup","failure_reason":"application_readiness_timeout"}\n'
+    return 1
+  fi
+
+  requests_json=""
+  completed_count=0
+  all_passed=true
+  all_assertions_configured=true
+  root_status=0
+  for ((scope_index = 0; scope_index < scope_count; scope_index += 1)); do
+    scope_method="${scope_methods[$scope_index]}"
+    scope_target="${scope_targets[$scope_index]}"
+    scope_statuses="${scope_statuses_list[$scope_index]}"
+    request_started="$(scope_now_ms)"
+    request_summary=""
+    if request_summary="$(timeout --signal=TERM --kill-after=1s 7s bash -c '
+      set -eu
+      port="$1"
+      target="$2"
+      exec 3<>"/dev/tcp/127.0.0.1/$port"
+      printf "GET %s HTTP/1.0\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n" "$target" >&3
+      IFS= read -r -t 3 status_line <&3 || exit 20
+      cr="$(printf "\\r")"
+      case "$status_line" in
+        HTTP/*\ [1-5][0-9][0-9]\ *) code="${status_line#HTTP/* }"; code="${code%% *}" ;;
+        *) exit 21 ;;
+      esac
+      header_count=0
+      while IFS= read -r -t 3 header_line <&3; do
+        [ "$header_line" != "$cr" ] || break
+        header_count=$((header_count + 1))
+        [ "$header_count" -le 100 ] || exit 22
+      done
+      body_bytes="$(head -c 65536 <&3 | wc -c | tr -d " ")"
+      printf "%s %s" "$code" "$body_bytes"
+    ' prism-scoped-request "$preview_port" "$scope_target" 2>/dev/null)"; then
+      response_status="${request_summary%% *}"
+      response_bytes="${request_summary#* }"
+      case "$response_status:$response_bytes" in *[!0-9:]*|:|*:) response_status=0; response_bytes=0 ;; esac
+      request_finished="$(scope_now_ms)"
+      elapsed_ms=$((request_finished - request_started))
+      [ "$elapsed_ms" -ge 0 ] || elapsed_ms=0
+      if [ "$scope_statuses" = - ]; then
+        assertion_status="not_configured"
+        all_assertions_configured=false
+        if [ "$response_status" -ge 100 ] && [ "$response_status" -lt 500 ]; then request_passed=true; else request_passed=false; fi
+      elif [[ ",$scope_statuses," == *",$response_status,"* ]]; then
+        assertion_status="matched"
+        request_passed=true
+      else
+        assertion_status="mismatch"
+        request_passed=false
+      fi
+      if [ "$scope_target" = / ]; then root_status="$response_status"; fi
+      completed_count=$((completed_count + 1))
+    else
+      response_status=0
+      response_bytes=0
+      request_finished="$(scope_now_ms)"
+      elapsed_ms=$((request_finished - request_started))
+      [ "$elapsed_ms" -ge 0 ] || elapsed_ms=0
+      assertion_status="no_response"
+      request_passed=false
+    fi
+    [ "$request_passed" = true ] || all_passed=false
+    if [ -n "$requests_json" ]; then requests_json+=","; fi
+    truncated=false
+    [ "$response_bytes" -lt 65536 ] || truncated=true
+    requests_json+="{\"method\":\"GET\",\"target\":\"$scope_target\",\"status_code\":$response_status,\"response_bytes\":$response_bytes,\"response_truncated\":$truncated,\"elapsed_ms\":$elapsed_ms,\"expected_statuses\":["
+    if [ "$scope_statuses" != - ]; then
+      status_csv="${scope_statuses//,/ }"
+      status_first=true
+      for status_code in $status_csv; do
+        if [ "$status_first" != true ]; then requests_json+=","; fi
+        requests_json+="$status_code"
+        status_first=false
+      done
+    fi
+    assertion_json="false"
+    [ "$scope_statuses" != - ] || assertion_json="true"
+    requests_json+="] ,\"assertion_not_configured\":$assertion_json,\"assertion_status\":\"$assertion_status\",\"request_passed\":$request_passed}"
+    printf 'blackbox scoped request method=GET target=%s status=%s bytes=%s elapsed_ms=%s assertion=%s passed=%s\n' \
+      "$scope_target" "$response_status" "$response_bytes" "$elapsed_ms" "$assertion_status" "$request_passed"
+  done
+  [ "$completed_count" -eq "$scope_count" ] || all_passed=false
+  stop_scoped_app
+  trap - EXIT INT TERM
+  if [ "$all_passed" = true ]; then
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":true,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":true,"route":"/","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
+      "$root_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
+    return 0
+  fi
+  printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":%s,"agent_assertions_passed":null,"request_count":%s,"response_count":%s,"requests":[%s],"all_status_assertions_configured":%s}\n' \
+    "$root_status" "$scope_count" "$completed_count" "$requests_json" "$all_assertions_configured"
+  return 1
+}
+
 run_blackbox() {
+  if [ "$action" = test ] && [ "$test_mode" = blackbox ]; then
+    if [ -z "${PRISM_HTTP_SCOPE_FILE:-}" ] || [ "${PRISM_HTTP_SCOPE_SANITIZED:-}" != 1 ]; then
+      printf '%s\n' '本地黑盒测试没有精确 HTTP 白名单，已失败关闭' >&2
+      printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_missing"}\n'
+      return 1
+    fi
+    # 白名单模式不安装依赖，也不运行项目测试或构建插件；仅启动应用并发送固定 GET 计划。
+    run_scoped_blackbox
+    return $?
+  fi
+  if [ "$action" = test ] && [ "$test_mode" = combined ] && [ -n "${PRISM_HTTP_SCOPE_B64:-}" ]; then
+    printf '%s\n' '组合测试不接受精确 HTTP 白名单，已失败关闭' >&2
+    printf 'PRISM_BLACKBOX_DONE {"executed":true,"passed":false,"basis":"exact_http_allowlist","scope_enforced":true,"route_passed":false,"route":"/","status_code":0,"agent_assertions_passed":null,"request_count":0,"requests":[],"failure_kind":"scope_invalid"}\n'
+    return 1
+  fi
   printf 'blackbox stage=dependency_preparation elapsed=%ss\n' "$SECONDS"
   # 依赖准备必须覆盖受控 deploy 黑盒脚本：部署自动核验会为 whitebox/blackbox
   # 分别启动一次性 worker，不能假定先前的白盒容器已经填好依赖缓存。

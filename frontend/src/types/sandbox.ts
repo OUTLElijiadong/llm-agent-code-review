@@ -2,6 +2,13 @@ export type SandboxLanguage = 'python' | 'node' | 'java' | 'go' | 'php'
 export type SandboxTestMode = 'whitebox' | 'blackbox' | 'combined' | 'deploy'
 export type SandboxPurpose = 'test' | 'deploy'
 
+export interface SandboxHttpRequestScope {
+  method: 'GET'
+  path: string
+  query: Record<string, string>
+  expected_statuses: number[]
+}
+
 export interface SandboxCreateInput {
   project_id: number
   purpose: SandboxPurpose
@@ -14,6 +21,7 @@ export interface SandboxCreateInput {
   remote_target_url?: string
   remote_target_authorized: boolean
   remote_target_approval_token?: string
+  http_scope?: SandboxHttpRequestScope[]
 }
 
 export interface SandboxRemoteTargetAuthorizationInput {

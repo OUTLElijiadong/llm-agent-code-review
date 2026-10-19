@@ -1,9 +1,11 @@
 """MCP、能力搜索和代码沙箱 API Schema。"""
 
+import re
+import urllib.parse
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StrictInt, StrictStr, field_validator, model_validator
 
 
 class McpServerUpsertIn(BaseModel):
@@ -80,6 +82,59 @@ class SandboxWorkerUpsertIn(BaseModel):
     enabled: bool = False
 
 
+class SandboxHttpRequestScope(BaseModel):
+    """单条本地黑盒 HTTP 白名单规则；路径和查询参数均按精确值匹配。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["GET"] = "GET"
+    path: str = Field(min_length=1, max_length=512)
+    query: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    expected_statuses: list[StrictInt] = Field(default_factory=list, max_length=20)
+
+    @field_validator("path")
+    @classmethod
+    def validate_exact_path(cls, value: str) -> str:
+        path = str(value or "")
+        if (
+            not re.fullmatch(r"/(?!/)[A-Za-z0-9._~!$&+,;=@/-]*", path)
+            or "//" in path
+        ):
+            raise ValueError("路径必须是精确的本地 URL 路径，不能含通配符、查询串、片段或双重编码")
+        if "\\" in path or any(segment in {".", ".."} for segment in path.split("/")):
+            raise ValueError("路径不能包含反斜杠或目录穿越段")
+        return path
+
+    @field_validator("query")
+    @classmethod
+    def validate_exact_query(cls, value: dict[str, str]) -> dict[str, str]:
+        if not isinstance(value, dict) or len(value) > 10:
+            raise ValueError("查询参数最多允许 10 个精确键值对")
+        normalized: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+                raise ValueError("查询参数名称和值必须是字符串")
+            key = raw_key
+            item = raw_value
+            if not re.fullmatch(r"[A-Za-z0-9_.~-]{1,80}", key) or not re.fullmatch(r"[A-Za-z0-9_.~-]{0,512}", item):
+                raise ValueError("查询参数名称或值超出白名单限制")
+            if item in {".", ".."}:
+                raise ValueError("查询参数值不能是目录穿越段")
+            normalized[key] = item
+        if len(urllib.parse.urlencode(normalized).encode("ascii")) > 2048:
+            raise ValueError("编码后的查询参数总长度不能超过 2048 字节")
+        return normalized
+
+    @field_validator("expected_statuses")
+    @classmethod
+    def validate_expected_statuses(cls, value: list[int]) -> list[int]:
+        if len(value) > 20 or any(type(code) is not int or not 100 <= code <= 599 for code in value):
+            raise ValueError("预期 HTTP 状态码必须在 100–599 之间")
+        if len(set(value)) != len(value):
+            raise ValueError("预期 HTTP 状态码不能重复")
+        return value
+
+
 class SandboxCreateIn(BaseModel):
     project_id: int = Field(gt=0)
     purpose: Literal["test", "deploy"]
@@ -92,6 +147,29 @@ class SandboxCreateIn(BaseModel):
     remote_target_url: Optional[HttpUrl] = None
     remote_target_authorized: bool = False
     remote_target_approval_token: Optional[str] = Field(default=None, max_length=120)
+    http_scope: Optional[list[SandboxHttpRequestScope]] = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_http_scope(self) -> "SandboxCreateIn":
+        local_bounded_blackbox = (
+            self.purpose == "test"
+            and self.remote_target_url is None
+            and self.test_mode == "blackbox"
+        )
+        if not local_bounded_blackbox:
+            if self.http_scope is not None:
+                raise ValueError("HTTP 白名单仅适用于本地黑盒测试")
+            return self
+        if not self.http_scope:
+            raise ValueError("本地黑盒测试必须提供精确 HTTP 路径白名单")
+        if self.db_type == "mysql":
+            raise ValueError("精确 HTTP 白名单模式不能连接非 loopback 测试数据库网络")
+        targets = [(item.path, tuple(sorted(item.query.items()))) for item in self.http_scope]
+        if len(set(targets)) != len(targets):
+            raise ValueError("HTTP 白名单不能包含重复请求目标")
+        if ("/", ()) not in targets:
+            raise ValueError("HTTP 白名单必须包含不带查询参数的 GET / 探活条目")
+        return self
 
     @field_validator("remote_target_authorized")
     @classmethod

@@ -1257,6 +1257,166 @@ def test_blackbox_receipt_fails_closed_on_missing_duplicate_or_invalid_receipt()
     assert _extract_blackbox_result("no runner marker") is None
 
 
+def test_exact_http_scope_receipt_matches_the_persisted_allowlist_and_never_saves_body() -> None:
+    scope = [
+        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]},
+        {"method": "GET", "path": "/about.php", "query": {"page": "1"}, "expected_statuses": [404]},
+    ]
+    receipt = {
+        "executed": True,
+        "passed": True,
+        "basis": "exact_http_allowlist",
+        "scope_enforced": True,
+        "route_passed": True,
+        "route": "/",
+        "status_code": 200,
+        "agent_assertions_passed": None,
+        "request_count": 2,
+        "response_count": 2,
+        "all_status_assertions_configured": True,
+        "requests": [
+            {
+                "method": "GET", "target": "/", "status_code": 200,
+                "response_bytes": 12, "response_truncated": False, "elapsed_ms": 5,
+                "expected_statuses": [200], "assertion_not_configured": False,
+                "assertion_status": "matched", "request_passed": True,
+            },
+            {
+                "method": "GET", "target": "/about.php?page=1", "status_code": 404,
+                "response_bytes": 65_536, "response_truncated": True, "elapsed_ms": 11,
+                "expected_statuses": [404], "assertion_not_configured": False,
+                "assertion_status": "matched", "request_passed": True,
+            },
+        ],
+    }
+
+    result = _extract_blackbox_result(
+        "PRISM_BLACKBOX_DONE " + json.dumps(receipt),
+        expected_http_scope=scope,
+    )
+
+    assert result is not None
+    assert result["status"] == "passed"
+    assert result["requests"][1]["target"] == "/about.php?page=1"
+    assert result["requests"][1]["response_truncated"] is True
+    assert result["response_bodies_saved"] is False
+    assert "body" not in result and "response_body" not in result
+    assert _extract_blackbox_result(
+        "PRISM_BLACKBOX_DONE " + json.dumps(receipt),
+        expected_http_scope=scope,
+        logs_truncated=True,
+    ) is None
+
+    for mutate in (
+        lambda value: value["requests"].append(value["requests"][0]),
+        lambda value: value["requests"][1].update(target="/unlisted.php"),
+        lambda value: value["requests"][0].update(response_body="sensitive"),
+        lambda value: value.update(request_count=1),
+        lambda value: value.update(basis="route_smoke"),
+    ):
+        invalid = json.loads(json.dumps(receipt))
+        mutate(invalid)
+        output = "PRISM_BLACKBOX_DONE " + json.dumps(invalid)
+        assert _extract_blackbox_result(output, expected_http_scope=scope) is None
+
+
+def test_exact_http_scope_is_reported_as_partial_with_explicit_coverage_gap() -> None:
+    execution = {
+        "status": "passed", "passed": True, "route_passed": True, "route": "/", "status_code": 200,
+        "basis": "exact_http_allowlist", "scope_enforced": True,
+        "requests": [{
+            "method": "GET", "target": "/", "status_code": 200, "response_bytes": 3,
+            "response_truncated": False, "elapsed_ms": 2, "expected_statuses": [200],
+            "assertion_not_configured": False, "assertion_status": "matched", "request_passed": True,
+        }],
+        "request_count": 1, "response_count": 1, "all_status_assertions_configured": True,
+        "response_bodies_saved": False,
+    }
+    result = {
+        "passed": True,
+        "summary": "黑盒请求全部符合预期",
+        "evidence": {
+            "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+            "agent_test_generation": {"status": "skipped", "mode": "blackbox"},
+            "blackbox_execution": execution,
+        },
+    }
+    coverage = _sandbox_verification_coverage(result)
+
+    assert coverage["verification_status"] == "partial"
+    assert coverage["http_scope_enforced"] is True
+    report = _sandbox_execution_disclosure({"passed": True, "evidence": result["evidence"]})
+    assert "## 精确 HTTP 请求范围" in report
+    assert "`GET /`：HTTP 200" in report
+    assert "不保存或输出 HTTP 响应正文" in report
+    assert "未执行白名单之外的路径发现" in report
+
+
+def test_exact_http_scope_report_skips_all_ai_calls_and_publishes_deterministic_content(monkeypatch) -> None:
+    published: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+    events: list[tuple[Any, ...]] = []
+    commits: list[bool] = []
+
+    def forbidden_ai_call(*_args, **_kwargs):
+        raise AssertionError("精确白名单黑盒不应配置或调用 AI Agent")
+
+    def publish(_db, _environment, conclusion, report_md, **kwargs):
+        published.append((conclusion, report_md, kwargs))
+        return {"report_persisted": True, "artifact_id": "artifact-1", "report_task_id": 77, "issues": 0}
+
+    monkeypatch.setattr(sandbox_service, "configure_subagent", forbidden_ai_call)
+    monkeypatch.setattr(sandbox_service, "_publish_sandbox_report", publish)
+    monkeypatch.setattr(sandbox_service, "_append_event", lambda *args: events.append(args))
+    conclusion = {
+        "passed": True,
+        "execution_status": "succeeded",
+        "summary": "指定 HTTP 请求符合状态断言",
+        "evidence": {
+            "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+            "agent_test_generation": {"status": "skipped", "mode": "blackbox"},
+            "blackbox_execution": {
+                "basis": "exact_http_allowlist",
+                "scope_enforced": True,
+                "status": "passed",
+                "passed": True,
+                "route_passed": True,
+                "route": "/",
+                "status_code": 200,
+                "requests": [{
+                    "method": "GET", "target": "/", "status_code": 200,
+                    "response_bytes": 2, "response_truncated": False, "elapsed_ms": 1,
+                    "expected_statuses": [200], "assertion_not_configured": False,
+                    "assertion_status": "matched", "request_passed": True,
+                }],
+                "request_count": 1,
+                "response_count": 1,
+                "all_status_assertions_configured": True,
+                "response_bodies_saved": False,
+            },
+        },
+    }
+    environment = SimpleNamespace(owner_id=5, project_id=9, public_id="scope-smoke", test_mode="blackbox")
+    db = SimpleNamespace(commit=lambda: commits.append(True))
+
+    summary = sandbox_service._run_test_review_report(db, environment, conclusion)
+
+    assert summary is not None
+    assert summary["ai_review_status"] == "skipped"
+    assert summary["review_mode"] == "deterministic_allowlist"
+    assert summary["roles_executed"] == summary["roles_total"] == 0
+    assert summary["report_persisted"] is True
+    assert conclusion["ai_review_status"] == "skipped"
+    assert len(published) == 1
+    report_md = published[0][1]
+    assert "多 Agent AI 审查：按执行策略跳过" in report_md
+    assert "没有调用模型" in report_md
+    assert "未执行白名单之外的路径发现" in report_md
+    assert "**" not in report_md
+    assert published[0][2]["_authoritative_ai_review"] is True
+    assert events and events[0][1:4] == (environment, "complete", "multi_agent_review")
+    assert commits == [True]
+
+
 def test_agent_runner_timeout_is_reported_as_execution_timeout_not_protocol_error() -> None:
     result = _extract_agent_tests_result(
         'PRISM_AGENT_TESTS_BEGIN {"protocol_version":2,"generated":1,"passed":0,"failed":1,'

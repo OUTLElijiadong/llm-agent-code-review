@@ -63,6 +63,7 @@ from app.models.agent_capability import (
 from app.models.agent_governance import AgentAlert, ApprovalItem
 from app.models.project import Project
 from app.models.user import User
+from app.schemas.agent_capability import SandboxHttpRequestScope
 from app.services import (
     audit_service,
     decompilation_service,
@@ -221,6 +222,7 @@ _WORKER_EXECUTE_FIELDS = frozenset(
         "image_digest",
     }
 )
+_WORKER_EXECUTE_OPTIONAL_FIELDS = frozenset({"http_scope"})
 
 
 def _worker_execute_payload(request_envelope: dict[str, Any], source_archive_base64: str) -> dict[str, Any]:
@@ -229,7 +231,8 @@ def _worker_execute_payload(request_envelope: dict[str, Any], source_archive_bas
     Revision and repair metadata stay in the durable backend execution ledger. The
     Worker only receives fields it uses to validate and run the immutable archive.
     """
-    payload = {key: request_envelope[key] for key in _WORKER_EXECUTE_FIELDS if key in request_envelope}
+    allowed_fields = _WORKER_EXECUTE_FIELDS | _WORKER_EXECUTE_OPTIONAL_FIELDS
+    payload = {key: request_envelope[key] for key in allowed_fields if key in request_envelope}
     payload["source_archive_base64"] = source_archive_base64
     required = _WORKER_EXECUTE_FIELDS | {"source_archive_base64"}
     missing = sorted(required.difference(payload))
@@ -4724,9 +4727,16 @@ def _extract_decompilation_result(log_text: str) -> dict[str, Any] | None:
     }
 
 
-def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
+def _extract_blackbox_result(
+    log_text: str,
+    *,
+    expected_http_scope: list[dict[str, Any]] | None = None,
+    logs_truncated: bool = False,
+) -> dict[str, Any] | None:
     """Read the runner's isolated smoke-test receipt; duplicate or malformed receipts are invalid."""
     records: list[dict[str, Any]] = []
+    if expected_http_scope is not None and logs_truncated:
+        return None
     for match in re.finditer(r"PRISM_BLACKBOX_DONE\s*(\{[^\n]*\})", str(log_text or "")):
         try:
             value = json.loads(match.group(1))
@@ -4737,6 +4747,12 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
     if len(records) != 1:
         return None
     result = records[0]
+    if expected_http_scope is not None:
+        if result.get("basis") != "exact_http_allowlist":
+            return None
+        return _extract_exact_http_scope_result(result, expected_http_scope)
+    if result.get("basis") == "exact_http_allowlist":
+        return _extract_exact_http_scope_result(result, expected_http_scope)
     route = str(result.get("route") or "")
     status_code = result.get("status_code")
     route_passed = result.get("route_passed")
@@ -4840,6 +4856,163 @@ def _extract_blackbox_result(log_text: str) -> dict[str, Any] | None:
     return receipt
 
 
+def _extract_exact_http_scope_result(
+    result: dict[str, Any],
+    expected_http_scope: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """核对 runner 回执与服务端持久化白名单完全一致，且只接受无正文证据。"""
+    if not isinstance(expected_http_scope, list) or not 1 <= len(expected_http_scope) <= 20:
+        return None
+    if (
+        result.get("executed") is not True
+        or result.get("scope_enforced") is not True
+        or type(result.get("passed")) is not bool
+        or type(result.get("route_passed")) is not bool
+        or result.get("agent_assertions_passed") is not None
+    ):
+        return None
+    failure_kind = result.get("failure_kind")
+    if failure_kind is not None:
+        failure_reason = result.get("failure_reason")
+        if (
+            failure_kind not in {"scope_invalid", "scope_missing", "application_startup"}
+            or (failure_reason is not None and failure_reason not in {
+                "application_exited_before_ready",
+                "application_readiness_timeout",
+            })
+            or (failure_reason is not None and failure_kind != "application_startup")
+            or result.get("passed") is not False
+            or result.get("route_passed") is not False
+            or result.get("requests") != []
+            or result.get("request_count") != 0
+            or result.get("status_code") != 0
+        ):
+            return None
+        failure_receipt = {
+            "status": "failed",
+            "passed": False,
+            "route_passed": False,
+            "route": "/",
+            "status_code": 0,
+            "basis": "exact_http_allowlist",
+            "scope_enforced": True,
+            "agent_assertions_passed": None,
+            "failure_kind": failure_kind,
+            "requests": [],
+            "request_count": 0,
+            "response_count": 0,
+            "all_status_assertions_configured": False,
+            "response_bodies_saved": False,
+        }
+        if failure_reason is not None:
+            failure_receipt["failure_reason"] = failure_reason
+        return failure_receipt
+
+    raw_requests = result.get("requests")
+    if (
+        not isinstance(raw_requests, list)
+        or len(raw_requests) != len(expected_http_scope)
+        or type(result.get("request_count")) is not int
+        or result.get("request_count") != len(expected_http_scope)
+    ):
+        return None
+    normalized_requests: list[dict[str, Any]] = []
+    expected_all_assertions = True
+    response_count = 0
+    every_request_passed = True
+    root_status: int | None = None
+    for actual, expected in zip(raw_requests, expected_http_scope, strict=True):
+        if not isinstance(actual, dict):
+            return None
+        query = expected.get("query") if isinstance(expected.get("query"), dict) else {}
+        query_string = urllib.parse.urlencode(sorted(query.items()))
+        target = str(expected.get("path") or "/") + (f"?{query_string}" if query_string else "")
+        statuses = expected.get("expected_statuses")
+        expected_statuses = statuses if isinstance(statuses, list) else []
+        expected_keys = {
+            "method", "target", "status_code", "response_bytes", "response_truncated",
+            "elapsed_ms", "expected_statuses", "assertion_not_configured", "assertion_status", "request_passed",
+        }
+        status_code = actual.get("status_code")
+        response_bytes = actual.get("response_bytes")
+        elapsed_ms = actual.get("elapsed_ms")
+        assertion_not_configured = not expected_statuses
+        if (
+            set(actual) != expected_keys
+            or actual.get("method") != "GET"
+            or actual.get("target") != target
+            or actual.get("expected_statuses") != expected_statuses
+            or type(status_code) is not int
+            or (status_code != 0 and not 100 <= status_code <= 599)
+            or type(response_bytes) is not int
+            or not 0 <= response_bytes <= 65_536
+            or actual.get("response_truncated") is not (response_bytes >= 65_536)
+            or type(elapsed_ms) is not int
+            or not 0 <= elapsed_ms <= 3_600_000
+            or actual.get("assertion_not_configured") is not assertion_not_configured
+            or type(actual.get("request_passed")) is not bool
+        ):
+            return None
+        if assertion_not_configured:
+            expected_all_assertions = False
+            assertion_status = "no_response" if status_code == 0 else "not_configured"
+            request_passed = 100 <= status_code < 500
+        elif status_code == 0:
+            assertion_status = "no_response"
+            request_passed = False
+        elif status_code in expected_statuses:
+            assertion_status = "matched"
+            request_passed = True
+        else:
+            assertion_status = "mismatch"
+            request_passed = False
+        if actual.get("assertion_status") != assertion_status or actual.get("request_passed") is not request_passed:
+            return None
+        if status_code:
+            response_count += 1
+        if target == "/":
+            root_status = status_code
+        every_request_passed = every_request_passed and request_passed
+        normalized_requests.append({
+            "method": "GET",
+            "target": target,
+            "status_code": status_code,
+            "response_bytes": response_bytes,
+            "response_truncated": actual["response_truncated"],
+            "elapsed_ms": elapsed_ms,
+            "expected_statuses": expected_statuses,
+            "assertion_not_configured": assertion_not_configured,
+            "assertion_status": assertion_status,
+            "request_passed": request_passed,
+        })
+    passed = result.get("passed")
+    if (
+        passed is not every_request_passed
+        or result.get("route_passed") is not every_request_passed
+        or result.get("response_count") != response_count
+        or result.get("all_status_assertions_configured") is not expected_all_assertions
+        or (root_status is None and expected_all_assertions)
+        or type(result.get("status_code")) is not int
+        or result.get("status_code") != (root_status or 0)
+    ):
+        return None
+    return {
+        "status": "passed" if passed else "failed",
+        "passed": passed,
+        "route_passed": passed,
+        "route": "/",
+        "status_code": root_status or 0,
+        "basis": "exact_http_allowlist",
+        "scope_enforced": True,
+        "agent_assertions_passed": None,
+        "requests": normalized_requests,
+        "request_count": len(normalized_requests),
+        "response_count": response_count,
+        "all_status_assertions_configured": expected_all_assertions,
+        "response_bodies_saved": False,
+    }
+
+
 def _remote_blackbox_execution(remote_probe: dict[str, Any]) -> dict[str, Any]:
     """A remote redirect or 4xx proves reachability, not a successful final route check."""
     status_code = remote_probe.get("status_code")
@@ -4886,6 +5059,7 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         dynamic_state = "unknown"
     blackbox = evidence.get("blackbox_execution")
     blackbox = blackbox if isinstance(blackbox, dict) else {}
+    exact_http_scope = blackbox.get("basis") == "exact_http_allowlist" and blackbox.get("scope_enforced") is True
     blackbox_state = str(blackbox.get("status") or "not_required")
     if mode in {"blackbox", "combined"} and blackbox_state == "not_required":
         blackbox_state = "unknown"
@@ -4924,12 +5098,15 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         or dynamic_state in {"skipped", "unknown"}
         or (mode in {"blackbox", "combined"} and blackbox_state != "passed")
         or remote_state in {"partial", "unknown"}
+        or exact_http_scope
     ):
         verification_status = "partial"
     elif mode in {"blackbox", "combined"} and blackbox_state != "passed":
         verification_status = "failed" if blackbox_state == "failed" else "partial"
     reason = (
-        "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围"
+        "黑盒只执行了精确 HTTP 白名单；未运行 AI 动态用例或白名单外路由发现，不代表完成完整漏洞覆盖"
+        if verification_status == "partial" and exact_http_scope
+        else "AI 动态测试未执行，结果只覆盖确定性 runner 已执行范围"
         if verification_status == "partial" and dynamic_state == "skipped"
         else "黑盒目标返回 3xx/4xx；入口有响应，但最终业务路由未完成验证"
         if verification_status == "partial" and (remote_state == "partial" or blackbox_state == "partial")
@@ -4943,6 +5120,8 @@ def _sandbox_verification_coverage(conclusion: dict[str, Any]) -> dict[str, Any]
         "deterministic_status": str(deterministic.get("status") or "unknown"),
         "ai_dynamic_status": dynamic_state,
         "blackbox_status": blackbox_state,
+        "http_scope_enforced": exact_http_scope,
+        "http_scope_request_count": int(blackbox.get("request_count") or 0) if exact_http_scope else 0,
         "remote_blackbox_status": remote_state,
         "reason": reason,
     }
@@ -5044,6 +5223,10 @@ def _reconcile_blackbox_agent_assertions(
     """只根据后端注入契约和逐文件可信回执认定 AI 黑盒断言状态。"""
     if not isinstance(result, dict):
         return None
+    if result.get("basis") == "exact_http_allowlist":
+        # 此模式的 GET 请求与状态断言已由 runner 和后端按持久白名单逐项核对；
+        # 不得将它改写成常规路由探测，也不得要求 AI 生成断言脚本。
+        return dict(result)
     reconciled = dict(result)
     generation = generation if isinstance(generation, dict) else {}
     generated_blackbox_files = {name for name in expected_files if name.rsplit("/", 1)[-1].startswith("blackbox.")}
@@ -5267,7 +5450,7 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         gate = "未通过"
         gate_label = "系统验证门禁"
     facts = [
-        f"**{gate_label}：{gate}。**",
+        f"{gate_label}：{gate}。",
         f"确定性执行结论：{_report_sentence(conclusion.get('summary'), '通过' if passed else '未通过')}",
     ]
     facts.append(
@@ -5276,6 +5459,11 @@ def _fact_gate_report(report_md: str, conclusion: dict[str, Any]) -> str:
         f"AI 动态用例={_report_status_label(coverage['ai_dynamic_status'])}，"
         f"黑盒路由={_report_status_label(coverage['blackbox_status'])}。"
     )
+    if coverage.get("http_scope_enforced"):
+        facts.append(
+            f"执行约束：服务端强制精确 HTTP 白名单，共 {coverage.get('http_scope_request_count', 0)} 条请求；"
+            "响应正文未保存，AI 生成可执行代码已跳过。"
+        )
     if coverage.get("reason"):
         facts.append(f"范围说明：{_report_sentence(coverage['reason'])}")
     if generated:
@@ -5531,12 +5719,19 @@ def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
         else ""
     )
     ai_review_failure_reason = str(conclusion.get("ai_review_failure_reason") or "").strip()
-    ai_review_status = (
-        f"多 Agent AI 审查：未完成；原因：{ai_review_failure_reason}。\n"
-        "本报告是确定性执行结果兜底，不代表 AI 审查已完成。\n\n"
-        if ai_review_failure_reason
-        else ""
-    )
+    ai_review_skip_reason = str(conclusion.get("ai_review_skip_reason") or "").strip()
+    if conclusion.get("ai_review_status") == "skipped":
+        ai_review_status = (
+            f"多 Agent AI 审查：按执行策略跳过；原因：{ai_review_skip_reason or '本任务只运行精确 HTTP 白名单'}。\n"
+            "没有调用模型；本报告只依据执行器回执，不代表完成完整漏洞覆盖。\n\n"
+        )
+    elif ai_review_failure_reason:
+        ai_review_status = (
+            f"多 Agent AI 审查：未完成；原因：{ai_review_failure_reason}。\n"
+            "本报告是确定性执行结果兜底，不代表 AI 审查已完成。\n\n"
+        )
+    else:
+        ai_review_status = ""
     report = (
         "## 总体结论\n\n"
         f"系统验证门禁：{_report_status_label(coverage['verification_status'])}。\n\n"
@@ -5587,13 +5782,48 @@ def _sandbox_execution_disclosure(conclusion: dict[str, Any]) -> str:
     lines = [
         "## 执行状态与覆盖范围",
         "",
-        f"- 最终状态：**{status}**。只有执行器明确返回成功且未被停止/过期时才报告测试通过。",
+        f"- 最终状态：{status}。只有执行器明确返回成功且未被停止/过期时才报告测试通过。",
         f"- 已测试范围：{'; '.join(tested) if tested else '执行器未提供可核验的逐项范围'}。",
         f"- 未扫描范围：{'; '.join(unscanned) if unscanned else '执行器未报告未扫描项；不据此推断范围完整'}。",
         f"- 跳过项：{'; '.join(skipped) if skipped else '无已记录跳过项'}。",
         f"- 排除项：{'; '.join(excluded) if excluded else '无已记录排除项'}。",
         f"- 错误：{'; '.join(list(dict.fromkeys(errors))) if errors else '无已记录错误'}。",
     ]
+    blackbox_execution = evidence.get("blackbox_execution")
+    blackbox_execution = blackbox_execution if isinstance(blackbox_execution, dict) else {}
+    if blackbox_execution.get("basis") == "exact_http_allowlist":
+        requests = blackbox_execution.get("requests")
+        requests = requests if isinstance(requests, list) else []
+        lines += [
+            "",
+            "## 精确 HTTP 请求范围",
+            "",
+            "- 执行策略：服务端强制的精确 GET 白名单；请求仅发往沙箱 loopback，不跟随重定向。",
+        ]
+        if requests:
+            lines.append("- 实际请求：")
+            for item in requests:
+                if not isinstance(item, dict):
+                    continue
+                status_code = item.get("status_code")
+                status_text = f"HTTP {status_code}" if type(status_code) is int and status_code else "未收到 HTTP 响应"
+                assertion = (
+                    "未配置状态断言，仅记录回包"
+                    if item.get("assertion_not_configured")
+                    else _report_status_label("passed" if item.get("assertion_status") == "matched" else "failed")
+                )
+                truncated_note = "（达到 64 KiB 读取上限）" if item.get("response_truncated") else ""
+                lines.append(
+                    f"  - `GET {item.get('target', '/')}`：{status_text}；"
+                    f"响应体读取 {item.get('response_bytes', 0)} 字节{truncated_note}；"
+                    f"耗时 {item.get('elapsed_ms', 0)} ms；断言：{assertion}。"
+                )
+        else:
+            lines.append("- 实际请求：应用未就绪，白名单请求未执行。")
+        lines += [
+            "- 正文处理：只计量有限响应字节数，不保存或输出 HTTP 响应正文。",
+            "- 覆盖缺口：未运行 AI 生成的启动补丁、PoC、动态测试脚本或 PHP 修复副本；未执行白名单之外的路径发现。未配置预期状态码的条目只证明收到 HTTP 回包，不证明业务行为正确，也不代表完成漏洞覆盖。",
+        ]
     remote = evidence.get("remote_blackbox")
     remote = remote if isinstance(remote, dict) else {}
     remote_execution = evidence.get("remote_blackbox_execution")
@@ -5707,6 +5937,62 @@ def _run_test_review_report(
     conclusion: dict[str, Any],
 ) -> dict[str, Any] | None:
     """黑白盒测试终态后生成中文报告；模型不可用时必须发布确定性报告兜底。"""
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    blackbox_execution = evidence.get("blackbox_execution")
+    blackbox_execution = blackbox_execution if isinstance(blackbox_execution, dict) else {}
+    if blackbox_execution.get("basis") == "exact_http_allowlist" and blackbox_execution.get("scope_enforced") is True:
+        # 精确白名单任务不再触发多 Agent 模型评审，避免额外 token 消耗和超出已授权请求范围。
+        skip_reason = "精确 HTTP 白名单任务按策略不启动 AI 多 Agent 评审"
+        conclusion["ai_review_status"] = "skipped"
+        conclusion["ai_review_skip_reason"] = skip_reason
+        conclusion.pop("ai_review_failure_reason", None)
+        report_md = _build_deterministic_test_report(conclusion)
+        summary: dict[str, Any] = {
+            "agent_code": "test_reviewer",
+            "roles_executed": 0,
+            "roles_total": 0,
+            "roles_manifest_valid": False,
+            "report_candidate_valid": False,
+            "review_mode": "deterministic_allowlist",
+            "ai_review_complete": False,
+            "ai_review_status": "skipped",
+            "ai_review_skip_reason": skip_reason,
+            "roles": {},
+            "report_bytes": len(report_md.encode("utf-8")),
+        }
+        published = _publish_sandbox_report(
+            db,
+            environment,
+            conclusion,
+            report_md,
+            _sync_terminal_artifact=True,
+            _authoritative_ai_review=True,
+        )
+        if isinstance(published, dict):
+            summary["artifact_id"] = published.get("artifact_id")
+            summary["report_task_id"] = published.get("report_task_id")
+            summary["issues"] = published.get("issues", 0)
+            summary["report_persisted"] = bool(published.get("report_persisted"))
+            if not summary["report_persisted"]:
+                summary["report_failure_code"] = published.get("failure_code", "report_persistence_failed")
+        else:
+            summary["report_persisted"] = False
+            summary["report_failure_code"] = "report_persistence_failed"
+        report_saved = summary["report_persisted"]
+        _append_event(
+            db,
+            environment,
+            "complete" if report_saved else "failed",
+            "multi_agent_review",
+            (
+                "精确 HTTP 白名单确定性报告已生成并写入报告中心；按策略未调用 AI 模型"
+                if report_saved
+                else "精确 HTTP 白名单确定性报告已生成，但写入报告中心失败；按策略未调用 AI 模型"
+            ),
+            summary,
+        )
+        db.commit()
+        return summary
     try:
         from app.agents.base import AgentContext
         from app.agents.test_review_reporter_agent import _EXTRA_ROLE_PROMPTS, TestReviewReporterAgent
@@ -6022,13 +6308,14 @@ def _merge_ai_review_metadata(
     """Keep persisted AI review state monotonic and prevent fallback reports from downgrading it."""
     previous = previous if isinstance(previous, dict) else {}
     incoming = incoming if isinstance(incoming, dict) else {}
-    previous_status = previous.get("status") if previous.get("status") in {"complete", "incomplete"} else "unknown"
-    incoming_status = incoming.get("status") if incoming.get("status") in {"complete", "incomplete"} else "unknown"
-    rank = {"unknown": 0, "incomplete": 1, "complete": 2}
+    allowed_statuses = {"complete", "incomplete", "skipped"}
+    previous_status = previous.get("status") if previous.get("status") in allowed_statuses else "unknown"
+    incoming_status = incoming.get("status") if incoming.get("status") in allowed_statuses else "unknown"
+    rank = {"unknown": 0, "skipped": 1, "incomplete": 2, "complete": 3}
     preserve_previous_report = rank[previous_status] > rank[incoming_status]
     status = previous_status if preserve_previous_report else incoming_status
     failure_reason = None
-    if status == "incomplete":
+    if status in {"incomplete", "skipped"}:
         reason_source = previous if preserve_previous_report else incoming
         failure_reason = str(reason_source.get("failure_reason") or "").strip() or None
     return {"status": status, "failure_reason": failure_reason}, preserve_previous_report
@@ -6196,7 +6483,7 @@ def _merge_terminal_report_conclusion(
     if (
         "ai_review_status" not in result
         and isinstance(previous_ai_review, dict)
-        and previous_ai_review.get("status") in {"complete", "incomplete"}
+        and previous_ai_review.get("status") in {"complete", "incomplete", "skipped"}
     ):
         result["ai_review_status"] = previous_ai_review["status"]
         if previous_ai_review.get("failure_reason"):
@@ -6292,7 +6579,7 @@ def _publish_sandbox_report(
         report_issue_summary = summarize_sandbox_report(report_md)
         ai_review_status = str(conclusion.get("ai_review_status") or "unknown")
         incoming_ai_review_metadata = {
-            "status": ai_review_status if ai_review_status in {"complete", "incomplete"} else "unknown",
+            "status": ai_review_status if ai_review_status in {"complete", "incomplete", "skipped"} else "unknown",
             "failure_reason": str(conclusion.get("ai_review_failure_reason") or "") or None,
         }
         verification = _sandbox_verification_coverage(conclusion)
@@ -6612,13 +6899,13 @@ def _publish_terminal_sandbox_report(
     if not prefer_incoming:
         current_ai_status = current_result.get("ai_review_status")
         previous_ai_review = existing_content.get("ai_review")
-        if current_ai_status in {"complete", "incomplete"}:
+        if current_ai_status in {"complete", "incomplete", "skipped"}:
             conclusion["ai_review_status"] = current_ai_status
             if current_result.get("ai_review_failure_reason"):
                 conclusion["ai_review_failure_reason"] = current_result["ai_review_failure_reason"]
             else:
                 conclusion.pop("ai_review_failure_reason", None)
-        elif isinstance(previous_ai_review, dict) and previous_ai_review.get("status") in {"complete", "incomplete"}:
+        elif isinstance(previous_ai_review, dict) and previous_ai_review.get("status") in {"complete", "incomplete", "skipped"}:
             conclusion["ai_review_status"] = previous_ai_review["status"]
             if previous_ai_review.get("failure_reason"):
                 conclusion["ai_review_failure_reason"] = previous_ai_review["failure_reason"]
@@ -7731,6 +8018,34 @@ def _require_remote_target_authorization(payload: dict[str, Any], *, server_appr
         raise ForbiddenError("必须显式确认已获得该远程目标本次测试授权", code=40340)
 
 
+def _normalize_sandbox_http_scope(value: Any, *, required: bool) -> list[dict[str, Any]] | None:
+    """在服务层再次校验本地黑盒范围，防止内部调用绕过 API schema。"""
+    if value is None:
+        if required:
+            raise ValidationError("本地黑盒测试必须提供精确 HTTP 路径白名单", code=40001)
+        return None
+    if not required or not isinstance(value, list) or not 1 <= len(value) <= 20:
+        raise ValidationError("HTTP 路径白名单仅适用于本地黑盒测试，且必须为 1–20 项", code=40001)
+    try:
+        items = [SandboxHttpRequestScope.model_validate(item) for item in value]
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"HTTP 路径白名单无效：{str(exc)[:300]}", code=40001) from exc
+    targets = [(item.path, tuple(sorted(item.query.items()))) for item in items]
+    if len(set(targets)) != len(targets):
+        raise ValidationError("HTTP 路径白名单不能包含重复请求目标", code=40001)
+    if ("/", ()) not in targets:
+        raise ValidationError("HTTP 路径白名单必须包含不带查询参数的 GET / 探活条目", code=40001)
+    return [
+        {
+            "method": item.method,
+            "path": item.path,
+            "query": dict(sorted(item.query.items())),
+            "expected_statuses": list(item.expected_statuses),
+        }
+        for item in items
+    ]
+
+
 def create_environment(
     db: Session,
     actor: User,
@@ -7826,12 +8141,22 @@ def _create_environment_locked(
         _require_remote_target_authorization(payload, server_approval_required=require_remote_target_approval)
         pin_public_http_url(remote_url, require_https=True)
 
+    local_http_scope_required = bool(
+        purpose == "test" and not remote_url and mode == "blackbox"
+    )
+    http_scope = _normalize_sandbox_http_scope(
+        payload.get("http_scope"),
+        required=local_http_scope_required,
+    )
+
     remote_only = bool(remote_url and mode == "blackbox")
     worker_mode = "whitebox" if remote_url and mode == "combined" else mode
     # 先做参数与源码/副本校验(worker 繁忙时不掩盖真实参数错误),最后再选 worker
     db_type = str(payload.get("db_type") or "none").strip().lower()
     if db_type not in {"none", "sqlite", "mysql"}:
         raise ValidationError("沙箱数据库类型不受支持", code=40001)
+    if local_http_scope_required and db_type == "mysql":
+        raise ValidationError("精确 HTTP 白名单模式不能连接非 loopback 测试数据库网络", code=40001)
     source_revision_id = payload.get("source_revision_id")
     source_revision_snapshot: dict[str, Any] | None = None
     if source_revision_id:
@@ -7915,6 +8240,8 @@ def _create_environment_locked(
             {
                 "worker_mode": worker_mode,
                 "remote_only": remote_only,
+                "http_scope_enforced": local_http_scope_required,
+                "http_scope": http_scope,
                 "ttl_hours": ttl_hours,
                 "requested_language": requested_language,
                 "resolved_language": language,
@@ -7978,6 +8305,8 @@ def _create_environment_locked(
         {
             "remote_target_approval_id": remote_target_approval_id,
             "remote_target_authorized": bool(remote_url and remote_target_approval_id),
+            "http_scope_enforced": local_http_scope_required,
+            "http_scope_count": len(http_scope or []),
         },
     )
     if language != requested_language:
@@ -8567,6 +8896,13 @@ def _execute_environment(
                 "count": 0,
                 "reason": "远程只读 HTTP 探测不注入 AI 动态测试用例",
             }
+        if environment.purpose == "test" and config.get("http_scope_enforced"):
+            agent_test_generation = {
+                "status": "skipped",
+                "mode": worker_mode,
+                "count": 0,
+                "reason": "精确 HTTP 白名单模式禁止注入 AI 生成的启动补丁、PoC、动态测试脚本和语法修复代码",
+            }
         if getattr(environment, "execution_archive_blob", None) is not None:
             execution_bytes = bytes(environment.execution_archive_blob)
             execution_sha = hashlib.sha256(execution_bytes).hexdigest()
@@ -8578,7 +8914,11 @@ def _execute_environment(
             effective_source = base64.b64encode(execution_bytes).decode("ascii")
             effective_sha = execution_sha
             repair_round = int(getattr(environment, "execution_round", 0) or 0)
-            expected_agent_tests = _agent_test_paths(effective_source)
+            expected_agent_tests = (
+                set()
+                if config.get("http_scope_enforced")
+                else _agent_test_paths(effective_source)
+            )
             if expected_agent_tests:
                 agent_test_generation = {
                     "status": "generated",
@@ -8586,7 +8926,12 @@ def _execute_environment(
                     "count": len(expected_agent_tests),
                     "source": "persisted_execution_snapshot",
                 }
-        elif worker and environment.purpose == "test" and ai_model_stop_reason is None:
+        elif (
+            worker
+            and environment.purpose == "test"
+            and ai_model_stop_reason is None
+            and not config.get("http_scope_enforced")
+        ):
             # 压缩、部署规划与动态用例共享一个时间预算，禁止各阶段分别重置超时。
             agent_context_deadline = time.monotonic() + int(
                 getattr(settings, "sandbox_agent_test_generation_seconds", 300) or 300
@@ -8654,7 +8999,7 @@ def _execute_environment(
                 db.commit()
             if effective_source != source_archive_base64:
                 effective_sha = hashlib.sha256(base64.b64decode(effective_source)).hexdigest()
-        elif worker and environment.purpose == "test":
+        elif worker and environment.purpose == "test" and not config.get("http_scope_enforced"):
             agent_test_generation = {
                 "status": "skipped",
                 "mode": worker_mode,
@@ -8714,6 +9059,8 @@ def _execute_environment(
                     "ttl_seconds": max(60, int((environment.expires_at - _utcnow()).total_seconds())),
                     "image_digest": environment.image_digest or "",
                 }
+                if config.get("http_scope_enforced"):
+                    saved_request["http_scope"] = config.get("http_scope")
                 persisted_request = _loads(getattr(environment, "worker_request_json", None), {})
                 if (
                     isinstance(persisted_request, dict)
@@ -8819,6 +9166,7 @@ def _execute_environment(
                     and environment.language == "php"
                     and repair_round < max_repair_rounds
                     and ai_model_stop_reason is None
+                    and not config.get("http_scope_enforced")
                 ):
                     worker_concl = result.get("result") if isinstance(result.get("result"), dict) else result
                     wlogs = worker_concl.get("logs") if isinstance(worker_concl, dict) else None
@@ -8964,6 +9312,14 @@ def _execute_environment(
         _require_execution_lease(db, environment_id, execution_token)
         worker_conclusion = result.get("result") if isinstance(result.get("result"), dict) else result
         evidence: dict[str, Any] = {"worker_result": worker_conclusion}
+        if config.get("http_scope_enforced"):
+            evidence["http_scope"] = {
+                "enforced": True,
+                "origin": "http://127.0.0.1:<preview_port>",
+                "requests": config.get("http_scope") if isinstance(config.get("http_scope"), list) else [],
+                "ai_generated_executable_code": "skipped",
+                "response_bodies_saved": False,
+            }
         if agent_test_generation is not None:
             evidence["agent_test_generation"] = agent_test_generation
         if environment.purpose == "test":
@@ -9062,7 +9418,15 @@ def _execute_environment(
             and worker is not None
             and str(environment.test_mode or "") in {"blackbox", "combined"}
         ):
-            blackbox_result = _extract_blackbox_result(str(worker_logs.get("text") or "") if worker_logs else "")
+            blackbox_result = _extract_blackbox_result(
+                str(worker_logs.get("text") or "") if worker_logs else "",
+                expected_http_scope=(
+                    config.get("http_scope")
+                    if config.get("http_scope_enforced") and isinstance(config.get("http_scope"), list)
+                    else None
+                ),
+                logs_truncated=bool(worker_logs and worker_logs.get("truncated")),
+            )
             blackbox_result = _reconcile_blackbox_agent_assertions(
                 blackbox_result,
                 generation=agent_test_generation,

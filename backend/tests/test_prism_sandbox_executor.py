@@ -112,6 +112,70 @@ def test_execute_rejects_arbitrary_command_image_mount_and_environment() -> None
             executor._validate_execute(_payload(archive, **{field: value}))
 
 
+def test_worker_requires_and_revalidates_exact_local_http_scope() -> None:
+    archive = _archive({"index.php": "<?php echo 'ok';\n"})
+    root_scope = [{"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]}]
+    normalized, decoded, _profile = executor._validate_execute(
+        _payload(archive, test_mode="blackbox", http_scope=root_scope)
+    )
+    assert decoded == archive
+    assert normalized["http_scope"] == root_scope
+
+    for overrides in (
+        {"test_mode": "blackbox"},
+        {"test_mode": "blackbox", "http_scope": [{**root_scope[0], "path": "/../etc/passwd"}]},
+        {"test_mode": "blackbox", "http_scope": [{**root_scope[0], "path": "/%2f%2e%2e/etc"}]},
+        {"test_mode": "blackbox", "http_scope": root_scope * 2},
+        {"test_mode": "blackbox", "db_type": "mysql", "http_scope": root_scope},
+        {"test_mode": "blackbox", "http_scope": [
+            root_scope[0], {
+                "method": "GET",
+                "path": "/search",
+                "query": {"q": "%2525252e%2525252e"},
+                "expected_statuses": [200],
+            },
+        ]},
+        {"test_mode": "blackbox", "http_scope": [
+            root_scope[0], {
+                "method": "GET",
+                "path": "/search",
+                "query": {f"key{i}": "a" * 512 for i in range(5)},
+                "expected_statuses": [200],
+            },
+        ]},
+        {"test_mode": "whitebox", "http_scope": root_scope},
+        {"test_mode": "combined", "http_scope": root_scope},
+    ):
+        with pytest.raises(ValueError):
+            executor._validate_execute(_payload(archive, **overrides))
+
+
+def test_http_scope_changes_worker_digest_and_is_passed_as_fixed_runner_plan(
+    tmp_path: Path, isolated_paths: Path
+) -> None:
+    request_id = "sandbox-http-scope-plan"
+    source = executor._job_path(request_id) / "source"
+    source.mkdir(parents=True)
+    profile = executor._load_profiles()["php"]
+    image_id = "sha256:" + ("b" * 64)
+    image = executor.ResolvedImage("allowlisted", image_id, image_id, image_id)
+    scope = [
+        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]},
+        {"method": "GET", "path": "/about.php", "query": {"page": "1"}, "expected_statuses": [200]},
+    ]
+    payload = _payload(_archive({"index.php": "<?php echo 'ok';\n"}), test_mode="blackbox", http_scope=scope)
+    changed = {**payload, "http_scope": [scope[0]]}
+
+    args = executor._build_docker_create_args(
+        request_id=request_id, purpose="test", test_mode="blackbox", db_type="none",
+        profile=profile, runtime="runsc", image=image, source_dir=source, http_scope=scope,
+    )
+    encoded = next(argument.split("=", 1)[1] for argument in args if argument.startswith("PRISM_HTTP_SCOPE_B64="))
+
+    assert base64.b64decode(encoded).decode("ascii") == "GET\t/\t200\nGET\t/about.php?page=1\t200\n"
+    assert executor._request_digest(payload) != executor._request_digest(changed)
+
+
 @pytest.mark.parametrize(
     ("test_mode", "outcome", "expected"),
     [
@@ -242,10 +306,23 @@ def test_backend_execute_projection_matches_worker_contract_for_initial_and_repa
         assert normalized["request_id"] == envelope["request_id"]
         assert decoded == archive
         assert normalized["source_sha256"] == source_sha256
-        assert set(payload) == executor.EXECUTE_KEYS
+        assert set(payload) == executor.EXECUTE_KEYS - {"http_scope"}
         assert "repair_round" not in payload
         assert "source_revision_id" not in payload
         assert "repair_revision_id" not in payload
+
+    scoped_envelope = {
+        **base,
+        "request_id": "sandbox-request-http-scope",
+        "test_mode": "blackbox",
+        "http_scope": [
+            {"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]},
+        ],
+    }
+    scoped_payload = _worker_execute_payload(scoped_envelope, encoded)
+    normalized, decoded, _profile = executor._validate_execute(scoped_payload)
+    assert decoded == archive
+    assert normalized["http_scope"] == scoped_envelope["http_scope"]
 
 
 @pytest.mark.parametrize(
@@ -261,8 +338,11 @@ def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
 
     source = tmp_path / "source"
     source.mkdir()
+    request_log = tmp_path / "requests.log"
     (source / "wsgi.py").write_text(
+        "from pathlib import Path\n"
         "def application(environ, start_response):\n"
+        f"    Path({str(request_log)!r}).open('a').write(environ.get('PATH_INFO', '') + '\\n')\n"
         "    if environ.get('PATH_INFO') == '/api/v1/health':\n"
         f"        status = '{route_status} Test'\n"
         "        body = b''\n"
@@ -277,72 +357,105 @@ def test_real_blackbox_runner_accepts_api_only_health_route_and_records_failure(
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     env = os.environ.copy()
-    python_bin = str(Path(sys.executable).parent)
+    python_alias_dir = tmp_path / "bin"
+    python_alias_dir.mkdir()
+    (python_alias_dir / "python").symlink_to(sys.executable)
     env.update({
-        "PATH": python_bin + os.pathsep + env.get("PATH", ""),
+        "PATH": str(python_alias_dir) + os.pathsep + env.get("PATH", ""),
         "PRISM_ACTION": "test",
         "PRISM_LANGUAGE": "python",
         "PRISM_TEST_MODE": "blackbox",
         "PRISM_PREVIEW_PORT": str(port),
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        "PRISM_HTTP_SCOPE_B64": base64.b64encode(
+            "GET\t/\t404\nGET\t/api/v1/health\t204\n".encode("ascii")
+        ).decode("ascii"),
     })
     completed = subprocess.run(
         ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env,
         text=True, capture_output=True, timeout=20, check=False,
     )
     assert completed.returncode == expected_exit, completed.stdout + completed.stderr
+    assert request_log.read_text(encoding="utf-8").splitlines() == ["/", "/api/v1/health"]
     output = completed.stdout + completed.stderr
-    assert "blackbox loopback status=404" in output
-    assert "blackbox route /api/v1/health" in output
+    assert "blackbox scoped request method=GET target=/ status=404" in output
+    assert f"blackbox scoped request method=GET target=/api/v1/health status={route_status}" in output
     assert "PRISM_BLACKBOX_DONE" in output
     assert expected_receipt in output
-    assert f'"status_code":{route_status}' in output
+    assert f'"status_code":{404}' in output
     assert '"agent_assertions_passed":null' in output
-    receipt = sandbox_service._extract_blackbox_result(output)
+    scope = [
+        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [404]},
+        {"method": "GET", "path": "/api/v1/health", "query": {}, "expected_statuses": [204]},
+    ]
+    receipt = sandbox_service._extract_blackbox_result(output, expected_http_scope=scope)
     assert receipt is not None
     assert receipt["agent_assertions_passed"] is None
-    assert receipt["basis"] == "route_smoke"
+    assert receipt["basis"] == "exact_http_allowlist"
     assert receipt["status"] == ("passed" if route_status == 204 else "failed")
 
 
-def test_real_blackbox_runner_marks_executed_agent_assertions_as_passed(tmp_path: Path) -> None:
-    """动态断言真实执行后才标记为 true。"""
+def test_exact_http_scope_runner_skips_agent_blackbox_and_only_requests_allowlisted_targets(tmp_path: Path) -> None:
+    """受限模式只发白名单请求，并跳过源码归档内可能遗留的 Agent 脚本。"""
     import os
     import socket
 
     source = tmp_path / "source"
     source.mkdir()
+    request_log = tmp_path / "requests.log"
     (source / "wsgi.py").write_text(
         "# path('/healthz', health_view)\n"
+        "from pathlib import Path\n"
+        "import os\n"
         "def application(environ, start_response):\n"
+        "    target = environ.get('PATH_INFO', '')\n"
+        "    query = environ.get('QUERY_STRING', '')\n"
+        "    if query:\n"
+        "        target += '?' + query\n"
+        "    scope_env = any(key in os.environ for key in (\n"
+        "        'PRISM_HTTP_SCOPE_B64', 'PRISM_HTTP_SCOPE_FILE',\n"
+        "        'PRISM_HTTP_SCOPE_SANITIZED', 'runner_scoped_mode'))\n"
+        f"    Path({str(request_log)!r}).open('a').write(target + ':' + str(scope_env) + '\\n')\n"
         "    status = '204 No Content' if environ.get('PATH_INFO') == '/healthz' else '404 Not Found'\n"
         "    start_response(status, [])\n"
         "    return []\n",
         encoding="utf-8",
     )
+    launch_marker = tmp_path / "launch_patch_was_run"
+    (source / "_prism_launch.sh").write_text(
+        f"touch {launch_marker}\n",
+        encoding="utf-8",
+    )
     tests_dir = source / "_agent_tests"
     tests_dir.mkdir()
     (tests_dir / "blackbox.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(tmp_path / 'agent_was_run')!r}).write_text('ran')\n"
         "import os\n"
         "from urllib.request import urlopen\n"
-        "url = 'http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/healthz'\n"
-        "with urlopen(url, timeout=3) as response:\n"
-        "    assert response.status == 204\n",
+        "url = 'http://127.0.0.1:' + os.environ['PRISM_PREVIEW_PORT'] + '/not-allowlisted'\n"
+        "urlopen(url, timeout=3).read()\n",
         encoding="utf-8",
     )
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = int(sock.getsockname()[1])
+    python_alias_dir = tmp_path / "bin"
+    python_alias_dir.mkdir()
+    (python_alias_dir / "python").symlink_to(sys.executable)
     env = os.environ.copy()
     env.update({
-        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}",
+        "PATH": f"{python_alias_dir}{os.pathsep}{env.get('PATH', '')}",
         "PRISM_ACTION": "test",
         "PRISM_LANGUAGE": "python",
         "PRISM_TEST_MODE": "blackbox",
         "PRISM_PREVIEW_PORT": str(port),
         "PRISM_SOURCE_DIR": str(source),
         "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        "PRISM_HTTP_SCOPE_B64": base64.b64encode(
+            b"GET\t/\t404\nGET\t/healthz?name=allowed\t204\n"
+        ).decode("ascii"),
     })
 
     completed = subprocess.run(
@@ -356,11 +469,60 @@ def test_real_blackbox_runner_marks_executed_agent_assertions_as_passed(tmp_path
     )
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    receipt = sandbox_service._extract_blackbox_result(completed.stdout + completed.stderr)
+    assert request_log.read_text(encoding="utf-8").splitlines() == ["/:False", "/healthz?name=allowed:False"]
+    scope = [
+        {"method": "GET", "path": "/", "query": {}, "expected_statuses": [404]},
+        {"method": "GET", "path": "/healthz", "query": {"name": "allowed"}, "expected_statuses": [204]},
+    ]
+    receipt = sandbox_service._extract_blackbox_result(
+        completed.stdout + completed.stderr,
+        expected_http_scope=scope,
+    )
     assert receipt is not None
     assert receipt["status"] == "passed"
     assert receipt["route_passed"] is True
-    assert receipt["agent_assertions_passed"] is True
+    assert receipt["agent_assertions_passed"] is None
+    assert [request["target"] for request in receipt["requests"]] == ["/", "/healthz?name=allowed"]
+    assert receipt["request_count"] == 2
+    assert not (tmp_path / "agent_was_run").exists()
+    assert not launch_marker.exists()
+
+
+def test_exact_http_scope_runner_rejects_encoded_query_before_starting_application(tmp_path: Path) -> None:
+    """Runner 自身拒绝残留编码参数，且在拒绝前不启动归档中的应用。"""
+    import os
+    import socket
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "app.py").write_text(
+        f"from pathlib import Path\nPath({str(tmp_path / 'application_started')!r}).write_text('started')\n",
+        encoding="utf-8",
+    )
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = int(sock.getsockname()[1])
+    env = os.environ.copy()
+    env.update({
+        "PRISM_ACTION": "test",
+        "PRISM_LANGUAGE": "python",
+        "PRISM_TEST_MODE": "blackbox",
+        "PRISM_PREVIEW_PORT": str(port),
+        "PRISM_SOURCE_DIR": str(source),
+        "PRISM_WORKSPACE_DIR": str(tmp_path / "workspace"),
+        "PRISM_HTTP_SCOPE_B64": base64.b64encode(
+            b"GET\t/\t200\nGET\t/search?q=%2525252e%2525252e\t200\n"
+        ).decode("ascii"),
+    })
+
+    completed = subprocess.run(
+        ["bash", str(RUNNER_PATH)], cwd=tmp_path, env=env,
+        text=True, capture_output=True, timeout=20, check=False,
+    )
+
+    assert completed.returncode != 0
+    assert '"failure_kind":"scope_invalid"' in completed.stdout
+    assert not (tmp_path / "application_started").exists()
 
 
 def test_fixed_profiles_cover_five_languages_and_are_bounded() -> None:
@@ -682,8 +844,13 @@ def test_submit_structured_events_and_idempotent_status(
         return {"exit_code": 0, "stdout": "", "stderr": "", "output_bytes": 0, "output_truncated": False}
 
     monkeypatch.setattr(executor, "_run_command", fake_run)
-    first, duplicate = executor.submit_job(_payload(archive, test_mode=test_mode))
-    second, duplicate_second = executor.submit_job(_payload(archive, test_mode=test_mode))
+    payload = _payload(archive, test_mode=test_mode)
+    if test_mode == "blackbox":
+        payload["http_scope"] = [
+            {"method": "GET", "path": "/", "query": {}, "expected_statuses": [200]},
+        ]
+    first, duplicate = executor.submit_job(payload)
+    second, duplicate_second = executor.submit_job(payload)
 
     assert duplicate is False
     assert duplicate_second is True

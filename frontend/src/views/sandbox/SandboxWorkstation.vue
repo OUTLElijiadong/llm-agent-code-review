@@ -28,7 +28,7 @@ import { listSandboxWorkers } from '@/api/mcpGovernance'
 import { getProjectDetail, getProjects } from '@/api/project'
 import { useUserStore } from '@/stores/user'
 import type { ProjectDetailOut, ProjectOut } from '@/types/project'
-import type { SandboxArtifact, SandboxEnvironment, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
+import type { SandboxArtifact, SandboxEnvironment, SandboxHttpRequestScope, SandboxLanguage, SandboxPurpose, SandboxTestMode } from '@/types/sandbox'
 import { canDownloadSandboxArtifact, visibleSandboxArtifacts } from '@/utils/sandboxArtifactAccess'
 import type { SandboxWorker } from '@/types/mcpGovernance'
 import {
@@ -106,6 +106,12 @@ const form = reactive({
   remote_target_url: '',
   remote_target_authorized: false,
 })
+interface HttpScopeRow {
+  path: string
+  queryText: string
+  expectedStatusesText: string
+}
+const httpScopeRows = ref<HttpScopeRow[]>([{ path: '/', queryText: '', expectedStatusesText: '200' }])
 
 const languageOptions: Array<{ value: SandboxLanguage; label: string }> = [
   { value: 'python', label: 'Python' },
@@ -178,6 +184,79 @@ const remoteAuthorizationRequired = computed(() => (
   form.purpose === 'test'
   && isRemoteAuthorizationRequired(form.test_mode, form.remote_target_url)
 ))
+const localHttpScopeRequired = computed(() => (
+  form.purpose === 'test'
+  && form.test_mode === 'blackbox'
+  && !form.remote_target_url.trim()
+))
+
+function normalizeHttpScope(): { items: SandboxHttpRequestScope[]; error: string } {
+  if (!localHttpScopeRequired.value) return { items: [], error: '' }
+  if (form.db_type === 'mysql') return { items: [], error: '此限制模式不能连接 MySQL 测试网络，请改用无数据库或 SQLite' }
+  if (httpScopeRows.value.length < 1 || httpScopeRows.value.length > 20) {
+    return { items: [], error: '请求范围必须为 1–20 条' }
+  }
+  const items: SandboxHttpRequestScope[] = []
+  const targets = new Set<string>()
+  try {
+    for (const row of httpScopeRows.value) {
+      const path = row.path.trim()
+      if (!/^\/(?!\/)[A-Za-z0-9._~!$&+,;=@/-]*$/.test(path) || path.includes('//')
+        || path.split('/').some((part) => part === '.' || part === '..')) {
+        throw new Error('路径需为精确的本地 URL 路径，不能包含通配符或目录穿越')
+      }
+      const query: Record<string, string> = {}
+      const rawQuery = row.queryText.trim()
+      if (rawQuery.length > 2048) throw new Error('查询参数总长度不能超过 2048 个字符')
+      if (rawQuery) {
+        if (rawQuery.includes('%')) throw new Error('查询参数不能使用 URL 百分号编码')
+        const params = new URLSearchParams(rawQuery)
+        for (const [key, value] of params.entries()) {
+          if (!/^[A-Za-z0-9_.~-]{1,80}$/.test(key) || !/^[A-Za-z0-9_.~-]{0,512}$/.test(value)
+            || value === '.' || value === '..' || Object.prototype.hasOwnProperty.call(query, key)) {
+            throw new Error('查询参数只允许未编码的安全字符，且不能重复或包含目录穿越段')
+          }
+          query[key] = value
+        }
+        if (Object.keys(query).length > 10) throw new Error('每条请求最多允许 10 个查询参数')
+        if (new TextEncoder().encode(new URLSearchParams(query).toString()).length > 2048) {
+          throw new Error('编码后的查询参数总长度不能超过 2048 字节')
+        }
+      }
+      const expectedStatusesText = row.expectedStatusesText.trim()
+      const expected_statuses = expectedStatusesText
+        ? expectedStatusesText.split(',').map((status) => Number(status.trim()))
+        : []
+      if (expected_statuses.length > 20 || expected_statuses.some((status) => !Number.isInteger(status) || status < 100 || status > 599)
+        || new Set(expected_statuses).size !== expected_statuses.length) {
+        throw new Error('预期状态码请填写 100–599 的数字，多个值用逗号分隔')
+      }
+      const item: SandboxHttpRequestScope = { method: 'GET', path, query, expected_statuses }
+      const targetKey = `${path}?${JSON.stringify(Object.entries(query).sort(([a], [b]) => a.localeCompare(b)))}`
+      if (targets.has(targetKey)) throw new Error('请求范围里不能有重复目标')
+      targets.add(targetKey)
+      items.push(item)
+    }
+  } catch (error) {
+    return { items: [], error: error instanceof Error ? error.message : '请求范围格式不正确' }
+  }
+  if (!items.some((item) => item.path === '/' && Object.keys(item.query).length === 0)) {
+    return { items: [], error: '必须保留 GET / 作为应用探活路径' }
+  }
+  return { items, error: '' }
+}
+
+const httpScopeValidation = computed(normalizeHttpScope)
+
+function addHttpScopeRow(): void {
+  if (httpScopeRows.value.length >= 20) return
+  httpScopeRows.value.push({ path: '', queryText: '', expectedStatusesText: '' })
+}
+
+function removeHttpScopeRow(index: number): void {
+  if (index === 0) return
+  httpScopeRows.value.splice(index, 1)
+}
 const availableWorkers = computed(() => workers.value.filter((worker) => (
   worker.enabled
   && worker.status === 'healthy'
@@ -195,6 +274,7 @@ const submitDisabled = computed(() => (
   || submitting.value
   || (form.purpose === 'deploy' && !selectedProjectLanguage.value)
   || (remoteAuthorizationRequired.value && !form.remote_target_authorized)
+  || Boolean(httpScopeValidation.value.error)
 ))
 
 function syncProjectLanguage(projectId: number | null): void {
@@ -229,6 +309,48 @@ function formatBytes(value: number): string {
 function resultEvidence(item: SandboxEnvironment): string {
   const evidence = item.result?.evidence ?? item.result
   return JSON.stringify(evidence || {}, null, 2)
+}
+
+interface HttpScopeRequestEvidence {
+  target: string
+  status_code: number
+  response_bytes: number
+  response_truncated: boolean
+  elapsed_ms: number
+  assertion_not_configured: boolean
+  assertion_status: string
+}
+
+function httpScopeExecution(item: SandboxEnvironment): Record<string, unknown> | null {
+  const evidence = item.result?.evidence
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null
+  const execution = (evidence as Record<string, unknown>).blackbox_execution
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) return null
+  return execution as Record<string, unknown>
+}
+
+function httpScopeEnforced(item: SandboxEnvironment): boolean {
+  const execution = httpScopeExecution(item)
+  return execution?.basis === 'exact_http_allowlist' && execution.scope_enforced === true
+}
+
+function httpScopeRequests(item: SandboxEnvironment): HttpScopeRequestEvidence[] {
+  const requests = httpScopeExecution(item)?.requests
+  if (!Array.isArray(requests)) return []
+  return requests.flatMap((request) => {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) return []
+    const value = request as Record<string, unknown>
+    if (typeof value.target !== 'string' || typeof value.status_code !== 'number') return []
+    return [{
+      target: value.target,
+      status_code: value.status_code,
+      response_bytes: typeof value.response_bytes === 'number' ? value.response_bytes : 0,
+      response_truncated: value.response_truncated === true,
+      elapsed_ms: typeof value.elapsed_ms === 'number' ? value.elapsed_ms : 0,
+      assertion_not_configured: value.assertion_not_configured === true,
+      assertion_status: typeof value.assertion_status === 'string' ? value.assertion_status : 'unknown',
+    }]
+  })
 }
 
 async function loadInitial(): Promise<void> {
@@ -317,6 +439,10 @@ async function submit(): Promise<void> {
     ElMessage.warning('请确认本次远程目标测试已获得授权')
     return
   }
+  if (httpScopeValidation.value.error) {
+    ElMessage.warning(httpScopeValidation.value.error)
+    return
+  }
   const deploymentLanguage = form.purpose === 'deploy'
     ? projectSandboxLanguage(selectedFormProject.value?.language)
     : null
@@ -329,6 +455,7 @@ async function submit(): Promise<void> {
   const requestedFormGeneration = formGeneration
   const remoteTargetUrl = form.remote_target_url.trim()
   const requiresRemoteApproval = remoteAuthorizationRequired.value
+  const boundedLocalHttpScope = localHttpScopeRequired.value
   const payload = {
     project_id: form.project_id,
     purpose: form.purpose,
@@ -340,6 +467,7 @@ async function submit(): Promise<void> {
     ttl_hours: form.ttl_hours,
     remote_target_url: remoteTargetUrl || undefined,
     remote_target_authorized: requiresRemoteApproval && form.remote_target_authorized,
+    ...(boundedLocalHttpScope ? { http_scope: httpScopeValidation.value.items } : {}),
   }
   submitting.value = true
   try {
@@ -654,6 +782,32 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <section v-if="localHttpScopeRequired" class="http-scope-panel" data-testid="http-scope-editor" aria-label="本地黑盒 HTTP 请求白名单">
+            <div class="http-scope-heading">
+              <b>本地 HTTP 请求白名单</b>
+              <span>{{ httpScopeRows.length }} / 20</span>
+            </div>
+            <p class="field-hint">后端和沙箱执行器会强制仅由黑盒探测器发送下列 GET 请求到本机应用。应用就绪检查只建立 TCP 连接，不发送 HTTP 请求。必须保留根路径 GET /。查询参数只允许未编码的安全字符。不跟随跳转、不保存响应正文。日志被截断时本次执行按失败处理。空状态码只记录可达性，不判断业务正确性。</p>
+            <div v-for="(row, index) in httpScopeRows" :key="index" class="http-scope-row">
+              <label class="scope-path-field">
+                <span>精确路径{{ index === 0 ? ' · 必需探活' : '' }}</span>
+                <input v-model="row.path" type="text" :readonly="index === 0" :aria-label="`请求 ${index + 1} 路径`" placeholder="/about.php">
+              </label>
+              <label>
+                <span>精确查询参数</span>
+                <input v-model="row.queryText" type="text" :aria-label="`请求 ${index + 1} 查询参数`" placeholder="name=value&amp;page=1">
+              </label>
+              <label>
+                <span>预期状态码</span>
+                <input v-model="row.expectedStatusesText" type="text" :aria-label="`请求 ${index + 1} 预期状态码`" placeholder="200 或 200,404">
+              </label>
+              <button v-if="index > 0" type="button" class="scope-remove" :aria-label="`移除请求 ${index + 1}`" @click="removeHttpScopeRow(index)">移除</button>
+            </div>
+            <p v-if="httpScopeValidation.error" class="scope-validation-error" role="alert">{{ httpScopeValidation.error }}</p>
+            <button type="button" class="scope-add" :disabled="httpScopeRows.length >= 20" @click="addHttpScopeRow">添加精确 GET 路径</button>
+            <p v-if="form.db_type === 'mysql'" class="scope-validation-error">此限制模式不能连接 MySQL 测试网络，请改用无数据库或 SQLite。</p>
+          </section>
+
           <div class="inline-fields">
             <el-form-item label="保留时长">
               <el-input-number v-model="form.ttl_hours" :min="1" :max="userStore.isSuperAdmin() ? 720 : 168" controls-position="right" />
@@ -759,7 +913,26 @@ onBeforeUnmount(() => {
               :closable="false"
               show-icon
             />
-            <pre v-if="Object.keys(selected.result || {}).length" class="evidence-output">{{ resultEvidence(selected) }}</pre>
+            <section v-if="httpScopeEnforced(selected)" class="http-scope-evidence" data-testid="http-scope-evidence">
+              <div class="section-title"><span>实际 HTTP 请求证据</span><span class="task-count">{{ httpScopeRequests(selected).length }} 项</span></div>
+              <div v-if="httpScopeRequests(selected).length" class="http-evidence-table-wrap">
+                <table class="http-evidence-table">
+                  <thead><tr><th>请求目标</th><th>状态</th><th>响应大小</th><th>耗时</th><th>断言</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(request, index) in httpScopeRequests(selected)" :key="`${request.target}-${index}`">
+                      <td><code>GET {{ request.target }}</code></td>
+                      <td>{{ request.status_code ? `HTTP ${request.status_code}` : '无响应' }}</td>
+                      <td>{{ formatBytes(request.response_bytes || 0) }}{{ request.response_truncated ? '（达 64 KiB 上限）' : '' }}</td>
+                      <td>{{ request.elapsed_ms ?? 0 }} ms</td>
+                      <td>{{ request.assertion_status === 'matched' ? '符合预期' : request.assertion_not_configured ? '未配置' : request.assertion_status === 'mismatch' ? '不符合预期' : '无响应' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else class="field-hint">应用未就绪，白名单请求没有执行。</p>
+              <p class="field-hint">响应正文未保存。此模式只覆盖列出的路径；不会自动发现其他路由，也不会运行 AI 生成的补丁、PoC 或动态测试脚本。</p>
+            </section>
+            <pre v-if="Object.keys(selected.result || {}).length && !httpScopeEnforced(selected)" class="evidence-output">{{ resultEvidence(selected) }}</pre>
           </section>
 
           <section v-if="reviewReport" class="review-report-panel" data-testid="review-report-panel">
@@ -814,6 +987,20 @@ onBeforeUnmount(() => {
 .field-hint { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--gray-500); }
 .authorization-row { margin: -7px 0 16px; padding: 9px 11px; border-left: 3px solid var(--color-warning); background: var(--color-warning-light); }
 .authorization-row :deep(.el-checkbox) { height: auto; white-space: normal; }
+.http-scope-panel { margin: 0 0 16px; padding: 12px; border: 1px solid var(--color-border-base); border-radius: 6px; background: var(--surface-2); }
+.http-scope-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--gray-800); }
+.http-scope-heading span { color: var(--gray-500); font-size: 10px; font-family: var(--font-mono); }
+.http-scope-panel > .field-hint { margin: 7px 0 10px; }
+.http-scope-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(100px, 1.2fr) minmax(74px, .65fr) auto; gap: 6px; align-items: end; margin-top: 8px; }
+.http-scope-row label { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--gray-600); }
+.http-scope-row input { min-width: 0; width: 100%; height: 31px; padding: 5px 7px; border: var(--hairline); border-radius: 4px; color: var(--gray-800); background: var(--surface-1); font: 11px var(--font-mono); }
+.http-scope-row input:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.http-scope-row input[readonly] { color: var(--gray-500); background: var(--gray-100); }
+.scope-remove, .scope-add { min-height: 30px; padding: 4px 8px; border: var(--hairline); border-radius: 4px; color: var(--gray-700); background: var(--surface-1); font-size: 10px; cursor: pointer; }
+.scope-add { margin-top: 9px; color: var(--color-primary); }
+.scope-remove:hover, .scope-add:hover:not(:disabled) { border-color: var(--color-primary); }
+.scope-add:disabled { opacity: .5; cursor: not-allowed; }
+.scope-validation-error { margin: 8px 0 0; color: var(--color-danger); font-size: 11px; line-height: 1.4; }
 .inline-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 10px; }
 .inline-fields :deep(.el-input-number), .inline-fields :deep(.el-select) { width: 100%; }
 .unit { margin-left: 7px; font-size: 12px; color: var(--gray-500); }
@@ -867,6 +1054,12 @@ onBeforeUnmount(() => {
 .event-body p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--gray-600); overflow-wrap: anywhere; }
 .conclusion-panel { margin-top: 2px; }
 .evidence-output { max-height: 300px; margin: 10px 0 0; padding: 12px; overflow: auto; border: var(--hairline); border-radius: 5px; background: #161A24; color: #D9E1F2; font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.http-scope-evidence { margin-top: 12px; padding: 12px; border: var(--hairline); border-radius: 6px; background: var(--surface-2); }
+.http-evidence-table-wrap { width: 100%; overflow-x: auto; }
+.http-evidence-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 11px; }
+.http-evidence-table th, .http-evidence-table td { padding: 8px 7px; border-bottom: var(--hairline); white-space: nowrap; }
+.http-evidence-table th { color: var(--gray-500); font-size: 10px; font-weight: 600; }
+.http-evidence-table code { color: var(--color-primary); font-size: 10px; }
 .empty-line { padding: 18px 0; color: var(--gray-500); font-size: 12px; }
 .detail-empty { min-height: 380px; }
 
@@ -888,6 +1081,7 @@ onBeforeUnmount(() => {
   .page-heading h1 { font-size: 21px; }
   .page-heading p { max-width: 28rem; }
   .inline-fields, .fact-grid, .artifact-list { grid-template-columns: 1fr; }
+  .http-scope-row { grid-template-columns: 1fr 1fr; }
   .detail-toolbar { flex-direction: column; }
   .detail-actions { width: 100%; justify-content: flex-start; }
   .task-row { grid-template-columns: 8px minmax(0, 1fr) auto; }
