@@ -38,7 +38,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.agents.discussion_bus import DiscussionBus
 from app.core.database import SessionLocal
 from app.core.dependencies import authenticate_access_token
+from app.models.roundtable import RoundtableSession
 from app.models.user import User
+from app.services.roundtable_report_lifecycle import cancel_running_discussion_report
 
 
 class PendingDiscussion:
@@ -83,6 +85,34 @@ def _finish_expired_pending(bus: DiscussionBus, session_id: str, owner_user_id: 
         "status": "failed",
         "error": message,
     })
+    bus.close_session(session_id)
+    return True
+
+
+def _publish_cancelled_terminal(
+    bus: DiscussionBus,
+    session_id: str,
+    *,
+    error: str,
+    task_id: int = 0,
+) -> bool:
+    """以幂等终态通知收敛已停止的会话和前端连接。"""
+    bus.request_stop(session_id, reason=error)
+    session = bus.get_session(session_id)
+    if session is None or session.terminal_status != "cancelled":
+        return False
+    payload = {
+        "task_id": int(
+            task_id
+            or getattr(session, "report_task_id", 0)
+            or getattr(session, "task_id", 0)
+            or 0
+        ),
+        "status": "cancelled",
+        "error": session.terminal_error or error,
+    }
+    bus.publish_control(session_id, "cancelled", payload)
+    bus.publish_control(session_id, "done", payload)
     bus.close_session(session_id)
     return True
 
@@ -136,7 +166,7 @@ def purge_stale_pending():
 
     # pending 状态也必须在进程重启后收敛。普通 active/paused 会话由总线恢复逻辑
     # 标为 interrupted；只有 pending 且超过 TTL 的预检会话在此标为 failed。
-    if bus._persist:
+    if getattr(bus, "_persist", False):
         try:
             from app.agents.discussion_bus import utc_timestamp
             from app.models.roundtable import RoundtableSession
@@ -360,11 +390,7 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
     )
     if not active or parent_cancelled:
         error = "发起圆桌的小菱运行已取消" if parent_cancelled else "登录会话已失效"
-        bus.request_stop(pending.session_id, reason=error)
-        bus.publish_control(pending.session_id, "cancelled", {
-            "task_id": 0, "status": "cancelled", "error": error,
-        })
-        bus.close_session(pending.session_id)
+        _publish_cancelled_terminal(bus, pending.session_id, error=error)
         return
 
     # 权限/父任务检查期间用户可能已停止该会话；在创建编排器前再读一次，
@@ -417,10 +443,7 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             logger.info(
                 f"[Discussion] 取消关联圆桌 reason={invalidation} session={pending.session_id}"
             )
-            bus.request_stop(pending.session_id, reason=error)
-            bus.publish_control(pending.session_id, "cancelled", {
-                "task_id": 0, "status": "cancelled", "error": error,
-            })
+            _publish_cancelled_terminal(bus, pending.session_id, error=error)
             orchestrator_task.cancel()
         await orchestrator_task
     finally:
@@ -704,7 +727,60 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
                             "payload": {"reason": reason},
                         }, ensure_ascii=False))
                 elif action in ("pause", "resume", "stop"):
-                    if not bus.control_session(session_id, action):
+                    if action == "stop":
+                        stop_error = "圆桌讨论已由用户停止"
+                        current_session = bus.get_session(
+                            session_id, owner_user_id=owner_user_id,
+                        )
+                        try:
+                            with SessionLocal() as stop_db:
+                                row = stop_db.query(RoundtableSession).filter(
+                                    RoundtableSession.session_id == session_id,
+                                    RoundtableSession.owner_user_id == owner_user_id,
+                                ).one_or_none()
+                                report_task_id = int(
+                                    getattr(current_session, "report_task_id", 0)
+                                    or getattr(current_session, "task_id", 0)
+                                    or getattr(row, "report_task_id", 0)
+                                    or getattr(row, "task_id", 0)
+                                    or 0
+                                )
+                                report_disposition = (
+                                    cancel_running_discussion_report(
+                                        stop_db,
+                                        task_id=report_task_id,
+                                        owner_user_id=owner_user_id,
+                                    )
+                                    if report_task_id else "missing"
+                                )
+                        except Exception:
+                            logger.exception(
+                                f"[WS] 圆桌停止前无法确认报告状态 session={session_id}"
+                            )
+                            bus.publish_control(session_id, "info", {
+                                "message": "报告状态暂时无法核验，本次未停止圆桌；请稍后重试。",
+                            })
+                            continue
+
+                        if report_disposition == "terminal":
+                            bus.publish_control(session_id, "info", {
+                                "message": "报告已经结束，本次未改写已有结果。",
+                            })
+                            continue
+
+                        cancel_pending(session_id, owner_user_id)
+                        if report_task_id:
+                            bus.link_report_task(session_id, report_task_id)
+                        stop_accepted = bus.request_stop(session_id, reason=stop_error)
+                        if stop_accepted:
+                            bus.cancel_discussion_task(session_id)
+                        if not _publish_cancelled_terminal(
+                            bus, session_id, error=stop_error, task_id=report_task_id,
+                        ):
+                            bus.publish_control(session_id, "info", {
+                                "message": "圆桌已结束，未修改其既有终态。",
+                            })
+                    elif not bus.control_session(session_id, action):
                         bus.publish_control(session_id, "info", {
                             "message": "讨论尚未启动或已结束。",
                         })

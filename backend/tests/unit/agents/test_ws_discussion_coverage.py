@@ -114,6 +114,7 @@ class FakeDiscussionBus:
         self._control_callbacks: dict[str, Any] = {}
         self.discussion_tasks: dict[str, asyncio.Task] = {}
         self.cancelled_sessions: list[str] = []
+        self.closed_sessions: list[str] = []
 
     def get_session(self, session_id: str, *, owner_user_id: int | None = None) -> Any:
         """返回为测试配置的既有会话。"""
@@ -181,6 +182,22 @@ class FakeDiscussionBus:
     def request_stop(self, session_id: str, reason: str = "") -> None:
         """记录会话停止请求。"""
         self.cancelled_sessions.append(session_id)
+        if self.session is not None and not getattr(self.session, "terminal_status", ""):
+            self.session.status = "cancelled"
+            self.session.terminal_status = "cancelled"
+            self.session.terminal_error = reason
+
+    def link_report_task(self, session_id: str, task_id: int) -> bool:
+        """模拟把真实报告关联到停止通知。"""
+        if self.session is None:
+            return False
+        self.session.task_id = int(task_id)
+        self.session.report_task_id = int(task_id)
+        return True
+
+    def close_session(self, session_id: str) -> None:
+        """记录终态会话关闭。"""
+        self.closed_sessions.append(session_id)
 
     def cancel_discussion_task(self, session_id: str) -> bool:
         """取消测试后台任务并记录会话。"""
@@ -431,8 +448,73 @@ async def test_ws_message_flow_uses_owner_registry_and_cleans_subscription(
     assert bus.user_inputs == [(session_id, "请检查这里")]
     assert callback_calls == [("pause", {"session_id": session_id})]
     info_controls = [item for item in bus.controls if item[1] == "info"]
-    assert len(info_controls) == 3
+    assert len(info_controls) == 2
+    terminal_actions = {item[1] for item in bus.controls if item[1] in {"cancelled", "done"}}
+    assert terminal_actions == {"cancelled", "done"}
+    assert bus.closed_sessions == [session_id]
     assert bus.unsubscribed == [(session_id, bus.queue)]
+
+
+@pytest.mark.asyncio
+async def test_ws_stop_cancels_linked_report_when_executor_is_missing(
+    db, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WebSocket 停止在执行器丢失时仍须取消持久报告。"""
+    from sqlalchemy.orm import Session
+
+    from app.models.review_task import ReviewTask
+    from app.models.roundtable import RoundtableSession
+
+    report = ReviewTask(
+        user_id=11, project_id=901, review_type="discuss", status="running",
+        coverage={"stage": "running"},
+    )
+    db.add(report)
+    db.flush()
+    report_id = report.id
+    session_id = "ws-linked-report-stop"
+    db.add(RoundtableSession(
+        session_id=session_id,
+        owner_user_id=11,
+        task_id=report_id,
+        project_id=901,
+        file_id=0,
+        file_name="main.py",
+        review_type="discuss",
+        status="active",
+        max_rounds=2,
+        report_task_id=report_id,
+        agents=[],
+        progress={"phase": "reviewing"},
+    ))
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
+    session = SimpleNamespace(
+        owner_user_id=11,
+        project_id=901,
+        task_id=report_id,
+        report_task_id=report_id,
+        status="active",
+        terminal_status="",
+        terminal_error="",
+    )
+    bus = FakeDiscussionBus(session=session)
+    _install_bus(monkeypatch, bus)
+    monkeypatch.setattr(module, "_load_ws_user", lambda token: _user(11))
+    module._session_owners[session_id] = 11
+    module._owner_registered_at[session_id] = time.time()
+    websocket = FakeWebSocket(
+        query=b"token=ok",
+        incoming=[json.dumps({"action": "stop"})],
+    )
+
+    await module.ws_discuss(websocket, session_id)
+
+    db.refresh(report)
+    assert report.status == "cancelled"
+    assert report.coverage["stage"] == "cancelled"
+    assert session.terminal_status == "cancelled"
+    assert {item[1] for item in bus.controls} >= {"cancelled", "done"}
 
 
 @pytest.mark.asyncio
@@ -808,6 +890,7 @@ async def test_pending_discussion_stops_when_parent_xiaoling_run_is_cancelled(
         session_id, task_id=0, file_name="cancelled.py", owner_user_id=21, project_id=7,
     )
     session.status = "pending"
+    queue = await bus.subscribe(session_id)
     monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
     monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
     monkeypatch.setattr(module, "_is_discussion_execution_active", lambda *_args: True)
@@ -848,6 +931,10 @@ async def test_pending_discussion_stops_when_parent_xiaoling_run_is_cancelled(
     assert session.status == "cancelled"
     assert session.terminal_status == "cancelled"
     assert bus.get_discussion_task(session_id) is None
+    frames = [json.loads(queue.get_nowait()) for _ in range(queue.qsize())]
+    actions = {frame.get("action") for frame in frames if frame.get("type") == "control"}
+    assert {"cancelled", "done"}.issubset(actions)
+    assert any(frame.get("type") == "session_end" for frame in frames)
 
 
 @pytest.mark.asyncio

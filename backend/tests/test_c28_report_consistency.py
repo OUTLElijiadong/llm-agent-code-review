@@ -86,13 +86,16 @@ def test_json_export_matches_page_file_inventory_and_frozen_versions(admin_clien
     detail, files = collect_report_files(client, task_id)
     report = json.loads(files["json"])
     assert report["statistics"]["total_issues"] == detail["stats"]["total_issues"] == 3
-    assert report["score"] == detail["stats"]["score"] == 74
+    assert report["score"] is detail["stats"]["score"] is None
+    assert report["statistics"]["score_breakdown"]["score_unavailable_reason"] == "coverage_not_complete"
     assert {item["file_name"] for item in report.get("files", [])} == {
         item["file_name"] for item in detail["files"]
     }
     assert all(item["version_no"] == 7 for item in report["files"])
     assert all(item["content_sha256"] == "a" * 64 for item in report["files"])
-    assert report["task_info"]["coverage"] == session.get(ReviewTask, task_id).coverage
+    exported_coverage = report["task_info"]["coverage"]
+    assert exported_coverage["coverage_status"] == "unknown"
+    assert exported_coverage["unscanned"]
 
 
 def test_pdf_chinese_code_does_not_fall_back_to_dingbat_squares(admin_client):
@@ -150,8 +153,8 @@ def test_empty_report_retains_all_submitted_files_and_historical_score(admin_cli
     report = json.loads(files["json"])
     assert len(report["files"]) == len(detail["files"]) == 3
     assert report["statistics"]["total_issues"] == detail["stats"]["total_issues"] == 0
-    assert report["score"] == detail["stats"]["score"] == 65
-    assert report["statistics"]["score_breakdown"]["score_source"] == "task_explicit_empty_report"
+    assert report["score"] is detail["stats"]["score"] is None
+    assert report["statistics"]["score_breakdown"]["score_unavailable_reason"] == "coverage_not_complete"
 
 
 def test_legacy_file_inventory_does_not_invent_frozen_versions(admin_client):

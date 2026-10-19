@@ -96,7 +96,7 @@
     </div>
 
     <!-- 平台级模型 Token 用量趋势 -->
-    <section class="card token-usage-card prism-glass-card" :data-state="tokenUsageState.status" :aria-busy="tokenUsageState.status === 'loading'">
+    <section v-if="canViewServer" class="card token-usage-card prism-glass-card" :data-state="tokenUsageState.status" :aria-busy="tokenUsageState.status === 'loading'">
       <header class="card-head token-usage-head">
         <div class="token-heading">
           <h3><el-icon><TrendCharts /></el-icon>每日 Token 用量</h3>
@@ -685,6 +685,7 @@ async function loadAgents(manual = true): Promise<void> {
 }
 
 async function loadTokenUsage(manual = true): Promise<void> {
+  if (!canViewServer.value) return
   await loadSection(tokenUsageState, () => getTokenUsageTrend(tokenUsageDays.value), (value) => {
     tokenUsage.value = value ?? null
     tokenUsageRevision.value += 1
@@ -732,7 +733,7 @@ function startPolling(): void {
 }
 
 function startTokenUsagePolling(): void {
-  if (tokenUsageTimer) return
+  if (!canViewServer.value || tokenUsageTimer) return
   tokenUsageTimer = setInterval(() => {
     if (document.visibilityState === 'visible') void loadTokenUsage(false)
   }, 60_000)
@@ -750,10 +751,10 @@ function onVisibilityChange(): void {
     return
   }
   void loadAll()
-  void loadTokenUsage(false)
+  if (canViewServer.value) void loadTokenUsage(false)
   startEventStream()
   startPolling()
-  startTokenUsagePolling()
+  if (canViewServer.value) startTokenUsagePolling()
 }
 
 function applyAgentEvent(event: AgentEvent): void {
@@ -778,10 +779,10 @@ onMounted(() => {
   window.addEventListener('resize', onResize)
   if (document.visibilityState === 'visible') {
     void loadAll()
-    void loadTokenUsage(false)
+    if (canViewServer.value) void loadTokenUsage(false)
     startEventStream()
     startPolling()
-    startTokenUsagePolling()
+    if (canViewServer.value) startTokenUsagePolling()
   }
 })
 onBeforeUnmount(() => {

@@ -485,6 +485,12 @@ class DiscussionOrchestrator:
         if not session:
             logger.error(f"[Discussion] session={session_id} 不存在")
             return
+        refresh_terminal = getattr(bus, "refresh_terminal_state", None)
+        if refresh_terminal is not None and not refresh_terminal(
+            session_id, owner_user_id=user_id,
+        ):
+            logger.info(f"[Discussion] session={session_id} 已持久终止，跳过迟到的启动事件")
+            return
 
         self._user_input_event = asyncio.Event()
         self._speaker_call_active = False
@@ -606,6 +612,10 @@ class DiscussionOrchestrator:
             except Exception:
                 task_id = 0
             if task_id:
+                try:
+                    bus.link_report_task(session_id, task_id)
+                except Exception as exc:
+                    logger.warning(f"[Discussion] 取消期间关联报告任务失败: {exc}")
                 await loop.run_in_executor(None, copy_context().run, lambda: _cancel_review_task(task_id))
             self._publish_terminal(session_id, task_id, "cancelled", "圆桌讨论已取消")
             raise
@@ -617,7 +627,27 @@ class DiscussionOrchestrator:
             self._publish_terminal(session_id, 0, "failed", "无法创建可信圆桌任务，讨论未执行")
             return
         self._task_id = task_id
-        session.task_id = task_id
+        try:
+            linked = bus.link_report_task(session_id, task_id)
+        except Exception as exc:
+            # 保留内存关联并由后续阶段重试持久化；停止请求需要据此终结报告。
+            session.task_id = task_id
+            session.report_task_id = task_id
+            logger.warning(f"[Discussion] 关联报告任务持久化失败，将在后续状态更新时重试: {exc}")
+        else:
+            if not linked:
+                await loop.run_in_executor(
+                    None, copy_context().run, lambda: _cancel_review_task(task_id),
+                )
+                current = bus.get_session(session_id)
+                if current and current.terminal_status == "cancelled":
+                    self._publish_terminal(
+                        session_id,
+                        task_id,
+                        "cancelled",
+                        current.terminal_error or "圆桌已停止，未继续生成报告。",
+                    )
+                return
         self._parent_agent_run_id = int(usage_origin.get("agent_run_id") or 0)
         final_status = "failed"
         final_error = ""
@@ -1124,7 +1154,14 @@ class DiscussionOrchestrator:
     async def _check_active(self) -> None:
         """同时校验讨论会话和持久化任务，停止、删除后不再继续发言。"""
         session = self._bus.get_session(self._session_id)
-        if not session or session.status != "active":
+        refresh_terminal = getattr(self._bus, "refresh_terminal_state", None)
+        if (
+            not session
+            or (refresh_terminal is not None and not refresh_terminal(
+                self._session_id, owner_user_id=self._user_id,
+            ))
+            or session.status != "active"
+        ):
             raise _DiscussionInactive("cancelled")
         await asyncio.get_running_loop().run_in_executor(
             None, copy_context().run, lambda: _ensure_running(self._task_id)

@@ -154,6 +154,22 @@ afterEach(() => {
 })
 
 describe('AdminOverview 真实状态与分区反馈', () => {
+  it('非超级管理员不显示也不请求平台级 Token 用量', async () => {
+    auth.profile = { id: 28, username: 'reviewer', role: 'reviewer', status: 1 } as UserOut
+    auth.roles = ['reviewer']
+    mocks.isSuperAdmin.mockReturnValue(false)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAll('.token-usage-card')).toHaveLength(0)
+    expect(mocks.getTokenUsageTrend).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+    expect(mocks.getTokenUsageTrend).not.toHaveBeenCalled()
+  })
+
   it('按真实每日用量绘图，并把缺失 Token 标记为未知', async () => {
     const wrapper = mountPage()
     await flushPromises()

@@ -2,19 +2,19 @@
 
 ## 正式发布
 
-Prism 4.1.6 已于 2026-10-18 正式全量部署，生产提交 SHA 为 `e9e02858342bc4cb33119b070c09cfeb502493e6`。候选通过本地 Git bundle 导入生产仓库并由正式 `deploy.sh all --revision` 发布；GitHub 上传失败按用户要求跳过。没有改版本号，也没有重复部署。
+Prism 4.1.11 已于 2026-10-19 正式全量部署，生产提交 SHA 为 `884e2bf2cf363f83d672c097330eee1e131ff290`。候选通过本地 Git bundle 导入生产仓库并由正式 `deploy.sh all --revision` 发布；GitHub 上传失败按用户要求跳过。没有另改版本号。
 
-备份与隔离恢复验证通过（恢复验证 109 张表）；Alembic 当前与唯一 head 均为 `064_remote_pentest_chain`。Backend、Frontend 使用同一 SHA 的镜像，外部 `/healthz` 与 `/readyz` 返回 200、HTTP 根路径 308 跳转 HTTPS、HTTPS 首页返回 200。部署后 `ops-check.sh` 为 `ok`，备份、容器、迁移、发布账本和 HTTPS 均通过。
+按授权轮换生产 MySQL root 凭据，并同步到 `/opt/code-review/deploy/.env` 的受保护配置；明文没有写入文档、日志或仓库。轮换前与发布前备份均通过校验和及隔离恢复（109 张表）。Alembic 当前与唯一 head 均为 `064_remote_pentest_chain`。Backend、Frontend 使用同一 SHA 的镜像，外部 `/healthz` 与 `/readyz` 返回 200、HTTP 根路径 308 跳转 HTTPS、HTTPS 首页返回 200。部署后 `ops-check.sh` 为 `degraded`、`can_continue=true`，唯一降级项为磁盘使用率 91%（告警阈值 85%、临界值 95%）；备份、容器、迁移、发布账本和 HTTPS 均通过。
 
 ## 自动化质量
 
-- 后端全量：7,397 passed、6 skipped、0 failed；跳过项需要本机 Redis。
-- 前端全量：154 个文件、2,042 passed；lint 与生产构建通过，3,759 个 Vite 模块。
-- 变更 Python 文件 Ruff、`git diff --check` 及发布脚本故障恢复回归通过。
-- 报告/权限定向回归 243 passed；小菱停止定向回归 122 passed，WebSocket 子集 17 passed。
+- 发布前候选自动化：后端 7,397 passed、6 skipped、0 failed；前端 154 个文件、2,042 passed；lint、构建、变更 Python Ruff、`git diff --check` 与发布脚本故障恢复回归通过。
+- 4.1.11 候选定向回归：后端 185 passed、前端 2,066 passed、发布脚本 33 项通过。自动化只作为发布前证据，不代替生产业务验证。
 
 ## 尚未完成的真实业务验收
 
-Safari 当前停在登录页，虽已确认页面构建版本为 4.1.6，但普通用户、审查员和管理员的登录态检查尚未执行。因此，真实报告卡片/详情/导出权限、管理员每日 Token 图与原始数据对账、各报告类型真实内容和排版仍需在对应账号中核验。CNVD/CNNVD 官方授权数据未接入，官方逐条匹配未完成；供应商侧已发请求是否停止计费没有账单证据。
+审查员账号已检查 9 张可见报告卡片，并打开黑盒报告 #199、白盒报告 #198、代码审查报告 #180；JSON、HTML、PDF、Word 生成与 HTML 预览均通过，导出文件结构、文本乱码和 Markdown 星号检查通过。本轮未新建代码审查、源码审计、安全扫描或黑白盒任务，因此不把历史样本说成 4.1.11 新执行结果。
 
-这些未完成项不影响本次部署事务和自动化测试结论，但不能据此宣称所有真实账号及报告样本均已验收通过。详细状态与执行条件见 [ACCEPTANCE](./ACCEPTANCE_稳定部署与生产验收.md) 和 [TODO](./TODO_稳定部署与生产验收.md)。
+远程评估申请 #`9f181b3b276446e091a8682dc4ee8215` 固定为最多两次 HTTPS 根路径只读 GET，但仍待另一账号独立审批，尚未运行或生成报告。管理员每日 Token 用量、普通用户隔离矩阵和全站页面滚动验收仍未在本轮完成。CNVD/CNNVD 官方授权数据未接入，官方逐条匹配未完成；供应商侧已发请求是否停止计费没有账单证据。
+
+这些未完成项不影响 4.1.11 部署和已执行检查结论，但不能据此宣称所有真实账号、所有页面和所有报告类型均已验收通过。详细状态与执行条件见 [ACCEPTANCE](./ACCEPTANCE_稳定部署与生产验收.md) 和 [TODO](./TODO_稳定部署与生产验收.md)。

@@ -901,6 +901,17 @@ function handleControl(msg: { action: string; payload: Record<string, unknown> }
       stageMessage.value = '后续讨论已停止；已发出的模型请求无法撤回，可能仍产生用量'
       ElMessage.info('正在停止圆桌讨论')
       break
+    case 'cancelled':
+      phase.value = 'concluded'
+      isStopping.value = false
+      terminalStatus.value = 'cancelled'
+      currentSpeaker.value = ''
+      currentSpeakerCode.value = ''
+      reportTaskId.value = (msg.payload?.task_id as number) || reportTaskId.value
+      stageMessage.value = String(msg.payload?.error || '圆桌讨论已停止')
+      emit('settled')
+      void syncLatest()
+      break
     case 'done':
       {
         const wasStopping = isStopping.value

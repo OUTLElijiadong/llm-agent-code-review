@@ -126,6 +126,7 @@ def _make_task(
         processed_files=1,
         total_issues=0,
         score=score,
+        coverage={"coverage_status": "complete", "verification_status": "complete"},
     )
     if created_at is not None:
         task.create_time = created_at

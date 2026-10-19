@@ -2409,6 +2409,29 @@ _REPORT_BACKED_REVIEW_TYPES = frozenset({
 })
 
 
+def _display_task_score_breakdown(task: ReviewTask, display_score: int | None) -> dict | None:
+    """Do not expose stale or unsupported source metrics as a score breakdown."""
+    if task.review_type in _REPORT_BACKED_REVIEW_TYPES and display_score is None:
+        coverage = task.coverage if isinstance(task.coverage, dict) else {}
+        coverage_status = str(
+            coverage.get("coverage_status") or coverage.get("verification_status") or "unknown"
+        ).strip().lower()
+        reason = coverage.get("score_unavailable_reason")
+        if not reason:
+            reason = (
+                "coverage_not_complete"
+                if coverage_status not in {"complete", "completed", "verified"}
+                else "score_unavailable"
+            )
+        return {
+            "score": None,
+            "risk_level": "未评估",
+            "score_source": "unavailable",
+            "score_unavailable_reason": str(reason),
+        }
+    return task.score_breakdown
+
+
 def can_view_task_metadata(
     db: Session,
     user: User,
@@ -2613,7 +2636,7 @@ def list_tasks(db: Session, user: User, project_id: int = None, status: str = ""
             "score": None if hide_report_metrics else display_score,
             "duration_ms": row.duration_ms,
             "score_version": None if hide_report_metrics else row.score_version,
-            "score_breakdown": None if hide_report_metrics else row.score_breakdown,
+            "score_breakdown": None if hide_report_metrics else _display_task_score_breakdown(row, display_score),
             "coverage": None if hide_report_metrics else row.coverage,
             "error_message": None if hide_report_metrics else row.error_message,
             "create_time": row.create_time,
@@ -2724,7 +2747,7 @@ def get_task_detail(db: Session, user: User, task_id: int) -> dict:
         "score": None if hide_report_metrics else display_score,
         "summary": summary,
         "score_version": None if hide_report_metrics else task.score_version,
-        "score_breakdown": None if hide_report_metrics else task.score_breakdown,
+        "score_breakdown": None if hide_report_metrics else _display_task_score_breakdown(task, display_score),
         "coverage": None if hide_report_metrics else report_coverage,
         "model_name": task.model_name, "duration_ms": task.duration_ms,
         "start_time": task.start_time, "end_time": task.end_time,

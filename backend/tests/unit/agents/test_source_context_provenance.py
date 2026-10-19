@@ -815,6 +815,88 @@ def test_compaction_keeps_large_protected_facts_in_a_separate_complete_ledger(mo
     assert protected_fact not in result["source_summaries"][0]["summary"]
 
 
+def test_compaction_groups_repeated_protected_facts_without_losing_source_mapping() -> None:
+    protected_fact = (
+        "// Do not disable the security boundary because every tenant must remain isolated, "
+        + "preserve exact authorization scope " * 5
+    ).rstrip()
+    chunks = []
+    for index in range(40):
+        text = f"{protected_fact}\nconst marker_{index} = {index};"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({
+            "source_id": f"module-{index:02d}.js-{digest[:12]}",
+            "text": text,
+            "sha256": digest,
+        })
+
+    class FaithfulAgent:
+        def call_json(self, message, **_kwargs):
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": "已逐片读取入口和授权边界。",
+                },
+            )
+
+    result = compact_source_context(
+        FaithfulAgent(),
+        {"coverage_complete": True, "source_chunk_count": len(chunks), "source_chunks": chunks},
+        ctx=None,
+        max_chars=4_000,
+    )
+
+    ledger = result["protected_facts"]
+    assert len(ledger) == 1
+    assert ledger[0]["source_ids"] == [chunk["source_id"] for chunk in chunks]
+    assert ledger[0]["fact"] == protected_fact
+    assert len(json.dumps(result, ensure_ascii=False)) <= 4_000
+
+
+def test_small_compaction_groups_repeated_facts_before_extra_model_call() -> None:
+    protected_fact = "核心授权边界必须保持租户隔离，任何普通用户不得读取其他账号数据。" * 4
+    chunks = []
+    for index in range(3):
+        text = f"{protected_fact}\nconst marker_{index} = {index};"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunks.append({
+            "source_id": f"module-{index}.js-{digest[:12]}",
+            "text": text,
+            "sha256": digest,
+        })
+
+    class CountingAgent:
+        calls = 0
+
+        def call_json(self, message, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "covered_source_ids": _source_ids(message),
+                    "source_quotes": _source_quotes(message),
+                    "summary": "已提取必要上下文摘要。",
+                },
+            )
+
+    agent = CountingAgent()
+    result = compact_source_context(
+        agent,
+        {"coverage_complete": True, "source_chunk_count": len(chunks), "source_chunks": chunks},
+        ctx=None,
+        max_chars=550,
+    )
+
+    assert agent.calls == len(chunks)
+    assert result["protected_facts"] == [{
+        "source_ids": [chunk["source_id"] for chunk in chunks],
+        "fact": protected_fact.split("。", 1)[0],
+    }]
+    assert len(json.dumps(result, ensure_ascii=False)) <= 550
+
+
 def test_context_compaction_retries_empty_summary_with_actionable_correction() -> None:
     text = "def start_server(): return 8080"
     calls: list[str] = []

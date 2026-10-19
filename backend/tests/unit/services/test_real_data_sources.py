@@ -70,7 +70,7 @@ def test_dashboard_recent_tasks_use_persisted_project_and_task_fields(db, monkey
             "project_name": "真实业务项目",
             "status": "success",
             "review_type": "security",
-            "score": 86,
+            "score": None,
             "coverage": None,
             "create_time": task.create_time.isoformat(),
         }

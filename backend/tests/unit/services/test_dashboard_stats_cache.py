@@ -34,6 +34,7 @@ def _success_task(db, user, project, *, score=90):
         review_type="standard",
         status="success",
         score=score,
+        coverage={"coverage_status": "complete", "verification_status": "complete"},
         create_time=datetime.now(timezone.utc),
     )
     db.add(task)

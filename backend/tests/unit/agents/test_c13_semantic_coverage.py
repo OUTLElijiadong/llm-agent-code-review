@@ -96,12 +96,13 @@ def test_source_compaction_preserves_head_middle_correction_and_tail_within_budg
     with pytest.raises(SourceContextError, match="超过模型预算"):
         compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=500)
     calls.clear()
-    result = compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=700)
+    result = compact_source_context(FaithfulAgent(), source, ctx=None, max_chars=800)
     assert calls[: len(ids)] == [[source_id] for source_id in ids]
     assert len(calls) in {len(ids), len(ids) + 1}
     assert result["covered_source_ids"] == ids
     assert len(result["source_summaries"]) <= len(ids)
     rendered = json.dumps(result, ensure_ascii=False)
+    assert len(rendered) <= 800
     assert all(fact in rendered for fact in _FACTS)
     assert rendered.index(_FACTS[1]) < rendered.index(_FACTS[2])
     assert all(chunk["sha256"][:12] in rendered for chunk in source["source_chunks"])
@@ -164,6 +165,62 @@ def test_source_compaction_splits_a_large_source_after_repeated_invalid_quotes()
     ]
     assert child_texts
     assert "".join(child_texts[:2]) == text
+
+
+def test_source_compaction_splits_after_invalid_json_without_repeating_full_batch() -> None:
+    text = "\n".join(
+        f"def handler_{index}(value): return value + {index}  # stable source line {index:04d}"
+        for index in range(120)
+    )
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source_id = f"main.py-source-{digest[:12]}"
+    source = {
+        "coverage_complete": True,
+        "source_chunks": [{"source_id": source_id, "text": text, "sha256": digest}],
+    }
+    calls: list[tuple[list[str], Any]] = []
+
+    class InvalidJsonThenRecoveringAgent:
+        def call_json(self, message, **_kwargs):
+            ids = _batch_ids(message)
+            payload = json.loads(message.split("原始材料:\n", 1)[1])
+            calls.append((ids, payload))
+            if ids == [source_id]:
+                return SimpleNamespace(
+                    success=False,
+                    error="[部署监理] JSON 解析失败: Extra data: line 3 column 1",
+                    failure_kind="invalid_json",
+                )
+            return SimpleNamespace(success=True, data={
+                "covered_source_ids": ids,
+                "source_quotes": _source_quotes(message),
+                "summary": "压缩了本批源码结构。",
+            })
+
+    diagnostics: dict[str, int] = {}
+    result = compact_source_context(
+        InvalidJsonThenRecoveringAgent(),
+        source,
+        ctx=None,
+        diagnostics=diagnostics,
+    )
+
+    assert result["covered_source_ids"] == [source_id]
+    assert sum(1 for ids, _payload in calls if ids == [source_id]) == 1
+    child_payloads = [
+        payload
+        for ids, payload in calls
+        if ids != [source_id]
+    ]
+    child_texts = [
+        entry.get("text")
+        for payload in child_payloads
+        for entry in (payload if isinstance(payload, list) else [payload])
+        if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+    ]
+    assert child_texts
+    assert "".join(child_texts[:2]) == text
+    assert diagnostics["model_calls"] == len(calls)
 
 
 def test_source_compaction_keeps_small_unverifiable_source_fail_closed() -> None:

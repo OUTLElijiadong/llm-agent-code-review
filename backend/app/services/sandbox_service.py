@@ -4154,9 +4154,14 @@ def _generate_agent_test_cases(
             "源码上下文已压缩并完成来源覆盖核验",
             {
                 "source_chunk_count": len(compacted.get("covered_source_ids") or []),
-                "protected_fact_count": len(compacted.get("protected_facts") or []),
+                "protected_fact_count": sum(
+                    len(item.get("source_ids") or [item.get("source_id")])
+                    for item in compacted.get("protected_facts") or []
+                    if isinstance(item, dict)
+                ),
+                "protected_fact_unique_count": len(compacted.get("protected_facts") or []),
                 "compression_calls": (compacted.get("compression") or {}).get("model_calls"),
-                "elapsed_ms": (compacted.get("compression") or {}).get("elapsed_ms"),
+                "elapsed_ms": diagnostics.get("elapsed_ms"),
                 "source_sha256": compacted.get("source_archive_sha256"),
                 "source_manifest_sha256": compacted.get("source_manifest_sha256"),
             },

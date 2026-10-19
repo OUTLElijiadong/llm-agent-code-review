@@ -1684,16 +1684,23 @@ def test_chat_rejects_current_message_that_cannot_fit_context(
     monkeypatch.setattr(settings, "deepseek_context_window_tokens", 20_000)
     agent._max_retries = 0
     requests = _install_http(monkeypatch, [])
+    compaction_calls: list[dict[str, Any]] = []
+
+    def fail_compaction(prompt: str, _ctx: AgentContext | None, **kwargs: Any) -> AgentResult:
+        compaction_calls.append({"prompt": prompt, **kwargs})
+        return _failed("compaction unavailable")
+
+    monkeypatch.setattr(agent, "call_json", fail_compaction)
     result = agent._handle_chat([{"role": "user", "content": "需要逐字审查" + "甲" * 15_000}], None)
 
     assert result.success is False
     assert result.failure_kind == "context_compaction_incomplete"
-    # 只调用压缩器；分片个数随预算而变，但回答模型不能收到不完整上下文。
+    # 只调用压缩器；回答模型不能收到不完整上下文，也不能为无效结果额外耗费 token。
     from app.agents.chat_agent import _COMPACTION_SYSTEM
 
-    assert requests
-    assert all(request["json"]["messages"][0]["content"] == _COMPACTION_SYSTEM
-               for request in requests)
+    assert compaction_calls
+    assert all(request["system_prompt"] == _COMPACTION_SYSTEM for request in compaction_calls)
+    assert requests == []
 
 
 def test_handle_chat_restarts_complete_answer_after_length(

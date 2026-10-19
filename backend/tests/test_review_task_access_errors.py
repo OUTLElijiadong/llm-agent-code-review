@@ -229,6 +229,12 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
             score=73,
             create_time=datetime.now(timezone.utc),
         ))
+    else:
+        task.coverage = {
+            "coverage_status": "complete",
+            "verification_status": "complete",
+            "score_available": True,
+        }
 
     report_role = Role(id=2, name="审查员", code="reviewer", status="active", is_builtin=0)
     report_permission = Permission(id=6, code="report:view", name="查看报告", module="report", type="api")
@@ -278,10 +284,11 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
     assert member_project_row["score"] is None
     assert member_project_row["coverage"] is None
     assert member_project_row["last_review_at"] is None
-    assert owner_project_row["score"] == 73
+    expected_score = None if review_type == "sandbox_test" else 73
+    assert owner_project_row["score"] == expected_score
     if review_type == "sandbox_test":
         assert owner_project_row["coverage"]["verification_status"] == "partial"
-    assert owner_recent["score"] == 73
+    assert owner_recent["score"] == expected_score
     if review_type == "sandbox_test":
         assert owner_recent["coverage"]["verification_status"] == "partial"
     assert owner_recent["total_issues"] == (1 if review_type == "sandbox_test" else 41)
@@ -293,8 +300,16 @@ def test_domain_report_metrics_require_report_permission_and_owner_scope(review_
         assert visible["high_issues"] == 12
         assert visible["medium_issues"] == 13
         assert visible["low_issues"] == 14
-        assert visible["score"] == 73
-        assert visible["score_breakdown"] == {"private_metric": "REPORT_METRIC_SECRET"}
+        assert visible["score"] == expected_score
+        if expected_score is None:
+            assert visible["score_breakdown"] == {
+                "score": None,
+                "risk_level": "未评估",
+                "score_source": "unavailable",
+                "score_unavailable_reason": "coverage_not_complete",
+            }
+        else:
+            assert visible["score_breakdown"] == {"private_metric": "REPORT_METRIC_SECRET"}
 
     # report:view alone must not reveal another account's report-backed task metadata.
     db.add(RolePermission(role_id=1, permission_id=report_permission.id))
@@ -352,6 +367,7 @@ def test_standard_review_metrics_remain_visible_to_project_member(review_http):
     task.review_type = "quick"
     task.score = 81
     task.total_issues = 4
+    task.coverage = {"coverage_status": "complete", "verification_status": "complete"}
     db.commit()
 
     listing = client.get("/api/projects", headers=headers(users["member"]))

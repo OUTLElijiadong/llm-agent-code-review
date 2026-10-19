@@ -25,6 +25,10 @@ def seed(db):
 
 
 def task(db, owner, project, status="running", **kwargs):
+    coverage = kwargs.pop("coverage", {
+        "coverage_status": "complete",
+        "verification_status": "complete",
+    })
     row = ReviewTask(
         user_id=owner.id,
         project_id=project.id,
@@ -34,6 +38,7 @@ def task(db, owner, project, status="running", **kwargs):
         total_files=5,
         processed_files=2,
         create_time=datetime.now(timezone.utc),
+        coverage=coverage,
         **kwargs,
     )
     db.add(row)

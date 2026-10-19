@@ -214,6 +214,122 @@ class DiscussionBus:
                 self._queues.setdefault(session_id, [])
         return session
 
+    def link_report_task(self, session_id: str, task_id: int) -> bool:
+        """在报告任务创建后立即绑定圆桌，确保停止与重连能找到报告。"""
+        session = self._sessions.get(session_id)
+        if session is None or int(task_id or 0) <= 0:
+            return False
+        if self._persist:
+            from app.models.roundtable import RoundtableSession
+
+            with self._session_maker().begin() as db:
+                row = db.query(RoundtableSession).filter_by(
+                    session_id=session_id,
+                    owner_user_id=session.owner_user_id,
+                ).with_for_update().populate_existing().one_or_none()
+                if row is None:
+                    return False
+                if row.status in _TERMINAL_SESSION_STATUSES:
+                    existing_ids = {
+                        int(value or 0)
+                        for value in (row.task_id, row.report_task_id)
+                        if int(value or 0) > 0
+                    }
+                    terminal_status = self._terminal_status_for_row(row)
+                    if (
+                        any(existing_id != int(task_id) for existing_id in existing_ids)
+                        or (not existing_ids and terminal_status != "cancelled")
+                    ):
+                        self._apply_persisted_terminal(session, row)
+                        return False
+                    # 只允许为取消终态补齐尚未写入的报告关联，或补齐同一报告的
+                    # 缺失字段；成功/失败等其他终态不能被迟到的新报告重新指向。
+                    if not int(row.task_id or 0):
+                        row.task_id = int(task_id)
+                    if not int(row.report_task_id or 0):
+                        row.report_task_id = int(task_id)
+                    row.updated_at = datetime.now(timezone.utc)
+                    self._apply_persisted_terminal(session, row)
+                    return False
+                row.task_id = int(task_id)
+                row.report_task_id = int(task_id)
+                row.updated_at = datetime.now(timezone.utc)
+                session.task_id = int(task_id)
+                session.report_task_id = int(task_id)
+        else:
+            if session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status:
+                existing_ids = {
+                    int(value or 0)
+                    for value in (session.task_id, session.report_task_id)
+                    if int(value or 0) > 0
+                }
+                if (
+                    any(existing_id != int(task_id) for existing_id in existing_ids)
+                    or (not existing_ids and session.terminal_status != "cancelled")
+                ):
+                    return False
+                if not session.task_id:
+                    session.task_id = int(task_id)
+                if not session.report_task_id:
+                    session.report_task_id = int(task_id)
+                return False
+            session.task_id = int(task_id)
+            session.report_task_id = int(task_id)
+        return True
+
+    @staticmethod
+    def _terminal_status_for_row(row) -> str:
+        progress = dict(row.progress or {})
+        terminal_status = str(progress.get("terminal_status") or "").lower()
+        if terminal_status:
+            return terminal_status
+        return {
+            "concluded": "interrupted" if progress.get("phase") == "interrupted" else "success",
+            "partial": "partial",
+            "failed": "failed",
+            "cancelled": "cancelled",
+            "interrupted": "interrupted",
+        }.get(str(row.status or "").lower(), "")
+
+    @staticmethod
+    def _apply_persisted_terminal(session: DiscussionSession, row) -> None:
+        """让进程内旧会话服从数据库已提交的终态，避免跨 worker 复活。"""
+        progress = dict(row.progress or {})
+        session.task_id = int(row.task_id or session.task_id or 0)
+        session.report_task_id = int(row.report_task_id or session.report_task_id or 0)
+        session.status = str(row.status or session.status)
+        session.terminal_status = DiscussionBus._terminal_status_for_row(row)
+        session.terminal_error = str(progress.get("terminal_error") or "")[:1000]
+        session.progress = progress
+        session.closed_at = utc_timestamp(row.closed_at)
+        session.stage = str(progress.get("stage") or session.terminal_status or session.status)
+        session.stage_message = str(
+            progress.get("stage_message") or session.terminal_error or "圆桌讨论已结束"
+        )
+        session.cancel_event.set()
+
+    def refresh_terminal_state(self, session_id: str, *, owner_user_id: int) -> bool:
+        """从持久账本刷新终态；每次模型阶段前用于跨 worker 停止检查。"""
+        session = self.get_session(session_id, owner_user_id=owner_user_id)
+        if session is None:
+            return False
+        if not self._persist:
+            return session.status == "active" and not session.terminal_status
+
+        from app.models.roundtable import RoundtableSession
+
+        with self._session_maker()() as db:
+            row = db.query(RoundtableSession).filter_by(
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+            ).one_or_none()
+            if row is None:
+                return False
+            if row.status in _TERMINAL_SESSION_STATUSES:
+                self._apply_persisted_terminal(session, row)
+                return False
+            return session.status == "active" and not session.terminal_status
+
     def get_turns_page(
         self,
         session_id: str,
@@ -411,14 +527,41 @@ class DiscussionBus:
                 updated_at=datetime.now(timezone.utc),
             ))
 
-    def _update_session(self, session: DiscussionSession) -> None:
+    def _update_session(self, session: DiscussionSession) -> bool:
         """持久化阶段、报告链接和终态；正文只放入 turn 表。"""
         from app.models.roundtable import RoundtableSession
 
         with self._session_maker().begin() as db:
-            row = db.get(RoundtableSession, session.session_id)
+            row = db.query(RoundtableSession).filter_by(
+                session_id=session.session_id,
+                owner_user_id=session.owner_user_id,
+            ).with_for_update().populate_existing().one_or_none()
             if row is None:
                 raise RuntimeError("圆桌持久会话不存在")
+            if row.status in _TERMINAL_SESSION_STATUSES:
+                persisted_status = self._terminal_status_for_row(row)
+                if (
+                    session.status != row.status
+                    or (session.terminal_status and session.terminal_status != persisted_status)
+                ):
+                    self._apply_persisted_terminal(session, row)
+                    return False
+                # 终态记录是跨 worker 的权威值。只允许补齐缺失的报告关联和
+                # 首次关闭时间；仅成功终态可补写追问边界。不接受旧进程覆盖
+                # 已提交的终态进度或清空其他 worker 新写入的 task ID。
+                if not int(row.task_id or 0) and session.task_id:
+                    row.task_id = session.task_id
+                if not int(row.report_task_id or 0) and session.report_task_id:
+                    row.report_task_id = session.report_task_id
+                if row.closed_at is None and session.closed_at:
+                    row.closed_at = datetime.fromtimestamp(session.closed_at, timezone.utc)
+                if row.status == "concluded" and persisted_status == "success":
+                    progress = dict(row.progress or {})
+                    if "followup_start_seq" in session.progress:
+                        progress["followup_start_seq"] = session.progress["followup_start_seq"]
+                    row.progress = progress
+                row.updated_at = datetime.now(timezone.utc)
+                return True
             row.task_id = session.task_id
             row.status = session.status
             row.report_task_id = session.report_task_id
@@ -429,8 +572,11 @@ class DiscussionBus:
                 datetime.fromtimestamp(session.closed_at, timezone.utc)
                 if session.closed_at else None
             )
+        return True
 
-    def _persist_turn(self, session: DiscussionSession, turn: DiscussionTurn) -> int:
+    def _persist_turn(
+        self, session: DiscussionSession, turn: DiscussionTurn, *, allow_followup: bool = False,
+    ) -> int | None:
         """给发言分配会话内唯一顺序号并提交，供分页和刷新恢复。"""
         from app.models.roundtable import RoundtableSession, RoundtableTurn
 
@@ -441,6 +587,12 @@ class DiscussionBus:
             ).with_for_update().one_or_none()
             if row is None:
                 raise RuntimeError("圆桌持久会话不存在或归属不匹配")
+            if row.status in _TERMINAL_SESSION_STATUSES and not (
+                allow_followup and row.status == "concluded"
+                and self._terminal_status_for_row(row) == "success"
+            ):
+                self._apply_persisted_terminal(session, row)
+                return None
             seq = int(row.last_turn_seq or 0) + 1
             turn.seq = seq
             db.add(RoundtableTurn(
@@ -457,7 +609,11 @@ class DiscussionBus:
     def _restore_session(
         self, session_id: str, *, owner_user_id: int,
     ) -> Optional[DiscussionSession]:
-        """从账本恢复元数据和最近发言；失去执行任务的旧会话标为中断。"""
+        """从账本恢复元数据和最近发言；失去执行任务的旧会话标为中断。
+
+        活跃圆桌执行器依赖进程内任务，因此服务必须固定为单 Uvicorn worker；
+        若未来需要多 worker/副本，应先引入持久租约与存活判断，再改变此恢复语义。
+        """
         from app.models.roundtable import RoundtableSession, RoundtableTurn
 
         with self._session_maker().begin() as db:
@@ -495,7 +651,9 @@ class DiscussionBus:
                 agents=list(row.agents or []),
                 progress=progress,
                 last_turn_seq=int(row.last_turn_seq or 0),
-                terminal_status=str(progress.get("terminal_status") or ""),
+                terminal_status=str(
+                    progress.get("terminal_status") or self._terminal_status_for_row(row)
+                ),
                 terminal_error=str(progress.get("terminal_error") or ""),
                 cancel_event=cancel_event,
                 current_round=int(progress.get("round") or 0),
@@ -508,31 +666,39 @@ class DiscussionBus:
                 stage_message=str(progress.get("stage_message") or "圆桌正在准备"),
             )
 
-    def request_stop(self, session_id: str, reason: str = ""):
-        """标记会话为终止 — 编排循环在下一次检查时退出。"""
+    def request_stop(self, session_id: str, reason: str = "") -> bool:
+        """持久终态允许停止时返回 True；其他终态阻止迟到的取消请求。"""
         session = self._sessions.get(session_id)
-        if session:
-            # 终态只允许单向提交；重复停止或迟到停止不能把已成功/失败
-            # 的会话改写为 cancelled。
-            if session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status:
-                return
-            session.cancel_event.set()
-            session.status = "cancelled"
-            session.terminal_status = "cancelled"
-            session.terminal_error = session.terminal_error or str(reason or "圆桌讨论已取消")[:1000]
-            session.stage = "cancelled"
-            session.stage_message = session.terminal_error
-            session.progress = {
-                **session.progress,
-                "phase": "cancelled",
-                "terminal_status": "cancelled",
-                "terminal_error": session.terminal_error,
-                "stage": session.stage,
-                "stage_message": session.stage_message,
-                "seq": int(session.progress.get("seq") or 0) + 1,
-            }
-            if self._persist:
-                self._update_session(session)
+        if not session:
+            return False
+        # 重复 stop 对已取消任务仍可幂等地确认停止；其他终态不能被改写。
+        if session.status in _TERMINAL_SESSION_STATUSES or session.terminal_status:
+            if session.status == "cancelled":
+                session.cancel_event.set()
+                session.terminal_status = "cancelled"
+                session.terminal_error = session.terminal_error or str(
+                    reason or "圆桌讨论已取消"
+                )[:1000]
+                return True
+            return False
+        session.cancel_event.set()
+        session.status = "cancelled"
+        session.terminal_status = "cancelled"
+        session.terminal_error = session.terminal_error or str(reason or "圆桌讨论已取消")[:1000]
+        session.stage = "cancelled"
+        session.stage_message = session.terminal_error
+        session.progress = {
+            **session.progress,
+            "phase": "cancelled",
+            "terminal_status": "cancelled",
+            "terminal_error": session.terminal_error,
+            "stage": session.stage,
+            "stage_message": session.stage_message,
+            "seq": int(session.progress.get("seq") or 0) + 1,
+        }
+        if self._persist and not self._update_session(session):
+            return False
+        return session.status == "cancelled" and session.terminal_status == "cancelled"
 
     @staticmethod
     def _session_status_for_terminal(terminal_status: str) -> str:
@@ -583,7 +749,8 @@ class DiscussionBus:
     def cancel_discussion_task(self, session_id: str) -> bool:
         """终止会话并取消其后台编排任务。"""
 
-        self.request_stop(session_id)
+        if not self.request_stop(session_id):
+            return False
         task = self.get_discussion_task(session_id)
         if task is None:
             return False
@@ -624,7 +791,12 @@ class DiscussionBus:
             ):
                 return
             if self._persist:
-                self._persist_turn(session, turn)
+                persisted_seq = (
+                    self._persist_turn(session, turn, allow_followup=True)
+                    if followup_turn else self._persist_turn(session, turn)
+                )
+                if persisted_seq is None:
+                    return
             else:
                 turn.seq = session.last_turn_seq + 1
             session.last_turn_seq = turn.seq
@@ -663,7 +835,9 @@ class DiscussionBus:
                 terminal_payload = {
                     **data,
                     "status": session.terminal_status,
-                    "task_id": session.report_task_id,
+                    "task_id": int(
+                        session.report_task_id or data.get("task_id") or session.task_id or 0
+                    ),
                     "error": session.terminal_error,
                 }
                 msg = json_lib.dumps({
@@ -787,7 +961,8 @@ class DiscussionBus:
                 })
                 session.progress = progress
                 if self._persist:
-                    self._update_session(session)
+                    if not self._update_session(session):
+                        return
         msg = json_lib.dumps({
             "type": "control",
             "session_id": session_id,

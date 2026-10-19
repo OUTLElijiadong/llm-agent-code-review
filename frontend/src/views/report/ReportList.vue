@@ -129,10 +129,10 @@
                 type="primary"
                 size="small"
                 :loading="exportingTaskId === row.task_id"
-                :aria-label="canExportReport(row) ? '导出报告' : '报告操作'"
+                :aria-label="canExportReport() ? '导出报告' : '报告操作'"
                 @click.stop
               >
-                {{ canExportReport(row) ? '导出' : '操作' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                {{ canExportReport() ? '导出' : '操作' }}<el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -214,10 +214,6 @@ const exportErrorNextAction = ref('')
 const retryExportRow = ref<ReportListItem | null>(null)
 const retryExportFormat = ref<ReportFormat | null>(null)
 
-function isDomainReport(row: ReportListItem): boolean {
-  return row.source?.type === 'sandbox_test' || row.source?.type === 'pentest'
-}
-
 /** 服务端基于所有权与来源权限给出显式结论；缺失或 false 一律不展示。 */
 function canDisplayReport(row: ReportListItem): boolean {
   if (row.can_view_report !== true || !userStore.hasPermission('report:view')) return false
@@ -246,12 +242,12 @@ function canExport(format: ReportFormat): boolean {
   return userStore.hasPermission(`report:export:${format}`)
 }
 
-function canExportReport(row: ReportListItem): boolean {
+function canExportReport(): boolean {
   return ['json', 'html', 'pdf', 'word'].some(format => canExport(format as ReportFormat))
 }
 
 function hasRowMenuActions(row: ReportListItem): boolean {
-  return canExportReport(row) || (canDeleteReport.value && row.can_delete === true)
+  return canExportReport() || (canDeleteReport.value && row.can_delete === true)
 }
 
 function scoreClass(score: number) {

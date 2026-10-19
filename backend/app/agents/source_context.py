@@ -157,6 +157,7 @@ def _context_call(
     last_error = "源码分片压缩失败"
     retry_feedback = ""
     saw_output_truncated = False
+    saw_invalid_json = False
     saw_source_validation_error = False
     for attempt in range(2):
         if deadline is not None and time.monotonic() >= deadline:
@@ -226,6 +227,12 @@ def _context_call(
                 # 不把同一份超长上下文原样重发给模型。
                 if attempt + 1 >= len(output_budgets):
                     break
+            elif failure_kind == "invalid_json":
+                # JSON 解析失败可能来自摘要批次过大或响应拼接污染。完整批次原样重试
+                # 会重复发送相同源码并继续耗用模型额度；先无损拆分，之后仍执行完全
+                # 相同的覆盖 ID、来源引文和摘要 schema 校验。
+                saw_invalid_json = True
+                break
             retry_feedback = f"\n上一轮响应未通过校验：{last_error}。本轮用更短摘要重试，必须返回完整 JSON。"
             continue
         data = result.data
@@ -290,9 +297,13 @@ def _context_call(
             saw_source_validation_error = True
             last_error = str(exc)
             retry_feedback = f"\n上一轮响应未通过校验：{last_error}。本轮必须严格修正，简短作答。"
-    if saw_output_truncated or saw_source_validation_error:
+    if saw_output_truncated or saw_invalid_json or saw_source_validation_error:
         if _split_depth >= MAX_CONTEXT_SPLIT_DEPTH:
-            reason = "输出仍被截断" if saw_output_truncated else "来源校验仍失败"
+            reason = (
+                "输出仍被截断" if saw_output_truncated
+                else "JSON 解析仍失败" if saw_invalid_json
+                else "来源校验仍失败"
+            )
             raise SourceContextError(f"源码上下文{reason}，达到拆分深度上限: {last_error}")
         split_groups = _split_context_payload(source_ids, payload, _split_depth)
         if split_groups:
@@ -338,7 +349,11 @@ def _context_call(
                 if len(merged) > MAX_CHUNK_SUMMARY_CHARS:
                     raise SourceContextError("源码关键事实原文超过摘要预算；拒绝静默省略")
             return merged
-        reason = "输出被截断" if saw_output_truncated else "来源校验失败"
+        reason = (
+            "输出被截断" if saw_output_truncated
+            else "JSON 解析失败" if saw_invalid_json
+            else "来源校验失败"
+        )
         raise SourceContextError(f"源码上下文{reason}，输入已无法安全拆分: {last_error}")
     raise SourceContextError(last_error)
 
@@ -476,6 +491,54 @@ def _compact_metadata(
     return compacted
 
 
+def _compact_repeated_protected_facts(facts: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Merge identical protected statements while retaining every source mapping."""
+    grouped: dict[str, list[str]] = {}
+    for item in facts:
+        fact = item.get("fact")
+        source_ids = item.get("source_ids")
+        if isinstance(source_ids, list):
+            ids = [source_id for source_id in source_ids if isinstance(source_id, str)]
+        else:
+            source_id = item.get("source_id")
+            ids = [source_id] if isinstance(source_id, str) else []
+        if ids and isinstance(fact, str):
+            source_ids = grouped.setdefault(fact, [])
+            source_ids.extend(source_id for source_id in ids if source_id not in source_ids)
+
+    compacted: list[dict[str, Any]] = []
+    for fact, source_ids in grouped.items():
+        if len(source_ids) == 1:
+            compacted.append({"source_id": source_ids[0], "fact": fact})
+        else:
+            compacted.append({"source_ids": source_ids, "fact": fact})
+    return compacted
+
+
+def _compact_repeated_source_summaries(summaries: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Share byte-identical summaries while keeping their complete source IDs."""
+    grouped: dict[str, list[str]] = {}
+    for item in summaries:
+        summary = item.get("summary")
+        raw_ids = item.get("source_ids")
+        source_ids = (
+            [source_id for source_id in raw_ids if isinstance(source_id, str)]
+            if isinstance(raw_ids, list)
+            else [item["source_id"]] if isinstance(item.get("source_id"), str) else []
+        )
+        if isinstance(summary, str) and source_ids:
+            ids = grouped.setdefault(summary, [])
+            ids.extend(source_id for source_id in source_ids if source_id not in ids)
+
+    compacted: list[dict[str, Any]] = []
+    for summary, source_ids in grouped.items():
+        if len(source_ids) == 1:
+            compacted.append({"source_id": source_ids[0], "summary": summary})
+        else:
+            compacted.append({"source_ids": source_ids, "summary": summary})
+    return compacted
+
+
 def _remove_protected_fact_duplicates(compacted: dict[str, Any]) -> None:
     """Remove only exact standalone duplicates; never cut facts out of prose."""
     facts = compacted.get("protected_facts")
@@ -512,7 +575,7 @@ def compact_source_context(
     max_chars: int = 10_000,
     diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """保留完整源码分片清单，以有界叶子批次和递归归并压缩；失败时不交给决策模型。"""
+    """保留完整源码覆盖与逐字事实映射，以有界层级压缩；失败时不交给决策模型。"""
     started_at = time.monotonic()
     if diagnostics is not None:
         diagnostics.update(model_calls=0, elapsed_ms=0)
@@ -648,6 +711,12 @@ def compact_source_context(
             )
         compacted = _compact_metadata(source_summary, expected_ids, compressed, protected_fact_ledger)
         _remove_protected_fact_duplicates(compacted)
+        compacted["protected_facts"] = _compact_repeated_protected_facts(
+            compacted.get("protected_facts") or [],
+        )
+        compacted["source_summaries"] = _compact_repeated_source_summaries(
+            compacted.get("source_summaries") or [],
+        )
         if len(json.dumps(compacted, ensure_ascii=False)) > max_chars:
             compacted["source_summaries"] = [
                 {
@@ -660,6 +729,12 @@ def compact_source_context(
                 }
             ]
             _remove_protected_fact_duplicates(compacted)
+            compacted["protected_facts"] = _compact_repeated_protected_facts(
+                compacted.get("protected_facts") or [],
+            )
+            compacted["source_summaries"] = _compact_repeated_source_summaries(
+                compacted.get("source_summaries") or [],
+            )
     else:
         nodes: list[dict[str, Any]] = [
             {
@@ -736,21 +811,20 @@ def compact_source_context(
             "model_calls": call_counter[0],
         }
         _remove_protected_fact_duplicates(compacted)
-    if len(json.dumps(compacted, ensure_ascii=False)) > max_chars:
-        if diagnostics is not None:
-            diagnostics.update(
-                model_calls=call_counter[0],
-                elapsed_ms=max(0, round((time.monotonic() - started_at) * 1000)),
-            )
-        raise SourceContextError("压缩后源码上下文仍超过模型预算")
     elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
     compacted["compression"] = {
         **(compacted.get("compression") if isinstance(compacted.get("compression"), dict) else {}),
         "method": "bounded_hierarchical" if len(expected_ids) > 32 else "bounded_per_chunk",
         "source_chunks": len(expected_ids),
         "model_calls": call_counter[0],
-        "elapsed_ms": elapsed_ms,
     }
+    compacted["protected_facts"] = _compact_repeated_protected_facts(
+        compacted.get("protected_facts") or [],
+    )
+    if len(json.dumps(compacted, ensure_ascii=False)) > max_chars:
+        if diagnostics is not None:
+            diagnostics.update(model_calls=call_counter[0], elapsed_ms=elapsed_ms)
+        raise SourceContextError("压缩后源码上下文仍超过模型预算")
     if diagnostics is not None:
         diagnostics.update(model_calls=call_counter[0], elapsed_ms=elapsed_ms)
     return compacted

@@ -422,7 +422,7 @@ def overview_agents_activity(db: Session = Depends(get_db), _: User = Depends(re
 def overview_token_usage(
     days: int = Query(default=30, ge=7, le=90),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_super_admin),
 ):
     """管理员每日 Token 趋势；只读真实 AiCallLog，缺失用量不伪装成零。"""
     return Resp(data=_daily_token_usage(db, days=days))

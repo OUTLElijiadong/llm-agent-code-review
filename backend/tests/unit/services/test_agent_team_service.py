@@ -1782,7 +1782,7 @@ def test_stopping_parent_run_suppresses_new_and_already_queued_team_receipts(db,
         )),
     ).all()
     assert len(root_receipts) == 2
-    assert {row.status for row in root_receipts} == {"completed"}
+    assert {row.status for row in root_receipts} == {"cancelled"}
     assert all(json.loads(row.context_json)["suppressed_after_parent_cancel"] is True for row in root_receipts)
     assert all(json.loads(row.context_json)["session_delivery"] is False for row in root_receipts)
     assert all(json.loads(row.context_json)["parent_run_id"] == root.run_id for row in root_receipts)

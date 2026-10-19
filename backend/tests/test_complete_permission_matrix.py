@@ -121,7 +121,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/discuss/sessions/{session_id}/stop"): [],
         ("POST", "/api/sandboxes/remote-target-authorization"): [],
         ("GET", "/api/admin/observability/alerts/page"): ["require_admin"],
-        ("GET", "/api/admin/overview/token-usage"): ["require_admin"],
+        ("GET", "/api/admin/overview/token-usage"): ["require_super_admin"],
         ("GET", "/api/projects/{project_id}/members/candidates"): ["project:member:manage"],
         ("GET", "/api/admin/security-center/overview"): ["require_super_admin"],
         ("GET", "/api/admin/security-center/events"): ["require_super_admin"],

@@ -2302,6 +2302,15 @@ def _add_terminal_mesh_message(
     session_delivery = send_to.startswith("session:") and deliver_to_session
     if session_delivery:
         status = "queued"
+    elif (
+        send_to.startswith("session:")
+        and isinstance(context, dict)
+        and context.get("suppressed_after_parent_stop") is True
+    ):
+        # A worker can finish after the user stopped its parent response. Keep
+        # the result in the team ledger, but persist its session receipt as
+        # cancelled so no inbox recovery path can resume Xiaoling from it.
+        status = "cancelled"
     row = AgentMeshMessage(
             **_terminal_message_attribution(db, team, causation_id),
             message_id=message_id,
@@ -2486,7 +2495,7 @@ def _suppress_parent_run_team_notifications(
         context["suppressed_after_parent_cancel"] = True
         context["suppressed_after_parent_stop"] = True
         row.context_json = _json(context)
-        row.status = "completed"
+        row.status = "cancelled"
         row.requires_ack = 0
         row.completed_at = row.completed_at or now
         row.lease_token = None
@@ -2496,7 +2505,7 @@ def _suppress_parent_run_team_notifications(
             db,
             team=team_by_correlation[row.correlation_id],
             message_id=row.message_id,
-            status="completed",
+            status="cancelled",
             actor="system:parent_run_cancelled",
             detail={"previous_status": previous_status, "reason": "parent_run_cancelled"},
         )

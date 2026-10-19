@@ -3158,7 +3158,9 @@ async def test_start_discussion_handles_missing_session_and_setup_failures(
     ) is None
 
     bus = DiscussionBus()
-    session = bus.create_session("degraded", task_id=0, file_name="degraded.py")
+    session = bus.create_session(
+        "degraded", task_id=0, file_name="degraded.py", owner_user_id=7,
+    )
     orchestrator = _make_orchestrator(bus)
 
     def create_agent() -> RecordingAgent:

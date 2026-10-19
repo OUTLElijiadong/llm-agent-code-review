@@ -62,6 +62,7 @@ def private_dashboard():
         memberships[name] = membership
     ordinary = ReviewTask(user_id=users["owner"].id, project_id=project.id,
                           task_name="普通代码审查", review_type="standard", status="success", score=88,
+                          coverage={"coverage_status": "complete", "verification_status": "complete"},
                           create_time=datetime.now(timezone.utc) - timedelta(seconds=1))
     db.add(ordinary)
     db.flush()
@@ -89,6 +90,11 @@ def _domain(scope, source, *, actor="author", status="success"):
         user_id=scope["users"][actor].id, project_id=scope["project"].id,
         task_name="可见的私域任务元信息", review_type=source, status=status,
         score=14, total_issues=3, severe_issues=3, summary="PRIVATE_REPORT_BODY",
+        coverage=(
+            {"coverage_status": "complete", "verification_status": "complete", "score_available": True}
+            if source == "pentest"
+            else {"coverage_status": "partial", "verification_status": "partial"}
+        ),
     )
     scope["db"].add(task)
     scope["db"].flush()
@@ -166,16 +172,19 @@ def test_private_author_and_admin_keep_authorized_metrics(private_dashboard, sou
     assert summary["total_issues"] == 4
     assert summary["severe_issues"] == 3
     recent_task = next(item for item in summary["recent_tasks"] if item["id"] == task.id)
-    assert recent_task["score"] is None
+    expected_domain_score = 14 if source == "pentest" else None
+    assert recent_task["score"] == expected_domain_score
     if source == "sandbox_test":
         assert recent_task["coverage"]["verification_status"] == "partial"
     # Domain metrics can be aggregated only within their authorized source
     # scope, and an unknown/partial coverage score remains undisplayed.
-    assert {item["task_id"] for item in _get(private_dashboard, actor, "/api/dashboard/score-trend")} == {
-        private_dashboard["ordinary"].id,
-    }
+    expected_trend_ids = {private_dashboard["ordinary"].id}
+    if source == "pentest":
+        expected_trend_ids.add(task.id)
+    trend_items = _get(private_dashboard, actor, "/api/dashboard/score-trend")
+    assert {item["task_id"] for item in trend_items} == expected_trend_ids
     safety = _get(private_dashboard, actor, "/api/security/dashboard-summary")
-    assert safety["avg_risk_score"] == 14
+    assert safety["avg_risk_score"] == (14 if source == "pentest" else 88)
     assert sum(item["total_issues"] for item in safety["source_summaries"]) == 4
 
 
