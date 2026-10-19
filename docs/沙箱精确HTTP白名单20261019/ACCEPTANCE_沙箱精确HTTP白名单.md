@@ -61,3 +61,12 @@
 ## 验收结论
 
 活动生产版本仍为 `4.1.11`。这次真实产品任务失败，直接判定因素是根路径无 HTTP 响应而原实现把它设为必选；三条显式 PHP 路由均返回 200。当前源代码已修正为根路径可选，白名单仍要求至少一条精确 GET；回执摘要优先使用已配置的无查询根路径，否则指向第一条白名单请求。活动发布树的只读巡检全绿；旧 checkout 的巡检失败不代表活动生产故障。修订尚未部署、未运行功能测试、未重新构建镜像，也未再次运行靶场。此前任务仍为失败，不得称为“黑盒测试通过”或“靶场完整测试成功”。
+
+## 4.1.12 生产部署与当前验收状态（2026-10-19）
+
+- 修订已提交并部署：版本 `4.1.12`，提交 `80bac2cc56640d65477926f1820c2abbe90046ae`。部署脚本报告全量发布完成；活动生产版本标记与该提交一致。
+- 生产 HTTPS `/healthz` 返回 `status=ok`、版本 `4.1.12` 和提交 SHA；`/readyz` 返回 `status=ready`，版本和 SHA 一致。只读 `ops-check.sh` 中发布、容器、备份校验、Alembic、HTTPS 和内存检查通过。
+- `ops-check.sh` 状态为 `degraded`、`can_continue=true`：磁盘使用率 85% 达到告警阈值 85%，要求人工审阅清理。未运行清理脚本或删除数据；用户表示自行清理服务器磁盘。
+- 4.1.12 本地验证：前端单测 27 项通过；后端沙箱 HTTP scope 与 executor 测试 106 项通过（1 条 Python `crypt` 弃用警告）；前端生产构建、Python AST、runner `bash -n`、五个 Compose profile 的 runner SHA 一致性、Compose 配置和 `git diff --check` 通过。生产端另完成前端构建和发布脚本健康检查。
+- Safari 真实产品页显示生产版本 `4.1.12` 和提交 SHA。当前配置已选择项目 `Local-File-Inclusion-Demo`（固定提交 `0e0e47093ac866b9a579a0c3fb61a3a6410355a`）、PHP、黑盒模式、无数据库、测试目标、远程目标为空；已配置且前后端强制执行三条本机 GET 白名单：`/vulnerable.php?page=about.php`、`/vulnerable.php?page=README_FILES.txt`、`/vulnerable.php?page=nonexistent.php`，每条期望 HTTP 200。根路径未加入，未配置其他请求。
+- 此刻上述新任务尚未提交或运行；当前动作确认待用户答复。不得把 4.1.11 的失败任务改写为成功，也不得把本次配置当作已产生 HTTP 请求或报告。
