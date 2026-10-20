@@ -53,7 +53,9 @@ def report_scope(db):
     db.flush()
     member = ProjectMember(project_id=project.id, user_id=reviewer.id, role_in_project="reviewer")
     task = ReviewTask(user_id=reviewer.id, project_id=project.id, task_name="member review",
-                      review_type="standard", status="success", total_files=1, processed_files=1)
+                      review_type="standard", status="success", total_files=1, processed_files=1, score=88,
+                      coverage={"coverage_status": "complete", "verification_status": "complete",
+                                "score_available": True})
     code_file = CodeFile(project_id=project.id, file_name="source.py", file_path="src/source.py",
                          language="python", content="value = 1\n", status="active", version_no=1)
     db.add_all([member, task, code_file])

@@ -19,7 +19,9 @@ def seed(db, role="viewer", *, authored=False):
     member = ProjectMember(project_id=project.id, user_id=actor.id, role_in_project=role)
     task = ReviewTask(id=7201, project_id=project.id, user_id=actor.id if authored else owner.id,
                       task_name="local task", review_type="standard", status="success", total_files=1,
-                      processed_files=1, score=88, execution_token="local-lease")
+                      processed_files=1, score=88, execution_token="local-lease",
+                      coverage={"coverage_status": "complete", "verification_status": "complete",
+                                "score_available": True})
     issue = ReviewIssue(id=7201, task_id=task.id, file_name="local.py", issue_type="代码规范",
                         severity="低", title="local claim", description="local", status="unfixed")
     db.add_all([owner, actor, project, member, task, issue])

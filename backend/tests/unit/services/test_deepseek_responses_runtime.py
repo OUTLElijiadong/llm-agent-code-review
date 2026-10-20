@@ -197,6 +197,44 @@ async def test_replays_two_tool_rounds_without_previous_response_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_coordinator_never_restores_historical_image_pixels_to_model_payload() -> None:
+    transport = ScriptedTransport([_message_response("已阻塞：没有图像执行合同")])
+    store = InMemoryCheckpointStore()
+    runtime = DeepSeekResponsesRuntime(
+        transport=transport,
+        tool_executor=RecordingExecutor(),
+        checkpoint_store=store,
+        image_assets={"a" * 64: "data:image/png;base64,c2VjcmV0"},
+        coordinator_only=True,
+    )
+    image_input = [{
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "请看这张图"},
+            {"type": "input_image", "image_url": f"prism-asset://{'a' * 64}"},
+        ],
+    }]
+
+    result = await runtime.start(
+        image_input,
+        instructions="协调器规则",
+        run_id="coordinator-legacy-image",
+        context_metadata={},
+    )
+
+    sent = transport.payloads[0]
+    assert result.status == COMPLETED
+    assert "input_image" not in str(sent["input"])
+    assert "data:image" not in str(sent["input"])
+    assert "小菱协调器不可读取图片像素" in str(sent["input"])
+    assert "没有适配成员或合同则创建临时阻塞团队" in sent["instructions"]
+    checkpoint = await store.load("coordinator-legacy-image")
+    assert checkpoint is not None
+    assert checkpoint.context_metadata["coordinator_input_has_images"] is True
+    assert "input_image" in str(checkpoint.transcript)
+
+
+@pytest.mark.asyncio
 async def test_compacts_model_projection_but_preserves_full_audit_transcript() -> None:
     transcript: List[Dict[str, Any]] = [{"role": "user", "content": "审查项目 42，保留所有证据"}]
     transcript.extend(

@@ -202,7 +202,7 @@ def test_worker_rechecks_project_analyzer_permissions_after_team_creation(
             "member_key": "reader",
             "display_name": "项目分析 Agent",
             "address": "agent:project_analyzer",
-            "role": "verifier",
+            "role": "worker",
         }],
         "tasks": [{
             "task_key": "inspect",

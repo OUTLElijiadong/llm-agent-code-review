@@ -1558,6 +1558,7 @@ async def stream_agent_response(
                 mesh_message_id = ""
                 source_attribution = {}
                 server_history_transcript: Optional[list[dict[str, Any]]] = None
+                trusted_terminal_team_snapshot: Optional[dict[str, Any]] = None
                 if payload.action == "start":
                     messages = [item.model_dump() for item in payload.messages if item.content.strip() or item.images]
                     first_user_text = next(
@@ -1587,6 +1588,9 @@ async def stream_agent_response(
                             mesh_message_id,
                             surface=payload.surface,
                             session_key=payload.session_id,
+                        )
+                        trusted_terminal_team_snapshot = system_input.pop(
+                            "_server_verified_terminal_team_snapshot", None,
                         )
                         messages = [system_input]
                         source_message = run_db.query(AgentMeshMessage).filter(
@@ -1655,6 +1659,8 @@ async def stream_agent_response(
                             start_kwargs: dict[str, Any] = {"run_id": run_id, "event_sink": sink}
                             if server_history_transcript is not None:
                                 start_kwargs["server_history_transcript"] = server_history_transcript
+                            if isinstance(trusted_terminal_team_snapshot, dict):
+                                start_kwargs["trusted_terminal_team_snapshot"] = trusted_terminal_team_snapshot
                             result = await service.start(messages, **start_kwargs)
                     elif payload.action == "cancel":
                         result = await service.cancel(run_id=run_id, reason=payload.cancel_reason)

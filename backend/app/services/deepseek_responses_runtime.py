@@ -451,6 +451,7 @@ class DeepSeekResponsesRuntime:
         completion_guard: Optional[CompletionGuard] = None,
         on_round: Optional[Callable[[Mapping[str, Any]], None]] = None,
         image_assets: Optional[Mapping[str, str]] = None,
+        coordinator_only: bool = False,
     ) -> None:
         if max_rounds < 1:
             raise ValueError("max_rounds 必须大于 0")
@@ -476,6 +477,7 @@ class DeepSeekResponsesRuntime:
         # 多模态:sha256 -> data URL。检查点只存 prism-asset:// 占位符,
         # 发往上游的 payload 在此还原;恢复运行缺项时降级为文字说明。
         self._image_assets: Dict[str, str] = dict(image_assets) if image_assets else {}
+        self._coordinator_only = coordinator_only
         self._locks: Dict[str, asyncio.Lock] = {}
         self._cancel_events: Dict[str, asyncio.Event] = {}
         self._cancel_reasons: Dict[str, str] = {}
@@ -487,6 +489,7 @@ class DeepSeekResponsesRuntime:
         instructions: str = "",
         tools: Optional[Sequence[Mapping[str, Any]]] = None,
         run_id: Optional[str] = None,
+        context_metadata: Optional[Mapping[str, Any]] = None,
     ) -> RuntimeResult:
         """启动新运行并持续执行，直到完成、暂停或达到轮数上限。"""
         actual_run_id = run_id or f"run_{uuid.uuid4().hex}"
@@ -498,6 +501,7 @@ class DeepSeekResponsesRuntime:
                 transcript=_normalize_input(input_value),
                 tools=_with_ask_user_tool(tools or []),
                 instructions=instructions,
+                context_metadata=copy.deepcopy(dict(context_metadata or {})),
             )
             if not await self._store.create(checkpoint):
                 raise InvalidRunStateError(
@@ -1362,6 +1366,16 @@ class DeepSeekResponsesRuntime:
             from app.services.multimodal_service import restore_image_placeholders, transcript_has_images
 
             has_images = transcript_has_images(projected_input)
+            if has_images and self._coordinator_only:
+                projected_input = _coordinator_projection_without_images(projected_input)
+                checkpoint.context_metadata["coordinator_input_has_images"] = True
+                image_policy = (
+                    "当前检查点历史含图片附件。小菱是协调器，不接收图片像素，也不得回答图像内容。"
+                    "必须将图像任务交给明确具备图像执行合同的团队成员；没有适配成员或合同则创建临时阻塞团队并报告阻塞。"
+                )
+                if image_policy not in checkpoint.instructions:
+                    checkpoint.instructions = f"{checkpoint.instructions}\n{image_policy}".strip()
+                has_images = False
             if has_images:
                 try:
                     projected_input = restore_image_placeholders(projected_input, self._image_assets, strict=True)
@@ -1386,6 +1400,8 @@ class DeepSeekResponsesRuntime:
             )
             if checkpoint.context_metadata.get("semantic_summary"):
                 context_metadata["semantic_summary"] = checkpoint.context_metadata["semantic_summary"]
+            if checkpoint.context_metadata.get("coordinator_input_has_images") is True:
+                context_metadata["coordinator_input_has_images"] = True
             context_metadata["force_tool_rounds"] = max(force_tool_rounds - 1, 0)
             checkpoint.context_metadata = context_metadata
 
@@ -2075,6 +2091,34 @@ def _without_unpaired_function_calls(
         if str(item.get("type") or "") != "function_call"
         or str(item.get("call_id") or item.get("id") or "") in output_call_ids
     ]
+
+
+def _coordinator_projection_without_images(
+    items: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Keep attachment presence visible without sending image pixels to the coordinator."""
+    projected: List[Dict[str, Any]] = []
+    for raw_item in items:
+        item = copy.deepcopy(dict(raw_item))
+        for field_name in ("content", "output"):
+            content = item.get(field_name)
+            if not isinstance(content, list):
+                continue
+            parts: List[Dict[str, Any]] = []
+            removed = 0
+            for part in content:
+                if isinstance(part, Mapping) and part.get("type") == "input_image":
+                    removed += 1
+                elif isinstance(part, Mapping):
+                    parts.append(dict(part))
+            if removed:
+                parts.append({
+                    "type": "input_text",
+                    "text": f"[此历史消息含 {removed} 个图片附件；小菱协调器不可读取图片像素]",
+                })
+                item[field_name] = parts
+        projected.append(item)
+    return projected
 
 
 def _tool_choice_for_round(model: str, force_tool_rounds: int) -> Optional[str]:

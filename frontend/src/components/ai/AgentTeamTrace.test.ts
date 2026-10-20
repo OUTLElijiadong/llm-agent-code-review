@@ -23,8 +23,8 @@ const team = {
     { member_id: 2, member_key: 'reviewer', display_name: '验证 Agent', address: 'agent:code_reviewer', kind: 'runtime', role: 'verifier' as const, status: 'running' },
   ],
   tasks: [
-    { task_id: 11, task_key: 'read', member_id: 1, title: '读取项目', depends_on: [], status: 'completed' as const, priority: 0, attempt_count: 1, max_attempts: 3 },
-    { task_id: 12, task_key: 'verify', member_id: 2, member_key: 'reviewer', title: '验证结果', depends_on: ['read'], status: 'running' as const, priority: 0, attempt_count: 1, max_attempts: 3 },
+    { task_id: 11, task_key: 'read', member_id: 1, title: '读取项目', instructions: '检查项目结构与现有文档', depends_on: [], status: 'completed' as const, priority: 0, attempt_count: 1, max_attempts: 3 },
+    { task_id: 12, task_key: 'verify', member_id: 2, member_key: 'reviewer', title: '验证结果', instructions: '独立复核执行节点的证据', depends_on: ['read'], status: 'running' as const, priority: 0, attempt_count: 1, max_attempts: 3 },
   ],
   events: [{ event_id: 1, team_id: 42, event_type: 'task.completed', trace_id: 'trace-team-42', created_at: '2026-08-12T12:00:00Z' }],
   messages: [{ message_id: 'msg-1', trace_id: 'trace-team-42', correlation_id: 'corr-1', sent_from: 'agent:project_analyzer', send_to: 'agent:code_reviewer', message_type: 'task.result', subject: '读取完成', status: 'completed', create_time: '2026-08-12T12:00:00Z' }],
@@ -67,6 +67,9 @@ describe('AgentTeamTrace', () => {
     expect(wrapper.get(`#${traceId}`).attributes('id')).toBe(traceId)
     expect(wrapper.text()).toContain('读取 Agent')
     expect(wrapper.text()).toContain('依赖: read')
+    expect(wrapper.text()).toContain('小菱派发内容')
+    expect(wrapper.text()).toContain('检查项目结构与现有文档')
+    expect(wrapper.text()).toContain('独立复核执行节点的证据')
     expect(wrapper.text()).toContain('读取完成')
     expect(wrapper.text()).not.toContain('并行执行测试')
     expect(wrapper.find('.agent-team-toggle').attributes('aria-expanded')).toBe('true')

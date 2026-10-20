@@ -1755,11 +1755,12 @@ it('核对请求返回前切换会话，不将旧图片或旧请求发往新会�
   const wrapper = mountCopilot()
   try {
     const payload = await failFirstAdminMessage(wrapper)
+    const readsBeforeRetry = sessionApi.get.mock.calls.length
     let resolveCheck!: (value: unknown) => void
     sessionApi.get.mockReturnValueOnce(new Promise(resolve => { resolveCheck = resolve }))
     void wrapper.find('.copilot-error-btn.is-retry').trigger('click')
     await flushPromises()
-    expect(sessionApi.get).toHaveBeenLastCalledWith('admin', payload.session_id)
+    expect(sessionApi.get.mock.calls.slice(readsBeforeRetry)).toContainEqual(['admin', payload.session_id])
     expect(wrapper.text()).toContain('正在核对上次提交状态')
     const vm = wrapper.vm as unknown as { handleSessionSelect: (id: string) => Promise<void> }
     await vm.handleSessionSelect('different-session')

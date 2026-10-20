@@ -261,7 +261,10 @@ def test_pentest_list_hides_unreadable_report_reference_from_authorizer(db, sour
 
 
 def _listed(db, owner, task):
-    item = next(item for item in report_service.list_reports(db, owner)["items"] if item["task_id"] == task.id)
+    item = next(
+        item for item in report_service.list_reports(db, owner, include_history=True)["items"]
+        if item["task_id"] == task.id
+    )
     assert item["can_view_report"] is True
     return item
 
@@ -417,7 +420,7 @@ def test_all_sources_agree_in_list_detail_and_dashboard(db, source_owner, source
         tasks.append(task)
     db.commit()
 
-    listed = report_service.list_reports(db, source_owner)["items"]
+    listed = report_service.list_reports(db, source_owner, include_history=True)["items"]
     details = [report_service.get_report_detail(db, source_owner, task.id) for task in tasks]
     summary = dashboard_service.get_summary(db, source_owner)
 
@@ -494,7 +497,8 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
     expected_count = 5 if source == "pentest" else 2
     assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == expected_count
     assert _listed(db, source_owner, task)["status"] == "failed"
-    assert report_service.list_reports(db, source_owner)["total"] == 1
+    assert report_service.list_reports(db, source_owner)["total"] == 0
+    assert report_service.list_reports(db, source_owner, include_history=True)["total"] == 1
     summary = dashboard_service.get_summary(db, source_owner)
     assert summary["review_count"] == 0
     assert summary["avg_score"] == 0
@@ -921,7 +925,7 @@ def test_source_http_list_detail_dashboard_and_ownership(source_api_client, sour
         _snapshot(db, task)
     db.commit()
 
-    response = client.get("/api/reports")
+    response = client.get("/api/reports", params={"include_history": source == "sandbox_test"})
     assert response.status_code == 200
     listed = response.json()["data"]["items"][0]
     assert listed["can_view_report"] is True
@@ -965,7 +969,7 @@ def test_skipped_ai_review_status_and_reason_are_preserved_in_list_and_detail(
     )
     db.commit()
 
-    listed = client.get("/api/reports").json()["data"]["items"][0]
+    listed = client.get("/api/reports", params={"include_history": True}).json()["data"]["items"][0]
     detail = client.get(f"/api/reports/{task.id}").json()["data"]
     expected = {
         "status": "skipped",

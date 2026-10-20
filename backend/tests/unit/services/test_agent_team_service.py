@@ -665,6 +665,32 @@ def test_create_team_rejects_dependency_cycle(db, team_user):
         agent_team_service.create_team_from_xiaoling(db, team_user, payload)
 
 
+def test_create_team_rejects_verifier_only_team_without_real_worker(db, team_user):
+    payload = _payload(
+        members=[
+            {
+                "member_key": "reviewer",
+                "display_name": "仅核验成员",
+                "address": "agent:code_reviewer",
+                "role": "verifier",
+            },
+        ],
+        tasks=[
+            {
+                "task_key": "verify",
+                "member_key": "reviewer",
+                "title": "核验",
+                "instructions": "核验已提供的证据",
+            },
+        ],
+    )
+
+    with pytest.raises(agent_team_service.AgentTeamValidationError, match="实际执行工作的 worker"):
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert db.query(AgentTeam).count() == 0
+
+
 def test_team_isolation_and_cancel_are_idempotent(db, team_user):
     created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
     other = SimpleNamespace(id=8, role="user", username="other")

@@ -244,7 +244,9 @@ def matrix_env():
                         language="python", content=f"print('{name}')\n", size_bytes=11, line_count=1)
         task = ReviewTask(user_id=owner.id, project_id=project.id, task_name=f"验收任务_{name}",
                           status="success", review_type="standard", total_files=1, processed_files=1,
-                          total_issues=1, high_issues=1, score=80, summary=f"验收报告_{name}")
+                          total_issues=1, high_issues=1, score=80, summary=f"验收报告_{name}",
+                          coverage={"coverage_status": "complete", "verification_status": "complete",
+                                    "score_available": True})
         db.add_all([file, task])
         db.flush()
         issue = ReviewIssue(task_id=task.id, file_id=file.id, file_name=file.file_name,

@@ -467,7 +467,7 @@ def test_legacy_sandbox_pass_rate_is_not_exposed_as_quality_or_risk_score(
     }
     db.commit()
 
-    listing = client.get("/api/reports?page=1&page_size=100").json()["data"]
+    listing = client.get("/api/reports?page=1&page_size=100&include_history=true").json()["data"]
     row = next(item for item in listing["items"] if item["task_id"] == task.id)
     detail = client.get(f"/api/reports/{task.id}").json()["data"]
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
@@ -705,7 +705,7 @@ def test_legacy_sandbox_report_without_coverage_preserves_score_and_marks_unknow
 
     detail = client.get(f"/api/reports/{task.id}")
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
-    listing = client.get("/api/reports?page=1&page_size=100")
+    listing = client.get("/api/reports?page=1&page_size=100&include_history=true")
 
     assert detail.status_code == exported.status_code == listing.status_code == 200
     # The historical database score remains stored, but unknown coverage must not
@@ -750,7 +750,7 @@ def test_legacy_nested_mode_scopes_detail_list_and_json_export_without_mutating_
     )
 
     detail = client.get(f"/api/reports/{task.id}")
-    listing = client.get("/api/reports?page=1&page_size=100")
+    listing = client.get("/api/reports?page=1&page_size=100&include_history=true")
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
 
     assert detail.status_code == listing.status_code == exported.status_code == 200
@@ -1021,7 +1021,8 @@ def test_terminal_code_review_reports_are_listed_readable_and_export_state(expor
     db.add(task)
     db.commit()
 
-    listed = client.get("/api/reports").json()["data"]["items"]
+    assert client.get("/api/reports").json()["data"]["items"] == []
+    listed = client.get("/api/reports", params={"include_history": True}).json()["data"]["items"]
     entry = next(item for item in listed if item["task_id"] == task.id)
     detail_response = client.get(f"/api/reports/{task.id}")
     assert detail_response.status_code == 200

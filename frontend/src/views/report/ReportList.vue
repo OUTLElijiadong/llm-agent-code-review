@@ -39,6 +39,9 @@
           style="width: 260px"
           @change="loadData"
         />
+        <el-checkbox v-model="includeHistory" @change="onHistoryChanged">
+          显示失败或无有效评分的历史记录
+        </el-checkbox>
       </div>
 
       <div class="report-cards" v-loading="loading" role="list" data-testid="report-cards">
@@ -48,7 +51,7 @@
         </section>
         <EmptyState
           v-else-if="!loading && !reports.length"
-          :description="hasFilter ? '该项目还没有审查报告' : '暂无审查报告'"
+          :description="includeHistory ? (hasFilter ? '该项目没有可见的审查记录' : '暂无可见的审查记录') : (hasFilter ? '该项目暂无已完成且有有效评分的报告' : '暂无已完成且有有效评分的报告')"
           :action-text="hasFilter || !canStartReview ? '' : '去启动审查'"
           :action-to="hasFilter || !canStartReview ? '' : '/reviews/start'"
         />
@@ -201,6 +204,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const filterProjectId = ref<number | null>(null)
+const includeHistory = ref(false)
 
 /** 空态文案依据:是否筛选了项目。 */
 const hasFilter = computed(() => Boolean(filterProjectId.value))
@@ -369,6 +373,7 @@ async function loadData() {
     const params: Record<string, unknown> = {
       page: page.value,
       page_size: pageSize.value,
+      include_history: includeHistory.value,
     }
     if (filterProjectId.value) params.project_id = filterProjectId.value
     if (dateRange.value) {
@@ -397,6 +402,11 @@ async function loadData() {
   } finally {
     if (current() && requestGeneration === loadRequestGeneration) loading.value = false
   }
+}
+
+function onHistoryChanged() {
+  page.value = 1
+  void loadData()
 }
 
 async function loadProjects() {

@@ -32,6 +32,10 @@ function mountPage(): VueWrapper {
         'el-card': { template: '<div><slot /></div>' },
         'el-select': { template: '<div><slot /></div>' }, 'el-option': true,
         'el-date-picker': true, 'el-pagination': true,
+        'el-checkbox': {
+          props: ['modelValue'], emits: ['update:modelValue', 'change'],
+          template: '<label><input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked); $emit(\'change\', $event.target.checked)"><slot /></label>',
+        },
         'el-tooltip': { template: '<div><slot /></div>' },
         'el-button': { inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' },
         'el-icon': { template: '<i><slot /></i>' }, 'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
@@ -187,6 +191,20 @@ describe('报告卡片列表', () => {
     expect(text).toContain('问题 3')
     expect(text).toContain('72')
     expect(text).toContain('2026-09-05')
+  })
+
+  it('默认请求排除失败或无有效评分历史，并允许用户显式展开历史', async () => {
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('显示失败或无有效评分的历史记录')
+    expect(api.reports).toHaveBeenLastCalledWith(expect.objectContaining({ include_history: false }))
+
+    const vm = wrapper.vm as any
+    vm.includeHistory = true
+    await vm.loadData()
+    await flushPromises()
+    expect(api.reports).toHaveBeenLastCalledWith(expect.objectContaining({ include_history: true }))
   })
 
   it('缺少明确评分回执时不把历史占位分数展示成真实评分', async () => {
@@ -447,8 +465,19 @@ describe('报告卡片列表', () => {
 
     resolveReports({ items: [], total: 0 })
     await flushPromises()
-    expect(wrapper.find('.empty-state').text()).toBe('暂无审查报告')
+    expect(wrapper.find('.empty-state').text()).toBe('暂无已完成且有有效评分的报告')
     expect(wrapper.find('.pagination-wrapper').exists()).toBe(true)
+  })
+
+  it('历史开关会重新请求并显式包含失败或无评分记录', async () => {
+    wrapper = mountPage()
+    await flushPromises()
+
+    expect(api.reports.mock.calls[0][0]).toMatchObject({ include_history: false })
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await flushPromises()
+
+    expect(api.reports.mock.calls.at(-1)?.[0]).toMatchObject({ include_history: true })
   })
 
   it('列表请求失败时显示失败状态，不伪装成空报告列表', async () => {

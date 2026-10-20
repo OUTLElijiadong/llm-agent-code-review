@@ -450,6 +450,13 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
               <div v-if="Array.isArray(task.depends_on) && task.depends_on.length" class="agent-team-dependencies">
                 依赖: <code v-for="dependency in task.depends_on" :key="dependency">{{ dependency }}</code>
               </div>
+              <details v-if="task.instructions?.trim()" class="agent-team-evidence agent-team-instructions">
+                <summary>小菱派发内容</summary>
+                <div class="agent-team-detail-row">
+                  <b>{{ taskMember(task) }}</b>
+                  <code>{{ task.instructions }}</code>
+                </div>
+              </details>
               <details v-if="hasTaskEvidence(task)" class="agent-team-evidence">
                 <summary>证据与错误</summary>
                 <div v-if="task.result" class="agent-team-detail-row">

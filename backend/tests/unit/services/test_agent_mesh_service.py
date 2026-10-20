@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from app.agents.contracts import CONTRACTS
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
 from app.models.agent_response_run import AgentResponseRun
+from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
 from app.services import agent_mesh_service
 
@@ -25,6 +26,9 @@ def db():
     AgentMeshMessage.__table__.create(engine)
     AgentMeshMessageEvent.__table__.create(engine)
     AgentResponseRun.__table__.create(engine)
+    AgentTeam.__table__.create(engine)
+    AgentTeamMember.__table__.create(engine)
+    AgentTeamTask.__table__.create(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     try:
         yield session
@@ -136,6 +140,108 @@ def test_admin_catalog_exposes_read_only_operations_child_only_to_superadmin(db)
     operations = next(item for item in super_admin["items"] if item["address"] == "agent:operations")
     assert operations["team_dispatch_state"] == "read_only"
     assert operations["team_input_contract"]["write_actions"] == "main_xiaoling_approval_only"
+
+
+def _add_temporary_agent_team(db, *, user_id: int, surface: str, definition: dict, status: str) -> None:
+    canonical = json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    checksum = __import__("hashlib").sha256(canonical.encode("utf-8")).hexdigest()
+    team = AgentTeam(
+        user_id=user_id,
+        surface=surface,
+        session_key=f"session-{user_id}-{surface}-{db.query(AgentTeam).count()}",
+        title="临时 Agent 验收团队",
+        objective="验证同一临时职责是否可重复复用",
+        status=status,
+        trace_id=f"trace-{user_id}-{surface}-{db.query(AgentTeam).count()}",
+    )
+    db.add(team)
+    db.flush()
+    worker = AgentTeamMember(
+        team_id=team.id,
+        member_key="worker",
+        display_name="问答专员",
+        address="temporary:worker",
+        kind="temporary",
+        role="worker",
+        capabilities_json=json.dumps(
+            {"temporary_definition": definition, "definition_checksum": checksum}, ensure_ascii=False,
+        ),
+        status="completed" if status == "completed" else "failed",
+    )
+    verifier = AgentTeamMember(
+        team_id=team.id,
+        member_key="verifier",
+        display_name="独立核验员",
+        address="agent:test_verifier",
+        kind="builtin",
+        role="verifier",
+        capabilities_json="{}",
+        status="completed" if status == "completed" else "failed",
+    )
+    db.add_all([worker, verifier])
+    db.flush()
+    db.add_all(
+        [
+            AgentTeamTask(
+                team_id=team.id,
+                member_id=worker.id,
+                task_key="answer",
+                title="回答用户问题",
+                instructions="依据输入独立完成回答",
+                status="completed" if status == "completed" else "failed",
+            ),
+            AgentTeamTask(
+                team_id=team.id,
+                member_id=verifier.id,
+                task_key="verify",
+                title="核验成员结果",
+                instructions="核验工作节点结果",
+                status="completed" if status == "completed" else "failed",
+            ),
+        ]
+    )
+    db.flush()
+
+
+def test_list_agents_derives_retention_candidates_from_verified_same_owner_surface_history(db, user) -> None:
+    definition = {
+        "purpose": "回答不依赖实时数据的普通问题",
+        "instructions": "仅依据问题文本作答，不调用工具、网络或命令。",
+    }
+    for _ in range(3):
+        _add_temporary_agent_team(db, user_id=7, surface="admin", definition=definition, status="completed")
+    # 同一职责在其他账号的历史不能抬高当前账号的复用次数。
+    for _ in range(4):
+        _add_temporary_agent_team(db, user_id=8, surface="admin", definition=definition, status="completed")
+    db.commit()
+
+    result = agent_mesh_service.list_agents(db, user, surface="admin")
+
+    assert len(result["temporary_agent_retention_candidates"]) == 1
+    candidate = result["temporary_agent_retention_candidates"][0]
+    assert candidate["display_name"] == "问答专员"
+    assert candidate["purpose"] == definition["purpose"]
+    assert candidate["independent_team_count"] == 3
+    assert candidate["verified_success_count"] == 3
+    assert candidate["verified_success_rate"] == 1.0
+    assert "现有治理审批" in candidate["decision"]
+
+
+def test_list_agents_does_not_recommend_infrequent_or_unstable_temporary_agents(db, user) -> None:
+    definition = {
+        "purpose": "核对可公开的基础信息",
+        "instructions": "仅使用给定材料回答，不调用工具。",
+    }
+    for _ in range(2):
+        _add_temporary_agent_team(db, user_id=7, surface="admin", definition=definition, status="completed")
+    # 形成至少三次记录，但 3/4 的经核验成功率低于 80%，不得推荐。
+    _add_temporary_agent_team(db, user_id=7, surface="admin", definition=definition, status="failed")
+    _add_temporary_agent_team(db, user_id=7, surface="admin", definition=definition, status="completed")
+    db.commit()
+
+    result = agent_mesh_service.list_agents(db, user, surface="admin")
+
+    assert result["temporary_agent_retention_candidates"] == []
 
 
 def test_send_message_is_owner_scoped_idempotent_and_traceable(db, user) -> None:

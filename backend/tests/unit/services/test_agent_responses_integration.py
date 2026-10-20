@@ -182,7 +182,7 @@ async def test_agent_responses_runtime_uses_configured_long_task_round_budget(
 
 
 @pytest.mark.asyncio
-async def test_admin_release_health_runtime_has_small_round_budget(db, monkeypatch) -> None:
+async def test_xiaoling_runtime_always_uses_coordinator_tool_scope(db, monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     class CapturingRuntime:
@@ -203,9 +203,12 @@ async def test_admin_release_health_runtime_has_small_round_budget(db, monkeypat
 
     executor, _runtime = await service._runtime("run-release-health", None, tool_scope="release_health")
 
-    assert captured["max_rounds"] == 4
-    assert captured["completion_guard"] == service._validate_release_health_completion
-    assert {item["name"] for item in await executor.tool_schemas()} == {"admin_release_health"}
+    assert captured["max_rounds"] == service_module.settings.agent_responses_max_rounds
+    assert captured["completion_guard"] == service._validate_xiaoling_completion
+    assert {item["name"] for item in await executor.tool_schemas()} == {
+        "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team",
+        "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
+    }
 
 
 def test_agent_response_request_accepts_only_one_start_input_source() -> None:

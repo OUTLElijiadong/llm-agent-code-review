@@ -65,7 +65,9 @@ def scope(monkeypatch):
         db.add(memberships[name])
     task = ReviewTask(user_id=users["author"].id, project_id=project.id,
                       task_name="PRIVATE_C04_REPORT", summary="PRIVATE_C04_BODY", review_type="full",
-                      status="success", total_files=1, processed_files=1, score=100)
+                      status="success", total_files=1, processed_files=1, score=100,
+                      coverage={"coverage_status": "complete", "verification_status": "complete",
+                                "score_available": True})
     db.add(task)
     db.commit()
     rendered = []
@@ -173,7 +175,9 @@ def test_terminal_standard_reports_remain_readable(scope, task_state, actor):
     for endpoint in READ_ENDPOINTS:
         response = _read(scope, endpoint)
         assert response.status_code == 200, endpoint
-    assert scope["client"].get("/reports").json()["data"]["total"] == 1
+    assert scope["client"].get("/reports").json()["data"]["total"] == 0
+    history = scope["client"].get("/reports", params={"include_history": True}).json()["data"]
+    assert history["total"] == 1
 
 
 @pytest.mark.parametrize("actor", ("author", "admin", "owner", "member", "outsider"))
@@ -182,10 +186,14 @@ def test_report_list_filters_owner_before_counting_and_pagination(scope, actor):
     now = datetime.now(timezone.utc)
     task.create_time = now
     own = ReviewTask(user_id=users["author"].id, project_id=scope["project"].id,
-                     task_name="second-own", review_type="full", status="success",
+                     task_name="second-own", review_type="full", status="success", score=100,
+                     coverage={"coverage_status": "complete", "verification_status": "complete",
+                               "score_available": True},
                      create_time=now - timedelta(seconds=1))
     other = ReviewTask(user_id=users["member"].id, project_id=scope["project"].id,
-                       task_name="member-private", review_type="full", status="success",
+                       task_name="member-private", review_type="full", status="success", score=100,
+                       coverage={"coverage_status": "complete", "verification_status": "complete",
+                                 "score_available": True},
                        create_time=now + timedelta(seconds=1))
     db.add_all([own, other])
     db.commit()

@@ -2410,6 +2410,8 @@ def _finalize_review(
         if call_budget:
             metrics["model_calls_used"] = call_budget.used
         task.coverage = {**(task.coverage or {}), **metrics, "stage": "complete" if complete else "partial"}
+        task.coverage["coverage_status"] = "complete" if complete else "partial"
+        task.coverage["verification_status"] = "complete" if complete else "failed"
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         # 问题记录与任务成功状态必须原子提交，避免生成半份报告。
@@ -2450,6 +2452,7 @@ def _finalize_review(
                 task.score_breakdown = None
                 task.coverage = {
                     **(task.coverage or {}), **metrics, "stage": "failed",
+                    "coverage_status": "failed", "verification_status": "failed",
                     "error": readable_error[:500],
                 }
                 task.end_time = datetime.now(timezone.utc)
@@ -2855,7 +2858,12 @@ def _extract_issues(
             if remaining_error:
                 raise RuntimeError(f"结构化问题抽取失败：{remaining_error}")
         last_truncation: DeepSeekOutputTruncatedError | None = None
-        for budget in budgets:
+        repair_attempted = False
+        budget_attempts = list(budgets)
+        budget_index = 0
+        while budget_index < len(budget_attempts):
+            budget = budget_attempts[budget_index]
+            budget_index += 1
             if task_guard is not None:
                 task_guard()
             request_count += 1
@@ -2864,11 +2872,12 @@ def _extract_issues(
                     f"结构化问题抽取失败：达到 {_EXTRACTION_MAX_REQUESTS} 次请求上限；"
                     f"已完成 {completed_batches}/{planned_batches} 批，不能标记完整报告"
                 )
+            chunk_index = 9100 + request_count - 1
             try:
                 raw, meta = _call_raw_for_task(
                     agent, task_id, user_id,
                     usage_file_id=file_id,
-                    usage_chunk_index=9100 + completed_batches,
+                    usage_chunk_index=chunk_index,
                     system_prompt=system,
                     user_prompt=user_prompt,
                     agent_label="general",
@@ -2886,11 +2895,28 @@ def _extract_issues(
             try:
                 parsed = parse_issues(raw).issues
             except Exception as exc:
-                raise RuntimeError(f"结构化问题解析失败：{exc}") from exc
+                try:
+                    DeepSeekAgent.log_deferred(
+                        db, task_id=task_id, user_id=user_id, file_id=file_id,
+                        chunk_index=chunk_index, meta=meta, status="failed",
+                    )
+                except Exception as log_exc:
+                    logger.debug(f"[Discussion] 补写无效 JSON 抽取日志失败: {log_exc}")
+                if repair_attempted:
+                    raise RuntimeError(f"结构化问题解析失败：修复重试后仍返回无效 JSON：{exc}") from exc
+                repair_attempted = True
+                user_prompt += (
+                    "\n\n上一次输出无法按既定结构解析。请只修复 JSON 语法和字段类型，"
+                    "严格依据同一代码与讨论证据，输出完整、可解析的 JSON 对象；"
+                    "不要解释、不要用 Markdown 代码围栏、不要新增或猜测问题。"
+                )
+                if budget_index >= len(budget_attempts):
+                    budget_attempts.append(max(budget, retry_budget))
+                continue
             try:
                 DeepSeekAgent.log_deferred(
                     db, task_id=task_id, user_id=user_id, file_id=file_id,
-                    chunk_index=9100 + completed_batches, meta=meta, status="success",
+                    chunk_index=chunk_index, meta=meta, status="success",
                 )
             except Exception as exc:
                 logger.debug(f"[Discussion] 补写结构化抽取日志失败: {exc}")

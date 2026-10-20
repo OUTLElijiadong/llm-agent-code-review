@@ -124,6 +124,10 @@ _FULL_VALIDATION_TERMINAL_STATES = frozenset({"succeeded", "failed", "blocked", 
 _FULL_VALIDATION_POLL_SECONDS = 2.0
 _ROUNDTABLE_TOOL_OUTPUT_BYTES = 8000
 _RELEASE_HEALTH_TOOL = "admin_release_health"
+_XIAOLING_COORDINATOR_TOOL_NAMES = frozenset({
+    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "retry_agent_team",
+    "user_describe_capabilities", "admin_describe_capabilities",
+})
 _PENDING_SITE_SUBMISSION_REASON = "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
 
 
@@ -1359,6 +1363,22 @@ class PrismToolExecutor:
 
     async def tool_schemas(self) -> list[Dict[str, Any]]:
         self._assert_session_active()
+        if self._tool_scope == "xiaoling_coordinator":
+            tools = [
+                {
+                    "type": "function",
+                    "name": name,
+                    "description": get_fixed_tool_description(name),
+                    "parameters": get_fixed_tool_schema(name),
+                }
+                for name in (
+                    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "retry_agent_team",
+                )
+            ]
+            tools.append(user_discovery_tool_schema())
+            if self._surface == "admin" and self._is_admin:
+                tools.append(discovery_tool_schema())
+            return tools
         if self._tool_scope == "release_health":
             return [{
                 "type": "function",
@@ -1532,8 +1552,62 @@ class PrismToolExecutor:
             },
         )
 
+    def _current_request_text(self) -> str:
+        """读取本轮持久检查点中的用户原文，用于限制停止/重试的执行意图。"""
+        row = self._db.query(AgentResponseRun).filter(
+            AgentResponseRun.run_id == self._run_id,
+            AgentResponseRun.user_id == int(self._user.id),
+            AgentResponseRun.surface == self._surface,
+            AgentResponseRun.session_key == self._session_key,
+        ).first()
+        if row is None:
+            return ""
+        try:
+            payload = json.loads(row.checkpoint_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        transcript = payload.get("transcript") if isinstance(payload, Mapping) else None
+        if not isinstance(transcript, list):
+            return ""
+        return _latest_user_message_text(transcript)
+
+    def _has_successful_agent_discovery(self) -> bool:
+        """读取同一用户、同一 Responses 运行里真实成功落账的成员清单调用。"""
+        return self._db.query(AgentToolExecution.id).filter(
+            AgentToolExecution.run_id == self._run_id,
+            AgentToolExecution.user_id == int(self._user.id),
+            AgentToolExecution.tool_name == "list_agents",
+            AgentToolExecution.status == "success",
+        ).first() is not None
+
     async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
         self._assert_session_active()
+        if self._tool_scope == "xiaoling_coordinator":
+            allowed = call.name in _XIAOLING_COORDINATOR_TOOL_NAMES
+            if call.name == "admin_describe_capabilities":
+                allowed = allowed and self._surface == "admin" and self._is_admin
+            if not allowed:
+                return await self._failed_attempt(
+                    call,
+                    "小菱只负责团队规划、组建、派发、跟踪、核验和汇总；业务工作必须交给 Agent 团队成员。",
+                )
+            if call.name == "create_agent_team":
+                if not self._has_successful_agent_discovery():
+                    return await self._failed_attempt(
+                        call,
+                        "组队前必须先由本轮运行成功读取当前可用 Agent；未读取前不创建或派发团队。",
+                    )
+            request_text = self._current_request_text()
+            if call.name == "cancel_agent_team" and not _is_explicit_team_stop_request(request_text):
+                return await self._failed_attempt(
+                    call,
+                    "当前用户消息没有明确要求停止团队；不得按模型猜测取消任务。",
+                )
+            if call.name == "retry_agent_team" and _is_explicit_team_stop_request(request_text):
+                return await self._failed_attempt(
+                    call,
+                    "用户已明确要求停止；该团队不得重试、续跑或恢复。",
+                )
         if self._tool_scope == "release_health" and call.name != _RELEASE_HEALTH_TOOL:
             return await self._failed_attempt(call, "本轮仅允许版本与就绪状态只读检查")
         if call.name == _RELEASE_HEALTH_TOOL:
@@ -3681,27 +3755,27 @@ class AgentResponsesService:
         run_id: str,
         event_sink: Optional[EventSink] = None,
         server_history_transcript: Optional[Sequence[Mapping[str, Any]]] = None,
+        trusted_terminal_team_snapshot: Optional[Mapping[str, Any]] = None,
     ) -> RuntimeResult:
         if self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first() is not None:
             raise InvalidRunStateError("运行标识已存在，请恢复原任务或使用新的运行标识")
-        # 多模态:抽取消息内图片,留档并把该条消息升级为 content parts;
-        # 含图运行切换视觉模型,仅本次运行生效。
-        vision_model = ""
-        image_assets_map: Optional[Mapping[str, str]] = None
+        # 小菱是协调器，不可直接感知图片并代替团队执行图像分析。
+        # 图片留在账号级附件账本；本轮只把“有图片、需要视觉执行合同”的提示交给协调器。
+        coordinator_has_images = False
         history_items = [copy.deepcopy(dict(item)) for item in (server_history_transcript or [])]
         if history_items:
             from app.services import multimodal_service
 
-            archived_hashes = multimodal_service.history_image_hashes(history_items)
-            if archived_hashes:
-                image_assets_map = multimodal_service.load_session_image_assets(
+            coordinator_has_images = multimodal_service.transcript_has_images(history_items)
+            if coordinator_has_images:
+                multimodal_service.validate_session_image_references(
                     self._db,
                     user_id=int(self._user.id),
                     surface=self._surface,
                     session_key=self._session_key,
-                    hashes=archived_hashes,
+                    hashes=multimodal_service.history_image_hashes(history_items),
                 )
-                vision_model = multimodal_service.resolve_vision_model(self._db)
+                history_items = _coordinator_transcript_without_images(history_items)
         # API schema 为兼容旧客户端会给每条消息补 images=[]；该字段不是
         # Responses message 合法字段，必须在纯文本路径也剥离，避免上游 400。
         prepared_messages: Sequence[Mapping[str, Any]] = [
@@ -3716,38 +3790,31 @@ class AgentResponsesService:
         if image_urls:
             from app.services import multimodal_service
 
-            vision_model = vision_model or multimodal_service.resolve_vision_model(self._db)
-            assets = multimodal_service.store_message_images(
+            coordinator_has_images = True
+            multimodal_service.store_message_images(
                 self._db,
                 user_id=int(self._user.id),
                 run_id=run_id,
                 surface=self._surface,
                 images=image_urls,
             )
-            # 仅把图片挂到最后一条用户消息(前端形态:新消息带图);
-            # 之前的消息保持纯文本,历史不重复带图。
             prepared_messages = []
             for index, message in enumerate(messages):
                 content = str(message.get("content") or "")
-                if index == len(messages) - 1 and assets:
-                    content = multimodal_service.multimodal_content_parts(content, assets)  # type: ignore[assignment]
+                if index == len(messages) - 1:
+                    content = (content + "\n" if content else "") + (
+                        "[用户已附图片。协调器不能读取图像像素或直接回答图像内容；"
+                        "必须查询视觉执行合同，没有适配成员时组建阻塞团队。]"
+                    )
                 prepared_messages.append({"role": message.get("role", "user"), "content": content})
-            image_assets_map = {
-                **(image_assets_map or {}),
-                **multimodal_service.image_asset_map(assets),
-            }
         if history_items:
             # The account-scoped checkpoint contains paired tool calls/results and
             # archived image references. Never rebuild model context from the
             # short, user-visible chat history returned by the session API.
             prepared_messages = [*history_items, *prepared_messages]
         executor, runtime = await self._runtime(
-            run_id, event_sink, vision_model=vision_model, image_assets=image_assets_map,
-            tool_scope=(
-                "release_health"
-                if self._surface == "admin" and _is_release_health_only_request(messages)
-                else ""
-            ),
+            run_id, event_sink,
+            tool_scope="xiaoling_coordinator",
         )
         tools = await executor.tool_schemas()
         instructions = _instructions(self._surface, self._user, self._is_super_admin)
@@ -3757,15 +3824,12 @@ class AgentResponsesService:
                 "随后直接回答版本、release、进程和数据库检查结果及来源；"
                 "不得推断公网 HTTPS、前端或整个平台健康，不要寻找主机文件或执行写操作。"
             )
-        if image_urls:
-            # 含图请求显式告知模型图片已经作为 input_image 附件传入。
-            # 小菱的通用提示会强调“工具列表没有图像识别工具”，模型可能据此
-            # 错误地声称没有收到图片；该提示只在本轮确有已校验图片时追加，
-            # 不会掩盖真正缺失或无效的附件。
+        if coordinator_has_images:
             instructions += (
-                "本轮用户消息包含已校验的图片附件，图片已通过 input_image 内容块提供给你；"
-                "请直接根据图片内容回答，不要因为工具列表没有单独的图像识别工具就声称未收到图片。"
-                "仅当输入内容确实没有 input_image 时，才说明缺少图片。"
+                "当前请求或可信会话历史含图片附件。小菱作为协调器不接收图片像素，不得描述、推断或回答图片内容。"
+                "先查找明确声明可接收图像证据的已发布 Agent 和执行合同；当前没有可让团队成员读取这些图片的合同，"
+                "因此必须组建 temporary blocker 成员并以 block_no_contract 结束为 blocked。"
+                "不得将普通 answer_question 临时成员的文字结果冒充图像分析。"
             )
         try:
             instructions += strategy_learning_service.build_strategy_context(
@@ -3776,11 +3840,26 @@ class AgentResponsesService:
             )
         except Exception:  # noqa: BLE001 - 记忆检索降级不能阻断小菱主链路
             self._db.rollback()
+        context_metadata: dict[str, Any] = {}
+        if isinstance(trusted_terminal_team_snapshot, Mapping):
+            try:
+                team_id = int(trusted_terminal_team_snapshot.get("team_id") or 0)
+            except (TypeError, ValueError):
+                team_id = 0
+            status = str(trusted_terminal_team_snapshot.get("status") or "")
+            if team_id > 0 and status in {"completed", "failed", "blocked", "cancelled", "expired"}:
+                context_metadata["trusted_terminal_team_snapshot"] = {
+                    "team_id": team_id,
+                    "status": status,
+                }
+        if coordinator_has_images:
+            context_metadata["coordinator_input_has_images"] = True
         result = await runtime.start(
             prepared_messages,
             instructions=instructions,
             tools=tools,
             run_id=run_id,
+            context_metadata=context_metadata,
         )
         await self._emit_validated_output(event_sink, result)
         return result
@@ -3922,22 +4001,16 @@ class AgentResponsesService:
         tool_scope: str = "",
     ) -> tuple[PrismToolExecutor, DeepSeekResponsesRuntime]:
         config = resolve_api_config(self._db, self._user.id)
-        from app.services import multimodal_service
         from app.services.agent_model_service import resolve_agent_model
 
-        # 只有本账号、本界面、本会话能恢复图片与检查点。先校验归属再读资产。
+        # 恢复检查点时校验账号归属，但协调器永远不加载历史图片资产。
         existing = self._db.query(AgentResponseRun).filter(AgentResponseRun.run_id == run_id).first()
-        checkpoint = None
         if existing is not None:
             self._store._assert_owner(existing)
-            checkpoint = await self._store.load(run_id)
-        if checkpoint and {str(item.get("name") or "") for item in checkpoint.tools} == {_RELEASE_HEALTH_TOOL}:
-            tool_scope = "release_health"
-        if checkpoint and multimodal_service.transcript_has_images(checkpoint.transcript):
-            vision_model = checkpoint.model
-            image_assets = multimodal_service.load_run_image_assets(
-                self._db, user_id=int(self._user.id), run_id=run_id, surface=self._surface,
-            )
+        if tool_scope != "xiaoling_coordinator":
+            tool_scope = "xiaoling_coordinator"
+        # Xiaoling is coordinator-only: restoring a legacy checkpoint must never
+        # rehydrate image bytes into the coordinator's model request.
         # 视觉分配属于管理员管理的平台端点；不将平台模型名配上用户自有端点/Key。
         if vision_model and config.source == "user":
             config = resolve_api_config(self._db)
@@ -4061,11 +4134,10 @@ class AgentResponsesService:
             compaction_threshold_tokens=settings.deepseek_compaction_threshold_tokens,
             keep_recent_tokens=settings.deepseek_compaction_keep_recent_tokens,
             completion_guard=(
-                self._validate_release_health_completion
-                if tool_scope == "release_health"
-                else self._validate_site_completion
+                self._validate_xiaoling_completion
             ),
             on_round=_write_ai_call_log,
+            coordinator_only=True,
         )
         return executor, runtime
 
@@ -4117,6 +4189,289 @@ class AgentResponsesService:
         if reason or self._surface != "admin":
             return reason
         return await self._validate_admin_completion(checkpoint, output_text)
+
+    @staticmethod
+    def _validate_xiaoling_completion(
+        checkpoint: RunCheckpoint, output_text: str,
+    ) -> Optional[str]:
+        """Require team work for every user request; only server-verified callbacks may summarize without dispatch."""
+        current = _current_turn_transcript(checkpoint.transcript)
+        trusted_snapshot = checkpoint.context_metadata.get("trusted_terminal_team_snapshot")
+        latest_user_text = _latest_user_message_text(checkpoint.transcript)
+        if isinstance(trusted_snapshot, Mapping):
+            try:
+                trusted_team_id = int(trusted_snapshot.get("team_id") or 0)
+            except (TypeError, ValueError):
+                trusted_team_id = 0
+            trusted_status = str(trusted_snapshot.get("status") or "")
+            if trusted_team_id <= 0 or trusted_status not in {
+                "completed", "failed", "blocked", "cancelled", "expired",
+            }:
+                return "服务端团队终态回执缺少有效团队标识或状态；不能汇总。"
+            if not _output_mentions_team_id(output_text, trusted_team_id):
+                return f"团队终态汇总必须绑定服务端回执中的团队编号 {trusted_team_id}。"
+            if trusted_status == "completed":
+                if _claims_team_terminal_failure(output_text):
+                    return f"团队 {trusted_team_id} 的服务端终态为 completed，回复却称团队失败、阻塞、取消或超时。"
+                if not _claims_team_terminal_completion(output_text):
+                    return f"团队 {trusted_team_id} 的服务端终态为 completed；汇总必须明确标记团队已完成。"
+                return None
+            if _claims_team_terminal_completion(output_text):
+                return f"团队 {trusted_team_id} 的服务端终态为 {trusted_status}，回复却声称团队已成功完成。"
+            status_markers = {
+                "failed": ("失败", "failed", "未能完成"),
+                "blocked": ("阻塞", "blocked", "缺少执行合同", "缺少合同"),
+                "cancelled": ("已停止", "已取消", "取消", "cancelled", "canceled"),
+                "expired": ("超时", "过期", "expired"),
+            }[trusted_status]
+            if not any(marker.casefold() in output_text.casefold() for marker in status_markers):
+                return f"团队 {trusted_team_id} 的服务端终态为 {trusted_status}；汇总必须如实说明该终态。"
+            return None
+
+        calls: dict[str, Mapping[str, Any]] = {}
+        outputs: dict[str, Mapping[str, Any]] = {}
+        for item in current:
+            if item.get("type") == "function_call":
+                calls[str(item.get("call_id") or item.get("id") or "")] = item
+        for item in current:
+            if item.get("type") != "function_call_output":
+                continue
+            call_id = str(item.get("call_id") or "")
+            call = calls.get(call_id)
+            if call is None:
+                continue
+            try:
+                raw = item.get("output")
+                result = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, ValueError):
+                continue
+            if isinstance(result, Mapping) and result.get("status") == "success":
+                outputs[call_id] = result
+
+        def call_arguments(call: Mapping[str, Any]) -> Mapping[str, Any]:
+            raw = call.get("arguments")
+            try:
+                value = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, ValueError):
+                value = {}
+            return value if isinstance(value, Mapping) else {}
+
+        def positive_int(value: Any) -> int:
+            try:
+                parsed = int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+            return parsed if parsed > 0 else 0
+
+        successful = [
+            (call, outputs[call_id]) for call_id, call in calls.items() if call_id in outputs
+        ]
+        cancel_call = next(
+            ((call, result) for call, result in successful if call.get("name") == "cancel_agent_team"),
+            None,
+        )
+        if cancel_call is not None:
+            try:
+                cancel_team_id = int(call_arguments(cancel_call[0]).get("team_id") or 0)
+            except (TypeError, ValueError):
+                cancel_team_id = 0
+            if cancel_team_id <= 0:
+                return "停止回执缺少有效 team_id；必须继续读回确认已强制停止。"
+            cancelled_snapshot = None
+            for call, result in successful:
+                if call.get("name") != "get_agent_team":
+                    continue
+                try:
+                    requested_team_id = int(call_arguments(call).get("team_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                data = result.get("output")
+                if not isinstance(data, Mapping):
+                    data = result.get("data")
+                if (
+                    requested_team_id == cancel_team_id
+                    and isinstance(data, Mapping)
+                    and str(data.get("team_id") or "") == str(cancel_team_id)
+                ):
+                    cancelled_snapshot = data
+            if cancelled_snapshot is None:
+                return "取消请求已提交，但尚未对同一 team_id 读回；请立即调用 get_agent_team 确认强制停止状态。"
+            if cancelled_snapshot.get("status") != "cancelled":
+                return "团队尚未进入 cancelled 终态；不能报告已停止，也不能重派或恢复该团队。"
+            return None
+
+        create_call = next(
+            ((call, output) for call, output in successful if call.get("name") == "create_agent_team"),
+            None,
+        )
+        if create_call is None:
+            tracking_request = re.search(
+                r"(?:团队|任务|执行).{0,12}(?:进度|状态|运行到|执行到|怎么样|如何)|"
+                r"(?:进度|状态).{0,12}(?:团队|任务|执行)",
+                latest_user_text,
+            )
+            if tracking_request:
+                explicit_team_ids = {
+                    int(value) for value in re.findall(r"(?:团队|team)\s*[#号:：-]?\s*(\d+)", latest_user_text, re.I)
+                }
+                snapshots = []
+                for call, result in successful:
+                    if call.get("name") != "get_agent_team":
+                        continue
+                    data = result.get("output")
+                    if not isinstance(data, Mapping):
+                        data = result.get("data")
+                    if not isinstance(data, Mapping):
+                        continue
+                    try:
+                        returned_id = int(data.get("team_id") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if returned_id <= 0 or returned_id != positive_int(call_arguments(call).get("team_id")):
+                        continue
+                    if explicit_team_ids and returned_id not in explicit_team_ids:
+                        continue
+                    snapshots.append((returned_id, str(data.get("status") or "")))
+                if len(snapshots) == 1:
+                    team_id, status = snapshots[0]
+                    status_words = {
+                        "created": ("已创建", "创建"),
+                        "queued": ("排队", "queued"),
+                        "waiting_dependency": ("等待依赖", "waiting_dependency"),
+                        "running": ("运行中", "进行中", "running"),
+                        "verifying": ("核验中", "验证中", "verifying"),
+                        "completed": ("完成", "completed"),
+                        "failed": ("失败", "failed"),
+                        "blocked": ("阻塞", "blocked"),
+                        "cancelled": ("停止", "取消", "cancelled"),
+                        "expired": ("过期", "超时", "expired"),
+                    }.get(status, ())
+                    if str(team_id) in output_text and any(word in output_text for word in status_words):
+                        return None
+                return "进度查询必须绑定同一账号实际返回的目标 team_id 和状态；不能借读取旧团队回答新的业务请求。"
+            return "本轮没有可验证的 Agent 团队执行记录；先查询成员并组建团队，普通问答也必须由团队成员完成。"
+
+        call_positions = {
+            str(item.get("call_id") or item.get("id") or ""): index
+            for index, item in enumerate(current)
+            if item.get("type") == "function_call"
+        }
+        output_positions = {
+            str(item.get("call_id") or ""): index
+            for index, item in enumerate(current)
+            if item.get("type") == "function_call_output"
+        }
+        create_call_id = str(create_call[0].get("call_id") or create_call[0].get("id") or "")
+        create_position = call_positions.get(create_call_id, -1)
+        if not any(
+            call.get("name") == "list_agents"
+            and call_positions.get(str(call.get("call_id") or call.get("id") or ""), -1) < create_position
+            and output_positions.get(str(call.get("call_id") or call.get("id") or ""), -1) < create_position
+            for call, _ in successful
+        ):
+            return "组队前没有读取当前账号可用成员；请先调用 list_agents，再按可执行合同组队或创建临时成员。"
+
+        create_data = create_call[1].get("output")
+        if not isinstance(create_data, Mapping):
+            create_data = create_call[1].get("data")
+        if not isinstance(create_data, Mapping):
+            return "团队创建回执缺少团队标识；不能将未绑定的回答视为已派发。"
+        try:
+            team_id = int(create_data.get("team_id") or 0)
+        except (TypeError, ValueError):
+            team_id = 0
+        if team_id <= 0:
+            return "团队创建回执缺少有效团队标识；请明确报告组队失败或阻塞。"
+
+        readback = None
+        for call, result in successful:
+            if call.get("name") != "get_agent_team":
+                continue
+            if positive_int(call_arguments(call).get("team_id")) != team_id:
+                continue
+            result_data = result.get("output")
+            if not isinstance(result_data, Mapping):
+                result_data = result.get("data")
+            if isinstance(result_data, Mapping) and positive_int(result_data.get("team_id")) == team_id:
+                readback = result_data
+        if readback is None:
+            return "团队已创建，但本轮还没有对同一 team_id 做真实状态读回；请先调用 get_agent_team，再如实汇报。"
+
+        status = str(readback.get("status") or "")
+        terminal = {"completed", "failed", "blocked", "cancelled", "expired"}
+        if status == "completed":
+            members = readback.get("members") if isinstance(readback.get("members"), list) else []
+            tasks = readback.get("tasks") if isinstance(readback.get("tasks"), list) else []
+            verifying_member_ids = {
+                positive_int(member.get("member_id"))
+                for member in members if isinstance(member, Mapping)
+                and member.get("role") in {"verifier", "summarizer"}
+            }
+            if not any(
+                isinstance(task, Mapping)
+                and positive_int(task.get("member_id")) in verifying_member_ids
+                and task.get("status") == "completed"
+                for task in tasks
+            ):
+                return "团队状态显示完成，但没有已完成的 verifier/summarizer 任务；不能汇总为核验通过。"
+            worker_member_ids = {
+                positive_int(member.get("member_id"))
+                for member in members if isinstance(member, Mapping) and member.get("role") == "worker"
+            }
+            worker_tasks = [
+                task for task in tasks if isinstance(task, Mapping)
+                and positive_int(task.get("member_id")) in worker_member_ids
+            ]
+            if not worker_tasks or any(task.get("status") != "completed" for task in worker_tasks):
+                return "团队状态显示完成，但没有全部完成的 worker 实际执行任务；不能汇总为成功。"
+            task_by_key = {
+                str(task.get("task_key") or ""): task for task in tasks if isinstance(task, Mapping)
+            }
+            verified_task_keys: set[str] = set()
+            for task in tasks:
+                if (
+                    not isinstance(task, Mapping)
+                    or positive_int(task.get("member_id")) not in verifying_member_ids
+                    or task.get("status") != "completed"
+                ):
+                    continue
+                pending = list(task.get("depends_on") or [])
+                while pending:
+                    dependency = str(pending.pop())
+                    if dependency in verified_task_keys:
+                        continue
+                    verified_task_keys.add(dependency)
+                    dependency_task = task_by_key.get(dependency)
+                    if isinstance(dependency_task, Mapping):
+                        pending.extend(dependency_task.get("depends_on") or [])
+            worker_task_keys = {str(task.get("task_key") or "") for task in worker_tasks}
+            if not worker_task_keys <= verified_task_keys:
+                return "已完成的 verifier/summarizer 未覆盖所有 worker 工作任务；不能汇总为核验通过。"
+            if checkpoint.context_metadata.get("coordinator_input_has_images") is True:
+                return (
+                    "当前没有可验证的图像执行合同；图片请求必须由团队明确阻塞，"
+                    "不能用未见到图像的 worker 输出冒充识图结果。"
+                )
+        elif status == "blocked" and not re.search(r"阻塞|缺少.{0,24}(?:合同|成员|权限|条件)|无法执行", output_text):
+            return "团队终态为 blocked；回复必须明确说明阻塞原因，不得改由小菱补答或执行。"
+        elif status == "failed" and not re.search(r"失败|未完成|错误", output_text):
+            return "团队终态为 failed；回复必须如实说明失败，不能给出任务成功结论。"
+        elif status == "cancelled" and not re.search(r"停止|取消|已中止", output_text):
+            return "团队终态为 cancelled；回复必须如实说明人工停止，不能继续该任务。"
+        elif status == "expired" and not re.search(r"过期|超时|失效", output_text):
+            return "团队终态为 expired；回复必须如实说明过期，不能声称任务完成。"
+        if status not in terminal:
+            allowed_progress = (
+                "任务已派发给团队成员执行，当前排队中。完成后我会核验并汇总。"
+                if status in {"queued", "created"}
+                else "任务已派发给团队成员执行，当前进行中。完成后我会核验并汇总。"
+            )
+            if output_text.strip() != allowed_progress:
+                return (
+                    f"团队当前状态为 {status or '未知'}；尚未终态，"
+                    "回复必须只说明排队或执行中，不能提供任务答案或宣称完成。"
+                )
+        return None
 
     async def _validate_admin_completion(
         self,
@@ -4619,6 +4974,32 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         f"{role_behavior}"
         "低、中风险按服务器策略自动执行；高风险或危急操作由系统暂停并展示审批。用户点击批准后系统自动恢复原调用，不要要求用户重复发送指令。"
         "涉及具体页面操作步骤时，先调用 recall_knowledge 检索对应页面指南。"
+        "小菱全任务团队硬规则（优先级高于本提示中的其他任何旧规则）：小菱只负责理解、规划、查询成员/能力合同、组队、派发、跟踪、停止、核验和汇总；"
+        "普通问答、解释、翻译、总结、报告查询和页面任务都必须由当前账号当前会话的 Agent 团队成员实际执行。"
+        "每条新用户请求先调用 list_agents 读取真实可用成员；匹配到明确 executable 合同就按其 input 合同分派。"
+        "没有适配成员但任务可由模型知识回答时，创建仅当前团队有效的 temporary Agent，定义其职责为 answer_question，"
+        "任务 input={operation:'answer_question',text:'用户原始问题'}；临时成员只给答案，"
+        "不得调用工具、网络、命令或写入。"
+        "遇到需要站点/项目/服务器等真实业务读取或写入、但无可执行成员和已登记能力合同时，创建 temporary blocker 成员，"
+        "input={operation:'block_no_contract',reason:'缺少的具体执行合同'}，由团队返回 blocked；"
+        "不得让临时语言模型假装执行业务，也不得由小菱直接回答结果。"
+        "必要时可用 user_describe_capabilities 或管理员页面的 admin_describe_capabilities 查精确合同；"
+        "该类发现只读，不能代替执行成员。"
+        "所有 create_agent_team 必须包含真实工作节点以及覆盖所有叶节点的 verifier/summarizer；"
+        "组队后必须用 get_agent_team 对同一 team_id 读回。"
+        "只有同一 team_id 读回的终态和已完成核验/汇总任务支持的内容才可作为完成结论；"
+        "队列或运行状态只允许原样报告等待，不得先回答用户问题。"
+        "服务器验证过的 verified_team_snapshot 是唯一无需新建团队的自动终态回执；"
+        "收到它时只核验并汇总，不要递归再建团队。"
+        "用户要求停止时立即调用 cancel_agent_team，并且不得重派、续跑或恢复该团队。"
+        "用户询问团队进度时由小菱用 get_agent_team 读取真实状态。"
+        "临时成员定义仅限本账号和本团队，结束后保留团队审计。list_agents 返回 temporary_agent_retention_candidates 时，"
+        "这些候选由服务端按同账号、同 surface 的历史团队实际状态计算：至少出现在 3 个独立团队，"
+        "且已完成工作节点并完成核验的成功率不低于 80%；"
+        "小菱可结合当前任务判断是否值得纳入常用 Agent 候选，并说明次数、成功率和职责；"
+        "没有该字段证据时不得自行声称‘常用’。"
+        "是否进入永久库只能走现有 Agent 发布与审批合同，不能静默持久化、直接改共享提示词或绕过发布审批。"
+        "绝对禁止小菱直接调用业务工具、MCP、Skill、页面操作、能力执行、服务器运维或发送业务请求；即使模型生成了这些调用，服务端也会拒绝。"
         "使用中文直接给出结果，不使用预设套话，不输出空白行；代码块内部格式保持原样。\n\n"
     )
 
@@ -4626,6 +5007,123 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
 def _current_turn_transcript(transcript: Sequence[Mapping[str, Any]]) -> Sequence[Mapping[str, Any]]:
     start = max((i for i, item in enumerate(transcript) if item.get("role") == "user"), default=-1)
     return transcript[start + 1:]
+
+
+def _output_mentions_team_id(text: str, team_id: int) -> bool:
+    """Require an explicit team label and the complete numeric ID, not a substring."""
+    identifier = re.escape(str(team_id))
+    patterns = (
+        rf"(?<![A-Za-z0-9_])团队(?:编号|ID|号)?\s*[\"']?\s*[:：=#]?\s*[\"']?{identifier}(?![A-Za-z0-9_])",
+        rf"(?<![A-Za-z0-9_])team(?:[_ -]?id)?\s*[\"']?\s*[:：=#]?\s*[\"']?{identifier}(?![A-Za-z0-9_])",
+        rf"(?<![A-Za-z0-9_])team[_-]{identifier}(?![A-Za-z0-9_])",
+    )
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _claims_team_terminal_completion(text: str) -> bool:
+    """识别明确把成功终态归因给团队/任务链的表述。"""
+    if not text:
+        return False
+    marker = re.compile(r"(?:已(?:经)?(?:成功)?完成|成功(?:完成|执行|核验)|核验通过|completed)", re.I)
+    for match in marker.finditer(text):
+        prefix = text[max(0, match.start() - 48):match.start()]
+        if not re.search(r"(?:团队|任务链|本次任务|本次执行)", prefix, re.I):
+            continue
+        current_clause = re.split(r"[，,。；;\n]", prefix)[-1]
+        if re.search(
+            r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)"
+            r"[^，,。；;\n]{0,10}$",
+            current_clause,
+            re.I,
+        ):
+            continue
+        return True
+    return False
+
+
+def _claims_team_terminal_failure(text: str) -> bool:
+    """识别把失败/阻塞/停止/超时归因给整个团队的表述。"""
+    if not text:
+        return False
+    pattern = re.compile(
+        r"(?:团队|任务链|本次任务|本次执行)[^，,。；;\n]{0,16}"
+        r"(?:失败|阻塞|已取消|已停止|超时|过期|failed|blocked|cancelled|canceled|expired)",
+        re.I,
+    )
+    for match in pattern.finditer(text):
+        statement = match.group(0)
+        prefix = text[max(0, match.start() - 14):match.start()]
+        if (
+            re.search(r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)\s*[^，,。；;\n]{0,8}$", prefix, re.I)
+            or re.search(
+                r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)"
+                r"[^，,。；;\n]{0,8}(?:失败|阻塞|已取消|已停止|超时|过期|failed|blocked|cancelled|canceled|expired)",
+                statement,
+                re.I,
+            )
+        ):
+            continue
+        return True
+    return False
+
+
+def _latest_user_message_text(transcript: Sequence[Mapping[str, Any]]) -> str:
+    """读取最近一条真实用户消息；工具调用账本的当前轮切片本身不含用户项。"""
+    latest = next((item for item in reversed(transcript) if item.get("role") == "user"), None)
+    if not isinstance(latest, Mapping):
+        return ""
+    content = latest.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text") or part.get("input_text") or "")
+            for part in content if isinstance(part, Mapping)
+        )
+    return ""
+
+
+def _coordinator_transcript_without_images(
+    transcript: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """为协调器移除图片像素，只保留附件存在的事实。"""
+    sanitized: list[dict[str, Any]] = []
+    for raw_item in transcript:
+        item = copy.deepcopy(dict(raw_item))
+        content = item.get("content")
+        if not isinstance(content, list):
+            sanitized.append(item)
+            continue
+        text_parts: list[dict[str, Any]] = []
+        removed = 0
+        for part in content:
+            if isinstance(part, Mapping) and part.get("type") == "input_image":
+                removed += 1
+                continue
+            if isinstance(part, Mapping):
+                text_parts.append(dict(part))
+        if removed:
+            text_parts.append({
+                "type": "input_text",
+                "text": f"[历史消息含 {removed} 个图片附件；协调器不能读取像素，需查图像执行合同或阻塞]",
+            })
+        item["content"] = text_parts
+        sanitized.append(item)
+    return sanitized
+
+
+def _is_explicit_team_stop_request(text: str) -> bool:
+    """只把明确的停止命令当作取消授权，拒绝把询问能力误执行成停止。"""
+    normalized = str(text or "").strip()
+    if not normalized or normalized.endswith(("?", "？")):
+        return False
+    if re.search(r"怎么|如何|能不能|能否|是否|可不可以|可以吗|怎样才能", normalized):
+        return False
+    return bool(re.search(
+        r"停止|停掉|停下|中止|取消|终止|别继续|不要继续|不再继续|\bstop\b|\bcancel\b|\babort\b",
+        normalized,
+        re.IGNORECASE,
+    ))
 
 
 def _pending_site_submission_guard(

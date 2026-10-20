@@ -433,8 +433,10 @@ def test_history_161_reads_four_report_entries_without_mutating_task(db, admin_u
     assert report_detail['source']['ai_review'] == {
         'status': 'incomplete', 'failure_reason': '模型未配置',
     }
-    assert report_service.list_reports(db, admin_user)['items'][0]['total_issues'] == 4
-    assert report_service.list_reports(db, admin_user)['items'][0]['source']['ai_review']['status'] == 'incomplete'
+    # 沙箱历史默认不进入演示报告列表；完整报告仍可从明确的历史入口查看。
+    history_item = report_service.list_reports(db, admin_user, include_history=True)['items'][0]
+    assert history_item['total_issues'] == 4
+    assert history_item['source']['ai_review']['status'] == 'incomplete'
     assert report_service.get_domain_report_export(db, admin_user, task, 'json')['statistics']['total_issues'] == 4
     assert dashboard_service.get_summary(db, admin_user)['total_issues'] == 4
     assert not db.dirty

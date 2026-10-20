@@ -18,7 +18,7 @@ def payload():
         "surface": "user", "session_id": "temporary-definition-test",
         "title": "临时专项分析", "objective": "按当前任务生成专项分析成员",
         "members": [{"member_key": "access", "display_name": "权限精灵",
-                     "address": "temporary:access", "role": "summarizer",
+                     "address": "temporary:access", "role": "worker",
                      "definition": {"purpose": "分析权限边界", "instructions": "核验输入材料中的权限漏洞并提供证据"}}],
         "tasks": [{"task_key": "analyze", "member_key": "access", "title": "专项分析",
                    "instructions": "分析权限设计", "input": {"text": "每次请求检查当前账号"}}],
@@ -66,11 +66,16 @@ def test_definition_cannot_override_address_or_authority(change):
 def test_generated_definition_is_frozen_without_permanent_agent(db, admin_user):
     before = db.query(CustomAgent).count()
     created = agent_team_service.create_team_from_xiaoling(db, admin_user, AgentTeamCreateIn.model_validate(payload()))
-    row = db.query(AgentTeamMember).filter_by(team_id=created["team_id"]).one()
+    row = db.query(AgentTeamMember).filter_by(
+        team_id=created["team_id"], member_key="access",
+    ).one()
     snapshot = json.loads(row.capabilities_json)
     assert row.kind == "temporary"
     assert snapshot["temporary_definition"] == payload()["members"][0]["definition"]
     assert len(snapshot["definition_checksum"]) == 64
+    assert db.query(AgentTeamMember).filter_by(
+        team_id=created["team_id"], role="summarizer", member_key="auto_reporter",
+    ).count() == 1
     assert db.query(CustomAgent).count() == before
 
 

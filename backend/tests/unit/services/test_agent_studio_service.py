@@ -165,7 +165,7 @@ def test_published_release_remains_callable_by_team_during_draft_and_pending_rev
                     "member_key": "reviewer",
                     "display_name": "专项审查员",
                     "address": f"custom:{agent.code}",
-                    "role": "verifier",
+                    "role": "worker",
                 }],
                 "tasks": [{
                     "task_key": "review",

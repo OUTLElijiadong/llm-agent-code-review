@@ -109,15 +109,14 @@ function resetComponentMocks(): void {
 beforeEach(resetComponentMocks)
 
 describe('SecurityPostureCard', () => {
-  it('将 OWASP 热点标为临时参考并说明官方库尚未查询', async () => {
+  it('展示 OWASP 热点时不显示额外来源说明', async () => {
     mocks.getDashboard.mockResolvedValue(baseSummary)
     const wrapper = mountCard()
     await flushPromises()
 
-    expect(wrapper.find('.mid-col .col-note').text()).toContain('CNVD/CNNVD 官方漏洞库当前未查询')
-    expect(wrapper.find('.mid-col .col-note').text()).toContain('未查询不代表官方库无匹配')
+    expect(wrapper.find('.mid-col .col-note').exists()).toBe(false)
     expect(wrapper.find('.mid-col').text()).not.toContain('OWASP 命中')
-    expect(wrapper.find('.mid-col .col-note').text()).not.toContain('OWASP 标签仅作回退分类')
+    expect(wrapper.find('.mid-col').text()).not.toContain('CNVD/CNNVD 官方漏洞库当前未查询')
   })
 
   it('exposes loading state until the dashboard request settles', async () => {

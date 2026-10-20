@@ -264,7 +264,7 @@ async def test_new_response_run_receives_same_account_strategy_context(db, monke
             return []
 
     class FakeRuntime:
-        async def start(self, _messages, *, instructions, tools, run_id):
+        async def start(self, _messages, *, instructions, tools, run_id, **_kwargs):
             captured["instructions"] = instructions
             assert tools == []
             return RuntimeResult(run_id=run_id, status=COMPLETED)

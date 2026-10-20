@@ -1451,6 +1451,10 @@ def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[st
     if len(member_keys) != len(set(member_keys)):
         raise AgentTeamValidationError("成员 member_key 不能重复")
     member_map = {item.member_key: item for item in payload.members}
+    if not any(item.role == "worker" for item in payload.members):
+        raise AgentTeamValidationError("团队必须至少包含一个实际执行工作的 worker 成员")
+    if not any(member_map[item.member_key].role == "worker" for item in payload.tasks):
+        raise AgentTeamValidationError("团队必须至少包含一个分派给 worker 的实际执行任务")
     if not any(item.role in {"verifier", "summarizer"} for item in payload.members):
         raise AgentTeamValidationError("团队必须至少包含一个 verifier 或 summarizer 成员")
     for item in payload.tasks:

@@ -26,7 +26,7 @@ from app.services import (
 )
 
 
-def test_temporary_agent_usage_accounting_failure_closes_team_and_mesh_error(monkeypatch, db):
+def test_temporary_agent_usage_accounting_failure_marks_worker_failed_for_verification(monkeypatch, db):
     from app.agents.base import BaseAgent
     from app.services.ai_usage_context import UsageAccountingError
 
@@ -46,7 +46,7 @@ def test_temporary_agent_usage_accounting_failure_closes_team_and_mesh_error(mon
             "member_key": "specialist",
             "display_name": "临时分析 Agent",
             "address": "temporary:specialist",
-            "role": "verifier",
+            "role": "worker",
             "definition": {"purpose": "分析输入", "instructions": "只基于当前任务输入给出有界分析"},
         }],
         "tasks": [{
@@ -106,18 +106,21 @@ def test_temporary_agent_usage_accounting_failure_closes_team_and_mesh_error(mon
         for item in agent_team_service._unjson(task.errors_json, [])
     )
     assert db.query(AgentTeamEvent).filter_by(team_id=created["team_id"], event_type="task.retry_queued").count() == 0
-    assert team["status"] == "failed"
+    assert team["status"] == "verifying"
+    summary_task = db.query(AgentTeamTask).filter_by(
+        team_id=created["team_id"], task_key="auto_summary",
+    ).one()
+    assert summary_task.status == "queued"
     error_message = db.query(AgentMeshMessage).filter_by(
         user_id=user.id, correlation_id=f"team:{created['team_id']}", message_type="task.error",
     ).filter(AgentMeshMessage.context_json.contains('"task_id"')).one()
     assert error_message.status == "failed"
     assert agent_mesh_service._load(error_message.payload_json, {})["failure_kind"] == "usage_accounting_error"
     assert agent_mesh_service._load(error_message.errors_json, [])[0]["code"] == "usage_accounting_error"
-    terminal_message = db.query(AgentMeshMessage).filter_by(
+    terminal_message_count = db.query(AgentMeshMessage).filter_by(
         user_id=user.id, correlation_id=f"team:{created['team_id']}", message_type="task.error",
-    ).filter(AgentMeshMessage.context_json.contains('"team_terminal"')).one()
-    assert terminal_message.status == "queued"
-    assert agent_mesh_service._load(terminal_message.context_json, {})["session_delivery"] is True
+    ).filter(AgentMeshMessage.context_json.contains('"team_terminal"')).count()
+    assert terminal_message_count == 0
 
 
 def test_retry_confirmation_authorizes_only_the_exact_retried_high_risk_attempt(db, monkeypatch):
@@ -1186,6 +1189,28 @@ def test_governed_sandbox_handler_only_runs_for_trusted_team_lease(monkeypatch):
     assert calls[0]["project_id"] == 31
     assert calls[0]["source_revision_id"] == 41
     assert reads == ["rollback", "expire_all"]
+
+
+def test_no_contract_temporary_member_closes_team_as_blocked(monkeypatch):
+    """缺少执行合同的临时成员只返回可审计阻塞，不调用模型或工具。"""
+    monkeypatch.setattr(
+        agent_team_service, "resolve_temporary_member",
+        lambda *_args: ("无合同阻塞成员", {"purpose": "无执行合同"}),
+    )
+    message = {
+        "user_id": 7,
+        "payload": {"operation": "block_no_contract", "reason": "缺少论坛查询执行合同"},
+    }
+
+    name, result = agent_mesh_dispatcher._handle(
+        object(), SimpleNamespace(id=7, role="user"), "temporary:blocker", message,
+        trusted_team_execution=True,
+    )
+
+    assert name == "无合同阻塞成员"
+    assert result["status"] == "blocked"
+    assert result["summary"] == "缺少论坛查询执行合同"
+    assert result["errors"] == [{"code": "no_execution_contract"}]
 
 
 def test_full_validation_releases_ready_dependency_deployment_before_start(monkeypatch):

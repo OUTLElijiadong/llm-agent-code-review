@@ -1299,7 +1299,15 @@ def _handle(
             name, definition = agent_team_service.resolve_temporary_member(db, user, target_address, message)
         except (ValueError, TypeError) as exc:
             return code, _result("blocked", str(exc), errors=[{"code": "invalid_temporary_member"}])
-        if _payload(message).get("operation") in {"execute_capability", "verify_results"}:
+        payload = _payload(message)
+        if payload.get("operation") == "block_no_contract":
+            reason = str(payload.get("reason") or "缺少适配的 Agent 成员或已登记执行合同。")[:500]
+            return name, _result(
+                "blocked",
+                reason,
+                errors=[{"code": "no_execution_contract"}],
+            )
+        if payload.get("operation") in {"execute_capability", "verify_results"}:
             import asyncio
 
             from app.services.site_agent_service import execute_site_task

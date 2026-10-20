@@ -966,7 +966,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复当前会话时拉取服务端团队并默认折叠展示协作过程', async () => {
+  it('恢复当前会话时拉取服务端团队并展开协作过程', async () => {
     teamApi.list.mockResolvedValue({
       items: [{ team_id: 42, title: '发布前验证', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],
       total: 1,
@@ -980,16 +980,11 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'user', limit: 20 }))
     expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
     const activity = wrapper.get('.agent-message-activity')
-    expect(activity.attributes('open')).toBeUndefined()
-    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
-    const tracePanel = wrapper.get('.agent-team-trace-panel')
-    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
-    expect(tracePanel.find('.agent-team-stats').exists()).toBe(false)
-
-    // 团队嵌入聊天过程卡后共用外层原生 disclosure；打开后团队内容应随之显示。
-    await expandTimeline(wrapper)
     expect(activity.attributes('open')).toBeDefined()
     expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
+    const tracePanel = wrapper.get('.agent-team-trace-panel')
+    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(true)
+    expect(tracePanel.find('.agent-team-stats').exists()).toBe(true)
     const traceBody = tracePanel.get('.agent-team-trace-body')
     expect(traceBody.isVisible()).toBe(true)
     expect(traceBody.get('.agent-team-stats').isVisible()).toBe(true)

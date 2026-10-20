@@ -108,15 +108,12 @@ def _score_is_available(task: ReviewTask) -> bool:
     explicit = coverage.get("score_available")
     if task.status != "success":
         return False
-    declared_statuses = {
-        str(coverage.get(field) or "").strip().lower()
-        for field in ("coverage_status", "verification_status")
-        if coverage.get(field) is not None
-    }
     complete_statuses = {"complete", "completed", "verified"}
-    if not declared_statuses or not declared_statuses <= complete_statuses:
+    coverage_status = str(coverage.get("coverage_status") or "").strip().lower()
+    verification_status = str(coverage.get("verification_status") or "complete").strip().lower()
+    # 核验完成不等于覆盖完整。评分、列表和各格式导出统一以明确的完整覆盖为准。
+    if coverage_status not in complete_statuses or verification_status not in complete_statuses:
         return False
-    coverage_status = "complete"
     if task.review_type == "sandbox_test":
         # Dynamic test pass rate is execution evidence, not a code-quality or
         # vulnerability-risk score. Hide it for both new and historical rows.
@@ -416,7 +413,8 @@ def get_readable_report_task(db: Session, user: User, task_id: int) -> ReviewTas
 
 def list_reports(db: Session, user: User, project_id: int = None,
                  start_date: str = "", end_date: str = "",
-                 page: int = 1, page_size: int = 20) -> dict:
+                 page: int = 1, page_size: int = 20,
+                 include_history: bool = False) -> dict:
     """查询报告列表
 
     Args:
@@ -432,6 +430,22 @@ def list_reports(db: Session, user: User, project_id: int = None,
         dict: 分页响应
     """
     q = db.query(ReviewTask).filter(ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES))
+    if not include_history:
+        coverage_status = ReviewTask.coverage["coverage_status"].as_string()
+        verification_status = ReviewTask.coverage["verification_status"].as_string()
+        score_available = ReviewTask.coverage["score_available"].as_boolean()
+        complete_statuses = ("complete", "completed", "verified")
+        q = q.filter(
+            ReviewTask.status == "success",
+            # 覆盖必须明确完整；仅核验成功或旧评分占位不足以进入演示列表。
+            coverage_status.in_(complete_statuses),
+            or_(coverage_status.is_(None), coverage_status.in_(complete_statuses)),
+            or_(verification_status.is_(None), verification_status.in_(complete_statuses)),
+            or_(score_available.is_(None), score_available.is_(True)),
+            ReviewTask.score.is_not(None),
+            ReviewTask.review_type != "sandbox_test",
+            or_(ReviewTask.review_type != "pentest", score_available.is_(True)),
+        )
     # API 路由已有 REPORT_VIEW 门禁；服务层仍需独立 fail-closed，避免其他
     # 调用方绕过路由后把无权限任务计入总数或分页卡片。
     report_permission = rbac_service.check_permission(db, int(user.id), PermissionCode.REPORT_VIEW)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import uuid
@@ -17,7 +19,7 @@ from app.agents.registry import AgentRegistry
 from app.core.config import settings
 from app.models.agent_mesh import AgentMeshConversation, AgentMeshMessage, AgentMeshMessageEvent
 from app.models.agent_response_run import AgentResponseRun, response_run_stop_requested
-from app.models.agent_team import AgentTeam, AgentTeamEvent
+from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamMember, AgentTeamTask
 from app.models.custom_agent import CustomAgent
 from app.models.user import User
 from app.schemas.agent_mesh import AgentMeshAckIn, AgentMeshMessageIn
@@ -40,6 +42,10 @@ _JARVIS_COST_GUARD_SUMMARY = "后台成本保护已关闭 JARVIS 自动模型派
 # 超出部分只归档会话索引，不删除 Responses/消息账本，便于审计和恢复。
 CONVERSATION_RETENTION_LIMIT = 10
 _PLACEHOLDER_CONVERSATION_TITLES = frozenset({"新对话", "默认对话", "用户端小菱对话", "贾维斯运维对话"})
+_TEMP_AGENT_REUSE_MIN_TEAMS = 3
+_TEMP_AGENT_REUSE_MIN_SUCCESS_RATE = 0.8
+_TEMP_AGENT_REUSE_HISTORY_LIMIT = 500
+_TEMP_AGENT_REUSE_CANDIDATE_LIMIT = 10
 
 
 class AgentMeshError(ValueError):
@@ -824,6 +830,140 @@ def _custom_agents(db: Session, user: User) -> list[dict[str, Any]]:
     ]
 
 
+def _temporary_agent_retention_candidates(
+    db: Session,
+    *,
+    user_id: int,
+    surface: str,
+) -> list[dict[str, Any]]:
+    """从同账号、同 surface 的已核验团队历史计算临时 Agent 留存候选。
+
+    这只是发现结果，不会持久化、发布或改变 Agent 权限。候选基于不可变团队
+    快照中的职责定义和实际任务状态计算；校验定义摘要，避免把损坏或伪造的
+    临时定义纳入统计。
+    """
+    bind = db.get_bind()
+    if bind is None or not {
+        AgentTeam.__tablename__, AgentTeamMember.__tablename__, AgentTeamTask.__tablename__,
+    }.issubset(set(inspect(bind).get_table_names())):
+        return []
+    teams = (
+        db.query(AgentTeam.id, AgentTeam.status)
+        .filter(AgentTeam.user_id == int(user_id), AgentTeam.surface == surface)
+        .order_by(AgentTeam.id.desc())
+        .limit(_TEMP_AGENT_REUSE_HISTORY_LIMIT)
+        .all()
+    )
+    if not teams:
+        return []
+
+    team_status = {int(team_id): str(status or "") for team_id, status in teams}
+    team_ids = list(team_status)
+    members = (
+        db.query(AgentTeamMember)
+        .filter(AgentTeamMember.team_id.in_(team_ids))
+        .order_by(AgentTeamMember.id.asc())
+        .all()
+    )
+    if not members:
+        return []
+    member_by_id = {int(member.id): member for member in members}
+    tasks = (
+        db.query(AgentTeamTask.team_id, AgentTeamTask.member_id, AgentTeamTask.status)
+        .filter(AgentTeamTask.team_id.in_(team_ids))
+        .order_by(AgentTeamTask.id.asc())
+        .all()
+    )
+
+    tasks_by_member: dict[int, list[AgentTeamTask]] = {}
+    completed_verifier_teams: set[int] = set()
+    for task_team_id, task_member_id, task_status in tasks:
+        member = member_by_id.get(int(task_member_id))
+        if member is None or int(member.team_id) != int(task_team_id):
+            continue
+        tasks_by_member.setdefault(int(task_member_id), []).append(str(task_status or ""))
+        if member.role == "verifier" and task_status == "completed":
+            completed_verifier_teams.add(int(task_team_id))
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for member in members:
+        if member.kind != "temporary" or member.role != "worker":
+            continue
+        capabilities = _load(member.capabilities_json, {})
+        if not isinstance(capabilities, dict):
+            continue
+        definition = capabilities.get("temporary_definition")
+        checksum = str(capabilities.get("definition_checksum") or "")
+        if not isinstance(definition, dict) or not checksum:
+            continue
+        canonical = json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        actual_checksum = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(actual_checksum, checksum):
+            continue
+
+        team_id = int(member.team_id)
+        if team_id not in team_status:
+            continue
+        member_tasks = tasks_by_member.get(int(member.id), [])
+        if not member_tasks:
+            continue
+        # 历史数据只有实际 worker 任务全部成功且核验成员成功的团队才进入
+        # 留存统计；空团队、纯核验团队或无实际执行证据都不能提高“常用”概率。
+        successful = (
+            team_status[team_id] == "completed"
+            and team_id in completed_verifier_teams
+            and all(status == "completed" for status in member_tasks)
+        )
+        sample = grouped.setdefault(
+            checksum,
+            {
+                "checksum": checksum,
+                "name": str(member.display_name or "临时 Agent"),
+                "definition": definition,
+                "teams": {},
+                "latest_team_id": team_id,
+            },
+        )
+        if team_id >= int(sample["latest_team_id"]):
+            sample["latest_team_id"] = team_id
+            sample["name"] = str(member.display_name or "临时 Agent")
+        # 一个团队中重复使用同一职责只计一次，避免虚高频率。
+        if team_id in sample["teams"]:
+            sample["teams"][team_id] = bool(sample["teams"][team_id] and successful)
+        else:
+            sample["teams"][team_id] = successful
+
+    candidates: list[dict[str, Any]] = []
+    for sample in grouped.values():
+        appearances = len(sample["teams"])
+        verified_successes = sum(1 for successful in sample["teams"].values() if successful)
+        success_rate = verified_successes / appearances if appearances else 0.0
+        if appearances < _TEMP_AGENT_REUSE_MIN_TEAMS or success_rate < _TEMP_AGENT_REUSE_MIN_SUCCESS_RATE:
+            continue
+        definition = sample["definition"]
+        candidates.append(
+            {
+                "definition_checksum": sample["checksum"],
+                "display_name": sample["name"],
+                "purpose": str(definition.get("purpose") or ""),
+                "instructions": str(definition.get("instructions") or ""),
+                "independent_team_count": appearances,
+                "verified_success_count": verified_successes,
+                "verified_success_rate": round(success_rate, 4),
+                "latest_team_id": int(sample["latest_team_id"]),
+                "decision": "小菱可评估是否申请纳入常用 Agent；永久发布仍须走现有治理审批。",
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            -int(item["independent_team_count"]),
+            -float(item["verified_success_rate"]),
+            -int(item["latest_team_id"]),
+        )
+    )
+    return candidates[:_TEMP_AGENT_REUSE_CANDIDATE_LIMIT]
+
+
 _TEAM_GOVERNED_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations", "site_operator"})
 
 
@@ -947,7 +1087,16 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
     by_kind: dict[str, int] = {}
     for item in items:
         by_kind[item["kind"]] = by_kind.get(item["kind"], 0) + 1
-    return {"items": items, "total": len(items), "by_kind": by_kind}
+    return {
+        "items": items,
+        "total": len(items),
+        "by_kind": by_kind,
+        "temporary_agent_retention_candidates": _temporary_agent_retention_candidates(
+            db,
+            user_id=int(user.id),
+            surface=effective_surface,
+        ),
+    }
 
 
 def _validate_target(db: Session, user: User, address: str) -> str:
@@ -2206,6 +2355,13 @@ def prepare_message_run(
         "role": "system",
         "content": content,
     }
+    if terminal_snapshot is not None:
+        # 仅由 prepare_message_run 在验证消息来源、会话绑定与团队终态后设置；
+        # 完成门同时校验 status 与最终汇总，不能只凭可信 team_id 放行。
+        system_input["_server_verified_terminal_team_snapshot"] = {
+            "team_id": int(terminal_snapshot["team_id"]),
+            "status": str(terminal_snapshot["status"]),
+        }
     return row, system_input
 
 

@@ -2958,6 +2958,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                   v-if="hasMessageActivity(msg)"
                   :summary="messageActivitySummary(msg)"
                   :state="messageActivityState(msg)"
+                  :initially-expanded="Boolean(msg.teamIds?.length)"
                 >
                   <section v-if="msg.steps?.length" class="step-stream">
                     <h4 class="step-summary">Agent 调度链 · 共 {{ msg.steps.length }} 步</h4>

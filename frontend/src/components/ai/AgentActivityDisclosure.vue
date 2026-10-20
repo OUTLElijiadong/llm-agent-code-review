@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { provide, ref } from 'vue'
+import { provide, ref, watch } from 'vue'
 
 import { messageActivityExpandedKey } from './agentActivityDisclosure'
 
 const props = withDefaults(defineProps<{
   summary: string
   state?: 'running' | 'completed' | 'attention'
+  initiallyExpanded?: boolean
 }>(), {
   state: 'completed',
+  initiallyExpanded: false,
 })
 
-const expanded = ref(false)
+const expanded = ref(props.initiallyExpanded)
 provide(messageActivityExpandedKey, expanded)
+
+watch(() => props.initiallyExpanded, (value) => {
+  if (value) expanded.value = true
+})
 
 function syncExpanded(event: Event): void {
   expanded.value = (event.currentTarget as HTMLDetailsElement).open
@@ -19,7 +25,7 @@ function syncExpanded(event: Event): void {
 </script>
 
 <template>
-  <details class="agent-message-activity" @toggle="syncExpanded">
+  <details class="agent-message-activity" :open="expanded" @toggle="syncExpanded">
     <summary class="agent-message-activity-summary">
       <span class="agent-message-activity-caret" :class="{ 'is-open': expanded }" aria-hidden="true">›</span>
       <span class="agent-message-activity-title">执行过程</span>

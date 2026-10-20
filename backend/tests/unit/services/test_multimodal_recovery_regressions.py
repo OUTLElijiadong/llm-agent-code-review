@@ -74,7 +74,7 @@ def test_failed_or_fallback_sync_does_not_mutate_registry(db, monkeypatch, succe
 
 
 @pytest.mark.asyncio
-async def test_runtime_consumes_chat_assignment_and_retains_resume_assets(db, monkeypatch):
+async def test_runtime_uses_chat_assignment_and_keeps_archived_images_out_of_coordinator(db, monkeypatch):
     scs.replace_model_registry(db, [{"id": "chat-custom", "vision": False}, {"id": "vision-custom", "vision": True}])
     scs.update_model_assignments(db, {"chat": "chat-custom", "chat_vision": "vision-custom"})
     config = ApiConfig(api_key="test", base_url="https://api.deepseek.com", model="system-base", source="system")
@@ -96,8 +96,12 @@ async def test_runtime_consumes_chat_assignment_and_retains_resume_assets(db, mo
     )
     await service._store.create(checkpoint)
     _, resumed = await service._runtime("image-run", None)
-    assert resumed._image_assets == ms.image_asset_map(assets)
-    assert resumed._fallback_model is None
+    assert resumed._image_assets == {}
+    persisted_checkpoint = await service._store.load("image-run")
+    assert ms.history_image_hashes(persisted_checkpoint.transcript) == {assets[0]["sha256"]}
+    assert resumed._fallback_model == (
+        ars.settings.deepseek_model if ars.settings.deepseek_orchestrator_fallback_to_flash else None
+    )
     _, next_plain = await service._runtime("next-text-run", None)
     assert next_plain._model == "chat-custom"
     assert next_plain._image_assets == {}
@@ -214,7 +218,7 @@ async def test_cancellation_does_not_require_models_or_images(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_service_image_question_resume_and_same_session_text_round(db, monkeypatch):
+async def test_image_and_text_answers_cannot_bypass_team_execution(db, monkeypatch):
     import json
 
     from app.models.agent_response_run import AgentResponseRun
@@ -268,21 +272,26 @@ async def test_service_image_question_resume_and_same_session_text_round(db, mon
         [{"role": "user", "content": "请看这张图", "images": [PNG_URL]}], run_id="vision-question"
     )
     assert first.status == "waiting_input"
-    assert "包含已校验的图片附件" in payloads[0]["instructions"]
-    assert "不要因为工具列表没有单独的图像识别工具就声称未收到图片" in payloads[0]["instructions"]
+    assert "不接收图片像素" in payloads[0]["instructions"]
+    assert "必须组建 temporary blocker 成员" in payloads[0]["instructions"]
+    assert payloads[0]["model"] == "plain-model"
     restored = ars.AgentResponsesService(db, user, surface="user", session_key="same-chat")
     second = await restored.resume(run_id="vision-question", action="answer", call_id="ask-image", answer="标题")
-    assert second.status == "completed"
-    assert payloads[1]["input"][0]["content"][1]["image_url"] == PNG_URL
-    assert payloads[1]["model"] == "deepseek-flash"
+    # 恢复图片会话后，主控仍必须组队；直接输出答案不得被记为成功。
+    assert second.status == "failed"
+    assert "Agent 团队" in second.error
+    assert payloads[1]["model"] == "plain-model"
     row = db.query(AgentResponseRun).filter_by(run_id="vision-question").one()
     assert "base64" not in row.checkpoint_json
-    assert "图片标题清晰" in row.checkpoint_json
+    assert PNG_URL not in row.checkpoint_json
+    assert "图片标题清晰" not in row.checkpoint_json
     third = await restored.start([{"role": "user", "content": "继续解释", "images": []}], run_id="next-text")
-    assert third.status == "completed"
-    assert payloads[2]["model"] == "plain-model"
-    assert "input_image" not in json.dumps(payloads[2])
-    assert "\"images\"" not in json.dumps(payloads[2])
+    assert third.status == "failed"
+    assert "Agent 团队" in third.error
+    assert payloads[-1]["model"] == "plain-model"
+    assert all("input_image" not in json.dumps(payload) for payload in payloads)
+    assert all('"images"' not in json.dumps(payload) for payload in payloads)
+    assert all(PNG_URL not in json.dumps(payload) for payload in payloads)
 
 
 @pytest.mark.asyncio

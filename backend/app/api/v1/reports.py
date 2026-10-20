@@ -556,11 +556,14 @@ def list_reports(
     end: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    include_history: bool = Query(False),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """报告列表"""
-    result = report_service.list_reports(db, user, project_id, start, end, page, page_size)
+    result = report_service.list_reports(
+        db, user, project_id, start, end, page, page_size, include_history=include_history,
+    )
     return Resp(data=PageOut(**result))
 
 

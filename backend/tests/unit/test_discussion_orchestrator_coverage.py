@@ -2066,19 +2066,42 @@ async def test_default_sized_context_reviews_300_lines_in_one_model_call(
 
 
 def test_extract_issues_propagates_invalid_json() -> None:
-    """结构化输出无法解析时必须暴露可读根因。"""
+    """结构化输出经一次有界纠偏仍无法解析时必须暴露根因。"""
     with pytest.raises(RuntimeError, match="结构化问题解析失败.*非合法 JSON"):
         module._extract_issues(
             [_turn(1)],
             "x = 1",
             "python",
             "failure.py",
-            RecordingAgent(responses=[("not-json", {"model_name": "fake"})]),
+            RecordingAgent(responses=[
+                ("not-json", {"model_name": "fake"}),
+                ("still-not-json", {"model_name": "fake"}),
+            ]),
             object(),
             1,
             2,
             3,
         )
+
+
+def test_extract_issues_repairs_one_invalid_json_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    """圆桌整理遇到模型格式错误时只做一次有界修复，并接受合法结果。"""
+    calls: list[dict[str, Any]] = []
+
+    def call_raw(_agent, *_args, **kwargs):
+        calls.append(kwargs)
+        return ("not-json", {"model_name": "fake"}) if len(calls) == 1 else ('{"issues":[]}', {"model_name": "fake"})
+
+    monkeypatch.setattr(module, "_call_raw_for_task", call_raw)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_k: None))
+    issues = module._extract_issues(
+        [_turn(1)], "x = 1", "python", "repair.py", RecordingAgent(), object(), 1, 2, 3,
+    )
+
+    assert issues == []
+    assert len(calls) == 2
+    assert calls[1]["user_prompt"].count("上一次输出无法按既定结构解析") == 1
+    assert calls[0]["usage_chunk_index"] != calls[1]["usage_chunk_index"]
 
 
 def test_finalize_review_persists_issues_statistics_and_log_labels(
@@ -2262,6 +2285,8 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert saved_task.score_breakdown["counts"] == {"严重": 0, "高": 1, "中": 1, "低": 0}
     assert saved_task.summary == consensus
     assert saved_task.status == "success"
+    assert saved_task.coverage["coverage_status"] == "complete"
+    assert saved_task.coverage["verification_status"] == "complete"
     assert saved_task.end_time is not None
     assert saved_task.duration_ms >= 0
 

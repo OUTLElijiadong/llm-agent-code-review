@@ -239,6 +239,36 @@ def load_session_image_assets(
     return assets
 
 
+def validate_session_image_references(
+    db: Session, *, user_id: int, surface: str, session_key: str, hashes: set[str],
+) -> None:
+    """验证历史图片引用属于当前会话且内容哈希有效，但不解码或返回图片字节。"""
+    from app.core.exceptions import ValidationError
+    from app.models.agent_response_run import AgentResponseRun
+
+    if not hashes:
+        return
+    rows = db.query(AgentMultimodalAsset).join(
+        AgentResponseRun, AgentResponseRun.run_id == AgentMultimodalAsset.run_id,
+    ).filter(
+        AgentResponseRun.user_id == user_id,
+        AgentResponseRun.surface == surface,
+        AgentResponseRun.session_key == session_key,
+        AgentMultimodalAsset.user_id == user_id,
+        AgentMultimodalAsset.surface == surface,
+        AgentMultimodalAsset.role == "input",
+        AgentMultimodalAsset.sha256.in_(hashes),
+    ).all()
+    valid_hashes: set[str] = set()
+    for row in rows:
+        binary = bytes(row.data)
+        if hashlib.sha256(binary).hexdigest() != row.sha256:
+            raise ValidationError("历史图片留档校验失败，请重新上传图片后重试")
+        valid_hashes.add(row.sha256)
+    if hashes - valid_hashes:
+        raise ValidationError("历史图片不属于当前对话或已失效，请重新上传后重试")
+
+
 def transcript_has_images(items: Sequence[Mapping[str, Any]]) -> bool:
     for item in items:
         for key in ("content", "output"):

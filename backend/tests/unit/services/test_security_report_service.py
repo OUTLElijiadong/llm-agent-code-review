@@ -371,7 +371,8 @@ def test_failed_security_scan_still_persists_report_with_unknown_coverage(db):
     assert "完整源码审计范围未执行" in report.content_json["report_md"]
 
     detail = report_service.get_report_detail(db, owner, task_id)
-    listed = report_service.list_reports(db, owner)["items"]
+    assert report_service.list_reports(db, owner)["items"] == []
+    listed = report_service.list_reports(db, owner, include_history=True)["items"]
     item = next(row for row in listed if row["task_id"] == task_id)
     assert detail["task"]["score"] is None
     assert detail["stats"]["score"] is None

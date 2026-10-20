@@ -298,16 +298,87 @@ def test_legacy_report_without_coverage_hides_score_and_explains_unknown_scope(d
         score=100,
     )
     db.add(task)
+    empty_coverage_task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="空覆盖快照的历史任务",
+        status="success",
+        total_issues=0,
+        score=100,
+        coverage={},
+    )
+    db.add(empty_coverage_task)
+    verification_only_task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="仅核验完成的历史任务",
+        status="success",
+        total_issues=0,
+        score=100,
+        coverage={"verification_status": "complete", "score_available": True},
+    )
+    db.add(verification_only_task)
     db.commit()
 
     detail = get_report_detail(db, admin_user, task.id)
-    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
+    listed = next(
+        item for item in list_reports(db, admin_user, include_history=True)["items"]
+        if item["task_id"] == task.id
+    )
 
     assert detail["task"]["score"] is None
     assert detail["stats"]["score"] is None
     assert detail["task"]["coverage"]["coverage_status"] == "unknown"
     assert listed["score"] is None
     assert listed["coverage"]["coverage_status"] == "unknown"
+    default_items = list_reports(db, admin_user)["items"]
+    assert task.id not in {item["task_id"] for item in default_items}
+    assert empty_coverage_task.id not in {item["task_id"] for item in default_items}
+    assert verification_only_task.id not in {item["task_id"] for item in default_items}
+
+
+def test_report_list_hides_failed_and_unscored_history_by_default_but_can_include_it(
+    db, admin_user, monkeypatch,
+):
+    """演示列表默认只展示成功且有评分依据的记录；历史筛选显式恢复查看，不删除数据。"""
+    from app.services import report_service
+
+    project = _make_project(db, admin_user)
+    valid = ReviewTask(
+        user_id=admin_user.id, project_id=project.id, task_name="有评分的报告", status="success",
+        coverage={"coverage_status": "complete", "verification_status": "complete", "score_available": True},
+        score=88,
+    )
+    failed = ReviewTask(
+        user_id=admin_user.id, project_id=project.id, task_name="失败历史", status="failed",
+        coverage={"coverage_status": "failed", "verification_status": "failed", "score_available": False},
+        score=0,
+    )
+    unscored = ReviewTask(
+        user_id=admin_user.id, project_id=project.id, task_name="无评分历史", status="success",
+        coverage={"coverage_status": "partial", "verification_status": "complete", "score_available": False},
+        score=0,
+    )
+    db.add_all([valid, failed, unscored])
+    db.commit()
+
+    monkeypatch.setattr(report_service.rbac_service, "check_permission", lambda *_args: True)
+    monkeypatch.setattr(report_service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(report_service, "_standard_report_permission_filter", lambda *_args: True)
+    monkeypatch.setattr(report_service, "get_visible_project_ids", lambda *_args: ([project.id], None))
+    monkeypatch.setattr(
+        report_service, "project_resource_capabilities",
+        lambda *_args, **_kwargs: {project.id: {"can_execute": True}},
+    )
+    monkeypatch.setattr(report_service, "has_source_report_permission", lambda *_args: True)
+
+    default = list_reports(db, admin_user)
+    history = list_reports(db, admin_user, include_history=True)
+
+    assert [item["task_name"] for item in default["items"]] == ["有评分的报告"]
+    assert default["total"] == 1
+    assert {item["task_name"] for item in history["items"]} == {"有评分的报告", "失败历史", "无评分历史"}
+    assert history["total"] == 3
 
 
 def test_sandbox_report_detail_localizes_legacy_statuses_without_mutating_snapshot(db, admin_user):
@@ -400,7 +471,10 @@ def test_blackbox_report_detail_omits_unrequested_whitebox_findings_without_muta
 
     detail = get_report_detail(db, admin_user, task.id)
     displayed = detail["source"]["domain_report_md"]
-    listed = next(item for item in list_reports(db, admin_user)["items"] if item["task_id"] == task.id)
+    listed = next(
+        item for item in list_reports(db, admin_user, include_history=True)["items"]
+        if item["task_id"] == task.id
+    )
     from app.services.report_service import get_domain_report_export
 
     exported = get_domain_report_export(db, admin_user, task, "json")
@@ -456,6 +530,11 @@ def test_report_list_fetches_projects_in_one_batch_query(db, admin_user, monkeyp
             task_name=f"批量项目任务 {index}",
             status="success",
             score=100,
+            coverage={
+                "coverage_status": "complete",
+                "verification_status": "complete",
+                "score_available": True,
+            },
         )
         for index, project in enumerate(projects)
     ])

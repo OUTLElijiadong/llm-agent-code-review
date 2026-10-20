@@ -66,7 +66,7 @@ def test_history_image_assets_require_same_account_surface_and_session(db) -> No
 
 
 @pytest.mark.asyncio
-async def test_service_continues_raw_tool_transcript_and_restores_own_image(db, monkeypatch) -> None:
+async def test_service_continues_raw_tool_transcript_without_restoring_image_pixels(db, monkeypatch) -> None:
     digest = _archive_image(db)
     captured: dict[str, Any] = {}
 
@@ -112,9 +112,22 @@ async def test_service_continues_raw_tool_transcript_and_restores_own_image(db, 
     )
 
     assert result.status == "completed"
-    assert captured["items"] == [*history, {"role": "user", "content": "请结合之前核验继续"}]
-    assert captured["vision_model"] == "test-vision"
-    assert captured["image_assets"][digest].startswith("data:image/png;base64,")
+    assert captured["items"][0] == {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "请看旧图"},
+            {
+                "type": "input_text",
+                "text": "[历史消息含 1 个图片附件；协调器不能读取像素，需查图像执行合同或阻塞]",
+            },
+        ],
+    }
+    assert captured["items"][1:] == [*history[1:], {"role": "user", "content": "请结合之前核验继续"}]
+    assert captured["vision_model"] == ""
+    assert captured["image_assets"] is None
+    assert "input_image" not in str(captured["items"])
+    assert "data:image" not in str(captured["items"])
+    assert captured["runtime_args"]["context_metadata"]["coordinator_input_has_images"] is True
     assert captured["runtime_args"]["run_id"] == "new-image-run"
 
 

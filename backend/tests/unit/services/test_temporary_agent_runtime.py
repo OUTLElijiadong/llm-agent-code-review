@@ -137,6 +137,21 @@ def test_general_analysis_uses_independent_prompt_and_no_permanent_assets(db, ac
     assert db.query(CustomAgent).count() == db.query(CustomAgentVersion).count() == 0
 
 
+def test_plain_question_runs_as_scoped_team_member_without_tools_or_network(db, actor, model):
+    result = run(
+        db, actor,
+        {"operation": "answer_question", "text": "什么是跨站脚本攻击？"},
+        definition={"purpose": "回答当前用户的普通问题", "instructions": "仅基于模型已有知识回答"},
+    )
+
+    assert result["status"] == "completed"
+    assert result["summary"] == "依据输入完成有限分析"
+    prompt = model[0][0]["prompt"]
+    assert "临时普通问答成员" in prompt
+    assert "没有工具、网络、命令、浏览器或写入能力" in prompt
+    assert db.query(CustomAgent).count() == db.query(CustomAgentVersion).count() == 0
+
+
 def test_task_input_finding_does_not_need_fabricated_database_file_coordinates(db, actor, model, monkeypatch):
     def answer(*_args, **_kwargs):
         return AgentResult(
