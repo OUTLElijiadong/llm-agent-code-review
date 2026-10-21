@@ -525,3 +525,31 @@ def test_issue_dataclass_v3_fields_assignable():
     assert issue.cvss_vector == "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
     assert issue.compliance_mapping == {"iso27001": ["A.8.28"]}
     assert issue.remediation == "立即修复"
+
+
+def test_parse_json_whose_strings_quote_markdown_fences():
+    """圆桌 #217：问题描述里引用 ``` 时不能把内部围栏当外层围栏截断。"""
+    text = json.dumps({
+        "summary": "x", "score": 60,
+        "issues": [{
+            "issue_type": "潜在Bug", "severity": "高", "title": "坏 JSON 入缓存",
+            "description": "模型返回带```围栏包裹的非 JSON 内容时 json.loads 抛错",
+            "suggestion": "先 ```json 解析``` 再写缓存",
+        }],
+    }, ensure_ascii=False)
+    result = parse(text)
+    assert len(result.issues) == 1
+    assert "围栏" in result.issues[0].description
+
+
+def test_parse_fenced_json_whose_strings_quote_fences():
+    inner = json.dumps({"summary": "x", "score": 60, "issues": [
+        {"title": "t", "severity": "低", "description": "引用了```代码块```"}]}, ensure_ascii=False)
+    result = parse(f"```json\n{inner}\n```")
+    assert result.issues[0].description == "引用了```代码块```"
+
+
+def test_parse_json_with_leading_or_trailing_prose():
+    body = '{"summary":"x","score":70,"issues":[]}'
+    assert parse(f"以下是结果：\n{body}").score == 70
+    assert parse(f"{body}\n以上为审查结论。").score == 70

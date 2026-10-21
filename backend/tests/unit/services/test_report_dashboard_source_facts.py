@@ -455,6 +455,7 @@ def test_score_trend_omits_successful_tasks_without_a_valid_score(db, source_own
 def test_dashboard_score_average_omits_unverified_historical_scores(db, source_owner, source_project):
     """缺少覆盖证明的旧分数不能混入工作台均分与有效样本数。"""
     task = _task(db, source_owner, source_project, "standard", count=0, score=87)
+    task.total_files = 2
     db.commit()
 
     summary = dashboard_service.get_summary(db, source_owner)

@@ -12,7 +12,6 @@ v2.0 新增:
 - GET  /agents/runtime/summary   注册总数与 category 分桶
 - GET  /agents/situation         态势感知面板数据
 - GET  /agents/events            SSE 实时事件流(M2 Agent 调用反馈)
-- POST /agents/clarify           Clarify 回填后继续执行(M4 主动提问)
 """
 import asyncio
 import contextlib
@@ -22,16 +21,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.agents import AgentContext
-from app.agents.clarify_store import ClarifyStore
 from app.agents.event_bus import AgentEventBus
 from app.agents.orchestrator import get_request_orchestrator
 from app.core.database import SessionLocal, get_db
 from app.core.dependencies import authenticate_access_token, get_current_user, require_admin
-from app.core.exceptions import AuthError, ForbiddenError, PermissionError
+from app.core.exceptions import AuthError
 from app.core.permission_codes import PermissionCode
 from app.core.rbac_dependency import require_permission
 from app.models.user import User
@@ -267,60 +263,7 @@ async def stream_agent_events(
 # =================== v2.0 M4: Clarify 回填 ===================
 
 
-class ClarifyAnswers(BaseModel):
-    clarify_id: str = Field(min_length=1, max_length=128)
-    answers: dict = Field(default_factory=dict)
-
-
-@router.post("/clarify", response_model=Resp[dict],
-             dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))])
-def submit_clarification(
-    payload: ClarifyAnswers,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """用户回填 Clarify 追问的答案后,合并 payload 继续执行原 intent"""
-    store = ClarifyStore.instance()
-    pending = store.peek(payload.clarify_id)
-    if pending is None:
-        return Resp(code=41001, message="追问已过期或不存在,请重新提问", data={})
-    owner_user_id = pending.get("user_id")
-    if (not isinstance(owner_user_id, int) or isinstance(owner_user_id, bool)
-            or owner_user_id <= 0 or owner_user_id != user.id):
-        raise ForbiddenError("无权回填此追问", code=40300)
-    reserved = store.reserve(payload.clarify_id, expected_data=pending)
-    if reserved is None:
-        return Resp(code=40901, message="追问正在处理中，请稍后查看结果", data={})
-    intent_name = pending["intent"]
-    answers = payload.answers or {}
-    question_keys = pending.get("question_keys")
-    if isinstance(question_keys, list):
-        allowed = {str(key) for key in question_keys}
-        answers = {key: value for key, value in answers.items() if key in allowed}
-    merged = {**pending.get("payload", {}), **answers}
-
-    try:
-        orch = get_request_orchestrator(db, user=user)
-        ctx = AgentContext(user_id=user.id, extra={})
-        result = orch.chat_agent.dispatch_with_payload(intent_name, merged, ctx)
-        if not result.success:
-            if result.failure_kind == "permission_denied":
-                raise PermissionError(result.error or "当前用户无操作权限")
-            from app.ai.exceptions import AiServiceError
-            raise AiServiceError(result.error or "执行失败", code=50202)
-    except Exception:
-        store.release(payload.clarify_id, reserved)
-        raise
-    if not store.consume(payload.clarify_id, reserved):
-        # 派发已经成功但条目被并发请求处理，禁止重复执行；当前结果仍可安全返回。
-        return Resp(code=40901, message="追问已由其他请求处理，请刷新查看最新结果", data={})
-    if isinstance(result.data, dict):
-        return Resp(data={
-            "content": result.data.get("content", ""),
-            "clarify": result.data.get("clarify"),
-            "model": result.model,
-        })
-    return Resp(data={"content": result.data, "model": result.model})
+# POST /agents/clarify 已在 4.1.20 下线：旧意图直派绕过小菱团队，追问改由小菱 ask_user 处理。
 
 
 # =================== v2.4: MetaGPT 编排层 ===================

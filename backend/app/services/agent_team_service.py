@@ -56,7 +56,9 @@ class AgentTeamLeaseError(AgentTeamError):
     """租约不存在或已经失效。"""
 
 
-_TERMINAL_TEAM = frozenset({"completed", "failed", "cancelled", "expired"})
+_TERMINAL_TEAM = frozenset({"completed", "failed", "blocked", "cancelled", "expired"})
+# 请求消息的投递终态：dead_letter 只描述投递，不回写成任务业务状态。
+_REQUEST_TERMINAL_STATUSES = frozenset({"completed", "failed", "blocked", "cancelled", "expired", "dead_letter"})
 _TERMINAL_TASK = frozenset({"completed", "failed", "blocked", "cancelled", "dead_letter", "expired"})
 _TEAM_GOVERNED_RUNTIME_CODES = frozenset({"sandbox_deployer", "test_verifier", "operations", "site_operator"})
 MAX_CUSTOM_TEAM_CODE_CHARS = 12_000
@@ -455,7 +457,7 @@ _TEAM_TASK_CONTRACTS: dict[str, dict[str, Any]] = {
     "review_orchestrator": {
         "default_operation": "list",
         "readonly_operation": None,
-        "allowed_operations": frozenset({"list", "get", "issues", "run_review"}),
+        "allowed_operations": frozenset({"list", "get", "issues", "run_review", "start_roundtable"}),
     },
     "test_verifier": {
         "default_operation": "run_project_tests",
@@ -514,8 +516,8 @@ def _normalize_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
         allowed_operations = contract.get("allowed_operations") or frozenset()
         operation = data.get("operation")
 
-        if readonly and code == "review_orchestrator" and operation == "run_review":
-            raise AgentTeamValidationError("只读团队不能发起新的正式审查，请读取现有任务")
+        if readonly and code == "review_orchestrator" and operation in {"run_review", "start_roundtable"}:
+            raise AgentTeamValidationError("只读团队不能发起新的正式审查或圆桌讨论，请读取现有任务")
 
         if operation is None and default_operation is not None:
             data["operation"] = default_operation
@@ -750,6 +752,19 @@ def _validate_task_scope(db: Session, user: User, task_input: Any, address: str)
 
         if not check_permission(db, int(user.id), PermissionCode.SECURITY_SCAN):
             raise AgentTeamAccessError("当前账户没有 security:scan 权限")
+    if code == "review_orchestrator" and raw.get("operation") == "start_roundtable":
+        file_id = raw.get("file_id")
+        if project_id is None or isinstance(file_id, bool) or not isinstance(file_id, int) or file_id <= 0:
+            raise AgentTeamValidationError(f"任务 {task_input.task_key} 启动圆桌必须提供 project_id 和单个 file_id")
+        experts = raw.get("temporary_experts")
+        if experts is not None and (not isinstance(experts, list) or len(experts) > 3):
+            raise AgentTeamValidationError("圆桌临时专家最多 3 位")
+        from app.core.permission_codes import PermissionCode
+        from app.services.rbac_service import check_permission
+
+        if not check_permission(db, int(user.id), PermissionCode.REVIEW_START):
+            raise AgentTeamAccessError("当前账户没有发起审查的权限")
+        return
     if code == "review_orchestrator" and raw.get("operation") == "run_review":
         if project_id is None:
             raise AgentTeamValidationError(f"任务 {task_input.task_key} 必须提供 project_id")
@@ -1990,7 +2005,7 @@ def _refresh_member_statuses(db: Session, team: AgentTeam, *, reclaim: bool = Fa
 
 
 def _refresh_team_status(db: Session, team: AgentTeam) -> None:
-    if team.status in {"failed", "cancelled", "expired"}:
+    if team.status in _TERMINAL_TEAM:
         return
     tasks = _locked_team_tasks(db, team)
     if not tasks:
@@ -2102,7 +2117,10 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         team.status = "verifying"
         team.started_at = team.started_at or _now()
     elif failed and not running:
-        team.status = "failed"
+        # 只有成员明确报告 blocked（缺合同/缺授权/需人工）时整队收口为 blocked；
+        # 任何真实执行失败仍是 failed。
+        root_failures = [item for item in failed if item.status != "blocked"]
+        team.status = "failed" if root_failures else "blocked"
         team.completed_at = team.completed_at or _now()
         completed_summarizers = [
             item for item in tasks
@@ -2161,7 +2179,7 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
             detail={"counts": _task_counts(tasks)},
         )
 
-    if team.status in {"completed", "failed"}:
+    if team.status in {"completed", "failed", "blocked"}:
         _persist_terminal_team_notification(db, team, now=_now())
 
 
@@ -2285,14 +2303,18 @@ def _mark_task_request_terminal(
     success: bool,
     error: str,
     now: datetime,
+    status: str | None = None,
 ) -> str:
+    """把本次任务请求消息收口到与业务一致的终态；已是终态的投递记录不再覆盖。"""
     if not _mesh_ready(db):
         return ""
     message_id = _request_message_id(team, task)
     row = db.query(AgentMeshMessage).filter(AgentMeshMessage.message_id == message_id).first()
     if row is None:
         return ""
-    row.status = "completed" if success else "failed"
+    if row.status in _REQUEST_TERMINAL_STATUSES:
+        return message_id
+    row.status = status or ("completed" if success else "failed")
     row.completed_at = now
     row.lease_token = None
     row.lease_expires_at = None
@@ -2412,7 +2434,7 @@ def _persist_terminal_team_notification(
     使重试、重复状态刷新和事务恢复都不会重复投递。
     """
 
-    if team.status not in {"completed", "failed", "cancelled", "expired"} or not _mesh_ready(db):
+    if team.status not in _TERMINAL_TEAM or not _mesh_ready(db):
         return
     tasks = db.query(AgentTeamTask).filter(
         AgentTeamTask.team_id == int(team.id),
@@ -2897,8 +2919,8 @@ def complete_task(
         raise AgentTeamNotFoundError("团队任务不存在")
     if team.status in {"cancelled", "expired"}:
         raise AgentTeamLeaseError("团队已取消或过期，任务租约失效")
-    if team.status == "failed":
-        raise AgentTeamLeaseError("团队已失败，任务租约失效")
+    if team.status in {"failed", "blocked"}:
+        raise AgentTeamLeaseError("团队已失败或被阻塞，任务租约失效")
     if team.status == "completed":
         raise AgentTeamLeaseError("团队已完成，任务租约失效")
     if task.status != "running" or not lease_token or task.lease_token != lease_token:
@@ -2915,6 +2937,7 @@ def complete_task(
     normalized_result = dict(result or {})
     task.result_json = _json(normalized_result)
     task.artifacts_json = _json(normalized_result.get("artifacts") or [])
+    reported_blocked = not success and str(normalized_result.get("status") or "").strip().lower() == "blocked"
     request_message_id = _mark_task_request_terminal(
         db,
         team,
@@ -2923,6 +2946,7 @@ def complete_task(
         success=success,
         error=error or str(normalized_result.get("summary") or ""),
         now=now,
+        status="blocked" if reported_blocked else None,
     )
     if success:
         task.status = "completed"
@@ -2949,7 +2973,8 @@ def complete_task(
             }
         )
         task.errors_json = _json(result_errors)
-        retryable = normalized_result.get("retryable") is not False
+        # blocked 是成员明确报告的“需外部条件/人工处理”，重派不会改变结果。
+        retryable = normalized_result.get("retryable") is not False and not reported_blocked
         if retryable and int(task.attempt_count or 0) < int(task.max_attempts or team.max_attempts or 1):
             strategy_change = str(normalized_result.get("strategy_change") or "").strip()
             if len(strategy_change) < 8:
@@ -2990,25 +3015,13 @@ def complete_task(
             )
             _persist_task_result_message(db, team, task, member, result=normalized_result, success=False, now=now)
         elif retryable:
-            task.status = "dead_letter"
-            task.completed_at = now
-            task.next_attempt_at = None
-            _event(
-                db,
-                team,
-                "task.dead_letter",
-                task=task,
-                member=member,
-                from_status="running",
-                to_status="dead_letter",
-                detail={"error": error},
-                message_id=request_message_id or None,
-            )
-            _persist_task_result_message(db, team, task, member, result=normalized_result, success=False, now=now)
-        else:
+            # 重试预算耗尽是业务失败；dead_letter 只保留给请求消息的投递状态。
             task.status = "failed"
             task.completed_at = now
             task.next_attempt_at = None
+            task.errors_json = _json([*result_errors, {
+                "code": "retry_budget_exhausted", "attempts": int(task.attempt_count or 0),
+            }][-20:])
             _event(
                 db,
                 team,
@@ -3017,6 +3030,22 @@ def complete_task(
                 member=member,
                 from_status="running",
                 to_status="failed",
+                detail={"error": error, "retryable": True, "reason": "retry_budget_exhausted"},
+                message_id=request_message_id or None,
+            )
+            _persist_task_result_message(db, team, task, member, result=normalized_result, success=False, now=now)
+        else:
+            task.status = "blocked" if reported_blocked else "failed"
+            task.completed_at = now
+            task.next_attempt_at = None
+            _event(
+                db,
+                team,
+                "task.blocked" if reported_blocked else "task.failed",
+                task=task,
+                member=member,
+                from_status="running",
+                to_status=task.status,
                 detail={"error": error, "retryable": False, "next_action": normalized_result.get("next_action")},
                 message_id=request_message_id or None,
             )
@@ -3060,6 +3089,7 @@ def _expire_team(db: Session, team: AgentTeam, *, reason: str) -> None:
             success=False,
             error="团队已超过截止时间",
             now=now,
+            status="expired",
         )
         _event(
             db,
@@ -3256,17 +3286,22 @@ def recover_expired_leases(db: Session, *, limit: int = 100) -> int:
             now=now,
         )
         if int(task.attempt_count or 0) >= int(task.max_attempts or team.max_attempts or 1):
-            task.status = "dead_letter"
+            task.status = "failed"
             task.completed_at = now
             task.next_attempt_at = None
+            errors = _unjson(task.errors_json, [])
+            errors = errors if isinstance(errors, list) else []
+            task.errors_json = _json([*errors, {
+                "code": "lease_expired_retry_exhausted", "message": "租约到期且重试预算耗尽，执行结果不确定",
+            }][-20:])
             _event(
                 db,
                 team,
-                "task.dead_letter",
+                "task.failed",
                 task=task,
                 from_status=previous,
-                to_status="dead_letter",
-                detail={"error": "租约到期且重试预算耗尽"},
+                to_status="failed",
+                detail={"error": "租约到期且重试预算耗尽", "reason": "lease_expired_retry_exhausted"},
             )
         else:
             strategy_instruction = "先确认 Worker 健康和输入边界，再使用新会话重新执行本任务"
@@ -3340,6 +3375,7 @@ def cancel_team(
                 success=False,
                 error=reason,
                 now=now,
+                status="cancelled",
             )
             _event(
                 db,
@@ -3432,7 +3468,7 @@ def cancel_team_tasks(
             "message": str(reason or "")[:300],
             "cascade_from": sorted(wanted) if key not in wanted else [],
         }][-20:])
-        _mark_task_request_terminal(db, team, task, member, success=False, error=reason, now=now)
+        _mark_task_request_terminal(db, team, task, member, success=False, error=reason, now=now, status="cancelled")
         _event(
             db, team, "task.cancelled", task=task, member=member,
             from_status=previous_status, to_status="cancelled",
@@ -3668,7 +3704,7 @@ def preview_retry_team(
 ) -> dict[str, Any]:
     """生成只读、账号绑定的重试风险预览和确定性确认摘要。"""
     team = _team_or_raise(db, user, team_id, lock=True)
-    if team.status not in {"failed", "completed", "queued", "running"}:
+    if team.status not in {"failed", "blocked", "completed", "queued", "running"}:
         raise AgentTeamStateError("当前团队状态不允许重试")
     return _build_retry_preview(
         db,
@@ -3755,7 +3791,7 @@ def retry_team(
     from app.services import agent_supervisor_service
 
     team = _team_or_raise(db, user, team_id, lock=True)
-    if team.status not in {"failed", "completed", "queued", "running"}:
+    if team.status not in {"failed", "blocked", "completed", "queued", "running"}:
         raise AgentTeamStateError("当前团队状态不允许重试")
     all_tasks = _locked_team_tasks(db, team)
     wanted = {str(key) for key in (task_keys or [])}

@@ -1,25 +1,7 @@
 import { get, post } from './http'
 import type { DiscussionTurn } from '@/utils/discussionStream'
 
-export interface StartDiscussionParams {
-  project_id: number
-  file_id: number
-  review_type: string
-}
-
-export interface StartDiscussionResult {
-  session_id: string
-  ws_url: string
-  file_name: string
-  language: string
-  review_type: string
-  agents: Array<{ code: string; name: string }>
-  rules_count: number
-}
-
-export function startDiscussion(params: StartDiscussionParams) {
-  return post<StartDiscussionResult>('/discuss/start', undefined, params)
-}
+// 4.1.20：/discuss/start 已下线，圆桌只能由小菱经团队成员 review_orchestrator 发起。
 
 /** 服务端圆桌阶段。未知值由 UI 显示通用处理中状态。 */
 export type DiscussionPhase =

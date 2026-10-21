@@ -175,20 +175,6 @@ export function downloadProjectSource(projectId: number): Promise<Blob> {
 }
 
 /**
- * AI智能检测项目语言
- * @param data - { project_name, description }
- * @returns 检测结果 { language, language_name, confidence, reason }
- */
-export function detectLanguage(data: { project_name: string; description?: string }): Promise<{
-  language: string
-  language_name: string
-  confidence: string
-  reason: string
-}> {
-  return post('/ai/detect-language', data)
-}
-
-/**
  * AI智能分析文件夹，生成项目元数据
  * @param data - { folder_name, file_names }
  * @returns 项目元数据 { project_name, description, language, language_name }

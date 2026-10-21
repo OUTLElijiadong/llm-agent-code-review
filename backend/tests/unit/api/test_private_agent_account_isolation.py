@@ -8,11 +8,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.agents.clarify_store import ClarifyStore
 from app.agents.discussion_bus import DiscussionBus
 from app.agents.events import AgentEvent, AgentEventType, DiscussionTurn
 from app.api.v1 import agent_responses, agents, ai_logs, ws_discussion
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.core.permission_codes import PermissionCode
 from app.models.agent_mesh import AgentMeshConversation
 from app.models.agent_multimodal import AgentMultimodalAsset
@@ -48,32 +47,6 @@ async def test_private_sse_only_delivers_owned_events(monkeypatch, role):
     assert "own-private" in body
     assert "foreign-private" not in body
     assert "unowned-private" not in body
-
-
-@pytest.mark.parametrize("owner_id", [8, None, 0])
-@pytest.mark.parametrize("role", ["user", "admin"])
-def test_clarification_rejects_other_or_missing_owner_without_consuming(monkeypatch, owner_id, role):
-    store = ClarifyStore()
-    pending = {"user_id": owner_id, "intent": "dashboard", "payload": {"private": "foreign-context"}}
-    store.put("guessable-clarify", pending)
-    monkeypatch.setattr(agents.ClarifyStore, "instance", lambda: store)
-    monkeypatch.setattr(agents.rbac_service, "is_admin_user", lambda *_args: role == "admin")
-    factory = Mock(
-        return_value=SimpleNamespace(
-            chat_agent=SimpleNamespace(
-                dispatch_with_payload=Mock(
-                    return_value=SimpleNamespace(success=True, data="foreign-context", model="fixture")
-                )
-            )
-        )
-    )
-    monkeypatch.setattr(agents, "get_request_orchestrator", factory)
-    with pytest.raises(ForbiddenError):
-        agents.submit_clarification(
-            agents.ClarifyAnswers(clarify_id="guessable-clarify"), db=object(), user=SimpleNamespace(id=7, role=role)
-        )
-    factory.assert_not_called()
-    assert store.peek("guessable-clarify") is pending
 
 
 @pytest.mark.parametrize("role", ["user", "admin"])

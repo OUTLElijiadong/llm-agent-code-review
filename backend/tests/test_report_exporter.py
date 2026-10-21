@@ -1648,3 +1648,30 @@ def test_empty_issue_text_distinguishes_clean_partial_and_inconclusive() -> None
         status="failed", processed_files=0, total_issues=0, coverage={"coverage_status": "failed"},
     ), [], "", None)
     assert "不能据此判定无问题" in failed["empty_issues_text"]
+
+
+def test_unscored_export_states_the_concrete_reason_in_scope_lines():
+    """不出分的导出正文必须写出具体原因，而不是只显示“未评估”。"""
+    task = _make_task(status="failed", processed_files=0, total_issues=0, severe_issues=0, high_issues=0,
+                      medium_issues=0, low_issues=0, score=None, coverage={"coverage_status": "partial"})
+    result = export_to_dict(task, [], "", None)
+
+    assert result["score"] is None
+    assert result["statistics"]["score_breakdown"]["score_unavailable_detail"]
+    joined = "\n".join(result["scope_lines"])
+    assert "不出分原因：" in joined
+    assert "没有任何已完成审查的文件或有效发言" in joined
+
+
+def test_domain_score_section_states_scope_or_reason():
+    from app.services.domain_report_exporter import insert_section_after_task_info, score_section_lines
+
+    scored = score_section_lines(80, available=True, scope_label="仅覆盖已测范围", rule="R", finding_count=2,
+                                 severity_counts={"高": 1, "低": 1})
+    assert "评分：80 / 100" in scored and "评分范围：仅覆盖已测范围" in scored
+    assert any("记录 2 项发现（高 1 项、低 1 项）" in line for line in scored)
+    unscored = score_section_lines(None, available=False, reason="安全配置探测阶段未完成", finding_count=0)
+    assert "评分：未评估" in unscored and "不出分原因：安全配置探测阶段未完成" in unscored
+    assert any("不等于已证明不存在风险" in line for line in unscored)
+    markdown = insert_section_after_task_info("# 标题\n\n## 任务信息\n任务：A\n\n## 正文\n内容\n", scored)
+    assert markdown.index("## 任务信息") < markdown.index("## 评分与结论") < markdown.index("## 正文")

@@ -11,7 +11,6 @@ const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: 
 vi.mock('@/api/project', () => ({ getProjects: api.projects }))
 vi.mock('@/api/codeFile', () => ({ list: api.files }))
 vi.mock('@/api/review', () => ({ startReview: api.start }))
-vi.mock('@/api/discussion', () => ({ startDiscussion: api.discuss }))
 vi.mock('@/composables/useDangerConfirm', () => ({ confirmDanger: api.confirm }))
 vi.mock('vue-router', () => ({ useRouter: () => router }))
 vi.mock('@/router', () => ({ default: router }))
@@ -32,11 +31,16 @@ beforeEach(() => {
   api.projects.mockResolvedValue(pageOf([project(1)]))
   api.files.mockResolvedValue(pageOf([codeFile(1)]))
   api.start.mockResolvedValue({ task_id: 7, status: 'pending' })
-  api.discuss.mockResolvedValue({ session_id: 'discussion', agents: [], file_name: 'file1.py', ws_url: '/ws/stub' })
+  window.addEventListener('prism:open-agent-chat', onAgentChat)
   api.confirm.mockResolvedValue(true)
   router.push.mockResolvedValue(undefined)
 })
-afterEach(() => wrapper?.unmount())
+// 4.1.20：圆桌不再直调 /discuss/start，而是把请求交给小菱自动发送
+const onAgentChat = (event: Event) => api.discuss((event as CustomEvent).detail)
+afterEach(() => {
+  window.removeEventListener('prism:open-agent-chat', onAgentChat)
+  wrapper?.unmount()
+})
 
 async function render() {
   wrapper = mount(ReviewStart, { ...scanMountOptions, global: { ...scanMountOptions.global, plugins: [pinia] } })
@@ -123,15 +127,20 @@ describe('审查扫描范围失败回归', () => {
     expect(vm.submitting).toBe(false)
   })
 
-  it('R3 合法单文件圆桌仍发送原选定范围，未更改审查方式', async () => {
+  it('R3 合法单文件圆桌交给小菱自动发送原选定范围，不直调圆桌接口', async () => {
     const vm = await render()
     await chooseProject(vm)
     vm.form.review_type = 'discuss'
     vm.form.scope = 'files'
     vm.form.file_ids = [1]
     await vm.onSubmit()
-    expect(api.discuss).toHaveBeenCalledExactlyOnceWith({ project_id: 1, file_id: 1, review_type: 'full' })
+    expect(api.discuss).toHaveBeenCalledOnce()
+    const detail = api.discuss.mock.calls[0][0]
+    expect(detail.autoSend).toBe(true)
+    expect(detail.prefill).toContain('project_id=1')
+    expect(detail.prefill).toContain('file_id=1')
     expect(api.start).not.toHaveBeenCalled()
+    expect(router.push).not.toHaveBeenCalled()
   })
 
   it('只有全部项目范围显示批量项目摘要', async () => {
@@ -310,7 +319,7 @@ describe('审查扫描范围失败回归', () => {
     const target = wrapper.findAllComponents(ElRadio).find(radio => radio.props('value') === 2)!
     await target.find('input').setValue(true)
     await vm.onSubmit()
-    expect(api.discuss).toHaveBeenCalledWith(expect.objectContaining({ file_id: 2 }))
+    expect(api.discuss).toHaveBeenCalledWith(expect.objectContaining({ autoSend: true, prefill: expect.stringContaining('file_id=2') }))
   })
 
   it('绕过UI的多文件圆桌调用也不得静默取第一项', async () => {

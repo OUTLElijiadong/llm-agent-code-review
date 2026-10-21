@@ -45,6 +45,7 @@ def test_dashboard_recent_tasks_use_persisted_project_and_task_fields(db, monkey
         review_type="security",
         status="success",
         score=86,
+        total_files=4,
         create_time=datetime(2026, 7, 9, 8, 0, tzinfo=timezone.utc),
     )
     deleted_task = ReviewTask(

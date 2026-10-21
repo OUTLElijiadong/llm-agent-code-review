@@ -53,9 +53,9 @@ import {
 } from '@/utils/agentChatSessions'
 import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
 
-function mountDrawer(prefill?: string, extraPlugins: Plugin[] = []): VueWrapper {
+function mountDrawer(prefill?: string, extraPlugins: Plugin[] = [], autoSendPrefill = false): VueWrapper {
   return mount(AgentChatDrawer, {
-    props: { visible: true, prefill },
+    props: { visible: true, prefill, autoSendPrefill },
     global: {
       plugins: extraPlugins,
       stubs: {
@@ -1273,6 +1273,23 @@ describe('AgentChatDrawer Responses stream', () => {
       answer: 'agent-quality',
     })
     await finish(0)
+  })
+
+  it('auto-sends a page hand-off prefill once the session is idle', async () => {
+    const wrapper = mountDrawer('请组织多 Agent 圆桌讨论审查：项目「A」(project_id=1)，文件「a.py」(file_id=2)', [], true)
+    await flushPromises()
+    expect(streams.records).toHaveLength(1)
+    expect(streams.records[0].body).toMatchObject({
+      action: 'start',
+      messages: [{ role: 'user', content: expect.stringContaining('file_id=2') }],
+    })
+    expect(wrapper.emitted('consumed-prefill')).toHaveLength(1)
+  })
+
+  it('does not auto-send an ordinary prefill', async () => {
+    mountDrawer('检查这段代码')
+    await flushPromises()
+    expect(streams.records).toHaveLength(0)
   })
 
   it('keeps the existing prefill workflow', () => {

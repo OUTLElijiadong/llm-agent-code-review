@@ -58,6 +58,8 @@ _SEVERITY_ALIASES = {
 }
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+# 整段被围栏包裹：贪婪匹配到最后一个 ```，正文里引用的围栏不会提前截断
+_OUTER_FENCE_RE = re.compile(r"```(?:json)?[ \t]*\n?([\s\S]*)```\s*$", re.IGNORECASE)
 
 
 def normalize_severity(value: object, default: str = "中") -> str:
@@ -155,6 +157,10 @@ class ParseDiagnostic:
 def _strip_fence(text: str) -> str:
     """去除Markdown围栏,提取JSON内容
 
+    只有整段输出以围栏开头时才剥围栏；JSON 字符串内部引用的 ``` 不能当成外层围栏，
+    否则会截出字符串中段导致 "Expecting value: char 0"（圆桌 #217 根因）。
+    围栏前有说明文字时，退回到第一个 { 到最后一个 } 的对象片段。
+
     Args:
         text: 包含可能的```json...```围栏的文本
 
@@ -162,9 +168,18 @@ def _strip_fence(text: str) -> str:
         str: 提取出的纯JSON文本
     """
     text = text.strip()
+    if text.startswith(("{", "[")):
+        return text
+    if text.startswith("```"):
+        m = _OUTER_FENCE_RE.match(text)
+        if m:
+            return m.group(1).strip()
     m = _FENCE_RE.search(text)
-    if m:
+    if m and m.group(1).strip().startswith(("{", "[")):
         return m.group(1).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        return text[start:end + 1]
     return text
 
 
@@ -430,9 +445,15 @@ def parse(text: str) -> ReviewResult:
     cleaned = _strip_fence(text)
     try:
         data = json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON 解析失败: {e}, 原始片段: {cleaned[:200]}")
-        raise ResultParseError(f"AI 返回非合法 JSON: {e}")
+    except json.JSONDecodeError:
+        data = None
+    if data is None:
+        try:
+            # 对象后带说明文字时只取第一个完整 JSON 值
+            data, _end = json.JSONDecoder().raw_decode(cleaned)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON 解析失败: {e}, 原始片段: {cleaned[:200]}")
+            raise ResultParseError(f"AI 返回非合法 JSON: {e}")
 
     if not isinstance(data, dict):
         raise ResultParseError("AI 返回不是 JSON 对象")

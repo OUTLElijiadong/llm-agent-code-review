@@ -405,7 +405,7 @@ def _team_task_is_active(
     return bool(
         team is not None
         and task is not None
-        and str(team.status) not in {"completed", "failed", "cancelled", "expired"}
+        and str(team.status) not in {"completed", "failed", "blocked", "cancelled", "expired"}
         and str(task.status) == "running"
         and str(task.lease_token or "") == lease_token
     )
@@ -543,13 +543,18 @@ def _runtime_handler(
 
         action = str(data.get("action") or "")
         params = data.get("params", {})
-        if action not in ops_service.TEAM_READ_ONLY_ACTIONS:
-            return _result(
-                "approval_required",
-                "运维写操作必须回到主小菱通过现有审批链执行",
-                errors=[{"code": "main_session_approval_required", "action": action}],
-                next_action={"use_main_xiaoling": True, "action": action},
+        write_confirmed = trusted_team_execution and context.get("high_risk_authorized") is True
+        if action not in ops_service.TEAM_READ_ONLY_ACTIONS and not write_confirmed:
+            # 写操作只在团队调度核对过当前账号对该任务的高风险确认后执行；
+            # ops_service 仍强制唯一超级管理员与白名单参数。
+            result = _result(
+                "blocked",
+                "改动服务器的运维任务需要唯一超级管理员确认该团队任务后才会执行",
+                errors=[{"code": "ops_write_confirmation_required", "action": action}],
+                next_action={"confirm_team_task": True, "action": action},
             )
+            result["retryable"] = False
+            return result
         try:
             validated = ops_service.validate_action_params(action, params if isinstance(params, dict) else {})
         except ValueError as exc:
@@ -583,7 +588,8 @@ def _runtime_handler(
             return failure
         return _result(
             "completed",
-            f"运维只读动作 {action} 已完成",
+            f"运维动作 {action} 已完成" if action not in ops_service.TEAM_READ_ONLY_ACTIONS
+            else f"运维只读动作 {action} 已完成",
             evidence=[{"source": "ops_execution", "data": execution}],
             artifacts=[{"type": "ops_execution", "data": execution}],
         )
@@ -877,6 +883,23 @@ def _runtime_handler(
                 lease_token=str(context.get("lease_token") or ""),
                 project_id=data.get("project_id"), file_ids=data.get("file_ids"),
                 review_type=str(data.get("review_type") or "full"), task_name=str(data.get("task_name") or ""),
+            )
+        if operation == "start_roundtable":
+            if not trusted_team_execution or _readonly_team_task(data):
+                return _result("approval_required", "圆桌讨论必须由小菱通过有效团队租约发起")
+            from app.core.permission_codes import PermissionCode
+
+            denied = _require_runtime_permissions(db, user, PermissionCode.REVIEW_START)
+            if denied is not None:
+                return denied
+            from app.services.agent_team_review import run_team_roundtable
+
+            experts = data.get("temporary_experts")
+            return run_team_roundtable(
+                db, user, team_id=context.get("team_id"), task_id=context.get("agent_team_task_id"),
+                lease_token=str(context.get("lease_token") or ""),
+                project_id=data.get("project_id"), file_id=data.get("file_id"),
+                temporary_experts=experts if isinstance(experts, list) else None,
             )
         if operation == "list":
             result = orch.review_orch.list_tasks(

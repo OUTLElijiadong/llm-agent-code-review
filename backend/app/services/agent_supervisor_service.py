@@ -303,7 +303,7 @@ def _review_team_task(
             return SupervisionReview(ALLOW, MEDIUM, "操作限定在项目隔离沙箱", False, "isolated_sandbox")
         return SupervisionReview(ESCALATE, HIGH, "沙箱部署 Agent 请求了未登记操作", True, "unclassified_operation")
     if code in {"review_orchestrator", "security_sentinel"}:
-        if operation in {"", "list", "get", "issues", "run_review", "audit_security_for_project"}:
+        if operation in {"", "list", "get", "issues", "run_review", "start_roundtable", "audit_security_for_project"}:
             return SupervisionReview(ALLOW, MEDIUM, "项目审查/审计限定为当前账号可见源码的只读分析",
                                      False, "project_readonly_review")
         return SupervisionReview(ESCALATE, HIGH, "审查 Agent 请求了未登记操作", True, "unclassified_operation")

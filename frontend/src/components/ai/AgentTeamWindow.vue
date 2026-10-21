@@ -85,12 +85,16 @@ const teamActive = computed(() => {
   return Boolean(status && ['running', 'verifying', 'queued'].includes(status))
 })
 
-/** 有失败/死信/过期任务时才允许「重试失败」。 */
-const failedTaskKeys = computed(() =>
-  tasks.value
-    .filter((task) => ['failed', 'dead_letter', 'expired'].includes(task.status))
-    .map((task) => task.task_key),
-)
+/** 有失败/死信/过期任务时才允许「重试失败」；整队阻塞时，补齐条件后可从阻塞根任务重试。 */
+const CASCADE_BLOCK_CODES = new Set(['team_failed', 'dependency_failed'])
+const failedTaskKeys = computed(() => {
+  const failed = tasks.value.filter((task) => ['failed', 'dead_letter', 'expired'].includes(task.status))
+  const roots = failed.length || props.team?.status !== 'blocked'
+    ? failed
+    : tasks.value.filter((task) => task.status === 'blocked'
+      && !(task.errors ?? []).some((item) => CASCADE_BLOCK_CODES.has(String(item.code ?? ''))))
+  return roots.map((task) => task.task_key)
+})
 const canRetry = computed(() => failedTaskKeys.value.length > 0 && userStore.profile?.id != null && !actionSubmitting.value)
 const canCancel = computed(() => {
   const status = props.team?.status
@@ -109,18 +113,36 @@ watch(
 
 const TEAM_STATUS_LABELS: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '运行中', verifying: '验证中',
-  completed: '已完成', failed: '失败', cancelled: '已取消', expired: '已过期',
+  completed: '已完成', failed: '失败', blocked: '已阻塞', cancelled: '已取消', expired: '已过期',
 }
 const TASK_STATUS_LABELS: Record<string, string> = {
   waiting_dependency: '等待依赖', queued: '排队中', running: '运行中',
   completed: '已完成', failed: '失败', blocked: '已阻塞',
-  cancelled: '已取消', dead_letter: '死信', expired: '已过期',
+  cancelled: '已取消', dead_letter: '失败终止', expired: '已过期',
 }
 const ROLE_LABELS: Record<string, string> = {
   worker: '执行', verifier: '验证', summarizer: '汇总',
 }
-/** 小菱/系统侧地址关键字:命中即视为主持人(品牌紫头像)。 */
-const MANAGER_TOKENS = ['manager', 'user', 'system', 'coordinator', 'orchestrator', '小菱', 'session:']
+/**
+ * 非成员发言者按真实地址区分，不再把用户/系统消息一律算到小菱头上：
+ * session:* 是派发团队的主小菱会话，agent:orchestrator 是小菱编排，
+ * agent:supervisor 是小菱监督，user:* 是当前用户，system:* 是平台系统。
+ */
+function nonMemberSpeaker(raw: string): Omit<Speaker, 'key'> | null {
+  const text = raw.trim().toLowerCase()
+  if (!text || text.startsWith('session:') || ['agent:xiaoling', 'agent:manager', 'xiaoling', 'manager', '小菱'].includes(text)) {
+    return { name: '小菱', badge: '主持', initial: '菱', theme: 'manager' }
+  }
+  if (text === 'agent:orchestrator' || text === 'agent:coordinator') {
+    return { name: '小菱', badge: '编排', initial: '菱', theme: 'manager' }
+  }
+  if (text === 'agent:supervisor') {
+    return { name: '小菱', badge: '监督', initial: '菱', theme: 'manager' }
+  }
+  if (text.startsWith('user:')) return { name: '你', badge: '用户', initial: '你', theme: 'user' }
+  if (text.startsWith('system:')) return { name: '系统', badge: '平台', initial: '系', theme: 'system' }
+  return null
+}
 
 function teamStatusLabel(status: string): string {
   return TEAM_STATUS_LABELS[status] ?? status
@@ -158,14 +180,15 @@ interface Speaker {
   /** 头像内单字。 */
   initial: string
   /** 配色类别 → CSS 修饰类。 */
-  theme: 'manager' | 'worker' | 'verifier' | 'summarizer'
+  theme: 'manager' | 'worker' | 'verifier' | 'summarizer' | 'user' | 'system'
 }
 
 function resolveSpeaker(raw?: string | null): Speaker {
   const key = normalizeAddress(raw) || 'system'
   const member = findMember(raw)
   if (member) {
-    const theme = ROLE_LABELS[member.role] ? (member.role as Speaker['theme']) : 'manager'
+    // 未知角色按执行成员配色，避免冒用小菱的品牌紫。
+    const theme = ROLE_LABELS[member.role] ? (member.role as Speaker['theme']) : 'worker'
     return {
       key,
       name: member.display_name,
@@ -175,9 +198,8 @@ function resolveSpeaker(raw?: string | null): Speaker {
     }
   }
   const text = (raw ?? '').trim()
-  if (!text || MANAGER_TOKENS.some((token) => key.includes(token))) {
-    return { key, name: '小菱', badge: '', initial: '菱', theme: 'manager' }
-  }
+  const known = nonMemberSpeaker(text)
+  if (known) return { key, ...known }
   // 未在成员列表里的其他地址:按未知成员处理,用执行色兜底
   return { key, name: text, badge: '', initial: text.charAt(0).toUpperCase() || '员', theme: 'worker' }
 }
@@ -199,6 +221,66 @@ function mentionLabel(message: AgentTeamMessage): string {
 function taskMember(task: AgentTeamTask): string {
   return task.member_key || members.value.find((member) => member.member_id === task.member_id)?.display_name || '未分配'
 }
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/** 把错误/结果里的人类可读说明提出来；原始 JSON 仍可展开核对。 */
+function readableErrors(errors?: Array<Record<string, unknown>> | null): string[] {
+  return (errors ?? [])
+    .map((item) => textOf(item.message) || textOf(item.reason) || textOf(item.code))
+    .filter((line, index, list) => line && list.indexOf(line) === index)
+    .slice(0, 6)
+}
+
+function taskResultSummary(task: AgentTeamTask): string {
+  return textOf(task.result?.summary)
+}
+
+/** 核验/汇总成员的结论：verdict/verification_status 与证据条数。 */
+function taskVerification(task: AgentTeamTask): string {
+  const result = task.result ?? {}
+  const verdict = textOf(result.verdict) || textOf(result.verification_status) || textOf(result.status)
+  const evidence = Array.isArray(result.evidence) ? result.evidence.length : null
+  if (!verdict && evidence === null) return ''
+  return [verdict && `结论：${verdict}`, evidence !== null && `证据 ${evidence} 条`].filter(Boolean).join(' · ')
+}
+
+/** 团队终态说明：完成写汇总结论，失败/阻塞写原因与涉及任务，不让用户只看到状态色块。 */
+const teamOutcome = computed<{ tone: string; title: string; lines: string[] } | null>(() => {
+  const team = props.team
+  if (!team || !['completed', 'failed', 'blocked', 'cancelled', 'expired'].includes(team.status)) return null
+  const summary = (team.summary ?? {}) as Record<string, unknown>
+  const error = (team.error ?? {}) as Record<string, unknown>
+  const finalResult = (summary.final_result ?? {}) as Record<string, unknown>
+  const lines: string[] = []
+  const finalText = textOf(finalResult.summary)
+  if (finalText) lines.push(finalText)
+  if (summary.partial) lines.push('部分完成：仅汇总了已交付的成员结果。')
+  const failedTasks = Array.isArray(error.failed_tasks) ? (error.failed_tasks as unknown[]).map(String) : []
+  if (failedTasks.length) lines.push(`未完成任务：${failedTasks.join('、')}`)
+  const reasons = tasks.value
+    .filter((task) => ['failed', 'blocked', 'dead_letter', 'expired'].includes(task.status))
+    .flatMap((task) => readableErrors(task.errors).map((line) => `${task.title}：${line}`))
+  lines.push(...reasons.slice(0, 4))
+  const reason = textOf(error.reason)
+  const reasonText: Record<string, string> = {
+    user_cancelled: '用户已停止团队，不会自动恢复。',
+    missing_verifier_or_summarizer: '团队缺少核验或汇总成员，无法给出可信结论。',
+    all_tasks_cancelled_by_instruction: '所有执行任务都已按指令停止。',
+  }
+  if (reason) lines.push(reasonText[reason] ?? reason)
+  const titles: Record<string, [string, string]> = {
+    completed: ['success', '团队已完成'],
+    failed: ['danger', '团队执行失败'],
+    blocked: ['warning', '团队被阻塞，需要处理后再继续'],
+    cancelled: ['muted', '团队已停止'],
+    expired: ['muted', '团队已超过截止时间'],
+  }
+  const [tone, title] = titles[team.status]
+  return { tone, title, lines: lines.length ? lines : ['没有记录更多说明。'] }
+})
 
 function formatTime(value?: string | null): string {
   const timestamp = parseUtcTimestamp(value)
@@ -558,6 +640,18 @@ async function cancelTeam(): Promise<void> {
         </div>
 
         <div ref="chatBodyRef" class="team-window-body">
+          <section
+            v-if="teamOutcome"
+            class="team-window-outcome"
+            :class="`is-${teamOutcome.tone}`"
+            role="status"
+            aria-label="团队结果"
+          >
+            <strong>{{ teamOutcome.title }}</strong>
+            <ul>
+              <li v-for="(line, index) in teamOutcome.lines" :key="index">{{ line }}</li>
+            </ul>
+          </section>
           <!-- 成员实时工作卡片(Codex 风格:头像+状态+计时+操作日志) -->
           <section v-if="members.length" class="team-window-section team-window-members-section" aria-label="团队成员实时状态">
             <AgentMemberWorkCard
@@ -646,8 +740,19 @@ async function cancelTeam(): Promise<void> {
                   {{ taskMember(task) }} · 第 {{ task.attempt_count }}/{{ task.max_attempts }} 次尝试
                   <template v-if="task.depends_on.length"> · 依赖 {{ task.depends_on.join('、') }}</template>
                 </small>
+                <p v-if="taskResultSummary(task)" class="team-window-task-result">结果：{{ taskResultSummary(task) }}</p>
+                <p v-if="taskVerification(task)" class="team-window-task-result">{{ taskVerification(task) }}</p>
+                <p
+                  v-for="(line, index) in readableErrors(task.errors)"
+                  :key="`err-${index}`"
+                  class="team-window-task-reason"
+                >{{ line }}</p>
+                <details v-if="task.instructions" class="team-window-task-instructions">
+                  <summary>执行指令</summary>
+                  <p>{{ task.instructions }}</p>
+                </details>
                 <details v-if="task.errors?.length" class="team-window-task-error">
-                  <summary>错误信息</summary>
+                  <summary>原始错误记录</summary>
                   <code class="team-window-task-error-content">{{ formatFullDetail(task.errors) }}</code>
                 </details>
               </li>
@@ -696,6 +801,24 @@ async function cancelTeam(): Promise<void> {
 }
 .agent-team-window.is-dragging { user-select: none; }
 
+.team-window-outcome {
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--r-md);
+  background: var(--color-bg-page);
+}
+.team-window-outcome strong { display: block; margin-bottom: 4px; font-size: var(--fs-sm); }
+.team-window-outcome ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+.team-window-outcome li { overflow-wrap: anywhere; }
+.team-window-outcome.is-success { border-color: var(--sev-low, #8fd19e); }
+.team-window-outcome.is-danger { border-color: var(--sev-high, #e58c8c); }
+.team-window-outcome.is-warning { border-color: var(--sev-medium, #d9a857); }
+.team-window-task-result,
+.team-window-task-reason { margin: 4px 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.team-window-task-reason { color: var(--sev-high, #b91c1c); }
+.team-window-task-instructions summary { cursor: pointer; color: var(--color-text-secondary); }
+.team-window-task-instructions p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .team-window-header {
   display: flex;
   align-items: center;
@@ -840,6 +963,8 @@ async function cancelTeam(): Promise<void> {
 .team-chat-avatar.is-worker { background: linear-gradient(135deg, var(--accent-500), var(--accent-400)); }
 .team-chat-avatar.is-verifier { background: linear-gradient(135deg, var(--sev-medium), #e8c07a); }
 .team-chat-avatar.is-summarizer { background: linear-gradient(135deg, var(--color-success), #7fce9b); }
+.team-chat-avatar.is-user { background: linear-gradient(135deg, #64748b, #94a3b8); }
+.team-chat-avatar.is-system { background: linear-gradient(135deg, #475569, #64748b); }
 .team-chat-main { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: calc(100% - 33px); }
 .team-chat-head { display: flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; margin-bottom: 2px; }
 .team-chat-name { overflow: hidden; font-weight: 600; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -853,6 +978,9 @@ async function cancelTeam(): Promise<void> {
 .team-chat-badge.is-worker { background: rgba(61, 188, 217, 0.12); color: var(--accent-600); }
 .team-chat-badge.is-verifier { background: var(--sev-medium-bg); color: var(--sev-medium); }
 .team-chat-badge.is-summarizer { background: var(--color-success-light); color: var(--color-success); }
+.team-chat-badge.is-manager { background: var(--brand-50); color: var(--brand-600); }
+.team-chat-badge.is-user,
+.team-chat-badge.is-system { background: var(--color-bg-page); color: var(--color-text-secondary); }
 .team-chat-mention {
   flex: none;
   max-width: 140px;

@@ -66,6 +66,8 @@ def _task_message(team: AgentTeam, claimed: dict[str, Any]) -> dict[str, Any]:
             "run_id": team.trace_id,
             "attempt": int(claimed.get("attempt_count") or 0),
             "lease_token": str(claimed.get("lease_token") or ""),
+            # 仅由调度器在核对监督确认指纹后写入；mesh 外部消息无法借此授权写操作。
+            "high_risk_authorized": bool(claimed.get("high_risk_authorized")),
         },
     }
 
@@ -229,7 +231,7 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     db,
                     user,
                     claimed["address"],
-                    _task_message(team, claimed),
+                    _task_message(team, {**claimed, "high_risk_authorized": high_risk_authorized}),
                     trusted_team_execution=True,
                 )
             access_error = _owner_access_error(db, int(team.user_id), agent_team_service._unjson(_task.input_json, {}),

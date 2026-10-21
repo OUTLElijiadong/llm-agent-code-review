@@ -8,6 +8,7 @@ export type AgentTeamStatus =
   | 'verifying'
   | 'completed'
   | 'failed'
+  | 'blocked'
   | 'cancelled'
   | 'expired'
 export type AgentTeamMemberRole = 'worker' | 'verifier' | 'summarizer'

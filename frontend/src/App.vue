@@ -16,6 +16,7 @@ const userStore = useUserStore()
 const routeLoading = ref(false)
 const agentVisible = ref(false)
 const agentPrefill = ref('')
+const agentAutoSend = ref(false)
 const agentPreferredSessionId = ref('')
 const agentSessionRequestId = ref(0)
 let showTimer: number | undefined
@@ -64,11 +65,12 @@ watch([canUseAgent, () => userStore.profile?.id], ([allowed, id]) => {
 }, { immediate: true })
 
 /** 两个权限隔离的会话 surface 共用小菱主控；管理员工具仍按当前角色授权。 */
-function openAgentChat(prefill = '', preferredSessionId = ''): void {
+function openAgentChat(prefill = '', preferredSessionId = '', autoSend = false): void {
   if (!canUseAgent.value) return
   if (userStore.isAdmin()) {
     window.dispatchEvent(new Event('prism:close-admin-copilot'))
   }
+  agentAutoSend.value = Boolean(prefill) && autoSend
   if (prefill) agentPrefill.value = prefill
   agentPreferredSessionId.value = preferredSessionId
   agentSessionRequestId.value += 1
@@ -80,8 +82,8 @@ function handleAdminCopilotOpened(): void {
 }
 
 function handleOpenAgentChat(event: Event): void {
-  const detail = (event as CustomEvent<{ prefill?: string; sessionId?: string }>).detail
-  openAgentChat(detail?.prefill ?? '', detail?.sessionId ?? '')
+  const detail = (event as CustomEvent<{ prefill?: string; sessionId?: string; autoSend?: boolean }>).detail
+  openAgentChat(detail?.prefill ?? '', detail?.sessionId ?? '', detail?.autoSend === true)
 }
 
 provide('openAgentChat', () => openAgentChat())
@@ -165,6 +167,7 @@ onBeforeUnmount(() => {
     v-if="canUseAgent"
     v-model:visible="agentVisible"
     :prefill="agentPrefill"
+    :auto-send-prefill="agentAutoSend"
     :preferred-session-id="agentPreferredSessionId"
     :preferred-session-request-id="agentSessionRequestId"
     :show-launcher="false"

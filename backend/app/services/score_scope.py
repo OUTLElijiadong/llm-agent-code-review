@@ -22,6 +22,7 @@ SCOPE_LABELS = {
     "historical": "历史任务按已保存问题集复算",
 }
 NO_SCOPE_REASON = "没有任何已完成审查的文件或有效发言，按规则不出分"
+HISTORICAL_NO_FILES_REASON = "历史任务既无覆盖记录也无提交文件，无法确认评分依据，不出分"
 
 
 def _int(value: Any) -> int:
@@ -64,8 +65,11 @@ def issue_score_scope(task: Any) -> dict[str, Any]:
         if not coverage and status == "success":
             return result("historical")
         return result("partial")
-    if not coverage and status == "success":
+    if not coverage and status == "success" and total_files > 0:
+        # 早期成功任务没有覆盖账本，但提交过文件：按已保存问题集复算并标注历史口径。
         return result("historical")
+    if not coverage and status == "success":
+        return result(None, HISTORICAL_NO_FILES_REASON)
     return result(None, NO_SCOPE_REASON)
 
 

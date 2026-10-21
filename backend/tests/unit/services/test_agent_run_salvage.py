@@ -101,3 +101,44 @@ def test_emergency_compaction_keeps_user_constraints_and_shortens_tool_output():
     assert metadata["emergency_compaction"] is True
     assert "目标：审查项目 A" in text and "约束：不得发布" in text
     assert "平台已截断" in text
+
+
+def _force_stale(monkeypatch):
+    from app.api.v1 import agent_responses as api
+
+    real = api._recover_stale_active_run
+    monkeypatch.setattr(api, "_recover_stale_active_run",
+                        lambda db, row, **kw: real(db, row, force=True))
+
+
+def test_orphan_sweep_counts_against_the_same_recovery_budget(salvage_db, monkeypatch):
+    _force_stale(monkeypatch)
+    _run(salvage_db, "orphan-2")
+    assert agent_run_salvage.sweep_orphan_runs_once() == 1
+    status, checkpoint = _checkpoint(salvage_db, "orphan-2")
+    assert status == "failed" and checkpoint["recovery_requested"] is True
+    metadata = checkpoint["context_metadata"]
+    assert metadata["auto_recovery_attempts"] == 1
+    assert metadata["recovery_events"][-1]["source"] == "orphan_sweep"
+    assert salvage_db.dispatched == ["orphan-2"]
+
+
+def test_orphan_sweep_stops_at_recovery_limit_and_keeps_audit_events(salvage_db, monkeypatch):
+    _force_stale(monkeypatch)
+    _run(salvage_db, "orphan-3", context_metadata={"auto_recovery_attempts": agent_run_salvage.MAX_AUTO_RECOVERIES})
+    agent_run_salvage.sweep_orphan_runs_once()
+    status, checkpoint = _checkpoint(salvage_db, "orphan-3")
+    assert status == "failed"
+    assert checkpoint["recovery_requested"] is False
+    assert "已安全停止" in checkpoint["error"]
+    assert checkpoint["context_metadata"]["recovery_events"][-1]["outcome"] == "budget_exhausted"
+    assert salvage_db.dispatched == []
+
+
+def test_orphan_sweep_never_recovers_a_human_stop(salvage_db, monkeypatch):
+    _force_stale(monkeypatch)
+    _run(salvage_db, "orphan-stop", stop_requested=True, stop_reason="用户停止")
+    agent_run_salvage.sweep_orphan_runs_once()
+    status, checkpoint = _checkpoint(salvage_db, "orphan-stop")
+    assert status == "cancelled" and checkpoint["recovery_requested"] is False
+    assert salvage_db.dispatched == []

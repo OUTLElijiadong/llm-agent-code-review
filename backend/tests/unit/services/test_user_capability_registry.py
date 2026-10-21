@@ -76,7 +76,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 125
+    assert len(USER_CAPABILITIES) == 124  # 4.1.20 移除已发布 Agent 直调
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))

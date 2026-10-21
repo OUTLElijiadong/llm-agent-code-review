@@ -32,7 +32,7 @@ export const CN_VULN_PORTALS: CnPortal[] = [
 ]
 
 /** 未执行官方查询时的固定提示；缺少查询证据不能被解释为官方库无记录。 */
-export const OFFICIAL_VULNERABILITY_SOURCE_NOTICE = 'CNVD/CNNVD 官方漏洞库当前未查询。OWASP 分类仅作临时参考；未查询不代表官方库无匹配。只有两库均成功查询且均无命中时，才可确认标注“OWASP 回退分类”。'
+export const OFFICIAL_VULNERABILITY_SOURCE_NOTICE = 'CNVD/CNNVD 未查询；OWASP 仅作临时参考。'
 export const OWASP_TEMPORARY_REFERENCE_LABEL = 'OWASP 临时参考'
 
 /** 相关参考规范；展示引用不代表平台认证或完整条款覆盖。 */

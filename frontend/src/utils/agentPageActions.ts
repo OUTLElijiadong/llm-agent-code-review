@@ -73,9 +73,10 @@ export function notifyVerifiedTeamPageActions(team: AgentTeamDetail, accountId?:
 export function applyTeamResultToToolCalls(calls: ResponseToolCall[], team: AgentTeamDetail): void {
   for (const call of calls) {
     if (call.teamId !== team.team_id) continue
-    if (team.status === 'failed' || team.status === 'expired') {
+    if (team.status === 'failed' || team.status === 'expired' || team.status === 'blocked') {
       call.status = 'failed'
-      call.error = formatResponseValue(team.error) || '团队执行或结果核验未通过'
+      call.error = formatResponseValue(team.error)
+        || (team.status === 'blocked' ? '团队被阻塞：缺少执行条件或需要人工处理' : '团队执行或结果核验未通过')
     } else if (team.status === 'cancelled') {
       call.status = 'rejected'
     } else if (team.status === 'completed') {

@@ -37,6 +37,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from app.agents.event_bus import emit_event
+from app.utils.sandbox_path_policy import validate_sandbox_relative_path, validate_sandbox_zip
 from app.agents.events import AgentEventType
 from app.agents.syntax_repair_agent import SyntaxRepairAgent, collect_php_lint_errors
 from app.ai.language_detector import detect_language
@@ -1788,6 +1789,8 @@ def _inject_agent_test_files(source_archive_base64: str, files: list[dict[str, s
             content = str(item.get("content") or "")
             if not path or not content:
                 continue
+            # Agent 生成的测试路径同样走白名单，越界路径直接拒绝而不是交给 executor。
+            path = validate_sandbox_relative_path(path)
             zf.writestr(f"_agent_tests/{path}", content)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
@@ -7206,6 +7209,8 @@ def _normalize_source_archive_for_worker(source_archive: bytes, filename: str) -
     """
     lower = (filename or "").lower()
     if lower.endswith((".zip", ".apk", ".aab")):
+        # 服务器端白名单：ZIP 成员路径不合规时拒绝，不能只靠 worker/executor 兜底。
+        validate_sandbox_zip(source_archive)
         return source_archive, filename
     members, _ = read_archive_members(
         source_archive,

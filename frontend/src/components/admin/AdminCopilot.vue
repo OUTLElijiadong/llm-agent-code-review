@@ -279,7 +279,7 @@ const agentTeamLoading = ref(false)
 const agentTeamError = ref('')
 let agentTeamRefreshGeneration = 0
 const selectedTeamId = ref<number | null>(null)
-const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled', 'expired'])
 const activeThinkingTeamIds = computed(() => (
   agentTeams.value
     .filter((team) => !TERMINAL_TEAM_STATUSES.has(team.status))

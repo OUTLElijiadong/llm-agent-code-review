@@ -264,9 +264,9 @@ def test_team_worker_discards_task_after_owner_loses_access(
     assert calls == (["model invoked"] if change.endswith("during") else [])
     db.expire_all()
     saved = db.get(AgentTeamTask, task.id)
-    assert saved.status == "failed"
+    assert saved.status == "blocked"  # 失去权限是需人工处理的阻塞，不是执行失败
     assert "旧权限下的结果" not in saved.result_json
-    assert db.query(AgentTeamEvent).filter_by(team_id=team.id, event_type="task.failed").count() == 1
+    assert db.query(AgentTeamEvent).filter_by(team_id=team.id, event_type="task.blocked").count() == 1
 
 
 def test_task_message_preserves_input_and_adds_team_handoff_context():
@@ -314,6 +314,7 @@ def test_task_message_preserves_input_and_adds_team_handoff_context():
         "run_id": "team-trace",
         "attempt": 2,
         "lease_token": "lease-12-2",
+        "high_risk_authorized": False,
     }
 
 
@@ -381,8 +382,34 @@ def test_operations_team_rejects_write_action_without_executing(monkeypatch):
     )
 
     assert calls == []
-    assert result["status"] == "approval_required"
-    assert result["next_action"]["use_main_xiaoling"] is True
+    assert result["status"] == "blocked" and result["retryable"] is False
+    assert result["next_action"]["confirm_team_task"] is True
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_operations_write_needs_dispatcher_verified_confirmation(monkeypatch, trusted):
+    """消息里自带 high_risk_authorized 不能授权写操作；只有可信团队调度核对确认后才执行。"""
+    calls = []
+    monkeypatch.setattr(
+        "app.services.ops_service.execute",
+        lambda *_args, **kwargs: calls.append(kwargs) or {"status": "success", "action": kwargs["action"]},
+    )
+    result = agent_mesh_dispatcher._runtime_handler(
+        SimpleNamespace(),
+        SimpleNamespace(id=1),
+        "operations",
+        {
+            "user_id": 1,
+            "payload": {"action": "restart_service", "params": {"service": "backend"}},
+            "context": {"team_id": 13, "agent_team_task_id": 41, "attempt": 1, "high_risk_authorized": True},
+        },
+        trusted_team_execution=trusted,
+    )
+    if trusted:
+        assert [call["action"] for call in calls] == ["restart_service"]
+        assert result["status"] == "completed"
+    else:
+        assert calls == [] and result["status"] == "blocked"
 
 
 def test_project_analyzer_can_inspect_project_without_source_paths(monkeypatch):

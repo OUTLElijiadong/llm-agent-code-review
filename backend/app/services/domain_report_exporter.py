@@ -175,6 +175,55 @@ def _coverage_lines(coverage: Any) -> list[str]:
     return lines
 
 
+def score_section_lines(
+    score: Any,
+    *,
+    available: bool,
+    scope_label: str = "",
+    reason: str = "",
+    rule: str = "",
+    audit_label: str = "",
+    finding_count: int | None = None,
+    severity_counts: dict[str, Any] | None = None,
+) -> list[str]:
+    """导出正文统一的“评分与结论”：出分写明范围与依据，不出分写明原因，绝不用占位分。"""
+    lines = ["## 评分与结论"]
+    if available and isinstance(score, (int, float)) and not isinstance(score, bool):
+        lines.append(f"评分：{int(score)} / 100")
+        if scope_label:
+            lines.append(f"评分范围：{scope_label}")
+        if rule:
+            lines.append(f"计分规则：{rule}")
+        if audit_label:
+            lines.append(f"复核状态：{audit_label}")
+    else:
+        lines.append("评分：未评估")
+        lines.append(f"不出分原因：{reason or '缺少可计分的已测范围'}")
+    if finding_count is not None:
+        counts = {
+            str(key): int(value) for key, value in (severity_counts or {}).items()
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+        detail = "、".join(f"{key} {value} 项" for key, value in counts.items())
+        if finding_count:
+            lines.append(f"结论：已测范围内记录 {finding_count} 项发现" + (f"（{detail}）" if detail else "") + "，请按修复建议逐项处理并复测。")
+        else:
+            lines.append("结论：已测范围内未记录发现；这只代表本次已测范围，不等于已证明不存在风险。")
+    return lines
+
+
+def insert_section_after_task_info(markdown: str, section: list[str]) -> str:
+    """把评分段放在“任务信息”之后、正文之前，阅读时先看到结论。"""
+    text = markdown.rstrip("\n")
+    marker = "\n## "
+    first = text.find(marker)
+    second = text.find(marker, first + 1) if first >= 0 else -1
+    block = "\n".join(section)
+    if second < 0:
+        return f"{text}\n\n{block}\n"
+    return f"{text[:second]}\n\n{block}\n{text[second:]}\n"
+
+
 def build_pentest_report_markdown(
     domain_data: dict[str, Any],
     *,
@@ -386,7 +435,19 @@ def build_remote_pentest_report_markdown(content: dict[str, Any]) -> str:
         lines.extend(
             ["", "## 失败信息", f"错误代码：{_value(failure.get('code'))}", f"说明：{_value(failure.get('message'))}"]
         )
-    return clean_report_markdown("\n".join(lines).strip() + "\n")
+    markdown = "\n".join(lines).strip() + "\n"
+    score = content.get("score") if isinstance(content.get("score"), dict) else {}
+    markdown = insert_section_after_task_info(markdown, score_section_lines(
+        score.get("score"),
+        available=bool(score.get("available")),
+        scope_label=str(score.get("scope_label") or ""),
+        reason=str(score.get("reason") or "报告未保存评分"),
+        rule=str(score.get("rule") or ""),
+        audit_label=str(score.get("audit_label") or ""),
+        finding_count=len([item for item in findings if isinstance(item, dict) and item.get("status") != "refuted"]),
+        severity_counts=score.get("severity_counts") if isinstance(score.get("severity_counts"), dict) else None,
+    ))
+    return clean_report_markdown(markdown)
 
 
 def export_markdown_report(title: str, markdown: str, format: str) -> tuple[bytes, str]:

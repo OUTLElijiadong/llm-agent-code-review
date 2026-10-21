@@ -93,7 +93,7 @@ MIN_ROUTE_METHODS = 345
 MIN_ENDPOINT_SOURCES = 44
 REQUIRED_ROUTES = {
     ("POST", "/api/auth/login"), ("POST", "/v1/responses"),
-    ("POST", "/api/discuss/start"), ("GET", "/api/review/tasks/{task_id}"),
+    ("POST", "/api/discuss/sessions/{session_id}/stop"), ("GET", "/api/review/tasks/{task_id}"),
     ("GET", "/healthz"), ("GET", "/readyz"), ("GET", "/metrics"),
 }
 

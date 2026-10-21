@@ -149,7 +149,7 @@
               <span class="review-mode"><span class="review-mode-title"><el-icon><Lightning /></el-icon> 多 Agent 全面审查</span><span class="review-mode-desc">多个审查 Agent 并行覆盖代码质量、安全与性能，再汇总结论。</span></span>
             </el-radio>
             <el-radio v-if="form.scope !== 'all'" value="discuss">
-              <span class="review-mode"><span class="review-mode-title"><el-icon><ChatDotRound /></el-icon> 多 Agent 圆桌讨论</span><span class="review-mode-desc">围绕选定的单个文件实时交流，可查看发言与讨论进度。</span></span>
+              <span class="review-mode"><span class="review-mode-title"><el-icon><ChatDotRound /></el-icon> 多 Agent 圆桌讨论</span><span class="review-mode-desc">交给小菱组织圆桌，围绕选定的单个文件交流，在小菱面板查看进度。</span></span>
             </el-radio>
           </el-radio-group>
           <div v-if="form.scope === 'all'" class="scope-hint">
@@ -215,7 +215,6 @@ import PrismLoading from '@/components/common/PrismLoading.vue'
 import { getProjects } from '@/api/project'
 import { list as getCodeFiles } from '@/api/codeFile'
 import { startReview } from '@/api/review'
-import { startDiscussion } from '@/api/discussion'
 import type { ProjectOut, CodeFileOut } from '@/types/project'
 import type { Page } from '@/types/common'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -354,7 +353,7 @@ function toggleSelectAll(selected: boolean | string | number) {
 
 const submitLabel = computed(() => {
   if (form.scope === 'all') return '启动全部项目审查'
-  return form.review_type === 'discuss' ? '启动讨论审查' : '启动审查'
+  return form.review_type === 'discuss' ? '交给小菱发起圆桌' : '启动审查'
 })
 
 const selectionIssue = computed(() => {
@@ -497,26 +496,19 @@ async function submitSingleProject(): Promise<void> {
   const current = captureSubmission()
   if (selectionIssue.value) throw new Error(selectionIssue.value)
   const fileIds = form.scope === 'whole' ? reviewableFiles.value.map(file => file.id) : [...form.file_ids]
-  submissionStage.value = form.review_type === 'discuss' ? '正在创建单文件圆桌会话' : '正在提交审查任务'
+  submissionStage.value = form.review_type === 'discuss' ? '正在交给小菱发起圆桌' : '正在提交审查任务'
   reviewingSublabel.value = `提交 ${fileIds.length} 个有效非空文件，等待服务器确认`
   reviewingVisible.value = true
 
   if (form.review_type === 'discuss') {
-    const data = await startDiscussion({
-      project_id: form.project_id!,
-      file_id: fileIds[0],
-      review_type: 'full',
-    })
+    // 4.1.20：圆桌只能经小菱编排，交给小菱派发 review_orchestrator 成员
+    const project = projects.value.find(p => p.id === form.project_id)
+    const file = files.value.find(f => f.id === fileIds[0])
+    const prefill = `请组织多 Agent 圆桌讨论审查：项目「${project?.project_name ?? form.project_id}」(project_id=${form.project_id})，文件「${file?.file_name ?? fileIds[0]}」(file_id=${fileIds[0]})`
     if (!current() || !canStartReview.value) return
-    await router.push({
-      name: 'AgentCenter',
-      query: {
-        discuss_session: data.session_id,
-        discuss_ws: data.ws_url,
-        discuss_agents: JSON.stringify(data.agents),
-        discuss_file: data.file_name,
-      },
-    })
+    window.dispatchEvent(new CustomEvent('prism:open-agent-chat', { detail: { prefill, autoSend: true } }))
+    reviewingVisible.value = false
+    ElMessage.success('已交给小菱发起圆桌，请在小菱面板查看进度')
     return
   }
 

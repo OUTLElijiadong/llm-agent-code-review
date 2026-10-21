@@ -1,6 +1,6 @@
 """讨论模式审查 REST API (v2.3 M7)
 
-POST /discuss/start  — 启动讨论模式审查(preflight)
+（POST /discuss/start 已在 4.1.20 下线，圆桌由小菱团队成员 review_orchestrator 发起）
      → 返回 session_id → 前端连接 WebSocket → 讨论开始
 """
 from __future__ import annotations
@@ -218,7 +218,8 @@ def _gen_session_id() -> str:
     return f"disc_{uuid.uuid4().hex[:10]}"
 
 
-@router.post("/discuss/start", response_model=Resp[dict])
+# 4.1.20 起不再暴露为 HTTP 路由：圆桌只能由小菱的 start_roundtable_discussion 工具发起，
+# 本函数保留为同一套预检，供小菱在后台复用。
 def start_discussion(
     project_id: int = Query(...),
     file_id: int = Query(...),
@@ -231,12 +232,10 @@ def start_discussion(
     continuation_context: str = "",
     temporary_experts_json: str = "",
 ):
-    """预检并注册讨论,返回 session_id 和基本信息。
+    """预检并注册讨论,返回 session_id 和基本信息(仅供小菱工具内部调用)。
 
-    前端调用此接口后:
-    1. 连接到 ws://host:8000/api/ws/discuss/{session_id}?token=xxx
-    2. 讨论自动开始,所有 Agent 发言实时推送到前端
-    3. 用户可通过 WebSocket 发送 {action:"user_input",content:"..."} 参与讨论
+    小菱启动后,前端按返回的 ws_url 连接 /api/ws/discuss/{session_id} 观看实时发言,
+    并可通过 WebSocket 发送 {action:"user_input",content:"..."} 参与讨论。
     """
     project = db.get(Project, project_id)
     if not project or project.status == "deleted":

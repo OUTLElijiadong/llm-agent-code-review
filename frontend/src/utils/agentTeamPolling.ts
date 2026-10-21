@@ -1,7 +1,7 @@
 import type { AgentTeamDetail, AgentTeamStatus, AgentTeamSummary } from '@/api/agentTeams'
 
 const TERMINAL_STATUSES: ReadonlySet<AgentTeamStatus> = new Set([
-  'completed', 'failed', 'cancelled', 'expired',
+  'completed', 'failed', 'blocked', 'cancelled', 'expired',
 ])
 
 /** 仅复用已成功读取且账本版本未变的终态详情；未知/失败读取仍需重试。 */

@@ -179,3 +179,114 @@ def run_team_review(
             )
         db.rollback()
         time.sleep(1)
+
+
+_ROUNDTABLE_TERMINAL = {"concluded", "partial", "failed", "cancelled", "interrupted"}
+
+
+def _roundtable_result(row: Any, *, status: str | None = None, summary: str = "") -> dict[str, Any]:
+    """把圆桌会话终态转换成团队任务结果；只有已结论的圆桌算完成。"""
+    session_status = str(getattr(row, "status", "") or "")
+    state = status or ("completed" if session_status == "concluded" else "failed")
+    report_task_id = int(getattr(row, "report_task_id", 0) or getattr(row, "task_id", 0) or 0)
+    detail = {
+        "session_id": str(getattr(row, "session_id", "") or ""),
+        "status": session_status,
+        "project_id": int(getattr(row, "project_id", 0) or 0),
+        "file_id": int(getattr(row, "file_id", 0) or 0),
+        "file_name": str(getattr(row, "file_name", "") or ""),
+        "report_task_id": report_task_id or None,
+        "open_path": f"/agents?discuss_session={getattr(row, 'session_id', '')}",
+        "report_url": f"/reports/{report_task_id}" if report_task_id and state == "completed" else None,
+    }
+    default_summary = {
+        "concluded": "圆桌讨论已形成结论",
+        "partial": "圆桌讨论只形成部分结论",
+        "cancelled": "圆桌讨论已停止",
+        "interrupted": "圆桌讨论被中断",
+    }.get(session_status, "圆桌讨论未完成")
+    return {
+        "status": state,
+        "summary": summary or default_summary,
+        "evidence": [{"source": "roundtable_session", "data": detail}],
+        "artifacts": [{"type": "roundtable_session", **detail}],
+        "errors": [] if state == "completed" else [{"code": "roundtable_incomplete", "status": session_status}],
+        "retryable": False,
+    }
+
+
+def run_team_roundtable(
+    db: Session, user: User, *, team_id: int, task_id: int, lease_token: str,
+    project_id: int, file_id: int, temporary_experts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """受信 Handler 专用：在有效团队租约下启动单文件圆桌，并等待真实终态。
+
+    圆桌复用小菱工具同一套预检（项目执行权、review:start、文件有效性），编排任务投递回
+    Web 主事件循环；团队停止或租约失效时请求圆桌停止。
+    """
+    from app.agents.discussion_bus import DiscussionBus
+    from app.api.v1.discussion import start_discussion
+    from app.api.v1.ws_discussion import launch_pending_discussion_from_thread, take_pending
+    from app.models.roundtable import RoundtableSession
+
+    user_id = int(user.id)
+    team, team_task, member = agent_team_service.require_active_task_lease(
+        db, team_id=team_id, task_id=task_id, lease_token=lease_token, owner_user_id=user_id, lock=True,
+    )
+    raw = json.loads(team_task.input_json or "{}")
+    if member.address != "agent:review_orchestrator" or raw.get("operation") != "start_roundtable":
+        raise agent_team_service.AgentTeamAccessError("团队任务未授权启动圆桌讨论")
+    if raw.get("project_id") != project_id or raw.get("file_id") != file_id:
+        raise agent_team_service.AgentTeamAccessError("圆桌参数与已授权的团队任务不一致")
+    texts = "\n".join((team.objective or "", team_task.instructions or ""))
+    if raw.get("execution_mode") == "read_only" or any(
+        marker in texts for marker in agent_team_service._READONLY_TEAM_MARKERS
+    ):
+        raise agent_team_service.AgentTeamAccessError("只读团队不能发起新的圆桌讨论")
+    actor = _require_actor(db, user_id, project_id)
+
+    # 同一团队任务重派时复用已经启动的圆桌，避免重复开会。
+    session_id = str((raw.get("_roundtable") or {}).get("session_id") or "")
+    if not session_id:
+        response = start_discussion(
+            project_id=project_id, file_id=file_id, review_type="full", db=db, user=actor,
+            temporary_experts_json=json.dumps(temporary_experts or [], ensure_ascii=False),
+        )
+        session_id = str((response.data or {}).get("session_id") or "")
+        pending = take_pending(session_id)
+        if not session_id or pending is None:
+            raise agent_team_service.AgentTeamStateError("圆桌讨论上下文创建失败")
+        if not launch_pending_discussion_from_thread(pending):
+            raise agent_team_service.AgentTeamStateError("圆桌会话已结束或已被停止，未启动")
+        team_task.input_json = json.dumps({**raw, "_roundtable": {"session_id": session_id}}, ensure_ascii=False)
+    db.commit()  # 释放团队行锁，等待期间不占事务。
+
+    bus = DiscussionBus.instance()
+    deadline = time.monotonic() + int(settings.agent_full_validation_wait_seconds)
+    while True:
+        db.rollback()
+        db.expire_all()
+        row = db.get(RoundtableSession, session_id)
+        try:
+            agent_team_service.require_active_task_lease(
+                db, team_id=team_id, task_id=task_id, lease_token=lease_token, owner_user_id=user_id,
+            )
+        except agent_team_service.AgentTeamLeaseError:
+            db.rollback()
+            bus.request_stop(session_id, "所属团队任务已停止")
+            return _roundtable_result(row, status="cancelled", summary="团队任务已停止，圆桌讨论随之停止")
+        session = bus.get_session(session_id, owner_user_id=user_id)
+        live_status = str(getattr(session, "status", "") or getattr(row, "status", "") or "")
+        if live_status in _ROUNDTABLE_TERMINAL:
+            db.expire_all()
+            row = db.get(RoundtableSession, session_id) or session
+            if row is not None and str(getattr(row, "status", "") or "") not in _ROUNDTABLE_TERMINAL:
+                row = session
+            return _roundtable_result(row)
+        if time.monotonic() >= deadline:
+            bus.request_stop(session_id, "团队等待圆桌讨论超时")
+            return _roundtable_result(
+                row or session, status="failed", summary="圆桌讨论未在团队等待期限内完成，已请求停止并保留已有发言",
+            )
+        db.rollback()
+        time.sleep(2)

@@ -457,6 +457,32 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
+_MAIN_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def bind_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """记录 Web 进程主事件循环；团队调度线程据此把圆桌编排投递回主循环。"""
+
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
+
+
+def launch_pending_discussion_from_thread(pending: PendingDiscussion, *, timeout: float = 10.0) -> bool:
+    """在非事件循环线程（团队调度器）里启动圆桌。
+
+    圆桌订阅队列属于主事件循环，编排任务必须在主循环创建，不能在工作线程另起循环。
+    """
+
+    loop = _MAIN_LOOP
+    if loop is None or loop.is_closed() or not loop.is_running():
+        raise RuntimeError("Web 主事件循环不可用，无法启动圆桌")
+
+    async def _launch() -> bool:
+        return launch_pending_discussion(pending) is not None
+
+    return bool(asyncio.run_coroutine_threadsafe(_launch(), loop).result(timeout=timeout))
+
+
 def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None:
     """按 session_id 唯一登记并启动待处理圆桌任务。"""
 

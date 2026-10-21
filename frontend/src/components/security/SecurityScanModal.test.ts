@@ -89,8 +89,8 @@ describe('同步安全扫描真实交互', () => {
     }))
     await renderModal({ autoStart: true })
 
-    expect(wrapper.find('.vulnerability-source-note').text()).toContain('CNVD/CNNVD 官方漏洞库当前未查询')
-    expect(wrapper.find('.vulnerability-source-note').text()).toContain('未查询不代表官方库无匹配')
+    expect(wrapper.find('.vulnerability-source-note').text()).toContain('CNVD/CNNVD 未查询')
+    expect(wrapper.find('.vulnerability-source-note').text()).toContain('OWASP 仅作临时参考')
     expect(wrapper.find('.group-head').text()).toContain('OWASP 临时参考 · A03:2025')
     expect(wrapper.find('.view-tags').text()).toContain('OWASP 临时参考 · A03:2025')
     expect(wrapper.find('.view-tags').text()).not.toContain('fallback')

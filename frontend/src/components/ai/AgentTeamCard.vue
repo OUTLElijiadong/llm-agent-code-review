@@ -40,7 +40,7 @@ const counts = computed(() => {
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "草稿", queued: "排队中", running: "运行中", verifying: "验证中",
-  completed: "已完成", failed: "失败", cancelled: "已取消", expired: "已过期",
+  completed: "已完成", failed: "失败", blocked: "已阻塞", cancelled: "已取消", expired: "已过期",
 }
 
 const statusLabel = computed(() => STATUS_LABELS[props.team?.status ?? ""] ?? props.team?.status ?? "")

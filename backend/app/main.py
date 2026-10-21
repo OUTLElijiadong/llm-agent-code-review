@@ -208,6 +208,11 @@ async def lifespan(app: FastAPI):
     get_orchestrator()
     AgentEventBus.instance().start_relay()
     start_agent_mesh_dispatcher()
+    import asyncio
+
+    from app.api.v1.ws_discussion import bind_main_loop
+
+    bind_main_loop(asyncio.get_running_loop())
     start_agent_team_dispatcher()
     start_agent_governance_scheduler()
     start_jarvis_patrol()

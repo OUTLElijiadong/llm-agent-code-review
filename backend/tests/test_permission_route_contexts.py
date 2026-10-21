@@ -19,13 +19,12 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 367  # 4.1.19 +POST /api/agent-teams/{team_id}/tasks/cancel
+    assert len(plan["routes"]) == 361  # 4.1.20 -6：圆桌、已发布 Agent 直调、旧 /ai 聊天与旧追问直派只能经小菱
     assert len({row["endpoint"] for row in plan["routes"]}) == 45
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
         ("POST", "/api/auth/login"),
         ("POST", "/v1/responses"),
-        ("POST", "/api/discuss/start"),
         ("POST", "/api/discuss/sessions/{session_id}/stop"),
         ("POST", "/api/agent-teams/{team_id}/retry/preview"),
         ("POST", "/api/agent-teams/{team_id}/tasks/cancel"),
@@ -58,8 +57,8 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
         ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 353
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 284
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 347
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 282
     stop_route = next(
         row for row in plan["routes"]
         if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"

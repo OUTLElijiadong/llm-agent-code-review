@@ -300,9 +300,19 @@ def test_legacy_report_without_coverage_scores_historically_and_explains_unknown
         task_name="缺失覆盖快照的历史任务",
         status="success",
         total_issues=0,
+        total_files=3,
         score=100,
     )
     db.add(task)
+    no_files_task = ReviewTask(
+        user_id=admin_user.id,
+        project_id=project.id,
+        task_name="无覆盖也无文件的历史任务",
+        status="success",
+        total_issues=0,
+        score=100,
+    )
+    db.add(no_files_task)
     empty_coverage_task = ReviewTask(
         user_id=admin_user.id,
         project_id=project.id,
@@ -338,8 +348,14 @@ def test_legacy_report_without_coverage_scores_historically_and_explains_unknown
     assert detail["task"]["coverage"]["coverage_status"] == "unknown"
     assert listed["score"] == 100
     assert listed["coverage"]["coverage_status"] == "unknown"
+    # 既无覆盖账本也无提交文件时没有评分依据：不出分并说明原因，绝不默认 100。
+    no_files = get_report_detail(db, admin_user, no_files_task.id)
+    assert no_files["task"]["score"] is None
+    assert no_files["task"]["score_scope"]["available"] is False
+    assert "无提交文件" in no_files["task"]["score_scope"]["reason"]
     default_items = list_reports(db, admin_user)["items"]
     assert task.id in {item["task_id"] for item in default_items}
+    assert no_files_task.id not in {item["task_id"] for item in default_items}
     assert empty_coverage_task.id not in {item["task_id"] for item in default_items}
     assert verification_only_task.id not in {item["task_id"] for item in default_items}
 

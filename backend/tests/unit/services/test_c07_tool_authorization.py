@@ -306,42 +306,19 @@ def test_legacy_planner_checks_same_account_action_permission(tool_scope, tool, 
         assert permission in result.error
 
 
-@pytest.mark.parametrize("intent,permission", (("list_code_files", "file:view"),
-                                             ("create_project", "project:create")))
-@pytest.mark.parametrize("revoked", [True, False])
-def test_legacy_clarify_rechecks_permission_before_dispatch(tool_scope, monkeypatch, intent, permission, revoked):
-    db, user, own, _foreign, links, executor, client = tool_scope
+@pytest.mark.parametrize("intent", ("list_code_files", "create_project"))
+def test_legacy_clarify_endpoint_is_gone_and_never_dispatches(tool_scope, monkeypatch, intent):
+    """4.1.20 起旧版追问直派已下线：即便存在合法待回填条目也不会绕过小菱执行。"""
+    db, user, _own, _foreign, _links, executor, client = tool_scope
     monkeypatch.setattr(ClarifyStore, "_instance", ClarifyStore())
     payload = {} if intent == "list_code_files" else {"project_name": "C07 不应经追问创建"}
     pending = executor._orch.chat_agent._maybe_clarify(intent, payload, AgentContext(user_id=user.id))
-    assert pending.success is True
     clarification = pending.data["clarify"]
-    if revoked:
-        db.delete(links[permission])
-        db.commit()
-    if intent == "list_code_files":
-        answers = {"project_id": own.id}
-        assert client.get("/code-files", params=answers).status_code == (403 if revoked else 200)
-    else:
-        answers = {executor._orch.chat_agent.WRITE_CONFIRMATION_KEY: "确认执行"}
-        if revoked:
-            assert client.post("/projects", json=payload).status_code == 403
-    response = client.post("/agents/clarify", json={"clarify_id": clarification["clarify_id"],
-                                                   "answers": answers})
-    if revoked:
-        assert response.status_code == 403, response.json()
-        assert permission in response.json()["message"]
-        assert db.query(Project).count() == 2
-        assert ClarifyStore.instance().peek(clarification["clarify_id"]) is not None
-        retried = client.post("/agents/clarify", json={"clarify_id": clarification["clarify_id"],
-                                                       "answers": answers})
-        assert retried.status_code == 403
-        assert db.query(Project).count() == 2
-    else:
-        assert response.status_code == 200, response.json()
-        assert "source.py" in response.text if intent == "list_code_files" else "项目已创建" in response.text
-        assert db.query(Project).count() == (2 if intent == "list_code_files" else 3)
-        assert ClarifyStore.instance().peek(clarification["clarify_id"]) is None
+    before = db.query(Project).count()
+    response = client.post("/agents/clarify", json={"clarify_id": clarification["clarify_id"], "answers": {}})
+    assert response.status_code in {404, 405}
+    assert db.query(Project).count() == before
+    assert ClarifyStore.instance().peek(clarification["clarify_id"]) is not None
 
 
 @pytest.mark.parametrize("tool,permission,path", READ_TOOLS)

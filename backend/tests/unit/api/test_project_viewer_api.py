@@ -10,6 +10,7 @@ from app.api.v1 import ai_prompt, discussion, project_members, reports, review
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.error_handlers import register_handlers
+from app.core.exceptions import ForbiddenError
 from app.core.permission_codes import PermissionCode
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.review_task import ReviewTask
@@ -93,7 +94,10 @@ def test_http_viewer_denies_formal_roundtable_and_member_mutation_with_global_gr
     actor, project, _, file, _, _ = seed(db)
     with client_for(db, actor, monkeypatch) as client:
         assert client.post("/review/start", json={"project_id": project.id, "file_ids": [file.id]}).status_code == 403
-        assert client.post("/agent/discuss/start", params={"project_id": project.id, "file_id": file.id}).status_code == 403
+        # 圆桌不再有 HTTP 入口；小菱工具复用的预检仍须拒绝只读成员。
+        assert client.post("/agent/discuss/start", params={"project_id": project.id, "file_id": file.id}).status_code in {404, 405}
+        with pytest.raises(ForbiddenError):
+            discussion.start_discussion(project_id=project.id, file_id=file.id, review_type="full", db=db, user=actor)
         assert client.get(f"/projects/{project.id}/members/candidates", params={"q": "local"}).status_code == 403
         assert db.query(ReviewTask).count() == 1
 

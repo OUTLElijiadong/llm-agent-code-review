@@ -4,14 +4,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
-import { post } from '@/api/http'
 import { cancelAgentResponseRun, getAgentResponseSession, getAgentResponseSessionMessages, type AgentResponseImageAsset, type AgentResponseSession } from '@/api/agentResponses'
 import { acknowledgeAgentMeshMessage, archiveAgentMeshSession, type AgentMeshMessage } from '@/api/agentMesh'
 import { getAgentTeam, listAgentTeams, type AgentTeamDetail, type AgentTeamSummary } from '@/api/agentTeams'
 import { shouldRefreshAgentTeamDetail } from '@/utils/agentTeamPolling'
 import { getProjects, createProject, updateProject, deleteProject } from '@/api/project'
 import { upload as uploadCodeFile } from '@/api/codeFile'
-import { getReviewTasks } from '@/api/review'
 import AgentAvatar from '@/components/agent/AgentAvatar.vue'
 import AgentNavLink from '@/components/ai/AgentNavLink.vue'
 import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
@@ -45,7 +43,6 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import { useRouter } from 'vue-router'
 import {
   CUSTOM_PROJECT_OPTION_VALUE,
-  prepareClarifyAnswers,
   resolveProjectClarifyOptions,
   type ClarifyProjectOption,
 } from '@/utils/clarifyProjectOptions'
@@ -166,6 +163,8 @@ interface ChatMessage {
 const props = defineProps<{
   visible: boolean
   prefill?: string
+  /** 页面把任务交给小菱时置为 true：预填后在会话空闲时自动发送。 */
+  autoSendPrefill?: boolean
   showLauncher?: boolean
   preferredSessionId?: string
   preferredSessionRequestId?: number
@@ -350,7 +349,7 @@ const anchoredTeamIds = computed(() => new Set(
 const unanchoredAgentTeams = computed(() => (
   visibleAgentTeams.value.filter((team) => !anchoredTeamIds.value.has(team.team_id))
 ))
-const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled', 'expired'])
 const activeThinkingTeamIds = computed(() => (
   visibleAgentTeams.value
     .filter((team) => !TERMINAL_TEAM_STATUSES.has(team.status))
@@ -1984,7 +1983,6 @@ const projectSearchKeyword = ref('')
 const taskOptions = ref<{ value: number; label: string }[]>([])
 const projectOptionsLoading = ref(false)
 
-let optionsPromise: Promise<void> | null = null
 let projectSearchTimer: number | undefined
 let projectSearchRequestId = 0
 
@@ -2023,21 +2021,6 @@ async function loadProjectOptions(keyword = ''): Promise<void> {
 }
 
 /**
- * 确保项目选择器至少加载一次项目 API 首屏。
- * @returns 首次加载中的共享 Promise。
- */
-async function ensureProjectOptions(): Promise<void> {
-  if (projectOptions.value.length) return
-  if (optionsPromise) return optionsPromise
-  const scopeCurrent = chatScope.capture()
-  optionsPromise = (async () => {
-    await loadProjectOptions()
-    if (scopeCurrent()) optionsPromise = null
-  })()
-  return optionsPromise
-}
-
-/**
  * 对项目选择器输入做防抖远程查询，避免项目较多时只搜索本地候选子集。
  * @param query - 用户在选择器内输入的项目名称关键词。
  * @returns 无返回值，防抖结束后更新项目候选。
@@ -2051,53 +2034,8 @@ function searchProjectOptions(query: string): void {
   }, 250)
 }
 
-async function ensureTaskOptions(): Promise<void> {
-  const scopeCurrent = chatScope.capture()
-  if (taskOptions.value.length) return
-  try {
-    const data = await getReviewTasks({ page: 1, page_size: 100 })
-    if (!scopeCurrent()) return
-    taskOptions.value = (data.items ?? []).map((t) => ({
-      value: t.id,
-      label: `#${t.id} ${t.task_name ?? '审查任务'}`,
-    }))
-  } catch {
-    if (!scopeCurrent()) return
-    taskOptions.value = []
-  }
-}
-
 const clarifyAnswers = ref<Record<string, Record<string, string | number>>>({})
 const clarifyCustomProjectInputs = ref<Record<string, Record<string, string>>>({})
-
-/**
- * 初始化 Clarify 答案、自定义项目输入和异步候选项。
- * @param clarifyId - Clarify 会话 ID。
- * @param questions - 当前追问问题列表。
- * @returns 无返回值。
- */
-function ensureClarifyAnswers(clarifyId: string, questions: ClarifyQuestion[]): void {
-  if (!clarifyAnswers.value[clarifyId]) {
-    const init: Record<string, string | number> = {}
-    // v3.1: 后端模糊命中项目时会下发 default,预填后用户一键即可确认
-    for (const q of questions) init[q.key] = q.default ?? ''
-    clarifyAnswers.value[clarifyId] = init
-  }
-  if (!clarifyCustomProjectInputs.value[clarifyId]) {
-    const customInputs: Record<string, string> = {}
-    for (const q of questions) {
-      if (q.type === 'select_project') customInputs[q.key] = ''
-    }
-    clarifyCustomProjectInputs.value[clarifyId] = customInputs
-    projectSearchKeyword.value = ''
-    projectSearchOptions.value = []
-  }
-  // 推荐候选只用于排序，完整项目列表始终从项目 API 加载并合并。
-  for (const q of questions) {
-    if (q.type === 'select_project') void ensureProjectOptions()
-    if (q.type === 'select_task' && !(q.options && q.options.length)) void ensureTaskOptions()
-  }
-}
 
 /**
  * 合并单个项目追问的推荐项、远程查询结果和自定义入口。
@@ -2140,59 +2078,14 @@ function submitConfirmation(message: ChatMessage, answer: '确认' | '取消'): 
 }
 
 /**
- * 提交 Clarify 回答并继续原 Agent 意图。
- * @param message - 携带 Clarify 协议的助手消息。
- * @returns 请求完成后更新对话消息，无直接返回值。
+ * 旧版 Clarify 追问卡片（4.1.20 起 /agents/clarify 已下线）：所有执行都必须经小菱团队，
+ * 因此把原问题放回输入框，由用户确认后重新交给小菱，不再直接派发旧意图。
+ * @param message - 携带旧 Clarify 协议的助手消息。
  */
 async function submitClarify(message: ChatMessage): Promise<void> {
-  const scopeCurrent = chatScope.capture()
-  const clarify = message.clarify
-  if (!clarify) return
-  const prepared = prepareClarifyAnswers(
-    clarify.questions,
-    clarifyAnswers.value[clarify.clarify_id] ?? {},
-    clarifyCustomProjectInputs.value[clarify.clarify_id] ?? {},
-  )
-  if (prepared.missing) {
-    ElMessage.warning(`请先回答: ${prepared.missing.label}`)
-    return
-  }
-  loading.value = true
-  message.clarifyError = undefined
-  try {
-    const res = await post<{ content: string; clarify?: ClarifyPayload; model?: string }>(
-      '/agents/clarify',
-      { clarify_id: clarify.clarify_id, answers: prepared.answers },
-    )
-    if (!scopeCurrent()) return
-    message.clarify = undefined
-    delete clarifyCustomProjectInputs.value[clarify.clarify_id]
-    messages.value.push({
-      role: 'assistant',
-      content: res.content,
-      time: dayjs().format('HH:mm'),
-      clarify: res.clarify ?? undefined,
-    })
-    // v3.1: 多轮追问 — 为新一轮 clarify 初始化答案与候选项
-    if (res.clarify) {
-      ensureClarifyAnswers(res.clarify.clarify_id, res.clarify.questions)
-    }
-  } catch (error) {
-    if (!scopeCurrent()) return
-    const info = actionableError(error, '提交追问失败,请重试')
-    message.clarifyError = {
-      message: info.message,
-      expired: info.code === 41001,
-      nextAction: info.nextAction,
-      requestId: info.requestId,
-    }
-  } finally {
-    if (scopeCurrent()) {
-      loading.value = false
-      await nextTick()
-      if (scopeCurrent()) scrollToBottom()
-    }
-  }
+  if (!message.clarify) return
+  ElMessage.info('旧版追问已停用，已把原问题放回输入框，请确认后重新发给小菱')
+  await restartExpiredClarify(message)
 }
 
 /** 追问失效后恢复原始问题到输入框，必须由用户确认后重新发送。 */
@@ -2673,9 +2566,13 @@ watch([() => props.visible, () => props.preferredSessionRequestId], async ([visi
   switcherRef.value?.refreshFromAgentMesh(props.preferredSessionId)
 })
 
+// 页面交办的原文单独保存：首次挂载切换会话时会用草稿覆盖输入框
+const pendingAutoSend = ref('')
+
 watch(() => props.prefill, (prefill) => {
   if (!prefill) return
   inputText.value = prefill
+  pendingAutoSend.value = props.autoSendPrefill ? prefill : ''
   emit('consumed-prefill')
   // 预填文本整体选中:用户直接打字即整体替换,不会与预填拼接污染首条消息
   void nextTick(() => {
@@ -2686,6 +2583,19 @@ watch(() => props.prefill, (prefill) => {
     }
   })
 }, { immediate: true })
+
+// 页面交办的任务等会话恢复、上一轮运行结束后再发，避免 sendMessage 静默丢弃。
+watch(
+  () => [pendingAutoSend.value, loading.value, sessionRestoring.value, sessionBusy.value, readingImages.value] as const,
+  ([pending, busy, restoring, sessionLocked, reading]) => {
+    if (!pending || busy || restoring || sessionLocked || reading) return
+    pendingAutoSend.value = ''
+    inputText.value = pending
+    void sendMessage()
+  },
+  // 带预填挂载时之后可能再无状态变化；sessionRestoring 初值为 true，不会抢在恢复前发送
+  { immediate: true },
+)
 
 function showReconnectHint(): void {
   reconnectHint.value = true
@@ -2755,7 +2665,6 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   projectOptions.value = []
   projectSearchOptions.value = []
   taskOptions.value = []
-  optionsPromise = null
   clarifyAnswers.value = {}
   clarifyCustomProjectInputs.value = {}
   sessionPollStopped = false

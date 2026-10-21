@@ -74,7 +74,7 @@ def route_inventory():
     # 本轮新增的远程网站评估报告导出接口由下方远程权限矩阵逐项核验。
     # 本次新增管理员只读 Token 趋势端点，已在下方逐条验证 require_admin 守卫。
     # 4.1.19 新增 /api/agent-teams/{team_id}/tasks/cancel（agent:chat + 账号私有，见下方矩阵）。
-    assert len(rows) == 367, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    assert len(rows) == 361, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -84,11 +84,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 367
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 367
+    assert len(ROUTES) == 361
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 361
     assert len({row["source"] for row in ROUTES}) == 45
-    assert len(AUTHENTICATED_ROUTES) == 353
-    assert len(GUARDED_ROUTES) == 284
+    assert len(AUTHENTICATED_ROUTES) == 347
+    assert len(GUARDED_ROUTES) == 282
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)

@@ -2,7 +2,7 @@ import type { AgentTeamDetail, AgentTeamTask } from '@/api/agentTeams'
 import type { AgentMeshMessage } from '@/api/agentMesh'
 import type { AgentResponseSession } from '@/api/agentResponses'
 
-const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'cancelled', 'expired'])
+const TERMINAL_TEAM_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled', 'expired'])
 const FAILED_TASK_STATUSES = new Set(['failed', 'blocked', 'cancelled', 'dead_letter', 'expired'])
 const TASK_SUMMARY_LIMIT = 700
 const MAX_TASK_SUMMARIES = 16

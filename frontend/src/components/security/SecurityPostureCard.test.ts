@@ -116,7 +116,7 @@ describe('SecurityPostureCard', () => {
 
     expect(wrapper.find('.mid-col .col-note').exists()).toBe(false)
     expect(wrapper.find('.mid-col').text()).not.toContain('OWASP 命中')
-    expect(wrapper.find('.mid-col').text()).not.toContain('CNVD/CNNVD 官方漏洞库当前未查询')
+    expect(wrapper.find('.mid-col').text()).not.toContain('CNVD/CNNVD 未查询')
   })
 
   it('exposes loading state until the dashboard request settles', async () => {

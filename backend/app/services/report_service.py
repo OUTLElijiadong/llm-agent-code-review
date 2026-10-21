@@ -528,7 +528,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
                 coverage_status.in_(("complete", "completed", "verified")),
                 ReviewTask.processed_files > 0,
                 ReviewTask.total_issues > 0,
-                and_(ReviewTask.status == "success", ReviewTask.coverage.is_(None)),
+                and_(ReviewTask.status == "success", ReviewTask.coverage.is_(None), ReviewTask.total_files > 0),
                 ReviewTask.review_type.in_(("sandbox_test", "pentest")),
             ),
         )
@@ -941,6 +941,20 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
             error_message=task.error_message,
             coverage=_task_coverage(task),
         )
+
+    if task.review_type in {"sandbox_test", "pentest"}:
+        from app.services.domain_report_exporter import insert_section_after_task_info, score_section_lines
+
+        scope_info = detail["task"].get("score_scope") or {}
+        stats = detail.get("stats") or {}
+        domain_markdown = insert_section_after_task_info(domain_markdown, score_section_lines(
+            detail["task"].get("score"),
+            available=bool(scope_info.get("available")) and detail["task"].get("score") is not None,
+            scope_label=str(scope_info.get("label") or ""),
+            reason=str(scope_info.get("reason") or ""),
+            finding_count=int(stats.get("total_issues") or 0) if task.review_type == "pentest" else None,
+            severity_counts=stats.get("severity") if isinstance(stats.get("severity"), dict) else None,
+        ))
 
     return {
         "source": clean_report_payload(detail["source"]),

@@ -1025,10 +1025,13 @@ def list_agents(db: Session, user: User, surface: str = "") -> dict[str, Any]:
             item["team_dispatch_state"] = "team_governed"
         if code == "review_orchestrator":
             item["team_input_contract"] = {
-                "operation": ["list", "get", "issues", "run_review"],
+                "operation": ["list", "get", "issues", "run_review", "start_roundtable"],
                 "run_review": {"required": ["project_id"], "optional": ["file_ids", "review_type", "task_name"],
                                "review_type": ["full", "security"],
                                "execution": "trusted_team_lease_only"},
+                "start_roundtable": {"required": ["project_id", "file_id"], "optional": ["temporary_experts"],
+                                     "temporary_experts": "最多3位 {name, focus, issue_types, instruction}",
+                                     "execution": "trusted_team_lease_only"},
             }
         elif code == "security_sentinel":
             item["team_input_contract"] = {
@@ -2411,7 +2414,7 @@ def _verified_terminal_team_snapshot(
         AgentTeam.user_id == int(user.id),
         AgentTeam.surface == surface,
         AgentTeam.session_key == session_key,
-        AgentTeam.status.in_(("completed", "failed", "cancelled", "expired")),
+        AgentTeam.status.in_(("completed", "failed", "blocked", "cancelled", "expired")),
     ).first()
     if team is None:
         return None

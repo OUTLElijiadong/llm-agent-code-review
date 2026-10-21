@@ -4,15 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import pytest
 
 from app.agents.base import AgentResult
-from app.agents.clarify_store import ClarifyStore
 from app.agents.events import AgentEvent, AgentEventType
-from app.ai.exceptions import AiServiceError
 from app.api.v1 import agents as module
 from app.core.exceptions import AuthError, ForbiddenError
 from app.schemas.agent import SkillInvokeIn
@@ -164,18 +162,6 @@ def _event(trace_id: str, user_id: Optional[int]) -> AgentEvent:
         payload={"trace": trace_id},
         user_id=user_id,
     )
-
-
-@pytest.fixture
-def clarify_store() -> Iterator[ClarifyStore]:
-    """隔离 ClarifyStore 单例；无业务参数，返回全新临时存储。"""
-    original = ClarifyStore._instance
-    store = ClarifyStore()
-    ClarifyStore._instance = store
-    try:
-        yield store
-    finally:
-        ClarifyStore._instance = original
 
 
 def test_basic_agent_routes_adapt_service_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -353,147 +339,6 @@ async def test_sse_emits_heartbeat_and_stops_on_cancellation(monkeypatch: pytest
 
     assert chunks == [":connected\n\n", ":heartbeat\n\n"]
     assert waiter.calls == 2
-
-
-def test_submit_clarification_returns_expired_response(clarify_store: ClarifyStore) -> None:
-    """不存在的 clarify_id 应返回 41001，而不是触发后续 Agent 调度。"""
-    response = module.submit_clarification(
-        module.ClarifyAnswers(clarify_id="missing", answers={"x": 1}),
-        db=object(),
-        user=SimpleNamespace(id=7, role="member"),
-    )
-
-    assert clarify_store.size() == 0
-    assert response.code == 41001
-    assert response.data == {}
-
-
-def test_submit_clarification_rejects_non_owner(clarify_store: ClarifyStore) -> None:
-    """非管理员不得回填其他用户的追问。"""
-    clarify_store.put("clarify-1", {"user_id": 8, "intent": "review", "payload": {}})
-
-    with pytest.raises(ForbiddenError) as exc:
-        module.submit_clarification(
-            module.ClarifyAnswers(clarify_id="clarify-1", answers={}),
-            db=object(),
-            user=SimpleNamespace(id=7, role="member"),
-        )
-
-    assert exc.value.code == 40300
-    assert clarify_store.peek("clarify-1") is not None
-
-
-def test_submit_clarification_dispatch_failure_keeps_pending_for_retry(
-    monkeypatch: pytest.MonkeyPatch,
-    clarify_store: ClarifyStore,
-) -> None:
-    """派发失败不能消费追问，下一次请求仍可恢复。"""
-    clarify_store.put("clarify-retry", {"user_id": 7, "intent": "review", "payload": {}})
-    failing = FakeChatAgent(AgentResult(success=False, error="暂时不可用"))
-    monkeypatch.setattr(
-        module,
-        "get_request_orchestrator",
-        MagicMock(return_value=SimpleNamespace(chat_agent=failing)),
-    )
-    with pytest.raises(AiServiceError):
-        module.submit_clarification(
-            module.ClarifyAnswers(clarify_id="clarify-retry", answers={}),
-            db=object(),
-            user=SimpleNamespace(id=7, role="member"),
-        )
-    assert clarify_store.peek("clarify-retry") is not None
-
-
-def test_submit_clarification_merges_payload_and_returns_dict_result(
-    monkeypatch: pytest.MonkeyPatch,
-    clarify_store: ClarifyStore,
-) -> None:
-    """本人回填应覆盖旧字段、注入用户上下文并保留 content/clarify/model。"""
-    clarify_store.put(
-        "clarify-2",
-        {
-            "user_id": 7,
-            "intent": "review",
-            "payload": {"project_id": 1, "mode": "old"},
-            "question_keys": ["mode", "file_id"],
-        },
-    )
-    chat_agent = FakeChatAgent(
-        AgentResult(
-            success=True,
-            data={"content": "done", "clarify": {"next": False}, "ignored": True},
-            model="model-a",
-        )
-    )
-    orchestrator = SimpleNamespace(chat_agent=chat_agent)
-    factory = MagicMock(return_value=orchestrator)
-    monkeypatch.setattr(module, "get_request_orchestrator", factory)
-    db = object()
-    user = SimpleNamespace(id=7, role="member")
-
-    response = module.submit_clarification(
-        module.ClarifyAnswers(
-            clarify_id="clarify-2",
-            answers={"mode": "new", "file_id": 3, "_write_confirmation": "确认执行"},
-        ),
-        db=db,
-        user=user,
-    )
-
-    assert response.data == {"content": "done", "clarify": {"next": False}, "model": "model-a"}
-    factory.assert_called_once_with(db, user=user)
-    intent, payload, ctx = chat_agent.calls[0]
-    assert intent == "review"
-    assert payload == {"project_id": 1, "mode": "new", "file_id": 3}
-    assert ctx.user_id == 7
-    assert ctx.extra == {}
-
-
-def test_submit_clarification_allows_owner_admin_and_returns_scalar_result(
-    monkeypatch: pytest.MonkeyPatch,
-    clarify_store: ClarifyStore,
-) -> None:
-    """管理员可回答自己的追问，非字典结果映射到 content 与 model。"""
-    clarify_store.put("clarify-3", {"user_id": 1, "intent": "summary", "payload": {}})
-    chat_agent = FakeChatAgent(AgentResult(success=True, data="plain text", model="model-b"))
-    monkeypatch.setattr(
-        module,
-        "get_request_orchestrator",
-        MagicMock(return_value=SimpleNamespace(chat_agent=chat_agent)),
-    )
-    monkeypatch.setattr(module.rbac_service, "is_admin_user", lambda _db, user_id: user_id == 1)
-
-    response = module.submit_clarification(
-        module.ClarifyAnswers(clarify_id="clarify-3", answers={}),
-        db=object(),
-        user=SimpleNamespace(id=1, role="admin"),
-    )
-
-    assert response.data == {"content": "plain text", "model": "model-b"}
-
-
-def test_submit_clarification_maps_agent_failure_to_ai_error(
-    monkeypatch: pytest.MonkeyPatch,
-    clarify_store: ClarifyStore,
-) -> None:
-    """续跑 Agent 失败时应抛出带 50202 业务码的 AiServiceError。"""
-    clarify_store.put("clarify-4", {"user_id": 7, "intent": "review", "payload": {}})
-    chat_agent = FakeChatAgent(AgentResult(success=False, error="upstream failed"))
-    monkeypatch.setattr(
-        module,
-        "get_request_orchestrator",
-        MagicMock(return_value=SimpleNamespace(chat_agent=chat_agent)),
-    )
-
-    with pytest.raises(AiServiceError) as exc:
-        module.submit_clarification(
-            module.ClarifyAnswers(clarify_id="clarify-4", answers={}),
-            db=object(),
-            user=SimpleNamespace(id=7, role="member"),
-        )
-
-    assert exc.value.code == 50202
-    assert exc.value.message == "upstream failed"
 
 
 def test_get_metagpt_info_lists_components_and_adaptable_agents(monkeypatch: pytest.MonkeyPatch) -> None:

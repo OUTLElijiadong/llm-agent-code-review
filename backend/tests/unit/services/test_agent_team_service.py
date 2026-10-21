@@ -850,7 +850,7 @@ def test_dependency_failure_recursively_blocks_all_descendants(db, team_user):
     assert all(item["completed_at"] for item in result["tasks"])
 
 
-@pytest.mark.parametrize(("retryable", "root_status"), [(False, "failed"), (True, "dead_letter")])
+@pytest.mark.parametrize(("retryable", "root_status"), [(False, "failed"), (True, "failed")])
 def test_terminal_failure_closes_independent_queued_and_waiting_tasks(db, team_user, retryable, root_status):
     """失败根节点、独立排队分支及其等待后继必须在同一提交中闭合。"""
     created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
@@ -940,7 +940,7 @@ def test_fail_fast_drains_running_sibling_without_starting_more_work(db, team_us
     assert agent_team_service.claim_next_task(db, created["team_id"]) is None
 
 
-@pytest.mark.parametrize(("retryable", "failure_status"), [(False, "failed"), (True, "dead_letter")])
+@pytest.mark.parametrize(("retryable", "failure_status"), [(False, "failed"), (True, "failed")])
 def test_failed_worker_preserves_running_sibling_and_runs_partial_summarizer(db, team_user, retryable, failure_status):
     """一个并行工作节点失败时停止新工作，等在途节点结束后仍汇总可用结果。"""
     created = agent_team_service.create_team_from_xiaoling(
@@ -1300,7 +1300,7 @@ def test_expired_last_attempt_closes_independent_pending_tasks(db, team_user):
     detail = agent_team_service.get_team(db, team_user, created["team_id"])
     assert detail["status"] == "failed"
     assert detail["counts"]["queued"] == detail["counts"]["running"] == 0
-    assert db.get(AgentTeamTask, claim["task_id"]).status == "dead_letter"
+    assert db.get(AgentTeamTask, claim["task_id"]).status == "failed"
 
 
 def test_failed_branch_waits_for_sibling_cleanup_before_terminal_reduction(db, team_user, monkeypatch):
@@ -2672,7 +2672,7 @@ def test_retry_failed_root_releases_blocked_descendants_without_reusing_attempt_
         error="路径 A 失败",
     )
     assert {item["task_key"]: item["status"] for item in failed["tasks"]} == {
-        "read": "dead_letter",
+        "read": "failed",
         "verify": "blocked",
     }
 
@@ -3032,3 +3032,51 @@ def test_cancel_unknown_task_key_is_rejected(db, team_user):
     created = agent_team_service.create_team_from_xiaoling(db, team_user, _two_worker_summary_payload())
     with pytest.raises(agent_team_service.AgentTeamValidationError):
         agent_team_service.cancel_team_tasks(db, team_user, created["team_id"], ["nope"])
+
+
+def test_member_reported_blocked_closes_team_as_blocked_without_retry(db, team_user):
+    """成员明确报告 blocked（未声明 retryable）不得重派成 dead_letter，整队收口为 blocked。"""
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload(root_attempts=3))
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    result = agent_team_service.complete_task(
+        db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+        result={"status": "blocked", "summary": "缺少论坛查询执行合同", "errors": [{"code": "no_execution_contract"}]},
+        success=False, error="缺少论坛查询执行合同",
+    )
+    tasks = {item["task_key"]: item for item in result["tasks"]}
+    assert tasks["read"]["status"] == "blocked"
+    assert db.get(AgentTeamTask, claim["task_id"]).attempt_count == 1
+    assert result["status"] == "blocked" and result["completed_at"]
+    assert all(item["status"] != "dead_letter" for item in result["tasks"])
+    assert agent_team_service.claim_next_task(db, created["team_id"]) is None
+
+
+def test_retry_exhaustion_is_business_failure_not_dead_letter(db, team_user):
+    """重试预算耗尽写 failed + retry_budget_exhausted；dead_letter 不再出现在任务业务状态。"""
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    result = _fail_claim(db, created["team_id"], claim, retryable=True)
+    root = next(item for item in result["tasks"] if item["task_key"] == "read")
+    assert root["status"] == "failed"
+    assert any(error.get("code") == "retry_budget_exhausted" for error in root["errors"])
+    assert result["status"] == "failed"
+
+
+def test_cancel_does_not_record_request_message_as_failed(db, team_user):
+    """用户停止时请求消息记 cancelled；已终态的投递记录不被后续收口覆盖。"""
+    from app.models.agent_mesh import AgentMeshMessage
+
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    agent_team_service.cancel_team(db, team_user, created["team_id"], reason="用户停止")
+    task = db.get(AgentTeamTask, claim["task_id"])
+    team = db.get(AgentTeam, created["team_id"])
+    row = db.query(AgentMeshMessage).filter(
+        AgentMeshMessage.message_id == agent_team_service._request_message_id(team, task),
+    ).first()
+    assert row is not None and row.status == "cancelled"
+    agent_team_service._mark_task_request_terminal(
+        db, team, task, None, success=False, error="late", now=agent_team_service._now(),
+    )
+    assert row.status == "cancelled"
+    assert task.status == "cancelled" and team.status == "cancelled"

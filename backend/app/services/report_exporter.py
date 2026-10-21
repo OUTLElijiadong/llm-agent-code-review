@@ -608,6 +608,7 @@ def _build_report_context(
             "risk_level": "未评估",
             "score_source": "unavailable",
             "score_unavailable_reason": unavailable_reason,
+            "score_unavailable_detail": _score_unavailable_detail(unavailable_reason, score_scope),
         }
     else:
         score_version = score_breakdown.get("version") or SCORING_VERSION
@@ -958,6 +959,19 @@ def _format_scope_facts(value: Any, namespace: str) -> List[str]:
     return lines
 
 
+_UNAVAILABLE_DETAIL = {
+    "ungraded_findings": "存在未分级问题，无法按严重度规则计分",
+    "execution_not_successful": "任务未成功完成，且没有已审文件或有效发言可计分",
+    "coverage_not_complete": "覆盖范围不足，没有可计分的已审内容",
+}
+
+
+def _score_unavailable_detail(code: str, score_scope: Dict[str, Any]) -> str:
+    """把内部不出分代码转换为导出正文可读的原因；优先使用评分范围给出的具体说明。"""
+    reason = str(score_scope.get("reason") or "").strip()
+    return reason or _UNAVAILABLE_DETAIL.get(code, "缺少可计分的已审范围")
+
+
 def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
     """各格式共用范围说明；历史缺失保持未知，处理数量不冒充语义覆盖率。"""
     task = context["task_info"]
@@ -991,7 +1005,9 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
             "存在未分级问题，无法按现有严重度权重可靠评分。"
             if basis["score_source"] == "unavailable"
             and context["statistics"]["score_breakdown"].get("score_unavailable_reason") == "ungraded_findings"
-            else "本次未获得有效评分，不能据此判定风险等级。"
+            else "本次未获得有效评分，不能据此判定风险等级。不出分原因：" + str(
+                context["statistics"]["score_breakdown"].get("score_unavailable_detail") or "缺少可计分的已审范围"
+            ) + "。"
             if basis["score_source"] == "unavailable"
             else
             "空问题报告保留历史显式分数，不代表已验证无漏洞。"

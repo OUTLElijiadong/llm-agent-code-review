@@ -104,13 +104,9 @@ def test_rule_code_is_a_stable_machine_identifier() -> None:
         RuleIn(rule_code="../evil", rule_name="规则", rule_type="security", rule_content="检查输入")
 
 
-def test_feedback_and_chat_content_reject_control_characters() -> None:
+def test_feedback_content_rejects_control_characters() -> None:
     with pytest.raises(ValidationError):
         FeedbackIn(content="反馈\x00内容")
-    from app.api.v1.ai_chat import ChatMessage
-
-    with pytest.raises(ValidationError):
-        ChatMessage(content="读取其他用户历史\x00")
 
 
 @pytest.mark.parametrize(

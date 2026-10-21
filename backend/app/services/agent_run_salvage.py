@@ -12,6 +12,7 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Iterator
 
 from loguru import logger
@@ -53,6 +54,60 @@ def _checkpoint(row: AgentResponseRun) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _recovery_metadata(checkpoint: dict) -> dict:
+    # 计数放在 context_metadata：运行时按检查点数据类回写，顶层未知键会丢失。
+    metadata = checkpoint.get("context_metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _recovery_budget_exhausted(db, row: AgentResponseRun, checkpoint: dict, *, error: str, source: str) -> bool:
+    """达到自动恢复上限时安全停止（保留进度与恢复记录），返回 True。"""
+    metadata = _recovery_metadata(checkpoint)
+    attempts = int(metadata.get("auto_recovery_attempts") or 0)
+    if attempts < MAX_AUTO_RECOVERIES:
+        return False
+    checkpoint.update({
+        "status": "failed",
+        "pending": None,
+        "recovery_requested": False,
+        "error": (
+            f"小菱连续 {attempts} 次自动恢复后仍出错，已安全停止并保留进度；"
+            "可点击重试，或换个说法让小菱改用其他方案。"
+        ),
+    })
+    checkpoint["context_metadata"] = _with_recovery_event(
+        metadata, source=source, error=error, outcome="budget_exhausted",
+    )
+    row.status = "failed"
+    row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+    row.version = int(row.version or 0) + 1
+    db.commit()
+    logger.warning("[salvage] 运行 {} 已达自动恢复上限({}): {}", row.run_id, source, error[:200])
+    return True
+
+
+def _with_recovery_event(metadata: dict, *, source: str, error: str, outcome: str) -> dict:
+    events = metadata.get("recovery_events") if isinstance(metadata.get("recovery_events"), list) else []
+    event = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source,
+        "outcome": outcome,
+        "error": str(error or "")[:300],
+    }
+    return {**metadata, "recovery_events": [*events, event][-10:]}
+
+
+def _record_recovery_attempt(row: AgentResponseRun, checkpoint: dict, *, error: str, source: str) -> None:
+    """自动恢复计数与恢复事件持久写入检查点；崩溃与僵尸清扫共用同一预算。"""
+    metadata = _recovery_metadata(checkpoint)
+    attempts = int(metadata.get("auto_recovery_attempts") or 0) + 1
+    checkpoint["context_metadata"] = {
+        **_with_recovery_event(metadata, source=source, error=error, outcome="recovering"),
+        "auto_recovery_attempts": attempts,
+    }
+    row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+
+
 def _active_statuses() -> set[str]:
     from app.api.v1.agent_responses import _ACTIVE_RUN_STATUSES
 
@@ -92,33 +147,15 @@ def salvage_crashed_run(run_id: str, *, error: str = "", delay_seconds: float = 
         if checkpoint.get("stop_requested") is True:
             _recover_stale_active_run(db, row, force=True)
             return "cancelled"
-        # 计数放在 context_metadata：运行时按检查点数据类回写，顶层未知键会丢失。
-        metadata = checkpoint.get("context_metadata") if isinstance(checkpoint.get("context_metadata"), dict) else {}
-        attempts = int(metadata.get("auto_recovery_attempts") or 0)
-        if attempts >= MAX_AUTO_RECOVERIES:
-            checkpoint.update({
-                "status": "failed",
-                "pending": None,
-                "recovery_requested": False,
-                "error": (
-                    f"小菱连续 {attempts} 次自动恢复后仍出错，已安全停止并保留进度；"
-                    "可点击重试，或换个说法让小菱改用其他方案。"
-                ),
-            })
-            row.status = "failed"
-            row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
-            row.version = int(row.version or 0) + 1
-            db.commit()
-            logger.warning("[salvage] 运行 {} 已达自动恢复上限: {}", run_id, error[:200])
+        if _recovery_budget_exhausted(db, row, checkpoint, error=error, source="crash"):
             return "failed"
-        checkpoint["context_metadata"] = {**metadata, "auto_recovery_attempts": attempts + 1}
-        row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
+        _record_recovery_attempt(row, checkpoint, error=error, source="crash")
         db.flush()
         _recover_stale_active_run(db, row, force=True)
         db.refresh(row)
         if row.status == "failed" and _checkpoint(row).get("recovery_requested") is True:
             _dispatch_recovery(row, delay_seconds=delay_seconds)
-            logger.warning("[salvage] 运行 {} 异常后自动恢复（第 {} 次）: {}", run_id, attempts + 1, error[:200])
+            logger.warning("[salvage] 运行 {} 异常后自动恢复: {}", run_id, error[:200])
             return "recovering"
         return "untouched"
     except Exception:  # noqa: BLE001 - 自愈失败不能掩盖原异常
@@ -152,7 +189,13 @@ def sweep_orphan_runs_once() -> int:
             if row.status == before:
                 continue
             recovered += 1
-            if row.status == "failed" and _checkpoint(row).get("recovery_requested") is True:
+            checkpoint = _checkpoint(row)
+            if row.status == "failed" and checkpoint.get("recovery_requested") is True:
+                # 僵尸清扫与崩溃自愈共用恢复预算，确定性错误不会被无限重派。
+                if _recovery_budget_exhausted(db, row, checkpoint, error="运行租约到期", source="orphan_sweep"):
+                    continue
+                _record_recovery_attempt(row, checkpoint, error="运行租约到期", source="orphan_sweep")
+                db.commit()
                 _dispatch_recovery(row, delay_seconds=0.5)
         return recovered
     except Exception:  # noqa: BLE001 - 周期任务失败等下一轮

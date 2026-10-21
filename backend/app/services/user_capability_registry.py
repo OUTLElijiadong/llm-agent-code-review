@@ -393,15 +393,7 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         "/api/agent-catalog",
         permission="custom_agent:invoke",
     ),
-    _cap(
-        "agent_catalog.invoke",
-        "/agents",
-        "调用已发布的自定义 Agent",
-        "POST",
-        "/api/agent-catalog/{agent_code}/invoke",
-        READ,
-        "custom_agent:invoke",
-    ),
+    # 4.1.20：已发布 Agent 只经小菱团队成员调用（agent_mesh_dispatcher），不再登记直调接口。
     _cap(
         "agent_studio.agents.list",
         "/agent-studio",

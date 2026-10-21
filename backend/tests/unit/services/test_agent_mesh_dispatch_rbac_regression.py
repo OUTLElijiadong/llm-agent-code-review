@@ -258,5 +258,5 @@ def test_worker_rechecks_project_analyzer_permissions_after_team_creation(
     orchestrator.file_mgr.list_files.assert_not_called()
     db.expire_all()
     saved_task = db.get(AgentTeamTask, claimed["task_id"])
-    assert saved_task.status in {"failed", "dead_letter"}
+    assert saved_task.status == "blocked"
     assert revoked in saved_task.result_json
