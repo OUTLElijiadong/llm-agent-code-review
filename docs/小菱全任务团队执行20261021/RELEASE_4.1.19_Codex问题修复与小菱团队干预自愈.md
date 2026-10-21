@@ -46,8 +46,17 @@
 
 ## 待决
 
-- 生产 `.env` 中 `AGENT_JARVIS_AUTO_DISPATCH_ENABLED=false` 覆盖了新默认值，所以 JARVIS 主动派发在生产仍是关闭的。改这一项属于服务器配置变更，需要本人确认。
 - 圆桌、讨论类 Agent 和 `/agent-catalog` 调用仍可以绕开小菱直接发起；旧 `/api/ai/chat` 仍然挂载（前端未使用）。
 - 种入脚本在嵌入失败时应该报错或重试，而不是静默写入哈希向量。
 - 临时空项目 `QA-20261021-Prism-Acceptance` 保留，本人未确认删除。
 - cr_mysql 900m 上限有 OOM 风险；根分区占用 82%。
+## 开启 JARVIS 主动派发（2026-10-21，本人确认后执行）
+
+- 07:23:59Z 备份 `.env` 为 `deploy/.env.before-jarvis-dispatch-20261021T072359Z`，只把 `AGENT_JARVIS_AUTO_DISPATCH_ENABLED` 改成 `true`。
+- 用同一镜像 `prism-backend:4d6db063…` 执行 `docker compose up -d --no-deps --no-build backend`，只重建后端，不重新构建。
+- 核验结果：
+  - 容器环境变量和进程内配置都为 true，巡逻间隔 300 秒；
+  - `[jarvis-patrol] started`，后端 healthy，readyz 返回 4.1.19 和同一 SHA；
+  - 当前有 18 条待简报告警（安全监控 14、沙箱看门狗 2、备份 1、巡检 1），在线管理端小菱会话为 0，所以还没有派发。管理员打开管理端小菱后，下一轮巡逻会投递简报。
+- 回滚：用上面的备份恢复 `.env`，再用同一命令重建后端。
+- 顺带发现：02:30Z 的定时备份因为检测到遗留的 `.releases/.maintenance.lock` 而失败。两次发布前备份都已成功；下一轮定时备份需要复核。
