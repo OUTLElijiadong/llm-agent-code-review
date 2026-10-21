@@ -344,7 +344,7 @@ def _monitor_snapshot(db: Session) -> dict[str, Any]:
         "schedule_label": schedule_label,
         "interval_minutes": interval_minutes,
         "last_run": {
-            "status": str(run.status) if run else "unknown",
+            "status": _monitor_run_result(run)[2] if run else "unknown",
             "started_at": _iso(run.started_at) if run else None,
             "finished_at": _iso(run.finished_at) if run else None,
             "completed_sources": len(completed),
@@ -391,15 +391,16 @@ def _matches_event_group(
 
 
 def _monitor_run_result(run: AgentJobRun) -> tuple[list[Any], list[Any], str]:
-    """复用巡检展示状态，避免把调度成功但有错误的运行当作成功心跳。"""
+    """总览与时间线共用业务终态，保留进行中和等待审批状态。"""
+    from app.services.scheduler_service import job_run_outcome
+
     result = _read_json(run.result_json)
     completed = result.get("completed_actions") if isinstance(result.get("completed_actions"), list) else []
     errors = result.get("errors") if isinstance(result.get("errors"), list) else []
-    display_status = (
-        "failed" if run.status == "failed" or (errors and not completed) else
-        "warning" if errors else
-        run.status
-    )
+    display_status, _ = job_run_outcome(run)
+    if display_status == "success" and errors:
+        # 兼容未记录 success/partial_failure 的旧回执。
+        display_status = "warning" if completed else "failed"
     return completed, errors, display_status
 
 

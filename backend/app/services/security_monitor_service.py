@@ -940,15 +940,38 @@ def query_security_status(
     backup = results.get("backup_audit") or {}
     db_signals = results.get("db_threat_signals") or {}
     db_signals_ok = db_signals.get("ok") is True
+
+    def collected_count(action: str, payload: dict[str, Any], key: str) -> Optional[int]:
+        if action not in results:
+            return None
+        if key in payload:
+            value = payload[key]
+            if value is None or isinstance(value, bool):
+                return None
+            try:
+                count = int(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if isinstance(value, float) and not value.is_integer():
+                return None
+            return count
+        return 0 if payload.get("ok") is True else None
+
+    ssh_accepted_total = collected_count("ssh_login_events", ssh, "accepted_total")
+    ssh_failed_total = collected_count("ssh_login_events", ssh, "failed_total")
     open_alerts = (
         db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(20).all()
     )
     return {
         "since_hours": since_hours,
         "ssh": {
-            "accepted_total": int(ssh.get("accepted_total") or 0),
-            "failed_total": int(ssh.get("failed_total") or 0),
-            "total": int(ssh.get("accepted_total") or 0) + int(ssh.get("failed_total") or 0),
+            "accepted_total": ssh_accepted_total,
+            "failed_total": ssh_failed_total,
+            "total": (
+                ssh_accepted_total + ssh_failed_total
+                if ssh_accepted_total is not None and ssh_failed_total is not None
+                else None
+            ),
             "accepted_top_ips": ssh.get("accepted_by_ip") or [],
             "failed_top_ips": ssh.get("failed_by_ip") or [],
         },
@@ -957,12 +980,12 @@ def query_security_status(
             "flytrap_status": str(
                 flytrap.get("status") or ("active" if settings.security_flytrap_enabled else "retired")
             ),
-            "flytrap_total": int(flytrap.get("total") or 0),
+            "flytrap_total": collected_count("flytrap_attack_events", flytrap, "total"),
             "flytrap_top_ips": flytrap.get("by_ip") or [],
             "flytrap_degraded": bool(flytrap.get("degraded")),
             "flytrap_health": flytrap.get("health") or {},
             "flytrap_human_actions": flytrap.get("human_actions") or [],
-            "nginx_total": int(nginx.get("total") or 0),
+            "nginx_total": collected_count("nginx_attack_events", nginx, "total"),
             "nginx_top_ips": nginx.get("by_ip") or [],
         },
         "backup": {

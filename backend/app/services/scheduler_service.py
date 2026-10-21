@@ -351,11 +351,11 @@ def run_job(
         db.refresh(run)
     try:
         result = _execute_job(db, job)
-        # 真实失败均需落入运行记录；安全监控只有在“部分数据源可用”时
-        # 例外地继续调度，并把失败源留在 result.errors 供人工复核。
-        result_failed = isinstance(result, dict) and result.get("success") is False
-        if job.job_type == "security_monitor" and isinstance(result, dict):
-            result_failed = result_failed and not bool(result.get("partial_failure"))
+        # 部分采集失败仍是本轮失败；运行状态不改变任务的启用配置，
+        # APScheduler 后续仍可按计划重试，不必用“成功”维持调度。
+        result_failed = isinstance(result, dict) and (
+            result.get("success") is False or result.get("partial_failure") is True
+        )
         budget_blocked = isinstance(result, dict) and result.get("budget_blocked") is True
         run.status = (
             "failed"
@@ -368,6 +368,8 @@ def run_job(
         elif run.status == "failed":
             if job.job_type == "ops_health_check":
                 run.error = "AI 自动运维巡检检测到不健康状态"
+            elif job.job_type == "security_monitor" and result.get("partial_failure") is True:
+                run.error = "安全监控部分采集源不可用"
             else:
                 run.error = str(result.get("error") or "调度任务返回失败")[:1000]
         run.finished_at = _utcnow()
@@ -379,6 +381,23 @@ def run_job(
     db.commit()
     db.refresh(run)
     return run
+
+
+def job_run_outcome(run: AgentJobRun) -> tuple[str, Optional[str]]:
+    """按持久化业务回执解释旧成功记录，不改写历史状态或结果。"""
+    if run.status != "success":
+        return run.status, run.error
+    result = _parse_job_config(run.result_json)
+    if (
+        result.get("success") is False
+        or result.get("partial_failure") is True
+        or result.get("budget_blocked") is True
+    ):
+        message = run.error or result.get("error") or (
+            "安全监控部分采集源不可用" if result.get("partial_failure") is True else "调度任务返回失败"
+        )
+        return "failed", str(message)[:1000]
+    return run.status, run.error
 
 
 def _record_skipped_run(db: Session, job: AgentJob, *, reason: str) -> AgentJobRun:

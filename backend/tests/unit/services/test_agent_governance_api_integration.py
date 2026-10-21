@@ -1092,3 +1092,45 @@ def test_generic_approval_api_keeps_legacy_response_items_without_runs_available
     session.refresh(approval)
     assert response.status_code == 200
     assert approval.status == "approved"
+
+
+@pytest.mark.parametrize("recorded_status", ["success", "failed"])
+def test_job_apis_show_partial_collection_failure_without_rewriting_history(admin_api_client, recorded_status):
+    """旧成功记录也按失败回执显示；历史状态和错误原文保持可追溯。"""
+    client, db = admin_api_client
+    db.get(User, 1).role = "super_admin"
+    super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+    db.add(super_role)
+    db.flush()
+    db.add(UserRole(user_id=1, role_id=super_role.id))
+    job = AgentJob(
+        job_code="security-monitor-degraded-history",
+        job_type="security_monitor",
+        agent_code="operations",
+        schedule="interval@5m",
+        status="enabled",
+    )
+    db.add(job)
+    db.flush()
+    now = datetime.now(timezone.utc)
+    run = AgentJobRun(
+        job_id=job.id,
+        status=recorded_status,
+        started_at=now,
+        finished_at=now,
+        result_json=json.dumps({"success": False, "partial_failure": True,
+                                "errors": [{"action": "nginx_attack_events", "error": "不可用"}]}),
+    )
+    db.add(run)
+    db.commit()
+
+    listed = next(item for item in _ok(client, "get", "/api/admin/jobs") if item["id"] == job.id)
+    assert listed["last_run_status"] == "failed"
+    if recorded_status == "success":
+        assert listed["last_run_error"] == "安全监控部分采集源不可用"
+    listed_run = next(item for item in _ok(client, "get", "/api/admin/jobs/runs") if item["id"] == run.id)
+    assert listed_run["status"] == "failed"
+    assert json.loads(listed_run["result_json"])["partial_failure"] is True
+    db.expire_all()
+    assert db.get(AgentJobRun, run.id).status == recorded_status
+    assert db.get(AgentJobRun, run.id).error is None

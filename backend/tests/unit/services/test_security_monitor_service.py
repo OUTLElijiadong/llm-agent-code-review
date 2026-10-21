@@ -840,6 +840,127 @@ def test_security_status_exposes_retired_flytrap_without_executor_call(db, monke
     assert status["attacks"]["flytrap_enabled"] is False
     assert status["attacks"]["flytrap_status"] == "retired"
     assert status["attacks"]["flytrap_degraded"] is False
+    assert status["attacks"]["flytrap_total"] == 0
+
+
+@pytest.mark.parametrize(
+    ("failed_action", "unknown_paths"),
+    [
+        ("ssh_login_events", (("ssh", "accepted_total"), ("ssh", "failed_total"), ("ssh", "total"))),
+        ("nginx_attack_events", (("attacks", "nginx_total"),)),
+        ("flytrap_attack_events", (("attacks", "flytrap_total"),)),
+    ],
+)
+def test_security_status_keeps_failed_non_db_source_counts_unknown(
+    db,
+    monkeypatch,
+    failed_action,
+    unknown_paths,
+):
+    """未成功采集的非 DB 来源必须显示未知，不能伪报为零。"""
+    monkeypatch.setattr(security_monitor_service.settings, "security_flytrap_enabled", True)
+    payloads = {
+        "ssh_login_events": _ssh_payload(
+            accepted=[{"method": "publickey", "user": "root", "ip": "192.0.2.10", "detail": ""}],
+            failed_by_ip=[{"value": "192.0.2.11", "count": 3}],
+        ),
+        "flytrap_attack_events": {
+            "total": 5,
+            "by_ip": [{"value": "192.0.2.12", "count": 5}],
+            "recent": [],
+        },
+        "nginx_attack_events": {
+            "total": 7,
+            "by_ip": [{"value": "192.0.2.13", "count": 7}],
+            "by_detail": [],
+            "recent": [],
+        },
+        "backup_audit": {},
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads, fail_actions={failed_action}))
+
+    status = security_monitor_service.query_security_status(db, since_hours=24)
+
+    for group, key in unknown_paths:
+        assert status[group][key] is None
+    assert status["errors"] == [{"action": failed_action, "error": f"动作 {failed_action} 执行失败(模拟)"}]
+    if failed_action != "ssh_login_events":
+        assert status["ssh"]["accepted_total"] == 1
+        assert status["ssh"]["failed_total"] == 3
+        assert status["ssh"]["total"] == 4
+    if failed_action != "nginx_attack_events":
+        assert status["attacks"]["nginx_total"] == 7
+    if failed_action != "flytrap_attack_events":
+        assert status["attacks"]["flytrap_total"] == 5
+
+
+@pytest.mark.parametrize(
+    ("action", "group", "keys"),
+    [
+        ("ssh_login_events", "ssh", ("accepted_total", "failed_total", "total")),
+        ("nginx_attack_events", "attacks", ("nginx_total",)),
+        ("flytrap_attack_events", "attacks", ("flytrap_total",)),
+    ],
+)
+@pytest.mark.parametrize(("payload", "expected"), [({}, None), ({"ok": True}, 0)])
+def test_security_status_requires_explicit_success_for_missing_source_counts(
+    db,
+    monkeypatch,
+    action,
+    group,
+    keys,
+    payload,
+    expected,
+):
+    """缺统计字段只有在 payload 明确 ok 时才能兼容地解释为零。"""
+    monkeypatch.setattr(security_monitor_service.settings, "security_flytrap_enabled", True)
+    payloads = _base_payloads()
+    payloads[action] = payload
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    status = security_monitor_service.query_security_status(db)
+
+    for key in keys:
+        assert status[group][key] == expected
+
+
+@pytest.mark.parametrize(
+    ("action", "group", "keys", "count_key"),
+    [
+        ("ssh_login_events", "ssh", ("accepted_total", "failed_total", "total"), "accepted_total"),
+        ("nginx_attack_events", "attacks", ("nginx_total",), "total"),
+        ("flytrap_attack_events", "attacks", ("flytrap_total",), "total"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("raw_value", "explicit_success"),
+    [(None, False), (None, True), ("not-a-count", False), ("not-a-count", True), ([], False)],
+)
+def test_security_status_keeps_null_or_invalid_source_counts_unknown(
+    db,
+    monkeypatch,
+    action,
+    group,
+    keys,
+    count_key,
+    raw_value,
+    explicit_success,
+):
+    """显式 null 或非法计数不能变成零，也不能使状态查询失败。"""
+    monkeypatch.setattr(security_monitor_service.settings, "security_flytrap_enabled", True)
+    payloads = _base_payloads()
+    payload = {count_key: raw_value}
+    if explicit_success:
+        payload["ok"] = True
+    if action == "ssh_login_events":
+        payload["failed_total"] = raw_value
+    payloads[action] = payload
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    status = security_monitor_service.query_security_status(db)
+
+    for key in keys:
+        assert status[group][key] is None
 
 
 def test_all_security_sources_failure_requires_human_recovery(

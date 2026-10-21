@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.2, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 244 items
+
+tests/unit/services/test_scheduler_skill_contract.py ................... [  7%]
+..............                                                           [ 13%]
+tests/unit/services/test_agent_governance_api_integration.py ........... [ 18%]
+..........                                                               [ 22%]
+tests/unit/services/test_scheduler_configuration_closure.py ............ [ 27%]
+.........................                                                [ 37%]
+tests/unit/services/test_security_monitor_service.py ................... [ 45%]
+..........................................                               [ 62%]
+tests/unit/api/test_security_monitor_api.py ............................ [ 73%]
+................................................................         [100%]
+
+=============================== warnings summary ===============================
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 244 passed, 2 warnings in 14.56s =======================

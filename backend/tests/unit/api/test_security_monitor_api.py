@@ -1175,3 +1175,34 @@ def test_security_activity_finds_real_defense_behind_500_empty_reconcile_receipt
     assert inspection["total"] == 500
     assert inspection["truncated"] is True
     assert all(item["evidence_summary"]["routine_check"] is True for item in inspection["items"])
+
+
+@pytest.mark.parametrize("recorded_status", ["success", "failed", "running", "waiting_approval"])
+def test_security_center_uses_same_business_outcome_for_overview_and_events(db, recorded_status):
+    """旧失败回执统一显示，进行中和等待审批状态及原始记录保持。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    job = AgentJob(job_code="monitor-outcome-projection", job_type="security_monitor",
+                   schedule="interval@5m", status="enabled")
+    db.add(job)
+    db.flush()
+    receipt = json.dumps({
+        "success": False, "partial_failure": True,
+        "completed_actions": ["ssh_login_events"],
+        "errors": [{"action": "db_threat_signals", "degraded": True,
+                    "error": "日志来源关闭"}],
+    })
+    run = AgentJobRun(job_id=job.id, status=recorded_status, started_at=now,
+                      finished_at=now if recorded_status in {"success", "failed"} else None,
+                      result_json=receipt)
+    db.add(run)
+    db.commit()
+
+    expected = "failed" if recorded_status == "success" else recorded_status
+    monitoring = security_center_service._monitor_snapshot(db)
+    assert monitoring["last_run"]["status"] == expected
+    events = security_center_service.list_events(db, hours=24, page_size=100)["items"]
+    event = next(item for item in events if item["id"] == f"run:{run.id}")
+    assert event["status"] == expected
+    db.expire_all()
+    assert db.get(AgentJobRun, run.id).status == recorded_status
+    assert db.get(AgentJobRun, run.id).result_json == receipt

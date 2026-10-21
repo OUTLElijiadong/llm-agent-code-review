@@ -657,8 +657,9 @@ def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin
         out = AgentJobOut.model_validate(row)
         run = latest.get(row.id)
         if run is not None:
-            out.last_run_status = run.status
-            out.last_run_error = (str(run.error)[:300] if run.error else None)
+            status, error = scheduler_service.job_run_outcome(run)
+            out.last_run_status = status
+            out.last_run_error = str(error)[:300] if error else None
             finished = run.finished_at or run.started_at
             if finished is not None:
                 out.last_run_finished_at = finished.isoformat()
@@ -748,13 +749,14 @@ def list_job_runs(db: Session = Depends(get_db), actor: User = Depends(require_a
             {
                 "id": row.id,
                 "job_id": row.job_id,
-                "status": row.status,
+                "status": status,
                 "started_at": row.started_at.isoformat() if row.started_at else None,
                 "finished_at": row.finished_at.isoformat() if row.finished_at else None,
                 "result_json": row.result_json,
-                "error": row.error,
+                "error": error,
             }
             for row in rows
+            for status, error in [scheduler_service.job_run_outcome(row)]
         ]
     )
 

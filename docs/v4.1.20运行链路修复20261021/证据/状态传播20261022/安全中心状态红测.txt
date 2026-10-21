@@ -1,0 +1,134 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.2, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 92 items / 88 deselected / 4 selected
+
+tests/unit/api/test_security_monitor_api.py F.FF                         [100%]
+
+=================================== FAILURES ===================================
+_ test_security_center_uses_same_business_outcome_for_overview_and_events[success] _
+
+db = <sqlalchemy.orm.session.Session object at 0x10ff71e10>
+recorded_status = 'success'
+
+    @pytest.mark.parametrize("recorded_status", ["success", "failed", "running", "waiting_approval"])
+    def test_security_center_uses_same_business_outcome_for_overview_and_events(db, recorded_status):
+        """旧失败回执统一显示，进行中和等待审批状态及原始记录保持。"""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        job = AgentJob(job_code="monitor-outcome-projection", job_type="security_monitor",
+                       schedule="interval@5m", status="enabled")
+        db.add(job)
+        db.flush()
+        receipt = json.dumps({
+            "success": False, "partial_failure": True,
+            "completed_actions": ["ssh_login_events"],
+            "errors": [{"action": "db_threat_signals", "degraded": True,
+                        "error": "日志来源关闭"}],
+        })
+        run = AgentJobRun(job_id=job.id, status=recorded_status, started_at=now,
+                          finished_at=now if recorded_status in {"success", "failed"} else None,
+                          result_json=receipt)
+        db.add(run)
+        db.commit()
+    
+        expected = "failed" if recorded_status == "success" else recorded_status
+        monitoring = security_center_service._monitor_snapshot(db)
+>       assert monitoring["last_run"]["status"] == expected
+E       AssertionError: assert 'success' == 'failed'
+E         
+E         - failed
+E         + success
+
+tests/unit/api/test_security_monitor_api.py:1202: AssertionError
+_ test_security_center_uses_same_business_outcome_for_overview_and_events[running] _
+
+db = <sqlalchemy.orm.session.Session object at 0x10ff70ed0>
+recorded_status = 'running'
+
+    @pytest.mark.parametrize("recorded_status", ["success", "failed", "running", "waiting_approval"])
+    def test_security_center_uses_same_business_outcome_for_overview_and_events(db, recorded_status):
+        """旧失败回执统一显示，进行中和等待审批状态及原始记录保持。"""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        job = AgentJob(job_code="monitor-outcome-projection", job_type="security_monitor",
+                       schedule="interval@5m", status="enabled")
+        db.add(job)
+        db.flush()
+        receipt = json.dumps({
+            "success": False, "partial_failure": True,
+            "completed_actions": ["ssh_login_events"],
+            "errors": [{"action": "db_threat_signals", "degraded": True,
+                        "error": "日志来源关闭"}],
+        })
+        run = AgentJobRun(job_id=job.id, status=recorded_status, started_at=now,
+                          finished_at=now if recorded_status in {"success", "failed"} else None,
+                          result_json=receipt)
+        db.add(run)
+        db.commit()
+    
+        expected = "failed" if recorded_status == "success" else recorded_status
+        monitoring = security_center_service._monitor_snapshot(db)
+        assert monitoring["last_run"]["status"] == expected
+        events = security_center_service.list_events(db, hours=24, page_size=100)["items"]
+        event = next(item for item in events if item["id"] == f"run:{run.id}")
+>       assert event["status"] == expected
+E       AssertionError: assert 'warning' == 'running'
+E         
+E         - running
+E         + warning
+
+tests/unit/api/test_security_monitor_api.py:1205: AssertionError
+_ test_security_center_uses_same_business_outcome_for_overview_and_events[waiting_approval] _
+
+db = <sqlalchemy.orm.session.Session object at 0x110703290>
+recorded_status = 'waiting_approval'
+
+    @pytest.mark.parametrize("recorded_status", ["success", "failed", "running", "waiting_approval"])
+    def test_security_center_uses_same_business_outcome_for_overview_and_events(db, recorded_status):
+        """旧失败回执统一显示，进行中和等待审批状态及原始记录保持。"""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        job = AgentJob(job_code="monitor-outcome-projection", job_type="security_monitor",
+                       schedule="interval@5m", status="enabled")
+        db.add(job)
+        db.flush()
+        receipt = json.dumps({
+            "success": False, "partial_failure": True,
+            "completed_actions": ["ssh_login_events"],
+            "errors": [{"action": "db_threat_signals", "degraded": True,
+                        "error": "日志来源关闭"}],
+        })
+        run = AgentJobRun(job_id=job.id, status=recorded_status, started_at=now,
+                          finished_at=now if recorded_status in {"success", "failed"} else None,
+                          result_json=receipt)
+        db.add(run)
+        db.commit()
+    
+        expected = "failed" if recorded_status == "success" else recorded_status
+        monitoring = security_center_service._monitor_snapshot(db)
+        assert monitoring["last_run"]["status"] == expected
+        events = security_center_service.list_events(db, hours=24, page_size=100)["items"]
+        event = next(item for item in events if item["id"] == f"run:{run.id}")
+>       assert event["status"] == expected
+E       AssertionError: assert 'warning' == 'waiting_approval'
+E         
+E         - waiting_approval
+E         + warning
+
+tests/unit/api/test_security_monitor_api.py:1205: AssertionError
+=============================== warnings summary ===============================
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/api/test_security_monitor_api.py::test_security_center_uses_same_business_outcome_for_overview_and_events[success]
+FAILED tests/unit/api/test_security_monitor_api.py::test_security_center_uses_same_business_outcome_for_overview_and_events[running]
+FAILED tests/unit/api/test_security_monitor_api.py::test_security_center_uses_same_business_outcome_for_overview_and_events[waiting_approval]
+============ 3 failed, 1 passed, 88 deselected, 2 warnings in 1.98s ============

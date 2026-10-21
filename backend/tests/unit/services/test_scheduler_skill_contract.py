@@ -416,8 +416,8 @@ def test_unhealthy_ops_result_marks_job_run_failed(db: Any, monkeypatch: Any) ->
     assert run.error == "AI 自动运维巡检检测到不健康状态"
 
 
-def test_security_monitor_partial_failure_does_not_block_scheduler(db: Any, monkeypatch: Any) -> None:
-    """安全监控单项采集失败保留在结果中，但不阻断后续调度。"""
+def test_security_monitor_partial_failure_is_failed_but_future_runs_continue(db: Any, monkeypatch: Any) -> None:
+    """部分采集失败如实落库，仍保留后续调度资格。"""
     job = AgentJob(
         job_code="security-monitor-failure",
         job_type="security_monitor",
@@ -439,9 +439,16 @@ def test_security_monitor_partial_failure_does_not_block_scheduler(db: Any, monk
 
     run = scheduler_service.run_job(db, job.id, system_scheduled=True)
 
-    assert run.status == "success"
-    assert run.error is None
+    assert run.status == "failed"
+    assert run.error == "安全监控部分采集源不可用"
     assert json.loads(run.result_json)["errors"][0]["action"] == "nginx_attack_events"
+
+    monkeypatch.setattr(scheduler_service, "_execute_job", lambda _db, _job: {"success": True})
+    next_run = scheduler_service.run_job(db, job.id, system_scheduled=True)
+    assert next_run.id != run.id
+    assert next_run.status == "success"
+    assert next_run.error is None
+    assert db.get(AgentJob, job.id).status == "enabled"
 
 
 def test_security_monitor_total_failure_is_persisted_as_failed(db: Any, monkeypatch: Any) -> None:
@@ -954,3 +961,24 @@ def test_unavailable_scheduler_rejects_and_rolls_back_configuration(db: Any, mon
 
     db.expire_all()
     assert db.get(AgentJob, job_id).status == "enabled"
+
+
+@pytest.mark.parametrize(
+    "recorded_status,result_json,expected_status",
+    [
+        ("success", '{"success": false, "partial_failure": true}', "failed"),
+        ("success", '{"budget_blocked": true}', "failed"),
+        ("success", '{"success": true}', "success"),
+        ("success", "malformed", "success"),
+        ("success", "[]", "success"),
+        ("waiting_approval", '{"success": false}', "waiting_approval"),
+        ("running", '{"success": false}', "running"),
+    ],
+)
+def test_job_run_outcome_uses_business_receipt_without_changing_raw_history(
+    recorded_status, result_json, expected_status,
+):
+    run = AgentJobRun(job_id=1, status=recorded_status, result_json=result_json)
+    assert scheduler_service.job_run_outcome(run)[0] == expected_status
+    assert run.status == recorded_status
+    assert run.result_json == result_json

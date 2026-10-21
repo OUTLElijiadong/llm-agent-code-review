@@ -1,0 +1,106 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.16, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, anyio-4.14.2, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 47 items / 44 deselected / 3 selected
+
+tests/unit/services/test_scheduler_skill_contract.py F                   [ 33%]
+tests/unit/services/test_agent_governance_api_integration.py F.          [100%]
+
+=================================== FAILURES ===================================
+___ test_security_monitor_partial_failure_is_failed_but_future_runs_continue ___
+
+db = <sqlalchemy.orm.session.Session object at 0x10dfacb10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10dae8050>
+
+    def test_security_monitor_partial_failure_is_failed_but_future_runs_continue(db: Any, monkeypatch: Any) -> None:
+        """部分采集失败如实落库，仍保留后续调度资格。"""
+        job = AgentJob(
+            job_code="security-monitor-failure",
+            job_type="security_monitor",
+            agent_code="operations",
+            schedule="interval@5m",
+            status="enabled",
+        )
+        db.add(job)
+        db.commit()
+        monkeypatch.setattr(
+            scheduler_service,
+            "_execute_job",
+            lambda _db, _job: {
+                "success": False,
+                "partial_failure": True,
+                "errors": [{"action": "nginx_attack_events", "error": "暂时不可用"}],
+            },
+        )
+    
+        run = scheduler_service.run_job(db, job.id, system_scheduled=True)
+    
+>       assert run.status == "failed"
+E       AssertionError: assert 'success' == 'failed'
+E         
+E         - failed
+E         + success
+
+tests/unit/services/test_scheduler_skill_contract.py:442: AssertionError
+_ test_job_apis_show_partial_collection_failure_without_rewriting_history[success] _
+
+admin_api_client = (<starlette.testclient.TestClient object at 0x10cf90e50>, <sqlalchemy.orm.session.Session object at 0x10dfaf6d0>)
+recorded_status = 'success'
+
+    @pytest.mark.parametrize("recorded_status", ["success", "failed"])
+    def test_job_apis_show_partial_collection_failure_without_rewriting_history(admin_api_client, recorded_status):
+        """旧成功记录也按失败回执显示；历史状态和错误原文保持可追溯。"""
+        client, db = admin_api_client
+        db.get(User, 1).role = "super_admin"
+        super_role = Role(name="超级管理员", code="super_admin", status="active", is_builtin=1)
+        db.add(super_role)
+        db.flush()
+        db.add(UserRole(user_id=1, role_id=super_role.id))
+        job = AgentJob(
+            job_code="security-monitor-degraded-history",
+            job_type="security_monitor",
+            agent_code="operations",
+            schedule="interval@5m",
+            status="enabled",
+        )
+        db.add(job)
+        db.flush()
+        now = datetime.now(timezone.utc)
+        run = AgentJobRun(
+            job_id=job.id,
+            status=recorded_status,
+            started_at=now,
+            finished_at=now,
+            result_json=json.dumps({"success": False, "partial_failure": True,
+                                    "errors": [{"action": "nginx_attack_events", "error": "不可用"}]}),
+        )
+        db.add(run)
+        db.commit()
+    
+        listed = next(item for item in _ok(client, "get", "/api/admin/jobs") if item["id"] == job.id)
+>       assert listed["last_run_status"] == "failed"
+E       AssertionError: assert 'success' == 'failed'
+E         
+E         - failed
+E         + success
+
+tests/unit/services/test_agent_governance_api_integration.py:1128: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 07:16:49.650 | INFO     | app.core.observability:__call__:235 - HTTP request completed
+=============================== warnings summary ===============================
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_scheduler_skill_contract.py::test_security_monitor_partial_failure_is_failed_but_future_runs_continue
+FAILED tests/unit/services/test_agent_governance_api_integration.py::test_job_apis_show_partial_collection_failure_without_rewriting_history[success]
+============ 2 failed, 1 passed, 44 deselected, 2 warnings in 1.88s ============
