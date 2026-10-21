@@ -1,0 +1,61 @@
+{
+  "checked_at_utc": "2026-10-21T19:49:20.491826+00:00",
+  "mysql_variables": {
+    "innodb_buffer_pool_size": "268435456",
+    "max_connections": "60",
+    "performance_schema": "OFF",
+    "temptable_max_mmap": "0",
+    "temptable_max_ram": "67108864"
+  },
+  "mysql_persisted_values": {
+    "temptable_max_ram": "67108864",
+    "temptable_max_mmap": "0"
+  },
+  "mysql_persisted_paths": {
+    "temptable_max_ram": "/mysql_dynamic_variables/temptable_max_ram",
+    "temptable_max_mmap": "/mysql_dynamic_variables/temptable_max_mmap"
+  },
+  "mysql_runtime": [
+    {
+      "name": "/cr_mysql",
+      "id": "2ce3b5ca3c50b2147d0ed424bcccdacd137a70532d92bf03d7cf7908c09be87f",
+      "restart_count": 1,
+      "oom_killed_flag": false,
+      "started_at": "2026-10-21T19:31:00.762731198Z",
+      "health": "healthy",
+      "memory_limit": 1342177280
+    },
+    {
+      "name": "/cr_backend",
+      "id": "9a6b76a109094909eb6c6a335c0ab26003194bcce0d5b2ac4b94195f8b1bec42",
+      "restart_count": 0,
+      "oom_killed_flag": false,
+      "started_at": "2026-10-21T19:39:28.64396996Z",
+      "health": "healthy",
+      "memory_limit": 805306368
+    },
+    {
+      "name": "/cr_frontend",
+      "id": "23500c7df04e118a317a95b3a956551e16483ce4b435006e6ee0d136b50d0288",
+      "restart_count": 0,
+      "oom_killed_flag": false,
+      "started_at": "2026-10-21T19:42:10.246314506Z",
+      "health": "healthy",
+      "memory_limit": 134217728
+    }
+  ],
+  "maintenance_lock_present": false,
+  "remaining_restore_verification_databases": [],
+  "kernel_oom_lines_since_193000Z": [
+    "2026-10-22T03:30:59+08:00 VM-0-16-opencloudos kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-2ce3b5ca3c50b2147d0ed424bcccdacd137a70532d92bf03d7cf7908c09be87f.scope,mems_allowed=0,oom_memcg=/system.slice/docker-2ce3b5ca3c50b2147d0ed424bcccdacd137a70532d92bf03d7cf7908c09be87f.scope,task_memcg=/system.slice/docker-2ce3b5ca3c50b2147d0ed424bcccdacd137a70532d92bf03d7cf7908c09be87f.scope,task=mysqld,pid=1993489,uid=999",
+    "2026-10-22T03:30:59+08:00 VM-0-16-opencloudos kernel: Memory cgroup out of memory: Killed process 1993489 (mysqld) total-vm:3040944kB, anon-rss:1274260kB, file-rss:8064kB, shmem-rss:0kB, UID:999 pgtables:3500kB oom_score_adj:0"
+  ],
+  "deployment_exit": "0",
+  "deployment_evidence": [
+    "[2026-10-21T19:38:05Z] INFO  独立恢复验证通过(container=cr_testdb, tables=109, alembic=064_remote_pentest_chain)",
+    "[2026-10-21T19:38:05Z] INFO  发布前备份已完成",
+    "[2026-10-21T19:42:17Z] INFO  HTTP→HTTPS 与同源 health/ready 冒烟通过(domain=lijiadong.cn)",
+    "[2026-10-21T19:42:47Z] INFO  运维执行器已绑定当前发布树，巡检发布账本通过",
+    "[2026-10-21T19:42:47Z] INFO  发布完成(target=all, sha=920ce618a9b1b2b52ba65c91cefdf285a5ae0605, alembic=064_remote_pentest_chain)"
+  ]
+}

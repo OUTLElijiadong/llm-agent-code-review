@@ -1,0 +1,191 @@
+{
+  "reviewed_at_utc": "2026-10-21T19:54:00.078966+00:00",
+  "mode": "local_readonly_no_ssh_no_sql_no_tests",
+  "candidate": "920ce618a9b1b2b52ba65c91cefdf285a5ae0605",
+  "checks": {
+    "local_head": true,
+    "checkout": true,
+    "summary_commands": true,
+    "ledger_sha": true,
+    "environment_sha": true,
+    "environment_version": true,
+    "health_ready": true,
+    "image_ids": true,
+    "alembic": true,
+    "backup_size_checksum": true,
+    "backup_metadata": true,
+    "backup_ledger": true,
+    "ops_can_continue": true,
+    "runtime_variables": true,
+    "persisted_variables": true,
+    "persisted_paths": true,
+    "health": true,
+    "restart_counts": true,
+    "default_lock_absent": true,
+    "restore_databases_zero": true,
+    "deployment_exit": true,
+    "final_stderr_empty": true,
+    "initial_runtime_correct": true,
+    "initial_persisted_extraction_empty": true,
+    "oom_container_matches": true,
+    "oom_two_lines_same_event": true,
+    "sources_match_candidate": true,
+    "inputs_stable": true
+  },
+  "metrics": {
+    "at": "2026-10-22T03:44:21+08:00",
+    "root_used_percent": "84%",
+    "root_available_bytes": 32272199680,
+    "host_memory_available_bytes": 3926077440,
+    "swap_total_bytes": 3222265856,
+    "swap_used_bytes": 3210825728,
+    "swap_free_bytes": 11440128,
+    "swap_used_percent": 99.64496635252185,
+    "container_memory": {
+      "cr_frontend": "16.02MiB / 128MiB",
+      "cr_decoy": "3.621MiB / 128MiB",
+      "cr_backend": "193MiB / 768MiB",
+      "cr_mysql": "651.9MiB / 1.25GiB",
+      "cr_clamav": "948.7MiB / 2.148GiB",
+      "cr_embedding": "90.75MiB / 768MiB",
+      "cr_testdb": "415.1MiB / 7.501GiB",
+      "cr_redis": "3.539MiB / 128MiB"
+    }
+  },
+  "sources": {
+    "deploy/prism_ops_executor.py": {
+      "sha256": "450a9c0449832feb02d80252f7e35dd789f65eb1d7f35a14d81dc297f4e0f695",
+      "matches_candidate_blob": true
+    },
+    "backend/app/services/security_monitor_service.py": {
+      "sha256": "abf928ca40f34edfabe3d7c9764e45dda00296c094376145b090893f02b4139b",
+      "matches_candidate_blob": true
+    },
+    "backend/app/services/security_center_service.py": {
+      "sha256": "e20921d0a43a7a87b799fe0b7e07dd1091fc400a732c2286423f402a1576b9e8",
+      "matches_candidate_blob": true
+    },
+    "backend/app/services/ops_service.py": {
+      "sha256": "c2a44f81b9e1ea410f7c5c126cf808cef70d80991169a59294386a5bb84221ed",
+      "matches_candidate_blob": true
+    },
+    "backend/app/core/config.py": {
+      "sha256": "dce16d3a1dd43ebdc15cb5bac08a4972cd2d78708bd175fa26862f946d2f2698",
+      "matches_candidate_blob": true
+    },
+    "deploy/lib/common.sh": {
+      "sha256": "ee12421c1e16c08dbb18f6e44ccae0fb51ff0974a2efcfade5d4e4934e3baad5",
+      "matches_candidate_blob": true
+    },
+    "deploy/deploy.sh": {
+      "sha256": "e10cdd1c88632d962603038719aa66bec53db26d8bbd4e845a6d3f8e3f95a1cd",
+      "matches_candidate_blob": true
+    },
+    "deploy/backup.sh": {
+      "sha256": "7ecdea70c77ef341eb4b21a908ae1320f017bbaf0431a7866735a839e149b4a0",
+      "matches_candidate_blob": true
+    },
+    "deploy/rollback.sh": {
+      "sha256": "6bbbecd22a0cb75acd1ce04992051d799a493e73c1d74c154a69bafa7365ce54",
+      "matches_candidate_blob": true
+    },
+    "deploy/ops-check.sh": {
+      "sha256": "62c9a11c282ab17a826454de82b5fa43d0c8db2dd19bf3f554f406eeb3ff5510",
+      "matches_candidate_blob": true
+    }
+  },
+  "evidence_files": {
+    "alembic.txt": {
+      "size": 159,
+      "sha256": "c0cc12196cd963094a84f26412ed6f00390ce58b41d3896ff7016a5d14d64016"
+    },
+    "anonymous-http-smoke.json": {
+      "size": 1662,
+      "sha256": "c2146e2d2dba135f7a8f95c5e1c1d426a8bbda16e7509d5f26231845691b16c8"
+    },
+    "backend_environment.txt": {
+      "size": 187,
+      "sha256": "c31235fda0b37af020fda4b2117a8b521572e31ef666a07e1dfbe9e02fd43e17"
+    },
+    "backup-verification.json": {
+      "size": 1119,
+      "sha256": "05384f52eb7fd18e628e290cc8e22a12ad787340d8ce9904ca82e4df341aa66b"
+    },
+    "backup-verification.stderr.txt": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "checkout.txt": {
+      "size": 41,
+      "sha256": "11ce66fd44122f53c98f599961caa99c2eac28e4a773b79845f04cca021456f8"
+    },
+    "containers.txt": {
+      "size": 8605,
+      "sha256": "a58d339fa207c199acc11f8a1510f0112db5b085e10f3a51ae3c9c3055fc6a38"
+    },
+    "executor.txt": {
+      "size": 259,
+      "sha256": "cb7cdc8f4bd5ce83c3145eaf635010c3fed9d7abc519ebe0cee36c510d337a7a"
+    },
+    "frontend_build_revision.txt": {
+      "size": 51,
+      "sha256": "d51bd2822fb92276034ef190e9fd4e2b10f4608fec25c4b4abd3435c1156e9b5"
+    },
+    "healthz.json": {
+      "size": 87,
+      "sha256": "f2df323ff7ba623b7d06b0156f78eea0a36b6b805cbdbfc51e004dd178e20ea2"
+    },
+    "image_runtime.txt": {
+      "size": 508,
+      "sha256": "2ec9345b0adf304ac77efb8b18cb68137de44b1e5a32822bc18d769e1c6d4831"
+    },
+    "ops_check.txt": {
+      "size": 1105,
+      "sha256": "36de9d02c4b945ea0356af0837c38e46606a3b3594bd8bc8ffbef1473e8ed149"
+    },
+    "readyz.json": {
+      "size": 90,
+      "sha256": "63266b8cafcdb08e86c183ec681e1c0a78dc8d3a8677355dd17683cb330fd336"
+    },
+    "release_state.txt": {
+      "size": 480,
+      "sha256": "af79483da2599d0aa7cabb477d2feb794b13fc528f9a37cc2704b4d1cfdc7a6f"
+    },
+    "resources.txt": {
+      "size": 1957,
+      "sha256": "2d52dc26367d6e06258fc052944b17ccea0f75757f53e8835200a3f86c1332c9"
+    },
+    "runtime-final-verification.json": {
+      "size": 2852,
+      "sha256": "7bf19bac995bf651bda57afe3a41f8196b3677c4214f4c3d39789331e3fe1d0f"
+    },
+    "runtime-final-verification.stderr.txt": {
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "runtime-final-verifier-initial-structure-mismatch.json": {
+      "size": 2605,
+      "sha256": "c65f530ce96e93d2f4bdc6e4f060b295744f3034c1120009c0d8f03dd2ca1cd4"
+    },
+    "runtime-final-verifier-initial-structure-mismatch.stderr.txt": {
+      "size": 89,
+      "sha256": "648c6f75097064c7bd2a53101483b10143adb0939b84114109f0d92958b38048"
+    },
+    "summary.json": {
+      "size": 1907,
+      "sha256": "76d939b8b38126ff38ef686be7d0db786404bdb2e5cfabc78aa3f6f88ced3bf3"
+    },
+    "timers.txt": {
+      "size": 440,
+      "sha256": "61559aa10a4c08a7b38b509c6015f249924d775348e68d3adff0e8c9ec9d64a9"
+    }
+  },
+  "boundaries": [
+    "One matching mysqld memcg OOM; initiating query/client not established.",
+    "Backup checksum/restore are collector records and log excerpts; no archive rehash or row-level equivalence here.",
+    "Lock check covers the hardcoded default path only.",
+    "Initial AssertionError plus empty extraction does not preserve the old extraction code/raw persisted JSON.",
+    "Snapshots have different timestamps and do not prove future stability.",
+    "Anonymous HTTP evidence does not prove authenticated business acceptance."
+  ]
+}

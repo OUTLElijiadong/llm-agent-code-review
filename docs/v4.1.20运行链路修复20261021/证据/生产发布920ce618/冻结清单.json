@@ -1,0 +1,83 @@
+{
+  "应用提交": "920ce618a9b1b2b52ba65c91cefdf285a5ae0605",
+  "记录时间": "2026-10-21T19:51:29.596347+00:00",
+  "证据来源": "/tmp/prism-v4120-production-920ce618a9b1",
+  "文件": [
+    {
+      "文件": "summary.json",
+      "字节数": 1907,
+      "SHA256": "76d939b8b38126ff38ef686be7d0db786404bdb2e5cfabc78aa3f6f88ced3bf3"
+    },
+    {
+      "文件": "healthz.json",
+      "字节数": 87,
+      "SHA256": "f2df323ff7ba623b7d06b0156f78eea0a36b6b805cbdbfc51e004dd178e20ea2"
+    },
+    {
+      "文件": "readyz.json",
+      "字节数": 90,
+      "SHA256": "63266b8cafcdb08e86c183ec681e1c0a78dc8d3a8677355dd17683cb330fd336"
+    },
+    {
+      "文件": "backup-verification.json",
+      "字节数": 1119,
+      "SHA256": "05384f52eb7fd18e628e290cc8e22a12ad787340d8ce9904ca82e4df341aa66b"
+    },
+    {
+      "文件": "runtime-final-verification.json",
+      "字节数": 2852,
+      "SHA256": "7bf19bac995bf651bda57afe3a41f8196b3677c4214f4c3d39789331e3fe1d0f"
+    },
+    {
+      "文件": "anonymous-http-smoke.json",
+      "字节数": 1662,
+      "SHA256": "c2146e2d2dba135f7a8f95c5e1c1d426a8bbda16e7509d5f26231845691b16c8"
+    },
+    {
+      "文件": "release_state.txt",
+      "字节数": 480,
+      "SHA256": "af79483da2599d0aa7cabb477d2feb794b13fc528f9a37cc2704b4d1cfdc7a6f"
+    },
+    {
+      "文件": "image_runtime.txt",
+      "字节数": 508,
+      "SHA256": "2ec9345b0adf304ac77efb8b18cb68137de44b1e5a32822bc18d769e1c6d4831"
+    },
+    {
+      "文件": "frontend_build_revision.txt",
+      "字节数": 51,
+      "SHA256": "d51bd2822fb92276034ef190e9fd4e2b10f4608fec25c4b4abd3435c1156e9b5"
+    },
+    {
+      "文件": "alembic.txt",
+      "字节数": 159,
+      "SHA256": "c0cc12196cd963094a84f26412ed6f00390ce58b41d3896ff7016a5d14d64016"
+    },
+    {
+      "文件": "resources.txt",
+      "字节数": 1957,
+      "SHA256": "2d52dc26367d6e06258fc052944b17ccea0f75757f53e8835200a3f86c1332c9"
+    },
+    {
+      "文件": "timers.txt",
+      "字节数": 440,
+      "SHA256": "61559aa10a4c08a7b38b509c6015f249924d775348e68d3adff0e8c9ec9d64a9"
+    },
+    {
+      "文件": "executor.txt",
+      "字节数": 259,
+      "SHA256": "cb7cdc8f4bd5ce83c3145eaf635010c3fed9d7abc519ebe0cee36c510d337a7a"
+    },
+    {
+      "文件": "ops_check.txt",
+      "字节数": 1105,
+      "SHA256": "36de9d02c4b945ea0356af0837c38e46606a3b3594bd8bc8ffbef1473e8ed149"
+    },
+    {
+      "文件": "checkout.txt",
+      "字节数": 41,
+      "SHA256": "11ce66fd44122f53c98f599961caa99c2eac28e4a773b79845f04cca021456f8"
+    }
+  ],
+  "边界": "仅允许列表中的脱敏发布与只读核验输出；不含凭据、数据库内容或原始模型响应。真实浏览器验收另记。"
+}

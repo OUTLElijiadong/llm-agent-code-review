@@ -1,0 +1,3 @@
+/cr_backend sha256:cf40130ddf4d56a01c45815284c0dc98464ee621398d7224aba150696782d1c7 prism-backend:920ce618a9b1b2b52ba65c91cefdf285a5ae0605 restart=0 health=healthy mem_limit=805306368
+/cr_frontend sha256:17922143e65482d5341c00fd8e8c16a4c36dc7f1391a2f7eb640b5a5b246291b prism-frontend:920ce618a9b1b2b52ba65c91cefdf285a5ae0605 restart=0 health=healthy mem_limit=134217728
+/cr_mysql sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39 mysql:8.0 restart=1 health=healthy mem_limit=1342177280

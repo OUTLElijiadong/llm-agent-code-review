@@ -1,0 +1,71 @@
+{
+  "checked_at_utc": "2026-10-21T19:49:40.158118+00:00",
+  "authentication": "none",
+  "scope": "公开HTTP旁证，不代替已登录浏览器验收或国内源数据验收",
+  "results": [
+    {
+      "method": "POST",
+      "path": "/api/discuss/start",
+      "http_status": 404,
+      "body": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/chat",
+      "http_status": 404,
+      "body": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/detect-language",
+      "http_status": 404,
+      "body": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agents/clarify",
+      "http_status": 404,
+      "body": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent-catalog/operations/invoke",
+      "http_status": 404,
+      "body": {
+        "detail": "Not Found"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/vulnerability-sources",
+      "http_status": 401,
+      "body": {
+        "code": 40100,
+        "message": "缺少token",
+        "request_id": "9d7a996978c9b5b3000a0a39e203710b",
+        "retryable": false,
+        "next_action": "请重新登录后再试"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/vulnerability-records?source=all&limit=3",
+      "http_status": 401,
+      "body": {
+        "code": 40100,
+        "message": "缺少token",
+        "request_id": "39e163ec8b0b3c1913689de3191169d4",
+        "retryable": false,
+        "next_action": "请重新登录后再试"
+      }
+    }
+  ]
+}

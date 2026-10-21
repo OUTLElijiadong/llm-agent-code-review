@@ -1,0 +1,40 @@
+{
+  "范围": "知识治理与元数据门禁结果；不代表16项业务点击通过。业务未验收缺口已原样写入postflight结果。",
+  "读取收据": "/Users/li/Documents/Obsidian/myself/03_索引/审计/读取记录/20261021-141119-9c75d53bc4.json",
+  "hard_gate": "ready",
+  "validate": {
+    "schema": "myself-harness-validation-v1",
+    "checked_at": "2026-10-21T19:54:14.688443+00:00",
+    "file_count": 2909,
+    "error_count": 0,
+    "warning_count": 0,
+    "errors": [],
+    "warnings": [],
+    "report": "/Users/li/Documents/Obsidian/myself/03_索引/审计/元数据校验-20261021-195414.json"
+  },
+  "postflight": {
+    "status": "postflight-created",
+    "result_status": "通过",
+    "path": "/Users/li/Documents/Obsidian/myself/03_索引/审计/任务闭环/任务闭环-20261021-200447.md",
+    "validation": {
+      "schema": "myself-harness-validation-v1",
+      "checked_at": "2026-10-21T20:04:47.839181+00:00",
+      "file_count": 2910,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": [],
+      "report": "/Users/li/Documents/Obsidian/myself/03_索引/审计/元数据校验-20261021-200447.json"
+    }
+  },
+  "原始日志": [
+    {
+      "路径": "/tmp/prism-v4120-final-harness-validate.log",
+      "SHA256": "5ee107f721c8f6c698a8abc4062a9685717753ce911363770ecf48b18fc2902f"
+    },
+    {
+      "路径": "/tmp/prism-v4120-final-harness-postflight.log",
+      "SHA256": "2b0fb2b418a884025abf16dbc06293aa72107aa0bebde972fecc5b6005ee1a0b"
+    }
+  ]
+}

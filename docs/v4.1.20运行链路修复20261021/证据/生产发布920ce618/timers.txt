@@ -1,0 +1,10 @@
+Result=success
+ExecMainStartTimestamp=Thu 2026-10-22 02:28:49 CST
+ExecMainExitTimestamp=Thu 2026-10-22 02:32:32 CST
+ExecMainStatus=0
+ActiveState=inactive
+NEXT                        LEFT LAST                              PASSED UNIT               ACTIVATES
+Fri 2026-10-23 02:22:05 CST  22h Thu 2026-10-22 02:28:49 CST 1h 15min ago prism-backup.timer prism-backup.service
+
+1 timers listed.
+Pass --all to see loaded but inactive timers, too.

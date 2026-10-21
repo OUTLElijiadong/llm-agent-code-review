@@ -1,0 +1,48 @@
+{
+  "记录时间": "2026-10-21T20:02:57.320166+00:00",
+  "范围": "限定清理及清理后只读核对的历史快照；生产最终SHA、重启次数及磁盘采样以生产发布920ce618证据为准。",
+  "清理开始": "2026-10-21T15:09:46.228633+00:00",
+  "清理结束": "2026-10-21T15:10:18.301950+00:00",
+  "根分区净释放字节": 4708421632,
+  "根分区净释放GiB": 4.39,
+  "删除旧镜像数量": 33,
+  "移除已批准构建缓存记录数": 105,
+  "清理包缓存数量": 3,
+  "清理后保护镜像数量": 27,
+  "清理后卷数量": 16,
+  "清理后保留文件数量": 967,
+  "清理后独立实现核验时间": "2026-10-21T16:32:57.516966+00:00",
+  "清理后检查": {
+    "all_approved_images_absent": true,
+    "all_approved_cache_records_absent": true,
+    "all_original_protected_images_present": true,
+    "all_expanded_protected_images_present": true,
+    "no_unapproved_image_removed": true,
+    "containers_unchanged": true,
+    "no_extra_or_missing_container": true,
+    "all_containers_running": true,
+    "volume_names_unchanged": true,
+    "config_and_ledgers_unchanged": true,
+    "retained_files_unchanged": true,
+    "head_unchanged": true,
+    "repo_status_unchanged": true,
+    "healthz_expected": true,
+    "mysql_1280m_unchanged": true,
+    "clamd_still_running": true,
+    "fresh_protected_images_present": true,
+    "fresh_protected_set_unchanged": true,
+    "maintenance_locks_absent": true
+  },
+  "清理后全部通过": true,
+  "原始证据": [
+    {
+      "路径": "/tmp/prism-space-cleanup-20261021-1457/cleanup_result.json",
+      "SHA256": "d7395adeff9dab40e30bc79a4bc99f623f2ce866f1b686672522c62313b47ebd"
+    },
+    {
+      "路径": "/tmp/prism-manifest-recheck-20261021-163251/live_verification.json",
+      "SHA256": "f05f0fe1a3eb838b006a017dd255a0ba15b4204eacdbdb1907de8270ff65890b"
+    }
+  ],
+  "边界": "保留SQL和env备份、审计、源码及恢复路径；未执行swapoff、未停止安全服务。未复制保留路径明细。"
+}

@@ -1,0 +1,64 @@
+{
+  "release": "920ce618a9b1b2b52ba65c91cefdf285a5ae0605",
+  "checked_at": "2026-10-21T19:43:41.869945+00:00",
+  "checks": {
+    "checkout": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/checkout.txt"
+    },
+    "containers": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/containers.txt"
+    },
+    "release_state": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/release_state.txt"
+    },
+    "alembic": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/alembic.txt"
+    },
+    "ops_check": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/ops_check.txt"
+    },
+    "resources": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/resources.txt"
+    },
+    "timers": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/timers.txt"
+    },
+    "executor": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/executor.txt"
+    },
+    "backend_environment": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/backend_environment.txt"
+    },
+    "frontend_build_revision": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/frontend_build_revision.txt"
+    },
+    "image_runtime": {
+      "exit": 0,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/image_runtime.txt"
+    },
+    "healthz": {
+      "http_status": 200,
+      "release": "920ce618a9b1b2b52ba65c91cefdf285a5ae0605",
+      "version": "4.1.20",
+      "exact_release": true,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/healthz.json"
+    },
+    "readyz": {
+      "http_status": 200,
+      "release": "920ce618a9b1b2b52ba65c91cefdf285a5ae0605",
+      "version": "4.1.20",
+      "exact_release": true,
+      "file": "/tmp/prism-v4120-production-920ce618a9b1/readyz.json"
+    }
+  }
+}

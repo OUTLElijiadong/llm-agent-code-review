@@ -1,0 +1,14 @@
+2026-10-22T03:44:21+08:00
+Filesystem        1B-blocks         Used   Available Use% Mounted on
+/dev/vda1      193205350400 160933150720 32272199680  84% /
+               total        used        free      shared  buff/cache   available
+Mem:      8054374400  4128296960  1782755328   133300224  2589372416  3926077440
+Swap:     3222265856  3210825728    11440128
+{"BlockIO":"5.87MB / 16.3MB","CPUPerc":"0.00%","Container":"23500c7df04e","ID":"23500c7df04e","MemPerc":"12.52%","MemUsage":"16.02MiB / 128MiB","Name":"cr_frontend","NetIO":"20.3kB / 56.5kB","PIDs":"5"}
+{"BlockIO":"729kB / 0B","CPUPerc":"0.00%","Container":"71d055af82d0","ID":"71d055af82d0","MemPerc":"2.83%","MemUsage":"3.621MiB / 128MiB","Name":"cr_decoy","NetIO":"954B / 0B","PIDs":"2"}
+{"BlockIO":"55.8MB / 1.36MB","CPUPerc":"4.95%","Container":"9a6b76a10909","ID":"9a6b76a10909","MemPerc":"25.13%","MemUsage":"193MiB / 768MiB","Name":"cr_backend","NetIO":"28.3MB / 11.3MB","PIDs":"23"}
+{"BlockIO":"4.38GB / 181MB","CPUPerc":"7.98%","Container":"2ce3b5ca3c50","ID":"2ce3b5ca3c50","MemPerc":"50.93%","MemUsage":"651.9MiB / 1.25GiB","Name":"cr_mysql","NetIO":"30.9MB / 76.3MB","PIDs":"49"}
+{"BlockIO":"6.25GB / 4.08GB","CPUPerc":"0.00%","Container":"b8be33777079","ID":"b8be33777079","MemPerc":"43.12%","MemUsage":"948.7MiB / 2.148GiB","Name":"cr_clamav","NetIO":"1.55MB / 130kB","PIDs":"5"}
+{"BlockIO":"4.14GB / 2.25GB","CPUPerc":"0.26%","Container":"ae73b060d7ef","ID":"ae73b060d7ef","MemPerc":"11.82%","MemUsage":"90.75MiB / 768MiB","Name":"cr_embedding","NetIO":"3.52MB / 22.6MB","PIDs":"16"}
+{"BlockIO":"38.6GB / 1.62TB","CPUPerc":"0.34%","Container":"aaf1f85ceb4a","ID":"aaf1f85ceb4a","MemPerc":"5.40%","MemUsage":"415.1MiB / 7.501GiB","Name":"cr_testdb","NetIO":"116kB / 0B","PIDs":"41"}
+{"BlockIO":"3.49GB / 326MB","CPUPerc":"0.46%","Container":"2845ed4a4dce","ID":"2845ed4a4dce","MemPerc":"2.76%","MemUsage":"3.539MiB / 128MiB","Name":"cr_redis","NetIO":"551MB / 4.24GB","PIDs":"6"}
