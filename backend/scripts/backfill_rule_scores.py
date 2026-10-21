@@ -49,6 +49,44 @@ def _record_backfill(task: ReviewTask, coverage: dict, basis: str) -> dict:
     }
 
 
+def _legacy_worker_score(conclusion: dict) -> dict | None:
+    """早期回执没有确定性 runner 记录，只保存了执行器退出码。
+
+    仅在没有任何其他检查项时，把真实运行过的执行器退出码作为唯一检查项；
+    执行器从未启动（exit_code 为空、被阻断或停止）时仍不出分。
+    """
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    worker = evidence.get("worker_result") if isinstance(evidence.get("worker_result"), dict) else {}
+    exit_code = worker.get("exit_code")
+    if type(exit_code) is not int or worker.get("outcome") not in {"succeeded", "failed"}:
+        return None
+    state = "passed" if exit_code == 0 and worker.get("outcome") == "succeeded" else "failed"
+    credit = 1.0 if state == "passed" else 0.0
+    return {
+        "score": int(round(100 * credit)),
+        "score_available": True,
+        "score_basis": sandbox_service.SANDBOX_SCORE_VERSION,
+        "sample": {
+            "executed_checks": 1,
+            "earned_credit": credit,
+            "checks": [{"check": "legacy_worker_exit_code", "state": state, "credit": credit}],
+            "verification_status": "partial",
+            "rule": "验证分 = 100 × 已执行检查项得分之和 ÷ 已执行检查项数（通过=1，部分=0.5，失败=0）",
+            "legacy_receipt": "早期回执仅含执行器退出码",
+        },
+        "unavailable_reason": None,
+    }
+
+
+def _no_check_reason(environment: SandboxEnvironment) -> str:
+    status = str(environment.status or "")
+    if status == "blocked":
+        return "沙箱测试被安全策略阻断，执行器没有运行任何检查项，按规则不出分"
+    if status in {"stopped", "expired", "cancelled"}:
+        return "沙箱测试在执行前被停止或过期，没有已执行的检查项，按规则不出分"
+    return "沙箱执行器未能启动测试容器，没有已执行的检查项，按规则不出分"
+
+
 def _sandbox(db, task: ReviewTask) -> tuple[str, int | None]:
     environment = db.query(SandboxEnvironment).filter(
         SandboxEnvironment.public_id == _public_id(task.task_name),
@@ -62,8 +100,16 @@ def _sandbox(db, task: ReviewTask) -> tuple[str, int | None]:
         return "no_receipt", None
     result = sandbox_service._sandbox_result_score(conclusion)
     if not result["score_available"]:
-        return "no_executed_checks", None
+        result = _legacy_worker_score(conclusion)
     coverage = dict(task.coverage) if isinstance(task.coverage, dict) else {}
+    if result is None:
+        if coverage.get("score_unavailable_reason") == _no_check_reason(environment):
+            return "no_executed_checks", None
+        # 不出分但写明沙箱自身的原因，替代“没有已审文件或发言”的通用文案。
+        coverage = _record_backfill(task, coverage, "sandbox-no-executed-checks")
+        coverage.update({"score_available": False, "score_unavailable_reason": _no_check_reason(environment)})
+        task.coverage = coverage
+        return "no_executed_checks", None
     verification = sandbox_service._sandbox_verification_coverage(conclusion)
     coverage = _record_backfill(task, coverage, sandbox_service.SANDBOX_SCORE_VERSION)
     coverage.update({
