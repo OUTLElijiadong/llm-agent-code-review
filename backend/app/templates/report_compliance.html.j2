@@ -341,7 +341,7 @@
     </div>
     {% endfor %}
     {% else %}
-    <div class="empty">本次审查未发现问题。</div>
+    <div class="empty">{{ empty_issues_text or "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。" }}</div>
     {% endif %}
 
     <div class="footer">本报告由基于大模型智能体的代码审查平台自动生成 · 合规版</div>

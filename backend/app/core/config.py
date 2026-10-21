@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     openapi_enabled: bool = True
     app_release: str = "dev"
-    app_version: str = "4.1.18"
+    app_version: str = "4.1.19"
     # 小菱每日模型 Token 提醒阈值；仅告警，不阻断交互会话。0 表示关闭。
     assistant_daily_token_alert_threshold: int = Field(default=5_000_000, ge=0, le=100_000_000)
     # 注册验证码开关:生产默认开(dev/test 可关以便自动化测试)
@@ -134,8 +134,10 @@ class Settings(BaseSettings):
     agent_mesh_max_active_conversations: int = Field(default=10, ge=1, le=100)
     # 管理小菱 JARVIS 巡逻:发现异常后采集只读证据。
     agent_jarvis_patrol_enabled: bool = True
-    # 成本保护:默认不把定时巡逻简报自动交给模型处理;管理员明确发起时仍可核验。
-    agent_jarvis_auto_dispatch_enabled: bool = False
+    # 主动运维:巡逻发现新异常（证据指纹变化）时把简报交给在线管理小菱，
+    # 由它直接组建只读巡检团队核验；改动服务器的写操作仍逐项等待管理员批准。
+    # 同一证据按指纹幂等，只投递一次；可用环境变量关闭以节省模型费用。
+    agent_jarvis_auto_dispatch_enabled: bool = True
     agent_jarvis_patrol_interval_seconds: int = Field(default=300, ge=60, le=86400)
     agent_jarvis_online_window_minutes: int = Field(default=10, ge=1, le=1440)
     # 动态子 Agent 团队的持久化队列和租约边界；小菱不计入子 Agent 槽位。

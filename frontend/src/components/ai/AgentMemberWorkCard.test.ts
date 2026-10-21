@@ -92,3 +92,25 @@ describe('AgentMemberWorkCard', () => {
     expect(wrapper.find('.member-work-pulse').exists()).toBe(false)
   })
 })
+
+describe('AgentMemberWorkCard 派发任务可视化', () => {
+  it('展示小菱派给成员的未完成任务、派发内容与成员进度，并可停止单个任务', async () => {
+    const briefed: AgentTeamTask[] = [
+      { ...tasks[0], instructions: '只读分析 src/ 下的鉴权代码，列出风险点' },
+      tasks[1],
+    ]
+    const wrapper = mount(AgentMemberWorkCard, {
+      props: { member: baseMember, tasks: briefed, showStop: true },
+    })
+    expect(wrapper.findAll('.member-work-task')).toHaveLength(2)
+    expect(wrapper.find('.member-work-task-brief').text()).toContain('只读分析 src/ 下的鉴权代码')
+    expect(wrapper.find('.member-work-progress').text()).toBe('完成 0/2')
+    await wrapper.find('.member-work-stop').trigger('click')
+    expect(wrapper.emitted('stop')?.[0]?.[0]).toMatchObject({ task_key: 'read' })
+  })
+
+  it('未开启 showStop 时不显示停止按钮', () => {
+    const wrapper = mount(AgentMemberWorkCard, { props: { member: baseMember, tasks } })
+    expect(wrapper.find('.member-work-stop').exists()).toBe(false)
+  })
+})

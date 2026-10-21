@@ -527,6 +527,14 @@ class CancelAgentTeamArguments(FixedToolArguments):
     reason: str = Field(default="小菱取消团队", max_length=1000)
 
 
+class CancelAgentTeamTaskArguments(FixedToolArguments):
+    """只停止当前账户团队中指定成员的任务。"""
+
+    team_id: int = Field(gt=0)
+    task_keys: List[str] = Field(min_length=1, max_length=20)
+    reason: str = Field(default="按用户指令停止该成员任务", max_length=1000)
+
+
 class RetryAgentTeamArguments(FixedToolArguments):
     """预览并按确认摘要重新排队当前账户团队的失败任务。"""
 
@@ -628,6 +636,14 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
         "cancel_agent_team",
         "取消当前账户仍在运行或排队的子 Agent 团队",
         CancelAgentTeamArguments,
+        True,
+    ),
+    FixedToolContract(
+        "cancel_agent_team_task",
+        "只停止团队中执行方向错误的指定成员任务（task_keys），其余成员继续；"
+        "依赖它的后续任务一并停止，汇总成员会说明缺失部分。停止后如需改派，"
+        "用 create_agent_team 为修正后的任务新建团队。",
+        CancelAgentTeamTaskArguments,
         True,
     ),
     FixedToolContract(

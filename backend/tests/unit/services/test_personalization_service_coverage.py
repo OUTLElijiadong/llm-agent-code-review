@@ -498,7 +498,7 @@ def test_retrieve_list_delete_and_stats_enforce_knowledge_isolation(db, monkeypa
             tuple[list[float], str]: 测试查询向量和模型标签。
         """
         assert user_id == 1
-        return ([], "fake") if text == "no-vector" else ([1.0, 0.0], "fake")
+        return ([], "test:model") if text == "no-vector" else ([1.0, 0.0], "test:model")
 
     monkeypatch.setattr(knowledge_service.embedding_service, "embed_one", fake_embed_one)
     monkeypatch.setattr(knowledge_service.embedding_service, "is_remote_enabled", lambda _db: True)

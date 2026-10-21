@@ -73,7 +73,8 @@ def route_inventory():
     # 参数化收集阶段即拒绝空/缩小清单，不能以 empty parameter set 的 skip 冒充验收。
     # 本轮新增的远程网站评估报告导出接口由下方远程权限矩阵逐项核验。
     # 本次新增管理员只读 Token 趋势端点，已在下方逐条验证 require_admin 守卫。
-    assert len(rows) == 366, "完整路由基线变化，需逐项复核后显式更新矩阵"
+    # 4.1.19 新增 /api/agent-teams/{team_id}/tasks/cancel（agent:chat + 账号私有，见下方矩阵）。
+    assert len(rows) == 367, "完整路由基线变化，需逐项复核后显式更新矩阵"
     return rows
 
 
@@ -83,11 +84,11 @@ GUARDED_ROUTES = [row for row in AUTHENTICATED_ROUTES if row["guards"]]
 
 
 def test_route_inventory_is_complete_and_studio_guard_is_included():
-    assert len(ROUTES) == 366
-    assert len({(row["method"], row["path"]) for row in ROUTES}) == 366
+    assert len(ROUTES) == 367
+    assert len({(row["method"], row["path"]) for row in ROUTES}) == 367
     assert len({row["source"] for row in ROUTES}) == 45
-    assert len(AUTHENTICATED_ROUTES) == 352
-    assert len(GUARDED_ROUTES) == 283
+    assert len(AUTHENTICATED_ROUTES) == 353
+    assert len(GUARDED_ROUTES) == 284
     studio = [row for row in ROUTES if row["source"].endswith("/api/v1/agent_studio.py")]
     assert len(studio) == 15
     assert all("require_studio_role" in row["guards"] for row in studio)
@@ -108,6 +109,7 @@ def test_route_inventory_is_complete_and_studio_guard_is_included():
         ("POST", "/api/ai-prompt/task"): ["review:view"],
         ("POST", "/api/ai-prompt/project"): ["project:view"],
         ("POST", "/api/agent-teams/{team_id}/retry/preview"): ["agent:chat"],
+        ("POST", "/api/agent-teams/{team_id}/tasks/cancel"): ["agent:chat"],
         ("GET", "/api/agent-responses/runs/{run_id}/assets"): ["agent:chat"],
         ("GET", "/api/agent-responses/assets/{asset_id}/image"): ["agent:chat"],
         ("GET", "/api/agent-responses/session/messages"): ["agent:chat"],
@@ -419,10 +421,12 @@ def test_project_reviewer_with_api_permission_still_cannot_write(matrix_env, met
 
 @pytest.mark.parametrize("suffix,method", [("", "GET"), ("/events", "GET"), ("/messages", "GET"),
                                             ("/cancel", "POST"), ("/retry/preview", "POST"),
-                                            ("/retry", "POST"), ("/archive", "POST")])
+                                            ("/retry", "POST"), ("/archive", "POST"),
+                                            ("/tasks/cancel", "POST")])
 def test_agent_teams_are_account_private_even_inside_same_project(matrix_env, suffix, method):
     team_id = matrix_env["resources"]["a"]["team"]
-    response = _request(matrix_env, "member_a", method, f"/api/agent-teams/{team_id}{suffix}", json={})
+    body = {"task_keys": ["read"]} if suffix == "/tasks/cancel" else {}
+    response = _request(matrix_env, "member_a", method, f"/api/agent-teams/{team_id}{suffix}", json=body)
     assert response.status_code == 404, response.text
     assert matrix_env["db"].get(AgentTeam, team_id).status == "completed"
 

@@ -3,7 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { Close, CircleCheck, Loading, WarningFilled } from "@element-plus/icons-vue"
 import AgentTeamMemberBadge from "./AgentTeamMemberBadge.vue"
 import AgentMemberWorkCard from "./AgentMemberWorkCard.vue"
-import { getAgentTeam, type AgentTeamDetail, type AgentTeamEvent, type AgentTeamMember, type AgentTeamTask } from "@/api/agentTeams"
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index"
+import { cancelAgentTeamTasks, getAgentTeam, type AgentTeamDetail, type AgentTeamEvent, type AgentTeamMember, type AgentTeamTask } from "@/api/agentTeams"
 import { formatDateTime, parseUtcTimestamp } from "@/utils/format"
 
 const props = defineProps<{
@@ -58,6 +60,35 @@ async function fetchTeam(teamId: number, generation: number, initial: boolean): 
       if (initial) loading.value = false
       schedulePolling(teamId, generation)
     }
+  }
+}
+
+const TEAM_TERMINAL = new Set(["completed", "failed", "cancelled", "expired"])
+const stopping = ref(false)
+const canStopTasks = computed(() => Boolean(team.value && !TEAM_TERMINAL.has(team.value.status) && !stopping.value))
+
+/** 只停止一个成员任务，其余成员继续；改派由用户告诉小菱新要求。 */
+async function stopMemberTask(task: AgentTeamTask): Promise<void> {
+  const current = team.value
+  if (!current || !canStopTasks.value) return
+  try {
+    await ElMessageBox.confirm(
+      `只停止「${task.title}」，其他成员继续执行；依赖它的后续任务会一并停止。`,
+      "停止该成员任务",
+      { confirmButtonText: "停止该任务", cancelButtonText: "先不了", type: "warning" },
+    )
+  } catch {
+    return
+  }
+  stopping.value = true
+  try {
+    await cancelAgentTeamTasks(current.team_id, [task.task_key], "管理员在团队面板停止该成员任务")
+    ElMessage.success("已停止该成员任务，其余成员继续执行")
+    loadTeam(current.team_id)
+  } catch {
+    ElMessage.error("停止失败，请稍后再试")
+  } finally {
+    stopping.value = false
   }
 }
 
@@ -250,7 +281,9 @@ function askMember(member: AgentTeamMember): void {
                   :team-started-at="team?.started_at ?? null"
                   show-ask
                   :log-limit="5"
+                  :show-stop="canStopTasks"
                   @ask="askMember"
+                  @stop="stopMemberTask"
                 />
                 <div v-if="!members.length" class="empty-tab">暂无成员数据</div>
               </div>

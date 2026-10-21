@@ -1873,6 +1873,16 @@ def _locked_team_tasks(db: Session, team: AgentTeam) -> list[AgentTeamTask]:
     )
 
 
+def _user_cancelled_task(task: AgentTeamTask) -> bool:
+    """单个成员任务被用户/小菱按指令停止（而非整队取消或失败）。"""
+    if task.status != "cancelled":
+        return False
+    errors = _unjson(task.errors_json, [])
+    return isinstance(errors, list) and any(
+        isinstance(item, dict) and item.get("code") == "task_cancelled_by_instruction" for item in errors
+    )
+
+
 def _promote_dependencies(db: Session, team: AgentTeam) -> None:
     tasks = _locked_team_tasks(db, team)
     by_key = {row.task_key: row for row in tasks}
@@ -1893,6 +1903,11 @@ def _promote_dependencies(db: Session, team: AgentTeam) -> None:
             dep_rows = [by_key.get(str(key)) for key in deps]
             member = members.get(int(row.member_id))
             is_summarizer = bool(member and member.role == "summarizer")
+            if member and member.role == "verifier" and dep_rows and all(dep is not None for dep in dep_rows):
+                # 被指令停止的成员不算失败：核验成员只核验其余已交付的结果。
+                live = [dep for dep in dep_rows if not _user_cancelled_task(dep)]
+                if live:
+                    dep_rows = live
             if any(dep is None for dep in dep_rows):
                 row.status = "blocked"
                 row.completed_at = now
@@ -2000,6 +2015,29 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
     ]
     workers = [item for item in tasks if item not in verification]
 
+    def _done(item: AgentTeamTask) -> bool:
+        return item.status == "completed" or _user_cancelled_task(item)
+
+    if workers and all(_user_cancelled_task(item) for item in workers) and not running:
+        # 所有工作成员都被指令停止：整队按取消收口，不再让核验/汇总空跑。
+        now = _now()
+        for task in tasks:
+            if task.status in _TERMINAL_TASK:
+                continue
+            task.status = "cancelled"
+            task.completed_at = now
+            task.next_attempt_at = None
+            task.lease_token = None
+            task.lease_expires_at = None
+        team.status = "cancelled"
+        team.completed_at = team.completed_at or now
+        team.error_json = _json({"reason": "all_tasks_cancelled_by_instruction"})
+        if previous != team.status:
+            _event(db, team, "team.status_changed", from_status=previous, to_status=team.status,
+                   detail={"counts": _task_counts(tasks)})
+        _persist_terminal_team_notification(db, team, now=now)
+        return
+
     if failed or not verification:
         failed_keys = [item.task_key for item in failed]
         now = _now()
@@ -2040,7 +2078,7 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         team.status = "failed"
         team.completed_at = team.completed_at or _now()
         team.error_json = _json({"reason": "missing_verifier_or_summarizer"})
-    elif all(item.status == "completed" for item in tasks) and all(item.status == "completed" for item in verification):
+    elif all(_done(item) for item in tasks) and all(item.status == "completed" for item in verification):
         team.status = "completed"
         team.completed_at = team.completed_at or _now()
         verification_results = [
@@ -2048,9 +2086,11 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
                 _unjson(item.result_json, {}), team_id=team.id, task_id=item.id,
             )} for item in verification
         ]
+        cancelled_keys = [item.task_key for item in tasks if _user_cancelled_task(item)]
         team.summary_json = _json(
             {
-                "completed_tasks": len(tasks),
+                "completed_tasks": sum(item.status == "completed" for item in tasks),
+                **({"partial": True, "cancelled_tasks": cancelled_keys} if cancelled_keys else {}),
                 "verification_results": verification_results,
                 "final_result": verification_results[-1]["result"] if verification_results else {},
             }
@@ -2100,7 +2140,7 @@ def _refresh_team_status(db: Session, team: AgentTeam) -> None:
         )
     elif (
         verification
-        and all(item.status == "completed" for item in workers)
+        and all(_done(item) for item in workers)
         and any(item.status in {"waiting_dependency", "queued", "running"} for item in verification)
     ):
         team.status = "verifying"
@@ -3280,7 +3320,7 @@ def cancel_team(
         team.status = "cancelled"
         team.completed_at = team.completed_at or _now()
         now = _now()
-        team.error_json = _json({"reason": "user_cancelled"})
+        team.error_json = _json({"reason": "user_cancelled", "detail": str(reason or "")[:300]})
         tasks = db.query(AgentTeamTask).filter(AgentTeamTask.team_id == team.id).all()
         for task in tasks:
             if task.status in _TERMINAL_TASK:
@@ -3327,6 +3367,90 @@ def cancel_team(
         db.commit()
         _cleanup_team_runtime_resources(db, team, reason="user_cancelled")
     return _team_out(db, team, include_events=True)
+
+
+def cancel_team_tasks(
+    db: Session,
+    user: User,
+    team_id: int,
+    task_keys: list[str],
+    *,
+    reason: str = "按用户指令停止该成员任务",
+) -> dict[str, Any]:
+    """只停止团队中指定成员的任务，其余成员继续执行。
+
+    依赖被停任务的工作/核验任务（其全部输入都来自被停任务时）一并停止；汇总成员
+    照常收到其余成员的结果并说明缺失部分。被停任务不计为失败，团队不会因此 fail-fast。
+    小菱随后可用 create_agent_team 为同一目标派发修正后的新任务。
+    """
+    wanted = {str(key).strip() for key in task_keys if str(key).strip()}
+    if not wanted:
+        raise AgentTeamValidationError("至少指定一个要停止的 task_key")
+    team = _team_or_raise(db, user, team_id, lock=True)
+    if team.status in _TERMINAL_TEAM:
+        raise AgentTeamStateError(f"团队已处于终态 {team.status}，无需停止成员任务")
+    tasks = _locked_team_tasks(db, team)
+    by_key = {row.task_key: row for row in tasks}
+    unknown = sorted(wanted - set(by_key))
+    if unknown:
+        raise AgentTeamValidationError(f"团队中没有这些任务：{', '.join(unknown)}")
+    members = {
+        int(item.id): item for item in db.query(AgentTeamMember).filter(AgentTeamMember.team_id == team.id).all()
+    }
+    targets = set(wanted)
+    while True:
+        grown = False
+        for row in tasks:
+            if row.task_key in targets or row.status in _TERMINAL_TASK:
+                continue
+            member = members.get(int(row.member_id))
+            if member and member.role == "summarizer":
+                continue
+            deps = [str(key) for key in (_unjson(row.dependency_keys_json, []) or [])]
+            if deps and all(key in targets or _user_cancelled_task(by_key[key]) for key in deps if key in by_key):
+                targets.add(row.task_key)
+                grown = True
+        if not grown:
+            break
+    now = _now()
+    stopped: list[str] = []
+    for key in sorted(targets):
+        task = by_key[key]
+        if task.status in _TERMINAL_TASK:
+            continue
+        previous_status = task.status
+        member = members.get(int(task.member_id))
+        task.status = "cancelled"
+        task.completed_at = now
+        task.next_attempt_at = None
+        task.lease_token = None
+        task.lease_expires_at = None
+        errors = _unjson(task.errors_json, [])
+        errors = errors if isinstance(errors, list) else []
+        task.errors_json = _json([*errors, {
+            "code": "task_cancelled_by_instruction",
+            "message": str(reason or "")[:300],
+            "cascade_from": sorted(wanted) if key not in wanted else [],
+        }][-20:])
+        _mark_task_request_terminal(db, team, task, member, success=False, error=reason, now=now)
+        _event(
+            db, team, "task.cancelled", task=task, member=member,
+            from_status=previous_status, to_status="cancelled",
+            actor_address=f"user:{user.id}",
+            detail={"reason": str(reason or "")[:300], "scope": "task",
+                    "cascade": key not in wanted},
+        )
+        stopped.append(key)
+    db.flush()
+    for key in stopped:
+        _cleanup_task_runtime_resources(db, team, by_key[key], reason="task_cancelled_by_instruction")
+    _promote_dependencies(db, team)
+    _refresh_member_statuses(db, team, reclaim=True)
+    _refresh_team_status(db, team)
+    db.commit()
+    out = _team_out(db, team, include_events=True)
+    out["stopped_tasks"] = stopped
+    return out
 
 
 def _select_retry_tasks(all_tasks: list[AgentTeamTask], wanted: set[str]) -> list[AgentTeamTask]:

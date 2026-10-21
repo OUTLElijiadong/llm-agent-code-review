@@ -670,7 +670,18 @@ def _build_report_context(
         "source": _to_serializable(source if isinstance(source, dict) else {}),
     }
     context["scope_lines"] = _build_scope_lines(context)
+    context["empty_issues_text"] = _empty_issues_text(task_info.get("status"), score_scope, effective_score)
     return context
+
+
+def _empty_issues_text(status: Any, score_scope: Dict[str, Any], effective_score: Any) -> str:
+    """没有问题时的说明：只有成功且完整覆盖并出分的任务才能写“未发现问题”。"""
+    scope = score_scope.get("scope") if score_scope.get("available") else None
+    if effective_score is not None and status == "success" and scope in {"complete", "historical"}:
+        return "本次审查未发现问题。"
+    if effective_score is not None and scope == "partial":
+        return "已审范围内未发现问题；审查覆盖不完整，未审部分不能据此判定无问题。"
+    return "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。"
 
 
 _SCOPE_FIELD_LABELS = {

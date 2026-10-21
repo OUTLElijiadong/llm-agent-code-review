@@ -17,6 +17,7 @@ from app.schemas.agent_team import (
     AgentTeamCreateIn,
     AgentTeamRetryIn,
     AgentTeamRetryPreviewIn,
+    AgentTeamTaskCancelIn,
 )
 from app.schemas.common import Resp
 from app.services import agent_team_service, audit_service
@@ -167,6 +168,33 @@ def cancel_team(
             db, user, "agent_team_cancel",
             target_type="agent_team", target_id=str(team_id),
             detail="取消多 Agent 团队",
+        )
+        return Resp(data=data)
+    except agent_team_service.AgentTeamError as exc:
+        _raise_team_error(exc)
+        raise AssertionError("unreachable")
+
+
+@router.post(
+    "/{team_id}/tasks/cancel",
+    response_model=Resp[dict],
+    dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
+)
+def cancel_team_tasks(
+    team_id: int,
+    payload: AgentTeamTaskCancelIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Resp[dict]:
+    """停止指定成员任务，其余成员继续执行。"""
+    try:
+        data = agent_team_service.cancel_team_tasks(
+            db, user, team_id, payload.task_keys, reason=payload.reason,
+        )
+        audit_service.log(
+            db, user, "agent_team_task_cancel",
+            target_type="agent_team", target_id=str(team_id),
+            detail=f"停止成员任务 {','.join(data.get('stopped_tasks') or [])}"[:500],
         )
         return Resp(data=data)
     except agent_team_service.AgentTeamError as exc:

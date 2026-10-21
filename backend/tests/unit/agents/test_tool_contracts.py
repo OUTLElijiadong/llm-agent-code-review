@@ -22,6 +22,7 @@ EXPECTED_FIXED_TOOL_NAMES = [
     "create_agent_team",
     "get_agent_team",
     "cancel_agent_team",
+    "cancel_agent_team_task",
     "retry_agent_team",
     "list_projects",
     "get_project_detail",
@@ -170,7 +171,7 @@ def test_fixed_tool_registry_has_stable_unique_names() -> None:
     """固定工具注册表应成为唯一名称来源且不含重复项。"""
     names = get_fixed_tool_names()
 
-    assert len(names) == 53  # 50 + 3 个渗透测试工具
+    assert len(names) == 54  # 50 + 3 个渗透测试工具 + 停止单个成员任务
     assert len(names) == len(set(names))
     assert names == EXPECTED_FIXED_TOOL_NAMES
     assert names[0] == "list_agents"

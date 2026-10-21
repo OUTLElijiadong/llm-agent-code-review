@@ -174,7 +174,7 @@ async def test_coordinator_only_exposes_team_and_capability_discovery_tools(db, 
     names = {item["name"] for item in await actor.tool_schemas()}
 
     assert names == {
-        "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team",
+        "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
         "retry_agent_team", "user_describe_capabilities",
     }
     monkeypatch.setattr(

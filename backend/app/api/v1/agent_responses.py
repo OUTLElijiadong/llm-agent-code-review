@@ -31,7 +31,7 @@ from app.models.agent_response_run import (
 )
 from app.models.user import User
 from app.schemas.common import Resp, StrictInputModel
-from app.services import agent_mesh_service, rbac_service
+from app.services import agent_mesh_service, agent_run_salvage, rbac_service
 from app.services.agent_responses_service import (
     AgentResponsesService,
     DatabaseCheckpointStore,
@@ -1792,7 +1792,21 @@ async def stream_agent_response(
                 },
             }
         )
-        task = asyncio.create_task(execute())
+        async def guarded_execute() -> Any:
+            # 非人为异常（数据库抖动、上游故障等）不让运行停在 running：
+            # 立即转入带恢复标记的失败态并从检查点续跑；人为停止由检查点 stop_requested 收敛。
+            with agent_run_salvage.live_run(run_id):
+                try:
+                    return await execute()
+                except Exception as exc:
+                    if payload.action != "cancel":
+                        recovery_state["value"] = await asyncio.to_thread(
+                            agent_run_salvage.salvage_crashed_run, run_id, error=str(exc),
+                        )
+                    raise
+
+        recovery_state: dict[str, str] = {"value": ""}
+        task = asyncio.create_task(guarded_execute())
         _BACKGROUND_RESPONSE_TASKS.add(task)
         task.add_done_callback(_release_background_response_task)
         event_task: asyncio.Task[Mapping[str, Any]] | None = None
@@ -1843,10 +1857,23 @@ async def stream_agent_response(
             # 会继续驱动工具链；进程重启时再由持久检查点接管。
             return
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能返回协议错误事件
+            logger.exception("小菱运行 {} 流式执行异常", run_id)
+            state = recovery_state.get("value") if "recovery_state" in locals() else ""
+            public_message = (
+                "小菱运行时遇到临时异常，已从检查点自动恢复，结果会在会话中继续更新。"
+                if state == "recovering"
+                else "小菱运行时遇到异常，进度已保留；可点击重试，或换个说法让小菱改用其他方案。"
+            )
+            raw_message = str(exc).strip()
+            if raw_message and re.search(r"[\u4e00-\u9fff]", raw_message) and "Traceback" not in raw_message:
+                # 业务校验类异常本身是给用户看的中文说明，保留原因；底层英文异常只给管理员。
+                public_message = f"{public_message}原因：{raw_message[:300]}"
+            elif payload.surface == "admin":
+                public_message = f"{public_message}（{type(exc).__name__}: {raw_message[:200]}）"
             error = {
                 "type": "error",
                 "error": {
-                    "message": str(exc),
+                    "message": public_message,
                     "type": "agent_runtime_error",
                     "code": "agent_runtime_error",
                 },
@@ -1859,7 +1886,7 @@ async def stream_agent_response(
                         "id": run_id,
                         "object": "response",
                         "status": "failed",
-                        "error": {"message": str(exc)},
+                        "error": {"message": public_message},
                     },
                 }
             )

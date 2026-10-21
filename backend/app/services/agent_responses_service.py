@@ -126,8 +126,8 @@ _FULL_VALIDATION_POLL_SECONDS = 2.0
 _ROUNDTABLE_TOOL_OUTPUT_BYTES = 8000
 _RELEASE_HEALTH_TOOL = "admin_release_health"
 _XIAOLING_COORDINATOR_TOOL_NAMES = frozenset({
-    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "retry_agent_team",
-    "user_describe_capabilities", "admin_describe_capabilities",
+    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
+    "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
 })
 _PENDING_SITE_SUBMISSION_REASON = "页面任务仅已提交团队，尚无执行与核验终态；请报告等待状态，不能声称业务完成"
 
@@ -1373,7 +1373,8 @@ class PrismToolExecutor:
                     "parameters": get_fixed_tool_schema(name),
                 }
                 for name in (
-                    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "retry_agent_team",
+                    "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team",
+                    "cancel_agent_team_task", "retry_agent_team",
                 )
             ]
             tools.append(user_discovery_tool_schema())
@@ -1603,6 +1604,13 @@ class PrismToolExecutor:
                 return await self._failed_attempt(
                     call,
                     "当前用户消息没有明确要求停止团队；不得按模型猜测取消任务。",
+                )
+            if call.name == "cancel_agent_team_task" and not (
+                _is_explicit_team_stop_request(request_text) or _is_explicit_task_redirect_request(request_text)
+            ):
+                return await self._failed_attempt(
+                    call,
+                    "当前用户消息没有要求停止或改派成员任务；不得按模型猜测停止子 Agent。",
                 )
             if call.name == "retry_agent_team" and _is_explicit_team_stop_request(request_text):
                 return await self._failed_attempt(
@@ -4878,6 +4886,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "必须先展示具体任务、风险和原因并等待当前用户明确确认，之后才可把 plan_sha256 回传再次调用。"
         "绝不能在同一轮自行把确认摘要回传，也不能把之前创建团队的确认复用于新的重试。"
         "用户要求停止时调用 cancel_agent_team。"
+        "用户在团队运行中纠正某个成员（“XX 方向错了”“改成…”“停掉 XX”）时，先 get_agent_team 找到对应 task_key，"
+        "用 cancel_agent_team_task 只停该成员任务，其余成员继续；再用 create_agent_team 为修正后的目标派发新任务，"
+        "并向用户列出停了哪个成员、新任务交给谁、具体做什么。"
         "唯一超级管理员在管理小菱中创建服务器运维团队时，成员必须使用 agent:operations，"
         "任务 input 必须是 {action,params}，且 action 必须来自 list_agents 返回的 team_input_contract.action；"
         "不得用 monitor、security_sentinel 或 dashboard 代替服务器运维。团队只允许只读运维，"
@@ -4994,7 +5005,9 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "队列或运行状态只允许原样报告等待，不得先回答用户问题。"
         "服务器验证过的 verified_team_snapshot 是唯一无需新建团队的自动终态回执；"
         "收到它时只核验并汇总，不要递归再建团队。"
-        "用户要求停止时立即调用 cancel_agent_team，并且不得重派、续跑或恢复该团队。"
+        "用户要求停止整个团队时立即调用 cancel_agent_team，并且不得重派、续跑或恢复该团队；"
+        "只要求停止或改派某个成员时用 cancel_agent_team_task，必要时用 create_agent_team 派发修正后的新任务。"
+        "能独立完成的规划直接组队执行，不要先问用户“是否创建团队/临时 Agent”；只有改动服务器的运维动作走审批。"
         "用户询问团队进度时由小菱用 get_agent_team 读取真实状态。"
         "临时成员定义仅限本账号和本团队，结束后保留团队审计。list_agents 返回 temporary_agent_retention_candidates 时，"
         "这些候选由服务端按同账号、同 surface 的历史团队实际状态计算：至少出现在 3 个独立团队，"
@@ -5113,6 +5126,17 @@ def _coordinator_transcript_without_images(
         item["content"] = text_parts
         sanitized.append(item)
     return sanitized
+
+
+def _is_explicit_task_redirect_request(text: str) -> bool:
+    """用户明确要求改派/纠正成员任务（“改成…”“换成…”“这个不对，重新…”）。"""
+    normalized = str(text or "").strip()
+    if not normalized or re.search(r"怎么|如何|能不能|能否|是否|可不可以|可以吗", normalized):
+        return False
+    return bool(re.search(
+        r"改成|改为|换成|换个|改派|重新派|重新分配|方向错|做错|不对|别做|不要做|调整.{0,6}任务|改.{0,4}任务",
+        normalized,
+    ))
 
 
 def _is_explicit_team_stop_request(text: str) -> bool:

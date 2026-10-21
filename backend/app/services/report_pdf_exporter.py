@@ -753,6 +753,7 @@ def _build_issues_section(
     issues: List[Dict[str, Any]],
     styles: Dict[str, ParagraphStyle],
     font_name: str,
+    empty_text: str = "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。",
 ) -> List[Any]:
     """构建问题列表章节(按严重度分组)。
 
@@ -771,7 +772,7 @@ def _build_issues_section(
     has_any_issue = any(len(grouped[key]) > 0 for key in grouped)
 
     if not has_any_issue:
-        elements.append(Paragraph("本次审查未发现问题。", styles["normal"]))
+        elements.append(Paragraph(empty_text, styles["normal"]))
         return elements
 
     for severity in _SEVERITY_ORDER + ("其他",):
@@ -868,7 +869,9 @@ def export_to_pdf(
     elements.extend(_build_score_breakdown_elements(statistics, styles, font_name))
 
     # 6. 问题详情(按严重度分组)
-    elements.extend(_build_issues_section(sorted_issues, styles, font_name))
+    elements.extend(_build_issues_section(
+        sorted_issues, styles, font_name, context.get("empty_issues_text") or "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。",
+    ))
 
     security_report = context.get("source", {}).get("security_report", {})
     security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None

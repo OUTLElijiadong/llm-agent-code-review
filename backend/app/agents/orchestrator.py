@@ -1002,6 +1002,35 @@ class Orchestrator(BaseAgent):
         except Exception as exc:
             return AgentResult(success=False, error=str(exc))
 
+    def cancel_agent_team_task(
+        self,
+        team_id: int,
+        task_keys: List[str],
+        reason: str = "按用户指令停止该成员任务",
+        ctx: Optional[AgentContext] = None,
+    ) -> AgentResult:
+        """只停止指定成员任务；其余成员继续执行。"""
+        del ctx
+        if self._db is None or self._user is None:
+            return AgentResult(success=False, error="停止成员任务缺少 DB 或用户上下文")
+        try:
+            from app.services import agent_team_service
+
+            data = agent_team_service.cancel_team_tasks(
+                self._db, self._user, team_id, list(task_keys or []), reason=reason,
+            )
+            return AgentResult(
+                success=True,
+                data={
+                    "team_id": data.get("team_id"),
+                    "status": data.get("status"),
+                    "stopped_tasks": data.get("stopped_tasks") or [],
+                    "counts": data.get("counts") or {},
+                },
+            )
+        except Exception as exc:
+            return AgentResult(success=False, error=str(exc))
+
     def retry_agent_team(
         self,
         team_id: int,

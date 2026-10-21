@@ -116,6 +116,9 @@ export interface AgentJob {
   schedule: string
   status: string
   last_run_at?: string | null
+  last_run_status?: string | null
+  last_run_error?: string | null
+  last_run_finished_at?: string | null
   config_json?: Record<string, unknown> | unknown[] | null
 }
 

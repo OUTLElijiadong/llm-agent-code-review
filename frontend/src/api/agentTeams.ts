@@ -268,6 +268,18 @@ export function cancelAgentTeam(teamId: number, reason = '用户取消'): Promis
   return post<AgentTeamMutationResult>(`/agent-teams/${encodeURIComponent(String(teamId))}/cancel`, { reason })
 }
 
+/** 只停止团队中指定成员任务；其余成员继续，依赖它的后续任务一并停止。 */
+export function cancelAgentTeamTasks(
+  teamId: number,
+  taskKeys: string[],
+  reason = '按用户指令停止该成员任务',
+): Promise<AgentTeamMutationResult> {
+  return post<AgentTeamMutationResult>(
+    `/agent-teams/${encodeURIComponent(String(teamId))}/tasks/cancel`,
+    { task_keys: taskKeys, reason },
+  )
+}
+
 export function retryAgentTeam(
   teamId: number,
   task_keys: string[] = [],

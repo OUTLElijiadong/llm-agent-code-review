@@ -33,17 +33,18 @@ function agentVisibleStorageKey(): string {
   return id ? `${AGENT_VISIBLE_PREFIX}${id}` : ''
 }
 
-// 浮窗打开状态按账号持久化:此前只存内存,退出登录后组件卸载,
-// 重新登录时状态归零,用户感觉"悬浮窗不见了"。
+// 浮窗打开状态只在当前标签页内记忆(刷新后保持);新登录、新标签页默认收起,
+// 避免 400×620 浮窗一进工作台就盖住页面(Codex 4.1.16 验收问题)。
+// 收起时右下角入口始终可见,运行中的任务不会因收起而中断。
 watch(agentVisible, (val) => {
   if (!val) agentPreferredSessionId.value = ''
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
-    if (val) window.localStorage.setItem(key, '1')
-    else window.localStorage.removeItem(key)
+    if (val) window.sessionStorage.setItem(key, '1')
+    else window.sessionStorage.removeItem(key)
   } catch {
-    // localStorage 不可用时退化为当前页面生命周期内记忆
+    // Storage 不可用时退化为当前页面生命周期内记忆
   }
 })
 
@@ -55,7 +56,8 @@ watch([canUseAgent, () => userStore.profile?.id], ([allowed, id]) => {
   const key = agentVisibleStorageKey()
   if (!key) return
   try {
-    agentVisible.value = window.localStorage.getItem(key) === '1'
+    window.localStorage.removeItem(key) // 清理旧版本的跨会话常开记录
+    agentVisible.value = window.sessionStorage.getItem(key) === '1'
   } catch {
     // 读取失败保持默认关闭
   }

@@ -45,9 +45,24 @@ def _seed(db, *, online=True):
     db.commit()
 
 
-def _enable_auto_dispatch(monkeypatch):
-    """旧行为测试显式开启派发;生产默认值必须保持成本保护。"""
+def _enable_auto_dispatch(monkeypatch, *, throttle=False):
+    """显式开启派发；默认关闭节流以便逐轮断言指纹刷新。"""
     monkeypatch.setattr(module.settings, "agent_jarvis_auto_dispatch_enabled", True)
+    monkeypatch.setattr(module, "_LAST_DISPATCH", {})
+    if not throttle:
+        monkeypatch.setattr(module, "_DISPATCH_MIN_INTERVAL", timedelta(0))
+
+
+def test_dispatch_throttle_blocks_repeat_warning_but_not_new_severe_alert():
+    module._LAST_DISPATCH.clear()
+    now = datetime(2026, 10, 21, 8, 0, 0)
+    warning = [{"id": "failed_runs_1h:2", "severity": "warning"}]
+    assert module._should_dispatch("s1", warning, now) is True
+    assert module._should_dispatch("s1", [{"id": "failed_runs_1h:3", "severity": "warning"}],
+                                   now + timedelta(minutes=5)) is False
+    assert module._should_dispatch("s1", [{"id": 9, "severity": "critical"}], now + timedelta(minutes=6)) is True
+    assert module._should_dispatch("s1", warning, now + timedelta(minutes=40)) is True
+    module._LAST_DISPATCH.clear()
 
 
 def test_patrol_collects_evidence_without_auto_dispatch(tmp_path, monkeypatch):

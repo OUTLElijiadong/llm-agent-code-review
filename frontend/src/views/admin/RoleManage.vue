@@ -101,11 +101,20 @@
 
     <!-- 数据范围设置对话框 -->
     <el-dialog v-model="scopeDialogVisible" title="设置数据范围" width="480px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="scope-enforcement-note"
+        title="数据范围当前仅作记录，尚未参与鉴权"
+        description="实际可访问的数据以项目成员关系为准：删除项目/文件、审批渗透授权都还要求对该项目有写权限或是他人提交的待授权任务，不会因为勾选了权限点就越过项目边界。"
+      />
       <el-form label-width="100px" v-loading="scopeLoading">
         <el-form-item label="角色">{{ roleNameText(currentRole) }}</el-form-item>
         <el-form-item label="范围类型">
           <el-radio-group v-model="scopeForm.scope_type">
             <el-radio value="all">全部数据</el-radio>
+            <el-radio value="project_member">参与的项目</el-radio>
             <el-radio value="custom">指定项目</el-radio>
             <el-radio value="project_own">仅本人</el-radio>
           </el-radio-group>
@@ -541,4 +550,5 @@ useAgentPageRefresh({ pages: ['/admin/access'], refresh: loadRoles, canRefresh: 
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
+.scope-enforcement-note { margin-bottom: 14px; }
 </style>

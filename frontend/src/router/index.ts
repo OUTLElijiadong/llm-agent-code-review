@@ -455,4 +455,30 @@ const router = createRouter({
 
 setupGuards(router)
 
+// 新版本发布后，旧标签页里懒加载的页面分包已不存在，跳转会失败成空白页。
+// 识别分包加载失败后按目标地址整页刷新一次（同一目标只刷新一次，防止循环）。
+const CHUNK_RELOAD_KEY = 'prism-chunk-reload-target'
+const CHUNK_ERROR_RE = /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading chunk [\w-]+ failed|ChunkLoadError/i
+
+router.onError((error, to) => {
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error)
+  if (!CHUNK_ERROR_RE.test(message)) return
+  const target = to?.fullPath || window.location.pathname
+  try {
+    if (window.sessionStorage.getItem(CHUNK_RELOAD_KEY) === target) return
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, target)
+  } catch {
+    // sessionStorage 不可用时仍刷新一次
+  }
+  window.location.assign(target)
+})
+
+router.afterEach(() => {
+  try {
+    window.sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+  } catch {
+    // ignore
+  }
+})
+
 export default router

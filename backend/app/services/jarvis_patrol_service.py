@@ -129,6 +129,21 @@ def _online_admin_sessions(db, now: datetime) -> list[AgentMeshConversation]:
     )
 
 
+# 主动运维投递节流：普通证据（失败次数、卡死沙箱）每个会话最多 30 分钟投递一次，
+# 避免“失败次数变化 → 新指纹 → 新运行 → 再失败”的自激；新的高危告警不受节流。
+_DISPATCH_MIN_INTERVAL = timedelta(minutes=30)
+_LAST_DISPATCH: dict[str, tuple[datetime, frozenset]] = {}
+
+
+def _should_dispatch(session_key: str, items: list[dict[str, Any]], now: datetime) -> bool:
+    severe = frozenset(str(item["id"]) for item in items if item.get("severity") in {"high", "critical"})
+    last = _LAST_DISPATCH.get(session_key)
+    if last is None or now - last[0] >= _DISPATCH_MIN_INTERVAL or (severe - last[1]):
+        _LAST_DISPATCH[session_key] = (now, severe | (last[1] if last else frozenset()))
+        return True
+    return False
+
+
 def patrol_once() -> dict[str, int]:
     """执行一次 JARVIS 巡逻;默认只采集证据,不触发模型调用。"""
     if not settings.agent_jarvis_patrol_enabled:
@@ -153,7 +168,12 @@ def patrol_once() -> dict[str, int]:
             # 管理员可在小菱中明确发起只读核验,不影响告警和审计记录。
             return {"alerts": len(items), "delivered": 0, "skipped": len(sessions)}
         delivered = 0
+        throttled = 0
+        now = _now()
         for conversation in sessions:
+            if not _should_dispatch(str(conversation.session_key), items, now):
+                throttled += 1
+                continue
             try:
                 _deliver_brief(
                     db,
@@ -170,7 +190,7 @@ def patrol_once() -> dict[str, int]:
                     exc,
                 )
                 db.rollback()
-        return {"alerts": len(items), "delivered": delivered, "skipped": 0}
+        return {"alerts": len(items), "delivered": delivered, "skipped": throttled}
     except Exception as exc:  # noqa: BLE001 - 巡逻异常不能杀死调度器
         logger.warning("[jarvis-patrol] patrol failed: {}", exc)
         db.rollback()
@@ -210,7 +230,8 @@ def _deliver_brief(
             "patrol_kind": "jarvis",
             "evidence": items,
             "recommendations": [
-                "先在管理小菱中复核证据,再决定处置;高危写操作必须等待你点击批准",
+                "管理小菱应主动规划:直接组建只读巡检团队(agent:operations 只读动作、monitor 等)核验证据,无需先询问",
+                "改动服务器的写操作(重启、配置、回滚、清理等)只给出方案,必须等待管理员点击批准",
                 "建议依次处理:未读高危告警 → 失败运行/卡死沙箱 → 节点健康 → 权限与审计异常",
                 "可用只读工具先核验:系统状态、指标快照、Worker 健康、审批中心清单",
             ],

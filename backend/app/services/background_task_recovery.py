@@ -224,6 +224,17 @@ def start_terminal_receipt_recovery_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    from app.services.agent_run_salvage import sweep_orphan_runs_once
+
+    scheduler.add_job(
+        sweep_orphan_runs_once,
+        "interval",
+        id="agent-orphan-run-sweep",
+        seconds=120,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     _terminal_receipt_scheduler = scheduler
     logger.info("[recovery] terminal Mesh receipt reconciler started")
@@ -243,6 +254,18 @@ def stop_terminal_receipt_recovery_scheduler() -> None:
 
 def _resume_agent_run(recovery: AgentRunRecovery) -> None:
     """在线程专属事件循环与数据库会话中重试一个检查点运行。"""
+    from app.services import agent_run_salvage
+
+    if agent_run_salvage.is_live(recovery.run_id):
+        logger.info("[recovery] 小菱运行 {} 已在本进程执行，跳过重复恢复", recovery.run_id)
+        return
+    with agent_run_salvage.live_run(recovery.run_id):
+        _resume_agent_run_locked(recovery)
+    # 恢复线程自身抛错且运行仍停在执行态时，按同一上限再自愈一次。
+    agent_run_salvage.salvage_crashed_run(recovery.run_id, error="恢复线程异常退出", delay_seconds=5.0)
+
+
+def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
     db = SessionLocal()
     try:
         user = db.get(User, recovery.user_id)
@@ -316,7 +339,7 @@ def _resume_agent_run(recovery: AgentRunRecovery) -> None:
             checkpoint = _load_checkpoint(row) or {}
             if row.status == "failed" and checkpoint.get("recovery_requested") is True:
                 checkpoint["recovery_requested"] = False
-                checkpoint["error"] = f"服务端自动恢复失败: {exc}"[:1000]
+                checkpoint["error"] = "服务端自动恢复未成功，进度已保留；可点击重试或换个说法让小菱改用其他方案。"
                 row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
                 row.version = int(row.version or 0) + 1
                 db.commit()

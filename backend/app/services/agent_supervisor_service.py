@@ -50,7 +50,7 @@ _LOW_RESPONSE_TOOLS = frozenset({
     "get_roundtable_discussion", "admin_release_health",
 })
 _MEDIUM_RESPONSE_TOOLS = frozenset({
-    "cancel_agent_team", "retry_agent_team", "create_project", "update_project", "start_review",
+    "cancel_agent_team", "cancel_agent_team_task", "retry_agent_team", "create_project", "update_project", "start_review",
     "generate_ai_prompt_for_issue", "generate_ai_prompt_for_task", "generate_ai_prompt_for_project",
     "audit_security_for_file", "audit_security_for_task", "audit_security_for_project",
     "run_full_project_validation", "deploy_project_sandbox", "close_sandbox", "extend_sandbox",
@@ -144,8 +144,12 @@ def review_agent_team_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
             code, operation, title=str(task.get("title") or ""),
             instructions=str(task.get("instructions") or ""), task_input=task_input,
         )
-        # 远程黑盒、正式渗透、管理/运维和职责未知成员均需确认。
-        if remote_target or code in {"operations", "incident_responder"} or code not in _READONLY_TEAM_AGENTS:
+        # 远程黑盒、正式渗透、改动服务器的运维和职责未知成员需确认；
+        # 只读运维巡检（成员执行层同样只放行只读动作）与其余已登记成员直接执行。
+        privileged_write = code in {"operations", "incident_responder"} and review.decision != ALLOW
+        if remote_target or privileged_write or (
+            code not in _READONLY_TEAM_AGENTS and code not in {"operations", "incident_responder"}
+        ):
             review = SupervisionReview(
                 ESCALATE, maximum_risk(review.risk_level, HIGH),
                 "团队任务包含外部目标、管理职责或无法确认的成员能力，等待当前账号确认",
@@ -277,7 +281,14 @@ def _review_team_task(
         risk = declared_capability_risk(spec.risk)
         return review_action("site." + spec.code, spec.page, declared_risk=risk)
     if code in {"operations", "incident_responder"}:
-        return SupervisionReview(ESCALATE, HIGH, "运维或事件处置任务需当前账号确认", True, "privileged_agent")
+        from app.services.ops_service import TEAM_READ_ONLY_ACTIONS
+
+        action = str(task_input.get("action") or "").strip()
+        # 只有 operations 成员的执行层强制只读动作清单，事件处置成员仍一律确认。
+        if code == "operations" and action and action in TEAM_READ_ONLY_ACTIONS:
+            return SupervisionReview(ALLOW, LOW, "只读运维巡检，不改动服务器", False, "ops_readonly")
+        return SupervisionReview(ESCALATE, HIGH, "改动服务器的运维或事件处置任务需当前账号确认", True,
+                                 "privileged_agent")
     if code in {"custom", "temporary"}:
         return SupervisionReview(ALLOW, MEDIUM, "该任务成员只能读取当前团队提供的有界源码或文本并返回分析", False,
                                  "bounded_readonly_agent")

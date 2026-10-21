@@ -133,5 +133,12 @@ class AgentTeamCancelIn(_StrictModel):
     reason: str = Field(default="用户取消", max_length=1000)
 
 
+
+class AgentTeamTaskCancelIn(_StrictModel):
+    """只停止团队中指定成员任务。"""
+
+    task_keys: List[str] = Field(min_length=1, max_length=20)
+    reason: str = Field(default="按用户指令停止该成员任务", max_length=1000)
+
 class AgentTeamArchiveIn(_StrictModel):
     reason: str = Field(default="归档", max_length=1000)

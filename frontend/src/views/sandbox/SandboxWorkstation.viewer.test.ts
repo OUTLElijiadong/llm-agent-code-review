@@ -183,6 +183,14 @@ describe('R3 沙箱只读资源门（本地 API 桩，不执行任务）', () =>
     expect(api.extend).not.toHaveBeenCalled()
   })
 
+  it('0 文件项目不能调用测试 Agent（Codex 4.1.16）', async () => {
+    api.projects.mockResolvedValue({ items: [{ ...project, file_count: 0 }], total: 1 })
+    const { vm } = await render()
+    expect(vm.submitDisabled).toBe(true)
+    await vm.submit()
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
   it('合法执行能力和全局权限保留创建与续期入口', async () => {
     const { vm } = await render()
     expect(vm.submitDisabled).toBe(false)

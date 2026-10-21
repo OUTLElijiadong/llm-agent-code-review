@@ -2964,3 +2964,71 @@ def test_list_team_events_limit_and_has_more(db, team_user):
             db, team_user, team_id, after_id=page["next_after_id"], limit=500
         )
         assert nxt["items"][0]["event_id"] > page["items"][0]["event_id"]
+
+
+def _two_worker_summary_payload():
+    return _payload(
+        max_active_children=2,
+        members=[
+            {"member_key": "quality", "display_name": "代码质量", "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "security", "display_name": "安全审查", "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "summary", "display_name": "汇总", "address": "agent:reporter", "role": "summarizer"},
+        ],
+        tasks=[
+            {"task_key": "quality", "member_key": "quality", "title": "代码质量检查", "instructions": "检查代码质量",
+             "priority": 100},
+            {"task_key": "security", "member_key": "security", "title": "安全检查", "instructions": "检查安全问题",
+             "priority": 90},
+            {"task_key": "summary", "member_key": "summary", "title": "汇总", "instructions": "汇总结果",
+             "depends_on": ["quality", "security"]},
+        ],
+    )
+
+
+def test_cancel_single_member_task_keeps_siblings_running_and_completes_team(db, team_user):
+    """用户通过小菱停掉一个方向错误的成员：其余成员继续，团队不因此失败。"""
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _two_worker_summary_payload())
+    quality = agent_team_service.claim_next_task(db, created["team_id"])
+    security = agent_team_service.claim_next_task(db, created["team_id"])
+
+    after_cancel = agent_team_service.cancel_team_tasks(
+        db, team_user, created["team_id"], ["quality"], reason="方向错误，改派",
+    )
+    by_key = {item["task_key"]: item for item in after_cancel["tasks"]}
+    assert after_cancel["stopped_tasks"] == ["quality"]
+    assert by_key["quality"]["status"] == "cancelled"
+    assert by_key["security"]["status"] == "running"
+    assert after_cancel["status"] not in {"failed", "cancelled"}
+
+    with pytest.raises(agent_team_service.AgentTeamError):
+        agent_team_service.complete_task(
+            db, created["team_id"], quality["task_id"], lease_token=quality["lease_token"],
+            result={"status": "completed", "summary": "迟到结果"}, success=True,
+        )
+
+    agent_team_service.complete_task(
+        db, created["team_id"], security["task_id"], lease_token=security["lease_token"],
+        result={"status": "completed", "summary": "无高危"}, success=True,
+    )
+    summary = agent_team_service.claim_next_task(db, created["team_id"])
+    assert summary["task_key"] == "summary"
+    final = agent_team_service.complete_task(
+        db, created["team_id"], summary["task_id"], lease_token=summary["lease_token"],
+        result={"status": "completed", "summary": "安全无高危；质量检查已按指令停止"}, success=True,
+    )
+    assert final["status"] == "completed"
+    assert final["summary"]["cancelled_tasks"] == ["quality"]
+
+
+def test_cancel_all_worker_tasks_closes_team_as_cancelled(db, team_user):
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _two_worker_summary_payload())
+    final = agent_team_service.cancel_team_tasks(db, team_user, created["team_id"], ["quality", "security"])
+    assert final["status"] == "cancelled"
+    with pytest.raises(agent_team_service.AgentTeamError):
+        agent_team_service.cancel_team_tasks(db, team_user, created["team_id"], ["quality"])
+
+
+def test_cancel_unknown_task_key_is_rejected(db, team_user):
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _two_worker_summary_payload())
+    with pytest.raises(agent_team_service.AgentTeamValidationError):
+        agent_team_service.cancel_team_tasks(db, team_user, created["team_id"], ["nope"])

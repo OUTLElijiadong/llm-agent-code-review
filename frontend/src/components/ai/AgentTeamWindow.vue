@@ -6,6 +6,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 
 import {
   cancelAgentTeam,
+  cancelAgentTeamTasks,
   previewRetryAgentTeam,
   retryAgentTeam,
   type AgentTeamDetail,
@@ -440,6 +441,37 @@ async function retryFailed(): Promise<void> {
   }
 }
 
+/** 只停止一个方向错误的成员任务；其余成员继续，可再让小菱派发修正后的任务。 */
+async function stopMemberTask(task: AgentTeamTask): Promise<void> {
+  const target = captureTeamOperationTarget()
+  if (!target || !canCancel.value) return
+  actionSubmitting.value = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `只停止「${task.title}」,其他成员继续执行;依赖它的后续任务会一并停止。需要改派时直接告诉小菱新的要求。`,
+        '停止该成员任务',
+        { confirmButtonText: '停止该任务', cancelButtonText: '先不了', type: 'warning', confirmButtonClass: 'el-button--danger' },
+      )
+    } catch {
+      return
+    }
+    if (!isTeamOperationTargetCurrent(target)) {
+      notifyChangedTarget()
+      return
+    }
+    await cancelAgentTeamTasks(target.teamId, [task.task_key], '用户在团队悬浮窗停止该成员任务')
+    if (!isTeamOperationTargetCurrent(target)) return
+    ElMessage.success('已停止该成员任务,其余成员继续执行')
+    emit('refreshed')
+  } catch {
+    if (!isTeamOperationTargetCurrent(target)) return
+    ElMessage.error('停止失败,请稍后再试')
+  } finally {
+    if (isTeamOperationTargetCurrent(target)) actionSubmitting.value = false
+  }
+}
+
 async function cancelTeam(): Promise<void> {
   const target = captureTeamOperationTarget()
   if (!target || !canCancel.value) return
@@ -536,7 +568,9 @@ async function cancelTeam(): Promise<void> {
               :events="props.team?.events ?? []"
               :team-started-at="team.started_at"
               show-ask
+              :show-stop="canCancel && !actionSubmitting"
               @ask="team && emit('ask-member', { teamId: team.team_id, name: $event.display_name, address: $event.address })"
+              @stop="stopMemberTask"
             />
           </section>
 

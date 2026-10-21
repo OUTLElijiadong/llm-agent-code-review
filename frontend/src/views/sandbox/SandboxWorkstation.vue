@@ -264,8 +264,14 @@ const availableWorkers = computed(() => workers.value.filter((worker) => (
       : (form.remote_target_url.trim() && form.test_mode === 'blackbox' ? 'whitebox' : form.test_mode),
   )
 )))
+// 0 文件项目没有可执行的源码：沙箱只会拿到空归档，必须在提交前拦截。
+const selectedProjectEmpty = computed(() => (
+  // 文件数未知时交给后端兜底拦截，避免旧接口缺字段时误禁用。
+  typeof selectedFormProject.value?.file_count === 'number' && selectedFormProject.value.file_count <= 0
+))
 const submitDisabled = computed(() => (
   !form.project_id
+  || selectedProjectEmpty.value
   || !canAccessExecution.value
   || selectedFormProject.value?.can_execute !== true
   || submitting.value
@@ -430,6 +436,10 @@ async function submit(): Promise<void> {
   }
   if (!canAccessExecution.value || selectedFormProject.value?.can_execute !== true) {
     ElMessage.warning('该项目仅可查看或未确认执行权限，不能创建任务')
+    return
+  }
+  if (selectedProjectEmpty.value) {
+    ElMessage.warning('该项目还没有代码文件，请先上传源码')
     return
   }
   if (remoteAuthorizationRequired.value && !form.remote_target_authorized) {
@@ -719,6 +729,7 @@ onBeforeUnmount(() => {
               <el-option v-for="project in projects" :key="project.id" :label="project.can_execute === true ? project.project_name : `${project.project_name}（${project.can_execute === false ? '仅可查看' : '未确认执行权限'}）`" :value="project.id" :disabled="project.can_execute !== true" />
             </el-select>
             <div v-if="selectedFormProject && selectedFormProject.can_execute !== true" class="field-hint">该项目仅可查看，不能创建或运行环境。</div>
+            <div v-else-if="selectedProjectEmpty" class="field-hint field-hint-warn" role="alert">该项目还没有代码文件，请先上传源码或从 GitHub 导入后再调用 Agent。</div>
           </el-form-item>
 
           <el-form-item v-if="sourceRevisions.length" label="源码版本">
@@ -982,6 +993,7 @@ onBeforeUnmount(() => {
 .mode-title { font-size: 13px; font-weight: 650; color: var(--gray-800); }
 .mode-hint { font-size: 11px; line-height: 1.4; color: var(--gray-500); }
 .field-hint { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--gray-500); }
+.field-hint-warn { color: var(--el-color-warning-dark-2, #b88230); }
 .authorization-row { margin: -7px 0 16px; padding: 9px 11px; border-left: 3px solid var(--color-warning); background: var(--color-warning-light); }
 .authorization-row :deep(.el-checkbox) { height: auto; white-space: normal; }
 .http-scope-panel { margin: 0 0 16px; padding: 12px; border: 1px solid var(--color-border-base); border-radius: 6px; background: var(--surface-2); }

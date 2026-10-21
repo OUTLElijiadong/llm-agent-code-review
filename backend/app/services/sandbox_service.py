@@ -8252,6 +8252,17 @@ def create_environment(
         raise
 
 
+def _archive_is_empty(archive: bytes) -> bool:
+    """0 文件项目会导出空 ZIP；非 ZIP 的隔离归档交给后续格式校验。"""
+    if not archive:
+        return True
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+            return not any(not info.is_dir() for info in zipped.infolist())
+    except zipfile.BadZipFile:
+        return False
+
+
 def _create_environment_locked(
     db: Session,
     actor: User,
@@ -8355,6 +8366,8 @@ def _create_environment_locked(
         archive = source_revision_snapshot["archive"]
     else:
         archive, archive_filename = project_source_service.build_source_archive(db, actor, project_id)
+    if _archive_is_empty(archive):
+        raise ValidationError("项目没有可执行的代码文件，请先上传源码", code=40001)
     if source_revision_id:
         archive_filename = "source-revision.zip"
     try:

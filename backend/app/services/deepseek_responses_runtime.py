@@ -1350,13 +1350,30 @@ class DeepSeekResponsesRuntime:
                     else:
                         raise ContextBudgetError("语义摘要来源选择无法收敛；未发送过期摘要")
             except ContextBudgetError as exc:
-                persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
-                if persisted_cancelled is not None:
-                    return persisted_cancelled
-                checkpoint.status = FAILED
-                checkpoint.error = f"Responses 上下文超出安全预算，已拒绝发送: {exc}"
-                await self._store.save(checkpoint)
-                return self._result(checkpoint, events=events)
+                # 语义摘要失败或单条工具输出过大时不终止任务：截断超长工具输出、
+                # 收缩保留窗口并改用确定性摘要后继续执行；仍放不下才安全失败。
+                emergency = emergency_compact_transcript(
+                    checkpoint.transcript,
+                    context_window_tokens=self._context_window_tokens,
+                    max_output_tokens=output_budget,
+                    compaction_threshold_tokens=min(
+                        self._compaction_threshold_tokens, self._context_window_tokens - output_budget,
+                    ),
+                    keep_recent_tokens=min(
+                        self._keep_recent_tokens, self._context_window_tokens - output_budget,
+                    ),
+                    overhead_tokens=overhead_tokens,
+                )
+                if emergency is None:
+                    persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
+                    if persisted_cancelled is not None:
+                        return persisted_cancelled
+                    checkpoint.status = FAILED
+                    checkpoint.error = f"Responses 上下文超出安全预算，已拒绝发送: {exc}"
+                    await self._store.save(checkpoint)
+                    return self._result(checkpoint, events=events)
+                projected_input, context_metadata = emergency
+                context_metadata = {**context_metadata, "emergency_reason": str(exc)[:300]}
 
             persisted_cancelled = await self._refresh_cancelled_checkpoint(checkpoint)
             if persisted_cancelled is not None:
@@ -2062,6 +2079,71 @@ def compact_transcript(
                 f"超过可用输入预算 {transcript_budget} tokens"
             )
         selected.difference_update(_paired_item_indices(items, removable[0]))
+
+
+_TRUNCATION_NOTE = "…[平台已截断，需要完整内容请用对应读取工具重新分页读取]…"
+
+
+def _shorten_text(text: str, limit_chars: int) -> str:
+    if len(text) <= limit_chars:
+        return text
+    head = max(1, limit_chars * 2 // 3)
+    tail = max(1, limit_chars - head)
+    return text[:head] + _TRUNCATION_NOTE + text[-tail:]
+
+
+def _shorten_non_user_items(items: List[Dict[str, Any]], limit_chars: int) -> List[Dict[str, Any]]:
+    """缩短助手文本与工具输出；用户消息（目标与约束）一字不改。"""
+    for index, item in enumerate(items):
+        if index == 0 or str(item.get("role") or "") == "user":
+            continue
+        item_type = str(item.get("type") or "")
+        if item_type == "function_call_output" and isinstance(item.get("output"), str):
+            item["output"] = _shorten_text(item["output"], limit_chars)
+        elif str(item.get("role") or "") == "assistant":
+            content = item.get("content")
+            if isinstance(content, str):
+                item["content"] = _shorten_text(content, limit_chars)
+            elif isinstance(content, list):
+                for piece in content:
+                    if isinstance(piece, dict) and isinstance(piece.get("text"), str):
+                        piece["text"] = _shorten_text(piece["text"], limit_chars)
+    return items
+
+
+def emergency_compact_transcript(
+    transcript: Sequence[Mapping[str, Any]],
+    *,
+    context_window_tokens: int,
+    max_output_tokens: int,
+    compaction_threshold_tokens: int,
+    keep_recent_tokens: int,
+    overhead_tokens: int = 0,
+) -> Optional[Tuple[List[Dict[str, Any]], Dict[str, Any]]]:
+    """语义压缩失败时的兜底投影，返回 None 表示确实无法安全发送。
+
+    只缩短可重新读取的助手文本与工具输出，并使用确定性来源索引（不调用模型），
+    因此任何用户目标与约束都原文保留；仍放不下时按原规则拒绝发送。
+    """
+    budget = context_window_tokens - max_output_tokens - overhead_tokens
+    if budget <= 0 or not transcript:
+        return None
+    for limit_chars in (2000, 600, 160):
+        items = _shorten_non_user_items([copy.deepcopy(dict(item)) for item in transcript], limit_chars)
+        try:
+            projected, metadata = compact_transcript(
+                items,
+                context_window_tokens=context_window_tokens,
+                max_output_tokens=max_output_tokens,
+                compaction_threshold_tokens=compaction_threshold_tokens,
+                keep_recent_tokens=keep_recent_tokens,
+                overhead_tokens=overhead_tokens,
+                semantic_summary=None,
+            )
+        except (ContextBudgetError, ValueError):
+            continue
+        return projected, {**metadata, "emergency_compaction": True, "emergency_limit_chars": limit_chars}
+    return None
 
 
 def _validate_context_budget(

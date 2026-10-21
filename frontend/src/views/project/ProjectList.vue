@@ -1232,8 +1232,10 @@ onBeforeUnmount(() => {
 
 .prism-table {
   width: 100%;
-  min-width: 960px;
-  border-collapse: collapse;
+  /* 窄屏横向滚动而不是把中文表头/状态逐字竖排；操作列固定在右侧始终可点。 */
+  min-width: 1180px;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
 
   thead th {
@@ -1245,7 +1247,10 @@ onBeforeUnmount(() => {
     font-size: 12px;
     letter-spacing: 0.02em;
     border-bottom: 1px solid var(--gray-100);
+    white-space: nowrap;
   }
+
+  tbody td:not(:first-child) { white-space: nowrap; }
 
   tbody tr {
     cursor: pointer;
@@ -1261,9 +1266,20 @@ onBeforeUnmount(() => {
     vertical-align: middle;
   }
 
-  .col-act { white-space: nowrap; text-align: right; }
-  .col-score { width: 90px; }
-  .col-files { width: 80px; }
+  .col-act {
+    white-space: nowrap;
+    text-align: right;
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    background: #fff;
+    box-shadow: -6px 0 8px -6px rgba(15, 23, 42, 0.12);
+  }
+  thead .col-act { background: var(--gray-50); }
+  tbody tr:hover .col-act { background: var(--brand-50); }
+  .col-name { min-width: 240px; }
+  .col-score { min-width: 120px; }
+  .col-files { min-width: 110px; }
   .col-status { width: 100px; }
   .col-lang { width: 110px; }
   .col-last, .col-create { width: 160px; }

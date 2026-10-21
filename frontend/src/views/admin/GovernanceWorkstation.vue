@@ -804,6 +804,26 @@ watch(selectedAgent, () => {
 onMounted(loadData)
 
 useAgentPageRefresh({ pages: ['/admin/governance', '/admin/operations'], refresh: loadData, canRefresh: () => !loading.value })
+
+function jobRunStatusText(status?: string | null): string {
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'running') return '运行中'
+  return status ? status : '已运行'
+}
+
+function jobRunTagType(status?: string | null): 'success' | 'danger' | 'warning' | 'info' {
+  if (status === 'success') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'running') return 'warning'
+  return 'info'
+}
+
+function jobRunTime(value?: string | null): string {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
 </script>
 
 <template>
@@ -1344,6 +1364,18 @@ useAgentPageRefresh({ pages: ['/admin/governance', '/admin/operations'], refresh
             </el-select>
           </template>
         </el-table-column>
+        <el-table-column label="最近执行" min-width="190">
+          <template #default="{ row }">
+            <div v-if="row.last_run_status || row.last_run_at" class="job-last-run">
+              <el-tag size="small" :type="jobRunTagType(row.last_run_status)" effect="plain">
+                {{ jobRunStatusText(row.last_run_status) }}
+              </el-tag>
+              <span class="job-last-run-time">{{ jobRunTime(row.last_run_finished_at || row.last_run_at) }}</span>
+              <small v-if="row.last_run_error" class="job-last-run-error" :title="row.last_run_error">{{ row.last_run_error }}</small>
+            </div>
+            <span v-else class="job-last-run-none">尚未运行</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button link type="primary" @click="onRunJob(row)">运行</el-button>
@@ -1819,4 +1851,8 @@ pre {
 .metric.is-link:hover { transform: translateY(-1px); }
 .metric.is-link:hover span { color: var(--brand-600); }
 .metric strong.is-warn { color: var(--color-danger); }
+.job-last-run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.job-last-run-time { font-size: 12px; color: var(--gray-600, #4b5563); white-space: nowrap; }
+.job-last-run-error { flex-basis: 100%; font-size: 11px; color: var(--el-color-danger, #d03050); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.job-last-run-none { font-size: 12px; color: var(--gray-400, #9ca3af); }
 </style>

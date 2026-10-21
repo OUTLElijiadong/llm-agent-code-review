@@ -206,7 +206,7 @@ async def test_xiaoling_runtime_always_uses_coordinator_tool_scope(db, monkeypat
     assert captured["max_rounds"] == service_module.settings.agent_responses_max_rounds
     assert captured["completion_guard"] == service._validate_xiaoling_completion
     assert {item["name"] for item in await executor.tool_schemas()} == {
-        "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team",
+        "list_agents", "create_agent_team", "get_agent_team", "cancel_agent_team", "cancel_agent_team_task",
         "retry_agent_team", "user_describe_capabilities", "admin_describe_capabilities",
     }
 

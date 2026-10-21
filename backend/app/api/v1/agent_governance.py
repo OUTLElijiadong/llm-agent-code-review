@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -640,7 +641,29 @@ def list_jobs(db: Session = Depends(get_db), actor: User = Depends(require_admin
     rows = scheduler_service.ensure_default_jobs(db)
     if not scheduler_service.can_access_restricted_jobs(db, actor):
         rows = [row for row in rows if not scheduler_service.requires_super_admin(row.job_type)]
-    return Resp(data=[AgentJobOut.model_validate(row) for row in rows])
+    # 列表直接带上每个任务最近一次运行的结果，页面不必再拼运行记录。
+    latest: dict[int, AgentJobRun] = {}
+    job_ids = [row.id for row in rows]
+    if job_ids:
+        latest_ids = (
+            db.query(func.max(AgentJobRun.id))
+            .filter(AgentJobRun.job_id.in_(job_ids))
+            .group_by(AgentJobRun.job_id)
+        )
+        for run in db.query(AgentJobRun).filter(AgentJobRun.id.in_(latest_ids.scalar_subquery())).all():
+            latest[run.job_id] = run
+    data = []
+    for row in rows:
+        out = AgentJobOut.model_validate(row)
+        run = latest.get(row.id)
+        if run is not None:
+            out.last_run_status = run.status
+            out.last_run_error = (str(run.error)[:300] if run.error else None)
+            finished = run.finished_at or run.started_at
+            if finished is not None:
+                out.last_run_finished_at = finished.isoformat()
+        data.append(out)
+    return Resp(data=data)
 
 
 @router.put("/jobs/{job_id}", response_model=Resp[AgentJobOut])

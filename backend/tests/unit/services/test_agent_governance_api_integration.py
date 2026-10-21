@@ -820,6 +820,10 @@ def test_admin_governance_api_business_loop(admin_api_client):
     assert job["schedule"] == "daily@02:10"
     run = _ok(client, "post", f"/api/admin/jobs/{reflection_job['id']}/run")
     assert run["status"] in {"success", "failed"}
+    # Codex 4.1.16：调度列表直接给出最近一次执行结果与时间。
+    listed = next(item for item in _ok(client, "get", "/api/admin/jobs") if item["id"] == reflection_job["id"])
+    assert listed["last_run_status"] == run["status"]
+    assert listed["last_run_finished_at"]
 
     alert = AgentAlert(alert_type="integration", severity="warning", status="open", title="集成告警")
     db.add(alert)

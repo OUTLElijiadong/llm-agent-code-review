@@ -1620,3 +1620,31 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "REFERENCE_TOKEN_20260827",
     ):
         assert token in document_xml
+
+
+@pytest.mark.parametrize("template_type", ["simple", "detailed", "compliance"])
+def test_failed_report_without_score_never_claims_no_issues(template_type: str) -> None:
+    """Codex 4.1.16 P1：失败且无有效分数的报告不得写“本次审查未发现问题”。"""
+    task = _make_task(
+        status="failed", processed_files=0, total_issues=0, score=None,
+        coverage={"coverage_status": "failed"},
+    )
+    html = export_to_html(task, [], "", None, load_builtin_template(template_type))
+    assert "本次审查未发现问题" not in html
+    assert "不能据此判定无问题" in html
+    for blob in (export_to_pdf(task, [], "", None), export_to_word(task, [], "", None)):
+        assert blob
+
+
+def test_empty_issue_text_distinguishes_clean_partial_and_inconclusive() -> None:
+    clean = _build_report_context(_make_task(total_issues=0), [], "", 100)
+    assert clean["empty_issues_text"] == "本次审查未发现问题。"
+    partial = _build_report_context(_make_task(
+        status="failed", processed_files=1, total_issues=0,
+        coverage={"coverage_status": "failed", "completed_files": 1},
+    ), [], "", None)
+    assert "已审范围内未发现问题" in partial["empty_issues_text"]
+    failed = _build_report_context(_make_task(
+        status="failed", processed_files=0, total_issues=0, coverage={"coverage_status": "failed"},
+    ), [], "", None)
+    assert "不能据此判定无问题" in failed["empty_issues_text"]

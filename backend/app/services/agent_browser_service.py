@@ -81,6 +81,8 @@ _ROUTES = (
     (r"/reviews(?:/\d+)?", ("review:view",)),
     (r"/pentests/start", ("pentest:start",)),
     (r"/pentests(?:/[A-Za-z0-9_-]+)?", ("pentest:view",)),
+    (r"/remote-pentests/start", ("pentest:start",)),
+    (r"/remote-pentests(?:/[A-Za-z0-9_-]+)?", ("pentest:view",)),
     (r"/(?:security|rules)", ("security:view", "rule:view")),
     (r"/reports(?:/\d+)?", ("report:view",)),
     (r"/report/templates", ("report:template_manage",)),

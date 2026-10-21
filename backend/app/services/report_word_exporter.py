@@ -677,7 +677,9 @@ def _build_issue_paragraph(doc: Any, issue: Dict[str, Any], index: int, severity
         )
 
 
-def _build_issues_section(doc: Any, issues: List[Dict[str, Any]]) -> None:
+def _build_issues_section(
+    doc: Any, issues: List[Dict[str, Any]], empty_text: str = "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。",
+) -> None:
     """构建问题列表章节(按严重度分组)。
 
     Args:
@@ -694,7 +696,7 @@ def _build_issues_section(doc: Any, issues: List[Dict[str, Any]]) -> None:
 
     if not has_any_issue:
         empty_para = doc.add_paragraph()
-        _add_run(empty_para, "本次审查未发现问题。", size=11)
+        _add_run(empty_para, empty_text, size=11)
         return
 
     for severity in _SEVERITY_ORDER + ("其他",):
@@ -781,7 +783,7 @@ def export_to_word(
     _build_score_breakdown(doc, statistics)
 
     # 6. 问题详情(按严重度分组)
-    _build_issues_section(doc, sorted_issues)
+    _build_issues_section(doc, sorted_issues, context.get("empty_issues_text") or "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。")
 
     security_report = context.get("source", {}).get("security_report", {})
     security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None

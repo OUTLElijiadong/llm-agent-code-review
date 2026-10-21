@@ -30,15 +30,32 @@ const props = withDefaults(defineProps<{
   showAsk?: boolean
   /** 最多展示的操作日志条数。 */
   logLimit?: number
+  /** 是否展示「停止此任务」按钮(团队仍在运行时由父组件开启)。 */
+  showStop?: boolean
 }>(), {
   tasks: () => [],
   events: () => [],
   teamStartedAt: null,
   showAsk: false,
   logLimit: 3,
+  showStop: false,
 })
 
-const emit = defineEmits<{ ask: [member: AgentTeamMember] }>()
+const emit = defineEmits<{ ask: [member: AgentTeamMember]; stop: [task: AgentTeamTask] }>()
+
+const TASK_STATUS_TEXT: Record<string, string> = {
+  waiting_dependency: '等待前置', queued: '排队', running: '进行中', completed: '已完成',
+  failed: '失败', dead_letter: '失败', blocked: '被阻断', cancelled: '已停止', expired: '已过期',
+}
+const TERMINAL_TASK = new Set(['completed', 'failed', 'dead_letter', 'blocked', 'cancelled', 'expired'])
+
+function taskStatusText(status: string): string {
+  return TASK_STATUS_TEXT[status] ?? status
+}
+
+function canStopTask(task: AgentTeamTask): boolean {
+  return props.showStop && !TERMINAL_TASK.has(task.status)
+}
 
 const ROLE_LABELS: Record<string, string> = {
   worker: '执行', verifier: '验证', summarizer: '汇总',
@@ -137,6 +154,23 @@ const memberTasks = computed(() => props.tasks.filter((task) => (
 )))
 
 const runningTask = computed(() => memberTasks.value.find((task) => task.status === 'running'))
+
+/**
+ * 卡片只展开未完成的任务(进行中/排队/失败等)及其派发内容,最多 4 条;
+ * 已完成任务折叠为日志里的「已完成 N 项」,完整列表在团队任务页查看。
+ */
+const VISIBLE_TASK_LIMIT = 4
+const openTasks = computed(() => memberTasks.value.filter((task) => task.status !== 'completed'))
+const visibleTasks = computed(() => openTasks.value.slice(0, VISIBLE_TASK_LIMIT))
+const hiddenTaskCount = computed(() => Math.max(0, openTasks.value.length - VISIBLE_TASK_LIMIT))
+
+/** 成员级进度:小菱派给它的任务完成了几项。 */
+const memberProgressText = computed(() => {
+  const total = memberTasks.value.length
+  if (!total) return ''
+  const done = memberTasks.value.filter((task) => task.status === 'completed').length
+  return `完成 ${done}/${total}`
+})
 
 /** 状态主文案:running 时优先展示当前任务标题,否则为通俗状态词。 */
 const statusText = computed(() => {
@@ -238,7 +272,29 @@ function statusClass(status: string): string {
         <i v-if="isRunning" class="member-work-pulse" aria-hidden="true"></i>
         <span class="member-work-status-text" :title="statusText">{{ statusText }}</span>
         <span v-if="timingText" class="member-work-timing">{{ timingText }}</span>
+        <span v-if="memberProgressText" class="member-work-progress">{{ memberProgressText }}</span>
       </div>
+      <ol v-if="visibleTasks.length" class="member-work-tasks" aria-label="小菱派给该成员的任务">
+        <li v-for="task in visibleTasks" :key="task.task_id" class="member-work-task" :class="statusClass(task.status)">
+          <div class="member-work-task-head">
+            <span class="member-work-task-status">{{ taskStatusText(task.status) }}</span>
+            <span class="member-work-task-title" :title="task.title">{{ task.title }}</span>
+            <span v-if="task.attempt_count > 1" class="member-work-task-attempt">第 {{ task.attempt_count }} 次</span>
+            <button
+              v-if="canStopTask(task)"
+              class="member-work-stop"
+              type="button"
+              :title="`只停止「${task.title}」，其余成员继续`"
+              @click.stop="emit('stop', task)"
+            >停止</button>
+          </div>
+          <details v-if="task.instructions" class="member-work-task-brief">
+            <summary>小菱的派发内容</summary>
+            <p>{{ task.instructions }}</p>
+          </details>
+        </li>
+        <li v-if="hiddenTaskCount" class="member-work-task-more">另有 {{ hiddenTaskCount }} 项未完成任务，见团队任务列表</li>
+      </ol>
       <ul v-if="logLines.length" class="member-work-log" aria-label="最近操作">
         <li v-for="line in logLines" :key="line.key">
           <time v-if="line.time">{{ line.time }}</time>
@@ -386,4 +442,43 @@ function statusClass(status: string): string {
   .member-work-pulse { animation: none; }
   .member-work-ask { transition: none; }
 }
+.member-work-progress {
+  flex: none;
+  margin-left: auto;
+  color: var(--gray-500, #6b7280);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.member-work-tasks { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; padding: 0; list-style: none; }
+.member-work-task {
+  padding: 5px 8px;
+  border: 1px solid var(--gray-200, #e0e3ea);
+  border-radius: 8px;
+  background: #fff;
+}
+.member-work-task.is-running { border-color: var(--brand-200, #b7b3fb); }
+.member-work-task.is-cancelled, .member-work-task.is-blocked { opacity: 0.72; }
+.member-work-task-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.member-work-task-status { flex: none; color: var(--brand-600, #4f46e5); font-weight: 600; }
+.member-work-task.is-completed .member-work-task-status { color: var(--color-success, #2f9e5f); }
+.member-work-task.is-failed .member-work-task-status,
+.member-work-task.is-dead_letter .member-work-task-status { color: var(--el-color-danger, #d03050); }
+.member-work-task-title { min-width: 0; overflow: hidden; color: var(--gray-800, #1f2937); text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.member-work-task-attempt { flex: none; color: var(--gray-500, #6b7280); font-size: 11px; }
+.member-work-stop {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid rgba(220, 73, 97, 0.45);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--el-color-danger, #d03050);
+  font-size: 11px;
+  cursor: pointer;
+}
+.member-work-stop:hover { background: rgba(220, 73, 97, 0.08); }
+.member-work-stop:focus-visible { outline: 2px solid var(--el-color-danger, #d03050); outline-offset: 1px; }
+.member-work-task-brief { margin-top: 3px; font-size: 11.5px; color: var(--gray-600, #4b5563); }
+.member-work-task-brief summary { cursor: pointer; color: var(--gray-500, #6b7280); }
+.member-work-task-brief p { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
+.member-work-task-more { color: var(--gray-500, #6b7280); font-size: 11px; padding-left: 2px; }
 </style>

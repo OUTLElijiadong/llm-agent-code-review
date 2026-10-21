@@ -134,8 +134,35 @@ def add_document(
 # ──────────────────────────────────────────────────────────
 # 检索(RAG 核心)
 # ──────────────────────────────────────────────────────────
+# 低于此相似度的切片视为不相关，不再返回给页面或注入小菱上下文。
+# 中文语义模型在无关段落之间也常有 0.5~0.6 的余弦，因此没有词面重合时要求更高的相似度；
+# 哈希词袋降级向量的伪相似更明显，必须有词面重合。
+_MIN_SEMANTIC_SCORE = 0.35
+_STRONG_SEMANTIC_SCORE = 0.68
+_MIN_SEMANTIC_OVERLAP = 0.2
+_MIN_FALLBACK_SCORE = 0.25
+_MIN_LEXICAL_OVERLAP = 0.34
+
+
+def _query_terms(text: str) -> set[str]:
+    """检索用词项：英文/数字词与中文二元组；查询只有单字时退化为单字。"""
+    tokens = embedding_service._tokenize(text)
+    terms = {tok for tok in tokens if len(tok) > 1}
+    return terms or set(tokens)
+
+
+def _lexical_overlap(query_terms: set[str], content: str) -> float:
+    if not query_terms:
+        return 0.0
+    content_terms = set(embedding_service._tokenize(content))
+    return len(query_terms & content_terms) / len(query_terms)
+
+
 def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict]:
     """在用户私有知识库内检索最相关切片
+
+    只比较同一嵌入模型产生的向量；模型不一致（历史切片、配置切换）或使用哈希降级时，
+    按词面重合度判定相关性，避免把不相关文档以 60% 左右的“相似度”返回。
 
     Returns:
         list[dict]: { content, score, doc_id, title, source_type }
@@ -143,9 +170,8 @@ def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict
     query = (query or "").strip()
     if not query:
         return []
-    qvec, _ = embedding_service.embed_one(db, query, user_id=user_id)
-    if not qvec:
-        return []
+    qvec, qtag = embedding_service.embed_one(db, query, user_id=user_id)
+    terms = _query_terms(query)
 
     rows = (
         db.query(KnowledgeChunk, KnowledgeDoc.title, KnowledgeDoc.source_type)
@@ -159,10 +185,24 @@ def retrieve(db: Session, user_id: int, query: str, top_k: int = 5) -> List[dict
     )
     scored = []
     for chunk, title, source_type in rows:
-        vec = embedding_service.parse_vector(chunk.embedding)
-        score = embedding_service.cosine(qvec, vec)
-        if score <= 0:
-            continue
+        overlap = _lexical_overlap(terms, f"{title or ''}\n{chunk.content or ''}")
+        # 未记录模型的历史切片按维度比对（cosine 维度不一致时返回 -1）。
+        same_model = bool(qvec) and (not chunk.embed_model or chunk.embed_model == qtag)
+        if same_model and qtag != embedding_service.FALLBACK_TAG:
+            score = embedding_service.cosine(qvec, embedding_service.parse_vector(chunk.embedding))
+            if score < _MIN_SEMANTIC_SCORE or (
+                score < _STRONG_SEMANTIC_SCORE and overlap < _MIN_SEMANTIC_OVERLAP
+            ):
+                continue
+        elif same_model:
+            score = embedding_service.cosine(qvec, embedding_service.parse_vector(chunk.embedding))
+            if score < _MIN_FALLBACK_SCORE or overlap < _MIN_LEXICAL_OVERLAP:
+                continue
+        else:
+            # 向量不可比：只按词面重合度返回，分数即重合比例。
+            if overlap < _MIN_LEXICAL_OVERLAP:
+                continue
+            score = overlap
         scored.append({
             "content": chunk.content,
             "score": round(score, 4),

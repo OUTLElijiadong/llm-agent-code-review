@@ -479,6 +479,9 @@ class AgentJobOut(BaseModel):
     schedule: str
     status: str
     last_run_at: Optional[str] = None
+    last_run_status: Optional[str] = None
+    last_run_error: Optional[str] = None
+    last_run_finished_at: Optional[str] = None
     config_json: Optional[Union[dict, list]] = None
 
     model_config = {"from_attributes": True}
