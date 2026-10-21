@@ -31,6 +31,7 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/agents": ("Agent 工作台", "查看 Agent 画像与运行态势"),
     "/agent-studio": ("Agent 工坊", "创建自定义 Agent 与 Skill"),
     "/sandboxes": ("代码沙箱", "创建测试沙箱与持续部署环境"),
+    "/pentests": ("授权渗透测试", "查看与发起授权渗透委托、远程网站测试"),
     "/forum": ("开发者论坛", "发帖交流、回复讨论"),
     "/forum/new": ("发布新帖", "撰写并发布论坛帖子"),
     "/knowledge": ("个人知识库", "沉淀与检索个人知识"),

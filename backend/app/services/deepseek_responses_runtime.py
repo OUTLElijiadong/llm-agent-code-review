@@ -71,6 +71,8 @@ MAX_RETRY_OUTPUT_TOKENS = 65_536
 # 1M+ 原始历史需以 32k 输入块多次压缩；64 次仍是显式的成本/循环上限。
 MAX_SEMANTIC_COMPACTION_CALLS_PER_RUN = 64
 _COMPLETION_GUARD_CORRECTION_PREFIX = "[runtime_completion_guard]"
+# 完成门可写入此键，要求运行时以服务端固定文本作为最终回复（如团队仍在执行时的进度说明）。
+COMPLETION_GUARD_FORCED_OUTPUT_KEY = "completion_guard_forced_output"
 
 
 def _semantic_compaction_json_schema(source_ids: Sequence[str]) -> Dict[str, Any]:
@@ -1403,7 +1405,15 @@ class DeepSeekResponsesRuntime:
             if checkpoint.context_metadata.get("coordinator_input_has_images") is True:
                 context_metadata["coordinator_input_has_images"] = True
             context_metadata["force_tool_rounds"] = max(force_tool_rounds - 1, 0)
-            checkpoint.context_metadata = context_metadata
+            # 调用方在 start() 注入的服务端可信上下文（如团队终态回执）必须跨轮保留；
+            # 只用压缩统计覆盖同名键，否则第二轮起完成门会丢失可信快照。
+            preserved = {
+                key: value
+                for key, value in checkpoint.context_metadata.items()
+                if key not in context_metadata
+            }
+            preserved.update(context_metadata)
+            checkpoint.context_metadata = preserved
 
             payload: Dict[str, Any] = {
                 "model": checkpoint.model,
@@ -1662,6 +1672,14 @@ class DeepSeekResponsesRuntime:
                 await self._store.save(checkpoint)
                 return self._result(checkpoint, events=events)
 
+            forced_text = checkpoint.context_metadata.pop(COMPLETION_GUARD_FORCED_OUTPUT_KEY, None)
+            if isinstance(forced_text, str) and forced_text.strip():
+                # 完成门判定只能如实报告进度时，以服务端固定文本替换模型措辞，
+                # 避免模型复述细节导致整轮失败。
+                candidate_text = forced_text.strip()
+                output_items = [
+                    item for item in output_items if str(item.get("type") or "") != "message"
+                ] + [_assistant_message_item(candidate_text)]
             checkpoint.transcript.extend(copy.deepcopy(output_items))
             checkpoint.output_text = candidate_text
             checkpoint.status = COMPLETED
@@ -2629,6 +2647,14 @@ def _response_from_events(events: Sequence[Mapping[str, Any]]) -> Dict[str, Any]
             }
         )
     return {**observed_metadata, "object": "response", "status": status, "output": ordered_items}
+
+
+def _assistant_message_item(text: str) -> Dict[str, Any]:
+    return {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}],
+    }
 
 
 def _extract_tool_calls(output_items: Sequence[Mapping[str, Any]]) -> List[ToolCall]:

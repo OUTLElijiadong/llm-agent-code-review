@@ -2216,3 +2216,33 @@ def test_checkpoint_round_trips_cancel_reason() -> None:
     checkpoint.cancel_reason = "用户要求停止"
     restored = RunCheckpoint.from_dict(checkpoint.to_dict())
     assert restored.cancel_reason == "用户要求停止"
+
+
+@pytest.mark.asyncio
+async def test_start_context_metadata_survives_tool_rounds_and_forced_output_replaces_text() -> None:
+    """服务端注入的可信上下文必须跨工具轮保留；完成门可要求以固定文本收尾。"""
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_FORCED_OUTPUT_KEY
+
+    transport = ScriptedTransport(
+        [
+            _function_response(("call_read", "read_team", {"team_id": 9})),
+            _message_response("团队给出的完整答案……"),
+        ]
+    )
+    seen: list[object] = []
+
+    def guard(checkpoint: RunCheckpoint, _text: str) -> str | None:
+        seen.append(checkpoint.context_metadata.get("trusted_terminal_team_snapshot"))
+        checkpoint.context_metadata[COMPLETION_GUARD_FORCED_OUTPUT_KEY] = "当前核验中。"
+        return None
+
+    result = await _runtime(transport, RecordingExecutor(), completion_guard=guard).start(
+        "进度",
+        tools=[{"type": "function", "name": "read_team", "parameters": {"type": "object"}}],
+        run_id="run_metadata_survives",
+        context_metadata={"trusted_terminal_team_snapshot": {"team_id": 9, "status": "completed"}},
+    )
+
+    assert result.status == "completed"
+    assert seen == [{"team_id": 9, "status": "completed"}]
+    assert result.output_text == "当前核验中。"

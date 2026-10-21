@@ -5204,14 +5204,64 @@ def _agent_tests_succeeded(result: dict[str, Any] | None) -> bool:
     return failed_count == 0 and passed_count == generated
 
 
+SANDBOX_SCORE_VERSION = "sandbox-check-pass-rate-v1"
+_SANDBOX_STATE_CREDIT = {"passed": 1.0, "partial": 0.5, "failed": 0.0}
+
+
 def _sandbox_result_score(conclusion: dict[str, Any]) -> dict[str, Any]:
-    """Keep sandbox execution evidence separate from code and risk scoring."""
+    """按规则计算沙箱验证分：已执行检查项的通过率（0-100）。
+
+    检查项只取执行器真实回执：确定性 runner、每条 AI 动态用例、黑盒入口、
+    受授权远程入口。部分通过（3xx/4xx 入口响应）记半分。没有任何已执行检查项
+    （停止/过期/未进入测试）时不出分，并说明原因，不用 0 分占位。
+    """
+    execution_status = str(conclusion.get("execution_status") or "")
+    verification = _sandbox_verification_coverage(conclusion)
+    evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
+    dynamic = evidence.get("agent_tests") if isinstance(evidence.get("agent_tests"), dict) else {}
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, state: str) -> None:
+        if state in _SANDBOX_STATE_CREDIT:
+            checks.append({"check": name, "state": state, "credit": _SANDBOX_STATE_CREDIT[state]})
+
+    add("deterministic_runner", str(verification.get("deterministic_status") or ""))
+    generated = int(dynamic.get("generated") or 0) if dynamic else 0
+    if generated > 0:
+        passed_cases = min(generated, int(dynamic.get("passed_count") or dynamic.get("passed") or 0))
+        checks.extend(
+            {"check": f"ai_dynamic_case_{index + 1}", "state": "passed" if index < passed_cases else "failed",
+             "credit": 1.0 if index < passed_cases else 0.0}
+            for index in range(generated)
+        )
+    add("blackbox_entry", str(verification.get("blackbox_status") or ""))
+    add("remote_blackbox_entry", str(verification.get("remote_blackbox_status") or ""))
+    if execution_status in {"stopped", "expired", "cancelled"} or not checks:
+        return {
+            "score": None,
+            "score_available": False,
+            "score_basis": None,
+            "sample": {"executed_checks": len(checks)},
+            "unavailable_reason": (
+                "测试在执行前被停止或过期，没有已执行的检查项可评分。"
+                if execution_status in {"stopped", "expired", "cancelled"}
+                else "执行器没有返回任何已执行检查项的回执，无法按规则评分。"
+            ),
+        }
+    earned = sum(item["credit"] for item in checks)
+    score = int(round(100 * earned / len(checks)))
     return {
-        "score": None,
-        "score_available": False,
-        "score_basis": None,
-        "sample": None,
-        "unavailable_reason": "沙箱测试执行与覆盖证据不是代码质量或漏洞风险评分，当前没有可核验的评分依据。",
+        "score": score,
+        "score_available": True,
+        "score_basis": SANDBOX_SCORE_VERSION,
+        "sample": {
+            "executed_checks": len(checks),
+            "earned_credit": earned,
+            "checks": checks[:50],
+            "verification_status": verification.get("verification_status"),
+            "rule": "验证分 = 100 × 已执行检查项得分之和 ÷ 已执行检查项数（通过=1，部分=0.5，失败=0）",
+        },
+        "unavailable_reason": None,
     }
 
 
@@ -6706,6 +6756,11 @@ def _publish_sandbox_report(
         verification_status = verification["verification_status"]
         raw_coverage = conclusion.get("coverage") if isinstance(conclusion.get("coverage"), dict) else {}
         coverage = {**raw_coverage, **verification, "execution_status": execution_status}
+        # 列表、评分门和导出统一读取 coverage_status；沙箱以独立核验结论为准，
+        # 避免已完整核验的任务被显示为“验证范围未记录”。
+        coverage["coverage_status"] = (
+            verification_status if verification_status in {"complete", "partial", "failed"} else "unknown"
+        )
         evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
         failure_message = (
             str(
@@ -6761,7 +6816,7 @@ def _publish_sandbox_report(
         # compatibility; score_available is authoritative at every report outlet.
         report_score = score_result["score"] if score_result["score_available"] else 0
         report_score_breakdown = {
-            "version": "sandbox-execution-unscored-v2",
+            "version": SANDBOX_SCORE_VERSION,
             "score": score_result["score"],
             "score_available": score_result["score_available"],
             "score_source": score_result["score_basis"],
@@ -6785,7 +6840,7 @@ def _publish_sandbox_report(
                 medium_issues=severity_counts["中"],
                 low_issues=severity_counts["低"],
                 score=report_score,
-                score_version="sandbox-execution-unscored-v2",
+                score_version=SANDBOX_SCORE_VERSION,
                 score_breakdown=report_score_breakdown,
                 summary=report_md,
                 error_message=failure_message,
@@ -6805,7 +6860,7 @@ def _publish_sandbox_report(
             task.medium_issues = severity_counts["中"]
             task.low_issues = severity_counts["低"]
             task.score = report_score
-            task.score_version = "sandbox-execution-unscored-v2"
+            task.score_version = SANDBOX_SCORE_VERSION
             task.score_breakdown = report_score_breakdown
             task.summary = report_md
             task.error_message = failure_message

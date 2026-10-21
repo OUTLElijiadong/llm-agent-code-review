@@ -472,11 +472,14 @@ function tallyCount(level: string, fallback: number | null | undefined): number 
 const displayScore = computed(() => {
   if (reportMetricsRestricted.value) return null
   const value = task.value?.score
-  return task.value?.status === 'success' && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
+  // 沙箱验证分按已执行检查项规则给出，失败的测试同样展示真实低分。
+  const allowed = task.value?.status === 'success' || (isSandboxReport.value && task.value?.status === 'failed')
+  return allowed && typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
 })
 function sandboxCoverageLabel(status?: string | null) {
   if (status === 'partial') return '验证范围不完整，当前分数只代表已完成部分'
-  if (status === 'failed') return '验证未通过；已记录的分数不代表测试通过'
+  if (status === 'complete') return '验证范围完整，分数按已执行检查项通过率计算'
+  if (status === 'failed') return '验证未通过；分数按已执行检查项通过率计算'
   return '历史记录未保存覆盖证据，无法确认验证范围'
 }
 const modelLabel = computed(() => task.value?.model_name?.trim() || '模型未知（接口未提供）')

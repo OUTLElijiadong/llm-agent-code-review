@@ -59,6 +59,11 @@ let lastTargetEl: HTMLElement | null = null
 /** 导航确认按钮发出的单次可视化导航请求。 */
 let requestedNavigation: XiaolingNavigationRequest | null = null
 let requestedActivityKey = ''
+// 已通过权限校验的导航一旦被接管，就必须保证最终执行：可视化点击失败、被遮挡、
+// 活动被清空或超时都回落为直接执行，避免“点了没反应”。
+let pendingNavigationFallback: (() => void) | null = null
+let navigationWatchdog = 0
+const NAVIGATION_WATCHDOG_MS = 4000
 let browserTarget: HTMLElement | null = null
 let browserActivityKey = ''
 
@@ -238,12 +243,20 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
   return Boolean(value && typeof (value as { then?: unknown }).then === 'function')
 }
 
-function waitForRoute(route: string, timeoutMs = 1200): Promise<boolean> {
-  if (isExactCurrentRoute(route)) return Promise.resolve(true)
+function routeReached(route: string, startPath: string): boolean {
+  if (isExactCurrentRoute(route)) return true
+  // 旧入口会被路由重定向到新页面（如 /admin/agents → /admin/governance?section=agents），
+  // 只要地址已离开起点或路径一致，就视为跳转完成。
+  if (window.location.pathname === routePathname(route)) return true
+  return Boolean(startPath) && currentFullPath() !== startPath
+}
+
+function waitForRoute(route: string, timeoutMs = 2500, startPath = ''): Promise<boolean> {
+  if (routeReached(route, startPath)) return Promise.resolve(true)
   return new Promise((resolve) => {
     const startedAt = Date.now()
     const check = () => {
-      if (isExactCurrentRoute(route)) {
+      if (routeReached(route, startPath)) {
         resolve(true)
         return
       }
@@ -261,11 +274,12 @@ async function activateTarget(target: Candidate, sequence: number): Promise<bool
   try {
     // 定位后、动画到达前页面可能弹出对话框，点击前再次检查实际命中。
     if (target.el !== document.body && (!isVisibleTarget(target.el) || !isUnobscuredTarget(target.el))) return false
+    const startPath = currentFullPath()
     const result = target.activate ? target.activate() : target.el.click()
     if (isPromiseLike(result)) await result
     if (sequence !== activitySequence) return false
     if (!target.route) return true
-    return await waitForRoute(target.route)
+    return await waitForRoute(target.route, 2500, startPath)
   } catch {
     return false
   }
@@ -311,7 +325,10 @@ function moveToTarget(): void {
       const target = findTarget()
       let point: { x: number; y: number }
       if (target) {
-        if (!isVisibleTarget(target.el)) return
+        if (!isVisibleTarget(target.el)) {
+          if (requestedNavigation) finishRequestedNavigation(false)
+          return
+        }
         bringTargetIntoView(target.el)
         if (!isUnobscuredTarget(target.el)) {
           visible.value = false
@@ -398,7 +415,15 @@ function handleBrowserTarget(event: Event): void {
   store.complete(browserActivityKey, 1400)
 }
 
-function finishRequestedNavigation(_success: boolean): void {
+function settlePendingNavigation(success: boolean): void {
+  window.clearTimeout(navigationWatchdog)
+  const fallback = pendingNavigationFallback
+  pendingNavigationFallback = null
+  if (!success && fallback) fallback()
+}
+
+function finishRequestedNavigation(success: boolean): void {
+  settlePendingNavigation(success)
   if (requestedActivityKey) store.complete(requestedActivityKey, 900)
   requestedNavigation = null
   requestedActivityKey = ''
@@ -410,7 +435,22 @@ function handleNavigationRequest(event: Event): void {
   if (!detail || !isSafeXiaolingRoute(detail.route) || typeof detail.execute !== 'function') return
   detail.handled = true
   if (requestedActivityKey) store.end(requestedActivityKey)
-  requestedNavigation = detail
+  settlePendingNavigation(false)
+  let executed = false
+  const original = detail.execute
+  const execute = () => {
+    if (executed) return undefined
+    executed = true
+    return original()
+  }
+  pendingNavigationFallback = () => {
+    if (!executed) void Promise.resolve(execute()).catch(() => undefined)
+  }
+  navigationWatchdog = window.setTimeout(() => {
+    if (requestedNavigation?.execute === execute) finishRequestedNavigation(false)
+    else settlePendingNavigation(false)
+  }, NAVIGATION_WATCHDOG_MS)
+  requestedNavigation = { ...detail, execute }
   requestedActivityKey = store.begin(
     `小菱正在打开${detail.label}…`,
     `xiaoling-nav-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -458,6 +498,8 @@ watch(
       arrived.value = false
       clicking.value = false
       targetBox.value = null
+      // 活动被清空（关闭抽屉、切换会话等）时，已接管的导航直接执行，不丢弃。
+      settlePendingNavigation(false)
       requestedNavigation = null
       requestedActivityKey = ''
       browserTarget = null
@@ -488,6 +530,8 @@ onBeforeUnmount(() => {
   if (browserActivityKey) store.end(browserActivityKey)
   if (requestedActivityKey) store.end(requestedActivityKey)
   activitySequence += 1
+  window.clearTimeout(navigationWatchdog)
+  pendingNavigationFallback = null
   requestedNavigation = null
   requestedActivityKey = ''
   clearHalo()

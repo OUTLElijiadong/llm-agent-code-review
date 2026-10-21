@@ -231,8 +231,8 @@ function canDisplayReport(row: ReportListItem): boolean {
 }
 
 function displayScore(row: ReportListItem): number | null {
-  // Dynamic sandbox tests report execution evidence, not a quality/risk score.
-  if (row.source?.type === 'sandbox_test') return null
+  // 沙箱只展示后端按检查项通过率规则给出的验证分（score_basis 为规则版本）。
+  if (row.source?.type === 'sandbox_test' && row.coverage?.score_basis !== 'sandbox-check-pass-rate-v1') return null
   const coverageAvailable = row.coverage?.score_available
   const sourceScoreAvailable = row.source?.security_report?.score_available
   if (coverageAvailable === false || sourceScoreAvailable === false) return null
@@ -325,9 +325,10 @@ function reportStatusNote(row: ReportListItem) {
 }
 
 function sandboxCoverageLabel(status?: string | null) {
+  if (status === 'complete') return '验证完整'
   if (status === 'partial') return '验证范围不完整'
   if (status === 'failed') return '验证未通过'
-  return '验证范围未知'
+  return '历史任务未保存覆盖证据'
 }
 
 function sandboxAiReviewStatus(row: ReportListItem): string {
@@ -352,6 +353,7 @@ function sandboxScoreTitle(row: ReportListItem) {
   if (score === null) {
     return String(row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
   }
+  if (row.source?.type === 'sandbox_test') return `沙箱验证分 ${score}（已执行检查项通过率）`
   return `代码质量评分 ${score}`
 }
 

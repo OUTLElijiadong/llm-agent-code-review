@@ -583,7 +583,9 @@ def test_review_coverage_snapshot_distinguishes_skipped_failed_and_unscanned_fil
     assert coverage["completed_files"] == 1
     assert coverage["processed_files"] == 3
     assert coverage["failed_files"] == ["broken.py"]
-    assert coverage["skipped_files"] == ["binary.bin"]
+    # 二进制文件属于不可审查范围，单列为排除项而不是"跳过未审"。
+    assert coverage["skipped_files"] == []
+    assert coverage["excluded_files"] == ["binary.bin"]
     assert coverage["unscanned_files"] == 2
     assert coverage["unscanned_file_names"] == ["queued.py", "never.py"]
     assert coverage["error"] == "partial failure"

@@ -27,6 +27,8 @@ PLAYBOOKS = [
     {"agent_code": "chat_assistant", "title": "系统角色权限说明书(普通用户视角)", "file": "role_permission_guide.md"},
     {"agent_code": "manager", "title": "系统角色权限说明书(管理视角)", "file": "role_permission_guide.md"},
     {"agent_code": "manager", "title": "运维教程(仅超级管理员)", "file": "ops_tutorial_superadmin.md"},
+    {"agent_code": "chat_assistant", "title": "小菱团队编排与状态回复知识库", "file": "xiaoling_team_orchestration_playbook.md"},
+    {"agent_code": "manager", "title": "小菱团队编排与状态回复知识库", "file": "xiaoling_team_orchestration_playbook.md"},
 ]
 
 CONTENT_DIR = Path(__file__).resolve().parent.parent / "app" / "ai" / "agent_knowledge"

@@ -99,6 +99,56 @@ describe('VirtualCursor real navigation click', () => {
     }
   })
 
+  it('still executes the authorized navigation when the route button is covered', async () => {
+    target = document.createElement('button')
+    target.dataset.route = '/reports'
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    document.body.appendChild(target)
+    const modal = document.createElement('div')
+    document.body.appendChild(modal)
+    const original = document.elementFromPoint
+    document.elementFromPoint = vi.fn(() => modal)
+    const execute = vi.fn()
+    try {
+      wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+      requestXiaolingNavigation('/reports', '审查报告', execute)
+      await flushPromises()
+      vi.advanceTimersByTime(1400)
+      await flushPromises()
+      expect(execute).toHaveBeenCalledOnce()
+    } finally {
+      document.elementFromPoint = original
+      modal.remove()
+    }
+  })
+
+  it('treats a redirected legacy route as a successful navigation', async () => {
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    const execute = vi.fn(() => {
+      window.history.pushState({}, '', '/admin/governance?section=agents')
+    })
+    requestXiaolingNavigation('/admin/agents', 'Agent 管理', execute)
+    await flushPromises()
+    vi.advanceTimersByTime(1400)
+    await flushPromises()
+    vi.advanceTimersByTime(100)
+    await flushPromises()
+    expect(execute).toHaveBeenCalledOnce()
+    expect(wrapper.find('.virtual-cursor-click-label').text()).toBe('已打开')
+  })
+
+  it('executes a pending navigation once when the activity is cleared before the click', async () => {
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    const execute = vi.fn()
+    requestXiaolingNavigation('/reviews/7', '审查详情', execute)
+    await flushPromises()
+    useAgentActivityStore().clear()
+    await flushPromises()
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it('visualizes the exact browser bridge element without clicking it again', async () => {
     target = document.createElement('button')
     target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)

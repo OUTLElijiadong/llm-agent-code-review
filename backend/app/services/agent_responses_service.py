@@ -85,6 +85,7 @@ from app.services.deepseek_provider_compat import prepare_deepseek_responses_pay
 from app.services.deepseek_responses_runtime import (
     CANCELLED,
     COMPLETED,
+    COMPLETION_GUARD_FORCED_OUTPUT_KEY,
     FAILED,
     INCOMPLETE,
     MAX_ROUNDS_EXCEEDED,
@@ -4461,16 +4462,9 @@ class AgentResponsesService:
         elif status == "expired" and not re.search(r"过期|超时|失效", output_text):
             return "团队终态为 expired；回复必须如实说明过期，不能声称任务完成。"
         if status not in terminal:
-            allowed_progress = (
-                "任务已派发给团队成员执行，当前排队中。完成后我会核验并汇总。"
-                if status in {"queued", "created"}
-                else "任务已派发给团队成员执行，当前进行中。完成后我会核验并汇总。"
-            )
-            if output_text.strip() != allowed_progress:
-                return (
-                    f"团队当前状态为 {status or '未知'}；尚未终态，"
-                    "回复必须只说明排队或执行中，不能提供任务答案或宣称完成。"
-                )
+            # 非终态只允许服务端固定进度文本；不再要求模型逐字复述（否则 verifying 等
+            # 状态下模型措辞稍有差异就整轮失败）。终态由团队回执触发小菱另行汇总。
+            checkpoint.context_metadata[COMPLETION_GUARD_FORCED_OUTPUT_KEY] = _team_progress_text(status)
         return None
 
     async def _validate_admin_completion(
@@ -4503,6 +4497,15 @@ class AgentResponsesService:
             output_text,
             write_evidence=evidence,
         )
+
+
+def _team_progress_text(status: str) -> str:
+    """团队尚未终态时唯一允许的小菱回复；终态结论由服务端团队回执另行触发。"""
+    if status in {"queued", "created", "waiting_dependency"}:
+        return "任务已派发给团队成员执行，当前排队中。完成后我会核验并汇总。"
+    if status == "verifying":
+        return "任务已派发给团队成员执行，成员已交付结果，当前核验中。核验完成后我会汇总结论。"
+    return "任务已派发给团队成员执行，当前进行中。完成后我会核验并汇总。"
 
 
 async def _emit(sink: Optional[EventSink], event: Mapping[str, Any]) -> None:

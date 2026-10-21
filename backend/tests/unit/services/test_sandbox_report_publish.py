@@ -40,6 +40,7 @@ from app.services.sandbox_service import (
     _remote_blackbox_passed,
     _sandbox_execution_disclosure,
     _sandbox_result_score,
+    SANDBOX_SCORE_VERSION,
     _sandbox_verification_coverage,
     _worker_execution_passed,
     _worker_status_is_terminal,
@@ -484,12 +485,11 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
     )
     assert original_ai_report["report_persisted"] is True
     original_task = db.get(ReviewTask, original_ai_report["report_task_id"])
-    # The database column is non-nullable; zero remains a storage placeholder.
-    # User-facing report payloads must treat it as unavailable.
-    assert original_task.score == 0
+    # runner、动态用例、黑盒入口三项全部通过 → 规则验证分 100。
+    assert original_task.score == 100
     assert original_task.coverage["coverage_status"] == "complete"
-    assert original_task.coverage["score_available"] is False
-    assert original_task.coverage["score_basis"] is None
+    assert original_task.coverage["score_available"] is True
+    assert original_task.coverage["score_basis"] == SANDBOX_SCORE_VERSION
 
     # Same terminal status does not mean the callback carries the latest snapshot.
     environment.error = "stale callback failure"
@@ -509,7 +509,7 @@ def test_same_status_stale_callback_cannot_overwrite_persisted_success(db) -> No
     stored_result = json.loads(stored_environment.result_json)
 
     assert task.status == "success"
-    assert task.score == 0
+    assert task.score == 100
     assert "已完成 AI 审查并核实执行证据。" in report.content_json["report_md"]
     assert "## 后续验证更新（Prism 系统）" in report.content_json["report_md"]
     assert "stale same-status callback" not in report.content_json["report_md"]
@@ -1132,17 +1132,16 @@ def test_partial_sandbox_report_preserves_recorded_score_and_exposes_scope() -> 
 
 
 @pytest.mark.parametrize(
-    ("agent_tests", "generation"),
+    ("agent_tests", "generation", "expected"),
     [
-        ({"generated": 2, "passed_count": 1, "failed": 1}, {"status": "generated", "count": 2}),
-        ({"generated": 1, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 1}),
-        ({"generated": 0, "passed_count": 0, "failed": 0}, {"status": "skipped"}),
-        ({"generated": 2, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 2}),
+        ({"generated": 2, "passed_count": 1, "failed": 1}, {"status": "generated", "count": 2}, 50),
+        ({"generated": 1, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 1}, 100),
+        ({"generated": 0, "passed_count": 0, "failed": 0}, {"status": "skipped"}, None),
+        ({"generated": 2, "passed_count": 1, "failed": 0}, {"status": "generated", "count": 2}, 50),
     ],
 )
-def test_dynamic_test_receipts_are_not_misrepresented_as_code_or_vulnerability_score(
-    agent_tests, generation
-):
+def test_sandbox_score_is_rule_based_check_pass_rate(agent_tests, generation, expected):
+    """沙箱验证分按已执行检查项通过率计算；没有执行回执时不出分，绝不用 0 占位。"""
     result = _sandbox_result_score({
         "passed": True,
         "evidence": {
@@ -1151,11 +1150,30 @@ def test_dynamic_test_receipts_are_not_misrepresented_as_code_or_vulnerability_s
         },
     })
 
-    assert result["score"] is None
-    assert result["score_available"] is False
-    assert result["score_basis"] is None
-    assert result["sample"] is None
-    assert "不是代码质量或漏洞风险评分" in result["unavailable_reason"]
+    assert result["score"] == expected
+    if expected is None:
+        assert result["score_available"] is False
+        assert result["score_basis"] is None
+        assert "回执" in result["unavailable_reason"]
+    else:
+        assert result["score_available"] is True
+        assert result["score_basis"] == SANDBOX_SCORE_VERSION
+        assert result["sample"]["executed_checks"] == agent_tests["generated"]
+        assert "已执行检查项" in result["sample"]["rule"]
+
+
+def test_sandbox_score_counts_runner_and_entry_checks_and_stopped_tasks_are_unscored() -> None:
+    evidence = {
+        "deterministic_test_execution": {"requested_mode": "blackbox", "status": "passed"},
+        "agent_test_generation": {"status": "generated", "mode": "blackbox", "count": 2},
+        "agent_tests": {"generated": 2, "passed_count": 1, "failed": 1},
+        "blackbox_execution": {"status": "passed", "route": "/healthz", "status_code": 204},
+    }
+    scored = _sandbox_result_score({"passed": False, "evidence": evidence})
+    assert scored["score"] == 75
+    stopped = _sandbox_result_score({"passed": False, "execution_status": "stopped", "evidence": evidence})
+    assert stopped["score"] is None
+    assert "停止" in stopped["unavailable_reason"]
 
 
 def test_sandbox_verification_coverage_distinguishes_complete_partial_and_failed() -> None:

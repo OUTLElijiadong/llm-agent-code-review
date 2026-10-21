@@ -29,7 +29,7 @@
 - 奖惩趋势 /admin/rewards：Agent 奖惩事件记录。
 - 回滚中心 /admin/rollback：治理制品版本与回滚。
 - 用户管理 /admin/users：查询/启停/重置密码/软删除/设历史角色(users.*)。
-- RBAC /admin/rbac/{roles,permissions,users}：角色、权限点、用户角色与数据范围。
+- RBAC：统一入口 /admin/access（角色、权限点、用户角色与数据范围分区，旧 /admin/rbac/* 路径已下线，不要输出）。
 - AI 调用日志 /admin/ai-logs。
 - 报告模板 /admin/report-templates。
 - 审计 /admin/audit：系统操作审计日志(audit.list)。

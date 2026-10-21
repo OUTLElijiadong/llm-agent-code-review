@@ -305,6 +305,22 @@ def test_every_human_request_requires_team_and_same_team_readback():
     )
 
 
+def test_non_terminal_team_forces_server_progress_text_instead_of_failing():
+    """verifying/running 不能因模型措辞差异整轮失败；运行时用服务端固定文本替换。"""
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_FORCED_OUTPUT_KEY
+
+    guard = service.AgentResponsesService._validate_xiaoling_completion
+    for status, marker in (("verifying", "核验中"), ("running", "进行中"), ("queued", "排队中")):
+        checkpoint = _team_checkpoint([
+            ("agents", "list_agents", {}, {"agents": []}),
+            ("create", "create_agent_team", {}, {"team_id": 52, "status": "queued"}),
+            ("readback", "get_agent_team", {"team_id": 52}, {"team_id": 52, "status": status}),
+        ])
+        assert guard(checkpoint, "团队已经给出答案：XYZ。") is None
+        forced = checkpoint.context_metadata[COMPLETION_GUARD_FORCED_OUTPUT_KEY]
+        assert marker in forced and "XYZ" not in forced
+
+
 def test_team_progress_readback_is_bound_to_an_explicit_progress_request():
     guard = service.AgentResponsesService._validate_xiaoling_completion
     unrelated_lookup = _team_checkpoint([

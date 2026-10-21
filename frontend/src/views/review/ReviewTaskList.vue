@@ -118,8 +118,12 @@
               />
             </svg>
             <span v-if="reportMetricsRestricted(row)" class="no-score">报告受限</span>
-            <span v-else-if="row.review_type === 'sandbox_test' && row.coverage?.coverage_status !== 'complete'" class="no-score">
-              {{ sandboxCoverageLabel(row.coverage?.coverage_status) }}
+            <span v-else-if="row.review_type === 'sandbox_test' && row.score != null" :class="scoreClass(row.score)">
+              {{ row.score }}
+              <small v-if="row.coverage?.coverage_status !== 'complete'" class="no-score">{{ sandboxCoverageLabel(row.coverage?.coverage_status) }}</small>
+            </span>
+            <span v-else-if="row.review_type === 'sandbox_test'" class="no-score">
+              {{ row.coverage?.score_unavailable_reason ? '未执行检查项' : sandboxCoverageLabel(row.coverage?.coverage_status) }}
             </span>
             <span v-else-if="row.status === 'success' && row.score != null" :class="scoreClass(row.score)">{{ row.score }}</span>
             <span v-else class="no-score">未形成评分</span>
@@ -224,14 +228,18 @@ const statusLabels: Record<string, string> = {
   pending: '待处理',
   running: '运行中',
   success: '成功',
+  partial: '部分完成',
   failed: '失败',
   cancelled: '已取消',
+  stopped: '已停止',
+  expired: '已过期',
 }
 
 const statusTypeMap: Record<string, string> = {
   pending: 'info',
   running: 'warning',
   success: 'success',
+  partial: 'warning',
   failed: 'danger',
   cancelled: 'info',
 }
@@ -252,8 +260,9 @@ function scoreClass(score: number) {
 
 function sandboxCoverageLabel(status?: string | null) {
   if (status === 'partial') return '验证范围不完整'
+  if (status === 'complete') return '验证完整'
   if (status === 'failed') return '验证未通过'
-  return '验证范围未记录'
+  return '历史任务未保存覆盖证据'
 }
 
 function formatDuration(ms: number): string {

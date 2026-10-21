@@ -103,9 +103,26 @@ def _security_report_snapshot(db: Session, task: ReviewTask) -> dict | None:
     return clean_report_payload(content)
 
 
+def _sandbox_rule_score_available(task: ReviewTask) -> bool:
+    """沙箱验证分只认按规则生成、带检查项样本的新版本；历史无依据记录保持不出分。"""
+    from app.services.sandbox_service import SANDBOX_SCORE_VERSION
+
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    return (
+        task.review_type == "sandbox_test"
+        and task.status in {"success", "failed"}
+        and str(getattr(task, "score_version", "") or "") == SANDBOX_SCORE_VERSION
+        and coverage.get("score_available") is True
+        and coverage.get("score_basis") == SANDBOX_SCORE_VERSION
+    )
+
+
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     explicit = coverage.get("score_available")
+    if task.review_type == "sandbox_test":
+        # 沙箱验证分 = 已执行检查项通过率；失败的测试同样按规则给出真实低分。
+        return _sandbox_rule_score_available(task)
     if task.status != "success":
         return False
     complete_statuses = {"complete", "completed", "verified"}
@@ -113,10 +130,6 @@ def _score_is_available(task: ReviewTask) -> bool:
     verification_status = str(coverage.get("verification_status") or "complete").strip().lower()
     # 核验完成不等于覆盖完整。评分、列表和各格式导出统一以明确的完整覆盖为准。
     if coverage_status not in complete_statuses or verification_status not in complete_statuses:
-        return False
-    if task.review_type == "sandbox_test":
-        # Dynamic test pass rate is execution evidence, not a code-quality or
-        # vulnerability-risk score. Hide it for both new and historical rows.
         return False
     if task.review_type == "pentest":
         # Domain rows historically used a non-null integer column, often 0 as a
@@ -130,7 +143,11 @@ _REPORTABLE_TASK_STATUSES = ("success", "partial", "failed", "cancelled", "expir
 
 
 def _sandbox_coverage_for_display(coverage: dict) -> dict:
+    from app.services.sandbox_service import SANDBOX_SCORE_VERSION
+
     result = dict(coverage)
+    if result.get("score_available") is True and result.get("score_basis") == SANDBOX_SCORE_VERSION:
+        return result
     sample = result.pop("score_sample", None)
     result.update({
         "score_available": False,
@@ -179,12 +196,20 @@ def _sandbox_domain_data_for_display(task: ReviewTask, content: dict) -> dict:
     if requested_mode in {"whitebox", "blackbox", "combined"}:
         coverage["requested_mode"] = requested_mode
     result["coverage"] = coverage
-    result.update({
-        "score": None,
-        "score_available": False,
-        "score_basis": None,
-        "score_sample": None,
-    })
+    if _sandbox_rule_score_available(task):
+        result.update({
+            "score": task.score,
+            "score_available": True,
+            "score_basis": coverage.get("score_basis"),
+            "score_sample": coverage.get("score_sample"),
+        })
+    else:
+        result.update({
+            "score": None,
+            "score_available": False,
+            "score_basis": None,
+            "score_sample": None,
+        })
     if isinstance(content.get("report_md"), str):
         from app.services.sandbox_report_summary import scope_sandbox_report_markdown, summarize_sandbox_report
 
@@ -627,6 +652,22 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     if not score_available:
         score = None
         score_breakdown = {"score": None, "risk_level": "未评估", "score_source": "unavailable"}
+    from app.services.score_credibility import audit_report_score
+
+    # 小菱终审：按规则独立复算，不一致则打回重判并采用规则分。
+    score_audit = audit_report_score(task, score, severity_count, issue_count)
+    if score_audit["status"] == "rescored" and score_audit["final_score"] != score:
+        score = score_audit["final_score"]
+        from app.ai.scoring import score_risk_level
+
+        score_breakdown = {
+            **score_breakdown, "score": score, "risk_level": score_risk_level(score),
+            "score_source": "xiaoling_rescored",
+        }
+    elif score_audit["status"] == "unavailable" and score is not None:
+        score = None
+        score_available = False
+        score_breakdown = {"score": None, "risk_level": "未评估", "score_source": "unavailable"}
 
     from app.services.review_service import _task_agent_release_summaries
 
@@ -697,6 +738,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "score": score,
                  "score_version": score_breakdown.get("version"),
                  "score_breakdown": score_breakdown,
+                 "score_audit": score_audit,
                  "status": task.status,
                  "error_message": clean_report_text(task.error_message),
                  "coverage": clean_report_payload(report_coverage),

@@ -101,7 +101,13 @@ def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, err
 
     completed = names_with_status("complete", "success")
     failed = names_with_status("failed")
-    skipped = names_with_status("skipped")
+    # 二进制文件不属于源码审查对象：记录为“已排除”，不把它当成漏审导致评分被隐藏。
+    excluded = [
+        str(entry.get("file_name") or file_id)
+        for file_id, entry in ledger.items()
+        if isinstance(entry, dict) and entry.get("status") == "skipped" and entry.get("reason") == "binary_file"
+    ]
+    skipped = [name for name in names_with_status("skipped") if name not in excluded]
     cancelled = names_with_status("cancelled")
     requested = coverage.get("requested_files") if isinstance(coverage.get("requested_files"), list) else []
     accounted = {
@@ -114,7 +120,7 @@ def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, err
     unscanned_count = (
         len(unscanned_names)
         if requested
-        else max(0, total - len(completed) - len(failed) - len(skipped) - len(cancelled))
+        else max(0, total - len(completed) - len(failed) - len(skipped) - len(excluded) - len(cancelled))
         if ledger
         else max(0, total - int(getattr(task, "processed_files", 0) or 0))
     )
@@ -123,6 +129,9 @@ def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, err
     else:
         completed_count = len(completed)
     coverage_status = "partial" if failed or skipped or cancelled or unscanned_count else "complete"
+    if excluded and completed_count == 0:
+        # 全部是二进制时没有任何源码被审查，不能以满分示人。
+        coverage_status = "partial"
     coverage.update({
         "coverage_status": coverage_status,
         "completed_files": completed_count,
@@ -130,6 +139,8 @@ def _review_coverage_snapshot(task: ReviewTask, *, stage: str | None = None, err
         "total_files": total,
         "failed_files": failed,
         "skipped_files": skipped,
+        "excluded_files": excluded,
+        "excluded_reason": "二进制文件不在源码审查范围内" if excluded else None,
         "cancelled_files": cancelled,
         "unscanned_files": unscanned_count,
         "unscanned_file_names": unscanned_names,

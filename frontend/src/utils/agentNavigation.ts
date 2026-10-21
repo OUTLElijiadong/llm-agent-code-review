@@ -229,6 +229,24 @@ export function isRouteAllowed(resolved: {
   return true
 }
 
+function resolveRedirectTarget(
+  router: Pick<Router, 'resolve'>,
+  resolved: ReturnType<Router['resolve']>,
+): ReturnType<Router['resolve']> | null {
+  const record = resolved.matched[resolved.matched.length - 1] as { redirect?: unknown } | undefined
+  const redirect = record?.redirect
+  if (!redirect) return null
+  try {
+    const target = typeof redirect === 'function' ? (redirect as (to: unknown) => unknown)(resolved) : redirect
+    if (typeof target !== 'string' && (typeof target !== 'object' || target === null)) return null
+    const next = router.resolve(target as Parameters<Router['resolve']>[0])
+    if (!next.matched.length || next.matched.some((item) => String(item.path ?? '').includes(':pathMatch'))) return null
+    return next
+  } catch {
+    return null
+  }
+}
+
 /**
  * 供菜单、搜索与 Agent 导航共用的站内路由可见性判定。
  * 未注册路由、外部路径或当前用户守卫不能放行时一律不展示入口。
@@ -250,6 +268,10 @@ export function isNavigationPathAllowed(
       ['/forum/:id', '/forum/:id/edit'].includes(String(record.path ?? ''))
     ))
     if (dynamicForumRoute && !/^\/forum\/[1-9]\d*(?:\/edit)?$/.test(path)) return false
+    // 旧入口是重定向占位：真实守卫只检查重定向后的页面，可见性必须同口径判定，
+    // 否则会因占位 meta 更严而隐藏实际可打开的入口。
+    const redirectTarget = resolveRedirectTarget(router, resolved)
+    if (redirectTarget) return isRouteAllowed(redirectTarget, guardSource)
     return isRouteAllowed(resolved, guardSource)
   } catch {
     return false
