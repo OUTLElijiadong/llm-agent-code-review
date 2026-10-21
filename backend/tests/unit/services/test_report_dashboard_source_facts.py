@@ -1009,3 +1009,19 @@ def test_republished_domain_result_uses_completion_time(db, source_owner, source
 
     assert sum(item["count"] for item in risk) == 3
     assert sum(item["total_issues"] for item in safety["source_summaries"]) == 3
+
+
+def test_pentest_publisher_clamps_duration_to_int_column(db, source_owner, source_project):
+    """长期挂起后取消的渗透任务耗时超过 INT 上限，曾让 MySQL 拒写并阻断启动清扫。"""
+    from datetime import datetime, timedelta
+
+    from app.services.pentest_service import TARGET_TYPE_LABELS, _MAX_DURATION_MS, _publish_pentest_report
+
+    task = _task(db, source_owner, source_project, "pentest", count=0, score=None)
+    engagement = _pentest(db, task)
+    task.task_name = f"授权渗透测试 · {TARGET_TYPE_LABELS[engagement.target_type]} · {engagement.public_id}"
+    engagement.started_at = datetime(2026, 1, 1)
+    engagement.completed_at = engagement.started_at + timedelta(days=60)
+    db.flush()
+    published = _publish_pentest_report(db, engagement, [], "", {}, {}, None, {}, {}, report_status="cancelled")
+    assert published.duration_ms == _MAX_DURATION_MS
