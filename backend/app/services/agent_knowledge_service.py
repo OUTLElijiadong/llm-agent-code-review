@@ -1,6 +1,7 @@
 """Agent 知识库服务。"""
 import ipaddress
 import json
+import math
 import re
 from html import unescape
 from typing import List, Optional
@@ -94,6 +95,7 @@ def add_document(
     risk_level: str = "low",
     confidence: float = 1.0,
     user_id: Optional[int] = None,
+    require_api_embedding: bool = False,
 ) -> AgentKnowledgeDoc:
     """新增 Agent 知识文档并生成切片向量。
 
@@ -117,6 +119,24 @@ def add_document(
         ).first() if user_id is not None else None
         if run is None:
             raise ForbiddenError("私人知识来源不属于当前账号", code=40300)
+    pieces = chunk_text(content)
+    strict_vectors = None
+    if require_api_embedding:
+        # 操作手册替换必须先确认真实向量完整；失败时不创建空文档或替换旧手册。
+        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
+        if (
+            not pieces or not isinstance(tag, str) or not tag.startswith("api:")
+            or not isinstance(vectors, (list, tuple)) or len(vectors) != len(pieces)
+            or not vectors or not isinstance(vectors[0], (list, tuple)) or not vectors[0]
+            or any(
+                not isinstance(vector, (list, tuple)) or len(vector) != len(vectors[0])
+                or any(not isinstance(value, (int, float)) or isinstance(value, bool)
+                       or not math.isfinite(value) for value in vector)
+                for vector in vectors
+            )
+        ):
+            raise RuntimeError("操作手册真实嵌入不可用或不完整，保留原手册，请恢复嵌入服务后重试")
+        strict_vectors = (vectors, tag)
     status = "active" if risk_level in ("low", "medium") and confidence >= 0.6 else "pending_approval"
     doc = AgentKnowledgeDoc(
         agent_code=agent_code,
@@ -133,9 +153,8 @@ def add_document(
     db.commit()
     db.refresh(doc)
 
-    pieces = chunk_text(content)
     if pieces:
-        vectors, tag = embedding_service.embed_texts(db, pieces, user_id=user_id)
+        vectors, tag = strict_vectors or embedding_service.embed_texts(db, pieces, user_id=user_id)
         for seq, piece in enumerate(pieces):
             vec = vectors[seq] if seq < len(vectors) else []
             db.add(AgentKnowledgeChunk(

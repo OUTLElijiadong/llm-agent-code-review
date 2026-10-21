@@ -1,0 +1,58 @@
+{
+  "environment": "生产主机出口只读官方域名请求，不读取应用配置或凭据",
+  "checked_at": "2026-10-21T15:36:50.080635+00:00",
+  "requests": [
+    {
+      "url": "https://www.cnnvd.org.cn/",
+      "checked_at": "2026-10-21T15:36:43.728564+00:00",
+      "http_status": 200,
+      "response_sha256": "b2136984413abe134f1a030312f367c8d9403a65f99a50bdd82d205b81122014",
+      "response_bytes": 985,
+      "final_url": "https://www.cnnvd.org.cn/",
+      "content_type": "text/html; charset=utf-8",
+      "set_cookie_names": [],
+      "scripts": [
+        "/static/tinymce/tinymce.min.js",
+        "/static/js/manifest.79105e61ed2a6facfb57.js",
+        "/static/js/vendor.df720bc99ca4fd4388f3.js",
+        "/static/js/app.7cf40bfa6c9d756e124a.js"
+      ],
+      "links": [],
+      "title": "国家信息安全漏洞库",
+      "challenge_markers": []
+    },
+    {
+      "url": "https://www.cnvd.org.cn/flaw/list",
+      "checked_at": "2026-10-21T15:36:45.832866+00:00",
+      "http_status": 521,
+      "response_sha256": "2b7b3a8a158ac4d52b5c8a861a62a804df83dcab4a6bc9af3e72807cb18b4c32",
+      "response_bytes": 910,
+      "final_url": "https://www.cnvd.org.cn/flaw/list",
+      "content_type": null,
+      "set_cookie_names": [
+        "__jsluid_s"
+      ],
+      "scripts": [],
+      "links": [],
+      "title": "",
+      "challenge_markers": []
+    },
+    {
+      "url": "https://www.cnvd.org.cn/shareData/list",
+      "checked_at": "2026-10-21T15:36:47.929654+00:00",
+      "http_status": 521,
+      "response_sha256": "d97e64de5b20fafde32cf82bf9122b6d3a03233ebe0666c373618e5525ca2ec9",
+      "response_bytes": 856,
+      "final_url": "https://www.cnvd.org.cn/shareData/list",
+      "content_type": null,
+      "set_cookie_names": [],
+      "scripts": [],
+      "links": [],
+      "title": "",
+      "challenge_markers": []
+    }
+  ],
+  "cookie_names_in_memory": [
+    "__jsluid_s"
+  ]
+}

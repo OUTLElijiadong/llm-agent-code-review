@@ -1,0 +1,267 @@
+{
+  "environment": "production egress, isolated public requests; no production files/config/credentials read or written",
+  "checked_at": "2026-10-21T16:01:29.617094+00:00",
+  "steps": [
+    {
+      "label": "official_documents_exact_page_parameters",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/2.0/common/docProtocol/list?keyId=specification",
+      "method": "GET",
+      "checked_at": "2026-10-21T16:01:23.204819+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:01:23 GMT",
+      "content_type": "application/json",
+      "response_bytes": 1285,
+      "response_sha256": "f7f20f5c2776ec23b21f6ca66897a5b3a5f6a364cd47c545ee7b54ee2b3b5161",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "User-Agent"
+      ],
+      "request_content_type": null,
+      "request_body": null,
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "list",
+      "data": [
+        {
+          "keyId": "productSpecification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/BB/rBBlBmoz3g-AIRmgAA2APglXe-I184.pdf",
+          "protocolName": "国家信息安全漏洞库(CNNVD) 网络安全受漏洞影响产品描述规范",
+          "updateTime": "2026-06-23 12:19:47"
+        },
+        {
+          "keyId": "xmlSpecification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/BB/rBBl8Woz3h2AMYZDAAdOVPocFRM427.pdf",
+          "protocolName": "国家信息安全漏洞库(CNNVD) 网络安全漏洞信息XML描述规范",
+          "updateTime": "2026-06-23 12:19:42"
+        },
+        {
+          "keyId": "getXml",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/B3/rBBls2LT8nOADUr6AAnoHmC7qC4290.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）漏洞XML信息获取接口文档",
+          "updateTime": "2026-06-24 10:08:55"
+        },
+        {
+          "keyId": "specification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/F3/rBBlBmp6eoCAXMXfABvJKEOx9gM793.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）漏洞提交API接口规范",
+          "updateTime": "2026-08-11 09:27:29"
+        },
+        {
+          "keyId": "0461d0172a1e4d70a014204dccf20b6d",
+          "enclosureContent": null,
+          "fileUrl": "group1/M00/02/C5/rBBlZ2o7PU2AMWccAGWKeYbxKuw975.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）用户使用手册",
+          "updateTime": "2026-06-24 10:13:34"
+        }
+      ]
+    },
+    {
+      "label": "xml_package_list_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:01:25.347920+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:01:25 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "827ef33c052bf91662ff405823a20d8e27bdf53f04cef49a571990c6ac3f4a52",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "xml_package_list",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/getXmlVulDownloadList",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:01:27.473234+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:01:27 GMT",
+      "content_type": "application/json",
+      "response_bytes": 2903,
+      "response_sha256": "6bae206b6ee79c05eb3ae45970471ba239865ef9803542b7ef4b8c0bc51e821f",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "page": 1,
+        "pageSize": 10
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "dict",
+      "data_keys": [
+        "total",
+        "records",
+        "pageIndex",
+        "pageSize"
+      ],
+      "data": {
+        "total": 40,
+        "records": [
+          {
+            "id": "e92558aa7b41cf78e396989e0a681a0e",
+            "packageType": 1,
+            "year": 2026,
+            "month": 10,
+            "day": 20,
+            "frequencyType": "daily",
+            "packageName": "vuln_20261020_without_pav_u1.tar.gz",
+            "packageSize": 406737,
+            "vulnCount": 794,
+            "createTime": "2026-10-21 00:10:00",
+            "updateTime": "2026-10-21 01:00:31"
+          },
+          {
+            "id": "0a9110f4797e1e98a162c8a866cc032d",
+            "packageType": 1,
+            "year": 2026,
+            "month": 10,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202610_without_pav_u1.tar.gz",
+            "packageSize": 4758193,
+            "vulnCount": 10008,
+            "createTime": "2026-10-13 03:10:00",
+            "updateTime": "2026-10-21 01:00:02"
+          },
+          {
+            "id": "06da67deb9f77719ad53f8e1863509c5",
+            "packageType": 1,
+            "year": 2026,
+            "month": 9,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202609_without_pav_u1.tar.gz",
+            "packageSize": 6509118,
+            "vulnCount": 13900,
+            "createTime": "2026-09-02 00:00:04",
+            "updateTime": "2026-10-21 01:00:01"
+          },
+          {
+            "id": "1939237c6a6d26acd5e177fb13630b2b",
+            "packageType": 1,
+            "year": 2026,
+            "month": 8,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202608_without_pav_u1.tar.gz",
+            "packageSize": 5048889,
+            "vulnCount": 11636,
+            "createTime": "2026-08-02 00:00:17",
+            "updateTime": "2026-10-21 01:00:05"
+          },
+          {
+            "id": "36d8cb4d833617dded9421f8d3dc8029",
+            "packageType": 1,
+            "year": 2026,
+            "month": 7,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202607_without_pav_u1.tar.gz",
+            "packageSize": 4484605,
+            "vulnCount": 10544,
+            "createTime": "2026-07-02 00:00:12",
+            "updateTime": "2026-10-21 01:00:06"
+          },
+          {
+            "id": "623c87b410e72f17e1191c7ca519ce09",
+            "packageType": 1,
+            "year": 2026,
+            "month": 6,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202606_without_pav_u1.tar.gz",
+            "packageSize": 3658217,
+            "vulnCount": 9708,
+            "createTime": "2026-06-16 09:00:03",
+            "updateTime": "2026-10-21 01:00:07"
+          },
+          {
+            "id": "dd04377bcd4c0c581b99dc66f673121e",
+            "packageType": 1,
+            "year": 2026,
+            "month": 5,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202605_without_pav_u1.tar.gz",
+            "packageSize": 2242471,
+            "vulnCount": 6203,
+            "createTime": "2026-05-07 01:31:20",
+            "updateTime": "2026-10-20 01:00:48"
+          },
+          {
+            "id": "65c5538a000f74a0d55eb4e570286b35",
+            "packageType": 1,
+            "year": 2026,
+            "month": 4,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202604_without_pav_u1.tar.gz",
+            "packageSize": 3491825,
+            "vulnCount": 21885,
+            "createTime": "2026-04-18 01:30:25",
+            "updateTime": "2026-10-20 04:00:08"
+          },
+          {
+            "id": "80f46d12800745afc5ae262a942f078d",
+            "packageType": 1,
+            "year": 2026,
+            "month": 3,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202603_without_pav_u1.tar.gz",
+            "packageSize": 2371000,
+            "vulnCount": 7211,
+            "createTime": "2026-04-18 01:30:25",
+            "updateTime": "2026-10-21 01:00:09"
+          },
+          {
+            "id": "7cbaa5f0e664c4efd625ad834ab22202",
+            "packageType": 1,
+            "year": 2026,
+            "month": 2,
+            "day": null,
+            "frequencyType": "monthly",
+            "packageName": "vuln_202602_without_pav_u1.tar.gz",
+            "packageSize": 869830,
+            "vulnCount": 2681,
+            "createTime": "2026-04-18 01:30:25",
+            "updateTime": "2026-10-21 01:00:09"
+          }
+        ]
+      }
+    }
+  ]
+}

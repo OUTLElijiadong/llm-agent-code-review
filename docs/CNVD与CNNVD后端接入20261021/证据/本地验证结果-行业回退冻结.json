@@ -1,0 +1,99 @@
+{
+  "checked_at": "2026-10-21T17:12:29.583260+00:00",
+  "checks": [
+    {
+      "output": "后端回归-行业回退冻结.txt",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/services/test_vulnerability_source_service.py",
+        "tests/unit/services/test_security_rule_catalog_service.py",
+        "tests/unit/api/test_vulnerability_sources_api.py",
+        "tests/test_security_catalog_current.py",
+        "tests/test_complete_permission_matrix.py",
+        "--no-cov",
+        "-q"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend",
+      "exit_code": 0,
+      "output_tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "====================== 1228 passed, 3 warnings in 39.27s ======================="
+      ],
+      "output_sha256": "a3b6cb4eecd0dd470774b7252d2340e4489404b29e450ed77f53ff257495dbec"
+    },
+    {
+      "output": "主线程11文件组-冻结复测.txt",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "pytest",
+        "backend/tests/unit/services/test_agent_team_review.py",
+        "backend/tests/unit/services/test_site_agent_service.py",
+        "backend/tests/unit/services/test_agent_team_summary_reconciliation.py",
+        "backend/tests/unit/services/test_agent_team_cancellation.py",
+        "backend/tests/unit/services/test_score_credibility.py",
+        "backend/tests/unit/services/test_ai_usage_attribution.py",
+        "backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py",
+        "backend/tests/unit/services/test_vulnerability_source_service.py",
+        "backend/tests/unit/api/test_vulnerability_sources_api.py",
+        "backend/tests/unit/agents/test_roundtable_startup_recovery.py",
+        "backend/tests/unit/agents/test_scan_entry_input_closure.py",
+        "--no-cov",
+        "-q"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9",
+      "exit_code": 0,
+      "output_tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "================== 409 passed, 3 warnings in 77.24s (0:01:17) =================="
+      ],
+      "output_sha256": "ee2c2acf0f8f90a76c51c77d7ae24264684226e45cd5c553e293b5ab2d08ed92"
+    },
+    {
+      "output": "代码静态检查-行业回退冻结.txt",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "ruff",
+        "check",
+        "backend/app/services/vulnerability_source_service.py",
+        "backend/app/schemas/vulnerability_source.py",
+        "backend/app/api/v1/security.py",
+        "backend/app/schemas/security.py",
+        "backend/app/services/security_rule_catalog_service.py",
+        "backend/tests/unit/services/test_vulnerability_source_service.py",
+        "backend/tests/unit/api/test_vulnerability_sources_api.py",
+        "backend/tests/test_complete_permission_matrix.py"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9",
+      "exit_code": 0,
+      "output_tail": [
+        "All checks passed!"
+      ],
+      "output_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    }
+  ],
+  "prior_main_failure": "主线程11文件组-编辑期间历史失败.txt",
+  "prior_main_summary": "396 passed, 8 failed; read and retained. Fresh same 11 file group is 409 passed, 0 failed. Old process module snapshot is unavailable; no unsupported exact version claim.",
+  "offline_validation": {
+    "all_evidence_json_parse": true,
+    "python_ast": true,
+    "service_matches_live_egress_hash": true,
+    "ai_html_matches_live_response_bytes_hash": true,
+    "production_acceptance_script_on_archived_actual_result": true
+  },
+  "frozen_python_files_sha256": {
+    "backend/app/services/vulnerability_source_service.py": "9c870423ca3711f381d0b446b97f1d9b1bd47a55dd4a01bb76c7698d30e151fd",
+    "backend/app/schemas/vulnerability_source.py": "4e1cf539378c3c466030ff2d519d28b1a5ab8dba55806c90793162650989098f",
+    "backend/app/api/v1/security.py": "ff7f1a5679ef899f966c5c78aa2154eb3399848abf33b2f2d69ba953c9b2be70",
+    "backend/app/schemas/security.py": "6c230eb4062b8864416da05ba2bc7f1c1efdba0e91350b1578f6f1c0928f6be2",
+    "backend/app/services/security_rule_catalog_service.py": "4abaf66d28242c1045c7aa75162c16cc97d484791476cc6ec8d7ca05a497f7cc",
+    "backend/tests/unit/services/test_vulnerability_source_service.py": "17d22aec679e4ec29050b40842eafce09722ab2864a63bb13f418f87bd4ec9b0",
+    "backend/tests/unit/api/test_vulnerability_sources_api.py": "027dca654702cb2ca0afaf39748def7cb120c178645e19517bba0f2ade190a29",
+    "backend/tests/test_complete_permission_matrix.py": "759163f424849862f796d6607098777e9cdc0d370574801d6daa9a9068029ed5"
+  }
+}

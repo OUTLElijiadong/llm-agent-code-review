@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.agents.discussion_bus import DiscussionBus
 from app.ai import discussion_orchestrator as orchestrator
@@ -18,8 +17,11 @@ from app.models.roundtable import RoundtableSession, RoundtableTurn
 
 
 @pytest.fixture
-def runtime(monkeypatch):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+def runtime(tmp_path, monkeypatch):
+    # 总线与线程池各持独立事务；StaticPool 会让另一个 Session 的 rollback 撤销当前写入。
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'startup-recovery.sqlite'}", connect_args={"check_same_thread": False},
+    )
     from app.core.database import Base
 
     Base.metadata.create_all(engine)

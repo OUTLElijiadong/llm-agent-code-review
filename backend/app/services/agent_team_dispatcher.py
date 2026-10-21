@@ -15,6 +15,11 @@ from app.core.permission_codes import PermissionCode
 from app.models.agent_team import AgentTeam, AgentTeamEvent, AgentTeamTask
 from app.models.user import User
 from app.services import agent_team_service, rbac_service
+from app.services.agent_scheduler_runtime import (
+    AgentExecutionCancelled,
+    agent_execution_scope,
+    check_agent_execution,
+)
 from app.services.ai_usage_context import model_attribution, usage_context
 
 _scheduler = None
@@ -226,7 +231,25 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                 "agent_team_task_id": int(claimed["task_id"]),
                 "agent_execution_event_id": claimed.get("execution_event_id"),
             }
-            with usage_context(int(user.id), fields, db=db):
+            bind = db.get_bind()
+            owner_id = int(user.id)
+
+            def check_lease() -> None:
+                # 每次轮询创建独立会话/事务，才能看见其他 worker 已提交的取消、
+                # 截止时间或新租约；绝不跨线程使用执行器的业务 Session。
+                with Session(bind=getattr(bind, "engine", bind), autoflush=False) as lease_db:
+                    _team, _leased_task, active_member = agent_team_service.require_active_task_lease(
+                        lease_db, team_id=team_id, task_id=claimed["task_id"],
+                        owner_user_id=owner_id, lease_token=claimed["lease_token"],
+                    )
+                    if (
+                        int(active_member.id) != int(claimed["member_id"])
+                        or active_member.address != claimed["address"]
+                    ):
+                        raise agent_team_service.AgentTeamLeaseError("团队成员声明与持久化任务不匹配")
+
+            with agent_execution_scope(check_lease), usage_context(owner_id, fields, db=db):
+                check_agent_execution()
                 _, result = _handle(
                     db,
                     user,
@@ -234,6 +257,17 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                     _task_message(team, {**claimed, "high_risk_authorized": high_risk_authorized}),
                     trusted_team_execution=True,
                 )
+                check_agent_execution()
+            # 对监督回执也做租约围栏；锁住同一团队/任务直至监督事件提交，
+            # 不让已失效的成员结果先进入监督时间线再被 complete_task 拒绝。
+            _team, _leased_task, active_member = agent_team_service.require_active_task_lease(
+                db, team_id=team_id, task_id=claimed["task_id"],
+                owner_user_id=owner_id, lease_token=claimed["lease_token"], lock=True,
+            )
+            # 业务 Session 可能缓存领取时的成员；锁内刷新，拒绝成员替换后的晚结果。
+            db.refresh(active_member, with_for_update=True)
+            if int(active_member.id) != int(claimed["member_id"]) or active_member.address != claimed["address"]:
+                raise agent_team_service.AgentTeamLeaseError("团队成员声明与持久化任务不匹配")
             access_error = _owner_access_error(db, int(team.user_id), agent_team_service._unjson(_task.input_json, {}),
                                            team_id=int(team.id), task_id=int(_task.id))
             if access_error:
@@ -275,6 +309,11 @@ def _execute_claimed(team_id: int, claimed: dict[str, Any]) -> dict[str, bool]:
                 error=str(result.get("summary") or "任务执行未完成") if not success else "",
             )
             return {"success": success}
+        except AgentExecutionCancelled:
+            db.rollback()
+            # 取消不走 complete_task/重试；持久化取消或租约恢复器拥有终态。
+            logger.info("[agent-team-dispatcher] cancelled team={} task={}", team_id, claimed["task_id"])
+            return {"success": False}
         except agent_team_service.AgentTeamError as exc:
             db.rollback()
             logger.warning(

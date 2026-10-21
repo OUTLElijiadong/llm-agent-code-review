@@ -1086,8 +1086,8 @@ useAgentPageRefresh({ pages: ['/reviews', '/issues', '/security'], refresh: load
   display: flex;
   flex-direction: column;
   gap: 14px;
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: 100%;
 }
 
 .page-error {
@@ -1413,8 +1413,8 @@ useAgentPageRefresh({ pages: ['/reviews', '/issues', '/security'], refresh: load
   display: grid;
   grid-template-columns: 240px 1fr 360px;
   gap: 14px;
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 360px;
+  min-height: 360px;
 }
 
 @media (max-width: 1280px) {

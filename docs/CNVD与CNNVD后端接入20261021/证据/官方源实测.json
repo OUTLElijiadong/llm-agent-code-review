@@ -1,0 +1,253 @@
+{
+  "checked_at": "2026-10-21T15:00:39.655742+00:00",
+  "environment": "本地共享工作树，只读官方网络；未访问生产数据库或部署环境",
+  "fixture": false,
+  "dedicated_config_names_present": [],
+  "runtime_query": {
+    "query": "",
+    "sources": [
+      {
+        "code": "cnvd",
+        "name": "国家信息安全漏洞共享平台",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "blocked",
+        "connected": false,
+        "status_message": "官方源返回 HTTP 521；本次未取得可核验漏洞记录。",
+        "checked_at": "2026-10-21T15:00:37.249790+00:00",
+        "last_success_at": null,
+        "http_status": 521,
+        "upstream_code": null,
+        "record_count": 0,
+        "cached": false,
+        "query_scope": "latest_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnvd.org.cn/flaw/list",
+            "method": "GET",
+            "checked_at": "2026-10-21T15:00:37.293068+00:00",
+            "http_status": 521,
+            "upstream_code": null,
+            "response_sha256": "d18fb9c1f22610fa4874ec185f384b338e2660a17334bcf22a8aa8836bfdbd3d",
+            "response_bytes": 877
+          }
+        ]
+      },
+      {
+        "code": "cnnvd",
+        "name": "国家信息安全漏洞库",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "blocked",
+        "connected": false,
+        "status_message": "官方源业务拒绝（码 4030）；本次查询未成功。",
+        "checked_at": "2026-10-21T15:00:37.250411+00:00",
+        "last_success_at": null,
+        "http_status": 200,
+        "upstream_code": "4030",
+        "record_count": 0,
+        "cached": false,
+        "query_scope": "official_search_first_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+            "method": "POST",
+            "checked_at": "2026-10-21T15:00:37.292463+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "5539d47a6ff5b6ba995c37ff5dfe674465eea8f94bbb3d050261f3e3fb176a40",
+            "response_bytes": 111
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+            "method": "POST",
+            "checked_at": "2026-10-21T15:00:37.585307+00:00",
+            "http_status": 200,
+            "upstream_code": "4030",
+            "response_sha256": "2a8082b1b2236bcec3b1fb29b5a79004397779d0d7f35ef2742eed0a98da90a2",
+            "response_bytes": 39
+          }
+        ]
+      }
+    ],
+    "records": []
+  },
+  "business_response_observations": [
+    {
+      "url": "https://www.cnvd.org.cn/flaw/list",
+      "http_status": 521
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "http_status": 200,
+      "upstream_code": 200,
+      "upstream_message": "操作成功"
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+      "http_status": 200,
+      "upstream_code": 4030,
+      "upstream_message": "非法访问"
+    }
+  ],
+  "public_site_checks": [
+    {
+      "url": "https://www.cnvd.org.cn/",
+      "checked_at": "2026-10-21T15:00:37.647849+00:00",
+      "http_status": 521,
+      "response_sha256": "c805ddbfafd8a76e3081430d7301c6964316cd325d5e84a78369da3025d715e9",
+      "response_bytes": 873
+    },
+    {
+      "url": "https://www.cnvd.org.cn/shareData/list",
+      "checked_at": "2026-10-21T15:00:37.648034+00:00",
+      "http_status": 521,
+      "response_sha256": "f57b878f4d8e9d9f526ec332d22e38536123703b828d0606b3681022c0e12428",
+      "response_bytes": 861
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/",
+      "checked_at": "2026-10-21T15:00:37.648282+00:00",
+      "http_status": 200,
+      "response_sha256": "b2136984413abe134f1a030312f367c8d9403a65f99a50bdd82d205b81122014",
+      "response_bytes": 985
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/app.7cf40bfa6c9d756e124a.js",
+      "checked_at": "2026-10-21T15:00:37.766882+00:00",
+      "http_status": 200,
+      "response_sha256": "adab124cee8c38d69deeee8a0dcf88fac4a6761053ae94d43843f9cffc694f0b",
+      "response_bytes": 79802,
+      "verified_contract_markers": {
+        "baseUrl:\"/cnnvdweb\"": true,
+        "/tourist/sign": true,
+        "signStr:t": true,
+        "s=t+l+r+i": true,
+        "X-Appid": true,
+        "X-Timestamp": true,
+        "X-Nonce": true,
+        "X-Sign": true,
+        "6i8417579268034679HXvp0Kb6r1C2A9": true
+      }
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/0.499105c30d335e4679c2.js",
+      "checked_at": "2026-10-21T15:00:37.769416+00:00",
+      "http_status": 200,
+      "response_sha256": "5e707d7ffcc4550b5b6162cca5f90bc6f3bd55f54c134d1d85f1915a1705ccab",
+      "response_bytes": 1305810,
+      "verified_contract_markers": {
+        "/homePage/searchVul": true,
+        "homePage/cnnvdVulList": true,
+        "cveId": true,
+        "cnnvdId": true
+      }
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/3.45a08984e8708e1005f8.js",
+      "checked_at": "2026-10-21T15:00:38.005484+00:00",
+      "http_status": 200,
+      "response_sha256": "4370448e1121cc2b02f9f951e46ce5cb6f0df37665894f9433d207029155af22",
+      "response_bytes": 37030,
+      "verified_contract_markers": {
+        "sortField:\"publishDate\"": true,
+        "pageSize:10": true,
+        "cleanParams:function": true,
+        "u.p)(t)": true,
+        "t.data.records": true,
+        "t.data.total": true,
+        "query:{vulId:e.id}": true,
+        "vulLevel": true
+      }
+    }
+  ],
+  "final_runtime_query": {
+    "checked_at": "2026-10-21T15:26:52.396516+00:00",
+    "purpose": "最终服务代码本地只读复测，不是生产验收",
+    "result": {
+      "query": "",
+      "sources": [
+        {
+          "code": "cnvd",
+          "name": "国家信息安全漏洞共享平台",
+          "role": "vulnerability_intelligence",
+          "url": "https://www.cnvd.org.cn/",
+          "adapter": "official_public_web",
+          "integration": "implemented",
+          "status": "blocked",
+          "connected": false,
+          "status_message": "官方源返回 HTTP 521；本次未取得可核验漏洞记录。",
+          "checked_at": "2026-10-21T15:26:52.047052+00:00",
+          "last_success_at": null,
+          "http_status": 521,
+          "upstream_code": null,
+          "record_count": 0,
+          "cached": false,
+          "query_scope": "latest_page",
+          "last_query": "",
+          "retry_after_seconds": null,
+          "evidence": [
+            {
+              "url": "https://www.cnvd.org.cn/flaw/list",
+              "method": "GET",
+              "checked_at": "2026-10-21T15:26:52.062148+00:00",
+              "http_status": 521,
+              "upstream_code": null,
+              "response_sha256": "a7e1b5140290a04939b0c68d76a0953ac746756a3a42f14a640c2fe8544aa0e4",
+              "response_bytes": 865
+            }
+          ]
+        },
+        {
+          "code": "cnnvd",
+          "name": "国家信息安全漏洞库",
+          "role": "vulnerability_intelligence",
+          "url": "https://www.cnnvd.org.cn/",
+          "adapter": "official_public_web",
+          "integration": "implemented",
+          "status": "blocked",
+          "connected": false,
+          "status_message": "官方源业务拒绝（码 4030）；本次查询未成功。",
+          "checked_at": "2026-10-21T15:26:52.047470+00:00",
+          "last_success_at": null,
+          "http_status": 200,
+          "upstream_code": "4030",
+          "record_count": 0,
+          "cached": false,
+          "query_scope": "official_search_first_page",
+          "last_query": "",
+          "retry_after_seconds": null,
+          "evidence": [
+            {
+              "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+              "method": "POST",
+              "checked_at": "2026-10-21T15:26:52.062660+00:00",
+              "http_status": 200,
+              "upstream_code": "200",
+              "response_sha256": "23f785ea60aaa7315035a052e0c782d9b494165b65d31cea47c4a55760402e01",
+              "response_bytes": 111
+            },
+            {
+              "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+              "method": "POST",
+              "checked_at": "2026-10-21T15:26:52.335343+00:00",
+              "http_status": 200,
+              "upstream_code": "4030",
+              "response_sha256": "2a8082b1b2236bcec3b1fb29b5a79004397779d0d7f35ef2742eed0a98da90a2",
+              "response_bytes": 39
+            }
+          ]
+        }
+      ],
+      "records": []
+    }
+  }
+}

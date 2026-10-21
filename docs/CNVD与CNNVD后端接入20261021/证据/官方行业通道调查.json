@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-10-21T16:56:11.318124+00:00",
+  "environment": "fixed official HTTPS origins via production egress 81.70.251.90; no production app/config/database access",
+  "ai_sector": {
+    "url": "https://ai.cnvd.org.cn/",
+    "http_status": 200,
+    "response_sha256": "b4975671f66df73ea7b4822d645a7e7e88463f53ae25d60c865f5d35046d21fd",
+    "response_bytes": 18475,
+    "body_file": "CNVD人工智能子库-首页响应.txt",
+    "scope": "人工智能行业首页最多20条，非CNVD全库",
+    "fields": "官方href编号、title属性完整标题、危害级别、列表时间；不推断CVE、CWE或发布日期"
+  },
+  "ics_sector": {
+    "url": "https://ics.cnvd.org.cn/",
+    "http_status": 200,
+    "response_sha256": "d376d516675ddaa11f9da0c5af38721fea4d6f10179e450980dcdea84094cf73",
+    "result": "application shell, no records"
+  },
+  "ics_public_read": {
+    "url": "https://ics.cnvd.org.cn/api/vulnerability/vulnerabilityInfos/getNew6",
+    "method": "GET",
+    "headers": {
+      "type": "index"
+    },
+    "http_status": 200,
+    "business_status": 500,
+    "message": "token is empty",
+    "response_sha256": "06d8f080e5e06abde7f93267a5854e5d775a871dcac92fb1509517cc7ebe740c",
+    "response_bytes": 49,
+    "result": "no records; no token supplied or obtained; did not proceed"
+  },
+  "ics_protocol": {
+    "url": "https://ics.cnvd.org.cn/js/chunk-d974ad92.e5f1cfc4.js",
+    "response_sha256": "c15b564468d9d2bf2055d788c8bf028bc001e63fd16e9e9a61eac1124bc3d397",
+    "finding": "official page declares GET ./vulnerability/vulnerabilityInfos/getNew6, type=index; /api/ base from official app bundle; no credentials copied to this evidence"
+  },
+  "final_service_evidence": "最终服务-行业回退生产出口真实取数.json",
+  "boundaries": [
+    "No CAPTCHA, script challenge, login or paid-access bypass",
+    "No pagination or full database crawl",
+    "CNVD primary 521 retained independently of AI sector availability",
+    "CNNVD already has live visitor search and does not require a PDF fallback"
+  ]
+}

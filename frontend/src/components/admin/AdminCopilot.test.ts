@@ -642,12 +642,15 @@ describe('AdminCopilot Responses stream', () => {
   })
 
   it('创建团队后主响应结束也持续展示真实子 Agent 协作城市', async () => {
-    teamApi.detail.mockResolvedValue({
+    const detail = {
       team_id: 88, title: '管理端实时协作', surface: 'admin', session_id: 'admin-test', status: 'running',
       max_active_children: 3, trace_id: 'trace-admin-88',
       counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 },
-      members: [], tasks: [], events: [], messages: [],
-    })
+      members: [{ member_id: 1, member_key: 'ops', display_name: '运维检查', address: 'agent:operations', kind: 'registered', role: 'worker', status: 'running' }],
+      tasks: [{ task_id: 1, task_key: 'ops-read', member_id: 1, title: '读取健康状态', depends_on: [], status: 'running', priority: 1, attempt_count: 1, max_attempts: 1 }], events: [], messages: [],
+    }
+    teamApi.detail.mockResolvedValue(detail)
+    teamApi.list.mockResolvedValue({ items: [detail], total: 1 })
     const wrapper = mountCopilot()
     await openCopilot(wrapper)
     await flushSessionRestore()
@@ -659,6 +662,10 @@ describe('AdminCopilot Responses stream', () => {
     emit(0, { type: 'response.tool.completed', call_id: 'call-admin-team', tool_name: 'create_agent_team', output: { team_id: 88 } })
     await flushPromises()
 
+    const graph = wrapper.get('[aria-label="实时团队星图"]')
+    expect(graph.text()).toContain('1 个子 Agent · 1 个执行中')
+    expect(graph.text()).toContain('读取健康状态')
+    expect(graph.element.closest('details')).toBeNull()
     expect(wrapper.find('.thinking-city').exists()).toBe(true)
     expect(wrapper.text()).toContain('子 Agent 正在协作')
     wrapper.unmount()
@@ -1891,4 +1898,32 @@ it('管理员surface打开时收起成员surface的小菱会话，反向切换�
   expect(document.querySelector('.copilot-trigger')).not.toBeNull()
   wrapper.unmount()
   window.removeEventListener('prism:admin-copilot-opened', opened)
+})
+
+
+describe('实时星图滚动跟随', () => {
+  it('靠近底部时跟随账本更新，向上阅读时保留位置', async () => {
+    const wrapper = mountCopilot()
+    const vm = wrapper.vm as any
+    vm.visible = true
+    await flushPromises()
+    await flushSessionRestore()
+    await flushPromises()
+    try {
+      const area = (wrapper.vm as any).messageArea as HTMLElement
+      expect(area).toBeInstanceOf(HTMLElement)
+      Object.defineProperty(area, 'scrollHeight', { configurable: true, value: 1000 })
+      Object.defineProperty(area, 'clientHeight', { configurable: true, value: 400 })
+      area.scrollTop = 600
+      vm.agentTeams = [...vm.agentTeams]
+      await flushPromises()
+      expect(area.scrollTop).toBe(1000)
+      area.scrollTop = 100
+      vm.agentTeams = [...vm.agentTeams]
+      await flushPromises()
+      expect(area.scrollTop).toBe(100)
+    } finally {
+      wrapper.unmount()
+    }
+  })
 })

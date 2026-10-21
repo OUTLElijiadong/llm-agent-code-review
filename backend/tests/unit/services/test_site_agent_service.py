@@ -6,8 +6,8 @@ import json
 import pytest
 
 from app.core.permission_codes import PermissionCode
-from app.models.agent_team import AgentTeamEvent, AgentTeamTask
 from app.models.agent_response_run import AgentToolExecution
+from app.models.agent_team import AgentTeamEvent, AgentTeamTask
 from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.services import agent_supervisor_service, agent_team_service, site_agent_service
@@ -91,7 +91,9 @@ def test_ordinary_write_executes_once_and_independent_verifier_reads_back(db, ac
 
 def test_cross_account_and_cancelled_lease_block_before_api(db, actor, monkeypatch):
     called = []
-    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", lambda *_a, **_k: called.append(True))
+    monkeypatch.setattr(
+        site_agent_service.admin_capability_service, "execute_api", lambda *_a, **_k: called.append(True),
+    )
     created, claim = claimed_team(db, actor)
     other = User(username="other-site-user", password="unused", role="user", status=1)
     db.add(other)
@@ -104,7 +106,9 @@ def test_cross_account_and_cancelled_lease_block_before_api(db, actor, monkeypat
 
 def test_revocation_after_dispatch_blocks_before_api(db, actor, monkeypatch):
     called = []
-    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", lambda *_a, **_k: called.append(True))
+    monkeypatch.setattr(
+        site_agent_service.admin_capability_service, "execute_api", lambda *_a, **_k: called.append(True),
+    )
     created, claim = claimed_team(db, actor)
     actor.status = 0
     db.commit()
@@ -238,3 +242,42 @@ def test_get_verifier_blocks_changed_item_despite_same_total(db, actor, monkeypa
     verified = run(db, actor, created, verifier)
     assert verified["status"] == "blocked"
     assert "快照" in verified["summary"] or "条目" in verified["summary"]
+
+
+@pytest.mark.parametrize("data,status_code,expected", [
+    ({"execution_status": "partial"}, 200, "failed"),
+    ({"execution_status": "failed"}, 200, "failed"),
+    ({"execution_status": "running"}, 200, "blocked"),
+    ({"agent": {"error": "model failed"}}, 200, "failed"),
+    ({"agent": {"error": {"code": "provider_failed"}}}, 200, "failed"),
+    ({"agent": {"status": "partial"}}, 200, "failed"),
+    ({"status": "partial"}, 200, "failed"),
+    ({"agent": {"error": ""}}, 200, "completed"),
+    ({"agent": {"success": False}}, 200, "failed"),
+    ({"status": "running", "execution_status": "failed"}, 202, "failed"),
+    ({"status": "completed", "execution_status": "partial"}, 200, "failed"),
+    ({"status": "completed"}, 500, "failed"),
+    ({"execution_status": "success", "id": 71}, 200, "completed"),
+])
+def test_business_receipt_preserves_explicit_failure_and_partial_evidence(
+    db, actor, monkeypatch, data, status_code, expected,
+):
+    calls = []
+
+    async def api(_user, spec, _params, **_kwargs):
+        calls.append(spec.code)
+        return {"capability": spec.code, "status_code": status_code, "data": data}
+
+    monkeypatch.setattr(site_agent_service.admin_capability_service, "execute_api", api)
+    created, claim = claimed_team(db, actor)
+    first, replayed = run(db, actor, created, claim), run(db, actor, created, claim)
+    assert first["status"] == replayed["status"] == expected
+    assert first["retryable"] is False
+    assert first["result_receipt"]["output"]["data"] == data
+    assert first["result_receipt"]["status_code"] == status_code
+    assert len(calls) == 1
+    ledger = db.query(AgentToolExecution).one()
+    assert ledger.status == ("success" if expected == "completed" else "failed")
+    assert json.loads(ledger.result_json) == first
+    if expected != "completed":
+        assert first["errors"] and first["result_receipt"]["page_action"]["phase"] != "completed"

@@ -52,10 +52,22 @@ def test_queued_review_worker_reloads_downgraded_role(db, monkeypatch):
 
 
 def test_team_formal_actor_denies_viewer_even_with_global_permission(db, monkeypatch):
+    from app.api.v1.agent_teams import _raise_team_error
+
     actor, project, *_ = seed(db)
     monkeypatch.setattr(rbac_service, "check_permission", lambda *_a: True)
-    with pytest.raises(ForbiddenError):
+    with pytest.raises(agent_team_service.AgentTeamAccessError, match="账户已无当前项目的审查执行权限") as denied:
         agent_team_review._require_actor(db, actor.id, project.id)
+    # 团队领域层封装拒绝原因，HTTP 边界仍必须明确返回 403，不能退化成任意异常。
+    cause = denied.value.__cause__
+    assert isinstance(cause, ForbiddenError)
+    assert cause.code == 40300
+    assert cause.http_status == 403
+    assert "只读项目成员不能执行" in str(cause)
+    with pytest.raises(ForbiddenError) as response:
+        _raise_team_error(denied.value)
+    assert response.value.code == 40331
+    assert response.value.http_status == 403
 
 
 @pytest.mark.parametrize("scope", ["project_id", "file_id", "task_id"])

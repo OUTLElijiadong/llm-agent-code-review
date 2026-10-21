@@ -25,6 +25,7 @@ from app.ai.security_patterns import list_patterns
 from app.ai.security_static_rules import list_static_rules
 from app.models.user import User
 from app.services.rule_service import list_rules
+from app.services.vulnerability_source_service import source_statuses
 
 CODEQL_QUERY_HELP_URL = "https://codeql.github.com/codeql-query-help/"
 CODEQL_SUITE_URL = "https://docs.github.com/en/code-security/concepts/code-scanning/codeql/codeql-query-suites"
@@ -195,8 +196,7 @@ def build_catalog(db: Session, user: User, *, include_review_rules: bool = False
         "sources": [
             {"code": "owasp", "name": "OWASP 安全代码审查", "role": "review_method", "url": OWASP_REVIEW_URL},
             {"code": "codeql", "name": "GitHub CodeQL 查询套件", "role": "executable_rules", "url": CODEQL_SUITE_URL},
-            {"code": "cnvd", "name": "国家信息安全漏洞共享平台", "role": "vulnerability_intelligence", "url": CNVD_URL},
-            {"code": "cnnvd", "name": "国家信息安全漏洞库", "role": "vulnerability_intelligence", "url": CNNVD_URL},
+            *source_statuses(),
         ],
         "mapping_note": "CNVD/CNNVD 仅用于漏洞情报与中文分类；代码规则以 CWE/OWASP 映射，不虚构漏洞实例编号。",
     }

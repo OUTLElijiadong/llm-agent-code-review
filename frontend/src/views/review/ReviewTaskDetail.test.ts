@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskDetailOut, TaskFileOut } from '@/types/review'
 import type { VersionDetailOut } from '@/types/project'
+import reviewDetailSource from './ReviewTaskDetail.vue?raw'
 
 const review = vi.hoisted(() => ({ getReviewTaskDetail: vi.fn(), getTaskIssues: vi.fn() }))
 const files = vi.hoisted(() => ({ getDetail: vi.fn(), getVersion: vi.fn() }))
@@ -28,6 +29,8 @@ vi.mock('@/components/issue/AiPromptModal.vue', () => ({ default: { template: '<
 vi.mock('@/components/security/SecurityScanModal.vue', () => ({ default: { template: '<div />' } }))
 
 import ReviewTaskDetail from './ReviewTaskDetail.vue'
+
+const reviewDetailStyles = reviewDetailSource.match(/<style scoped lang="scss">([\s\S]*?)<\/style>/)?.[1] ?? ''
 
 function taskResult(overrides: Record<string, unknown> = {}): TaskDetailOut {
   return {
@@ -103,6 +106,21 @@ afterEach(() => {
   document.body.innerHTML = ''
   vi.useRealTimers()
   vi.unstubAllGlobals()
+})
+
+describe('审查详情纵向滚动布局', () => {
+  it('运行状态摘要增加时详情页可增长，宽屏工作台不会被固定视口压缩', async () => {
+    await renderDetail()
+
+    expect(wrapper.element.querySelector('.execution-panel')).not.toBeNull()
+    const page = reviewDetailStyles.match(/\.review-detail-page\s*\{([^}]+)\}/)?.[1] ?? ''
+    const workbench = reviewDetailStyles.match(/\.workbench\s*\{([^}]+)\}/)?.[1] ?? ''
+
+    expect(page).toContain('height: auto;')
+    expect(page).toContain('min-height: 100%;')
+    expect(workbench).toContain('flex: 1 0 360px;')
+    expect(workbench).toContain('min-height: 360px;')
+  })
 })
 
 it.each([

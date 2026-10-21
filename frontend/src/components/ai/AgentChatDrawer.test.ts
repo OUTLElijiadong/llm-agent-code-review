@@ -910,7 +910,13 @@ describe('AgentChatDrawer Responses stream', () => {
     })
     teamApi.detail.mockResolvedValue({
       team_id: 44, title: '实时白盒团队', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-44',
-      counts: { total: 2, completed: 0, running: 2, queued: 0, failed: 0, blocked: 0 }, members: [], tasks: [], events: [], messages: [],
+      counts: { total: 2, completed: 0, running: 1, queued: 1, failed: 0, blocked: 0 },
+      members: [
+        { member_id: 1, member_key: 'security', display_name: '安全检查', address: 'agent:security', kind: 'registered', role: 'worker', status: 'running' },
+        { member_id: 2, member_key: 'review', display_name: '临时审查员', address: 'temporary:review', kind: 'temporary', role: 'worker', status: 'queued' },
+      ], tasks: [
+        { task_id: 1, task_key: 'scan', member_id: 1, title: '检查输入边界', depends_on: [], status: 'running', priority: 1, attempt_count: 1, max_attempts: 1 },
+      ], events: [], messages: [],
     })
 
     await wrapper.find('.chat-input').setValue('请组建团队检查白盒测试')
@@ -923,6 +929,12 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
     expect(wrapper.text()).toContain('实时白盒团队')
     expect(wrapper.text()).not.toContain('最终结论')
+    const graph = wrapper.get('[aria-label="实时团队星图"]')
+    expect(graph.text()).toContain('2 个子 Agent · 1 个执行中')
+    expect(graph.text()).toContain('检查输入边界')
+    expect(graph.find('[data-member-id="1"]').attributes('data-status')).toBe('running')
+    expect(graph.element.closest('details')).toBeNull()
+    expect(streams.records[0].aborted).toBe(false)
 
     emit(0, { type: 'response.tool.completed', call_id: 'call-team', tool_name: 'create_agent_team', output_summary: '团队已创建' })
     await settleAll()
@@ -2092,5 +2104,28 @@ describe('小菱账号切换隔离', () => {
     resolveNew({ surface: 'user', session_id: 'new', run: null, messages: [], pending: null })
     await flushPromises()
     wrapper.unmount()
+  })
+})
+
+
+describe('实时星图滚动跟随', () => {
+  it('靠近底部时跟随账本更新，向上阅读时保留位置', async () => {
+    const wrapper = await mountReadyDrawer()
+    try {
+      const area = wrapper.get('.chat-body').element as HTMLElement
+      Object.defineProperty(area, 'scrollHeight', { configurable: true, value: 1000 })
+      Object.defineProperty(area, 'clientHeight', { configurable: true, value: 400 })
+      area.scrollTop = 600
+      const vm = wrapper.vm as any
+      vm.agentTeams = [...vm.agentTeams]
+      await flushPromises()
+      expect(area.scrollTop).toBe(1000)
+      area.scrollTop = 100
+      vm.agentTeams = [...vm.agentTeams]
+      await flushPromises()
+      expect(area.scrollTop).toBe(100)
+    } finally {
+      wrapper.unmount()
+    }
   })
 })

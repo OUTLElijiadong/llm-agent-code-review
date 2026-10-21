@@ -365,20 +365,29 @@ async def execute_site_task(db: Session, user: User, *, team_id: int, task_id: i
                 "output": safe,
                 "page_action": capability_page_action(raw["scope"], spec.code, "pending", actor.id, output),
             }
-            pending = output.get("status_code") == 202 or (
-                isinstance(output.get("data"), Mapping) and output["data"].get("status") in _PENDING
-            )
-            failed = isinstance(output.get("data"), Mapping) and (
-                output["data"].get("status") in {"failed", "blocked", "error", "cancelled"}
-                or output["data"].get("success") is False
-                or output["data"].get("ok") is False
+            data = output.get("data")
+            data = data if isinstance(data, Mapping) else {}
+            agent = data.get("agent")
+            agent = agent if isinstance(agent, Mapping) else {}
+            # 只解释显式业务状态；畸形值保留在脱敏回执中，不能参与集合或视为成功。
+            values = [obj[key] for obj, key in (
+                (data, "status"), (data, "execution_status"), (agent, "status"),
+            ) if key in obj]
+            malformed = any(not isinstance(value, str) or not value.strip() for value in values)
+            states = {value.strip().lower() for value in values if isinstance(value, str) and value.strip()}
+            pending = output.get("status_code") == 202 or bool(states & _PENDING)
+            failed = (
+                malformed or int(output.get("status_code") or 200) >= 400
+                or bool(states & {"failed", "blocked", "error", "cancelled", "partial"})
+                or data.get("success") is False or data.get("ok") is False
+                or bool(agent.get("error")) or agent.get("success") is False or agent.get("ok") is False
             )
             result = _result(
-                "blocked" if pending else "failed" if failed else "completed",
-                "业务已受理，仍需等待真实业务终态"
-                if pending
-                else "业务回执报告失败，不能标记为完成"
+                "failed" if failed else "blocked" if pending else "completed",
+                "业务回执报告失败或仅部分完成，不能标记为完成"
                 if failed
+                else "业务已受理，仍需等待真实业务终态"
+                if pending
                 else "业务调用已执行，等待独立结果核验",
                 receipt=receipt,
                 evidence=[{"source": "site_api_receipt", "request_id": request_id}],
@@ -425,6 +434,11 @@ async def _verify_dependencies(db, actor, team, task, lease_token):
         verified = dict(receipt)
         if pair:
             read, read_params = pair
+            from app.services.agent_responses_service import redact_agent_model_context_value
+
+            # 在实际调用处记录身份，包含 DELETE 的 404；汇总不得从预期目标补造。
+            readback_identity = {"capability": read.code,
+                                 "request_params": redact_agent_model_context_value(read_params)}
             try:
                 readback = await admin_capability_service.execute_api(
                     actor, read, read_params, request_id=receipt["request_id"] + "-verify"
@@ -454,9 +468,7 @@ async def _verify_dependencies(db, actor, team, task, lease_token):
                         return _result("blocked", "查询条目快照已变化，不能确认一致：" + key, receipt=receipt)
             if spec.method == "DELETE" and readback.get("status_code") != 404:
                 return _result("blocked", "删除目标仍可读，业务结果尚未确认", receipt=receipt)
-            from app.services.agent_responses_service import redact_agent_model_context_value
-
-            verified["readback"] = redact_agent_model_context_value(readback)
+            verified["readback"] = {**redact_agent_model_context_value(readback), **readback_identity}
             evidence.append(
                 {
                     "source": "site_same_target_readback",

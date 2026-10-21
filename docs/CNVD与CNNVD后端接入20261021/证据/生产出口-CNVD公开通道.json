@@ -1,0 +1,115 @@
+{
+  "environment": "production egress, ordinary read-only requests, JS challenges neither executed nor solved",
+  "checked_at": "2026-10-21T16:02:13.978875+00:00",
+  "steps": [
+    {
+      "url": "https://www.cnvd.org.cn/robots.txt",
+      "checked_at": "2026-10-21T16:02:05.242201+00:00",
+      "http_status": 521,
+      "response_bytes": 882,
+      "response_sha256": "49df21d62399065f7c30b974251d668d5fc2d00ffcca404be52eba0d29fa5032",
+      "content_type": null,
+      "server_date": "Wed, 21 Oct 2026 16:02:05 GMT",
+      "redirect": null,
+      "cookie_names_in_memory": [
+        "__jsluid_s"
+      ],
+      "script_challenge_markers": {
+        "inline_script": true,
+        "sets_document_cookie": true,
+        "eval": false,
+        "jsl_clearance": false
+      },
+      "links": []
+    },
+    {
+      "url": "https://www.cnvd.org.cn/webinfo/list?type=4",
+      "checked_at": "2026-10-21T16:02:07.384445+00:00",
+      "http_status": 521,
+      "response_bytes": 865,
+      "response_sha256": "aea79006be5d06fe144bfcbe1dbde2f568f8c8ebc7cac3bd33528a3dab665605",
+      "content_type": null,
+      "server_date": "Wed, 21 Oct 2026 16:02:07 GMT",
+      "redirect": null,
+      "cookie_names_in_memory": [
+        "__jsluid_s"
+      ],
+      "script_challenge_markers": {
+        "inline_script": true,
+        "sets_document_cookie": true,
+        "eval": false,
+        "jsl_clearance": false
+      },
+      "links": []
+    },
+    {
+      "url": "https://www.cnvd.org.cn/",
+      "checked_at": "2026-10-21T16:02:09.580798+00:00",
+      "http_status": 521,
+      "response_bytes": 855,
+      "response_sha256": "5bc85afc9745ff2bf36bcc61e1f58dd81210623e66db9b71ce104b0bc8e6c5aa",
+      "content_type": null,
+      "server_date": "Wed, 21 Oct 2026 16:02:09 GMT",
+      "redirect": null,
+      "cookie_names_in_memory": [
+        "__jsluid_s"
+      ],
+      "script_challenge_markers": {
+        "inline_script": true,
+        "sets_document_cookie": true,
+        "eval": false,
+        "jsl_clearance": false
+      },
+      "links": []
+    },
+    {
+      "url": "https://www.cert.org.cn/publish/main/44/2025/20250618165255933705533/20250618165255933705533_.html",
+      "checked_at": "2026-10-21T16:02:11.723780+00:00",
+      "http_status": 200,
+      "response_bytes": 10043,
+      "response_sha256": "08d30e3fe208ac62c2e7e91a0addef6cf8bd1476ab2312d233a06b76d78be7a1",
+      "content_type": "text/html; charset=utf-8",
+      "server_date": "Wed, 21 Oct 2026 16:02:11 GMT",
+      "redirect": null,
+      "cookie_names_in_memory": [
+        "__jsluid_s"
+      ],
+      "script_challenge_markers": {
+        "inline_script": true,
+        "sets_document_cookie": false,
+        "eval": false,
+        "jsl_clearance": false
+      },
+      "links": [
+        {
+          "url": "https://www.cert.org.cn/sites/main/list/rss_list.htm",
+          "text": "RSS订阅"
+        },
+        {
+          "url": "https://www.cert.org.cn/publish/main/9/index.html",
+          "text": "漏洞公告"
+        },
+        {
+          "url": "https://www.cert.org.cn/publish/main/68/index.html",
+          "text": "数据分析报告"
+        },
+        {
+          "url": "https://www.cert.org.cn/publish/main/23/index.html",
+          "text": "安全工具下载"
+        },
+        {
+          "url": "https://www.cert.org.cn/publish/main/44/2025/20250606152525689975812/20250606152525689975812_.html",
+          "text": "CNVD漏洞周报2025年第20期"
+        },
+        {
+          "url": "https://www.cert.org.cn/publish/main/44/2025/20250530174129150612432/20250530174129150612432_.html",
+          "text": "CNVD漏洞周报2025年第19期"
+        },
+        {
+          "url": "https://www.cnvd.org.cn/webinfo/show/11296",
+          "text": "CNVD漏洞周报2025年第21期"
+        }
+      ]
+    }
+  ]
+}

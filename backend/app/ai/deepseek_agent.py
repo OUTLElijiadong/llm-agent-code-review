@@ -8,9 +8,11 @@ DeepSeek Agent: HTTP调用、重试、日志记录
 
 时区约定: 所有 create_time 均为 timezone-aware UTC (datetime.now(timezone.utc))。
 """
+import asyncio
 import json
 import threading
 import time
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
@@ -184,6 +186,34 @@ def _clamp_max_tokens(max_tokens: Optional[int]) -> int:
     return max(1, min(ceiling, int(max_tokens)))
 
 
+async def _finish_http_cleanup(awaitable) -> None:
+    """首次或重复取消均须等 HTTP 清理结束，再把取消交回调用方。"""
+    cleanup = asyncio.ensure_future(awaitable)
+    interrupted = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            interrupted = True
+    cleanup.result()
+    if interrupted:
+        raise asyncio.CancelledError
+
+
+class _CancellationSafeStream(httpx.AsyncByteStream):
+    """httpx 在读到 EOF 时也会主动关闭流，保护这一正常清理入口。"""
+
+    def __init__(self, stream: httpx.AsyncByteStream):
+        self.stream = stream
+
+    async def __aiter__(self):
+        async for chunk in self.stream:
+            yield chunk
+
+    async def aclose(self):
+        await _finish_http_cleanup(self.stream.aclose())
+
+
 class DeepSeekAgent:
     """API 统一调用封装 — 支持用户自定义配置"""
 
@@ -269,6 +299,64 @@ class DeepSeekAgent:
                 client.close()
         return resp, int((time.time() - t0) * 1000)
 
+    def _request_with_cancellation(self, url: str, headers: dict, payload: dict, *, on_cancel) -> tuple:
+        """团队调用绑定完整 async HTTP 生命周期；未绑定租约的调用沿用共享同步池。"""
+        from app.services.agent_scheduler_runtime import (
+            check_agent_execution,
+            has_agent_execution_scope,
+            run_agent_coroutine,
+        )
+
+        if not has_agent_execution_scope():
+            return self._do_request(url, headers, payload)
+        started = None
+        response = None
+
+        async def request():
+            nonlocal started, response
+            target = await asyncio.to_thread(pin_public_http_url, url)
+            # 每次同步桥接有独立事件循环，客户端不能复用到另一事件循环。
+            resources = AsyncExitStack()
+            try:
+                client = await resources.enter_async_context(httpx.AsyncClient(
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=40),
+                    timeout=httpx.Timeout(self.timeout), trust_env=False,
+                ))
+                await asyncio.to_thread(check_agent_execution)
+                started = time.monotonic()
+                response = await resources.enter_async_context(client.stream(
+                    "POST", target.request_url, headers={**headers, "Host": target.host_header},
+                    json=payload, timeout=self.timeout, extensions=target.request_extensions,
+                ))
+                response.stream = _CancellationSafeStream(response.stream)
+                await response.aread()
+                return response, int((time.monotonic() - started) * 1000)
+            finally:
+                # 清理已正常开始时首次取消也不能打断；关闭完成后才允许记账和退出。
+                await _finish_http_cleanup(resources.aclose())
+
+        try:
+            return run_agent_coroutine(request())
+        except asyncio.CancelledError:
+            if started is not None:
+                # 完整响应已到达、但最后租约核验失败时，仍保留真实 usage；
+                # 未读完响应的 token 数未知，不能把取消解释成零消耗。
+                try:
+                    body = response.json() if response is not None else {}
+                except (TypeError, ValueError, httpx.ResponseNotRead):
+                    body = {}
+                on_cancel(body if isinstance(body, dict) else {}, int((time.monotonic() - started) * 1000))
+            raise
+
+    @staticmethod
+    def _wait_before_retry(delay: float) -> None:
+        from app.services.agent_scheduler_runtime import has_agent_execution_scope, run_agent_coroutine
+
+        if has_agent_execution_scope():
+            run_agent_coroutine(asyncio.sleep(delay))
+        else:
+            time.sleep(delay)
+
     # ── 并行线程调用 (作用域内独立记账，返回 ID 与元数据) ──
 
     def call_raw(
@@ -299,6 +387,8 @@ class DeepSeekAgent:
         Raises:
             RuntimeError: 全部重试均失败
         """
+        from app.services.agent_scheduler_runtime import check_agent_execution
+
         model_tag = (
             f"{self.model}/{agent_label}-agent"
             if agent_label and agent_label != "general"
@@ -328,8 +418,20 @@ class DeepSeekAgent:
             if callable(before_request):
                 before_request()
             started = time.time()
+
+            def cancelled(body, duration):
+                nonlocal http_attempts
+                http_attempts += 1
+                log_id = record_usage_attempt(
+                    model_name=str(body.get("model") or self.model), agent_label=agent_label,
+                    usage=body.get("usage"), status="cancelled", error="团队任务调用已取消，已关闭 HTTP 请求",
+                    duration_ms=duration, prompt=user_prompt,
+                )
+                if log_id is not None:
+                    usage_log_ids.append(log_id)
+
             try:
-                response, duration = self._do_request(url, headers, payload)
+                response, duration = self._request_with_cancellation(url, headers, payload, on_cancel=cancelled)
                 http_attempts += 1
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 http_attempts += 1
@@ -382,7 +484,7 @@ class DeepSeekAgent:
                     raise failure(
                         f"[call_raw] {agent_label} 全部 {self.max_retries+1} 次重试均失败: {err}",
                     ) from exc
-                time.sleep(min(60, 2 ** (attempt + 1)))
+                self._wait_before_retry(min(60, 2 ** (attempt + 1)))
                 continue
 
             if resp.status_code == 200:
@@ -407,10 +509,11 @@ class DeepSeekAgent:
                     }
                     if isinstance(exc, DeepSeekJsonOutputError) and attempt < self.max_retries:
                         logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} JSON 校验失败，重试")
-                        time.sleep(min(60, 2 ** (attempt + 1)))
+                        self._wait_before_retry(min(60, 2 ** (attempt + 1)))
                         continue
                     raise exc
                 content, usage, finish_reason = parsed
+                check_agent_execution()  # 独立审计提交期间也可能撤销租约，正文交付前再次核验。
                 return content, {
                     "_usage_attribution": attribution_snapshot(),
                     "_usage_log_ids": list(usage_log_ids),
@@ -449,7 +552,7 @@ class DeepSeekAgent:
                 raise failure(
                     f"[call_raw] {agent_label} 全部 {self.max_retries+1} 次重试均失败: {err}",
                 )
-            time.sleep(min(60, 2 ** (attempt + 1)))
+            self._wait_before_retry(min(60, 2 ** (attempt + 1)))
 
         raise failure(f"[call_raw] {agent_label} 未知错误")  # unreachable
 
@@ -469,6 +572,8 @@ class DeepSeekAgent:
         max_tokens: Optional[int] = None,
     ) -> tuple:
         """调用 DeepSeek Chat API + 写 AiCallLog"""
+        from app.services.agent_scheduler_runtime import check_agent_execution
+
         model_tag = (
             f"{self.model}/{agent_label}-agent"
             if agent_label and agent_label != "general"
@@ -487,10 +592,20 @@ class DeepSeekAgent:
             usage_log_ids.extend(meta.get("_usage_log_ids", []))
             meta["_usage_log_ids"] = list(usage_log_ids)
 
+        def cancelled(body, duration):
+            log_attempt(
+                db=db, task_id=task_id, user_id=user_id, file_id=file_id,
+                chunk_index=chunk_index, prompt=user_prompt, response=None,
+                status="cancelled", error="团队任务调用已取消，已关闭 HTTP 请求",
+                meta={**{key: usage_tokens(body.get("usage"), key) for key in
+                         ("prompt_tokens", "completion_tokens", "total_tokens")}, "duration_ms": duration},
+                model_name=model_tag, agent_label=agent_label,
+            )
+
         last_err: Optional[Exception] = None
         while attempt <= self.max_retries:
             try:
-                resp, duration_ms = self._do_request(url, headers, payload)
+                resp, duration_ms = self._request_with_cancellation(url, headers, payload, on_cancel=cancelled)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 err = AiServiceError(f"DeepSeek 网络请求失败: {exc}", code=50201)
                 last_err = err
@@ -504,7 +619,7 @@ class DeepSeekAgent:
                 if attempt >= self.max_retries:
                     break
                 logger.warning(f"DeepSeek 调用失败({err}), 第 {attempt+1} 次重试")
-                time.sleep(min(60, 2 ** (attempt + 1)))
+                self._wait_before_retry(min(60, 2 ** (attempt + 1)))
                 attempt += 1
                 continue
 
@@ -538,7 +653,7 @@ class DeepSeekAgent:
                     )
                     if retryable:
                         logger.warning(f"DeepSeek JSON 校验失败，第 {attempt+1} 次重试")
-                        time.sleep(min(60, 2 ** (attempt + 1)))
+                        self._wait_before_retry(min(60, 2 ** (attempt + 1)))
                         attempt += 1
                         continue
                     error = AiServiceError(f"DeepSeek 响应无效: {exc}", code=50201)
@@ -559,6 +674,7 @@ class DeepSeekAgent:
                     model_name=model_tag,
                     agent_label=agent_label,
                 )
+                check_agent_execution()  # 已完成请求的真实记账保留，撤销后不交付正文。
                 return content, meta
 
             if resp.status_code == 402:
@@ -597,7 +713,7 @@ class DeepSeekAgent:
             if not retryable or attempt >= self.max_retries:
                 break
             logger.warning(f"DeepSeek 调用失败({err}), 第 {attempt+1} 次重试")
-            time.sleep(min(60, 2 ** (attempt + 1)))
+            self._wait_before_retry(min(60, 2 ** (attempt + 1)))
             attempt += 1
 
         if getattr(last_err, "failure_kind", "") == "billing_error":

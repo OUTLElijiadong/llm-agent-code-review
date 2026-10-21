@@ -30,7 +30,8 @@ from app.schemas.security import (
     SecurityScanProjectIn,
     SecurityScanTaskIn,
 )
-from app.services import security_rule_catalog_service, security_service
+from app.schemas.vulnerability_source import VulnerabilitySourceQueryOut, VulnerabilitySourceStatusOut
+from app.services import security_rule_catalog_service, security_service, vulnerability_source_service
 from app.services.project_member_service import require_project_execution
 from app.services.rbac_service import check_permission
 from app.services.security_report_service import infer_coverage_status, persist_security_report
@@ -163,6 +164,31 @@ def get_checklist(_: User = Depends(get_current_user)):
     orch = get_orchestrator()
     data = orch.security_sentinel.get_checklist()
     return Resp(data=SecurityChecklistOut(**data))
+
+
+@router.get(
+    "/vulnerability-sources",
+    response_model=Resp[list[VulnerabilitySourceStatusOut]],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
+def get_vulnerability_sources(user: User = Depends(get_current_user)):
+    """实际只读查询官方最新页并返回接通/限流/拒绝证据；可按来源短期退避。"""
+    return Resp(data=vulnerability_source_service.query_sources()["sources"])
+
+
+@router.get(
+    "/vulnerability-records",
+    response_model=Resp[VulnerabilitySourceQueryOut],
+    dependencies=[Depends(require_permission(PermissionCode.SECURITY_VIEW))],
+)
+def get_vulnerability_records(
+    q: str = Query("", max_length=200),
+    source: str = Query("all", pattern="^(all|cnvd|cnnvd)$"),
+    limit: int = Query(10, ge=1, le=20),
+    user: User = Depends(get_current_user),
+):
+    """按官方编号/关键字查询；空词返回公开最新页，失败不伪装成无匹配。"""
+    return Resp(data=vulnerability_source_service.query_sources(q, source=source, limit=limit))
 
 
 @router.get(

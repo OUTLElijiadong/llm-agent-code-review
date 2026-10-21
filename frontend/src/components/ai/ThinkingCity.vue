@@ -77,7 +77,7 @@ let resizeObserver: ResizeObserver | null = null
 let hudSyncAt = 0
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const TERMINAL_TEAM_STATUS: ReadonlySet<AgentTeamStatus> = new Set([
-  'completed', 'failed', 'cancelled', 'expired',
+  'completed', 'failed', 'blocked', 'cancelled', 'expired',
 ])
 
 interface TrackedTeam {

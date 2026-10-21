@@ -55,3 +55,12 @@ def test_missing_rule_inputs_never_fall_back_to_zero() -> None:
     unavailable = audit_report_score(SimpleNamespace(review_type="code_review", score=0, coverage={}), None, {}, 0)
     assert unavailable["status"] == "unavailable"
     assert unavailable["final_score"] is None
+
+
+def test_score_recalculation_does_not_claim_independent_finding_review() -> None:
+    task = SimpleNamespace(review_type="discussion", score=29, coverage={})
+    audit = audit_report_score(task, 29, {"高": 6, "中": 6, "低": 5}, 17)
+    assert audit["status"] == "trusted"
+    assert audit["reviewer"] == "规则复算"
+    assert audit["verification_scope"] == "score_only"
+    assert audit["independent_review"] is False

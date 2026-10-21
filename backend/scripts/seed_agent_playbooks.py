@@ -81,6 +81,7 @@ def seed(only_files: set[str] | None = None) -> None:
                 source_ref=meta["file"],
                 risk_level="low",
                 confidence=1.0,
+                require_api_embedding=True,
             )
             if doc.status != "active":
                 agent_knowledge_service.activate_document(db, doc.id)

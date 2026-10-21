@@ -1,5 +1,7 @@
+import asyncio
 import json as json_lib
 import time
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
@@ -163,6 +165,13 @@ class BaseAgent:
         Returns:
             AgentResult
         """
+        from app.services.agent_scheduler_runtime import (
+            check_agent_execution,
+            has_agent_execution_scope,
+            run_agent_coroutine,
+        )
+
+        check_agent_execution()
         # 解析最终使用的 API 配置：传入 > 实例默认
         from app.utils.api_resolver import normalize_ai_base_url
 
@@ -246,6 +255,7 @@ class BaseAgent:
         usage_log_ids: list[int] = []
         http_attempts = 0
         for attempt in range(max_retries + 1):
+            check_agent_execution()
             if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                 last_error = "模型调用超过语义审计全局时限"
                 last_failure_kind = "semantic_budget_exhausted"
@@ -268,27 +278,52 @@ class BaseAgent:
             attempt_model = model
             attempt_error = ""
             attempt_success = False
+            attempt_cancelled = False
+            resp = None
             try:
-                target = pin_public_http_url(f"{base_url}/chat/completions")
                 request_timeout = float(timeout)
                 if deadline_monotonic is not None:
                     request_timeout = min(
                         request_timeout,
                         max(0.1, deadline_monotonic - time.monotonic()),
                     )
-                with httpx.Client(timeout=request_timeout, trust_env=False) as client:
-                    request_sent = True
-                    http_attempts += 1
-                    resp = client.post(
-                        target.request_url,
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                            "Host": target.host_header,
-                        },
-                        json=payload,
-                        extensions=target.request_extensions,
-                    )
+                url = f"{base_url}/chat/completions"
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                if has_agent_execution_scope():
+                    from app.ai.deepseek_agent import _CancellationSafeStream, _finish_http_cleanup
+
+                    async def request():
+                        nonlocal request_sent, http_attempts, resp
+                        target = await asyncio.to_thread(pin_public_http_url, url)
+                        # 同步桥每次创建独立事件循环，不能跨循环复用 AsyncClient。
+                        resources = AsyncExitStack()
+                        try:
+                            client = await resources.enter_async_context(httpx.AsyncClient(
+                                timeout=request_timeout, trust_env=False,
+                            ))
+                            await asyncio.to_thread(check_agent_execution)
+                            request_sent = True
+                            http_attempts += 1
+                            resp = await resources.enter_async_context(client.stream(
+                                "POST", target.request_url, headers={**headers, "Host": target.host_header},
+                                json=payload, extensions=target.request_extensions,
+                            ))
+                            resp.stream = _CancellationSafeStream(resp.stream)
+                            await resp.aread()
+                        finally:
+                            # EOF 关闭期间或父任务重复取消，仍等流/连接关闭完再独立记账。
+                            await _finish_http_cleanup(resources.aclose())
+
+                    run_agent_coroutine(request())
+                else:
+                    target = pin_public_http_url(url)
+                    with httpx.Client(timeout=request_timeout, trust_env=False) as client:
+                        request_sent = True
+                        http_attempts += 1
+                        resp = client.post(
+                            target.request_url, headers={**headers, "Host": target.host_header},
+                            json=payload, extensions=target.request_extensions,
+                        )
                 duration_ms = int((time.time() - t0) * 1000)
 
                 try:
@@ -391,14 +426,6 @@ class BaseAgent:
                         f"[{self.name}] 调用成功 duration={duration_ms}ms "
                         f"tokens={usage.get('total_tokens', '?')}"
                     )
-                    # JSON 调用必须等 call_json() 完成结构解析后再广播唯一终态。
-                    if not json_mode:
-                        self._emit(AgentEventType.COMPLETE, ctx,
-                                   message=f"{self.name} 调用完成",
-                                   payload={
-                                       "duration_ms": duration_ms,
-                                       "total_tokens": usage.get("total_tokens"),
-                                   })
                     return AgentResult(
                         usage_log_ids=usage_log_ids, http_attempts=http_attempts,
                         success=True,
@@ -433,6 +460,19 @@ class BaseAgent:
                     last_failure_kind = "http_error"
                     retryable = False
 
+            except asyncio.CancelledError:
+                attempt_cancelled = True
+                retryable = False
+                attempt_error = "成员执行已取消，HTTP 已关闭；未返回 usage 时用量未知"
+                # 已完整缓存的响应保留供应商真实用量；部分响应不能推算成 0。
+                try:
+                    cancelled_body = resp.json() if resp is not None else {}
+                except (TypeError, ValueError, httpx.ResponseNotRead):
+                    cancelled_body = {}
+                if isinstance(cancelled_body, dict):
+                    attempt_usage = cancelled_body.get("usage")
+                    attempt_model = str(cancelled_body.get("model") or model)
+                raise
             except httpx.TimeoutException:
                 last_error = "模型请求超时"
                 last_failure_kind = "timeout"
@@ -453,7 +493,7 @@ class BaseAgent:
 
                     log_id = record_usage_attempt(
                         model_name=attempt_model, agent_label=self.name, usage=attempt_usage,
-                        status=("success" if attempt_success else
+                        status=("cancelled" if attempt_cancelled else "success" if attempt_success else
                                 "retry" if retryable and attempt < max_retries else "failed"),
                         error="" if attempt_success else attempt_error or (last_error or ""),
                         duration_ms=int((time.time() - t0) * 1000),
@@ -464,6 +504,12 @@ class BaseAgent:
                     )
                     if log_id is not None:
                         usage_log_ids.append(log_id)
+                # 独立记账期间也可能撤销租约：消费保留，但正文和成功事件不得交付。
+                check_agent_execution()
+                if attempt_success and not json_mode:
+                    self._emit(AgentEventType.COMPLETE, ctx,
+                               message=f"{self.name} 调用完成",
+                               payload={"duration_ms": duration_ms, "total_tokens": usage.get("total_tokens")})
 
             logger.warning(f"[{self.name}] 第 {attempt+1} 次尝试失败: {last_error}")
             if retryable and attempt < max_retries:
@@ -474,7 +520,10 @@ class BaseAgent:
                         last_error = "模型重试退避将超过语义审计全局时限"
                         last_failure_kind = "semantic_budget_exhausted"
                         break
-                time.sleep(retry_delay)
+                if has_agent_execution_scope():
+                    run_agent_coroutine(asyncio.sleep(retry_delay))
+                else:
+                    time.sleep(retry_delay)
             else:
                 break
 
@@ -517,11 +566,15 @@ class BaseAgent:
             thinking=thinking,
             system_prompt=system_prompt,
         )
+        from app.services.agent_scheduler_runtime import check_agent_execution
+
+        check_agent_execution()
         if not result.success:
             return result
         try:
             result.data = json_lib.loads(result.data)
         except (json_lib.JSONDecodeError, TypeError) as e:
+            check_agent_execution()
             from app.agents.events import AgentEventType
 
             self._emit(
@@ -544,6 +597,7 @@ class BaseAgent:
                 failure_kind="invalid_json",
                 finish_reason=result.finish_reason,
             )
+        check_agent_execution()
         from app.agents.events import AgentEventType
 
         self._emit(

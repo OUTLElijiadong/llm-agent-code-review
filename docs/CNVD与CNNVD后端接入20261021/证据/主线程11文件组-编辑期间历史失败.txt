@@ -1,0 +1,234 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend
+configfile: pyproject.toml
+plugins: cov-5.0.0, asyncio-0.26.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 404 items
+
+backend/tests/unit/services/test_agent_team_review.py .................. [  4%]
+................                                                         [  8%]
+backend/tests/unit/services/test_site_agent_service.py ................. [ 12%]
+...........                                                              [ 15%]
+backend/tests/unit/services/test_agent_team_summary_reconciliation.py .. [ 15%]
+........................................................                 [ 29%]
+backend/tests/unit/services/test_agent_team_cancellation.py ............ [ 32%]
+........................................................................ [ 50%]
+........                                                                 [ 52%]
+backend/tests/unit/services/test_score_credibility.py .....              [ 53%]
+backend/tests/unit/services/test_ai_usage_attribution.py ...........     [ 56%]
+backend/tests/unit/scripts/test_seed_agent_playbooks_selection.py ...... [ 57%]
+.....                                                                    [ 59%]
+backend/tests/unit/services/test_vulnerability_source_service.py ....... [ 60%]
+....................................F....FFFFFFF                         [ 72%]
+backend/tests/unit/api/test_vulnerability_sources_api.py ..........      [ 75%]
+backend/tests/unit/agents/test_roundtable_startup_recovery.py .......... [ 77%]
+................                                                         [ 81%]
+backend/tests/unit/agents/test_scan_entry_input_closure.py ............. [ 84%]
+.............................................................            [100%]
+
+=================================== FAILURES ===================================
+____ test_cnvd_ai_fallback_preserves_scope_primary_failure_and_real_fields _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11387e410>
+
+    def test_cnvd_ai_fallback_preserves_scope_primary_failure_and_real_fields(monkeypatch):
+        mock_site(monkeypatch, ai_fallback_handler)
+        result = service.query_sources(source="cnvd", limit=1)
+        source = result["sources"][0]
+>       assert source["status"] == "available" and source["connected"] is True
+E       AssertionError: assert ('blocked' == 'available'
+E         
+E         - available
+E         + blocked)
+
+backend/tests/unit/services/test_vulnerability_source_service.py:418: AssertionError
+_ test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e<div id='app'></div></html>] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111f7c810>
+body = "<html>人工智能行业漏洞<div id='app'></div></html>"
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>人工智能行业漏洞<div id='app'></div></html>",
+            AI_PAGE.replace("www.cnvd.org.cn/flaw/show", "evil.example/flaw/show"),
+            AI_PAGE.replace("2026-10-12", "2026-99-99").replace("2026-10-10", "2026-99-99"),
+            AI_PAGE.replace('title="合成行业完整标题，显示文本被截断"', '').replace('title="另一个合成行业漏洞"', ''),
+        ],
+    )
+    def test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles(monkeypatch, body):
+        def handler(request):
+            if request.url.host == "www.cnvd.org.cn":
+                return httpx.Response(521, text="合成挑战")
+            return httpx.Response(200, text=body)
+    
+        mock_site(monkeypatch, handler)
+        result = service.query_sources(source="cnvd")
+>       assert result["sources"][0]["status"] == "invalid_response"
+E       AssertionError: assert 'blocked' == 'invalid_response'
+E         
+E         - invalid_response
+E         + blocked
+
+backend/tests/unit/services/test_vulnerability_source_service.py:466: AssertionError
+_ test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://evil.example/flaw/show/CNVD-2026-999997"\n title="\u5408\u6210\u884c\u4e1a\u5b8c\u6574\u6807\u9898\uff0c\u663e\u793a\u6587\u672c\u88ab\u622a\u65ad">\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-10-12</td></tr>\n<tr><td><a href="https://evil.example/flaw/show/CNVD-2026-999998"\n title="\u53e6\u4e00\u4e2a\u5408\u6210\u884c\u4e1a\u6f0f\u6d1e">\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1125da150>
+body = '<html><title>人工智能行业漏洞</title><table>\n<thead><tr><th>漏洞标题</th><th>危害级别</th><th>点击数</th><th>评论</th><th>关注</th><th>时间</...tle="另一个合成行业漏洞">另一个...</a></td><td>中</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>'
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>人工智能行业漏洞<div id='app'></div></html>",
+            AI_PAGE.replace("www.cnvd.org.cn/flaw/show", "evil.example/flaw/show"),
+            AI_PAGE.replace("2026-10-12", "2026-99-99").replace("2026-10-10", "2026-99-99"),
+            AI_PAGE.replace('title="合成行业完整标题，显示文本被截断"', '').replace('title="另一个合成行业漏洞"', ''),
+        ],
+    )
+    def test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles(monkeypatch, body):
+        def handler(request):
+            if request.url.host == "www.cnvd.org.cn":
+                return httpx.Response(521, text="合成挑战")
+            return httpx.Response(200, text=body)
+    
+        mock_site(monkeypatch, handler)
+        result = service.query_sources(source="cnvd")
+>       assert result["sources"][0]["status"] == "invalid_response"
+E       AssertionError: assert 'blocked' == 'invalid_response'
+E         
+E         - invalid_response
+E         + blocked
+
+backend/tests/unit/services/test_vulnerability_source_service.py:466: AssertionError
+_ test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999997"\n title="\u5408\u6210\u884c\u4e1a\u5b8c\u6574\u6807\u9898\uff0c\u663e\u793a\u6587\u672c\u88ab\u622a\u65ad">\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-99-99</td></tr>\n<tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999998"\n title="\u53e6\u4e00\u4e2a\u5408\u6210\u884c\u4e1a\u6f0f\u6d1e">\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-99-99</td></tr></tbody></table></html>] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x112e5a210>
+body = '<html><title>人工智能行业漏洞</title><table>\n<thead><tr><th>漏洞标题</th><th>危害级别</th><th>点击数</th><th>评论</th><th>关注</th><th>时间</...tle="另一个合成行业漏洞">另一个...</a></td><td>中</td><td>2</td><td>0</td><td>0</td><td>2026-99-99</td></tr></tbody></table></html>'
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>人工智能行业漏洞<div id='app'></div></html>",
+            AI_PAGE.replace("www.cnvd.org.cn/flaw/show", "evil.example/flaw/show"),
+            AI_PAGE.replace("2026-10-12", "2026-99-99").replace("2026-10-10", "2026-99-99"),
+            AI_PAGE.replace('title="合成行业完整标题，显示文本被截断"', '').replace('title="另一个合成行业漏洞"', ''),
+        ],
+    )
+    def test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles(monkeypatch, body):
+        def handler(request):
+            if request.url.host == "www.cnvd.org.cn":
+                return httpx.Response(521, text="合成挑战")
+            return httpx.Response(200, text=body)
+    
+        mock_site(monkeypatch, handler)
+        result = service.query_sources(source="cnvd")
+>       assert result["sources"][0]["status"] == "invalid_response"
+E       AssertionError: assert 'blocked' == 'invalid_response'
+E         
+E         - invalid_response
+E         + blocked
+
+backend/tests/unit/services/test_vulnerability_source_service.py:466: AssertionError
+_ test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999997"\n >\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-10-12</td></tr>\n<tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999998"\n >\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1136b7bd0>
+body = '<html><title>人工智能行业漏洞</title><table>\n<thead><tr><th>漏洞标题</th><th>危害级别</th><th>点击数</th><th>评论</th><th>关注</th><th>时间</...2026-999998"\n >另一个...</a></td><td>中</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>'
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>人工智能行业漏洞<div id='app'></div></html>",
+            AI_PAGE.replace("www.cnvd.org.cn/flaw/show", "evil.example/flaw/show"),
+            AI_PAGE.replace("2026-10-12", "2026-99-99").replace("2026-10-10", "2026-99-99"),
+            AI_PAGE.replace('title="合成行业完整标题，显示文本被截断"', '').replace('title="另一个合成行业漏洞"', ''),
+        ],
+    )
+    def test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles(monkeypatch, body):
+        def handler(request):
+            if request.url.host == "www.cnvd.org.cn":
+                return httpx.Response(521, text="合成挑战")
+            return httpx.Response(200, text=body)
+    
+        mock_site(monkeypatch, handler)
+        result = service.query_sources(source="cnvd")
+>       assert result["sources"][0]["status"] == "invalid_response"
+E       AssertionError: assert 'blocked' == 'invalid_response'
+E         
+E         - invalid_response
+E         + blocked
+
+backend/tests/unit/services/test_vulnerability_source_service.py:466: AssertionError
+__ test_ai_fallback_filters_only_sector_first_page_and_empty_is_not_connected __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1108113d0>
+
+    def test_ai_fallback_filters_only_sector_first_page_and_empty_is_not_connected(monkeypatch):
+        mock_site(monkeypatch, ai_fallback_handler)
+        result = service.query_sources("不存在的合成关键词", source="cnvd")
+        source = result["sources"][0]
+>       assert source["status"] == "empty" and source["connected"] is False
+E       AssertionError: assert ('blocked' == 'empty'
+E         
+E         - empty
+E         + blocked)
+
+backend/tests/unit/services/test_vulnerability_source_service.py:475: AssertionError
+_____ test_ai_fallback_exact_cnvd_id_must_match_link_not_other_title_text ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111e0f750>
+
+    def test_ai_fallback_exact_cnvd_id_must_match_link_not_other_title_text(monkeypatch):
+        mock_site(monkeypatch, ai_fallback_handler)
+        result = service.query_sources("CNVD-2026-999998", source="cnvd")
+>       assert [r["record_id"] for r in result["records"]] == ["CNVD-2026-999998"]
+E       AssertionError: assert [] == ['CNVD-2026-999998']
+E         
+E         Right contains one more item: 'CNVD-2026-999998'
+E         Use -v to get more diff
+
+backend/tests/unit/services/test_vulnerability_source_service.py:484: AssertionError
+___ test_ai_success_does_not_remove_primary_failure_backoff_on_query_change ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111adae50>
+
+    def test_ai_success_does_not_remove_primary_failure_backoff_on_query_change(monkeypatch):
+        calls = []
+    
+        def handler(request):
+            calls.append(request.url.host)
+            return ai_fallback_handler(request)
+    
+        mock_site(monkeypatch, handler)
+        service.query_sources(source="cnvd")
+        result = service.query_sources("另一个", source="cnvd")
+        assert calls.count("www.cnvd.org.cn") == 1
+>       assert result["sources"][0]["evidence"][0]["cached"] is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'cached'
+
+backend/tests/unit/services/test_vulnerability_source_service.py:501: KeyError
+=============================== warnings summary ===============================
+../../../backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+../../../backend/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../backend/.venv/lib/python3.11/site-packages/starlette/testclient.py:53
+  /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/lib/python3.11/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_cnvd_ai_fallback_preserves_scope_primary_failure_and_real_fields
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e<div id='app'></div></html>]
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://evil.example/flaw/show/CNVD-2026-999997"\n title="\u5408\u6210\u884c\u4e1a\u5b8c\u6574\u6807\u9898\uff0c\u663e\u793a\u6587\u672c\u88ab\u622a\u65ad">\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-10-12</td></tr>\n<tr><td><a href="https://evil.example/flaw/show/CNVD-2026-999998"\n title="\u53e6\u4e00\u4e2a\u5408\u6210\u884c\u4e1a\u6f0f\u6d1e">\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>]
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999997"\n title="\u5408\u6210\u884c\u4e1a\u5b8c\u6574\u6807\u9898\uff0c\u663e\u793a\u6587\u672c\u88ab\u622a\u65ad">\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-99-99</td></tr>\n<tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999998"\n title="\u53e6\u4e00\u4e2a\u5408\u6210\u884c\u4e1a\u6f0f\u6d1e">\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-99-99</td></tr></tbody></table></html>]
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_rejects_shell_foreign_links_invalid_dates_and_truncated_titles[<html><title>\u4eba\u5de5\u667a\u80fd\u884c\u4e1a\u6f0f\u6d1e</title><table>\n<thead><tr><th>\u6f0f\u6d1e\u6807\u9898</th><th>\u5371\u5bb3\u7ea7\u522b</th><th>\u70b9\u51fb\u6570</th><th>\u8bc4\u8bba</th><th>\u5173\u6ce8</th><th>\u65f6\u95f4</th></tr></thead>\n<tbody><tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999997"\n >\u5408\u6210\u884c\u4e1a...</a></td><td>\u9ad8</td><td>1</td><td>0</td><td>0</td><td>2026-10-12</td></tr>\n<tr><td><a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-999998"\n >\u53e6\u4e00\u4e2a...</a></td><td>\u4e2d</td><td>2</td><td>0</td><td>0</td><td>2026-10-10</td></tr></tbody></table></html>]
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_filters_only_sector_first_page_and_empty_is_not_connected
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_fallback_exact_cnvd_id_must_match_link_not_other_title_text
+FAILED backend/tests/unit/services/test_vulnerability_source_service.py::test_ai_success_does_not_remove_primary_failure_backoff_on_query_change
+============ 8 failed, 396 passed, 3 warnings in 599.79s (0:09:59) =============

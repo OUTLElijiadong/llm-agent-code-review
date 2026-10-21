@@ -13,6 +13,99 @@ import type {
   SecurityScanTaskIn,
 } from '@/types/security'
 
+export type VulnerabilitySourceCode = 'cnvd' | 'cnnvd'
+export type VulnerabilitySourceState =
+  | 'not_checked'
+  | 'available'
+  | 'empty'
+  | 'blocked'
+  | 'rate_limited'
+  | 'timeout'
+  | 'unavailable'
+  | 'invalid_response'
+  | 'stale'
+
+export interface VulnerabilitySourceEvidenceOut {
+  url: string
+  method: string
+  checked_at: string
+  http_status: number | null
+  upstream_code: string | null
+  response_sha256: string
+  response_bytes: number
+  cached: boolean
+  retry_after_seconds: number | null
+}
+
+export interface VulnerabilitySourceStatusOut {
+  code: VulnerabilitySourceCode
+  name: string
+  role: string
+  url: string
+  integration: 'reference' | 'implemented'
+  adapter: string | null
+  status: VulnerabilitySourceState | null
+  connected: boolean | null
+  status_message: string
+  checked_at: string | null
+  last_success_at: string | null
+  http_status: number | null
+  upstream_code: string | null
+  record_count: number
+  cached: boolean
+  query_scope: string
+  coverage_scope: 'ai_sector' | null
+  coverage_label: string
+  primary_status: string | null
+  primary_http_status: number | null
+  last_query: string
+  retry_after_seconds: number | null
+  evidence: VulnerabilitySourceEvidenceOut[]
+}
+
+export interface VulnerabilityRecordOut {
+  source: VulnerabilitySourceCode
+  record_id: string
+  title: string
+  url: string
+  description: string
+  coverage_scope: 'ai_sector' | null
+  source_date: string | null
+  severity: string
+  cve_ids: string[]
+  cwe_ids: string[]
+  published_at: string | null
+  updated_at: string | null
+  checked_at: string
+  match_type: 'latest' | 'keyword' | 'exact_identifier'
+  evidence_url: string
+  evidence_sha256: string
+}
+
+export interface VulnerabilitySourceQueryOut {
+  query: string
+  sources: VulnerabilitySourceStatusOut[]
+  records: VulnerabilityRecordOut[]
+}
+
+export interface VulnerabilitySourceQueryIn {
+  q?: string
+  source?: 'all' | VulnerabilitySourceCode
+  limit?: number
+}
+
+/** 主动读取 CNVD/CNNVD 官方来源连接状态。 */
+export function getVulnerabilitySources(): Promise<VulnerabilitySourceStatusOut[]> {
+  return get<VulnerabilitySourceStatusOut[]>('/security/vulnerability-sources')
+}
+
+/** 查询国内官方漏洞源；平台成功响应不代表来源连接成功，需检查 sources。 */
+export function getVulnerabilityRecords(
+  params: VulnerabilitySourceQueryIn = {},
+): Promise<VulnerabilitySourceQueryOut> {
+  return get<VulnerabilitySourceQueryOut>('/security/vulnerability-records', params)
+}
+
 /** OWASP Top10 + 内置敏感信息正则规则清单 */
 export function getSecurityChecklist(): Promise<SecurityChecklistOut> {
   return get<SecurityChecklistOut>('/security/checklist')

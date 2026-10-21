@@ -1,0 +1,191 @@
+{
+  "checked_at": "2026-10-21T16:56:11.318124+00:00",
+  "environment": "final local service via SSH fixed-official-host TLS tunnel, production egress 81.70.251.90",
+  "production_application_executed": false,
+  "production_files_read_or_written": false,
+  "tls_certificate_verification": true,
+  "minimum_request_spacing_seconds_per_source": 2,
+  "module_sha256": "9c870423ca3711f381d0b446b97f1d9b1bd47a55dd4a01bb76c7698d30e151fd",
+  "transport_override": "TCP dial only; original official hostname, TLS SNI, certificate verification, Host header, protocol/parser/cache are retained",
+  "result": {
+    "query": "",
+    "sources": [
+      {
+        "code": "cnvd",
+        "name": "国家信息安全漏洞共享平台",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "available",
+        "connected": true,
+        "status_message": "已取得人工智能行业子库首页记录（最多20条），非CNVD全库；主库HTTP521仍受限，详情页可能不可达。",
+        "checked_at": "2026-10-21T16:56:02.165167+00:00",
+        "last_success_at": "2026-10-21T16:56:02.165167+00:00",
+        "http_status": 200,
+        "upstream_code": null,
+        "record_count": 2,
+        "cached": false,
+        "query_scope": "ai_sector_latest_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnvd.org.cn/flaw/list",
+            "method": "GET",
+            "checked_at": "2026-10-21T16:56:02.197350+00:00",
+            "http_status": 521,
+            "upstream_code": null,
+            "response_sha256": "1d7a96bd0998e00d0748be63d255c0551518d9e47bc655bbb70a042a85814b15",
+            "response_bytes": 946
+          },
+          {
+            "url": "https://ai.cnvd.org.cn/",
+            "method": "GET",
+            "checked_at": "2026-10-21T16:56:04.677798+00:00",
+            "http_status": 200,
+            "upstream_code": null,
+            "response_sha256": "b4975671f66df73ea7b4822d645a7e7e88463f53ae25d60c865f5d35046d21fd",
+            "response_bytes": 18475
+          }
+        ],
+        "primary_status": "blocked",
+        "primary_http_status": 521,
+        "coverage_scope": "ai_sector",
+        "coverage_label": "人工智能行业子库首页（最多20条），非CNVD全库"
+      },
+      {
+        "code": "cnnvd",
+        "name": "国家信息安全漏洞库",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "available",
+        "connected": true,
+        "status_message": "官方查询成功；记录适用的组件、版本与环境仍需逐项核验。",
+        "checked_at": "2026-10-21T16:56:02.172175+00:00",
+        "last_success_at": "2026-10-21T16:56:02.172175+00:00",
+        "http_status": 200,
+        "upstream_code": "200",
+        "record_count": 2,
+        "cached": false,
+        "query_scope": "official_search_first_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:56:02.214803+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "4c6d7c1bae9c3a81bbb4dcf25995baab1f6839d1bb9cd366b405b43cb2a8b258",
+            "response_bytes": 111
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/vulTypeList",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:56:04.727819+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "9745e247cad52704b4f2c11230fadf3d795bcdeed607edf7b904bf74756f33f4",
+            "response_bytes": 6770
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:56:06.935278+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "3c82888797ae9aa7acec44f8a87211d55976e15a45cbee3995d3b7e3bdd22be4",
+            "response_bytes": 111
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:56:09.052339+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "823ba5bb810ea5575136d8b3cb7592b6057718747d3d24c5d2aaeed8c03bc630",
+            "response_bytes": 1123
+          }
+        ]
+      }
+    ],
+    "records": [
+      {
+        "source": "cnvd",
+        "record_id": "CNVD-2026-41250",
+        "title": "IBM Langflow OSS访问控制不当漏洞",
+        "url": "https://www.cnvd.org.cn/flaw/show/CNVD-2026-41250",
+        "description": "",
+        "severity": "中",
+        "cve_ids": [],
+        "cwe_ids": [],
+        "published_at": null,
+        "updated_at": null,
+        "checked_at": "2026-10-21T16:56:02.165167+00:00",
+        "match_type": "latest",
+        "source_date": "2026-10-12",
+        "coverage_scope": "ai_sector",
+        "evidence_url": "https://ai.cnvd.org.cn/",
+        "evidence_sha256": "b4975671f66df73ea7b4822d645a7e7e88463f53ae25d60c865f5d35046d21fd"
+      },
+      {
+        "source": "cnvd",
+        "record_id": "CNVD-2026-41251",
+        "title": "IBM Langflow OSS代码注入漏洞",
+        "url": "https://www.cnvd.org.cn/flaw/show/CNVD-2026-41251",
+        "description": "",
+        "severity": "高",
+        "cve_ids": [],
+        "cwe_ids": [],
+        "published_at": null,
+        "updated_at": null,
+        "checked_at": "2026-10-21T16:56:02.165167+00:00",
+        "match_type": "latest",
+        "source_date": "2026-10-12",
+        "coverage_scope": "ai_sector",
+        "evidence_url": "https://ai.cnvd.org.cn/",
+        "evidence_sha256": "b4975671f66df73ea7b4822d645a7e7e88463f53ae25d60c865f5d35046d21fd"
+      },
+      {
+        "source": "cnnvd",
+        "record_id": "CNNVD-2026-84461689",
+        "title": "TYPO3 Analytics 授权问题漏洞",
+        "url": "https://www.cnnvd.org.cn/frontend/detail?vulId=800186420",
+        "description": "TYPO3 Analytics 1.1.1之前版本存在授权问题漏洞，该漏洞源于后端模块未检查后端用户是否有权访问请求的站点，可能导致有权访问该模块的用户打开任意站点的分析仪表盘。",
+        "severity": "中危",
+        "cve_ids": [
+          "CVE-2026-112068"
+        ],
+        "cwe_ids": [],
+        "published_at": "2026-10-20",
+        "updated_at": "2026-10-21 16:49:26",
+        "checked_at": "2026-10-21T16:56:02.172175+00:00",
+        "match_type": "latest",
+        "evidence_url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+        "evidence_sha256": "823ba5bb810ea5575136d8b3cb7592b6057718747d3d24c5d2aaeed8c03bc630"
+      },
+      {
+        "source": "cnnvd",
+        "record_id": "CNNVD-2026-26477039",
+        "title": "TYPO3 Accessible Form Captcha 信任管理问题漏洞",
+        "url": "https://www.cnnvd.org.cn/frontend/detail?vulId=800186421",
+        "description": "TYPO3 Accessible Form Captcha 4.0.0版本至5.4.2之前版本存在安全漏洞，该漏洞源于CAPTCHA图像数据中嵌入了正确答案且默认启用音频功能，可能导致攻击者读取答案并通过验证，使自动化客户端或机器人绕过CAPTCHA保护。",
+        "severity": "中危",
+        "cve_ids": [
+          "CVE-2026-112067"
+        ],
+        "cwe_ids": [],
+        "published_at": "2026-10-20",
+        "updated_at": "2026-10-21 16:49:25",
+        "checked_at": "2026-10-21T16:56:02.172175+00:00",
+        "match_type": "latest",
+        "evidence_url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+        "evidence_sha256": "823ba5bb810ea5575136d8b3cb7592b6057718747d3d24c5d2aaeed8c03bc630"
+      }
+    ]
+  }
+}

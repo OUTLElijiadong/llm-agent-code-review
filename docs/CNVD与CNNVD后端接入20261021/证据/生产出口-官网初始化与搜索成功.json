@@ -1,0 +1,872 @@
+{
+  "environment": "production egress, isolated public requests, no config or credentials read/written",
+  "checked_at": "2026-10-21T16:04:51.422589+00:00",
+  "steps": [
+    {
+      "label": "public_page",
+      "url": "https://www.cnnvd.org.cn/frontend/loophole",
+      "method": "GET",
+      "checked_at": "2026-10-21T16:04:34.516339+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:34 GMT",
+      "content_type": "text/html; charset=utf-8",
+      "response_bytes": 985,
+      "response_sha256": "b2136984413abe134f1a030312f367c8d9403a65f99a50bdd82d205b81122014",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "User-Agent"
+      ],
+      "request_content_type": null,
+      "request_body": null
+    },
+    {
+      "label": "official_page_vul_type_bootstrap_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:36.660833+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:36 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "4ef8baeaae6ce1a92f7913323cbb1457caa1832e6b57641c703183a3261fb2b3",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "official_page_vul_type_bootstrap",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/vulTypeList",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:38.734672+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:38 GMT",
+      "content_type": "application/json",
+      "response_bytes": 6770,
+      "response_sha256": "2631a2b56019ec97c35bfab60922e38a066e1a087cde2d0913df4e09e65c5323",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": null,
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "list",
+      "data": [
+        {
+          "id": "9001",
+          "pid": "0",
+          "code": "9001",
+          "name": "基于影响的漏洞分类",
+          "children": [
+            {
+              "id": "3006",
+              "pid": "9001",
+              "code": "3006",
+              "name": "拒绝服务",
+              "children": [
+                {
+                  "id": "4023",
+                  "pid": "3006",
+                  "code": "4023",
+                  "name": "服务质量降级",
+                  "children": null
+                },
+                {
+                  "id": "4022",
+                  "pid": "3006",
+                  "code": "4022",
+                  "name": "硬件级拒绝服务",
+                  "children": null
+                },
+                {
+                  "id": "4021",
+                  "pid": "3006",
+                  "code": "4021",
+                  "name": "网络级拒绝服务",
+                  "children": null
+                },
+                {
+                  "id": "4020",
+                  "pid": "3006",
+                  "code": "4020",
+                  "name": "操作系统级拒绝服务",
+                  "children": null
+                },
+                {
+                  "id": "4019",
+                  "pid": "3006",
+                  "code": "4019",
+                  "name": "应用级拒绝服务",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "3005",
+              "pid": "9001",
+              "code": "3005",
+              "name": "数据泄露",
+              "children": [
+                {
+                  "id": "4015",
+                  "pid": "3005",
+                  "code": "4015",
+                  "name": "应用程序数据泄露",
+                  "children": null
+                },
+                {
+                  "id": "4016",
+                  "pid": "3005",
+                  "code": "4016",
+                  "name": "内存数据泄露",
+                  "children": null
+                },
+                {
+                  "id": "4018",
+                  "pid": "3005",
+                  "code": "4018",
+                  "name": "传输数据泄露",
+                  "children": null
+                },
+                {
+                  "id": "4017",
+                  "pid": "3005",
+                  "code": "4017",
+                  "name": "文件数据泄露",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "3004",
+              "pid": "9001",
+              "code": "3004",
+              "name": "数据篡改",
+              "children": [
+                {
+                  "id": "4014",
+                  "pid": "3004",
+                  "code": "4014",
+                  "name": "文件数据篡改",
+                  "children": null
+                },
+                {
+                  "id": "4013",
+                  "pid": "3004",
+                  "code": "4013",
+                  "name": "内存数据篡改",
+                  "children": null
+                },
+                {
+                  "id": "4012",
+                  "pid": "3004",
+                  "code": "4012",
+                  "name": "应用程序数据篡改",
+                  "children": null
+                },
+                {
+                  "id": "9004",
+                  "pid": "3004",
+                  "code": "9004",
+                  "name": "传输数据篡改",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "3003",
+              "pid": "9001",
+              "code": "3003",
+              "name": "防御突破",
+              "children": [
+                {
+                  "id": "4011",
+                  "pid": "3003",
+                  "code": "4011",
+                  "name": "穿透",
+                  "children": null
+                },
+                {
+                  "id": "4010",
+                  "pid": "3003",
+                  "code": "4010",
+                  "name": "逃逸",
+                  "children": null
+                },
+                {
+                  "id": "4009",
+                  "pid": "3003",
+                  "code": "4009",
+                  "name": "绕过",
+                  "children": null
+                },
+                {
+                  "id": "4008",
+                  "pid": "3003",
+                  "code": "4008",
+                  "name": "隐匿",
+                  "children": null
+                },
+                {
+                  "id": "9003",
+                  "pid": "3003",
+                  "code": "9003",
+                  "name": "传输数据篡改",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "3002",
+              "pid": "9001",
+              "code": "3002",
+              "name": "权限提升",
+              "children": [
+                {
+                  "id": "4007",
+                  "pid": "3002",
+                  "code": "4007",
+                  "name": "集控设施级权限提升",
+                  "children": null
+                },
+                {
+                  "id": "4006",
+                  "pid": "3002",
+                  "code": "4006",
+                  "name": "系统级权限提升",
+                  "children": null
+                },
+                {
+                  "id": "4005",
+                  "pid": "3002",
+                  "code": "4005",
+                  "name": "应用级权限提升",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "3001",
+              "pid": "9001",
+              "code": "3001",
+              "name": "代码执行",
+              "children": [
+                {
+                  "id": "4004",
+                  "pid": "3001",
+                  "code": "4004",
+                  "name": "本地代码执行",
+                  "children": null
+                },
+                {
+                  "id": "4003",
+                  "pid": "3001",
+                  "code": "4003",
+                  "name": "客户端代码执行",
+                  "children": null
+                },
+                {
+                  "id": "4002",
+                  "pid": "3001",
+                  "code": "4002",
+                  "name": "服务端脚本代码执行",
+                  "children": null
+                },
+                {
+                  "id": "4001",
+                  "pid": "3001",
+                  "code": "4001",
+                  "name": "服务端二进制代码执行",
+                  "children": null
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "9000",
+          "pid": "0",
+          "code": "9000",
+          "name": "基于缺陷的漏洞分类",
+          "children": [
+            {
+              "id": "1001",
+              "pid": "9000",
+              "code": "1001",
+              "name": "资源管理错误",
+              "children": [
+                {
+                  "id": "2001",
+                  "pid": "1001",
+                  "code": "2001",
+                  "name": "缓冲区错误",
+                  "children": null
+                },
+                {
+                  "id": "9002",
+                  "pid": "1001",
+                  "code": "9002",
+                  "name": "释放后重用",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1002",
+              "pid": "9000",
+              "code": "1002",
+              "name": "输入验证错误",
+              "children": [
+                {
+                  "id": "2009",
+                  "pid": "1002",
+                  "code": "2009",
+                  "name": "跨站请求伪造",
+                  "children": null
+                },
+                {
+                  "id": "2010",
+                  "pid": "1002",
+                  "code": "2010",
+                  "name": "服务端请求伪造",
+                  "children": null
+                },
+                {
+                  "id": "2011",
+                  "pid": "1002",
+                  "code": "2011",
+                  "name": "任意文件上传",
+                  "children": null
+                },
+                {
+                  "id": "2012",
+                  "pid": "1002",
+                  "code": "2012",
+                  "name": "反序列化注入",
+                  "children": null
+                },
+                {
+                  "id": "2008",
+                  "pid": "1002",
+                  "code": "2008",
+                  "name": "后置链接",
+                  "children": null
+                },
+                {
+                  "id": "2007",
+                  "pid": "1002",
+                  "code": "2007",
+                  "name": "路径遍历",
+                  "children": null
+                },
+                {
+                  "id": "2006",
+                  "pid": "1002",
+                  "code": "2006",
+                  "name": "SQL注入",
+                  "children": null
+                },
+                {
+                  "id": "2005",
+                  "pid": "1002",
+                  "code": "2005",
+                  "name": "代码注入",
+                  "children": null
+                },
+                {
+                  "id": "2004",
+                  "pid": "1002",
+                  "code": "2004",
+                  "name": "命令注入",
+                  "children": null
+                },
+                {
+                  "id": "2003",
+                  "pid": "1002",
+                  "code": "2003",
+                  "name": "跨站脚本",
+                  "children": null
+                },
+                {
+                  "id": "2002",
+                  "pid": "1002",
+                  "code": "2002",
+                  "name": "格式化字符串错误",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1003",
+              "pid": "9000",
+              "code": "1003",
+              "name": "处理逻辑错误",
+              "children": [
+                {
+                  "id": "2013",
+                  "pid": "1003",
+                  "code": "2013",
+                  "name": "竞争条件问题",
+                  "children": null
+                },
+                {
+                  "id": "2014",
+                  "pid": "1003",
+                  "code": "2014",
+                  "name": "数字错误",
+                  "children": null
+                },
+                {
+                  "id": "2015",
+                  "pid": "1003",
+                  "code": "2015",
+                  "name": "异常处理不当",
+                  "children": null
+                },
+                {
+                  "id": "2025",
+                  "pid": "1003",
+                  "code": "2025",
+                  "name": "时序逻辑问题",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1004",
+              "pid": "9000",
+              "code": "1004",
+              "name": "加密问题",
+              "children": null
+            },
+            {
+              "id": "1005",
+              "pid": "9000",
+              "code": "1005",
+              "name": "授权问题",
+              "children": [
+                {
+                  "id": "2016",
+                  "pid": "1005",
+                  "code": "2016",
+                  "name": "信任管理问题",
+                  "children": null
+                },
+                {
+                  "id": "2017",
+                  "pid": "1005",
+                  "code": "2017",
+                  "name": "权限许可和访问控制问题",
+                  "children": null
+                },
+                {
+                  "id": "2018",
+                  "pid": "1005",
+                  "code": "2018",
+                  "name": "会话机制问题",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1006",
+              "pid": "9000",
+              "code": "1006",
+              "name": "配置错误",
+              "children": null
+            },
+            {
+              "id": "1007",
+              "pid": "9000",
+              "code": "1007",
+              "name": "信息泄露",
+              "children": [
+                {
+                  "id": "2019",
+                  "pid": "1007",
+                  "code": "2019",
+                  "name": "日志信息泄露",
+                  "children": null
+                },
+                {
+                  "id": "2020",
+                  "pid": "1007",
+                  "code": "2020",
+                  "name": "调试信息泄露",
+                  "children": null
+                },
+                {
+                  "id": "2021",
+                  "pid": "1007",
+                  "code": "2021",
+                  "name": "侧信道信息泄露",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1008",
+              "pid": "9000",
+              "code": "1008",
+              "name": "输出处理不当",
+              "children": null
+            },
+            {
+              "id": "1009",
+              "pid": "9000",
+              "code": "1009",
+              "name": "供应链问题",
+              "children": [
+                {
+                  "id": "2024",
+                  "pid": "1009",
+                  "code": "2024",
+                  "name": "服务供应链问题",
+                  "children": null
+                },
+                {
+                  "id": "2022",
+                  "pid": "1009",
+                  "code": "2022",
+                  "name": "软件供应链问题",
+                  "children": null
+                },
+                {
+                  "id": "2023",
+                  "pid": "1009",
+                  "code": "2023",
+                  "name": "硬件供应链问题",
+                  "children": null
+                }
+              ]
+            },
+            {
+              "id": "1011",
+              "pid": "9000",
+              "code": "1011",
+              "name": "其他",
+              "children": null
+            },
+            {
+              "id": "1010",
+              "pid": "9000",
+              "code": "1010",
+              "name": "人工智能安全问题",
+              "children": [
+                {
+                  "id": "2033",
+                  "pid": "1010",
+                  "code": "2033",
+                  "name": "输出越狱问题",
+                  "children": null
+                },
+                {
+                  "id": "2032",
+                  "pid": "1010",
+                  "code": "2032",
+                  "name": "无界消费",
+                  "children": null
+                },
+                {
+                  "id": "2031",
+                  "pid": "1010",
+                  "code": "2031",
+                  "name": "向量嵌入错误",
+                  "children": null
+                },
+                {
+                  "id": "2030",
+                  "pid": "1010",
+                  "code": "2030",
+                  "name": "过度代理",
+                  "children": null
+                },
+                {
+                  "id": "2029",
+                  "pid": "1010",
+                  "code": "2029",
+                  "name": "模型投毒",
+                  "children": null
+                },
+                {
+                  "id": "2028",
+                  "pid": "1010",
+                  "code": "2028",
+                  "name": "数据投毒",
+                  "children": null
+                },
+                {
+                  "id": "2027",
+                  "pid": "1010",
+                  "code": "2027",
+                  "name": "模型信息泄露",
+                  "children": null
+                },
+                {
+                  "id": "2026",
+                  "pid": "1010",
+                  "code": "2026",
+                  "name": "提示词注入",
+                  "children": null
+                },
+                {
+                  "id": "2034",
+                  "pid": "1010",
+                  "code": "2034",
+                  "name": "对话模板问题",
+                  "children": null
+                },
+                {
+                  "id": "2035",
+                  "pid": "1010",
+                  "code": "2035",
+                  "name": "模型供应链问题",
+                  "children": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "search_after_page_bootstrap_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:40.802111+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:40 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "811a5b8e8aae8908bd4a3563c1b9152a925cd8ee6f9d22922093246961264b19",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "search_after_page_bootstrap",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:42.878451+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:43 GMT",
+      "content_type": "application/json",
+      "response_bytes": 1123,
+      "response_sha256": "a7826f6c8ccf26f658376e194a7f6e64c058128bba3586c4dc3b2f2b585bdf0e",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "sortOrder": "desc",
+        "sortField": "publishDate",
+        "page": 1,
+        "pageSize": 2
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "dict",
+      "data_keys": [
+        "total",
+        "records",
+        "pageIndex",
+        "pageSize"
+      ],
+      "data": {
+        "total": 404043,
+        "records": [
+          {
+            "vulName": "TYPO3 Analytics 授权问题漏洞",
+            "vulDesc": "TYPO3 Analytics 1.1.1之前版本存在授权问题漏洞，该漏洞源于后端模块未检查后端用户是否有权访问请求的站点，可能导致有权访问该模块的用户打开任意站点的分析仪表盘。",
+            "cveId": "CVE-2026-112068",
+            "publishDate": "2026-10-20",
+            "updateTime": "2026-10-21 16:49:26",
+            "cnnvdId": "CNNVD-2026-84461689",
+            "vulLevel": "中危",
+            "id": "800186420",
+            "hasAi": 0
+          },
+          {
+            "vulName": "TYPO3 Accessible Form Captcha 信任管理问题漏洞",
+            "vulDesc": "TYPO3 Accessible Form Captcha 4.0.0版本至5.4.2之前版本存在安全漏洞，该漏洞源于CAPTCHA图像数据中嵌入了正确答案且默认启用音频功能，可能导致攻击者读取答案并通过验证，使自动化客户端或机器人绕过CAPTCHA保护。",
+            "cveId": "CVE-2026-112067",
+            "publishDate": "2026-10-20",
+            "updateTime": "2026-10-21 16:49:25",
+            "cnnvdId": "CNNVD-2026-26477039",
+            "vulLevel": "中危",
+            "id": "800186421",
+            "hasAi": 0
+          }
+        ]
+      }
+    },
+    {
+      "label": "xml_package_list_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:45.192619+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:45 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "451fdd0caad38deb2ab911c74cfbbe16a577df05d8939d3792e0bb410831dfa7",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "xml_package_list",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/getXmlVulDownloadList",
+      "method": "POST",
+      "checked_at": "2026-10-21T16:04:47.261952+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:47 GMT",
+      "content_type": "application/json",
+      "response_bytes": 413,
+      "response_sha256": "7fdc5bcfb1785cd9c4ccd1feaaa77f308327ca9ba2a80c27a233036643b10d60",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "page": 1,
+        "pageSize": 1
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "dict",
+      "data_keys": [
+        "total",
+        "records",
+        "pageIndex",
+        "pageSize"
+      ],
+      "data": {
+        "total": 40,
+        "records": [
+          {
+            "id": "e92558aa7b41cf78e396989e0a681a0e",
+            "packageType": 1,
+            "year": 2026,
+            "month": 10,
+            "day": 20,
+            "frequencyType": "daily",
+            "packageName": "vuln_20261020_without_pav_u1.tar.gz",
+            "packageSize": 406737,
+            "vulnCount": 794,
+            "createTime": "2026-10-21 00:10:00",
+            "updateTime": "2026-10-21 01:00:31"
+          }
+        ]
+      }
+    },
+    {
+      "label": "official_package_download_link",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/downloadXmlVulPackage?packageId=e92558aa7b41cf78e396989e0a681a0e",
+      "method": "GET",
+      "checked_at": "2026-10-21T16:04:49.352464+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 16:04:49 GMT",
+      "content_type": "application/json",
+      "response_bytes": 113,
+      "response_sha256": "60fb6ef83569cd4406bed53ceb2c63e87e55c01c8f8c131344525fa4e4747351",
+      "cookie_names_in_memory": [
+        "pv_code"
+      ],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Referer",
+        "User-Agent"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": null,
+      "upstream_code": 5101,
+      "message": "请先登录后再进行下载",
+      "data_type": "NoneType"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "official_javascript": [
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/app.7cf40bfa6c9d756e124a.js",
+      "response_bytes": 79802,
+      "response_sha256": "adab124cee8c38d69deeee8a0dcf88fac4a6761053ae94d43843f9cffc694f0b",
+      "snippets": [
+        {
+          "marker": "signStr",
+          "offset": 71164,
+          "excerpt": "{for(;;)switch(e.prev=e.next){case 0:return e.prev=0,e.next=3,v.a.post(x.a.baseUrl+\"/tourist/sign\",{signStr:t},{headers:{\"X-Appid\":this.appId,\"X-Timestamp\":n,\"X-Nonce\":a}});case 3:if(!(r=e.sent).data||200!==r.data.code){e.next=6;break}return e.abrupt(\"return\",r.data.data);case 6:throw new Error(r.data.msg||\"touristSign 返回异常\");case 9:throw"
+        },
+        {
+          "marker": "application/json",
+          "offset": 72792,
+          "excerpt": "i8417579268034679HXvp0Kb6r1C2A9\";var E=I,P=this,V=x.a.baseUrl;v.a.defaults.headers[\"Content-Type\"]=\"application/json;charset=utf-8\";var D,O=v.a.create({baseURL:x.a.baseUrl,timeout:6e5}),M=[\"/2.0/openapi/**\",\"/thirdParty/**\",\"/tourist/**\",\"/homePage/downloadXmlVulPackage\",\"/homePage/downloadAllXmlVulPackage\",\"/2.0/captcha/**\",\"/login\",\"/lo"
+        }
+      ]
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/0.499105c30d335e4679c2.js",
+      "response_bytes": 1305810,
+      "response_sha256": "5e707d7ffcc4550b5b6162cca5f90bc6f3bd55f54c134d1d85f1915a1705ccab",
+      "snippets": [
+        {
+          "marker": "vulTypeList",
+          "offset": 465,
+          "excerpt": "homePage/searchVendorList\",method:\"post\",data:e})},t.q=function(){return Object(n.a)({url:\"homePage/vulTypeList\",method:\"post\"})},t.e=function(e){return Object(n.a)({url:\"cnnvdVul/getCnnnvdDetailOnDatasource\",method:\"post\",data:e})},t.j=function(e){return Object(n.a)({url:\"/homePage/searchVulByVendor?keyword=\"+encodeURIComponent(e.keyword"
+        },
+        {
+          "marker": "searchVul",
+          "offset": 196,
+          "excerpt": ":\"homePage/cnnvdVulList\",method:\"post\",data:e})},t.p=function(e){return Object(n.a)({url:\"/homePage/searchVul\",method:\"post\",data:e})},t.l=function(e){return Object(n.a)({url:\"homePage/searchProductList\",method:\"post\",data:e})},t.m=function(e){return Object(n.a)({url:\"homePage/searchVendorList\",method:\"post\",data:e})},t.q=function(){retur"
+        }
+      ]
+    },
+    {
+      "url": "https://www.cnnvd.org.cn/static/js/3.45a08984e8708e1005f8.js",
+      "response_bytes": 37030,
+      "response_sha256": "4370448e1121cc2b02f9f951e46ce5cb6f0df37665894f9433d207029155af22",
+      "snippets": [
+        {
+          "marker": "getVulTypeList",
+          "offset": 30790,
+          "excerpt": ".c}},created:function(){var e=this;this.from=this.$route.query.from||\"\",this.$nextTick(function(){e.getVulTypeList(),e.getList()})},mounted:function(){},watch:{},methods:{handleUpdateShow:function(e){this.isSearchShow=e},handleSelect:function(){},handleSelectProduct:function(){},changeClassification:function(){this.queryParams.vulTypes=nu"
+        }
+      ]
+    }
+  ],
+  "official_xml_document": {
+    "url": "https://www.cnnvd.org.cn/group1/M00/02/B3/rBBls2LT8nOADUr6AAnoHmC7qC4290.pdf",
+    "title": "漏洞 XML 信息获取接口文档",
+    "version": "V1.0",
+    "publication_month": "2026-05",
+    "response_bytes": 649246,
+    "response_sha256": "805577874f0ea63e137b147b7728eb232f12a003a105db12b54bc5764b24377c",
+    "verified_sections": [
+      "第1页：实名认证单位、有效AppID和AppSecret为正式接口前提",
+      "第5页：POST /cnnvdweb/2.0/openapi/vul/xml，pageNum/pageSize",
+      "第15页：企业实名认证、单位中心、账号安全、OpenAPI密钥管理"
+    ],
+    "limitations": [
+      "第2页接口地址与第5页取数路径不一致",
+      "认证章节HMAC-SHA256与后文SHA256示例不一致；无凭证时未推测实现正式API",
+      "未保存或使用文档示例Secret"
+    ]
+  }
+}

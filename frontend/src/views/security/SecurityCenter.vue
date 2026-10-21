@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { useAgentPageRefresh } from '@/composables/useAgentPageRefresh'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ArrowRight, Lock, TrendCharts } from '@element-plus/icons-vue'
-import { getSecurityChecklist, getSecurityDashboard } from '@/api/security'
+import {
+  getSecurityChecklist,
+  getSecurityDashboard,
+  getVulnerabilityRecords,
+  type VulnerabilityRecordOut,
+  type VulnerabilitySourceCode,
+  type VulnerabilitySourceQueryOut,
+  type VulnerabilitySourceStatusOut,
+} from '@/api/security'
 import type {
   SecurityChecklistItem,
   SecurityChecklistOut,
@@ -13,7 +21,6 @@ import type {
 import SecurityScanModal from '@/components/security/SecurityScanModal.vue'
 import { OWASP_TOP10, SECURITY_CATALOG_METADATA, type OwaspDoc } from './owasp-knowledge'
 import { CN_VULN_PORTALS, CN_SECURITY_STANDARDS } from './cnnvd-knowledge'
-import { lookupStatusDescription, resolveVulnerabilitySource, type OfficialLookupState } from './vulnerability-source'
 import { useUserStore } from '@/stores/user'
 import { actionableError, mustDiscardReadSnapshot } from '@/composables/withFeedback'
 
@@ -30,21 +37,65 @@ const dashboardData = ref<SecurityDashboardSummaryOut | null>(null)
 const dashboardLoading = ref(false)
 const dashboardError = ref('')
 const checklistError = ref('')
+const vulnerabilityQuery = ref('')
+const vulnerabilityData = ref<VulnerabilitySourceQueryOut | null>(null)
+const vulnerabilityLoading = ref(false)
+const vulnerabilityError = ref('')
 let disposed = false
+let mounted = false
+let vulnerabilityRequestVersion = 0
 const selectedOwasp = ref<OwaspDoc | null>(null)
 const detailVisible = ref(false)
 const securityScanVisible = ref(false)
 
-// 安全概览接口尚未接入官方库查询；状态如实标为“尚未接入”，不能显示成已查询无命中。
-const cnLookups: { cnvd: OfficialLookupState; cnnvd: OfficialLookupState } = {
-  cnvd: { status: 'not_configured' },
-  cnnvd: { status: 'not_configured' },
-}
+const vulnerabilitySources = computed(() => {
+  const sources = vulnerabilityData.value?.sources ?? []
+  return (['cnvd', 'cnnvd'] as const).map(code => sources.find(source => source.code === code) ?? null)
+})
 
-const owaspHotspotSourceResolution = computed(() => resolveVulnerabilitySource({
-  records: [],
-  lookups: cnLookups,
-  owasp: dashboardData.value?.owasp_hotspots[0]?.owasp ?? '',
+const visibleVulnerabilityRecords = computed(() => {
+  const connected = new Set(
+    (vulnerabilityData.value?.sources ?? [])
+      .filter(source => source.status === 'available' && source.connected === true)
+      .map(source => source.code),
+  )
+  return (vulnerabilityData.value?.records ?? []).filter(record => (
+    connected.has(record.source) && isOfficialVulnerabilityRecord(record)
+  ))
+})
+
+const hiddenVulnerabilityRecordCount = computed(() => (
+  (vulnerabilityData.value?.records.length ?? 0) - visibleVulnerabilityRecords.value.length
+))
+
+const vulnerabilityEmptyMessage = computed(() => {
+  if (!vulnerabilityData.value || visibleVulnerabilityRecords.value.length > 0) return ''
+  const sources = vulnerabilityData.value.sources
+  const emptySources = sources.filter(source => source.status === 'empty')
+  if (emptySources.length > 0) {
+    const scopes = [...new Set(emptySources.map(source => source.query_scope).filter(Boolean))].join('、')
+    const emptyNames = emptySources.map(source => source.name).join('、')
+    const allSourcesReturnedNoRecords = sources.every(source => (
+      source.status === 'empty' || (source.status === 'available' && source.connected === true)
+    ))
+    const noRecordsMessage = `${emptyNames} 未返回匹配记录（范围：${scopes || '后端未提供'}），不代表官方库全库无匹配。`
+    return allSourcesReturnedNoRecords
+      ? noRecordsMessage
+      : `${noRecordsMessage}至少一个官方来源本次查询未成功；当前空列表不能判定无匹配。`
+  }
+  const allSourcesSucceeded = sources.length > 0 && sources.every(source => (
+    source.status === 'available' && source.connected === true
+  ))
+  if (!allSourcesSucceeded) return '至少一个官方来源本次查询未成功；当前空列表不能判定无匹配。'
+  const scopes = [...new Set(sources.map(source => source.query_scope).filter(Boolean))].join('、')
+  return `本次查询未返回记录（范围：${scopes || '后端未提供'}），不代表官方库全库无匹配。`
+})
+
+const owaspHotspotSourceResolution = computed(() => ({
+  displayLabel: 'OWASP 分类参考',
+  message: `${vulnerabilitySources.value.map(source => (
+    `${source?.name ?? sourceName(source?.code)}：${source ? vulnerabilityStatusLabel(source) : '尚未取得状态'}`
+  )).join('；')}。OWASP 仅作风险分类参考，不代表 CNVD/CNNVD 命中。`,
 }))
 
 const secretCount = computed(() => checklist.value?.secret_patterns.length ?? '—')
@@ -126,6 +177,102 @@ async function loadDashboardSummary(): Promise<void> {
   }
 }
 
+function sourceName(code: VulnerabilitySourceCode | undefined): string {
+  if (code === 'cnvd') return 'CNVD'
+  if (code === 'cnnvd') return 'CNNVD'
+  return '未知来源'
+}
+
+function vulnerabilityStatusLabel(source: VulnerabilitySourceStatusOut): string {
+  if (source.status === 'available' && source.connected === true) return '已连接'
+  if (source.status === 'available') return '未确认连接'
+  const labels: Record<NonNullable<VulnerabilitySourceStatusOut['status']>, string> = {
+    not_checked: '尚未核验',
+    available: '未确认连接',
+    empty: '未返回匹配记录',
+    blocked: '访问受阻',
+    rate_limited: '请求限流',
+    timeout: '查询超时',
+    unavailable: '当前不可用',
+    invalid_response: '响应无效',
+    stale: '状态待重核验',
+  }
+  return source.status ? labels[source.status] : '尚未核验'
+}
+
+function sourceStateLabel(status: string | null): string {
+  if (status === 'blocked') return '访问受阻'
+  if (status === 'rate_limited') return '请求限流'
+  if (status === 'timeout') return '查询超时'
+  if (status === 'unavailable') return '当前不可用'
+  if (status === 'available') return '已连接'
+  return status || '未知'
+}
+
+function recordCoverageLabel(scope: VulnerabilityRecordOut['coverage_scope']): string {
+  return scope === 'ai_sector' ? '人工智能行业子库（非CNVD全库）' : ''
+}
+
+function isOfficialVulnerabilityRecord(record: VulnerabilityRecordOut): boolean {
+  if (record.source !== 'cnvd' && record.source !== 'cnnvd') return false
+  const recordHosts = record.source === 'cnvd'
+    ? new Set(['www.cnvd.org.cn', 'cnvd.org.cn'])
+    : new Set(['www.cnnvd.org.cn', 'cnnvd.org.cn'])
+  const evidenceHosts = new Set(recordHosts)
+  if (record.source === 'cnvd' && record.coverage_scope === 'ai_sector') {
+    evidenceHosts.add('ai.cnvd.org.cn')
+  }
+  try {
+    const url = new URL(record.url)
+    const evidenceUrl = new URL(record.evidence_url)
+    return url.protocol === 'https:'
+      && recordHosts.has(url.hostname.toLowerCase())
+      && !url.port
+      && url.pathname !== '/'
+      && evidenceUrl.protocol === 'https:'
+      && evidenceHosts.has(evidenceUrl.hostname.toLowerCase())
+      && !evidenceUrl.port
+      && /^[a-f\d]{64}$/i.test(record.evidence_sha256)
+      && Boolean(record.record_id.trim() && record.title.trim())
+  } catch {
+    return false
+  }
+}
+
+async function loadVulnerabilityRecords(): Promise<void> {
+  if (vulnerabilityLoading.value || disposed) return
+  const version = ++vulnerabilityRequestVersion
+  const accountScope = JSON.stringify([userStore.token, userStore.profile?.id])
+  const requestIsCurrent = () => !disposed
+    && version === vulnerabilityRequestVersion
+    && accountScope === JSON.stringify([userStore.token, userStore.profile?.id])
+  vulnerabilityLoading.value = true
+  vulnerabilityError.value = ''
+  vulnerabilityData.value = null
+  try {
+    const result = await getVulnerabilityRecords({
+      q: vulnerabilityQuery.value.trim(),
+      source: 'all',
+      limit: 10,
+    })
+    if (!requestIsCurrent()) return
+    vulnerabilityData.value = result
+  } catch (error) {
+    if (!requestIsCurrent()) return
+    vulnerabilityError.value = readFailure(error, 'CNVD/CNNVD 查询', false)
+  } finally {
+    if (requestIsCurrent()) vulnerabilityLoading.value = false
+  }
+}
+
+watch(() => [userStore.token, userStore.profile?.id], () => {
+  vulnerabilityRequestVersion += 1
+  vulnerabilityLoading.value = false
+  vulnerabilityData.value = null
+  vulnerabilityError.value = ''
+  if (mounted && !disposed) void loadVulnerabilityRecords()
+})
+
 function gotoProjects(): void {
   if (!canViewProjects.value) return
   router.push('/projects')
@@ -143,10 +290,16 @@ function jumpAndCloseDetail(): void {
 }
 
 onMounted(() => {
+  mounted = true
   loadChecklist()
   loadDashboardSummary()
+  loadVulnerabilityRecords()
 })
-onBeforeUnmount(() => { disposed = true })
+onBeforeUnmount(() => {
+  disposed = true
+  mounted = false
+  vulnerabilityRequestVersion += 1
+})
 
 useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.all([loadChecklist(), loadDashboardSummary()]) })
 </script>
@@ -280,10 +433,78 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
     <section class="block">
       <header class="block-head">
         <h3 class="block-title">中国漏洞库来源与匹配状态</h3>
-        <p class="block-sub">CNVD 优先，其次 CNNVD；两库都查询成功且无命中时才按 OWASP 回退。</p>
+        <p class="block-sub">分别展示 CNVD 与 CNNVD 官方查询结果；OWASP 仅用于风险分类参考，不代表漏洞库命中。</p>
       </header>
       <div class="cn-source-status" data-testid="cn-source-status" role="status">
-        CNVD：{{ lookupStatusDescription(cnLookups.cnvd) }} · CNNVD：{{ lookupStatusDescription(cnLookups.cnnvd) }} · OWASP 临时参考
+        <div v-for="(source, index) in vulnerabilitySources" :key="index" class="cn-source-row">
+          <template v-if="source">
+            <b>{{ source.name }}：{{ vulnerabilityStatusLabel(source) }}</b>
+            <span>{{ source.status_message || '后端未提供来源状态说明。' }}</span>
+            <span v-if="source.checked_at">核验：{{ source.checked_at }}</span>
+            <span v-if="source.http_status !== null">HTTP {{ source.http_status }}</span>
+            <span v-if="source.upstream_code">上游码 {{ source.upstream_code }}</span>
+            <span v-if="source.cached">当前为缓存/退避观察，非本次新网络核验</span>
+            <span v-if="typeof source.retry_after_seconds === 'number'">建议等待 {{ source.retry_after_seconds }} 秒后再试</span>
+            <span v-if="source.coverage_label">覆盖范围：{{ source.coverage_label }}（{{ source.coverage_scope }}）</span>
+            <span v-if="source.primary_status || source.primary_http_status !== null">
+              主库：{{ sourceStateLabel(source.primary_status) }}<template v-if="source.primary_http_status !== null">，HTTP {{ source.primary_http_status }}</template>
+            </span>
+            <span v-if="source.query_scope">查询范围：{{ source.query_scope }}</span>
+            <span v-for="(evidence, evidenceIndex) in source.evidence" :key="`${evidence.url}:${evidence.checked_at}`">
+              证据{{ evidenceIndex + 1 }} HTTP {{ evidence.http_status ?? '未知' }}{{ evidence.cached ? '（缓存证据）' : '（本次请求证据）' }}
+            </span>
+            <a v-if="source.evidence[0]?.url" :href="source.evidence[0].url" target="_blank" rel="noopener noreferrer">
+              查看官方查询端点
+            </a>
+          </template>
+          <template v-else>{{ sourceName(undefined) }}：尚未取得状态</template>
+        </div>
+        <p class="cn-owasp-note">OWASP 分类参考仅用于风险归类，不代表 CNVD/CNNVD 命中。</p>
+      </div>
+      <form class="cn-query-controls" @submit.prevent="loadVulnerabilityRecords">
+        <el-input
+          v-model="vulnerabilityQuery"
+          data-testid="vulnerability-query"
+          maxlength="200"
+          clearable
+          placeholder="漏洞编号或关键词"
+          aria-label="漏洞编号或关键词"
+        />
+        <el-button data-testid="search-vulnerabilities" native-type="submit" :disabled="vulnerabilityLoading" @click="loadVulnerabilityRecords">
+          {{ vulnerabilityLoading ? '查询中…' : '查询官方来源' }}
+        </el-button>
+        <el-button data-testid="refresh-cn-sources" :disabled="vulnerabilityLoading" @click="loadVulnerabilityRecords">
+          刷新来源状态
+        </el-button>
+      </form>
+      <p v-if="vulnerabilityError" data-testid="cn-query-error" class="read-error" role="alert">{{ vulnerabilityError }}</p>
+      <div v-if="vulnerabilityLoading && !vulnerabilityData" class="cn-record-state" role="status">正在读取后端来源状态与查询结果…</div>
+      <div v-else-if="!vulnerabilityData" data-testid="cn-vulnerability-records" class="cn-record-state">
+        尚未取得本次查询结果。
+      </div>
+      <div v-else data-testid="cn-vulnerability-records" class="cn-records">
+        <p class="cn-record-state">检索词：{{ vulnerabilityData.query || '最新公开记录' }} · 当前展示 {{ visibleVulnerabilityRecords.length }} 条可核验记录</p>
+        <p v-if="vulnerabilityEmptyMessage" class="cn-record-state">{{ vulnerabilityEmptyMessage }}</p>
+        <p v-if="hiddenVulnerabilityRecordCount" class="cn-record-state" role="alert">
+          {{ hiddenVulnerabilityRecordCount }} 条记录因来源状态或官方链接证据不完整而隐藏。
+        </p>
+        <article v-for="record in visibleVulnerabilityRecords" :key="`${record.source}:${record.record_id}`" class="cn-record">
+          <div class="cn-record-head">
+            <span class="cn-record-source">{{ sourceName(record.source) }}</span>
+            <a :href="record.url" target="_blank" rel="noopener noreferrer">{{ record.record_id }} · {{ record.title }}</a>
+          </div>
+          <p v-if="record.description">{{ record.description }}</p>
+          <p class="cn-record-meta">
+            <span v-if="record.severity">级别：{{ record.severity }}</span>
+            <span v-if="recordCoverageLabel(record.coverage_scope)">覆盖范围：{{ recordCoverageLabel(record.coverage_scope) }}</span>
+            <span v-if="record.source_date">来源日期：{{ record.source_date }}</span>
+            <span v-if="record.cve_ids.length">CVE：{{ record.cve_ids.join('、') }}</span>
+            <span v-if="record.cwe_ids.length">CWE：{{ record.cwe_ids.join('、') }}</span>
+            <span>查询时间：{{ record.checked_at }}</span>
+            <span>匹配类型：{{ record.match_type }}</span>
+            <a :href="record.evidence_url" target="_blank" rel="noopener noreferrer">查看响应来源</a>
+          </p>
+        </article>
       </div>
       <div class="cn-portal-grid">
         <a
@@ -1078,6 +1299,83 @@ useAgentPageRefresh({ pages: ['/security', '/reviews'], refresh: () => Promise.a
   color: var(--gray-800, #323746);
   font-size: 13px;
   line-height: 1.65;
+}
+
+.cn-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 5px 0;
+}
+
+.cn-source-row + .cn-source-row {
+  border-top: 1px solid rgba(50, 55, 70, 0.12);
+}
+
+.cn-owasp-note,
+.cn-record-state {
+  margin: 8px 0 0;
+  color: var(--gray-600, #5e6575);
+  line-height: 1.6;
+}
+
+.cn-query-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cn-query-controls :deep(.el-input) {
+  flex: 1 1 260px;
+  max-width: 520px;
+}
+
+.cn-records {
+  display: grid;
+  gap: 8px;
+}
+
+.cn-record {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--gray-100, #eef0f4);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.cn-record-head,
+.cn-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+
+.cn-record-head a {
+  overflow-wrap: anywhere;
+  color: var(--brand-700, #2848ad);
+}
+
+.cn-record-source {
+  flex: 0 0 auto;
+  color: var(--gray-700, #454c5c);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cn-record > p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cn-record .cn-record-meta {
+  margin-bottom: 0;
+  color: var(--gray-600, #5e6575);
+  font-size: 12px;
 }
 
 

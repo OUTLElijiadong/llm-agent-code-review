@@ -9,10 +9,14 @@ v3.0 AgentSkill 升级新增:
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from threading import RLock
-from typing import Optional
+from typing import Optional, TypeVar
 
 from loguru import logger
 
@@ -23,6 +27,112 @@ from app.services import agent_governance_service, scheduler_service
 
 _scheduler = None
 job_configuration_lock = RLock()
+
+_T = TypeVar("_T")
+_execution_guard: ContextVar[Optional[Callable[[], None]]] = ContextVar("agent_execution_guard", default=None)
+_CANCELLATION_POLL_SECONDS = 0.25
+
+
+class AgentExecutionCancelled(asyncio.CancelledError):
+    """租约撤销是控制流信号，不进入模型或业务的普通异常重试。"""
+
+
+@contextmanager
+def agent_execution_scope(check_active: Callable[[], None]):
+    """绑定当前成员的租约检查；回调必须自行创建独立数据库会话。"""
+    token = _execution_guard.set(check_active)
+    try:
+        yield
+    finally:
+        _execution_guard.reset(token)
+
+
+def has_agent_execution_scope() -> bool:
+    """仅受团队租约管理的调用使用可取消 HTTP 与退避。"""
+    return _execution_guard.get() is not None
+
+
+def check_agent_execution() -> None:
+    """模型重试、退避结束和业务副作用前可主动检查当前持久化租约。"""
+    guard = _execution_guard.get()
+    if guard is not None:
+        try:
+            guard()
+        except Exception as exc:
+            # 数据库检查失败同样停止当前执行；不能把无法验证当作继续授权。
+            raise AgentExecutionCancelled("团队任务租约已失效或无法验证，已停止当前执行") from exc
+
+
+async def _cancel_and_drain(*tasks: asyncio.Future) -> tuple[list, bool]:
+    """只取消一次；重复父取消不能打断 HTTP 关闭和独立记账。"""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    cleanup = asyncio.gather(*tasks, return_exceptions=True)
+    interrupted = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            interrupted = True
+    return cleanup.result(), interrupted
+
+
+async def await_agent_coroutine(awaitable: Awaitable[_T]) -> _T:
+    """租约失效时取消并等待 async 请求清理，完成后再次丢弃晚到结果。
+
+    只取消调用方传入的异步操作，不强杀线程。HTTP 层须将请求和流的整个
+    async with 生命周期放在该操作内；该接口不能取消尚未接入的同步 post。
+    """
+    if _execution_guard.get() is None:
+        return await awaitable
+    try:
+        await asyncio.to_thread(check_agent_execution)
+    except BaseException:
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        elif isinstance(awaitable, asyncio.Future):
+            # 调用方也可能传入已经启动的 task；拒绝租约时仍须取消并等待清理。
+            results, _interrupted = await _cancel_and_drain(awaitable)
+            if isinstance(results[0], Exception):
+                raise results[0]
+        raise
+
+    async def watch_lease() -> None:
+        while True:
+            await asyncio.sleep(_CANCELLATION_POLL_SECONDS)
+            # 同步 SQLAlchemy 检查在独立线程/会话执行，不占用请求事件循环。
+            await asyncio.to_thread(check_agent_execution)
+
+    operation = asyncio.ensure_future(awaitable)
+    watcher = asyncio.create_task(watch_lease())
+    completed = False
+    try:
+        done, _pending = await asyncio.wait((operation, watcher), return_when=asyncio.FIRST_COMPLETED)
+        if watcher in done:
+            watcher.result()
+        await asyncio.to_thread(check_agent_execution)
+        result = operation.result()
+        completed = True
+        return result
+    finally:
+        results, interrupted = await _cancel_and_drain(operation, watcher)
+        # 取消时仍让请求的 finally 独立记账；审计失败不能被 gather 静默吞掉。
+        if isinstance(results[0], Exception):
+            raise results[0]
+        if completed and interrupted:
+            raise asyncio.CancelledError
+
+
+def run_agent_coroutine(awaitable: Awaitable[_T]) -> _T:
+    """供同步成员调用链运行可取消的 async HTTP；沿用当前归因 ContextVar。"""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(await_agent_coroutine(awaitable))
+    if inspect.iscoroutine(awaitable):
+        awaitable.close()
+    raise RuntimeError("事件循环内请使用 await_agent_coroutine，不能调用同步 run_agent_coroutine")
 
 
 def _parse_daily_schedule(schedule: str) -> Optional[tuple[int, int]]:

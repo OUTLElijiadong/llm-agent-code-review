@@ -207,13 +207,20 @@ def test_stop_signal_before_final_report_extraction_prevents_new_model_call(
 
 @pytest.fixture
 def live_roundtable(roundtable_store, monkeypatch):
-    bus = DiscussionBus()
+    # 真实调度要求活动会话先落库，报告创建必须原子绑定该会话。
+    bus = DiscussionBus(persist=True, session_factory=roundtable_store)
     monkeypatch.setattr(discussion.DiscussionBus, "instance", lambda: bus)
     monkeypatch.setattr(discussion, "build_discussion_environment", Mock(side_effect=RuntimeError("offline")))
     agent = SimpleNamespace(model="isolated", call_raw=Mock(side_effect=AssertionError("unexpected model call")))
     monkeypatch.setattr(discussion, "DeepSeekAgent", Mock(return_value=agent))
     orchestrator = discussion.DiscussionOrchestrator()
-    session = bus.create_session("isolated", task_id=0, file_name="before.py", owner_user_id=3, max_rounds=1)
+    session = bus.create_session(
+        "isolated", task_id=0, file_name="before.py", owner_user_id=3,
+        project_id=7, file_id=11, max_rounds=1,
+    )
+    with roundtable_store() as database:
+        row = database.get(RoundtableSession, session.session_id)
+        assert (row.owner_user_id, row.project_id, row.file_id, row.status) == (3, 7, 11, "active")
     real_sleep = asyncio.sleep
 
     async def no_delay(_seconds):

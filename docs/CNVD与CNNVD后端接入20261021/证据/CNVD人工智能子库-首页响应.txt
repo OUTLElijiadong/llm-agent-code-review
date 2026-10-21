@@ -1,0 +1,766 @@
+
+
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+	<title>人工智能行业漏洞</title>
+	<link rel="stylesheet" href="/theme/mobileInternet/content.css"/>
+	<script type="text/javascript" src="/js/jquery.min.js"></script>
+	<script type="text/javascript" src="/amcharts/swfobject.js"></script>
+	<script type="text/javascript" src="/amcharts/highcharts.js"></script>
+	<script type="text/javascript" src="/amcharts/highcharts-3d.js"></script>
+	<script type="text/javascript">
+		window.onload=function(){
+			// var rows = document.getElementById("tr").rows.length;
+			// var tab = document.getElementById("tr");
+			// var tabItem = tab.getElementsByTagName("tr");
+			// for(var i=0;i<rows;i++){
+			// 	if(i%2==0){
+			// 		tabItem[i].style.backgroundColor = "#f9f9f9";
+			// 	}else{
+			// 		tabItem[i].style.backgroundColor = "#fff";
+			// 	}
+			// }
+		}
+	</script>
+</head>
+
+<body>
+<div class="head" style="width:1000px; margin:0px auto;"><img src="/img/ai/top.jpg"/></div>
+<div class="con">
+	<div class="con_left">
+		<div class="search">
+			<div class="lens"></div>
+			<div class="input_search">
+				<form action="/" method="post" >
+					<input type="text" name="title" value="" style="font-size:16px;font-family:'微软雅黑';"/>
+					<div class="sub_search">
+						<input type="submit" value="搜索"/>
+					</div>
+				</form>
+			</div>
+		</div>
+		<div class="list">
+			<table cellpadding="0" cellspacing="0">
+				<thead>
+				<tr>
+					<th width="300px">漏洞标题</th>
+					<th width="80px">危害级别</th>
+					<th>点击数</th>
+					<th>评论</th>
+					<th>关注</th>
+					<th>时间</th>
+				</tr>
+				</thead>
+				<tbody id="tr">
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41250" title="IBM Langflow OSS访问控制不当漏洞" target="_blank">
+								
+									IBM Langflow OSS访问控制不当漏...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41251" title="IBM Langflow OSS代码注入漏洞" target="_blank">
+								
+									IBM Langflow OSS代码注入漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41252" title="IBM Langflow OSS代码注入漏洞（CNVD-2026-41252）" target="_blank">
+								
+									IBM Langflow OSS代码注入漏洞（...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41253" title="IBM Langflow OSS代码注入漏洞（CNVD-2026-41253）" target="_blank">
+								
+									IBM Langflow OSS代码注入漏洞（...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41254" title="IBM Langflow OSS代码注入漏洞（CNVD-2026-41254）" target="_blank">
+								
+									IBM Langflow OSS代码注入漏洞（...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-41255" title="IBM Langflow OSS代码注入漏洞（CNVD-2026-41255）" target="_blank">
+								
+									IBM Langflow OSS代码注入漏洞（...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>2</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-12
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39814" title="OpenClaw资源管理错误漏洞" target="_blank">
+								
+									OpenClaw资源管理错误漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39815" title="OpenClaw拒绝服务漏洞" target="_blank">
+								
+									OpenClaw拒绝服务漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39816" title="OpenClaw服务器端请求伪造漏洞" target="_blank">
+								
+									OpenClaw服务器端请求伪造漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39817" title="OpenClaw服务器端请求伪造漏洞（CNVD-2026-39817）" target="_blank">
+								
+									OpenClaw服务器端请求伪造漏洞（...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39818" title="OpenClaw信息泄露漏洞" target="_blank">
+								
+									OpenClaw信息泄露漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39819" title="OpenClaw信息泄露漏洞（CNVD-2026-39819）" target="_blank">
+								
+									OpenClaw信息泄露漏洞（CNVD-202...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39820" title="OpenClaw访问控制漏洞" target="_blank">
+								
+									OpenClaw访问控制漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39821" title="OpenClaw输入验证错误漏洞" target="_blank">
+								
+									OpenClaw输入验证错误漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39822" title="OpenClaw输入验证错误漏洞（CNVD-2026-39822）" target="_blank">
+								
+									OpenClaw输入验证错误漏洞（CNVD...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39823" title="OpenClaw处理逻辑错误漏洞" target="_blank">
+								
+									OpenClaw处理逻辑错误漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39824" title="OpenClaw授权问题漏洞" target="_blank">
+								
+									OpenClaw授权问题漏洞
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39825" title="OpenClaw授权问题漏洞（CNVD-2026-39825）" target="_blank">
+								
+									OpenClaw授权问题漏洞（CNVD-202...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="red"></span>
+								高
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39826" title="OpenClaw授权问题漏洞（CNVD-2026-39826）" target="_blank">
+								
+									OpenClaw授权问题漏洞（CNVD-202...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="yellow"></span>
+								中
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+					<tr>
+						<td style="text-align:left;padding-left:10px;">
+							<img src="/img/wrang_con.gif"></img>
+							<a href="https://www.cnvd.org.cn/flaw/show/CNVD-2026-39827" title="OpenClaw授权问题漏洞（CNVD-2026-39827）" target="_blank">
+								
+									OpenClaw授权问题漏洞（CNVD-202...
+								
+							</a>
+						</td>
+						<td class="denle">
+							
+							
+								
+									<span class="green"></span>
+								低
+							
+						</td>
+						<td>3</td>
+						<td>0</td>
+						<td>0</td>
+						<td>
+							2026-10-10
+						</td>
+					</tr>
+				
+				</tbody>
+			</table>
+			<div class="pages clearfix">
+				<span class="currentStep">1</span><a href="/?max=20&amp;offset=20" class="step">2</a><a href="/?max=20&amp;offset=40" class="step">3</a><a href="/?max=20&amp;offset=60" class="step">4</a><a href="/?max=20&amp;offset=80" class="step">5</a><a href="/?max=20&amp;offset=100" class="step">6</a><a href="/?max=20&amp;offset=120" class="step">7</a><a href="/?max=20&amp;offset=140" class="step">8</a><a href="/?max=20&amp;offset=160" class="step">9</a><a href="/?max=20&amp;offset=180" class="step">10</a><span class="step">..</span><a href="/?max=20&amp;offset=1220" class="step">62</a><a href="/?max=20&amp;offset=20" class="nextLink">Next</a>
+				<span>共&nbsp;1230&nbsp;条</span>
+			</div>
+		</div>
+	</div>
+	<div class="con_right">
+		<div class="number">
+			<div class="right_top">
+				<span class="span">
+					
+						<span>人工智能领域漏洞产生原因分布</span>
+					
+				</span>
+			</div>
+			<div id="manuFlawPieDiv" style="margin-left:10px;">
+			</div>
+		</div>
+		<div class="rank">
+			<div class="right_top"><span class="span">人工智能领域漏洞危害等级分布</span></div>
+			<div id="manuFlawLevelPieDiv" style="margin-left:10px;">
+
+			</div>
+		</div>
+	</div>
+</div>
+<div class="foot">
+	<div>Copyright (c) 2010 国家计算机网络应急技术处理协调中心  版权所有</div>
+	<div>Email：vreport@cert.org.cn 联系电话：010-82991783</div>
+	<div>京ICP备10012421号</div>
+</div>
+<script type="text/javascript">
+	$(function(){
+
+
+		readTxtFile();
+		readVulmLevelFile();
+	});
+
+	function readTxtFile() {
+		var htmlObj = $.ajax({ url: "/amcharts/ai/industry_CorFLaw_data.txt", async: false });
+		var arr = htmlObj.responseText.split('\n');
+		var data = [];
+		var seriesData = [];
+		$.each(arr, function (k, v) {
+			var tmp = v.split(";");
+			var series = [];
+			// series.name = tmp[0];
+			// series.value = tmp[1];
+
+			data.push(tmp[0]);
+			if(tmp[1]) {
+				series[0] = tmp[0];
+				series[1] = Number(tmp[1]);
+				seriesData.push(series);
+			}
+		});
+		fillCircularGraph(data, seriesData);
+	}
+
+	function readVulmLevelFile() {
+		var htmlObj = $.ajax({ url: "/amcharts/ai/industry_FLaw_level_data.txt", async: false });
+		var arr = htmlObj.responseText.split('\n');
+		var data = [];
+		var seriesData = [];
+		$.each(arr, function (k, v) {
+			var tmp = v.split(";");
+			var series = [];
+			// series.name = tmp[0];
+			// series.value = tmp[1];
+
+			data.push(tmp[0]);
+			if(tmp[1]) {
+				series[0] = tmp[0];
+				series[1] = Number(tmp[1]);
+				seriesData.push(series);
+			}
+		});
+		volumLevelCircularGraph(data, seriesData);
+	}
+
+	function fillCircularGraph(data, seriesData) {
+
+		var chart = Highcharts.chart('manuFlawPieDiv', {
+			chart: {
+				type: 'pie',
+				options3d: {
+					enabled: true,
+					alpha: 45,
+					beta: 0
+				},
+				width:312,
+				height:300
+			},
+			exporting:{
+				enabled:false
+			},
+			credits: {
+				enabled: false
+			},
+			title: {
+				text: ''
+			},
+			colors: ['#0389BC', '#A7D7E3', '#EA8400','#7da947','#d755c6'],
+			tooltip: {
+				pointFormat: '{point.name} : {point.percentage:.1f}%</b>'
+			},
+			legend: {
+				y: 10,
+				navigation: {
+					activeColor: '#3E576F',
+					animation: true,
+					arrowSize: 12,
+					inactiveColor: '#CCC',
+					style: {
+						fontWeight: 'bold',
+						color: '#333',
+						fontSize: '12px'
+					}
+				}
+			},
+			plotOptions: {
+				pie: {
+					allowPointSelect: true,
+					cursor: 'pointer',
+					depth: 25,
+					dataLabels: {
+						enabled: true,
+						format: '{point.name}'
+					},
+					showInLegend: false
+				}
+			},
+			series: [{
+				type: 'pie',
+				size:'40%',
+				data: seriesData
+			}]
+		});
+	}
+
+
+
+	function volumLevelCircularGraph(data, seriesData) {
+
+		var chart = Highcharts.chart('manuFlawLevelPieDiv', {
+			chart: {
+				type: 'pie',
+				options3d: {
+					enabled: true,
+					alpha: 45,
+					beta: 0
+				},
+				width:312,
+				height:280
+			},
+			exporting:{
+				enabled:false
+			},
+			credits: {
+				enabled: false
+			},
+			title: {
+				text: ''
+			},
+			colors: ['#0389BC', '#A7D7E3', '#EA8400','#7da947','#d755c6'],
+			tooltip: {
+				pointFormat: '{point.name} : {point.percentage:.1f}%</b>'
+			},
+			legend: {
+				y: 20,
+				navigation: {
+					activeColor: '#3E576F',
+					animation: true,
+					arrowSize: 12,
+					inactiveColor: '#CCC',
+					style: {
+						fontWeight: 'bold',
+						color: '#333',
+						fontSize: '12px'
+					}
+				}
+			},
+			plotOptions: {
+				pie: {
+					allowPointSelect: true,
+					cursor: 'pointer',
+					depth: 35,
+					dataLabels: {
+						enabled: true,
+						format: '{point.name}'
+					},
+					showInLegend: true
+				}
+			},
+			series: [{
+				type: 'pie',
+				size:'80%',
+				data: seriesData
+			}]
+		});
+	}
+</script>
+</body>
+</html>

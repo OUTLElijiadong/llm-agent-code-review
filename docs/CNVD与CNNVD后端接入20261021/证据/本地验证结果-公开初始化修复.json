@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-10-21T16:27:19.686400+00:00",
+  "checks": [
+    {
+      "output": "后端回归-公开初始化修复.txt",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/services/test_vulnerability_source_service.py",
+        "tests/unit/services/test_security_rule_catalog_service.py",
+        "tests/unit/api/test_vulnerability_sources_api.py",
+        "tests/test_security_catalog_current.py",
+        "tests/test_complete_permission_matrix.py",
+        "--no-cov",
+        "-q"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend",
+      "exit_code": 0,
+      "output_tail": [
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "====================== 1211 passed, 3 warnings in 13.58s ======================="
+      ]
+    },
+    {
+      "output": "代码静态检查-公开初始化修复.txt",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "ruff",
+        "check",
+        "backend/app/services/vulnerability_source_service.py",
+        "backend/app/schemas/vulnerability_source.py",
+        "backend/tests/unit/services/test_vulnerability_source_service.py",
+        "backend/tests/unit/api/test_vulnerability_sources_api.py"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9",
+      "exit_code": 0,
+      "output_tail": [
+        "All checks passed!"
+      ]
+    }
+  ]
+}

@@ -98,6 +98,19 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it.each([['trusted', '规则计分：复算一致'], ['rescored', '规则计分：已校正']])('评分 %s 仅说明规则复算，不声称独立终审', async (status, label) => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: { status: 'success', score_audit: { status, verification_scope: 'score_only', independent_review: false } },
+      stats: { score: 29, total_issues: 17 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).not.toContain('小菱终审')
+    wrapper.unmount()
+  })
+
   it('详情明确显示执行失败原因和未完成的验证覆盖', async () => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: {},

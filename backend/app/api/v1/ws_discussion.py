@@ -29,7 +29,8 @@ import contextlib
 import json as json_lib
 import threading
 import time
-from dataclasses import asdict
+from contextvars import copy_context
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
@@ -45,6 +46,18 @@ from app.models.user import User
 from app.services.roundtable_report_lifecycle import cancel_running_discussion_report
 
 
+@dataclass(frozen=True)
+class _RecoveredTeamLease:
+    team_id: int
+    task_id: int
+    member_id: int
+    lease_token: str
+
+
+class _DiscussionTeamRevoked(ValueError):
+    """持久团队绑定无效，禁止把团队圆桌降级为普通恢复。"""
+
+
 class PendingDiscussion:
     """待启动的讨论上下文 — 前端 preflight 后暂存"""
     def __init__(self, session_id: str, **kwargs):
@@ -53,6 +66,7 @@ class PendingDiscussion:
         self.session_token_version = int(raw_version) if raw_version is not None else None
         self.kwargs = kwargs
         self.created_at = time.time()
+        self.recovered_team_lease: _RecoveredTeamLease | None = None
 
 
 _pending: dict[str, PendingDiscussion] = {}
@@ -427,11 +441,119 @@ def _fail_pending_discussion(
     bus.close_session(session_id)
 
 
+def _validate_recovered_team_lease(db, row, lease: _RecoveredTeamLease) -> None:
+    from app.services.agent_team_service import require_active_task_lease
+
+    _team, task, member = require_active_task_lease(
+        db, team_id=lease.team_id, task_id=lease.task_id, lease_token=lease.lease_token,
+        owner_user_id=row.owner_user_id,
+    )
+    raw = json_lib.loads(task.input_json)
+    if (int(member.id) != lease.member_id or member.address != "agent:review_orchestrator"
+            or raw.get("operation") != "start_roundtable"
+            or raw.get("project_id") != row.project_id or raw.get("file_id") != row.file_id
+            or (raw.get("_roundtable") or {}).get("session_id") != row.session_id):
+        raise _DiscussionTeamRevoked("团队圆桌持久绑定已失效")
+
+
+def _recover_team_lease(db, row, kwargs, report) -> _RecoveredTeamLease | None:
+    """只由持久关联重建 scope；归因字段本身不能授予团队执行权限。"""
+    from app.models.agent_team import AgentTeamTask
+
+    def team_pair(team_id, task_id):
+        if team_id is None and task_id is None:
+            return None
+        if (isinstance(team_id, bool) or not isinstance(team_id, int) or team_id <= 0
+                or isinstance(task_id, bool) or not isinstance(task_id, int) or task_id <= 0):
+            raise _DiscussionTeamRevoked("恢复团队归因不完整")
+        return team_id, task_id
+
+    origin = kwargs.get("usage_origin") or {}
+    if not isinstance(origin, dict):
+        raise _DiscussionTeamRevoked("恢复团队归因格式无效")
+    claims = {pair for pair in (
+        team_pair(origin.get("agent_team_id"), origin.get("agent_team_task_id")),
+        team_pair(report.agent_team_id, report.agent_team_task_id) if report is not None else None,
+    ) if pair is not None}
+    # 历史快照可能没有团队归因，仍可通过任务中已提交的会话关联定位。
+    # 不按同账号/同项目猜团队；LIKE 仅缩小候选，随后核验精确 session_id。
+    for task in db.query(AgentTeamTask).filter(AgentTeamTask.input_json.contains(row.session_id)).all():
+        try:
+            raw = json_lib.loads(task.input_json)
+            if (raw.get("_roundtable") or {}).get("session_id") == row.session_id:
+                claims.add((int(task.team_id), int(task.id)))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    if not claims:
+        return None
+    if len(claims) != 1:
+        raise _DiscussionTeamRevoked("恢复团队归因与持久关联冲突")
+    team_id, task_id = claims.pop()
+    task = db.get(AgentTeamTask, task_id)
+    if task is None or not task.lease_token:
+        raise _DiscussionTeamRevoked("恢复团队任务缺少有效租约")
+    lease = _RecoveredTeamLease(team_id, task_id, int(task.member_id), task.lease_token)
+    try:
+        _validate_recovered_team_lease(db, row, lease)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise _DiscussionTeamRevoked("恢复团队租约或会话绑定已失效") from exc
+    return lease
+
+
 async def _run_pending_discussion(pending: PendingDiscussion) -> None:
+    from app.services.agent_scheduler_runtime import (
+        AgentExecutionCancelled,
+        agent_execution_scope,
+        await_agent_coroutine,
+        check_agent_execution,
+        has_agent_execution_scope,
+    )
+
+    lease = pending.recovered_team_lease
+    if lease is None:
+        # 正常首次启动沿用 dispatcher 的 scope；此时反向会话映射可能尚未提交。
+        await _run_pending_discussion_inner(pending)
+        return
+    bus = DiscussionBus.instance()
+    inherited = copy_context() if has_agent_execution_scope() else None
+
+    def check_recovered_execution() -> None:
+        try:
+            if inherited is not None:
+                inherited.copy().run(check_agent_execution)
+            # 每次独立 Session，观察跨 worker 已提交的取消或换租约。
+            with SessionLocal() as db:
+                row = db.get(RoundtableSession, pending.session_id)
+                if (row is None or row.owner_user_id != pending.kwargs["user_id"]
+                        or row.project_id != pending.kwargs["project_id"]
+                        or row.file_id != pending.kwargs["file_id"]
+                        or row.status == "cancelled" or (row.progress or {}).get("terminal_status") == "cancelled"):
+                    raise _DiscussionTeamRevoked("圆桌会话已停止或归属已变化")
+                _validate_recovered_team_lease(db, row, lease)
+        except (Exception, AgentExecutionCancelled):
+            # 先建立既有会话/报告取消围栏，再由 runtime 取消 async 任务。
+            # 编排器据此拒绝晚结果，并且不能把租约撤销记成可恢复 interrupted。
+            session = bus.get_session(pending.session_id)
+            if session is not None:
+                # 报告收尾可能正持行锁；先让其提交前的既有 cancel_event 围栏生效。
+                session.cancel_event.set()
+            _publish_cancelled_terminal(bus, pending.session_id, error="所属团队任务或圆桌会话已停止")
+            raise
+
+    try:
+        with agent_execution_scope(check_recovered_execution):
+            await await_agent_coroutine(_run_pending_discussion_inner(pending))
+    except AgentExecutionCancelled:
+        _publish_cancelled_terminal(bus, pending.session_id, error="所属团队任务租约已失效")
+
+
+async def _run_pending_discussion_inner(pending: PendingDiscussion) -> None:
     """完整包围启动、授权与执行；任何异常都不能遗留无执行器的 active。"""
     bus = DiscussionBus.instance()
     orchestrator_task: asyncio.Task | None = None
     monitor_task: asyncio.Task | None = None
+    from app.services.agent_scheduler_runtime import AgentExecutionCancelled
+
     try:
         from app.ai.discussion_orchestrator import DiscussionOrchestrator
 
@@ -513,6 +635,9 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
         current = bus.get_session(pending.session_id)
         if current is not None and getattr(current, "terminal_status", "") not in {"success", "cancelled"}:
             _fail_pending_discussion(bus, pending.session_id, "圆桌执行已退出，未形成完整报告")
+    except AgentExecutionCancelled:
+        _publish_cancelled_terminal(bus, pending.session_id, error="所属团队任务租约已失效")
+        raise
     except asyncio.CancelledError:
         session = bus.get_session(pending.session_id)
         if (session is not None and session.progress.get("_recovery")
@@ -610,6 +735,7 @@ async def recover_persisted_discussions() -> None:
                     if not kwargs["profiles"] or not isinstance(kwargs["code"], str) or not kwargs["code"].strip():
                         raise ValueError("恢复快照缺少原始输入或专家")
                     task_id = int(row.report_task_id or row.task_id or 0)
+                    report = None
                     if task_id:
                         report = db.query(ReviewTask).filter_by(
                             id=task_id, user_id=owner, project_id=row.project_id, review_type="discuss",
@@ -621,12 +747,32 @@ async def recover_persisted_discussions() -> None:
                         ):
                             close_row(row, progress, report.status, report.error_message or "", report)
                             continue
+                    try:
+                        lease = _recover_team_lease(db, row, kwargs, report)
+                    except _DiscussionTeamRevoked:
+                        error = "所属团队任务租约或圆桌绑定已失效，停止恢复"
+                        close_row(row, progress, "cancelled", error)
+                        if report is not None:
+                            report.status = "cancelled"
+                            report.end_time = datetime.now(timezone.utc)
+                            report.error_message = error
+                            report.coverage = {
+                                **(report.coverage or {}), "stage": "cancelled", "score_available": False,
+                            }
+                        continue
+                    if task_id:
                         report.status = "running"
                         report.end_time = None
                         report.error_message = None
                         report.coverage = {**(report.coverage or {}), "stage": "recovering"}
                         kwargs["resume_task_id"] = task_id
                     pending = PendingDiscussion(sid, session_token_version=snapshot.get("token_version"), **kwargs)
+                    pending.recovered_team_lease = lease
+                    if lease is not None:
+                        pending.kwargs["usage_origin"] = {
+                            **(kwargs.get("usage_origin") or {}),
+                            "agent_team_id": lease.team_id, "agent_team_task_id": lease.task_id,
+                        }
                     pending.created_at = float(snapshot.get("created_at") or pending.created_at)
                     if task_id or row.status != "pending":
                         pending.created_at = time.time()

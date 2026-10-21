@@ -58,6 +58,7 @@ def test_targeted_seed_does_not_delete_unrelated_knowledge(monkeypatch, tmp_path
     assert {item["agent_code"] for item in added} == {"chat_assistant", "manager"}
     assert {item["source_ref"] for item in added} == {"role_permission_guide.md"}
     assert all("审查员可依 audit:view" in item["content"] for item in added)
+    assert all(item["require_api_embedding"] is True for item in added)
 
 
 def test_embedding_failure_keeps_old_playbook(monkeypatch, tmp_path) -> None:
@@ -74,3 +75,51 @@ def test_embedding_failure_keeps_old_playbook(monkeypatch, tmp_path) -> None:
     with pytest.raises(RuntimeError, match="embedding unavailable"):
         seed_agent_playbooks.seed({"role_permission_guide.md"})
     assert not deleted
+
+
+@pytest.mark.parametrize("vectors,tag", [
+    ([[1.0, 0.0]], "fallback:hash"),
+    ([], "api:embedding"),
+    (None, "api:embedding"),
+    ([None], "api:embedding"),
+    ([[True, 0.0]], "api:embedding"),
+    ([[1.0, 0.0]], None),
+    ([[float("nan"), 0.0]], "api:embedding"),
+])
+def test_strict_playbook_rejects_degraded_vectors_without_replacing_old(db, monkeypatch, vectors, tag):
+    from app.models.agent_governance import AgentKnowledgeDoc
+    from app.services import agent_knowledge_service
+
+    old = AgentKnowledgeDoc(
+        agent_code="chat_assistant", title="操作手册", source_type="playbook",
+        source_ref="test.md", status="active", risk_level="low", confidence=1.0,
+        char_count=2, chunk_count=1,
+    )
+    db.add(old)
+    db.commit()
+    old_id = old.id
+    monkeypatch.setattr(agent_knowledge_service.embedding_service, "embed_texts",
+                        lambda *_args, **_kwargs: (vectors, tag))
+    with pytest.raises(RuntimeError, match="真实嵌入"):
+        agent_knowledge_service.add_document(
+            db, agent_code="chat_assistant", title="操作手册", content="新版操作手册",
+            source_type="playbook", require_api_embedding=True,
+        )
+    assert db.query(AgentKnowledgeDoc).filter(AgentKnowledgeDoc.title == "操作手册").count() == 1
+    assert db.get(AgentKnowledgeDoc, old_id).status == "active"
+
+
+def test_strict_playbook_persists_only_complete_api_vectors(db, monkeypatch):
+    from app.models.agent_governance import AgentKnowledgeChunk
+    from app.services import agent_knowledge_service
+
+    monkeypatch.setattr(agent_knowledge_service.embedding_service, "embed_texts",
+                        lambda _db, texts, **_kwargs: ([[1.0, 0.0] for _ in texts], "api:embedding"))
+    doc = agent_knowledge_service.add_document(
+        db, agent_code="chat_assistant", title="真实向量手册", content="新版操作手册",
+        source_type="playbook", require_api_embedding=True,
+    )
+    chunks = db.query(AgentKnowledgeChunk).filter(AgentKnowledgeChunk.doc_id == doc.id).all()
+    assert doc.status == "active"
+    assert len(chunks) == doc.chunk_count > 0
+    assert {row.embed_model for row in chunks} == {"api:embedding"}

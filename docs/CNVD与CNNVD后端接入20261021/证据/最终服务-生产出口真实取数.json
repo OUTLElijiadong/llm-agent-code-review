@@ -1,0 +1,142 @@
+{
+  "checked_at": "2026-10-21T16:27:41.954120+00:00",
+  "environment": "final local service via SSH fixed-official-host TLS tunnel, production egress 81.70.251.90",
+  "production_application_executed": false,
+  "production_files_read_or_written": false,
+  "tls_certificate_verification": true,
+  "minimum_request_spacing_seconds_per_source": 2,
+  "module_sha256": "7197dd4ae56e2369be8291b72af6da49287c61e926f9de5c209c27103134da01",
+  "transport_override": "TCP dial only; original official hostname, TLS SNI, certificate verification, Host header, protocol/parser/cache are retained",
+  "result": {
+    "query": "",
+    "sources": [
+      {
+        "code": "cnvd",
+        "name": "国家信息安全漏洞共享平台",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "blocked",
+        "connected": false,
+        "status_message": "官方源返回 HTTP 521；本次未取得可核验漏洞记录。",
+        "checked_at": "2026-10-21T16:27:32.688903+00:00",
+        "last_success_at": null,
+        "http_status": 521,
+        "upstream_code": null,
+        "record_count": 0,
+        "cached": false,
+        "query_scope": "latest_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnvd.org.cn/flaw/list",
+            "method": "GET",
+            "checked_at": "2026-10-21T16:27:32.703038+00:00",
+            "http_status": 521,
+            "upstream_code": null,
+            "response_sha256": "7db05dbcbc27a9739f5229b8d709f0913c937adf43b78c9ca89adb3ffce98e15",
+            "response_bytes": 900
+          }
+        ]
+      },
+      {
+        "code": "cnnvd",
+        "name": "国家信息安全漏洞库",
+        "role": "vulnerability_intelligence",
+        "url": "https://www.cnnvd.org.cn/",
+        "adapter": "official_public_web",
+        "integration": "implemented",
+        "status": "available",
+        "connected": true,
+        "status_message": "官方查询成功；记录适用的组件、版本与环境仍需逐项核验。",
+        "checked_at": "2026-10-21T16:27:32.689581+00:00",
+        "last_success_at": "2026-10-21T16:27:32.689581+00:00",
+        "http_status": 200,
+        "upstream_code": "200",
+        "record_count": 2,
+        "cached": false,
+        "query_scope": "official_search_first_page",
+        "last_query": "",
+        "retry_after_seconds": null,
+        "evidence": [
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:27:32.703355+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "029521c24a7fb81988ada55b0ea2e446394bf11818a0714e10493b797ea2141a",
+            "response_bytes": 111
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/vulTypeList",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:27:35.483709+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "7e6f1501a6e846c64a4b58f979fab3a5b25891b0b5c553ecb1ebf1368ad7f9e3",
+            "response_bytes": 6770
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:27:37.562308+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "0c6601225bc9c5a30ce5fff663d47782d2bb4d0e074a7655e12a93dccc4a0efc",
+            "response_bytes": 111
+          },
+          {
+            "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+            "method": "POST",
+            "checked_at": "2026-10-21T16:27:39.648885+00:00",
+            "http_status": 200,
+            "upstream_code": "200",
+            "response_sha256": "90864493436f0fb43269ad3bba2a19e4da2483ca2823ad090342cb9ba94d95a9",
+            "response_bytes": 1123
+          }
+        ]
+      }
+    ],
+    "records": [
+      {
+        "source": "cnnvd",
+        "record_id": "CNNVD-2026-84461689",
+        "title": "TYPO3 Analytics 授权问题漏洞",
+        "url": "https://www.cnnvd.org.cn/frontend/detail?vulId=800186420",
+        "description": "TYPO3 Analytics 1.1.1之前版本存在授权问题漏洞，该漏洞源于后端模块未检查后端用户是否有权访问请求的站点，可能导致有权访问该模块的用户打开任意站点的分析仪表盘。",
+        "severity": "中危",
+        "cve_ids": [
+          "CVE-2026-112068"
+        ],
+        "cwe_ids": [],
+        "published_at": "2026-10-20",
+        "updated_at": "2026-10-21 16:49:26",
+        "checked_at": "2026-10-21T16:27:32.689581+00:00",
+        "match_type": "latest",
+        "evidence_url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+        "evidence_sha256": "90864493436f0fb43269ad3bba2a19e4da2483ca2823ad090342cb9ba94d95a9"
+      },
+      {
+        "source": "cnnvd",
+        "record_id": "CNNVD-2026-26477039",
+        "title": "TYPO3 Accessible Form Captcha 信任管理问题漏洞",
+        "url": "https://www.cnnvd.org.cn/frontend/detail?vulId=800186421",
+        "description": "TYPO3 Accessible Form Captcha 4.0.0版本至5.4.2之前版本存在安全漏洞，该漏洞源于CAPTCHA图像数据中嵌入了正确答案且默认启用音频功能，可能导致攻击者读取答案并通过验证，使自动化客户端或机器人绕过CAPTCHA保护。",
+        "severity": "中危",
+        "cve_ids": [
+          "CVE-2026-112067"
+        ],
+        "cwe_ids": [],
+        "published_at": "2026-10-20",
+        "updated_at": "2026-10-21 16:49:25",
+        "checked_at": "2026-10-21T16:27:32.689581+00:00",
+        "match_type": "latest",
+        "evidence_url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+        "evidence_sha256": "90864493436f0fb43269ad3bba2a19e4da2483ca2823ad090342cb9ba94d95a9"
+      }
+    ]
+  }
+}

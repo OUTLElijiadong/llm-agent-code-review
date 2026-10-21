@@ -722,7 +722,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         score_breakdown = {**score_breakdown, "score_scope": score_scope.get("scope")}
     from app.services.score_credibility import audit_report_score
 
-    # 小菱终审：按规则独立复算，不一致则打回重判并采用规则分。
+    # 仅复算分数；不表示对问题真实性做独立复核。
     score_audit = audit_report_score(task, score, severity_count, issue_count, score_scope=score_scope)
     if score_audit["status"] == "rescored" and score_audit["final_score"] != score:
         score = score_audit["final_score"]

@@ -1,0 +1,39 @@
+{
+  "checked_at": "2026-10-21T15:19:27.034882+00:00",
+  "checks": [
+    {
+      "name": "后端回归",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/unit/services/test_vulnerability_source_service.py",
+        "tests/unit/services/test_security_rule_catalog_service.py",
+        "tests/unit/api/test_vulnerability_sources_api.py",
+        "tests/test_security_catalog_current.py",
+        "tests/test_complete_permission_matrix.py",
+        "--no-cov",
+        "-q"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend",
+      "exit_code": 0
+    },
+    {
+      "name": "代码静态检查",
+      "command": [
+        "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/backend/.venv/bin/ruff",
+        "check",
+        "app/services/vulnerability_source_service.py",
+        "app/schemas/vulnerability_source.py",
+        "app/api/v1/security.py",
+        "app/schemas/security.py",
+        "app/services/security_rule_catalog_service.py",
+        "tests/unit/services/test_vulnerability_source_service.py",
+        "tests/unit/api/test_vulnerability_sources_api.py",
+        "tests/test_complete_permission_matrix.py"
+      ],
+      "cwd": "/Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/backend",
+      "exit_code": 0
+    }
+  ]
+}

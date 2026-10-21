@@ -35,6 +35,8 @@ import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import AuthenticatedChatImage from '@/components/ai/AuthenticatedChatImage.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
+import AgentTeamLiveGraph from '@/components/ai/AgentTeamLiveGraph.vue'
+import { useLiveAgentTeamPolling } from '@/composables/useLiveAgentTeamPolling'
 import AiOrb from '@/components/common/AiOrb.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
@@ -286,6 +288,11 @@ const activeThinkingTeamIds = computed(() => (
     .map((team) => team.team_id)
 ))
 const thinkingCityActive = computed(() => showTyping.value || activeThinkingTeamIds.value.length > 0)
+const liveGraphTeams = computed(() => {
+  const active = agentTeams.value.filter(team => !TERMINAL_TEAM_STATUSES.has(team.status))
+  return active.length ? active : agentTeams.value.slice(0, 1)
+})
+const teamForming = computed(() => loading.value && ['create_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(lastActiveToolName.value))
 function openTeamPanel(teamId: number): void { selectedTeamId.value = teamId }
 
 async function handleAskMember({ teamId, name, address }: { teamId: number; name: string; address: string }): Promise<void> {
@@ -636,6 +643,12 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     if (isCurrent()) agentTeamLoading.value = false
   }
 }
+
+useLiveAgentTeamPolling({
+  active: () => loading.value,
+  scope: () => sessionId.value ? `${userStore.profile?.id ?? 'anonymous'}:${sessionId.value}` : '',
+  refresh: refreshAgentTeam,
+})
 
 function scheduleSessionPoll(immediate = false): void {
   clearSessionPoll()
@@ -1196,6 +1209,19 @@ function eventErrorMessage(event: ResponseStreamEvent): string {
   return ''
 }
 
+// 星图异步出现或长高时，仅跟随原本贴底的阅读位置。
+watch([liveGraphTeams, teamForming], () => {
+  const area = messageArea.value
+  if (!area || area.scrollHeight - area.scrollTop - area.clientHeight > 80) return
+  const oldTop = area.scrollTop
+  const scopeCurrent = chatScope.capture()
+  void nextTick(() => {
+    if (scopeCurrent() && messageArea.value === area && area.scrollTop === oldTop) {
+      area.scrollTop = area.scrollHeight
+    }
+  })
+})
+
 async function scrollToBottom(): Promise<void> {
   await nextTick()
   if (messageArea.value) messageArea.value.scrollTop = messageArea.value.scrollHeight
@@ -1594,19 +1620,10 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
         }
-        // Detect create_agent_team tool completion and immediately fetch team
-        if (event.type === 'response.tool.completed' && ['create_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(String(event.tool_name))) {
-          try {
-            const result = typeof event.output === 'object' && event.output !== null ? event.output : {}
-            const teamId = event.team_id ?? (result as any).team_id ?? (result as any).data?.team_id
-            if (typeof teamId === 'number') {
-              const detail = await getAgentTeam(teamId)
-              if (!isCurrentSubmission()) return
-              if (!agentTeams.value.some((t) => t.team_id === teamId)) {
-                agentTeams.value = [...agentTeams.value, detail]
-              }
-            }
-          } catch { /* team fetch failed, will be picked up by polling */ }
+        if (['response.tool.started', 'response.tool.completed'].includes(event.type)
+          && ['create_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(String(event.tool_name))) {
+          await refreshAgentTeam()
+          if (!isCurrentSubmission()) return
         }
         syncBusy()
       } else if (event.type === 'response.output_text.delta') {
@@ -2448,6 +2465,8 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           :loading="agentTeamLoading"
           @open-panel="openTeamPanel"
         />
+
+        <AgentTeamLiveGraph :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamPanel($event.team_id)" />
 
         <div v-if="thinkingCityActive" class="typing-row">
           <div class="message-avatar">

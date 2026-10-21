@@ -1123,8 +1123,8 @@ const scoreAvailable = computed(() => (
 ))
 const scoreAuditLabel = computed(() => {
   const status = String(scoreAudit.value?.status || '')
-  if (status === 'trusted') return '小菱终审：可信'
-  if (status === 'rescored') return '小菱终审：已打回重判，采用规则分'
+  if (status === 'trusted') return '规则计分：复算一致'
+  if (status === 'rescored') return '规则计分：已校正'
   return ''
 })
 const sandboxAiReviewStatus = computed(() => report.value?.source?.ai_review?.status ?? 'unknown')

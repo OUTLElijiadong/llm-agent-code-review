@@ -1,0 +1,207 @@
+{
+  "environment": "production egress, isolated Python stdlib, no production files/config/credentials read or written",
+  "checked_at": "2026-10-21T15:49:54.354167+00:00",
+  "steps": [
+    {
+      "label": "public_page",
+      "url": "https://www.cnnvd.org.cn/frontend/loophole",
+      "method": "GET",
+      "checked_at": "2026-10-21T15:49:41.772936+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:41 GMT",
+      "content_type": "text/html; charset=utf-8",
+      "response_bytes": 985,
+      "response_sha256": "b2136984413abe134f1a030312f367c8d9403a65f99a50bdd82d205b81122014",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "User-Agent"
+      ],
+      "request_content_type": null,
+      "request_body": null
+    },
+    {
+      "label": "prism_baseline_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T15:49:43.902385+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:43 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "b06b8f454c96bc2ce76d8fd6dd5c2557ce18d18fbc680cfdf58ff4c4c0d57162",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "prism_baseline_search",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+      "method": "POST",
+      "checked_at": "2026-10-21T15:49:45.980220+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:46 GMT",
+      "content_type": "application/json",
+      "response_bytes": 39,
+      "response_sha256": "2d0671d38485d3f87ac7d8e70be9cadb3dca850f89ab663b2d6d466fbc9501f9",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json",
+      "request_body": {
+        "sortOrder": "desc",
+        "sortField": "publishDate",
+        "page": 1,
+        "pageSize": 10
+      },
+      "upstream_code": 4030,
+      "message": "非法访问",
+      "data_type": "NoneType"
+    },
+    {
+      "label": "official_public_format_signature",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/tourist/sign",
+      "method": "POST",
+      "checked_at": "2026-10-21T15:49:48.046540+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:48 GMT",
+      "content_type": "application/json",
+      "response_bytes": 111,
+      "response_sha256": "d2dd2523b40ebe300be3930f83eb9139d2cac91f2ce6130a9f2570a87f682102",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "signStr": "POST + target path + timestamp + nonce (values redacted)"
+      },
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "str"
+    },
+    {
+      "label": "official_public_format_search",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/homePage/searchVul",
+      "method": "POST",
+      "checked_at": "2026-10-21T15:49:50.154485+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:50 GMT",
+      "content_type": "application/json",
+      "response_bytes": 39,
+      "response_sha256": "2d0671d38485d3f87ac7d8e70be9cadb3dca850f89ab663b2d6d466fbc9501f9",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Content-Type",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-Appid",
+        "X-Nonce",
+        "X-Sign",
+        "X-Timestamp"
+      ],
+      "request_content_type": "application/json;charset=utf-8",
+      "request_body": {
+        "sortOrder": "desc",
+        "sortField": "publishDate",
+        "page": 1,
+        "pageSize": 10
+      },
+      "upstream_code": 4030,
+      "message": "非法访问",
+      "data_type": "NoneType"
+    },
+    {
+      "label": "public_documents",
+      "url": "https://www.cnnvd.org.cn/cnnvdweb/2.0/common/docProtocol/list?type=1",
+      "method": "GET",
+      "checked_at": "2026-10-21T15:49:52.219391+00:00",
+      "http_status": 200,
+      "server_date": "Wed, 21 Oct 2026 15:49:52 GMT",
+      "content_type": "application/json",
+      "response_bytes": 1285,
+      "response_sha256": "47d590af6985ea9a2963a2487ce83c7ecc75a7a2d0ededcc58837878a0522534",
+      "cookie_names_in_memory": [],
+      "request_header_names": [
+        "Accept",
+        "Referer",
+        "User-Agent"
+      ],
+      "request_content_type": null,
+      "request_body": null,
+      "upstream_code": 200,
+      "message": "操作成功",
+      "data_type": "list",
+      "data": [
+        {
+          "keyId": "productSpecification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/BB/rBBlBmoz3g-AIRmgAA2APglXe-I184.pdf",
+          "protocolName": "国家信息安全漏洞库(CNNVD) 网络安全受漏洞影响产品描述规范",
+          "updateTime": "2026-06-23 12:19:47"
+        },
+        {
+          "keyId": "xmlSpecification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/BB/rBBl8Woz3h2AMYZDAAdOVPocFRM427.pdf",
+          "protocolName": "国家信息安全漏洞库(CNNVD) 网络安全漏洞信息XML描述规范",
+          "updateTime": "2026-06-23 12:19:42"
+        },
+        {
+          "keyId": "getXml",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/B3/rBBls2LT8nOADUr6AAnoHmC7qC4290.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）漏洞XML信息获取接口文档",
+          "updateTime": "2026-06-24 10:08:55"
+        },
+        {
+          "keyId": "specification",
+          "enclosureContent": "",
+          "fileUrl": "group1/M00/02/F3/rBBlBmp6eoCAXMXfABvJKEOx9gM793.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）漏洞提交API接口规范",
+          "updateTime": "2026-08-11 09:27:29"
+        },
+        {
+          "keyId": "0461d0172a1e4d70a014204dccf20b6d",
+          "enclosureContent": null,
+          "fileUrl": "group1/M00/02/C5/rBBlZ2o7PU2AMWccAGWKeYbxKuw975.pdf",
+          "protocolName": "国家信息安全漏洞库（CNNVD）用户使用手册",
+          "updateTime": "2026-06-24 10:13:34"
+        }
+      ]
+    }
+  ]
+}

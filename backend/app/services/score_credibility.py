@@ -1,9 +1,9 @@
-"""报告分数可信度终审（小菱核验环节）。
+"""报告分数规则复算；不表示对问题真实性做独立复核。
 
 规则评分之后、报告展示之前，按评分规则从原始输入（问题严重度计数 / 沙箱
 检查项回执）独立重算一次，与任务记录分比对：
-- 一致 → ``trusted``，原分数可信，直接生成报告；
-- 不一致 → ``rescored``，打回按规则重判，报告使用重算分并保留被否决的原值；
+- 一致 → ``trusted``，仅表示算术复算一致；
+- 不一致 → ``rescored``，报告使用重算分并保留原值；
 - 规则输入缺失 → ``unavailable``，不出分也不用 0 占位。
 """
 
@@ -14,7 +14,7 @@ from typing import Any
 from app.ai.scoring import SCORING_VERSION, compute_score_breakdown
 
 SCORE_AUDIT_VERSION = "xiaoling-score-audit-v1"
-_REVIEWER = "小菱终审"
+_REVIEWER = "规则复算"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -76,7 +76,7 @@ def audit_report_score(
     issue_count: int,
     score_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """返回终审结论；``final_score`` 是报告应展示的分数。"""
+    """返回评分复算结果；``final_score`` 是报告应展示的分数。"""
     stored = _int_or_none(getattr(task, "score", None))
     if (
         not getattr(task, "score_version", None)
@@ -91,6 +91,7 @@ def audit_report_score(
     base = {
         "version": SCORE_AUDIT_VERSION, "reviewer": _REVIEWER, "stored_score": stored,
         "scope": scope.get("scope"), "scope_label": scope.get("label"),
+        "verification_scope": "score_only", "independent_review": False,
     }
 
     if displayed_score is None:
@@ -121,10 +122,10 @@ def audit_report_score(
     if trusted:
         return {
             **base, "status": "trusted", "rule": rule, "rule_score": rule_score, "final_score": rule_score,
-            "reason": "按规则复算与记录分一致，分数可信，生成报告" + _scope_note(scope),
+            "reason": "规则复算与记录分一致；问题真实性未经本环节独立复核" + _scope_note(scope),
         }
     return {
         **base, "status": "rescored", "rule": rule, "rule_score": rule_score, "final_score": rule_score,
         "rejected_score": stored if stored != rule_score else displayed_score,
-        "reason": "记录分与规则复算不一致，已打回按规则重判，报告采用重判分" + _scope_note(scope),
+        "reason": "记录分与规则复算不一致，报告采用规则校正分；问题真实性未经本环节独立复核" + _scope_note(scope),
     }

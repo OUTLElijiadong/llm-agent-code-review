@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from app.core.database import Base
 from app.models.agent_team import AgentTeam, AgentTeamMember, AgentTeamTask
 from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
@@ -17,6 +20,17 @@ from app.models.review_task_file import ReviewTaskFile
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_team_review, agent_team_service, review_service
+
+
+@pytest.fixture
+def db(tmp_path):
+    # 续租和观察者必须使用独立连接，不能由单连接内存库代替事务边界。
+    engine = create_engine(f"sqlite:///{tmp_path / 'team-review.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with sessions() as database:
+        yield database
+    engine.dispose()
 
 
 @pytest.fixture
@@ -138,14 +152,256 @@ def test_lost_team_lease_does_not_cancel_review_owned_by_next_waiter(db, monkeyp
     assert rows.thread.call_count == 1
 
 
-def test_wait_timeout_cancels_review_and_never_claims_success(db, monkeypatch, review_team):
-    monkeypatch.setattr(agent_team_review.settings, "agent_full_validation_wait_seconds", 0)
+@pytest.mark.parametrize("wait_seconds", [0, 600])
+def test_observation_timeout_renews_original_lease_without_cancelling_review(
+    db, monkeypatch, review_team, wait_seconds,
+):
+    rows = review_team
+    initial = datetime.now(timezone.utc)
+    clock = SimpleNamespace(seconds=0)
+    rows.task.lease_expires_at = initial + timedelta(seconds=660)
+    rows.task.attempt_count = 1
+    rows.team.deadline_at = initial + timedelta(seconds=1200)
+    db.commit()
+    monkeypatch.setattr(agent_team_service, "_now", lambda: initial + timedelta(seconds=clock.seconds))
+    monkeypatch.setattr(agent_team_review.settings, "agent_full_validation_wait_seconds", wait_seconds)
+    monkeypatch.setattr(agent_team_review.settings, "agent_team_task_lease_seconds", 300)
+    snapshots = []
+
+    def advance(_):
+        clock.seconds += 30
+        with sessionmaker(bind=db.get_bind())() as observer:
+            task = observer.get(AgentTeamTask, rows.task.id)
+            review = observer.query(ReviewTask).one()
+            snapshots.append((review.id, review.execution_token, task.lease_token, task.lease_expires_at))
+        if clock.seconds >= 750:
+            _finish_review(db)
+        assert clock.seconds <= 750, "等待器没有读取真实终态"
+
+    monkeypatch.setattr(agent_team_review, "time", SimpleNamespace(
+        sleep=advance, monotonic=lambda: clock.seconds,
+    ))
+    result = _run(db, rows)
+    assert result["status"] == "completed"
+    assert clock.seconds == 750
+    assert len({(item[0], item[1], item[2]) for item in snapshots}) == 1
+    assert len({item[3] for item in snapshots}) == 3  # 初始期限及两次续租；不能每轮都写库。
+    assert snapshots[-1][3].replace(tzinfo=timezone.utc) > initial + timedelta(seconds=750)
+    assert db.query(ReviewTask).count() == db.query(ReviewTaskFile).count() == 1
+    assert db.get(AgentTeamTask, rows.task.id).attempt_count == 1
+    assert rows.thread.call_count == 1
+
+
+def test_observer_handoff_reuses_persisted_review_and_original_frozen_version(db, monkeypatch, review_team):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", Mock(side_effect=RuntimeError("observer interrupted")))
+    with pytest.raises(RuntimeError, match="observer interrupted"):
+        _run(db, rows)
+    review = db.query(ReviewTask).one()
+    review_id, original_token = review.id, review.execution_token
+    original_hash = db.query(ReviewTaskFile).one().content_sha256
+    rows.source.content = "print('new version')\n"
+    rows.source.version_no = 2
+    db.add(CodeVersion(file_id=rows.source.id, version_no=2, content=rows.source.content,
+                       create_time=datetime.now(timezone.utc)))
+    # 新 dispatcher 领取后换发团队租约；持久审查映射与审查执行 token 不变。
+    rows.task.lease_token = "next-observer"
+    db.commit()
+    db.rollback()
+    with sessionmaker(bind=db.get_bind(), expire_on_commit=False)() as resumed:
+        monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(resumed))
+        result = agent_team_review.run_team_review(
+            resumed, resumed.get(User, rows.user.id), team_id=rows.team.id, task_id=rows.task.id,
+            lease_token="next-observer", project_id=rows.project.id,
+        )
+        stored = resumed.get(ReviewTask, review_id)
+        frozen = resumed.query(ReviewTaskFile).one()
+        assert result["status"] == "completed" and result["task_id"] == review_id
+        assert stored.execution_token == original_token
+        assert (frozen.version_no, frozen.content_sha256) == (1, original_hash)
+        assert review_service.load_task_inputs(resumed, review_id)[0].content == "print(1)\n"
+    assert rows.thread.call_count == 1
+
+
+@pytest.mark.parametrize("change", ["cancelled", "expired", "replaced", "deadline", "disabled", "member"])
+def test_lease_renewal_cannot_revive_stopped_or_reassigned_execution(db, monkeypatch, review_team, change):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db))
+    _run(db, rows)
+    review = db.query(ReviewTask).one()
+    review.status = "running"
+    db.commit()
+    original_expiry = rows.task.lease_expires_at
+    if change == "cancelled":
+        agent_team_service.cancel_team(db, rows.user, rows.team.id)
+    elif change == "expired":
+        rows.task.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif change == "replaced":
+        rows.task.lease_token = "replacement"
+    elif change == "deadline":
+        rows.team.deadline_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif change == "disabled":
+        rows.user.status = 0
+    else:
+        db.get(AgentTeamMember, rows.task.member_id).address = "agent:reporter"
+    db.commit()
+    with pytest.raises(agent_team_service.AgentTeamError):
+        agent_team_review._renew_review_lease(
+            db.get_bind(), user_id=rows.user.id, project_id=rows.project.id,
+            team_id=rows.team.id, task_id=rows.task.id, member_id=rows.task.member_id,
+            lease_token="lease", review_id=review.id,
+        )
+    db.expire_all()
+    current = db.get(AgentTeamTask, rows.task.id)
+    if current.lease_expires_at is not None:
+        assert current.lease_expires_at.replace(tzinfo=timezone.utc) <= original_expiry.replace(tzinfo=timezone.utc)
+    assert rows.thread.call_count == 1
+
+
+def test_human_cancelled_review_is_not_restarted_by_observer_or_recovery(db, monkeypatch, review_team):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db, "cancelled"))
+    first = _run(db, rows)
+    again = _run(db, rows)
+    resume = Mock()
+    monkeypatch.setattr(review_service, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    monkeypatch.setattr(review_service, "_run_review_task", resume)
+    review = db.get(ReviewTask, first["task_id"])
+    review_service._resume_interrupted_task(review.id, rows.user.id, review.execution_token)
+    assert first["status"] == again["status"] == "failed"
+    assert db.query(ReviewTask).count() == rows.thread.call_count == 1
+    assert db.get(ReviewTask, first["task_id"]).status == "cancelled"
+    resume.assert_not_called()
+
+
+@pytest.mark.parametrize("mutation", ["owner", "project", "frozen_project"])
+def test_handoff_rejects_changed_review_binding_without_creating_second_review(
+    db, monkeypatch, review_team, mutation,
+):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db))
+    _run(db, rows)
+    review = db.query(ReviewTask).one()
+    if mutation == "owner":
+        review.user_id = rows.user.id + 100
+    elif mutation == "project":
+        review.project_id = rows.project.id + 100
+    else:
+        frozen = db.query(ReviewTaskFile).one()
+        frozen.file_snapshot = {**frozen.file_snapshot, "project_id": rows.project.id + 100}
+    db.commit()
+    with pytest.raises(agent_team_service.AgentTeamStateError):
+        _run(db, rows)
+    assert db.query(ReviewTask).count() == rows.thread.call_count == 1
+
+
+def test_project_permission_revocation_stops_existing_formal_review(db, monkeypatch, review_team):
+    def revoke(_):
+        review_team.project.user_id = review_team.user.id + 100
+        db.commit()
+
+    monkeypatch.setattr(agent_team_review.time, "sleep", revoke)
     result = _run(db, review_team)
-    assert result["status"] == "failed"
-    assert result["retryable"] is False
-    review = db.get(ReviewTask, result["task_id"])
-    assert review.status == "cancelled"
-    assert "超时" in review.error_message
+    assert result["status"] == "blocked"
+    assert db.get(ReviewTask, result["task_id"]).status == "cancelled"
+    assert review_team.thread.call_count == 1
+
+
+def test_lease_renewal_caps_existing_expiry_at_hard_deadline(db, monkeypatch, review_team):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db))
+    _run(db, rows)
+    review = db.query(ReviewTask).one()
+    review.status = "running"
+    now = datetime.now(timezone.utc)
+    rows.task.lease_expires_at = now + timedelta(seconds=300)
+    rows.team.deadline_at = now + timedelta(seconds=45)
+    db.commit()
+    agent_team_review._renew_review_lease(
+        db.get_bind(), user_id=rows.user.id, project_id=rows.project.id,
+        team_id=rows.team.id, task_id=rows.task.id, member_id=rows.task.member_id,
+        lease_token="lease", review_id=review.id,
+    )
+    db.expire_all()
+    assert db.get(AgentTeamTask, rows.task.id).lease_expires_at == db.get(AgentTeam, rows.team.id).deadline_at
+
+
+def test_lease_renewal_commits_on_separate_connection_without_observer_writes(db, monkeypatch, review_team):
+    rows = review_team
+    monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db))
+    _run(db, rows)
+    review = db.query(ReviewTask).one()
+    review.status = "running"
+    old_expiry = datetime.now(timezone.utc) + timedelta(seconds=10)
+    rows.task.lease_expires_at = old_expiry
+    db.commit()
+    review_id, team_id, task_id = review.id, rows.team.id, rows.task.id
+    user_id, project_id, member_id = rows.user.id, rows.project.id, rows.task.member_id
+    db.rollback()
+    with db.get_bind().connect() as connection, connection.begin():
+        with sessionmaker(bind=connection, autoflush=False)() as observer:
+            pending = User(username="uncommitted-observer", password="x", role="user", status=1)
+            observer.add(pending)
+            agent_team_review._renew_review_lease(
+                observer.get_bind(), user_id=user_id, project_id=project_id, team_id=team_id,
+                task_id=task_id, member_id=member_id, lease_token="lease", review_id=review_id,
+            )
+            with sessionmaker(bind=db.get_bind())() as independent:
+                renewed = independent.get(AgentTeamTask, task_id).lease_expires_at
+                assert renewed.replace(tzinfo=timezone.utc) > old_expiry
+                assert independent.query(User).filter_by(username=pending.username).count() == 0
+            assert pending in observer.new and pending.id is None
+            observer.rollback()
+
+
+def test_interrupted_team_review_resumes_only_unfinished_files_with_original_task(db, monkeypatch, review_team):
+    rows = review_team
+    second = CodeFile(project_id=rows.project.id, file_name="two.py", file_path="two.py", language="python",
+                      content="print(2)\n", status="active", is_binary=0, version_no=1)
+    db.add(second)
+    db.flush()
+    db.add(CodeVersion(file_id=second.id, version_no=1, content=second.content,
+                       create_time=datetime.now(timezone.utc)))
+    db.commit()
+    monkeypatch.setattr(agent_team_review.time, "sleep", Mock(side_effect=RuntimeError("observer interrupted")))
+    with pytest.raises(RuntimeError, match="observer interrupted"):
+        _run(db, rows)
+    review = db.query(ReviewTask).one()
+    review_id, old_token = review.id, review.execution_token
+    frozen_before = [(item.file_id, item.version_no, item.content_sha256)
+                     for item in db.query(ReviewTaskFile).order_by(ReviewTaskFile.file_id).all()]
+    for source in (rows.source, second):
+        db.add(ReviewIssue(task_id=review_id, file_id=source.id, file_name=source.file_name,
+                           line_number=1, title="原审查证据", severity="高", issue_type="安全漏洞",
+                           description="由原冻结文件产生的证据"))
+    review.coverage = {"stage": "reviewing", "files": {
+        str(rows.source.id): {"status": "complete"}, str(second.id): {"status": "failed"},
+    }}
+    review.processed_files = 1
+    rows.source.content = "print('changed live input')\n"
+    rows.source.version_no = 2
+    db.add(CodeVersion(file_id=rows.source.id, version_no=2, content=rows.source.content,
+                       create_time=datetime.now(timezone.utc)))
+    db.commit()
+    resume = Mock()
+    monkeypatch.setattr(review_service, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    monkeypatch.setattr(review_service, "_run_review_task", resume)
+    review_service._resume_interrupted_task(review_id, rows.user.id, old_token)
+    review_service._resume_interrupted_task(review_id, rows.user.id, old_token)
+    db.expire_all()
+    stored = db.get(ReviewTask, review_id)
+    assert stored.execution_token != old_token
+    resume.assert_called_once_with(review_id, rows.user.id, stored.execution_token)
+    assert (stored.user_id, stored.project_id, stored.agent_team_id, stored.agent_team_task_id) == (
+        rows.user.id, rows.project.id, rows.team.id, rows.task.id,
+    )
+    assert stored.status == "running" and stored.coverage["stage"] == "recovering"
+    assert stored.processed_files == 1
+    assert [issue.file_id for issue in db.query(ReviewIssue).all()] == [rows.source.id]
+    assert [(item.file_id, item.version_no, item.content_sha256)
+            for item in db.query(ReviewTaskFile).order_by(ReviewTaskFile.file_id).all()] == frozen_before
+    assert review_service.load_task_inputs(db, review_id)[0].content == "print(1)\n"
+    assert db.query(ReviewTask).count() == rows.thread.call_count == 1
 
 
 @pytest.mark.parametrize("mutation", ["readonly", "wrong_member", "wrong_operation", "wrong_project", "disabled"])

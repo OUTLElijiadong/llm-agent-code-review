@@ -2,3 +2,7 @@
 *.png -diff
 *.jpg -diff
 *.jpeg -diff
+
+# 原始上游响应和历史测试日志按字节归档，保留CRLF及尾随空白以便核对取数哈希。
+docs/CNVD与CNNVD后端接入20261021/证据/CNVD人工智能子库-首页响应.txt whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+docs/CNVD与CNNVD后端接入20261021/证据/主线程11文件组-编辑期间历史失败.txt whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

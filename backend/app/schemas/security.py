@@ -3,6 +3,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.vulnerability_source import VulnerabilitySourceStatusOut
+
 # ---- Input ----
 
 
@@ -226,11 +228,8 @@ class SecurityRuleEngineOut(BaseModel):
     status_message: str = ""
 
 
-class SecurityRuleSourceOut(BaseModel):
-    code: str
-    name: str
-    role: str
-    url: str
+class SecurityRuleSourceOut(VulnerabilitySourceStatusOut):
+    """规则参考源可不带状态；国内库状态来自实际查询适配器。"""
 
 
 class SecurityRuleCatalogOut(BaseModel):

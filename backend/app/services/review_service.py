@@ -14,8 +14,10 @@ import json
 import threading
 import time
 import uuid
+from contextlib import ExitStack
 from contextvars import copy_context
 from datetime import datetime, timezone
+from functools import partial
 from typing import List, Optional
 
 from loguru import logger
@@ -325,7 +327,7 @@ def start(
     dispatch_token = str(task.execution_token)
     try:
         threading.Thread(
-            target=_run_review_task,
+            target=partial(copy_context().run, _run_review_task),
             args=(task.id, user.id, dispatch_token),
             name=f"review-task-{task.id}",
             daemon=True,
@@ -376,9 +378,17 @@ def resume_interrupted_tasks(task_refs: list[tuple[int, int, str]]) -> int:
 
 def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) -> None:
     """CAS 换发执行租约，保留已完整覆盖的文件，仅重跑未完成文件。"""
+    from app.services.agent_scheduler_runtime import (
+        AgentExecutionCancelled,
+        agent_execution_scope,
+        check_agent_execution,
+    )
+
     db = SessionLocal()
     next_token = uuid.uuid4().hex
     try:
+        # 先核验持久账号/项目/团队租约，再换发审查 token 或清理未完成问题。
+        binding = _assert_review_execution_authorized(task_id, user_id, previous_token)
         claimed = (
             db.query(ReviewTask)
             .filter(
@@ -397,7 +407,9 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
                 _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
             return
         task = db.query(ReviewTask).filter(ReviewTask.id == task_id).one()
-        load_task_inputs(db, task_id)
+        frozen = load_task_inputs(db, task_id)
+        if any(item.project_id != task.project_id for item in frozen):
+            raise ReviewAuthorizationRevokedError("冻结审查输入与原项目不一致")
         coverage = task.coverage if isinstance(task.coverage, dict) else {}
         file_ledger = coverage.get("files") if isinstance(coverage.get("files"), dict) else {}
         completed_file_ids = {
@@ -429,10 +441,15 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
         task.error_message = None
         task.start_time = task.start_time or datetime.now(timezone.utc)
         _safe_commit(db, task)
+    except (TaskCancelledError, TaskSupersededError):
+        db.rollback()
+        with _RECOVERY_LOCK:
+            _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
+        return
     except Exception as exc:  # noqa: BLE001 - 恢复准备失败必须落库并隔离
         db.rollback()
         failed_task = db.query(ReviewTask).filter(
-            ReviewTask.id == task_id, ReviewTask.status == "running",
+            ReviewTask.id == task_id, ReviewTask.user_id == user_id, ReviewTask.status == "running",
             ReviewTask.execution_token.in_((previous_token, next_token)),
         ).with_for_update().populate_existing().one_or_none()
         if failed_task is not None:
@@ -453,7 +470,15 @@ def _resume_interrupted_task(task_id: int, user_id: int, previous_token: str) ->
         db.close()
 
     try:
-        _run_review_task(task_id, user_id, next_token)
+        def check_handoff() -> None:
+            if _assert_review_execution_authorized(task_id, user_id, next_token) != binding:
+                raise TaskSupersededError("恢复交接期间团队授权已变化，拒绝换领执行")
+
+        with agent_execution_scope(check_handoff):
+            check_agent_execution()
+            _run_review_task(task_id, user_id, next_token)
+    except AgentExecutionCancelled:
+        logger.info("[recovery] 审查任务 #{} 的恢复交接授权已失效，停止派发", task_id)
     finally:
         with _RECOVERY_LOCK:
             _RECOVERING_REVIEW_TASK_IDS.discard(task_id)
@@ -469,14 +494,26 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         task_id: 审查任务 ID(已在请求线程中入库)
         user_id: 发起用户 ID
     """
+    from app.services.agent_scheduler_runtime import (
+        AgentExecutionCancelled,
+        agent_execution_scope,
+        check_agent_execution,
+        has_agent_execution_scope,
+    )
+
+    inherited_scope = copy_context() if has_agent_execution_scope() else None
     _REVIEW_SEMAPHORE.acquire()
     db = SessionLocal()
     task = None
+    scope = ExitStack()
     try:
         task = db.get(ReviewTask, task_id)
         user = db.get(User, user_id)
         if not task or not user:
             logger.error(f"[review] 后台任务 #{task_id} 找不到 task/user,放弃执行")
+            return
+        if isinstance(db, Session) and task.user_id != user_id:
+            logger.error("[review] 后台任务 #{} 的发起账号不匹配，放弃执行", task_id)
             return
         active_token = (
             execution_token
@@ -486,9 +523,19 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         if task.status != "running" or str(getattr(task, "execution_token", "") or "") != active_token:
             logger.info("[review] 后台任务 #{} 的执行租约已失效，跳过旧 Worker", task_id)
             return
+        if inherited_scope is not None:
+            inherited_scope.copy().run(check_agent_execution)
+        binding = _assert_review_execution_authorized(task_id, user_id, active_token)
+
         def authorization_check() -> None:
-            _assert_review_execution_authorized(task_id, user_id, active_token)
-        authorization_check()
+            # 保留原调度租约或恢复交接授权，不能以当前新 token 覆盖旧 worker 的边界。
+            if inherited_scope is not None:
+                inherited_scope.copy().run(check_agent_execution)
+            if _assert_review_execution_authorized(task_id, user_id, active_token) != binding:
+                raise TaskSupersededError("正式审查的持久团队授权已变化")
+
+        # 重启恢复线程没有调用方 Context，必须从持久绑定重建可取消执行边界。
+        scope.enter_context(agent_execution_scope(authorization_check))
         if int(getattr(user, "status", 1) or 0) != 1:
             _check_cancelled(db, task, active_token, lock=True)
             task.status = "failed"
@@ -574,6 +621,8 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
         # 保留共享实例参数兼容既有内部调用；各独立代理会创建隔离客户端。
         collab_agent = DeepSeekAgent(api_config=api_config)
         files = load_task_inputs(db, task.id)
+        if isinstance(db, Session) and any(code_file.project_id != task.project_id for code_file in files):
+            raise ReviewAuthorizationRevokedError("冻结审查输入与原项目不一致")
         coverage = task.coverage if isinstance(getattr(task, "coverage", None), dict) else {}
         file_ledger = coverage.get("files") if isinstance(coverage.get("files"), dict) else {}
         completed_file_ids = {
@@ -599,7 +648,7 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
                 execution_token=active_token,
                 authorization_check=authorization_check,
             )
-    except (TaskCancelledError, TaskSupersededError):
+    except (TaskCancelledError, TaskSupersededError, AgentExecutionCancelled):
         if hasattr(db, "rollback"):
             db.rollback()
     except Exception as e:
@@ -619,24 +668,29 @@ def _run_review_task(task_id: int, user_id: int, execution_token: Optional[str] 
             except (TaskCancelledError, TaskSupersededError):
                 db.rollback()
     finally:
+        scope.close()
         db.close()
         _REVIEW_SEMAPHORE.release()
 
 
 def _assert_review_execution_authorized(
     task_id: int, user_id: int, execution_token: str,
-) -> None:
-    """用独立数据库会话核验后台正式审查的实时账号、项目与 RBAC 权限。"""
+) -> tuple | None:
+    """独立 Engine 会话核验持久授权，并返回本 worker 不可换领的团队绑定。"""
     auth_db = SessionLocal()
     try:
         if not isinstance(auth_db, Session):
             # Pure state-machine unit tests may supply a lightweight fake session;
             # production SessionLocal always returns a real SQLAlchemy Session.
             return
+        bind = auth_db.get_bind()
+        auth_db.close()
+        # 轮询可能在 async HTTP 的辅助线程中；不能复用调用方 Connection 或事务快照。
+        auth_db = Session(bind=getattr(bind, "engine", bind), autoflush=False)
         task = auth_db.get(ReviewTask, task_id, populate_existing=True)
         user = auth_db.get(User, user_id, populate_existing=True)
-        if task is None or user is None:
-            raise ReviewAuthorizationRevokedError("账号或审查任务已不可用，审查执行已阻断")
+        if task is None or user is None or task.user_id != user_id:
+            raise ReviewAuthorizationRevokedError("账号或审查任务归属不一致，审查执行已阻断")
         if task.status != "running" or str(getattr(task, "execution_token", "") or "") != execution_token:
             raise TaskSupersededError("审查任务执行租约已失效")
         if int(getattr(user, "status", 0) or 0) != 1:
@@ -651,6 +705,29 @@ def _assert_review_execution_authorized(
             raise ReviewAuthorizationRevokedError("项目成员资格已撤销，后续审查执行已阻断") from exc
         if not rbac_service.check_permission(auth_db, int(user.id), PermissionCode.REVIEW_START):
             raise ReviewAuthorizationRevokedError("review:start 权限已撤销，后续审查执行已阻断")
+        binding = (task.user_id, task.project_id, task.review_type)
+        if task.agent_team_id is None and task.agent_team_task_id is None:
+            return binding
+        if task.agent_team_id is None or task.agent_team_task_id is None:
+            raise TaskSupersededError("正式审查缺少完整团队绑定")
+
+        from app.models.agent_team import AgentTeamTask
+        from app.services import agent_team_service
+
+        try:
+            candidate = auth_db.get(AgentTeamTask, task.agent_team_task_id)
+            team, team_task, member = agent_team_service.require_active_task_lease(
+                auth_db, team_id=task.agent_team_id, task_id=task.agent_team_task_id,
+                owner_user_id=user_id, lease_token=str(getattr(candidate, "lease_token", "") or ""),
+            )
+            raw = json.loads(team_task.input_json or "{}")
+            if (not isinstance(raw, dict) or member.address != "agent:review_orchestrator"
+                    or raw.get("operation") != "run_review" or raw.get("project_id") != task.project_id
+                    or raw.get("review_type", "full") != task.review_type):
+                raise TaskSupersededError("正式审查与原团队账号/项目/任务绑定不一致")
+            return (*binding, team.id, team_task.id, member.id, team_task.lease_token, team_task.input_json)
+        except (agent_team_service.AgentTeamError, ValueError, TypeError) as exc:
+            raise TaskSupersededError("正式审查团队租约无效，停止执行或恢复") from exc
     finally:
         auth_db.close()
 

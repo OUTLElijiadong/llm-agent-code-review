@@ -16,6 +16,8 @@ import AgentSessionSwitcher from '@/components/ai/AgentSessionSwitcher.vue'
 import AuthenticatedChatImage from '@/components/ai/AuthenticatedChatImage.vue'
 import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
+import AgentTeamLiveGraph from '@/components/ai/AgentTeamLiveGraph.vue'
+import { useLiveAgentTeamPolling } from '@/composables/useLiveAgentTeamPolling'
 import AgentActivityDisclosure from '@/components/ai/AgentActivityDisclosure.vue'
 import AiOrb from '@/components/common/AiOrb.vue'
 import FluidProgress from '@/components/common/FluidProgress.vue'
@@ -207,7 +209,6 @@ let activeResponse: ResponsesStreamHandle | null = null
 let sessionRestoreStarted = false
 let sessionPollFailures = 0
 let sessionPollTimer: number | undefined
-let liveTeamPollTimer: number | undefined
 let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
@@ -356,6 +357,11 @@ const activeThinkingTeamIds = computed(() => (
     .map((team) => team.team_id)
 ))
 const thinkingCityActive = computed(() => showTyping.value || activeThinkingTeamIds.value.length > 0)
+const liveGraphTeams = computed(() => {
+  const active = agentTeams.value.filter(team => !TERMINAL_TEAM_STATUSES.has(team.status))
+  return active.length ? active : agentTeams.value.slice(0, 1)
+})
+const teamForming = computed(() => loading.value && ['create_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(lastActiveToolName.value))
 
 function snapshotTeam(team: AgentTeamDetail | AgentTeamSummary): AgentChatSnapshotTeam {
   return {
@@ -516,7 +522,6 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   activeResponse?.abort()
   activeResponse = null
   agentTeamRefreshGeneration += 1
-  clearLiveTeamPoll()
   sessionPollStopped = true
   invalidateSessionPoll()
   sessionPollStopped = false
@@ -1177,26 +1182,6 @@ function clearSessionPoll(): void {
   }
 }
 
-function clearLiveTeamPoll(): void {
-  if (liveTeamPollTimer !== undefined) {
-    window.clearTimeout(liveTeamPollTimer)
-    liveTeamPollTimer = undefined
-  }
-}
-
-/** SSE 运行期间会话轮询暂停，团队账本需要独立轮询才能在创建时立即展示。 */
-function scheduleLiveTeamPoll(delay = 0): void {
-  clearLiveTeamPoll()
-  if (!loading.value || !sessionId.value) return
-  const requestedSessionId = sessionId.value
-  liveTeamPollTimer = window.setTimeout(async () => {
-    liveTeamPollTimer = undefined
-    if (!loading.value || requestedSessionId !== sessionId.value) return
-    await refreshAgentTeam()
-    if (loading.value && requestedSessionId === sessionId.value) scheduleLiveTeamPoll(1000)
-  }, delay)
-}
-
 function invalidateSessionPoll(): void {
   sessionPollGeneration += 1
   clearSessionPoll()
@@ -1281,6 +1266,12 @@ async function refreshAgentTeam(generation?: number): Promise<void> {
     if (isCurrent()) agentTeamLoading.value = false
   }
 }
+
+useLiveAgentTeamPolling({
+  active: () => loading.value,
+  scope: () => sessionId.value ? `${userStore.profile?.id ?? 'anonymous'}:${sessionId.value}` : '',
+  refresh: refreshAgentTeam,
+})
 
 function scheduleSessionPoll(immediate = false): void {
   clearSessionPoll()
@@ -1726,7 +1717,6 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     }
   }
   invalidateSessionPoll()
-  clearLiveTeamPoll()
   loading.value = true
   showTyping.value = true
   let rawText = ''
@@ -1833,15 +1823,6 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
           applyResponseToolEvent(runToolCalls, event)
           syncTimeline()
         }
-        if (
-          typeof event.tool_name === 'string'
-          && ['create_agent_team', 'get_agent_team', 'retry_agent_team', 'user_execute_capability', 'admin_execute_capability'].includes(event.tool_name)
-          && (event.type === 'response.tool.started' || event.type === 'response.tool.completed')
-        ) {
-          // create_agent_team.started 时可能尚未落库，独立轮询会持续到 SSE 结束；
-          // completed 再立即刷新一次，保证卡片在最终文本输出前出现。
-          scheduleLiveTeamPoll(0)
-        }
         syncBusy()
       } else if (event.type === 'response.output_text.delta') {
         rawText += event.delta
@@ -1880,7 +1861,6 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
         || event.type === 'response.cancelled'
         || event.type === 'error'
       ) {
-        clearLiveTeamPoll()
         showTyping.value = false
         lastActiveToolName.value = ''
         if (cancelUnconfirmedRunId.value && cancelUnconfirmedRunId.value === activeRunId) {
@@ -1963,7 +1943,6 @@ async function runResponse(payload: Record<string, unknown>): Promise<boolean> {
     return false
   } finally {
     if (scopeCurrent()) {
-      clearLiveTeamPoll()
       if (activeResponse === handle) activeResponse = null
       loading.value = false
       showTyping.value = false
@@ -2354,6 +2333,19 @@ function onMessageClick(event: MouseEvent): void {
   followNavigation({ action: 'navigate', route: href, label })
 }
 
+// 星图异步出现或长高时，仅跟随原本贴底的阅读位置。
+watch([liveGraphTeams, teamForming], () => {
+  const area = chatBody.value
+  if (!area || area.scrollHeight - area.scrollTop - area.clientHeight > 80) return
+  const oldTop = area.scrollTop
+  const scopeCurrent = chatScope.capture()
+  void nextTick(() => {
+    if (scopeCurrent() && chatBody.value === area && area.scrollTop === oldTop) {
+      area.scrollTop = area.scrollHeight
+    }
+  })
+})
+
 function scrollToBottom(): void {
   if (chatBody.value) {
     chatBody.value.scrollTop = chatBody.value.scrollHeight
@@ -2655,7 +2647,6 @@ watch([() => userStore.profile?.id, () => userStore.token], () => {
   cancelPromptVisible.value = false
   lastActiveToolName.value = ''
   activityStore.clear()
-  clearLiveTeamPoll()
   sessionRestoreStarted = false
   cachedAgentTeams.value = []
   teamWindowVisible.value = false
@@ -2678,7 +2669,6 @@ onBeforeUnmount(() => {
   persistSnapshot()
   sessionPollStopped = true
   invalidateSessionPoll()
-  clearLiveTeamPoll()
   // 组件卸载（退出登录/离开布局）只断开本地订阅。服务端任务由持久检查点继续执行；
   // 只有用户点击“停止”才走 cancelResponse() 并取消服务端运行。
   activeResponse?.abort()
@@ -3181,6 +3171,8 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               :error="index === 0 ? agentTeamError : ''"
               @open-detail="openTeamWindow"
             />
+
+            <AgentTeamLiveGraph :teams="liveGraphTeams" :forming="teamForming" :error="agentTeamError" @open-detail="openTeamWindow" />
 
             <div v-if="thinkingCityActive" class="msg-row assistant">
               <div class="msg-avatar">
