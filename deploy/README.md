@@ -255,3 +255,10 @@ git -C .. rev-parse HEAD
 生产发布与回滚应始终按 [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) 记录精确 SHA、备份、恢复验证、迁移 revision、业务冒烟、观察窗口和最终结论。
 
 小菱主动研判可单独启用：只接收经 root 验证且脱敏的候选编号与统计，不向模型发送真实 IP、账号或原始日志。可信 SSH 失败至少 10 次，或 Web 至少 10 次且 3 种敏感目标时，小菱可提前处置单个来源，最多 120 秒。root 再读日志验证有效期、保护规则和重放边界，幻觉候选编号或失效证据拒绝执行。每批最多 3 个、每天最多 24 次模型研判；无新候选不调用模型，模型失败仅观察。一般聊天工具不包含这些执行动作。
+
+
+## 数据库威胁日志有界采样
+
+宿主 `prism-ops-executor.service` 读取 `mysql.general_log` 时，SQL 内将 argument 裁剪至160字节并HEX编码传输，默认4000行、最多5000行；多读一行只判断行截断。返回 `sql_truncated_rows`、`row_limit_reached`、`source_truncated`，采样不完整不能表示未发现威胁。SQL使用5000毫秒只读SELECT预算，容器内GNU timeout在10秒后TERM、2秒后KILL，宿主等待20秒。宿主超时不能证明容器内进程已终止；失败或记录损坏不发布部分统计。
+
+代码发布后须核对宿主脚本SHA-256并重启现有 `prism-ops-executor.service`，再验证is-active和MainPID；仅重建应用容器不会加载宿主执行器更新。此预算约束查询持续时间和返回体积，不能单独限制MySQL扫描/排序的总内存，也不能据此认定既有OOM根因。

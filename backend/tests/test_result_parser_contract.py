@@ -225,3 +225,76 @@ def test_bare_severity_repair_rejects_unknown_values_truncation_and_ambiguity(ra
 def test_bare_severity_and_trailing_commas_repair_preserves_escaped_field_name() -> None:
     raw = '```json\n{"issues":[{"title":"脱敏发现","\\u0073everity":低,},],}\n```'
     assert load_json_object(raw) == {"issues": [{"title": "脱敏发现", "severity": "低"}]}
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("issue_type", value) for value in (
+        "代码规范", "潜在Bug", "安全漏洞", "性能问题", "异常处理",
+        "命名规范", "可维护性", "注释完整性", "其他",
+    )
+] + [("severity", value) for value in ("严重", "高", "中", "低")])
+@pytest.mark.parametrize("quotes", ["neither", "opening", "closing"])
+def test_registered_enum_missing_quotes_preserves_complete_payload(field, value, quotes) -> None:
+    """生产日志20696/20706及20209：枚举缺一侧或两侧引号，不改正文。"""
+    evidence = 'literal "issue_type":代码规范, "severity":"中, and escaped \\" quote'
+    expected = {"summary": "脱敏原文", "issues": [_valid_issue(evidence=evidence, **{field: value})]}
+    encoded = json.dumps(expected, ensure_ascii=False, separators=(",", ":"))
+    broken = value
+    if quotes == "opening":
+        broken = '"' + broken
+    elif quotes == "closing":
+        broken += '"'
+    raw = encoded.replace(json.dumps(field) + ":" + json.dumps(value, ensure_ascii=False),
+                          json.dumps(field) + ":" + broken, 1)
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(raw)
+    assert load_json_object(raw) == expected
+    result = parse(raw)
+    assert result.input_issue_count == 1
+    assert result.invalid_issue_count == 0
+    assert result.issues[0].evidence == evidence
+
+
+def test_real_missing_issue_type_quotes_column_4068_preserves_both_findings() -> None:
+    expected = {"summary": "", "score": 61, "issues": [
+        _valid_issue(), _valid_issue(issue_type="代码规范", title="脱敏第二项"),
+    ]}
+    def encode():
+        return json.dumps(expected, ensure_ascii=False, separators=(",", ":")).replace(
+            '"issue_type":"代码规范"', '"issue_type":代码规范', 1,
+        )
+    offset = encode().index('"issue_type":代码规范') + len('"issue_type":')
+    expected["summary"] = "审" * (4067 - offset)
+    raw = encode()
+    with pytest.raises(json.JSONDecodeError) as malformed:
+        json.loads(raw)
+    assert (malformed.value.pos, malformed.value.colno) == (4067, 4068)
+    assert load_json_object(raw) == expected
+    assert len(parse(raw).issues) == 2
+
+
+@pytest.mark.parametrize("raw", [
+    '{"issues":[{"title":"脱敏发现","issue_type":未知类型}]}',
+    '{"issues":[{"title":"脱敏发现","issue_type":代码规范扩展}]}',
+    '{"issues":[{"title":"脱敏发现","issue_type":代码规范,"description":"截断',
+    '{"issues":[{"title":"脱敏发现","severity":"中',
+    '{"issues":[{"title":"脱敏发现","issue_type":代码规范,"issue_type":"安全漏洞"}]}',
+    '{"issues":[{"title":"脱敏发现","other_field":代码规范}]}',
+    '{"issues":[{"title":"脱敏发现","severity":"中,"description":"截断',
+])
+def test_enum_quote_repair_rejects_unknown_missing_values_and_ambiguous_output(raw) -> None:
+    with pytest.raises(ResultParseError):
+        load_json_object(raw)
+
+
+def test_enum_quote_repair_keeps_valid_string_ending_in_comma_and_repairs_trailing_comma() -> None:
+    expected = {"issues": [_valid_issue(severity="中,", evidence='"issue_type":代码规范,]')]}
+    raw = json.dumps(expected, ensure_ascii=False)[:-2] + ",]}"
+    assert load_json_object(raw) == expected
+
+
+def test_enum_quote_repair_and_trailing_commas_can_coexist() -> None:
+    raw = '{"issues":[{"title":"脱敏发现","issue_type":代码规范,"severity":"中,},],}'
+    assert load_json_object(raw) == {"issues": [{
+        "title": "脱敏发现", "issue_type": "代码规范", "severity": "中",
+    }]}

@@ -837,6 +837,12 @@ def _backup_audit() -> dict[str, Any]:
 
 
 DB_SQL_MAX_LEN = 160
+# general_log.argument 是 BLOB；在 SQL 内按字节裁剪后再编码传输。
+DB_SQL_MAX_BYTES = 160
+DB_QUERY_TIMEOUT_MS = 5000
+DB_CONTAINER_TIMEOUT_SECONDS = 10
+DB_CONTAINER_KILL_AFTER_SECONDS = 2
+DB_HOST_TIMEOUT_SECONDS = 20
 _DB_DESTRUCTIVE_RE = re.compile(
     r"\b(drop\s+table|drop\s+database|truncate\s+table|delete\s+from|"
     r"alter\s+table|rename\s+table|grant\b|revoke\b|"
@@ -844,11 +850,11 @@ _DB_DESTRUCTIVE_RE = re.compile(
 )
 _DB_DUMP_RE = re.compile(r"\b(select\s+.+\s+into\s+(out|dump)file|load_file\s*\()\b")
 _DB_ERROR_RE = re.compile(r"\b(access\s+denied|error\s+\d{3,5}|you have an error)\b")
-_DB_SQL_REDACT_RE = re.compile(r"('[^']*'|\"[^\"]*\"|\b\d{4,}\b)")
+_DB_SQL_REDACT_RE = re.compile(r"('[^']*(?:'|$)|\"[^\"]*(?:\"|$)|\b\d{4,}\b)")
 
 
 def _normalize_db_sql(text: Any) -> str:
-    return re.sub(r"\s+", " ", str(text or "")).strip()[:DB_SQL_MAX_LEN]
+    return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
 def _redact_db_sql(text: str) -> str:
@@ -857,16 +863,21 @@ def _redact_db_sql(text: str) -> str:
 
 def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
     categories: dict[str, list[dict[str, Any]]] = {"destructive": [], "dump_exfil": [], "error": []}
+    sql_truncated_rows = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
-        raw = _normalize_db_sql(row.get("argument"))
+        normalized = _normalize_db_sql(row.get("argument"))
+        sql_truncated = bool(row.get("argument_truncated")) or len(normalized) > DB_SQL_MAX_LEN
+        sql_truncated_rows += int(sql_truncated)
+        raw = normalized[:DB_SQL_MAX_LEN]
         if not raw:
             continue
         sample = {
-            "user_host": str(row.get("user_host") or "")[:128],
-            "sql": _redact_db_sql(raw),
+            "user_host": _redact_text(str(row.get("user_host") or "")[:128]),
+            "sql": _redact_text(_redact_db_sql(raw)),
             "event_time": str(row.get("event_time") or ""),
+            "sql_truncated": sql_truncated,
         }
         lowered = raw.lower()
         if _DB_DUMP_RE.search(lowered):
@@ -894,6 +905,7 @@ def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "dump_exfil_by_user": aggregate(categories["dump_exfil"], "user_host"),
         "error_by_user": aggregate(categories["error"], "user_host"),
         "samples": {name: values[-20:] for name, values in categories.items()},
+        "sql_truncated_rows": sql_truncated_rows,
     }
 
 
@@ -901,45 +913,85 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     since_hours = _since_hours_arg(params)
     limit = _event_limit_arg(params, default=4000)
     sql = (
-        "SELECT user_host, argument, event_time FROM mysql.general_log "
+        f"SELECT /*+ MAX_EXECUTION_TIME({DB_QUERY_TIMEOUT_MS}) */ "
+        f"HEX(LEFT(user_host, 128)), HEX(LEFT(argument, {DB_SQL_MAX_BYTES})), "
+        f"event_time, OCTET_LENGTH(argument) > {DB_SQL_MAX_BYTES} FROM mysql.general_log "
         f"WHERE event_time >= DATE_SUB(NOW(), INTERVAL {since_hours} HOUR) "
-        f"AND command_type IN ('Query','Execute') ORDER BY event_time DESC LIMIT {limit}"
+        # 多取一行仅用于确认是否截断，不能把该行计入样本统计。
+        f"AND command_type IN ('Query','Execute') ORDER BY event_time DESC LIMIT {limit + 1}"
     )
-    result = run([
-        "docker", "exec", "cr_mysql", "sh", "-ec",
-        (
-            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=TCP -h 127.0.0.1 '
-            '-uroot --batch --skip-column-names --raw -e "$1"'
-        ),
-        "sh", sql,
-    ], timeout=90, allow_failure=True)
+    try:
+        result = run([
+            "docker", "exec", "cr_mysql", "sh", "-ec",
+            (
+                # Docker 客户端取消不代表容器内 exec 已停止。独立看门狗
+                # 先 TERM，再 KILL 整个命令进程组；缺失 timeout 时失败关闭。
+                'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec timeout --signal=TERM '
+                f'--kill-after={DB_CONTAINER_KILL_AFTER_SECONDS}s {DB_CONTAINER_TIMEOUT_SECONDS}s '
+                'mysql --protocol=TCP -h 127.0.0.1 -uroot --connect-timeout=3 '
+                '--skip-reconnect --quick --batch --skip-column-names --raw -e "$1"'
+            ),
+            "sh", sql,
+        ], timeout=DB_HOST_TIMEOUT_SECONDS, allow_failure=True, stdout_tail_limit=None)
+    except subprocess.TimeoutExpired:
+        # 不泄漏部分输出，也不把宿主超时误报为已经确认容器/服务端终止。
+        return {
+            "ok": False,
+            "since_hours": since_hours,
+            "reason": "Docker 客户端超时；容器内采样由独立 TERM/KILL 看门狗约束，终止状态未确认",
+            "source_exit_code": None,
+            "source_error": "宿主等待预算耗尽",
+            "source_timed_out": True,
+            "termination_confirmed": False,
+        }
     if result["exit_code"] != 0:
         return {
             "ok": False,
             "since_hours": since_hours,
-            "reason": "general_log 未开启或暂时不可读",
+            "reason": "general_log 有界采样失败或暂时不可读",
             "source_exit_code": result["exit_code"],
             "source_error": result["stderr"][:400],
+            # 137 也可能来自其他 SIGKILL，不能单凭退出码断言超时或 OOM。
+            "source_timed_out": result["exit_code"] == 124 or bool(
+                re.search(r"\bERROR 3024\b", result["stderr"])
+            ),
         }
     rows: list[dict[str, Any]] = []
     for line in result["stdout"].splitlines():
         parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        rows.append({
-            "user_host": parts[0],
-            "argument": "\t".join(parts[1:-1]),
-            "event_time": parts[-1],
-        })
+        try:
+            if len(parts) != 4 or parts[3] not in {"0", "1"} or len(rows) > limit:
+                raise ValueError("invalid sample framing")
+            # HEX 防止原始 SQL 中的换行/制表符破坏记录边界，也避免在解码前
+            # 被通用 stdout 脱敏误改。UTF-8 被字节上限切断时用替代字符显示。
+            rows.append({
+                "user_host": bytes.fromhex(parts[0]).decode("utf-8", errors="replace"),
+                "argument": bytes.fromhex(parts[1]).decode("utf-8", errors="replace"),
+                "event_time": parts[2],
+                "argument_truncated": parts[3] == "1",
+            })
+        except ValueError:
+            return {
+                "ok": False,
+                "since_hours": since_hours,
+                "reason": "general_log 采样输出格式损坏，不能确认威胁统计",
+                "source_exit_code": result["exit_code"],
+                "source_error": "采样记录格式不合法",
+                "source_truncated": True,
+            }
+    row_limit_reached = len(rows) > limit
+    rows = rows[:limit]
     parsed = parse_db_general_log(rows)
-    parsed.update(
-        {
-            "ok": True,
-            "since_hours": since_hours,
-            "sampled_rows": len(rows),
-            "stdout_capped": len(result["stdout"]) >= 100_000,
-        }
-    )
+    parsed.update({
+        "ok": True,
+        "since_hours": since_hours,
+        "sampled_rows": len(rows),
+        "stdout_capped": False,  # SQL 已限制行数和字段宽度，保留完整有界输出。
+        "row_limit": limit,
+        "row_limit_reached": row_limit_reached,
+        "sql_max_bytes": DB_SQL_MAX_BYTES,
+        "source_truncated": row_limit_reached or parsed["sql_truncated_rows"] > 0,
+    })
     return parsed
 
 

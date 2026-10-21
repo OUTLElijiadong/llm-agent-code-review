@@ -203,3 +203,87 @@ def test_review_length_retry_compresses_extra_context_for_new_output_budget(monk
     assert [call["max_tokens"] for call in main] == [8_192, 16_384]
     assert any(call.get("agent_label") == "review_context_compaction" for call in calls)
     assert "tail = 1" in main[-1]["user_prompt"]
+
+
+def test_json_retry_exhaustion_recovers_disjoint_source_ranges_without_fabricating_results(monkeypatch):
+    from app.ai.deepseek_agent import DeepSeekJsonOutputError
+
+    calls = []
+
+    def fake_call_raw(self, system_prompt, user_prompt, agent_label='', json_mode=True,
+                      temperature=None, max_tokens=None):
+        calls.append({'prompt': user_prompt, 'budget': max_tokens})
+        if len(calls) == 1:
+            error = DeepSeekJsonOutputError('JSON 重试已耗尽，字符串未闭合', finish_reason='stop')
+            error.meta = {
+                'prompt_tokens': 3, 'completion_tokens': 4, 'total_tokens': 7,
+                'duration_ms': 2, '_http_attempts': 3, '_usage_log_ids': [71, 72, 73],
+            }
+            raise error
+        title = '前半范围' if 'first()' in user_prompt else '后半范围'
+        return json.dumps({'issues': [{
+            'line_number': 1, 'issue_type': '潜在Bug', 'severity': '高',
+            'title': title, 'description': '范围内缺少异常处理。', 'evidence': title,
+        }]}), {'prompt_tokens': 11, 'completion_tokens': 17, 'total_tokens': 28,
+               'duration_ms': 5, '_http_attempts': 1, '_usage_log_ids': [len(calls) + 72]}
+
+    monkeypatch.setattr(review_service.DeepSeekAgent, 'call_raw', fake_call_raw)
+    profile = GENERAL_AGENT.__class__(**{**GENERAL_AGENT.__dict__, 'max_tokens': 4096})
+    raw, meta = review_service._call_single_agent(
+        profile, 'first()\nsecond()\nthird()\nfourth()\n', 'python', 'a.py', [], 20,
+        context_section='完整文件符号索引',
+    )
+    result = json.loads(raw)
+    assert [issue['line_number'] for issue in result['issues']] == [1, 3]
+    assert [issue['evidence'] for issue in result['issues']] == ['前半范围', '后半范围']
+    assert [call['budget'] for call in calls] == [4096, 4096, 4096]
+    assert 'third()' not in calls[1]['prompt'] and 'first()' not in calls[2]['prompt']
+    assert all('完整文件符号索引' in call['prompt'] for call in calls)
+    assert meta['_usage_log_ids'] == [74, 75]
+    assert [attempt['_usage_log_ids'] for attempt in meta['_failed_attempts']] == [[71, 72, 73]]
+    assert meta['_http_attempts'] == 5
+    assert (meta['prompt_tokens'], meta['completion_tokens'], meta['total_tokens']) == (25, 38, 63)
+
+
+def test_json_retry_exhaustion_on_unsplittable_source_keeps_failure_and_usage(monkeypatch):
+    from app.ai.deepseek_agent import DeepSeekJsonOutputError
+
+    calls = []
+
+    def fake_call_raw(*args, **kwargs):
+        calls.append(kwargs)
+        error = DeepSeekJsonOutputError('正文未闭合', finish_reason='stop')
+        error.meta = {'_usage_log_ids': [81, 82, 83], '_http_attempts': 3}
+        raise error
+
+    monkeypatch.setattr(review_service.DeepSeekAgent, 'call_raw', fake_call_raw)
+    with pytest.raises(DeepSeekJsonOutputError, match='结构化输出.*覆盖不完整') as failure:
+        review_service._call_single_agent(GENERAL_AGENT, 'one()\n', 'python', 'a.py', [], 0)
+    assert len(calls) == 1
+    assert failure.value.finish_reason == 'stop'
+    assert failure.value.attempt_metas == [{'_usage_log_ids': [81, 82, 83], '_http_attempts': 3}]
+
+
+def test_json_recovery_call_limit_preserves_last_structural_error(monkeypatch):
+    import re
+    from app.ai.deepseek_agent import DeepSeekJsonOutputError
+
+    calls = []
+    failures = []
+
+    def fake_call_raw(self, system_prompt, user_prompt, **kwargs):
+        calls.append(user_prompt)
+        if len(set(re.findall(r"line[0-9]+\(\)", user_prompt))) > 1:
+            error = DeepSeekJsonOutputError("unclosed JSON", finish_reason="stop")
+            error.meta = {"_usage_log_ids": [len(calls)], "_http_attempts": 1}
+            failures.append(error.meta)
+            raise error
+        return '{"issues": []}', {"_usage_log_ids": [len(calls)], "_http_attempts": 1}
+
+    monkeypatch.setattr(review_service.DeepSeekAgent, "call_raw", fake_call_raw)
+    source = "".join(f"line{index}()\n" for index in range(64))
+    with pytest.raises(DeepSeekJsonOutputError, match="安全调用上限.*覆盖不完整") as failure:
+        review_service._call_single_agent(GENERAL_AGENT, source, "python", "a.py", [], 0)
+    assert len(calls) == 32
+    assert failure.value.finish_reason == "stop"
+    assert failure.value.attempt_metas == failures

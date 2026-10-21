@@ -60,11 +60,15 @@ _SEVERITY_ALIASES = {
 
 # 整段被围栏包裹：贪婪匹配到最后一个 ```，正文里引用的围栏不会提前截断
 _OUTER_FENCE_RE = re.compile(r"```(?:json)?[ \t]*\n?([\s\S]*)```\s*$", re.IGNORECASE)
-_BARE_SEVERITY_VALUE_RE = re.compile(
-    r"(?P<separator>[ \t\r\n]*:[ \t\r\n]*)(?P<value>"
-    + "|".join(sorted(ALLOWED_SEVERITY))
-    + r")(?=[ \t\r\n]*[,}])"
-)
+# 只修复已登记的枚举，不推测自由文本、未知枚举或缺失的结果内容。
+_ENUM_VALUE_RES = {
+    name: re.compile(
+        r'(?P<separator>[ \t\r\n]*:[ \t\r\n]*)"?(?P<value>'
+        + "|".join(re.escape(value) for value in sorted(values, key=len, reverse=True))
+        + r')"?(?=[ \t\r\n]*[,}])'
+    )
+    for name, values in (("severity", ALLOWED_SEVERITY), ("issue_type", ALLOWED_TYPES))
+}
 
 
 def normalize_severity(value: object, default: str = "中") -> str:
@@ -214,8 +218,8 @@ def _remove_trailing_commas(text: str) -> str:
     return "".join(result)
 
 
-def _quote_bare_severity_values(text: str) -> str:
-    """只给字符串外 severity 字段的四级已登记裸枚举补引号。"""
+def _quote_registered_enum_values(text: str) -> str:
+    """为字符串外的已登记枚举补缺失引号，保留合法字符串和证据原文。"""
     result: list[str] = []
     index = 0
     previous = ""
@@ -228,22 +232,32 @@ def _quote_bare_severity_values(text: str) -> str:
             index += 1
             continue
         try:
-            # 跳过完整字符串，保留转义及证据原文，不匹配字符串内部的伪字段。
+            # 完整跳过字段名和正文，避免把证据中的伪字段当作结构。
             value, end = json.decoder.scanstring(text, index + 1)
         except json.JSONDecodeError:
-            # 不补全截断字符串；后续严格解码仍会拒绝不完整的对象。
             result.append(text[index:])
             break
         result.append(text[index:end])
-        match = (
-            _BARE_SEVERITY_VALUE_RE.match(text, end)
-            if value == "severity" and previous in ("{", ",") else None
-        )
+        pattern = _ENUM_VALUE_RES.get(value) if previous in ("{", ",") else None
+        match = pattern.match(text, end) if pattern else None
         if match:
-            result.extend((
-                match.group("separator"), json.dumps(match.group("value"), ensure_ascii=False),
-            ))
-            end = match.end()
+            value_start = end + len(match.group("separator"))
+            complete_string = False
+            if text[value_start] == '"':
+                try:
+                    _, string_end = json.decoder.scanstring(text, value_start + 1)
+                    following = string_end
+                    while following < len(text) and text[following] in " \t\r\n":
+                        following += 1
+                    # 例如合法值 "中," 必须原样保留，不能把逗号当结构后补引号。
+                    complete_string = following < len(text) and text[following] in ",}"
+                except json.JSONDecodeError:
+                    pass
+            if not complete_string:
+                result.extend((
+                    match.group("separator"), json.dumps(match.group("value"), ensure_ascii=False),
+                ))
+                end = match.end()
         previous = '"'
         index = end
     return "".join(result)
@@ -281,7 +295,7 @@ def load_json_object(text: str) -> dict:
         try:
             data, end = decoder.raw_decode(cleaned)
         except json.JSONDecodeError:
-            repaired = _quote_bare_severity_values(_remove_trailing_commas(cleaned))
+            repaired = _remove_trailing_commas(_quote_registered_enum_values(cleaned))
             if repaired == cleaned:
                 raise
             data, end = decoder.raw_decode(repaired)

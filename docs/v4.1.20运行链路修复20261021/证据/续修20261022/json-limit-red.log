@@ -1,0 +1,19 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_json_recovery_call_limit_preserves_last_structural_error _________
+tests/unit/services/test_review_truncation_retry.py:286: in test_json_recovery_call_limit_preserves_last_structural_error
+    review_service._call_single_agent(GENERAL_AGENT, source, "python", "a.py", [], 0)
+app/services/review_service.py:2373: in _call_single_agent
+    raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整")
+app/services/review_service.py:2323: in raise_incomplete
+    raise error
+E   app.ai.deepseek_agent.DeepSeekOutputTruncatedError: 代码审查分片恢复超过安全调用上限，覆盖不完整
+=============================== warnings summary ===============================
+../../../../../../../../../tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /tmp/prism-v4120-continuation-20261022-test-venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/services/test_review_truncation_retry.py::test_json_recovery_call_limit_preserves_last_structural_error
+1 failed, 10 deselected, 1 warning in 0.88s

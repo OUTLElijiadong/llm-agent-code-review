@@ -12,8 +12,10 @@ import pytest
 
 from app.ai.deepseek_agent import (
     DeepSeekAgent,
+    DeepSeekJsonOutputError,
     DeepSeekOutputTruncatedError,
     DeepSeekResponseError,
+    _parse_completion_response,
 )
 from app.ai.exceptions import AiServiceError
 
@@ -380,10 +382,21 @@ def test_json_mode_retries_invalid_content_and_accounts_every_attempt(monkeypatc
 
 @pytest.mark.parametrize("method", ["raw", "chat"])
 @pytest.mark.parametrize("max_retries", [0, 2])
-def test_json_mode_exhaustion_remains_failed_with_usage(monkeypatch, method, max_retries):
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"issues": [...]}',
+        '{"issues":[{"title":"未闭合截断"}',
+        '{"issues":[{"title":"重复字段","title":"歧义值"}]}',
+    ],
+    ids=["invalid-json", "unrecoverable-truncation", "duplicate-field"],
+)
+def test_json_mode_exhaustion_remains_failed_with_usage(
+    monkeypatch, method, max_retries, content,
+):
     agent = _agent(max_retries=max_retries)
     calls = _install_responses(monkeypatch, agent, [
-        _Response(200, _completion(content='{"issues":[...]}'))
+        _Response(200, _completion(content=content))
         for _ in range(max_retries + 1)
     ])
     attempts = []
@@ -401,6 +414,10 @@ def test_json_mode_exhaustion_remains_failed_with_usage(monkeypatch, method, max
     assert len(calls) == max_retries + 1
     assert [item["status"] for item in attempts] == ["retry"] * max_retries + ["failed"]
     assert sum(item["usage"]["total_tokens"] for item in attempts) == 5 * len(calls)
+    if method == "raw":
+        assert isinstance(error.value, DeepSeekJsonOutputError)
+    else:
+        assert isinstance(error.value.__cause__, DeepSeekJsonOutputError)
     if method == "raw":
         assert error.value.meta["_http_attempts"] == len(calls)
         assert error.value.meta["_usage_log_ids"] == list(range(1, len(calls) + 1))
@@ -476,3 +493,60 @@ def test_json_mode_repairs_bare_severity_without_retry_or_losing_evidence(monkey
         assert attempts[0]["response"] == raw
     else:
         assert json.loads(attempts[0]["response"]) == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed_value"),
+    [
+        ("issue_type", "安全漏洞"),
+        ("issue_type", '安全漏洞"'),
+        ("issue_type", '"安全漏洞'),
+        ("severity", '高"'),
+        ("severity", '"高'),
+    ],
+    ids=[
+        "bare-issue-type",
+        "issue-type-missing-opening-quote",
+        "issue-type-missing-closing-quote",
+        "severity-missing-opening-quote",
+        "severity-missing-closing-quote",
+    ],
+)
+def test_parse_completion_response_repairs_registered_enums_without_losing_findings(
+    field, malformed_value,
+):
+    expected = {
+        "issues": [
+            {
+                "issue_type": "安全漏洞",
+                "severity": "高",
+                "title": "脱敏发现一",
+                "evidence": 'literal "severity":低, escaped \\" text',
+            },
+            {
+                "issue_type": "代码规范",
+                "severity": "低",
+                "title": "脱敏发现二",
+                "evidence": 'source contains "issue_type":代码规范',
+            },
+        ],
+    }
+    raw = json.dumps(expected, ensure_ascii=False)
+    original_value = json.dumps(expected["issues"][0][field], ensure_ascii=False)
+    raw = raw.replace(
+        f'"{field}": {original_value}', f'"{field}":{malformed_value}', 1,
+    )
+
+    content, usage, finish_reason = _parse_completion_response(
+        _Response(200, _completion(content=raw)),
+    )
+
+    parsed = json.loads(content)
+    assert content == json.dumps(expected, ensure_ascii=False)
+    assert parsed == expected
+    assert len(parsed["issues"]) == len(expected["issues"])
+    assert [issue["evidence"] for issue in parsed["issues"]] == [
+        issue["evidence"] for issue in expected["issues"]
+    ]
+    assert usage["total_tokens"] == 5
+    assert finish_reason == "stop"

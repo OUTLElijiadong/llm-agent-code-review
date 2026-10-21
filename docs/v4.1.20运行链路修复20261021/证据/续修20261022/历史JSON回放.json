@@ -1,0 +1,496 @@
+{
+  "record_count": 70,
+  "nonempty_responses": 45,
+  "empty_responses": 25,
+  "baseline_passed": 32,
+  "current_passed": 36,
+  "newly_recovered": [
+    20209,
+    20236,
+    20696,
+    20706
+  ],
+  "still_rejected": [
+    20216,
+    20226,
+    20229,
+    20244,
+    20246,
+    20248,
+    20252,
+    20255,
+    20258
+  ],
+  "baseline_results_unchanged": true,
+  "rows": [
+    {
+      "id": 20206,
+      "task_id": 226,
+      "response_sha256": "729e7189cb6e325f7de3dd293092074d37199adddb64f937debf3c117af36e37",
+      "response_length": 8409,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 10,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20208,
+      "task_id": 226,
+      "response_sha256": "f56fae2136ff584eb3b9a6198e1074f20e9c10ebea50595ffe4eb2d9f9573203",
+      "response_length": 10098,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 9,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20209,
+      "task_id": 226,
+      "response_sha256": "54333c2c1aa38e155f672d819d8a8ed2b6b2cae1f88e44d3a7dbfad34e63910b",
+      "response_length": 11417,
+      "baseline": "rejected",
+      "replay": "passed",
+      "issues": 9,
+      "invalid_issues": 0,
+      "baseline_identical": null
+    },
+    {
+      "id": 20211,
+      "task_id": 226,
+      "response_sha256": "cb5e6fdea62e8663b5a5045c00c74c787c5050d74b9a0b10442bf54d4eb4a0b4",
+      "response_length": 4838,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20216,
+      "task_id": 226,
+      "response_sha256": "1833bd6b7ab6884e95c14b27f96fc36045b698c116cd665ca42986bcd029c8af",
+      "response_length": 8524,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20226,
+      "task_id": 226,
+      "response_sha256": "784a49925f073a66f8684c8302eea640111813e69ddccd433032f239fa134fb2",
+      "response_length": 5480,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20227,
+      "task_id": 226,
+      "response_sha256": "3f7b00f514504fa0ef7933a6fb5693348ae20bc4ceb497c108565bfc839757b8",
+      "response_length": 6281,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20229,
+      "task_id": 226,
+      "response_sha256": "e7217831a7004ac0c5684746e398fa26bd79b577575495fd95de4508242fcf28",
+      "response_length": 5398,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20230,
+      "task_id": 226,
+      "response_sha256": "f035460cce857abda30b731ce5045359464f09faf8a09efe4565e0a71ee49306",
+      "response_length": 7017,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 6,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20232,
+      "task_id": 226,
+      "response_sha256": "73c5b0bd09633a5890f46473113a471c8afc3cbc84d6e1085bdc09a901208e3d",
+      "response_length": 7108,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20233,
+      "task_id": 226,
+      "response_sha256": "cd284b49572de0f48cf0cc7920e4ebd78f48a4f91cdfd0ad190cf369929253ca",
+      "response_length": 5140,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20234,
+      "task_id": 226,
+      "response_sha256": "db732b893f508752165e741d2409f6e2710378b9c382a586fe1afbe909aeefb9",
+      "response_length": 6559,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20236,
+      "task_id": 226,
+      "response_sha256": "5832026892f96b87a7deb1782670a2d6b9b92954959229efb15aba09e69370c2",
+      "response_length": 7737,
+      "baseline": "rejected",
+      "replay": "passed",
+      "issues": 7,
+      "invalid_issues": 0,
+      "baseline_identical": null
+    },
+    {
+      "id": 20237,
+      "task_id": 226,
+      "response_sha256": "4cc13b08bfa87759266d33da8ea0dca2c2901fed8aeba2fbc62213fa26202e92",
+      "response_length": 4858,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20238,
+      "task_id": 226,
+      "response_sha256": "f1a5b1798c6921f86548adabfdbef3dc29443d5fa0a74889d0b1b0d26a6f51d7",
+      "response_length": 11603,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 12,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20240,
+      "task_id": 226,
+      "response_sha256": "11920ec13c72e31197452cd23018a62181eaf12dce00d12729d40e5c94324251",
+      "response_length": 9086,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 8,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20242,
+      "task_id": 226,
+      "response_sha256": "bdc82ee6b6473e84fdfb6fffda2f7d4522260dd44c2e29a6e0e5ca9b52a8e626",
+      "response_length": 11607,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 10,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20244,
+      "task_id": 226,
+      "response_sha256": "18921e1b7602ff25d185152cde475b487ee09f154aabebefc17583a0d4054320",
+      "response_length": 9388,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20246,
+      "task_id": 226,
+      "response_sha256": "548446bc1a1ee56d7c22407fe2ef90edb2f57497649ac0d2767d9dae07b0384a",
+      "response_length": 7901,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20248,
+      "task_id": 226,
+      "response_sha256": "50ccd234f13bd2de76af695cabb20fda3e959870f618f71aa2a9e05940cfcc56",
+      "response_length": 2929,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20249,
+      "task_id": 226,
+      "response_sha256": "b3d5a6dd4ee637eb04b9ac60a60e06d02e949e8fed53107a9a39906d103fb5ec",
+      "response_length": 5657,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20252,
+      "task_id": 226,
+      "response_sha256": "bfe9002e379c32097851d2f584a90f9e581272a8543c730c3cb9aa6ca5c00430",
+      "response_length": 4074,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20254,
+      "task_id": 226,
+      "response_sha256": "fc443acf6d4503cfa7b919b6708e301a92f7021ba9d0624de17285a2456fe318",
+      "response_length": 5560,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20255,
+      "task_id": 226,
+      "response_sha256": "bbf8bfe15f1930f6c252be6c8dc78d325f57f66e7627648a81f63ef7788dedbf",
+      "response_length": 1581,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20257,
+      "task_id": 226,
+      "response_sha256": "dac733df5fe75a5672c15e9dc86773ae9d8a42a516e269b18ba159e2757f405a",
+      "response_length": 5483,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20258,
+      "task_id": 226,
+      "response_sha256": "6c09c8b0437b9cf4291082a655eb076d0b08ffb713fe550e9effbb599e524b8a",
+      "response_length": 650,
+      "baseline": "rejected",
+      "replay": "rejected"
+    },
+    {
+      "id": 20260,
+      "task_id": 226,
+      "response_sha256": "614d409db3ffbdab270226cb80834387f573d3109ccc2a2bdb9dda8e1664d39a",
+      "response_length": 5853,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20261,
+      "task_id": 226,
+      "response_sha256": "27ba0ee1091551ce296e6becb5fc1f4b32a674bfd7285670f24cd4cc5987391a",
+      "response_length": 5850,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20264,
+      "task_id": 226,
+      "response_sha256": "45225d426fa5d6007824e5d061c7b4aa4a29b3bd62d085ffcd909d187c486088",
+      "response_length": 8217,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 6,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20265,
+      "task_id": 226,
+      "response_sha256": "faef468d09c75c11da38a9dd127f8e61a3e1f012f4d60af16fd619ddda357023",
+      "response_length": 5030,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 4,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20266,
+      "task_id": 226,
+      "response_sha256": "dcb82e40c6d37bf9e462ea0bd315c9c3254b049c39abf5476738e907e85aa6f5",
+      "response_length": 7502,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 7,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20693,
+      "task_id": 229,
+      "response_sha256": "98ed4bb0abbf66a6d444ceabc67b550edb333063ec4182c5ce8bf85b2135ec48",
+      "response_length": 4464,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20694,
+      "task_id": 229,
+      "response_sha256": "3b8863de347572e742d21f081d00c3b2b3d08e20fb869be6bcb833292ce9cc43",
+      "response_length": 6936,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20696,
+      "task_id": 229,
+      "response_sha256": "ba8524be3e03e6de0b65cecfc69472484b7f2367b8860594d3b580d90b854932",
+      "response_length": 7283,
+      "baseline": "rejected",
+      "replay": "passed",
+      "issues": 7,
+      "invalid_issues": 0,
+      "baseline_identical": null
+    },
+    {
+      "id": 20697,
+      "task_id": 229,
+      "response_sha256": "b47d80726e713ba4df7e26d94e705b955a0731ea0eefc084d03ac8269920ed27",
+      "response_length": 6252,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20699,
+      "task_id": 229,
+      "response_sha256": "c36fff7a4c34592a6fcd5210b8542480bb2f3e069f5740cc0f1d3a7cb081a5fd",
+      "response_length": 3923,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20700,
+      "task_id": 229,
+      "response_sha256": "9b9dae8d6c394fcd7258e3cbdc8c2a550dac0c0459dc501b4cde125c45ffbbb1",
+      "response_length": 3569,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20701,
+      "task_id": 229,
+      "response_sha256": "8335fa84776bb08af2036dc7a04cf7bd3ff91056917fc555db570c15b3c896ba",
+      "response_length": 3829,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20702,
+      "task_id": 229,
+      "response_sha256": "a9548a5bd9b5988b61bc785fd00f72be010309faf33ad2ad44515290cfadc700",
+      "response_length": 4510,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20703,
+      "task_id": 229,
+      "response_sha256": "b8290d56457a02e8bf22766f9b725f60588c92dc2076fe2aa554c3c39fa060af",
+      "response_length": 6343,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20704,
+      "task_id": 229,
+      "response_sha256": "178801869c88d2e87e725f4c74cae49315b3d9aa005b30b7ddb8e692605e7bad",
+      "response_length": 5509,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20706,
+      "task_id": 229,
+      "response_sha256": "71bc02ad5123a20623c6b0d9753a018971978e29fc30ea6351c154e56f83fefd",
+      "response_length": 6519,
+      "baseline": "rejected",
+      "replay": "passed",
+      "issues": 7,
+      "invalid_issues": 0,
+      "baseline_identical": null
+    },
+    {
+      "id": 20708,
+      "task_id": 229,
+      "response_sha256": "5501cc7e31bab9947ea689aa5628e3ca499500f10c10ae9056cb864a322c1bd4",
+      "response_length": 4310,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20709,
+      "task_id": 229,
+      "response_sha256": "22688f9379a5ba1ff32873eb5ad26816beb503f74257de5164d6803880b3ab44",
+      "response_length": 3373,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 3,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    },
+    {
+      "id": 20710,
+      "task_id": 229,
+      "response_sha256": "1d1eada0a330de4344d8e08ffdf6d8432adaead84ba549ad13b4dd2d42954269",
+      "response_length": 5979,
+      "baseline": "passed",
+      "replay": "passed",
+      "issues": 5,
+      "invalid_issues": 0,
+      "baseline_identical": true
+    }
+  ],
+  "privacy": "不含原始响应、源码、发言、prompt或账号凭据。私有原文只在本机权限600文件中用于回放。"
+}

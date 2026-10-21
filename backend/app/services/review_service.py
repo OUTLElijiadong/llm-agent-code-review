@@ -32,7 +32,7 @@ from app.agents.events import AgentEvent, AgentEventType
 from app.agents.registry import AgentRegistry
 from app.ai.code_chunker import chunk_code_with_context
 from app.ai.cvss import normalize_cvss
-from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekOutputTruncatedError
+from app.ai.deepseek_agent import DeepSeekAgent, DeepSeekJsonOutputError, DeepSeekOutputTruncatedError
 from app.ai.finding_aggregator import aggregate_agent_findings_safely
 from app.ai.multi_agent import (
     ReviewAgentProfile,
@@ -1737,7 +1737,7 @@ def _review_chunk_collaborative(
                         deferred_logs.append({
                             "meta": failed_meta,
                             "status": "failed",
-                            "error": "模型输出被截断，后续通过源码范围恢复完成",
+                            "error": "模型结构化输出不完整，后续通过源码范围恢复完成",
                             "chunk_index": chunk_idx * 100 + list(profiles).index(profile),
                         })
                     deferred_logs.append({
@@ -2310,9 +2310,14 @@ def _call_single_agent(
     recovered = False
     processed_ranges: list[tuple[int, int]] = []
     call_count = 0
+    last_recovery_error: Optional[Exception] = None
 
     def raise_incomplete(message: str, cause: Optional[Exception] = None) -> None:
-        error = DeepSeekOutputTruncatedError(message, finish_reason="length")
+        error = (
+            DeepSeekJsonOutputError(message, finish_reason=cause.finish_reason)
+            if isinstance(cause, DeepSeekJsonOutputError)
+            else DeepSeekOutputTruncatedError(message, finish_reason="length")
+        )
         error.attempt_metas = list(failed_attempt_meta)
         if cause is not None:
             raise error from cause
@@ -2366,17 +2371,23 @@ def _call_single_agent(
 
         call_count += 1
         if call_count > 32:
-            raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整")
+            raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整", last_recovery_error)
         try:
             raw, meta = invoke(source, line_offset + start, source_context, budget)
-        except DeepSeekOutputTruncatedError as first_error:
+        except (DeepSeekOutputTruncatedError, DeepSeekJsonOutputError) as first_error:
+            last_recovery_error = first_error
             if isinstance(getattr(first_error, "meta", None), dict):
                 failed_attempt_meta.append(first_error.meta)
             from app.ai.deepseek_agent import _clamp_max_tokens
 
             ceiling = _clamp_max_tokens(settings.deepseek_max_output_tokens)
-            retry_budget = min(max(profile.max_tokens * 2, 8192), ceiling)
-            retry_error: Optional[DeepSeekOutputTruncatedError] = first_error
+            # JSON 错误在 call_raw 内已经有限重试；继续缩小原始源码焦点，
+            # 不追加同范围的预算重试，也不补全/丢弃模型未返回的发现。
+            retry_budget = (
+                budget if isinstance(first_error, DeepSeekJsonOutputError)
+                else min(max(profile.max_tokens * 2, 8192), ceiling)
+            )
+            retry_error: Optional[Exception] = first_error
             if retry_budget > budget:
                 logger.warning(
                     f"[review] {profile.code} 第 {line_offset + start + 1}-{line_offset + end} 行输出截断，"
@@ -2385,17 +2396,22 @@ def _call_single_agent(
                 try:
                     call_count += 1
                     if call_count > 32:
-                        raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整")
+                        raise_incomplete("代码审查分片恢复超过安全调用上限，覆盖不完整", last_recovery_error)
                     raw, meta = invoke(source, line_offset + start, source_context, retry_budget)
                     retry_error = None
-                except DeepSeekOutputTruncatedError as exc:
+                except (DeepSeekOutputTruncatedError, DeepSeekJsonOutputError) as exc:
+                    last_recovery_error = exc
                     if isinstance(getattr(exc, "meta", None), dict):
                         failed_attempt_meta.append(exc.meta)
                     retry_error = exc
             if retry_error is not None:
                 if end - start <= 1 or depth >= 8:
+                    reason = (
+                        "结构化输出仍不完整" if isinstance(retry_error, DeepSeekJsonOutputError)
+                        else "仍被截断"
+                    )
                     raise_incomplete(
-                        f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行仍被截断，覆盖不完整",
+                        f"代码审查原文件第 {line_offset + start + 1}-{line_offset + end} 行{reason}，覆盖不完整",
                         retry_error,
                     )
                 midpoint = start + (end - start) // 2

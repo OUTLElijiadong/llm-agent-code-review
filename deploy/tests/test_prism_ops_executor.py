@@ -5,6 +5,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -543,6 +548,214 @@ def test_database_signal_parser_redacts_and_avoids_normal_update_false_positive(
     assert "/tmp/users.sql" not in serialized
     assert "12345" not in serialized
 
+
+
+def _db_sample_line(argument: str, *, truncated: bool = False, user: str = "root@localhost") -> str:
+    return "\t".join((user.encode().hex(), argument.encode().hex(), "2026-10-22 01:02:03", str(int(truncated))))
+
+
+def test_db_sampling_bounds_sql_and_container_lifetime_before_host_timeout(monkeypatch) -> None:
+    calls = []
+
+    def capture(args, **kwargs):
+        calls.append((args, kwargs))
+        return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(executor, "run", capture)
+    result = executor._db_threat_signals({"since_hours": 3, "limit": 7})
+    args, options = calls[0]
+    sql = args[-1]
+    assert args[:5] == ["docker", "exec", "cr_mysql", "sh", "-ec"]
+    assert "MAX_EXECUTION_TIME(5000)" in sql
+    assert "HEX(LEFT(argument, 160))" in sql
+    assert "HEX(LEFT(user_host, 128))" in sql
+    assert "OCTET_LENGTH(argument) > 160" in sql
+    assert sql.endswith("ORDER BY event_time DESC LIMIT 8")
+    assert "INTERVAL 3 HOUR" in sql
+    assert sql.count("SELECT") == 1
+    assert ";" not in sql
+    assert not re.search(r"\b(SET|KILL|UPDATE|INSERT|DELETE|TRUNCATE|INTO)\b", sql)
+    script = args[5]
+    assert "exec timeout --signal=TERM --kill-after=2s 10s mysql " in script
+    assert "--connect-timeout=3" in script
+    assert "--quick" in script
+    assert "--skip-reconnect" in script
+    assert '-e "$1"' in script
+    assert options["timeout"] == 20
+    assert options["stdout_tail_limit"] is None
+    assert options["allow_failure"] is True
+    assert result["stdout_capped"] is False
+
+
+@pytest.mark.parametrize(("count", "limited"), [(0, False), (1, False), (2, False), (3, True)])
+def test_db_sampling_reports_only_observed_row_truncation(monkeypatch, count, limited) -> None:
+    output = "\n".join(_db_sample_line(f"DROP TABLE sample_{i}") for i in range(count))
+    monkeypatch.setattr(executor, "run", lambda *_a, **_k: {"exit_code": 0, "stdout": output, "stderr": ""})
+    result = executor._db_threat_signals({"limit": 2})
+    assert result["ok"] is True
+    assert result["sampled_rows"] == min(count, 2)
+    assert result["destructive_total"] == min(count, 2)
+    assert result["row_limit_reached"] is limited
+    assert result["source_truncated"] is limited
+    assert result["sql_truncated_rows"] == 0
+    assert result["row_limit"] == 2
+
+
+def test_db_sampling_preserves_multiline_unicode_and_reports_argument_clipping(monkeypatch) -> None:
+    output = "\n".join([
+        _db_sample_line("DROP\n\tTABLE 用户表", user="管理\t员\n@localhost"),
+        _db_sample_line("SELECT 1\x00", truncated=True),
+    ])
+    monkeypatch.setattr(executor, "run", lambda *_a, **_k: {"exit_code": 0, "stdout": output, "stderr": ""})
+    result = executor._db_threat_signals({"limit": 2})
+    assert result["sampled_rows"] == 2
+    sample = result["samples"]["destructive"][0]
+    assert sample["sql"] == "DROP TABLE 用户表"
+    assert sample["user_host"] == "管理\t员\n@localhost"
+    assert sample["sql_truncated"] is False
+    assert result["sql_truncated_rows"] == 1  # 包括未匹配威胁的被裁剪 SQL。
+    assert result["source_truncated"] is True
+    assert result["row_limit_reached"] is False
+
+
+def test_db_sampling_keeps_more_than_100k_of_bounded_rows(monkeypatch) -> None:
+    output = "\n".join(_db_sample_line("DROP TABLE " + "x" * 140) for _ in range(1000))
+    assert len(output) > 100_000
+    monkeypatch.setattr(executor, "run", lambda *_a, **_k: {"exit_code": 0, "stdout": output, "stderr": ""})
+    result = executor._db_threat_signals({"limit": 1000})
+    assert result["sampled_rows"] == 1000
+    assert result["destructive_total"] == 1000
+    assert result["stdout_capped"] is False
+    assert result["source_truncated"] is False
+
+
+def test_db_sampling_redacts_unterminated_literal_at_sql_clip_boundary(monkeypatch) -> None:
+    argument = "DROP TABLE users; SELECT 'private-value-that-was-clipped"
+    monkeypatch.setattr(executor, "run", lambda *_a, **_k: {
+        "exit_code": 0, "stdout": _db_sample_line(argument, truncated=True), "stderr": "",
+    })
+    result = executor._db_threat_signals({"limit": 1})
+    assert result["destructive_total"] == 1
+    assert "private-value" not in json.dumps(result)
+    assert result["samples"]["destructive"][0]["sql_truncated"] is True
+
+
+@pytest.mark.parametrize("bad_line", ["invalid", "xx\t00\tnow\t0", "00\t00\tnow\t2"])
+def test_db_sampling_rejects_corrupt_output_instead_of_reporting_clean(monkeypatch, bad_line) -> None:
+    monkeypatch.setattr(executor, "run", lambda *_a, **_k: {
+        "exit_code": 0, "stdout": bad_line, "stderr": "",
+    })
+    result = executor._db_threat_signals({"limit": 1})
+    assert result["ok"] is False
+    assert "destructive_total" not in result
+    assert result["source_truncated"] is True
+
+
+@pytest.mark.parametrize(("code", "error", "timed_out"), [
+    (1, "ERROR 3024 (HY000): Query execution was interrupted", True),
+    (124, "", True),
+    (137, "Killed", False),  # 退出 137 本身不能确认超时或 OOM 根因。
+    (127, "timeout: not found", False),
+])
+def test_db_sampling_failures_never_publish_partial_success_or_retry(monkeypatch, code, error, timed_out) -> None:
+    calls = []
+
+    def fail(args, **kwargs):
+        calls.append(args)
+        return {"exit_code": code, "stdout": _db_sample_line("DROP TABLE users"), "stderr": error}
+
+    monkeypatch.setattr(executor, "run", fail)
+    result = executor._db_threat_signals({"limit": 1})
+    assert len(calls) == 1
+    assert result["ok"] is False
+    assert result["source_exit_code"] == code
+    assert result["source_timed_out"] is timed_out
+    assert "destructive_total" not in result
+
+
+def test_db_sampling_host_timeout_does_not_claim_container_termination(monkeypatch) -> None:
+    def timeout(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"], output=b"private partial output")
+
+    monkeypatch.setattr(executor, "run", timeout)
+    result = executor._db_threat_signals({"limit": 1})
+    assert result["ok"] is False
+    assert result["source_timed_out"] is True
+    assert result["termination_confirmed"] is False
+    assert result["source_exit_code"] is None
+    assert "private" not in json.dumps(result)
+    assert "destructive_total" not in result
+
+
+@pytest.mark.parametrize("params", [{"limit": 5001}, {"limit": 0}, {"since_hours": 721}, {"since_hours": "1; DROP TABLE x"}])
+def test_db_sampling_rejects_bad_bounds_before_running(params, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(executor, "run", lambda *a, **k: calls.append(a))
+    with pytest.raises(ValueError):
+        executor._db_threat_signals(params)
+    assert calls == []
+
+
+def test_db_container_watchdog_kills_term_ignoring_client_after_host_detaches(tmp_path, monkeypatch) -> None:
+    """在本地执行实际容器命令，使用假 mysql；不调用 Docker 或数据库。"""
+    timeout_bin = shutil.which("timeout")
+    if timeout_bin is None:
+        pytest.skip("需要 GNU timeout 验证容器命令的 TERM/KILL 语义")
+    calls = []
+    monkeypatch.setattr(executor, "DB_CONTAINER_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(executor, "DB_CONTAINER_KILL_AFTER_SECONDS", 1)
+    monkeypatch.setattr(executor, "run", lambda args, **kwargs: calls.append(args) or {
+        "exit_code": 0, "stdout": "", "stderr": "",
+    })
+    executor._db_threat_signals({"limit": 1})
+    (tmp_path / "timeout").symlink_to(timeout_bin)
+    pid_file = tmp_path / "mysql.pid"
+    fake_mysql = tmp_path / "mysql"
+    fake_mysql.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "pathlib.Path(os.environ['PROBE_PID_FILE']).write_text(str(os.getpid()))\n"
+        "while True: time.sleep(0.02)\n"
+    )
+    fake_mysql.chmod(0o700)
+    # 模拟 Docker 客户端与独立容器进程：客户端退出后内部命令继续运行。
+    client_code = (
+        "import subprocess, sys, time\n"
+        "subprocess.Popen(sys.argv[1:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)\n"
+        "time.sleep(60)\n"
+    )
+    client = subprocess.Popen(
+        [sys.executable, "-c", client_code, "/bin/sh", *calls[0][4:]],
+        env={**os.environ, "PATH": str(tmp_path), "PROBE_PID_FILE": str(pid_file), "MYSQL_ROOT_PASSWORD": "local-dummy"},
+    )
+    mysql_pid = None
+    try:
+        deadline = time.monotonic() + 1
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pid_file.exists(), "假 mysql 应在容器看门狗下启动"
+        mysql_pid = int(pid_file.read_text())
+        client.kill()
+        client.wait(timeout=2)
+        os.kill(mysql_pid, 0)  # 客户端取消本身并未终止内部进程。
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            status = subprocess.run(["ps", "-p", str(mysql_pid), "-o", "stat="], capture_output=True, text=True)
+            if not status.stdout.strip() or status.stdout.strip().startswith("Z"):
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("容器内看门狗未在预算内终止忽略 TERM 的客户端")
+    finally:
+        if client.poll() is None:
+            client.kill()
+        client.wait(timeout=2)
+        if mysql_pid is not None:
+            try:
+                os.kill(mysql_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 def test_security_action_contract_is_in_sync_with_backend_scheduler() -> None:
     expected = {
