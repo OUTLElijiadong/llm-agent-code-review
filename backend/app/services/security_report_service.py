@@ -217,6 +217,7 @@ def _report_markdown(
         "execution_not_successful": "执行未完整成功",
         "coverage_not_complete": "扫描覆盖范围不完整或未知",
         "ungraded_findings": "存在未分级发现",
+        "score_unavailable": "当前证据不足以计算评分",
     }
     if coverage.get("score_available") is False:
         reason = score_reason_labels.get(
@@ -224,6 +225,8 @@ def _report_markdown(
             "当前证据不足以计算评分",
         )
         lines.append(f"评分状态：未评估（{reason}）")
+    elif coverage.get("score_scope") == "partial":
+        lines.append("评分状态：已按规则出分，仅代表已扫描范围；未覆盖部分见下方覆盖记录")
     for key, label in (
         ("requested_mode", "请求模式"),
         ("scan_mode", "实际扫描模式"),
@@ -514,17 +517,26 @@ def persist_security_report(
         for finding in findings
     )
     score_unavailable_reason = None
-    if execution_status != "success":
-        score_unavailable_reason = "execution_not_successful"
-    elif verification_status != "complete":
-        score_unavailable_reason = "coverage_not_complete"
-    elif normalized_coverage.get("score_available") is False:
+    scanned_files = max(
+        _safe_int(payload.get("file_count")),
+        _safe_int(normalized_coverage.get("scanned_file_count")),
+    )
+    complete_run = execution_status == "success" and verification_status == "complete"
+    if has_ungraded_findings:
+        score_unavailable_reason = "ungraded_findings"
+    elif complete_run and normalized_coverage.get("score_available") is False:
         score_unavailable_reason = str(
             normalized_coverage.get("score_unavailable_reason") or "score_unavailable"
         )
-    elif has_ungraded_findings:
-        score_unavailable_reason = "ungraded_findings"
+    elif not complete_run and scanned_files <= 0 and not findings:
+        # 没有任何已扫描文件时没有评分依据；部分完成的扫描按已扫范围出分。
+        score_unavailable_reason = (
+            "execution_not_successful" if execution_status != "success" else "coverage_not_complete"
+        )
     score_available = score_unavailable_reason is None
+    normalized_coverage["score_scope"] = (
+        ("complete" if complete_run else "partial") if score_available else None
+    )
     score = int(compute_score_breakdown(severity_counts)["score"]) if score_available else None
     if score_available and source_score is not None and source_score != score:
         payload["source_risk_score"] = source_score

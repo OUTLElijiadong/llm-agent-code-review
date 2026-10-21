@@ -268,11 +268,18 @@ async def test_discussion_only_complete_valid_speech_can_succeed(
     await orchestrator.start_discussion(**arguments)
     with roundtable_store() as database:
         task = database.query(ReviewTask).one()
-        assert task.status == ("success" if outcomes == "success" else "failed")
+        # 部分轮次失败但已有有效发言并完成问题抽取：按已完成发言范围出分。
+        scored = outcomes in {"success", "partial"}
+        assert task.status == ("success" if scored else "failed")
         assert task.coverage["valid_speeches"] == {"failed": 0, "silent": 0, "partial": 1, "success": 2}[outcomes]
-        assert task.processed_files == (1 if outcomes == "success" else 0)
+        assert task.processed_files == (1 if scored else 0)
         if outcomes == "success":
             assert task.score == 100
+            assert task.coverage["score_scope"] == "complete"
+        elif outcomes == "partial":
+            assert task.score == 92
+            assert task.coverage["coverage_status"] == "partial"
+            assert task.coverage["score_scope"] == "partial"
         else:
             assert task.error_message
             assert task.score != 100
@@ -343,7 +350,7 @@ def test_terminal_status_written_during_extraction_wins(
 
 
 @pytest.mark.asyncio
-async def test_summary_fallback_keeps_partial_report_failed(live_roundtable, roundtable_store, monkeypatch):
+async def test_summary_fallback_scores_reviewed_scope_as_partial(live_roundtable, roundtable_store, monkeypatch):
     orchestrator, _bus, _session, arguments, _agent = live_roundtable
     monkeypatch.setattr(orchestrator, "_speaker_turn", AsyncMock(return_value=(
         discussion.SpeakerDecision("speak", "neutral", None, "valid speech"), {}, True,
@@ -353,8 +360,11 @@ async def test_summary_fallback_keeps_partial_report_failed(live_roundtable, rou
     await orchestrator.start_discussion(**arguments)
     with roundtable_store() as database:
         task = database.query(ReviewTask).one()
-        assert task.status == "failed"
-        assert task.score != 100
+        # 主持人小结降级不影响已完成发言的问题集：按已审范围出分，覆盖标为部分。
+        assert task.status == "success"
+        assert task.score == 100
+        assert task.coverage["score_scope"] == "partial"
+        assert task.coverage["coverage_status"] == "partial"
         assert task.coverage["summary_status"] == "failed"
         assert task.coverage["stage"] == "partial"
 

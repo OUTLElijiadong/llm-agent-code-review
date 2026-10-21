@@ -560,17 +560,25 @@ def _build_report_context(
     top_vulnerabilities = _build_top_vulnerabilities(active_issues, top_n=10)
     refuted_issue_count = len(normalized_issues) - len(active_issues)
     coverage = task_info.get("coverage") if isinstance(task_info.get("coverage"), dict) else {}
-    complete_statuses = {"complete", "completed", "verified"}
-    coverage_complete = (
-        str(coverage.get("coverage_status") or "").strip().lower() in complete_statuses
-        and str(coverage.get("verification_status") or "complete").strip().lower() in complete_statuses
-    )
-    execution_successful = task_info.get("status") == "success"
-    if not execution_successful:
-        unavailable_reason = "execution_not_successful"
-    elif not coverage_complete:
-        unavailable_reason = "coverage_not_complete"
-    elif coverage.get("score_available") is False:
+    from types import SimpleNamespace
+
+    from app.services.score_scope import issue_score_scope
+
+    # 与报告详情共用评分范围规则：覆盖不完整时按已审范围出分，只有没有
+    # 任何已审内容时才不出分。
+    raw_coverage = task.get("coverage") if isinstance(task, dict) else getattr(task, "coverage", None)
+    score_scope = issue_score_scope(SimpleNamespace(**{
+        **{key: task_info.get(key) for key in ("status", "total_files", "processed_files", "total_issues")},
+        # 用归一化前的覆盖快照判断：归一化会给历史任务补“unknown”占位。
+        "coverage": raw_coverage if isinstance(raw_coverage, dict) else None,
+    }))
+    if not score_scope["available"]:
+        unavailable_reason = (
+            "execution_not_successful" if task_info.get("status") != "success" else "coverage_not_complete"
+        )
+        if coverage.get("score_unavailable_reason") == "ungraded_findings":
+            unavailable_reason = "ungraded_findings"
+    elif score_scope["scope"] == "complete" and coverage.get("score_available") is False:
         unavailable_reason = str(coverage.get("score_unavailable_reason") or "score_unavailable")
     else:
         unavailable_reason = ""
@@ -578,7 +586,11 @@ def _build_report_context(
         active_issue_count = sum(item.get("status") != "refuted" for item in normalized_issues)
         explicit_score = (
             (score if score is not None else task_info.get("score"))
-            if not normalized_issues else None
+            if not normalized_issues and (
+                score_scope["scope"] in {"complete", "historical"}
+                or (task_info.get("status") == "success" and task_info.get("score_version"))
+            )
+            else None
         )
         effective_score, score_breakdown = build_report_score_facts(
             severity_count,
@@ -599,6 +611,7 @@ def _build_report_context(
         }
     else:
         score_version = score_breakdown.get("version") or SCORING_VERSION
+        score_breakdown = {**score_breakdown, "score_scope": score_scope["scope"]}
 
     # task_info 也是导出契约的一部分，不能继续暴露与 statistics 冲突的任务快照。
     task_info.update({

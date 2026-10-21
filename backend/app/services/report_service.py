@@ -48,11 +48,14 @@ _UNAVAILABLE_SCORE_CLAIM = re.compile(
 )
 
 
-def display_report_summary(summary: str | None, *, score_available: bool) -> str:
+def display_report_summary(summary: str | None, *, score_available: bool, score: int | None = None) -> str:
     """Hide legacy prose scores whenever the canonical report score is unavailable."""
     text = summary or ""
     if score_available:
-        return text
+        if score is None:
+            return text
+        # 摘要里的旧分数必须与规则分（含小菱重判分）一致。
+        return _UNAVAILABLE_SCORE_CLAIM.sub(lambda match: f"{match.group('label')} {score}", text)
     return _UNAVAILABLE_SCORE_CLAIM.sub(
         lambda match: f"{match.group('label')}未评估",
         text,
@@ -117,25 +120,33 @@ def _sandbox_rule_score_available(task: ReviewTask) -> bool:
     )
 
 
+def _pentest_rule_score_available(task: ReviewTask) -> bool:
+    from app.services.pentest_service import PENTEST_SCORE_VERSION
+
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    return (
+        task.status in _REPORTABLE_TASK_STATUSES
+        and coverage.get("score_available") is True
+        and coverage.get("score_basis") == PENTEST_SCORE_VERSION
+    )
+
+
 def _score_is_available(task: ReviewTask) -> bool:
     coverage = task.coverage if isinstance(task.coverage, dict) else {}
     explicit = coverage.get("score_available")
     if task.review_type == "sandbox_test":
         # 沙箱验证分 = 已执行检查项通过率；失败的测试同样按规则给出真实低分。
         return _sandbox_rule_score_available(task)
-    if task.status != "success":
-        return False
-    complete_statuses = {"complete", "completed", "verified"}
-    coverage_status = str(coverage.get("coverage_status") or "").strip().lower()
-    verification_status = str(coverage.get("verification_status") or "complete").strip().lower()
-    # 核验完成不等于覆盖完整。评分、列表和各格式导出统一以明确的完整覆盖为准。
-    if coverage_status not in complete_statuses or verification_status not in complete_statuses:
-        return False
     if task.review_type == "pentest":
-        # Domain rows historically used a non-null integer column, often 0 as a
-        # placeholder. Only an explicit source receipt can make that value real.
-        return explicit is True and coverage_status == "complete"
-    return explicit is not False
+        # 渗透分按已测范围内确认发现扣分；旧记录的 0 只是占位，必须带规则回执。
+        if _pentest_rule_score_available(task):
+            return True
+        coverage_status = str(coverage.get("coverage_status") or "").strip().lower()
+        return task.status == "success" and explicit is True and coverage_status == "complete"
+    from app.services.score_scope import issue_score_scope
+
+    # 问题集评分：覆盖范围只决定分数的适用范围，不再隐藏分数。
+    return bool(issue_score_scope(task)["available"])
 
 
 # 部分覆盖仍是可交付结果：报告必须展示已完成内容，并明确列出未覆盖范围。
@@ -249,9 +260,60 @@ def _sandbox_requested_mode(task: ReviewTask, content: dict | None = None) -> st
 
 def display_report_score(task: ReviewTask, score: int | None) -> int | None:
     """Display only scores with an explicit basis; coverage remains a separate fact."""
-    if score is None:
+    if not _score_is_available(task):
         return None
-    return score if _score_is_available(task) else None
+    if task.review_type not in {"sandbox_test", "pentest"}:
+        from app.services.score_scope import issue_rule_score
+
+        # 旧失败/部分任务的记录分可能是 0 占位，按已保存问题计数复算。
+        if score is None or not _stored_score_is_trusted_input(task):
+            return issue_rule_score(task)
+    return score
+
+
+def metric_report_score(task: ReviewTask, score: int | None) -> int | None:
+    """工作台均分与趋势只统计完整覆盖的分数；部分范围分只在报告中展示。"""
+    if task.review_type != "sandbox_test" and _score_scope_of(task) != "complete":
+        return None
+    return display_report_score(task, score)
+
+
+def _stored_score_is_trusted_input(task: ReviewTask) -> bool:
+    """记录分可作为展示输入：完整覆盖、历史成功任务，或部分覆盖下成功落库的规则分。"""
+    from app.services.score_scope import stored_score_is_rule_result
+
+    scope = _score_scope_of(task)
+    if scope in {"complete", "historical"}:
+        return True
+    return scope == "partial" and task.status == "success" and stored_score_is_rule_result(task)
+
+
+def _score_scope_of(task: ReviewTask) -> str | None:
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    if task.review_type == "sandbox_test":
+        return "complete" if str(coverage.get("verification_status") or "") == "complete" else "partial"
+    if task.review_type == "pentest":
+        return str(coverage.get("score_scope") or coverage.get("coverage_status") or "partial")
+    from app.services.score_scope import issue_score_scope
+
+    return issue_score_scope(task)["scope"]
+
+
+def score_scope_payload(task: ReviewTask) -> dict:
+    """报告与列表共用的评分范围说明。"""
+    from app.services.score_scope import NO_SCOPE_REASON, SCOPE_LABELS, issue_score_scope
+
+    if task.review_type not in {"sandbox_test", "pentest"}:
+        return issue_score_scope(task)
+    available = _score_is_available(task)
+    scope = _score_scope_of(task) if available else None
+    coverage = task.coverage if isinstance(task.coverage, dict) else {}
+    return {
+        "available": available,
+        "scope": scope,
+        "label": SCOPE_LABELS.get(scope or "", "不出分"),
+        "reason": None if available else str(coverage.get("score_unavailable_reason") or NO_SCOPE_REASON),
+    }
 
 
 def is_report_available(task: ReviewTask | None) -> bool:
@@ -456,20 +518,19 @@ def list_reports(db: Session, user: User, project_id: int = None,
     """
     q = db.query(ReviewTask).filter(ReviewTask.status.in_(_REPORTABLE_TASK_STATUSES))
     if not include_history:
+        # 默认列表展示所有已出分的终态报告（完整覆盖或仅覆盖已审范围）；
+        # 完全没有已审内容的任务只在“含历史”视图中出现，并显示不出分原因。
         coverage_status = ReviewTask.coverage["coverage_status"].as_string()
-        verification_status = ReviewTask.coverage["verification_status"].as_string()
-        score_available = ReviewTask.coverage["score_available"].as_boolean()
-        complete_statuses = ("complete", "completed", "verified")
         q = q.filter(
-            ReviewTask.status == "success",
-            # 覆盖必须明确完整；仅核验成功或旧评分占位不足以进入演示列表。
-            coverage_status.in_(complete_statuses),
-            or_(coverage_status.is_(None), coverage_status.in_(complete_statuses)),
-            or_(verification_status.is_(None), verification_status.in_(complete_statuses)),
-            or_(score_available.is_(None), score_available.is_(True)),
+            ReviewTask.status.in_(("success", "partial", "failed")),
             ReviewTask.score.is_not(None),
-            ReviewTask.review_type != "sandbox_test",
-            or_(ReviewTask.review_type != "pentest", score_available.is_(True)),
+            or_(
+                coverage_status.in_(("complete", "completed", "verified")),
+                ReviewTask.processed_files > 0,
+                ReviewTask.total_issues > 0,
+                and_(ReviewTask.status == "success", ReviewTask.coverage.is_(None)),
+                ReviewTask.review_type.in_(("sandbox_test", "pentest")),
+            ),
         )
     # API 路由已有 REPORT_VIEW 门禁；服务层仍需独立 fail-closed，避免其他
     # 调用方绕过路由后把无权限任务计入总数或分页卡片。
@@ -592,7 +653,6 @@ def list_reports(db: Session, user: User, project_id: int = None,
             row,
             issue_stats[row.id],
         )
-        score = display_report_score(row, score)
         if not _score_is_available(row):
             score = None
         can_view_report = report_access[row.id]
@@ -612,6 +672,7 @@ def list_reports(db: Session, user: User, project_id: int = None,
             "can_delete": can_delete and capabilities.get(row.project_id, {}).get("can_execute", False),
             "can_view_report": can_view_report,
             "total_issues": issue_count, "score": score, "status": row.status,
+            "score_scope": score_scope_payload(row) if can_view_report else None,
             "error_message": clean_report_text(row.error_message) if can_view_report else None,
             "coverage": clean_report_payload(coverage) if coverage is not None else None,
             "source": source,
@@ -641,8 +702,10 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         task,
         issue_stats,
     )
-    score = display_report_score(task, score)
     score_available = score is not None and _score_is_available(task)
+    if not score_available:
+        score = None
+    score_scope = score_scope_payload(task)
     security_snapshot = _security_report_snapshot(db, task)
     if task.review_type in {"security_scan", "fullchain_audit"} and security_snapshot is None:
         raise ConflictError(
@@ -651,11 +714,16 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         )
     if not score_available:
         score = None
-        score_breakdown = {"score": None, "risk_level": "未评估", "score_source": "unavailable"}
+        score_breakdown = {
+            "score": None, "risk_level": "未评估", "score_source": "unavailable",
+            "score_unavailable_reason": score_scope.get("reason"),
+        }
+    else:
+        score_breakdown = {**score_breakdown, "score_scope": score_scope.get("scope")}
     from app.services.score_credibility import audit_report_score
 
     # 小菱终审：按规则独立复算，不一致则打回重判并采用规则分。
-    score_audit = audit_report_score(task, score, severity_count, issue_count)
+    score_audit = audit_report_score(task, score, severity_count, issue_count, score_scope=score_scope)
     if score_audit["status"] == "rescored" and score_audit["final_score"] != score:
         score = score_audit["final_score"]
         from app.ai.scoring import score_risk_level
@@ -739,6 +807,7 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
                  "score_version": score_breakdown.get("version"),
                  "score_breakdown": score_breakdown,
                  "score_audit": score_audit,
+                 "score_scope": score_scope,
                  "status": task.status,
                  "error_message": clean_report_text(task.error_message),
                  "coverage": clean_report_payload(report_coverage),
@@ -763,7 +832,10 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
         },
         "source": source,
         "summary": clean_report_markdown(
-            display_report_summary(report_summary, score_available=score_available)
+            display_report_summary(
+                report_summary, score_available=score_available,
+                score=None if task.review_type in {"sandbox_test", "pentest"} else score,
+            )
         ),
         "files": [] if task.review_type in {"sandbox_test", "pentest"} else _build_file_summaries(
             db,
@@ -1105,10 +1177,13 @@ def _build_task_score_facts(
             ),
             "risk_level": risk_level,
         }, severity_count
+    explicit_score = None
+    if issue_count == 0 and _stored_score_is_trusted_input(task):
+        explicit_score = task.score
     score, score_breakdown = build_report_score_facts(
         severity_count,
         max(0, issue_count - int(issue_stats.get("refuted", 0) or 0)),
-        task.score if issue_count == 0 else None,
+        explicit_score,
     )
     return issue_count, score, score_breakdown, severity_count
 

@@ -484,7 +484,7 @@ def test_legacy_sandbox_pass_rate_is_not_exposed_as_quality_or_risk_score(
     assert exported["domain_data"]["coverage"]["score_basis"] is None
 
 
-def test_unavailable_score_is_not_claimed_in_report_summary_or_json_export(export_context):
+def test_unknown_coverage_score_is_rescored_in_report_summary_and_json_export(export_context):
     client, db, owner, _other, project, _current = export_context
     task = ReviewTask(
         user_id=owner.id,
@@ -513,15 +513,13 @@ def test_unavailable_score_is_not_claimed_in_report_summary_or_json_export(expor
     detail = client.get(f"/api/reports/{task.id}").json()["data"]
     exported = client.get(f"/api/reports/tasks/{task.id}/export?format=json").json()
 
-    assert detail["task"]["score"] is None
-    assert detail["files"][0]["score"] is None
-    assert "综合评分未评估" in detail["summary"]
+    # 覆盖未知但已审 1 个文件：按问题集复算已审范围分（1 高 = 92），摘要旧分数同步改写。
+    assert detail["task"]["score"] == 92
+    assert detail["task"]["score_scope"]["scope"] == "partial"
+    assert "综合评分 92" in detail["summary"]
     assert "综合评分 64" not in detail["summary"]
-    assert exported["score"] is None
-    assert exported["files"][0]["score"] is None
-    assert "综合评分未评估" in exported["summary"]
+    assert exported["score"] == 92
     assert "综合评分 64" not in exported["summary"]
-    assert "综合评分未评估" in exported["task_info"]["summary"]
     assert "综合评分 64" not in exported["task_info"]["summary"]
 
 
@@ -1021,7 +1019,9 @@ def test_terminal_code_review_reports_are_listed_readable_and_export_state(expor
     db.add(task)
     db.commit()
 
-    assert client.get("/api/reports").json()["data"]["items"] == []
+    default_ids = {item["task_id"] for item in client.get("/api/reports").json()["data"]["items"]}
+    # 已完成 1 个文件的失败任务按已审范围出分并进入默认列表；取消/过期只在历史视图。
+    assert (task.id in default_ids) == (status == "failed")
     listed = client.get("/api/reports", params={"include_history": True}).json()["data"]["items"]
     entry = next(item for item in listed if item["task_id"] == task.id)
     detail_response = client.get(f"/api/reports/{task.id}")

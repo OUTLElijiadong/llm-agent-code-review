@@ -24,24 +24,29 @@ from app.services.report_service import (
 @pytest.mark.parametrize(
     ("status", "coverage", "score", "expected"),
     [
+        # 没有任何已审文件或问题：不出分，绝不用 0 占位。
         ("failed", None, 0, None),
         ("cancelled", None, 82, None),
-        ("partial", {"coverage_status": "partial", "score_available": True}, 100, None),
         ("success", {"coverage_status": "partial", "score_available": True}, 82, None),
-        ("success", {"coverage_status": "unknown", "score_available": True}, 82, None),
+        # 已审部分文件：按已保存问题计数复算已审范围分（2 高 1 低 = 83）。
+        ("partial", {"coverage_status": "partial", "completed_files": 1, "score_available": True}, 100, 83),
+        ("failed", {"coverage_status": "failed", "completed_files": 2}, 0, 83),
         (
             "success",
-            {"coverage_status": "complete", "verification_status": "failed", "score_available": True},
+            {"coverage_status": "complete", "verification_status": "failed", "completed_files": 1},
             82,
-            None,
+            83,
         ),
         ("success", {"coverage_status": "complete", "score_available": True}, 82, 82),
-        # Missing legacy coverage is unknown; it cannot support a completeness claim.
-        ("success", None, 100, None),
+        # 无覆盖账本的历史成功任务按记录分展示（historical）。
+        ("success", None, 100, 100),
     ],
 )
-def test_report_score_is_hidden_when_execution_or_coverage_is_incomplete(status, coverage, score, expected):
-    task = SimpleNamespace(status=status, coverage=coverage, review_type="standard")
+def test_report_score_follows_reviewed_scope(status, coverage, score, expected):
+    task = SimpleNamespace(
+        status=status, coverage=coverage, review_type="standard", total_files=3, processed_files=0,
+        total_issues=0, severe_issues=0, high_issues=2, medium_issues=0, low_issues=1, score_version=None,
+    )
 
     assert display_report_score(task, score) == expected
 
@@ -287,7 +292,7 @@ def test_refuted_issue_remains_counted_but_does_not_affect_report_score(db, admi
     assert listed["score"] == detail["stats"]["score"]
 
 
-def test_legacy_report_without_coverage_hides_score_and_explains_unknown_scope(db, admin_user):
+def test_legacy_report_without_coverage_scores_historically_and_explains_unknown_scope(db, admin_user):
     project = _make_project(db, admin_user)
     task = ReviewTask(
         user_id=admin_user.id,
@@ -326,13 +331,15 @@ def test_legacy_report_without_coverage_hides_score_and_explains_unknown_scope(d
         if item["task_id"] == task.id
     )
 
-    assert detail["task"]["score"] is None
-    assert detail["stats"]["score"] is None
+    # 无覆盖账本的历史成功任务按已保存问题集复算出分，同时明确覆盖范围未知。
+    assert detail["task"]["score"] == 100
+    assert detail["stats"]["score"] == 100
+    assert detail["task"]["score_scope"]["scope"] == "historical"
     assert detail["task"]["coverage"]["coverage_status"] == "unknown"
-    assert listed["score"] is None
+    assert listed["score"] == 100
     assert listed["coverage"]["coverage_status"] == "unknown"
     default_items = list_reports(db, admin_user)["items"]
-    assert task.id not in {item["task_id"] for item in default_items}
+    assert task.id in {item["task_id"] for item in default_items}
     assert empty_coverage_task.id not in {item["task_id"] for item in default_items}
     assert verification_only_task.id not in {item["task_id"] for item in default_items}
 

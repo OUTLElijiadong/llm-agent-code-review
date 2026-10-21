@@ -118,6 +118,17 @@ export interface ReportListItem {
   error_message?: string | null
   coverage?: TaskCoverageOut | null
   source?: ReportSource
+  score_scope?: ScoreScope | null
+}
+
+/** 评分范围：complete 完整覆盖；partial 仅覆盖已审范围；historical 历史任务复算。 */
+export interface ScoreScope {
+  available: boolean
+  scope: 'complete' | 'partial' | 'historical' | null
+  label: string
+  reason?: string | null
+  reviewed_files?: number
+  total_files?: number
 }
 
 /** 报告详情(与后端 ReportDetailOut 对齐,issues 需前端单独调用 issue API 获取) */

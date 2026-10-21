@@ -2330,12 +2330,15 @@ def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
     )
 
     saved = db.get(ReviewTask, task.id)
-    assert saved.status == "failed"
+    # 一位专家截断但有效发言已抽取问题：按已完成发言范围出分。
+    assert saved.status == "success"
     assert saved.coverage["stage"] == "partial"
+    assert saved.coverage["coverage_status"] == "partial"
+    assert saved.coverage["score_scope"] == "partial"
     assert saved.coverage["extraction_status"] == "success"
     assert saved.summary == "主持已归纳有效部分"
-    assert saved.processed_files == 0
-    assert saved.score == 0
+    assert saved.processed_files == 1
+    assert saved.score == 100
     assert saved.coverage["summary_coverage"]["source_window_ids"] == ["C0001", "C0002"]
     assert saved.coverage["summary_coverage"]["history_projection"]["status"] == "success"
     assert saved.coverage["summary_coverage"]["history_projection"]["model_calls"] == 3
@@ -2418,7 +2421,8 @@ def test_finalize_review_persists_failed_host_compression_as_partial(
     )
 
     saved = db.get(ReviewTask, task.id)
-    assert saved.status == "failed"
+    assert saved.status == "success"
+    assert saved.coverage["score_scope"] == "partial"
     assert saved.summary.startswith("⚠️")
     assert saved.coverage["summary_coverage"]["failure_kind"] == "source_projection_failed"
     history = saved.coverage["summary_coverage"]["history_projection"]

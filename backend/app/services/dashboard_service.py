@@ -28,6 +28,7 @@ from app.services import rbac_service
 from app.services.project_member_service import get_visible_project_ids
 from app.services.report_service import (
     display_report_score,
+    metric_report_score,
     load_task_issue_stats,
     task_metrics_access_filter,
     visible_report_review_types,
@@ -287,7 +288,7 @@ def get_summary(db: Session, user: User) -> dict:
     # Stream a bounded number of ORM rows at a time; the dashboard may cover a
     # long history, so do not materialize every scored task in memory.
     for task in score_task_query.yield_per(500):
-        visible_score = display_report_score(task, task.score)
+        visible_score = metric_report_score(task, task.score)
         if visible_score is None:
             continue
         score_total += visible_score
@@ -409,7 +410,7 @@ def get_score_trend(db: Session, user: User, limit: int = 10) -> list[dict]:
             break
         offset += len(batch)
         for task in batch:
-            score = display_report_score(task, task.score)
+            score = metric_report_score(task, task.score)
             if score is None:
                 continue
             rows.append((task, score))

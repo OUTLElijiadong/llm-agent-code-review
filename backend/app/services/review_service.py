@@ -820,14 +820,9 @@ def _execute_review(
         if isinstance(db, Session):
             all_issues = db.query(ReviewIssue).filter(ReviewIssue.task_id == task.id).all()
         file_failures: list[str] = []
-        for code_file in files:
-            _check_cancelled(db, task, execution_token, lock=True)
-            _check_review_authorization(authorization_check)
-            task.coverage = {**(task.coverage or {}), "stage": "analyzing", "current_file": code_file.file_name,
-                             "total_files": int(task.total_files or len(files)),
-                             "completed_files": int(task.processed_files or 0),
-                             "completed_chunks": 0, "total_chunks": None}
-            _safe_commit(db, task)
+        failed_files: list = []
+
+        def review_file(code_file, failures: list[str]) -> bool:
             try:
                 file_issues = _review_one_file(
                     db, collab_agent, api_config, task, code_file, rules, user, profiles,
@@ -841,12 +836,12 @@ def _execute_review(
                 raise
             except ReviewCoverageError as exc:
                 _check_review_authorization(authorization_check)
-                file_failures.append(f"{code_file.file_name}: {'; '.join(exc.failures)}")
-                continue
+                failures.append(f"{code_file.file_name}: {'; '.join(exc.failures)}")
+                return False
             except Exception as exc:  # noqa: BLE001 - 单文件失败不应阻断其余文件覆盖
                 _check_cancelled(db, task, execution_token, lock=True)
                 _check_review_authorization(authorization_check)
-                file_failures.append(f"{code_file.file_name}: {exc}")
+                failures.append(f"{code_file.file_name}: {exc}")
                 coverage = task.coverage if isinstance(task.coverage, dict) else {}
                 ledger = dict(coverage.get("files") or {})
                 file_key = str(getattr(code_file, "id", code_file.file_name))
@@ -855,7 +850,7 @@ def _execute_review(
                 ledger[file_key] = entry
                 task.coverage = {**coverage, "files": ledger}
                 _safe_commit(db, task)
-                continue
+                return False
             all_issues.extend(file_issues)
             _check_cancelled(db, task, execution_token, lock=True)
             _check_review_authorization(authorization_check)
@@ -868,9 +863,41 @@ def _execute_review(
                                    f"文件 {task.processed_files}/{task.total_files}: {code_file.file_name} 审查完成,"
                                    f"累计 {len(all_issues)} 个问题",
                                    agent_code=ac)
+            return True
+
+        for code_file in files:
+            _check_cancelled(db, task, execution_token, lock=True)
+            _check_review_authorization(authorization_check)
+            task.coverage = {**(task.coverage or {}), "stage": "analyzing", "current_file": code_file.file_name,
+                             "total_files": int(task.total_files or len(files)),
+                             "completed_files": int(task.processed_files or 0),
+                             "completed_chunks": 0, "total_chunks": None}
+            _safe_commit(db, task)
+            if not review_file(code_file, file_failures):
+                failed_files.append(code_file)
+
+        if failed_files:
+            # 失败文件统一重试一次：模型偶发超时/解析失败不应让整份审查失效。
+            retry_failures: list[str] = []
+            for code_file in failed_files:
+                _check_cancelled(db, task, execution_token, lock=True)
+                _check_review_authorization(authorization_check)
+                if isinstance(db, Session):
+                    # 失败尝试已落库的部分问题由重试结果替换，避免重复计分。
+                    db.query(ReviewIssue).filter(
+                        ReviewIssue.task_id == task.id,
+                        ReviewIssue.file_id == code_file.id,
+                    ).delete(synchronize_session=False)
+                    _safe_commit(db)
+                review_file(code_file, retry_failures)
+            file_failures = retry_failures
 
         if file_failures:
-            raise ReviewCoverageError(file_failures)
+            if int(task.processed_files or 0) <= 0:
+                raise ReviewCoverageError(file_failures)
+            # 已有文件完成审查：按已审范围出分，失败文件写入覆盖缺口，不把整份结果判失败。
+            if isinstance(db, Session):
+                all_issues = db.query(ReviewIssue).filter(ReviewIssue.task_id == task.id).all()
 
         _check_cancelled(db, task, execution_token, lock=True)
         _check_review_authorization(authorization_check)
@@ -901,9 +928,21 @@ def _execute_review(
         task.score_version = SCORING_VERSION
         task.score_breakdown = score_breakdown
         task.summary = _build_summary(profiles, int(task.total_files or len(files)), len(all_issues), task.score)
+        if file_failures:
+            # 放在加锁复查之后写入，避免 _check_cancelled 刷新任务时丢弃未提交的说明。
+            task.error_message = ("部分文件重试后仍审查失败，分数仅代表已审范围：" + "; ".join(file_failures))[:500]
+            task.summary += (
+                f"其中 {len(file_failures)} 个文件重试后仍审查失败，评分仅代表已完成审查的"
+                f" {int(task.processed_files or 0)} 个文件。"
+            )
+        else:
+            task.error_message = None
         task.status = "success"
         task.coverage = {**(task.coverage or {}), "stage": "complete", "current_file": None}
         task.coverage = _review_coverage_snapshot(task, stage="complete")
+        if file_failures:
+            # 快照会重建覆盖账本，失败文件缺口需重新挂上供报告“覆盖记录”展示。
+            task.coverage = {**task.coverage, "partial_failures": [item[:300] for item in file_failures]}
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         _check_review_authorization(authorization_check)

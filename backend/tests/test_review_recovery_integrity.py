@@ -497,7 +497,8 @@ def test_failed_chunk_does_not_prevent_later_chunks_from_running(isolated_rows, 
 
     rows.database.refresh(rows.task)
     ledger = rows.task.coverage["files"][str(rows.code_file.id)]
-    assert invoked == [0, 1]
+    # 失败文件统一重试一次；重试仍失败且没有任何文件完成时整份任务失败。
+    assert invoked == [0, 1, 0, 1]
     assert rows.task.status == "failed"
     assert ledger["completed_chunk_indexes"] == [1]
     assert ledger["failed_chunks"][0]["index"] == 0
@@ -534,9 +535,13 @@ def test_failed_file_does_not_prevent_later_files_from_running(isolated_rows, mo
         get_agent_profiles("standard"), "", execution_token="initial-lease",
     )
 
-    assert invoked == ["source.py", "second.py"]
-    assert rows.task.status == "failed"
+    # 失败文件重试一次；仍失败时按已审文件出分，失败文件写入覆盖缺口。
+    assert invoked == ["source.py", "second.py", "source.py"]
+    assert rows.task.status == "success"
     assert rows.task.processed_files == 1
+    assert rows.task.score_version
+    assert rows.task.coverage["partial_failures"]
+    assert "仅代表已审范围" in rows.task.error_message
 
 
 def test_one_collaborative_failure_keeps_other_agents_valid_evidence(isolated_rows, monkeypatch):

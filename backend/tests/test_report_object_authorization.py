@@ -175,7 +175,9 @@ def test_terminal_standard_reports_remain_readable(scope, task_state, actor):
     for endpoint in READ_ENDPOINTS:
         response = _read(scope, endpoint)
         assert response.status_code == 200, endpoint
-    assert scope["client"].get("/reports").json()["data"]["total"] == 0
+    # 已有审查结果的失败任务按已审范围出分并进入默认列表；取消任务只在历史视图。
+    expected_default = 1 if task_state == "failed" else 0
+    assert scope["client"].get("/reports").json()["data"]["total"] == expected_default
     history = scope["client"].get("/reports", params={"include_history": True}).json()["data"]
     assert history["total"] == 1
 

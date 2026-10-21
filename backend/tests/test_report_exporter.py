@@ -666,7 +666,7 @@ def test_legacy_report_export_marks_missing_coverage_unknown():
 
 
 @pytest.mark.parametrize("coverage_status", ["partial", "failed", "unknown"])
-def test_report_exports_hide_explicit_scores_when_coverage_is_not_complete(coverage_status):
+def test_report_exports_score_reviewed_scope_when_coverage_is_not_complete(coverage_status):
     task = _make_task(
         score=100,
         coverage={"coverage_status": coverage_status, "score_available": True},
@@ -674,9 +674,22 @@ def test_report_exports_hide_explicit_scores_when_coverage_is_not_complete(cover
 
     result = export_to_dict(task, [], "仍保留已取得的报告内容", 100)
 
+    # 覆盖不完整不再隐藏分数：按已审范围规则出分并标注评分范围。
+    assert result["score"] == 100
+    assert result["task_info"]["score"] == 100
+    assert result["statistics"]["score_breakdown"]["score_scope"] == "partial"
+    assert result["statistics"]["risk_level"] != "未评估"
+
+
+def test_report_export_without_any_reviewed_scope_is_not_scored():
+    task = _make_task(
+        status="failed", score=0, processed_files=0, total_issues=0,
+        coverage={"coverage_status": "failed", "score_available": False},
+    )
+
+    result = export_to_dict(task, [], "没有任何文件完成审查", 0)
+
     assert result["score"] is None
-    assert result["task_info"]["score"] is None
-    assert result["statistics"]["score_breakdown"]["score"] is None
     assert result["statistics"]["score_breakdown"]["score_source"] == "unavailable"
     assert result["statistics"]["risk_level"] == "未评估"
 
@@ -750,7 +763,7 @@ def test_refuted_finding_status_is_readable_in_html_word_and_pdf(monkeypatch):
     assert "已证伪" in pdf_text
 
 
-def test_inconsistent_coverage_and_verification_statuses_remain_separate_and_hide_score():
+def test_inconsistent_coverage_and_verification_statuses_remain_separate_and_scope_score():
     result = export_to_dict(
         _make_task(coverage={
             "coverage_status": "partial",
@@ -764,7 +777,8 @@ def test_inconsistent_coverage_and_verification_statuses_remain_separate_and_hid
 
     assert result["task_info"]["coverage"]["coverage_status"] == "partial"
     assert result["task_info"]["coverage"]["verification_status"] == "complete"
-    assert result["score"] is None
+    assert result["score"] == 100
+    assert result["statistics"]["score_breakdown"]["score_scope"] == "partial"
     assert "覆盖状态：部分覆盖" in "\n".join(result["scope_lines"])
     assert "验证状态：已核验通过" in "\n".join(result["scope_lines"])
 
@@ -774,13 +788,13 @@ def test_pdf_and_word_score_formatters_show_unavailable_as_unassessed():
     assert format_word_score(None) == "未评估"
 
 
-def test_report_without_coverage_snapshot_does_not_publish_a_score():
+def test_report_without_coverage_snapshot_scores_as_historical_task():
     result = export_to_dict(_make_task(score=88, coverage={}), [], "历史报告", 88)
 
     assert result["task_info"]["coverage"]["coverage_status"] == "unknown"
-    assert result["score"] is None
-    assert result["task_info"]["score"] is None
-    assert result["statistics"]["score_breakdown"]["score_source"] == "unavailable"
+    assert result["score"] == 88
+    assert result["task_info"]["score"] == 88
+    assert result["statistics"]["score_breakdown"]["score_scope"] == "historical"
 
 
 def test_export_to_json_preserves_chinese_chars():
@@ -868,6 +882,7 @@ def test_nonempty_report_uses_final_issues_as_only_score_source():
         "score": 73,
         "risk_level": "中风险",
         "score_source": "review_issues",
+        "score_scope": "complete",
     }
 
 

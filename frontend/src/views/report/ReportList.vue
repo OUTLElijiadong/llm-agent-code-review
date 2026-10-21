@@ -231,6 +231,10 @@ function canDisplayReport(row: ReportListItem): boolean {
 }
 
 function displayScore(row: ReportListItem): number | null {
+  // 后端评分范围是唯一口径：部分覆盖也按规则出分，只有没有已审内容时不出分。
+  if (row.score_scope) {
+    return row.score_scope.available && typeof row.score === 'number' && Number.isFinite(row.score) ? row.score : null
+  }
   // 沙箱只展示后端按检查项通过率规则给出的验证分（score_basis 为规则版本）。
   if (row.source?.type === 'sandbox_test' && row.coverage?.score_basis !== 'sandbox-check-pass-rate-v1') return null
   const coverageAvailable = row.coverage?.score_available
@@ -351,10 +355,12 @@ function sandboxAiReviewTitle(row: ReportListItem): string {
 function sandboxScoreTitle(row: ReportListItem) {
   const score = displayScore(row)
   if (score === null) {
-    return String(row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
+    return String(row.score_scope?.reason || row.coverage?.score_unavailable_reason || '没有可核验的评分回执；0 分与未知分数分别处理')
   }
-  if (row.source?.type === 'sandbox_test') return `沙箱验证分 ${score}（已执行检查项通过率）`
-  return `代码质量评分 ${score}`
+  const scope = row.score_scope?.label ? `，${row.score_scope.label}` : ''
+  if (row.source?.type === 'sandbox_test') return `沙箱验证分 ${score}（已执行检查项通过率${scope}）`
+  if (row.source?.type === 'pentest') return `渗透已测范围分 ${score}（按已确认发现扣分${scope}）`
+  return `规则评分 ${score}（按问题严重度扣分${scope}）`
 }
 
 async function loadData() {

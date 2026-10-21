@@ -86,8 +86,9 @@ def test_json_export_matches_page_file_inventory_and_frozen_versions(admin_clien
     detail, files = collect_report_files(client, task_id)
     report = json.loads(files["json"])
     assert report["statistics"]["total_issues"] == detail["stats"]["total_issues"] == 3
-    assert report["score"] is detail["stats"]["score"] is None
-    assert report["statistics"]["score_breakdown"]["score_unavailable_reason"] == "coverage_not_complete"
+    # 无覆盖账本的历史任务按已保存问题集复算，页面与导出口径一致。
+    assert report["score"] == detail["stats"]["score"] == 74
+    assert report["statistics"]["score_breakdown"]["score_scope"] == detail["task"]["score_scope"]["scope"]
     assert {item["file_name"] for item in report.get("files", [])} == {
         item["file_name"] for item in detail["files"]
     }
@@ -153,8 +154,8 @@ def test_empty_report_retains_all_submitted_files_and_historical_score(admin_cli
     report = json.loads(files["json"])
     assert len(report["files"]) == len(detail["files"]) == 3
     assert report["statistics"]["total_issues"] == detail["stats"]["total_issues"] == 0
-    assert report["score"] is detail["stats"]["score"] is None
-    assert report["statistics"]["score_breakdown"]["score_unavailable_reason"] == "coverage_not_complete"
+    assert report["score"] == detail["stats"]["score"] is not None
+    assert report["statistics"]["score_breakdown"]["score_scope"] == detail["task"]["score_scope"]["scope"]
 
 
 def test_legacy_file_inventory_does_not_invent_frozen_versions(admin_client):

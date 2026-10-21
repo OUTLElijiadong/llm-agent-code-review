@@ -253,10 +253,12 @@
             <div v-else class="risk-tag" data-testid="report-domain-score-label">
               领域评分
             </div>
+            <div v-if="scoreScope?.label" class="score-scope-tag" data-testid="report-score-scope">{{ scoreScope.label }}</div>
+            <div v-if="scoreAuditLabel" class="score-scope-tag" data-testid="report-score-audit">{{ scoreAuditLabel }}</div>
           </div>
           <div v-else class="cover-score score-unavailable" data-testid="report-score-unavailable">
             <strong>未评估</strong>
-            <span>本次报告没有有效评分，不能推断为零风险。</span>
+            <span>{{ scoreScope?.reason || String(scoreAudit?.reason || '') || '本次报告没有有效评分，不能推断为零风险。' }}</span>
           </div>
         </div>
 
@@ -691,7 +693,7 @@ import {
   exportReport as apiExportReport,
 } from '@/api/report'
 import { getTaskIssues } from '@/api/review'
-import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType } from '@/types/report'
+import type { ReportDetailOut, ReportIssue, ReportFormat, ReportTemplateType, ScoreScope } from '@/types/report'
 import type { TaskCoverageOut } from '@/types/review'
 import { PRISM_SEVERITY_COLORS, PRISM_DIM_COLORS } from '@/components/chart/prismTheme'
 import { reviewTypeLabel } from '@/constants/reviewType'
@@ -1109,11 +1111,22 @@ const score = computed(() => {
   const value = Number(stats.value.score ?? 0)
   return Number.isFinite(value) ? value : 0
 })
+const scoreScope = computed(() => report.value?.task?.score_scope as ScoreScope | undefined)
+const scoreAudit = computed(() => report.value?.task?.score_audit as Record<string, unknown> | undefined)
 const scoreAvailable = computed(() => (
   stats.value.score !== null
   && stats.value.score !== undefined
-  && (report.value?.task?.coverage as TaskCoverageOut | undefined)?.score_available !== false
+  // 后端评分范围优先：部分覆盖也按规则出分；旧响应才退回覆盖开关。
+  && (scoreScope.value
+    ? scoreScope.value.available
+    : (report.value?.task?.coverage as TaskCoverageOut | undefined)?.score_available !== false)
 ))
+const scoreAuditLabel = computed(() => {
+  const status = String(scoreAudit.value?.status || '')
+  if (status === 'trusted') return '小菱终审：可信'
+  if (status === 'rescored') return '小菱终审：已打回重判，采用规则分'
+  return ''
+})
 const sandboxAiReviewStatus = computed(() => report.value?.source?.ai_review?.status ?? 'unknown')
 const sandboxAiReviewLabel = computed(() => {
   if (sandboxAiReviewStatus.value === 'complete') return '完成'
@@ -2019,6 +2032,11 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   margin-top: 4px;
 }
 
+.score-scope-tag {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: .85;
+}
 .risk-tag {
   padding: 4px 14px;
   border: 1.5px solid;

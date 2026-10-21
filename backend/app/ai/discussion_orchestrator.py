@@ -2393,25 +2393,36 @@ def _finalize_review(
             and not metrics.get("failed_turns") and not metrics.get("errors")
             and metrics.get("summary_status") == "success"
         )
-        task.processed_files = 1 if complete else 0
+        # 有效发言已形成并完成问题抽取时，即使部分轮次失败也按已完成发言出分；
+        # 分数只代表已审范围，覆盖缺口写入 coverage。主持人接管未抽取问题时不出分。
+        scored = complete or metrics.get("extraction_status") == "success"
+        task.processed_files = 1 if scored else 0
         task.total_issues = len(issue_rows)
         task.severe_issues = sev_count["严重"]
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
         score_breakdown = compute_score_breakdown(sev_count)
-        task.score = int(score_breakdown["score"]) if complete else 0
-        task.score_version = SCORING_VERSION if complete else None
-        task.score_breakdown = score_breakdown if complete else None
-        metrics["score_available"] = complete
+        scope = "complete" if complete else "partial"
+        # score 列非空：不出分时写 0 占位，并以 score_version=None 标识非规则分。
+        task.score = int(score_breakdown["score"]) if scored else 0
+        task.score_version = SCORING_VERSION if scored else None
+        task.score_breakdown = {**score_breakdown, "score_scope": scope} if scored else None
+        metrics["score_available"] = scored
+        metrics["score_scope"] = scope if scored else None
+        if not scored:
+            metrics["score_unavailable_reason"] = "主持人接管后未抽取结构化问题，没有可计分的问题集"
         task.summary = consensus or "圆桌讨论已完成。"
-        task.error_message = None if complete else "圆桌审查覆盖不完整，已保存有效部分，不能作为完整审查结论。"
-        task.status = "success" if complete else "failed"
+        task.error_message = None if complete else (
+            "圆桌部分轮次未完成，分数仅代表已完成的有效发言范围。" if scored
+            else "圆桌审查覆盖不完整，已保存有效部分，不能作为完整审查结论。"
+        )
+        task.status = "success" if scored else "failed"
         if call_budget:
             metrics["model_calls_used"] = call_budget.used
         task.coverage = {**(task.coverage or {}), **metrics, "stage": "complete" if complete else "partial"}
         task.coverage["coverage_status"] = "complete" if complete else "partial"
-        task.coverage["verification_status"] = "complete" if complete else "failed"
+        task.coverage["verification_status"] = "complete" if complete else ("partial" if scored else "failed")
         task.end_time = datetime.now(timezone.utc)
         task.duration_ms = int((time.time() - t0) * 1000)
         # 问题记录与任务成功状态必须原子提交，避免生成半份报告。
@@ -2450,6 +2461,7 @@ def _finalize_review(
                 task.score = 0
                 task.score_version = None
                 task.score_breakdown = None
+                metrics["score_unavailable_reason"] = "圆桌报告整理失败，问题集未落库，按规则不出分"
                 task.coverage = {
                     **(task.coverage or {}), **metrics, "stage": "failed",
                     "coverage_status": "failed", "verification_status": "failed",

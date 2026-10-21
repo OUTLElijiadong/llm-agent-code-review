@@ -105,7 +105,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
     task = report_service.get_readable_report_task(db, user, task_id)
 
     if task.review_type in {"sandbox_test", "pentest"}:
-        score = task.score if report_service._score_is_available(task) else None
+        score = report_service.display_report_score(task, task.score)
         return task, [], task.summary or "", score
 
     # Generic report permission allows an overview, but a generated report may
@@ -120,7 +120,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
             detail={"required_permission": PermissionCode.ISSUE_VIEW},
         )
 
-    score = task.score if report_service._score_is_available(task) else None
+    score = report_service.display_report_score(task, task.score)
 
     issues: List[ReviewIssue] = (
         db.query(ReviewIssue)
@@ -128,7 +128,7 @@ def _get_task_with_issues(db: Session, task_id: int, user: User) -> tuple:
         .order_by(ReviewIssue.id.asc())
         .all()
     )
-    summary = report_service.display_report_summary(task.summary, score_available=score is not None)
+    summary = report_service.display_report_summary(task.summary, score_available=score is not None, score=score)
     return task, issues, summary, score
 
 

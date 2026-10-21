@@ -112,21 +112,26 @@ def test_security_scan_persists_readable_owner_scoped_report_and_partial_coverag
     assert task.status == "partial"
     assert task.review_type == "security_scan"
     assert task.coverage["verification_status"] == "partial"
-    assert task.coverage["score_available"] is False
+    # 部分扫描按已扫描范围出分，并明确标注评分范围。
+    assert task.coverage["score_available"] is True
+    assert task.coverage["score_scope"] == "partial"
     assert task.coverage["unscanned"] == ["src/other.py: 语义分析未执行"]
     assert report.content_json["execution_status"] == "partial"
-    assert report.content_json["score_available"] is False
-    assert report.content_json["risk_score"] is None
+    assert report.content_json["score_available"] is True
+    assert isinstance(report.content_json["risk_score"], int)
     assert report.content_json["findings"][0]["title"] == issue.title == "未授权命令执行"
     assert "验证覆盖" in report.content_json["report_md"]
-    assert "风险评分：未评估" in report.content_json["report_md"]
-    assert "58/100" not in report.content_json["report_md"]
+    assert f"风险评分：{report.content_json['risk_score']}/100" in report.content_json["report_md"]
+    assert "仅代表已扫描范围" in report.content_json["report_md"]
+    # 来源自报的 58 分只作为核对值披露，不作为报告评分。
+    assert "来源评分：58/100" in report.content_json["report_md"]
     assert "src/other.py" in report.content_json["report_md"]
     assert "*" not in report.content_json["report_md"]
     assert task_file.file_snapshot["file_path"] == "src/app.py"
 
     detail = report_service.get_report_detail(db, owner, task_id)
-    assert detail["task"]["score"] is None
+    assert detail["task"]["score"] == report.content_json["risk_score"]
+    assert detail["task"]["score_scope"]["scope"] == "partial"
     assert detail["source"]["type"] == "security_scan"
     assert detail["source"]["security_report"]["threat_model"]["data_flows"]
     assert any(item["file_path"] == "src/app.py" for item in detail["files"])
@@ -325,7 +330,8 @@ def test_fullchain_verification_failure_persists_completed_analysis_as_partial_r
         assert task.status == "partial"
         assert task.total_issues == 1
         assert task.coverage["verification_status"] == "partial"
-        assert task.coverage["score_available"] is False
+        assert task.coverage["score_available"] is True
+        assert task.coverage["score_scope"] == "partial"
         assert task.coverage["unscanned"]
         assert issue.title == "命令执行入口未校验"
         assert report.content_json["execution_status"] == "partial"
@@ -598,10 +604,12 @@ def test_successful_security_scan_without_coverage_evidence_reports_unknown_scop
     assert task.coverage["verification_status"] == "unknown"
     assert task.coverage["unscanned"] == ["存在未完成或未能确认的扫描范围"]
     assert report.content_json["coverage"]["coverage_status"] == "unknown"
-    assert report.content_json["score_available"] is False
-    assert report.content_json["risk_score"] is None
+    # 已扫描 12 个文件但覆盖证据缺失：按已扫范围出分，不采用来源自报的 99 分。
+    assert report.content_json["score_available"] is True
+    assert report.content_json["risk_score"] == 100
+    assert report.content_json["coverage"]["score_scope"] == "partial"
     assert "覆盖范围：未知" in report.content_json["report_md"]
-    assert "风险评分：未评估" in report.content_json["report_md"]
+    assert "风险评分：100/100" in report.content_json["report_md"]
     assert "存在未完成或未能确认的扫描范围" in report.content_json["report_md"]
 
 
@@ -647,9 +655,10 @@ def test_security_report_removes_ai_markdown_and_rejects_non_finite_scores(db):
     report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
     issue = db.query(ReviewIssue).filter_by(task_id=task_id).one()
     detail = report_service.get_report_detail(db, owner, task_id)
-    assert task.coverage["score_available"] is False
-    assert report.content_json["risk_score"] is None
-    assert detail["task"]["score"] is None
+    # 非有限的来源分被丢弃，改按已核验发现规则计分（1 个高危 = 92）。
+    assert task.coverage["score_available"] is True
+    assert report.content_json["risk_score"] == 92
+    assert detail["task"]["score"] == 92
     assert "*" not in report.content_json["report_md"]
     assert "审计结论" in report.content_json["report_md"]
     assert "CWE：CWE-284" in report.content_json["report_md"]

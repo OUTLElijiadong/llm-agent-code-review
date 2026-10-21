@@ -461,7 +461,8 @@ def test_dashboard_score_average_omits_unverified_historical_scores(db, source_o
 
     assert summary["avg_score"] == 0
     assert summary["code_review_count"] == 0
-    assert next(item for item in summary["recent_tasks"] if item["id"] == task.id)["score"] is None
+    # 最近任务仍展示按历史问题集复算的分数；只是不混入完整覆盖均分。
+    assert next(item for item in summary["recent_tasks"] if item["id"] == task.id)["score"] == 87
 
 
 @pytest.mark.parametrize("source", ["standard", "discuss", "sandbox_test", "pentest"])
@@ -497,7 +498,8 @@ def test_failed_sources_preserve_availability_and_success_counts(db, source_owne
     expected_count = 5 if source == "pentest" else 2
     assert report_service.get_report_detail(db, source_owner, task.id)["stats"]["total_issues"] == expected_count
     assert _listed(db, source_owner, task)["status"] == "failed"
-    assert report_service.list_reports(db, source_owner)["total"] == 0
+    # 失败但已有审查结果的报告按已审范围进入默认列表，不再只能在历史中找到。
+    assert report_service.list_reports(db, source_owner)["total"] == 1
     assert report_service.list_reports(db, source_owner, include_history=True)["total"] == 1
     summary = dashboard_service.get_summary(db, source_owner)
     assert summary["review_count"] == 0
