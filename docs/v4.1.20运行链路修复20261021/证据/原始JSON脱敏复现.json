@@ -1,0 +1,27 @@
+[
+  {
+    "ai_call_log_id": 20255,
+    "original_error": {
+      "message": "Unterminated string starting at",
+      "position": 1355,
+      "line": 1,
+      "column": 1356
+    },
+    "truncated_response_still_rejected": true
+  },
+  {
+    "ai_call_log_id": 20265,
+    "original_error": {
+      "message": "Expecting value",
+      "position": 3068,
+      "line": 1,
+      "column": 3069
+    },
+    "repair": "仅为裸severity枚举补引号",
+    "repaired_enum_count": 2,
+    "issue_count": 4,
+    "matches_minimal_syntax_repair": true,
+    "preserved_issue_field_count": 68,
+    "preserved_total_field_count": 71
+  }
+]

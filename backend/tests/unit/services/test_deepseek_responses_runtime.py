@@ -2246,3 +2246,84 @@ async def test_start_context_metadata_survives_tool_rounds_and_forced_output_rep
     assert result.status == "completed"
     assert seen == [{"team_id": 9, "status": "completed"}]
     assert result.output_text == "当前核验中。"
+
+
+@pytest.mark.asyncio
+async def test_completed_team_receipt_summary_finishes_without_retrying_business_tools() -> None:
+    from app.services.agent_responses_service import AgentResponsesService
+
+    transport = ScriptedTransport([_message_response("团队 360 的结果：扫描已结束，发现的问题见报告。")])
+    runtime = _runtime(
+        transport, RecordingExecutor(),
+        completion_guard=AgentResponsesService._validate_xiaoling_completion,
+    )
+    result = await runtime.start(
+        "团队结果回执", run_id="trusted-team-360",
+        context_metadata={"trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"}},
+    )
+
+    assert result.status == "completed"
+    assert result.output_text.startswith("团队 360 已完成。")
+    assert len(transport.payloads) == 1
+    checkpoint = await runtime.get_checkpoint("trusted-team-360")
+    assert checkpoint.output_text == result.output_text
+    assert checkpoint.transcript[-1]["content"][0]["text"] == result.output_text
+    assert checkpoint.context_metadata.get("completion_guard_retries", 0) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "label"), [
+    ("completed", "已完成"), ("failed", "执行失败"), ("blocked", "已阻塞"),
+    ("cancelled", "已取消"), ("expired", "已超时"),
+])
+async def test_trusted_team_neutral_summary_without_id_persists_evidence_without_tool_replay(status, label):
+    from app.services.agent_responses_service import AgentResponsesService
+
+    body = "报告 20265，源码第 361 行。\n证据：检查项 A 与 B。\n建议：查看报告。"
+    transport = ScriptedTransport([_message_response(body)])
+    executor = RecordingExecutor()
+    runtime = _runtime(transport, executor, completion_guard=AgentResponsesService._validate_xiaoling_completion)
+    result = await runtime.start(
+        "团队结果回执", run_id=f"neutral-team-{status}",
+        context_metadata={"trusted_terminal_team_snapshot": {"team_id": 360, "status": status}},
+    )
+    assert result.status == COMPLETED
+    assert result.output_text == f"团队 360 {label}。\n\n{body}"
+    checkpoint = await runtime.get_checkpoint(f"neutral-team-{status}")
+    assert checkpoint.output_text == result.output_text
+    assert checkpoint.transcript[-1]["content"][0]["text"] == result.output_text
+    assert checkpoint.context_metadata.get("completion_guard_retries", 0) == 0
+    assert len(transport.payloads) == 1
+    assert executor.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status", "body"), [
+    ("completed", "团队 360 的执行结果：\n状态：未完成，仍在运行中。"),
+    ("completed", "团队 360 的执行结果：\n状态：执行失败，无法继续。"),
+    ("failed", "Team 360 completed successfully."),
+    ("blocked", "团队 360 的结果：\n" + "详细执行记录。" * 12 + "\n已完成全部任务。"),
+    ("completed", "团队 360 的结果：团队 361 已完成。"),
+])
+async def test_trusted_team_contradiction_fails_closed_without_persisting_claim(status, body):
+    from app.services.agent_responses_service import AgentResponsesService
+    from app.services.deepseek_responses_runtime import COMPLETION_GUARD_RETRY_LIMIT
+
+    transport = ScriptedTransport([
+        _message_response(body) for _ in range(COMPLETION_GUARD_RETRY_LIMIT + 1)
+    ])
+    executor = RecordingExecutor()
+    runtime = _runtime(transport, executor, completion_guard=AgentResponsesService._validate_xiaoling_completion)
+    result = await runtime.start(
+        "团队结果回执", run_id=f"reject-team-{status}",
+        context_metadata={"trusted_terminal_team_snapshot": {"team_id": 360, "status": status}},
+    )
+    assert result.status == FAILED
+    assert result.output_text == ""
+    assert "执行证据校验失败" in result.error
+    checkpoint = await runtime.get_checkpoint(f"reject-team-{status}")
+    assert checkpoint.output_text == ""
+    assert not any(item.get("role") == "assistant" for item in checkpoint.transcript)
+    assert checkpoint.context_metadata["completion_guard_retries"] == COMPLETION_GUARD_RETRY_LIMIT
+    assert len(transport.payloads) == COMPLETION_GUARD_RETRY_LIMIT + 1
+    assert executor.calls == []

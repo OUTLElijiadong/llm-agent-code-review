@@ -740,12 +740,15 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
     from sqlalchemy.orm import Session
 
     import app.ai.discussion_orchestrator as orchestrator_module
+    from app.ai.multi_agent import GENERAL_AGENT
     _seed_execution_actor(db, 21, 901)
     monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "pending-session"
     bus = FakeDiscussionBus(session=SimpleNamespace(
-        status="pending", cancel_event=threading.Event(),
+        status="pending", cancel_event=threading.Event(), owner_user_id=21, progress={},
+        terminal_status="", report_task_id=0, task_id=0,
     ))
+    bus._persist = False
     _install_bus(monkeypatch, bus)
     module.register_pending(
         session_id,
@@ -753,7 +756,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
         project_id=901,
         code="print('hello')",
         language="python",
-        profiles=("security",),
+        profiles=(GENERAL_AGENT,),
     )
     monkeypatch.setattr(module, "_load_ws_user", lambda token: _user(21))
     starts: list[dict[str, Any]] = []
@@ -763,7 +766,10 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
 
         async def start_discussion(self, **kwargs: Any) -> None:
             """保存讨论启动参数并立即完成。"""
+            bus.publish_control(session_id, "started", {"status": "active"})
             starts.append(kwargs)
+            bus.session.status = "concluded"
+            bus.session.terminal_status = "success"
 
     monkeypatch.setattr(orchestrator_module, "DiscussionOrchestrator", FakeOrchestrator)
     websocket = FakeWebSocket(
@@ -782,7 +788,7 @@ async def test_ws_pending_session_starts_orchestrator_with_auth_subprotocol(
             "project_id": 901,
             "code": "print('hello')",
             "language": "python",
-            "profiles": ("security",),
+            "profiles": (GENERAL_AGENT,),
         },
     ]
     assert bus.controls == [(session_id, "started", {"status": "active"})]
@@ -802,7 +808,9 @@ async def test_pending_discussion_is_cancelled_when_owner_session_is_replaced(
     monkeypatch.setattr(module, "SessionLocal", lambda: Session(bind=db.get_bind()))
     session_id = "expired-owner-session"
     bus = DiscussionBus()
-    bus.create_session(session_id, task_id=0, file_name="expired.py", owner_user_id=21).status = "pending"
+    bus.create_session(
+        session_id, task_id=0, file_name="expired.py", owner_user_id=21, project_id=901,
+    ).status = "pending"
     monkeypatch.setattr(module.DiscussionBus, "instance", classmethod(lambda cls: bus))
     monkeypatch.setattr(module, "_SESSION_CHECK_INTERVAL", 0.001)
     session_checks = iter((True, False))
@@ -919,6 +927,7 @@ async def test_pending_discussion_stops_when_parent_xiaoling_run_is_cancelled(
     pending = module.PendingDiscussion(
         session_id,
         user_id=21,
+        project_id=7,
         usage_origin={"agent_run_id": 123},
     )
 

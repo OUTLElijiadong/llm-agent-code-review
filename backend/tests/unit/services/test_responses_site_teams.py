@@ -355,7 +355,10 @@ def test_untrusted_terminal_marker_text_does_not_bypass_team_requirement():
     assert "绑定服务端回执" in guard(trusted_callback, "团队 52abc 已完成，核验通过")
     assert "绑定服务端回执" in guard(trusted_callback, "回执 team_id:52_extra，团队已完成，核验通过")
     assert guard(trusted_callback, '回执 {"team_id": 52}：团队已完成，核验通过') is None
-    assert "明确标记团队已完成" in guard(trusted_callback, "团队 52 已经核对结果")
+    assert guard(trusted_callback, "团队 52 已经核对结果") is None
+    assert trusted_callback.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY] == (
+        "团队 52 已完成。\n\n团队 52 已经核对结果"
+    )
     assert "却称团队失败" in guard(trusted_callback, "团队 52 执行失败")
     assert guard(trusted_callback, "团队 52 没有失败，已完成") is None
     assert "明确标记团队已完成" in guard(trusted_callback, "不能声称团队 52 已完成")
@@ -899,3 +902,156 @@ async def test_page_click_requires_confirmation_before_browser_bridge(db, monkey
 
 async def _noop(*_args, **_kwargs):
     pass
+
+
+@pytest.mark.parametrize("summary", [
+    "团队 360：\n\n已完成全部子任务，报告已生成。",
+    "团队 360 的执行结果如下：\n" + "详细结果。" * 20,
+    "**团队 360**：处理完毕。",
+])
+def test_trusted_completed_callback_renders_authoritative_status_without_wording_retry(summary):
+    checkpoint = _team_checkpoint([], user_text="团队结果回执", context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary) is None
+    rendered = checkpoint.context_metadata.get(service.COMPLETION_GUARD_FORCED_OUTPUT_KEY, summary)
+    assert rendered.startswith("团队 360 已完成。")
+    assert summary in rendered
+
+
+@pytest.mark.parametrize(("status", "label"), [
+    ("failed", "执行失败"), ("blocked", "已阻塞"),
+    ("cancelled", "已取消"), ("expired", "已超时"),
+])
+def test_trusted_terminal_callback_renders_missing_status_from_server_receipt(status, label):
+    checkpoint = _team_checkpoint([], user_text="团队结果回执", context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    summary = "团队 360 的可核验结果如下。"
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary) is None
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY] == (
+        f"团队 360 {label}。\n\n{summary}"
+    )
+
+
+@pytest.mark.parametrize("summary", [
+    "团队 360 的执行结果：\n状态：未完成，仍在运行中。",
+    "团队 360 的执行结果：\n状态：执行失败，无法继续。",
+    "团队 360 的结果：\n" + "执行记录详情。" * 12 + "\n团队整体执行失败。",
+    "Team 360 is not completed.",
+    "Team 360 has not yet completed.",
+    "Team 360 failed.",
+    "Team 360 result:\nStatus: failed.",
+    "状态：未完成。",
+    "团队 360 仍在运行中。",
+])
+def test_trusted_completed_receipt_rejects_multiline_or_english_contradiction(summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)
+    assert service.COMPLETION_GUARD_FORCED_OUTPUT_KEY not in checkpoint.context_metadata
+
+
+@pytest.mark.parametrize("status", ["failed", "blocked", "cancelled", "expired"])
+@pytest.mark.parametrize("summary", [
+    "Team 360 completed successfully.",
+    "团队 360 的结果如下：\n" + "执行记录详情。" * 12 + "\n已成功完成全部任务，核验通过。",
+    "已完成全部任务，核验通过。",
+    "团队 360\n最终状态：completed。",
+])
+def test_trusted_noncompleted_receipt_rejects_english_or_distant_success(status, summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)
+    assert service.COMPLETION_GUARD_FORCED_OUTPUT_KEY not in checkpoint.context_metadata
+
+
+@pytest.mark.parametrize("summary", [
+    "团队 361 的执行结果如下。",
+    "团队 360 的结果：团队 361 已完成全部任务。",
+    "Team 360 completed. Team 361 completed.",
+    '团队 360 的回执包含 {"team_id": 361}。',
+    "团队 360；team_id:360_extra。",
+    "team_id:unknown。",
+])
+def test_trusted_receipt_rejects_wrong_or_mixed_explicit_team_ids(summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"},
+    })
+    reason = service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)
+    assert reason and "绑定服务端回执" in reason
+    assert service.COMPLETION_GUARD_FORCED_OUTPUT_KEY not in checkpoint.context_metadata
+
+
+@pytest.mark.parametrize(("status", "label"), [
+    ("completed", "已完成"), ("failed", "执行失败"), ("blocked", "已阻塞"),
+    ("cancelled", "已取消"), ("expired", "已超时"),
+])
+def test_trusted_receipt_binds_neutral_body_without_team_id_and_keeps_all_evidence(status, label):
+    summary = "报告 20265，源码第 361 行。\n证据：检查项 A 与 B。\n建议：见原报告。"
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary) is None
+    assert checkpoint.context_metadata[service.COMPLETION_GUARD_FORCED_OUTPUT_KEY] == (
+        f"团队 360 {label}。\n\n{summary}"
+    )
+
+
+@pytest.mark.parametrize(("status", "summary"), [
+    ("completed", "团队 360 的报告：\n单测执行失败，发现 2 项问题。\n扫描证据见第 361 行。"),
+    ("completed", "团队 360 的两项单测执行失败，问题已记录。"),
+    ("completed", "Team 360 report:\nTwo unit tests failed.\nEvidence is retained."),
+    ("completed", "团队 360 的报告状态：failed，指单项测试结果。"),
+    ("failed", "团队 360 的已完成子任务：报告生成。失败子任务：部署。"),
+    ("blocked", "团队 360：\n已完成的子任务有 2 项；后续工作缺少合同。"),
+    ("cancelled", "Team 360: completed steps are retained in the report."),
+])
+def test_trusted_receipt_does_not_treat_local_report_outcomes_as_team_terminal_status(status, summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary) is None
+    rendered = checkpoint.context_metadata.get(service.COMPLETION_GUARD_FORCED_OUTPUT_KEY, summary)
+    assert summary in rendered
+
+
+@pytest.mark.parametrize(("status", "summary"), [
+    ("failed", "团队 360 已取消。"),
+    ("blocked", "团队 360 执行失败。"),
+    ("cancelled", "Team 360 expired."),
+    ("expired", "团队 360 的状态：blocked。"),
+])
+def test_trusted_receipt_rejects_a_different_terminal_status(status, summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)
+
+
+@pytest.mark.parametrize(("status", "summary"), [
+    ("blocked", "团队 360 已完成 2 个子任务，后续缺少执行合同。"),
+    ("cancelled", "Team 360 completed 2 subtasks; evidence is retained."),
+    ("completed", "没有发现问题，团队 360 已完成。"),
+    ("completed", "没有发现问题且团队 360 已完成。"),
+    ("completed", "团队 360：单测未完成，仍在运行中；报告保留原始结果。"),
+])
+def test_trusted_receipt_keeps_partial_progress_and_local_negation(status, summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": status},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary) is None
+
+
+@pytest.mark.parametrize("summary", [
+    "团队 ID：361 的结果如下。",
+    "团队 360 的结果：团队 ID 为 361 已完成。",
+    "Team ID = 361 completed.",
+])
+def test_trusted_receipt_checks_spaced_explicit_team_ids(summary):
+    checkpoint = _team_checkpoint([], context_metadata={
+        "trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"},
+    })
+    assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)

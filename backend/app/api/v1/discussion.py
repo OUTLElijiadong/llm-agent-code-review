@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.discussion_bus import DiscussionBus, utc_timestamp, visible_roundtable_progress
 from app.api.v1.ws_discussion import (
+    _fail_pending_discussion,
     _publish_cancelled_terminal,
     cancel_pending,
     purge_stale_pending,
@@ -315,57 +316,65 @@ def start_discussion(
         origin_session_key=origin_session_key,
         continued_from_session_id=continued_from_session_id,
         agents=agent_list,
+        status="pending",
     )
-    session = bus.get_session(session_id)
-    if session:
-        session.status = "pending"
-        session.stage = "pending"
-        session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
-        session.expected_turns = rounds * len(profiles)
-        session.participants = agent_list
-        session.progress = {
-            **session.progress,
-            "phase": "pending",
-            "stage": "pending",
-            "stage_message": session.stage_message,
-            "completed_units": 0,
-            "total_units": session.expected_turns,
-            "expected_turns": session.expected_turns,
-        }
-        # create_session 初始账本会先落入默认 active；在返回 session_id 前，
-        # 持久化预检态，确保服务重启后的清理逻辑不会误认为已启动。
-        if getattr(bus, "_persist", False):
-            persisted = db.query(RoundtableSession).filter_by(
-                session_id=session_id,
-                owner_user_id=int(user.id),
-            ).one_or_none()
-            if persisted is None:
-                raise RuntimeError("圆桌预检会话未能写入当前账号账本")
-            persisted.status = "pending"
-            persisted.progress = dict(session.progress)
-            persisted.agents = agent_list
-            persisted.updated_at = datetime.now(timezone.utc)
-            db.commit()
+    try:
+        session = bus.get_session(session_id)
+        if session:
+            session.status = "pending"
+            session.stage = "pending"
+            session.stage_message = "等待圆桌连接启动；当前任务已排队，尚未消耗 Agent 讨论调用"
+            session.expected_turns = rounds * len(profiles)
+            session.participants = agent_list
+            session.progress = {
+                **session.progress,
+                "phase": "pending",
+                "stage": "pending",
+                "stage_message": session.stage_message,
+                "completed_units": 0,
+                "total_units": session.expected_turns,
+                "expected_turns": session.expected_turns,
+            }
+            # create_session 已以 pending 落库；返回 session_id 前补齐预检进度，
+            # 确保服务重启后的恢复逻辑只启动具有完整上下文的会话。
+            if getattr(bus, "_persist", False):
+                persisted = db.query(RoundtableSession).filter_by(
+                    session_id=session_id,
+                    owner_user_id=int(user.id),
+                ).one_or_none()
+                if persisted is None:
+                    raise RuntimeError("圆桌预检会话未能写入当前账号账本")
+                persisted.status = "pending"
+                persisted.progress = dict(session.progress)
+                persisted.agents = agent_list
+                persisted.updated_at = datetime.now(timezone.utc)
+                db.commit()
 
-    register_pending(
-        session_id=session_id,
-        profiles=profiles,
-        code=code_file.content or "",
-        language=project.language or code_file.language or "plaintext",
-        file_name=code_file.file_name,
-        user_id=user.id,
-        project_id=project_id,
-        file_id=file_id,
-        review_type=review_type,
-        max_rounds=rounds,
-        session_token_version=int(getattr(user, "token_version", 0) or 0),
-        usage_origin=current_attribution(int(user.id)),
-        # 小菱在会话内启动时记录来源会话,讨论结束后把结论回投给该会话自动汇报。
-        origin_surface=str(origin_surface or "")[:24],
-        origin_session_key=str(origin_session_key or "")[:128],
-        continued_from_session_id=str(continued_from_session_id or "")[:64],
-        continuation_context=str(continuation_context or ""),
-    )
+        register_pending(
+            session_id=session_id,
+            profiles=profiles,
+            code=code_file.content or "",
+            language=project.language or code_file.language or "plaintext",
+            file_name=code_file.file_name,
+            user_id=user.id,
+            project_id=project_id,
+            file_id=file_id,
+            review_type=review_type,
+            max_rounds=rounds,
+            session_token_version=int(getattr(user, "token_version", 0) or 0),
+            usage_origin=current_attribution(int(user.id)),
+            # 小菱在会话内启动时记录来源会话,讨论结束后把结论回投给该会话自动汇报。
+            origin_surface=str(origin_surface or "")[:24],
+            origin_session_key=str(origin_session_key or "")[:128],
+            continued_from_session_id=str(continued_from_session_id or "")[:64],
+            continuation_context=str(continuation_context or ""),
+        )
+    except Exception:
+        # 预检事务与上下文注册共用收口，不能遗留缺少恢复快照的 pending。
+        db.rollback()
+        cancel_pending(session_id, owner_user_id=int(user.id))
+        _fail_pending_discussion(bus, session_id, "圆桌启动预检或上下文注册失败")
+        raise
 
     return Resp(data={
         "session_id": session_id,

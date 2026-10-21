@@ -28,8 +28,8 @@ from app.services import rbac_service
 from app.services.project_member_service import get_visible_project_ids
 from app.services.report_service import (
     display_report_score,
-    metric_report_score,
     load_task_issue_stats,
+    metric_report_score,
     task_metrics_access_filter,
     visible_report_review_types,
 )

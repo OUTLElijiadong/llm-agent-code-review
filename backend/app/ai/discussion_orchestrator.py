@@ -30,8 +30,9 @@ import re
 import time
 import traceback
 from contextvars import ContextVar, copy_context
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
@@ -61,6 +62,7 @@ from app.models.code_file import CodeFile
 from app.models.code_version import CodeVersion
 from app.models.review_issue import ReviewIssue
 from app.models.review_task import ReviewTask
+from app.models.review_task_file import ReviewTaskFile
 from app.services.agent_model_service import resolve_agent_model, resolve_subagent_config
 from app.services.ai_usage_context import current_attribution, model_attribution, usage_context
 from app.services.context_fidelity import extract_protected_facts
@@ -479,6 +481,7 @@ class DiscussionOrchestrator:
         continuation_context: str = "",
         continued_from_session_id: str = "",
         usage_origin: Optional[dict[str, int]] = None,
+        resume_task_id: int = 0,
     ):
         bus = self._bus
         session = bus.get_session(session_id)
@@ -492,6 +495,7 @@ class DiscussionOrchestrator:
             logger.info(f"[Discussion] session={session_id} 已持久终止，跳过迟到的启动事件")
             return
 
+        checkpoint = dict(session.progress.get("_checkpoint") or {}) if resume_task_id else {}
         self._user_input_event = asyncio.Event()
         self._speaker_call_active = False
         self._moderator_takeover_notified = False
@@ -507,17 +511,35 @@ class DiscussionOrchestrator:
         self._steering_event = asyncio.Event()
         self._user_id = user_id
         self._file_id = file_id
-        self._task_id = 0
+        self._task_id = int(resume_task_id or 0)
         self._origin_surface = str(origin_surface or "")[:24]
         self._origin_session_key = str(origin_session_key or "")[:128]
         self._continued_from_session_id = str(continued_from_session_id or "")[:64]
         self._roster_profiles = tuple(profiles)
         self._trace_id = new_trace_id()
-        all_turns: list[DiscussionTurn] = []
+        all_turns = [DiscussionTurn(**turn) for turn in checkpoint.get("turns", [])]
         self._all_turns = all_turns
-        deferred_logs: list[dict] = []
-        turn_counter = 0
-        summary_text = ""
+        deferred_logs: list[dict] = list(checkpoint.get("deferred_logs", []))
+        turn_counter = int(checkpoint.get("turn_counter") or 0)
+        summary_text = str(checkpoint.get("summary_text") or "")
+        self._user_inputs = list(checkpoint.get("user_inputs", []))
+        self._steering_inputs = [tuple(item) for item in checkpoint.get("steering_inputs", [])]
+        self._steering_version = int(checkpoint.get("steering_version") or 0)
+        self._has_expert_speech = any(turn.role == "agent" and turn.round_index > 0 for turn in all_turns)
+        if self._steering_inputs:
+            self._steering_event.set()
+        # 检查点之后落库的用户插话同样要恢复，不能只恢复最后 100 条可见回放。
+        if resume_task_id and not checkpoint.get("summary_done"):
+            after_seq = int(checkpoint.get("last_turn_seq") or 0)
+            while True:
+                late_turns = bus.get_turns_after(session_id, user_id, after_seq=after_seq)
+                if not late_turns:
+                    break
+                for turn in late_turns:
+                    if turn.role == "user":
+                        self._handle_control("user_input", {"content": turn.content, "turn_id": turn.turn_id})
+                after_seq = late_turns[-1].seq
+        bus.publish_control(session_id, "started", {"status": "active"})
         loop = asyncio.get_running_loop()
         coverage = {
             "expected_turns": max_rounds * len(profiles), "attempted_turns": 0,
@@ -532,6 +554,7 @@ class DiscussionOrchestrator:
             },
             "errors": [],
         }
+        coverage.update(checkpoint.get("coverage") or {})
         progress_total = coverage["expected_turns"] + 3  # 汇总、至少一批抽取、报告落库
 
         def publish_progress(phase: str, completed: int, total: int, *,
@@ -593,10 +616,19 @@ class DiscussionOrchestrator:
         # ── 讨论开始即创建 ReviewTask(running),拿到 task_id 供日志/问题/报告 ──
         task_id = 0
         cancelled = False
+        interrupted = False
+
+        def recoverable_shutdown() -> bool:
+            return bool(session.progress.get("_recovery")) and session.terminal_status not in {
+                "success", "failed", "cancelled",
+            }
         usage_origin = usage_origin if usage_origin is not None else current_attribution(user_id)
         create_future = loop.run_in_executor(
             None, copy_context().run,
-            lambda: _create_review_task(
+            lambda: _resume_review_task(
+                resume_task_id, user_id=user_id, project_id=project_id, file_id=file_id, code=code,
+            ) if resume_task_id else _create_review_task(
+                discussion_session_id=session_id,
                 user_id=user_id, project_id=project_id, file_name=file_name,
                 file_id=file_id, review_type=review_type,
                 code=code, language=language, model_name=agent.model, profiles=profiles,
@@ -616,8 +648,12 @@ class DiscussionOrchestrator:
                     bus.link_report_task(session_id, task_id)
                 except Exception as exc:
                     logger.warning(f"[Discussion] 取消期间关联报告任务失败: {exc}")
-                await loop.run_in_executor(None, copy_context().run, lambda: _cancel_review_task(task_id))
-            self._publish_terminal(session_id, task_id, "cancelled", "圆桌讨论已取消")
+                settle = _interrupt_review_task if recoverable_shutdown() else _cancel_review_task
+                await loop.run_in_executor(None, copy_context().run, lambda: settle(task_id))
+            status = "interrupted" if recoverable_shutdown() else "cancelled"
+            self._publish_terminal(
+                session_id, task_id, status, "圆桌服务中断" if status == "interrupted" else "圆桌讨论已取消",
+            )
             raise
         except Exception as exc:
             logger.warning(f"[Discussion] 创建 ReviewTask 失败: {traceback.format_exc()}")
@@ -654,6 +690,11 @@ class DiscussionOrchestrator:
         final_partial = False
         summary_turns: tuple[DiscussionTurn, ...] | None = None
         call_budget = _RoundtableCallBudget()
+        saved_state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
+        call_budget.used = max(
+            int(coverage.get("model_calls_used") or 0),
+            int((saved_state.get("coverage") or {}).get("model_calls_used") or 0),
+        )
         budget_token = _roundtable_call_budget.set(call_budget)
         publish_progress("speaking", 0, progress_total)
 
@@ -662,57 +703,104 @@ class DiscussionOrchestrator:
             self._emit(AgentEventType.DISPATCH, code_,
                        f"圆桌讨论启动: {file_name}")
 
-        try:
-            # ── 开场白 ──
-            opening_text = (
-                f"🎤 欢迎来到代码审查圆桌会议！\n\n"
-                f"审查文件: {file_name} ({language})\n"
-                f"主持人：小菱\n参会专家: {', '.join(p.name for p in profiles)}\n"
-                f"共 {max_rounds} 轮讨论。每位 Agent 都会读取共享聊天记录,"
-                f"可选择发言或静音;发言时可赞同、否认、质疑或补充他人观点。"
-            )
-            bus.publish_turn(session_id, DiscussionTurn(
-                turn_id=0,
-                agent_code="orchestrator",
-                agent_name="小菱（主持人）",
-                role="agent",
-                content=opening_text,
-            ))
-            # v2.4 B1: 开场白 publish 到 MetaGPT Environment
-            self._publish_to_env(
-                speaker="orchestrator",
-                content=opening_text,
-                turn_id=0,
-                cause_by="StartDiscussion",
-            )
-            continuation_text = str(continuation_context or "").strip()
-            if continuation_text:
-                turn_counter += 1
-                continuation_turn = DiscussionTurn(
-                    turn_id=turn_counter,
-                    agent_code="user",
-                    agent_name="你",
-                    role="user",
-                    content=continuation_text,
-                )
-                all_turns.append(continuation_turn)
-                # 续会包同时包含上一轮结论与已入账的原始纠正；仅作模型上下文，
-                # 不再发布成第二条用户聊天气泡，也不写入圆桌公开发言账本。
-                self._publish_to_env(
-                    speaker="user",
-                    content=continuation_text,
-                    turn_id=turn_counter,
-                    cause_by="DiscussionContinuation",
-                )
-            await asyncio.sleep(0.5)
+        profile_by_code = {profile.code: profile for profile in profiles}
+        remaining_plan = (
+            [(round_idx, speaker_idx, profile_by_code[code_])
+             for round_idx, speaker_idx, code_ in checkpoint["remaining_plan"]]
+            if checkpoint else
+            [(round_idx, speaker_idx, profile)
+             for round_idx in range(max_rounds) for speaker_idx, profile in enumerate(profiles)]
+        )
+        consumed_user_input_count = int(checkpoint.get("consumed_user_input_count") or 0)
+        moderator_takeover = bool(coverage.get("moderator_takeover"))
 
-            consumed_user_input_count = 0
-            moderator_takeover = False
-            remaining_plan = [
-                (round_idx, speaker_idx, profile)
-                for round_idx in range(max_rounds)
-                for speaker_idx, profile in enumerate(profiles)
-            ]
+        def save_checkpoint(
+            *, turn: DiscussionTurn | None = None, summary_done: bool = False, extraction: dict | None = None,
+        ) -> None:
+            if not hasattr(bus, "save_checkpoint"):
+                if turn is not None:
+                    bus.publish_turn(session_id, turn)
+                return
+            state = json.loads(json.dumps({
+                "version": 1, "opened": True,
+                "remaining_plan": [(r, i, profile.code) for r, i, profile in remaining_plan],
+                "turns": [item.to_dict() for item in all_turns],
+                "coverage": {**coverage, "model_calls_used": call_budget.used},
+                "deferred_logs": deferred_logs, "turn_counter": turn_counter,
+                "summary_text": summary_text, "summary_done": summary_done,
+                "extraction": extraction if extraction is not None else checkpoint.get("extraction"),
+                "user_inputs": self._user_inputs, "steering_inputs": self._steering_inputs,
+                "steering_version": self._steering_version,
+                "consumed_user_input_count": consumed_user_input_count,
+                "last_turn_seq": session.last_turn_seq + (1 if turn is not None else 0),
+            }, ensure_ascii=False))
+            if turn is None:
+                bus.save_checkpoint(session_id, state)
+            else:
+                # 发言与下一执行位置在同一事务提交，崩溃不能重复已入账专家回合。
+                bus.publish_turn(session_id, turn, checkpoint=state)
+
+        def save_extraction_checkpoint(issues: list[Issue], batches: dict) -> None:
+            async def persist() -> None:
+                if session.cancel_event.is_set() or session.terminal_status:
+                    raise _DiscussionInactive(session.terminal_status or "cancelled")
+                save_checkpoint(summary_done=True, extraction={
+                    "binding": {
+                        "task_id": task_id, "user_id": user_id, "project_id": project_id,
+                        "file_id": file_id, "content_sha256": sha256(code.encode("utf-8")).hexdigest(),
+                    },
+                    "issues": [asdict(issue) for issue in issues], "batches": dict(batches),
+                })
+
+            # 与进度推送串行更新总线，避免线程中的新检查点被旧内存进度覆盖。
+            asyncio.run_coroutine_threadsafe(persist(), loop).result()
+
+        try:
+            if not checkpoint.get("opened"):
+                # ── 开场白 ──
+                opening_text = (
+                    f"🎤 欢迎来到代码审查圆桌会议！\n\n"
+                    f"审查文件: {file_name} ({language})\n"
+                    f"主持人：小菱\n参会专家: {', '.join(p.name for p in profiles)}\n"
+                    f"共 {max_rounds} 轮讨论。每位 Agent 都会读取共享聊天记录,"
+                    f"可选择发言或静音;发言时可赞同、否认、质疑或补充他人观点。"
+                )
+                bus.publish_turn(session_id, DiscussionTurn(
+                    turn_id=0,
+                    agent_code="orchestrator",
+                    agent_name="小菱（主持人）",
+                    role="agent",
+                    content=opening_text,
+                ))
+                # v2.4 B1: 开场白 publish 到 MetaGPT Environment
+                self._publish_to_env(
+                    speaker="orchestrator",
+                    content=opening_text,
+                    turn_id=0,
+                    cause_by="StartDiscussion",
+                )
+                continuation_text = str(continuation_context or "").strip()
+                if continuation_text:
+                    turn_counter += 1
+                    continuation_turn = DiscussionTurn(
+                        turn_id=turn_counter,
+                        agent_code="user",
+                        agent_name="你",
+                        role="user",
+                        content=continuation_text,
+                    )
+                    all_turns.append(continuation_turn)
+                    # 续会包同时包含上一轮结论与已入账的原始纠正；仅作模型上下文，
+                    # 不再发布成第二条用户聊天气泡，也不写入圆桌公开发言账本。
+                    self._publish_to_env(
+                        speaker="user",
+                        content=continuation_text,
+                        turn_id=turn_counter,
+                        cause_by="DiscussionContinuation",
+                    )
+                await asyncio.sleep(0.5)
+
+                save_checkpoint()
             while remaining_plan or self._steering_event.is_set():
                 await self._wait_if_paused(session_id)
                 await self._check_active()
@@ -739,6 +827,7 @@ class DiscussionOrchestrator:
                     coverage["expected_turns"] = coverage["attempted_turns"] + len(remaining_plan)
                     progress_total = coverage["expected_turns"] + 3
                     session.expected_turns = coverage["expected_turns"]
+                    save_checkpoint()
                     if not remaining_plan and not self._steering_event.is_set():
                         moderator_takeover = True
                     if not remaining_plan:
@@ -831,7 +920,7 @@ class DiscussionOrchestrator:
                 )
                 if ok:
                     all_turns.append(turn)
-                bus.publish_turn(session_id, turn)
+                save_checkpoint(turn=turn)
                 self._publish_to_env(speaker=profile.code, content=turn.content, turn_id=turn_counter)
                 publish_progress(
                     "speaking", coverage["attempted_turns"], progress_total,
@@ -864,79 +953,81 @@ class DiscussionOrchestrator:
                     coverage["pending_user_inputs"] = remaining_user_inputs
                     coverage["errors"].append("最后阶段有用户消息未获专家补答，报告仅可作为部分结果")
 
-            # ── 主持人汇总 (线程池执行,避免阻塞事件循环) ──
-            await self._check_active()
-            if not coverage["valid_speeches"]:
-                coverage["summary_status"] = "skipped"
-                raise RuntimeError("圆桌讨论没有产生有效审查发言，不能生成成功报告")
-            stopped = False
-            self._emit(AgentEventType.THINKING, "orchestrator", "主持人正在汇总讨论共识")
-            publish_progress("summarizing", coverage["attempted_turns"], progress_total)
-            # 此阶段总线拒绝新发言；主持人与结构化抽取使用同一不可变边界。
-            summary_turns = tuple(all_turns)
-            summary_text, summary_meta = await self._await_model_stage(
-                loop.run_in_executor(
-                    None, copy_context().run,
-                    lambda: self._summarize(
-                        list(summary_turns), code, language, file_name, agent, stopped,
+            if not checkpoint.get("summary_done"):
+                # ── 主持人汇总 (线程池执行,避免阻塞事件循环) ──
+                await self._check_active()
+                if not coverage["valid_speeches"]:
+                    coverage["summary_status"] = "skipped"
+                    raise RuntimeError("圆桌讨论没有产生有效审查发言，不能生成成功报告")
+                stopped = False
+                self._emit(AgentEventType.THINKING, "orchestrator", "主持人正在汇总讨论共识")
+                publish_progress("summarizing", coverage["attempted_turns"], progress_total)
+                # 此阶段总线拒绝新发言；主持人与结构化抽取使用同一不可变边界。
+                summary_turns = tuple(all_turns)
+                summary_text, summary_meta = await self._await_model_stage(
+                    loop.run_in_executor(
+                        None, copy_context().run,
+                        lambda: self._summarize(
+                            list(summary_turns), code, language, file_name, agent, stopped,
+                        ),
                     ),
-                ),
-                stage="host_summarizing",
-                message="小菱主持人正在汇总讨论共识",
-            )
-            await self._check_active()
-            late_user_inputs = [
-                turn.content.strip()
-                for turn in all_turns[len(summary_turns):]
-                if turn.role == "user" and turn.content.strip()
-            ]
-            if late_user_inputs:
-                moderator_takeover = True
-                coverage["moderator_takeover"] = True
-                coverage["pending_user_inputs"] = len(late_user_inputs)
-                coverage["errors"].append(
-                    "汇总期间收到新的用户补充；已保留原文，但未再次调用专家或执行结构化问题抽取"
+                    stage="host_summarizing",
+                    message="小菱主持人正在汇总讨论共识",
                 )
-                summary_text = (
-                    f"{summary_text.rstrip()}\n\n"
-                    "## 汇总期间收到的用户补充\n\n"
-                    "以下内容由小菱原样记录，未经过额外专家核验：\n"
-                    + "\n".join(f"- {message}" for message in late_user_inputs)
+                await self._check_active()
+                late_user_inputs = [
+                    turn.content.strip()
+                    for turn in all_turns[len(summary_turns):]
+                    if turn.role == "user" and turn.content.strip()
+                ]
+                if late_user_inputs:
+                    moderator_takeover = True
+                    coverage["moderator_takeover"] = True
+                    coverage["pending_user_inputs"] = len(late_user_inputs)
+                    coverage["errors"].append(
+                        "汇总期间收到新的用户补充；已保留原文，但未再次调用专家或执行结构化问题抽取"
+                    )
+                    summary_text = (
+                        f"{summary_text.rstrip()}\n\n"
+                        "## 汇总期间收到的用户补充\n\n"
+                        "以下内容由小菱原样记录，未经过额外专家核验：\n"
+                        + "\n".join(f"- {message}" for message in late_user_inputs)
+                    )
+                coverage["summary_coverage"] = dict(getattr(self, "_summary_coverage", {}) or {})
+                coverage["summary_status"] = "success" if summary_meta is not None else "failed"
+                publish_progress("summarizing", coverage["attempted_turns"] + 1, progress_total)
+                if summary_meta is None:
+                    coverage["errors"].append("主持人共识小结未完成，仅保留未核验为共识的发言摘录")
+                if summary_meta:
+                    deferred_logs.append({
+                        "meta": summary_meta,
+                        "status": "success",
+                        "chunk_index": 9000,
+                        "agent_label": "general",
+                    })
+                save_checkpoint(summary_done=True, turn=DiscussionTurn(
+                    turn_id=turn_counter + 1,
+                    agent_code="orchestrator",
+                    agent_name="小菱（主持人）",
+                    role="agent",
+                    content=summary_text,
+                ))
+                # v2.4 B1: 主持人汇总 publish 到 MetaGPT Environment
+                self._publish_to_env(
+                    speaker="orchestrator",
+                    content=summary_text,
+                    turn_id=turn_counter + 1,
+                    cause_by="DiscussionSummary",
                 )
-            coverage["summary_coverage"] = dict(getattr(self, "_summary_coverage", {}) or {})
-            coverage["summary_status"] = "success" if summary_meta is not None else "failed"
-            publish_progress("summarizing", coverage["attempted_turns"] + 1, progress_total)
-            if summary_meta is None:
-                coverage["errors"].append("主持人共识小结未完成，仅保留未核验为共识的发言摘录")
-            if summary_meta:
-                deferred_logs.append({
-                    "meta": summary_meta,
-                    "status": "success",
-                    "chunk_index": 9000,
-                    "agent_label": "general",
-                })
-            bus.publish_turn(session_id, DiscussionTurn(
-                turn_id=turn_counter + 1,
-                agent_code="orchestrator",
-                agent_name="小菱（主持人）",
-                role="agent",
-                content=summary_text,
-            ))
-            # v2.4 B1: 主持人汇总 publish 到 MetaGPT Environment
-            self._publish_to_env(
-                speaker="orchestrator",
-                content=summary_text,
-                turn_id=turn_counter + 1,
-                cause_by="DiscussionSummary",
-            )
-            self._emit(
-                AgentEventType.COMPLETE if summary_meta is not None else AgentEventType.FAILED,
-                "orchestrator", "主持人已汇总共识" if summary_meta is not None else "主持人汇总失败",
-            )
+                self._emit(
+                    AgentEventType.COMPLETE if summary_meta is not None else AgentEventType.FAILED,
+                    "orchestrator", "主持人已汇总共识" if summary_meta is not None else "主持人汇总失败",
+                )
 
         except asyncio.CancelledError:
-            cancelled = True
-            logger.info(f"[Discussion] 会话任务已取消 session={session_id} task={task_id}")
+            interrupted = recoverable_shutdown()
+            cancelled = not interrupted
+            logger.info(f"[Discussion] 会话任务已取消 session={session_id} task={task_id} recoverable={interrupted}")
             raise
         except _DiscussionInactive as exc:
             cancelled = exc.status == "cancelled"
@@ -952,10 +1043,10 @@ class DiscussionOrchestrator:
             cancelled_during_finalization = False
             if task_id:
                 try:
-                    if cancelled:
+                    if interrupted or cancelled:
+                        settle = _interrupt_review_task if interrupted else _cancel_review_task
                         report_task_id = await loop.run_in_executor(
-                            None, copy_context().run,
-                            lambda: _cancel_review_task(task_id),
+                            None, copy_context().run, lambda: settle(task_id),
                         )
                     else:
                         stopped = session.status != "active"
@@ -976,20 +1067,29 @@ class DiscussionOrchestrator:
                                 coverage=coverage,
                                 progress_callback=publish_progress_from_worker,
                                 cancel_event=session.cancel_event,
+                                cached_extraction=checkpoint.get("extraction"),
+                                extraction_checkpoint_callback=save_extraction_checkpoint,
                             ),
                         )
                         report_task_id = await asyncio.shield(finalize_future)
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
-                    final_status = state["status"]
+                    final_status = (
+                        "interrupted" if (state.get("coverage") or {}).get("stage") == "interrupted"
+                        else state["status"]
+                    )
                     final_error = state.get("error") or ""
                     final_partial = (state.get("coverage") or {}).get("stage") == "partial"
                 except asyncio.CancelledError:
                     cancelled_during_finalization = True
+                    settle = _interrupt_review_task if recoverable_shutdown() else _cancel_review_task
                     report_task_id = await loop.run_in_executor(
-                        None, copy_context().run, lambda: _cancel_review_task(task_id)
+                        None, copy_context().run, lambda: settle(task_id),
                     )
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
-                    final_status = state["status"]
+                    final_status = (
+                        "interrupted" if (state.get("coverage") or {}).get("stage") == "interrupted"
+                        else state["status"]
+                    )
                     final_error = state.get("error") or "圆桌讨论已取消，丢弃未完成的报告结果"
                 except Exception as exc:
                     final_status = "failed"
@@ -1003,7 +1103,7 @@ class DiscussionOrchestrator:
                 partial=final_partial,
             )
             # 对齐团队派发逻辑:结论回投发起会话,小菱自动续跑汇报,无需用户手动追问。
-            if self._origin_surface and self._origin_session_key and final_status != "cancelled":
+            if self._origin_surface and self._origin_session_key and final_status not in {"cancelled", "interrupted"}:
                 await loop.run_in_executor(
                     None,
                     lambda: _notify_origin_session(
@@ -2128,7 +2228,14 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
         task = log_db.get(ReviewTask, task_id)
         if task is None or task.user_id != user_id:
             raise RuntimeError("圆桌模型调用缺少可信任务来源")
+        if task.status != "running":
+            raise RuntimeError("圆桌任务已终止，不能继续派发模型请求")
         _require_discussion_actor(log_db, user_id, int(task.project_id))
+        used = int((task.coverage or {}).get("model_calls_used") or 0)
+        if used >= _ROUNDTABLE_MAX_MODEL_CALLS:
+            raise RuntimeError("圆桌模型调用预算已用尽，不能继续派发")
+        task.coverage = {**(task.coverage or {}), "model_calls_used": used + 1}
+        log_db.commit()
         fields = {
             **model_attribution(task), "_review_task_id": task_id,
             "_file_id": usage_file_id, "_chunk_index": usage_chunk_index,
@@ -2141,6 +2248,9 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
                 # Do not return an in-flight model result after project execution was revoked.
                 with SessionLocal() as auth_db:
                     _require_discussion_actor(auth_db, user_id, int(task.project_id))
+                    current = auth_db.get(ReviewTask, task_id)
+                    if current is None or current.status != "running":
+                        raise RuntimeError("圆桌任务已终止，丢弃迟到的模型结果")
                 return result
             finally:
                 log_db.commit()
@@ -2148,11 +2258,24 @@ def _call_raw_for_task(agent: DeepSeekAgent, task_id: int, user_id: int, *,
         log_db.close()
 
 
+def _resume_review_task(task_id: int, *, user_id: int, project_id: int, file_id: int, code: str) -> int:
+    with SessionLocal() as db:
+        _require_discussion_actor(db, user_id, project_id)
+        task = db.query(ReviewTask).filter_by(
+            id=task_id, user_id=user_id, project_id=project_id, review_type="discuss", status="running",
+        ).one_or_none()
+        source = db.query(ReviewTaskFile).filter_by(task_id=task_id, file_id=file_id).one_or_none()
+        if task is None or source is None or source.content_sha256 != sha256(code.encode("utf-8")).hexdigest():
+            raise RuntimeError("圆桌恢复缺少同账号原报告或可信冻结输入")
+        return task_id
+
+
 def _create_review_task(
     *, user_id: int, project_id: int, file_id: int, file_name: str,
     code: str, language: str, review_type: str, model_name: str,
     profiles: tuple[ReviewAgentProfile, ...],
     usage_origin: Optional[dict[str, int]] = None,
+    discussion_session_id: str = "",
 ) -> int:
     """把实际输入匹配的历史版本与 running 任务原子保存，禁止改用新内容。"""
     db = SessionLocal()
@@ -2192,6 +2315,16 @@ def _create_review_task(
         db.add(task)
         db.flush()
         freeze_task_inputs(db, task.id, [snapshot])
+        if discussion_session_id:
+            from app.models.roundtable import RoundtableSession
+
+            session_row = db.query(RoundtableSession).filter_by(
+                session_id=discussion_session_id, owner_user_id=user_id, status="active",
+            ).with_for_update().one_or_none()
+            if session_row is None:
+                raise RuntimeError("圆桌已终止，拒绝创建孤立报告")
+            session_row.task_id = task.id
+            session_row.report_task_id = task.id
         db.commit()
         return task.id
     except Exception:
@@ -2199,6 +2332,20 @@ def _create_review_task(
         raise
     finally:
         db.close()
+
+
+def _interrupt_review_task(task_id: int) -> int:
+    """服务退出保留原任务和检查点；停止墓碑或已提交报告始终优先。"""
+    with SessionLocal.begin() as db:
+        task = db.query(ReviewTask).filter_by(
+            id=task_id, review_type="discuss", status="running",
+        ).with_for_update().populate_existing().one_or_none()
+        if task is not None:
+            task.status = "failed"
+            task.end_time = datetime.now(timezone.utc)
+            task.error_message = "圆桌服务中断，等待进程重启恢复"
+            task.coverage = {**(task.coverage or {}), "stage": "interrupted", "score_available": False}
+    return task_id
 
 
 def _cancel_review_task(task_id: int) -> int:
@@ -2241,6 +2388,8 @@ def _finalize_review(
     consensus: str = "", coverage: Optional[dict] = None,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     cancel_event: Optional[Event] = None,
+    cached_extraction: Optional[dict] = None,
+    extraction_checkpoint_callback: Optional[Callable[[list[Issue], dict], None]] = None,
 ) -> int:
     """讨论结束: 补写 AiCallLog + 抽取结构化问题 + 收尾 ReviewTask。返回 task_id。"""
     db = SessionLocal()
@@ -2295,6 +2444,16 @@ def _finalize_review(
         if metrics.get("moderator_takeover"):
             extracted_issues = []
             metrics["extraction_status"] = "skipped_moderator_takeover"
+        elif cached_extraction is not None:
+            binding = {
+                "task_id": task_id, "user_id": user_id, "project_id": int(task.project_id),
+                "file_id": file_id, "content_sha256": sha256(code.encode("utf-8")).hexdigest(),
+            }
+            if cached_extraction.get("binding") != binding:
+                raise RuntimeError("圆桌抽取检查点与原报告或冻结输入不匹配")
+            extracted_issues = [Issue(**item) for item in cached_extraction["issues"]]
+            extraction_progress.update(cached_extraction["batches"])
+            metrics["extraction_status"] = "success"
         else:
             extracted_issues = _extract_issues(
                 all_turns, code, language, file_name, agent, db,
@@ -2302,6 +2461,12 @@ def _finalize_review(
                 task_guard=ensure_task_running,
             )
             metrics["extraction_status"] = "success"
+            if extraction_checkpoint_callback is not None:
+                # 成功解析后的结果先持久化；只保证已提交检查点的复用，不保证
+                # 供应商网络响应返回到检查点提交之前的跨系统窗口。
+                db.commit()
+                ensure_task_running()
+                extraction_checkpoint_callback(extracted_issues, extraction_progress)
         report_progress(
             "reporting", progress_base + extraction_progress["total"],
             progress_base + extraction_progress["total"] + 1,

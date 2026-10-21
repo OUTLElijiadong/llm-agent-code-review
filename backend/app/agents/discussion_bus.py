@@ -55,9 +55,14 @@ def interrupt_orphan_roundtable(db, row) -> None:
         task.coverage = {**(task.coverage or {}), "stage": "interrupted"}
 
 
+def public_roundtable_progress(progress: dict) -> dict:
+    """公开进度不携带恢复所需的源码、画像和执行检查点。"""
+    return {key: value for key, value in progress.items() if not key.startswith("_")}
+
+
 def visible_roundtable_progress(db, row) -> dict:
     """兼容旧圆桌终态：仅凭同账号报告的覆盖账本展示部分完成。"""
-    progress = dict(row.progress or {})
+    progress = public_roundtable_progress(dict(row.progress or {}))
     if row.status not in {"concluded", "failed"} or progress.get("phase") != "failed" or not row.report_task_id:
         return progress
     from app.models.review_task import ReviewTask
@@ -172,12 +177,13 @@ class DiscussionBus:
                        origin_surface: str = "",
                        origin_session_key: str = "",
                        continued_from_session_id: str = "",
-                       agents: list[dict] | None = None) -> DiscussionSession:
+                       agents: list[dict] | None = None,
+                       status: str = "active") -> DiscussionSession:
         participant_list = [dict(item) for item in (agents or [])]
         expected = max_rounds * len(participant_list) + 3
         session = DiscussionSession(
             session_id=session_id, task_id=task_id,
-            file_name=file_name, owner_user_id=owner_user_id,
+            file_name=file_name, owner_user_id=owner_user_id, status=status,
             max_rounds=max_rounds,
             project_id=int(project_id or 0),
             file_id=int(file_id or 0),
@@ -403,7 +409,7 @@ class DiscussionBus:
         session = self.get_session(session_id, owner_user_id=owner_user_id)
         if session is None:
             raise PermissionError("圆桌讨论不存在或无权访问")
-        snapshot = dict(session.progress)
+        snapshot = public_roundtable_progress(session.progress)
         snapshot["turn_count"] = session.last_turn_seq
         snapshot["has_earlier"] = session.last_turn_seq > len(session.turns[-_REPLAY_LIMIT:])
         frames = [json_lib.dumps({
@@ -574,8 +580,16 @@ class DiscussionBus:
             )
         return True
 
+    def save_checkpoint(self, session_id: str, checkpoint: dict) -> None:
+        """检查点失败须终止编排，不能把未保存的进度伪称可恢复。"""
+        session = self._sessions[session_id]
+        session.progress = {**session.progress, "_checkpoint": checkpoint}
+        if self._persist and not self._update_session(session):
+            raise RuntimeError("圆桌已终止，拒绝保存迟到的检查点")
+
     def _persist_turn(
         self, session: DiscussionSession, turn: DiscussionTurn, *, allow_followup: bool = False,
+        checkpoint: dict | None = None,
     ) -> int | None:
         """给发言分配会话内唯一顺序号并提交，供分页和刷新恢复。"""
         from app.models.roundtable import RoundtableSession, RoundtableTurn
@@ -603,6 +617,8 @@ class DiscussionBus:
                 created_at=datetime.now(timezone.utc),
             ))
             row.last_turn_seq = seq
+            if checkpoint is not None:
+                row.progress = {**dict(row.progress or {}), "_checkpoint": checkpoint}
             row.updated_at = datetime.now(timezone.utc)
         return seq
 
@@ -628,7 +644,7 @@ class DiscussionBus:
                 session_id=session_id,
                 owner_user_id=row.owner_user_id,
             ).order_by(RoundtableTurn.seq.desc()).limit(_REPLAY_LIMIT).all()
-            progress = visible_roundtable_progress(db, row)
+            progress = {**dict(row.progress or {}), **visible_roundtable_progress(db, row)}
             cancel_event = threading.Event()
             if row.status == "cancelled":
                 cancel_event.set()
@@ -707,6 +723,7 @@ class DiscussionBus:
             "partial": "partial",
             "failed": "failed",
             "cancelled": "cancelled",
+            "interrupted": "interrupted",
         }.get(str(terminal_status or "").lower(), "concluded")
 
     def start_discussion_task(
@@ -759,7 +776,7 @@ class DiscussionBus:
 
     # ── 发言推送 ──
 
-    def publish_turn(self, session_id: str, turn: DiscussionTurn):
+    def publish_turn(self, session_id: str, turn: DiscussionTurn, *, checkpoint: dict | None = None):
         """推送一条发言到所有 WebSocket 订阅者"""
         session = self._sessions.get(session_id)
         if session:
@@ -793,13 +810,18 @@ class DiscussionBus:
             if self._persist:
                 persisted_seq = (
                     self._persist_turn(session, turn, allow_followup=True)
-                    if followup_turn else self._persist_turn(session, turn)
+                    if followup_turn else (
+                        self._persist_turn(session, turn, checkpoint=checkpoint)
+                        if checkpoint is not None else self._persist_turn(session, turn)
+                    )
                 )
                 if persisted_seq is None:
                     return
             else:
                 turn.seq = session.last_turn_seq + 1
             session.last_turn_seq = turn.seq
+            if checkpoint is not None:
+                session.progress = {**session.progress, "_checkpoint": checkpoint}
             session.turns.append(turn)
 
         msg = json_lib.dumps({
@@ -846,7 +868,7 @@ class DiscussionBus:
                 }, ensure_ascii=False)
                 progress_msg = json_lib.dumps({
                     "type": "control", "session_id": session_id,
-                    "action": "progress", "payload": dict(session.progress),
+                    "action": "progress", "payload": public_roundtable_progress(session.progress),
                 }, ensure_ascii=False) if action == "done" else None
                 for q in list(self._queues.get(session_id, [])):
                     try:
@@ -967,14 +989,16 @@ class DiscussionBus:
             "type": "control",
             "session_id": session_id,
             "action": action,
-            "payload": dict(session.progress) if action == "progress" and session else (payload or {}),
+            "payload": (
+                public_roundtable_progress(session.progress) if action == "progress" and session else (payload or {})
+            ),
         }, ensure_ascii=False)
 
         progress_msg = None
         if session and action in {"started", "round_start", "speaker", "paused", "resumed", "done"}:
             progress_msg = json_lib.dumps({
                 "type": "control", "session_id": session_id,
-                "action": "progress", "payload": dict(session.progress),
+                "action": "progress", "payload": public_roundtable_progress(session.progress),
             }, ensure_ascii=False)
         for q in list(self._queues.get(session_id, [])):
             try:
@@ -1023,7 +1047,7 @@ class DiscussionBus:
                 }, ensure_ascii=False))
 
         if session:
-            snapshot = dict(session.progress)
+            snapshot = public_roundtable_progress(session.progress)
             snapshot["turn_count"] = session.last_turn_seq
             snapshot["has_earlier"] = session.last_turn_seq > len(session.turns[-_REPLAY_LIMIT:])
             q.put_nowait(json_lib.dumps({

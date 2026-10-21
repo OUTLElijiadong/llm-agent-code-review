@@ -37,7 +37,6 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from app.agents.event_bus import emit_event
-from app.utils.sandbox_path_policy import validate_sandbox_relative_path, validate_sandbox_zip
 from app.agents.events import AgentEventType
 from app.agents.syntax_repair_agent import SyntaxRepairAgent, collect_php_lint_errors
 from app.ai.language_detector import detect_language
@@ -89,6 +88,7 @@ from app.services.project_member_service import (
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
 from app.utils.archive_extractor import read_archive_members
 from app.utils.public_http import pin_public_http_url
+from app.utils.sandbox_path_policy import validate_sandbox_relative_path, validate_sandbox_zip
 
 LANGUAGES = ("python", "node", "java", "go", "php")
 MODES = ("whitebox", "blackbox", "combined", "deploy")

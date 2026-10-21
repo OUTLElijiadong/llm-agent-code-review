@@ -1,0 +1,66 @@
+{
+  "baseline_commit": "f18e1cd6",
+  "production_before": "156798050b837f86f4e42690fcb650198c249348",
+  "backend_integrated_before_roundtable_followup": {
+    "passed": 147,
+    "warnings": 1,
+    "seconds": 51.34,
+    "exit_code": 0,
+    "files": [
+      "backend/tests/test_result_parser_contract.py",
+      "backend/tests/unit/ai/test_c15_output_contract.py",
+      "backend/tests/unit/ai/test_deepseek_agent_response.py",
+      "backend/tests/unit/agents/test_discussion_gc.py",
+      "backend/tests/unit/agents/test_ws_discussion_coverage.py",
+      "backend/tests/unit/agents/test_roundtable_startup_recovery.py",
+      "backend/tests/unit/services/test_agent_browser_service.py"
+    ]
+  },
+  "team_terminal_final": {
+    "passed": 178,
+    "warnings": 1,
+    "seconds": 25.23,
+    "exit_code": 0,
+    "files": [
+      "backend/tests/unit/services/test_responses_site_teams.py",
+      "backend/tests/unit/services/test_deepseek_responses_runtime.py"
+    ]
+  },
+  "frontend_api_and_bridge": {
+    "passed": 5,
+    "exit_code": 0,
+    "files": [
+      "frontend/src/api/siteBrowser.test.ts",
+      "frontend/src/composables/useSiteBrowserBridge.test.ts"
+    ]
+  },
+  "frontend_lint": {
+    "exit_code": 0
+  },
+  "frontend_build": {
+    "exit_code": 0,
+    "includes": "vue-tsc及vite生产构建",
+    "vite_duration": "22m21s"
+  },
+  "notes": [
+    "不叠加统计重复测试运行",
+    "圆桌和JSON补充修复已通过最终回归",
+    "CI与生产真实验收仍待完成"
+  ],
+  "roundtable_final": {
+    "passed": 81,
+    "warnings": 3,
+    "seconds": 25.0,
+    "exit_code": 0
+  },
+  "json_final": {
+    "passed": 85,
+    "warnings": 1,
+    "seconds": 2.43,
+    "exit_code": 0,
+    "prefix_json_followed_by_conflicting_fence": {
+      "before_failed": 2,
+      "after": "rejected"
+    }
+  }
+}

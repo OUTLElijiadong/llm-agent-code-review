@@ -193,8 +193,10 @@ class TestWsRegistryPurge:
         from app.api.v1 import ws_discussion
 
         bus = _fresh_bus()
-        bus.create_session("disc_preflight_expired", task_id=0, file_name="main.py", owner_user_id=7)
-        ws_discussion.register_pending("disc_preflight_expired", user_id=7)
+        bus.create_session("disc_preflight_expired", task_id=0, file_name="main.py", owner_user_id=7, status="pending")
+        from app.ai.multi_agent import GENERAL_AGENT
+
+        ws_discussion.register_pending("disc_preflight_expired", user_id=7, profiles=(GENERAL_AGENT,))
         ws_discussion._pending["disc_preflight_expired"].created_at = (
             time.time() - ws_discussion._STALE_TTL - 1
         )

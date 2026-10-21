@@ -14,6 +14,6 @@ describe('site browser authenticated protocol', () => {
     await siteBrowserApi.ack(7, receipt)
     expect(post).toHaveBeenCalledWith('/agent-browser/actions/7/ack', receipt, undefined, [40901], true)
     await siteBrowserApi.pending({ session_id: 'session-7', surface: 'user', run_id: 'run-7' })
-    expect(get).toHaveBeenCalledWith('/agent-browser/pending', { session_id: 'session-7', surface: 'user', run_id: 'run-7' }, [40901], true)
+    expect(get).toHaveBeenCalledWith('/agent-browser/pending', { session_id: 'session-7', surface: 'user', run_id: 'run-7' }, [40400, 40901], true)
   })
 })

@@ -1,0 +1,32 @@
+{
+  "checked_local_date": "2026-10-21",
+  "production_sha": "156798050b837f86f4e42690fcb650198c249348",
+  "app_version": "4.1.20",
+  "backend_health": "healthy",
+  "frontend_health": "healthy",
+  "team360": {
+    "owner_user_id": 5,
+    "status": "completed"
+  },
+  "original_source": {
+    "project_id": 13,
+    "file_id": 512,
+    "file_name": "1.py",
+    "lines": 216
+  },
+  "before_browser_acceptance": {
+    "max_team_id": 364,
+    "max_review_task_id": 226
+  },
+  "disk": {
+    "used_percent": 85,
+    "available_gib_approx": 28
+  },
+  "host_memory_available_mib": 3449,
+  "swap_used_mib": 3072,
+  "tracked_worktree_clean": true,
+  "notes": [
+    "只读检查，不修改历史会话或终态",
+    "不得将此快照作为发布后当前状态"
+  ]
+}

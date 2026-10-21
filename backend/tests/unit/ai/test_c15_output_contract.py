@@ -86,7 +86,7 @@ def test_402_stops_but_429_503_timeout_retry_and_count_every_attempt(
         httpx.Response(503, text="unavailable"),
         httpx.ReadTimeout("timed out"),
         httpx.Response(200, json={
-            "choices": [{"finish_reason": "stop", "message": {"content": "complete"}}],
+            "choices": [{"finish_reason": "stop", "message": {"content": '{"issues": []}'}}],
             "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25},
         }),
     ]
@@ -99,7 +99,7 @@ def test_402_stops_but_429_503_timeout_retry_and_count_every_attempt(
 
     monkeypatch.setattr(recovered, "_do_request", fake_request)
     content, metadata = recovered.call_raw("system", "user")
-    assert content == "complete"
+    assert content == '{"issues": []}'
     assert metadata["_http_attempts"] == 4
     assert metadata["_usage_log_ids"] == [2, 3, 4, 5]
     assert [attempt["status"] for attempt in recorded] == [

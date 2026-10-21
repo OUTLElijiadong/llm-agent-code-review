@@ -4205,6 +4205,7 @@ class AgentResponsesService:
     ) -> Optional[str]:
         """Require team work for every user request; only server-verified callbacks may summarize without dispatch."""
         current = _current_turn_transcript(checkpoint.transcript)
+        checkpoint.context_metadata.pop(COMPLETION_GUARD_FORCED_OUTPUT_KEY, None)
         trusted_snapshot = checkpoint.context_metadata.get("trusted_terminal_team_snapshot")
         latest_user_text = _latest_user_message_text(checkpoint.transcript)
         if isinstance(trusted_snapshot, Mapping):
@@ -4217,24 +4218,14 @@ class AgentResponsesService:
                 "completed", "failed", "blocked", "cancelled", "expired",
             }:
                 return "服务端团队终态回执缺少有效团队标识或状态；不能汇总。"
-            if not _output_mentions_team_id(output_text, trusted_team_id):
-                return f"团队终态汇总必须绑定服务端回执中的团队编号 {trusted_team_id}。"
-            if trusted_status == "completed":
-                if _claims_team_terminal_failure(output_text):
-                    return f"团队 {trusted_team_id} 的服务端终态为 completed，回复却称团队失败、阻塞、取消或超时。"
-                if not _claims_team_terminal_completion(output_text):
-                    return f"团队 {trusted_team_id} 的服务端终态为 completed；汇总必须明确标记团队已完成。"
-                return None
-            if _claims_team_terminal_completion(output_text):
-                return f"团队 {trusted_team_id} 的服务端终态为 {trusted_status}，回复却声称团队已成功完成。"
-            status_markers = {
-                "failed": ("失败", "failed", "未能完成"),
-                "blocked": ("阻塞", "blocked", "缺少执行合同", "缺少合同"),
-                "cancelled": ("已停止", "已取消", "取消", "cancelled", "canceled"),
-                "expired": ("超时", "过期", "expired"),
+            reason = _terminal_team_output_error(output_text, trusted_team_id, trusted_status)
+            if reason:
+                return reason
+            label = {
+                "completed": "已完成", "failed": "执行失败", "blocked": "已阻塞",
+                "cancelled": "已取消", "expired": "已超时",
             }[trusted_status]
-            if not any(marker.casefold() in output_text.casefold() for marker in status_markers):
-                return f"团队 {trusted_team_id} 的服务端终态为 {trusted_status}；汇总必须如实说明该终态。"
+            _bind_terminal_team_status(checkpoint, output_text, trusted_team_id, label)
             return None
 
         calls: dict[str, Mapping[str, Any]] = {}
@@ -4771,7 +4762,8 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
             "圆桌讨论由团队成员 agent:review_orchestrator 执行，input={operation:'start_roundtable',"
             "project_id,file_id}（单文件，可选 temporary_experts），再配一个 summarizer 汇报结论与报告入口；"
             "审查页的“多 Agent 圆桌讨论”按钮也会把请求交给你按此组队。"
-            "以下 start_roundtable_discussion 等固定工具仅用于旧会话兼容。start_roundtable_discussion 启动后立即结束本轮,"
+            "以下 start_roundtable_discussion 等固定工具仅用于旧会话兼容。"
+            "start_roundtable_discussion 启动后立即结束本轮,"
             "由小菱主持人按代码情境调用固定审查专家；只有确有不同专业视角时才可在 "
             "temporary_experts 中定义最多 3 位任务临时专家，"
             "临时专家只加入本次圆桌 roster，不得创建或修改永久 Agent；"
@@ -5028,62 +5020,102 @@ def _current_turn_transcript(transcript: Sequence[Mapping[str, Any]]) -> Sequenc
     return transcript[start + 1:]
 
 
-def _output_mentions_team_id(text: str, team_id: int) -> bool:
-    """Require an explicit team label and the complete numeric ID, not a substring."""
-    identifier = re.escape(str(team_id))
+def _output_has_conflicting_team_id(text: str, team_id: int) -> bool:
+    """中性正文可省略 ID；所有显式标识（含非法后缀）都必须与回执一致。"""
     patterns = (
-        rf"(?<![A-Za-z0-9_])团队(?:编号|ID|号)?\s*[\"']?\s*[:：=#]?\s*[\"']?{identifier}(?![A-Za-z0-9_])",
-        rf"(?<![A-Za-z0-9_])team(?:[_ -]?id)?\s*[\"']?\s*[:：=#]?\s*[\"']?{identifier}(?![A-Za-z0-9_])",
-        rf"(?<![A-Za-z0-9_])team[_-]{identifier}(?![A-Za-z0-9_])",
+        r"(?<![A-Za-z0-9_])(?:团队(?:\s*(?:编号|ID|号))?|team(?:[ _-]*id)?|team[_-])"
+        r"\s*[\"']?\s*(?:[:：=#]|为|是)?\s*[\"']?([0-9]+[A-Za-z0-9_-]*)",
+        r"(?<![A-Za-z0-9_])(?:团队\s*(?:编号|ID|号)|team[ _-]*id)"
+        r"\s*[\"']?\s*(?:[:：=]|为|是)\s*[\"']?([A-Za-z0-9_-]+)",
     )
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+    return any(value != str(team_id) for pattern in patterns for value in re.findall(pattern, text, re.I))
 
 
-def _claims_team_terminal_completion(text: str) -> bool:
-    """识别明确把成功终态归因给团队/任务链的表述。"""
-    if not text:
-        return False
-    marker = re.compile(r"(?:已(?:经)?(?:成功)?完成|成功(?:完成|执行|核验)|核验通过|completed)", re.I)
-    for match in marker.finditer(text):
-        prefix = text[max(0, match.start() - 48):match.start()]
-        if not re.search(r"(?:团队|任务链|本次任务|本次执行)", prefix, re.I):
-            continue
-        current_clause = re.split(r"[，,。；;\n]", prefix)[-1]
-        if re.search(
-            r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)"
-            r"[^，,。；;\n]{0,10}$",
-            current_clause,
-            re.I,
-        ):
-            continue
-        return True
-    return False
+def _bind_terminal_team_status(
+    checkpoint: RunCheckpoint, text: str, team_id: int, label: str,
+) -> None:
+    """由已验证回执渲染终态；模型只负责解释证据，不承担状态展示协议。"""
+    heading = f"团队 {team_id} {label}。"
+    if not text.strip().startswith(heading):
+        checkpoint.context_metadata[COMPLETION_GUARD_FORCED_OUTPUT_KEY] = (
+            f"{heading}\n\n{text.strip()}"
+        )
 
 
-def _claims_team_terminal_failure(text: str) -> bool:
-    """识别把失败/阻塞/停止/超时归因给整个团队的表述。"""
-    if not text:
-        return False
-    pattern = re.compile(
-        r"(?:团队|任务链|本次任务|本次执行)[^，,。；;\n]{0,16}"
-        r"(?:失败|阻塞|已取消|已停止|超时|过期|failed|blocked|cancelled|canceled|expired)",
+def _team_terminal_assertions(text: str) -> list[tuple[str, bool]]:
+    """逐分句识别团队状态及否定；局部报告/成员/测试结果不代表团队状态。"""
+    markers = re.compile(
+        r"(?P<completed>已(?:经)?(?:成功)?完成|成功(?:完成|执行|核验)|完成|核验通过|\bcompleted\b|\bcomplete\b)"
+        r"|(?P<failed>失败|\bfailed\b)"
+        r"|(?P<blocked>阻塞|\bblocked\b)"
+        r"|(?P<cancelled>已取消|已停止|\bcancelled\b|\bcanceled\b)"
+        r"|(?P<expired>超时|过期|\bexpired\b)"
+        r"|(?P<running>运行中|进行中|\brunning\b|\bincomplete\b|\bunfinished\b)",
         re.I,
     )
-    for match in pattern.finditer(text):
-        statement = match.group(0)
-        prefix = text[max(0, match.start() - 14):match.start()]
-        if (
-            re.search(r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)\s*[^，,。；;\n]{0,8}$", prefix, re.I)
-            or re.search(
-                r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|not)"
-                r"[^，,。；;\n]{0,8}(?:失败|阻塞|已取消|已停止|超时|过期|failed|blocked|cancelled|canceled|expired)",
-                statement,
-                re.I,
-            )
-        ):
+    team_scope = re.compile(r"团队|任务链|本次任务|本次执行|\bteam(?:[_ -]?id)?\b|\boverall\b", re.I)
+    local_scope = re.compile(
+        r"报告|子任务|成员|单测|测试|用例|检查项|扫描项|漏洞|发现|文件|函数|工具|步骤|局部|部分"
+        r"|\b(?:report|subtasks?|members?|workers?|tests?|checks?|findings?|files?|steps?)\b", re.I,
+    )
+    negation = re.compile(
+        r"(?:不能|不要|不得|禁止|并未|没有|未|不会|不是|不|\bnot\b|\bnever\b)[^，,。；;\n]{0,24}$", re.I,
+    )
+    assertions: list[tuple[str, bool]] = []
+    subject = ""
+    # 分句不限制团队标题到结论的距离；逗号连接的省略主语沿用上一分句。
+    for clause in re.split(r"([，,。；;\n.!?！？])", re.sub(r"[*`]", "", text)):
+        if clause in {"，", ","}:
             continue
-        return True
-    return False
+        if clause in {"。", "；", ";", "\n", ".", "!", "?", "！", "？"}:
+            subject = ""
+            continue
+        previous_end = 0
+        for match in markers.finditer(clause):
+            prefix = clause[:match.start()]
+            teams = list(team_scope.finditer(prefix))
+            locals_ = list(local_scope.finditer(prefix))
+            if locals_ and (not teams or locals_[-1].start() > teams[-1].start()):
+                subject = "local"
+            elif teams or re.match(
+                r"^\s*(?:最终|整体|团队)?状态\s*[:：]|^\s*(?:final |overall )?status\s*:", prefix, re.I,
+            ):
+                subject = "team"
+            # 完成若干子任务只表示局部进度，不能替代团队终态。
+            suffix = clause[match.end():]
+            local_result = re.match(
+                r"的|(?:子任务|步骤)|\s*(?:[0-9一二三四五六七八九十百两]+\s*(?:个|项)?\s*)?"
+                r"(?:子任务|步骤|检查项)|\s+(?:[0-9]+\s+)?(?:steps?|tests?|subtasks?|checks?)\b",
+                suffix, re.I,
+            )
+            if subject != "local" and not local_result:
+                predicate_start = max(previous_end, teams[-1].end()) if teams else previous_end
+                denied = bool(negation.search(prefix[predicate_start:]))
+                if teams:
+                    # “没有发现问题且团队已完成”中的局部否定不修饰团队；禁言仍算否定。
+                    denied = denied or bool(re.search(
+                        r"(?:不能|不要|不得|禁止|不可|并非|不是)(?:声称|宣称|说|报告|认为|表示)?\s*$",
+                        prefix[previous_end:teams[-1].start()],
+                    ))
+                assertions.append((str(match.lastgroup), denied))
+            previous_end = match.end()
+    return assertions
+
+
+def _terminal_team_output_error(text: str, team_id: int, status: str) -> Optional[str]:
+    """可信状态只补全中性表述，不覆盖正文中错误的团队身份或状态声明。"""
+    if _output_has_conflicting_team_id(text, team_id):
+        return f"团队终态汇总必须绑定服务端回执中的团队编号 {team_id}，不能包含其他或非法团队编号。"
+    for claimed, denied in _team_terminal_assertions(text):
+        if status == "completed" and claimed == "completed" and denied:
+            return f"团队 {team_id} 的服务端终态为 completed；汇总必须明确标记团队已完成。"
+        if status == "completed" and not denied and claimed != "completed":
+            return f"团队 {team_id} 的服务端终态为 completed，回复却称团队失败、阻塞、取消、超时或仍未完成。"
+        if status != "completed" and claimed == "completed" and not denied:
+            return f"团队 {team_id} 的服务端终态为 {status}，回复却声称团队已成功完成。"
+        if (claimed == status and denied) or (claimed != status and not denied):
+            return f"团队 {team_id} 的服务端终态为 {status}，回复中的团队状态与回执矛盾。"
+    return None
 
 
 def _latest_user_message_text(transcript: Sequence[Mapping[str, Any]]) -> str:

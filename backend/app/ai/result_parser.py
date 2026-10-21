@@ -14,6 +14,7 @@ v3 增强(2026-06-25):
 import json
 import re
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -57,9 +58,13 @@ _SEVERITY_ALIASES = {
     "note": "低",
 }
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 # 整段被围栏包裹：贪婪匹配到最后一个 ```，正文里引用的围栏不会提前截断
 _OUTER_FENCE_RE = re.compile(r"```(?:json)?[ \t]*\n?([\s\S]*)```\s*$", re.IGNORECASE)
+_BARE_SEVERITY_VALUE_RE = re.compile(
+    r"(?P<separator>[ \t\r\n]*:[ \t\r\n]*)(?P<value>"
+    + "|".join(sorted(ALLOWED_SEVERITY))
+    + r")(?=[ \t\r\n]*[,}])"
+)
 
 
 def normalize_severity(value: object, default: str = "中") -> str:
@@ -159,7 +164,7 @@ def _strip_fence(text: str) -> str:
 
     只有整段输出以围栏开头时才剥围栏；JSON 字符串内部引用的 ``` 不能当成外层围栏，
     否则会截出字符串中段导致 "Expecting value: char 0"（圆桌 #217 根因）。
-    围栏前有说明文字时，退回到第一个 { 到最后一个 } 的对象片段。
+    围栏前有说明文字时，从第一个 JSON 起始符提取并保留尾部供完整性校验。
 
     Args:
         text: 包含可能的```json...```围栏的文本
@@ -174,13 +179,125 @@ def _strip_fence(text: str) -> str:
         m = _OUTER_FENCE_RE.match(text)
         if m:
             return m.group(1).strip()
-    m = _FENCE_RE.search(text)
-    if m and m.group(1).strip().startswith(("{", "[")):
-        return m.group(1).strip()
-    start, end = text.find("{"), text.rfind("}")
-    if 0 <= start < end:
-        return text[start:end + 1]
+    # 始终从最早的对象开始，不能用后方围栏覆盖前方已经存在的发现。
+    start = re.search(r"[{\[]", text)
+    if start:
+        return text[start.start():]
     return text
+
+
+def _remove_trailing_commas(text: str) -> str:
+    """只删除字符串外、完整值之后的尾逗号；不补值或闭合符。"""
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    previous = ""
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "," and previous and previous not in "[{,:":
+            following = index + 1
+            while following < len(text) and text[following] in " \t\r\n":
+                following += 1
+            if following < len(text) and text[following] in "]}":
+                continue
+        result.append(char)
+        if char not in " \t\r\n":
+            previous = char
+    return "".join(result)
+
+
+def _quote_bare_severity_values(text: str) -> str:
+    """只给字符串外 severity 字段的四级已登记裸枚举补引号。"""
+    result: list[str] = []
+    index = 0
+    previous = ""
+    while index < len(text):
+        char = text[index]
+        if char != '"':
+            result.append(char)
+            if char not in " \t\r\n":
+                previous = char
+            index += 1
+            continue
+        try:
+            # 跳过完整字符串，保留转义及证据原文，不匹配字符串内部的伪字段。
+            value, end = json.decoder.scanstring(text, index + 1)
+        except json.JSONDecodeError:
+            # 不补全截断字符串；后续严格解码仍会拒绝不完整的对象。
+            result.append(text[index:])
+            break
+        result.append(text[index:end])
+        match = (
+            _BARE_SEVERITY_VALUE_RE.match(text, end)
+            if value == "severity" and previous in ("{", ",") else None
+        )
+        if match:
+            result.extend((
+                match.group("separator"), json.dumps(match.group("value"), ensure_ascii=False),
+            ))
+            end = match.end()
+        previous = '"'
+        index = end
+    return "".join(result)
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ResultParseError("AI 返回非合法 JSON: 包含重复对象字段")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str):
+    raise ResultParseError(f"AI 返回非合法 JSON: 不允许 {value}")
+
+
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not isfinite(number):
+        raise ResultParseError("AI 返回非合法 JSON: 数值超出有限浮点数范围")
+    return number
+
+
+def load_json_object(text: str) -> dict:
+    """复用围栏提取并修复无损格式错误，拒绝会掩盖发现的歧义 JSON。"""
+    if not text or not text.strip():
+        raise ResultParseError("AI 返回为空")
+    cleaned = _strip_fence(text)
+    decoder = json.JSONDecoder(
+        object_pairs_hook=_unique_object, parse_constant=_reject_constant, parse_float=_finite_float,
+    )
+    try:
+        try:
+            data, end = decoder.raw_decode(cleaned)
+        except json.JSONDecodeError:
+            repaired = _quote_bare_severity_values(_remove_trailing_commas(cleaned))
+            if repaired == cleaned:
+                raise
+            data, end = decoder.raw_decode(repaired)
+            cleaned = repaired
+        # 保留尾随说明兼容，但不能只消费多个结果中的第一个干净对象。
+        tail = cleaned[end:].strip()
+        if tail.startswith("```"):
+            tail = tail[3:].strip()
+        if tail.startswith(("```", ",", ":")) or re.search(r"[{}\[\]]", tail):
+            raise ResultParseError("AI 返回非合法 JSON: 包含额外 JSON 内容")
+    except (ValueError, RecursionError) as exc:
+        logger.warning(f"JSON 解析失败: {exc}, 原始片段: {cleaned[:200]}")
+        raise ResultParseError(f"AI 返回非合法 JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ResultParseError("AI 返回不是 JSON 对象")
+    return data
 
 
 def _coerce_int(v, default: int = 0) -> int:
@@ -439,24 +556,7 @@ def parse(text: str) -> ReviewResult:
     Raises:
         ResultParseError: JSON解析失败或格式异常
     """
-    if not text or not text.strip():
-        raise ResultParseError("AI 返回为空")
-
-    cleaned = _strip_fence(text)
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        data = None
-    if data is None:
-        try:
-            # 对象后带说明文字时只取第一个完整 JSON 值
-            data, _end = json.JSONDecoder().raw_decode(cleaned)
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON 解析失败: {e}, 原始片段: {cleaned[:200]}")
-            raise ResultParseError(f"AI 返回非合法 JSON: {e}")
-
-    if not isinstance(data, dict):
-        raise ResultParseError("AI 返回不是 JSON 对象")
+    data = load_json_object(text)
 
     issues_raw = data.get("issues")
     if not isinstance(issues_raw, list):

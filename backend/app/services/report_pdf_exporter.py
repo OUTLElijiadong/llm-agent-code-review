@@ -870,7 +870,8 @@ def export_to_pdf(
 
     # 6. 问题详情(按严重度分组)
     elements.extend(_build_issues_section(
-        sorted_issues, styles, font_name, context.get("empty_issues_text") or "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。",
+        sorted_issues, styles, font_name,
+        context.get("empty_issues_text") or "审查未完成或覆盖范围未知，没有可用结论，不能据此判定无问题。",
     ))
 
     security_report = context.get("source", {}).get("security_report", {})

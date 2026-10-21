@@ -206,7 +206,10 @@ def score_section_lines(
         }
         detail = "、".join(f"{key} {value} 项" for key, value in counts.items())
         if finding_count:
-            lines.append(f"结论：已测范围内记录 {finding_count} 项发现" + (f"（{detail}）" if detail else "") + "，请按修复建议逐项处理并复测。")
+            lines.append(
+                f"结论：已测范围内记录 {finding_count} 项发现"
+                + (f"（{detail}）" if detail else "") + "，请按修复建议逐项处理并复测。"
+            )
         else:
             lines.append("结论：已测范围内未记录发现；这只代表本次已测范围，不等于已证明不存在风险。")
     return lines

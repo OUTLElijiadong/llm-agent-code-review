@@ -408,3 +408,85 @@ def test_live_tool_metadata_survives_public_filter_without_unregistered_page_inj
     assert public["page_action"]["result_route"] == "/forum/42"
     public = agent_responses._public_stream_event({**event, "tool_name": "unregistered"})
     assert "page_action" not in public
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["user", "admin"])
+async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface):
+    """客户端 run/created 早于 create 提交；404 不应通过伪造 run 或放宽归属修复。"""
+    from app.models.agent_mesh import AgentMeshConversation
+    from app.services.agent_responses_service import DatabaseCheckpointStore
+    from app.services.deepseek_responses_runtime import RunCheckpoint
+
+    if surface == "admin":
+        admin_role = Role(name="管理员", code="admin", status="active")
+        db.add(admin_role)
+        db.flush()
+        db.query(UserRole).filter_by(user_id=owner.id).delete(synchronize_session=False)
+        owner.role = "admin"
+        db.add(UserRole(user_id=owner.id, role_id=admin_role.id))
+    session_key = "browser-start-session"
+    run_id = "run_client_before_checkpoint"
+    db.add(
+        AgentMeshConversation(
+            user_id=owner.id,
+            surface=surface,
+            session_key=session_key,
+            status="active",
+            last_seen_at=service._now(),
+        )
+    )
+    other = User(username="browser-unrelated-owner", password="unused", role="user", status=1)
+    db.add(other)
+    db.flush()
+    role = db.query(Role).filter_by(code="user").one()
+    db.add(UserRole(user_id=other.id, role_id=role.id))
+    db.commit()
+    application = FastAPI()
+    register_handlers(application)
+    application.include_router(router_module.router, prefix="/api/agent-browser")
+    application.dependency_overrides[get_db] = lambda: db
+    headers = {"Authorization": "Bearer " + create_access_token(owner.id, owner.role)}
+    params = {"run_id": run_id, "session_id": session_key, "surface": surface}
+    store = DatabaseCheckpointStore(db, user_id=owner.id, surface=surface, session_key=session_key)
+    checkpoint = RunCheckpoint(
+        run_id=run_id,
+        model="test-model",
+        transcript=[],
+        tools=[],
+        last_response={"id": "resp_upstream_response"},
+    )
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://test") as client:
+        # 首次恢复探测发生在真正的运行创建之前；不生成占位检查点或页面动作。
+        missing = await client.get("/api/agent-browser/pending", params=params, headers=headers)
+        assert missing.status_code == 404
+        assert missing.json()["code"] == 40400
+        assert missing.json()["message"] == "页面操作运行不存在"
+        assert db.query(AgentResponseRun).filter_by(run_id=run_id).count() == 0
+        assert db.query(AgentBrowserAction).count() == 0
+        assert await store.create(checkpoint) is True
+        restored = await store.load(run_id)
+        assert restored.run_id == run_id
+        assert restored.last_response["id"] == "resp_upstream_response"
+        available = await client.get("/api/agent-browser/pending", params=params, headers=headers)
+        assert available.status_code == 200 and available.json()["data"] == {"actions": []}
+        for invalid in [
+            {**params, "run_id": "resp_upstream_response"},
+            {**params, "session_id": "other-session"},
+            {**params, "surface": "admin" if surface == "user" else "user"},
+        ]:
+            rejected = await client.get("/api/agent-browser/pending", params=invalid, headers=headers)
+            assert rejected.status_code in {403, 404}
+        foreign = await client.get(
+            "/api/agent-browser/pending",
+            params=params,
+            headers={"Authorization": "Bearer " + create_access_token(other.id, "user")},
+        )
+        assert foreign.status_code in {403, 404}
+        run = db.query(AgentResponseRun).filter_by(run_id=run_id).one()
+        run.status = "completed"
+        db.commit()
+        stopped = await client.get("/api/agent-browser/pending", params=params, headers=headers)
+        assert stopped.status_code == 409
+        assert db.query(AgentBrowserAction).count() == 0

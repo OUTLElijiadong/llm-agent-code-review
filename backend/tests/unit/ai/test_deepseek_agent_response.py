@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -139,7 +141,7 @@ def test_call_raw_retries_429_and_5xx_then_returns_complete_response(monkeypatch
         [
             _Response(429, text="rate limited"),
             _Response(503, text="unavailable"),
-            _Response(200, _completion(content="complete", finish_reason="stop")),
+            _Response(200, _completion(content='{"issues": []}', finish_reason="stop")),
         ],
     )
     sleeps = []
@@ -147,7 +149,7 @@ def test_call_raw_retries_429_and_5xx_then_returns_complete_response(monkeypatch
 
     content, meta = agent.call_raw("system", "user", agent_label="code_reviewer")
 
-    assert content == "complete"
+    assert json.loads(content) == {"issues": []}
     assert meta["finish_reason"] == "stop"
     assert meta["total_tokens"] == 5
     assert len(calls) == 3
@@ -288,7 +290,7 @@ def test_chat_retries_transient_http_errors_then_logs_success(monkeypatch):
         [
             _Response(429, text="rate limited"),
             _Response(502, text="bad gateway"),
-            _Response(200, _completion(content="complete")),
+            _Response(200, _completion(content='{"issues": []}')),
         ],
     )
     monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", lambda _seconds: None)
@@ -297,7 +299,7 @@ def test_chat_retries_transient_http_errors_then_logs_success(monkeypatch):
 
     content, meta = agent.chat(system_prompt="system", user_prompt="user", db=db)
 
-    assert content == "complete"
+    assert json.loads(content) == {"issues": []}
     assert meta["finish_reason"] == "stop"
     assert len(calls) == 3
     assert [record.status for record in records] == ["retry", "retry", "success"]
@@ -334,3 +336,143 @@ def test_chat_retries_transient_network_errors_and_logs_final_failure(monkeypatc
 
     assert len(calls) == 3
     assert [record.status for record in records] == ["retry", "retry", "failed"]
+
+
+@pytest.mark.parametrize("method", ["raw", "chat"])
+def test_json_mode_retries_invalid_content_and_accounts_every_attempt(monkeypatch, method):
+    agent = _agent(max_retries=2)
+    requests, attempts = [], []
+    valid = '{"issues":[{"title":"命令注入","evidence":"os.system(user_input)"}]}'
+    responses = [
+        _Response(200, _completion(content='{"issues":[...]}')),
+        _Response(200, _completion(content=valid)),
+    ]
+
+    def request(url, headers, payload):
+        requests.append(deepcopy(payload))
+        return responses[len(requests) - 1], 17
+
+    monkeypatch.setattr(agent, "_do_request", request)
+    monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "app.ai.deepseek_agent.record_usage_attempt",
+        lambda **kwargs: attempts.append(kwargs) or len(attempts),
+    )
+    if method == "raw":
+        content, meta = agent.call_raw("system", "完整源码", agent_label="security_sentinel")
+    else:
+        content, meta = agent.chat(
+            system_prompt="system", user_prompt="完整源码", db=MagicMock(),
+            agent_label="security_sentinel",
+        )
+
+    assert json.loads(content) == json.loads(valid)
+    assert len(requests) == 2
+    assert requests[0] == requests[1]  # 重试仍审查同一份完整源码。
+    assert [item["status"] for item in attempts] == ["retry", "success"]
+    assert [item["usage"]["total_tokens"] for item in attempts] == [5, 5]
+    assert all(item["agent_label"] == "security_sentinel" for item in attempts)
+    assert attempts[0]["response"] == '{"issues":[...]}'
+    assert meta["_usage_log_ids"] == [1, 2]
+    if method == "raw":
+        assert meta["_http_attempts"] == 2
+
+
+@pytest.mark.parametrize("method", ["raw", "chat"])
+@pytest.mark.parametrize("max_retries", [0, 2])
+def test_json_mode_exhaustion_remains_failed_with_usage(monkeypatch, method, max_retries):
+    agent = _agent(max_retries=max_retries)
+    calls = _install_responses(monkeypatch, agent, [
+        _Response(200, _completion(content='{"issues":[...]}'))
+        for _ in range(max_retries + 1)
+    ])
+    attempts = []
+    monkeypatch.setattr("app.ai.deepseek_agent.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "app.ai.deepseek_agent.record_usage_attempt",
+        lambda **kwargs: attempts.append(kwargs) or len(attempts),
+    )
+    with pytest.raises((DeepSeekResponseError, AiServiceError), match="JSON") as error:
+        if method == "raw":
+            agent.call_raw("system", "source")
+        else:
+            agent.chat(system_prompt="system", user_prompt="source", db=MagicMock())
+
+    assert len(calls) == max_retries + 1
+    assert [item["status"] for item in attempts] == ["retry"] * max_retries + ["failed"]
+    assert sum(item["usage"]["total_tokens"] for item in attempts) == 5 * len(calls)
+    if method == "raw":
+        assert error.value.meta["_http_attempts"] == len(calls)
+        assert error.value.meta["_usage_log_ids"] == list(range(1, len(calls) + 1))
+        assert error.value.meta["total_tokens"] == 5
+
+
+@pytest.mark.parametrize("method", ["raw", "chat"])
+def test_json_mode_repairs_only_format_and_returns_strict_json(monkeypatch, method):
+    agent = _agent()
+    raw = '```json\n{"issues":[{"title":"命令注入","evidence":"os.system(x)"},],}\n```'
+    calls = _install_responses(monkeypatch, agent, [_Response(200, _completion(content=raw))])
+    if method == "raw":
+        content, _ = agent.call_raw("system", "source")
+    else:
+        content, _ = agent.chat(system_prompt="system", user_prompt="source", db=MagicMock())
+    assert json.loads(content) == {"issues": [{"title": "命令注入", "evidence": "os.system(x)"}]}
+    assert len(calls) == 1
+
+
+def test_plain_text_mode_preserves_content_without_json_repair(monkeypatch):
+    agent = _agent()
+    raw = '自然语言讨论，保留 ```json 和未闭合 { 原文'
+    calls = _install_responses(monkeypatch, agent, [_Response(200, _completion(content=raw))])
+    content, _ = agent.call_raw("system", "source", json_mode=False)
+    assert content == raw
+    assert "response_format" not in calls[0][2]
+
+
+@pytest.mark.parametrize("method", ["raw", "chat"])
+@pytest.mark.parametrize("content", ['{"issues": []}', '{"issues":[...]}'])
+def test_usage_accounting_failure_never_resends_model_request(monkeypatch, method, content):
+    from app.services.ai_usage_context import UsageAccountingError
+
+    agent = _agent(max_retries=2)
+    calls = _install_responses(monkeypatch, agent, [_Response(200, _completion(content=content))])
+
+    def reject_accounting(**_kwargs):
+        raise UsageAccountingError("审计提交失败")
+
+    monkeypatch.setattr("app.ai.deepseek_agent.record_usage_attempt", reject_accounting)
+    with pytest.raises(UsageAccountingError, match="审计提交失败"):
+        if method == "raw":
+            agent.call_raw("system", "source")
+        else:
+            agent.chat(system_prompt="system", user_prompt="source", db=MagicMock())
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("method", ["raw", "chat"])
+def test_json_mode_repairs_bare_severity_without_retry_or_losing_evidence(monkeypatch, method):
+    agent = _agent(max_retries=0)
+    evidence = 'literal "severity":低, escaped \\" text'
+    expected = {"issues": [
+        {"title": "脱敏发现一", "severity": "低", "evidence": evidence},
+        {"title": "脱敏发现二", "severity": "低", "fixed_code": "check(value)"},
+    ]}
+    raw = json.dumps(expected, ensure_ascii=False).replace('"severity": "低"', '"severity":低')
+    calls = _install_responses(monkeypatch, agent, [_Response(200, _completion(content=raw))])
+    attempts = []
+    monkeypatch.setattr(
+        "app.ai.deepseek_agent.record_usage_attempt",
+        lambda **kwargs: attempts.append(kwargs) or len(attempts),
+    )
+    if method == "raw":
+        content, _ = agent.call_raw("system", "source")
+    else:
+        content, _ = agent.chat(system_prompt="system", user_prompt="source", db=MagicMock())
+
+    assert json.loads(content) == expected
+    assert len(calls) == 1
+    assert [attempt["status"] for attempt in attempts] == ["success"]
+    if method == "raw":
+        assert attempts[0]["response"] == raw
+    else:
+        assert json.loads(attempts[0]["response"]) == expected

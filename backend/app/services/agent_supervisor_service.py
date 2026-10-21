@@ -50,7 +50,8 @@ _LOW_RESPONSE_TOOLS = frozenset({
     "get_roundtable_discussion", "admin_release_health",
 })
 _MEDIUM_RESPONSE_TOOLS = frozenset({
-    "cancel_agent_team", "cancel_agent_team_task", "retry_agent_team", "create_project", "update_project", "start_review",
+    "cancel_agent_team", "cancel_agent_team_task", "retry_agent_team", "create_project", "update_project",
+    "start_review",
     "generate_ai_prompt_for_issue", "generate_ai_prompt_for_task", "generate_ai_prompt_for_project",
     "audit_security_for_file", "audit_security_for_task", "audit_security_for_project",
     "run_full_project_validation", "deploy_project_sandbox", "close_sandbox", "extend_sandbox",

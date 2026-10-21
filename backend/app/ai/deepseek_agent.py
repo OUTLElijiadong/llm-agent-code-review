@@ -8,6 +8,7 @@ DeepSeek Agent: HTTP调用、重试、日志记录
 
 时区约定: 所有 create_time 均为 timezone-aware UTC (datetime.now(timezone.utc))。
 """
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -17,7 +18,8 @@ import httpx
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.ai.exceptions import AiServiceError
+from app.ai.exceptions import AiServiceError, ResultParseError
+from app.ai.result_parser import load_json_object
 from app.core.config import settings
 from app.models.ai_call_log import AiCallLog
 from app.services.ai_usage_context import (
@@ -50,7 +52,13 @@ class DeepSeekOutputTruncatedError(DeepSeekResponseError):
     """DeepSeek 因 token 上限截断了响应。"""
 
 
-def _parse_completion_response(resp: httpx.Response) -> tuple[str, dict, str]:
+class DeepSeekJsonOutputError(DeepSeekResponseError):
+    """响应已完整结束，但 JSON 正文仍需有限重试。"""
+
+
+def _parse_completion_response(
+    resp: httpx.Response, *, json_mode: bool = True,
+) -> tuple[str, dict, str]:
     """解析并校验非流式 Chat Completions 响应。
 
     这里必须在业务层解析 JSON 之前拒绝 ``finish_reason=length``。
@@ -122,6 +130,18 @@ def _parse_completion_response(resp: httpx.Response) -> tuple[str, dict, str]:
                 finish_reason=finish_reason,
             )
 
+    if json_mode:
+        try:
+            data = load_json_object(content)
+        except ResultParseError as exc:
+            error = DeepSeekJsonOutputError(
+                f"DeepSeek 返回非合法 JSON: {exc}", finish_reason=finish_reason,
+            )
+            error.usage = usage
+            error.model_name = str(body.get("model") or "")
+            raise error from exc
+        # 同一解析入口恢复围栏/尾逗号后，供所有 JSON 消费方使用严格 JSON。
+        content = json.dumps(data, ensure_ascii=False, allow_nan=False)
     return content, usage, finish_reason
 
 
@@ -331,22 +351,30 @@ class DeepSeekAgent:
             choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
             content = choice.get("message", {})
             content = content.get("content") if isinstance(content, dict) else None
-            success = (response.status_code == 200 and choice.get("finish_reason") == "stop"
-                       and isinstance(content, str) and bool(content.strip()))
-            retryable = response.status_code == 429 or response.status_code >= 500
+            parsed = None
+            validation_error = None
+            if response.status_code == 200:
+                try:
+                    parsed = _parse_completion_response(response, json_mode=json_mode)
+                except DeepSeekResponseError as exc:
+                    validation_error = exc
+            success = parsed is not None
+            retryable = (response.status_code == 429 or response.status_code >= 500
+                         or isinstance(validation_error, DeepSeekJsonOutputError))
             log_id = record_usage_attempt(
                 model_name=str(body.get("model") or self.model), agent_label=agent_label, usage=body.get("usage"),
                 status="success" if success else "retry" if retryable and attempt < self.max_retries else "failed",
-                error="" if success else f"HTTP {response.status_code}; finish_reason={choice.get('finish_reason')}",
+                error=("" if success else str(validation_error) if validation_error else
+                       f"HTTP {response.status_code}; finish_reason={choice.get('finish_reason')}"),
                 duration_ms=duration, prompt=user_prompt, response=content if isinstance(content, str) else "",
             )
             if log_id is not None:
                 usage_log_ids.append(log_id)
-            return response, duration
+            return response, duration, parsed, validation_error
 
         for attempt in range(self.max_retries + 1):
             try:
-                resp, duration_ms = raw_attempt(attempt)
+                resp, duration_ms, parsed, validation_error = raw_attempt(attempt)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 err = f"DeepSeek 网络请求失败: {exc}"
                 logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} {err}")
@@ -358,9 +386,8 @@ class DeepSeekAgent:
                 continue
 
             if resp.status_code == 200:
-                try:
-                    content, usage, finish_reason = _parse_completion_response(resp)
-                except DeepSeekResponseError as exc:
+                if validation_error is not None:
+                    exc = validation_error
                     exc.usage_log_ids = list(usage_log_ids)
                     exc.meta = {
                         "_usage_attribution": attribution_snapshot(),
@@ -378,7 +405,12 @@ class DeepSeekAgent:
                         "response": "",
                         "create_time": datetime.now(timezone.utc),
                     }
-                    raise
+                    if isinstance(exc, DeepSeekJsonOutputError) and attempt < self.max_retries:
+                        logger.warning(f"[call_raw] {agent_label} attempt={attempt+1} JSON 校验失败，重试")
+                        time.sleep(min(60, 2 ** (attempt + 1)))
+                        continue
+                    raise exc
+                content, usage, finish_reason = parsed
                 return content, {
                     "_usage_attribution": attribution_snapshot(),
                     "_usage_log_ids": list(usage_log_ids),
@@ -447,6 +479,14 @@ class DeepSeekAgent:
         )
 
         attempt = 0
+        usage_log_ids: list[int] = []
+
+        def log_attempt(**kwargs):
+            meta = kwargs["meta"]
+            self._log(**kwargs)
+            usage_log_ids.extend(meta.get("_usage_log_ids", []))
+            meta["_usage_log_ids"] = list(usage_log_ids)
+
         last_err: Optional[Exception] = None
         while attempt <= self.max_retries:
             try:
@@ -454,8 +494,8 @@ class DeepSeekAgent:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 err = AiServiceError(f"DeepSeek 网络请求失败: {exc}", code=50201)
                 last_err = err
-                self._log(
-                    db, task_id=task_id, user_id=user_id, file_id=file_id,
+                log_attempt(
+                    db=db, task_id=task_id, user_id=user_id, file_id=file_id,
                     chunk_index=chunk_index, prompt=user_prompt, response=None,
                     status="retry" if attempt < self.max_retries else "failed",
                     error=str(err)[:500], meta={"duration_ms": 0},
@@ -480,21 +520,31 @@ class DeepSeekAgent:
                 try:
                     content, usage, finish_reason = _parse_completion_response(resp)
                 except DeepSeekResponseError as exc:
-                    self._log(
-                        db, task_id=task_id, user_id=user_id, file_id=file_id,
-                        chunk_index=chunk_index, prompt=user_prompt, response=None,
-                        status="failed", error=str(exc)[:500],
-                        meta={
-                            **reported_usage,
-                            "duration_ms": duration_ms,
-                            "finish_reason": exc.finish_reason,
-                        },
-                        model_name=model_tag,
-                        agent_label=agent_label,
+                    retryable = isinstance(exc, DeepSeekJsonOutputError) and attempt < self.max_retries
+                    raw_content = None
+                    if isinstance(exc, DeepSeekJsonOutputError):
+                        raw_content = response_body["choices"][0]["message"]["content"]
+                    meta = {
+                        **reported_usage,
+                        "duration_ms": duration_ms,
+                        "finish_reason": exc.finish_reason,
+                    }
+                    log_attempt(
+                        db=db, task_id=task_id, user_id=user_id, file_id=file_id,
+                        chunk_index=chunk_index, prompt=user_prompt,
+                        response=raw_content if isinstance(raw_content, str) else None,
+                        status="retry" if retryable else "failed", error=str(exc)[:500],
+                        meta=meta, model_name=model_tag, agent_label=agent_label,
                     )
-                    raise AiServiceError(
-                        f"DeepSeek 响应无效: {exc}", code=50201,
-                    ) from exc
+                    if retryable:
+                        logger.warning(f"DeepSeek JSON 校验失败，第 {attempt+1} 次重试")
+                        time.sleep(min(60, 2 ** (attempt + 1)))
+                        attempt += 1
+                        continue
+                    error = AiServiceError(f"DeepSeek 响应无效: {exc}", code=50201)
+                    error.meta = meta
+                    error.usage_log_ids = list(usage_log_ids)
+                    raise error from exc
                 meta = {
                     "prompt_tokens": usage.get("prompt_tokens"),
                     "completion_tokens": usage.get("completion_tokens"),
@@ -502,8 +552,8 @@ class DeepSeekAgent:
                     "duration_ms": duration_ms,
                     "finish_reason": finish_reason,
                 }
-                self._log(
-                    db, task_id=task_id, user_id=user_id, file_id=file_id,
+                log_attempt(
+                    db=db, task_id=task_id, user_id=user_id, file_id=file_id,
                     chunk_index=chunk_index, prompt=user_prompt, response=content,
                     status="success", error=None, meta=meta,
                     model_name=model_tag,
@@ -535,8 +585,8 @@ class DeepSeekAgent:
                 )
                 retryable = False
             last_err = err
-            self._log(
-                db, task_id=task_id, user_id=user_id, file_id=file_id,
+            log_attempt(
+                db=db, task_id=task_id, user_id=user_id, file_id=file_id,
                 chunk_index=chunk_index, prompt=user_prompt, response=None,
                 status="retry" if retryable and attempt < self.max_retries else "failed",
                 error=str(err)[:500],

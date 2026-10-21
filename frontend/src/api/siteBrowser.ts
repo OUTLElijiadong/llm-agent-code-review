@@ -28,5 +28,7 @@ const base = '/agent-browser'
 export const siteBrowserApi: SiteBrowserApi = {
   claim: (id, body) => post(`${base}/actions/${id}/claim`, body, undefined, [40901], true),
   ack: (id, body) => post(`${base}/actions/${id}/ack`, body, undefined, [40901], true),
-  pending: query => get(`${base}/pending`, query, [40901], true),
+  // 客户端 run ID 与 response.created 都可能早于检查点提交；后台恢复继续轮询，
+  // 404 仍 reject 且不能执行动作，只免除这条只读探测的全局提示。
+  pending: query => get(`${base}/pending`, query, [40400, 40901], true),
 }

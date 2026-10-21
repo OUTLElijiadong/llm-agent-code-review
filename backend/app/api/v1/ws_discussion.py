@@ -29,6 +29,8 @@ import contextlib
 import json as json_lib
 import threading
 import time
+from dataclasses import asdict
+from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -97,6 +99,23 @@ def _publish_cancelled_terminal(
     task_id: int = 0,
 ) -> bool:
     """以幂等终态通知收敛已停止的会话和前端连接。"""
+    session = bus.get_session(session_id)
+    report_id = int(task_id or getattr(session, "report_task_id", 0) or getattr(session, "task_id", 0) or 0)
+    if session is not None and report_id and getattr(bus, "_persist", False):
+        with bus._session_maker()() as db:
+            outcome = cancel_running_discussion_report(
+                db, task_id=report_id, owner_user_id=session.owner_user_id,
+            )
+            if outcome == "terminal":
+                from app.models.review_task import ReviewTask
+
+                report = db.get(ReviewTask, report_id)
+                bus.publish_control(session_id, "done", {
+                    "task_id": report_id, "status": report.status,
+                    "error": report.error_message or "",
+                })
+                bus.close_session(session_id)
+                return False
     bus.request_stop(session_id, reason=error)
     session = bus.get_session(session_id)
     if session is None or session.terminal_status != "cancelled":
@@ -204,8 +223,25 @@ def purge_stale_pending():
 
 def register_pending(session_id: str, **kwargs):
     purge_stale_pending()
+    pending = PendingDiscussion(session_id, **kwargs)
+    bus = DiscussionBus.instance()
+    session = bus.get_session(session_id)
+    if session is not None:
+        if session.owner_user_id != int(kwargs.get("user_id") or 0) or session.status != "pending":
+            raise RuntimeError("圆桌待启动上下文与会话归属或状态不匹配")
+        recovery = {
+            "version": 1, "created_at": pending.created_at,
+            "token_version": pending.session_token_version,
+            "kwargs": {**pending.kwargs, "profiles": [asdict(profile) for profile in kwargs["profiles"]]},
+        }
+        session.progress = {**session.progress, "_recovery": recovery}
+        try:
+            if bus._persist and not bus._update_session(session):
+                raise RuntimeError("圆桌已终止，启动上下文保存失败")
+        except Exception:
+            _fail_pending_discussion(bus, session_id, "圆桌启动上下文保存失败")
+            raise
     with _pending_lock:
-        pending = PendingDiscussion(session_id, **kwargs)
         _pending[session_id] = pending
         owner = kwargs.get("user_id")
         if owner is not None:
@@ -366,49 +402,77 @@ def _is_parent_response_run_cancelled(user_id: int, agent_run_id: int) -> bool:
         db.close()
 
 
+def _fail_pending_discussion(
+    bus: DiscussionBus, session_id: str, error: str, *, status: str = "failed",
+) -> None:
+    """启动/执行异常同时关闭会话与仍在运行的同账号报告。"""
+    session = bus.get_session(session_id)
+    if session is None or getattr(session, "terminal_status", "") in {"success", "cancelled"}:
+        return
+    status = getattr(session, "terminal_status", "") or status
+    task_id = int(session.report_task_id or session.task_id or 0)
+    if getattr(bus, "_persist", False) and task_id:
+        from app.models.review_task import ReviewTask
+
+        with bus._session_maker().begin() as db:
+            task = db.query(ReviewTask).filter_by(
+                id=task_id, user_id=session.owner_user_id, review_type="discuss",
+            ).with_for_update().one_or_none()
+            if task is not None and task.status == "running":
+                task.status = "failed"
+                task.end_time = datetime.now(timezone.utc)
+                task.error_message = error
+                task.coverage = {**(task.coverage or {}), "stage": status, "score_available": False}
+    bus.publish_control(session_id, "done", {"task_id": task_id, "status": status, "error": error})
+    bus.close_session(session_id)
+
+
 async def _run_pending_discussion(pending: PendingDiscussion) -> None:
-    """运行圆桌编排，并监视登录失效及发起它的父级 Responses 取消。"""
-
-    from app.ai.discussion_orchestrator import DiscussionOrchestrator
-
+    """完整包围启动、授权与执行；任何异常都不能遗留无执行器的 active。"""
     bus = DiscussionBus.instance()
-    session = bus.get_session(pending.session_id)
-    if not session or session.status != "pending" or session.cancel_event.is_set():
-        logger.info("[WS] 丢弃已终止或不存在的待启动圆桌 session=%s", pending.session_id)
-        return
-    bus.publish_control(pending.session_id, "started", {"status": "active"})
-    user_id = int(pending.kwargs.get("user_id") or 0)
-    project_id = int(pending.kwargs.get("project_id") or 0)
-    usage_origin = pending.kwargs.get("usage_origin") or {}
-    parent_run_id = int(usage_origin.get("agent_run_id") or 0)
-    active = await asyncio.to_thread(
-        _is_discussion_execution_active, user_id, project_id, pending.session_token_version,
-    )
-    parent_cancelled = bool(
-        parent_run_id
-        and await asyncio.to_thread(_is_parent_response_run_cancelled, user_id, parent_run_id)
-    )
-    if not active or parent_cancelled:
-        error = "发起圆桌的小菱运行已取消" if parent_cancelled else "登录会话已失效"
-        _publish_cancelled_terminal(bus, pending.session_id, error=error)
-        return
-
-    # 权限/父任务检查期间用户可能已停止该会话；在创建编排器前再读一次，
-    # 避免一个迟到的 pending 启动任务重新进入模型流程。
-    session = bus.get_session(pending.session_id)
-    if not session or session.status != "active" or session.cancel_event.is_set():
-        logger.info("[WS] 启动前会话已终止，跳过圆桌编排 session=%s", pending.session_id)
-        return
-
-    orchestrator_task = asyncio.create_task(
-        DiscussionOrchestrator().start_discussion(
-            session_id=pending.session_id,
-            **pending.kwargs,
-        ),
-        name=f"discussion-orchestrator:{pending.session_id}",
-    )
+    orchestrator_task: asyncio.Task | None = None
     monitor_task: asyncio.Task | None = None
     try:
+        from app.ai.discussion_orchestrator import DiscussionOrchestrator
+
+        session = bus.get_session(pending.session_id)
+        user_id = int(pending.kwargs.get("user_id") or 0)
+        project_id = int(pending.kwargs.get("project_id") or 0)
+        if (not session or session.status != "pending" or session.cancel_event.is_set()
+                or getattr(session, "owner_user_id", user_id) != user_id
+                or getattr(session, "project_id", project_id) != project_id):
+            return
+        usage_origin = pending.kwargs.get("usage_origin") or {}
+        parent_run_id = int(usage_origin.get("agent_run_id") or 0)
+        active = await asyncio.to_thread(
+            _is_discussion_execution_active, user_id, project_id, pending.session_token_version,
+        )
+        parent_cancelled = bool(
+            parent_run_id
+            and await asyncio.to_thread(_is_parent_response_run_cancelled, user_id, parent_run_id)
+        )
+        if not active or parent_cancelled:
+            error = "发起圆桌的小菱运行已取消" if parent_cancelled else "登录会话已失效"
+            _publish_cancelled_terminal(bus, pending.session_id, error=error)
+            return
+
+        # 权限/父任务检查期间用户可能已停止该会话；在创建编排器前再读一次，
+        # 避免一个迟到的 pending 启动任务重新进入模型流程。
+        session = bus.get_session(pending.session_id)
+        if not session or session.status != "pending" or session.cancel_event.is_set():
+            logger.info("[WS] 启动前会话已终止，跳过圆桌编排 session=%s", pending.session_id)
+            return
+
+        session.status = "active"
+        if getattr(bus, "_persist", False) and not bus._update_session(session):
+            return
+        orchestrator_task = asyncio.create_task(
+            DiscussionOrchestrator().start_discussion(
+                session_id=pending.session_id,
+                **pending.kwargs,
+            ),
+            name=f"discussion-orchestrator:{pending.session_id}",
+        )
         async def monitor_session() -> str:
             while True:
                 await asyncio.sleep(_SESSION_CHECK_INTERVAL)
@@ -446,15 +510,29 @@ async def _run_pending_discussion(pending: PendingDiscussion) -> None:
             _publish_cancelled_terminal(bus, pending.session_id, error=error)
             orchestrator_task.cancel()
         await orchestrator_task
+        current = bus.get_session(pending.session_id)
+        if current is not None and getattr(current, "terminal_status", "") not in {"success", "cancelled"}:
+            _fail_pending_discussion(bus, pending.session_id, "圆桌执行已退出，未形成完整报告")
+    except asyncio.CancelledError:
+        session = bus.get_session(pending.session_id)
+        if (session is not None and session.progress.get("_recovery")
+                and session.terminal_status not in {"success", "failed", "cancelled"}):
+            _fail_pending_discussion(
+                bus, pending.session_id, "圆桌服务中断，等待进程重启恢复", status="interrupted",
+            )
+        else:
+            _publish_cancelled_terminal(bus, pending.session_id, error="圆桌执行已取消")
+        raise
+    except Exception:
+        logger.exception("[Discussion] 启动或执行失败 session={}", pending.session_id)
+        _fail_pending_discussion(bus, pending.session_id, "圆桌启动或执行失败，请重试")
     finally:
-        if monitor_task is not None:
-            monitor_task.cancel()
-        if not orchestrator_task.done():
-            bus.request_stop(pending.session_id)
-            orchestrator_task.cancel()
-        pending_tasks = [task for task in (monitor_task, orchestrator_task) if task is not None]
-        if pending_tasks:
-            await asyncio.gather(*pending_tasks, return_exceptions=True)
+        tasks = [task for task in (monitor_task, orchestrator_task) if task is not None]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 _MAIN_LOOP: asyncio.AbstractEventLoop | None = None
@@ -465,6 +543,129 @@ def bind_main_loop(loop: asyncio.AbstractEventLoop) -> None:
 
     global _MAIN_LOOP
     _MAIN_LOOP = loop
+    task = loop.create_task(recover_persisted_discussions(), name="roundtable-recovery")
+    task.add_done_callback(_log_recovery_failure)
+
+
+def _log_recovery_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("[Discussion] 启动恢复失败: {}", task.exception())
+
+
+async def recover_persisted_discussions() -> None:
+    """单 Web worker 启动时恢复可信快照；历史无快照记录保留中断终态。"""
+    from app.ai.multi_agent import ReviewAgentProfile
+    from app.models.review_task import ReviewTask
+
+    bus = DiscussionBus.instance()
+    bus.enable_persistence(SessionLocal)
+
+    def close_row(row, progress, status, error="", report=None):
+        row.status = bus._session_status_for_terminal(status)
+        row.closed_at = (report.end_time if report is not None else None) or datetime.now(timezone.utc)
+        row.progress = {
+            **progress, "phase": "completed" if status == "success" else status,
+            "terminal_status": status, "terminal_error": error, "stage": status,
+            "speaker_code": "",
+        }
+        if status == "success":
+            row.progress = {
+                **row.progress,
+                "followup_start_seq": progress.get("finalizing_input_start_seq", row.last_turn_seq),
+            }
+
+    def claim():
+        candidates = []
+        with SessionLocal() as db:
+            ids = [(row.session_id, row.owner_user_id) for row in db.query(RoundtableSession).filter(
+                RoundtableSession.status.in_(["pending", "active", "paused", "concluded", "interrupted"]),
+            ).all() if isinstance((row.progress or {}).get("_recovery"), dict)
+                and row.progress["_recovery"].get("version") == 1]
+        for sid, owner in ids:
+            if bus.get_discussion_task(sid) is not None:
+                continue
+            try:
+                with SessionLocal.begin() as db:
+                    row = db.query(RoundtableSession).filter_by(
+                        session_id=sid, owner_user_id=owner,
+                    ).with_for_update().one_or_none()
+                    progress = dict(row.progress or {}) if row else {}
+                    if row is None or not (
+                        row.status in {"pending", "active", "paused"}
+                        or (row.status in {"concluded", "interrupted"} and progress.get("phase") == "interrupted")
+                    ):
+                        continue
+                    if progress.get("terminal_status") in {"success", "failed", "cancelled"}:
+                        close_row(row, progress, progress["terminal_status"])
+                        continue
+                    snapshot = progress["_recovery"]
+                    kwargs = dict(snapshot["kwargs"])
+                    if (int(kwargs["user_id"]) != owner or int(kwargs["project_id"]) != row.project_id
+                            or int(kwargs["file_id"]) != row.file_id):
+                        raise ValueError("恢复快照归属与会话不匹配")
+                    kwargs["profiles"] = tuple(
+                        ReviewAgentProfile(**{**profile, "issue_types": tuple(profile["issue_types"])})
+                        for profile in kwargs["profiles"]
+                    )
+                    if not kwargs["profiles"] or not isinstance(kwargs["code"], str) or not kwargs["code"].strip():
+                        raise ValueError("恢复快照缺少原始输入或专家")
+                    task_id = int(row.report_task_id or row.task_id or 0)
+                    if task_id:
+                        report = db.query(ReviewTask).filter_by(
+                            id=task_id, user_id=owner, project_id=row.project_id, review_type="discuss",
+                        ).with_for_update().one_or_none()
+                        if report is None:
+                            raise ValueError("恢复会话缺少同账号原报告")
+                        if report.status != "running" and not (
+                            report.status == "failed" and (report.coverage or {}).get("stage") == "interrupted"
+                        ):
+                            close_row(row, progress, report.status, report.error_message or "", report)
+                            continue
+                        report.status = "running"
+                        report.end_time = None
+                        report.error_message = None
+                        report.coverage = {**(report.coverage or {}), "stage": "recovering"}
+                        kwargs["resume_task_id"] = task_id
+                    pending = PendingDiscussion(sid, session_token_version=snapshot.get("token_version"), **kwargs)
+                    pending.created_at = float(snapshot.get("created_at") or pending.created_at)
+                    if task_id or row.status != "pending":
+                        pending.created_at = time.time()
+                    row.status = "pending"
+                    row.closed_at = None
+                    row.progress = {**progress, "phase": "pending", "terminal_status": "", "terminal_error": ""}
+                    candidates.append((pending, owner))
+            except (KeyError, TypeError, ValueError):
+                # 单条损坏快照不能让其他账号的恢复排队一并失败；不记录源码或提示词。
+                logger.error("[Discussion] 拒绝无效恢复快照 session={}", sid)
+                with SessionLocal.begin() as db:
+                    row = db.query(RoundtableSession).filter_by(
+                        session_id=sid, owner_user_id=owner,
+                    ).with_for_update().one_or_none()
+                    if row is None or row.status not in {"pending", "active", "paused", "concluded", "interrupted"}:
+                        continue
+                    if row.status == "concluded" and (row.progress or {}).get("phase") != "interrupted":
+                        continue
+                    error = "圆桌恢复快照无效，请重新发起"
+                    close_row(row, dict(row.progress or {}), "failed", error)
+                    report = db.query(ReviewTask).filter_by(
+                        id=int(row.report_task_id or row.task_id or 0), user_id=owner,
+                        project_id=row.project_id, review_type="discuss", status="running",
+                    ).with_for_update().one_or_none()
+                    if report is not None:
+                        report.status = "failed"
+                        report.end_time = datetime.now(timezone.utc)
+                        report.error_message = error
+                        report.coverage = {**(report.coverage or {}), "stage": "failed", "score_available": False}
+        return candidates
+
+    candidates = await asyncio.to_thread(claim)
+    # 成功报告可能在发布终态前退出；同步已有缓存，使公开状态服从持久账本。
+    for sid, cached in list(bus._sessions.items()):
+        bus.refresh_terminal_state(sid, owner_user_id=cached.owner_user_id)
+    for pending, owner in candidates:
+        bus._sessions.pop(pending.session_id, None)
+        if bus.get_session(pending.session_id, owner_user_id=owner) is not None:
+            launch_pending_discussion(pending)
 
 
 def launch_pending_discussion_from_thread(pending: PendingDiscussion, *, timeout: float = 10.0) -> bool:
@@ -475,12 +676,19 @@ def launch_pending_discussion_from_thread(pending: PendingDiscussion, *, timeout
 
     loop = _MAIN_LOOP
     if loop is None or loop.is_closed() or not loop.is_running():
+        _fail_pending_discussion(DiscussionBus.instance(), pending.session_id, "Web 主事件循环不可用，无法启动圆桌")
         raise RuntimeError("Web 主事件循环不可用，无法启动圆桌")
 
     async def _launch() -> bool:
         return launch_pending_discussion(pending) is not None
 
-    return bool(asyncio.run_coroutine_threadsafe(_launch(), loop).result(timeout=timeout))
+    future = asyncio.run_coroutine_threadsafe(_launch(), loop)
+    try:
+        return bool(future.result(timeout=timeout))
+    except Exception:
+        future.cancel()
+        _fail_pending_discussion(DiscussionBus.instance(), pending.session_id, "圆桌投递主事件循环失败或超时")
+        raise
 
 
 def launch_pending_discussion(pending: PendingDiscussion) -> asyncio.Task | None:
@@ -563,10 +771,9 @@ async def ws_discuss(websocket: WebSocket, session_id: str):
         await websocket.close(code=4003, reason="无权访问讨论会话")
         return
 
-    # 检查是否有待启动的讨论。通过鉴权后再 pop,避免越权连接消耗 pending。
-    pending = take_pending(session_id)
-
     await websocket.accept(subprotocol="prism-auth" if use_auth_subprotocol else None)
+    # 握手成功后再领取；握手异常不能丢失唯一启动上下文。
+    pending = take_pending(session_id)
     logger.info(f"[WS] 讨论连接已接受 session={session_id} pending={bool(pending)} client={client}")
     queue: asyncio.Queue = await bus.subscribe(session_id)
     if session is not None and session.status == "concluded":
