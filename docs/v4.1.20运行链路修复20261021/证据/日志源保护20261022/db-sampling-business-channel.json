@@ -1,0 +1,30 @@
+[
+  {
+    "started_at_utc": "2026-10-21T21:53:29.181309+00:00",
+    "request": {
+      "action": "db_threat_signals",
+      "params": {
+        "since_hours": 1,
+        "limit": 1
+      },
+      "request_id": "verify-db-2ea88fcc-f6f9f0a451e44e0f958d68076fb06ffa"
+    },
+    "uid": 10001,
+    "gid": 991,
+    "duration_ms": 5344,
+    "http_status": 200,
+    "outer_ok": true,
+    "action": "db_threat_signals",
+    "duplicate": false,
+    "result": {
+      "ok": false,
+      "since_hours": 1,
+      "source_exit_code": 1,
+      "source_timed_out": true,
+      "reason": "general_log 有界采样失败或暂时不可读",
+      "source_error": "ERROR 3024 (HY000) at line 1: Query execution was interrupted, maximum statement execution time exceeded\nexit status 1\n"
+    },
+    "compat_fields_present": false,
+    "acceptance_passed": false
+  }
+]

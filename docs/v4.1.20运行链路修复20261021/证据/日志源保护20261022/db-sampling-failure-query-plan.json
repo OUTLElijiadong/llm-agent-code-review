@@ -1,0 +1,17 @@
+[
+  {
+    "exit": 0,
+    "stdout": "TABLE\t0\t/var/lib/mysql/2ce3b5ca3c50.log\t/var/lib/mysql/\tSYSTEM\tCST\n",
+    "stderr": ""
+  },
+  {
+    "exit": 0,
+    "stdout": "CSV\t0\t0\n",
+    "stderr": ""
+  },
+  {
+    "exit": 0,
+    "stdout": "1\tSIMPLE\tgeneral_log\tNULL\tALL\tNULL\tNULL\tNULL\tNULL\t2\t50.00\tUsing where; Using filesort\n",
+    "stderr": ""
+  }
+]

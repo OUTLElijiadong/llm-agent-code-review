@@ -909,6 +909,74 @@ def parse_db_general_log(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _run_db_readonly_sql(sql: str, *, timeout: float = DB_HOST_TIMEOUT_SECONDS) -> dict[str, Any]:
+    return run([
+        "docker", "exec", "cr_mysql", "sh", "-ec",
+        (
+            # Docker 客户端取消不代表容器内 exec 已停止。独立看门狗
+            # 先 TERM，再 KILL 整个命令进程组；缺失 timeout 时失败关闭。
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec timeout --signal=TERM '
+            f'--kill-after={DB_CONTAINER_KILL_AFTER_SECONDS}s {DB_CONTAINER_TIMEOUT_SECONDS}s '
+            'mysql --protocol=TCP -h 127.0.0.1 -uroot --connect-timeout=3 '
+            '--skip-reconnect --quick --batch --skip-column-names --raw -e "$1"'
+        ),
+        "sh", sql,
+    ], timeout=timeout, allow_failure=True, stdout_tail_limit=None)
+
+
+def _db_log_source_status() -> dict[str, Any]:
+    result = _run_db_readonly_sql(
+        f"SELECT /*+ MAX_EXECUTION_TIME({DB_QUERY_TIMEOUT_MS}) */ "
+        "@@GLOBAL.general_log, @@GLOBAL.log_output"
+    )
+    if result["exit_code"] != 0:
+        return {
+            "ok": False,
+            "degraded": True,
+            "reason_code": "general_log_source_query_failed",
+            "reason": "无法核验数据库通用日志源状态，未扫描历史日志",
+            "history_not_scanned": True,
+            "source_exit_code": result["exit_code"],
+            "source_error": result["stderr"][:400],
+            "source_timed_out": result["exit_code"] == 124 or bool(
+                re.search(r"\bERROR 3024\b", result["stderr"])
+            ),
+        }
+    parts = result["stdout"].strip().split("\t")
+    outputs = parts[1].split(",") if len(parts) == 2 else []
+    if (
+        len(parts) != 2 or parts[0] not in {"0", "1"} or not outputs
+        or len(outputs) != len(set(outputs))
+        or not set(outputs) <= {"TABLE", "FILE", "NONE"}
+    ):
+        return {
+            "ok": False,
+            "degraded": True,
+            "reason_code": "general_log_source_invalid",
+            "reason": "数据库通用日志源状态格式无效，未扫描历史日志",
+            "history_not_scanned": True,
+            "source_exit_code": 0,
+            "source_timed_out": False,
+        }
+    enabled = parts[0] == "1"
+    table_output = "TABLE" in outputs and "NONE" not in outputs
+    state = {
+        "ok": enabled and table_output,
+        "source_logging_enabled": enabled,
+        "source_log_output": parts[1],
+    }
+    if not state["ok"]:
+        state.update({
+            "degraded": True,
+            "reason_code": "general_log_disabled" if not enabled else "general_log_table_output_disabled",
+            "reason": "数据库通用日志未开启，未扫描历史日志；当前状态不能证明没有威胁"
+            if not enabled else "数据库通用日志未输出到 TABLE，未扫描历史日志；当前状态不能证明没有威胁",
+            "history_not_scanned": True,
+            "source_timed_out": False,
+        })
+    return state
+
+
 def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     since_hours = _since_hours_arg(params)
     limit = _event_limit_arg(params, default=4000)
@@ -920,23 +988,20 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
         # 多取一行仅用于确认是否截断，不能把该行计入样本统计。
         f"AND command_type IN ('Query','Execute') ORDER BY event_time DESC LIMIT {limit + 1}"
     )
+    started = time.monotonic()
     try:
-        result = run([
-            "docker", "exec", "cr_mysql", "sh", "-ec",
-            (
-                # Docker 客户端取消不代表容器内 exec 已停止。独立看门狗
-                # 先 TERM，再 KILL 整个命令进程组；缺失 timeout 时失败关闭。
-                'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec timeout --signal=TERM '
-                f'--kill-after={DB_CONTAINER_KILL_AFTER_SECONDS}s {DB_CONTAINER_TIMEOUT_SECONDS}s '
-                'mysql --protocol=TCP -h 127.0.0.1 -uroot --connect-timeout=3 '
-                '--skip-reconnect --quick --batch --skip-column-names --raw -e "$1"'
-            ),
-            "sh", sql,
-        ], timeout=DB_HOST_TIMEOUT_SECONDS, allow_failure=True, stdout_tail_limit=None)
+        source = _db_log_source_status()
+        if not source["ok"]:
+            return {"since_hours": since_hours, **source}
+        remaining = DB_HOST_TIMEOUT_SECONDS - (time.monotonic() - started)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("db_threat_signals", DB_HOST_TIMEOUT_SECONDS)
+        result = _run_db_readonly_sql(sql, timeout=remaining)
     except subprocess.TimeoutExpired:
         # 不泄漏部分输出，也不把宿主超时误报为已经确认容器/服务端终止。
         return {
             "ok": False,
+            "degraded": True,
             "since_hours": since_hours,
             "reason": "Docker 客户端超时；容器内采样由独立 TERM/KILL 看门狗约束，终止状态未确认",
             "source_exit_code": None,
@@ -947,6 +1012,7 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     if result["exit_code"] != 0:
         return {
             "ok": False,
+            "degraded": True,
             "since_hours": since_hours,
             "reason": "general_log 有界采样失败或暂时不可读",
             "source_exit_code": result["exit_code"],
@@ -973,6 +1039,7 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             return {
                 "ok": False,
+                "degraded": True,
                 "since_hours": since_hours,
                 "reason": "general_log 采样输出格式损坏，不能确认威胁统计",
                 "source_exit_code": result["exit_code"],
@@ -984,6 +1051,8 @@ def _db_threat_signals(params: dict[str, Any]) -> dict[str, Any]:
     parsed = parse_db_general_log(rows)
     parsed.update({
         "ok": True,
+        "source_logging_enabled": source["source_logging_enabled"],
+        "source_log_output": source["source_log_output"],
         "since_hours": since_hours,
         "sampled_rows": len(rows),
         "stdout_capped": False,  # SQL 已限制行数和字段宽度，保留完整有界输出。

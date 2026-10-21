@@ -554,7 +554,15 @@ def _db_sample_line(argument: str, *, truncated: bool = False, user: str = "root
     return "\t".join((user.encode().hex(), argument.encode().hex(), "2026-10-22 01:02:03", str(int(truncated))))
 
 
-def test_db_sampling_bounds_sql_and_container_lifetime_before_host_timeout(monkeypatch) -> None:
+@pytest.fixture
+def db_log_source_enabled(monkeypatch):
+    """正文采样测试显式假设已通过源状态核验；真实前置检查另组覆盖。"""
+    monkeypatch.setattr(executor, "_db_log_source_status", lambda: {
+        "ok": True, "source_logging_enabled": True, "source_log_output": "TABLE",
+    })
+
+
+def test_db_sampling_bounds_sql_and_container_lifetime_before_host_timeout(monkeypatch, db_log_source_enabled) -> None:
     calls = []
 
     def capture(args, **kwargs):
@@ -581,14 +589,14 @@ def test_db_sampling_bounds_sql_and_container_lifetime_before_host_timeout(monke
     assert "--quick" in script
     assert "--skip-reconnect" in script
     assert '-e "$1"' in script
-    assert options["timeout"] == 20
+    assert 0 < options["timeout"] <= 20
     assert options["stdout_tail_limit"] is None
     assert options["allow_failure"] is True
     assert result["stdout_capped"] is False
 
 
 @pytest.mark.parametrize(("count", "limited"), [(0, False), (1, False), (2, False), (3, True)])
-def test_db_sampling_reports_only_observed_row_truncation(monkeypatch, count, limited) -> None:
+def test_db_sampling_reports_only_observed_row_truncation(monkeypatch, count, limited, db_log_source_enabled) -> None:
     output = "\n".join(_db_sample_line(f"DROP TABLE sample_{i}") for i in range(count))
     monkeypatch.setattr(executor, "run", lambda *_a, **_k: {"exit_code": 0, "stdout": output, "stderr": ""})
     result = executor._db_threat_signals({"limit": 2})
@@ -601,7 +609,7 @@ def test_db_sampling_reports_only_observed_row_truncation(monkeypatch, count, li
     assert result["row_limit"] == 2
 
 
-def test_db_sampling_preserves_multiline_unicode_and_reports_argument_clipping(monkeypatch) -> None:
+def test_db_sampling_preserves_multiline_unicode_and_reports_argument_clipping(monkeypatch, db_log_source_enabled) -> None:
     output = "\n".join([
         _db_sample_line("DROP\n\tTABLE 用户表", user="管理\t员\n@localhost"),
         _db_sample_line("SELECT 1\x00", truncated=True),
@@ -618,7 +626,7 @@ def test_db_sampling_preserves_multiline_unicode_and_reports_argument_clipping(m
     assert result["row_limit_reached"] is False
 
 
-def test_db_sampling_keeps_more_than_100k_of_bounded_rows(monkeypatch) -> None:
+def test_db_sampling_keeps_more_than_100k_of_bounded_rows(monkeypatch, db_log_source_enabled) -> None:
     output = "\n".join(_db_sample_line("DROP TABLE " + "x" * 140) for _ in range(1000))
     assert len(output) > 100_000
     monkeypatch.setattr(executor, "run", lambda *_a, **_k: {"exit_code": 0, "stdout": output, "stderr": ""})
@@ -629,7 +637,7 @@ def test_db_sampling_keeps_more_than_100k_of_bounded_rows(monkeypatch) -> None:
     assert result["source_truncated"] is False
 
 
-def test_db_sampling_redacts_unterminated_literal_at_sql_clip_boundary(monkeypatch) -> None:
+def test_db_sampling_redacts_unterminated_literal_at_sql_clip_boundary(monkeypatch, db_log_source_enabled) -> None:
     argument = "DROP TABLE users; SELECT 'private-value-that-was-clipped"
     monkeypatch.setattr(executor, "run", lambda *_a, **_k: {
         "exit_code": 0, "stdout": _db_sample_line(argument, truncated=True), "stderr": "",
@@ -641,7 +649,7 @@ def test_db_sampling_redacts_unterminated_literal_at_sql_clip_boundary(monkeypat
 
 
 @pytest.mark.parametrize("bad_line", ["invalid", "xx\t00\tnow\t0", "00\t00\tnow\t2"])
-def test_db_sampling_rejects_corrupt_output_instead_of_reporting_clean(monkeypatch, bad_line) -> None:
+def test_db_sampling_rejects_corrupt_output_instead_of_reporting_clean(monkeypatch, bad_line, db_log_source_enabled) -> None:
     monkeypatch.setattr(executor, "run", lambda *_a, **_k: {
         "exit_code": 0, "stdout": bad_line, "stderr": "",
     })
@@ -657,7 +665,7 @@ def test_db_sampling_rejects_corrupt_output_instead_of_reporting_clean(monkeypat
     (137, "Killed", False),  # 退出 137 本身不能确认超时或 OOM 根因。
     (127, "timeout: not found", False),
 ])
-def test_db_sampling_failures_never_publish_partial_success_or_retry(monkeypatch, code, error, timed_out) -> None:
+def test_db_sampling_failures_never_publish_partial_success_or_retry(monkeypatch, code, error, timed_out, db_log_source_enabled) -> None:
     calls = []
 
     def fail(args, **kwargs):
@@ -673,7 +681,7 @@ def test_db_sampling_failures_never_publish_partial_success_or_retry(monkeypatch
     assert "destructive_total" not in result
 
 
-def test_db_sampling_host_timeout_does_not_claim_container_termination(monkeypatch) -> None:
+def test_db_sampling_host_timeout_does_not_claim_container_termination(monkeypatch, db_log_source_enabled) -> None:
     def timeout(args, **kwargs):
         raise subprocess.TimeoutExpired(args, kwargs["timeout"], output=b"private partial output")
 
@@ -688,7 +696,7 @@ def test_db_sampling_host_timeout_does_not_claim_container_termination(monkeypat
 
 
 @pytest.mark.parametrize("params", [{"limit": 5001}, {"limit": 0}, {"since_hours": 721}, {"since_hours": "1; DROP TABLE x"}])
-def test_db_sampling_rejects_bad_bounds_before_running(params, monkeypatch) -> None:
+def test_db_sampling_rejects_bad_bounds_before_running(params, monkeypatch, db_log_source_enabled) -> None:
     calls = []
     monkeypatch.setattr(executor, "run", lambda *a, **k: calls.append(a))
     with pytest.raises(ValueError):
@@ -696,7 +704,7 @@ def test_db_sampling_rejects_bad_bounds_before_running(params, monkeypatch) -> N
     assert calls == []
 
 
-def test_db_container_watchdog_kills_term_ignoring_client_after_host_detaches(tmp_path, monkeypatch) -> None:
+def test_db_container_watchdog_kills_term_ignoring_client_after_host_detaches(tmp_path, monkeypatch, db_log_source_enabled) -> None:
     """在本地执行实际容器命令，使用假 mysql；不调用 Docker 或数据库。"""
     timeout_bin = shutil.which("timeout")
     if timeout_bin is None:

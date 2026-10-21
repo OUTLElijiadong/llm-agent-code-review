@@ -87,6 +87,9 @@ def _call_action(
     if action != "db_threat_signals" and payload.get("ok") is False:
         reason = payload.get("source_error") or payload.get("reason") or payload.get("error")
         raise RuntimeError(str(reason or f"动作 {action} 数据源不可用"))
+    if action == "db_threat_signals" and payload.get("ok") is False:
+        # 兼容旧执行器：即使没有 degraded 标记，ok=False 也代表本轮不可观测。
+        payload = {**payload, "degraded": True}
     return payload
 
 
@@ -928,12 +931,15 @@ def query_security_status(
             results[action] = _call_action(db, action, params, actor=actor, source=source)
         except Exception as exc:  # noqa: BLE001 - 单动作失败不阻断聚合
             errors.append({"action": action, "error": str(exc)})
+            if action == "db_threat_signals":
+                results[action] = {"ok": False, "degraded": True, "reason": str(exc)}
 
     ssh = results.get("ssh_login_events") or {}
     flytrap = results.get("flytrap_attack_events") or {}
     nginx = results.get("nginx_attack_events") or {}
     backup = results.get("backup_audit") or {}
     db_signals = results.get("db_threat_signals") or {}
+    db_signals_ok = db_signals.get("ok") is True
     open_alerts = (
         db.query(AgentAlert).filter(AgentAlert.status == "open").order_by(AgentAlert.id.desc()).limit(20).all()
     )
@@ -969,13 +975,20 @@ def query_security_status(
         },
         "db_threat": {
             "enabled": bool(settings.security_db_monitor_enabled),
-            "ok": bool(db_signals.get("ok")),
-            "reason": db_signals.get("reason"),
-            "destructive_total": int(db_signals.get("destructive_total") or 0),
-            "dump_exfil_total": int(db_signals.get("dump_exfil_total") or 0),
-            "error_total": int(db_signals.get("error_total") or 0),
+            "ok": db_signals_ok,
+            "degraded": bool(db_signals.get("degraded"))
+            or (bool(settings.security_db_monitor_enabled) and not db_signals_ok),
+            "reason": db_signals.get("reason") or db_signals.get("source_error") or db_signals.get("error"),
+            "destructive_total": int(db_signals.get("destructive_total") or 0) if db_signals_ok else None,
+            "dump_exfil_total": int(db_signals.get("dump_exfil_total") or 0) if db_signals_ok else None,
+            "error_total": int(db_signals.get("error_total") or 0) if db_signals_ok else None,
             "destructive_by_user": db_signals.get("destructive_by_user") or [],
             "error_by_user": db_signals.get("error_by_user") or [],
+            **{
+                key: value
+                for key, value in db_signals.items()
+                if key in {"reason_code", "history_not_scanned"} or key.startswith("source_")
+            },
         },
         "open_alerts": [
             {

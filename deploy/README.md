@@ -262,3 +262,6 @@ git -C .. rev-parse HEAD
 宿主 `prism-ops-executor.service` 读取 `mysql.general_log` 时，SQL 内将 argument 裁剪至160字节并HEX编码传输，默认4000行、最多5000行；多读一行只判断行截断。返回 `sql_truncated_rows`、`row_limit_reached`、`source_truncated`，采样不完整不能表示未发现威胁。SQL使用5000毫秒只读SELECT预算，容器内GNU timeout在10秒后TERM、2秒后KILL，宿主等待20秒。宿主超时不能证明容器内进程已终止；失败或记录损坏不发布部分统计。
 
 代码发布后须核对宿主脚本SHA-256并重启现有 `prism-ops-executor.service`，再验证is-active和MainPID；仅重建应用容器不会加载宿主执行器更新。此预算约束查询持续时间和返回体积，不能单独限制MySQL扫描/排序的总内存，也不能据此认定既有OOM根因。
+
+
+采样前先以只读查询核验 `@@GLOBAL.general_log` 与 `@@GLOBAL.log_output`。日志关闭、未输出到TABLE（包括NONE优先）、源状态损坏或读取失败时返回 `ok=false`、`degraded=true` 并保留 `history_not_scanned=true`，跳过历史表，不返回零威胁统计。核验和正文共用宿主20秒总预算。执行器不会自动开启通用日志或改变日志表引擎。生产源关闭场景的验收只能证明快速降级与拒绝旧表扫描，不能证明非空威胁采集正常。

@@ -1,0 +1,5 @@
+{
+  "exit": 0,
+  "stdout": "/var/lib/mysql/mysql/general_log.CSV 863024936 2026-08-19 19:45:11.361380570 +0800\n/var/lib/mysql/mysql/general_log.CSM 35 2026-10-22 02:36:40.255710313 +0800\n",
+  "stderr": ""
+}

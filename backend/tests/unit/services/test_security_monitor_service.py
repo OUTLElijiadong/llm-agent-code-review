@@ -1036,13 +1036,35 @@ def test_db_errors_threshold_creates_warning(db, super_admin_user, monkeypatch, 
 def test_db_general_log_disabled_no_alert(db, super_admin_user, monkeypatch, emitted):
     """general_log 未开启（ok=False）不应产生任何数据库告警。"""
     payloads = _base_payloads()
-    payloads["db_threat_signals"] = _db_payload(ok=False, reason="general_log 未开启")
+    payloads["db_threat_signals"] = {
+        **_db_payload(ok=False, reason="general_log 未开启"),
+        "reason_code": "log_source_unavailable",
+        "history_not_scanned": True,
+        "source_logging_enabled": False,
+        "source_log_output": "TABLE",
+        "source_exit_code": 0,
+        "source_error": "history source disabled",
+        "source_timed_out": False,
+    }
     monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
 
     result = security_monitor_service.run_security_monitor(db)
 
     assert result["created_alerts"] == []
     assert db.query(AgentAlert).filter(AgentAlert.category == "db_threat").count() == 0
+    assert result["success"] is False
+    assert result["degraded_actions"] == ["db_threat_signals"]
+    assert result["actions"]["db_threat_signals"]["degraded"] is True
+    assert result["actions"]["db_threat_signals"]["reason_code"] == "log_source_unavailable"
+    assert result["errors"] == [
+        {
+            "action": "db_threat_signals",
+            "error": "general_log 未开启",
+            "degraded": True,
+            "retryable": True,
+            "next_action": "请人工检查该数据源并在恢复后重新运行巡检",
+        }
+    ]
 
 
 def test_collector_source_failure_is_reported_without_blocking_other_sources(
@@ -1094,6 +1116,40 @@ def test_query_security_status_includes_db_threat(db, super_admin_user, monkeypa
     assert status["db_threat"]["ok"] is True
     assert status["db_threat"]["destructive_total"] == 1
     assert status["db_threat"]["error_total"] == 2
+
+
+def test_query_security_status_preserves_unavailable_db_source_metadata(db, super_admin_user, monkeypatch):
+    """数据库日志源不可用时保留原因与来源状态，未知统计不伪报为零。"""
+    payloads = _base_payloads()
+    payloads["db_threat_signals"] = {
+        "ok": False,
+        "reason": "general_log 未开启",
+        "reason_code": "log_source_unavailable",
+        "history_not_scanned": True,
+        "source_logging_enabled": False,
+        "source_log_output": "TABLE",
+        "source_exit_code": 0,
+        "source_error": "history source disabled",
+        "source_timed_out": False,
+    }
+    monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
+
+    status = security_monitor_service.query_security_status(db)
+
+    db_threat = status["db_threat"]
+    assert db_threat["ok"] is False
+    assert db_threat["degraded"] is True
+    assert db_threat["reason"] == "general_log 未开启"
+    assert db_threat["reason_code"] == "log_source_unavailable"
+    assert db_threat["history_not_scanned"] is True
+    assert db_threat["source_logging_enabled"] is False
+    assert db_threat["source_log_output"] == "TABLE"
+    assert db_threat["source_exit_code"] == 0
+    assert db_threat["source_error"] == "history source disabled"
+    assert db_threat["source_timed_out"] is False
+    assert db_threat["destructive_total"] is None
+    assert db_threat["dump_exfil_total"] is None
+    assert db_threat["error_total"] is None
 
 
 def test_db_health_restart_creates_critical_alert(db, super_admin_user, monkeypatch, emitted):
