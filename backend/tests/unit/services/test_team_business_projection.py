@@ -1,6 +1,7 @@
 """团队业务结果可完整读取，摘要有界且不越过账号和脱敏边界。"""
 # ruff: noqa: F811 -- 跨文件共享pytest fixture名与参数名保持一致。
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -48,15 +49,18 @@ def test_large_result_retains_owner_scoped_paged_original(db, actor):
 def test_reporter_retains_verified_business_items_and_scope():
     output = {"capability": "forum.posts.list", "status_code": 200,
               "data": {"items": [{"id": 44, "title": "版本公告"}], "total": 38}}
-    receipt = {"output": output, "readback": output, "page_action": {
-        "page": "/forum", "phase": "completed", "mutation": False,
-    }}
+    receipt = {"request_params": {}, "output": output,
+               "readback": {**deepcopy(output), "request_params": {}}, "page_action": {
+                   "page": "/forum", "phase": "completed", "mutation": False,
+               }}
     report = summarize_dependencies({"verify": {"status": "completed", "result": {
         "status": "completed", "result_receipt": receipt,
     }}})
     assert report["status"] == "completed"
     assert report["business_results"][0]["data"]["items"][0]["title"] == "版本公告"
     assert report["business_results"][0]["verification_scope"] == "same_query_readback"
+    business_check = next(check for check in report["claim_checks"] if check["kind"] == "business_result")
+    assert business_check["status"] == "supported"
     assert report["unique_finding_count"] == 0
 
 

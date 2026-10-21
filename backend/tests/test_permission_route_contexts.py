@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import inspect
 from pathlib import Path
 
 import pytest
@@ -15,11 +16,13 @@ SPEC.loader.exec_module(m)
 
 
 def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypatch):
+    from app.api.v1 import security
+    from app.core.rbac_dependency import require_permission
     from app.main import app
 
     monkeypatch.setattr(app, "openapi", lambda: pytest.fail("OpenAPI cannot prove authorization"))
     plan = m.build_plan()
-    assert len(plan["routes"]) == 361  # 4.1.20 -6：圆桌、已发布 Agent 直调、旧 /ai 聊天与旧追问直派只能经小菱
+    assert len(plan["routes"]) == 363  # 4.1.20 -6 旧直调路由，+2 CNVD/CNNVD 官方漏洞源 GET 接口
     assert len({row["endpoint"] for row in plan["routes"]}) == 45
     paths = {(row["method"], row["path"]) for row in plan["routes"]}
     assert {
@@ -57,8 +60,37 @@ def test_complete_real_app_including_hidden_endpoints_without_lifespan(monkeypat
         ("GET", "/api/remote-pentest/tasks/{public_id}/report"),
         ("GET", "/api/remote-pentest/tasks/{public_id}/report/export"),
     } <= paths
-    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 347
-    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 282
+    assert sum(row["anonymous"] == "ready" for row in plan["routes"]) == 349
+    assert sum(row["no_permission"] == "ready" for row in plan["routes"]) == 284
+    vulnerability_endpoints = {
+        "/api/security/vulnerability-sources": security.get_vulnerability_sources,
+        "/api/security/vulnerability-records": security.get_vulnerability_records,
+    }
+    vulnerability_rows = [row for row in plan["routes"] if row["path"] in vulnerability_endpoints]
+    assert len(vulnerability_rows) == 2
+    assert {(row["method"], row["path"]) for row in vulnerability_rows} == {
+        ("GET", path) for path in vulnerability_endpoints
+    }
+    assert all(
+        row["endpoint"] == "app/api/v1/security.py"
+        and row["guard"] == "app.core.rbac_dependency.require_permission.<locals>._dependency"
+        and row["anonymous"] == row["no_permission"] == "ready"
+        and "app.core.dependencies.get_current_user" in row["dependency_order"]
+        and not row["unknown_dependencies"]
+        for row in vulnerability_rows
+    )
+    guard_code = require_permission("security:view").__code__
+    for route in m.iter_api_route_contexts(app.routes):
+        if route.path not in vulnerability_endpoints:
+            continue
+        assert route.methods == {"GET"}
+        assert route.endpoint is vulnerability_endpoints[route.path]
+        guards = [
+            dependency.call for dependency in route.dependant.dependencies
+            if getattr(dependency.call, "__code__", None) is guard_code
+        ]
+        assert len(guards) == 1
+        assert inspect.getclosurevars(guards[0]).nonlocals["permission_code"] == "security:view"
     stop_route = next(
         row for row in plan["routes"]
         if row["method"] == "POST" and row["path"] == "/api/discuss/sessions/{session_id}/stop"

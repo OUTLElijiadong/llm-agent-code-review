@@ -3080,6 +3080,124 @@ async def test_user_input_during_host_summary_is_preserved_without_another_model
 
 
 @pytest.mark.asyncio
+async def test_initial_state_read_failure_preserves_persisted_budget_without_finalizing(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """旧检查点不能在首次持久状态读取失败后抽取、出分或回退计数。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'initial-state-failure.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    ReviewTask.metadata.create_all(engine)
+    db_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    task = ReviewTask(
+        user_id=42, project_id=12, review_type="discuss", status="running",
+        total_files=1, processed_files=0,
+        coverage={"stage": "speaking", "model_calls_used": 63, "source_chars": 10},
+    )
+    with db_session_factory.begin() as db:
+        db.add(task)
+        db.flush()
+        task_id = task.id
+    bus = DiscussionBus()
+    session = bus.create_session(
+        "roundtable-state-read-failed", task_id=task_id, file_name="budget.py",
+        owner_user_id=42, max_rounds=1,
+    )
+    session.progress["_checkpoint"] = {
+        "coverage": {"model_calls_used": 5}, "remaining_plan": [],
+        "opened": True, "summary_done": True,
+    }
+    orchestrator = _make_orchestrator(bus)
+    finalized: list[int] = []
+    state_reads = 0
+    real_read_state = module._review_task_state
+
+    def read_state(review_task_id: int) -> dict:
+        nonlocal state_reads
+        state_reads += 1
+        if state_reads == 1:
+            raise RuntimeError("injected first state-read failure")
+        return real_read_state(review_task_id)
+
+    def finalize_review(**kwargs: Any) -> int:
+        finalized.append(kwargs["task_id"])
+        return kwargs["task_id"]
+
+    def fail_environment(**_kwargs: Any) -> Any:
+        raise RuntimeError("environment disabled")
+
+    agent = RecordingAgent()
+    monkeypatch.setattr(module, "SessionLocal", db_session_factory)
+    monkeypatch.setattr(module, "_resume_review_task", lambda *_args, **_kwargs: task_id)
+    monkeypatch.setattr(module, "_build_discussion_agents", lambda *_args: (agent, {"code_reviewer": agent}))
+    monkeypatch.setattr(module, "build_discussion_environment", fail_environment)
+    monkeypatch.setattr(module, "_review_task_state", read_state)
+    monkeypatch.setattr(module, "_finalize_review", finalize_review)
+    outer_budget = module._RoundtableCallBudget()
+    token = module._roundtable_call_budget.set(outer_budget)
+    try:
+        await orchestrator.start_discussion(
+            session_id=session.session_id, profiles=(GENERAL_AGENT,), code="print(1)",
+            language="python", file_name="budget.py", user_id=42, project_id=12,
+            file_id=34, max_rounds=1, resume_task_id=task_id,
+        )
+        assert module._roundtable_call_budget.get() is outer_budget
+    finally:
+        module._roundtable_call_budget.reset(token)
+
+    with db_session_factory() as db:
+        persisted = db.get(ReviewTask, task_id)
+    engine.dispose()
+    assert finalized == []
+    assert agent.calls == []
+    assert persisted.status == "failed"
+    assert persisted.coverage["model_calls_used"] == 63
+    assert persisted.coverage["source_chars"] == 10
+    assert persisted.coverage["stage"] == "failed"
+    assert persisted.coverage["failure_kind"] == "initial_state_unverified"
+    assert persisted.coverage["score_available"] is False
+    assert persisted.coverage["extraction_status"] == "skipped"
+    assert persisted.score_version is None
+    assert persisted.score_breakdown is None
+    assert session.terminal_status == "failed"
+    assert session.report_task_id == task_id
+
+
+@pytest.mark.parametrize("status", ["cancelled", "success", "failed"])
+def test_initial_state_failure_does_not_overwrite_existing_terminal(
+    db: Any, monkeypatch: pytest.MonkeyPatch, status: str,
+) -> None:
+    """首次状态失败收尾必须让已提交的取消、成功和失败终态优先。"""
+    original_coverage = {"stage": status, "model_calls_used": 63, "score_available": True}
+    task = ReviewTask(
+        user_id=42, project_id=12, review_type="discuss", status=status,
+        total_files=1, processed_files=1, coverage=original_coverage,
+        summary="已提交结论", error_message="已提交说明", score=78,
+        score_version="existing", score_breakdown={"score": 78},
+    )
+    db.add(task)
+    db.commit()
+    task_id = task.id
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+
+    assert module._fail_unverified_review_task(task_id) == task_id
+
+    persisted = db.get(ReviewTask, task_id)
+    assert persisted.status == status
+    assert persisted.coverage == original_coverage
+    assert persisted.summary == "已提交结论"
+    assert persisted.error_message == "已提交说明"
+    assert persisted.score == 78
+    assert persisted.score_version == "existing"
+    assert persisted.score_breakdown == {"score": 78}
+
+
+@pytest.mark.asyncio
 async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3093,13 +3211,13 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
         max_rounds=1,
     )
     orchestrator = _make_orchestrator(bus)
-    created = threading.Event()
+    state_read_started = threading.Event()
+    state_read_release = threading.Event()
     cancelled_task_ids: list[int] = []
     notified_sessions: list[str] = []
     finalized = False
 
     def create_task(**_kwargs: Any) -> int:
-        created.set()
         return 77
 
     def cancel_review(task_id: int) -> int:
@@ -3110,6 +3228,12 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
         nonlocal finalized
         finalized = True
         return 88
+
+    def read_task_state(_task_id: int) -> dict:
+        state_read_started.set()
+        if not state_read_release.wait(10):
+            raise AssertionError("initial task-state read was not released")
+        return {"status": "cancelled", "error": ""}
 
     def fail_environment(**_kwargs: Any) -> Any:
         raise RuntimeError("environment disabled")
@@ -3124,7 +3248,7 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
     monkeypatch.setattr(module, "_create_review_task", create_task)
     monkeypatch.setattr(module, "_cancel_review_task", cancel_review)
     monkeypatch.setattr(module, "_finalize_review", finalize_review)
-    monkeypatch.setattr(module, "_review_task_state", lambda _task_id: {"status": "cancelled", "error": ""})
+    monkeypatch.setattr(module, "_review_task_state", read_task_state)
     monkeypatch.setattr(
         module,
         "_notify_origin_session",
@@ -3146,11 +3270,18 @@ async def test_cancelled_discussion_marks_task_cancelled_without_finalizing_repo
             origin_session_key="cancelled-chat",
         )
     )
-    assert await asyncio.wait_for(asyncio.to_thread(created.wait, 10), timeout=12)
-    await asyncio.sleep(0)
-    run.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await run
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(state_read_started.wait, 10), timeout=12)
+        # 创建已完成，精确阻塞在首次持久状态读取，覆盖初始化期间的取消窗口。
+        run.cancel()
+        state_read_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+    finally:
+        state_read_release.set()
+        if not run.done():
+            run.cancel()
+            await asyncio.gather(run, return_exceptions=True)
 
     assert cancelled_task_ids == [77]
     assert finalized is False

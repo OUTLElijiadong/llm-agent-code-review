@@ -1,0 +1,73 @@
+{
+  "首次候选": "dbdbe46dd62ac25ce38fff0b041a21ba7723f4fc",
+  "CI运行": 39651216009,
+  "CI结果": {
+    "通过": 8203,
+    "失败": 4
+  },
+  "失败分组": {
+    "路由基线": 2,
+    "业务回读夹具": 1,
+    "圆桌初始化取消竞态": 1
+  },
+  "取消竞态复现": "创建报告后首次持久状态读取阻塞，用明确的线程事件在该await取消，旧实现漏过统一finally，取消状态未落库。",
+  "修复": "将首次持久状态读取和派发纳入统一取消及报告收尾；保留恢复预算上下文。",
+  "定向回归": {
+    "文件": 2,
+    "通过": 112,
+    "失败": 0
+  },
+  "原始日志": {
+    "prism-v4120-dbdbe46d-ci-failed.log": {
+      "路径": "/tmp/prism-v4120-dbdbe46d-ci-failed.log",
+      "sha256": "c710302c5366f1d06115cdd5144e01e93ac8bdcc8d38b97cccdbc69b8fa78e8e"
+    },
+    "prism-v4120-startup-cancel-red.log": {
+      "路径": "/tmp/prism-v4120-startup-cancel-red.log",
+      "sha256": "53a830fc1cce4cde870fa17aa5447b19d1f4be63c156078bfa6ea6ac88bc3998"
+    },
+    "prism-v4120-startup-cancel-green.log": {
+      "路径": "/tmp/prism-v4120-startup-cancel-green.log",
+      "sha256": "ab6cfde46fa7cfac9df7008da01dd698457e024b47d6ecd43bad6f7fc042b898"
+    },
+    "prism-v4120-startup-budget-red.log": {
+      "路径": "/tmp/prism-v4120-startup-budget-red.log",
+      "sha256": "8dfb8839b44122773631ee65b5861b7a405ef72da5e225609cd6c078d834a82c"
+    },
+    "prism-v4120-startup-final.log": {
+      "路径": "/tmp/prism-v4120-startup-final.log",
+      "sha256": "ca781e11ac3a6b7ff116b543b47dfc6a27d391994409a2ce1ada274490a04f4b"
+    },
+    "prism-v4120-startup-final.xml": {
+      "路径": "/tmp/prism-v4120-startup-final.xml",
+      "sha256": "7ed9c54ec07e1bf0d63e0e12e2215472c7bbf84e0d85583199531b56b01b5504"
+    },
+    "prism-v4120-permission-baseline-guards-final.log": {
+      "路径": "/tmp/prism-v4120-permission-baseline-guards-final.log",
+      "sha256": "f07cfc7031c248dbf2beff51802c40035275162f39f62d8c46ac94dbb663f174"
+    }
+  },
+  "业务回读夹具": "GET同查询回读缺readback.request_params，补齐执行与回读的空参数，维持严格same_query_readback与supported断言。",
+  "汇总定向回归": {
+    "通过": 101,
+    "失败": 0
+  },
+  "后续预算异常复现": "checkpoint已用5次、持久记录已用63次，首次状态读取抛错时旧实现仍进入finalizer；真实async入口与文件SQLite回归先红后绿。",
+  "预算异常修复": "首次持久状态核验成功才允许继续；失败时锁定discuss/running直接记录不可出分失败，保留持久coverage和调用次数；取消、中断及已有终态优先。",
+  "最终圆桌定向回归": {
+    "文件": 2,
+    "通过": 116,
+    "失败": 0,
+    "日志": "/tmp/prism-v4120-startup-final.log"
+  },
+  "权限组合回归": {
+    "通过": 1297,
+    "失败": 0,
+    "新增路由": 2,
+    "总路由": 363,
+    "无身份门禁": 349,
+    "无权限门禁": 284,
+    "权限": "security:view"
+  },
+  "独立复核": "Meitner只读复核预算失败patch通过，无新增阻断；取消/成功/失败已提交终态另有3项持久化回归。"
+}

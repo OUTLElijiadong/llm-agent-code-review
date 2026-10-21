@@ -689,19 +689,10 @@ class DiscussionOrchestrator:
         final_error = ""
         final_partial = False
         summary_turns: tuple[DiscussionTurn, ...] | None = None
+        initial_state_verified = False
         call_budget = _RoundtableCallBudget()
-        saved_state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
-        call_budget.used = max(
-            int(coverage.get("model_calls_used") or 0),
-            int((saved_state.get("coverage") or {}).get("model_calls_used") or 0),
-        )
+        call_budget.used = int(coverage.get("model_calls_used") or 0)
         budget_token = _roundtable_call_budget.set(call_budget)
-        publish_progress("speaking", 0, progress_total)
-
-        # 广播调度事件,点亮参会工位卡
-        for code_ in {_PROFILE_TO_AGENT_CODE.get(p.code, p.code) for p in profiles}:
-            self._emit(AgentEventType.DISPATCH, code_,
-                       f"圆桌讨论启动: {file_name}")
 
         profile_by_code = {profile.code: profile for profile in profiles}
         remaining_plan = (
@@ -756,6 +747,18 @@ class DiscussionOrchestrator:
             asyncio.run_coroutine_threadsafe(persist(), loop).result()
 
         try:
+            # 首次持久状态读取也可能收到停止；纳入统一收尾，不能留下 running 报告。
+            saved_state = await loop.run_in_executor(
+                None, copy_context().run, lambda: _review_task_state(task_id),
+            )
+            call_budget.used = max(
+                call_budget.used,
+                int((saved_state.get("coverage") or {}).get("model_calls_used") or 0),
+            )
+            initial_state_verified = True
+            publish_progress("speaking", 0, progress_total)
+            for code_ in {_PROFILE_TO_AGENT_CODE.get(p.code, p.code) for p in profiles}:
+                self._emit(AgentEventType.DISPATCH, code_, f"圆桌讨论启动: {file_name}")
             if not checkpoint.get("opened"):
                 # ── 开场白 ──
                 opening_text = (
@@ -1048,6 +1051,11 @@ class DiscussionOrchestrator:
                         report_task_id = await loop.run_in_executor(
                             None, copy_context().run, lambda: settle(task_id),
                         )
+                    elif not initial_state_verified:
+                        # 无可信持久预算时禁止抽取；旧检查点不能覆盖数据库中的实际用量。
+                        report_task_id = await loop.run_in_executor(
+                            None, copy_context().run, lambda: _fail_unverified_review_task(task_id),
+                        )
                     else:
                         stopped = session.status != "active"
                         finalize_future = loop.run_in_executor(
@@ -1073,6 +1081,10 @@ class DiscussionOrchestrator:
                         )
                         report_task_id = await asyncio.shield(finalize_future)
                     state = await loop.run_in_executor(None, copy_context().run, lambda: _review_task_state(task_id))
+                    call_budget.used = max(
+                        call_budget.used,
+                        int((state.get("coverage") or {}).get("model_calls_used") or 0),
+                    )
                     final_status = (
                         "interrupted" if (state.get("coverage") or {}).get("stage") == "interrupted"
                         else state["status"]
@@ -2346,6 +2358,38 @@ def _interrupt_review_task(task_id: int) -> int:
             task.error_message = "圆桌服务中断，等待进程重启恢复"
             task.coverage = {**(task.coverage or {}), "stage": "interrupted", "score_available": False}
     return task_id
+
+
+def _fail_unverified_review_task(task_id: int) -> int:
+    """首次持久状态读取失败时停止生成，保留数据库中的预算和既有终态。"""
+    db = SessionLocal()
+    try:
+        task = db.query(ReviewTask).filter_by(
+            id=task_id, review_type="discuss", status="running",
+        ).with_for_update().populate_existing().one_or_none()
+        if task is not None:
+            reason = "未能核验圆桌持久执行状态，已停止调用模型，审查结论不可用"
+            task.status = "failed"
+            task.summary = reason
+            task.error_message = reason
+            task.score = 0
+            task.score_version = None
+            task.score_breakdown = None
+            task.coverage = {
+                **(task.coverage or {}),
+                "stage": "failed", "failure_kind": "initial_state_unverified",
+                "coverage_status": "failed", "verification_status": "failed",
+                "extraction_status": "skipped", "score_available": False,
+                "score_unavailable_reason": reason,
+            }
+            task.end_time = datetime.now(timezone.utc)
+            db.commit()
+        return task_id
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _cancel_review_task(task_id: int) -> int:
