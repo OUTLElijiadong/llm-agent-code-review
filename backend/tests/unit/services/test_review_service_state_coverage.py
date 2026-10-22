@@ -421,12 +421,12 @@ def test_run_review_task_missing_objects_still_closes_and_releases(monkeypatch: 
     assert semaphore.released == 1
 
 
-def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    """成功流程应累计文件、归一化未知严重度、评分并发布完成事件。"""
+def test_execute_review_with_ungraded_issue_does_not_fabricate_score(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未知严重度不应被计入中危或生成看似有效的评分。"""
     task = _runtime_task()
     user = SimpleNamespace(id=9)
     files = [SimpleNamespace(id=1, file_name="a.py", content="value = 1")]
-    issues = [SimpleNamespace(severity="严重"), SimpleNamespace(severity="unexpected")]
+    issues = [SimpleNamespace(severity="严重"), SimpleNamespace(severity="未分级")]
     events: list[tuple[AgentEventType, str]] = []
     commit_calls: list[Any] = []
     clock = iter([10.0, 10.25])
@@ -446,7 +446,6 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     monkeypatch.setattr(review_service, "_review_one_file", lambda *args, **kwargs: issues)
     monkeypatch.setattr(review_service, "_safe_commit", lambda db, task_obj=None: commit_calls.append(task_obj))
     monkeypatch.setattr(review_service, "_emit_review_event", _capture_event)
-    monkeypatch.setattr(review_service, "compute_score", lambda counts: 77)
     monkeypatch.setattr(review_service, "_build_summary", lambda *args, **kwargs: "summary")
 
     review_service._execute_review(
@@ -465,9 +464,16 @@ def test_execute_review_success_normalizes_severity_and_emits_progress(monkeypat
     assert task.processed_files == 1
     assert task.total_issues == 2
     assert task.severe_issues == 1
-    assert task.medium_issues == 1
-    assert task.score == 77
-    assert task.summary == "summary"
+    assert task.medium_issues == 0
+    assert task.score == 0
+    assert task.score_version is None
+    assert task.score_breakdown["score"] is None
+    assert task.score_breakdown["score_source"] == "unavailable"
+    assert task.score_breakdown["score_unavailable_reason"] == "ungraded_findings"
+    assert task.coverage["score_available"] is False
+    assert task.coverage["score_unavailable_reason"] == "ungraded_findings"
+    assert "1 项未分级" in task.summary
+    assert "未生成综合评分" in task.summary
     assert task.duration_ms == 250
     assert len(commit_calls) == 3
     assert (AgentEventType.PROGRESS, "code_reviewer") in events

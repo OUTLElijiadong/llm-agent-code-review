@@ -98,6 +98,46 @@ beforeEach(() => {
 })
 
 describe('ReportDetail 报告口径', () => {
+  it('新版评分显示 CVSS/质量分权重、向量覆盖和回退依据', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {},
+      task: {
+        score_breakdown: {
+          policy_version: 'cvss-weighted-v1',
+          formula: '平台综合分 = 70% × CVSS 安全分 + 30% × 原规则分',
+          cvss_status: 'unavailable',
+          cvss_reason: '发现未提供可复算的 CVSS 向量，暂用原规则分，CVSS 70% 权重未生效',
+          components: {
+            cvss: { weight: 0, score: null, max_base_score: null, scored_findings: 0, unscored_findings: 1 },
+            quality: { weight: 1, score: 77 },
+          },
+        },
+      },
+      stats: { score: 77, total_issues: 1 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const details = wrapper.get('[data-testid="report-cvss-score-details"]')
+    expect(details.text()).toContain('CVSS 安全分 · 0%')
+    expect(details.text()).toContain('规则质量分 · 100%')
+    expect(details.text()).toContain('0 项已评分，1 项未评分')
+    expect(details.text()).toContain('CVSS 70% 权重未生效')
+    expect(details.text()).toContain('非 CVSS 官方综合分')
+    wrapper.unmount()
+  })
+
+  it('旧评分记录不展示 CVSS 新策略说明', async () => {
+    reportApi.getReportDetail.mockResolvedValueOnce({
+      project: {}, task: { score_breakdown: { version: 'severity-deduction-v1', score: 77 } },
+      stats: { score: 77 }, files: [], rules_snapshot: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="report-cvss-score-details"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([['trusted', '规则计分：复算一致'], ['rescored', '规则计分：已校正']])('评分 %s 仅说明规则复算，不声称独立终审', async (status, label) => {
     reportApi.getReportDetail.mockResolvedValueOnce({
       project: {},

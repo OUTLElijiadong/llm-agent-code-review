@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import AgentContext, AgentResult, BaseAgent
 from app.services import agent_knowledge_service
 from app.services.ai_usage_context import UsageAccountingError
+from app.services.sandbox_review_findings import build_cvss_evidence, normalize_review_findings
 
 # ── 四角色系统提示词 ──────────────────────────────────────────
 _WHITEBOX_PROMPT = (
@@ -30,6 +31,16 @@ _VERIFY_PROMPT = (
     "任务:证伪——逐条检查'发现'是否有证据支撑,无证据的降级为'建议验证'或删除;"
     "检查'通过'结论是否与退出码/状态码矛盾。"
     "输出 JSON: {\"confirmed\":[\"...\"],\"downgraded\":[\"...\"],\"contradictions\":[\"...\"],\"notes\":\"...\"}。"
+    'JSON 同时必须含 security_findings 数组；没有实证漏洞时返回 []。每项结构：'
+    '{"title":"漏洞标题","severity":"严重/高/中/低/提示","status":"confirmed/suspected/refuted",'
+    '"description":"具体漏洞机制","impact":"已观察的安全影响",'
+    '"cvss_vector":"CVSS:3.1/完整8项基础向量，不能确定时为null",'
+    '"cvss_rationale":"逐项解释基础指标与证据的对应关系，未证实的影响不得猜测",'
+    '"evidence_refs":[{"test_file":"cvss_evidence中的精确键","quote":"output中至少24字符连续原文"}]}。'
+    "只有本次 cvss_evidence 中执行回执能支撑机制与影响的漏洞才能 confirmed；"
+    "HTTP 200、版本头、编译失败、测试退出码、模型草稿本身均不构成漏洞证据。"
+    "只能引用输出实际包含的源码片段或请求与响应及实测断言；不能仅凭引文存在就确认漏洞。"
+    "证据不足标 suspected；已证伪标 refuted；禁止从草稿Markdown提取/猜测CVSS，禁止补造向量。"
 )
 _REPORT_PROMPT = (
     "你是报告 Agent(Report)。输入是白盒/黑盒结论与对抗复检的裁决。"
@@ -531,18 +542,22 @@ class TestReviewReporterAgent(BaseAgent):
         if not bb.success or not isinstance(bb.data, str) or not bb.data.strip():
             return self._failed_role("黑盒", bb)
         roles["blackbox"] = {"ok": bb.success, "text": (bb.data or "") if bb.success else f"未执行: {bb.error}"}
+        cvss_evidence = build_cvss_evidence(safe_conclusion, mode)
         # 3) 对抗复检角色(gate:无证据降级)
         vf = self._role_call(
             self._role_prompt(_VERIFY_PROMPT, compressed=evidence_is_compressed),
             "白盒草稿:\n" + str(roles["whitebox"]["text"])
             + "\n\n黑盒草稿:\n" + str(roles["blackbox"]["text"])
             + "\n\n原始证据:\n" + evidence
+            + "\n\n本次可引用的执行原文（cvss_evidence）:\n"
+            + json.dumps({"cvss_evidence": cvss_evidence}, ensure_ascii=False)
             + knowledge_refs["verify"],
             ctx,
         )
         if not vf.success or not isinstance(vf.data, (str, dict)) or not vf.data:
             return self._failed_role("对抗复检", vf)
         roles["verify"] = {"ok": vf.success, "text": (vf.data or "") if vf.success else f"未执行: {vf.error}"}
+        structured_findings = normalize_review_findings(vf.data, safe_conclusion, mode)
         # 4) 编排 Agent 按证据追加专项角色(SAST/DAST/注入/依赖/渗透),失败则保持基础四角色
         extra_roles: list[str] = []
         try:
@@ -600,6 +615,8 @@ class TestReviewReporterAgent(BaseAgent):
             "白盒结论:\n" + str(roles["whitebox"]["text"])
             + "\n\n黑盒结论:\n" + str(roles["blackbox"]["text"])
             + "\n\n对抗复检裁决:\n" + str(roles["verify"]["text"])
+            + "\n\n服务器校验后的结构化安全发现（只有cvss_findings可标已确认，其余列待复核）:\n"
+            + json.dumps(structured_findings, ensure_ascii=False)
             + extra_conclusions
             + "\n\n原始证据:\n" + evidence
             + knowledge_refs["report"],
@@ -637,6 +654,10 @@ class TestReviewReporterAgent(BaseAgent):
         return AgentResult(
             success=True,
             data={
+                **structured_findings,
+                "security_findings": {"security_findings": [
+                    *structured_findings["cvss_findings"], *structured_findings["unconfirmed_findings"],
+                ]},
                 "report_md": report_md,
                 "roles": roles,
                 "roles_executed": executed,

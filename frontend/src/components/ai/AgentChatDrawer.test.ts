@@ -598,7 +598,6 @@ it.each(['completed', 'pending'] as const)('本地导航恢复断网：%s记录�
   } finally { wrapper.unmount() }
   expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction).map(message => message.localAction?.status)).toEqual([status, status])
 })
-
 describe('AgentChatDrawer Responses stream', () => {
   it('建 run 前网络失败时立即保存消息和错误，刷新后可恢复并重试', async () => {
     const wrapper = await mountReadyDrawer()

@@ -170,6 +170,7 @@ describe('local navigation cost guard', () => {
         ],
       },
       { path: '/projects', meta: { title: '项目管理', permissions: ['project:view'] } },
+      { path: '/code', meta: { title: '代码中心', permissions: ['code:view'] } },
       { path: '/reviews', meta: { title: '审查记录', permissions: ['review:view'] } },
     ],
   }
@@ -179,7 +180,6 @@ describe('local navigation cost guard', () => {
       component: {}, ...route, children: route.children?.map(child => ({ component: {}, ...child })),
     })) })
   }
-
   it('resolves an explicit navigation request without requiring a model round', () => {
     const result = resolveLocalNavigationRequest(
       '请只执行页面导航：打开系统操作审计页面。不要查询、修改、删除或执行任何运维操作。',
@@ -196,6 +196,20 @@ describe('local navigation cost guard', () => {
       },
     })
   })
+
+  it.each(['不要发起审查', '不启动测试', '不用运行扫描', '不要创建圆桌讨论'])(
+    '打开代码中心并限定“%s”时只导航', boundary => {
+      expect(resolveLocalNavigationRequest(`打开代码中心，${boundary}。`, routerFor('/code'), guard(true)))
+        .toEqual({ kind: 'navigate', directive: { action: 'navigate', route: '/code', label: '代码中心' } })
+    },
+  )
+
+  it.each(['不要发起审查，直接启动测试', '不要创建圆桌讨论并删除项目', '不要运行扫描；读取文件'])(
+    '业务否定分句之后的其他请求不能被纯导航吞掉：%s', boundary => {
+      expect(resolveLocalNavigationRequest(`打开代码中心，${boundary}`, routerFor('/code'), guard(true)))
+        .toBeNull()
+    },
+  )
 
   it('审查员打开系统操作审计时导航到 audit:view 页面', () => {
     const result = resolveLocalNavigationRequest(
@@ -224,6 +238,16 @@ describe('local navigation cost guard', () => {
       kind: 'navigate',
       directive: { action: 'navigate', route: '/audit', label: '操作审计' },
     })
+  })
+
+  it('无审计权限的普通用户请求“审计”时拒绝，不回退到管理路径', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开审计页面',
+      routerFor('/audit') as never,
+      { ...guard(true), hasRole: () => false, hasPermission: () => false },
+    )
+
+    expect(result).toEqual({ kind: 'forbidden' })
   })
 
   it('明确要求管理后台审计时仍选择管理路由并拒绝普通用户', () => {

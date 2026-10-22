@@ -6,15 +6,16 @@ interface PanelState extends Point, Size {}
 export type FloatingChatResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
 
 const EDGE = 12
+const DEFAULT_SIZE: Size = { width: 400, height: 620 }
 const MIN_SIZE: Size = { width: 360, height: 420 }
 const MAX_SIZE: Size = { width: 760, height: 900 }
+const KEYBOARD_RESIZE_STEP = 16
 
 function storageName(storageKey: string): string {
   return `prism-floating-chat-position:${storageKey}`
 }
 
 function responsive(): boolean {
-  // 与两端组件的手机、低高度媒体查询保持一致，避免 CSS inset 与内联坐标竞争。
   return window.innerWidth <= 520 || window.innerHeight <= 520
 }
 
@@ -50,8 +51,13 @@ export function useFloatingChatPosition(storageKey: string) {
   let restoreFrame: number | null = null
 
   const style = computed<CSSProperties>(() => state.value ? {
-    position: 'fixed', left: `${state.value.left}px`, top: `${state.value.top}px`,
-    right: 'auto', bottom: 'auto', width: `${state.value.width}px`, height: `${state.value.height}px`,
+    position: 'fixed',
+    left: `${state.value.left}px`,
+    top: `${state.value.top}px`,
+    right: 'auto',
+    bottom: 'auto',
+    width: `${state.value.width}px`,
+    height: `${state.value.height}px`,
   } : {})
 
   function cancelRestore(): void {
@@ -82,8 +88,12 @@ export function useFloatingChatPosition(storageKey: string) {
       if (parsed && Number.isFinite(parsed.left) && Number.isFinite(parsed.top)) saved = parsed
     } catch { /* 本地偏好损坏不影响打开聊天 */ }
     const size = clampSize({
-      width: typeof saved?.width === 'number' && Number.isFinite(saved.width) ? saved.width : panel.offsetWidth,
-      height: typeof saved?.height === 'number' && Number.isFinite(saved.height) ? saved.height : panel.offsetHeight,
+      width: typeof saved?.width === 'number' && Number.isFinite(saved.width)
+        ? saved.width
+        : panel.offsetWidth || DEFAULT_SIZE.width,
+      height: typeof saved?.height === 'number' && Number.isFinite(saved.height)
+        ? saved.height
+        : panel.offsetHeight || DEFAULT_SIZE.height,
     })
     const point = clampPosition(saved ? { left: saved.left!, top: saved.top! } : {
       left: window.innerWidth - size.width - 24,
@@ -130,8 +140,9 @@ export function useFloatingChatPosition(storageKey: string) {
       state.value = { ...origin, ...clampPosition({ left: origin.left + dx, top: origin.top + dy }, origin) }
       return
     }
+    if (!resizing.value) return
     const next = { ...origin }
-    // 固定未拖动的对边，边角碰到视口后停止，不能把整个窗口挤走。
+    // 固定未拖动的对边，边角碰到视口后停止，不把整个窗口挤走。
     if (direction.includes('e')) next.width = bound(origin.width + dx, MIN_SIZE.width, Math.min(MAX_SIZE.width, window.innerWidth - origin.left - EDGE))
     if (direction.includes('s')) next.height = bound(origin.height + dy, MIN_SIZE.height, Math.min(MAX_SIZE.height, window.innerHeight - origin.top - EDGE))
     if (direction.includes('w')) {
@@ -147,7 +158,7 @@ export function useFloatingChatPosition(storageKey: string) {
 
   function resizeByKeyboard(event: KeyboardEvent): void {
     if (responsive() || !panelRef.value) return
-    const step = event.shiftKey ? 64 : 16
+    const step = event.shiftKey ? KEYBOARD_RESIZE_STEP * 4 : KEYBOARD_RESIZE_STEP
     const dx = event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0
     const dy = event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0
     if (!dx && !dy) return
@@ -185,10 +196,10 @@ export function useFloatingChatPosition(storageKey: string) {
     }
     if (!state.value) restoreOrAnchor()
     const base = preferred ?? state.value
-    if (base) {
-      const size = clampSize(base)
-      state.value = { ...clampPosition(base, size), ...size }
-    }
+    if (!base) return
+    const size = clampSize(base)
+    state.value = { ...clampPosition(base, size), ...size }
+    persist()
   }
 
   watch(panelRef, panel => {

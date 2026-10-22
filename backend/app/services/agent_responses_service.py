@@ -279,120 +279,6 @@ def _has_explicit_human_roundtable_continue_request(
     )
 
 
-def _is_automatic_task_result_for_roundtable(
-    db: Session,
-    *,
-    user_id: int,
-    surface: str,
-    session_key: str,
-    session_id: str = "",
-    run_id: str = "",
-) -> bool:
-    """识别当前小菱运行是否由该圆桌的 task.result 消息自动触发。"""
-
-    if user_id <= 0 or not surface or not session_key:
-        return False
-
-    message_ids: set[str] = set()
-    if run_id:
-        run = (
-            db.query(AgentResponseRun)
-            .filter(
-                AgentResponseRun.run_id == str(run_id),
-                AgentResponseRun.user_id == int(user_id),
-                AgentResponseRun.surface == str(surface),
-                AgentResponseRun.session_key == str(session_key),
-            )
-            .one_or_none()
-        )
-        if run is not None and run.mesh_message_id:
-            message_ids.add(str(run.mesh_message_id))
-
-    query = db.query(AgentMeshMessage).filter(
-        AgentMeshMessage.user_id == int(user_id),
-        AgentMeshMessage.send_to == f"session:{surface}:{session_key}",
-        AgentMeshMessage.message_type == "task.result",
-        AgentMeshMessage.status == "processing",
-    )
-    if message_ids:
-        query = query.filter(AgentMeshMessage.message_id.in_(message_ids))
-    else:
-        query = query.order_by(AgentMeshMessage.id.desc()).limit(50)
-
-    for message in query.all():
-        try:
-            payload = json.loads(str(message.payload_json or "{}"))
-        except (TypeError, ValueError):
-            continue
-        result_session_id = str(payload.get("discussion_session_id") or "") if isinstance(payload, dict) else ""
-        if result_session_id and (not session_id or result_session_id == session_id):
-            return True
-    return False
-
-
-_ROUNDTABLE_CONTINUE_INTENT = re.compile(
-    r"(?:继续|接着(?:做|处理|审查|复核|讨论|上次|上一轮)?|再(?:跑|做|审查|复核)(?:一遍|一次)?)"
-)
-_ROUNDTABLE_CONTINUE_NEGATION = re.compile(r"(?:不要|别|不必|无需|暂不|先不).{0,4}(?:继续|接着)")
-
-
-def _has_explicit_human_roundtable_continue_request(
-    db: Session,
-    *,
-    user_id: int,
-    surface: str,
-    session_key: str,
-    run_id: str,
-) -> bool:
-    """只接受新的人类 Responses 输入明确要求继续，不以模型工具参数代替用户授权。"""
-
-    if user_id <= 0 or not surface or not session_key or not run_id:
-        return False
-    row = (
-        db.query(AgentResponseRun)
-        .filter(
-            AgentResponseRun.run_id == str(run_id),
-            AgentResponseRun.user_id == int(user_id),
-            AgentResponseRun.surface == str(surface),
-            AgentResponseRun.session_key == str(session_key),
-            AgentResponseRun.status == "running",
-        )
-        .one_or_none()
-    )
-    # AgentMesh 触发的运行（task.result、status.update、团队事件等）不是新的人类消息。
-    if row is None or row.mesh_message_id:
-        return False
-    try:
-        checkpoint = json.loads(str(row.checkpoint_json or "{}"))
-    except (TypeError, ValueError):
-        return False
-    transcript = checkpoint.get("transcript") if isinstance(checkpoint, dict) else None
-    if not isinstance(transcript, list):
-        return False
-    latest_user = next(
-        (item for item in reversed(transcript) if isinstance(item, dict) and item.get("role") == "user"),
-        None,
-    )
-    if latest_user is None:
-        return False
-    content = latest_user.get("content")
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = " ".join(
-            str(part.get("text") or "")
-            for part in content
-            if isinstance(part, dict) and isinstance(part.get("text"), str)
-        )
-    else:
-        text = ""
-    return bool(
-        text.strip()
-        and not _ROUNDTABLE_CONTINUE_NEGATION.search(text)
-        and _ROUNDTABLE_CONTINUE_INTENT.search(text)
-    )
-
-
 class AgentSessionExpiredError(RuntimeError):
     """当前 Responses 运行所属的登录版本已被更新登录取代。"""
 
@@ -1861,6 +1747,32 @@ class PrismToolExecutor:
             )
 
         if call.name == "create_agent_team":
+            # 缺失合同是可修正的参数错误，审批不能赋予一个未定义动作可执行语义。
+            # 在风险审批前校验；合法高风险合同仍走下面的指纹绑定审批。
+            from app.services.site_agent_service import resolve_site_input
+
+            member_addresses = {
+                item["member_key"]: item["address"] for item in call.arguments.get("members", [])
+            }
+            for task in call.arguments.get("tasks", []):
+                address = member_addresses.get(task.get("member_key"), "")
+                task_input = task.get("input") or {}
+                if address != "agent:site_operator" and not (
+                    address.startswith("temporary:")
+                    and task_input.get("operation") in {"execute_capability", "verify_results"}
+                ):
+                    continue
+                try:
+                    resolve_site_input(task_input)
+                except ValueError as exc:
+                    return await self._failed_attempt(
+                        call,
+                        f"任务 {task.get('task_key', '')} 的站点执行合同无效：{exc}。"
+                        "先查当前账号能力清单，再绑定 input={operation:'execute_capability',"
+                        "scope:'user或admin',capability:'已登记能力',params:{业务参数}}；"
+                        "核验任务用 operation:'verify_results' 并依赖实际执行任务。"
+                        "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
+                    )
             team_supervision = agent_supervisor_service.review_agent_team_plan(call.arguments)
             remote_targets = []
             for task in call.arguments.get("tasks", []):
@@ -4871,13 +4783,16 @@ def _instructions(surface: str, user: Optional[User] = None, is_super_admin: boo
         "低、中风险按当前账号权限自动执行，高风险和危急风险等待用户点击确认。普通管理员仍按权限执行。"
         "用户请求超出权限时直接说明原因并拒绝,不要尝试调用也不会报'工具权限不足'错误。"
         "所有事实查询和操作必须使用已提供工具；不要编造工具结果，也不要声称未执行的动作已完成。"
-        "回复先给结论，再给必要证据、阻塞原因或下一步；默认短段落和少量要点，重点突出。"
-        "不要重复复述需求、计划、工具过程或整份成员输出；用户明确要详情时再展开。"
-        "团队派发后只报告真实进度；终态说明完成、失败、阻塞或取消，不为简短遗漏未完成项。"
+        "回复先给结论，再列必要证据、阻塞原因或下一步；默认用短段落和少量要点，突出关键结果。"
+        "不要重复复述需求、计划、工具过程或整份成员输出；简单问题简短回答，用户明确要详情时再展开。"
+        "团队派发后只报告真实进度；终态汇报必须明确完成、失败、阻塞或取消，不能为简短而遗漏未完成项。"
         "自然业务答复默认只给结果和页面链接，不显示内部 capability、task_id、request_hash、账号 ID 等；"
         "除非用户明确索要技术证据，执行细节保留在系统记录中。"
         "论坛最新查询的 newest 按发布时间严格排序并忽略置顶，default 才置顶优先，不得混淆两种排序。"
-        "评分口径：代码审查 0-100 分是平台内部按严重程度扣分，不是 CVSS 或国家漏洞定级；CVSS 只依据合法向量。"
+        "评分口径：CVSS 3.1 基础分为 0-10，必须由服务端按合法向量复算。"
+        "平台综合分为 0-100，采用70% CVSS 安全项与30%质量规则分；这不是 FIRST 官方项目评分。"
+        "全部发现均缺少有效向量时回退规则分；仅部分缺失时仍按有效向量计算，综合分受原质量分上限约束。"
+        "不得虚构 CVSS 或国家漏洞定级；以报告保存的评分明细为准。"
         "国内定级按现行 GB/T 30279-2020 区分技术等级和结合环境的综合等级。当前没有 CNVD/CNNVD 实时查询能力；"
         "询问权威性或最新数据时必须说明本轮是否实际查询官方精确记录，未查询时只能称 AI 初步判断，"
         "禁止声称使用最新漏洞库或权威评级。"

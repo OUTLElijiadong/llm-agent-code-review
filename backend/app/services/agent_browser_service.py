@@ -101,7 +101,6 @@ _ROUTES = (
         (),
     ),
 )
-
 _SUPER_ADMIN_ROUTES = frozenset(
     {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"}
 )
@@ -133,6 +132,9 @@ def authorize_route(db: Session, user: User, route: str) -> str:
     parts = urlsplit(route)
     if parts.scheme or parts.netloc or parts.fragment:
         raise ValidationError("禁止外部 URL 或脚本导航")
+    if parts.path == "/report/templates":
+        route = "/admin/report-templates" + (f"?{parts.query}" if parts.query else "")
+        parts = urlsplit(route)
     found = next((permissions for pattern, permissions in _ROUTES if re.fullmatch(pattern, parts.path)), None)
     if found is None:
         raise ValidationError("页面未登记，停止猜测目标")

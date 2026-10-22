@@ -15,6 +15,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
+from app.ai.cvss import CVSS_VERSION, normalize_cvss
 from app.services.report_exporter import _sanitize_report_html
 from app.services.report_markdown import markdown_to_html
 from app.services.report_pdf_exporter import (
@@ -185,17 +186,56 @@ def score_section_lines(
     audit_label: str = "",
     finding_count: int | None = None,
     severity_counts: dict[str, Any] | None = None,
+    score_breakdown: dict[str, Any] | None = None,
 ) -> list[str]:
     """导出正文统一的“评分与结论”：出分写明范围与依据，不出分写明原因，绝不用占位分。"""
     lines = ["## 评分与结论"]
+    is_cvss_policy = isinstance(score_breakdown, dict) and score_breakdown.get("policy_version") == "cvss-weighted-v1"
     if available and isinstance(score, (int, float)) and not isinstance(score, bool):
-        lines.append(f"评分：{int(score)} / 100")
+        label = (
+            str(score_breakdown.get("score_label") or "平台综合分（非 CVSS 官方综合分）")
+            if is_cvss_policy
+            else "评分"
+        )
+        lines.append(f"{label}：{int(score)} / 100")
         if scope_label:
             lines.append(f"评分范围：{scope_label}")
         if rule:
             lines.append(f"计分规则：{rule}")
         if audit_label:
             lines.append(f"复核状态：{audit_label}")
+        if is_cvss_policy:
+            components = score_breakdown.get("components") or {}
+            cvss = components.get("cvss") if isinstance(components, dict) else {}
+            cvss = cvss if isinstance(cvss, dict) else {}
+            vectors = score_breakdown.get("cvss_vectors")
+            vectors = vectors if isinstance(vectors, list) else []
+            scored_findings = int(cvss.get("scored_findings") or 0)
+            standard = score_breakdown.get("cvss_standard") or "CVSS 3.1（FIRST）"
+            lines.append(f"CVSS 来源：{_value(standard)}")
+            if vectors:
+                vector_summary = "、".join(str(item) for item in vectors)
+            elif scored_findings:
+                vector_summary = "已评分发现存在，但向量明细未随评分分项保存"
+            else:
+                vector_summary = "无有效向量"
+            lines.append(f"CVSS 向量：{vector_summary}")
+            cvss_weight = cvss.get("weight", 0)
+            lines.append(f"CVSS 权重：{int(round(cvss_weight * 100))}%" if cvss_weight else "CVSS 权重：0%")
+            quality = components.get("quality") if isinstance(components, dict) else None
+            quality = quality if isinstance(quality, dict) else {}
+            quality_weight = quality.get("weight")
+            if isinstance(quality_weight, (int, float)):
+                lines.append(f"原规则质量分权重：{int(round(quality_weight * 100))}%")
+            lines.append(f"CVSS 已评分发现：{scored_findings} 项")
+            lines.append(f"CVSS 未评分发现：{int(cvss.get('unscored_findings') or 0)} 项")
+            max_base_score = cvss.get("max_base_score")
+            if max_base_score is not None:
+                lines.append(f"CVSS 最高基础分：{_value(max_base_score)} / 10")
+            else:
+                lines.append("CVSS 最高基础分：未评估")
+            if score_breakdown.get("cvss_reason"):
+                lines.append(f"CVSS 说明：{_value(score_breakdown['cvss_reason'])}")
     else:
         lines.append("评分：未评估")
         lines.append(f"不出分原因：{reason or '缺少可计分的已测范围'}")
@@ -300,6 +340,18 @@ def build_pentest_report_markdown(
                 f"问题说明：{_value(finding.get('description'))}",
             ]
         )
+        cvss_score, cvss_vector, _, _ = normalize_cvss(
+            finding.get("cvss_score"), finding.get("cvss_vector"),
+        )
+        if cvss_score is None or cvss_vector is None:
+            lines.append("CVSS 基础分：未评分")
+        else:
+            lines.extend(
+                [
+                    f"CVSS 基础分：{cvss_score:.1f} / 10",
+                    f"CVSS 向量：CVSS:{CVSS_VERSION}/{cvss_vector}",
+                ]
+            )
         if finding.get("repro_steps"):
             lines.extend(["复现步骤：", _value(finding["repro_steps"])])
         if finding.get("evidence"):
@@ -440,16 +492,27 @@ def build_remote_pentest_report_markdown(content: dict[str, Any]) -> str:
         )
     markdown = "\n".join(lines).strip() + "\n"
     score = content.get("score") if isinstance(content.get("score"), dict) else {}
-    markdown = insert_section_after_task_info(markdown, score_section_lines(
-        score.get("score"),
-        available=bool(score.get("available")),
-        scope_label=str(score.get("scope_label") or ""),
-        reason=str(score.get("reason") or "报告未保存评分"),
-        rule=str(score.get("rule") or ""),
-        audit_label=str(score.get("audit_label") or ""),
-        finding_count=len([item for item in findings if isinstance(item, dict) and item.get("status") != "refuted"]),
-        severity_counts=score.get("severity_counts") if isinstance(score.get("severity_counts"), dict) else None,
-    ))
+    markdown = insert_section_after_task_info(
+        markdown,
+        score_section_lines(
+            score.get("score"),
+            available=bool(score.get("available")),
+            scope_label=str(score.get("scope_label") or ""),
+            reason=str(score.get("reason") or "报告未保存评分"),
+            rule=str(score.get("rule") or ""),
+            audit_label=str(score.get("audit_label") or ""),
+            finding_count=sum(
+                1 for item in findings
+                if isinstance(item, dict) and item.get("status") == "config_confirmed"
+            ),
+            severity_counts=(
+                score.get("severity_counts")
+                if isinstance(score.get("severity_counts"), dict)
+                else None
+            ),
+            score_breakdown=score,
+        ),
+    )
     return clean_report_markdown(markdown)
 
 

@@ -27,7 +27,7 @@
 | 团队状态机 | 成员上报 blocked 时，任务和团队都收敛为“已阻塞”，不重试。重试预算用尽或租约过期时记为业务失败（`retry_budget_exhausted` / `lease_expired_retry_exhausted`）；`dead_letter` 只表示投递状态。取消和过期不再把 mesh 请求记成失败。 |
 | 运维写操作 | 写操作只能作为 agent:operations 团队任务提交。必须有调度器核验过指纹的 `high_risk_authorized` 才执行，否则阻塞，返回 `ops_write_confirmation_required`。小菱提示词和两份手册同步更新。 |
 | 有界自愈 | 崩溃抢救和孤儿清扫共用同一个恢复预算，每次尝试写入 `recovery_events`（保留最近 10 条）。 |
-| 只经小菱 | 下线以下旁路接口：`/api/discuss/start`、agent-catalog invoke、`/api/ai/chat`、`/api/ai/detect-language`、`/api/agents/clarify`。用户能力 124 项；权限基线为 361 路由。 |
+| 只经小菱 | 下线以下旁路接口：`/api/discuss/start`、agent-catalog invoke、`/api/ai/chat`、`/api/ai/detect-language`、`/api/agents/clarify`。发布时用户能力基线为 124 项；截至 2026-10-22 当前用户能力为 120 项、管理能力为 143 项，4 个报告模板操作仍保留在管理能力注册表并受 `report:template_manage` 约束；权限基线路由数仍以发布时的 361 项为历史记录。 |
 | 评分诚实 | 既没有覆盖账本、也没有提交文件的历史任务不出分（生产受影响 0 条）。沙箱和渗透导出加入“评分与结论”一节；远程渗透改为“规则计分，未经独立复核”，不再写“小菱终审”。 |
 | 权限 | 远程渗透报告的非归属者四种导出都返回 404；圆桌会话按账号隔离（新增测试）。 |
 | 沙箱路径 | 服务端默认拒绝的白名单：拒绝穿越、编码穿越、绝对路径、盘符、URI、控制字符、符号链接。 |

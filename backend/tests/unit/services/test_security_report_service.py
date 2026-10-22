@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.agents.base import AgentResult
 from app.agents.fullchain_audit_agent import FullChainAuditOrchestrator, ReconReport
 from app.agents.security_sentinel_agent import SecuritySentinelAgent
+from app.ai.cvss import calculate_cvss_score
 from app.api.v1 import security as security_api
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
@@ -693,7 +694,12 @@ def test_security_report_with_ungraded_finding_does_not_publish_source_score(db)
         result={
             "summary": "扫描完整，但发现尚未完成分级。",
             "risk_score": 100,
-            "findings": [{"title": "待分级的风险", "severity": "未分级", "file_path": "src/app.py"}],
+            "findings": [{
+                "title": "待分级的风险",
+                "severity": "未分级",
+                "file_path": "src/app.py",
+                "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            }],
             "file_count": 1,
         },
         coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
@@ -703,7 +709,12 @@ def test_security_report_with_ungraded_finding_does_not_publish_source_score(db)
     report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
     assert task.coverage["score_available"] is False
     assert task.coverage["score_unavailable_reason"] == "ungraded_findings"
+    assert task.score == 0
+    assert task.score_version is None
+    assert task.score_breakdown is None
     assert report.content_json["risk_score"] is None
+    assert report.content_json["score_version"] is None
+    assert report.content_json["score_breakdown"] is None
     assert report.content_json["findings"][0]["severity"] == "未分级"
     assert "风险评分：未评估" in report.content_json["report_md"]
 
@@ -741,4 +752,111 @@ def test_security_report_score_matches_final_issue_severity_basis(db):
     assert report.content_json["source_risk_score"] == 100
     assert "风险评分：92/100" in report.content_json["report_md"]
     assert "来源评分：100/100" in report.content_json["report_md"]
+    assert "CVSS 基础分：未评分" in report.content_json["report_md"]
+    assert "CVSS 3.1 基础向量：未评分" in report.content_json["report_md"]
     assert "安全评分 100/100" not in report.content_json["summary"]
+
+
+def test_security_report_persists_vector_recomputed_composite_score(db):
+    owner = User(username="security_report_cvss_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    project = Project(user_id=owner.id, project_name="CVSS落库一致性", language="python", status="active")
+    db.add(project)
+    db.flush()
+
+    task_id = persist_security_report(
+        db,
+        owner=owner,
+        project_id=project.id,
+        report_kind="security_scan",
+        task_name="CVSS持久化核验",
+        execution_status="success",
+        result={
+            "summary": "扫描完成。安全评分 100/100。",
+            "risk_score": 100,
+            "findings": [{
+                "title": "命令注入",
+                "severity": "高",
+                "file_path": "src/app.py",
+                "cvss_score": 0.1,
+                "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            }],
+            "file_count": 1,
+        },
+        coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
+    )
+
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    issue = db.query(ReviewIssue).filter_by(task_id=task_id).one()
+    detail = report_service.get_report_detail(db, owner, task_id)
+    assert task.score == report.score == report.content_json["risk_score"] == detail["task"]["score"] == 29
+    assert task.score_version == task.score_breakdown["version"] == "cvss-weighted-v1"
+    assert task.score_breakdown["policy_version"] == "cvss-weighted-v1"
+    assert task.score == task.score_breakdown["score"]
+    assert report.content_json["score_version"] == task.score_version
+    assert report.content_json["score_breakdown"] == task.score_breakdown
+    assert report.content_json["source_risk_score"] == 100
+    assert issue.cvss_vector == "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    assert report.content_json["findings"][0]["source_cvss_vector"] == (
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    )
+    assert issue.cvss_score == pytest.approx(9.8)
+    assert issue.cvss_version == "3.1"
+    assert issue.cvss_source == "vector"
+    assert "CVSS 基础分：9.8/10" in report.content_json["report_md"]
+    assert "CVSS 3.1 基础向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" in report.content_json["report_md"]
+
+
+def test_security_report_persists_full_cvss_source_and_recomputable_base_vector(db):
+    owner = User(username="security_report_long_cvss_owner", password="x", role="user", status=1)
+    db.add(owner)
+    db.flush()
+    _grant_security_report_view(db, owner)
+    project = Project(user_id=owner.id, project_name="长 CVSS 向量落库", language="python", status="active")
+    db.add(project)
+    db.flush()
+    full_vector = (
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/"
+        "E:P/RL:O/RC:C/CR:H/IR:H/AR:H/"
+        "MAV:N/MAC:L/MPR:N/MUI:N/MS:U/MC:H/MI:H/MA:H"
+    )
+    base_vector = "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+
+    task_id = persist_security_report(
+        db,
+        owner=owner,
+        project_id=project.id,
+        report_kind="security_scan",
+        task_name="长向量基础分复算核验",
+        execution_status="success",
+        result={
+            "summary": "安全扫描完成。",
+            "risk_score": 100,
+            "findings": [{
+                "title": "命令注入",
+                "severity": "高",
+                "file_path": "src/app.py",
+                "cvss_vector": full_vector,
+            }],
+            "file_count": 1,
+        },
+        coverage={"coverage_status": "complete", "scanned_file_count": 1, "total_file_count": 1},
+    )
+
+    task = db.get(ReviewTask, task_id)
+    report = db.query(ReviewReport).filter_by(task_id=task_id, user_id=owner.id).one()
+    issue = db.query(ReviewIssue).filter_by(task_id=task_id).one()
+    finding = report.content_json["findings"][0]
+    assert len(full_vector) > 64
+    assert issue.cvss_vector == finding["cvss_vector"] == base_vector
+    assert len(issue.cvss_vector) <= 64
+    assert issue.cvss_score == pytest.approx(calculate_cvss_score(base_vector))
+    assert finding["source_cvss_vector"] == full_vector
+    assert issue.cvss_version == "3.1"
+    assert issue.cvss_source == "vector"
+    assert task.score == task.score_breakdown["score"]
+    assert "CVSS 基础分：9.8/10" in report.content_json["report_md"]
+    assert f"CVSS 3.1 基础向量：{base_vector}" in report.content_json["report_md"]

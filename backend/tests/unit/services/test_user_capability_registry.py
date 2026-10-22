@@ -77,7 +77,7 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 125  # 补齐审查员页面已有的只读审计接口
+    assert len(USER_CAPABILITIES) == 121  # 移除管理端报告模板能力，补齐审查员只读审计接口
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
         if spec.code != "audit.list":
@@ -149,12 +149,18 @@ def test_support_capabilities_share_one_page_entry() -> None:
     assert "/support/feedback" not in USER_PAGE_ROUTES
 
 
-def test_explicit_permissions_match_rbac_catalog_except_migrated_report_template_permission() -> None:
-    exceptions = {"report:template_manage"}
+def test_report_template_capabilities_are_not_discovered_as_user_pages() -> None:
+    report_template_specs = [spec for spec in USER_CAPABILITIES if spec.code.startswith("report_templates.")]
 
+    assert report_template_specs == []
+    assert "/report/templates" not in USER_PAGE_ROUTES
+    assert "/audit" in USER_PAGE_ROUTES
+
+
+def test_explicit_permissions_match_rbac_catalog() -> None:
     for spec in USER_CAPABILITIES:
         if spec.permission:
-            assert spec.permission in ALL_PERMISSION_CODES or spec.permission in exceptions, spec.code
+            assert spec.permission in ALL_PERMISSION_CODES, spec.code
 
 
 def test_user_discovery_returns_exact_openapi_contract() -> None:

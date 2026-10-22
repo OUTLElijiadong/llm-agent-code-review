@@ -43,7 +43,9 @@ from app.ai.multi_agent import (
 )
 from app.ai.prompt_builder import _format_experience, build_prompt
 from app.ai.result_parser import Issue, normalize_severity, parse
-from app.ai.scoring import SCORING_VERSION, compute_score, compute_score_breakdown, score_risk_level
+from app.ai.scoring import (
+    compute_composite_score_breakdown,
+)
 from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
@@ -979,32 +981,43 @@ def _execute_review(
         _check_cancelled(db, task, execution_token, lock=True)
         _check_review_authorization(authorization_check)
         sev_count = {"严重": 0, "高": 0, "中": 0, "低": 0}
+        ungraded_count = 0
         for it in all_issues:
-            # 归一化:LLM 偶发返回四类之外的 severity 时归入「中」,
-            # 保证四级计数之和恒等于 total_issues,评分与统计口径自洽。
-            key = it.severity if it.severity in sev_count else "中"
-            sev_count[key] += 1
+            if it.severity in sev_count:
+                sev_count[it.severity] += 1
+            else:
+                ungraded_count += 1
         task.total_issues = len(all_issues)
         task.severe_issues = sev_count["严重"]
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
-        # 保留 compute_score 作为旧调用方/测试的兼容入口；生产实现与
-        # breakdown 使用同一公式，因此两者正常情况下始终一致。
-        score = int(compute_score(sev_count))
-        score_breakdown = compute_score_breakdown(sev_count)
-        if score != score_breakdown["score"]:
-            # 外部兼容调用方可能暂时覆盖 compute_score；仍保持接口返回的
-            # 最终分数与风险等级自洽，而不丢失扣分明细。
-            score_breakdown = {
-                **score_breakdown,
-                "score": score,
-                "risk_level": score_risk_level(score),
+        if ungraded_count:
+            task.score = 0
+            task.score_version = None
+            task.score_breakdown = {
+                "score": None,
+                "risk_level": "未评估",
+                "score_source": "unavailable",
+                "score_unavailable_reason": "ungraded_findings",
+                "ungraded_issue_count": ungraded_count,
             }
-        task.score = score
-        task.score_version = SCORING_VERSION
-        task.score_breakdown = score_breakdown
-        task.summary = _build_summary(profiles, int(task.total_files or len(files)), len(all_issues), task.score)
+            task.coverage = {
+                **(task.coverage if isinstance(task.coverage, dict) else {}),
+                "score_available": False,
+                "score_unavailable_reason": "ungraded_findings",
+                "ungraded_issue_count": ungraded_count,
+            }
+            task.summary = (
+                f"本次审查发现 {len(all_issues)} 项问题，其中 {ungraded_count} 项未分级，"
+                "因此未生成综合评分。"
+            )
+        else:
+            score_breakdown = compute_composite_score_breakdown(sev_count, all_issues)
+            task.score = int(score_breakdown["score"])
+            task.score_version = score_breakdown["version"]
+            task.score_breakdown = score_breakdown
+            task.summary = _build_summary(profiles, int(task.total_files or len(files)), len(all_issues), task.score)
         if file_failures:
             # 放在加锁复查之后写入，避免 _check_cancelled 刷新任务时丢弃未提交的说明。
             task.error_message = ("部分文件重试后仍审查失败，分数仅代表已审范围：" + "; ".join(file_failures))[:500]
@@ -3135,14 +3148,28 @@ def cancel_task(db: Session, user: User, task_id: int) -> None:
 
 def _update_issue_counts(db: Session, task: ReviewTask) -> None:
     counts = {"严重": 0, "高": 0, "中": 0, "低": 0}
+    total = 0
+    ungraded = 0
     for severity, count in db.query(ReviewIssue.severity, func.count(ReviewIssue.id)).filter(
         ReviewIssue.task_id == task.id,
     ).group_by(ReviewIssue.severity).all():
-        counts[severity if severity in counts else "中"] += count
-    task.total_issues = sum(counts.values())
+        total += count
+        if severity in counts:
+            counts[severity] += count
+        else:
+            ungraded += count
+    task.total_issues = total
     task.severe_issues, task.high_issues, task.medium_issues, task.low_issues = (
         counts["严重"], counts["高"], counts["中"], counts["低"],
     )
+    if ungraded:
+        coverage = task.coverage if isinstance(task.coverage, dict) else {}
+        task.coverage = {
+            **coverage,
+            "score_available": False,
+            "score_unavailable_reason": "ungraded_findings",
+            "ungraded_issue_count": ungraded,
+        }
 
 
 def _update_duration(task: ReviewTask) -> None:

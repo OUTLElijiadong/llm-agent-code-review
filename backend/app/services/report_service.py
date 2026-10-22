@@ -11,7 +11,7 @@ from sqlalchemy import and_, false, func, or_, select, true
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.ai.scoring import compute_score
+from app.ai.scoring import CVSS_SCORING_VERSION, compute_composite_score_breakdown, compute_score, uses_cvss_policy
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, PermissionError
 from app.core.pagination import Pagination
 from app.core.permission_codes import PermissionCode
@@ -114,7 +114,7 @@ def _sandbox_rule_score_available(task: ReviewTask) -> bool:
     return (
         task.review_type == "sandbox_test"
         and task.status in {"success", "failed"}
-        and str(getattr(task, "score_version", "") or "") == SANDBOX_SCORE_VERSION
+        and str(getattr(task, "score_version", "") or "") in {SANDBOX_SCORE_VERSION, CVSS_SCORING_VERSION}
         and coverage.get("score_available") is True
         and coverage.get("score_basis") == SANDBOX_SCORE_VERSION
     )
@@ -262,6 +262,9 @@ def display_report_score(task: ReviewTask, score: int | None) -> int | None:
     """Display only scores with an explicit basis; coverage remains a separate fact."""
     if not _score_is_available(task):
         return None
+    if uses_cvss_policy(task):
+        # 新策略必须保留其向量复算结果；无输入时不能用旧严重度公式补分。
+        return score
     if task.review_type not in {"sandbox_test", "pentest"}:
         from app.services.score_scope import issue_rule_score
 
@@ -723,7 +726,10 @@ def get_report_detail(db: Session, user: User, task_id: int) -> dict:
     from app.services.score_credibility import audit_report_score
 
     # 仅复算分数；不表示对问题真实性做独立复核。
-    score_audit = audit_report_score(task, score, severity_count, issue_count, score_scope=score_scope)
+    score_audit = audit_report_score(
+        task, score, severity_count, issue_count, score_scope=score_scope,
+        findings=issue_stats.get("cvss_findings"),
+    )
     if score_audit["status"] == "rescored" and score_audit["final_score"] != score:
         score = score_audit["final_score"]
         from app.ai.scoring import score_risk_level
@@ -954,6 +960,11 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
             reason=str(scope_info.get("reason") or ""),
             finding_count=int(stats.get("total_issues") or 0) if task.review_type == "pentest" else None,
             severity_counts=stats.get("severity") if isinstance(stats.get("severity"), dict) else None,
+            score_breakdown=(
+                detail["task"].get("score_breakdown")
+                if isinstance(detail["task"].get("score_breakdown"), dict)
+                else None
+            ),
         ))
 
     return {
@@ -1008,7 +1019,7 @@ def _sandbox_native_exports(db: Session, user: User, task: ReviewTask, content: 
 def _empty_issue_stats(task: ReviewTask, basis: str) -> dict:
     return {
         "total_issues": 0, "severity": {}, "by_type": {},
-        "fixed": 0, "confirmed": 0, "refuted": 0,
+        "fixed": 0, "confirmed": 0, "refuted": 0, "confirmed_severity": {},
         "source": {"type": task.review_type, "stats_basis": basis},
     }
 
@@ -1025,6 +1036,8 @@ def _add_issue_stats(stats: dict, severity: str, kind: str, status: str, count: 
         stats["fixed"] += count
     if status == "confirmed":
         stats["confirmed"] += count
+        confirmed = stats.setdefault("confirmed_severity", {})
+        confirmed[severity] = confirmed.get(severity, 0) + count
 
 
 def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: datetime | None = None) -> dict[int, dict]:
@@ -1058,6 +1071,20 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
     ).all() if review_ids else []
     for task_id, severity, kind, status, count in rows:
         _add_issue_stats(stats[task_id], severity, kind, status, int(count))
+    composite_ids = [
+        task.id for task in tasks
+        if task.id in review_ids and uses_cvss_policy(task)
+    ]
+    if composite_ids:
+        for task_id in composite_ids:
+            stats[task_id]["cvss_findings"] = []
+        cvss_query = db.query(
+            ReviewIssue.task_id, ReviewIssue.cvss_vector, ReviewIssue.status,
+        ).filter(ReviewIssue.task_id.in_(composite_ids))
+        if since is not None:
+            cvss_query = cvss_query.filter(ReviewIssue.create_time >= since)
+        for task_id, vector, status in cvss_query.all():
+            stats[task_id]["cvss_findings"].append({"cvss_vector": vector, "status": status})
 
     reports = {
         row.task_id: row for row in db.query(ReviewReport).filter(ReviewReport.task_id.in_(domain_tasks)).all()
@@ -1080,6 +1107,10 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
             continue
         total = _count(task.total_issues)
         if task.review_type == "sandbox_test":
+            if uses_cvss_policy(task):
+                raw_findings = content.get("findings")
+                if isinstance(raw_findings, list):
+                    item["cvss_findings"] = [row for row in raw_findings if isinstance(row, dict)]
             from app.services.sandbox_report_summary import scope_sandbox_report_markdown, summarize_sandbox_report
 
             # Preserve the requested mode in the list response so old task cards do not
@@ -1131,6 +1162,7 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
         confirmed = content.get("confirmed_severity_counts")
         if isinstance(confirmed, dict):
             item["confirmed"] = sum(_count(count) for count in confirmed.values())
+            item["confirmed_severity"] = dict(confirmed)
 
     pentest_ids = [task.id for task in tasks if task.review_type == "pentest"]
     engagements = db.query(
@@ -1159,6 +1191,20 @@ def load_task_issue_stats(db: Session, tasks: list[ReviewTask], *, since: dateti
             PentestFinding.engagement_id, PentestFinding.severity, PentestFinding.category, PentestFinding.status,
         ).all():
             _add_issue_stats(stats[engagement_tasks[engagement_id]], severity, kind or "渗透测试", status, int(count))
+        composite_engagements = [
+            eid for eid, tid in engagement_tasks.items() if uses_cvss_policy(task_map[tid])
+        ]
+        if composite_engagements:
+            for eid in composite_engagements:
+                stats[engagement_tasks[eid]]["cvss_findings"] = []
+            vector_query = db.query(
+                PentestFinding.engagement_id, PentestFinding.cvss_vector, PentestFinding.status,
+            ).filter(PentestFinding.engagement_id.in_(composite_engagements))
+            if since is not None:
+                vector_query = vector_query.filter(PentestFinding.create_time >= since)
+            for eid, vector, status in vector_query.all():
+                if status == "confirmed":
+                    stats[engagement_tasks[eid]]["cvss_findings"].append({"cvss_vector": vector, "status": status})
     return stats
 
 
@@ -1173,6 +1219,65 @@ def _build_task_score_facts(
         for severity in ("严重", "高", "中", "低")
     }
     issue_count = issue_stats["total_issues"]
+    if uses_cvss_policy(task):
+        if "cvss_findings" not in issue_stats:
+            return issue_count, None, {"score": None, "score_source": "unavailable"}, severity_count
+        quality = None
+        if task.review_type in {"sandbox_test", "pentest"}:
+            from app.services.score_credibility import _pentest_rule_score, _sandbox_rule_score
+
+            coverage = task.coverage if isinstance(task.coverage, dict) else {}
+            quality = (
+                _sandbox_rule_score(coverage) if task.review_type == "sandbox_test"
+                else _pentest_rule_score(coverage, None)
+            )
+            if quality is None:
+                counts = coverage.get("confirmed_counts", {}) if task.review_type == "pentest" else {}
+                ungraded = any(_count(value) and key not in {"严重", "高", "中", "低", "提示"}
+                               for key, value in counts.items()) if isinstance(counts, dict) else False
+                return issue_count, None, {
+                    "score": None, "score_source": "unavailable",
+                    "score_unavailable_reason": "ungraded_findings" if ungraded else "missing_quality_inputs",
+                }, severity_count
+        if task.review_type not in {"sandbox_test", "pentest"}:
+            score, breakdown = build_report_score_facts(
+                severity_count,
+                max(0, issue_count - int(issue_stats.get("refuted", 0) or 0)),
+                findings=issue_stats["cvss_findings"],
+                scoring_version=CVSS_SCORING_VERSION,
+            )
+            return issue_count, score, breakdown, severity_count
+        scoring_counts = severity_count
+        if task.review_type == "pentest":
+            confirmed_counts = coverage.get("confirmed_counts", {})
+            actual_counts = issue_stats.get("confirmed_severity", confirmed_counts)
+            expected_total = int(issue_stats.get("confirmed", sum(confirmed_counts.values())) or 0)
+            scoring_counts = {severity: _count(actual_counts.get(severity)) for severity in severity_count}
+            # 提示是渗透规则的合法零扣分等级，仍参与覆盖计数。
+            graded_total = sum(scoring_counts.values()) + _count(actual_counts.get("提示"))
+            reason = None
+            if graded_total != expected_total:
+                reason = "ungraded_findings"
+            elif any(_count(actual_counts.get(key)) != _count(confirmed_counts.get(key))
+                     for key in set(actual_counts) | set(confirmed_counts)):
+                reason = "confirmed_counts_mismatch"
+            if reason:
+                return issue_count, None, {"score": None, "score_source": "unavailable",
+                                          "score_unavailable_reason": reason}, severity_count
+        else:
+            graded_total = sum(severity_count.values())
+            expected_total = max(0, issue_count - int(issue_stats.get("refuted", 0) or 0))
+            if graded_total < expected_total:
+                return issue_count, None, {"score": None, "score_source": "unavailable",
+                                          "score_unavailable_reason": "ungraded_findings",
+                                          "ungraded_issue_count": expected_total - graded_total}, severity_count
+        breakdown = compute_composite_score_breakdown(
+            scoring_counts, issue_stats["cvss_findings"], quality_score=quality,
+        )
+        if breakdown["version"] != CVSS_SCORING_VERSION:
+            breakdown["version"] = task.score_version
+        breakdown["score_source"] = task.review_type
+        return issue_count, breakdown["score"], breakdown, severity_count
     if task.review_type in {"sandbox_test", "pentest"}:
         risk_level = None
         if task.review_type == "pentest":

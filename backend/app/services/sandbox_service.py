@@ -85,6 +85,7 @@ from app.services.project_member_service import (
     require_project_access,
     require_project_execution,
 )
+from app.services.sandbox_review_findings import normalize_review_findings
 from app.utils.api_resolver import decrypt_api_key_with_metadata, encrypt_api_key
 from app.utils.archive_extractor import read_archive_members
 from app.utils.public_http import pin_public_http_url
@@ -5211,6 +5212,38 @@ SANDBOX_SCORE_VERSION = "sandbox-check-pass-rate-v1"
 _SANDBOX_STATE_CREDIT = {"passed": 1.0, "partial": 0.5, "failed": 0.0}
 
 
+def _sandbox_composite_score_breakdown(conclusion: dict[str, Any], score_result: dict[str, Any]) -> dict[str, Any]:
+    """Combine real execution quality with only explicitly structured CVSS findings."""
+    from app.ai.scoring import compute_composite_score_breakdown
+
+    mode = str(conclusion.get("test_mode") or "unknown")
+    findings = conclusion.get("cvss_findings")
+    if not isinstance(findings, list):
+        findings = []
+    if not score_result.get("score_available"):
+        return {
+            "version": SANDBOX_SCORE_VERSION,
+            "policy_version": "cvss-weighted-v1",
+            "score": None,
+            "score_available": False,
+            "score_source": SANDBOX_SCORE_VERSION,
+            "cvss_status": "unavailable" if findings else "not_applicable",
+            "components": {"cvss": {"scored_findings": 0, "unscored_findings": len(findings), "weight": 0},
+                           "quality": {"score": None, "weight": 1.0}},
+            "coverage_status": mode,
+            "unavailable_reason": score_result.get("unavailable_reason"),
+        }
+    breakdown = compute_composite_score_breakdown(
+        {}, findings, quality_score=score_result["score"],
+    )
+    breakdown["score_source"] = SANDBOX_SCORE_VERSION
+    breakdown["score_available"] = True
+    breakdown["coverage_status"] = mode
+    if breakdown.get("cvss_status") in {"unavailable", "not_applicable"}:
+        breakdown["version"] = SANDBOX_SCORE_VERSION
+    return breakdown
+
+
 def _sandbox_result_score(conclusion: dict[str, Any]) -> dict[str, Any]:
     """按规则计算沙箱验证分：已执行检查项的通过率（0-100）。
 
@@ -5754,6 +5787,59 @@ def _separate_unverified_ai_findings(report_md: str) -> tuple[str, int | None]:
     return separated, candidate_count
 
 
+def _render_structured_sandbox_findings(report_md: str, conclusion: dict[str, Any]) -> str:
+    """Render validated objects directly; prose never supplies findings or CVSS."""
+    from html import escape
+
+    from app.services.sandbox_report_summary import _markdown_h2_sections, _matches_report_section
+
+    review = conclusion.get("cvss_review")
+    if not isinstance(review, dict) or review.get("status") != "complete":
+        return report_md
+
+    def prose(value: object) -> str:
+        value = escape(" ".join(str(value or "").split()))
+        return re.sub(r"([\\`*{}\[\]()#+!|_])", r"\\\1", value)
+
+    def render(finding: dict[str, Any], index: int) -> str:
+        label = finding["severity"]
+        lines = [f"### {index}. [{label}] {prose(finding['title'])}",
+                 f"描述：{prose(finding['description'])}", f"影响：{prose(finding['impact'])}"]
+        if finding.get("cvss_vector"):
+            lines.extend([f"CVSS 3.1 基础分：{finding['cvss_score']}；向量：`{finding['cvss_vector']}`",
+                          f"指标依据：{prose(finding.get('cvss_rationale'))}"])
+        else:
+            lines.append("CVSS：缺少合法且有依据的基础向量，未参与向量评分。")
+        if finding["status"] != "confirmed":
+            status_label = "已证伪" if finding["status"] == "refuted" else "待复核"
+            lines.append(f"复核状态：{status_label}；不计入已确认问题或评分。")
+        for ref in finding.get("evidence_refs", []):
+            quote = ref["quote"]
+            fence = "`" * max(3, max((len(m) for m in re.findall(r"`+", quote)), default=0) + 1)
+            lines.extend([f"执行证据：{prose(ref['test_file'])}；SHA256：`{ref['sha256']}`",
+                          f"{fence}text\n{quote}\n{fence}"])
+        return "\n\n".join(lines)
+
+    confirmed = conclusion.get("cvss_findings") or []
+    unconfirmed = conclusion.get("unconfirmed_findings") or []
+    replacement = "## 问题清单\n\n"
+    replacement += "\n\n".join(render(row, i) for i, row in enumerate(confirmed, 1)) or "- 无问题。"
+    if unconfirmed:
+        replacement += "\n\n## AI 候选发现（未核实）\n\n"
+        replacement += "\n\n".join(render(row, i) for i, row in enumerate(unconfirmed, 1))
+    replacement += "\n\n"
+    sections = [section for section in _markdown_h2_sections(report_md)
+                if any(_matches_report_section(str(section["title"]), title)
+                       for title in ("问题清单", "AI 候选发现（未核实）"))]
+    if not sections:
+        return report_md.rstrip() + "\n\n" + replacement
+    output, cursor = [], 0
+    for index, section in enumerate(sections):
+        output.extend([report_md[cursor:int(section["start"])], replacement if index == 0 else ""])
+        cursor = int(section["end"])
+    return "".join([*output, report_md[cursor:]])
+
+
 def _build_deterministic_test_report(conclusion: dict[str, Any]) -> str:
     """模型不可用时生成可导出的确定性报告，禁止把缺少模型伪装成成功。"""
     execution_status = str(conclusion.get("execution_status") or "")
@@ -6051,6 +6137,7 @@ def _run_test_review_report(
     conclusion: dict[str, Any],
 ) -> dict[str, Any] | None:
     """黑白盒测试终态后生成中文报告；模型不可用时必须发布确定性报告兜底。"""
+    conclusion.setdefault("test_mode", str(getattr(environment, "test_mode", "") or ""))
     evidence = conclusion.get("evidence") if isinstance(conclusion.get("evidence"), dict) else {}
     blackbox_execution = evidence.get("blackbox_execution")
     blackbox_execution = blackbox_execution if isinstance(blackbox_execution, dict) else {}
@@ -6234,6 +6321,17 @@ def _run_test_review_report(
         else:
             conclusion.pop("ai_review_failure_reason", None)
             conclusion["ai_review_status"] = "complete"
+            # Only Verify's explicit JSON and real runner receipts supply CVSS.
+            # Revalidate at the service boundary; narrative Markdown is never an input.
+            structured = normalize_review_findings(
+                data.get("security_findings"), conclusion, str(getattr(environment, "test_mode", "") or ""),
+            )
+            conclusion.update(structured)
+            if isinstance(data.get("cvss_review"), dict):
+                conclusion["cvss_review"]["status"] = data["cvss_review"].get("status", "unavailable")
+            report_md = _render_structured_sandbox_findings(report_md, conclusion)
+            if conclusion["cvss_review"]["status"] == "complete":
+                unverified_findings = len(conclusion["unconfirmed_findings"])
         roles_executed = sum(
             1 for role in roles.values()
             if isinstance(role, dict) and role.get("ok") is True
@@ -6791,97 +6889,13 @@ def _publish_sandbox_report(
             .with_for_update()
             .first()
         )
-        now = datetime.now(_tz.utc).replace(tzinfo=None)
-        stopped_at = getattr(environment, "stopped_at", None) or now
-        if getattr(stopped_at, "tzinfo", None) is not None:
-            stopped_at = stopped_at.replace(tzinfo=None)
-        measured_duration = conclusion.get("duration_ms")
-        duration_is_measured = (
-            isinstance(measured_duration, int)
-            and not isinstance(measured_duration, bool)
-            and measured_duration >= 0
-        )
-        duration_ms = int(measured_duration) if duration_is_measured else 0
-        started_at = (
-            stopped_at - timedelta(milliseconds=duration_ms)
-            if duration_is_measured
-            else None
-        )
-        coverage["duration_source"] = "measured_execution" if duration_is_measured else "unknown"
-        score_result = _sandbox_result_score(conclusion)
-        coverage.update({
-            "score_available": score_result["score_available"],
-            "score_basis": score_result["score_basis"],
-            "score_sample": score_result["sample"],
-            "score_unavailable_reason": score_result["unavailable_reason"],
-        })
-        # The legacy integer column cannot store NULL. Keep 0 only as storage
-        # compatibility; score_available is authoritative at every report outlet.
-        report_score = score_result["score"] if score_result["score_available"] else 0
-        report_score_breakdown = {
-            "version": SANDBOX_SCORE_VERSION,
-            "score": score_result["score"],
-            "score_available": score_result["score_available"],
-            "score_source": score_result["score_basis"],
-            "sample": score_result["sample"],
-            "coverage_status": coverage.get("coverage_status", "unknown"),
-            "unavailable_reason": score_result["unavailable_reason"],
-        }
-        if task is None:
-            task = ReviewTask(
-                user_id=owner_id,
-                **model_attribution(environment),
-                project_id=project_id,
-                task_name=task_name,
-                review_type="sandbox_test",
-                status=task_status if task_status != "success" or passed else "failed",
-                total_files=1,
-                processed_files=1,
-                total_issues=issue_count,
-                severe_issues=severity_counts["严重"],
-                high_issues=severity_counts["高"],
-                medium_issues=severity_counts["中"],
-                low_issues=severity_counts["低"],
-                score=report_score,
-                score_version=SANDBOX_SCORE_VERSION,
-                score_breakdown=report_score_breakdown,
-                summary=report_md,
-                error_message=failure_message,
-                start_time=started_at,
-                end_time=stopped_at,
-                duration_ms=duration_ms,
-                coverage={"stage": "complete" if verification_status == "complete" else verification_status, **coverage},
-            )
-            db.add(task)
-        else:
-            task.task_name = task_name
-            task.project_id = project_id
-            task.status = task_status if task_status != "success" or passed else "failed"
-            task.total_issues = issue_count
-            task.severe_issues = severity_counts["严重"]
-            task.high_issues = severity_counts["高"]
-            task.medium_issues = severity_counts["中"]
-            task.low_issues = severity_counts["低"]
-            task.score = report_score
-            task.score_version = SANDBOX_SCORE_VERSION
-            task.score_breakdown = report_score_breakdown
-            task.summary = report_md
-            task.error_message = failure_message
-            task.start_time = started_at
-            task.end_time = stopped_at
-            task.duration_ms = duration_ms
-            task.coverage = {"stage": "complete" if verification_status == "complete" else verification_status, **coverage}
-            origin = model_attribution(environment)
-            for field in ATTRIBUTION_FIELDS:
-                setattr(task, field, origin.get(field))
-        db.flush()
         report_row = (
             db.query(ReviewReport)
             .filter(ReviewReport.task_id == task.id)
             .populate_existing()
             .with_for_update()
             .first()
-        )
+        ) if task is not None else None
         existing_content = (
             report_row.content_json if report_row is not None and isinstance(report_row.content_json, dict) else {}
         )
@@ -6906,6 +6920,14 @@ def _publish_sandbox_report(
         else:
             conclusion.pop("ai_review_skip_reason", None)
         if preserve_previous_ai_report:
+            # Keep the successful report and its structured judgement as one
+            # snapshot before recalculating the current execution-quality cap.
+            if isinstance(existing_content.get("findings"), list):
+                conclusion.update({
+                    "cvss_findings": existing_content["findings"],
+                    "unconfirmed_findings": existing_content.get("unconfirmed_findings") or [],
+                    "cvss_review": existing_content.get("cvss_review") or {},
+                })
             previous_report_md = existing_content.get("report_md")
             if isinstance(previous_report_md, str) and previous_report_md.strip():
                 if _sync_terminal_artifact:
@@ -6923,8 +6945,115 @@ def _publish_sandbox_report(
             # execution report for this terminal snapshot instead.
             report_md = _build_deterministic_test_report(conclusion)
 
-        # The locked report row may carry the canonical, more complete report. Derive
-        # every summary and exported artifact from that same final body.
+        if isinstance(conclusion.get("cvss_findings"), list):
+            structured = normalize_review_findings(
+                {"security_findings": [
+                    *conclusion["cvss_findings"],
+                    *(conclusion.get("unconfirmed_findings") or []),
+                ]},
+                conclusion,
+                str(getattr(environment, "test_mode", "") or ""),
+            )
+            prior_review = conclusion.get("cvss_review")
+            if isinstance(prior_review, dict):
+                structured["cvss_review"]["status"] = prior_review.get("status", "unavailable")
+            conclusion.update(structured)
+        findings = conclusion.get("cvss_findings") if isinstance(conclusion.get("cvss_findings"), list) else []
+        unconfirmed_findings = conclusion.get("unconfirmed_findings") or []
+        if environment_id and environment.status == "finalizing" and "cvss_review" in conclusion:
+            # Save the new schema alongside the existing execution snapshot before
+            # publication commits. The execution lease still controls the final status.
+            current_result = _loads(environment.result_json, {})
+            environment.result_json = _json({
+                **(current_result if isinstance(current_result, dict) else {}),
+                **{key: conclusion[key] for key in ("cvss_findings", "unconfirmed_findings", "cvss_review")},
+            })
+
+        report_md = _render_structured_sandbox_findings(report_md, conclusion)
+        report_issue_summary = summarize_sandbox_report(report_md)
+        issue_count = report_issue_summary["total"] or 0
+        severity_counts = report_issue_summary["severity_counts"]
+        now = datetime.now(_tz.utc).replace(tzinfo=None)
+        stopped_at = getattr(environment, "stopped_at", None) or now
+        if getattr(stopped_at, "tzinfo", None) is not None:
+            stopped_at = stopped_at.replace(tzinfo=None)
+        measured_duration = conclusion.get("duration_ms")
+        duration_is_measured = (
+            isinstance(measured_duration, int)
+            and not isinstance(measured_duration, bool)
+            and measured_duration >= 0
+        )
+        duration_ms = int(measured_duration) if duration_is_measured else 0
+        started_at = (
+            stopped_at - timedelta(milliseconds=duration_ms)
+            if duration_is_measured
+            else None
+        )
+        coverage["duration_source"] = "measured_execution" if duration_is_measured else "unknown"
+        score_result = _sandbox_result_score(conclusion)
+        score_breakdown = _sandbox_composite_score_breakdown(conclusion, score_result)
+        coverage.update({
+            "score_available": score_result["score_available"],
+            "score_basis": score_result["score_basis"],
+            "score_sample": score_result["sample"],
+            "score_unavailable_reason": score_result["unavailable_reason"],
+            "composite_scoring": score_breakdown,
+        })
+        # The legacy integer column cannot store NULL. Keep 0 only as storage
+        # compatibility; score_available is authoritative at every report outlet.
+        report_score = score_breakdown["score"] if score_result["score_available"] else 0
+        report_score_breakdown = {**score_breakdown, "sample": score_result["sample"]}
+        if task is None:
+            task = ReviewTask(
+                user_id=owner_id,
+                **model_attribution(environment),
+                project_id=project_id,
+                task_name=task_name,
+                review_type="sandbox_test",
+                status=task_status if task_status != "success" or passed else "failed",
+                total_files=1,
+                processed_files=1,
+                total_issues=issue_count,
+                severe_issues=severity_counts["严重"],
+                high_issues=severity_counts["高"],
+                medium_issues=severity_counts["中"],
+                low_issues=severity_counts["低"],
+                score=report_score,
+                score_version=report_score_breakdown["version"],
+                score_breakdown=report_score_breakdown,
+                summary=report_md,
+                error_message=failure_message,
+                start_time=started_at,
+                end_time=stopped_at,
+                duration_ms=duration_ms,
+                coverage={"stage": "complete" if verification_status == "complete" else verification_status, **coverage},
+            )
+            db.add(task)
+        else:
+            task.task_name = task_name
+            task.project_id = project_id
+            task.status = task_status if task_status != "success" or passed else "failed"
+            task.total_issues = issue_count
+            task.severe_issues = severity_counts["严重"]
+            task.high_issues = severity_counts["高"]
+            task.medium_issues = severity_counts["中"]
+            task.low_issues = severity_counts["低"]
+            task.score = report_score
+            task.score_version = report_score_breakdown["version"]
+            task.score_breakdown = report_score_breakdown
+            task.summary = report_md
+            task.error_message = failure_message
+            task.start_time = started_at
+            task.end_time = stopped_at
+            task.duration_ms = duration_ms
+            task.coverage = {"stage": "complete" if verification_status == "complete" else verification_status, **coverage}
+            origin = model_attribution(environment)
+            for field in ATTRIBUTION_FIELDS:
+                setattr(task, field, origin.get(field))
+        db.flush()
+
+        # Preserve the canonical execution report. Export paths append the saved
+        # composite score once, without rewriting this auditable source body.
         report_issue_summary = summarize_sandbox_report(report_md)
         issue_count = report_issue_summary["total"] or 0
         severity_counts = report_issue_summary["severity_counts"]
@@ -6940,6 +7069,9 @@ def _publish_sandbox_report(
                 user_id=owner_id,
                 content_json={
                     "source": "sandbox_test",
+                    "findings": findings,
+                    "unconfirmed_findings": unconfirmed_findings,
+                    "cvss_review": conclusion.get("cvss_review"),
                     "public_id": public_id,
                     "report_md": report_md,
                     "report_issue_summary": report_issue_summary,
@@ -6948,10 +7080,12 @@ def _publish_sandbox_report(
                     "execution_status": execution_status,
                     "error_message": failure_message,
                     "coverage": coverage,
-                    "score": score_result["score"],
+                    "score": report_score if score_result["score_available"] else None,
                     "score_available": score_result["score_available"],
                     "score_basis": score_result["score_basis"],
                     "score_sample": score_result["sample"],
+                    "score_breakdown": score_breakdown,
+                    "composite_scoring": score_breakdown,
                 },
                 summary=report_md[:2000],
                 score=report_score,
@@ -6962,6 +7096,9 @@ def _publish_sandbox_report(
             report_row.content_json = {
                 **existing_content,
                 "source": "sandbox_test",
+                "findings": findings,
+                "unconfirmed_findings": unconfirmed_findings,
+                "cvss_review": conclusion.get("cvss_review"),
                 "public_id": public_id,
                 "report_md": report_md,
                 "report_issue_summary": report_issue_summary,
@@ -6970,10 +7107,12 @@ def _publish_sandbox_report(
                 "execution_status": execution_status,
                 "error_message": failure_message,
                 "coverage": coverage,
-                "score": score_result["score"],
+                "score": report_score if score_result["score_available"] else None,
                 "score_available": score_result["score_available"],
                 "score_basis": score_result["score_basis"],
                 "score_sample": score_result["sample"],
+                "score_breakdown": score_breakdown,
+                "composite_scoring": score_breakdown,
             }
             report_row.summary = report_md[:2000]
             report_row.score = report_score
@@ -10227,7 +10366,24 @@ def _supplement_legacy_sandbox_report_score(
         finding_count=finding_count,
         severity_counts=severity_counts if isinstance(severity_counts, dict) else None,
     )
+    if available and breakdown.get("policy_version") == "cvss-weighted-v1":
+        section = _sandbox_composite_score_lines(breakdown)
     return insert_section_after_task_info(markdown, section).encode("utf-8")
+
+
+def _sandbox_composite_score_lines(breakdown: dict[str, Any]) -> list[str]:
+    """Render the persisted CVSS composite once in downloaded report Markdown."""
+    components = breakdown.get("components") if isinstance(breakdown.get("components"), dict) else {}
+    cvss = components.get("cvss") if isinstance(components.get("cvss"), dict) else {}
+    quality = components.get("quality") if isinstance(components.get("quality"), dict) else {}
+    return [
+        "## 评分与结论",
+        f"评分：{breakdown.get('score')} / 100",
+        f"综合风险评级：{breakdown.get('risk_level', '未评估')}",
+        f"计分规则：{breakdown.get('formula', 'CVSS 加权评分；执行质量分为上限。')}",
+        f"CVSS 状态：{breakdown.get('cvss_status', 'unavailable')}；已评分 {cvss.get('scored_findings', 0)} 项；未评分 {cvss.get('unscored_findings', 0)} 项。",
+        f"执行质量分：{quality.get('score', '未评估')}；依据：{breakdown.get('score_source', SANDBOX_SCORE_VERSION)}。",
+    ]
 
 
 def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]:

@@ -775,7 +775,7 @@ Appended to the `severity_score` field in each exploit_result:
     "impact": "number (0-10, impact: RCE=10, SQLi_data=9, file_write=8, XSS_stored=7, info_leak=5, config=4)",
     "complexity": "number (0-10, exploitation complexity inverted: trivial=10, low=8, medium=5, high=3, theoretical=1)",
     "weighted_score": "number (= R×0.40 + I×0.35 + C×0.25)",
-    "cvss_estimate": "number (≈ weighted_score, 0-10 range)"
+    "cvss_estimate": "null (deprecated; internal weighted_score is not CVSS)"
   }
 }
 ```
@@ -785,7 +785,7 @@ Scoring guidelines:
 - **Impact (I)**: Based on vulnerability type — RCE > SQLi > file write > XSS > information leak > config issues
 - **Complexity (C)**: Easier to exploit = higher score — directly exploitable=10, multi-step=5, theoretical only=1
 - **Weighted Score**: `Score = R × 0.40 + I × 0.35 + C × 0.25`
-- **CVSS Estimate**: Use weighted_score directly as CVSS approximation
+- **CVSS**: Never label weighted_score or R/I/C as CVSS. Only a complete evidence-supported CVSS 3.1 vector may produce a CVSS score; backend recomputes the score. Otherwise cvss_score is null and cvss_vector is empty.
 
 ## 27. evidence Extended Fields (EVID Evidence References)
 

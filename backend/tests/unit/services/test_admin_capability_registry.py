@@ -193,6 +193,19 @@ def test_every_admin_route_and_menu_entry_has_agent_capabilities() -> None:
         assert any(spec.page == page for spec in ADMIN_CAPABILITIES), page
 
 
+def test_report_template_capabilities_remain_admin_only() -> None:
+    specs = [spec for spec in ADMIN_CAPABILITIES if spec.code.startswith("report_templates.")]
+
+    assert {spec.code for spec in specs} == {
+        "report_templates.list",
+        "report_templates.create",
+        "report_templates.update",
+        "report_templates.delete",
+    }
+    assert {spec.page for spec in specs} == {"/report/templates"}
+    assert {spec.permission for spec in specs} == {"report:template_manage"}
+
+
 def test_all_registered_capabilities_bind_existing_openapi_operations() -> None:
     openapi = app.openapi()
     # 固定角色模型移除新建角色与页面未使用的逐用户角色查询能力。

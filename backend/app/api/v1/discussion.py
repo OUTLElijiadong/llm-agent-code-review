@@ -338,12 +338,20 @@ def start_discussion(
             # create_session 已以 pending 落库；返回 session_id 前补齐预检进度，
             # 确保服务重启后的恢复逻辑只启动具有完整上下文的会话。
             if getattr(bus, "_persist", False):
+                # 总线用独立事务插入；MySQL RR 的旧快照可能看不到新行。
+                # 此处随即写预检进度，必须锁定当前行并刷新 ORM 缓存。
                 persisted = db.query(RoundtableSession).filter_by(
                     session_id=session_id,
                     owner_user_id=int(user.id),
-                ).one_or_none()
+                ).with_for_update().populate_existing().one_or_none()
                 if persisted is None:
                     raise RuntimeError("圆桌预检会话未能写入当前账号账本")
+                if DiscussionBus._terminal_status_for_row(persisted):
+                    # 已提交的终态优先于本进程预检；不得复活或注册迟到上下文。
+                    DiscussionBus._apply_persisted_terminal(session, persisted)
+                    result = _session_data(db, persisted)
+                    db.commit()
+                    return Resp(data=result)
                 persisted.status = "pending"
                 persisted.progress = dict(session.progress)
                 persisted.agents = agent_list

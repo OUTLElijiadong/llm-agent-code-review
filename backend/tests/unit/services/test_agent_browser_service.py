@@ -55,7 +55,28 @@ def test_audit_route_requires_reviewer_and_audit_permission(db, owner, monkeypat
         service.authorize_route(db, owner, "/audit")
 
     monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: False)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/audit")
+
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
     assert service.authorize_route(db, owner, "/audit") == "/audit"
+
+
+def test_legacy_report_template_route_normalizes_to_admin_path(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    assert service.authorize_route(db, owner, "/report/templates") == "/admin/report-templates"
+
+
+def test_legacy_report_template_route_does_not_grant_users_admin_access(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/report/templates")
 
 
 @pytest.fixture
@@ -443,7 +464,7 @@ def test_live_tool_metadata_survives_public_filter_without_unregistered_page_inj
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["user", "admin"])
-@pytest.mark.parametrize("terminal_status", ["completed", "cancelled"])
+@pytest.mark.parametrize("terminal_status", ["completed", "cancelled", "failed"])
 async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface, terminal_status):
     """客户端 run/created 早于 create 提交；404 不应通过伪造 run 或放宽归属修复。"""
     from app.models.agent_mesh import AgentMeshConversation
@@ -578,7 +599,8 @@ def test_agent_studio_legacy_route_uses_real_redirect_page_permissions(db, owner
     assert service.authorize_route(db, owner, "/agent-studio") == "/agent-studio"
 
 
-def test_report_template_page_keeps_existing_permission_contract(db, owner, monkeypatch):
+def test_report_template_permission_does_not_bypass_admin_surface(db, owner, monkeypatch):
     monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
     monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage")
-    assert service.authorize_route(db, owner, "/report/templates") == "/report/templates"
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/report/templates")

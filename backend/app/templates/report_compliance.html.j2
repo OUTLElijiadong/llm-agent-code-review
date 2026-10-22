@@ -120,7 +120,16 @@
     <div class="table-scroll" role="region" aria-label="评分明细表格" tabindex="0">
     <table>
       <tbody>
-        {% if breakdown.score is none %}
+        {% if breakdown.policy_version == "cvss-weighted-v1" %}
+        {% set cvss = breakdown.components.cvss %}
+        {% set quality = breakdown.components.quality %}
+        <tr><th>评分策略</th><td><code>{{ breakdown.policy_version }}</code> · 平台综合评分（非 CVSS 官方综合分）</td></tr>
+        <tr><th>CVSS 安全分</th><td>{{ cvss.score if cvss.score is not none else "未应用（回退）" }}{% if cvss.score is not none %}/100{% endif %} · 权重 {{ (cvss.weight * 100)|round|int }}% · 最高基础分 {{ cvss.max_base_score if cvss.max_base_score is not none else "-" }}</td></tr>
+        <tr><th>规则质量分</th><td>{{ quality.score }}/100 · 权重 {{ (quality.weight * 100)|round|int }}%</td></tr>
+        <tr><th>向量覆盖</th><td>{{ cvss.scored_findings }} 项已评分；{{ cvss.unscored_findings }} 项未评分（{{ breakdown.cvss_status }}）</td></tr>
+        <tr><th>计算依据</th><td>{{ breakdown.formula }}；{{ breakdown.cvss_reason }}</td></tr>
+        <tr><th>最终评分</th><td>{{ breakdown.score }}/100（{{ breakdown.risk_level }}）</td></tr>
+        {% elif breakdown.score is none %}
         <tr><th>评分明细</th><td>未评估</td></tr>
         <tr><th>评分来源</th><td>{{ breakdown.score_source or "未提供" }}</td></tr>
         {% else %}
@@ -199,7 +208,7 @@
     <h2>CVSS 评分分布</h2>
     {% set ns = namespace(critical=0, high=0, medium=0, low=0, none=0) %}
     {% for issue in active_issues %}
-      {% if issue.cvss_score is not none %}
+      {% if issue.cvss_vector and issue.cvss_score is not none %}
         {% if issue.cvss_score >= 9.0 %}{% set ns.critical = ns.critical + 1 %}
         {% elif issue.cvss_score >= 7.0 %}{% set ns.high = ns.high + 1 %}
         {% elif issue.cvss_score >= 4.0 %}{% set ns.medium = ns.medium + 1 %}
@@ -259,7 +268,7 @@
         <tr>
           <td>{{ loop.index }}</td>
           <td>
-            {% if issue.cvss_score is not none %}
+            {% if issue.cvss_vector and issue.cvss_score is not none %}
               {% if issue.cvss_score >= 9.0 %}<span class="cvss-badge cvss-critical">{{ issue.cvss_score }}
               {% elif issue.cvss_score >= 7.0 %}<span class="cvss-badge cvss-high">{{ issue.cvss_score }}
               {% elif issue.cvss_score >= 4.0 %}<span class="cvss-badge cvss-medium">{{ issue.cvss_score }}
@@ -267,7 +276,7 @@
               {% else %}<span class="cvss-badge cvss-none">{{ issue.cvss_score }}
               {% endif %}</span>
               <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
-            {% else %}-{% endif %}
+            {% else %}未评分{% endif %}
           </td>
           <td><span class="sev sev-{{ issue.severity or '其他' }}">{{ issue.severity or "-" }}</span></td>
           <td>{{ issue.title or "未命名问题" }}</td>
@@ -292,21 +301,21 @@
         {% if issue.cwe %}<code>{{ issue.cwe }}</code>{% endif %}
       </div>
       <div class="field"><span class="field-label">文件:</span>{{ issue.file_name or "-" }}{% if issue.line_number %}:L{{ issue.line_number }}{% endif %}</div>
-      {% if issue.cvss_score is not none %}
       <div class="field">
-        <span class="field-label">CVSS:</span>
+        <span class="field-label">CVSS 状态:</span>
+        {% if issue.cvss_vector and issue.cvss_score is not none %}
         {% if issue.cvss_score >= 9.0 %}<span class="cvss-badge cvss-critical">{{ issue.cvss_score }}
         {% elif issue.cvss_score >= 7.0 %}<span class="cvss-badge cvss-high">{{ issue.cvss_score }}
         {% elif issue.cvss_score >= 4.0 %}<span class="cvss-badge cvss-medium">{{ issue.cvss_score }}
         {% elif issue.cvss_score > 0.0 %}<span class="cvss-badge cvss-low">{{ issue.cvss_score }}
         {% else %}<span class="cvss-badge cvss-none">{{ issue.cvss_score }}
         {% endif %}</span>
-        {% if issue.cvss_vector %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">{{ issue.cvss_vector }}</span>{% endif %}
+        <span style="color:#6b7280;font-size:12px;margin-left:6px;">{{ issue.cvss_vector }}</span>
         {% if issue.cvss_version %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">v{{ issue.cvss_version }}</span>{% endif %}
         {% if issue.cvss_source %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">来源:{{ issue.cvss_source_label }}</span>{% endif %}
         <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
+        {% else %}未评分{% endif %}
       </div>
-      {% endif %}
       <div class="field"><span class="field-label">发现来源:</span>{{ issue.source_label }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>
       {% if issue.source_detail_lines %}<div class="field"><span class="field-label">来源明细:</span><ul>{% for line in issue.source_detail_lines %}<li>{{ line }}</li>{% endfor %}</ul></div>{% endif %}

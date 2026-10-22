@@ -1055,3 +1055,27 @@ def test_trusted_receipt_checks_spaced_explicit_team_ids(summary):
         "trusted_terminal_team_snapshot": {"team_id": 360, "status": "completed"},
     })
     assert service.AgentResponsesService._validate_xiaoling_completion(checkpoint, summary)
+
+
+@pytest.mark.asyncio
+async def test_malformed_site_contract_is_repairable_error_not_high_risk_approval(db, monkeypatch):
+    actor = executor(db, monkeypatch, [])
+    actor._mcp = SimpleNamespace(has_tool=lambda _name: False)
+    actor._tool_scope = "xiaoling_coordinator"
+    monkeypatch.setattr(actor, "_has_successful_agent_discovery", lambda: True)
+    monkeypatch.setattr(actor, "_assert_session_active", lambda: None)
+    monkeypatch.setattr(actor, "_failed_attempt", lambda _call, error: _async_failure(error))
+
+    def forbid_approval(*_args, **_kwargs):
+        pytest.fail("缺失站点合同不能要求用户授权未定义的动作")
+
+    monkeypatch.setattr(actor, "_approval", forbid_approval)
+    result = await actor.execute(ToolCall("bad-site-contract", "create_agent_team", {
+        "title": "打开代码中心", "objective": "仅打开代码中心",
+        "members": [{"member_key": "site_ops", "display_name": "页面执行", "address": "agent:site_operator"}],
+        "tasks": [{"task_key": "open_code_page", "member_key": "site_ops", "title": "打开页面",
+                   "instructions": "打开代码中心，不要发起审查", "input": {"route": "/code"}}],
+    }, "{}"))
+    assert result.status == "error"
+    assert "execute_capability" in result.error
+    assert "scope" in result.error

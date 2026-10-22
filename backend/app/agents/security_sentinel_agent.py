@@ -27,7 +27,7 @@ from app.agents.contracts import compose_system_prompt
 from app.agents.events import AgentEventType
 from app.ai.code_chunker import chunk_code_with_context
 from app.ai.result_parser import _infer_owasp_cwe, normalize_severity
-from app.ai.scoring import compute_score_breakdown
+from app.ai.scoring import compute_composite_score_breakdown
 from app.ai.security_patterns import list_patterns, scan_secrets
 from app.ai.security_static_rules import apply_static_rules, list_static_rules
 from app.constants.security_catalog import (
@@ -649,6 +649,10 @@ class SecuritySentinelAgent(BaseAgent):
                 "references": [],
                 "confidence": 0.9,
                 "source": "task_review",
+                "cvss_score": issue.cvss_score,
+                "cvss_vector": issue.cvss_vector,
+                "cvss_version": issue.cvss_version,
+                "cvss_source": issue.cvss_source,
             })
 
         duration_ms = int((time.time() - t0) * 1000)
@@ -1233,7 +1237,7 @@ class SecuritySentinelAgent(BaseAgent):
         finding_total_count = len(all_findings)
         finding_severity_counts = self._severity_counts(effective_findings)
         sev_counts = dict(finding_severity_counts)
-        risk_score = int(compute_score_breakdown(sev_counts)["score"])
+        risk_score = self._compute_risk_score(effective_findings)
         compliance = self._compute_compliance(effective_findings)
         compliance.update({
             "verification": verification,
@@ -1849,11 +1853,7 @@ class SecuritySentinelAgent(BaseAgent):
                 all_code_links.append(link)
 
         duration_ms = int((time.time() - t0) * 1000)
-        deduct = sum(
-            _SEVERITY_DEDUCT[severity] * count
-            for severity, count in finding_severity_counts.items()
-        )
-        risk_score = max(0, min(100, 100 - deduct))
+        risk_score = self._compute_risk_score(all_findings)
         sev_counts = dict(finding_severity_counts)
         skipped_projects = len(projects) - scanned_projects
         compliance = self._compute_compliance(all_findings)
@@ -3403,7 +3403,7 @@ class SecuritySentinelAgent(BaseAgent):
 
     def _compute_risk_score(self, findings: List[dict]) -> int:
         counts = self._severity_counts(findings)
-        return int(compute_score_breakdown(counts)["score"])
+        return int(compute_composite_score_breakdown(counts, findings)["score"])
 
     def _severity_counts(self, findings: List[dict]) -> dict:
         out = {"严重": 0, "高": 0, "中": 0, "低": 0}

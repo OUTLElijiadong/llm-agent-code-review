@@ -2316,13 +2316,18 @@ it('重复点击提交核对只发一个GET，卸载后的核对结果不再创�
   const wrapper = mountCopilot()
   await failFirstAdminMessage(wrapper)
   let resolveCheck!: (value: unknown) => void
-  sessionApi.get.mockReturnValueOnce(new Promise(resolve => { resolveCheck = resolve }))
-  const before = sessionApi.get.mock.calls.length
+  sessionApi.get.mockImplementation((_surface: string, id: string, silent?: boolean) => {
+    if (silent) return Promise.resolve({ surface: 'admin', session_id: id, run: null, messages: [], pending: null })
+    return new Promise(resolve => { resolveCheck = resolve })
+  })
+  // 页面桥另有静默落库确认；这里只约束用户重试的提交核对去重。
+  const submissionReads = () => sessionApi.get.mock.calls.filter(call => call[2] !== true).length
+  const before = submissionReads()
   const retry = wrapper.find('.copilot-error-btn.is-retry')
   void retry.trigger('click')
   void retry.trigger('click')
   await flushPromises()
-  expect(sessionApi.get).toHaveBeenCalledTimes(before + 1)
+  expect(submissionReads()).toBe(before + 1)
   wrapper.unmount()
   resolveCheck({ surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null })
   await flushPromises()

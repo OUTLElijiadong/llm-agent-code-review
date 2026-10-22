@@ -114,7 +114,16 @@
     <div class="table-scroll" role="region" aria-label="评分明细表格" tabindex="0">
     <table class="score-table">
       <tbody>
-        {% if breakdown.score is none %}
+        {% if breakdown.policy_version == "cvss-weighted-v1" %}
+        {% set cvss = breakdown.components.cvss %}
+        {% set quality = breakdown.components.quality %}
+        <tr><th>评分策略</th><td><code>{{ breakdown.policy_version }}</code> · 平台综合评分（非 CVSS 官方综合分）</td></tr>
+        <tr><th>CVSS 安全分</th><td>{{ cvss.score if cvss.score is not none else "未应用（回退）" }}{% if cvss.score is not none %}/100{% endif %} · 权重 {{ (cvss.weight * 100)|round|int }}% · 最高基础分 {{ cvss.max_base_score if cvss.max_base_score is not none else "-" }}</td></tr>
+        <tr><th>规则质量分</th><td>{{ quality.score }}/100 · 权重 {{ (quality.weight * 100)|round|int }}%</td></tr>
+        <tr><th>向量覆盖</th><td>{{ cvss.scored_findings }} 项已评分；{{ cvss.unscored_findings }} 项未评分（{{ breakdown.cvss_status }}）</td></tr>
+        <tr><th>计算依据</th><td>{{ breakdown.formula }}；{{ breakdown.cvss_reason }}</td></tr>
+        <tr><th>最终评分</th><td>{{ breakdown.score }}/100（{{ breakdown.risk_level }}）</td></tr>
+        {% elif breakdown.score is none %}
         <tr><th>评分明细</th><td>未评估</td></tr>
         <tr><th>评分来源</th><td>{{ breakdown.score_source or "未提供" }}</td></tr>
         {% else %}
@@ -186,17 +195,21 @@
         </span>
       </div>
 
-      {% if issue.cwe or issue.owasp or issue.cvss_score is not none or issue.cvss_vector %}
+      {% if issue.cwe or issue.owasp %}
       <div class="field">
         <span class="field-label">分类:</span>
         {% if issue.cwe %}<span class="tag">CWE: {{ issue.cwe }}</span>{% endif %}
         {% if issue.owasp %}<span class="tag">OWASP: {{ issue.owasp }}</span>{% endif %}
-        {% if issue.cvss_score is not none %}<span class="tag">CVSS: {{ issue.cvss_score }}</span>{% endif %}
-        {% if issue.cvss_version %}<span class="tag">版本: {{ issue.cvss_version }}</span>{% endif %}
-        {% if issue.cvss_source %}<span class="tag">评分来源: {{ issue.cvss_source_label }}</span>{% endif %}
       </div>
-      {% if issue.cvss_vector %}<div class="field"><span class="field-label">CVSS 向量:</span><code>{{ issue.cvss_vector }}</code></div>{% endif %}
       {% endif %}
+      <div class="field">
+        <span class="field-label">CVSS 状态:</span>
+        {% if issue.cvss_vector and issue.cvss_score is not none %}
+          已评分 {{ issue.cvss_score }}{% if issue.cvss_version %} · v{{ issue.cvss_version }}{% endif %}
+          {% if issue.cvss_source %} · {{ issue.cvss_source_label }}{% endif %}
+          · <code>{{ issue.cvss_vector }}</code>
+        {% else %}未评分{% endif %}
+      </div>
 
       <div class="field"><span class="field-label">发现来源:</span>{{ issue.source_label }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>

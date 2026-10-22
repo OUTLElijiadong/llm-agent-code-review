@@ -3356,6 +3356,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .icon-button,
   .send-button,
   .stop-button { width: 40px; height: 40px; }
@@ -3375,6 +3376,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .icon-button,
   .send-button,
   .stop-button { width: 40px; height: 40px; }

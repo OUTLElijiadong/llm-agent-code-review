@@ -156,7 +156,12 @@ describe('useFloatingChatPosition', () => {
     await nextTick()
     expect(wrapper.attributes('style')).toContain('width: 497px')
     expect(wrapper.attributes('style')).toContain('height: 536px')
-    expect(wrapper.attributes('style')).toContain('left: 12px')
+    setViewport(521, 480)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(wrapper.attributes('style') ?? '').not.toContain('left:')
+    expect(wrapper.attributes('style') ?? '').not.toContain('top:')
+    expect(wrapper.attributes('style') ?? '').not.toContain('width:')
     wrapper.unmount()
   })
 

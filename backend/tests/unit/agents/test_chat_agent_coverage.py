@@ -221,8 +221,12 @@ def test_system_prompt_lists_agents_and_empty_execute_fails(
     assert "security: 安全审计" in prompt
     assert "由小菱决定是否调用子 Agent" in prompt
     assert "不得声称未返回的 Agent、工具或操作结果" in prompt
-    assert "当前没有 CNVD/CNNVD 实时查询能力" in prompt
+    assert "平台安全模块提供 CNVD/CNNVD 只读查询适配器" in prompt
+    assert "只有回执证明查询成功并返回记录时，才可称本轮已查询" in prompt
+    assert "当前没有 CNVD/CNNVD 实时查询能力" not in prompt
     assert "禁止声称使用了最新漏洞库" in prompt
+    assert "70%" in prompt and "30%" in prompt and "CVSS" in prompt
+    assert "不是 CVSS" not in prompt
     assert "系统会自动判断用户意图并路由" not in prompt
     assert result.success is False
     assert result.error == "消息列表为空"

@@ -56,6 +56,7 @@ _SEVERITY_ALIASES = {
     "p4": "低",
     "error": "严重",
     "note": "低",
+    "未分级": "未分级",
 }
 
 # 整段被围栏包裹：贪婪匹配到最后一个 ```，正文里引用的围栏不会提前截断
@@ -74,7 +75,7 @@ _ENUM_VALUE_RES = {
 def normalize_severity(value: object, default: str = "中") -> str:
     """把模型、协同 Agent 与静态引擎的严重度收敛为四级中文枚举。"""
 
-    fallback = default if default in ALLOWED_SEVERITY else "中"
+    fallback = default if default in ALLOWED_SEVERITY or default == "未分级" else "中"
     text = str(value or "").strip()
     if not text:
         return fallback
@@ -496,7 +497,7 @@ def _normalize_issue(raw: dict) -> Issue:
     issue_type = raw.get("issue_type") or "其他"
     if issue_type not in ALLOWED_TYPES:
         issue_type = "其他"
-    severity = normalize_severity(raw.get("severity"))
+    severity = normalize_severity(raw.get("severity"), default="未分级")
 
     title = (raw.get("title") or "")[:200] or None
     description = str(raw.get("description") or "")
@@ -612,16 +613,10 @@ def parse(text: str) -> ReviewResult:
                 message=f"无法识别的严重度: {raw_severity[:40]}",
                 index=index,
             ))
-            # v1 旧调用可能仅提供 description，没有标题和结构化严重度。
-            # 为保证主流程可继续，仅对这类旧格式使用中等级回退，同时保留诊断。
-            if (
-                not str(raw.get("title") or "").strip()
-                and not str(raw.get("evidence") or "").strip()
-                and str(raw.get("issue_type") or "") == "其他"
-            ):
-                legacy_raw = dict(raw)
-                legacy_raw["severity"] = "中"
-                issues.append(_normalize_issue(legacy_raw))
+            # 保留问题本身以便展示和追踪，但不得将未知严重度伪装成有效等级。
+            ungraded_raw = dict(raw)
+            ungraded_raw["severity"] = "未分级"
+            issues.append(_normalize_issue(ungraded_raw))
             continue
         issues.append(_normalize_issue(raw))
 

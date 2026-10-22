@@ -58,7 +58,7 @@ from app.ai.deepseek_agent import (
 from app.ai.multi_agent import ReviewAgentProfile
 from app.ai.result_parser import Issue, normalize_severity
 from app.ai.result_parser import parse as parse_issues
-from app.ai.scoring import SCORING_VERSION, compute_score_breakdown
+from app.ai.scoring import compute_composite_score_breakdown
 from app.ai.static_analyzer import scan as static_scan
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -2616,11 +2616,14 @@ def _finalize_review(
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
-        score_breakdown = compute_score_breakdown(sev_count)
+        score_breakdown = (
+            compute_composite_score_breakdown(sev_count, issue_rows)
+            if scored else None
+        )
         scope = "complete" if complete else "partial"
         # score 列非空：不出分时写 0 占位，并以 score_version=None 标识非规则分。
-        task.score = int(score_breakdown["score"]) if scored else 0
-        task.score_version = SCORING_VERSION if scored else None
+        task.score = int(score_breakdown["score"]) if score_breakdown else 0
+        task.score_version = score_breakdown["version"] if score_breakdown else None
         task.score_breakdown = {**score_breakdown, "score_scope": scope} if scored else None
         metrics["score_available"] = scored
         metrics["score_scope"] = scope if scored else None

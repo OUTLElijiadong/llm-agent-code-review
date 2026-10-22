@@ -4652,6 +4652,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   }
   /* 触控适配:关键按钮加大到 40px,更好点 */
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .mascot-hero { display: none; }
   .quick-questions {
     position: static;
@@ -4699,6 +4700,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
     max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .mascot-hero { display: none; }
   .quick-questions {
     position: static;

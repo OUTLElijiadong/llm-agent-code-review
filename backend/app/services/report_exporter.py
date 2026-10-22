@@ -38,7 +38,14 @@ from jinja2 import select_autoescape
 from jinja2.sandbox import SandboxedEnvironment
 from markupsafe import Markup
 
-from app.ai.scoring import SCORING_VERSION, compute_score_breakdown, score_risk_level
+from app.ai.scoring import (
+    CVSS_SCORING_VERSION,
+    SCORING_VERSION,
+    compute_composite_score_breakdown,
+    compute_score_breakdown,
+    score_risk_level,
+    uses_cvss_policy,
+)
 from app.constants.compliance import build_compliance_summary
 from app.core.exceptions import ConflictError
 from app.services.report_markdown import markdown_to_html, markdown_to_safe_html
@@ -313,11 +320,14 @@ def build_report_score_facts(
     severity_count: Dict[str, int],
     issue_count: int,
     explicit_score: Any = None,
+    *,
+    findings: list | None = None,
+    scoring_version: str | None = None,
 ) -> tuple[Optional[int], Dict[str, Any]]:
     """构造所有报告出口共享的评分事实。
 
-    最终 ReviewIssue 非空时，评分严格按 15/8/3/1 从问题集重算。空问题
-    历史任务可能保存了人工或旧算法的显式评分；该值为兼容保留，并通过
+    新策略按有效 CVSS 向量和问题严重度复算，历史策略保留 15/8/3/1。
+    空问题历史任务可能保存人工或旧算法的显式评分；该值为兼容保留，并通过
     ``score_source`` 与 ``compatibility_override`` 明确标识，避免伪造扣分。
     """
     breakdown: Dict[str, Any] = compute_score_breakdown(severity_count)
@@ -335,6 +345,10 @@ def build_report_score_facts(
             "ungraded_issue_count": ungraded_issue_count,
         })
         return None, breakdown
+    if scoring_version == CVSS_SCORING_VERSION and findings is not None:
+        breakdown = compute_composite_score_breakdown(severity_count, findings)
+        breakdown["score_source"] = "review_issues_cvss"
+        return int(breakdown["score"]), breakdown
     if normalized_issue_count > 0:
         breakdown["score_source"] = "review_issues"
         return int(breakdown["score"]), breakdown
@@ -596,6 +610,8 @@ def _build_report_context(
             severity_count,
             active_issue_count,
             explicit_score,
+            findings=active_issues,
+            scoring_version=CVSS_SCORING_VERSION if uses_cvss_policy(task_info) else task_info.get("score_version"),
         )
         if effective_score is None:
             unavailable_reason = str(score_breakdown.get("score_unavailable_reason") or "score_unavailable")
