@@ -1,0 +1,21 @@
+{
+  "scope": "仅为知识库结构校验和任务结果收据，不表示16项生产业务点击已通过。",
+  "validate": {
+    "checked_at": "2026-10-22T00:22:21.375751+00:00",
+    "file_count": 2986,
+    "error_count": 0,
+    "warning_count": 0
+  },
+  "postflight": {
+    "status": "postflight-created",
+    "result_status": "通过",
+    "validation": {
+      "checked_at": "2026-10-22T00:24:15.418150+00:00",
+      "file_count": 2986,
+      "error_count": 0,
+      "warning_count": 0
+    }
+  },
+  "business_clicks": "16项未验证；浏览器业务页仍为空登录表单。",
+  "long_term_preferences": "本轮没有新增可复用长期偏好，不创建空摘要，不更改Codex记忆。"
+}

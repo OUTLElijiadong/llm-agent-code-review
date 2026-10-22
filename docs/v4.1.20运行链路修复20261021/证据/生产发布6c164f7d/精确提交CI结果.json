@@ -1,0 +1,521 @@
+{
+  "候选提交": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "业务CI": {
+    "run_id": 39695533672,
+    "conclusion": "success",
+    "createdAt": "2026-10-21T23:46:10Z",
+    "headSha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+    "jobs": [
+      {
+        "completedAt": "2026-10-22T00:02:06Z",
+        "conclusion": "success",
+        "databaseId": 119551856325,
+        "name": "后端全量业务回归",
+        "startedAt": "2026-10-21T23:46:13Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-21T23:46:14Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-21T23:46:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:19Z",
+            "conclusion": "success",
+            "name": "检出源码",
+            "number": 2,
+            "startedAt": "2026-10-21T23:46:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:20Z",
+            "conclusion": "success",
+            "name": "配置 Python 3.11",
+            "number": 3,
+            "startedAt": "2026-10-21T23:46:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:26Z",
+            "conclusion": "success",
+            "name": "安装运行库",
+            "number": 4,
+            "startedAt": "2026-10-21T23:46:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:36Z",
+            "conclusion": "success",
+            "name": "按锁文件安装后端测试依赖",
+            "number": 5,
+            "startedAt": "2026-10-21T23:46:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:42Z",
+            "conclusion": "success",
+            "name": "启动网络隔离 Redis 限流夹具",
+            "number": 6,
+            "startedAt": "2026-10-21T23:46:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:01:52Z",
+            "conclusion": "success",
+            "name": "后端全量测试与覆盖率",
+            "number": 7,
+            "startedAt": "2026-10-21T23:46:42Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:01:52Z",
+            "conclusion": "success",
+            "name": "后端 Ruff 与字节码编译",
+            "number": 8,
+            "startedAt": "2026-10-22T00:01:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:02:03Z",
+            "conclusion": "success",
+            "name": "后端依赖漏洞审计",
+            "number": 9,
+            "startedAt": "2026-10-22T00:01:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:02:03Z",
+            "conclusion": "success",
+            "name": "清理 Redis 测试夹具",
+            "number": 10,
+            "startedAt": "2026-10-22T00:02:03Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:02:04Z",
+            "conclusion": "success",
+            "name": "Post 配置 Python 3.11",
+            "number": 19,
+            "startedAt": "2026-10-22T00:02:03Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:02:04Z",
+            "conclusion": "success",
+            "name": "Post 检出源码",
+            "number": 20,
+            "startedAt": "2026-10-22T00:02:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-22T00:02:04Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 21,
+            "startedAt": "2026-10-22T00:02:04Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533672/job/119551856325"
+      },
+      {
+        "completedAt": "2026-10-21T23:49:54Z",
+        "conclusion": "success",
+        "databaseId": 119551856669,
+        "name": "前端测试、静态检查与构建",
+        "startedAt": "2026-10-21T23:46:14Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-21T23:46:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-21T23:46:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:19Z",
+            "conclusion": "success",
+            "name": "检出源码",
+            "number": 2,
+            "startedAt": "2026-10-21T23:46:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:23Z",
+            "conclusion": "success",
+            "name": "配置 Node.js 20",
+            "number": 3,
+            "startedAt": "2026-10-21T23:46:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:31Z",
+            "conclusion": "success",
+            "name": "按锁文件安装前端依赖",
+            "number": 4,
+            "startedAt": "2026-10-21T23:46:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:31Z",
+            "conclusion": "success",
+            "name": "前端依赖漏洞审计",
+            "number": 5,
+            "startedAt": "2026-10-21T23:46:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:27Z",
+            "conclusion": "success",
+            "name": "前端完整单元测试",
+            "number": 6,
+            "startedAt": "2026-10-21T23:46:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:41Z",
+            "conclusion": "success",
+            "name": "ESLint",
+            "number": 7,
+            "startedAt": "2026-10-21T23:48:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:49:52Z",
+            "conclusion": "success",
+            "name": "类型检查与生产构建",
+            "number": 8,
+            "startedAt": "2026-10-21T23:48:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:49:52Z",
+            "conclusion": "success",
+            "name": "Post 配置 Node.js 20",
+            "number": 15,
+            "startedAt": "2026-10-21T23:49:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:49:53Z",
+            "conclusion": "success",
+            "name": "Post 检出源码",
+            "number": 16,
+            "startedAt": "2026-10-21T23:49:52Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:49:53Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-21T23:49:53Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533672/job/119551856669"
+      },
+      {
+        "completedAt": "2026-10-21T23:47:34Z",
+        "conclusion": "success",
+        "databaseId": 119551856749,
+        "name": "部署、执行器与故障注入回归",
+        "startedAt": "2026-10-21T23:46:15Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-21T23:46:17Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-21T23:46:16Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:22Z",
+            "conclusion": "success",
+            "name": "检出源码",
+            "number": 2,
+            "startedAt": "2026-10-21T23:46:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:25Z",
+            "conclusion": "success",
+            "name": "配置 Python 3.11",
+            "number": 3,
+            "startedAt": "2026-10-21T23:46:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:45Z",
+            "conclusion": "success",
+            "name": "安装部署测试依赖与 ShellCheck",
+            "number": 4,
+            "startedAt": "2026-10-21T23:46:25Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:51Z",
+            "conclusion": "success",
+            "name": "部署执行器 Python 回归",
+            "number": 5,
+            "startedAt": "2026-10-21T23:46:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:24Z",
+            "conclusion": "success",
+            "name": "发布脚本绑定与故障注入",
+            "number": 6,
+            "startedAt": "2026-10-21T23:46:51Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:30Z",
+            "conclusion": "success",
+            "name": "Shell 语法与 ShellCheck",
+            "number": 7,
+            "startedAt": "2026-10-21T23:47:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:30Z",
+            "conclusion": "success",
+            "name": "Compose 配置校验",
+            "number": 8,
+            "startedAt": "2026-10-21T23:47:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:31Z",
+            "conclusion": "success",
+            "name": "Post 配置 Python 3.11",
+            "number": 15,
+            "startedAt": "2026-10-21T23:47:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:31Z",
+            "conclusion": "success",
+            "name": "Post 检出源码",
+            "number": 16,
+            "startedAt": "2026-10-21T23:47:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:31Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-21T23:47:31Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533672/job/119551856749"
+      }
+    ],
+    "status": "completed",
+    "updatedAt": "2026-10-22T00:02:07Z",
+    "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533672"
+  },
+  "CodeQL": {
+    "run_id": 39695533666,
+    "conclusion": "success",
+    "createdAt": "2026-10-21T23:46:10Z",
+    "headSha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+    "jobs": [
+      {
+        "completedAt": "2026-10-21T23:47:36Z",
+        "conclusion": "success",
+        "databaseId": 119551856274,
+        "name": "CodeQL javascript-typescript",
+        "startedAt": "2026-10-21T23:46:13Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-21T23:46:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-21T23:46:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:19Z",
+            "conclusion": "success",
+            "name": "检出源码",
+            "number": 2,
+            "startedAt": "2026-10-21T23:46:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:37Z",
+            "conclusion": "success",
+            "name": "初始化 CodeQL",
+            "number": 3,
+            "startedAt": "2026-10-21T23:46:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:32Z",
+            "conclusion": "success",
+            "name": "执行 CodeQL 分析",
+            "number": 4,
+            "startedAt": "2026-10-21T23:46:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:32Z",
+            "conclusion": "success",
+            "name": "Post 执行 CodeQL 分析",
+            "number": 6,
+            "startedAt": "2026-10-21T23:47:32Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:33Z",
+            "conclusion": "success",
+            "name": "Post 初始化 CodeQL",
+            "number": 7,
+            "startedAt": "2026-10-21T23:47:32Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:33Z",
+            "conclusion": "success",
+            "name": "Post 检出源码",
+            "number": 8,
+            "startedAt": "2026-10-21T23:47:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:47:33Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 9,
+            "startedAt": "2026-10-21T23:47:33Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533666/job/119551856274"
+      },
+      {
+        "completedAt": "2026-10-21T23:48:29Z",
+        "conclusion": "success",
+        "databaseId": 119551856614,
+        "name": "CodeQL python",
+        "startedAt": "2026-10-21T23:46:14Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-21T23:46:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-21T23:46:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:19Z",
+            "conclusion": "success",
+            "name": "检出源码",
+            "number": 2,
+            "startedAt": "2026-10-21T23:46:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:46:35Z",
+            "conclusion": "success",
+            "name": "初始化 CodeQL",
+            "number": 3,
+            "startedAt": "2026-10-21T23:46:19Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:26Z",
+            "conclusion": "success",
+            "name": "执行 CodeQL 分析",
+            "number": 4,
+            "startedAt": "2026-10-21T23:46:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:26Z",
+            "conclusion": "success",
+            "name": "Post 执行 CodeQL 分析",
+            "number": 6,
+            "startedAt": "2026-10-21T23:48:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:27Z",
+            "conclusion": "success",
+            "name": "Post 初始化 CodeQL",
+            "number": 7,
+            "startedAt": "2026-10-21T23:48:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:27Z",
+            "conclusion": "success",
+            "name": "Post 检出源码",
+            "number": 8,
+            "startedAt": "2026-10-21T23:48:27Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-21T23:48:27Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 9,
+            "startedAt": "2026-10-21T23:48:27Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533666/job/119551856614"
+      }
+    ],
+    "status": "completed",
+    "updatedAt": "2026-10-21T23:48:30Z",
+    "url": "https://github.com/OUTLElijiadong/llm-agent-code-review/actions/runs/39695533666"
+  },
+  "业务统计": [
+    {
+      "name": "后端全量业务回归",
+      "job_id": 119551856325,
+      "conclusion": "success",
+      "统计原文行": [
+        "后端全量业务回归\t后端全量测试与覆盖率\t2026-10-22T00:01:45.2236921Z ================= 8314 passed, 7 warnings in 894.57s (0:14:54) =================",
+        "后端全量业务回归\t后端依赖漏洞审计\t2026-10-22T00:02:03.8169609Z No known vulnerabilities found"
+      ],
+      "本地完整日志": "/tmp/prism-v4120-continuation-20261022/status-propagation-ci-job-119551856325.txt"
+    },
+    {
+      "name": "前端测试、静态检查与构建",
+      "job_id": 119551856669,
+      "conclusion": "success",
+      "统计原文行": [
+        "前端测试、静态检查与构建\t前端完整单元测试\t2026-10-21T23:48:26.9386991Z  Test Files  159 passed (159)",
+        "前端测试、静态检查与构建\t前端完整单元测试\t2026-10-21T23:48:26.9406855Z       Tests  2113 passed (2113)"
+      ],
+      "本地完整日志": "/tmp/prism-v4120-continuation-20261022/status-propagation-ci-job-119551856669.txt"
+    },
+    {
+      "name": "部署、执行器与故障注入回归",
+      "job_id": 119551856749,
+      "conclusion": "success",
+      "统计原文行": [
+        "部署、执行器与故障注入回归\t部署执行器 Python 回归\t2026-10-21T23:46:51.3539709Z 176 passed, 2 skipped in 4.83s",
+        "部署、执行器与故障注入回归\t发布脚本绑定与故障注入\t2026-10-21T23:47:02.0893186Z release binding tests: passed=33 failed=0"
+      ],
+      "本地完整日志": "/tmp/prism-v4120-continuation-20261022/status-propagation-ci-job-119551856749.txt"
+    }
+  ],
+  "边界": "定向与全量成绩不累加；CodeQL任务成功不代表告警清单为零。"
+}

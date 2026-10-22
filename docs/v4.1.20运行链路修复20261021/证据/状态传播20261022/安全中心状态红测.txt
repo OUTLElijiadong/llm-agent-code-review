@@ -33,12 +33,12 @@ recorded_status = 'success'
                           result_json=receipt)
         db.add(run)
         db.commit()
-    
+
         expected = "failed" if recorded_status == "success" else recorded_status
         monitoring = security_center_service._monitor_snapshot(db)
 >       assert monitoring["last_run"]["status"] == expected
 E       AssertionError: assert 'success' == 'failed'
-E         
+E
 E         - failed
 E         + success
 
@@ -67,7 +67,7 @@ recorded_status = 'running'
                           result_json=receipt)
         db.add(run)
         db.commit()
-    
+
         expected = "failed" if recorded_status == "success" else recorded_status
         monitoring = security_center_service._monitor_snapshot(db)
         assert monitoring["last_run"]["status"] == expected
@@ -75,7 +75,7 @@ recorded_status = 'running'
         event = next(item for item in events if item["id"] == f"run:{run.id}")
 >       assert event["status"] == expected
 E       AssertionError: assert 'warning' == 'running'
-E         
+E
 E         - running
 E         + warning
 
@@ -104,7 +104,7 @@ recorded_status = 'waiting_approval'
                           result_json=receipt)
         db.add(run)
         db.commit()
-    
+
         expected = "failed" if recorded_status == "success" else recorded_status
         monitoring = security_center_service._monitor_snapshot(db)
         assert monitoring["last_run"]["status"] == expected
@@ -112,7 +112,7 @@ recorded_status = 'waiting_approval'
         event = next(item for item in events if item["id"] == f"run:{run.id}")
 >       assert event["status"] == expected
 E       AssertionError: assert 'warning' == 'waiting_approval'
-E         
+E
 E         - waiting_approval
 E         + warning
 

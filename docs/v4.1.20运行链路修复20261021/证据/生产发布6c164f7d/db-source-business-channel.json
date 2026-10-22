@@ -1,0 +1,65 @@
+[
+  {
+    "started_at_utc": "2026-10-22T00:13:13.981304+00:00",
+    "request": {
+      "action": "db_threat_signals",
+      "params": {
+        "since_hours": 1,
+        "limit": 1
+      },
+      "request_id": "verify-db-source-7169ba1bf15f49259207508b3e98f120"
+    },
+    "uid": 10001,
+    "gid": 991,
+    "duration_ms": 327,
+    "http_status": 200,
+    "outer_ok": true,
+    "action": "db_threat_signals",
+    "duplicate": false,
+    "result": {
+      "ok": false,
+      "degraded": true,
+      "reason": "数据库通用日志未开启，未扫描历史日志；当前状态不能证明没有威胁",
+      "reason_code": "general_log_disabled",
+      "since_hours": 1,
+      "source_logging_enabled": false,
+      "source_log_output": "TABLE",
+      "history_not_scanned": true,
+      "source_timed_out": false
+    },
+    "statistics_absent": true,
+    "acceptance_scope": "日志源OFF快速明确降级；未验证非空威胁采集",
+    "acceptance_passed": true
+  },
+  {
+    "started_at_utc": "2026-10-22T00:13:14.308153+00:00",
+    "request": {
+      "action": "db_threat_signals",
+      "params": {
+        "since_hours": 1
+      },
+      "request_id": "verify-db-source-ccf4657012084b9b8a3f5c3122238119"
+    },
+    "uid": 10001,
+    "gid": 991,
+    "duration_ms": 111,
+    "http_status": 200,
+    "outer_ok": true,
+    "action": "db_threat_signals",
+    "duplicate": false,
+    "result": {
+      "ok": false,
+      "degraded": true,
+      "reason": "数据库通用日志未开启，未扫描历史日志；当前状态不能证明没有威胁",
+      "reason_code": "general_log_disabled",
+      "since_hours": 1,
+      "source_logging_enabled": false,
+      "source_log_output": "TABLE",
+      "history_not_scanned": true,
+      "source_timed_out": false
+    },
+    "statistics_absent": true,
+    "acceptance_scope": "日志源OFF快速明确降级；未验证非空威胁采集",
+    "acceptance_passed": true
+  }
+]

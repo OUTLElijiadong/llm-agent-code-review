@@ -35,12 +35,12 @@ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10dae8050>
                 "errors": [{"action": "nginx_attack_events", "error": "暂时不可用"}],
             },
         )
-    
+
         run = scheduler_service.run_job(db, job.id, system_scheduled=True)
-    
+
 >       assert run.status == "failed"
 E       AssertionError: assert 'success' == 'failed'
-E         
+E
 E         - failed
 E         + success
 
@@ -79,11 +79,11 @@ recorded_status = 'success'
         )
         db.add(run)
         db.commit()
-    
+
         listed = next(item for item in _ok(client, "get", "/api/admin/jobs") if item["id"] == job.id)
 >       assert listed["last_run_status"] == "failed"
 E       AssertionError: assert 'success' == 'failed'
-E         
+E
 E         - failed
 E         + success
 

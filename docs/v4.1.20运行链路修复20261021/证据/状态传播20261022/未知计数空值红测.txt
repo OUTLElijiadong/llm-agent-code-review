@@ -50,9 +50,9 @@ raw_value = None, explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -97,9 +97,9 @@ count_key = 'total', raw_value = None, explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -144,9 +144,9 @@ count_key = 'total', raw_value = None, explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -192,9 +192,9 @@ raw_value = None, explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -239,9 +239,9 @@ count_key = 'total', raw_value = None, explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -286,9 +286,9 @@ count_key = 'total', raw_value = None, explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -334,16 +334,16 @@ raw_value = 'not-a-count', explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:951: in query_security_status
     ssh_accepted_total = collected_count("ssh_login_events", ssh, "accepted_total")
                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'ssh_login_events'
 payload = {'accepted_total': 'not-a-count', 'failed_total': 'not-a-count'}
@@ -397,16 +397,16 @@ count_key = 'total', raw_value = 'not-a-count', explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:979: in query_security_status
     "nginx_total": collected_count("nginx_attack_events", nginx, "total"),
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'nginx_attack_events', payload = {'total': 'not-a-count'}
 key = 'total'
@@ -459,16 +459,16 @@ count_key = 'total', raw_value = 'not-a-count', explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:974: in query_security_status
     "flytrap_total": collected_count("flytrap_attack_events", flytrap, "total"),
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'flytrap_attack_events', payload = {'total': 'not-a-count'}
 key = 'total'
@@ -522,16 +522,16 @@ raw_value = 'not-a-count', explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:951: in query_security_status
     ssh_accepted_total = collected_count("ssh_login_events", ssh, "accepted_total")
                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'ssh_login_events'
 payload = {'accepted_total': 'not-a-count', 'failed_total': 'not-a-count', 'ok': True}
@@ -585,16 +585,16 @@ count_key = 'total', raw_value = 'not-a-count', explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:979: in query_security_status
     "nginx_total": collected_count("nginx_attack_events", nginx, "total"),
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'nginx_attack_events', payload = {'ok': True, 'total': 'not-a-count'}
 key = 'total'
@@ -647,16 +647,16 @@ count_key = 'total', raw_value = 'not-a-count', explicit_success = True
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
 >       status = security_monitor_service.query_security_status(db)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-backend/tests/unit/services/test_security_monitor_service.py:960: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/tests/unit/services/test_security_monitor_service.py:960:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 backend/app/services/security_monitor_service.py:974: in query_security_status
     "flytrap_total": collected_count("flytrap_attack_events", flytrap, "total"),
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 action = 'flytrap_attack_events', payload = {'ok': True, 'total': 'not-a-count'}
 key = 'total'
@@ -710,9 +710,9 @@ raw_value = [], explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -757,9 +757,9 @@ count_key = 'total', raw_value = [], explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None
@@ -804,9 +804,9 @@ count_key = 'total', raw_value = [], explicit_success = False
             payload["failed_total"] = raw_value
         payloads[action] = payload
         monkeypatch.setattr(ops_service, "execute", _fake_execute(payloads))
-    
+
         status = security_monitor_service.query_security_status(db)
-    
+
         for key in keys:
 >           assert status[group][key] is None
 E           assert 0 is None

@@ -1,0 +1,25 @@
+{
+  "sha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "collected_at_utc": "2026-10-22T00:13:47.984060+00:00",
+  "web": {
+    "/healthz": {
+      "status": 200,
+      "release": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+      "version": "4.1.20",
+      "exact_sha": true
+    },
+    "/readyz": {
+      "status": 200,
+      "release": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+      "version": "4.1.20",
+      "exact_sha": true
+    }
+  },
+  "git_match": true,
+  "tracked_clean": true,
+  "current_ledger_match": true,
+  "pending_absent": true,
+  "backup_hash_match": true,
+  "executor_source_sha256": "ae22de7ed78a13c39c665e5eecae8925751ec9d3a7e80200d8feaf1001387ba9",
+  "oom_events": []
+}

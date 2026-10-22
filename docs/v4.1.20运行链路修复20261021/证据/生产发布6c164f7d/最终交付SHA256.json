@@ -1,0 +1,101 @@
+{
+  "application_sha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "scope": "本次纯文档闭环变更的内容校验清单；排除本清单自身。应用与生产发布SHA不随此文档提交改变。",
+  "files": [
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/ACCEPTANCE_运行链路修复.md",
+      "bytes": 14821,
+      "sha256": "edf929f6c7f045c8defde7a2c0316b585b03d584865e51d1cc706a14d4904e94"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/FINAL_运行链路修复.md",
+      "bytes": 8273,
+      "sha256": "f220adcf04a8621edeba335217fde90026b610cf41535fef6ddcd7c67804f262"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/TODO_运行链路修复.md",
+      "bytes": 2754,
+      "sha256": "7c26e1a42fda37b4fba131e8768d19fbb3b35f2d153a67a033a23b82ed52ec40"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/真实点击验收_20261022.md",
+      "bytes": 5678,
+      "sha256": "4695a28e0a9c0c6bb85e6b711a8a690d3023b85e93ac6fa2926d93a947b5e2c2"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/Luna状态传播与CI独立复核20261022.md",
+      "bytes": 1477,
+      "sha256": "83bc2f62890b3b672856d153e37a5caf4d1e41bd9da2fa6e6d541fed129c5b18"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/Luna生产与文档独立复核6c164f7d.md",
+      "bytes": 8065,
+      "sha256": "fc5795fe30f5e461685af53904f4eb1a1e0a4e65376b64ed5b01b4e7164c869b"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/状态传播20261022/安全中心状态红测.txt",
+      "bytes": 7609,
+      "sha256": "e753e6a709c84ebdefb9ac7fcaa90bacfc953aa92cc6a9071fd95da990bd3822"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/状态传播20261022/日志格式规范化.json",
+      "bytes": 983,
+      "sha256": "5f747989f2f0ca63e3d217e26b538d9f3b73623ee249784e421e2e1775c90b47"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/状态传播20261022/未知计数空值红测.txt",
+      "bytes": 81986,
+      "sha256": "5190cf7b2aa1c5907cd19742bcac86670bbbd0b84a7bde301a40b6adb7b7311d"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/状态传播20261022/调度状态红测.txt",
+      "bytes": 5452,
+      "sha256": "b6519f28764049ef7fb38052706f329268d02c3af60a839aefce3e2dd9bce602"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/cross-checks.json",
+      "bytes": 1462,
+      "sha256": "42b6765959457b8476708114e1a8344655d1e9aed134eae3f23e34dc282470c4"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/db-source-business-channel.json",
+      "bytes": 1931,
+      "sha256": "49c13a1fcedae8ec9c13e552211701e42f07bd67035df75a153067605876735b"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/healthz.json",
+      "bytes": 87,
+      "sha256": "925d106924f994f454f52cb7cfdd747a3914f7a7a7f769df27f89ae6e4adbda7"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/natural-scheduler-observation.json",
+      "bytes": 920,
+      "sha256": "661418acee898a6ef05eb9754c81492f022edb86afa5710faa696b5216921afa"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/readyz.json",
+      "bytes": 90,
+      "sha256": "ef5103b123299ac062b6c824cfec0fe78583ed4a9561719ddd65763077de1715"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/remote-checks.json",
+      "bytes": 9987,
+      "sha256": "a09dfddf6e22f62d51cb4c4e144a6721f25a37ecdb0143cd6a98c658f2ffdfc7"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/summary.json",
+      "bytes": 692,
+      "sha256": "86d9d1b2226f399390294b62f1576886ade5ed7093f1dc38830ea806e45b3553"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/知识闭环校验.json",
+      "bytes": 705,
+      "sha256": "bc6df7ef2afa6fa93de8de8c69b0142d29c6261b2b03adb50b0f6493f277d7ef"
+    },
+    {
+      "file": "docs/v4.1.20运行链路修复20261021/证据/生产发布6c164f7d/精确提交CI结果.json",
+      "bytes": 18094,
+      "sha256": "631b2005313849d6fee7b6339a84077e6c90c6e6997583043aa256297c107e33"
+    }
+  ]
+}

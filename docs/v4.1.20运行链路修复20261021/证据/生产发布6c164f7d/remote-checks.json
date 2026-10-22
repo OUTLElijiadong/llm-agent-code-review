@@ -1,0 +1,169 @@
+{
+  "expected_sha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "collected_at_utc": "2026-10-22T00:12:49.468213+00:00",
+  "git": {
+    "exit": 0,
+    "stdout": "6c164f7d2a596f4839bad7563ac68eb70655725a\n",
+    "stderr": ""
+  },
+  "tracked_status": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "ledgers": {
+    "current": {
+      "exists": true,
+      "values": {
+        "RELEASE_SHA": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "APP_VERSION": "4.1.20",
+        "BACKEND_RELEASE": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "FRONTEND_RELEASE": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "BACKEND_IMAGE_ID": "sha256:f85dc71e55d2d5b0abe665b11855ed16391ec5756b24cd81504d88d0176f7f47",
+        "FRONTEND_IMAGE_ID": "sha256:d492027d82b3a64c417994ff925edc10bf7eae9769314d844b6c98ba167c7434",
+        "TARGET": "all",
+        "BACKUP_FILE": "../backups/code_review_20261022T000236Z_6c164f7d2a59.sql.gz",
+        "ALEMBIC_REVISION": "064_remote_pentest_chain",
+        "DEPLOYED_AT_UTC": "2026-10-22T00:12:00Z"
+      }
+    },
+    "previous": {
+      "exists": true,
+      "values": {
+        "RELEASE_SHA": "46c48084793dc80a198ce68c204c1048a799d8b7",
+        "APP_VERSION": "4.1.20",
+        "BACKEND_RELEASE": "46c48084793dc80a198ce68c204c1048a799d8b7",
+        "FRONTEND_RELEASE": "46c48084793dc80a198ce68c204c1048a799d8b7",
+        "BACKEND_IMAGE_ID": "sha256:8d48f2a73b9eb79aacdb72227695144e1613c06b677d610cdc9b122a7928ee0e",
+        "FRONTEND_IMAGE_ID": "sha256:42c6d3f467d3045cf48cbb789c8557f6271e8f4daa9bf289d0fff5dae415d77b",
+        "TARGET": "all",
+        "BACKUP_FILE": "../backups/code_review_20261021T224818Z_46c48084793d.sql.gz",
+        "ALEMBIC_REVISION": "064_remote_pentest_chain",
+        "DEPLOYED_AT_UTC": "2026-10-22T00:02:34Z"
+      }
+    },
+    "pending": {
+      "exists": false,
+      "values": {}
+    }
+  },
+  "containers": [
+    {
+      "name": "/cr_backend",
+      "image_id": "sha256:f85dc71e55d2d5b0abe665b11855ed16391ec5756b24cd81504d88d0176f7f47",
+      "image_tag": "prism-backend:6c164f7d2a596f4839bad7563ac68eb70655725a",
+      "restart_count": 0,
+      "running": true,
+      "health": "healthy",
+      "started_at": "2026-10-22T00:09:28.674211112Z",
+      "memory_limit": 805306368,
+      "release_env": {
+        "APP_RELEASE": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "FRONTEND_RELEASE": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "BACKEND_RELEASE": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+        "APP_VERSION": "4.1.20"
+      }
+    },
+    {
+      "name": "/cr_frontend",
+      "image_id": "sha256:d492027d82b3a64c417994ff925edc10bf7eae9769314d844b6c98ba167c7434",
+      "image_tag": "prism-frontend:6c164f7d2a596f4839bad7563ac68eb70655725a",
+      "restart_count": 0,
+      "running": true,
+      "health": "healthy",
+      "started_at": "2026-10-22T00:11:52.835229423Z",
+      "memory_limit": 134217728,
+      "release_env": {}
+    },
+    {
+      "name": "/cr_mysql",
+      "image_id": "sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39",
+      "image_tag": "mysql:8.0",
+      "restart_count": 1,
+      "running": true,
+      "health": "healthy",
+      "started_at": "2026-10-21T19:31:00.762731198Z",
+      "memory_limit": 1342177280,
+      "release_env": {}
+    }
+  ],
+  "alembic_current": {
+    "exit": 0,
+    "stdout": "064_remote_pentest_chain (head)\n",
+    "stderr": "INFO  [alembic.runtime.migration] Context impl MySQLImpl.\nINFO  [alembic.runtime.migration] Will assume non-transactional DDL.\n"
+  },
+  "alembic_heads": {
+    "exit": 0,
+    "stdout": "064_remote_pentest_chain (head)\n",
+    "stderr": ""
+  },
+  "ops_check": {
+    "exit": 0,
+    "stdout": "{\n  \"schema_version\": 1,\n  \"status\": \"degraded\",\n  \"can_continue\": true,\n  \"summary\": \"关键服务可继续，但存在需要人工处理的降级项\",\n  \"actions\": [{\"code\":\"disk_cleanup_review\",\"label\":\"审阅磁盘清理\",\"message\":\"磁盘使用率 86% 已达到或超过告警阈值 85%，请先执行 cleanup.sh dry-run 并由人确认。\",\"requires_human\":true}],\n  \"blocking_checks\": [],\n  \"checked_at_utc\": \"2026-10-22T00:13:19Z\",\n  \"checks\": {\n    \"release\": {\"ok\": true, \"status\": \"ok\", \"message\": \"发布账本、运行镜像和默认环境一致\"},\n    \"containers\": {\"ok\": true, \"status\": \"ok\", \"services\": {\"mysql\":\"healthy\",\"redis\":\"healthy\",\"clamav\":\"healthy\",\"backend\":\"healthy\",\"frontend\":\"healthy\"}},\n    \"disk\": {\"ok\": false, \"status\": \"degraded\", \"used_percent\": 86, \"max_percent\": 85, \"critical_percent\": 95},\n    \"memory\": {\"ok\": true, \"status\": \"ok\", \"used_percent\": 56, \"max_percent\": 90, \"critical_percent\": 98},\n    \"backup\": {\"ok\": true, \"status\": \"ok\", \"file\": \"code_review_20261022T000236Z_6c164f7d2a59.sql.gz\", \"age_hours\": 0, \"max_age_hours\": 30, \"gzip_ok\": true, \"checksum_ok\": true},\n    \"alembic\": {\"ok\": true, \"status\": \"ok\", \"current\": \"064_remote_pentest_chain\", \"head\": \"064_remote_pentest_chain\"},\n    \"https\": {\"ok\": true, \"status\": \"ok\", \"mode\": \"required\", \"http_redirect_code\": \"308\", \"health\": \"ok\"}\n  }\n}\n",
+    "stderr": ""
+  },
+  "executor": {
+    "exit": 0,
+    "stdout": "MainPID=3191234\nExecMainStartTimestamp=Thu 2026-10-22 08:12:01 CST\nExecStart={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /opt/code-review/deploy/prism_ops_executor.py ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }\nWorkingDirectory=/opt/code-review/deploy\nActiveState=active\n",
+    "stderr": ""
+  },
+  "executor_source_sha256": "ae22de7ed78a13c39c665e5eecae8925751ec9d3a7e80200d8feaf1001387ba9",
+  "disk": {
+    "exit": 0,
+    "stdout": "Filesystem        1B-blocks         Used   Available Use% Mounted on\n/dev/vda1      193205350400 165001523200 28203827200  86% /\n",
+    "stderr": ""
+  },
+  "memory": {
+    "exit": 0,
+    "stdout": "               total        used        free      shared  buff/cache   available\nMem:      8054374400  4508749824  1445953536   132034560  2544373760  3545624576\nSwap:     3222265856  3222249472       16384\n",
+    "stderr": ""
+  },
+  "docker_stats": {
+    "exit": 0,
+    "stdout": "{\"BlockIO\":\"2.87MB / 16.3MB\",\"CPUPerc\":\"0.00%\",\"Container\":\"01b6964258d8\",\"ID\":\"01b6964258d8\",\"MemPerc\":\"6.52%\",\"MemUsage\":\"8.34MiB / 128MiB\",\"Name\":\"cr_frontend\",\"NetIO\":\"15.8kB / 49.4kB\",\"PIDs\":\"5\"}\n{\"BlockIO\":\"106MB / 131kB\",\"CPUPerc\":\"3.71%\",\"Container\":\"72b0c23c632c\",\"ID\":\"72b0c23c632c\",\"MemPerc\":\"25.62%\",\"MemUsage\":\"196.8MiB / 768MiB\",\"Name\":\"cr_backend\",\"NetIO\":\"21.8MB / 8.82MB\",\"PIDs\":\"23\"}\n{\"BlockIO\":\"17.8MB / 4.1kB\",\"CPUPerc\":\"0.00%\",\"Container\":\"71d055af82d0\",\"ID\":\"71d055af82d0\",\"MemPerc\":\"3.02%\",\"MemUsage\":\"3.863MiB / 128MiB\",\"Name\":\"cr_decoy\",\"NetIO\":\"2.52kB / 0B\",\"PIDs\":\"2\"}\n{\"BlockIO\":\"36.1GB / 3.99GB\",\"CPUPerc\":\"0.39%\",\"Container\":\"2ce3b5ca3c50\",\"ID\":\"2ce3b5ca3c50\",\"MemPerc\":\"64.71%\",\"MemUsage\":\"828.3MiB / 1.25GiB\",\"Name\":\"cr_mysql\",\"NetIO\":\"659MB / 1.63GB\",\"PIDs\":\"50\"}\n{\"BlockIO\":\"6.27GB / 4.09GB\",\"CPUPerc\":\"2.71%\",\"Container\":\"b8be33777079\",\"ID\":\"b8be33777079\",\"MemPerc\":\"42.74%\",\"MemUsage\":\"940.3MiB / 2.148GiB\",\"Name\":\"cr_clamav\",\"NetIO\":\"1.55MB / 130kB\",\"PIDs\":\"5\"}\n{\"BlockIO\":\"4.14GB / 2.25GB\",\"CPUPerc\":\"0.25%\",\"Container\":\"ae73b060d7ef\",\"ID\":\"ae73b060d7ef\",\"MemPerc\":\"11.83%\",\"MemUsage\":\"90.85MiB / 768MiB\",\"Name\":\"cr_embedding\",\"NetIO\":\"3.52MB / 22.6MB\",\"PIDs\":\"16\"}\n{\"BlockIO\":\"38.9GB / 1.66TB\",\"CPUPerc\":\"0.37%\",\"Container\":\"aaf1f85ceb4a\",\"ID\":\"aaf1f85ceb4a\",\"MemPerc\":\"5.56%\",\"MemUsage\":\"427MiB / 7.501GiB\",\"Name\":\"cr_testdb\",\"NetIO\":\"117kB / 0B\",\"PIDs\":\"41\"}\n{\"BlockIO\":\"3.5GB / 327MB\",\"CPUPerc\":\"0.46%\",\"Container\":\"2845ed4a4dce\",\"ID\":\"2845ed4a4dce\",\"MemPerc\":\"3.92%\",\"MemUsage\":\"5.023MiB / 128MiB\",\"Name\":\"cr_redis\",\"NetIO\":\"553MB / 4.24GB\",\"PIDs\":\"6\"}\n",
+    "stderr": ""
+  },
+  "backup_timer": {
+    "exit": 0,
+    "stdout": "Result=success\nExecMainStartTimestamp=Thu 2026-10-22 02:28:49 CST\nExecMainExitTimestamp=Thu 2026-10-22 02:32:32 CST\nExecMainStatus=0\nActiveState=inactive\n",
+    "stderr": ""
+  },
+  "backup_schedule": {
+    "exit": 0,
+    "stdout": "NEXT                        LEFT LAST                              PASSED UNIT               ACTIVATES\nFri 2026-10-23 02:16:25 CST  18h Thu 2026-10-22 02:28:49 CST 5h 44min ago prism-backup.timer prism-backup.service\n\n1 timers listed.\nPass --all to see loaded but inactive timers, too.\n",
+    "stderr": ""
+  },
+  "frontend_build_revision": {
+    "exit": 0,
+    "stdout": "/usr/share/nginx/html/assets/buildInfo-CnejNGo3.js\n",
+    "stderr": ""
+  },
+  "configured_lock": {
+    "exit": 0,
+    "stdout": "absent .releases/.maintenance.lock\n",
+    "stderr": ""
+  },
+  "backup": {
+    "file": "/opt/code-review/deploy/../backups/code_review_20261022T000236Z_6c164f7d2a59.sql.gz",
+    "size": 1001291208,
+    "sha256": "f70bd172ae169daa3e04c6a7cec8d376882e4c5eb3898f7fef20a549a07fb452",
+    "sidecar_sha256": "f70bd172ae169daa3e04c6a7cec8d376882e4c5eb3898f7fef20a549a07fb452",
+    "meta": "created_at_utc=20261022T000236Z\nreason=pre_deploy\ngit_sha=6c164f7d2a596f4839bad7563ac68eb70655725a\nalembic_revision=064_remote_pentest_chain\ntable_count=109\nsha256=f70bd172ae169daa3e04c6a7cec8d376882e4c5eb3898f7fef20a549a07fb452\nfile=code_review_20261022T000236Z_6c164f7d2a59.sql.gz\n"
+  },
+  "isolated_verify_databases": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "kernel_memory_events_since_release": {
+    "exit": 0,
+    "lines": [],
+    "stderr": ""
+  },
+  "kernel_memory_events_during_release": {
+    "since_utc": "2026-10-22T00:02:34Z",
+    "exit": 0,
+    "lines": [],
+    "stderr": ""
+  }
+}

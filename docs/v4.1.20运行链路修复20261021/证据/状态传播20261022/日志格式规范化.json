@@ -1,0 +1,20 @@
+{
+  "scope": "只规范化证据副本每行尾部空格及末尾换行；原始日志保留在/tmp，不改成绩、错误或已推送历史。前一应用提交的staged diff检查报告了证据尾空格，不能记为通过。",
+  "files": [
+    {
+      "file": "安全中心状态红测.txt",
+      "original_sha256": "fcd407763a039bab1f1ecc210336077316930bffd52bff87d781de5772695184",
+      "normalized_sha256": "e753e6a709c84ebdefb9ac7fcaa90bacfc953aa92cc6a9071fd95da990bd3822"
+    },
+    {
+      "file": "未知计数空值红测.txt",
+      "original_sha256": "c5117e8c2f775d34dc162896cb00921ed62e3118009e1751a46bdd41245969bd",
+      "normalized_sha256": "5190cf7b2aa1c5907cd19742bcac86670bbbd0b84a7bde301a40b6adb7b7311d"
+    },
+    {
+      "file": "调度状态红测.txt",
+      "original_sha256": "b8bfe93a01d8198013a9c1aa067b17163daa83d20ecf7f0919c78470465ea999",
+      "normalized_sha256": "b6519f28764049ef7fb38052706f329268d02c3af60a839aefce3e2dd9bce602"
+    }
+  ]
+}
