@@ -1365,8 +1365,9 @@ def send_message(
     session_key: str,
     message: AgentMeshMessageIn,
     trusted_source: bool = False,
+    commit: bool = True,
 ) -> dict[str, Any]:
-    """校验并持久化标准消息；相同幂等键返回原记录。"""
+    """校验并持久化标准消息；内部回执可与调用方的请求终态共用事务。"""
     _assert_surface(db, user, surface)
     if _conversation(db, int(user.id), surface, session_key) is None:
         raise AgentMeshAccessError("发送会话尚未注册或不属于当前账户")
@@ -1437,6 +1438,10 @@ def send_message(
     try:
         db.flush()
     except IntegrityError:
+        if not commit:
+            # 调用方持有请求行锁；冲突必须由调用方回滚整个完成事务，
+            # 不能在这里释放锁后继续用旧请求快照覆盖终态。
+            raise
         db.rollback()
         existing = (
             db.query(AgentMeshMessage)
@@ -1467,9 +1472,20 @@ def send_message(
         target_conversation = _conversation(db, int(user.id), target_parts[1], target_parts[2])
         if target_conversation is not None:
             target_conversation.last_message_at = now
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     return _message_out(row)
+
+
+def standalone_dispatch_conditions() -> tuple[Any, ...]:
+    """团队请求由团队租约管理；旧数据没有归因字段时仍按确定性 ID 隔离。"""
+    return (
+        AgentMeshMessage.agent_team_task_id.is_(None),
+        AgentMeshMessage.message_id.not_like("team-%-task-%-attempt-%-request"),
+    )
 
 
 def claim_dispatch_message(
@@ -1521,6 +1537,7 @@ def claim_dispatch_message(
                 AgentMeshMessage.user_id == int(user.id),
                 AgentMeshMessage.send_to == target_address,
                 AgentMeshMessage.message_type == "task.request",
+                *standalone_dispatch_conditions(),
                 AgentMeshMessage.status == expected,
                 or_(AgentMeshMessage.expires_at.is_(None), AgentMeshMessage.expires_at > now),
                 or_(AgentMeshMessage.next_attempt_at.is_(None), AgentMeshMessage.next_attempt_at <= now),
@@ -1579,6 +1596,7 @@ def _send_dispatch_reply(
             surface=surface,
             session_key=session_key,
             trusted_source=True,
+            commit=False,
             message=AgentMeshMessageIn.model_validate({
                 "idempotency_key": f"agent-result:{row.message_id}",
                 "trace_id": row.trace_id,
@@ -1645,8 +1663,10 @@ def complete_dispatch_message(
             AgentMeshMessage.user_id == int(user.id),
             AgentMeshMessage.send_to == target_address,
             AgentMeshMessage.lease_token == lease_token,
+            *standalone_dispatch_conditions(),
         )
         .with_for_update()
+        .populate_existing()
         .first()
     )
     if row is None:
@@ -1771,6 +1791,7 @@ def expire_unclaimed_dispatch_messages(db: Session, *, limit: int = 100) -> int:
         db.query(AgentMeshMessage)
         .filter(
             AgentMeshMessage.message_type == "task.request",
+            *standalone_dispatch_conditions(),
             AgentMeshMessage.send_to.like("agent:%") | AgentMeshMessage.send_to.like("custom:%"),
             AgentMeshMessage.status.in_(("queued", "delivered")),
             AgentMeshMessage.expires_at.is_not(None),
@@ -1792,6 +1813,7 @@ def recover_stale_dispatch_messages(db: Session, *, limit: int = 100) -> int:
         db.query(AgentMeshMessage)
         .filter(
             AgentMeshMessage.message_type == "task.request",
+            *standalone_dispatch_conditions(),
             or_(AgentMeshMessage.send_to.like("agent:%"), AgentMeshMessage.send_to.like("custom:%")),
             AgentMeshMessage.status == "processing",
             AgentMeshMessage.lease_expires_at.is_not(None),

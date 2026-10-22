@@ -11,7 +11,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from sqlalchemy.orm import Session
 
@@ -90,7 +90,7 @@ _ROUTES = (
     (r"/code(?:/\d+(?:/file/\d+(?:/versions)?)?)?", ("file:view",)),
     (r"/issues", ("issue:view",)),
     (r"/agents", ("agent:view", "agent_asset:create")),
-    (r"/agent-studio", ("agent_asset:create",)),
+    (r"/agent-studio", ("agent:view", "agent_asset:create")),
     (r"/sandboxes", ()),
     (r"/forum(?:/(?:new|\d+(?:/edit)?))?", ()),
     (r"/knowledge", ()),
@@ -101,6 +101,11 @@ _ROUTES = (
         (),
     ),
 )
+
+_SUPER_ADMIN_ROUTES = frozenset(
+    {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"}
+)
+_SUPER_ADMIN_PLATFORM_SECTIONS = frozenset({"embedding", "mcp-workers", "llm"})
 
 
 def _now() -> datetime:
@@ -131,10 +136,17 @@ def authorize_route(db: Session, user: User, route: str) -> str:
     found = next((permissions for pattern, permissions in _ROUTES if re.fullmatch(pattern, parts.path)), None)
     if found is None:
         raise ValidationError("页面未登记，停止猜测目标")
-    if parts.path.startswith("/admin") and not rbac_service.is_admin_user(db, int(user.id)):
+    is_admin = rbac_service.is_admin_user(db, int(user.id))
+    if parts.path.startswith("/admin") and not is_admin:
         raise ForbiddenError("当前账号不能操作管理页面")
-    if parts.path == "/admin/security-center" and not rbac_service.is_super_admin_user(db, int(user.id)):
-        raise ForbiddenError("安全中心仅最高管理员可用")
+    sections = parse_qs(parts.query).get("section", [])
+    super_admin_target = parts.path in _SUPER_ADMIN_ROUTES or (
+        parts.path == "/admin/platform" and bool(_SUPER_ADMIN_PLATFORM_SECTIONS.intersection(sections))
+    )
+    if super_admin_target and not rbac_service.is_super_admin_user(db, int(user.id)):
+        raise ForbiddenError("该管理页面仅最高管理员可用")
+    if parts.path == "/audit" and not is_admin and not rbac_service.has_effective_role(db, int(user.id), "reviewer"):
+        raise ForbiddenError("操作审计仅审查员可用")
     if found and not any(rbac_service.check_permission(db, int(user.id), permission) for permission in found):
         raise ForbiddenError("当前账号没有此页面权限")
     return route

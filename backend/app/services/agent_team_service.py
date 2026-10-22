@@ -1427,8 +1427,9 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
     output = {
         **_team_metadata_out(team, _task_counts(tasks)),
         "summary": project_team_result(summary, team_id=team.id,
-                                       task_id=verification[-1].id if verification else 0, budget=24000),
-        "error": _public(_unjson(team.error_json, {})),
+                                       result_scope="team_summary", budget=24000),
+        "error": project_team_result(_unjson(team.error_json, {}), team_id=team.id,
+                                     result_scope="team_error", budget=8000),
         "members": [_serialize_member(item) for item in members],
         "tasks": [_serialize_task(item, member_key_by_id.get(int(item.member_id), ""),
                                   result_budget=min(16000, max(1600, 24000 // max(1, len(tasks))))) for item in tasks],
@@ -1767,16 +1768,26 @@ def get_team(db: Session, user: User, team_id: int) -> dict[str, Any]:
     return _team_out(db, _team_or_raise(db, user, team_id), include_events=True)
 
 
-def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
+def get_team_result_page(db: Session, user: User, team_id: int, task_id: Optional[int] = None, *,
+                         result_scope: str = "task",
                          result_path: str = "", result_indices: Optional[list[int]] = None,
                          result_part: str = "value", offset: int = 0, limit: int = 20) -> dict[str, Any]:
-    """当前账号原结果分页；索引引用适配长字典键，仍先完整脱敏。"""
+    """当前账号任务/团队账本原值分页；所有作用域均先完整脱敏再定位。"""
     from app.services.agent_responses_service import redact_agent_model_context_value
 
     team = _team_or_raise(db, user, team_id)
-    task = db.query(AgentTeamTask).filter_by(team_id=team.id, id=task_id).first()
-    if task is None:
-        raise AgentTeamNotFoundError("任务不属于当前团队或不存在")
+    if (result_scope not in {"task", "team_summary", "team_error"}
+            or (result_scope == "task") != (task_id is not None)):
+        raise AgentTeamValidationError("结果作用域与task_id不匹配")
+    source = {"team_id": int(team.id), "result_scope": result_scope}
+    if result_scope == "task":
+        task = db.query(AgentTeamTask).filter_by(team_id=team.id, id=task_id).first()
+        if task is None:
+            raise AgentTeamNotFoundError("任务不属于当前团队或不存在")
+        source["task_id"] = int(task.id)
+        stored_result = task.result_json
+    else:
+        stored_result = team.summary_json if result_scope == "team_summary" else team.error_json
     if (not isinstance(result_path, str) or len(result_path) > 1000
             or result_path and not result_path.startswith("/") or offset < 0 or not 1 <= limit <= 20
             or result_part not in {"key", "value"}
@@ -1785,7 +1796,7 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
                 or any(type(index) is not int or not 0 <= index <= 2147483647 for index in result_indices))
             or result_part == "key" and not result_indices):
         raise AgentTeamValidationError("结果路径或分页参数无效")
-    value = redact_agent_model_context_value(_unjson(task.result_json, {}))
+    value = redact_agent_model_context_value(_unjson(stored_result, {}))
     indices: list[int] = []
     try:
         for token in result_path.split("/")[1:] if result_path else []:
@@ -1813,7 +1824,7 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
             raise ValueError("引用深度超限")
     except (KeyError, IndexError, ValueError):
         raise AgentTeamValidationError("结果路径不存在") from None
-    output = {"team_id": int(team.id), "task_id": int(task.id), "result_path": result_path,
+    output = {**source, "result_path": result_path,
               "result_indices": indices, "result_part": result_part}
     if isinstance(value, str):
         end = min(len(value), offset + 2000)
@@ -1827,15 +1838,14 @@ def get_team_result_page(db: Session, user: User, team_id: int, task_id: int, *,
             locator = indices + [index]
             if len(locator) > 32:
                 raise AgentTeamValidationError("结果引用深度超限")
-            projected = project_team_result(child, team_id=team.id, task_id=task.id,
+            projected = project_team_result(child, team_id=team.id, task_id=task_id, result_scope=result_scope,
                                             result_indices=locator, budget=1024)
             items.append((key, projected))
             if oversized_keys:
                 entries.append({
                     "index": index, "key": key if len(str(key).encode()) <= 100 else None,
                     "key_length": len(str(key)), "value": projected,
-                    "key_reference": {"tool": "get_agent_team", "team_id": int(team.id),
-                                      "task_id": int(task.id), "result_indices": locator,
+                    "key_reference": {"tool": "get_agent_team", **source, "result_indices": locator,
                                       "result_part": "key", "offset": 0, "limit": 20},
                 })
         output["total"] = len(children)
@@ -2328,7 +2338,21 @@ def _mark_task_request_terminal(
     if not _mesh_ready(db):
         return ""
     message_id = _request_message_id(team, task)
-    row = db.query(AgentMeshMessage).filter(AgentMeshMessage.message_id == message_id).first()
+    # 团队锁只串行化团队执行器，不能代替消息行锁。先刷新本事务待写数据，
+    # 再读取持久终态，避免 Session 缓存的 processing 覆盖已提交的 dead_letter。
+    db.flush()
+    row = (
+        db.query(AgentMeshMessage)
+        .filter(
+            AgentMeshMessage.message_id == message_id,
+            AgentMeshMessage.user_id == int(team.user_id),
+            AgentMeshMessage.trace_id == team.trace_id,
+            AgentMeshMessage.sent_from == f"session:{team.surface}:{team.session_key}",
+        )
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
     if row is None:
         return ""
     if row.status in _REQUEST_TERMINAL_STATUSES:
@@ -2337,6 +2361,7 @@ def _mark_task_request_terminal(
     row.completed_at = now
     row.lease_token = None
     row.lease_expires_at = None
+    row.next_attempt_at = None
     row.last_error = "" if success else error[:2000]
     _mesh_event(
         db,
@@ -2505,13 +2530,15 @@ def _persist_terminal_team_notification(
         "summary": project_team_result(
             summary if isinstance(summary, dict) else {},
             team_id=int(team.id),
-            task_id=int(latest_task.id),
+            task_id=None,
+            result_scope="team_summary",
             budget=8000,
         ),
         "error": project_team_result(
             error if isinstance(error, dict) else {},
             team_id=int(team.id),
-            task_id=int(latest_task.id),
+            task_id=None,
+            result_scope="team_error",
             budget=3000,
         ),
         "task_statuses": task_statuses,

@@ -27,6 +27,37 @@ from app.services import agent_browser_service as service
 from app.services.agent_supervisor_service import review_response_tool
 
 
+@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm",
+    "/admin/platform?section=embedding", "/admin/platform?section=mcp-workers", "/admin/platform?section=llm"])
+def test_super_admin_routes_reject_regular_admin(db, owner, monkeypatch, route):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: False)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, route)
+
+
+@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm",
+    "/admin/platform?section=embedding", "/admin/platform?section=mcp-workers", "/admin/platform?section=llm"])
+def test_super_admin_routes_allow_verified_super_admin(db, owner, monkeypatch, route):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: True)
+
+    assert service.authorize_route(db, owner, route) == route
+
+
+def test_audit_route_requires_reviewer_and_audit_permission(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/audit")
+
+    monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: True)
+    assert service.authorize_route(db, owner, "/audit") == "/audit"
+
+
 @pytest.fixture
 def db():
     # ASGI 同步鉴权在线程池执行；所有线程必须读到同一份隔离测试数据库。
@@ -412,7 +443,8 @@ def test_live_tool_metadata_survives_public_filter_without_unregistered_page_inj
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["user", "admin"])
-async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface):
+@pytest.mark.parametrize("terminal_status", ["completed", "cancelled"])
+async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_owner_binding(db, owner, surface, terminal_status):
     """客户端 run/created 早于 create 提交；404 不应通过伪造 run 或放宽归属修复。"""
     from app.models.agent_mesh import AgentMeshConversation
     from app.services.agent_responses_service import DatabaseCheckpointStore
@@ -445,6 +477,7 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
     application = FastAPI()
     register_handlers(application)
     application.include_router(router_module.router, prefix="/api/agent-browser")
+    application.include_router(agent_responses.router, prefix="/api/agent-responses")
     application.dependency_overrides[get_db] = lambda: db
     headers = {"Authorization": "Bearer " + create_access_token(owner.id, owner.role)}
     params = {"run_id": run_id, "session_id": session_key, "surface": surface}
@@ -458,6 +491,9 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
     )
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://test") as client:
+        confirmation = await client.get("/api/agent-responses/session", params=params, headers=headers)
+        assert confirmation.status_code == 200
+        assert confirmation.json()["data"]["run"] is None
         # 首次恢复探测发生在真正的运行创建之前；不生成占位检查点或页面动作。
         missing = await client.get("/api/agent-browser/pending", params=params, headers=headers)
         assert missing.status_code == 404
@@ -469,6 +505,8 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
         restored = await store.load(run_id)
         assert restored.run_id == run_id
         assert restored.last_response["id"] == "resp_upstream_response"
+        confirmed = (await client.get("/api/agent-responses/session", params=params, headers=headers)).json()["data"]
+        assert (confirmed["surface"], confirmed["session_id"], confirmed["run"]["run_id"]) == (surface, session_key, run_id)
         available = await client.get("/api/agent-browser/pending", params=params, headers=headers)
         assert available.status_code == 200 and available.json()["data"] == {"actions": []}
         for invalid in [
@@ -484,9 +522,63 @@ async def test_pending_run_creation_window_uses_real_checkpoint_id_and_keeps_own
             headers={"Authorization": "Bearer " + create_access_token(other.id, "user")},
         )
         assert foreign.status_code in {403, 404}
+        ack_delivered = asyncio.Event()
+
+        async def wait_for_browser_receipt(_event):
+            # 此 fixture 用同一 Session 供 ASGI 线程和工具调用读取。回执提交前
+            # 暂停工具的数据库轮询，避免测试自身并发使用非线程安全的 Session。
+            await ack_delivered.wait()
+
+        execution = asyncio.create_task(service.request_action(
+            db, owner, run_id=run_id, session_key=session_key, surface=surface,
+            call_id="confirmed-browser-action", action="inspect", args={}, event_sink=wait_for_browser_receipt,
+        ))
+        try:
+            await asyncio.sleep(0)
+            recovered = (await client.get("/api/agent-browser/pending", params=params, headers=headers)).json()["data"]["actions"][0]
+            action_path = f"/api/agent-browser/actions/{recovered['action_id']}"
+            context = {"session_id": session_key, "surface": surface, "client_nonce": recovered["client_nonce"]}
+            claimed = await client.post(action_path + "/claim", json=context, headers=headers)
+            assert claimed.status_code == 200
+            receipt = {**context, **claimed.json()["data"], "outcome": "completed", "observation": {
+                "snapshot_id": recovered["observation_snapshot_id"], "route": "/forum", "title": "论坛", "controls": [], "messages": [],
+            }}
+            receipt.pop("action_id")
+            delivered = await client.post(action_path + "/ack", json=receipt, headers=headers)
+            assert delivered.status_code == 200 and delivered.json()["data"]["server_verified"] is False
+            ack_delivered.set()
+            assert (await execution)["status"] == "completed"
+        finally:
+            if not execution.done():
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
         run = db.query(AgentResponseRun).filter_by(run_id=run_id).one()
-        run.status = "completed"
+        run.status = terminal_status
         db.commit()
         stopped = await client.get("/api/agent-browser/pending", params=params, headers=headers)
         assert stopped.status_code == 409
-        assert db.query(AgentBrowserAction).count() == 0
+        assert (await client.post(action_path + "/claim", json=context, headers=headers)).status_code == 409
+        assert (await client.post(action_path + "/ack", json=receipt, headers=headers)).status_code == 409
+        assert db.query(AgentBrowserAction).count() == 1
+
+
+def test_audit_reviewer_still_requires_permission_and_admin_keeps_access(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: False)
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/audit")
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+    assert service.authorize_route(db, owner, "/audit") == "/audit"
+
+
+def test_agent_studio_legacy_route_uses_real_redirect_page_permissions(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "agent:view")
+    assert service.authorize_route(db, owner, "/agent-studio") == "/agent-studio"
+
+
+def test_report_template_page_keeps_existing_permission_contract(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda _db, _id, permission: permission == "report:template_manage")
+    assert service.authorize_route(db, owner, "/report/templates") == "/report/templates"

@@ -264,11 +264,6 @@ function formatFullDetail(value: unknown): string {
   }
 }
 
-function formatDetail(value: unknown, limit = 700): string {
-  const text = formatFullDetail(value)
-  return text.length > limit ? `${text.slice(0, limit)}...` : text
-}
-
 function hasTaskEvidence(task: AgentTeamTask): boolean {
   return Boolean(
     task.result
@@ -502,7 +497,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
               <span>{{ eventLabel(event) }}</span>
               <code v-if="event.trace_id">{{ event.trace_id }}</code>
               <details v-if="event.detail" class="agent-team-record-detail">
-                <summary>{{ formatDetail(event.detail, 360) }}</summary>
+                <summary>查看事件详情</summary>
                 <code>{{ formatFullDetail(event.detail) }}</code>
               </details>
             </li>
@@ -539,7 +534,7 @@ function hasTaskEvidence(task: AgentTeamTask): boolean {
               <small>{{ message.sent_from }} -> {{ message.send_to }} · {{ message.message_id }}</small>
               <code class="agent-team-message-trace">{{ message.trace_id }} / {{ message.correlation_id }} / {{ message.causation_id }}</code>
               <details v-if="message.payload || message.context || message.artifacts?.length || message.errors?.length" class="agent-team-record-detail">
-                <summary>{{ formatDetail({ payload: message.payload, context: message.context }, 520) }}</summary>
+                <summary>查看消息详情</summary>
                 <code>{{ formatFullDetail({ payload: message.payload, context: message.context, artifacts: message.artifacts, errors: message.errors }) }}</code>
               </details>
             </li>

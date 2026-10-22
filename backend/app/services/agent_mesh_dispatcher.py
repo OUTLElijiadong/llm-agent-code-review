@@ -1402,11 +1402,14 @@ def _handle(
 
 
 def _candidate_rows(db: Session, limit: int) -> list[tuple[str, int, str]]:
+    from app.services.agent_mesh_service import standalone_dispatch_conditions
+
     now = datetime.now(timezone.utc)
     rows = (
         db.query(AgentMeshMessage.message_id, AgentMeshMessage.user_id, AgentMeshMessage.send_to)
         .filter(
             AgentMeshMessage.message_type == "task.request",
+            *standalone_dispatch_conditions(),
             or_(AgentMeshMessage.send_to.like("agent:%"), AgentMeshMessage.send_to.like("custom:%")),
             AgentMeshMessage.status.in_(("queued", "delivered")),
             or_(AgentMeshMessage.expires_at.is_(None), AgentMeshMessage.expires_at > now),

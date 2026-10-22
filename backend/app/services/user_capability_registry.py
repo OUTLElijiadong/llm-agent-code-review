@@ -2,7 +2,8 @@
 
 模型只能选择固定 ``code`` 并提供业务参数。HTTP 方法和路径由
 注册表锁定，参数契约则从同一 FastAPI OpenAPI operation 解析。
-本注册表只收录普通用户界面使用的 JSON API；管理路由、流式路由、
+本注册表只收录用户界面使用的 JSON API；仅按审计权限开放的历史 /admin/audit
+只读接口是明确例外，其他管理路由、流式路由、
 二进制/多段上传和密码/API Key 参数路由不得通过通用执行器暴露。
 """
 
@@ -42,7 +43,11 @@ class UserCapabilitySpec:
             raise ValueError(f"不支持的 HTTP 方法: {self.method}")
         if self.risk not in _VALID_RISKS:
             raise ValueError(f"不支持的风险等级: {self.risk}")
-        if not self.path.startswith("/api/") or self.path.startswith(_FORBIDDEN_PREFIXES):
+        # /audit 审查员页实际读取这个历史地址；只豁免精确只读契约，不能开放整个 /admin。
+        reviewer_audit = (
+            self.code, self.page, method, self.path, self.permission, self.risk
+        ) == ("audit.list", "/audit", "GET", "/api/admin/audit", "audit:view", READ)
+        if not self.path.startswith("/api/") or (self.path.startswith(_FORBIDDEN_PREFIXES) and not reviewer_audit):
             raise ValueError(f"用户能力路径不在白名单边界内: {self.path}")
         object.__setattr__(self, "method", method)
 
@@ -67,6 +72,7 @@ USER_PAGE_ROUTES: tuple[str, ...] = (
     "/issues",
     "/reports",
     "/report/templates",
+    "/audit",
     "/security",
     "/agents",
     "/agent-studio",
@@ -296,7 +302,8 @@ USER_CAPABILITIES: tuple[UserCapabilitySpec, ...] = (
         CRITICAL,
         "report:template_manage",
     ),
-    # 规则和安全审计
+    # 规则和安全审计；复用页面现有 API，实际身份、权限及私人内容脱敏由原路由强制执行。
+    _cap("audit.list", "/audit", "查询当前账号可见的操作审计日志", "GET", "/api/admin/audit", permission="audit:view"),
     _cap("rules.list", "/security", "查询审查规则", "GET", "/api/rules"),
     _cap("rules.create", "/security", "创建审查规则", "POST", "/api/rules", WRITE),
     _cap("rules.update", "/security", "更新审查规则", "PUT", "/api/rules/{rule_id}", WRITE),

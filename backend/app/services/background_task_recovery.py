@@ -121,7 +121,7 @@ def _query_pending_terminal_receipts(db, *, limit: int) -> list[tuple[AgentRespo
         db.query(AgentResponseRun, AgentMeshMessage)
         .join(AgentMeshMessage, AgentMeshMessage.message_id == AgentResponseRun.mesh_message_id)
         .filter(
-            AgentResponseRun.status.in_(("completed", "failed")),
+            AgentResponseRun.status.in_(("completed", "failed", "cancelled")),
             AgentMeshMessage.status == "processing",
             AgentMeshMessage.user_id == AgentResponseRun.user_id,
         )
@@ -141,7 +141,10 @@ def recover_pending_terminal_receipts_once(*, limit: int = 100) -> int:
             if message.send_to != expected_target:
                 continue
             checkpoint = _load_checkpoint(run)
-            if checkpoint is None or checkpoint.get("recovery_requested") is True:
+            if run.status == "cancelled":
+                # 取消终态本身就是停止依据，检查点损坏也不能重新派发模型。
+                checkpoint = checkpoint or {}
+            elif checkpoint is None or checkpoint.get("recovery_requested") is True:
                 continue
             user = db.get(User, int(run.user_id))
             if user is None:
@@ -275,6 +278,9 @@ def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
         row = _load_recovery_run(db, recovery)
         if row is not None:
             checkpoint = _load_checkpoint(row)
+            if row.status == "cancelled":
+                _finish_terminal_run_receipt(db, user, row, recovery, checkpoint or {})
+                return
             if checkpoint is not None and checkpoint.get("stop_requested") is True:
                 reason = str(checkpoint.get("stop_reason") or checkpoint.get("cancel_reason") or "").strip()[:500]
                 checkpoint.update({
@@ -292,6 +298,7 @@ def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
                 row.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, default=str)
                 row.version = int(row.version or 0) + 1
                 db.commit()
+                _finish_terminal_run_receipt(db, user, row, recovery, checkpoint)
                 logger.info("[recovery] 小菱运行 {} 已收到停止意图，跳过自动恢复", recovery.run_id)
                 return
         if row is not None and row.status in {"completed", "failed"}:
@@ -324,6 +331,7 @@ def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
                     row,
                     recovery,
                     success=result.status == "completed",
+                    cancelled=result.status == "cancelled",
                     summary=str(getattr(result, "output_text", "") or ""),
                     error=str(getattr(result, "error", "") or ""),
                 )
@@ -353,7 +361,7 @@ def _resume_agent_run_locked(recovery: AgentRunRecovery) -> None:
                         success=False,
                         error=f"服务端自动恢复失败: {exc}"[:1000],
                     )
-            elif row.status in {"completed", "failed"} and checkpoint:
+            elif row.status in {"completed", "failed", "cancelled"} and (checkpoint or row.status == "cancelled"):
                 user = db.get(User, recovery.user_id)
                 if user is not None:
                     _finish_terminal_run_receipt(db, user, row, recovery, checkpoint)
@@ -369,6 +377,7 @@ def _finish_recovered_session_message(
     recovery: AgentRunRecovery,
     *,
     success: bool,
+    cancelled: bool = False,
     summary: str = "",
     error: str = "",
 ) -> None:
@@ -396,6 +405,7 @@ def _finish_recovered_session_message(
         surface=recovery.surface,
         session_key=recovery.session_key,
         success=success,
+        cancelled=cancelled,
         summary=summary,
         error=error,
     )
@@ -435,6 +445,7 @@ def _finish_terminal_run_receipt(
         run,
         recovery,
         success=run.status == "completed",
+        cancelled=run.status == "cancelled",
         summary=str(checkpoint.get("output_text") or "")[:2000],
         error=str(checkpoint.get("error") or "")[:2000],
     )
@@ -447,10 +458,11 @@ def _finish_recovered_session_message_with_retry(
     recovery: AgentRunRecovery,
     *,
     success: bool,
+    cancelled: bool = False,
     summary: str = "",
     error: str = "",
 ) -> None:
-    """一次数据库瞬断后回滚并重试；失败仍留作启动时的终态回执扫描。"""
+    """一次数据库瞬断后回滚并重试；失败仍留作周期性的终态回执扫描。"""
     for attempt in range(2):
         try:
             _finish_recovered_session_message(
@@ -459,6 +471,7 @@ def _finish_recovered_session_message_with_retry(
                 run,
                 recovery,
                 success=success,
+                cancelled=cancelled,
                 summary=summary,
                 error=error,
             )
@@ -467,7 +480,7 @@ def _finish_recovered_session_message_with_retry(
             db.rollback()
             if attempt == 1:
                 logger.warning(
-                    "[recovery] 小菱运行 {} 的 Mesh 回执暂未收敛，将在下次启动继续: {}",
+                    "[recovery] 小菱运行 {} 的 Mesh 回执暂未收敛，将在下一周期继续: {}",
                     recovery.run_id,
                     exc,
                 )

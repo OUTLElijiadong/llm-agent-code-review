@@ -58,6 +58,7 @@ def _seed_recoverable_run(db, *, status="completed", raise_error=False):
 @pytest.mark.parametrize("status, expected_message_status", [
     ("completed", "completed"),
     ("failed", "queued"),
+    ("cancelled", "cancelled"),
 ])
 def test_recovered_terminal_run_finishes_its_processing_mesh_message(
     db, monkeypatch, status, expected_message_status,
@@ -295,10 +296,13 @@ def test_terminal_failed_run_releases_mesh_message_after_receipt_retry(db, monke
     assert message.status == "queued"
 
 
-def test_periodic_receipt_scan_reconciles_after_two_attempts_fail_without_restarting_service(db, monkeypatch):
+@pytest.mark.parametrize("status, stop_requested", [("completed", False), ("cancelled", False), ("cancelled", True)])
+def test_periodic_receipt_scan_reconciles_after_two_attempts_fail_without_restarting_service(
+    db, monkeypatch, status, stop_requested,
+):
     user, run, message, _status, _raise_error = _seed_recoverable_run(db)
-    run.status = "completed"
-    run.checkpoint_json = json.dumps({"output_text": "审查结论已保存"})
+    run.status = status
+    run.checkpoint_json = json.dumps({"output_text": "运行结果已保存", "stop_requested": stop_requested})
     db.commit()
     Session = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
     monkeypatch.setattr(background_task_recovery, "SessionLocal", Session)
@@ -321,8 +325,29 @@ def test_periodic_receipt_scan_reconciles_after_two_attempts_fail_without_restar
 
     assert background_task_recovery.recover_pending_terminal_receipts_once() == 1
     db.refresh(message)
-    assert message.status == "completed"
+    assert message.status == status
     assert finish_calls == 3
+
+
+@pytest.mark.parametrize("checkpoint", [{"stop_requested": True}, {}, None])
+def test_cancelled_run_only_settles_receipt_and_never_invokes_model(db, monkeypatch, checkpoint):
+    user, run, message, *_ = _seed_recoverable_run(db)
+    run.status = "cancelled"
+    run.checkpoint_json = json.dumps(checkpoint)
+    db.commit()
+    Session = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(background_task_recovery, "SessionLocal", Session)
+
+    def forbidden_model(*args, **kwargs):
+        pytest.fail("人工取消的运行不得再次创建模型服务")
+
+    monkeypatch.setattr(background_task_recovery, "AgentResponsesService", forbidden_model)
+    background_task_recovery._resume_agent_run_locked(background_task_recovery.AgentRunRecovery(
+        run_id=run.run_id, user_id=user.id, surface=run.surface, session_key=run.session_key,
+    ))
+    db.refresh(run)
+    db.refresh(message)
+    assert run.status == message.status == "cancelled"
 
 
 def test_recovery_exception_does_not_update_run_from_another_session(db, monkeypatch):

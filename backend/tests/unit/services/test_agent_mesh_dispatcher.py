@@ -255,6 +255,101 @@ def _seed(factory, message=None):
     return user, created
 
 
+@pytest.mark.parametrize("success", [True, False])
+def test_dispatch_reply_and_terminal_status_are_atomic(tmp_path, monkeypatch, success):
+    """终态事件落库失败时，不能独立提交可被小菱消费的成功或失败回执。"""
+    engine, factory = _factory(tmp_path)
+    user, created = _seed(factory, _message(max_attempts=1))
+    with factory() as db:
+        claimed = agent_mesh_service.claim_dispatch_message(
+            db, user, created["message_id"], target_address="agent:code_reviewer",
+        )
+        original_event = agent_mesh_service._event
+
+        def fail_terminal_event(session, row, status, *args, **kwargs):
+            if row.message_id == created["message_id"] and status in {"completed", "dead_letter"}:
+                raise RuntimeError("模拟终态事件持久化失败")
+            return original_event(session, row, status, *args, **kwargs)
+
+        monkeypatch.setattr(agent_mesh_service, "_event", fail_terminal_event)
+        with pytest.raises(RuntimeError, match="模拟终态事件持久化失败"):
+            agent_mesh_service.complete_dispatch_message(
+                db, user, created["message_id"], target_address="agent:code_reviewer", target_name="审查成员",
+                lease_token=claimed["lease_token"], success=success,
+                summary={"status": "completed" if success else "failed", "summary": "实际结果"},
+            )
+        db.rollback()
+        assert db.query(AgentMeshMessage).filter_by(correlation_id=created["message_id"]).count() == 0
+        request = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert request.status == "processing" and request.lease_token == claimed["lease_token"]
+    engine.dispose()
+
+
+@pytest.mark.parametrize("state", ["queued", "delivered", "processing"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_mesh_dispatch_cannot_claim_team_owned_requests(tmp_path, state, legacy):
+    engine, factory = _factory(tmp_path)
+    user, created = _seed(factory)
+    with factory() as db:
+        request = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        if legacy:
+            request.message_id = "team-41-task-52-attempt-1-request"
+        else:
+            request.agent_team_id = 41
+            request.agent_team_task_id = 52
+        request.status = state
+        db.commit()
+        message_id = request.message_id
+        assert agent_mesh_dispatcher._candidate_rows(db, 20) == []
+        assert agent_mesh_service.claim_dispatch_message(
+            db, user, message_id, target_address="agent:code_reviewer",
+        ) is None
+        db.refresh(request)
+        assert request.status == state
+        if state in {"queued", "delivered"}:
+            request.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+            assert agent_mesh_service.expire_unclaimed_dispatch_messages(db) == 0
+        else:
+            request.lease_token = "team-lease"
+            request.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+            assert agent_mesh_service.recover_stale_dispatch_messages(db) == 0
+        db.refresh(request)
+        assert request.status == state
+    engine.dispose()
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_dispatch_repeated_or_opposite_result_keeps_one_terminal_receipt(tmp_path, success):
+    engine, factory = _factory(tmp_path)
+    user, created = _seed(factory, _message(max_attempts=1))
+    with factory() as db:
+        claimed = agent_mesh_service.claim_dispatch_message(
+            db, user, created["message_id"], target_address="agent:code_reviewer",
+        )
+        kwargs = dict(
+            target_address="agent:code_reviewer", target_name="审查成员", lease_token=claimed["lease_token"],
+        )
+        first = agent_mesh_service.complete_dispatch_message(
+            db, user, created["message_id"], **kwargs, success=success,
+            summary={"status": "completed" if success else "failed", "summary": "原始业务结果"},
+        )
+        for late_success in (success, not success):
+            with pytest.raises(agent_mesh_service.AgentMeshStateError, match="租约已失效"):
+                agent_mesh_service.complete_dispatch_message(
+                    db, user, created["message_id"], **kwargs, success=late_success,
+                    summary={"summary": "重复或晚到结果"},
+                )
+            db.rollback()
+        request = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert request.status == first["status"] == ("completed" if success else "dead_letter")
+        replies = db.query(AgentMeshMessage).filter_by(correlation_id=request.message_id).all()
+        assert len(replies) == 1
+        assert replies[0].message_type == ("task.result" if success else "task.error")
+    engine.dispose()
+
+
 def test_agent_message_claim_and_result_reply_are_traceable(tmp_path):
     engine, factory = _factory(tmp_path)
     user, created = _seed(factory)

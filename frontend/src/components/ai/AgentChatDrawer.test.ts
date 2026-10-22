@@ -1,3 +1,4 @@
+import { siteBrowserApi, type SiteBrowserRequiredEvent } from '@/api/siteBrowser'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -419,6 +420,68 @@ it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', asyn
   expect(wrapper.get('.chat-drawer').attributes('style')).toContain('left:')
   expect(wrapper.get('.chat-drawer').attributes('style')).toContain('top:')
   wrapper.unmount()
+})
+
+it('浮窗缩放柄支持键盘调整，消息滚动区与输入区保持分离', async () => {
+  const wrapper = mountDrawer()
+  const panel = wrapper.get('.chat-drawer').element
+  Object.defineProperty(panel, 'offsetWidth', { configurable: true, value: 400 })
+  Object.defineProperty(panel, 'offsetHeight', { configurable: true, value: 620 })
+  await flushPromises()
+
+  const resizeHandle = wrapper.get('.panel-resize-handle')
+  expect(resizeHandle.attributes('aria-label')).toContain('方向键')
+  await resizeHandle.trigger('keydown', { key: 'ArrowRight' })
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('width: 416px')
+
+  const body = wrapper.get('.chat-body').element
+  const inputArea = wrapper.get('.chat-input-area').element
+  expect(body.parentElement?.classList.contains('chat-body-region')).toBe(true)
+  expect(body.closest('.chat-drawer')).toBe(inputArea.closest('.chat-drawer'))
+  expect(body.contains(inputArea)).toBe(false)
+  wrapper.unmount()
+})
+
+it.each([true, false])('本地导航持久化：审查员权限=%s，空服务端会话重开不误报未送达、不重放', async allowed => {
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/', component: {} },
+    { path: '/audit', component: {}, meta: { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] } },
+  ] })
+  await router.push('/')
+  const user = useUserStore()
+  user.profile = { id: 77, username: 'audit-reviewer', role: 'reviewer', status: 1 }
+  user.token = 'audit-token'
+  user.roles = ['reviewer']
+  user.permissions = new Set(allowed ? ['audit:view'] : [])
+  sessionApi.get.mockImplementation(async (_surface, session_id) => ({ surface: 'user', session_id, run: null, messages: [], pending: null }))
+  const push = vi.spyOn(router, 'push')
+  const wrapper = await mountReadyDrawer(undefined, [router])
+  await settleAll()
+  await wrapper.get('.chat-input').setValue('打开审计')
+  await wrapper.get('.send-btn').trigger('click')
+  await settleAll()
+  const vm = wrapper.vm as any
+  const sessionId = vm.sessionId as string
+  const key = agentChatStorageKey('user', 77)
+  const saved = loadAgentChatSnapshot(sessionId, key)
+  expect(saved?.messages.filter(message => message.localAction)).toHaveLength(2)
+  expect(saved?.messages.at(-1)?.localAction?.status).toBe(allowed ? 'completed' : 'forbidden')
+  expect(router.currentRoute.value.path).toBe(allowed ? '/audit' : '/')
+  expect(streams.start).not.toHaveBeenCalled()
+  saveAgentChatSessions(key, [{ id: sessionId, title: '审计', createdAt: Date.now() }])
+  saveActiveAgentChatSession(key, sessionId)
+  wrapper.unmount()
+  push.mockClear()
+  const reopened = await mountReadyDrawer(undefined, [router])
+  try {
+    await settleAll()
+    expect(reopened.text()).toContain(allowed ? '已打开「操作审计」' : '当前账号没有权限')
+    expect(reopened.text()).not.toContain('未在服务器留痕')
+    expect(reopened.find('.msg-error-card').exists()).toBe(false)
+    expect(push).not.toHaveBeenCalled()
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { reopened.unmount(); push.mockRestore() }
 })
 
 describe('AgentChatDrawer Responses stream', () => {
@@ -938,6 +1001,9 @@ describe('AgentChatDrawer Responses stream', () => {
 
     emit(0, { type: 'response.tool.completed', call_id: 'call-team', tool_name: 'create_agent_team', output_summary: '团队已创建' })
     await settleAll()
+    expect(wrapper.find('.thinking-city').exists()).toBe(false)
+    await wrapper.get('.thinking-city-toggle').trigger('click')
+    expect(wrapper.findComponent({ name: 'ThinkingCity' }).props('animated')).toBe(false)
     expect(wrapper.find('.thinking-city').exists()).toBe(true)
     expect(wrapper.text()).toContain('子 Agent 正在协作')
     emit(0, { type: 'response.output_text.delta', delta: '最终结论' })
@@ -978,7 +1044,7 @@ describe('AgentChatDrawer Responses stream', () => {
     wrapper.unmount()
   })
 
-  it('恢复当前会话时拉取服务端团队并展开协作过程', async () => {
+  it('恢复当前会话时拉取服务端团队，过程默认折叠且可按需展开', async () => {
     teamApi.list.mockResolvedValue({
       items: [{ team_id: 42, title: '发布前验证', surface: 'user', session_id: 'user-test', status: 'running', max_active_children: 3, trace_id: 'trace-42', counts: { total: 1, completed: 0, running: 1, queued: 0, failed: 0, blocked: 0 } }],
       total: 1,
@@ -992,6 +1058,8 @@ describe('AgentChatDrawer Responses stream', () => {
     expect(teamApi.list).toHaveBeenCalledWith(expect.objectContaining({ surface: 'user', limit: 20 }))
     expect(wrapper.find('.agent-team-trace').exists()).toBe(true)
     const activity = wrapper.get('.agent-message-activity')
+    expect(activity.attributes('open')).toBeUndefined()
+    await expandTimeline(wrapper)
     expect(activity.attributes('open')).toBeDefined()
     expect(activity.get('.agent-message-activity-body').isVisible()).toBe(true)
     const tracePanel = wrapper.get('.agent-team-trace-panel')
@@ -2128,4 +2196,144 @@ describe('实时星图滚动跟随', () => {
       wrapper.unmount()
     }
   })
+})
+
+
+it('精简欢迎语后仍识别旧版欢迎语，历史回答保持完整', async () => {
+  sessionApi.get.mockResolvedValue({
+    surface: 'user', session_id: 'user-test', run: null, pending: null,
+    messages: [
+      { role: 'assistant', content: `你好呀,我是小菱,Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。` },
+      { role: 'user', content: '查看我的项目' },
+      { role: 'assistant', content: '历史回答：共找到两个项目' },
+    ],
+  })
+  const wrapper = await mountReadyDrawer()
+  try {
+    expect(wrapper.text()).not.toContain('Prism 棱镜智能代码审查平台的小助手')
+    expect(wrapper.text()).toContain('历史回答：共找到两个项目')
+    expect(wrapper.findAll('.msg-row')).toHaveLength(3)
+  } finally { wrapper.unmount() }
+})
+
+
+it('路径读取失败后恢复完成仍只显示过程摘要，原事件可按需查看', async () => {
+  const team = {
+    team_id: 142, title: '查看我的项目', surface: 'user', session_id: 'user-test', status: 'completed',
+    max_active_children: 3, trace_id: 'trace-recovered',
+    counts: { total: 1, completed: 1, running: 0, queued: 0, failed: 0, blocked: 0 },
+    members: [], tasks: [], messages: [],
+    events: [
+      { event_id: 1, team_id: 142, event_type: 'task.failed', detail: { error: '首次路径读取失败' } },
+      { event_id: 2, team_id: 142, event_type: 'task.completed', detail: { result: '改用正确路径读取成功' } },
+    ],
+  }
+  sessionApi.get.mockResolvedValue({
+    surface: 'user', session_id: 'user-test',
+    run: { run_id: 'run-recovered', status: 'completed', model: '', rounds: 1, error: '', updated_at: '' },
+    messages: [{ role: 'user', content: '查看我的项目' }, { role: 'assistant', content: '共找到两个项目' }],
+    events: [], mesh_messages: [], pending: null,
+  })
+  teamApi.list.mockResolvedValue({ items: [team], total: 1 })
+  teamApi.detail.mockResolvedValue(team)
+  const wrapper = await mountReadyDrawer()
+  try {
+    const activity = wrapper.get('.agent-message-activity')
+    expect(activity.attributes('open')).toBeUndefined()
+    expect(activity.get('.agent-message-activity-body').isVisible()).toBe(false)
+    expect(wrapper.find('.agent-team-trace-body').exists()).toBe(false)
+    expect(wrapper.text()).toContain('共找到两个项目')
+    await expandTimeline(wrapper)
+    const records = wrapper.findAll('.agent-team-record-detail')
+    expect(records).toHaveLength(2)
+    expect(records.every(record => record.attributes('open') === undefined)).toBe(true)
+    expect(records.map(record => record.get('summary').text())).toEqual(['查看事件详情', '查看事件详情'])
+    expect(records.map(record => record.get('code').text()).join(' ')).toContain('首次路径读取失败')
+    expect(records.map(record => record.get('code').text()).join(' ')).toContain('改用正确路径读取成功')
+  } finally { wrapper.unmount() }
+})
+
+
+it.each(['pending', 'claim'] as const)('停止真实接线：%s 迟到及停止失败不执行页面动作，显式重试才恢复', async (stage) => {
+  vi.useFakeTimers()
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main />' } }] })
+  await router.push('/')
+  await router.isReady()
+  const pending = vi.spyOn(siteBrowserApi, 'pending').mockResolvedValue({ actions: [] })
+  const claim = vi.spyOn(siteBrowserApi, 'claim').mockImplementation(async id => ({ action_id: id, claim_token: 'claim-token' }))
+  const ack = vi.spyOn(siteBrowserApi, 'ack').mockResolvedValue({})
+  let vm: any
+  sessionApi.get.mockImplementation(async () => ({
+    surface: 'user', session_id: vm?.sessionId || 'user-test', run: vm?.sessionRun || null,
+    messages: [], pending: null,
+  }))
+  const wrapper = await mountReadyDrawer(undefined, [router])
+  try {
+    vm = wrapper.vm as any
+    const user = useUserStore()
+    user.profile = { id: 707, username: 'bridge-owner', role: 'user', status: 1 }
+    user.token = 'bridge-component-test-token'
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+    const action: SiteBrowserRequiredEvent = {
+      type: 'response.browser.required', action_id: 81, run_id: 'run-component-stop',
+      session_id: vm.sessionId, surface: 'user', account_id: 707, client_nonce: 'nonce-stop',
+      action: 'inspect', args: {}, observation_snapshot_id: 'snapshot-stop',
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+    }
+    const delayed = deferred<any>()
+    if (stage === 'pending') pending.mockReturnValueOnce(delayed.promise)
+    else {
+      pending.mockResolvedValueOnce({ actions: [action] })
+      claim.mockReturnValueOnce(delayed.promise)
+    }
+    vm.sessionRun = { run_id: action.run_id, status: 'running', model: '', rounds: 1, error: '', updated_at: '' }
+    await flushPromises()
+    expect(pending).toHaveBeenCalled()
+    if (stage === 'claim') expect(claim).toHaveBeenCalledOnce()
+
+    let rejectCancel!: (reason: Error) => void
+    responseApi.cancel.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectCancel = reject }))
+    const cancelling = vm.cancelResponse('人工停止页面操作')
+    delayed.resolve(stage === 'pending' ? { actions: [action] } : { action_id: 81, claim_token: 'claim-token' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(claim).toHaveBeenCalledTimes(stage === 'claim' ? 1 : 0)
+    expect(ack).not.toHaveBeenCalled()
+
+    rejectCancel(new Error('取消接口暂时断开'))
+    await cancelling
+    await flushPromises()
+    expect(vm.sessionRun.status).toBe('running')
+    const callsAfterStop = pending.mock.calls.length
+    vm.siteBrowser.handle({ ...action, action_id: 82 })
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(pending).toHaveBeenCalledTimes(callsAfterStop)
+    expect(claim).toHaveBeenCalledTimes(stage === 'claim' ? 1 : 0)
+    expect(ack).not.toHaveBeenCalled()
+
+    // 后续同步失败终态也不自动撤销停止；只有用户重试可以恢复此 run。
+    vm.sessionRun = { ...vm.sessionRun, status: 'failed' }
+    await flushPromises()
+    expect(vm.isResponseRunResumeBlocked(action.run_id)).toBe(true)
+    void vm.retryRun()
+    await flushPromises()
+    expect(streams.records.at(-1)?.body.action).toBe('retry')
+    expect(vm.isResponseRunResumeBlocked(action.run_id)).toBe(false)
+    const streamIndex = streams.records.length - 1
+    emit(streamIndex, { type: 'response.created', response: { id: action.run_id } })
+    await flushPromises()
+    vm.siteBrowser.handle({ ...action, action_id: 83 })
+    await vi.advanceTimersByTimeAsync(100)
+    await flushPromises()
+    expect(claim).toHaveBeenLastCalledWith(83, expect.objectContaining({ surface: 'user' }))
+    expect(ack).toHaveBeenCalledWith(83, expect.objectContaining({ outcome: 'completed' }))
+    emit(streamIndex, { type: 'response.completed', response: { id: action.run_id } })
+    await finish(streamIndex)
+  } finally {
+    wrapper.unmount()
+    vi.useRealTimers()
+  }
 })

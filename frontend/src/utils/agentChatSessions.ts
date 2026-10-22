@@ -38,6 +38,13 @@ export interface AgentChatSnapshotMessage {
   /** 失败卡片只属于其产生的运行,切换账号或会话时不得串入。 */
   runId?: string
   errorCard?: { retryable: boolean; nextAction?: string; requestId?: string }
+  /** 浏览器确定性动作的记录，不是 Responses 运行或服务端成功凭据。 */
+  localAction?: {
+    id: string
+    kind: 'navigation'
+    status: 'pending' | 'completed' | 'failed' | 'forbidden'
+    route?: string
+  }
 }
 
 export interface AgentChatSnapshotTeam {

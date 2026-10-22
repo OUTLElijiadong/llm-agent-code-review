@@ -1,3 +1,4 @@
+import { getAgentResponseSession } from '@/api/agentResponses'
 import { nextTick, onBeforeUnmount, watch } from 'vue'
 import type { Router } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -12,19 +13,24 @@ export function useSiteBrowserBridge(options: {
   sessionId: () => string
   runId: () => string
   status: () => string
+  /** 人工停止意图优先于尚未更新的服务端 running 状态。 */
+  isStopped?: () => boolean
   router: Router
 }) {
   const user = useUserStore(), activity = useAgentActivityStore()
   let disposed = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let recovering = false
+  let generation = 0
+  let confirmedRunId = ''
+  const canRecover = () => !options.isStopped?.() && ['running', 'queued', 'waiting_browser'].includes(options.status())
   const bridge = createSiteBrowserBridge({
     current: () => ({ accountId: user.profile?.id, token: user.token, sessionId: options.sessionId(),
       runId: options.runId(), surface: options.surface, route: options.router.currentRoute.value.fullPath }),
     canNavigate: path => !['/login', '/register', '/403', '/404'].includes(path.split(/[?#]/)[0]!)
       && isNavigationPathAllowed(options.router, path, user),
     navigate: route => options.router.push(route),
-    isActive: () => ['running', 'approving', 'answering', 'rejecting', 'queued', 'waiting_browser'].includes(options.status()),
+    isActive: () => !options.isStopped?.() && ['running', 'approving', 'answering', 'rejecting', 'queued', 'waiting_browser'].includes(options.status()),
     settle: async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 80)); await nextTick() },
     onStatus: status => {
       const id = `browser-${status.actionId}`
@@ -34,21 +40,56 @@ export function useSiteBrowserBridge(options: {
   })
   function stop(): void { if (timer !== undefined) clearTimeout(timer); timer = undefined }
   async function recover(): Promise<void> {
-    if (disposed || recovering || !user.token || !options.runId()) return
+    if (disposed || recovering || !user.profile?.id || !user.token || !options.sessionId() || !options.runId() || !canRecover()) return
+    const epoch = generation
+    const runId = options.runId(), sessionId = options.sessionId()
+    const owned = () => !disposed && epoch === generation
+      && runId === options.runId() && sessionId === options.sessionId()
+    const current = () => owned() && canRecover()
     recovering = true
-    try { await bridge.recover() } finally { recovering = false }
-    if (!disposed && ['running', 'queued', 'waiting_browser'].includes(options.status())) {
-      stop(); timer = setTimeout(() => { timer = undefined; void recover() }, 2000)
+    try {
+      // 本地预先生成的 ID 和 response.created 均早于运行提交，不能作为恢复依据。
+      // 复用账号隔离的会话回读，未落库时等待；只对已确认的同一运行查询页面动作。
+      if (confirmedRunId !== runId) {
+        const session = await getAgentResponseSession(options.surface, sessionId, true)
+        if (!current()) return
+        if (session.surface === options.surface && session.session_id === sessionId
+          && session.run?.run_id === runId
+          && ['running', 'approving', 'answering'].includes(session.run.status)) confirmedRunId = runId
+      }
+      if (current() && confirmedRunId === runId) await bridge.recover()
+    } catch {
+      // 真实鉴权错误由 HTTP 层报告；网络失败不推断运行存在或执行动作。
+    } finally {
+      if (owned()) {
+        recovering = false
+        if (canRecover()) {
+          stop(); timer = setTimeout(() => { timer = undefined; void recover() }, 2000)
+        }
+      }
     }
   }
   watch([() => user.profile?.id, () => user.token, options.sessionId, options.runId], () => {
+    generation += 1; recovering = false; confirmedRunId = ''
     stop(); bridge.reset()
-    if (options.runId() && ['running', 'queued', 'waiting_browser'].includes(options.status())) void recover()
+    if (options.runId() && canRecover()) void recover()
   }, { flush: 'sync' })
   watch(options.status, status => {
-    if (['running', 'queued', 'waiting_browser'].includes(status)) void recover()
-    else { stop(); if (['completed', 'cancelled', 'failed', 'incomplete', 'max_rounds_exceeded'].includes(status)) bridge.reset() }
+    if (canRecover()) void recover()
+    else {
+      stop()
+      // 终态使尚未返回的会话确认失效；旧请求不能在结束后再恢复页面动作。
+      if (['completed', 'cancelled', 'failed', 'incomplete', 'blocked', 'max_rounds_exceeded'].includes(status)) {
+        generation += 1; recovering = false; confirmedRunId = ''; bridge.reset()
+      }
+    }
   })
+  watch(() => options.isStopped?.() ?? false, stopped => {
+    if (stopped) {
+      generation += 1; recovering = false; confirmedRunId = ''
+      stop(); bridge.reset()
+    } else if (canRecover()) void recover()
+  }, { flush: 'sync' })
   onBeforeUnmount(() => { disposed = true; stop(); bridge.reset() })
   return {
     handle(event: ResponseStreamEvent): boolean {

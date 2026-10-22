@@ -3598,6 +3598,102 @@ async def _collect_stream(response: Any) -> str:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("receipt_failures", [1, 2])
+async def test_api_mesh_receipt_database_error_preserves_business_terminal(
+    db, monkeypatch, status, receipt_failures,
+) -> None:
+    """投递回执瞬断或连续失败均不能把已落库的业务终态改为运行异常。"""
+    from sqlalchemy.exc import OperationalError
+
+    from app.models.agent_mesh import AgentMeshMessage, AgentMeshMessageEvent
+    from app.models.user import User
+    from app.schemas.agent_mesh import AgentMeshMessageIn
+
+    for model in (User, AgentMeshMessage, AgentMeshMessageEvent):
+        model.__table__.create(db.get_bind(), checkfirst=True)
+    user = User(id=7, username="receipt-owner", password="unused", role="user", status=1)
+    db.add(user)
+    db.commit()
+    mesh = api_module.agent_mesh_service
+    for key in ("receipt-source", "receipt-target"):
+        mesh.heartbeat(db, user, surface="user", session_key=key, title=key)
+    message = mesh.send_message(
+        db, user, surface="user", session_key="receipt-source",
+        message=AgentMeshMessageIn.model_validate({
+            "idempotency_key": "terminal-receipt", "send_to": "session:user:receipt-target",
+            "message_type": "coordination", "subject": "处理结果",
+            "payload": {"summary": "待处理信息"}, "delivery": {"max_attempts": 1},
+        }),
+    )
+    runtime_calls = []
+    receipt_calls = []
+    salvage_calls = []
+    original_finish = mesh.finish_message_run
+
+    class FakeService:
+        def __init__(self, run_db, *_args, **_kwargs):
+            self.db = run_db
+
+        async def start(self, _messages, *, run_id, **_kwargs):
+            runtime_calls.append(run_id)
+            self.db.add(AgentResponseRun(
+                run_id=run_id, user_id=user.id, surface="user", session_key="receipt-target",
+                status=status, checkpoint_json=json.dumps({
+                    "status": status, "output_text": "真实业务结果",
+                    "error": "原始业务失败" if status == "failed" else "",
+                    "stop_requested": status == "cancelled",
+                }),
+            ))
+            self.db.commit()
+            return RuntimeResult(
+                run_id=run_id, status=status, output_text="真实业务结果",
+                error="原始业务失败" if status == "failed" else "",
+            )
+
+    def fail_receipt(*args, **kwargs):
+        receipt_calls.append(kwargs)
+        if len(receipt_calls) <= receipt_failures:
+            raise OperationalError("receipt update", {}, RuntimeError("simulated database disconnect"))
+        return original_finish(*args, **kwargs)
+
+    monkeypatch.setattr(api_module, "AgentResponsesService", FakeService)
+    monkeypatch.setattr(api_module, "resolve_api_config", lambda *_args: None)
+    monkeypatch.setattr(mesh, "finish_message_run", fail_receipt)
+    monkeypatch.setattr(
+        api_module.agent_run_salvage, "salvage_crashed_run", lambda *args, **kwargs: salvage_calls.append(args),
+    )
+    response = await api_module.stream_agent_response(
+        api_module.AgentResponsesRequest(
+            surface="user", session_id="receipt-target", mesh_message_id=message["message_id"],
+            messages=[],
+        ),
+        db=db, user=user,
+    )
+    body = await _collect_stream(response)
+
+    assert len(runtime_calls) == 1 and not salvage_calls
+    assert len(receipt_calls) == 2
+    assert all(call["success"] == (status == "completed") for call in receipt_calls)
+    assert all(call.get("cancelled", False) == (status == "cancelled") for call in receipt_calls)
+    assert body.count(f"event: response.{status}") == 1
+    assert "event: error" not in body
+    db.expire_all()
+    run = db.query(AgentResponseRun).filter_by(run_id=runtime_calls[0]).one()
+    assert run.status == status and run.mesh_message_id == message["message_id"]
+    delivery = db.query(AgentMeshMessage).filter_by(message_id=message["message_id"]).one()
+    expected = "dead_letter" if status == "failed" else status
+    assert delivery.status == (expected if receipt_failures == 1 else "processing")
+    # 连续失败后原业务结果仍可用于回执补偿，不需要重新调用模型。
+    original_finish(
+        db, user, message["message_id"], surface="user", session_key="receipt-target",
+        success=status == "completed", cancelled=status == "cancelled", error="原始业务失败",
+    )
+    db.refresh(delivery)
+    assert delivery.status == expected
+
+
+@pytest.mark.asyncio
 async def test_api_stream_rejects_archived_session_before_start(monkeypatch) -> None:
     """归档会话不能通过旧标签页绕过显式恢复与活动会话上限。"""
 
