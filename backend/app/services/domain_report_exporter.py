@@ -15,6 +15,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
+from app.ai.cvss import CVSS_VERSION, normalize_cvss
 from app.services.report_exporter import _sanitize_report_html
 from app.services.report_markdown import markdown_to_html
 from app.services.report_pdf_exporter import (
@@ -216,6 +217,13 @@ def score_section_lines(
             )
             cvss_weight = cvss.get("weight", 0)
             lines.append(f"CVSS 权重：{int(round(cvss_weight * 100))}%" if cvss_weight else "CVSS 权重：0%")
+            quality = components.get("quality") if isinstance(components, dict) else None
+            quality = quality if isinstance(quality, dict) else {}
+            quality_weight = quality.get("weight")
+            if isinstance(quality_weight, (int, float)):
+                lines.append(f"原规则质量分权重：{int(round(quality_weight * 100))}%")
+            lines.append(f"CVSS 已评分发现：{int(cvss.get('scored_findings') or 0)} 项")
+            lines.append(f"CVSS 未评分发现：{int(cvss.get('unscored_findings') or 0)} 项")
             max_base_score = cvss.get("max_base_score")
             if max_base_score is not None:
                 lines.append(f"CVSS 最高基础分：{_value(max_base_score)} / 10")
@@ -327,6 +335,18 @@ def build_pentest_report_markdown(
                 f"问题说明：{_value(finding.get('description'))}",
             ]
         )
+        cvss_score, cvss_vector, _, _ = normalize_cvss(
+            finding.get("cvss_score"), finding.get("cvss_vector"),
+        )
+        if cvss_score is None or cvss_vector is None:
+            lines.append("CVSS 基础分：未评分")
+        else:
+            lines.extend(
+                [
+                    f"CVSS 基础分：{cvss_score:.1f} / 10",
+                    f"CVSS 向量：CVSS:{CVSS_VERSION}/{cvss_vector}",
+                ]
+            )
         if finding.get("repro_steps"):
             lines.extend(["复现步骤：", _value(finding["repro_steps"])])
         if finding.get("evidence"):

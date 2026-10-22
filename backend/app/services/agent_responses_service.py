@@ -1747,6 +1747,32 @@ class PrismToolExecutor:
             )
 
         if call.name == "create_agent_team":
+            # 缺失合同是可修正的参数错误，审批不能赋予一个未定义动作可执行语义。
+            # 在风险审批前校验；合法高风险合同仍走下面的指纹绑定审批。
+            from app.services.site_agent_service import resolve_site_input
+
+            member_addresses = {
+                item["member_key"]: item["address"] for item in call.arguments.get("members", [])
+            }
+            for task in call.arguments.get("tasks", []):
+                address = member_addresses.get(task.get("member_key"), "")
+                task_input = task.get("input") or {}
+                if address != "agent:site_operator" and not (
+                    address.startswith("temporary:")
+                    and task_input.get("operation") in {"execute_capability", "verify_results"}
+                ):
+                    continue
+                try:
+                    resolve_site_input(task_input)
+                except ValueError as exc:
+                    return await self._failed_attempt(
+                        call,
+                        f"任务 {task.get('task_key', '')} 的站点执行合同无效：{exc}。"
+                        "先查当前账号能力清单，再绑定 input={operation:'execute_capability',"
+                        "scope:'user或admin',capability:'已登记能力',params:{业务参数}}；"
+                        "核验任务用 operation:'verify_results' 并依赖实际执行任务。"
+                        "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
+                    )
             team_supervision = agent_supervisor_service.review_agent_team_plan(call.arguments)
             remote_targets = []
             for task in call.arguments.get("tasks", []):

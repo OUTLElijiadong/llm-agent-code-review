@@ -960,6 +960,11 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
             reason=str(scope_info.get("reason") or ""),
             finding_count=int(stats.get("total_issues") or 0) if task.review_type == "pentest" else None,
             severity_counts=stats.get("severity") if isinstance(stats.get("severity"), dict) else None,
+            score_breakdown=(
+                detail["task"].get("score_breakdown")
+                if isinstance(detail["task"].get("score_breakdown"), dict)
+                else None
+            ),
         ))
 
     return {

@@ -399,15 +399,18 @@ def test_parse_invalid_issue_type_falls_back_to_other():
     assert result.issues[0].issue_type == "其他"
 
 
-def test_parse_invalid_severity_falls_back_to_medium():
-    """非法 severity 回退到 '中'"""
+def test_parse_invalid_or_missing_severity_remains_ungraded():
+    """非法或缺失 severity 必须保留未分级，不能伪装为“中”。"""
     text = json.dumps({
         "summary": "x",
         "score": 50,
-        "issues": [{"issue_type": "其他", "severity": "极其严重", "description": "x"}],
+        "issues": [
+            {"issue_type": "其他", "severity": "极其严重", "description": "invalid"},
+            {"issue_type": "其他", "description": "missing"},
+        ],
     })
     result = parse(text)
-    assert result.issues[0].severity == "中"
+    assert [issue.severity for issue in result.issues] == ["未分级", "未分级"]
 
 
 # ============ static_analyzer Finding v3 字段 ============

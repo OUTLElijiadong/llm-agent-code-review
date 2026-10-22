@@ -6,6 +6,7 @@ import pytest
 
 from app.ai.scoring import score_risk_level
 from app.services import pentest_service, sandbox_service
+from app.services.domain_report_exporter import build_pentest_report_markdown, score_section_lines
 
 VECTOR_HIGH = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
 
@@ -109,3 +110,65 @@ def test_sandbox_export_score_section_uses_saved_composite_once_and_exposes_qual
     assert f"综合风险评级：{breakdown['risk_level']}" in lines
     assert f"执行质量分：40；依据：{sandbox_service.SANDBOX_SCORE_VERSION}。" in lines
     assert breakdown["score"] <= 40
+
+
+def test_cvss_score_section_exports_weight_vectors_and_ungraded_count():
+    breakdown = {
+        "policy_version": "cvss-weighted-v1",
+        "score_label": "平台综合分（非 CVSS 官方综合分）",
+        "cvss_standard": "CVSS 3.1（FIRST）",
+        "cvss_vectors": [VECTOR_HIGH],
+        "cvss_reason": "部分发现缺少有效向量，综合分受原规则分上限约束",
+        "components": {
+            "cvss": {
+                "weight": 0.7, "max_base_score": 9.8,
+                "scored_findings": 1, "unscored_findings": 1,
+            },
+            "quality": {"weight": 0.3},
+        },
+    }
+    lines = score_section_lines(42, available=True, score_breakdown=breakdown)
+
+    assert "CVSS 权重：70%" in lines
+    assert f"CVSS 向量：{VECTOR_HIGH}" in lines
+    assert "CVSS 最高基础分：9.8 / 10" in lines
+    assert "原规则质量分权重：30%" in lines
+    assert "CVSS 已评分发现：1 项" in lines
+    assert "CVSS 未评分发现：1 项" in lines
+
+
+def test_pentest_export_recalculates_cvss_score_from_vector():
+    markdown = build_pentest_report_markdown(
+        {
+            "scope": {"remote_target_url": "https://example.test"},
+            "findings": [{
+                "title": "访问控制缺失", "severity": "高", "status": "confirmed",
+                "cvss_score": 8.1, "cvss_vector": VECTOR_HIGH,
+            }],
+        },
+        task_name="授权测试", project_name="项目", execution_status="completed",
+        error_message=None, coverage={"coverage_status": "complete"},
+    )
+
+    assert "CVSS 基础分：9.8 / 10" in markdown
+    assert f"CVSS 向量：{VECTOR_HIGH}" in markdown
+    assert "CVSS 基础分：8.1 / 10" not in markdown
+
+
+@pytest.mark.parametrize("vector", [None, "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:INVALID"])
+def test_pentest_export_does_not_trust_score_without_valid_vector(vector):
+    markdown = build_pentest_report_markdown(
+        {
+            "scope": {"remote_target_url": "https://example.test"},
+            "findings": [{
+                "title": "访问控制缺失", "severity": "高", "status": "confirmed",
+                "cvss_score": 8.1, "cvss_vector": vector,
+            }],
+        },
+        task_name="授权测试", project_name="项目", execution_status="completed",
+        error_message=None, coverage={"coverage_status": "complete"},
+    )
+
+    assert "CVSS 基础分：未评分" in markdown
+    assert "CVSS 向量：" not in markdown
+    assert "CVSS 基础分：8.1 / 10" not in markdown
