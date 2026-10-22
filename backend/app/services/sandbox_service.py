@@ -10121,7 +10121,113 @@ def get_artifact_download(
         raise RuntimeError("沙箱制品内容损坏") from exc
     if len(content) != row.byte_size or not hmac.compare_digest(hashlib.sha256(content).hexdigest(), row.sha256):
         raise RuntimeError("沙箱制品完整性校验失败")
+    if row.artifact_type == "review_report":
+        content = _supplement_legacy_sandbox_report_score(db, environment, content)
     return content, row.file_name, row.mime_type
+
+
+def _supplement_legacy_sandbox_report_score(
+    db: Session,
+    environment: "SandboxEnvironment",
+    artifact_content: bytes,
+) -> bytes:
+    """Add the current saved score section to a legacy download without rewriting its artifact."""
+    try:
+        markdown = artifact_content.decode("utf-8")
+    except UnicodeDecodeError:
+        return artifact_content
+    if re.search(r"(?m)^##\s+评分与结论\s*$", markdown):
+        return artifact_content
+
+    from app.models.review_report import ReviewReport
+    from app.models.review_task import ReviewTask
+    from app.services.domain_report_exporter import insert_section_after_task_info, score_section_lines
+
+    tasks = (
+        db.query(ReviewTask)
+        .filter(
+            ReviewTask.task_name.in_(_sandbox_report_task_names(environment)),
+            ReviewTask.review_type == "sandbox_test",
+            ReviewTask.user_id == environment.owner_id,
+            ReviewTask.project_id == environment.project_id,
+        )
+        .all()
+    )
+    if len(tasks) != 1:
+        reason = (
+            "未评估：无可核验关联；按沙箱名称和所属项目未能唯一关联到一条评分任务，"
+            "因此不能确认该制品对应的评分。"
+        )
+        section = score_section_lines(None, available=False, reason=reason)
+        return insert_section_after_task_info(markdown, section).encode("utf-8")
+    task = tasks[0]
+    report = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
+    snapshot = report.content_json if report and isinstance(report.content_json, dict) else {}
+    if (
+        snapshot.get("source") != "sandbox_test"
+        or snapshot.get("public_id") != environment.public_id
+        or snapshot.get("report_md") != markdown
+    ):
+        reason = (
+            "未评估：无可核验关联；未找到与当前沙箱及该制品内容完全匹配的报告快照，"
+            "无法确认评分依据。"
+        )
+        section = score_section_lines(None, available=False, reason=reason)
+        return insert_section_after_task_info(markdown, section).encode("utf-8")
+
+    coverage = snapshot.get("coverage") if isinstance(snapshot.get("coverage"), dict) else {}
+    breakdown = task.score_breakdown if isinstance(task.score_breakdown, dict) else {}
+    sample = snapshot.get("score_sample")
+    if not isinstance(sample, dict):
+        sample = breakdown.get("sample") if isinstance(breakdown.get("sample"), dict) else {}
+    from app.services.report_service import _sandbox_rule_score_available
+
+    score = task.score
+    available = (
+        _sandbox_rule_score_available(task)
+        and isinstance(score, int)
+        and not isinstance(score, bool)
+        and 0 <= score <= 100
+    )
+    if available:
+        snapshot_score = snapshot.get("score")
+        if (
+            isinstance(snapshot_score, int)
+            and not isinstance(snapshot_score, bool)
+            and snapshot_score != score
+        ):
+            available = False
+            score = None
+
+    coverage_status = str(coverage.get("coverage_status") or "unknown").strip().lower()
+    scope_label = (
+        "完整覆盖"
+        if coverage_status in {"complete", "completed", "verified"}
+        else "仅覆盖已验证范围"
+    )
+    reason = str(
+        coverage.get("score_unavailable_reason")
+        or breakdown.get("unavailable_reason")
+        or "历史报告未保存可核验评分依据"
+    )
+    rule = str(sample.get("rule") or snapshot.get("score_basis") or breakdown.get("score_source") or "")
+    issue_summary = snapshot.get("report_issue_summary")
+    if not isinstance(issue_summary, dict):
+        issue_summary = {}
+    finding_count = issue_summary.get("total")
+    if not isinstance(finding_count, int) or isinstance(finding_count, bool) or finding_count < 0:
+        finding_count = None
+    severity_counts = issue_summary.get("severity_counts")
+    section = score_section_lines(
+        score,
+        available=available,
+        scope_label=scope_label,
+        reason=reason,
+        rule=rule,
+        finding_count=finding_count,
+        severity_counts=severity_counts if isinstance(severity_counts, dict) else None,
+    )
+    return insert_section_after_task_info(markdown, section).encode("utf-8")
 
 
 def stop_environment(db: Session, actor: User, public_id: str) -> dict[str, Any]:

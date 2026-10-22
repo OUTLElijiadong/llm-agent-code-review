@@ -159,6 +159,7 @@ def _sandbox_artifact(db, owner, project, task):
         runtime="runsc",
         image_ref="synthetic",
         purpose="test",
+        test_mode="whitebox",
         language="python",
         resource_policy_json="{}",
         agent_config_json="{}",
@@ -166,6 +167,7 @@ def _sandbox_artifact(db, owner, project, task):
     )
     db.add(environment)
     db.flush()
+    task.task_name = f"沙箱白盒测试 · {environment.public_id}"
     content = REPORT_MD.encode("utf-8")
     artifact = SandboxArtifact(
         environment_id=environment.id,
@@ -873,6 +875,42 @@ def test_sandbox_export_links_to_integrity_checked_native_artifact(export_contex
     client, db, owner, other, project, current = export_context
     task = _domain_fixture(db, owner, project, "sandbox_test")
     environment, artifact = _sandbox_artifact(db, owner, project, task)
+    snapshot = db.query(ReviewReport).filter(ReviewReport.task_id == task.id).first()
+    task.score = 82
+    task.score_version = "sandbox-check-pass-rate-v1"
+    task.coverage = {
+        **task.coverage,
+        "coverage_status": "partial",
+        "score_available": True,
+        "score_basis": "sandbox-check-pass-rate-v1",
+        "score_sample": {
+            "rule": "验证分 = 100 × 已执行检查项得分之和 ÷ 已执行检查项数",
+        },
+    }
+    snapshot.content_json = {
+        **snapshot.content_json,
+        "score": 82,
+        "score_available": True,
+        "score_basis": "sandbox-check-pass-rate-v1",
+        "score_sample": {
+            "rule": "验证分 = 100 × 已执行检查项得分之和 ÷ 已执行检查项数",
+        },
+        "coverage": {"verification_status": "complete", "coverage_status": "partial"},
+        "report_issue_summary": {"total": 1, "severity_counts": {"高": 1}},
+    }
+    task.score_breakdown = {
+        "score": 82,
+        "score_available": True,
+        "score_source": "sandbox-check-pass-rate-v1",
+        "sample": snapshot.content_json["score_sample"],
+    }
+    db.commit()
+    from app.services.sandbox_service import _sandbox_report_task_names
+    assert task.task_name in _sandbox_report_task_names(environment)
+    assert snapshot.content_json["public_id"] == environment.public_id
+    assert snapshot.content_json["report_md"] == REPORT_MD
+    original_hash = artifact.sha256
+    original_size = artifact.byte_size
     response = client.get(f"/api/reports/tasks/{task.id}/export?format=json")
 
     assert response.status_code == 200
@@ -880,8 +918,79 @@ def test_sandbox_export_links_to_integrity_checked_native_artifact(export_contex
     assert native["download_api"] == f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}"
     downloaded = client.get(native["download_api"])
     assert downloaded.status_code == 200
-    assert downloaded.content.decode("utf-8") == REPORT_MD
+    downloaded_text = downloaded.content.decode("utf-8")
+    assert "## 评分与结论" in downloaded_text
+    assert "评分：82 / 100" in downloaded_text
+    assert "评分范围：仅覆盖已验证范围" in downloaded_text
+    assert "结论：已测范围内记录 1 项发现（高 1 项）" in downloaded_text
     assert hashlib.sha256(downloaded.content).hexdigest() == native["sha256"]
+    assert native["artifact_sha256"] == original_hash
+    db.refresh(artifact)
+    assert artifact.sha256 == original_hash and artifact.byte_size == original_size
+    assert base64.b64decode(artifact.content_base64) == REPORT_MD.encode("utf-8")
+    assert snapshot.content_json["report_md"] == REPORT_MD
+
+
+def test_legacy_sandbox_download_marks_missing_score_unassessed_without_mutating_artifact(export_context):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test", status="failed")
+    environment, artifact = _sandbox_artifact(db, owner, project, task)
+    original_hash = artifact.sha256
+    original_content = base64.b64decode(artifact.content_base64)
+
+    downloaded = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
+
+    assert downloaded.status_code == 200
+    text = downloaded.content.decode("utf-8")
+    assert "## 评分与结论" in text
+    assert "评分：未评估" in text
+    assert "不出分原因：" in text
+    assert "评分：0 / 100" not in text
+    db.refresh(artifact)
+    assert artifact.sha256 == original_hash
+    assert artifact.byte_size == len(original_content)
+    assert base64.b64decode(artifact.content_base64) == original_content
+
+
+@pytest.mark.parametrize("association", ["no_task", "ambiguous_tasks", "snapshot_mismatch"])
+def test_legacy_sandbox_download_adds_unassessed_section_without_verified_link(
+    export_context, association
+):
+    client, db, owner, _other, project, _current = export_context
+    task = _domain_fixture(db, owner, project, "sandbox_test")
+    environment, artifact = _sandbox_artifact(db, owner, project, task)
+    environment.public_id = "sbx_5fd4a253ec1543de8a7d8a91"
+    task.task_name = f"沙箱白盒测试 · {environment.public_id}"
+    if association == "no_task":
+        task.task_name = "unassociated historical task"
+    elif association == "ambiguous_tasks":
+        duplicate = ReviewTask(
+            user_id=owner.id,
+            project_id=project.id,
+            task_name=task.task_name,
+            review_type="sandbox_test",
+            status="success",
+            score=100,
+            coverage={"score_available": True, "coverage_status": "complete"},
+        )
+        db.add(duplicate)
+    db.commit()
+    original_content = base64.b64decode(artifact.content_base64)
+    original_hash = artifact.sha256
+
+    response = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
+
+    assert response.status_code == 200
+    text = response.content.decode("utf-8")
+    assert text.startswith(original_content.decode("utf-8").rstrip())
+    assert "## 评分与结论" in text
+    assert "评分：未评估" in text
+    assert "未评估：无可核验关联" in text
+    assert "评分：100 / 100" not in text
+    db.refresh(artifact)
+    assert artifact.sha256 == original_hash
+    assert artifact.byte_size == len(original_content)
+    assert base64.b64decode(artifact.content_base64) == original_content
 
 
 @pytest.mark.parametrize("task_status", ["success", "failed"])
@@ -956,14 +1065,21 @@ def test_sandbox_report_artifact_requires_report_scope_and_view_permission(expor
     assert report_item["download_allowed"] is True
     owner_with_view_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
     assert owner_with_view_download.status_code == 200
-    assert owner_with_view_download.content.decode("utf-8") == REPORT_MD
+    owner_report = owner_with_view_download.content.decode("utf-8")
+    assert owner_report.startswith(REPORT_MD.rstrip())
+    assert "## 评分与结论" in owner_report
+    assert "评分：未评估" in owner_report
+    assert "不出分原因：" in owner_report
 
     current["user"] = owner
     admin_environment = client.get(f"/api/sandboxes/{environment.public_id}")
     assert any(item["artifact_type"] == "review_report" for item in admin_environment.json()["data"]["artifacts"])
     admin_download = client.get(f"/api/sandboxes/{environment.public_id}/artifacts/{artifact.id}")
     assert admin_download.status_code == 200
-    assert admin_download.content.decode("utf-8") == REPORT_MD
+    admin_report = admin_download.content.decode("utf-8")
+    assert admin_report.startswith(REPORT_MD.rstrip())
+    assert "## 评分与结论" in admin_report
+    assert "评分：未评估" in admin_report
 
 
 @pytest.mark.parametrize("source", ["sandbox_test", "pentest"])

@@ -21,6 +21,7 @@ from app.services import (
     agent_knowledge_service,
     agent_scheduler_runtime,
     agent_supervisor_service,
+    agent_team_service,
     approval_service,
     policy_engine,
     rollback_service,
@@ -152,6 +153,16 @@ def test_supervisor_classifies_team_members_by_capability_and_external_scope():
         },
     }
     assert agent_supervisor_service.review_agent_team_plan(approved_payload)["plan_sha256"] == high["plan_sha256"]
+
+
+def test_supervisor_rejects_task_referencing_missing_member_as_input_error():
+    with pytest.raises(agent_team_service.AgentTeamValidationError,
+                       match="任务 summary 引用不存在成员 missing_summarizer"):
+        agent_supervisor_service.review_agent_team_plan({
+            "members": [{"member_key": "reviewer", "address": "agent:code_reviewer", "role": "worker"}],
+            "tasks": [{"task_key": "summary", "member_key": "missing_summarizer", "title": "汇总",
+                       "instructions": "汇总静态审查结果", "input": {}}],
+        })
 
 
 def test_supervisor_rejects_unverified_success_result():

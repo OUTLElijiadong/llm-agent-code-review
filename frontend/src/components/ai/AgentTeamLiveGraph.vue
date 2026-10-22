@@ -47,8 +47,9 @@ const short = (text: string, size = 18) => text.length > size ? `${text.slice(0,
   <section v-if="teams.length || forming" class="agent-team-live" aria-label="实时团队星图">
     <header class="live-heading">
       <strong>团队实时星图</strong>
+      <span v-if="forming" role="status">{{ teams.length ? '正在组建新团队 · 新成员以服务端账本确认为准' : '正在组建团队 · 等待服务端确认成员' }}</span>
       <span v-if="teams.length" role="status">{{ memberCount }} 个子 Agent · {{ runningCount }} 个执行中</span>
-      <span v-else role="status">正在组建团队 · 等待服务端确认成员</span>
+      <span v-else-if="!forming" role="status">等待团队账本更新</span>
     </header>
     <p v-if="error" class="live-error" role="status">{{ error }}，保留上次确认的进度</p>
     <div v-for="graph in graphs" :key="graph.team.team_id" class="live-team">

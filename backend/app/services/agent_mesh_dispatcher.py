@@ -153,6 +153,17 @@ def _readonly_team_task(data: dict[str, Any]) -> bool:
     )
 
 
+def _authorized_static_review_operation(data: dict[str, Any]) -> bool:
+    """只将本地代码审查/圆桌操作从描述型只读拦截中豁免。"""
+
+    if str(data.get("operation") or "").casefold() not in {"run_review", "start_roundtable"}:
+        return False
+    return not any(
+        str(data.get(key) or "").strip()
+        for key in ("remote_target_url", "target_url", "external_target_url")
+    )
+
+
 def _ctx(message: dict[str, Any]) -> AgentContext:
     context = message.get("context") if isinstance(message.get("context"), dict) else {}
     data = _payload(message)
@@ -869,7 +880,9 @@ def _runtime_handler(
     if code == "review_orchestrator":
         operation = str(data.get("operation") or "list")
         if operation == "run_review":
-            if not trusted_team_execution or _readonly_team_task(data):
+            if not trusted_team_execution or (
+                _readonly_team_task(data) and not _authorized_static_review_operation(data)
+            ):
                 return _result("approval_required", "正式团队审查必须由小菱通过有效团队租约发起")
             from app.core.permission_codes import PermissionCode
 
@@ -885,7 +898,9 @@ def _runtime_handler(
                 review_type=str(data.get("review_type") or "full"), task_name=str(data.get("task_name") or ""),
             )
         if operation == "start_roundtable":
-            if not trusted_team_execution or _readonly_team_task(data):
+            if not trusted_team_execution or (
+                _readonly_team_task(data) and not _authorized_static_review_operation(data)
+            ):
                 return _result("approval_required", "圆桌讨论必须由小菱通过有效团队租约发起")
             from app.core.permission_codes import PermissionCode
 

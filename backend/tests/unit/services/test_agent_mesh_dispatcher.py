@@ -68,6 +68,87 @@ def test_unclassified_review_failure_is_not_replayed_as_same_source():
     assert mesh_result["retryable"] is False
 
 
+@pytest.mark.parametrize("operation", ["run_review", "start_roundtable"])
+def test_static_review_operation_is_not_blocked_by_readonly_task_marker(operation):
+    data = {
+        "operation": operation,
+        "execution_mode": "read_only",
+        "instructions": "只读静态分析当前账号可见源码",
+    }
+    assert agent_mesh_dispatcher._readonly_team_task(data) is True
+    assert agent_mesh_dispatcher._authorized_static_review_operation(data) is True
+
+
+@pytest.mark.parametrize("target_field", ["remote_target_url", "target_url", "external_target_url"])
+def test_static_review_operation_does_not_bypass_remote_target_guard(target_field):
+    data = {
+        "operation": "start_roundtable",
+        "execution_mode": "read_only",
+        target_field: "https://external.example/target",
+    }
+    assert agent_mesh_dispatcher._authorized_static_review_operation(data) is False
+
+
+@pytest.mark.parametrize("data", [
+    {"operation": "run_project_tests", "execution_mode": "read_only", "instructions": "只读静态分析"},
+    {"operation": "restart_service", "execution_mode": "read_only", "instructions": "只读静态分析"},
+])
+def test_readonly_task_guard_remains_for_non_static_or_remote_operations(data):
+    assert agent_mesh_dispatcher._readonly_team_task(data) is True
+    assert agent_mesh_dispatcher._authorized_static_review_operation(data) is False
+
+
+@pytest.mark.parametrize("trusted_team_execution", [True, False])
+def test_readonly_roundtable_dispatch_requires_trusted_team_and_reaches_start_service(
+    monkeypatch, trusted_team_execution
+):
+    from app.agents import orchestrator
+    from app.services import agent_team_review
+
+    calls = []
+    monkeypatch.setattr(orchestrator, "get_request_orchestrator", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(agent_mesh_dispatcher, "_require_runtime_permissions", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        agent_team_review,
+        "run_team_roundtable",
+        lambda *_args, **kwargs: calls.append(kwargs) or {"status": "completed"},
+    )
+    message = {
+        "user_id": 7,
+        "trace_id": "readonly-roundtable-dispatch",
+        "message_id": "readonly-roundtable-message",
+        "payload": {
+            "operation": "start_roundtable",
+            "project_id": 13,
+            "file_id": 512,
+            "execution_mode": "read_only",
+            "instructions": "只读静态分析当前账号可见源码",
+        },
+        "context": {
+            "team_id": 41,
+            "agent_team_task_id": 52,
+            "lease_token": "server-issued-lease",
+        },
+    }
+
+    result = agent_mesh_dispatcher._runtime_handler(
+        object(), SimpleNamespace(id=7), "review_orchestrator", message,
+        trusted_team_execution=trusted_team_execution,
+    )
+
+    if trusted_team_execution:
+        assert result == {"status": "completed"}
+        assert len(calls) == 1
+        assert calls[0]["project_id"] == 13
+        assert calls[0]["file_id"] == 512
+        assert calls[0]["team_id"] == 41
+        assert calls[0]["task_id"] == 52
+        assert calls[0]["lease_token"] == "server-issued-lease"
+    else:
+        assert result["status"] == "approval_required"
+        assert calls == []
+
+
 @pytest.mark.parametrize("failure_kind", ["billing_error", "usage_accounting_error"])
 def test_mesh_dispatch_prefers_canonical_nonretryable_error_over_unknown_top_level_kind(failure_kind):
     result = {

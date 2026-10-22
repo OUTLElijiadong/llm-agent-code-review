@@ -970,7 +970,7 @@ def get_domain_report_export(db: Session, user: User, task: ReviewTask, format: 
 def _sandbox_native_exports(db: Session, user: User, task: ReviewTask, content: dict) -> list[dict]:
     """只提供与报告快照一致、归属正确且通过原生完整性校验的 Markdown 制品。"""
     from app.models.agent_capability import SandboxArtifact, SandboxEnvironment
-    from app.services.sandbox_service import get_artifact_download
+    from app.services.sandbox_service import _supplement_legacy_sandbox_report_score, get_artifact_download
 
     public_id = content.get("public_id")
     if not isinstance(public_id, str) or not public_id:
@@ -982,12 +982,13 @@ def _sandbox_native_exports(db: Session, user: User, task: ReviewTask, content: 
     ).first()
     if environment is None:
         return []
-    expected = content["report_md"].encode("utf-8")
+    original = content["report_md"].encode("utf-8")
+    expected = _supplement_legacy_sandbox_report_score(db, environment, original)
     artifacts = db.query(SandboxArtifact).filter(
         SandboxArtifact.environment_id == environment.id,
         SandboxArtifact.artifact_type == "review_report",
-        SandboxArtifact.sha256 == hashlib.sha256(expected).hexdigest(),
-        SandboxArtifact.byte_size == len(expected),
+        SandboxArtifact.sha256 == hashlib.sha256(original).hexdigest(),
+        SandboxArtifact.byte_size == len(original),
     ).order_by(SandboxArtifact.id.desc()).all()
     for artifact in artifacts:
         try:
@@ -997,7 +998,8 @@ def _sandbox_native_exports(db: Session, user: User, task: ReviewTask, content: 
         if body == expected:
             return [{
                 "format": "markdown", "file_name": filename, "mime_type": mime_type,
-                "byte_size": len(body), "sha256": artifact.sha256,
+                "byte_size": len(body), "sha256": hashlib.sha256(body).hexdigest(),
+                "artifact_sha256": artifact.sha256,
                 "download_api": f"/api/sandboxes/{public_id}/artifacts/{artifact.id}",
             }]
     return []

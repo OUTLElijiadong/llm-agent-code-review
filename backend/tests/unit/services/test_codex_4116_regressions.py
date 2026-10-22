@@ -3,6 +3,8 @@
 import io
 import zipfile
 
+import pytest
+
 from app.services import agent_supervisor_service, sandbox_service
 
 
@@ -119,15 +121,21 @@ def test_team_roundtable_operation_is_allowed_and_runs_without_confirmation():
     assert review["needs_confirmation"] is False
 
 
-def test_readonly_team_cannot_start_roundtable():
-    import pytest
-
+@pytest.mark.parametrize("operation", ["run_review", "start_roundtable"])
+def test_readonly_team_can_start_authorized_static_review_operation(operation):
     from app.services import agent_team_service
 
-    payload = _roundtable_plan({"operation": "start_roundtable", "project_id": 1, "file_id": 2},
-                               objective="只读核对已有审查结果")
-    with pytest.raises(agent_team_service.AgentTeamValidationError):
-        agent_team_service._normalize_task_inputs(payload)
+    payload = _roundtable_plan({"operation": "start_roundtable", "project_id": 13, "file_id": 512},
+                               objective="只读静态审查当前账号可见源码")
+    payload.tasks[0].input["operation"] = operation
+    if operation == "run_review":
+        payload.tasks[0].input.pop("file_id")
+        payload.tasks[0].input["file_ids"] = [512]
+    normalized = agent_team_service._normalize_task_inputs(payload)
+
+    assert normalized.tasks[0].input["operation"] == operation
+    review = agent_supervisor_service.review_agent_team_plan(normalized.model_dump())
+    assert review["needs_confirmation"] is False
 
 
 class _Row:
@@ -197,13 +205,14 @@ def _patch_roundtable(monkeypatch, *, raw, row, lease_ok=lambda: True):
     return task, calls
 
 
-def _run_roundtable(row):
+def _run_roundtable(row, *, project_id=1, file_id=2):
     from types import SimpleNamespace
 
     from app.services import agent_team_review
 
     return agent_team_review.run_team_roundtable(
-        _FakeDb(row), SimpleNamespace(id=7), team_id=1, task_id=2, lease_token="t", project_id=1, file_id=2,
+        _FakeDb(row), SimpleNamespace(id=7), team_id=1, task_id=2, lease_token="t",
+        project_id=project_id, file_id=file_id,
     )
 
 
@@ -221,6 +230,19 @@ def test_team_roundtable_completes_only_when_concluded(monkeypatch):
 
     row.status = "partial"
     assert _run_roundtable(row)["status"] == "failed"
+
+
+def test_readonly_static_roundtable_reaches_real_start_path(monkeypatch):
+    raw = {"operation": "start_roundtable", "project_id": 13, "file_id": 512,
+           "execution_mode": "read_only"}
+    row = _Row("concluded")
+    task, calls = _patch_roundtable(monkeypatch, raw=raw, row=row)
+    task.instructions = "只读静态分析项目源码并形成圆桌结论"
+
+    result = _run_roundtable(row, project_id=13, file_id=512)
+
+    assert result["status"] == "completed"
+    assert calls["start"] == calls["launch"] == 1
 
 
 def test_team_roundtable_retry_reuses_session(monkeypatch):

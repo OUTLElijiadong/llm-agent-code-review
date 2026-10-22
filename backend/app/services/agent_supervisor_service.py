@@ -119,6 +119,9 @@ def review_action(
 
 def review_agent_team_plan(payload: Mapping[str, Any]) -> dict[str, Any]:
     """审阅小菱拟创建的团队工作图，返回稳定摘要及高风险任务列表。"""
+    from app.services.agent_team_service import validate_task_member_references
+
+    validate_task_member_references(payload)
     members = payload.get("members") if isinstance(payload.get("members"), list) else []
     tasks = payload.get("tasks") if isinstance(payload.get("tasks"), list) else []
     member_by_key = {

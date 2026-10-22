@@ -558,7 +558,7 @@ class DeepSeekResponsesRuntime:
         *,
         reason: str = "用户拒绝执行该操作",
     ) -> RuntimeResult:
-        """拒绝精确调用，并把拒绝结果回灌模型继续判断。"""
+        """拒绝精确调用并终止本轮，避免模型把拒绝改写为重新授权请求。"""
         lock = self._locks.setdefault(run_id, asyncio.Lock())
         async with lock:
             preview = await self._require_checkpoint(run_id)
@@ -585,16 +585,27 @@ class DeepSeekResponsesRuntime:
                 await self._store.save(checkpoint)
                 return self._result(checkpoint)
             checkpoint.pending = None
-            checkpoint.status = RUNNING
+            checkpoint.status = COMPLETED
+            checkpoint.output_text = "已按你的拒绝决定停止本轮执行；该操作未执行、未重试，也不会再次请求授权。"
             checkpoint.transcript.append(
                 _function_call_output(
                     pending.call.call_id,
                     {"status": "rejected", "error": reason},
                 )
             )
+            for call in pending.remaining_calls:
+                checkpoint.transcript.append(
+                    _function_call_output(
+                        call.call_id,
+                        {
+                            "status": "not_executed",
+                            "error": "本轮已有审批被拒绝；该调用未执行。",
+                        },
+                    )
+                )
+            checkpoint.transcript.append(_assistant_message_item(checkpoint.output_text))
             await self._store.save(checkpoint)
-            paused = await self._process_calls(checkpoint, pending.remaining_calls)
-            return paused or await self._drive(checkpoint)
+            return self._result(checkpoint)
 
     async def answer(
         self,

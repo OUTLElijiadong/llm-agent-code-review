@@ -990,6 +990,7 @@ def _build_scope_lines(context: Dict[str, Any]) -> List[str]:
             lines.append("覆盖完整性：未知，未记录，不能据此判定完整覆盖。")
     else:
         lines.append("覆盖记录：未记录，不能据此判定完整覆盖。")
+    lines.append("覆盖状态说明：反映本次任务记录的范围口径，不应单独解读为逐行语义审查完整。")
 
     stats = context["statistics"]
     if stats.get("refuted_issue_count"):

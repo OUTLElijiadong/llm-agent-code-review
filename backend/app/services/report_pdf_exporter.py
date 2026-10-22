@@ -16,15 +16,18 @@ from __future__ import annotations
 
 import re
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
 
+import reportlab
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     HRFlowable,
     KeepTogether,
@@ -53,6 +56,7 @@ from app.services.report_markdown import markdown_to_blocks, parse_markdown_bloc
 
 # 中文字体名称(ReportLab 内置 CID 字体,无需额外字体文件)
 _CHINESE_FONT_NAME: str = "STSong-Light"
+_LATIN_FONT_NAME: str = "Vera"
 
 # 严重度 → 颜色映射(ReportLab colors 对象)
 _SEVERITY_COLORS: Dict[str, colors.Color] = {
@@ -97,8 +101,63 @@ def _ensure_chinese_font() -> str:
         pdfmetrics.getFont(_CHINESE_FONT_NAME)
     except KeyError:
         pdfmetrics.registerFont(UnicodeCIDFont(_CHINESE_FONT_NAME))
+    vera_font_dir = Path(reportlab.__file__).parent / "fonts"
+    for font_name, filename in (
+        (_LATIN_FONT_NAME, "Vera.ttf"),
+        ("Vera-Bold", "VeraBd.ttf"),
+        ("Vera-Italic", "VeraIt.ttf"),
+        ("Vera-BoldItalic", "VeraBI.ttf"),
+    ):
+        try:
+            pdfmetrics.getFont(font_name)
+        except KeyError:
+            pdfmetrics.registerFont(TTFont(font_name, str(vera_font_dir / filename)))
+    pdfmetrics.registerFontFamily(
+        _LATIN_FONT_NAME,
+        normal=_LATIN_FONT_NAME,
+        bold="Vera-Bold",
+        italic="Vera-Italic",
+        boldItalic="Vera-BoldItalic",
+    )
     _font_registered = True
     return _CHINESE_FONT_NAME
+
+
+def _with_cjk_fallback(markup: str) -> str:
+    """Keep Latin metrics on a standard font and use the CID font only for CJK text."""
+    pieces: List[str] = []
+    active_fonts: List[str] = []
+    token_pattern = re.compile(r"<[^>]+>|&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);|[^<&]+|[<&]")
+    for match in token_pattern.finditer(markup):
+        token = match.group(0)
+        if token.startswith("<"):
+            if token.startswith("</font"):
+                if active_fonts:
+                    active_fonts.pop()
+            elif token.startswith("<font"):
+                font_match = re.search(r'name=[\"\']([^\"\']+)', token)
+                active_fonts.append(font_match.group(1) if font_match else "")
+            pieces.append(token)
+            continue
+        if token.startswith("&") or token in {"<", "&"}:
+            pieces.append(token)
+            continue
+        current_font = active_fonts[-1] if active_fonts else ""
+        if current_font == _CHINESE_FONT_NAME:
+            pieces.append(token)
+            continue
+        chunks = re.split(r"([^\x00-\x7f]+)", token)
+        pieces.extend(
+            f'<font name="{_CHINESE_FONT_NAME}">{chunk}</font>'
+            if chunk and not chunk.isascii() else chunk
+            for chunk in chunks
+        )
+    return "".join(pieces)
+
+
+def _paragraph(markup: str, style: ParagraphStyle, **kwargs: Any) -> Paragraph:
+    """Create a Paragraph with explicit Latin/CJK font fallback."""
+    return Paragraph(_with_cjk_fallback(markup), style, **kwargs)
 
 
 def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
@@ -115,32 +174,32 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
     styles: Dict[str, ParagraphStyle] = {
         "title": ParagraphStyle(
             "ReportTitle", parent=base["Title"],
-            fontName=font_name, fontSize=20, leading=28, spaceAfter=14,
+            fontName=_LATIN_FONT_NAME, fontSize=20, leading=28, spaceAfter=14,
             alignment=1,  # 居中
         ),
         "heading": ParagraphStyle(
             "ReportHeading", parent=base["Heading1"],
-            fontName=font_name, fontSize=15, leading=22, spaceBefore=14, spaceAfter=8,
+            fontName=_LATIN_FONT_NAME, fontSize=15, leading=22, spaceBefore=14, spaceAfter=8,
             textColor=colors.HexColor("#111827"),
         ),
         "subheading": ParagraphStyle(
             "ReportSubHeading", parent=base["Heading2"],
-            fontName=font_name, fontSize=12, leading=18, spaceBefore=10, spaceAfter=6,
+            fontName=_LATIN_FONT_NAME, fontSize=12, leading=18, spaceBefore=10, spaceAfter=6,
             textColor=colors.HexColor("#1F2937"),
         ),
         "normal": ParagraphStyle(
             "ReportNormal", parent=base["Normal"],
-            fontName=font_name, fontSize=10, leading=16,
+            fontName=_LATIN_FONT_NAME, fontSize=10, leading=16,
             textColor=colors.HexColor("#374151"),
         ),
         "table_header": ParagraphStyle(
             "ReportTableHeader", parent=base["Normal"],
-            fontName=font_name, fontSize=10, leading=16,
+            fontName=_LATIN_FONT_NAME, fontSize=10, leading=16,
             textColor=colors.whitesmoke,
         ),
         "table_cell": ParagraphStyle(
             "ReportTableCell", parent=base["Normal"],
-            fontName=font_name, fontSize=9, leading=13,
+            fontName=_LATIN_FONT_NAME, fontSize=9, leading=13,
             textColor=colors.HexColor("#374151"),
         ),
         "code": ParagraphStyle(
@@ -152,7 +211,7 @@ def _build_styles(font_name: str) -> Dict[str, ParagraphStyle]:
         ),
         "quote": ParagraphStyle(
             "ReportQuote", parent=base["Normal"],
-            fontName=font_name, fontSize=10, leading=16,
+            fontName=_LATIN_FONT_NAME, fontSize=10, leading=16,
             textColor=colors.HexColor("#4B5563"),
             leftIndent=12, borderColor=colors.HexColor("#CBD5E1"),
             borderWidth=1, borderPadding=6, spaceBefore=3, spaceAfter=6,
@@ -188,13 +247,13 @@ def _build_summary_markdown_elements(markdown: str, styles: Dict[str, ParagraphS
         if kind == "heading":
             level = int(block.get("level") or 2)
             style = styles["heading"] if level <= 2 else styles["subheading"]
-            elements.append(Paragraph(_summary_inline_markup(block["runs"]), style))
+            elements.append(_paragraph(_summary_inline_markup(block["runs"]), style))
         elif kind == "paragraph":
-            elements.append(Paragraph(_summary_inline_markup(block["runs"]), styles["normal"]))
+            elements.append(_paragraph(_summary_inline_markup(block["runs"]), styles["normal"]))
         elif kind in {"unordered_list", "ordered_list"}:
             for index, item in enumerate(block["items"], start=1):
                 bullet = "•" if kind == "unordered_list" else f"{index}."
-                elements.append(Paragraph(
+                elements.append(_paragraph(
                     _summary_inline_markup(item), styles["normal"], bulletText=bullet,
                 ))
         elif kind == "table":
@@ -202,7 +261,7 @@ def _build_summary_markdown_elements(markdown: str, styles: Dict[str, ParagraphS
             if rows:
                 data = [
                     [
-                        Paragraph(
+                        _paragraph(
                             _summary_inline_markup(cell),
                             styles["table_header"] if row_index == 0 else styles["normal"],
                         )
@@ -224,10 +283,10 @@ def _build_summary_markdown_elements(markdown: str, styles: Dict[str, ParagraphS
                 elements.append(table)
                 elements.append(Spacer(1, 3 * mm))
         elif kind == "quote":
-            elements.append(Paragraph(_summary_inline_markup(block["runs"]), styles["quote"]))
+            elements.append(_paragraph(_summary_inline_markup(block["runs"]), styles["quote"]))
         elif kind == "code":
             code_text = escape(str(block.get("text") or "")).replace("\n", "<br/>")
-            elements.append(Paragraph(code_text or " ", styles["code"]))
+            elements.append(_paragraph(code_text or " ", styles["code"]))
         elif kind == "rule":
             elements.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#CBD5E1")))
     return elements
@@ -309,7 +368,7 @@ def _append_markdown_elements(
                     if row_index == 0:
                         markup = f"<b>{markup}</b>"
                     style = styles["table_header"] if row_index == 0 else styles["table_cell"]
-                    cells.append(Paragraph(markup or " ", style))
+                    cells.append(_paragraph(markup or " ", style))
                 data.append(cells)
             available_width = A4[0] - 36 * mm
             table = Table(
@@ -334,12 +393,12 @@ def _append_markdown_elements(
             continue
         if block.kind == "heading":
             style = styles["heading"] if block.level <= 2 else styles["subheading"]
-            elements.append(Paragraph(reportlab_markup(block.segments), style))
+            elements.append(_paragraph(reportlab_markup(block.segments), style))
             continue
         if block.kind == "code":
             code = block.segments[0].text if block.segments else ""
             code_markup = escape(code.expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
-            elements.append(Paragraph(_code_markup(code_markup), styles["code"]))
+            elements.append(_paragraph(_code_markup(code_markup), styles["code"]))
             continue
         markup = reportlab_markup(
             block.segments,
@@ -354,9 +413,9 @@ def _append_markdown_elements(
             quote_style = ParagraphStyle(
                 f"ReportQuote{depth}", parent=styles["quote"], leftIndent=12 * depth,
             )
-            elements.append(Paragraph(markup, quote_style))
+            elements.append(_paragraph(markup, quote_style))
         else:
-            elements.append(Paragraph(markup, styles["normal"]))
+            elements.append(_paragraph(markup, styles["normal"]))
 
     if keep_final_quote and len(elements) >= initial_element_count + 2:
         previous, caveat = elements[-2:]
@@ -382,7 +441,7 @@ def _build_header_elements(
         List[Any]: PDF 元素列表(Paragraph / Spacer)。
     """
     elements: List[Any] = []
-    elements.append(Paragraph("代码审查报告", styles["title"]))
+    elements.append(_paragraph("代码审查报告", styles["title"]))
     elements.append(Spacer(1, 6 * mm))
 
     task_name = escape(str(task_info.get("task_name") or "未命名任务"))
@@ -391,15 +450,15 @@ def _build_header_elements(
     create_time = escape(str(task_info.get("create_time") or "-"))
     model_name = escape(str(task_info.get("model_name") or "-"))
 
-    elements.append(Paragraph(f"任务名称:{task_name}", styles["normal"]))
-    elements.append(Paragraph(f"所属项目:{project_name}", styles["normal"]))
-    elements.append(Paragraph(f"审查类型:{review_type}", styles["normal"]))
-    elements.append(Paragraph(f"审查模型:{model_name}", styles["normal"]))
-    elements.append(Paragraph(f"生成时间:{create_time}", styles["normal"]))
-    elements.append(Paragraph(f"综合评分:<b>{_format_score(score)}</b>", styles["normal"]))
-    elements.append(Paragraph(f"执行状态:{escape(report_status_label(task_info.get('status')))}", styles["normal"]))
+    elements.append(_paragraph(f"任务名称:{task_name}", styles["normal"]))
+    elements.append(_paragraph(f"所属项目:{project_name}", styles["normal"]))
+    elements.append(_paragraph(f"审查类型:{review_type}", styles["normal"]))
+    elements.append(_paragraph(f"审查模型:{model_name}", styles["normal"]))
+    elements.append(_paragraph(f"生成时间:{create_time}", styles["normal"]))
+    elements.append(_paragraph(f"综合评分:<b>{_format_score(score)}</b>", styles["normal"]))
+    elements.append(_paragraph(f"执行状态:{escape(report_status_label(task_info.get('status')))}", styles["normal"]))
     if task_info.get("error_message"):
-        elements.append(Paragraph(f"错误:{escape(str(task_info['error_message']))}", styles["normal"]))
+        elements.append(_paragraph(f"错误:{escape(str(task_info['error_message']))}", styles["normal"]))
     elements.append(Spacer(1, 4 * mm))
     return elements
 
@@ -418,7 +477,7 @@ def _build_summary_table(
         Table: ReportLab 表格对象,包含问题总数 / 各严重度数量 / 已修复数。
     """
     severity_count = statistics.get("severity_count", {})
-    table_data = [
+    raw_rows = [
         ["指标", "数值"],
         ["问题总数", str(statistics.get("total_issues", 0))],
         ["严重问题", str(severity_count.get("严重", 0))],
@@ -427,15 +486,23 @@ def _build_summary_table(
         ["低优先级问题", str(severity_count.get("低", 0))],
         ["已修复问题", str(statistics.get("fixed_count", 0))],
     ]
+    cell_style = _build_styles(font_name)
+    table_data = [
+        [
+            _paragraph(escape(value), cell_style["table_header" if row_index == 0 else "table_cell"])
+            for value in row
+        ]
+        for row_index, row in enumerate(raw_rows)
+    ]
     table = Table(table_data, colWidths=[120, 80])
     table.setStyle(TableStyle([
         # 表头样式
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("FONTNAME", (0, 0), (-1, 0), font_name),
+        ("FONTNAME", (0, 0), (-1, 0), _LATIN_FONT_NAME),
         ("FONTSIZE", (0, 0), (-1, 0), 11),
         # 数据行样式
-        ("FONTNAME", (0, 1), (-1, -1), font_name),
+        ("FONTNAME", (0, 1), (-1, -1), _LATIN_FONT_NAME),
         ("FONTSIZE", (0, 1), (-1, -1), 10),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -462,24 +529,24 @@ def _build_score_breakdown_elements(
             ("评分来源", breakdown.get("score_source") or "未提供", True),
         ]
         table_data: List[List[Any]] = [[
-            Paragraph("字段", styles["table_header"]),
-            Paragraph("值", styles["table_header"]),
+            _paragraph("字段", styles["table_header"]),
+            _paragraph("值", styles["table_header"]),
         ]]
         for label, value, _code_value in rows:
             table_data.append([
-                Paragraph(escape(str(label)), styles["table_cell"]),
-                Paragraph(escape(str(value)), styles["table_cell"]),
+                _paragraph(escape(str(label)), styles["table_cell"]),
+                _paragraph(escape(str(value)), styles["table_cell"]),
             ])
         table = Table(table_data, colWidths=[45 * mm, 120 * mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2937")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTNAME", (0, 0), (-1, -1), _LATIN_FONT_NAME),
             ("FONTSIZE", (0, 0), (-1, -1), 10),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
-        return [Paragraph("评分明细", styles["heading"]), table, Spacer(1, 4 * mm)]
+        return [_paragraph("评分明细", styles["heading"]), table, Spacer(1, 4 * mm)]
     weights = breakdown.get("weights") or {}
     counts = breakdown.get("counts") or {}
     deductions = breakdown.get("deductions") or {}
@@ -531,13 +598,13 @@ def _build_score_breakdown_elements(
         ))
 
     table_data: List[List[Any]] = [[
-        Paragraph("字段", styles["table_header"]),
-        Paragraph("值", styles["table_header"]),
+        _paragraph("字段", styles["table_header"]),
+        _paragraph("值", styles["table_header"]),
     ]]
     for label, value, code_value in rows:
         table_data.append([
-            Paragraph(escape(str(label)), styles["normal"]),
-            Paragraph(
+            _paragraph(escape(str(label)), styles["normal"]),
+            _paragraph(
                 _code_markup(escape(str(value)).replace("\n", "<br/>")) or "-",
                 styles["code"] if code_value else styles["normal"],
             ),
@@ -546,7 +613,7 @@ def _build_score_breakdown_elements(
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("FONTNAME", (0, 0), (-1, 0), font_name),
+        ("FONTNAME", (0, 0), (-1, 0), _LATIN_FONT_NAME),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
@@ -554,7 +621,7 @@ def _build_score_breakdown_elements(
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
     return [
-        Paragraph("评分明细", styles["heading"]),
+        _paragraph("评分明细", styles["heading"]),
         table,
         Spacer(1, 6 * mm),
     ]
@@ -593,19 +660,19 @@ def _build_decompilation_evidence_elements(
         ("制品", artifacts),
     ]
     table_data: List[List[Any]] = [[
-        Paragraph("字段", styles["table_header"]),
-        Paragraph("值", styles["table_header"]),
+        _paragraph("字段", styles["table_header"]),
+        _paragraph("值", styles["table_header"]),
     ]]
     for label, value in rows:
         table_data.append([
-            Paragraph(escape(str(label)), styles["normal"]),
-            Paragraph(_code_markup(escape(str(value))), styles["code"]),
+            _paragraph(escape(str(label)), styles["normal"]),
+            _paragraph(_code_markup(escape(str(value))), styles["code"]),
         ])
     table = Table(table_data, colWidths=[38 * mm, 132 * mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("FONTNAME", (0, 0), (-1, 0), font_name),
+        ("FONTNAME", (0, 0), (-1, 0), _LATIN_FONT_NAME),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
@@ -613,7 +680,7 @@ def _build_decompilation_evidence_elements(
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
     return [
-        Paragraph("反编译证据", styles["heading"]),
+        _paragraph("反编译证据", styles["heading"]),
         table,
         Spacer(1, 6 * mm),
     ]
@@ -646,14 +713,14 @@ def _build_issue_section(
         f'<font color="{color_hex}">[{severity}]</font> '
         f'{index}. {title}'
     )
-    elements.append(Paragraph(title_html, styles["subheading"]))
+    elements.append(_paragraph(title_html, styles["subheading"]))
 
     # 基本信息
     file_name = escape(str(issue.get("file_name") or "-"))
     line_number = issue.get("line_number") or "-"
     issue_type = escape(str(issue.get("issue_type") or "-"))
     cwe = escape(str(issue.get("cwe") or "-"))
-    elements.append(Paragraph(
+    elements.append(_paragraph(
         f"文件:{file_name} | 行号:{line_number} | 类型:{issue_type} | CWE:{cwe}",
         styles["normal"],
     ))
@@ -668,21 +735,21 @@ def _build_issue_section(
     if issue.get("cvss_source"):
         cvss_parts.append(f"评分来源：{cvss_source_label(issue.get('cvss_source'))}")
     if cvss_parts:
-        elements.append(Paragraph("<b>CVSS:</b>", styles["normal"]))
-        elements.append(Paragraph(escape("；".join(cvss_parts), {"&": "&amp;"}), styles["normal"]))
+        elements.append(_paragraph("<b>CVSS:</b>", styles["normal"]))
+        elements.append(_paragraph(escape("；".join(cvss_parts), {"&": "&amp;"}), styles["normal"]))
 
     source_parts = [f"发现来源：{discovery_source_label(issue.get('source'))}"]
     source_parts.append(f"独立确认数：{issue.get('confirmation_count') or 0}")
-    elements.append(Paragraph("<b>来源与确认:</b>", styles["normal"]))
-    elements.append(Paragraph(escape("；".join(source_parts), {"&": "&amp;"}), styles["normal"]))
+    elements.append(_paragraph("<b>来源与确认:</b>", styles["normal"]))
+    elements.append(_paragraph(escape("；".join(source_parts), {"&": "&amp;"}), styles["normal"]))
     fingerprint = escape(str(issue.get("finding_fingerprint") or "-"))
-    elements.append(Paragraph(f"<b>问题指纹:</b> {_code_markup(fingerprint)}", styles["normal"]))
+    elements.append(_paragraph(f"<b>问题指纹:</b> {_code_markup(fingerprint)}", styles["normal"]))
     source_details = issue.get("source_details")
     if source_details:
         from app.services.report_exporter import _format_scope_facts
 
         details_lines = _format_scope_facts({"source_details": source_details}, "source")
-        elements.extend(Paragraph(escape(line), styles["normal"]) for line in details_lines)
+        elements.extend(_paragraph(escape(line), styles["normal"]) for line in details_lines)
 
     if issue.get("aggregation_version"):
         trust_parts = [f"聚合版本：{issue.get('aggregation_version')}"]
@@ -690,42 +757,42 @@ def _build_issue_section(
         trust_parts.append(f"证据等级：{evidence_quality_label(issue.get('evidence_quality'))}")
         trust_parts.append(f"冲突状态：{conflict_status_label(issue.get('conflict_status'))}")
         trust_parts.append(f"人工复核：{human_review_status_label(issue.get('human_review_status'))}")
-        elements.append(Paragraph("<b>可信聚合:</b>", styles["normal"]))
-        elements.append(Paragraph(escape("；".join(trust_parts), {"&": "&amp;"}), styles["normal"]))
+        elements.append(_paragraph("<b>可信聚合:</b>", styles["normal"]))
+        elements.append(_paragraph(escape("；".join(trust_parts), {"&": "&amp;"}), styles["normal"]))
 
     status_parts = [f"状态：{finding_status_label(issue.get('status'))}"]
     status_parts.append(f"处理人：{issue.get('handled_by') or '-'}")
     status_parts.append(f"处理时间：{issue.get('handled_at') or '-'}")
     status_parts.append(f"更新时间：{issue.get('update_time') or '-'}")
-    elements.append(Paragraph("<b>处理状态:</b>", styles["normal"]))
-    elements.append(Paragraph(escape("；".join(status_parts), {"&": "&amp;"}), styles["normal"]))
+    elements.append(_paragraph("<b>处理状态:</b>", styles["normal"]))
+    elements.append(_paragraph(escape("；".join(status_parts), {"&": "&amp;"}), styles["normal"]))
 
     # 问题描述
     description = str(issue.get("description") or "")
     if description:
-        elements.append(Paragraph("<b>描述:</b>", styles["normal"]))
+        elements.append(_paragraph("<b>描述:</b>", styles["normal"]))
         _append_markdown_elements(elements, description, styles)
 
     evidence = issue.get("evidence") or ""
     if evidence:
         evidence_text = escape(str(evidence).expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
-        elements.append(Paragraph("<b>证据:</b>", styles["normal"]))
-        elements.append(Paragraph(_code_markup(evidence_text), styles["code"]))
+        elements.append(_paragraph("<b>证据:</b>", styles["normal"]))
+        elements.append(_paragraph(_code_markup(evidence_text), styles["code"]))
 
     exploit_scenario = str(issue.get("exploit_scenario") or "")
     if exploit_scenario:
-        elements.append(Paragraph("<b>攻击场景:</b>", styles["normal"]))
+        elements.append(_paragraph("<b>攻击场景:</b>", styles["normal"]))
         _append_markdown_elements(elements, exploit_scenario, styles)
 
     # 修复建议
     suggestion = str(issue.get("suggestion") or "")
     if suggestion:
-        elements.append(Paragraph("<b>修复建议:</b>", styles["normal"]))
+        elements.append(_paragraph("<b>修复建议:</b>", styles["normal"]))
         _append_markdown_elements(elements, suggestion, styles)
 
     remediation = str(issue.get("remediation") or "")
     if remediation:
-        elements.append(Paragraph("<b>详细修复:</b>", styles["normal"]))
+        elements.append(_paragraph("<b>详细修复:</b>", styles["normal"]))
         _append_markdown_elements(elements, remediation, styles)
 
     # 修复代码(Courier 字体)
@@ -733,17 +800,17 @@ def _build_issue_section(
     if fixed_code:
         # 转义 HTML 特殊字符并保留换行
         code_escaped = escape(str(fixed_code).expandtabs(4)).replace(" ", "&#160;").replace("\n", "<br/>")
-        elements.append(Paragraph("<b>修复代码:</b>", styles["normal"]))
-        elements.append(Paragraph(_code_markup(code_escaped), styles["code"]))
+        elements.append(_paragraph("<b>修复代码:</b>", styles["normal"]))
+        elements.append(_paragraph(_code_markup(code_escaped), styles["code"]))
 
     references = issue.get("references_json") or []
     if not isinstance(references, (list, tuple)):
         references = [references]
     if references:
-        elements.append(Paragraph("<b>参考:</b>", styles["normal"]))
+        elements.append(_paragraph("<b>参考:</b>", styles["normal"]))
         for reference in references:
             if reference:
-                elements.append(Paragraph(_code_markup(escape(str(reference))), styles["code"]))
+                elements.append(_paragraph(_code_markup(escape(str(reference))), styles["code"]))
 
     elements.append(Spacer(1, 4 * mm))
     return elements
@@ -766,13 +833,13 @@ def _build_issues_section(
         List[Any]: PDF 元素列表(章节标题 + 各分组 issue)。
     """
     elements: List[Any] = []
-    elements.append(Paragraph("问题详情", styles["heading"]))
+    elements.append(_paragraph("问题详情", styles["heading"]))
 
     grouped = _group_issues_by_severity(issues)
     has_any_issue = any(len(grouped[key]) > 0 for key in grouped)
 
     if not has_any_issue:
-        elements.append(Paragraph(empty_text, styles["normal"]))
+        elements.append(_paragraph(empty_text, styles["normal"]))
         return elements
 
     for severity in _SEVERITY_ORDER + ("其他",):
@@ -780,7 +847,7 @@ def _build_issues_section(
         if not group:
             continue
         color_hex = _severity_color(severity).hexval()
-        elements.append(Paragraph(
+        elements.append(_paragraph(
             f'<font color="{color_hex}">{severity}级问题({len(group)} 个)</font>',
             styles["subheading"],
         ))
@@ -844,14 +911,14 @@ def export_to_pdf(
     # 1. 报告头
     elements.extend(_build_header_elements(task_info, context.get("score", score), styles))
 
-    elements.append(Paragraph("审查范围与版本", styles["heading"]))
+    elements.append(_paragraph("审查范围与版本", styles["heading"]))
     for line in context["scope_lines"]:
-        elements.append(Paragraph(escape(line), styles["normal"]))
+        elements.append(_paragraph(escape(line), styles["normal"]))
 
     # 2. 总体评价
     summary_text = context.get("summary") or ""
     if summary_text:
-        elements.append(Paragraph("总体评价", styles["heading"]))
+        elements.append(_paragraph("总体评价", styles["heading"]))
         elements.extend(_build_summary_markdown_elements(str(summary_text), styles))
         elements.append(Spacer(1, 4 * mm))
 
@@ -861,7 +928,7 @@ def export_to_pdf(
     ))
 
     # 4. 统计摘要
-    elements.append(Paragraph("统计摘要", styles["heading"]))
+    elements.append(_paragraph("统计摘要", styles["heading"]))
     elements.append(_build_summary_table(statistics, font_name))
     elements.append(Spacer(1, 6 * mm))
 
@@ -877,7 +944,7 @@ def export_to_pdf(
     security_report = context.get("source", {}).get("security_report", {})
     security_markdown = security_report.get("report_md") if isinstance(security_report, dict) else None
     if isinstance(security_markdown, str) and security_markdown.strip():
-        elements.append(Paragraph("安全审计专项结果", styles["heading"]))
+        elements.append(_paragraph("安全审计专项结果", styles["heading"]))
         elements.extend(_build_summary_markdown_elements(security_markdown, styles))
 
     # 构建 PDF

@@ -85,8 +85,13 @@ def _finish_review(db, status="success", *, coverage_complete=True):
     db.commit()
 
 
-def test_team_creates_one_formal_review_freezes_input_and_reuses_on_retry(db, monkeypatch, review_team):
+@pytest.mark.parametrize("readonly", [False, True])
+def test_team_creates_one_formal_review_freezes_input_and_reuses_on_retry(db, monkeypatch, review_team, readonly):
     rows = review_team
+    if readonly:
+        rows.team.objective = "只读静态审查当前账号可见源码"
+        rows.task.instructions = "静态分析源码，不执行代码或测试"
+        db.commit()
     monkeypatch.setattr(agent_team_review.time, "sleep", lambda _: _finish_review(db))
 
     first = _run(db, rows)
@@ -404,12 +409,10 @@ def test_interrupted_team_review_resumes_only_unfinished_files_with_original_tas
     assert db.query(ReviewTask).count() == rows.thread.call_count == 1
 
 
-@pytest.mark.parametrize("mutation", ["readonly", "wrong_member", "wrong_operation", "wrong_project", "disabled"])
+@pytest.mark.parametrize("mutation", ["wrong_member", "wrong_operation", "wrong_project", "disabled"])
 def test_untrusted_scope_is_rejected_before_creating_review(db, review_team, mutation):
     rows = review_team
-    if mutation == "readonly":
-        rows.team.objective = "只读核对既有审查"
-    elif mutation == "wrong_member":
+    if mutation == "wrong_member":
         db.get(AgentTeamMember, rows.task.member_id).address = "agent:code_reviewer"
     elif mutation == "wrong_operation":
         rows.task.input_json = json.dumps({"operation": "list", "project_id": rows.project.id})
@@ -453,25 +456,21 @@ def test_default_selection_records_binary_and_empty_exclusions(db, monkeypatch, 
 
 
 @pytest.mark.parametrize("readonly", [False, True])
-def test_team_creation_preserves_run_review_contract_and_enforces_readonly(db, review_team, readonly):
+def test_team_creation_preserves_run_review_contract_for_static_analysis(db, review_team, readonly):
     rows = review_team
     payload = AgentTeamCreateIn.model_validate({
         "surface": "user", "session_id": "new-formal-session", "title": "正式团队",
-        "objective": "只读核对已有结果" if readonly else "正式并行审查",
+        "objective": "只读静态审查当前账号可见源码" if readonly else "正式并行审查",
         "members": [{"member_key": "coordinator", "display_name": "审查总指挥",
                      "address": "agent:review_orchestrator", "role": "worker"}],
         "tasks": [{"task_key": "formal-review", "member_key": "coordinator", "title": "正式审查",
                    "instructions": "检查代码", "input": {"operation": "run_review",
                                                         "project_id": rows.project.id, "review_type": "full"}}],
     })
-    if readonly:
-        with pytest.raises(agent_team_service.AgentTeamValidationError, match="只读"):
-            agent_team_service.create_team_from_xiaoling(db, rows.user, payload)
-    else:
-        created = agent_team_service.create_team_from_xiaoling(db, rows.user, payload)
-        stored = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="formal-review").one()
-        assert json.loads(stored.input_json)["operation"] == "run_review"
-        assert {item["address"] for item in created["members"]} == {"agent:review_orchestrator", "agent:reporter"}
+    created = agent_team_service.create_team_from_xiaoling(db, rows.user, payload)
+    stored = db.query(AgentTeamTask).filter_by(team_id=created["team_id"], task_key="formal-review").one()
+    assert json.loads(stored.input_json)["operation"] == "run_review"
+    assert {item["address"] for item in created["members"]} == {"agent:review_orchestrator", "agent:reporter"}
 
 
 @pytest.mark.parametrize("status", ["success", "failed"])

@@ -241,6 +241,42 @@ def test_create_team_persists_graph_and_dependency_state(db, team_user):
     assert created["tasks"][1]["status"] == "waiting_dependency"
 
 
+def test_missing_task_member_is_rejected_before_supervisor_confirmation(db, team_user, monkeypatch):
+    from app.services import agent_supervisor_service
+
+    payload = _payload(tasks=[
+        {"task_key": "read", "member_key": "reader", "title": "读取源码", "instructions": "静态分析源码"},
+        {"task_key": "summary", "member_key": "missing_summarizer", "title": "汇总", "instructions": "汇总分析"},
+    ])
+    monkeypatch.setattr(
+        agent_supervisor_service,
+        "review_agent_team_plan",
+        lambda *_args, **_kwargs: pytest.fail("缺失成员必须在风险复核前拒绝"),
+    )
+
+    with pytest.raises(
+        agent_team_service.AgentTeamValidationError,
+        match="任务 summary 引用不存在成员 missing_summarizer",
+    ):
+        agent_team_service.create_team_from_xiaoling(db, team_user, payload)
+
+    assert db.query(AgentTeam).count() == 0
+    assert db.query(AgentMeshConversation).count() == 0
+
+
+def test_create_team_rejects_missing_task_member_before_worker_index(db, team_user):
+    payload = _payload(tasks=[
+        {"task_key": "read", "member_key": "reader", "title": "读取源码", "instructions": "静态分析源码"},
+        {"task_key": "summary", "member_key": "missing_summarizer", "title": "汇总", "instructions": "汇总分析"},
+    ])
+
+    with pytest.raises(agent_team_service.AgentTeamValidationError,
+                       match="任务 summary 引用不存在成员 missing_summarizer"):
+        agent_team_service._create_team(db, team_user, payload)
+
+    assert db.query(AgentTeam).count() == 0
+
+
 @pytest.mark.parametrize(
     ("requested_limit", "configured_limit"),
     [(3, 1), (1, 3)],

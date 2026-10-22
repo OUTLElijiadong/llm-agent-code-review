@@ -1,0 +1,495 @@
+{
+  "schema": "prism-backup-dedup-manifest-v1",
+  "created_at": "2026-10-22T11:41:41.979801+08:00",
+  "server": "81.70.251.90",
+  "production_root": "/opt/code-review",
+  "production_sha": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "authority": {
+    "path": "/opt/code-review/backups",
+    "replacement_forbidden": true
+  },
+  "scope": {
+    "release_roots": [
+      "/opt/prism-releases/818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "/opt/prism-releases/a9fea1a9896005a8b94966f5927931422f0461a9"
+    ],
+    "file_filter": "regular .sql.gz only",
+    "required_checks": [
+      "same device",
+      "not symlink",
+      "single-link source",
+      "stable stat before/after SHA-256",
+      "size and SHA-256 exactly match authority",
+      "same-filesystem hard-link support",
+      "Docker mount source not referencing target release"
+    ],
+    "operation": "hard-link authority to temp sibling then atomic replace candidate; preserve candidate pathname and bytes"
+  },
+  "audit": {
+    "candidate_paths_scanned": 44,
+    "verified_candidates": 38,
+    "verified_logical_bytes": 19927601220,
+    "skipped": {
+      "no_authority_size_match": 6
+    },
+    "device_id": 64769,
+    "filesystem": "xfs",
+    "backup_immutable_attribute_set": false,
+    "docker_mount_references_found": false
+  },
+  "entries": [
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "ebe5c1943ae1fba0",
+      "size_bytes": 93976518,
+      "sha256": "08c09387c9cac0032dca4634efb565b06f135b214555fe2f53d6918685eedd3b",
+      "mtime_ns": 1785467639898552234,
+      "device": 64769,
+      "candidate_inode_before": 327280026,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "b897802704764dd3",
+      "size_bytes": 93886089,
+      "sha256": "0e101fc3217c5e93a888f97150946b7e539227ab8b2ff849f344284159132934",
+      "mtime_ns": 1785482901830441024,
+      "device": 64769,
+      "candidate_inode_before": 327280027,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "b20287879f9214e4",
+      "size_bytes": 895426276,
+      "sha256": "45b527afb4c395499aff3ca3f98bc2c5b0a36199e610d9a09b685228c065e99b",
+      "mtime_ns": 1792089094337955820,
+      "device": 64769,
+      "candidate_inode_before": 327280033,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "1f3fc8df21148f5c",
+      "size_bytes": 895735009,
+      "sha256": "bcfeabc08ae0eb1553fd09f62f0c7ed329d6e4bca7947dc9ec85f6b1f575c0d5",
+      "mtime_ns": 1792125195639652832,
+      "device": 64769,
+      "candidate_inode_before": 327280036,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "8d0d723bafb2a20e",
+      "size_bytes": 904960234,
+      "sha256": "d3b68e0f57cb3718fb2ccd7da8ac235002e7628f4c65d72a18b0758e566f03a1",
+      "mtime_ns": 1792135916919837897,
+      "device": 64769,
+      "candidate_inode_before": 327280045,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "56182f01e253b70c",
+      "size_bytes": 895403667,
+      "sha256": "a77c658995abf47f851bdc572b945e1ca0c3e0de46644275f794a15fd8d16230",
+      "mtime_ns": 1792087986436264265,
+      "device": 64769,
+      "candidate_inode_before": 327280060,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "8dbb0379ce7dd49e",
+      "size_bytes": 93976888,
+      "sha256": "27c386db9d0659fa5b7ade7512aa1311a19e63005bd41e117b4def42ae8e1f8b",
+      "mtime_ns": 1785465686992901231,
+      "device": 64769,
+      "candidate_inode_before": 327280063,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "bf54785959829660",
+      "size_bytes": 93981082,
+      "sha256": "c42c0c0d6d9344b54a2eb2c0a8eaac2730bda1a903cabdc8d7ac461b1b6bc30c",
+      "mtime_ns": 1785469873738632343,
+      "device": 64769,
+      "candidate_inode_before": 327280128,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "c3709dbf31da64d5",
+      "size_bytes": 894270355,
+      "sha256": "b4ee64fa2c2aa9abb08b31663bc475615765890ef57e626cbad411b6761deb2d",
+      "mtime_ns": 1792050391849154338,
+      "device": 64769,
+      "candidate_inode_before": 327280130,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "c2ae6a26256e05db",
+      "size_bytes": 979715689,
+      "sha256": "2a3fa473742d5cd203005ab274fda2bd8f856c3ca94d95f71a3d0c00e585ff07",
+      "mtime_ns": 1792168900664550956,
+      "device": 64769,
+      "candidate_inode_before": 327280135,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "5a6262bb2c677e3e",
+      "size_bytes": 979720191,
+      "sha256": "cc85d47999ce609bbdafa72a3519e7e1820e4c587eaa3a22e522fb56194c89f6",
+      "mtime_ns": 1792169959751016739,
+      "device": 64769,
+      "candidate_inode_before": 327280136,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "0113ed9152eee136",
+      "size_bytes": 93397414,
+      "sha256": "5fd696a150eb8cbebc9694d2155c151965fee458575caf6049793b70d06f9de7",
+      "mtime_ns": 1784096362906001789,
+      "device": 64769,
+      "candidate_inode_before": 594155,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "93586f6bb449a443",
+      "size_bytes": 93391706,
+      "sha256": "a9789de5e264d0587c0116deac4e02fa060eb931e02ab8638e1632a6972dea49",
+      "mtime_ns": 1784082111253786705,
+      "device": 64769,
+      "candidate_inode_before": 52275351,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "2b10a3504611088c",
+      "size_bytes": 93983138,
+      "sha256": "e20716533802e6bc38582e4abf3882aca059a09f7b30e39e0cfce9334308fd23",
+      "mtime_ns": 1785472229229048976,
+      "device": 64769,
+      "candidate_inode_before": 285294951,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "979af594e1882784",
+      "size_bytes": 93983137,
+      "sha256": "bfe90434eea42b0c65fce3301aaed0b8d3626dadf8ce9dd82409a5c5eecde4c2",
+      "mtime_ns": 1785472310470827960,
+      "device": 64769,
+      "candidate_inode_before": 285294953,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "7f964b2afc9a2970",
+      "size_bytes": 404342825,
+      "sha256": "d9cfe796f21f8be04f1b4983be633ad6ce49fa92de949ae626f4604d9dcb0eb1",
+      "mtime_ns": 1788763746035778831,
+      "device": 64769,
+      "candidate_inode_before": 412275434,
+      "link_count_before": 1
+    },
+    {
+      "release": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+      "path_token": "2c435145e6b2df54",
+      "size_bytes": 402258176,
+      "sha256": "c9e69911cbb2a046b2dc7412ae0061e150d4359a23468c5fa1f7384b9a71ada3",
+      "mtime_ns": 1788609806639169747,
+      "device": 64769,
+      "candidate_inode_before": 427929323,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "cfb35a908b692ba2",
+      "size_bytes": 93976518,
+      "sha256": "08c09387c9cac0032dca4634efb565b06f135b214555fe2f53d6918685eedd3b",
+      "mtime_ns": 1785467639898552234,
+      "device": 64769,
+      "candidate_inode_before": 168056469,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "8fe4bd92924ec497",
+      "size_bytes": 93886089,
+      "sha256": "0e101fc3217c5e93a888f97150946b7e539227ab8b2ff849f344284159132934",
+      "mtime_ns": 1785482901830441024,
+      "device": 64769,
+      "candidate_inode_before": 168056470,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "348bba589a9a3e9f",
+      "size_bytes": 895426276,
+      "sha256": "45b527afb4c395499aff3ca3f98bc2c5b0a36199e610d9a09b685228c065e99b",
+      "mtime_ns": 1792089094337955820,
+      "device": 64769,
+      "candidate_inode_before": 168056476,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "4fe0b50e3db34ef1",
+      "size_bytes": 895735009,
+      "sha256": "bcfeabc08ae0eb1553fd09f62f0c7ed329d6e4bca7947dc9ec85f6b1f575c0d5",
+      "mtime_ns": 1792125195639652832,
+      "device": 64769,
+      "candidate_inode_before": 168056479,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "66fc3eff4d1202a8",
+      "size_bytes": 904960234,
+      "sha256": "d3b68e0f57cb3718fb2ccd7da8ac235002e7628f4c65d72a18b0758e566f03a1",
+      "mtime_ns": 1792135916919837897,
+      "device": 64769,
+      "candidate_inode_before": 168056488,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "f785d4112d615c47",
+      "size_bytes": 895403667,
+      "sha256": "a77c658995abf47f851bdc572b945e1ca0c3e0de46644275f794a15fd8d16230",
+      "mtime_ns": 1792087986436264265,
+      "device": 64769,
+      "candidate_inode_before": 168056503,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "20d6814479915b05",
+      "size_bytes": 93976888,
+      "sha256": "27c386db9d0659fa5b7ade7512aa1311a19e63005bd41e117b4def42ae8e1f8b",
+      "mtime_ns": 1785465686992901231,
+      "device": 64769,
+      "candidate_inode_before": 168056506,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "46d2f4a1f709d246",
+      "size_bytes": 93981082,
+      "sha256": "c42c0c0d6d9344b54a2eb2c0a8eaac2730bda1a903cabdc8d7ac461b1b6bc30c",
+      "mtime_ns": 1785469873738632343,
+      "device": 64769,
+      "candidate_inode_before": 168056507,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "235f33677fe3ea1a",
+      "size_bytes": 980622377,
+      "sha256": "db9ad6c17081776e1187cc408bc68aed41eb5243b0b5d00e01ab3a34c472635e",
+      "mtime_ns": 1792305150013668455,
+      "device": 64769,
+      "candidate_inode_before": 168056509,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "6058627cb073daf9",
+      "size_bytes": 980725787,
+      "sha256": "25ed363fe8bff74af1322f62a25c3a3ad80e205bc19797bbdc6fedca09f2e34e",
+      "mtime_ns": 1792318187718313451,
+      "device": 64769,
+      "candidate_inode_before": 168056511,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "daba46778638da92",
+      "size_bytes": 980697961,
+      "sha256": "a2f4ec01b90e87ca446364ad24cd49ffae299934e5659851c0d1a7ced22cb983",
+      "mtime_ns": 1792314654412236185,
+      "device": 64769,
+      "candidate_inode_before": 168056576,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "003ad9f4abf83053",
+      "size_bytes": 894270355,
+      "sha256": "b4ee64fa2c2aa9abb08b31663bc475615765890ef57e626cbad411b6761deb2d",
+      "mtime_ns": 1792050391849154338,
+      "device": 64769,
+      "candidate_inode_before": 168056579,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "381a94bcbe02542a",
+      "size_bytes": 979715689,
+      "sha256": "2a3fa473742d5cd203005ab274fda2bd8f856c3ca94d95f71a3d0c00e585ff07",
+      "mtime_ns": 1792168900664550956,
+      "device": 64769,
+      "candidate_inode_before": 168056584,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "58b2fda1101199b0",
+      "size_bytes": 979720191,
+      "sha256": "cc85d47999ce609bbdafa72a3519e7e1820e4c587eaa3a22e522fb56194c89f6",
+      "mtime_ns": 1792169959751016739,
+      "device": 64769,
+      "candidate_inode_before": 168056585,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "bd1869a3706280ee",
+      "size_bytes": 980738307,
+      "sha256": "622f6c6da7221a9a9dc32327046d52190f2a80381ef048f935402200e9a402b0",
+      "mtime_ns": 1792320724914195824,
+      "device": 64769,
+      "candidate_inode_before": 168056591,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "048f87f79041cda2",
+      "size_bytes": 93983138,
+      "sha256": "e20716533802e6bc38582e4abf3882aca059a09f7b30e39e0cfce9334308fd23",
+      "mtime_ns": 1785472229229048976,
+      "device": 64769,
+      "candidate_inode_before": 511969217,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "f7a84752c50a0f75",
+      "size_bytes": 93983137,
+      "sha256": "bfe90434eea42b0c65fce3301aaed0b8d3626dadf8ce9dd82409a5c5eecde4c2",
+      "mtime_ns": 1785472310470827960,
+      "device": 64769,
+      "candidate_inode_before": 511969219,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "612ea8cedbb67091",
+      "size_bytes": 93397414,
+      "sha256": "5fd696a150eb8cbebc9694d2155c151965fee458575caf6049793b70d06f9de7",
+      "mtime_ns": 1784096362906001789,
+      "device": 64769,
+      "candidate_inode_before": 587365778,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "b4d491bf2b44f5aa",
+      "size_bytes": 93391706,
+      "sha256": "a9789de5e264d0587c0116deac4e02fa060eb931e02ab8638e1632a6972dea49",
+      "mtime_ns": 1784082111253786705,
+      "device": 64769,
+      "candidate_inode_before": 3833735,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "8a26d122e1aa3264",
+      "size_bytes": 404342825,
+      "sha256": "d9cfe796f21f8be04f1b4983be633ad6ce49fa92de949ae626f4604d9dcb0eb1",
+      "mtime_ns": 1788763746035778831,
+      "device": 64769,
+      "candidate_inode_before": 43037023,
+      "link_count_before": 1
+    },
+    {
+      "release": "a9fea1a9896005a8b94966f5927931422f0461a9",
+      "path_token": "af023d83a1a1d5e8",
+      "size_bytes": 402258176,
+      "sha256": "c9e69911cbb2a046b2dc7412ae0061e150d4359a23468c5fa1f7384b9a71ada3",
+      "mtime_ns": 1788609806639169747,
+      "device": 64769,
+      "candidate_inode_before": 52269490,
+      "link_count_before": 1
+    }
+  ],
+  "execution": {
+    "selected_release_for_controlled_batch": "818adf35aaf9df23559e2b7c640edaaa3de549e1",
+    "selected_count": 17,
+    "selected_logical_bytes": 8002408394,
+    "other_verified_candidates_deferred": 21,
+    "other_verified_logical_bytes_deferred": 11925192826,
+    "status": "completed_first_controlled_batch",
+    "replaced": 17,
+    "skipped": 0,
+    "source_allocated_blocks_bytes_sum": 8002453504,
+    "theoretical_physical_reclaim_upper_bound_bytes_if_all_source_extents_were_exclusive": 8002453504,
+    "confirmed_physical_bytes_saved": null,
+    "physical_saving_basis": "sum of pre-replacement source st_blocks * 512; this is an allocated-block total and only a theoretical upper bound if no extents were shared",
+    "source_pre_replace_link_count": {
+      "files_checked_in_manifest": 17,
+      "st_nlink_equals_1": 17,
+      "meaning": "No additional hard-link aliases were recorded for these source inodes at audit time; this does not rule out reflink sharing."
+    },
+    "post_replace_open_deleted_fd_check": {
+      "checked_at": "2026-10-22",
+      "proc_fd_entries_examined": 1346,
+      "matching_old_source_inodes": 0,
+      "matches": 0,
+      "result": "No currently open file descriptors pointing to the 17 replaced source inodes were observed during this read-only snapshot. This does not establish whether a descriptor existed earlier in the operation window."
+    },
+    "filesystem_extent_sharing_evidence": {
+      "filesystem_type": "xfs",
+      "reflink_feature_enabled": true,
+      "source": "xfs_info /",
+      "per_file_shared_extent_check": "not_performed",
+      "meaning": "XFS reflink is enabled. Whether the replaced source files shared physical extents was not inspected; st_nlink=1 does not answer this."
+    },
+    "cross_release_references": {
+      "same_content_copies_in_deferred_release": 17,
+      "recorded_as_distinct_inodes": true,
+      "deferred_release_source_st_nlink_equals_1": 17,
+      "reflink_shared_extent_status": "not_verified",
+      "note": "Other-release copies were separate files/inodes, not hard-link aliases of the replaced source inodes. Separate inodes may still share XFS reflink extents."
+    },
+    "before_df": {
+      "total_bytes": 193205350400,
+      "used_bytes": 166144851968,
+      "available_bytes": 27060498432,
+      "percent_used": "86%"
+    },
+    "after_batch_df": {
+      "total_bytes": 193205350400,
+      "used_bytes": 166254981120,
+      "available_bytes": 26950369280,
+      "percent_used": "87%"
+    },
+    "df_net_change_during_batch": {
+      "used_bytes": 110129152,
+      "available_bytes_change": -110129152,
+      "note": "The host-wide df used value increased during the operation window. The interval snapshots cannot identify the cause or prove how much source allocation was physically reclaimed; concurrent allocation, delayed allocation/accounting, snapshots, or reflink-shared extents were not isolated."
+    },
+    "post_verification": {
+      "verified_at": "2026-10-22",
+      "candidate_count": 17,
+      "sha256_matches": 17,
+      "same_inode_as_authority": 17,
+      "observed_link_count": 2,
+      "residual_dedup_temp_files": 0,
+      "current_df_bytes": {
+        "total": 193205350400,
+        "used": 166231322624,
+        "available": 26974027776,
+        "percent_used": "87%",
+        "source": "df -P -B1 /"
+      },
+      "notes": "Re-hashed each scoped candidate under the first release root; verified original release path and authority resolve to the same inode on device 64769. No second release batch was run. Read-only /proc scan found no open deleted descriptors for the 17 replaced source inodes at scan time. Root filesystem is XFS with reflink enabled; per-file shared extent status remains unknown. Net physical bytes reclaimed are unconfirmed."
+    }
+  }
+}

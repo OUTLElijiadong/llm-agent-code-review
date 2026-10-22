@@ -10,7 +10,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 from sqlalchemy import func, or_, update
 from sqlalchemy import inspect as sa_inspect
@@ -516,9 +516,6 @@ def _normalize_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
         allowed_operations = contract.get("allowed_operations") or frozenset()
         operation = data.get("operation")
 
-        if readonly and code == "review_orchestrator" and operation in {"run_review", "start_roundtable"}:
-            raise AgentTeamValidationError("只读团队不能发起新的正式审查或圆桌讨论，请读取现有任务")
-
         if operation is None and default_operation is not None:
             data["operation"] = default_operation
             operation = default_operation
@@ -529,6 +526,26 @@ def _normalize_task_inputs(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
             data["operation"] = default_operation
         task.input = data
     return payload
+
+
+def validate_task_member_references(payload: Any) -> None:
+    """在风险复核和工作图索引前拒绝引用缺失团队成员的任务。"""
+
+    members = payload.get("members") if isinstance(payload, Mapping) else getattr(payload, "members", None)
+    tasks = payload.get("tasks") if isinstance(payload, Mapping) else getattr(payload, "tasks", None)
+    member_keys = {
+        str(item.get("member_key") or "") if isinstance(item, Mapping) else str(getattr(item, "member_key", "") or "")
+        for item in (members or [])
+    }
+    for item in tasks or []:
+        if isinstance(item, Mapping):
+            task_key = str(item.get("task_key") or "")
+            member_key = str(item.get("member_key") or "")
+        else:
+            task_key = str(getattr(item, "task_key", "") or "")
+            member_key = str(getattr(item, "member_key", "") or "")
+        if member_key not in member_keys:
+            raise AgentTeamValidationError(f"任务 {task_key} 引用不存在成员 {member_key}")
 
 
 def _strip_untrusted_team_metadata(payload: AgentTeamCreateIn) -> AgentTeamCreateIn:
@@ -1428,6 +1445,7 @@ def _team_out(db: Session, team: AgentTeam, *, include_events: bool = False) -> 
 
 
 def _create_team(db: Session, user: User, payload: AgentTeamCreateIn) -> dict[str, Any]:
+    validate_task_member_references(payload)
     payload = _strip_untrusted_team_metadata(payload)
     payload = _normalize_task_inputs(payload)
     payload = _normalize_verification_graph(payload)
@@ -1620,6 +1638,7 @@ def create_team_from_xiaoling(
     from app.core.site_request_context import trusted_request_origin
     from app.services import agent_supervisor_service
 
+    validate_task_member_references(payload)
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
     if review["needs_confirmation"]:
         if (

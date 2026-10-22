@@ -272,6 +272,153 @@ def test_unicode_dependency_uses_actual_model_window_budget(db, actor, model, mo
     assert result["coverage"]["complete"] is True
 
 
+def test_nested_worker_dependencies_compact_with_output_budget_large_enough_for_contract(
+    db, actor, model, monkeypatch,
+):
+    import hashlib
+
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    nested_result_sizes = (243_900, 24_700, 7_800, 6_900)
+    dependencies = {
+        f"worker_{index}": {
+            "status": "completed",
+            "result": {
+                "status": "completed",
+                "summary": f"worker {index} static review completed",
+                "nested_result": {
+                    "status": "failed" if index == 1 else "completed",
+                    "errors": [{"code": "output_truncated", "detail": "上下文压缩未完成"}]
+                    if index == 1 else [],
+                    "result_text": "中" * nested_result_sizes[index - 1],
+                },
+            },
+        }
+        for index in range(1, 5)
+    }
+    compression_calls = []
+    final_calls = []
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            compression_calls.append((part, kwargs))
+            if kwargs["max_tokens"] < 16_384:
+                return AgentResult(success=False, failure_kind="output_truncated", http_attempts=1)
+            quote = part["text"][:32]
+            return AgentResult(
+                success=True,
+                data={
+                    "part_id": part["part_id"],
+                    "part_sha256": part["part_sha256"],
+                    "summary": "已读取并保留本分片的静态证据。",
+                    "evidence_quotes": [quote],
+                },
+                http_attempts=1,
+            )
+        final_calls.append(json.loads(message))
+        return AgentResult(
+            success=True,
+            data={"summary": "完成三份上游结果的静态汇总", "findings": [], "limitations": []},
+            http_attempts=1,
+        )
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    result = run(db, actor, {"dependency_context": dependencies})
+
+    assert result["status"] == "completed"
+    assert all(options["max_tokens"] >= 16_384 for _, options in compression_calls)
+    assert compression_calls and len(final_calls) == 1
+    compacted = [
+        source for source in final_calls[0]["sources"]
+        if source["type"] == "dependency_result"
+    ]
+    assert {source["id"] for source in compacted} == {
+        "dependency:worker_1", "dependency:worker_2", "dependency:worker_3", "dependency:worker_4",
+    }
+    calls_by_part = {call["part_id"]: call for call, _ in compression_calls}
+    assert sum(source["covered_parts"] for source in compacted if source.get("compressed")) == len(
+        compression_calls
+    )
+    for source in compacted:
+        if source.get("compressed"):
+            assert source["summary_parts"]
+            assert source["covered_parts"] == len(source["summary_parts"])
+            for part in source["summary_parts"]:
+                source_part = calls_by_part[part["part_id"]]
+                assert part["sha256"] == hashlib.sha256(source_part["text"].encode()).hexdigest()
+                assert part["evidence_quotes"]
+                assert all(quote in source_part["text"] for quote in part["evidence_quotes"])
+        else:
+            assert source.get("content") or source.get("text") or source.get("data")
+    failed_dependency = next(source for source in compacted if source["id"] == "dependency:worker_1")
+    assert "failed" in failed_dependency["observed_statuses"]
+    assert "output_truncated" in failed_dependency["failure_codes"]
+    assert len(calls_by_part) == len(compression_calls)
+
+
+def test_compaction_uses_existing_bounded_retry_output_budget(db, actor, model, monkeypatch):
+    import app.services.temporary_agent_runtime as runtime
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "deepseek_context_window_tokens", 100_000)
+    compression_calls = []
+    final_calls = []
+    payload = {"dependency_context": {
+        "large_result": {"status": "completed", "result": {"report": "中" * 70_000}},
+    }}
+
+    def answer(instance, message, **kwargs):
+        if kwargs.get("system_prompt"):
+            part = json.loads(message)
+            compression_calls.append((part, kwargs))
+            if kwargs["max_tokens"] < 16_384:
+                return AgentResult(success=False, failure_kind="output_truncated", http_attempts=1)
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "完整复核当前结果分片", "evidence_quotes": [part["text"][:32]],
+            }, http_attempts=1)
+        final_calls.append(json.loads(message))
+        return AgentResult(success=True, data={
+            "summary": "已复核依赖结果", "findings": [], "limitations": [],
+        }, http_attempts=1)
+
+    monkeypatch.setattr(BaseAgent, "call_json", answer)
+    monkeypatch.setattr(runtime, "RETRY_OUTPUT_TOKENS", 2_048)
+    truncated = run(db, actor, payload)
+    assert truncated["status"] == "failed"
+    assert truncated["errors"][0]["code"] == "output_truncated"
+    assert compression_calls and all(kwargs["max_tokens"] == 2_048 for _, kwargs in compression_calls)
+    assert not final_calls
+
+    compression_calls.clear()
+    monkeypatch.setattr(runtime, "RETRY_OUTPUT_TOKENS", 16_384)
+    result = run(db, actor, payload)
+
+    assert result["status"] == "completed"
+    assert compression_calls and len(final_calls) == 1
+    assert all(kwargs["max_tokens"] == 16_384 for _, kwargs in compression_calls)
+    assert (
+        sum(source["covered_parts"] for source in final_calls[0]["sources"] if source.get("compressed"))
+        == len(compression_calls)
+    )
+
+
+def test_nested_dependency_metadata_limit_blocks_before_model_call(db, actor, model):
+    result = run(db, actor, {"dependency_context": {
+        "oversized": {
+            "status": "completed",
+            "result": {"items": [{"value": index} for index in range(runtime.MAX_DEPENDENCY_METADATA_NODES)]},
+        },
+    }})
+
+    assert result["status"] == "blocked"
+    assert result["retryable"] is False
+    assert "状态保留上限" in result["summary"]
+    assert model[0] == []
+
+
 @pytest.mark.parametrize("upstream_coverage", [{"complete": False}, {"truncated": True}])
 def test_partial_dependency_does_not_claim_complete_coverage(db, actor, model, upstream_coverage):
     result = run(db, actor, {"dependency_context": {
@@ -285,6 +432,8 @@ def test_partial_dependency_does_not_claim_complete_coverage(db, actor, model, u
 
 def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, actor, model, monkeypatch):
     import hashlib
+
+    from app.services.temporary_agent_runtime import SOURCE_PART_CHARS
 
     first = "first\r" + "x" * 70_000 + "FIRST_TAIL_RISK"
     second = "second\n" + "y" * 70_000 + "SECOND_TAIL_RISK"
@@ -331,7 +480,8 @@ def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, act
     assert result["coverage"]["complete"] is True and result["coverage"]["truncated"] is False
     assert result["coverage"]["compressed"] is True
     assert result["coverage"]["source_parts"] == result["coverage"]["covered_source_parts"] == len(map_calls)
-    assert len(map_calls) == 18
+    expected_parts_per_file = (len(first) + SOURCE_PART_CHARS - 1) // SOURCE_PART_CHARS
+    assert len(map_calls) == expected_parts_per_file * 2
     assert any("FIRST_TAIL_RISK" in part["text"] for part in map_calls)
     assert any("SECOND_TAIL_RISK" in part["text"] for part in map_calls)
     files = [source for source in final_calls[0]["sources"] if source["type"] == "source_file"]
@@ -339,15 +489,15 @@ def test_selected_large_files_are_compacted_with_each_part_and_full_hash(db, act
         "file:811": hashlib.sha256(first.encode()).hexdigest(),
         "file:813": hashlib.sha256(second.encode()).hexdigest(),
     }
-    assert all(len(source["summary_parts"]) == 9 for source in files)
+    assert all(len(source["summary_parts"]) == expected_parts_per_file for source in files)
     assert all(part["evidence_quotes"] for source in files for part in source["summary_parts"])
     assert files[0]["summary_parts"][0]["line_start"] == 1
     assert files[0]["summary_parts"][1]["line_start"] == 2
     assert files[0]["summary_parts"][-1]["line_end"] == 2
     assert result["findings"][0]["evidence_quote"] in first
     assert "FIRST_TAIL_RISK" in result["findings"][0]["evidence_quote"]
-    assert result["usage_log_ids"] == [*(1000 + index for index in range(1, 19)), 2000]
-    assert result["http_attempts"] == 19
+    assert result["usage_log_ids"] == [*(1000 + index for index in range(1, len(map_calls) + 1)), 2000]
+    assert result["http_attempts"] == len(map_calls) + 1
 
 
 def test_complete_source_ids_cannot_drop_middle_user_constraint(db, actor, model, monkeypatch):
@@ -441,7 +591,10 @@ def test_single_long_unpunctuated_user_fact_keeps_full_input_and_bounded_ledger(
     assert "原文过长" in facts[0] and "中段省略" in facts[0]
 
 
-@pytest.mark.parametrize("failure", ["missing_part", "length", "fabricated_quote", "empty_quote", "short_quote"])
+@pytest.mark.parametrize(
+    "failure",
+    ["missing_part", "length", "fabricated_quote", "empty_quote", "short_quote", "oversized_quote"],
+)
 def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, model, monkeypatch, failure):
     db.query(CodeFile).filter_by(id=811).update({"content": "x" * 70_000})
     db.commit()
@@ -451,6 +604,12 @@ def test_compaction_failure_never_reaches_final_model_or_completed(db, actor, mo
         calls.append(message)
         assert kwargs.get("system_prompt")
         part = json.loads(message)
+        if failure == "oversized_quote":
+            assert "每条不超过 500 字符" in kwargs["system_prompt"]
+            return AgentResult(success=True, data={
+                "part_id": part["part_id"], "part_sha256": part["part_sha256"],
+                "summary": "已阅读来源分片", "evidence_quotes": [part["text"][:501]],
+            }, usage_log_ids=[1901], http_attempts=1)
         if failure == "length":
             return AgentResult(success=False, failure_kind="output_truncated",
                                usage_log_ids=[1901], http_attempts=1)

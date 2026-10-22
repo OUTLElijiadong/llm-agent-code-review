@@ -166,11 +166,6 @@ def run_team_review(
     raw = json.loads(team_task.input_json or "{}")
     if member.address != "agent:review_orchestrator" or raw.get("operation") != "run_review":
         raise agent_team_service.AgentTeamAccessError("团队任务未授权执行正式审查")
-    texts = "\n".join((team.objective or "", team_task.instructions or ""))
-    if raw.get("execution_mode") == "read_only" or any(
-        marker in texts for marker in agent_team_service._READONLY_TEAM_MARKERS
-    ):
-        raise agent_team_service.AgentTeamAccessError("只读团队不能发起新的正式审查")
     if (raw.get("project_id") != project_id or raw.get("review_type", "full") != review_type
             or raw.get("file_ids") != file_ids):
         raise agent_team_service.AgentTeamAccessError("审查参数与已授权的团队任务不一致")
@@ -295,11 +290,6 @@ def run_team_roundtable(
         raise agent_team_service.AgentTeamAccessError("团队任务未授权启动圆桌讨论")
     if raw.get("project_id") != project_id or raw.get("file_id") != file_id:
         raise agent_team_service.AgentTeamAccessError("圆桌参数与已授权的团队任务不一致")
-    texts = "\n".join((team.objective or "", team_task.instructions or ""))
-    if raw.get("execution_mode") == "read_only" or any(
-        marker in texts for marker in agent_team_service._READONLY_TEAM_MARKERS
-    ):
-        raise agent_team_service.AgentTeamAccessError("只读团队不能发起新的圆桌讨论")
     actor = _require_actor(db, user_id, project_id)
 
     # 同一团队任务重派时复用已经启动的圆桌，避免重复开会。

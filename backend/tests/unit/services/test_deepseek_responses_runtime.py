@@ -1242,7 +1242,7 @@ async def test_approval_resume_preserves_remaining_calls_from_same_response() ->
 
 
 @pytest.mark.asyncio
-async def test_rejection_is_tool_output_and_model_continues() -> None:
+async def test_rejection_is_terminal_and_does_not_resume_model() -> None:
     class ApprovalExecutor(RecordingExecutor):
         def __init__(self) -> None:
             super().__init__()
@@ -1271,14 +1271,91 @@ async def test_rejection_is_tool_output_and_model_continues() -> None:
     await runtime.start("修改配置", run_id="run_reject")
     completed = await runtime.reject("run_reject", "call_write", reason="本次不执行")
 
-    assert completed.output_text == "已取消写入，配置保持不变"
+    assert completed.status == COMPLETED
+    assert completed.output_text == "已按你的拒绝决定停止本轮执行；该操作未执行、未重试，也不会再次请求授权。"
     assert len(executor.calls) == 1
     assert executor.rejections == [("call_write", "本次不执行")]
-    resumed_input = transport.payloads[1]["input"]
-    assert sum(1 for item in resumed_input if item.get("role") == "user") == 1
-    rejection = json.loads(resumed_input[-1]["output"])
-    assert resumed_input[-1]["call_id"] == "call_write"
+    assert len(transport.payloads) == 1
+    checkpoint = await runtime._store.load("run_reject")
+    assert checkpoint is not None
+    rejection_item = next(
+        item for item in checkpoint.transcript
+        if item.get("type") == "function_call_output" and item.get("call_id") == "call_write"
+    )
+    rejection = json.loads(rejection_item["output"])
     assert rejection == {"status": "rejected", "error": "本次不执行"}
+
+
+@pytest.mark.asyncio
+async def test_rejection_terminates_run_before_duplicate_or_clarification_and_new_run_is_fresh() -> None:
+    class ApprovalExecutor(RecordingExecutor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.rejections: List[tuple[str, str]] = []
+
+        async def execute(self, call: ToolCall, *, approved: bool = False) -> ToolExecutionResult:
+            self.calls.append((call, approved))
+            if call.name == "restart_service":
+                return ToolExecutionResult.approval_required(
+                    operation="重启后端",
+                    impact="中断当前服务",
+                    danger=True,
+                    approval_id=f"approval-{call.call_id}",
+                )
+            return ToolExecutionResult.success({"tool": call.name})
+
+        async def reject(self, call: ToolCall, *, reason: str) -> None:
+            self.rejections.append((call.call_id, reason))
+
+    restart_args = {"service": "backend", "reason": "管理员请求"}
+    transport = ScriptedTransport(
+        [
+            _function_response(
+                ("call_restart_1", "restart_service", restart_args),
+                ("call_restart_queued", "restart_service", restart_args),
+            ),
+            _function_response(("call_reauthorize", "ask_user", {
+                "question": "确认创建该待确认任务，我随后自行拒绝写操作？",
+                "options": ["确认创建", "不创建团队"],
+                "allow_free_text": False,
+            })),
+        ]
+    )
+    executor = ApprovalExecutor()
+    runtime = _runtime(transport, executor)
+
+    paused = await runtime.start("重启后端", run_id="run_reject_duplicate")
+    completed = await runtime.reject(
+        "run_reject_duplicate", "call_restart_1", reason="管理员拒绝本次重启"
+    )
+
+    assert paused.status == WAITING_APPROVAL
+    assert completed.status == COMPLETED
+    assert completed.output_text == "已按你的拒绝决定停止本轮执行；该操作未执行、未重试，也不会再次请求授权。"
+    assert [(call.name, call.call_id) for call, _ in executor.calls] == [
+        ("restart_service", "call_restart_1"),
+    ]
+    assert executor.rejections == [("call_restart_1", "管理员拒绝本次重启")]
+    assert len(transport.payloads) == 1
+    checkpoint = await runtime._store.load("run_reject_duplicate")
+    assert checkpoint is not None
+    tool_outputs = {
+        item["call_id"]: json.loads(item["output"])
+        for item in checkpoint.transcript if item.get("type") == "function_call_output"
+    }
+    assert tool_outputs["call_restart_1"]["status"] == "rejected"
+    assert tool_outputs["call_restart_queued"]["status"] == "not_executed"
+
+    fresh_transport = ScriptedTransport(
+        [
+            _function_response(("call_restart_new_turn", "restart_service", restart_args)),
+        ]
+    )
+    fresh = await _runtime(fresh_transport, executor).start(
+        "稍后重新确认后重启后端", run_id="run_new_restart_request"
+    )
+    assert fresh.status == WAITING_APPROVAL
+    assert executor.calls[-1][0].call_id == "call_restart_new_turn"
 
 
 @pytest.mark.asyncio

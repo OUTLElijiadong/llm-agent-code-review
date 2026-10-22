@@ -6,9 +6,10 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import KeepTogether, Table
 
-from app.services import domain_report_exporter
+from app.services import domain_report_exporter, report_exporter
 from app.services.domain_report_exporter import _coverage_lines, export_markdown_report
 from app.services.report_exporter import export_to_html, load_builtin_template
 from app.services.report_markdown import MarkdownSegment, markdown_to_blocks, reportlab_markup
@@ -17,6 +18,7 @@ from app.services.report_pdf_exporter import (
     _build_styles,
     _build_summary_markdown_elements,
     _ensure_chinese_font,
+    _paragraph,
     export_to_pdf,
 )
 from app.services.report_word_exporter import export_to_word
@@ -83,6 +85,59 @@ def test_pdf_export_consumes_markdown_without_leaking_emphasis_markers():
     assert pdf.startswith(b"%PDF-")
     assert b"**" not in pdf
     assert b"javascript:" not in pdf
+
+
+def test_pdf_mixed_language_paragraph_uses_latin_metrics_and_keeps_code_monospace():
+    styles = _build_styles(_ensure_chinese_font())
+    body = _paragraph("路径 backend/app.py，时间 2026-10-16T06:40:20", styles["normal"])
+    code = _paragraph("agent_service.py", styles["code"])
+
+    body_fonts = {fragment.fontName for fragment in body.frags}
+    code_fonts = {fragment.fontName for fragment in code.frags}
+    assert "Vera" in body_fonts
+    assert "STSong-Light" in body_fonts
+    assert code_fonts == {"Courier"}
+    pdf_buffer = BytesIO()
+    canvas = Canvas(pdf_buffer)
+    body.wrapOn(canvas, 500, 100)
+    code.wrapOn(canvas, 500, 100)
+    body.drawOn(canvas, 48, 760)
+    code.drawOn(canvas, 48, 730)
+    canvas.save()
+    pdf = pdf_buffer.getvalue()
+    assert b"BitstreamVeraSans-Roman" in pdf
+    assert b"/FontFile2" in pdf
+
+
+def test_report_scope_explains_coverage_is_not_line_by_line_semantic_review():
+    context = {
+        "task_info": {
+            "status": "success",
+            "processed_files": 1,
+            "total_files": 1,
+            "coverage": {"coverage_status": "complete"},
+        },
+        "source": {"source_type": "discuss"},
+        "files": [],
+        "statistics": {
+            "total_issues": 0,
+            "refuted_issue_count": 0,
+            "assessment_basis": {
+                "human_review_counts": {
+                    "pending": 0,
+                    "evidence_requested": 0,
+                    "rejected": 0,
+                    "unrecorded": 0,
+                },
+                "score_source": "review_issues",
+            },
+            "score_breakdown": {},
+        },
+    }
+
+    lines = report_exporter._build_scope_lines(context)
+
+    assert any("不应单独解读为逐行语义审查完整" in line for line in lines)
 
 
 def test_word_export_uses_native_markdown_formatting_and_safe_links():

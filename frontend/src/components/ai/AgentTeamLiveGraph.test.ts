@@ -23,6 +23,17 @@ describe('实时团队星图', () => {
     expect(wrapper.text()).toContain('等待服务端确认成员')
     expect(wrapper.findAll('[data-member-id]')).toHaveLength(0)
   })
+  it('存在历史终态团队时仍明确标记新团队正在组建', () => {
+    const previous = team()
+    previous.status = 'completed'
+    previous.tasks[0]!.status = 'completed'
+    const wrapper = mount(AgentTeamLiveGraph, { props: { teams: [previous], forming: true } })
+
+    expect(wrapper.text()).toContain('正在组建新团队')
+    expect(wrapper.text()).toContain('新成员以服务端账本确认为准')
+    expect(wrapper.text()).toContain('2 个子 Agent')
+    expect(wrapper.findAll('[data-member-id]')).toHaveLength(2)
+  })
   it('立即展示注册和临时成员，并随任务状态更新', async () => {
     const detail = team()
     const wrapper = mount(AgentTeamLiveGraph, { props: { teams: [detail] } })
