@@ -1090,6 +1090,119 @@ def test_all_html_templates_render_canonical_score_breakdown():
         assert "77/100" in html
 
 
+@pytest.mark.parametrize("template_type", ["simple", "detailed", "compliance"])
+def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss_weight(template_type: str):
+    import re
+
+    vector_issue = _make_issue(
+        severity="高",
+        cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        cvss_version="3.1",
+        cvss_source="vector",
+    )
+    task = _make_task(
+        score_version="cvss-weighted-v1",
+        total_issues=1,
+        high_issues=1,
+        severe_issues=0,
+        medium_issues=0,
+        low_issues=0,
+    )
+    html = export_to_html(task, [vector_issue], "", None, load_builtin_template(template_type))
+    assert "CVSS 安全分" in html
+    assert "权重 70%" in html
+    assert "规则质量分" in html and "权重 30%" in html
+    assert "1 项已评分；0 项未评分" in html
+    assert "最高基础分" in html
+    assert "最高 CVSS 3.1 基础分" in html
+    assert "非 CVSS 官方综合分" in html
+
+    fallback = export_to_html(
+        task,
+        [_make_issue(
+            severity="高",
+            title="CVSS 缺向量逐项检查",
+            cvss_score=7.5,
+            cvss_vector=None,
+            cvss_source="model",
+        )],
+        "",
+        None,
+        load_builtin_template(template_type),
+    )
+    assert "CVSS 安全分" in fallback
+    assert "未应用（回退）" in fallback
+    assert "权重 0%" in fallback and "权重 100%" in fallback
+    assert "0 项已评分；1 项未评分" in fallback
+    assert "CVSS 70% 权重未生效" in fallback
+    assert 'CVSS 缺向量逐项检查' in fallback
+    issue_fragment = fallback[fallback.index("CVSS 缺向量逐项检查"):]
+    if template_type == "simple":
+        assert re.search(r"<td>未评分</td>", issue_fragment)
+    else:
+        assert re.search(r"CVSS 状态:</span>\s*未评分", issue_fragment)
+    assert "7.5" not in issue_fragment
+
+
+def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
+    from app.ai.scoring import compute_composite_score_breakdown
+    from reportlab.platypus import Paragraph, Table
+
+    valid = compute_composite_score_breakdown(
+        {"严重": 0, "高": 1, "中": 0, "低": 0},
+        [{"cvss_vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+    )
+    valid.update(score_source="review_issues_cvss")
+    fallback = compute_composite_score_breakdown(
+        {"严重": 0, "高": 1, "中": 0, "低": 0},
+        [{"cvss_vector": None}],
+    )
+    fallback.update(score_source="review_issues_cvss")
+
+    for breakdown, expected_weight, expected_coverage in (
+        (valid, "权重 70%", "1 项已评分；0 项未评分"),
+        (fallback, "权重 0%", "0 项已评分；1 项未评分"),
+    ):
+        statistics = {"score_breakdown": breakdown}
+        styles = _build_styles(_ensure_chinese_font())
+        pdf_elements = report_pdf_exporter._build_score_breakdown_elements(
+            statistics, styles, _ensure_chinese_font(),
+        )
+        pdf_visible_text = []
+
+        def collect_flowable_text(flowable):
+            if isinstance(flowable, Paragraph):
+                pdf_visible_text.append(flowable.getPlainText())
+            elif isinstance(flowable, Table):
+                for row in flowable._cellvalues:
+                    for cell in row:
+                        if isinstance(cell, (list, tuple)):
+                            for nested in cell:
+                                collect_flowable_text(nested)
+                        else:
+                            collect_flowable_text(cell)
+
+        for element in pdf_elements:
+            collect_flowable_text(element)
+        pdf_text = "\n".join(pdf_visible_text)
+        assert expected_weight in pdf_text
+        assert expected_coverage in pdf_text
+        assert "非 CVSS 官方综合分" in pdf_text
+
+        document = Document()
+        from app.services.report_word_exporter import _build_score_breakdown
+        _build_score_breakdown(document, statistics)
+        word_text = "\n".join(
+            cell.text for table in document.tables for row in table.rows for cell in row.cells
+        )
+        assert expected_weight in word_text
+        assert expected_coverage in word_text
+        assert "非 CVSS 官方综合分" in word_text
+        if breakdown["cvss_status"] == "unavailable":
+            assert "CVSS 70% 权重未生效" in pdf_text
+            assert "CVSS 70% 权重未生效" in word_text
+
+
 def test_export_to_html_supports_legacy_template_context():
     """历史模板的 task/metrics/compliance_summary 变量应继续可用。"""
 

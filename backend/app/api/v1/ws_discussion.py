@@ -421,22 +421,37 @@ def _fail_pending_discussion(
 ) -> None:
     """启动/执行异常同时关闭会话与仍在运行的同账号报告。"""
     session = bus.get_session(session_id)
-    if session is None or getattr(session, "terminal_status", "") in {"success", "cancelled"}:
+    if session is None or getattr(session, "terminal_status", ""):
         return
     status = getattr(session, "terminal_status", "") or status
     task_id = int(session.report_task_id or session.task_id or 0)
     if getattr(bus, "_persist", False) and task_id:
         from app.models.review_task import ReviewTask
 
+        report_terminal_state: tuple[str, str] | None = None
         with bus._session_maker().begin() as db:
             task = db.query(ReviewTask).filter_by(
                 id=task_id, user_id=session.owner_user_id, review_type="discuss",
             ).with_for_update().one_or_none()
-            if task is not None and task.status == "running":
-                task.status = "failed"
-                task.end_time = datetime.now(timezone.utc)
-                task.error_message = error
-                task.coverage = {**(task.coverage or {}), "stage": status, "score_available": False}
+            if task is not None:
+                if task.status in {"success", "failed", "cancelled"}:
+                    # 另一个 worker 已在该行锁下提交终态。通知严格采用已提交
+                    # 状态；不能让迟到异常把取消/成功改写成失败。
+                    report_terminal_state = (task.status, str(task.error_message or ""))
+                elif task.status == "running":
+                    task.status = "failed"
+                    task.end_time = datetime.now(timezone.utc)
+                    task.error_message = error
+                    task.coverage = {**(task.coverage or {}), "stage": status, "score_available": False}
+        if report_terminal_state is not None:
+            persisted_status, persisted_error = report_terminal_state
+            bus.publish_control(session_id, "done", {
+                "task_id": task_id,
+                "status": persisted_status,
+                "error": persisted_error,
+            })
+            bus.close_session(session_id)
+            return
     bus.publish_control(session_id, "done", {"task_id": task_id, "status": status, "error": error})
     bus.close_session(session_id)
 

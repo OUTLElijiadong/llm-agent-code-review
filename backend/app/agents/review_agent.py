@@ -22,6 +22,27 @@ from app.ai.result_parser import parse as parse_review_result
 from app.ai.static_analyzer import Finding
 
 
+def _composite_score_fields(findings: list[object], severity_count: dict | None = None) -> dict:
+    from app.ai.scoring import compute_composite_score_breakdown
+
+    if severity_count is None:
+        severity_count = {severity: 0 for severity in ("严重", "高", "中", "低")}
+        for finding in findings:
+            severity = (
+                finding.get("severity")
+                if isinstance(finding, dict)
+                else getattr(finding, "severity", None)
+            )
+            if severity in severity_count:
+                severity_count[severity] += 1
+    breakdown = compute_composite_score_breakdown(severity_count, findings)
+    return {
+        "score": int(breakdown["score"]),
+        "score_version": breakdown["version"],
+        "score_breakdown": breakdown,
+    }
+
+
 class CodeReviewerAgent(BaseAgent):
     """代码审查智能体
 
@@ -131,7 +152,6 @@ class CodeReviewerAgent(BaseAgent):
         ctx: Optional[AgentContext],
     ) -> AgentResult:
         """Losslessly review all rules in bounded batches, covering the full source each time."""
-        from app.ai.scoring import compute_score
         from app.core.config import settings
 
         window = int(settings.deepseek_context_window_tokens)
@@ -294,7 +314,7 @@ class CodeReviewerAgent(BaseAgent):
                     f"已按 {len(results)} 个连续规则批次无损审查完整源码，"
                     f"覆盖 {total_lines}/{total_lines} 行，合并去重后发现 {len(findings)} 项。"
                 ),
-                "score": compute_score(severity_count),
+                **_composite_score_fields(findings, severity_count),
                 "issues": findings,
                 "coverage": {
                     **source_coverage,
@@ -640,8 +660,6 @@ class CodeReviewerAgent(BaseAgent):
                     findings.append(finding)
             reviewed_ranges.append((line_offset + start + 1, line_offset + end))
 
-        from app.ai.scoring import compute_score
-
         severity_count = {severity: 0 for severity in ("严重", "高", "中", "低")}
         for finding in findings:
             severity = finding.get("severity")
@@ -667,7 +685,7 @@ class CodeReviewerAgent(BaseAgent):
             success=True,
             data={
                 "summary": summary,
-                "score": compute_score(severity_count),
+                **_composite_score_fields(findings, severity_count),
                 "issues": findings,
                 "coverage": {
                     "total_lines": total_lines,
@@ -938,7 +956,7 @@ class CodeReviewerAgent(BaseAgent):
                 data={
                     "issues": recovered_issues,
                     "summary": recovered_data.get("summary", "输出截断后按焦点范围完成审查"),
-                    "score": recovered_data.get("score", 100),
+                    **_composite_score_fields(recovered_issues),
                     "invalid_issue_count": 0,
                     "diagnostics": [],
                     "coverage": recovered_data.get("coverage"),
@@ -976,7 +994,7 @@ class CodeReviewerAgent(BaseAgent):
             data={
                 "issues": findings,
                 "summary": review_result.summary,
-                "score": review_result.score,
+                **_composite_score_fields(findings),
                 "invalid_issue_count": review_result.invalid_issue_count,
                 "diagnostics": [item.code for item in review_result.diagnostics],
             },

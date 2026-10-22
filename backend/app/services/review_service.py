@@ -43,7 +43,9 @@ from app.ai.multi_agent import (
 )
 from app.ai.prompt_builder import _format_experience, build_prompt
 from app.ai.result_parser import Issue, normalize_severity, parse
-from app.ai.scoring import SCORING_VERSION, compute_score, compute_score_breakdown, score_risk_level
+from app.ai.scoring import (
+    compute_composite_score_breakdown,
+)
 from app.ai.static_analyzer import Finding
 from app.ai.static_analyzer import scan_file as static_scan_file
 from app.core.config import settings
@@ -989,20 +991,9 @@ def _execute_review(
         task.high_issues = sev_count["高"]
         task.medium_issues = sev_count["中"]
         task.low_issues = sev_count["低"]
-        # 保留 compute_score 作为旧调用方/测试的兼容入口；生产实现与
-        # breakdown 使用同一公式，因此两者正常情况下始终一致。
-        score = int(compute_score(sev_count))
-        score_breakdown = compute_score_breakdown(sev_count)
-        if score != score_breakdown["score"]:
-            # 外部兼容调用方可能暂时覆盖 compute_score；仍保持接口返回的
-            # 最终分数与风险等级自洽，而不丢失扣分明细。
-            score_breakdown = {
-                **score_breakdown,
-                "score": score,
-                "risk_level": score_risk_level(score),
-            }
-        task.score = score
-        task.score_version = SCORING_VERSION
+        score_breakdown = compute_composite_score_breakdown(sev_count, all_issues)
+        task.score = int(score_breakdown["score"])
+        task.score_version = score_breakdown["version"]
         task.score_breakdown = score_breakdown
         task.summary = _build_summary(profiles, int(task.total_files or len(files)), len(all_issues), task.score)
         if file_failures:

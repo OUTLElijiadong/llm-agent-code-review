@@ -1626,6 +1626,46 @@ describe('AdminCopilot 窄桌面布局回归', () => {
     }
   })
 
+  it('桌面缩放柄同时支持鼠标拖动与键盘，输入区仍独立于消息区', async () => {
+    const restoreViewport = setViewport(1280, 800)
+    const restorePanelSize = mockPanelSize(400, 620)
+    const wrapper = mountCopilot()
+
+    try {
+      await openCopilot(wrapper)
+      await flushSessionRestore()
+      const panel = wrapper.find<HTMLElement>('.copilot-panel')
+      const resizeHandle = wrapper.find<HTMLButtonElement>('.panel-resize-handle')
+
+      expect(resizeHandle.attributes('aria-label')).toContain('方向键')
+      await resizeHandle.trigger('keydown', { key: 'ArrowRight' })
+      expect(panel.attributes('style')).toContain('width: 416px')
+
+      await resizeHandle.trigger('pointerdown', {
+        button: 0,
+        clientX: 300,
+        clientY: 300,
+        pointerId: 2,
+      })
+      expect(panel.classes()).toContain('is-resizing')
+      await panel.trigger('pointermove', { clientX: 340, clientY: 330, pointerId: 2 })
+      await panel.trigger('pointerup', { pointerId: 2 })
+      expect(panel.attributes('style')).toContain('width: 440px')
+      expect(panel.attributes('style')).toContain('height: 650px')
+      expect(panel.classes()).not.toContain('is-resizing')
+
+      const messages = panel.find('.copilot-messages').element
+      const input = panel.find('.copilot-input-area').element
+      expect(messages.parentElement).toBe(panel.element)
+      expect(input.parentElement).toBe(panel.element)
+      expect(messages.contains(input)).toBe(false)
+    } finally {
+      wrapper.unmount()
+      restorePanelSize()
+      restoreViewport()
+    }
+  })
+
   it('520px 以下仍由移动端 inset 布局接管且禁止拖动', async () => {
     const restoreViewport = setViewport(390, 844)
     const restorePanelSize = mockPanelSize(366, 620)
@@ -1798,13 +1838,18 @@ it('重复点击提交核对只发一个GET，卸载后的核对结果不再创�
   const wrapper = mountCopilot()
   await failFirstAdminMessage(wrapper)
   let resolveCheck!: (value: unknown) => void
-  sessionApi.get.mockReturnValueOnce(new Promise(resolve => { resolveCheck = resolve }))
-  const before = sessionApi.get.mock.calls.length
+  sessionApi.get.mockImplementation((_surface: string, id: string, silent?: boolean) => {
+    if (silent) return Promise.resolve({ surface: 'admin', session_id: id, run: null, messages: [], pending: null })
+    return new Promise(resolve => { resolveCheck = resolve })
+  })
+  // 页面桥另有静默落库确认；这里只约束用户重试的提交核对去重。
+  const submissionReads = () => sessionApi.get.mock.calls.filter(call => call[2] !== true).length
+  const before = submissionReads()
   const retry = wrapper.find('.copilot-error-btn.is-retry')
   void retry.trigger('click')
   void retry.trigger('click')
   await flushPromises()
-  expect(sessionApi.get).toHaveBeenCalledTimes(before + 1)
+  expect(submissionReads()).toBe(before + 1)
   wrapper.unmount()
   resolveCheck({ surface: 'admin', session_id: 'admin-test', run: null, messages: [], pending: null })
   await flushPromises()

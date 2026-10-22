@@ -22,10 +22,10 @@ const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|�
 /** 常用简称只作为已有静态路由标题的别名,不新增可访问路径。 */
 const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/admin/governance': ['Agent治理', 'Agent管理'],
-  '/admin/operations': ['运行', '监控', '告警', '审计', '总览'],
+  '/admin/operations': ['运行', '监控', '告警', '审计', '总览', '管理端审计', '管理后台审计'],
   '/admin/access': ['用户', '权限', '角色'],
   '/admin/platform': ['平台配置', '模型配置', '节点'],
-  '/audit': ['系统操作审计', '操作审计', '系统审计', '审计日志'],
+  '/audit': ['审计', '系统操作审计', '操作审计', '系统审计', '审计日志'],
   '/projects': ['项目'],
   '/code': ['代码'],
   '/reviews': ['审查任务', '审查'],
@@ -85,23 +85,35 @@ export function resolveLocalNavigationRequest(
   const compact = compactNavigationText(content)
   if (!compact) return null
 
-  const seenRoutes = new Set<string>()
+  const matches: Array<{ route: string; label: string; matchLabel: string }> = []
   for (const target of localNavigationTargets(router)) {
-    if (seenRoutes.has(target.route)) continue
     const matchLabel = compactNavigationText(target.matchLabel)
     const start = compact.indexOf(matchLabel)
     if (start < 0) continue
     const prefix = compact.slice(0, start)
     const tail = compact.slice(start + matchLabel.length)
     if (!LOCAL_NAVIGATION_PREFIX_RE.test(prefix) || !isSafeLocalNavigationTail(tail)) continue
-    seenRoutes.add(target.route)
-    if (!isNavigationPathAllowed(router, target.route, guardSource)) return { kind: 'forbidden' }
-    return {
-      kind: 'navigate',
-      directive: { action: 'navigate', route: target.route, label: target.label },
-    }
+    matches.push(target)
   }
-  return null
+  if (!matches.length) return null
+
+  const explicitAdminTargets = matches.filter(
+    (target) => target.route.startsWith('/admin') && /管理端|管理后台/.test(target.matchLabel),
+  )
+  const preferredTargets = explicitAdminTargets.length
+    ? explicitAdminTargets
+    : matches.some((target) => !target.route.startsWith('/admin'))
+      ? matches.filter((target) => !target.route.startsWith('/admin'))
+      : matches
+  const target = preferredTargets.find((candidate) => (
+    isNavigationPathAllowed(router, candidate.route, guardSource)
+  ))
+  if (!target) return { kind: 'forbidden' }
+
+  return {
+    kind: 'navigate',
+    directive: { action: 'navigate', route: target.route, label: target.label },
+  }
 }
 
 function flattenRoutes(routes: readonly RouteRecordRaw[], prefix: string): RouteRecordRaw[] {

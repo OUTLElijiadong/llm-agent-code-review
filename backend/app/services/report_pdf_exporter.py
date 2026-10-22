@@ -547,55 +547,79 @@ def _build_score_breakdown_elements(
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         return [_paragraph("评分明细", styles["heading"]), table, Spacer(1, 4 * mm)]
-    weights = breakdown.get("weights") or {}
-    counts = breakdown.get("counts") or {}
-    deductions = breakdown.get("deductions") or {}
-    rows = [
-        ("评分版本", breakdown.get("version") or "-", True),
-        ("基础分", breakdown.get("base_score", 100), False),
-        (
-            "扣分权重",
-            "严重 × {0}；高 × {1}；中 × {2}；低 × {3}".format(
-                weights.get("严重", 15),
-                weights.get("高", 8),
-                weights.get("中", 3),
-                weights.get("低", 1),
+    if breakdown.get("policy_version") == "cvss-weighted-v1":
+        components = breakdown.get("components") or {}
+        cvss = components.get("cvss") or {}
+        quality = components.get("quality") or {}
+        cvss_score = cvss.get("score")
+        rows = [
+            ("评分策略", "cvss-weighted-v1 · 平台综合评分（非 CVSS 官方综合分）", True),
+            (
+                "CVSS 安全分",
+                f"{cvss_score if cvss_score is not None else '未应用（回退）'}"
+                f"{'/100' if cvss_score is not None else ''} · 权重 {round(float(cvss.get('weight') or 0) * 100)}%"
+                f" · 最高基础分 {cvss.get('max_base_score') if cvss.get('max_base_score') is not None else '-'}",
+                False,
             ),
-            False,
-        ),
-        (
-            "问题计数",
-            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
-                counts.get("严重", 0),
-                counts.get("高", 0),
-                counts.get("中", 0),
-                counts.get("低", 0),
+            (
+                "规则质量分",
+                f"{quality.get('score', '-')}/100 · 权重 "
+                f"{round(float(quality.get('weight') or 0) * 100)}%",
+                False,
             ),
-            False,
-        ),
-        (
-            "分级扣分",
-            "严重 {0}；高 {1}；中 {2}；低 {3}".format(
-                deductions.get("严重", 0),
-                deductions.get("高", 0),
-                deductions.get("中", 0),
-                deductions.get("低", 0),
+            (
+                "向量覆盖",
+                f"{cvss.get('scored_findings', 0)} 项已评分；{cvss.get('unscored_findings', 0)} 项未评分"
+                f"（{breakdown.get('cvss_status') or '-'}）",
+                False,
             ),
-            False,
-        ),
-        ("总扣分", breakdown.get("total_deduction", 0), False),
-        ("原始分", breakdown.get("raw_score", 100), False),
-        ("最终分", breakdown.get("score", 100), False),
-        ("风险等级", breakdown.get("risk_level") or "-", False),
-        ("评分来源", breakdown.get("score_source") or "-", True),
-    ]
-    override = breakdown.get("compatibility_override")
-    if isinstance(override, dict):
-        rows.append((
-            "兼容说明",
-            f"{override.get('reason') or '-'}; canonical={override.get('canonical_score')}",
-            True,
-        ))
+            ("计算依据", f"{breakdown.get('formula') or '-'}；{breakdown.get('cvss_reason') or '-'}", False),
+            ("最终评分", f"{breakdown.get('score', '-')}/100（{breakdown.get('risk_level') or '-'}）", False),
+        ]
+    else:
+        weights = breakdown.get("weights") or {}
+        counts = breakdown.get("counts") or {}
+        deductions = breakdown.get("deductions") or {}
+        rows = [
+            ("评分版本", breakdown.get("version") or "-", True),
+            ("基础分", breakdown.get("base_score", 100), False),
+            (
+                "扣分权重",
+                "严重 × {0}；高 × {1}；中 × {2}；低 × {3}".format(
+                    weights.get("严重", 15), weights.get("高", 8), weights.get("中", 3), weights.get("低", 1),
+                ),
+                False,
+            ),
+            (
+                "问题计数",
+                "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                    counts.get("严重", 0), counts.get("高", 0), counts.get("中", 0), counts.get("低", 0),
+                ),
+                False,
+            ),
+            (
+                "分级扣分",
+                "严重 {0}；高 {1}；中 {2}；低 {3}".format(
+                    deductions.get("严重", 0),
+                    deductions.get("高", 0),
+                    deductions.get("中", 0),
+                    deductions.get("低", 0),
+                ),
+                False,
+            ),
+            ("总扣分", breakdown.get("total_deduction", 0), False),
+            ("原始分", breakdown.get("raw_score", 100), False),
+            ("最终分", breakdown.get("score", 100), False),
+            ("风险等级", breakdown.get("risk_level") or "-", False),
+            ("评分来源", breakdown.get("score_source") or "-", True),
+        ]
+        override = breakdown.get("compatibility_override")
+        if isinstance(override, dict):
+            rows.append((
+                "兼容说明",
+                f"{override.get('reason') or '-'}; canonical={override.get('canonical_score')}",
+                True,
+            ))
 
     table_data: List[List[Any]] = [[
         _paragraph("字段", styles["table_header"]),

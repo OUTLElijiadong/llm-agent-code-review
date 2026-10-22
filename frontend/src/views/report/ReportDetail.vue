@@ -265,6 +265,34 @@
         <p v-if="report.summary && !domainReportHtml" class="cover-summary">{{ summaryText }}</p>
       </section>
 
+      <section
+        v-if="cvssScoreBreakdown"
+        class="card cvss-score-details"
+        data-testid="report-cvss-score-details"
+        aria-labelledby="report-cvss-score-title"
+      >
+        <header class="card-head">
+          <h3 id="report-cvss-score-title" class="font-display">评分依据</h3>
+          <span class="score-scope-tag">平台综合评分，非 CVSS 官方综合分</span>
+        </header>
+        <div class="cvss-score-components">
+          <div>
+            <strong>CVSS 安全分 · {{ cvssWeightLabel }}%</strong>
+            <span>{{ cvssScoreLabel }}</span>
+          </div>
+          <div>
+            <strong>规则质量分 · {{ qualityWeightLabel }}%</strong>
+            <span>{{ qualityScoreLabel }}/100</span>
+          </div>
+        </div>
+        <p class="cvss-score-formula">{{ cvssFormulaLabel }}</p>
+        <p class="cvss-score-coverage">
+          CVSS 3.1 向量覆盖：{{ cvssScoredCount }} 项已评分，{{ cvssUnscoredCount }} 项未评分
+          <span v-if="cvssMaxBaseScore !== null">；最高基础分 {{ cvssMaxBaseScore }}</span>
+        </p>
+        <p v-if="cvssReason" class="cvss-score-reason" role="note">{{ cvssReason }}</p>
+      </section>
+
       <!-- ============ 严重度 + 修复进度 + 评分历史 ============ -->
       <section class="row-grid no-break">
         <div class="rg-card">
@@ -1111,6 +1139,33 @@ const score = computed(() => {
   const value = Number(stats.value.score ?? 0)
   return Number.isFinite(value) ? value : 0
 })
+type ScoreBreakdownView = Record<string, any>
+const cvssScoreBreakdown = computed<ScoreBreakdownView | null>(() => {
+  const taskBreakdown = report.value?.task?.score_breakdown
+  const statsBreakdown = stats.value.score_breakdown
+  const breakdown = (taskBreakdown && typeof taskBreakdown === 'object'
+    ? taskBreakdown
+    : statsBreakdown) as ScoreBreakdownView | undefined
+  return breakdown?.policy_version === 'cvss-weighted-v1' ? breakdown : null
+})
+const cvssComponents = computed<Record<string, any>>(() => cvssScoreBreakdown.value?.components ?? {})
+const cvssScoreComponent = computed<Record<string, any>>(() => cvssComponents.value.cvss ?? {})
+const qualityScoreComponent = computed<Record<string, any>>(() => cvssComponents.value.quality ?? {})
+const cvssWeightLabel = computed(() => Math.round(Number(cvssScoreComponent.value.weight ?? 0) * 100))
+const qualityWeightLabel = computed(() => Math.round(Number(qualityScoreComponent.value.weight ?? 0) * 100))
+const cvssScoreLabel = computed(() => cvssScoreComponent.value.score == null
+  ? '未应用（回退）'
+  : `${cvssScoreComponent.value.score}/100`)
+const qualityScoreLabel = computed(() => qualityScoreComponent.value.score ?? '未提供')
+const cvssScoredCount = computed(() => Number(cvssScoreComponent.value.scored_findings ?? 0))
+const cvssUnscoredCount = computed(() => Number(cvssScoreComponent.value.unscored_findings ?? 0))
+const cvssMaxBaseScore = computed<number | null>(() => {
+  const value = cvssScoreComponent.value.max_base_score
+  return value == null || !Number.isFinite(Number(value)) ? null : Number(value)
+})
+const cvssFormulaLabel = computed(() => cvssScoreBreakdown.value?.formula
+  || 'CVSS 安全分 = 100 − 10 × 最高有效 CVSS 3.1 基础分；综合分 = CVSS 安全分与规则质量分按权重合成。')
+const cvssReason = computed(() => String(cvssScoreBreakdown.value?.cvss_reason ?? '').trim())
 const scoreScope = computed(() => report.value?.task?.score_scope as ScoreScope | undefined)
 const scoreAudit = computed(() => report.value?.task?.score_audit as Record<string, unknown> | undefined)
 const scoreAvailable = computed(() => (
@@ -2054,6 +2109,48 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   padding-top: 24px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   margin: 0;
+}
+
+.cvss-score-details {
+  padding: 20px 24px;
+}
+
+.cvss-score-components {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cvss-score-components > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+}
+
+.cvss-score-components strong,
+.cvss-score-components span,
+.cvss-score-formula,
+.cvss-score-coverage,
+.cvss-score-reason {
+  overflow-wrap: anywhere;
+}
+
+.cvss-score-formula,
+.cvss-score-coverage,
+.cvss-score-reason {
+  margin: 10px 0 0;
+  color: var(--gray-600);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .cvss-score-details { padding: 16px; }
+  .cvss-score-components { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ============ 多列卡片行 ============ */

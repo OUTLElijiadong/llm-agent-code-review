@@ -197,7 +197,10 @@ const dragActive = ref(false)
 const imageInput = ref<HTMLInputElement>()
 const unreadAlerts = ref(0)
 const messageArea = ref<HTMLElement | null>(null)
-const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('admin')
+const {
+  panelRef, style: panelStyle, dragging, resizing, restoreOrAnchor,
+  beginDrag, beginResize, resizeByKeyboard, moveDrag, endDrag,
+} = useFloatingChatPosition('admin')
 const expandedTables = ref<Set<string>>(new Set())
 
 function compactDesktopAnchor(panel: HTMLElement): { left: number; top: number } | null {
@@ -2176,7 +2179,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       v-if="visible"
       ref="panelRef"
       class="copilot-panel"
-      :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
+      :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'drag-over': dragActive }"
       :style="panelStyle"
       role="dialog"
       aria-label="管理副驾驶对话"
@@ -2554,6 +2557,15 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           </button>
         </div>
       </footer>
+      <button
+        class="panel-resize-handle"
+        type="button"
+        aria-label="调整管理副驾驶大小，方向键调整宽度和高度"
+        title="拖动调整大小；方向键调整宽度和高度"
+        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
+        @pointerdown="beginResize"
+        @keydown="resizeByKeyboard"
+      >◢</button>
     </section>
 
     <AgentTeamSidePanel :team-id="selectedTeamId" @close="selectedTeamId = null" @ask-member="handleAskMember" />
@@ -2634,8 +2646,9 @@ input { font: inherit; }
   position: fixed;
   width: 400px;
   height: 620px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  min-width: 0;
   display: grid;
   grid-template-areas:
     'header'
@@ -2658,6 +2671,30 @@ input { font: inherit; }
 }
 
 .copilot-panel.is-dragging { user-select: none; }
+.copilot-panel.is-resizing { user-select: none; }
+.panel-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 22;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--agent-border);
+  border-radius: 8px 0 14px 0;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--agent-primary-strong);
+  font-size: 14px;
+  line-height: 1;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.panel-resize-handle:hover { background: var(--agent-primary-soft); }
+.panel-resize-handle:focus-visible { outline: 2px solid var(--agent-primary); outline-offset: -3px; }
+.copilot-panel.is-resizing .panel-resize-handle { background: var(--agent-primary-soft); }
+.copilot-panel > * { min-width: 0; }
 .panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -10px; border: 0; border-radius: 6px; background: transparent; color: var(--agent-text-secondary); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
 .panel-drag-handle:hover { color: var(--agent-primary); background: rgba(91, 88, 232, 0.08); }
 .copilot-panel.is-dragging .panel-drag-handle { cursor: grabbing; }
@@ -2867,7 +2904,7 @@ input { font: inherit; }
 @keyframes session-restoring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .session-restoring-spinner { animation: none; } }
 
-.copilot-messages { grid-area: messages; min-height: 0; overflow-y: auto; padding: 16px 14px;
+.copilot-messages { grid-area: messages; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px;
   /* 极淡品牌氛围底 + 滚动渐隐,替代平涂灰 */
   background:
     radial-gradient(circle at 88% 0%, rgba(142, 136, 245, 0.10), transparent 42%),
@@ -2913,7 +2950,7 @@ input { font: inherit; }
 .message-stack.has-response-control { width: calc(100% - 34px); }
 .message-row.is-user .message-stack { display: flex; align-items: flex-end; flex-direction: column; }
 .message-stack time { display: block; margin-top: 5px; color: var(--agent-text-secondary); font-size: 10px; }
-.message-bubble { padding: 9px 12px; border-radius: 12px; color: var(--agent-text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; position: relative; transition: box-shadow 0.2s ease, transform 0.2s ease; }
+.message-bubble { max-width: 100%; min-width: 0; padding: 9px 12px; border-radius: 12px; color: var(--agent-text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; position: relative; transition: box-shadow 0.2s ease, transform 0.2s ease; }
 /* assistant 气泡:极浅品牌渐变白卡 + 微阴影,替代平涂灰块 */
 .message-row.is-assistant .message-bubble,
 .message-row.is-assistant .message-bubble.markdown-body {
@@ -3219,8 +3256,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.copilot-input-area { grid-area: input; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
-.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto 38px; align-items: end; gap: 8px; padding: 9px 10px 10px; }
+.copilot-input-area { grid-area: input; min-width: 0; border-top: 1px solid var(--agent-border); background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-radius: 0 0 18px 18px; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr) auto 38px; align-items: end; gap: 8px; padding: 9px 38px 10px 10px; }
 /* ── 多模态图片附件 ── */
 .image-upload-input { display: none; }
 .image-upload-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 76px; height: 38px; padding: 0 10px; border: 1px solid var(--agent-border); border-radius: 8px; color: var(--agent-primary); background: white; font-size: 12px; white-space: nowrap; cursor: pointer; }
@@ -3287,6 +3324,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .icon-button,
   .send-button,
   .stop-button { width: 40px; height: 40px; }
@@ -3306,6 +3344,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .icon-button,
   .send-button,
   .stop-button { width: 40px; height: 40px; }

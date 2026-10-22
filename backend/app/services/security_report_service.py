@@ -11,7 +11,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.ai.scoring import compute_score_breakdown
+from app.ai.cvss import CVSS_VERSION, calculate_cvss_score, normalize_cvss_vector
+from app.ai.scoring import compute_composite_score_breakdown
 from app.core.exceptions import NotFoundError
 from app.models.code_file import CodeFile
 from app.models.project import Project
@@ -199,7 +200,7 @@ def _report_markdown(
         f"风险评分：{score}/100" if score is not None else "风险评分：未评估",
         *(
             [
-                f"来源评分：{result['source_risk_score']}/100（与按问题严重度计算的报告评分不同，保留来源值供核对）"
+                f"来源评分：{result['source_risk_score']}/100（保留来源值供核对，不作为平台评分）"
             ]
             if score is not None and result.get("source_risk_score") is not None
             else []
@@ -287,6 +288,21 @@ def _report_markdown(
                 f"位置：{path} · {line}",
             ]
         )
+        cvss_vector = _plain_report_text(finding.get("cvss_vector"), 128)
+        cvss_base_score = (
+            calculate_cvss_score(cvss_vector)
+            if finding.get("cvss_source") == "vector" and cvss_vector
+            else None
+        )
+        if cvss_base_score is None:
+            lines.extend(["CVSS 基础分：未评分", "CVSS 3.1 基础向量：未评分"])
+        else:
+            lines.extend(
+                [
+                    f"CVSS 基础分：{cvss_base_score:.1f}/10",
+                    f"CVSS 3.1 基础向量：{cvss_vector}",
+                ]
+            )
         if finding.get("cwe"):
             lines.append(f"CWE：{_plain_report_text(finding.get('cwe'), 100)}")
         if finding.get("owasp"):
@@ -504,6 +520,27 @@ def persist_security_report(
         ):
             if safe_finding.get(field) is not None:
                 safe_finding[field] = _plain_report_text(safe_finding[field], limit)
+        normalized_cvss_vector = normalize_cvss_vector(safe_finding.get("cvss_vector"))
+        normalized_metrics = {
+            metric.partition(":")[0]: metric.partition(":")[2]
+            for metric in (normalized_cvss_vector or "").split("/")
+            if ":" in metric
+        }
+        base_metric_names = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
+        base_vector = (
+            "/".join(f"{name}:{normalized_metrics[name]}" for name in base_metric_names)
+            if all(name in normalized_metrics for name in base_metric_names)
+            else None
+        )
+        validated_cvss_score = calculate_cvss_score(base_vector)
+        safe_finding["source_cvss_vector"] = (
+            f"CVSS:{CVSS_VERSION}/{normalized_cvss_vector}"
+            if validated_cvss_score is not None and normalized_cvss_vector else None
+        )
+        safe_finding["cvss_score"] = validated_cvss_score
+        safe_finding["cvss_vector"] = base_vector if validated_cvss_score is not None else None
+        safe_finding["cvss_version"] = CVSS_VERSION if validated_cvss_score is not None else None
+        safe_finding["cvss_source"] = "vector" if validated_cvss_score is not None else "unavailable"
         findings.append(safe_finding)
     payload["findings"] = findings
     severity_counts = {severity: 0 for severity in _SEVERITIES}
@@ -537,7 +574,19 @@ def persist_security_report(
     normalized_coverage["score_scope"] = (
         ("complete" if complete_run else "partial") if score_available else None
     )
-    score = int(compute_score_breakdown(severity_counts)["score"]) if score_available else None
+    scoring_findings = [
+        {
+            **finding,
+            "status": "refuted" if finding.get("verification") == "refuted" else "confirmed",
+        }
+        for finding in findings
+    ]
+    score_breakdown = (
+        compute_composite_score_breakdown(severity_counts, scoring_findings)
+        if score_available else None
+    )
+    score = int(score_breakdown["score"]) if score_breakdown is not None else None
+    score_version = score_breakdown["version"] if score_breakdown is not None else None
     if score_available and source_score is not None and source_score != score:
         payload["source_risk_score"] = source_score
     else:
@@ -570,6 +619,8 @@ def persist_security_report(
         # The snapshot carries score_available=false when no score exists;
         # keep the legacy non-null integer column neutral instead of implying 100.
         score=score if score is not None else 0,
+        score_version=score_version,
+        score_breakdown=score_breakdown,
         summary=(
             _plain_report_text(payload.get("summary"))
             or _plain_report_text(safe_error)
@@ -659,6 +710,10 @@ def persist_security_report(
                 references_json=finding.get("references") if isinstance(finding.get("references"), list) else None,
                 confidence=_safe_confidence(finding.get("confidence")),
                 source=_text(finding.get("source") or "security_scan", 16),
+                cvss_score=finding.get("cvss_score"),
+                cvss_vector=finding.get("cvss_vector"),
+                cvss_version=finding.get("cvss_version"),
+                cvss_source=finding.get("cvss_source"),
                 human_review_status="pending" if verification in {"plausible", "unreviewed"} else None,
             )
         )
@@ -681,6 +736,8 @@ def persist_security_report(
         "execution_status": execution_status,
         "score_available": score is not None,
         "risk_score": score,
+        "score_version": score_version,
+        "score_breakdown": score_breakdown,
         "coverage": normalized_coverage,
         "findings": findings,
         "threat_model": clean_report_payload(

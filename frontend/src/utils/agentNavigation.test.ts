@@ -159,7 +159,11 @@ describe('local navigation cost guard', () => {
         path: '/admin',
         children: [
           { path: 'audit', meta: { title: '系统操作审计', role: 'admin' } },
+          { path: 'operations', meta: { title: '运行监控', role: 'admin' } },
           { path: 'users', meta: { title: '用户管理', role: 'admin', permissions: ['user:view'] } },
+          { path: 'embedding', meta: { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true } },
+          { path: 'mcp-workers', meta: { title: 'MCP 与沙箱节点', role: 'admin', superAdmin: true } },
+          { path: 'llm', meta: { title: '大模型配置', role: 'admin', superAdmin: true } },
         ],
       },
       { path: '/projects', meta: { title: '项目管理', permissions: ['project:view'] } },
@@ -174,8 +178,16 @@ describe('local navigation cost guard', () => {
         matched: [{ path }],
         meta: path === '/admin/audit'
           ? { title: '系统操作审计', role: 'admin' }
+          : path === '/admin/operations'
+          ? { title: '运行监控', role: 'admin' }
           : path === '/admin/users'
           ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
+          : path === '/admin/embedding'
+          ? { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true }
+          : path === '/admin/mcp-workers'
+          ? { title: 'MCP 与沙箱节点', role: 'admin', superAdmin: true }
+          : path === '/admin/llm'
+          ? { title: '大模型配置', role: 'admin', superAdmin: true }
             : path === '/audit'
               ? { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] }
             : path === '/reviews'
@@ -214,6 +226,55 @@ describe('local navigation cost guard', () => {
       directive: { action: 'navigate', route: '/audit', label: '操作审计' },
     })
   })
+
+  it('普通用户的歧义“审计”导航选择可访问的审计页，不误派管理端', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开审计页面',
+      routerFor('/audit') as never,
+      {
+        ...guard(true),
+        hasRole: (role: string) => role === 'reviewer',
+      },
+    )
+
+    expect(result).toEqual({
+      kind: 'navigate',
+      directive: { action: 'navigate', route: '/audit', label: '操作审计' },
+    })
+  })
+
+  it('无审计权限的普通用户请求“审计”时拒绝，不回退到管理路径', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开审计页面',
+      routerFor('/audit') as never,
+      { ...guard(true), hasRole: () => false, hasPermission: () => false },
+    )
+
+    expect(result).toEqual({ kind: 'forbidden' })
+  })
+
+  it('明确要求管理后台审计时仍选择管理路由并拒绝普通用户', () => {
+    const result = resolveLocalNavigationRequest(
+      '打开管理后台审计页面',
+      routerFor('/admin/operations') as never,
+      { ...guard(true), hasRole: (role: string) => role === 'reviewer' },
+    )
+
+    expect(result).toEqual({ kind: 'forbidden' })
+  })
+
+  it.each(['/admin/embedding', '/admin/mcp-workers', '/admin/llm'])(
+    '普通管理员不能本地导航到最高管理员页面 %s',
+    (route) => {
+      const result = resolveLocalNavigationRequest(
+        `打开${route === '/admin/embedding' ? 'RAG 嵌入配置' : route === '/admin/mcp-workers' ? 'MCP 与沙箱节点' : '大模型配置'}页面`,
+        routerFor(route) as never,
+        { ...guard(true), isAdmin: () => true, isSuperAdmin: () => false },
+      )
+
+      expect(result).toEqual({ kind: 'forbidden' })
+    },
+  )
 
   it('does not intercept a request that combines navigation with an operation', () => {
     const result = resolveLocalNavigationRequest(

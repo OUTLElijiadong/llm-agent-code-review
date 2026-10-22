@@ -27,6 +27,56 @@ from app.services import agent_browser_service as service
 from app.services.agent_supervisor_service import review_response_tool
 
 
+@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm"])
+def test_super_admin_routes_reject_regular_admin(db, owner, monkeypatch, route):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: False)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, route)
+
+
+@pytest.mark.parametrize("route", ["/admin/embedding", "/admin/mcp-workers", "/admin/llm"])
+def test_super_admin_routes_allow_verified_super_admin(db, owner, monkeypatch, route):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "is_super_admin_user", lambda *_args: True)
+
+    assert service.authorize_route(db, owner, route) == route
+
+
+def test_audit_route_requires_reviewer_and_audit_permission(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/audit")
+
+    monkeypatch.setattr(service.rbac_service, "has_effective_role", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: False)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/audit")
+
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+    assert service.authorize_route(db, owner, "/audit") == "/audit"
+
+
+def test_legacy_report_template_route_normalizes_to_admin_path(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: True)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    assert service.authorize_route(db, owner, "/report/templates") == "/admin/report-templates"
+
+
+def test_legacy_report_template_route_does_not_grant_users_admin_access(db, owner, monkeypatch):
+    monkeypatch.setattr(service.rbac_service, "is_admin_user", lambda *_args: False)
+    monkeypatch.setattr(service.rbac_service, "check_permission", lambda *_args: True)
+
+    with pytest.raises(ForbiddenError):
+        service.authorize_route(db, owner, "/report/templates")
+
+
 @pytest.fixture
 def db():
     # ASGI 同步鉴权在线程池执行；所有线程必须读到同一份隔离测试数据库。

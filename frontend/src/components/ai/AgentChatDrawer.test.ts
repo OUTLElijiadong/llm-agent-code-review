@@ -421,6 +421,26 @@ it('登录后自动恢复已打开的浮窗时首次挂载即完成定位', asyn
   wrapper.unmount()
 })
 
+it('浮窗缩放柄支持键盘调整，消息滚动区与输入区保持分离', async () => {
+  const wrapper = mountDrawer()
+  const panel = wrapper.get('.chat-drawer').element
+  Object.defineProperty(panel, 'offsetWidth', { configurable: true, value: 400 })
+  Object.defineProperty(panel, 'offsetHeight', { configurable: true, value: 620 })
+  await flushPromises()
+
+  const resizeHandle = wrapper.get('.panel-resize-handle')
+  expect(resizeHandle.attributes('aria-label')).toContain('方向键')
+  await resizeHandle.trigger('keydown', { key: 'ArrowRight' })
+  expect(wrapper.get('.chat-drawer').attributes('style')).toContain('width: 416px')
+
+  const body = wrapper.get('.chat-body').element
+  const inputArea = wrapper.get('.chat-input-area').element
+  expect(body.parentElement?.classList.contains('chat-body-region')).toBe(true)
+  expect(body.closest('.chat-drawer')).toBe(inputArea.closest('.chat-drawer'))
+  expect(body.contains(inputArea)).toBe(false)
+  wrapper.unmount()
+})
+
 describe('AgentChatDrawer Responses stream', () => {
   it('建 run 前网络失败时立即保存消息和错误，刷新后可恢复并重试', async () => {
     const wrapper = await mountReadyDrawer()

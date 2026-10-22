@@ -26,14 +26,24 @@ def project_team_result(value: Any, *, team_id: int, task_id: int, result_path: 
     if result_indices is not None:
         reference.pop("result_path")
         reference["result_indices"] = result_indices
+    projection_summary = "结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。"
+    business_summary = safe.get("summary") if isinstance(safe, dict) else None
+    if not isinstance(business_summary, str):
+        business_summary = None
     preview = {}
     if isinstance(safe, dict):
         for key in ("status", "summary", "capability", "status_code", "id", "title", "total", "page", "page_size"):
+            if key == "summary":
+                continue
             child = safe.get(key)
             if isinstance(child, (int, float, bool)) or isinstance(child, str) and _encoded_size(child) <= 200:
                 preview[key] = child
     output = {
-        "summary": "结果超过单次上下文预算；此处为结构摘要，完整脱敏结果仍可按引用读取。",
+        # Keep the business field consumed by terminal-team clients separate from
+        # the metadata explaining that this payload is only a projection.
+        "summary": business_summary if business_summary is not None else projection_summary,
+        "projection_summary": projection_summary,
+        "summary_truncated": False,
         "complete": False, "preview": preview,
         "type": type(safe).__name__, "size_bytes": len(raw),
         "item_count": len(safe) if isinstance(safe, (dict, list, str)) else None,
@@ -46,6 +56,17 @@ def project_team_result(value: Any, *, team_id: int, task_id: int, result_path: 
         output["field_names"].pop()
     while _encoded_size(output) > budget and preview:
         preview.pop(next(reversed(preview)))
+    if business_summary is not None and _encoded_size(output) > budget:
+        output["summary_truncated"] = True
+        low, high = 0, len(business_summary)
+        while low < high:
+            middle = (low + high + 1) // 2
+            output["summary"] = business_summary[:middle] + ("…" if middle < len(business_summary) else "")
+            if _encoded_size(output) <= budget:
+                low = middle
+            else:
+                high = middle - 1
+        output["summary"] = business_summary[:low] + ("…" if low < len(business_summary) else "")
     if _encoded_size(output) > budget:
         raise ValueError("结构摘要引用超过预算，请使用索引定位引用")
     for key, child in preview.items():

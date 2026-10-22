@@ -59,7 +59,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
     # 与 frontend/src/router/index.ts 的主导航路径对账；兼容重定向 /rules 不再重复注入提示词。
     frontend_static_user_routes = {
         "/dashboard", "/projects", "/reviews", "/reviews/start",
-        "/security", "/reports", "/report/templates", "/code", "/issues",
+        "/security", "/reports", "/audit", "/code", "/issues",
         "/agents", "/sandboxes", "/agent-studio", "/forum", "/forum/new",
         "/knowledge", "/support", "/profile",
         "/profile/personalization", "/profile/password", "/profile/api-config",
@@ -71,11 +71,21 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
     user_block = user_guide_block()
     for route in frontend_static_user_routes:
         assert route in user_block, f"用户引导缺少前端已有路由: {route}"
+    assert "/report/templates" not in user_block
     assert "/support/maintenance" not in user_block
     assert "/support/feedback" not in user_block
     admin_block = admin_guide_block()
     for route in frontend_static_admin_routes:
         assert route in admin_block, f"管理引导缺少前端已有路由: {route}"
+
+
+def test_audit_is_discovered_for_reviewer_and_report_templates_only_for_admin() -> None:
+    user_block = user_guide_block()
+    admin_block = admin_guide_block()
+
+    assert "- /audit 操作审计:" in user_block
+    assert "/report/templates" not in user_block
+    assert "- /report/templates 报告模板管理:" in admin_block
 
 
 def test_openapi_still_valid_for_all_capabilities() -> None:

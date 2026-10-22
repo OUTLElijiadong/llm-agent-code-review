@@ -199,7 +199,10 @@ const thinkingCityOpen = ref(true)
 const modelName = ref(ORCHESTRATOR_MODEL)
 const chatBody = ref<HTMLElement>()
 const chatInputRef = ref<HTMLTextAreaElement>()
-const { panelRef, style: panelStyle, dragging, restoreOrAnchor, beginDrag, moveDrag, endDrag } = useFloatingChatPosition('user')
+const {
+  panelRef, style: panelStyle, dragging, resizing, restoreOrAnchor,
+  beginDrag, beginResize, resizeByKeyboard, moveDrag, endDrag,
+} = useFloatingChatPosition('user')
 const LEGACY_SESSION_KEY = 'prism-user-agent-session'
 const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const sessionId = ref('')
@@ -2720,7 +2723,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
         <div
           ref="panelRef"
           class="chat-drawer"
-          :class="{ 'is-dragging': dragging, 'drag-over': dragActive }"
+          :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'drag-over': dragActive }"
           :style="panelStyle"
           @pointermove="moveDrag"
           @pointerup="endDrag"
@@ -3300,6 +3303,15 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               </button>
             </div>
           </div>
+          <button
+            class="panel-resize-handle"
+            type="button"
+            aria-label="调整小菱对话框大小，方向键调整宽度和高度"
+            title="拖动调整大小；方向键调整宽度和高度"
+            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
+            @pointerdown="beginResize"
+            @keydown="resizeByKeyboard"
+          >◢</button>
         </div>
       </div>
     </Transition>
@@ -3324,7 +3336,10 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 .chat-drawer {
   position: fixed;
   width: min(400px, calc(100vw - 32px));
-  height: min(620px, calc(100dvh - 48px));
+  height: min(620px, calc(100dvh - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  min-width: 0;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -3488,6 +3503,30 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 }
 
 .chat-drawer.is-dragging { user-select: none; }
+.chat-drawer.is-resizing { user-select: none; }
+.panel-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 22;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px 0 14px 0;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--brand-600, #4a46d4);
+  font-size: 14px;
+  line-height: 1;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.panel-resize-handle:hover { background: var(--brand-50, #f5f6ff); }
+.panel-resize-handle:focus-visible { outline: 2px solid var(--brand-500, #5b58e8); outline-offset: -3px; }
+.chat-drawer.is-resizing .panel-resize-handle { background: var(--brand-50, #f5f6ff); }
+.chat-drawer > * { min-width: 0; }
 .panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-placeholder, #8f959e); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
 .panel-drag-handle:hover { color: var(--primary-color, #5b58e8); background: rgba(91, 88, 232, .08); }
 .chat-drawer.is-dragging .panel-drag-handle { cursor: grabbing; }
@@ -3576,6 +3615,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   position: relative;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -3681,7 +3721,11 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .chat-body {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
@@ -4354,8 +4398,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .chat-input-area {
   display: flex;
+  min-width: 0;
   gap: 10px;
-  padding: 12px 20px;
+  padding: 12px 48px 12px 20px;
   border-top: 1px solid var(--color-border-light);
   flex-shrink: 0;
   flex-wrap: wrap;
@@ -4597,9 +4642,12 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
     inset: auto 16px 16px 16px !important;
     width: auto;
     height: min(600px, calc(100dvh - 32px));
+    max-width: none;
+    max-height: none;
   }
   /* 触控适配:关键按钮加大到 40px,更好点 */
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .mascot-hero { display: none; }
   .quick-questions {
     position: static;
@@ -4617,6 +4665,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   }
   .quick-question:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .chat-body { padding: 12px; gap: 12px; }
+  .chat-input-area { padding: 12px; }
   .close-btn { width: 40px; height: 40px; }
   .msg-row.assistant .msg-bubble { padding-right: 48px; }
   .msg-copy-btn {
@@ -4642,8 +4691,11 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
     inset: auto 12px 12px auto !important;
     width: min(520px, calc(100vw - 24px));
     height: calc(100dvh - 24px);
+    max-width: none;
+    max-height: none;
   }
   .panel-drag-handle { display: none; }
+  .panel-resize-handle { display: none; }
   .mascot-hero { display: none; }
   .quick-questions {
     position: static;

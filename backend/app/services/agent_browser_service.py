@@ -101,6 +101,9 @@ _ROUTES = (
         (),
     ),
 )
+_SUPER_ADMIN_ROUTES = frozenset(
+    {"/admin/security-center", "/admin/embedding", "/admin/mcp-workers", "/admin/llm"}
+)
 
 
 def _now() -> datetime:
@@ -128,13 +131,23 @@ def authorize_route(db: Session, user: User, route: str) -> str:
     parts = urlsplit(route)
     if parts.scheme or parts.netloc or parts.fragment:
         raise ValidationError("禁止外部 URL 或脚本导航")
+    if parts.path == "/report/templates":
+        route = "/admin/report-templates" + (f"?{parts.query}" if parts.query else "")
+        parts = urlsplit(route)
     found = next((permissions for pattern, permissions in _ROUTES if re.fullmatch(pattern, parts.path)), None)
     if found is None:
         raise ValidationError("页面未登记，停止猜测目标")
-    if parts.path.startswith("/admin") and not rbac_service.is_admin_user(db, int(user.id)):
+    is_admin = rbac_service.is_admin_user(db, int(user.id))
+    if parts.path.startswith("/admin") and not is_admin:
         raise ForbiddenError("当前账号不能操作管理页面")
-    if parts.path == "/admin/security-center" and not rbac_service.is_super_admin_user(db, int(user.id)):
-        raise ForbiddenError("安全中心仅最高管理员可用")
+    if parts.path in _SUPER_ADMIN_ROUTES and not rbac_service.is_super_admin_user(db, int(user.id)):
+        raise ForbiddenError("该管理页面仅最高管理员可用")
+    if (
+        parts.path == "/audit"
+        and not is_admin
+        and not rbac_service.has_effective_role(db, int(user.id), "reviewer")
+    ):
+        raise ForbiddenError("操作审计仅审查员可用")
     if found and not any(rbac_service.check_permission(db, int(user.id), permission) for permission in found):
         raise ForbiddenError("当前账号没有此页面权限")
     return route

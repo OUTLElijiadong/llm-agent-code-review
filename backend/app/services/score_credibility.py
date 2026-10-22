@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.ai.scoring import SCORING_VERSION, compute_score_breakdown
+from app.ai.scoring import (
+    SCORING_VERSION,
+    compute_composite_score_breakdown,
+    compute_score_breakdown,
+    uses_cvss_policy,
+)
 
 SCORE_AUDIT_VERSION = "xiaoling-score-audit-v1"
 _REVIEWER = "规则复算"
@@ -65,7 +70,14 @@ def _pentest_rule_score(coverage: dict, displayed_score: int | None) -> int | No
     if counts is None:
         # 早期记录没有确认发现计数回执，只能核对取值范围。
         return displayed_score
-    deduction = sum(_SEVERITY_DEDUCTION.get(str(sev), 0) * max(0, int(num or 0)) for sev, num in counts.items())
+    normalized = {}
+    for severity, value in counts.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return None
+        if value and severity not in _SEVERITY_DEDUCTION:
+            return None
+        normalized[severity] = value
+    deduction = sum(_SEVERITY_DEDUCTION.get(sev, 0) * num for sev, num in normalized.items())
     return max(0, 100 - deduction)
 
 
@@ -75,6 +87,7 @@ def audit_report_score(
     severity_count: dict[str, int],
     issue_count: int,
     score_scope: dict[str, Any] | None = None,
+    findings: list | None = None,
 ) -> dict[str, Any]:
     """返回评分复算结果；``final_score`` 是报告应展示的分数。"""
     stored = _int_or_none(getattr(task, "score", None))
@@ -112,6 +125,18 @@ def audit_report_score(
     else:
         rule = "无问题且记录分来自规则评分的任务保留记录分"
         rule_score = displayed_score
+
+    if uses_cvss_policy(task):
+        # 新策略必须使用独立规则输入，不能将待验证的展示分回灌作为质量分。
+        if review_type == "pentest":
+            rule_score = _pentest_rule_score(coverage, None)
+        quality = rule_score if review_type in {"sandbox_test", "pentest"} else None
+        if findings is None or (review_type in {"sandbox_test", "pentest"} and quality is None):
+            rule_score = None
+        else:
+            composite = compute_composite_score_breakdown(severity_count, findings, quality_score=quality)
+            rule = composite["formula"] + "；" + composite["cvss_reason"]
+            rule_score = int(composite["score"])
 
     if rule_score is None:
         return {

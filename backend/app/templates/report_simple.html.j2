@@ -90,7 +90,16 @@
     <div class="table-scroll" role="region" aria-label="评分明细表格" tabindex="0">
     <table>
       <tbody>
-        {% if breakdown.score is none %}
+        {% if breakdown.policy_version == "cvss-weighted-v1" %}
+        {% set cvss = breakdown.components.cvss %}
+        {% set quality = breakdown.components.quality %}
+        <tr><th>评分策略</th><td><code>{{ breakdown.policy_version }}</code> · 平台综合评分（非 CVSS 官方综合分）</td></tr>
+        <tr><th>CVSS 安全分</th><td>{{ cvss.score if cvss.score is not none else "未应用（回退）" }}{% if cvss.score is not none %}/100{% endif %} · 权重 {{ (cvss.weight * 100)|round|int }}% · 最高基础分 {{ cvss.max_base_score if cvss.max_base_score is not none else "-" }}</td></tr>
+        <tr><th>规则质量分</th><td>{{ quality.score }}/100 · 权重 {{ (quality.weight * 100)|round|int }}%</td></tr>
+        <tr><th>向量覆盖</th><td>{{ cvss.scored_findings }} 项已评分；{{ cvss.unscored_findings }} 项未评分（{{ breakdown.cvss_status }}）</td></tr>
+        <tr><th>计算依据</th><td>{{ breakdown.formula }}；{{ breakdown.cvss_reason }}</td></tr>
+        <tr><th>最终评分</th><td>{{ breakdown.score }}/100（{{ breakdown.risk_level }}）</td></tr>
+        {% elif breakdown.score is none %}
         <tr><th>评分明细</th><td>未评估</td></tr>
         <tr><th>评分来源</th><td>{{ breakdown.score_source or "未提供" }}</td></tr>
         {% else %}
@@ -148,6 +157,7 @@
           <th style="width:120px;">类型</th>
           <th style="width:100px;">处理状态</th>
           <th>标题</th>
+          <th style="width:90px;">CVSS 状态</th>
           <th style="width:160px;">文件</th>
           <th style="width:70px;">行号</th>
         </tr>
@@ -160,6 +170,7 @@
           <td>{{ issue.issue_type or "-" }}</td>
           <td>{{ issue.status_label }}</td>
           <td>{{ issue.title or issue.description[:40] }}</td>
+          <td>{% if issue.cvss_vector and issue.cvss_score is not none %}已评分 {{ issue.cvss_score }}{% else %}未评分{% endif %}</td>
           <td>{{ issue.file_name or "-" }}</td>
           <td>{{ issue.line_number or "-" }}</td>
         </tr>

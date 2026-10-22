@@ -16,6 +16,9 @@ vi.mock('@/utils/agentNavigation', () => ({ isNavigationPathAllowed: () => true 
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: { error: vi.fn() } }))
 
 const actor = reactive({ profile: { id: 7 }, token: 'browser-owner-token' })
+const sessionLookup = vi.hoisted(() => vi.fn())
+vi.mock('@/api/agentResponses', () => ({ getAgentResponseSession: sessionLookup }))
+
 const originalAdapter = http.defaults.adapter
 const wrappers: Array<ReturnType<typeof mount>> = []
 
@@ -53,6 +56,7 @@ beforeEach(() => {
   sessionStorage.clear()
   actor.profile.id = 7
   actor.token = 'browser-owner-token'
+  sessionLookup.mockReset()
 })
 afterEach(() => {
   for (const wrapper of wrappers.splice(0)) wrapper.unmount()
@@ -61,8 +65,36 @@ afterEach(() => {
 })
 
 describe('页面桥的运行创建与恢复时序', () => {
+  it('确认请求期间进入审批后能继续恢复，不遗留恢复锁', async () => {
+    let finish: (value: unknown) => void = () => undefined
+    sessionLookup.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    sessionLookup.mockResolvedValue({
+      surface: 'user', session_id: 'browser-session', run: { run_id: 'run-approval', status: 'running' },
+    })
+    const requests: string[] = []
+    http.defaults.adapter = async config => {
+      requests.push(config.url || '')
+      return response(config, 200, { code: 0, message: 'ok', data: { actions: [] } })
+    }
+    const scope = mountBridge('user')
+    scope.status.value = 'running'
+    scope.runId.value = 'run-approval'
+    await vi.advanceTimersByTimeAsync(0)
+    scope.status.value = 'approving'
+    finish({ surface: 'user', session_id: 'browser-session', run: { run_id: 'run-approval', status: 'running' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(requests).toHaveLength(0)
+    scope.status.value = 'running'
+    await vi.advanceTimersByTimeAsync(0)
+    expect(requests).toEqual(['/agent-browser/pending'])
+  })
+
   it.each(['user', 'admin'] as const)('客户端先发布 %s run ID 时，未落库的恢复不弹错且落库后执行排队动作', async surface => {
     let committed = false
+    sessionLookup.mockImplementation(async () => ({
+      surface, session_id: 'browser-session',
+      run: committed ? { run_id: 'run_client_before_checkpoint', status: 'running' } : null,
+    }))
     const requests: InternalAxiosRequestConfig[] = []
     const action: SiteBrowserRequiredEvent = {
       type: 'response.browser.required',
@@ -94,21 +126,21 @@ describe('页面桥的运行创建与恢复时序', () => {
     scope.status.value = 'running'
     scope.runId.value = action.run_id
     await vi.advanceTimersByTimeAsync(0)
-    expect(requests).toHaveLength(1)
-    expect(requests[0]!.params).toEqual({ session_id: 'browser-session', surface, run_id: action.run_id })
+    expect(sessionLookup).toHaveBeenCalledExactlyOnceWith(surface, 'browser-session', true)
+    expect(requests).toHaveLength(0)
     expect(scope.navigate).not.toHaveBeenCalled()
     expect(ElMessage.error).not.toHaveBeenCalled()
 
     committed = true
     await vi.advanceTimersByTimeAsync(2080)
     expect(requests.map(request => request.url)).toEqual([
-      '/agent-browser/pending', '/agent-browser/pending',
+      '/agent-browser/pending',
       '/agent-browser/actions/9/claim', '/agent-browser/actions/9/ack',
     ])
-    expect(requests[1]!.params).toEqual(requests[0]!.params)
-    expect(JSON.parse(requests[2]!.data)).toEqual({ session_id: 'browser-session', surface, client_nonce: 'owner-nonce' })
+    expect(requests[0]!.params).toEqual({ session_id: 'browser-session', surface, run_id: action.run_id })
+    expect(JSON.parse(requests[1]!.data)).toEqual({ session_id: 'browser-session', surface, client_nonce: 'owner-nonce' })
     expect(scope.navigate).toHaveBeenCalledExactlyOnceWith('/forum/42')
-    expect(JSON.parse(requests[3]!.data)).toMatchObject({
+    expect(JSON.parse(requests[2]!.data)).toMatchObject({
       session_id: 'browser-session', surface, client_nonce: 'owner-nonce', claim_token: 'claim-9', outcome: 'completed',
       observation: { snapshot_id: 'snapshot-9', route: '/forum/42' },
     })
@@ -116,7 +148,75 @@ describe('页面桥的运行创建与恢复时序', () => {
 
     scope.status.value = 'completed'
     await vi.advanceTimersByTimeAsync(5000)
-    expect(requests).toHaveLength(4)
+    expect(requests).toHaveLength(3)
+  })
+
+  it.each([
+    { surface: 'user', session_id: 'browser-session', run: { run_id: 'old-run', status: 'running' } },
+    { surface: 'admin', session_id: 'browser-session', run: { run_id: 'new-run', status: 'running' } },
+    { surface: 'user', session_id: 'foreign-session', run: { run_id: 'new-run', status: 'running' } },
+    { surface: 'user', session_id: 'browser-session', run: { run_id: 'new-run', status: 'completed' } },
+  ])('服务端回读与当前运行不匹配时不恢复页面动作：%j', async session => {
+    sessionLookup.mockResolvedValue(session)
+    const requests: InternalAxiosRequestConfig[] = []
+    http.defaults.adapter = async config => {
+      requests.push(config)
+      return response(config, 200, { code: 0, data: { actions: [] } })
+    }
+    const scope = mountBridge('user')
+    scope.status.value = 'running'
+    scope.runId.value = 'new-run'
+    await vi.advanceTimersByTimeAsync(2050)
+    expect(requests).toEqual([])
+    expect(scope.navigate).not.toHaveBeenCalled()
+  })
+
+  it.each(['completed', 'cancelled', 'failed', 'incomplete', 'blocked', 'max_rounds_exceeded'])(
+    '运行进入%s后，迟到的确认不恢复页面动作', async terminal => {
+      let completeLookup!: (value: unknown) => void
+      sessionLookup.mockImplementationOnce(() => new Promise(resolve => { completeLookup = resolve }))
+      const requests: InternalAxiosRequestConfig[] = []
+      http.defaults.adapter = async config => {
+        requests.push(config)
+        return response(config, 200, { code: 0, data: { actions: [] } })
+      }
+      const scope = mountBridge('user')
+      scope.status.value = 'running'
+      scope.runId.value = 'stopped-run'
+      await vi.advanceTimersByTimeAsync(0)
+      scope.status.value = terminal
+      await vi.advanceTimersByTimeAsync(0)
+      completeLookup({ surface: 'user', session_id: 'browser-session',
+        run: { run_id: 'stopped-run', status: 'running' } })
+      await vi.advanceTimersByTimeAsync(4100)
+      expect(requests).toEqual([])
+      expect(scope.navigate).not.toHaveBeenCalled()
+    },
+  )
+
+  it('旧账号运行确认迟到时不发送恢复请求，新账号仍可继续确认', async () => {
+    let completeLookup!: (value: unknown) => void
+    sessionLookup.mockImplementationOnce(() => new Promise(resolve => { completeLookup = resolve }))
+    const requests: InternalAxiosRequestConfig[] = []
+    http.defaults.adapter = async config => {
+      requests.push(config)
+      return response(config, 200, { code: 0, data: { actions: [] } })
+    }
+    const scope = mountBridge('user')
+    scope.status.value = 'running'
+    scope.runId.value = 'old-run'
+    await vi.advanceTimersByTimeAsync(0)
+    actor.profile.id = 8
+    actor.token = 'new-account-token'
+    scope.runId.value = 'new-run'
+    sessionLookup.mockResolvedValue({ surface: 'user', session_id: 'browser-session',
+      run: { run_id: 'new-run', status: 'running' } })
+    completeLookup({ surface: 'user', session_id: 'browser-session',
+      run: { run_id: 'old-run', status: 'running' } })
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.params.run_id).toBe('new-run')
+    expect(scope.navigate).not.toHaveBeenCalled()
   })
 
   it('恢复的404仍拒绝，认领与回执的404仍报告真实错误', async () => {
