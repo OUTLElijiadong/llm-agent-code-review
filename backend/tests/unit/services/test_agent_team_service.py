@@ -17,6 +17,7 @@ from app.models.code_file import CodeFile
 from app.models.custom_agent import CustomAgent, CustomAgentRelease, CustomAgentVersion
 from app.models.project import Project
 from app.models.project_source_revision import ProjectSourceRevision
+from app.models.rbac import Permission, Role, RolePermission, UserRole
 from app.models.user import User
 from app.schemas.agent_team import AgentTeamCreateIn
 from app.services import agent_mesh_service, agent_responses_service, agent_team_service, sandbox_service
@@ -3207,3 +3208,118 @@ def test_large_team_summary_and_error_never_reference_last_task_results(db, team
             "tool": "get_agent_team", "team_id": team.id, "result_scope": f"team_{key}",
             "result_path": "", "offset": 0, "limit": 20,
         }
+
+
+def test_escalated_plan_can_be_created_without_granting_execution_authorization(db):
+    from app.services import agent_supervisor_service
+
+    user = User(username="autocreate-owner", password="x", role="user", status=1)
+    db.add(user)
+    db.commit()
+    payload = _payload(tasks=[
+        {
+            "task_key": "read_external",
+            "member_key": "reader",
+            "title": "读取外部目标",
+            "instructions": "按当前请求读取目标并记录证据",
+            "input": {"remote_target_url": "https://target.example"},
+        },
+        {
+            "task_key": "verify",
+            "member_key": "reviewer",
+            "title": "核验结果",
+            "instructions": "仅核验前序任务的实际结果",
+            "depends_on": ["read_external"],
+        },
+    ])
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+
+    created = agent_team_service.create_team_from_xiaoling(db, user, payload)
+
+    assert created["status"] == "queued"
+    event = db.query(AgentTeamEvent).filter_by(
+        team_id=created["team_id"], event_type="supervisor.plan_reviewed",
+    ).one()
+    detail = agent_team_service._unjson(event.detail_json, {})
+    assert detail["confirmed_by_user_id"] is None
+    assert detail["authorized_high_risk_fingerprints"]
+
+
+def test_unclassified_plan_can_be_created_without_granting_execution_authorization(db):
+    from app.services import agent_supervisor_service
+
+    user = User(username="unclassified-owner", password="x", role="reviewer", status=1)
+    role = Role(name="审查员", code="reviewer", status="active", is_builtin=1)
+    permission = Permission(code="security:scan", name="security:scan", module="security", type="api")
+    db.add_all([user, role, permission])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id))
+    db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    db.commit()
+    payload = _payload(members=[
+        {"member_key": "reader", "display_name": "审查 Agent", "address": "agent:security_sentinel",
+         "role": "worker"},
+        {"member_key": "reviewer", "display_name": "核验 Agent", "address": "agent:code_reviewer",
+         "role": "verifier"},
+    ], tasks=[
+        {"task_key": "read_external", "member_key": "reader", "title": "未登记操作",
+         "instructions": "执行未登记操作", "input": {"operation": "unlisted_operation"}},
+        {"task_key": "verify", "member_key": "reviewer", "title": "核验结果",
+         "instructions": "核验前序结果", "depends_on": ["read_external"]},
+    ])
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+    assert review["tasks"][0]["classification"] == "unclassified_operation"
+
+    created = agent_team_service.create_team_from_xiaoling(db, user, payload)
+
+    assert created["status"] == "queued"
+    event = db.query(AgentTeamEvent).filter_by(
+        team_id=created["team_id"], event_type="supervisor.plan_reviewed",
+    ).one()
+    detail = agent_team_service._unjson(event.detail_json, {})
+    assert detail["confirmed_by_user_id"] is None
+    assert detail["authorized_high_risk_fingerprints"]
+
+
+@pytest.mark.parametrize("confirmation", ["none", "digest_only", "other_account", "trusted"])
+def test_created_plan_records_execution_authority_only_from_trusted_bound_confirmation(db, confirmation):
+    from app.services import agent_supervisor_service
+
+    user = User(username="bound-confirmation-owner", password="x", role="user", status=1)
+    db.add(user)
+    db.commit()
+    payload = _payload()
+    payload.tasks[0].input = {"remote_target_url": "https://target.example"}
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+    kwargs = {}
+    if confirmation != "none":
+        kwargs["supervisor_plan_sha256"] = review["plan_sha256"]
+    if confirmation in {"other_account", "trusted"}:
+        kwargs["supervisor_confirmed_by"] = user.id if confirmation == "trusted" else user.id + 1
+
+    created = agent_team_service.create_team_from_xiaoling(db, user, payload, **kwargs)
+
+    event = db.query(AgentTeamEvent).filter_by(
+        team_id=created["team_id"], event_type="supervisor.plan_reviewed",
+    ).one()
+    detail = agent_team_service._unjson(event.detail_json, {})
+    assert detail["confirmed_by_user_id"] == (user.id if confirmation == "trusted" else None)
+    assert detail["authorized_high_risk_fingerprints"]
+
+
+def test_page_control_plan_keeps_existing_bound_creation_approval_gate(db, team_user):
+    from app.services import agent_supervisor_service
+
+    user = SimpleNamespace(**vars(team_user), token_version=0)
+    payload = _payload()
+    payload.members[0].address = "agent:site_operator"
+    payload.tasks[0].input = {
+        "operation": "operate_current_page", "action": "click", "args": {"control_handle": "c" * 32},
+    }
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert review["needs_confirmation"] is True
+    with pytest.raises(agent_team_service.AgentTeamAccessError, match="当前账号确认"):
+        agent_team_service.create_team_from_xiaoling(db, user, payload)

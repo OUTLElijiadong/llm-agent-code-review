@@ -371,8 +371,8 @@ def review_response_tool(tool_name: str, arguments: Mapping[str, Any]) -> dict[s
         team_review = review_agent_team_plan(arguments)
         review = SupervisionReview(
             team_review["decision"], team_review["risk_level"],
-            "团队计划通过监督复核" if not team_review["needs_confirmation"]
-            else "团队计划包含高风险或未分类任务，等待当前账号确认",
+            "团队计划通过监督复核；执行仍受任务级权限与合同门禁约束" if not team_review["needs_confirmation"]
+            else "团队计划已记录；高风险或未分类任务须在执行前完成当前账号确认",
             bool(team_review["needs_confirmation"]), "team_plan",
         )
         extra = team_review

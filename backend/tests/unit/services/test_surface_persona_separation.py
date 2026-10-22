@@ -328,8 +328,8 @@ async def test_remote_blackbox_runs_only_after_click_approval_and_forces_server_
 
 
 @pytest.mark.asyncio
-async def test_remote_target_in_agent_team_requires_click_approval_and_is_bound(db, admin, monkeypatch):
-    """含远程目标的子 Agent 团队须展示目标待批准，获批后才授予本次探测。"""
+async def test_remote_team_creation_needs_no_click_and_never_promotes_target_authorization(db, admin, monkeypatch):
+    """创建含远程目标的团队免确认，但不能提升任务中的远程执行授权。"""
     captured: list[dict] = []
     orchestrator = _bare_orchestrator()
 
@@ -366,16 +366,8 @@ async def test_remote_target_in_agent_team_requires_click_approval_and_is_bound(
     }
     call = ToolCall("call-team-remote", "create_agent_team", args, json.dumps(args))
 
-    pending = await executor.execute(call)
-    assert pending.status == "approval_required"
-    assert pending.preview["remote_targets"] == ["https://authorized.example.test/health"]
-    assert pending.preview["method"] == "GET"
-    assert pending.preview["risk_level"] == "high"
-    assert pending.preview["plan_sha256"]
-    assert captured == []
-
-    completed = await executor.execute(call, approved=True)
+    completed = await executor.execute(call)
     assert completed.status == "success"
     assert len(captured) == 1
     task_input = captured[0]["tasks"][0]["input"]
-    assert task_input["remote_target_authorized"] is True
+    assert task_input["remote_target_authorized"] is False

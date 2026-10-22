@@ -19,6 +19,8 @@ def test_cvss_is_seventy_percent_and_recalculated_from_vector():
     assert result['components']['quality']['weight'] == .3
     assert result['components']['quality']['score'] == 92
     assert result['score'] == 29  # 0.7 * 2 + 0.3 * 92
+    assert result['cvss_standard'] == 'CVSS 3.1（FIRST）'
+    assert result['cvss_standard_url'] == 'https://www.first.org/cvss/v3.1/specification-document'
 
 
 def test_invalid_vector_or_model_number_never_becomes_cvss():
@@ -28,6 +30,7 @@ def test_invalid_vector_or_model_number_never_becomes_cvss():
         assert result['version'] == 'severity-deduction-v1'
         assert result['score'] == 92
         assert result['components']['cvss']['weight'] == 0
+        assert result['cvss_standard_url'] == 'https://www.first.org/cvss/v3.1/specification-document'
 
 
 def test_missing_vector_cannot_raise_existing_score():

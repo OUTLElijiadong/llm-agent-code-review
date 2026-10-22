@@ -1725,6 +1725,7 @@ class PrismToolExecutor:
             return await self._execute_once(call, lambda: self._run_full_project_validation(call))
 
         team_supervision = None
+        page_team_requires_confirmation = False
         if call.name == "run_project_tests" and str(call.arguments.get("remote_target_url") or "").strip():
             target = str(call.arguments.get("remote_target_url") or "").strip()
             if not approved:
@@ -1774,6 +1775,12 @@ class PrismToolExecutor:
                         "纯页面跳转使用已核实路由的 PRISM_NAVIGATE，不能伪造站点业务能力。",
                     )
             team_supervision = agent_supervisor_service.review_agent_team_plan(call.arguments)
+            # 普通团队创建只登记计划；页面团队保留现有桥的控件动作审批合同。
+            page_team_requires_confirmation = bool(
+                team_supervision["needs_confirmation"]
+                and any(task.get("input", {}).get("operation") == "operate_current_page"
+                        for task in call.arguments.get("tasks", []))
+            )
             remote_targets = []
             for task in call.arguments.get("tasks", []):
                 task_input = task.get("input") if isinstance(task, Mapping) else None
@@ -1782,7 +1789,7 @@ class PrismToolExecutor:
                     remote_targets.append(target.strip())
             if remote_targets and not team_supervision["needs_confirmation"]:
                 raise InvalidRunStateError("监督器未将远程目标归类为需确认，已阻断不一致决策")
-            if team_supervision["needs_confirmation"] and not approved:
+            if page_team_requires_confirmation and not approved:
                 unique_targets = list(dict.fromkeys(remote_targets))
                 return self._approval(
                     call,
@@ -1801,12 +1808,12 @@ class PrismToolExecutor:
                     },
                     request_extra={"supervisor_plan_sha256": team_supervision["plan_sha256"]},
                 )
-            if team_supervision["needs_confirmation"]:
+            if page_team_requires_confirmation:
                 approval_request = self._approval_request(call)
                 if approval_request.get("supervisor_plan_sha256") != team_supervision["plan_sha256"]:
                     raise InvalidRunStateError("当前审批未绑定此版本的 Agent 团队计划")
                 self._mark_approval(call, approve=True)
-            if remote_targets:
+            if remote_targets and page_team_requires_confirmation:
                 # 审批先验证原始模型参数与计划摘要，再注入服务端外部目标授权标记。
                 authorized_arguments = copy.deepcopy(call.arguments)
                 for task in authorized_arguments.get("tasks", []):
@@ -1978,7 +1985,7 @@ class PrismToolExecutor:
         if team_supervision is not None:
             agent_context.extra["supervisor_plan_sha256"] = team_supervision["plan_sha256"]
             agent_context.extra["supervisor_confirmed_by"] = int(self._user.id) if approved and \
-                team_supervision["needs_confirmation"] else None
+                page_team_requires_confirmation else None
         if call.name == "retry_agent_team" and call.arguments.get("supervisor_plan_sha256"):
             agent_context.extra["supervisor_user_confirmed"] = bool(approved)
         async def invoke_team_tool():

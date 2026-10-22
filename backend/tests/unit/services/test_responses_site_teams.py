@@ -1079,3 +1079,238 @@ async def test_malformed_site_contract_is_repairable_error_not_high_risk_approva
     assert result.status == "error"
     assert "execute_capability" in result.error
     assert "scope" in result.error
+
+
+@pytest.mark.asyncio
+async def test_escalated_team_creation_does_not_request_approval_or_authorize_remote_execution(db, monkeypatch):
+    from app.agents.orchestrator import Orchestrator
+    from app.models.agent_response_run import AgentToolExecution
+    from app.models.user import User
+
+    user = User(id=11, username="team-create-owner", password="x", role="user", status=1)
+    db.add(user)
+    db.add(AgentToolExecution(
+        request_id="create-plan-discovery", run_id="site-run", call_id="discovery",
+        user_id=user.id, tool_name="list_agents", status="success", arguments_json="{}",
+    ))
+    db.commit()
+    actor = executor(db, monkeypatch, [])
+    actor._tool_scope = "xiaoling_coordinator"
+    actor._orch = Orchestrator(register=False)
+    actor._orch._db = db
+    actor._orch._user = user
+    actor._mcp = SimpleNamespace(has_tool=lambda _name: False)
+
+    def forbid_approval(*_args, **_kwargs):
+        pytest.fail("团队组建本身不应触发高风险确认")
+
+    monkeypatch.setattr(actor, "_approval", forbid_approval)
+    result = await actor.execute(ToolCall(
+        "high-risk-create",
+        "create_agent_team",
+        {
+            "title": "外部目标核验团队",
+            "objective": "创建并审计团队计划；实际外部目标执行仍需任务级授权",
+            "members": [
+                {"member_key": "reader", "display_name": "读取 Agent", "address": "agent:project_analyzer",
+                 "role": "worker"},
+                {"member_key": "reviewer", "display_name": "核验 Agent", "address": "agent:code_reviewer",
+                 "role": "verifier"},
+            ],
+            "tasks": [
+                {"task_key": "read", "member_key": "reader", "title": "读取目标",
+                 "instructions": "读取指定目标并整理证据", "input": {"remote_target_url": "https://target.example"}},
+                {"task_key": "verify", "member_key": "reviewer", "title": "核验结果",
+                 "instructions": "核验前序结果", "depends_on": ["read"]},
+            ],
+        },
+        "{}",
+    ))
+
+    assert result.status == "success"
+    event = db.query(agent_team_service.AgentTeamEvent).filter_by(
+        team_id=result.output["team_id"], event_type="supervisor.plan_reviewed",
+    ).one()
+    detail = agent_team_service._unjson(event.detail_json, {})
+    assert detail["confirmed_by_user_id"] is None
+    assert detail["authorized_high_risk_fingerprints"]
+    task = db.query(agent_team_service.AgentTeamTask).filter_by(
+        team_id=result.output["team_id"], task_key="read",
+    ).one()
+    assert "remote_target_authorized" not in agent_team_service._unjson(task.input_json, {})
+
+    from sqlalchemy.orm import sessionmaker
+
+    from app.services import agent_mesh_dispatcher, agent_team_dispatcher
+
+    monkeypatch.setattr(
+        agent_team_dispatcher, "SessionLocal", sessionmaker(bind=db.get_bind(), autoflush=False),
+    )
+    monkeypatch.setattr(
+        agent_mesh_dispatcher, "_handle",
+        lambda *_args, **_kwargs: pytest.fail("未经当前账号执行期确认的外部任务不得调用成员 handler"),
+    )
+    claim = agent_team_service.claim_next_task(db, result.output["team_id"])
+    assert claim is not None
+    dispatched = agent_team_dispatcher._execute_claimed(result.output["team_id"], claim)
+    db.expire_all()
+    task = db.query(agent_team_service.AgentTeamTask).filter_by(id=claim["task_id"]).one()
+    assert dispatched["success"] is False
+    assert task.status == "blocked"
+    assert agent_team_service._unjson(task.result_json, {})["errors"][0]["code"] == "supervisor_confirmation_required"
+
+
+@pytest.mark.asyncio
+async def test_ordinary_answer_runs_persisted_team_members_and_passes_completion_guard(db, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.agents.base import AgentResult, BaseAgent
+    from app.agents.orchestrator import Orchestrator
+    from app.models.agent_response_run import AgentToolExecution
+    from app.models.user import User
+    from app.services import agent_model_service, agent_team_dispatcher, temporary_agent_runtime
+
+    user = User(id=11, username="answer-team-owner", password="x", role="user", status=1)
+    db.add(user)
+    db.add(AgentToolExecution(
+        request_id="answer-discovery", run_id="site-run", call_id="discovery",
+        user_id=user.id, tool_name="list_agents", status="success", arguments_json="{}",
+    ))
+    db.commit()
+    actor = executor(db, monkeypatch, [])
+    actor._tool_scope = "xiaoling_coordinator"
+    actor._orch = Orchestrator(register=False)
+    actor._orch._db = db
+    actor._orch._user = user
+    actor._mcp = SimpleNamespace(has_tool=lambda _name: False)
+
+    tool_calls = []
+
+    async def execute_tool(call):
+        result = await actor.execute(call)
+        tool_calls.append((call, result))
+        return result
+
+    discovery = await execute_tool(ToolCall("discovery", "list_agents", {}, "{}"))
+    assert discovery.status == "success"
+    created = await execute_tool(ToolCall(
+        "ordinary-answer",
+        "create_agent_team",
+        {
+            "title": "普通问答",
+            "objective": "由成员回答：为什么 Python 字典保留插入顺序？",
+            "members": [
+                {"member_key": "answerer", "display_name": "问答 Agent", "address": "temporary:answerer",
+                 "role": "worker", "definition": {"purpose": "回答普通知识问题", "instructions": "基于已有知识回答"}},
+                {"member_key": "reporter", "display_name": "汇总 Agent", "address": "agent:reporter",
+                 "role": "summarizer"},
+            ],
+            "tasks": [
+                {"task_key": "answer", "member_key": "answerer", "title": "回答问题",
+                 "instructions": "回答用户问题并给出简洁解释",
+                 "input": {"operation": "answer_question", "text": "为什么 Python 字典保留插入顺序？"}},
+                {"task_key": "report", "member_key": "reporter", "title": "汇总答案",
+                 "instructions": "依据问答成员的真实结果汇总", "depends_on": ["answer"]},
+            ],
+        },
+        "{}",
+    ))
+    assert created.status == "success"
+    team_id = created.output["team_id"]
+    model_calls = []
+
+    def fake_model_call(agent, prompt, ctx=None, **_kwargs):
+        model_calls.append({"prompt": prompt, "ctx": ctx})
+        return AgentResult(
+            success=True,
+            data={"summary": "Python 3.7 起保证字典保持插入顺序。", "findings": [], "limitations": []},
+            model="test-model",
+            usage_log_ids=[],
+            http_attempts=1,
+        )
+
+    monkeypatch.setattr(agent_team_dispatcher.rbac_service, "check_permission", lambda *_args: True)
+    monkeypatch.setattr(BaseAgent, "call_json", fake_model_call)
+    monkeypatch.setattr(agent_model_service, "configure_subagent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        agent_team_dispatcher, "SessionLocal", sessionmaker(bind=db.get_bind(), autoflush=False),
+    )
+    temporary_handler_calls = []
+    original_temporary_handler = temporary_agent_runtime.run_temporary_agent
+
+    def observe_temporary_handler(*args, **kwargs):
+        definition = kwargs.get("definition") or (args[3] if len(args) > 3 else {})
+        temporary_handler_calls.append(definition["purpose"])
+        return original_temporary_handler(*args, **kwargs)
+
+    monkeypatch.setattr(temporary_agent_runtime, "run_temporary_agent", observe_temporary_handler)
+    for _ in range(5):
+        db.expire_all()
+        snapshot = agent_team_service.get_team(db, user, team_id)
+        if snapshot["status"] in {"completed", "failed", "blocked", "cancelled", "expired"}:
+            break
+        claim = agent_team_service.claim_next_task(db, team_id)
+        if claim is None:
+            break
+        agent_team_dispatcher._execute_claimed(team_id, claim)
+
+    db.expire_all()
+    snapshot = agent_team_service.get_team(db, user, team_id)
+    answer_task = db.query(agent_team_service.AgentTeamTask).filter_by(
+        team_id=team_id, task_key="answer",
+    ).one()
+    assert temporary_handler_calls == ["回答普通知识问题"], (
+        f"team={snapshot!r}; answer_task_status={answer_task.status}; "
+        f"answer_task_result={agent_team_service._unjson(answer_task.result_json, {})!r}"
+    )
+    assert len(model_calls) == 1
+    assert model_calls[0]["ctx"].extra["temporary_agent"] is True
+    assert "为什么 Python 字典保留插入顺序？" in model_calls[0]["prompt"]
+    assert answer_task.status == "completed"
+    persisted_answer = agent_team_service._unjson(answer_task.result_json, {})
+    assert persisted_answer["summary"] == "Python 3.7 起保证字典保持插入顺序。"
+    assert snapshot["status"] == "completed"
+
+    readback_result = await execute_tool(ToolCall(
+        "ordinary-answer-readback", "get_agent_team", {"team_id": team_id}, "{}",
+    ))
+    assert readback_result.status == "success"
+    assert readback_result.output["status"] == "completed"
+    checkpoint = _team_checkpoint([
+        (call.call_id, call.name, call.arguments, result.output)
+        for call, result in tool_calls if result.status == "success"
+    ], user_text="为什么 Python 字典保留插入顺序？")
+    assert service.AgentResponsesService._validate_xiaoling_completion(
+        checkpoint,
+        f"团队 {team_id} 已完成，成员解释 Python 字典保持插入顺序。",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_approved_business_capability_preserves_bound_execution_consent(db, monkeypatch):
+    actor = executor(db, monkeypatch, [])
+    call = ToolCall(
+        "delete", "user_execute_capability",
+        {"capability": "forum.posts.delete", "params": {"post_id": 71}}, "{}",
+    )
+    captured = []
+
+    def submit(_db, user, payload, **kwargs):
+        captured.append((user.id, payload, kwargs))
+        return {"team_id": 53, "status": "queued"}
+
+    async def run_once(_call, operation):
+        return operation()
+
+    monkeypatch.setattr(actor, "_execute_once", run_once)
+    monkeypatch.setattr(actor, "_approval", lambda *_a, **_k: ToolExecutionResult(status="approval_required"))
+    monkeypatch.setattr(agent_team_service, "create_team_from_xiaoling", submit)
+    pending = await actor._submit_site_capability(call, scope="user", approved=False)
+    assert pending.status == "approval_required"
+    assert captured == []
+    result = await actor._submit_site_capability(call, scope="user", approved=True)
+    assert result.status == "success"
+    user_id, payload, kwargs = captured[0]
+    from app.services import agent_supervisor_service
+    review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
+    assert kwargs == {"supervisor_plan_sha256": review["plan_sha256"], "supervisor_confirmed_by": user_id}

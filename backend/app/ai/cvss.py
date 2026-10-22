@@ -8,6 +8,8 @@ from cvss import CVSS3
 from cvss.exceptions import CVSS3Error
 
 CVSS_VERSION = "3.1"
+CVSS_STANDARD = "CVSS 3.1（FIRST）"
+CVSS_STANDARD_URL = "https://www.first.org/cvss/v3.1/specification-document"
 CVSS_PREFIX = f"CVSS:{CVSS_VERSION}/"
 
 

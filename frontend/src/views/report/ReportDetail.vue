@@ -291,6 +291,13 @@
           <span v-if="cvssMaxBaseScore !== null">；最高基础分 {{ cvssMaxBaseScore }}</span>
         </p>
         <p v-if="cvssReason" class="cvss-score-reason" role="note">{{ cvssReason }}</p>
+        <a
+          class="cvss-score-reference"
+          data-testid="cvss-first-specification"
+          href="https://www.first.org/cvss/v3.1/specification-document"
+          target="_blank"
+          rel="noopener noreferrer"
+        >FIRST CVSS v3.1 规范</a>
       </section>
 
       <!-- ============ 严重度 + 修复进度 + 评分历史 ============ -->
@@ -486,6 +493,10 @@
                 <div v-if="issue.cwe"><dt>CWE</dt><dd>{{ issue.cwe }}</dd></div>
                 <div><dt>证据状态</dt><dd>{{ evidenceQualityLabel(issue.evidence_quality) }}</dd></div>
                 <div><dt>人工复核</dt><dd>{{ issueReviewStatusLabel(issue) }}</dd></div>
+                <div v-if="deterministicCvssScore(issue) !== null" class="report-issue-cvss-vector">
+                  <dt>CVSS 3.1（FIRST）向量</dt>
+                  <dd><code>{{ issue.cvss_vector }}</code></dd>
+                </div>
               </dl>
               <div class="report-issue-content">
                 <section class="report-issue-field">
@@ -2146,6 +2157,18 @@ useAgentPageRefresh({ pages: ['/reports', '/reviews', '/issues'], refresh: loadR
   color: var(--gray-600);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.cvss-score-reference {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.report-issue-cvss-vector code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {

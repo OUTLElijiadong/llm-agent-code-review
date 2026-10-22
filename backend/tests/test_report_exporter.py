@@ -413,7 +413,7 @@ def test_issue_and_decompilation_states_are_localized_in_all_visual_exports(monk
     )
     evidence = {"decompilation": {"status": "succeeded", "tool": "jadx"}}
     expected_labels = (
-        "已修复", "静态规则", "向量计算", "证据引用已核对", "待处理冲突", "待补充证据", "执行成功",
+        "已修复", "静态规则", "CVSS 3.1（FIRST）向量复算", "证据引用已核对", "待处理冲突", "待补充证据", "执行成功",
     )
     raw_values = ("fixed", "static", "vector", "verified", "unresolved", "evidence_requested", "succeeded")
     html_outputs = [
@@ -1110,6 +1110,8 @@ def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss
     )
     html = export_to_html(task, [vector_issue], "", None, load_builtin_template(template_type))
     assert "CVSS 安全分" in html
+    assert "FIRST CVSS v3.1 规范" in html
+    assert "https://www.first.org/cvss/v3.1/specification-document" in html
     assert "权重 70%" in html
     assert "规则质量分" in html and "权重 30%" in html
     assert "1 项已评分；0 项未评分" in html
@@ -1138,7 +1140,9 @@ def test_html_templates_render_cvss_weighting_and_fallback_without_claiming_cvss
     assert 'CVSS 缺向量逐项检查' in fallback
     issue_fragment = fallback[fallback.index("CVSS 缺向量逐项检查"):]
     if template_type == "simple":
-        assert re.search(r"<td>未评分</td>", issue_fragment)
+        assert re.search(r"<td>CVSS 3.1（FIRST）未评分</td>", issue_fragment)
+    elif template_type == "compliance":
+        assert re.search(r"CVSS 状态:</span>\s*CVSS 3.1（FIRST）未评分", issue_fragment)
     else:
         assert re.search(r"CVSS 状态:</span>\s*未评分", issue_fragment)
     assert "7.5" not in issue_fragment
@@ -1186,6 +1190,7 @@ def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
             collect_flowable_text(element)
         pdf_text = "\n".join(pdf_visible_text)
         assert expected_weight in pdf_text
+        assert "https://www.first.org/cvss/v3.1/specification-document" in pdf_text
         assert expected_coverage in pdf_text
         assert "非 CVSS 官方综合分" in pdf_text
 
@@ -1196,6 +1201,7 @@ def test_pdf_and_word_render_cvss_breakdown_and_vector_fallback():
             cell.text for table in document.tables for row in table.rows for cell in row.cells
         )
         assert expected_weight in word_text
+        assert "https://www.first.org/cvss/v3.1/specification-document" in word_text
         assert expected_coverage in word_text
         assert "非 CVSS 官方综合分" in word_text
         if breakdown["cvss_status"] == "unavailable":
@@ -1675,6 +1681,7 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         exploit_scenario="EXPLOIT_TOKEN_20260827",
         suggestion="SUGGESTION_TOKEN_20260827",
         remediation="REMEDIATION_TOKEN_20260827",
+        cvss_score=9.8,
         cvss_vector="AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         cvss_version="3.1",
         cvss_source="vector",
@@ -1710,8 +1717,8 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "FINGERPRINT_TOKEN_20260827",
         "2026-08-27T01:02:03",
         "REFERENCE_TOKEN_20260827",
-        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "向量计算",
+        "FIRST 向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "CVSS 3.1（FIRST）向量复算",
         "模型 + 静态规则",
         "已修复",
     ):
@@ -1728,8 +1735,8 @@ def test_pdf_and_word_render_full_issue_audit_metadata_and_score_breakdown():
         "EXPLOIT_TOKEN_20260827",
         "SUGGESTION_TOKEN_20260827",
         "REMEDIATION_TOKEN_20260827",
-        "评分向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "向量计算",
+        "FIRST 向量：AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "CVSS 3.1（FIRST）向量复算",
         "模型 + 静态规则",
         "独立确认数: 2",
         "FINGERPRINT_TOKEN_20260827",

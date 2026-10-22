@@ -1685,14 +1685,14 @@ def create_team_from_xiaoling(
     browser_token_version = int(user.token_version or 0) if has_browser_tasks else None
     validate_task_member_references(payload)
     review = agent_supervisor_service.review_agent_team_plan(payload.model_dump(mode="json"))
-    if review["needs_confirmation"]:
-        if (
-            not supervisor_plan_sha256
-            or supervisor_plan_sha256 != review["plan_sha256"]
-            or supervisor_confirmed_by != int(user.id)
-        ):
-            raise AgentTeamAccessError("监督子 Agent 要求当前账号确认该高风险或未分类团队任务")
-    elif supervisor_plan_sha256 and supervisor_plan_sha256 != review["plan_sha256"]:
+    # 普通团队可先登记计划；只有可信审批上下文同时绑定摘要和账号才授予执行权限。
+    has_confirmed_plan = (
+        supervisor_plan_sha256 == review["plan_sha256"]
+        and supervisor_confirmed_by == int(user.id)
+    )
+    if has_browser_tasks and review["needs_confirmation"] and not has_confirmed_plan:
+        raise AgentTeamAccessError("监督子 Agent 要求当前账号确认该高风险或未分类团队任务")
+    if supervisor_plan_sha256 and supervisor_plan_sha256 != review["plan_sha256"]:
         raise AgentTeamAccessError("监督子 Agent 计划摘要与团队任务不匹配")
     try:
         result = _create_team(db, user, payload)
@@ -1718,7 +1718,7 @@ def create_team_from_xiaoling(
             "risk_level": review["risk_level"],
             "plan_sha256": review["plan_sha256"],
             "tasks": review["tasks"],
-            "confirmed_by_user_id": int(user.id) if review["needs_confirmation"] else None,
+            "confirmed_by_user_id": int(user.id) if review["needs_confirmation"] and has_confirmed_plan else None,
             "authorized_high_risk_fingerprints": authorized_fingerprints,
             # 仅服务端可信来源；不得从model/task input赋值或送入模型上下文。
             "site_request_origin": trusted_request_origin(),

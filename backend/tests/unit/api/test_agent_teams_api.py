@@ -156,9 +156,7 @@ def test_agent_teams_public_create_requires_xiaoling(team_api):
     assert team_api["db"].query(AgentTeam).count() == 0
 
 
-def test_supervisor_requires_current_account_confirmation_for_high_risk_team_plan(team_api):
-    from app.services.agent_team_service import AgentTeamAccessError
-
+def test_high_risk_creation_is_automatic_and_execution_consent_is_account_bound(team_api):
     owner = team_api["owner"]
     payload = _team_payload()
     payload["tasks"][1]["input"] = {"external_target_url": "https://target.example"}
@@ -167,24 +165,24 @@ def test_supervisor_requires_current_account_confirmation_for_high_risk_team_pla
     assert review["needs_confirmation"] is True
     assert review["risk_level"] == "high"
 
-    with pytest.raises(AgentTeamAccessError, match="要求当前账号确认"):
-        agent_team_service.create_team_from_xiaoling(team_api["db"], owner, parsed)
-    with pytest.raises(AgentTeamAccessError, match="要求当前账号确认"):
-        agent_team_service.create_team_from_xiaoling(
+    # These are trusted service arguments; model/public payloads cannot supply consent.
+    for confirmed_by in (None, int(team_api["other"].id), int(owner.id)):
+        created = agent_team_service.create_team_from_xiaoling(
             team_api["db"], owner, parsed,
-            supervisor_plan_sha256=review["plan_sha256"],
-            supervisor_confirmed_by=int(team_api["other"].id),
+            supervisor_plan_sha256=review["plan_sha256"] if confirmed_by else "",
+            supervisor_confirmed_by=confirmed_by,
         )
-    assert team_api["db"].query(agent_team_service.AgentTeam).count() == 0
+        assert created["status"] == "queued"
+        event = created["events"][-1]
+        assert event["actor_address"] == "agent:supervisor"
+        expected = owner.id if confirmed_by == owner.id else None
+        assert event["detail"]["confirmed_by_user_id"] == expected
+        assert event["detail"]["authorized_high_risk_fingerprints"]
 
-    created = agent_team_service.create_team_from_xiaoling(
-        team_api["db"], owner, parsed,
-        supervisor_plan_sha256=review["plan_sha256"],
-        supervisor_confirmed_by=int(owner.id),
-    )
-    assert created["status"] == "queued"
-    assert created["events"][-1]["actor_address"] == "agent:supervisor"
-    assert created["events"][-1]["detail"]["confirmed_by_user_id"] == owner.id
+    with pytest.raises(agent_team_service.AgentTeamAccessError, match="计划"):
+        agent_team_service.create_team_from_xiaoling(
+            team_api["db"], owner, parsed, supervisor_plan_sha256="invalid-plan",
+        )
 
 
 def test_high_risk_team_retry_api_requires_exact_preview_and_account_confirmation(team_api):

@@ -38,6 +38,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.ai.cvss import CVSS_STANDARD_URL
 from app.ai.scoring import score_risk_level
 from app.services.report_exporter import (
     conflict_status_label,
@@ -555,6 +556,7 @@ def _build_score_breakdown_elements(
         rows = [
             ("评分策略", "cvss-weighted-v1 · 平台综合评分（非 CVSS 官方综合分）", True),
             ("基础分来源", f"{breakdown.get('cvss_standard') or 'CVSS 3.1（FIRST）'}；70/30 为平台工程规则", False),
+            ("规范引用", f"FIRST CVSS v3.1 规范：{CVSS_STANDARD_URL}", False),
             (
                 "CVSS 安全分",
                 f"{cvss_score if cvss_score is not None else '未应用（回退）'}"
