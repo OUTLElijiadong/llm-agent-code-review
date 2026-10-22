@@ -554,6 +554,7 @@ def _build_score_breakdown_elements(
         cvss_score = cvss.get("score")
         rows = [
             ("评分策略", "cvss-weighted-v1 · 平台综合评分（非 CVSS 官方综合分）", True),
+            ("基础分来源", f"{breakdown.get('cvss_standard') or 'CVSS 3.1（FIRST）'}；70/30 为平台工程规则", False),
             (
                 "CVSS 安全分",
                 f"{cvss_score if cvss_score is not None else '未应用（回退）'}"
@@ -751,13 +752,15 @@ def _build_issue_section(
 
     cvss_parts = []
     if issue.get("cvss_score") is not None:
-        cvss_parts.append(f"CVSS 评分：{issue.get('cvss_score')}")
+        cvss_parts.append(f"CVSS 3.1（FIRST）基础分：{issue.get('cvss_score')}")
     if issue.get("cvss_vector"):
-        cvss_parts.append(f"评分向量：{issue.get('cvss_vector')}")
+        cvss_parts.append(f"FIRST 向量：{issue.get('cvss_vector')}")
     if issue.get("cvss_version"):
         cvss_parts.append(f"向量版本：{issue.get('cvss_version')}")
     if issue.get("cvss_source"):
         cvss_parts.append(f"评分来源：{cvss_source_label(issue.get('cvss_source'))}")
+    if not issue.get("cvss_vector") or issue.get("cvss_score") is None:
+        cvss_parts.append("CVSS 3.1（FIRST）未评分（缺少有效向量）")
     if cvss_parts:
         elements.append(_paragraph("<b>CVSS:</b>", styles["normal"]))
         elements.append(_paragraph(escape("；".join(cvss_parts), {"&": "&amp;"}), styles["normal"]))

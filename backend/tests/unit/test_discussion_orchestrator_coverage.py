@@ -2312,6 +2312,65 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert any(item["cvss_vector"] == rows[1].cvss_vector for item in exported["issues"])
 
 
+def test_finalize_ungraded_issue_keeps_completed_task_but_marks_score_unavailable(
+    db: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = ReviewTask(
+        user_id=2,
+        project_id=3,
+        task_name="未分级圆桌",
+        review_type="discuss",
+        status="running",
+        total_files=1,
+        processed_files=0,
+    )
+    _seed_execution_actor(db, task.user_id, task.project_id)
+    db.add(task)
+    db.commit()
+    monkeypatch.setattr(module, "SessionLocal", lambda: db)
+    monkeypatch.setattr(module.DeepSeekAgent, "log_deferred", staticmethod(lambda *_a, **_kw: None))
+    monkeypatch.setattr(
+        module,
+        "_extract_issues",
+        lambda *_a, **_kw: [Issue(
+            line_number=1,
+            issue_type="安全漏洞",
+            severity="未分级",
+            title="待确认严重度的问题",
+            description="证据已保留，但严重度尚未确认。",
+        )],
+    )
+
+    result = module._finalize_review(
+        task_id=task.id,
+        user_id=task.user_id,
+        file_id=10,
+        file_name="ungraded.py",
+        all_turns=[_turn(1)],
+        code="pass",
+        language="python",
+        deferred_logs=[],
+        agent=RecordingAgent(),
+        stopped=False,
+        consensus="已保存未分级发现。",
+    )
+
+    saved = db.get(ReviewTask, task.id)
+    issue = db.query(ReviewIssue).filter_by(task_id=task.id).one()
+    assert result == task.id
+    assert issue.severity == "未分级"
+    assert saved.status == "success"
+    assert saved.coverage["coverage_status"] == "complete"
+    assert saved.coverage["score_available"] is False
+    assert saved.coverage["score_unavailable_reason"] == "ungraded_findings"
+    assert saved.score == 0
+    assert saved.score_version is None
+    assert saved.score_breakdown["score"] is None
+    assert saved.score_breakdown["score_unavailable_reason"] == "ungraded_findings"
+    assert saved.score_breakdown["ungraded_issue_count"] == 1
+
+
 def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
     db: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

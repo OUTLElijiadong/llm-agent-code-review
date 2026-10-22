@@ -314,7 +314,7 @@
         {% if issue.cvss_version %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">v{{ issue.cvss_version }}</span>{% endif %}
         {% if issue.cvss_source %}<span style="color:#6b7280;font-size:12px;margin-left:6px;">来源:{{ issue.cvss_source_label }}</span>{% endif %}
         <div class="cvss-bar-wrap"><div class="cvss-bar" style="width:{{ (issue.cvss_score * 10) | int }}%;background:#dc2626;"></div></div>
-        {% else %}未评分{% endif %}
+        {% else %}CVSS 3.1（FIRST）未评分{% endif %}
       </div>
       <div class="field"><span class="field-label">发现来源:</span>{{ issue.source_label }} · 确认数: {{ issue.confirmation_count or 0 }}</div>
       <div class="field"><span class="field-label">问题指纹:</span><code>{{ issue.finding_fingerprint or "-" }}</code></div>

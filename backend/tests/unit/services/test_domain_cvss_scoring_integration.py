@@ -158,6 +158,7 @@ def test_cvss_score_section_exports_weight_vectors_and_ungraded_count():
     lines = score_section_lines(42, available=True, score_breakdown=breakdown)
 
     assert "CVSS 权重：70%" in lines
+    assert "CVSS 来源：CVSS 3.1（FIRST）" in lines
     assert f"CVSS 向量：{VECTOR_HIGH}" in lines
     assert "CVSS 最高基础分：9.8 / 10" in lines
     assert "原规则质量分权重：30%" in lines
