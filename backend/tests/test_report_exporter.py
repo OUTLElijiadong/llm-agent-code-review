@@ -496,8 +496,10 @@ def test_scope_coverage_is_human_readable_in_html_word_and_pdf_exports(monkeypat
     original_paragraph = report_pdf_exporter.Paragraph
 
     def record_pdf_paragraph(text, style, *args, **kwargs):
-        pdf_paragraphs.append(str(text))
-        return original_paragraph(text, style, *args, **kwargs)
+        paragraph = original_paragraph(text, style, *args, **kwargs)
+        # 字体标签属于排版，断言核对读者实际看到的完整文本。
+        pdf_paragraphs.append(paragraph.getPlainText())
+        return paragraph
 
     monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
     assert export_to_pdf(task, [issue], "", 72).startswith(b"%PDF")
@@ -555,8 +557,10 @@ def test_scope_exports_hide_internal_metadata_and_bound_large_payloads(monkeypat
     original_paragraph = report_pdf_exporter.Paragraph
 
     def record_pdf_paragraph(text, style, *args, **kwargs):
-        pdf_paragraphs.append(str(text))
-        return original_paragraph(text, style, *args, **kwargs)
+        paragraph = original_paragraph(text, style, *args, **kwargs)
+        # 字体标签属于排版，断言核对读者实际看到的完整文本。
+        pdf_paragraphs.append(paragraph.getPlainText())
+        return paragraph
 
     monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
     assert export_to_pdf(task, [], "", 72).startswith(b"%PDF")
@@ -750,8 +754,10 @@ def test_refuted_finding_status_is_readable_in_html_word_and_pdf(monkeypatch):
     original_paragraph = report_pdf_exporter.Paragraph
 
     def record_pdf_paragraph(text, style, *args, **kwargs):
-        pdf_paragraphs.append(str(text))
-        return original_paragraph(text, style, *args, **kwargs)
+        paragraph = original_paragraph(text, style, *args, **kwargs)
+        # 字体标签属于排版，断言核对读者实际看到的完整文本。
+        pdf_paragraphs.append(paragraph.getPlainText())
+        return paragraph
 
     monkeypatch.setattr(report_pdf_exporter, "Paragraph", record_pdf_paragraph)
     assert export_to_pdf(task, [issue], "人工复核已排除", 100).startswith(b"%PDF")
