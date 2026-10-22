@@ -258,11 +258,17 @@ def _validate_team_binding(db: Session, user: User, row: AgentBrowserAction, *, 
             db, team_id=binding["team_id"], task_id=task.id, lease_token=task.lease_token,
             owner_user_id=int(user.id), lock=lock,
         )
+        agent_supervisor_service.require_browser_team_session(
+            db, team, expected_token_version=row.token_version, lock=lock,
+        )
+        if lock:
+            # 行锁不能冻结租约时间；等到最后的用户授权锁后，必须用当前时间复验。
+            team, task, member = agent_team_service.require_active_task_lease(
+                db, team_id=team.id, task_id=task.id, lease_token=task.lease_token,
+                owner_user_id=int(user.id), lock=True,
+            )
     except agent_team_service.AgentTeamError as exc:
         raise ConflictError("页面动作的团队租约已失效") from exc
-    agent_supervisor_service.require_browser_team_session(
-        db, team, expected_token_version=row.token_version, lock=lock,
-    )
     parent = db.get(AgentResponseRun, team.agent_run_id or team.root_agent_run_id, populate_existing=True)
     if parent is not None and (response_run_stop_requested(parent) or parent.status not in _ACTIVE):
         raise ConflictError("小菱运行已停止，不能继续页面操作")

@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -626,3 +627,117 @@ async def test_request_action_keeps_creation_version_and_locks_user_for_issue_cl
             if not execution.done():
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "claim", "ack"])
+@pytest.mark.parametrize("expiry", ["task", "team", "none"])
+async def test_page_actions_recheck_lease_after_user_lock(
+    race_db, race_owner, monkeypatch, operation, expiry,
+):
+    """在真实 User FOR UPDATE 查询处推进时钟，覆盖最后授权锁等待期间的到期。"""
+    created = _create_team(race_db, race_owner)
+    lease = agent_team_service.claim_next_task(race_db, created["team_id"], lease_seconds=60)
+    assert lease is not None
+    team = race_db.get(AgentTeam, created["team_id"])
+    task = race_db.get(AgentTeamTask, lease["task_id"])
+    now = agent_team_service._now()
+    task_deadline = now + timedelta(seconds=5 if expiry == "task" else 60)
+    team_deadline = now + timedelta(seconds=5 if expiry == "team" else 60)
+    task.lease_expires_at = task_deadline
+    team.deadline_at = team_deadline
+    binding = {
+        "team_id": team.id, "task_id": task.id,
+        "lease_sha256": browser._hash(lease["lease_token"]),
+    }
+    nonce, claim_token = "n" * 32, "c" * 32
+    initial_status = "executing" if operation == "ack" else "queued"
+    row = AgentBrowserAction(
+        request_id="user-lock-lease-race",
+        input_sha256=browser._hash(browser._json({"action": "inspect", "args": {}})),
+        user_id=race_owner.id, token_version=int(race_owner.token_version or 0),
+        run_id=RUN_ID, session_key=SESSION_KEY, surface="user",
+        call_id=f"site-team-{team.id}-task-{task.id}", action="inspect", status=initial_status,
+        arguments_json=browser._json({"_team_binding": binding}),
+        observation_snapshot_id="a" * 32, nonce_sha256=browser._hash(nonce),
+        claim_sha256=browser._hash(claim_token) if operation == "ack" else None,
+        # 动作自身未过期，不能让 action TTL 掩盖团队/任务租约缺少复验。
+        expires_at=(now + timedelta(seconds=120)).replace(tzinfo=None),
+    )
+    if operation != "create":
+        race_db.add(row)
+    race_db.commit()
+    clock = {"now": now}
+    monkeypatch.setattr(agent_team_service, "_now", lambda: clock["now"])
+    monkeypatch.setattr(browser, "_now", lambda: clock["now"].replace(tzinfo=None))
+    user_locks, dispatched = [], []
+
+    def advance_at_user_lock(state):
+        statement = state.statement
+        if (
+            state.is_select
+            and getattr(statement, "_for_update_arg", None) is not None
+            and any(table.name == User.__tablename__ for table in statement.get_final_froms())
+        ):
+            if not user_locks:
+                assert clock["now"] < min(task_deadline, team_deadline)
+            user_locks.append(True)
+            # SQLite 不执行行锁；在真实锁查询处模拟等待六秒后取得锁。
+            clock["now"] = now + timedelta(seconds=6)
+
+    def receive_action(required):
+        dispatched.append(required)
+        assert expiry == "none", "租约在 User 锁等待期间到期后不得创建或派发页面动作"
+        claim = _claim(race_db, race_owner, required)
+        browser.acknowledge_action(
+            race_db, race_owner, required["action_id"], _ack_payload(required, claim),
+        )
+
+    async def invoke():
+        if operation == "create":
+            return await browser.request_action(
+                race_db, race_owner, run_id=RUN_ID, session_key=SESSION_KEY, surface="user",
+                call_id=row.call_id, action="inspect", args={}, event_sink=receive_action,
+                team_binding=binding,
+            )
+        if operation == "claim":
+            return browser.claim_action(
+                race_db, race_owner, row.id, session_key=SESSION_KEY, surface="user", nonce=nonce,
+            )
+        return browser.acknowledge_action(
+            race_db, race_owner, row.id,
+            _ack_payload(
+                {"client_nonce": nonce, "observation_snapshot_id": row.observation_snapshot_id},
+                {"claim_token": claim_token},
+            ),
+        )
+
+    event.listen(race_db, "do_orm_execute", advance_at_user_lock)
+    try:
+        if expiry != "none":
+            with pytest.raises(ConflictError, match="租约"):
+                await invoke()
+        else:
+            result = await invoke()
+    finally:
+        event.remove(race_db, "do_orm_execute", advance_at_user_lock)
+        race_db.rollback()
+    assert user_locks, "三个入口必须经过真实 User 行锁，不能提前拒绝而绕过竞态"
+    saved = race_db.query(AgentBrowserAction).populate_existing().all()
+    if expiry != "none":
+        assert not dispatched
+        if operation == "create":
+            assert not saved
+        else:
+            assert len(saved) == 1 and saved[0].status == initial_status
+            assert saved[0].claim_sha256 == (browser._hash(claim_token) if operation == "ack" else None)
+            assert not saved[0].observation_json
+    else:
+        assert len(saved) == 1
+        assert saved[0].status == ("executing" if operation == "claim" else "completed")
+        if operation == "create":
+            assert len(dispatched) == 1 and result["completed"] is True
+        elif operation == "claim":
+            assert saved[0].claim_sha256 == browser._hash(result["claim_token"])
+        else:
+            assert saved[0].observation_json
