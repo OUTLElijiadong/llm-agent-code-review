@@ -484,6 +484,28 @@ it.each([true, false])('本地导航持久化：审查员权限=%s，空服务�
   } finally { reopened.unmount(); push.mockRestore() }
 })
 
+it.each(['completed', 'pending'] as const)('本地导航恢复断网：%s记录在切回、卸载后仍保留且不重放', async status => {
+  const wrapper = await mountReadyDrawer()
+  const vm = wrapper.vm as any
+  const sessionId = 'user-offline-navigation'
+  const key = vm.chatStorageKey as string
+  const localAction = { id: 'offline-navigation', kind: 'navigation' as const, status, route: '/audit' }
+  saveAgentChatSnapshot(sessionId, {
+    messages: [{ role: 'user', content: '打开审计', localAction },
+      { role: 'assistant', content: status === 'completed' ? '已打开「操作审计」。' : '正在打开「操作审计」…', localAction }],
+    runStatus: null, updatedAt: Date.now(),
+  }, key)
+  sessionApi.get.mockRejectedValue(new Error('会话读取暂时失败'))
+  try {
+    await vm.handleSessionSelect(sessionId)
+    await settleAll()
+    expect(wrapper.text()).toContain(status === 'completed' ? '已打开「操作审计」。' : '尚未确认')
+    expect(wrapper.text()).not.toContain('未在服务器留痕')
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+  expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction).map(message => message.localAction?.status)).toEqual([status, status])
+})
+
 describe('AgentChatDrawer Responses stream', () => {
   it('建 run 前网络失败时立即保存消息和错误，刷新后可恢复并重试', async () => {
     const wrapper = await mountReadyDrawer()

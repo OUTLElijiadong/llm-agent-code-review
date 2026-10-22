@@ -26,6 +26,7 @@ USER_PAGE_LABELS: dict[str, tuple[str, str]] = {
     "/reviews/start": ("发起审查", "按项目与文件发起新审查"),
     "/issues": ("问题追踪", "跨任务检索并闭环问题"),
     "/reports": ("审查报告", "查看与导出审查报告"),
+    "/audit": ("操作审计", "审查员查看权限范围内的操作审计记录"),
     "/report/templates": ("报告模板管理", "维护报告模板"),
     "/security": ("安全与审查规则", "查看安全态势、权威规则目录并管理审查规则"),
     "/agents": ("Agent 工作台", "查看 Agent 画像与运行态势"),

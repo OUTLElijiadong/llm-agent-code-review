@@ -79,17 +79,20 @@ export function performLocalNavigation(
       settled = true
       try { onResult(status, content) } finally { resolve() }
     }
+    const confirmed = () => ownsAccount() && hasReachedNavigationTarget(router, route)
+    const finishNavigation = (success: boolean) => {
+      if (success && confirmed()) finish('completed', `已打开「${label}」。`)
+      else finish('failed', '未能确认目标页面已打开，请检查当前页面后重新发起导航。')
+    }
     const accepted = requestXiaolingNavigation(route, label, async () => {
       if (!canExecute()) { finish('failed', '会话已变化，未执行这次页面跳转。'); return }
       try {
         const result = await router.push(route)
-        if (ownsAccount() && (!isNavigationFailure(result) || isNavigationFailure(result, NavigationFailureType.duplicated))
-          && hasReachedNavigationTarget(router, route)) finish('completed', `已打开「${label}」。`)
-        else finish('failed', '未能确认目标页面已打开，请检查当前页面后重新发起导航。')
+        finishNavigation(!isNavigationFailure(result) || isNavigationFailure(result, NavigationFailureType.duplicated))
       } catch {
         finish('failed', '页面跳转失败，请重新发起导航。')
       }
-    })
+    }, undefined, { canExecute, confirmResult: confirmed, onSettled: finishNavigation })
     if (!accepted) finish('failed', '目标页面无效，未执行页面跳转。')
   })
 }

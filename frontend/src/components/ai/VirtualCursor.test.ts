@@ -1,8 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRouter, createWebHistory } from 'vue-router'
 
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { performLocalNavigation } from '@/utils/agentLocalNavigation'
 import VirtualCursor from './VirtualCursor.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 
@@ -26,6 +28,81 @@ describe('VirtualCursor real navigation click', () => {
     wrapper = null
     target = null
     window.history.replaceState({}, '', '/')
+  })
+
+  it.each(['success', 'redirect', 'account'] as const)('本地导航真实菜单回执：%s，仅真实到达且账号有效才结算成功', async outcome => {
+    const history = createWebHistory()
+    const router = createRouter({ history, routes: [
+      { path: '/', component: {} }, { path: '/audit', component: {} }, { path: '/403', component: {} },
+    ] })
+    await router.push('/')
+    if (outcome === 'redirect') router.beforeEach(to => to.path === '/audit' ? '/403' : true)
+    let accountCurrent = true
+    const push = vi.spyOn(router, 'push')
+    const settled = vi.fn()
+    target = document.createElement('button')
+    target.dataset.route = '/audit'
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    target.addEventListener('click', () => { void router.push('/audit') })
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    try {
+      const navigation = performLocalNavigation(router, '/audit', '操作审计', () => accountCurrent, settled)
+      await flushPromises()
+      if (outcome === 'account') accountCurrent = false
+      await vi.advanceTimersByTimeAsync(4000)
+      await flushPromises()
+      expect(settled).toHaveBeenCalledExactlyOnceWith(outcome === 'success' ? 'completed' : 'failed', expect.any(String))
+      expect(router.currentRoute.value.path).toBe(outcome === 'success' ? '/audit' : outcome === 'redirect' ? '/403' : '/')
+      expect(push).toHaveBeenCalledTimes(outcome === 'account' ? 0 : 1)
+      await navigation
+    } finally { history.destroy() }
+  })
+
+  it.each([
+    ['clear', false], ['replace', false], ['unmount', false],
+    ['clear', true], ['replace', true], ['unmount', true],
+  ] as const)('本地导航中断：%s，已点击=%s，旧请求必须结算且不能补点', async (interruption, clicked) => {
+    const history = createWebHistory()
+    const router = createRouter({ history, routes: [
+      { path: '/', component: {} }, { path: '/audit', component: {} }, { path: '/reports', component: {} },
+    ] })
+    await router.push('/')
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    router.beforeEach(to => to.path === '/audit' ? gate : undefined)
+    const push = vi.spyOn(router, 'push')
+    const settled = vi.fn(), replacementSettled = vi.fn()
+    target = document.createElement('button')
+    target.dataset.route = '/audit'
+    target.getBoundingClientRect = () => ({ left: 20, top: 30, right: 140, bottom: 70, width: 120, height: 40 } as DOMRect)
+    target.addEventListener('click', () => { void router.push('/audit') })
+    document.body.appendChild(target)
+    wrapper = mount(VirtualCursor, { global: { stubs: { Transition: false } } })
+    try {
+      const navigation = performLocalNavigation(router, '/audit', '操作审计', () => true, settled)
+      await flushPromises()
+      if (clicked) await vi.advanceTimersByTimeAsync(1400)
+      expect(push).toHaveBeenCalledTimes(clicked ? 1 : 0)
+      let replacement: Promise<void> | undefined
+      if (interruption === 'clear') useAgentActivityStore().clear()
+      else if (interruption === 'unmount') { wrapper.unmount(); wrapper = null }
+      else replacement = performLocalNavigation(router, '/reports', '审查报告', () => true, replacementSettled)
+      await flushPromises()
+      expect(settled).toHaveBeenCalledExactlyOnceWith('failed', expect.any(String))
+      await navigation
+      // 已发出的路由允许自行结束；中断不得补发旧跳转，也不得再次回写成功。
+      release()
+      await vi.advanceTimersByTimeAsync(4000)
+      await flushPromises()
+      expect(settled).toHaveBeenCalledTimes(1)
+      expect(push).toHaveBeenCalledTimes(Number(clicked) + Number(interruption === 'replace'))
+      if (replacement) {
+        expect(replacementSettled).toHaveBeenCalledExactlyOnceWith('completed', expect.any(String))
+        expect(router.currentRoute.value.path).toBe('/reports')
+        await replacement
+      }
+    } finally { release(); history.destroy() }
   })
 
   it('moves to a visible route button and triggers its real click', async () => {

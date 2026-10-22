@@ -825,7 +825,12 @@ async function restoreSession(): Promise<void> {
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
-    restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId, chatStorageKey.value)?.teams)
+    const cached = loadAgentChatSnapshot(requestedSessionId, chatStorageKey.value)
+    restoreCachedTeams(cached?.teams)
+    // 本地导航没有服务端副本；先恢复显示，网络失败也不能用欢迎语覆盖唯一记录。
+    messages.value = mergeLocalNavigationMessages(messages.value, cached?.messages ?? [], message => message, message => ({
+      ...message, id: messageId(), time: '',
+    }))
     const session = await getAgentResponseSession('user', requestedSessionId)
     if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。

@@ -720,32 +720,27 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
         navigations: directives.length ? directives : undefined,
       }
     })
-  const restored = mergeLocalNavigationMessages(serverEntries,
-    loadAgentChatSnapshot(session.session_id, chatStorageKey.value)?.messages ?? [],
-    entry => ({ role: entry.role, content: entry.payload.content ?? '', localAction: entry.localAction }),
-    message => ({
-      id: crypto.randomUUID(), role: message.role === 'user' ? 'user' as const : 'assistant' as const,
-      time: restoredTime, payload: { type: 'text' as const, content: message.content }, localAction: message.localAction,
-    }))
+  const restored = serverEntries
   const toolCalls = [
     ...agentMeshToolCalls(session.mesh_messages, `session:admin:${session.session_id}`),
     ...responseToolCallsFromEvents(session.events),
   ]
-  if (!toolCalls.length) return restored
-  const timeline: ChatEntry = {
-    ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
-    time: restoredTime,
-    runId: session.run?.run_id,
-    toolCalls,
-  }
-  let conclusionIndex = -1
-  for (let index = restored.length - 1; index >= 0; index -= 1) {
-    if (restored[index].role === 'assistant' && restored[index].payload.content?.trim()) {
-      conclusionIndex = index
-      break
+  if (toolCalls.length) {
+    const timeline: ChatEntry = {
+      ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+      time: restoredTime,
+      runId: session.run?.run_id,
+      toolCalls,
     }
+    let conclusionIndex = -1
+    for (let index = restored.length - 1; index >= 0; index -= 1) {
+      if (restored[index].role === 'assistant' && restored[index].payload.content?.trim()) {
+        conclusionIndex = index
+        break
+      }
+    }
+    restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   }
-  restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   // 非终态或已取消运行:展示模型尚未落库为完整消息的结论文本(取消原因/回滚提示)。
   const partialOutput = session.run?.output_text?.trim()
   if (
@@ -762,7 +757,17 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
       })
     }
   }
-  return restored
+  return mergeLocalNavigationEntries(restored, session.session_id, restoredTime)
+}
+
+function mergeLocalNavigationEntries(entries: ChatEntry[], targetSessionId: string, time = ''): ChatEntry[] {
+  return mergeLocalNavigationMessages(entries,
+    loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)?.messages ?? [],
+    entry => ({ role: entry.role, content: entry.payload.content ?? '', localAction: entry.localAction }),
+    message => ({
+      id: crypto.randomUUID(), role: message.role === 'user' ? 'user' as const : 'assistant' as const,
+      time, payload: { type: 'text' as const, content: message.content }, localAction: message.localAction,
+    }))
 }
 
 function withLoadedHistory(session: AgentResponseSession): AgentResponseSession {
@@ -898,6 +903,8 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
+    // 即使服务端暂时不可用，也保留只存本地的导航问答，恢复不会执行导航。
+    messages.value = mergeLocalNavigationEntries(messages.value, requestedSessionId)
     const session = await getAgentResponseSession('admin', requestedSessionId)
     if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。

@@ -20,6 +20,7 @@ const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn(), cancel: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), conversations: vi.fn(), acknowledge: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
+const mountedCopilots = new Set<VueWrapper>()
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({
@@ -49,7 +50,7 @@ import AdminCopilot from './AdminCopilot.vue'
 import AdminLayout from './AdminLayout.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
-import { agentChatStorageKey, loadAgentChatSnapshot, saveActiveAgentChatSession, saveAgentChatSessions } from '@/utils/agentChatSessions'
+import { agentChatStorageKey, loadAgentChatSnapshot, saveActiveAgentChatSession, saveAgentChatSessions, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
 
 it.each([true, false])('本地导航持久化：管理端路由成功=%s，恢复保留结果且不重放', async allowed => {
   const router = createRouter({ history: createMemoryHistory(), routes: [
@@ -87,6 +88,58 @@ it.each([true, false])('本地导航持久化：管理端路由成功=%s，恢�
   } finally { wrapper.unmount(); push.mockRestore() }
 })
 
+it.each(['completed', 'pending'] as const)('本地导航恢复断网：管理端%s记录在切回、卸载后仍保留且不重放', async status => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const vm = wrapper.vm as any
+  const sessionId = 'admin-offline-navigation', key = vm.chatStorageKey as string
+  const localAction = { id: 'offline-navigation', kind: 'navigation' as const, status, route: '/admin/audit' }
+  saveAgentChatSnapshot(sessionId, {
+    messages: [{ role: 'user', content: '打开管理端审计', localAction },
+      { role: 'assistant', content: status === 'completed' ? '已打开「管理端审计」。' : '正在打开「管理端审计」…', localAction }],
+    runStatus: null, updatedAt: Date.now(),
+  }, key)
+  sessionApi.get.mockRejectedValue(new Error('会话读取暂时失败'))
+  try {
+    await vm.handleSessionSelect(sessionId)
+    await flushSessionRestore()
+    expect(wrapper.text()).toContain(status === 'completed' ? '已打开「管理端审计」。' : '尚未确认')
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+  expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction).map(message => message.localAction?.status)).toEqual([status, status])
+})
+
+it.each(['completed', 'cancelled'] as const)('本地导航恢复顺序：%s旧运行步骤与结论保持在导航之前且不重复', async status => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const vm = wrapper.vm as any
+  const sessionId = vm.sessionId as string
+  const conclusion = status === 'cancelled' ? '已停止任务，保留已有结果。' : '系统检查完成。'
+  const serverMessages = [{ role: 'user' as const, content: '检查系统' }, { role: 'assistant' as const, content: conclusion }]
+  const localAction = { id: 'navigation-after-run', kind: 'navigation' as const, status: 'completed' as const }
+  saveAgentChatSnapshot(sessionId, {
+    messages: [...serverMessages, { role: 'user', content: '打开审计', localAction },
+      { role: 'assistant', content: '已打开「操作审计」。', localAction }],
+    runStatus: status, updatedAt: Date.now(),
+  }, vm.chatStorageKey)
+  try {
+    vm.applySessionSnapshot({
+      surface: 'admin', session_id: sessionId,
+      run: { run_id: 'old-run', status, output_text: conclusion, model: '', rounds: 1, error: '', updated_at: '' },
+      messages: serverMessages, pending: null,
+      events: [{ type: 'response.tool.completed', sequence_number: 1, call_id: 'old-call', tool_name: 'get_agent_team', output: {} }],
+    })
+    await nextTick()
+    const rows = vm.messages.slice(1)
+    expect(rows.map((row: any) => row.toolCalls?.length ? '旧运行步骤' : row.payload.content))
+      .toEqual(['检查系统', '旧运行步骤', conclusion, '打开审计', '已打开「操作审计」。'])
+    expect(wrapper.findAll('.message-row')).toHaveLength(6)
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+})
+
 function flushSessionRestore(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(() => {
@@ -98,7 +151,7 @@ function flushSessionRestore(): Promise<void> {
 function mountCopilot(extraPlugins: Plugin[] = []): VueWrapper {
   const pinia = createPinia()
   setActivePinia(pinia)
-  return mount(AdminCopilot, {
+  const wrapper = mount(AdminCopilot, {
     global: {
       plugins: [pinia, ...extraPlugins],
       stubs: {
@@ -111,6 +164,10 @@ function mountCopilot(extraPlugins: Plugin[] = []): VueWrapper {
       },
     },
   })
+  mountedCopilots.add(wrapper)
+  const unmount = wrapper.unmount.bind(wrapper)
+  wrapper.unmount = () => { mountedCopilots.delete(wrapper); unmount() }
+  return wrapper
 }
 
 function deferred<T>() {
@@ -124,6 +181,7 @@ async function openCopilot(wrapper: VueWrapper): Promise<void> {
   if (trigger) trigger.click()
   else await wrapper.find('.copilot-trigger').trigger('click')
   await flushPromises()
+  expect(wrapper.find('.copilot-panel').exists()).toBe(true)
 }
 
 function emit(index: number, event: Record<string, unknown>): void {
@@ -184,7 +242,11 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // 部分流式用例没有显式卸载；其 Teleport 入口和全局监听会截获后续用例的点击。
+  for (const wrapper of mountedCopilots) wrapper.unmount()
+  await flushPromises()
+  expect(document.querySelector('.copilot-trigger')).toBeNull()
   vi.useRealTimers()
 })
 
