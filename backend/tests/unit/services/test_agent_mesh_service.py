@@ -537,6 +537,148 @@ def test_cancelled_inbox_message_cannot_be_requeued_by_late_response(db, user) -
     ) == []
 
 
+def test_finish_message_run_is_idempotent_after_message_dead_letter(db, user) -> None:
+    """Responses 晚到失败不得把消息投递死信改成业务 failed 或中断回调。"""
+    for key in ("session-a1", "session-b1"):
+        agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+    created = agent_mesh_service.send_message(
+        db,
+        user,
+        surface="user",
+        session_key="session-a1",
+        message=_message(
+            idempotency_key="dead-letter-finish-idempotency",
+            delivery={"requires_ack": True, "max_attempts": 1},
+        ),
+    )
+    agent_mesh_service.pull_inbox(
+        db, user, surface="user", session_key="session-b1", limit=10,
+    )
+    agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="processing"),
+    )
+    dead_letter = agent_mesh_service.ack_message(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        acknowledgement=AgentMeshAckIn(status="failed", error="执行失败"),
+    )
+    assert dead_letter["status"] == "dead_letter"
+    event_count = db.query(AgentMeshMessageEvent).filter_by(message_id=created["message_id"]).count()
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="不能从 dead_letter 转为 failed"):
+        agent_mesh_service.ack_message(
+            db,
+            user,
+            created["message_id"],
+            surface="user",
+            session_key="session-b1",
+            acknowledgement=AgentMeshAckIn(status="failed", error="重复失败回执"),
+        )
+
+    late_failure = agent_mesh_service.finish_message_run(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        success=False,
+        error="迟到的 Responses 失败事件",
+    )
+    repeated_success = agent_mesh_service.finish_message_run(
+        db,
+        user,
+        created["message_id"],
+        surface="user",
+        session_key="session-b1",
+        success=True,
+        summary="迟到的成功事件",
+    )
+
+    row = db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+    assert late_failure["status"] == repeated_success["status"] == row.status == "dead_letter"
+    assert row.last_error == "执行失败"
+    assert row.next_attempt_at is None
+    assert row.lease_token is None and row.lease_expires_at is None
+    assert db.query(AgentMeshMessageEvent).filter_by(message_id=created["message_id"]).count() == event_count
+
+
+def test_finish_message_run_keeps_terminal_result_from_concurrent_session(db, user) -> None:
+    """另一 Session 缓存 processing 后，晚到回调必须读取并保留已提交终态。"""
+    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+    other_db = factory()
+    try:
+        for key in ("session-a1", "session-b1"):
+            agent_mesh_service.heartbeat(db, user, surface="user", session_key=key, title=key)
+        created = agent_mesh_service.send_message(
+            db, user, surface="user", session_key="session-a1", message=_message(),
+        )
+        agent_mesh_service.pull_inbox(db, user, surface="user", session_key="session-b1", limit=10)
+        agent_mesh_service.ack_message(
+            db,
+            user,
+            created["message_id"],
+            surface="user",
+            session_key="session-b1",
+            acknowledgement=AgentMeshAckIn(status="processing"),
+        )
+
+        stale_row = other_db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert stale_row.status == "processing"
+        other_db.commit()
+
+        agent_mesh_service.ack_message(
+            db,
+            user,
+            created["message_id"],
+            surface="user",
+            session_key="session-b1",
+            acknowledgement=AgentMeshAckIn(status="completed", summary="先提交的成功回执"),
+        )
+        late_result = agent_mesh_service.finish_message_run(
+            other_db,
+            user,
+            created["message_id"],
+            surface="user",
+            session_key="session-b1",
+            success=False,
+            error="迟到的失败回执",
+        )
+
+        row = other_db.query(AgentMeshMessage).filter_by(message_id=created["message_id"]).one()
+        assert late_result["status"] == row.status == "completed"
+        assert stale_row.last_error in (None, "")
+        assert [event.status for event in db.query(AgentMeshMessageEvent).filter_by(
+            message_id=created["message_id"],
+        ).order_by(AgentMeshMessageEvent.id)] == ["queued", "delivered", "processing", "completed"]
+    finally:
+        other_db.close()
+
+
+def test_finish_message_run_does_not_swallow_nonterminal_state_conflict(db, user) -> None:
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-a1", title="来源会话")
+    agent_mesh_service.heartbeat(db, user, surface="user", session_key="session-b1", title="目标会话")
+    created = agent_mesh_service.send_message(db, user, surface="user", session_key="session-a1", message=_message())
+
+    with pytest.raises(agent_mesh_service.AgentMeshStateError, match="不能从 queued 转为 failed"):
+        agent_mesh_service.finish_message_run(
+            db,
+            user,
+            created["message_id"],
+            surface="user",
+            session_key="session-b1",
+            success=False,
+            error="尚未开始处理的结果",
+        )
+
+
 def test_discussion_result_from_cancelled_parent_is_not_auto_resumed(db, user) -> None:
     """已停止的小菱收到迟到的圆桌回执时，只收敛账本，不再启动模型。"""
     agent_mesh_service.heartbeat(

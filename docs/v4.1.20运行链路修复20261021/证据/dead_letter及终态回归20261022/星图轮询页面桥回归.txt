@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/frontend
+
+
+ Test Files  4 passed (4)
+      Tests  32 passed (32)
+   Start at  13:55:29
+   Duration  2.92s (transform 1.52s, setup 422ms, import 2.97s, tests 442ms, environment 4.01s)
+

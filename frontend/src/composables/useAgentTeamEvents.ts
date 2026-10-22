@@ -12,6 +12,7 @@ import { listAgentTeamEvents, type AgentTeamEvent, type AgentTeamStatus } from '
 const TERMINAL_STATUS: ReadonlySet<AgentTeamStatus> = new Set([
   'completed',
   'failed',
+  'blocked',
   'cancelled',
   'expired',
 ])

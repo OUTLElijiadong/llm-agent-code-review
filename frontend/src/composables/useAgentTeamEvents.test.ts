@@ -84,6 +84,29 @@ describe('useAgentTeamEvents', () => {
     harness.wrapper.unmount()
   })
 
+  it.each(['blocked', 'expired'])('%s 终态排空剩余事件后停止轮询', async (status) => {
+    teamApi.events
+      .mockResolvedValueOnce({
+        items: [{ event_id: 1, team_id: 52, event_type: 'task.status_changed', to_status: status }],
+        has_more: true, next_after_id: 1, page_size: 1, team_status: status,
+      })
+      .mockResolvedValueOnce({
+        items: [{ event_id: 2, team_id: 52, event_type: 'team.status_changed', to_status: status }],
+        has_more: false, next_after_id: 2, page_size: 1, team_status: status,
+      })
+    const harness = mountHarness()
+    try {
+      harness.controller.start(52)
+      await flushPromises()
+      expect(harness.controller.events.value.map(event => event.event_id)).toEqual([1, 2])
+      expect(harness.controller.teamStatuses.value[52]).toBe(status)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(teamApi.events.mock.calls).toEqual([[52, 0, 2], [52, 1, 2]])
+    } finally {
+      harness.wrapper.unmount()
+    }
+  })
+
   it('403/404 权限类错误立即停止且不形成持续轮询', async () => {
     teamApi.events.mockRejectedValue({ code: 40431, message: '团队不存在' })
     const harness = mountHarness()

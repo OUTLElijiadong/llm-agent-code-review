@@ -1,0 +1,15 @@
+{
+  "采集时间": "2026-10-22T05:43:31.919570+00:00",
+  "生产提交": "6c164f7d2a596f4839bad7563ac68eb70655725a",
+  "范围": "仅提取状态机异常及栈，不保留完整应用日志",
+  "后台异常事件数": 2,
+  "异常日志行": [
+    "2026-10-22 02:40:40.346 | ERROR    | request_id=bec3ed39fb12c66c287d79a694fbcb68 | app.api.v1.agent_responses:_release_background_response_task:132 | 小菱后台运行异常: 消息不能从 dead_letter 转为 failed",
+    "2026-10-22 02:45:47.314 | ERROR    | request_id=410902d15b105c446f79adf76c010d6d | app.api.v1.agent_responses:_release_background_response_task:132 | 小菱后台运行异常: 消息不能从 dead_letter 转为 failed"
+  ],
+  "调用栈": [
+    "agent_responses.py:1714 execute → agent_mesh_service.finish_message_run",
+    "agent_mesh_service.py:2505 finish_message_run → ack_message",
+    "agent_mesh_service.py:2037 ack_message → AgentMeshStateError: 消息不能从 dead_letter 转为 failed"
+  ]
+}

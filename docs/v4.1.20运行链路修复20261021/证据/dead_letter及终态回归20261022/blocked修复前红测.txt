@@ -1,0 +1,48 @@
+
+ RUN  v4.1.11 /Users/li/Documents/代码程序/基于大模型智能体的代码审查平台/.claude/worktrees/great-heisenberg-8a6fa9/frontend
+
+ ❯ src/composables/useAgentTeamEvents.test.ts (9 tests | 1 failed) 52ms
+     × blocked 终态排空剩余事件后停止轮询 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/composables/useAgentTeamEvents.test.ts > useAgentTeamEvents > blocked 终态排空剩余事件后停止轮询
+AssertionError: expected [ [ 52, +0, 2 ], [ 52, 1, 2 ], …(2) ] to deeply equal [ [ 52, +0, 2 ], [ 52, 1, 2 ] ]
+
+- Expected
++ Received
+
+@@ -7,6 +7,16 @@
+    [
+      52,
+      1,
+      2,
+    ],
++   [
++     52,
++     2,
++     2,
++   ],
++   [
++     52,
++     2,
++     2,
++   ],
+  ]
+
+ ❯ src/composables/useAgentTeamEvents.test.ts:104:41
+    102|       expect(harness.controller.teamStatuses.value[52]).toBe(status)
+    103|       await vi.advanceTimersByTimeAsync(5000)
+    104|       expect(teamApi.events.mock.calls).toEqual([[52, 0, 2], [52, 1, 2…
+       |                                         ^
+    105|     } finally {
+    106|       harness.wrapper.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  13:54:01
+   Duration  1.00s (transform 74ms, setup 48ms, import 119ms, tests 52ms, environment 573ms)
+

@@ -2001,6 +2001,7 @@ def _owned_target_message(
             AgentMeshMessage.send_to == target,
         )
         .with_for_update()
+        .populate_existing()
         .first()
     )
     if row is None:
@@ -2501,16 +2502,25 @@ def finish_message_run(
     summary: str = "",
     error: str = "",
 ) -> dict[str, Any]:
-    """把自动 Responses 回合结果回写消息状态。"""
-    return ack_message(
-        db,
-        user,
-        message_id,
-        surface=surface,
-        session_key=session_key,
-        acknowledgement=AgentMeshAckIn(
-            status="cancelled" if cancelled else "completed" if success else "failed",
-            summary=summary[:2000],
-            error=error[:2000],
-        ),
-    )
+    """回写 Responses 结果；与既有终态竞争时保留先提交的终态。"""
+    try:
+        return ack_message(
+            db,
+            user,
+            message_id,
+            surface=surface,
+            session_key=session_key,
+            acknowledgement=AgentMeshAckIn(
+                status="cancelled" if cancelled else "completed" if success else "failed",
+                summary=summary[:2000],
+                error=error[:2000],
+            ),
+        )
+    except AgentMeshStateError:
+        # A different callback may finish the message between its read and
+        # transition. Only a confirmed terminal row makes this conflict idempotent;
+        # ack_message remains strict for all ordinary callers and nonterminal states.
+        row = _owned_target_message(db, user, message_id, surface=surface, session_key=session_key)
+        if row.status in _SESSION_TERMINAL:
+            return _message_out(row)
+        raise
