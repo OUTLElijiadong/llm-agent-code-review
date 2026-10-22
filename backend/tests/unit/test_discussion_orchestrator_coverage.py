@@ -2297,6 +2297,20 @@ def test_finalize_review_persists_issues_statistics_and_log_labels(
     assert saved_task.end_time is not None
     assert saved_task.duration_ms >= 0
 
+    # 圆桌的正式报告、列表复算与导出必须引用同一组持久化向量。
+    from app.services.report_exporter import export_to_dict
+    from app.services.report_service import _build_task_score_facts, load_task_issue_stats
+
+    stats = load_task_issue_stats(db, [saved_task])[saved_task.id]
+    issue_count, report_score, report_breakdown, _ = _build_task_score_facts(saved_task, stats)
+    exported = export_to_dict(saved_task, rows, saved_task.summary, saved_task.score)
+    assert issue_count == 2
+    assert report_score == exported["score"] == saved_task.score == 40
+    for breakdown in (report_breakdown, exported["statistics"]["score_breakdown"]):
+        assert breakdown["components"]["cvss"] == saved_task.score_breakdown["components"]["cvss"]
+        assert breakdown["policy_version"] == "cvss-weighted-v1"
+    assert any(item["cvss_vector"] == rows[1].cvss_vector for item in exported["issues"])
+
 
 def test_finalize_review_keeps_summary_but_marks_truncated_speaker_partial(
     db: Any, monkeypatch: pytest.MonkeyPatch,

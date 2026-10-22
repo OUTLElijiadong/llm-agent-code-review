@@ -88,6 +88,34 @@ def test_sandbox_missing_vectors_keep_quality_and_domain_version():
     assert breakdown["components"]["cvss"]["weight"] == 0
     assert breakdown["score"] == 40
     assert breakdown["score_source"] == sandbox_service.SANDBOX_SCORE_VERSION
+    lines = score_section_lines(breakdown["score"], available=True, score_breakdown=breakdown)
+    assert f"CVSS 向量：无有效向量" in lines
+
+
+def test_sandbox_scored_breakdown_without_vector_list_does_not_claim_no_vector():
+    quality = {
+        "score": 40,
+        "score_available": True,
+        "score_basis": sandbox_service.SANDBOX_SCORE_VERSION,
+        "sample": {"executed_checks": 5, "earned_credit": 2},
+    }
+    breakdown = sandbox_service._sandbox_composite_score_breakdown(
+        {
+            "test_mode": "combined",
+            "cvss_findings": [{"title": "confirmed", "status": "confirmed", "cvss_vector": VECTOR_HIGH}],
+        },
+        quality,
+    )
+
+    lines = score_section_lines(breakdown["score"], available=True, score_breakdown=breakdown)
+
+    assert breakdown["components"]["cvss"]["scored_findings"] == 1
+    assert breakdown["components"]["cvss"]["max_base_score"] == 9.8
+    assert breakdown["components"]["cvss"]["weight"] == 0.7
+    assert breakdown["score"] == 13
+    assert "CVSS 向量：已评分发现存在，但向量明细未随评分分项保存" in lines
+    assert "CVSS 向量：无有效向量" not in lines
+    assert VECTOR_HIGH not in lines
 
 
 def test_sandbox_export_score_section_uses_saved_composite_once_and_exposes_quality_cap():

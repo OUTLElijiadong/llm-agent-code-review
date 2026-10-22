@@ -210,11 +210,16 @@ def score_section_lines(
             cvss = cvss if isinstance(cvss, dict) else {}
             vectors = score_breakdown.get("cvss_vectors")
             vectors = vectors if isinstance(vectors, list) else []
+            scored_findings = int(cvss.get("scored_findings") or 0)
             standard = score_breakdown.get("cvss_standard") or "CVSS 3.1（FIRST）"
             lines.append(f"CVSS 来源：{_value(standard)}")
-            lines.append(
-                "CVSS 向量：" + ("、".join(str(item) for item in vectors) if vectors else "无有效向量")
-            )
+            if vectors:
+                vector_summary = "、".join(str(item) for item in vectors)
+            elif scored_findings:
+                vector_summary = "已评分发现存在，但向量明细未随评分分项保存"
+            else:
+                vector_summary = "无有效向量"
+            lines.append(f"CVSS 向量：{vector_summary}")
             cvss_weight = cvss.get("weight", 0)
             lines.append(f"CVSS 权重：{int(round(cvss_weight * 100))}%" if cvss_weight else "CVSS 权重：0%")
             quality = components.get("quality") if isinstance(components, dict) else None
@@ -222,7 +227,7 @@ def score_section_lines(
             quality_weight = quality.get("weight")
             if isinstance(quality_weight, (int, float)):
                 lines.append(f"原规则质量分权重：{int(round(quality_weight * 100))}%")
-            lines.append(f"CVSS 已评分发现：{int(cvss.get('scored_findings') or 0)} 项")
+            lines.append(f"CVSS 已评分发现：{scored_findings} 项")
             lines.append(f"CVSS 未评分发现：{int(cvss.get('unscored_findings') or 0)} 项")
             max_base_score = cvss.get("max_base_score")
             if max_base_score is not None:
