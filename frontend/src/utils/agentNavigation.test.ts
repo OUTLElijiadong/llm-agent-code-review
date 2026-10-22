@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 import {
   extractAgentNavigations,
@@ -159,6 +160,7 @@ describe('local navigation cost guard', () => {
         path: '/admin',
         children: [
           { path: 'audit', meta: { title: '系统操作审计', role: 'admin' } },
+          { path: 'platform', meta: { title: '平台配置中心', role: 'admin' } },
           { path: 'operations', meta: { title: '运行监控', role: 'admin' } },
           { path: 'users', meta: { title: '用户管理', role: 'admin', permissions: ['user:view'] } },
           { path: 'embedding', meta: { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true } },
@@ -171,32 +173,11 @@ describe('local navigation cost guard', () => {
     ],
   }
 
-  function routerFor(path: string) {
-    return {
-      options: routeOptions,
-      resolve: () => ({
-        matched: [{ path }],
-        meta: path === '/admin/audit'
-          ? { title: '系统操作审计', role: 'admin' }
-          : path === '/admin/operations'
-          ? { title: '运行监控', role: 'admin' }
-          : path === '/admin/users'
-          ? { title: '用户管理', role: 'admin', permissions: ['user:view'] }
-          : path === '/admin/embedding'
-          ? { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true }
-          : path === '/admin/mcp-workers'
-          ? { title: 'MCP 与沙箱节点', role: 'admin', superAdmin: true }
-          : path === '/admin/llm'
-          ? { title: '大模型配置', role: 'admin', superAdmin: true }
-            : path === '/audit'
-              ? { title: '操作审计', roles: ['reviewer'], permissions: ['audit:view'] }
-            : path === '/reviews'
-              ? { title: '审查记录', permissions: ['review:view'] }
-            : { title: '项目管理', permissions: ['project:view'] },
-      }),
-    }
+  function routerFor(_path: string) {
+    return createRouter({ history: createMemoryHistory(), routes: routeOptions.routes.map(route => ({
+      component: {}, ...route, children: route.children?.map(child => ({ component: {}, ...child })),
+    })) })
   }
-
   it('resolves an explicit navigation request without requiring a model round', () => {
     const result = resolveLocalNavigationRequest(
       '请只执行页面导航：打开系统操作审计页面。不要查询、修改、删除或执行任何运维操作。',
@@ -227,9 +208,9 @@ describe('local navigation cost guard', () => {
     })
   })
 
-  it('普通用户的歧义“审计”导航选择可访问的审计页，不误派管理端', () => {
+  it.each(['打开审计', '打开审计页面'])('审查员输入“%s”选择可访问的审计页，不误派管理端', content => {
     const result = resolveLocalNavigationRequest(
-      '打开审计页面',
+      content,
       routerFor('/audit') as never,
       {
         ...guard(true),
@@ -261,6 +242,93 @@ describe('local navigation cost guard', () => {
     )
 
     expect(result).toEqual({ kind: 'forbidden' })
+  })
+
+  it('管理员明确要求管理后台审计时进入审计分区，不能误开运行总览', () => {
+    expect(resolveLocalNavigationRequest('打开管理后台审计页面', routerFor('/admin/audit'),
+      { ...guard(true), isAdmin: () => true })).toEqual({
+      kind: 'navigate', directive: { action: 'navigate', route: '/admin/audit', label: '系统操作审计' },
+    })
+  })
+
+  describe.each(['管理后台的', '管理端的', '管理员的'])('中文管理限定词 %s', qualifier => {
+    it.each([
+      ['平台配置', '/admin/platform', '平台配置中心'],
+      ['审计', '/admin/audit', '系统操作审计'],
+    ])('无权账号打开%s直接禁止，不降级同名用户入口', (target, _route, _label) => {
+      const actor = { ...guard(true), hasRole: (role: string) => role === 'reviewer' }
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}`, routerFor('/audit'), actor))
+        .toEqual({ kind: 'forbidden' })
+    })
+
+    it.each([
+      ['平台配置', '/admin/platform', '平台配置中心'],
+      ['审计', '/admin/audit', '系统操作审计'],
+    ])('具备管理权限打开%s准确选择管理路径', (target, route, label) => {
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}`, routerFor(route),
+        { ...guard(true), isAdmin: () => true })).toEqual({
+        kind: 'navigate', directive: { action: 'navigate', route, label },
+      })
+    })
+
+    it.each([
+      ['平台配置', '修改默认模型'],
+      ['审计', '删除审计日志'],
+    ])('打开%s同时要求%s时不得当作纯导航吞掉写入命令', (target, operation) => {
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}并${operation}`, routerFor('/admin/platform'),
+        { ...guard(true), isAdmin: () => true })).toBeNull()
+    })
+  })
+
+  describe.each([
+    { target: '管理后台的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '管理端的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '管理员的平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '平台配置', route: '/admin/platform', label: '平台配置中心', admin: true, operation: '修改默认模型' },
+    { target: '审计', route: '/audit', label: '操作审计', admin: false, operation: '删除审计日志' },
+    { target: '项目', route: '/projects', label: '项目管理', admin: false, operation: '删除项目' },
+  ])('导航分句边界：$target', ({ target, route, label, admin, operation }) => {
+    const actor = {
+      ...guard(true),
+      isAdmin: () => admin,
+      hasRole: (role: string) => role === 'reviewer',
+    }
+
+    it('否定查询后肯定写入必须保留完整命令', () => {
+      expect(resolveLocalNavigationRequest(`打开${target}，不要查询，直接${operation}`,
+        routerFor(route), actor)).toBeNull()
+    })
+
+    it.each(['，', '\n'])('否定查询后无宾语的肯定删除也不能当成否定动作列表，分隔符=%j', separator => {
+      expect(resolveLocalNavigationRequest(`打开${target}，不要查询${separator}删除`,
+        routerFor(route), actor)).toBeNull()
+    })
+
+    it.each(['不要查询，不要修改', '不要查询、修改'])(
+      '只有否定动作边界“%s”时仍本地导航', boundary => {
+        expect(resolveLocalNavigationRequest(`打开${target}，${boundary}`, routerFor(route), actor)).toEqual({
+          kind: 'navigate', directive: { action: 'navigate', route, label },
+        })
+      },
+    )
+  })
+
+  it('否定查询后要求读取页面标题时不能只执行导航', () => {
+    expect(resolveLocalNavigationRequest('打开管理后台的平台配置，不要查询，读取页面标题',
+      routerFor('/admin/platform'), { ...guard(true), isAdmin: () => true })).toBeNull()
+  })
+
+  it.each([false, true])('没有管理限定词的同名审计入口保持用户路径，管理员=%s', isAdmin => {
+    expect(resolveLocalNavigationRequest('打开审计', routerFor('/audit'), {
+      ...guard(true), isAdmin: () => isAdmin, hasRole: (role: string) => role === 'reviewer',
+    })).toEqual({
+      kind: 'navigate', directive: { action: 'navigate', route: '/audit', label: '操作审计' },
+    })
+  })
+
+  it('未加管理限定词的平台配置仍按管理入口权限拒绝普通用户', () => {
+    expect(resolveLocalNavigationRequest('打开平台配置', routerFor('/admin/platform'), guard(true)))
+      .toEqual({ kind: 'forbidden' })
   })
 
   it.each(['/admin/embedding', '/admin/mcp-workers', '/admin/llm'])(
@@ -311,5 +379,26 @@ describe('local navigation cost guard', () => {
         label: '审查记录',
       },
     })
+  })
+})
+
+
+describe('真实管理入口重定向权限', () => {
+  const routes = [{ path: '/admin', meta: { role: 'admin' }, children: [
+    { path: 'platform', component: {}, meta: { title: '平台配置中心' } },
+    ...['embedding', 'mcp-workers', 'llm'].map(section => ({
+      path: section, redirect: { path: '/admin/platform', query: { section } },
+      meta: { superAdmin: true },
+    })),
+  ] }]
+  const router = createRouter({ history: createMemoryHistory(), routes })
+  it.each(['embedding', 'mcp-workers', 'llm'])('普通管理员不能通过旧入口或 section 查询进入 %s', section => {
+    const actor = { ...guard(true), isAdmin: () => true }
+    expect(isNavigationPathAllowed(router, `/admin/${section}`, actor)).toBe(false)
+    expect(isNavigationPathAllowed(router, `/admin/platform?section=${section}`, actor)).toBe(false)
+    expect(isNavigationPathAllowed(router, '/admin/platform?section=report-templates', actor)).toBe(true)
+    const superAdmin = { ...actor, isSuperAdmin: () => true }
+    expect(isNavigationPathAllowed(router, `/admin/${section}`, superAdmin)).toBe(true)
+    expect(isNavigationPathAllowed(router, `/admin/platform?section=${section}`, superAdmin)).toBe(true)
   })
 })

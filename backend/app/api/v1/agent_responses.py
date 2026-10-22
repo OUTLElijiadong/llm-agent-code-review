@@ -1429,6 +1429,48 @@ def _public_stream_event(
     return None
 
 
+def _persist_mesh_run_receipt(
+    db: Session,
+    user: User,
+    *,
+    run_id: str,
+    message_id: str,
+    surface: str,
+    session_key: str,
+    success: bool,
+    cancelled: bool = False,
+    summary: str = "",
+    error: str = "",
+    acknowledge: bool = True,
+) -> None:
+    """独立收敛投递回执，失败不得改写已经持久化的业务终态或重启模型。"""
+    for attempt in range(2):
+        try:
+            response_row = db.query(AgentResponseRun).filter(
+                AgentResponseRun.run_id == run_id,
+                AgentResponseRun.user_id == user.id,
+                AgentResponseRun.surface == surface,
+                AgentResponseRun.session_key == session_key,
+            ).first()
+            if response_row is not None and response_row.mesh_message_id != message_id:
+                response_row.mesh_message_id = message_id
+                # 先持久化关联，回执暂时失败时后台扫描仍能找到原始业务结果。
+                db.commit()
+            if acknowledge:
+                agent_mesh_service.finish_message_run(
+                    db, user, message_id, surface=surface, session_key=session_key,
+                    success=success, cancelled=cancelled, summary=summary, error=error,
+                )
+            return
+        except Exception as exc:  # noqa: BLE001 - 回执故障与业务运行异常分开处理
+            db.rollback()
+            if attempt == 1:
+                logger.warning(
+                    "小菱运行 {} 的 Mesh 回执暂未收敛，保留业务结果: {}",
+                    run_id, type(exc).__name__,
+                )
+
+
 @router.post(
     "/stream",
     dependencies=[Depends(require_permission(PermissionCode.AGENT_CHAT))],
@@ -1699,29 +1741,12 @@ async def stream_agent_response(
                         except Exception:  # noqa: BLE001
                             pass
                     if mesh_message_id:
-                        response_row = (
-                            run_db.query(AgentResponseRun)
-                            .filter(
-                                AgentResponseRun.run_id == run_id,
-                                AgentResponseRun.user_id == run_user.id,
-                            )
-                            .first()
+                        _persist_mesh_run_receipt(
+                            run_db, run_user, run_id=run_id, message_id=mesh_message_id,
+                            surface=payload.surface, session_key=payload.session_id,
+                            success=result.status == "completed", cancelled=result.status == "cancelled",
+                            summary=result.output_text, error=result.error, acknowledge=not is_paused(result),
                         )
-                        if response_row is not None and response_row.mesh_message_id != mesh_message_id:
-                            response_row.mesh_message_id = mesh_message_id
-                            run_db.commit()
-                        if not is_paused(result):
-                            agent_mesh_service.finish_message_run(
-                                run_db,
-                                run_user,
-                                mesh_message_id,
-                                surface=payload.surface,
-                                session_key=payload.session_id,
-                                success=result.status == "completed",
-                                cancelled=result.status == "cancelled",
-                                summary=result.output_text,
-                                error=result.error,
-                            )
                     if result.status == "completed" and payload.surface == "user":
                         try:
                             if not _is_admin_actor(run_db, run_user):
@@ -1747,18 +1772,11 @@ async def stream_agent_response(
                         except Exception:  # noqa: BLE001
                             pass
                     if mesh_message_id:
-                        try:
-                            agent_mesh_service.finish_message_run(
-                                run_db,
-                                run_user,
-                                mesh_message_id,
-                                surface=payload.surface,
-                                session_key=payload.session_id,
-                                success=False,
-                                error=str(exc),
-                            )
-                        except agent_mesh_service.AgentMeshError:
-                            run_db.rollback()
+                        _persist_mesh_run_receipt(
+                            run_db, run_user, run_id=run_id, message_id=mesh_message_id,
+                            surface=payload.surface, session_key=payload.session_id,
+                            success=False, error=str(exc),
+                        )
                     raise
             finally:
                 if owns_run_db:

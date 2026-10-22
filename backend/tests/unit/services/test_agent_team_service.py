@@ -3006,8 +3006,10 @@ def _two_worker_summary_payload():
     return _payload(
         max_active_children=2,
         members=[
-            {"member_key": "quality", "display_name": "代码质量", "address": "agent:project_analyzer", "role": "worker"},
-            {"member_key": "security", "display_name": "安全审查", "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "quality", "display_name": "代码质量",
+             "address": "agent:project_analyzer", "role": "worker"},
+            {"member_key": "security", "display_name": "安全审查",
+             "address": "agent:project_analyzer", "role": "worker"},
             {"member_key": "summary", "display_name": "汇总", "address": "agent:reporter", "role": "summarizer"},
         ],
         tasks=[
@@ -3116,3 +3118,92 @@ def test_cancel_does_not_record_request_message_as_failed(db, team_user):
     )
     assert row.status == "cancelled"
     assert task.status == "cancelled" and team.status == "cancelled"
+
+
+@pytest.mark.parametrize("delivery_status", ["dead_letter", "completed", "cancelled", "expired"])
+@pytest.mark.parametrize("success", [True, False])
+def test_task_completion_preserves_delivery_terminal_from_another_session(db, team_user, delivery_status, success):
+    """已缓存 processing 的执行会话不能覆盖另一事务提交的投递终态。"""
+    from app.models.agent_mesh import AgentMeshMessageEvent
+
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    request = db.query(AgentMeshMessage).filter_by(message_id=claim["request_message_id"]).one()
+    assert request.status == "processing"
+    db.commit()
+    with Session(db.get_bind(), expire_on_commit=False) as delivery_db:
+        current = delivery_db.get(AgentMeshMessage, request.id)
+        current.status = delivery_status
+        current.completed_at = datetime.now(timezone.utc)
+        current.last_error = "先提交的投递结果"
+        current.lease_token = None
+        current.lease_expires_at = None
+        delivery_db.commit()
+    assert request.status == "processing"
+    count_before = db.query(AgentMeshMessageEvent).filter_by(message_id=request.message_id).count()
+
+    completed = agent_team_service.complete_task(
+        db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+        result={"status": "completed" if success else "failed", "summary": "实际业务结果", "retryable": False},
+        success=success, error="" if success else "真实业务失败",
+    )
+
+    db.refresh(request)
+    assert request.status == delivery_status
+    assert request.last_error == "先提交的投递结果"
+    assert request.lease_token is None and request.next_attempt_at is None
+    assert db.query(AgentMeshMessageEvent).filter_by(message_id=request.message_id).count() == count_before
+    task = next(item for item in completed["tasks"] if item["task_id"] == claim["task_id"])
+    assert task["status"] == ("completed" if success else "failed")
+
+
+def test_mesh_recovery_does_not_consume_team_request_lease(db, team_user):
+    """团队请求仅作账本投影，Mesh 回收不得越过团队恢复器提前发布失败回执。"""
+    db.add(User(id=team_user.id, username="lease-owner", password="unused", role="user", status=1))
+    db.commit()
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _branching_payload())
+    claim = agent_team_service.claim_next_task(db, created["team_id"])
+    request = db.query(AgentMeshMessage).filter_by(message_id=claim["request_message_id"]).one()
+    task = db.get(AgentTeamTask, claim["task_id"])
+    request.lease_expires_at = task.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+
+    assert agent_mesh_service.recover_stale_dispatch_messages(db) == 0
+    db.refresh(request)
+    assert request.status == "processing"
+    assert agent_team_service.recover_expired_leases(db) == 1
+    db.refresh(request)
+    db.refresh(task)
+    assert task.status == request.status == "failed"
+    assert db.get(AgentTeam, created["team_id"]).status == "failed"
+    assert db.query(AgentMeshMessage).filter_by(correlation_id=request.message_id).count() == 0
+    for success in (False, True):
+        with pytest.raises(agent_team_service.AgentTeamLeaseError):
+            agent_team_service.complete_task(
+                db, created["team_id"], claim["task_id"], lease_token=claim["lease_token"],
+                result={"status": "completed" if success else "failed"}, success=success,
+            )
+
+
+def test_large_team_summary_and_error_never_reference_last_task_results(db, team_user):
+    created = agent_team_service.create_team_from_xiaoling(db, team_user, _payload())
+    team = db.get(AgentTeam, created["team_id"])
+    team.status = "failed"
+    team.summary_json = json.dumps({"completed_tasks": 1, "final_result": "完整团队摘要" * 8000})
+    team.error_json = json.dumps({"errors": [{"message": "真实失败" * 4000}]})
+    db.commit()
+
+    detail = agent_team_service.get_team(db, team_user, team.id)
+    assert detail["summary"]["result_reference"] == {
+        "tool": "get_agent_team", "team_id": team.id, "result_scope": "team_summary",
+        "result_path": "", "offset": 0, "limit": 20,
+    }
+    agent_team_service._persist_terminal_team_notification(db, team, now=agent_team_service._now())
+    db.commit()
+    notice = db.query(AgentMeshMessage).filter_by(message_id=f"team-{team.id}-terminal-0-result").one()
+    payload = json.loads(notice.payload_json)
+    for key in ("summary", "error"):
+        assert payload[key]["result_reference"] == {
+            "tool": "get_agent_team", "team_id": team.id, "result_scope": f"team_{key}",
+            "result_path": "", "offset": 0, "limit": 20,
+        }

@@ -61,7 +61,7 @@ def test_guide_routes_exist_in_frontend_route_table() -> None:
         "/dashboard", "/projects", "/reviews", "/reviews/start",
         "/security", "/reports", "/audit", "/code", "/issues",
         "/agents", "/sandboxes", "/agent-studio", "/forum", "/forum/new",
-        "/knowledge", "/support", "/profile",
+        "/knowledge", "/support", "/profile", "/audit",
         "/profile/personalization", "/profile/password", "/profile/api-config",
     }
     frontend_static_admin_routes = {
@@ -98,6 +98,7 @@ def test_openapi_still_valid_for_all_capabilities() -> None:
     [
         ("user", "/reviews", "审查任务"),
         ("user", "/agents", "Agent 工作台"),
+        ("user", "/audit", "操作审计"),
         ("admin", "/admin/governance", "Agent 治理中心"),
         ("admin", "/admin/operations", "运行与审计中心"),
         ("admin", "/admin/access", "用户与权限中心"),

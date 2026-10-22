@@ -33,6 +33,8 @@ import {
 interface Props {
   /** 思考是否进行中;false 时定格最后一帧并停止 rAF */
   active?: boolean
+  /** 聊天静态展示不启动动画循环，仍按团队事件更新。 */
+  animated?: boolean
   /** 紧凑模式(嵌入消息气泡),降低高度与字号 */
   compact?: boolean
   /** 自定义目标句子(小菱正在组织的话) */
@@ -45,6 +47,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   active: true,
+  animated: true,
   compact: false,
   sentences: undefined,
   demoSubAgent: false,
@@ -75,7 +78,7 @@ let rafId = 0
 let lastFrameAt = 0
 let resizeObserver: ResizeObserver | null = null
 let hudSyncAt = 0
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const reducedMotion = !props.animated || window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const TERMINAL_TEAM_STATUS: ReadonlySet<AgentTeamStatus> = new Set([
   'completed', 'failed', 'blocked', 'cancelled', 'expired',
 ])
@@ -359,12 +362,13 @@ function drawFrame(dt: number): void {
 
   // 多Agent联动:子城市(光带建立 → 成员点亮 → 完成飞回)
   for (const sub of s.subCities) {
+    const buildProgress = reducedMotion ? 1 : sub.buildProgress
     const alpha = sub.returnProgress >= 0 ? 1 - sub.returnProgress : 1
     ctx.globalAlpha = alpha * 0.92
 
     // 建立期:从主城市广场到子城市拉一条光带
-    if (sub.buildProgress < 1) {
-      const t = sub.buildProgress
+    if (buildProgress < 1) {
+      const t = buildProgress
       const ex = s.plaza.x + (sub.x + sub.w / 2 - s.plaza.x) * t
       const ey = s.plaza.y + (sub.y + sub.h - s.plaza.y) * t
       const grad = ctx.createLinearGradient(s.plaza.x, s.plaza.y, ex, ey)
@@ -387,7 +391,7 @@ function drawFrame(dt: number): void {
     }
 
     // 子城市楼体(微缩)
-    const grow = 0.3 + 0.7 * sub.buildProgress
+    const grow = 0.3 + 0.7 * buildProgress
     const bh = sub.h * grow
     const by = sub.y + (sub.h - bh)
     ctx.fillStyle = 'rgba(58, 34, 84, 0.92)'
@@ -399,7 +403,7 @@ function drawFrame(dt: number): void {
     ctx.stroke()
 
     // 成员微缩房间
-    if (sub.buildProgress > 0.6) {
+    if (buildProgress > 0.6) {
       const cols = Math.max(2, Math.ceil(Math.sqrt(sub.rooms.length)))
       const cw = (sub.w - 14) / cols
       sub.rooms.forEach((room, i) => {
@@ -531,7 +535,7 @@ function formatTime(ts: number): string {
 }
 
 function loop(now: number): void {
-  if (!props.active) return
+  if (!props.active || reducedMotion) return
   const dt = lastFrameAt ? now - lastFrameAt : 16
   lastFrameAt = now
   drawFrame(dt)
@@ -596,6 +600,7 @@ const teamEvents = useAgentTeamEvents({
         finishTrackedTeam(Number(ev.team_id ?? 0), ev.to_status as AgentTeamStatus)
       }
     }
+    if (reducedMotion) drawFrame(0)
   },
   onStatus: (status, teamId) => finishTrackedTeam(teamId, status),
 })
@@ -628,6 +633,7 @@ function replayTrackedTeam(teamId: number, tracked: TrackedTeam): void {
   )
   for (const memberKey of tracked.startedMembers) eng.subCityTaskStarted(teamId, memberKey)
   if (TERMINAL_TEAM_STATUS.has(tracked.status)) eng.subCityFinished(teamId, tracked.status)
+  if (reducedMotion) drawFrame(0)
 }
 
 function replayTrackedTeams(): void {
@@ -642,6 +648,7 @@ function finishTrackedTeam(teamId: number, status: AgentTeamStatus): void {
     engine?.subCityFinished(teamId, status)
     teamEvents.stop(teamId)
   }
+  if (reducedMotion) drawFrame(0)
 }
 
 /**

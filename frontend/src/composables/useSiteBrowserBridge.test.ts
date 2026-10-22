@@ -32,7 +32,7 @@ function rejectRequest(config: InternalAxiosRequestConfig, status: number, code:
 }
 
 function mountBridge(surface: 'user' | 'admin') {
-  const sessionId = ref('browser-session'), runId = ref(''), status = ref('')
+  const sessionId = ref('browser-session'), runId = ref(''), status = ref(''), stopped = ref(false)
   const currentRoute = ref({ fullPath: '/forum' })
   const navigate = vi.fn(async (path: string) => { currentRoute.value.fullPath = path })
   wrappers.push(mount(defineComponent({
@@ -42,12 +42,13 @@ function mountBridge(surface: 'user' | 'admin') {
         sessionId: () => sessionId.value,
         runId: () => runId.value,
         status: () => status.value,
+        isStopped: () => stopped.value,
         router: { currentRoute, push: navigate } as unknown as Router,
       })
       return () => h('main')
     },
   })))
-  return { sessionId, runId, status, navigate }
+  return { sessionId, runId, status, stopped, navigate }
 }
 
 beforeEach(() => {
@@ -65,6 +66,67 @@ afterEach(() => {
 })
 
 describe('页面桥的运行创建与恢复时序', () => {
+  it.each(['pending', 'claim'])('人工停止后迟到的%s不能触发导航或成功回执', async stage => {
+    sessionLookup.mockResolvedValue({ surface: 'user', session_id: 'browser-session',
+      run: { run_id: 'run-stop-in-flight', status: 'running' } })
+    const action: SiteBrowserRequiredEvent = {
+      type: 'response.browser.required', action_id: 91, run_id: 'run-stop-in-flight',
+      session_id: 'browser-session', surface: 'user', account_id: 7, client_nonce: 'nonce',
+      action: 'navigate', args: { route: '/forum/42' }, observation_snapshot_id: 'snapshot-91',
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+    }
+    let finish!: () => void
+    const requests: string[] = []
+    http.defaults.adapter = async config => {
+      requests.push(config.url || '')
+      const data = config.url?.endsWith('/pending') ? { actions: [action] } : { action_id: 91, claim_token: 'claim' }
+      const reply = response(config, 200, { code: 0, data })
+      if (config.url?.endsWith(`/${stage}`)) return new Promise(resolve => { finish = () => resolve(reply) })
+      return reply
+    }
+    const scope = mountBridge('user')
+    scope.status.value = 'running'
+    scope.runId.value = action.run_id
+    await vi.advanceTimersByTimeAsync(0)
+    expect(finish).toBeTypeOf('function')
+    scope.stopped.value = true
+    finish()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(scope.navigate).not.toHaveBeenCalled()
+    expect(requests.some(path => path.endsWith('/ack'))).toBe(false)
+    expect(requests.filter(path => path.endsWith('/claim'))).toHaveLength(stage === 'claim' ? 1 : 0)
+  })
+
+  it('人工停止尚未收到服务端终态时，迟到确认仍不能恢复页面动作', async () => {
+    let finish!: (value: unknown) => void
+    sessionLookup.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const requests: string[] = []
+    http.defaults.adapter = async config => {
+      requests.push(config.url || '')
+      return response(config, 200, { code: 0, data: { actions: [] } })
+    }
+    const scope = mountBridge('user')
+    scope.status.value = 'running'
+    scope.runId.value = 'run-stopped-locally'
+    await vi.advanceTimersByTimeAsync(0)
+    scope.stopped.value = true
+    finish({ surface: 'user', session_id: 'browser-session', run: { run_id: 'run-stopped-locally', status: 'running' } })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(requests).toEqual([])
+    expect(sessionLookup).toHaveBeenCalledTimes(1)
+    expect(scope.navigate).not.toHaveBeenCalled()
+  })
+
+  it.each(['session', 'account'] as const)('当前%s尚未恢复时不向服务器确认运行', async missing => {
+    const scope = mountBridge('user')
+    if (missing === 'session') scope.sessionId.value = ''
+    else actor.profile.id = 0
+    scope.status.value = 'running'
+    scope.runId.value = 'run-before-owner-ready'
+    await vi.advanceTimersByTimeAsync(4100)
+    expect(sessionLookup).not.toHaveBeenCalled()
+  })
+
   it('确认请求期间进入审批后能继续恢复，不遗留恢复锁', async () => {
     let finish: (value: unknown) => void = () => undefined
     sessionLookup.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))

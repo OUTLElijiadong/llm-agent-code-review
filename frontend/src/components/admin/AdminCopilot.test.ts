@@ -1,5 +1,6 @@
+import { siteBrowserApi, type SiteBrowserRequiredEvent } from '@/api/siteBrowser'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, type Plugin } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTeamDetail, AgentTeamStatus } from '@/api/agentTeams'
@@ -19,6 +20,7 @@ const messages = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), success: vi.
 const sessionApi = vi.hoisted(() => ({ get: vi.fn(), page: vi.fn(), cancel: vi.fn() }))
 const meshApi = vi.hoisted(() => ({ heartbeat: vi.fn(), inbox: vi.fn(), list: vi.fn(), conversations: vi.fn(), acknowledge: vi.fn() }))
 const teamApi = vi.hoisted(() => ({ list: vi.fn(), detail: vi.fn(), messages: vi.fn(), events: vi.fn() }))
+const mountedCopilots = new Set<VueWrapper>()
 
 vi.mock('@/utils/responsesStream', () => ({ streamResponses: streams.start }))
 vi.mock('@/api/agentResponses', () => ({
@@ -48,6 +50,95 @@ import AdminCopilot from './AdminCopilot.vue'
 import AdminLayout from './AdminLayout.vue'
 import { useAgentActivityStore } from '@/stores/agentActivity'
 import { useUserStore } from '@/stores/user'
+import { agentChatStorageKey, loadAgentChatSnapshot, saveActiveAgentChatSession, saveAgentChatSessions, saveAgentChatSnapshot } from '@/utils/agentChatSessions'
+
+it.each([true, false])('本地导航持久化：管理端路由成功=%s，恢复保留结果且不重放', async allowed => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/', component: {} }, { path: '/admin/audit', component: {}, meta: { title: '管理端审计' } },
+  ] })
+  await router.push('/')
+  if (!allowed) router.beforeEach(to => to.path === '/admin/audit' ? false : true)
+  sessionApi.get.mockImplementation(async (_surface, session_id) => ({ surface: 'admin', session_id, run: null, messages: [], pending: null }))
+  const wrapper = mountCopilot([router])
+  const user = useUserStore()
+  user.profile = { id: 88, username: 'audit-admin', role: 'admin', status: 1 }
+  user.token = 'audit-admin-token'
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const vm = wrapper.vm as any
+  vm.inputText = '打开管理端审计'
+  await vm.sendMessage()
+  await flushSessionRestore()
+  const sessionId = vm.sessionId as string, key = agentChatStorageKey('admin', 88)
+  const saved = loadAgentChatSnapshot(sessionId, key)
+  expect(saved?.messages.filter(message => message.localAction)).toHaveLength(2)
+  expect(saved?.messages.at(-1)?.localAction?.status).toBe(allowed ? 'completed' : 'failed')
+  expect(router.currentRoute.value.path).toBe(allowed ? '/admin/audit' : '/')
+  expect(streams.start).not.toHaveBeenCalled()
+  saveAgentChatSessions(key, [{ id: sessionId, title: '审计', createdAt: Date.now() }])
+  saveActiveAgentChatSession(key, sessionId)
+  const push = vi.spyOn(router, 'push')
+  try {
+    // 同组件重复恢复与真实会话读取路径一致；不会把导航转为Responses重试。
+    await vm.restoreSession()
+    await flushSessionRestore()
+    expect(wrapper.text()).toContain(allowed ? '已打开「管理端审计」' : '未能确认目标页面')
+    expect(push).not.toHaveBeenCalled()
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount(); push.mockRestore() }
+})
+
+it.each(['completed', 'pending'] as const)('本地导航恢复断网：管理端%s记录在切回、卸载后仍保留且不重放', async status => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const vm = wrapper.vm as any
+  const sessionId = 'admin-offline-navigation', key = vm.chatStorageKey as string
+  const localAction = { id: 'offline-navigation', kind: 'navigation' as const, status, route: '/admin/audit' }
+  saveAgentChatSnapshot(sessionId, {
+    messages: [{ role: 'user', content: '打开管理端审计', localAction },
+      { role: 'assistant', content: status === 'completed' ? '已打开「管理端审计」。' : '正在打开「管理端审计」…', localAction }],
+    runStatus: null, updatedAt: Date.now(),
+  }, key)
+  sessionApi.get.mockRejectedValue(new Error('会话读取暂时失败'))
+  try {
+    await vm.handleSessionSelect(sessionId)
+    await flushSessionRestore()
+    expect(wrapper.text()).toContain(status === 'completed' ? '已打开「管理端审计」。' : '尚未确认')
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+  expect(loadAgentChatSnapshot(sessionId, key)?.messages.filter(message => message.localAction).map(message => message.localAction?.status)).toEqual([status, status])
+})
+
+it.each(['completed', 'cancelled'] as const)('本地导航恢复顺序：%s旧运行步骤与结论保持在导航之前且不重复', async status => {
+  const wrapper = mountCopilot()
+  await openCopilot(wrapper)
+  await flushSessionRestore()
+  const vm = wrapper.vm as any
+  const sessionId = vm.sessionId as string
+  const conclusion = status === 'cancelled' ? '已停止任务，保留已有结果。' : '系统检查完成。'
+  const serverMessages = [{ role: 'user' as const, content: '检查系统' }, { role: 'assistant' as const, content: conclusion }]
+  const localAction = { id: 'navigation-after-run', kind: 'navigation' as const, status: 'completed' as const }
+  saveAgentChatSnapshot(sessionId, {
+    messages: [...serverMessages, { role: 'user', content: '打开审计', localAction },
+      { role: 'assistant', content: '已打开「操作审计」。', localAction }],
+    runStatus: status, updatedAt: Date.now(),
+  }, vm.chatStorageKey)
+  try {
+    vm.applySessionSnapshot({
+      surface: 'admin', session_id: sessionId,
+      run: { run_id: 'old-run', status, output_text: conclusion, model: '', rounds: 1, error: '', updated_at: '' },
+      messages: serverMessages, pending: null,
+      events: [{ type: 'response.tool.completed', sequence_number: 1, call_id: 'old-call', tool_name: 'get_agent_team', output: {} }],
+    })
+    await nextTick()
+    const rows = vm.messages.slice(1)
+    expect(rows.map((row: any) => row.toolCalls?.length ? '旧运行步骤' : row.payload.content))
+      .toEqual(['检查系统', '旧运行步骤', conclusion, '打开审计', '已打开「操作审计」。'])
+    expect(wrapper.findAll('.message-row')).toHaveLength(6)
+    expect(streams.start).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
+})
 
 function flushSessionRestore(): Promise<void> {
   return new Promise((resolve) => {
@@ -57,12 +148,12 @@ function flushSessionRestore(): Promise<void> {
   })
 }
 
-function mountCopilot(): VueWrapper {
+function mountCopilot(extraPlugins: Plugin[] = []): VueWrapper {
   const pinia = createPinia()
   setActivePinia(pinia)
-  return mount(AdminCopilot, {
+  const wrapper = mount(AdminCopilot, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, ...extraPlugins],
       stubs: {
         'el-icon': { template: '<span class="el-icon-stub"><slot /></span>' },
         ChatDotRound: true,
@@ -73,6 +164,10 @@ function mountCopilot(): VueWrapper {
       },
     },
   })
+  mountedCopilots.add(wrapper)
+  const unmount = wrapper.unmount.bind(wrapper)
+  wrapper.unmount = () => { mountedCopilots.delete(wrapper); unmount() }
+  return wrapper
 }
 
 function deferred<T>() {
@@ -86,6 +181,7 @@ async function openCopilot(wrapper: VueWrapper): Promise<void> {
   if (trigger) trigger.click()
   else await wrapper.find('.copilot-trigger').trigger('click')
   await flushPromises()
+  expect(wrapper.find('.copilot-panel').exists()).toBe(true)
 }
 
 function emit(index: number, event: Record<string, unknown>): void {
@@ -146,7 +242,11 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // 部分流式用例没有显式卸载；其 Teleport 入口和全局监听会截获后续用例的点击。
+  for (const wrapper of mountedCopilots) wrapper.unmount()
+  await flushPromises()
+  expect(document.querySelector('.copilot-trigger')).toBeNull()
   vi.useRealTimers()
 })
 
@@ -400,7 +500,7 @@ describe('安全中心小菱页头入口', () => {
       expect(document.body.querySelector(':scope > .copilot-trigger')).toBeNull()
       expect(trigger!.classList.contains('is-header-trigger')).toBe(true)
       expect(trigger!.type).toBe('button')
-      expect(trigger!.getAttribute('aria-label')).toBe('打开小菱 · 管理员工作台')
+      expect(trigger!.getAttribute('aria-label')).toBe('打开小菱 · 管理助手')
       trigger!.focus()
       expect(document.activeElement).toBe(trigger)
       trigger!.click()
@@ -666,6 +766,9 @@ describe('AdminCopilot Responses stream', () => {
     expect(graph.text()).toContain('1 个子 Agent · 1 个执行中')
     expect(graph.text()).toContain('读取健康状态')
     expect(graph.element.closest('details')).toBeNull()
+    expect(wrapper.find('.thinking-city').exists()).toBe(false)
+    await wrapper.get('.thinking-city-toggle').trigger('click')
+    expect(wrapper.findComponent({ name: 'ThinkingCity' }).props('animated')).toBe(false)
     expect(wrapper.find('.thinking-city').exists()).toBe(true)
     expect(wrapper.text()).toContain('子 Agent 正在协作')
     wrapper.unmount()
@@ -1557,11 +1660,11 @@ describe('AdminCopilot 窄桌面布局回归', () => {
   function mockPanelSize(width: number, height: number): () => void {
     const widthSpy = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get')
       .mockImplementation(function (this: HTMLElement) {
-        return this.classList.contains('copilot-panel') ? width : 0
+        return this.classList.contains('copilot-panel') ? Number.parseFloat(this.style.width) || width : 0
       })
     const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
       .mockImplementation(function (this: HTMLElement) {
-        return this.classList.contains('copilot-panel') ? height : 0
+        return this.classList.contains('copilot-panel') ? Number.parseFloat(this.style.height) || height : 0
       })
     return () => {
       widthSpy.mockRestore()
@@ -1650,9 +1753,15 @@ describe('AdminCopilot 窄桌面布局回归', () => {
       expect(panel.classes()).toContain('is-resizing')
       await panel.trigger('pointermove', { clientX: 340, clientY: 330, pointerId: 2 })
       await panel.trigger('pointerup', { pointerId: 2 })
-      expect(panel.attributes('style')).toContain('width: 440px')
-      expect(panel.attributes('style')).toContain('height: 650px')
+      expect(panel.attributes('style')).toContain('width: 456px')
+      expect(panel.attributes('style')).toContain('height: 632px') // 800px 视口减去 top=156px 与 12px 下边距
       expect(panel.classes()).not.toContain('is-resizing')
+      expect(wrapper.findAll('.panel-resize-handle')).toHaveLength(8)
+      await resizeHandle.trigger('pointerdown', { button: 0, clientX: 450, clientY: 650, pointerId: 3 })
+      await panel.trigger('lostpointercapture', { pointerId: 3 })
+      await panel.trigger('pointermove', { clientX: 500, clientY: 650, pointerId: 3 })
+      expect(panel.classes()).not.toContain('is-resizing')
+      expect(panel.attributes('style')).toContain('width: 456px')
 
       const messages = panel.find('.copilot-messages').element
       const input = panel.find('.copilot-input-area').element
@@ -1971,4 +2080,112 @@ describe('实时星图滚动跟随', () => {
       wrapper.unmount()
     }
   })
+})
+
+
+it('精简欢迎语后仍识别旧版欢迎语，历史回答保持完整', async () => {
+  sessionApi.get.mockResolvedValue({
+    surface: 'admin', session_id: 'admin-test', run: null, pending: null,
+    messages: [
+      { role: 'assistant', content: `你好,我是小菱,Prism 的唯一主控 Agent。我会按当前登录账号权限处理代码审查、安全审计、Agent 团队协作、审批与管理运维;子 Agent 只负责我派发的专项任务,写操作仍走现有审批流程。点击「+」可开新对话,多个任务并行处理。` },
+      { role: 'user', content: '查看我的项目' },
+      { role: 'assistant', content: '历史回答：共找到两个项目' },
+    ],
+  })
+  const wrapper = mountCopilot()
+    await openCopilot(wrapper)
+    await flushSessionRestore()
+  try {
+    expect(wrapper.text()).not.toContain('Prism 的唯一主控 Agent')
+    expect(wrapper.text()).toContain('历史回答：共找到两个项目')
+    expect(wrapper.findAll('.message-row')).toHaveLength(3)
+  } finally { wrapper.unmount() }
+})
+
+
+it.each(['pending', 'claim'] as const)('停止真实接线：%s 迟到及停止失败不执行页面动作，显式重试才恢复', async (stage) => {
+  vi.useFakeTimers()
+  const { createRouter, createMemoryHistory } = await import('vue-router')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<main />' } }] })
+  await router.push('/')
+  await router.isReady()
+  const pending = vi.spyOn(siteBrowserApi, 'pending').mockResolvedValue({ actions: [] })
+  const claim = vi.spyOn(siteBrowserApi, 'claim').mockImplementation(async id => ({ action_id: id, claim_token: 'claim-token' }))
+  const ack = vi.spyOn(siteBrowserApi, 'ack').mockResolvedValue({})
+  let vm: any
+  sessionApi.get.mockImplementation(async () => ({
+    surface: 'admin', session_id: vm?.sessionId || 'admin-test', run: vm?.sessionRun || null,
+    messages: [], pending: null,
+  }))
+  const wrapper = mountCopilot([router])
+  await openCopilot(wrapper)
+  await vi.advanceTimersByTimeAsync(0)
+  await flushPromises()
+  try {
+    vm = wrapper.vm as any
+    const user = useUserStore()
+    user.profile = { id: 707, username: 'bridge-owner', role: 'admin', status: 1 }
+    user.token = 'bridge-component-test-token'
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(0)
+    await flushPromises()
+    const action: SiteBrowserRequiredEvent = {
+      type: 'response.browser.required', action_id: 81, run_id: 'run-component-stop',
+      session_id: vm.sessionId, surface: 'admin', account_id: 707, client_nonce: 'nonce-stop',
+      action: 'inspect', args: {}, observation_snapshot_id: 'snapshot-stop',
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+    }
+    const delayed = deferred<any>()
+    if (stage === 'pending') pending.mockReturnValueOnce(delayed.promise)
+    else {
+      pending.mockResolvedValueOnce({ actions: [action] })
+      claim.mockReturnValueOnce(delayed.promise)
+    }
+    vm.sessionRun = { run_id: action.run_id, status: 'running', model: '', rounds: 1, error: '', updated_at: '' }
+    await flushPromises()
+    expect(pending).toHaveBeenCalled()
+    if (stage === 'claim') expect(claim).toHaveBeenCalledOnce()
+
+    let rejectCancel!: (reason: Error) => void
+    sessionApi.cancel.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectCancel = reject }))
+    const cancelling = vm.cancelResponse('人工停止页面操作')
+    delayed.resolve(stage === 'pending' ? { actions: [action] } : { action_id: 81, claim_token: 'claim-token' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(claim).toHaveBeenCalledTimes(stage === 'claim' ? 1 : 0)
+    expect(ack).not.toHaveBeenCalled()
+
+    rejectCancel(new Error('取消接口暂时断开'))
+    await cancelling
+    await flushPromises()
+    expect(vm.sessionRun.status).toBe('running')
+    const callsAfterStop = pending.mock.calls.length
+    vm.siteBrowser.handle({ ...action, action_id: 82 })
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(pending).toHaveBeenCalledTimes(callsAfterStop)
+    expect(claim).toHaveBeenCalledTimes(stage === 'claim' ? 1 : 0)
+    expect(ack).not.toHaveBeenCalled()
+
+    // 后续同步失败终态也不自动撤销停止；只有用户重试可以恢复此 run。
+    vm.sessionRun = { ...vm.sessionRun, status: 'failed' }
+    await flushPromises()
+    expect(vm.isResponseRunResumeBlocked(action.run_id)).toBe(true)
+    void vm.retryRun()
+    await flushPromises()
+    expect(streams.records.at(-1)?.body.action).toBe('retry')
+    expect(vm.isResponseRunResumeBlocked(action.run_id)).toBe(false)
+    const streamIndex = streams.records.length - 1
+    emit(streamIndex, { type: 'response.created', response: { id: action.run_id } })
+    await flushPromises()
+    vm.siteBrowser.handle({ ...action, action_id: 83 })
+    await vi.advanceTimersByTimeAsync(100)
+    await flushPromises()
+    expect(claim).toHaveBeenLastCalledWith(83, expect.objectContaining({ surface: 'admin' }))
+    expect(ack).toHaveBeenCalledWith(83, expect.objectContaining({ outcome: 'completed' }))
+    emit(streamIndex, { type: 'response.completed', response: { id: action.run_id } })
+    await finish(streamIndex)
+  } finally {
+    wrapper.unmount()
+    vi.useRealTimers()
+  }
 })

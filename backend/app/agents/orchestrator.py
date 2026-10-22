@@ -956,6 +956,7 @@ class Orchestrator(BaseAgent):
         result_part: str = "value",
         offset: int = 0,
         limit: int = 20,
+        result_scope: str = "task",
     ) -> AgentResult:
         """读取当前账户的团队树和脱敏协作时间线。"""
         del ctx
@@ -964,9 +965,10 @@ class Orchestrator(BaseAgent):
         try:
             from app.services import agent_team_service
 
-            if task_id is not None:
+            if task_id is not None or result_scope != "task":
                 return AgentResult(success=True, data=agent_team_service.get_team_result_page(
                     self._db, self._user, team_id, task_id,
+                    result_scope=result_scope,
                     result_path=result_path, result_indices=result_indices, result_part=result_part,
                     offset=offset, limit=limit,
                 ))

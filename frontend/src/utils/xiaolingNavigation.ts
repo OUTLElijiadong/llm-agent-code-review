@@ -7,6 +7,11 @@ export interface XiaolingNavigationRequest {
   execute: () => unknown | Promise<unknown>
   sourceElement?: HTMLElement | null
   handled: boolean
+  /** 动画等待期间账号或会话可能失效，真实点击前再次校验。 */
+  canExecute?: () => boolean
+  /** 真实菜单点击也必须核对原目标，不能把任意地址变化当成功。 */
+  confirmResult?: () => boolean
+  onSettled?: (success: boolean) => void
 }
 
 /** 校验小菱导航目标是否为安全的站内绝对路径。 */
@@ -29,6 +34,7 @@ export function requestXiaolingNavigation(
   label: string,
   execute: () => unknown | Promise<unknown>,
   sourceElement?: HTMLElement | null,
+  lifecycle: Pick<XiaolingNavigationRequest, 'canExecute' | 'confirmResult' | 'onSettled'> = {},
 ): boolean {
   if (!isSafeXiaolingRoute(route)) return false
   const detail: XiaolingNavigationRequest = {
@@ -37,6 +43,7 @@ export function requestXiaolingNavigation(
     execute,
     sourceElement,
     handled: false,
+    ...lifecycle,
   }
   window.dispatchEvent(new CustomEvent<XiaolingNavigationRequest>(XIAOLING_NAVIGATION_EVENT, { detail }))
   if (!detail.handled) {

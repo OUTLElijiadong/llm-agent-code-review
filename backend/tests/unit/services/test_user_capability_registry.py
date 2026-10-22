@@ -31,6 +31,7 @@ from app.services.user_capability_registry import (
     READ,
     USER_CAPABILITIES,
     USER_PAGE_ROUTES,
+    UserCapabilitySpec,
     describe_capabilities,
     discovery_tool_schema,
     execution_tool_schema,
@@ -76,10 +77,11 @@ def _executor(db, user: User, run_id: str = "run_user_capability") -> PrismToolE
 def test_every_user_capability_is_a_real_json_openapi_operation() -> None:
     openapi = app.openapi()
 
-    assert len(USER_CAPABILITIES) == 120  # 用户端移除仅管理端使用的报告模板能力
+    assert len(USER_CAPABILITIES) == 121  # 移除管理端报告模板能力，补齐审查员只读审计接口
     assert len(CAPABILITY_BY_CODE) == len(USER_CAPABILITIES)
     for spec in USER_CAPABILITIES:
-        assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
+        if spec.code != "audit.list":
+            assert not spec.path.startswith(("/api/admin", "/api/auth", "/api/rbac", "/api/users"))
         operation = openapi["paths"][spec.path][spec.method.lower()]
         content = (operation.get("requestBody") or {}).get("content", {})
         assert not content or set(content) == {"application/json"}, spec.code
@@ -131,7 +133,7 @@ def test_registry_excludes_binary_stream_multipart_admin_and_secret_routes() -> 
     assert "/api/api-config" in paths
     assert not any(spec.path == "/api/api-config" and spec.method == "PUT" for spec in USER_CAPABILITIES)
     assert "/api/api-config/test" not in paths
-    assert not any(spec.path.startswith("/api/admin") for spec in USER_CAPABILITIES)
+    assert {spec.path for spec in USER_CAPABILITIES if spec.path.startswith("/api/admin")} == {"/api/admin/audit"}
 
 
 def test_support_capabilities_share_one_page_entry() -> None:
@@ -1095,3 +1097,86 @@ async def test_unregistered_or_injected_user_capability_is_rejected(db, monkeypa
     assert "未注册" in unknown.error
     assert injected.status == "error"
     assert "不接受参数" in injected.error
+
+
+def test_audit_user_page_contract_is_exact_existing_readonly_operation():
+    assert "/audit" in USER_PAGE_ROUTES
+    spec = CAPABILITY_BY_CODE["audit.list"]
+    assert (spec.page, spec.method, spec.path, spec.permission, spec.risk) == (
+        "/audit", "GET", "/api/admin/audit", "audit:view", READ,
+    )
+    rows = describe_capabilities(app.openapi(), page="/audit")
+    assert [row["capability"] for row in rows] == ["audit.list"]
+    assert {"action", "keyword", "actor_id", "page", "page_size"} <= set(rows[0]["parameters"]["properties"])
+
+
+@pytest.mark.parametrize("changed", [
+    {"path": "/api/admin/users"}, {"path": "/api/admin/audit/1"},
+    {"method": "POST"}, {"permission": None}, {"permission": "agent:view"},
+    {"page": "/forum"}, {"code": "audit.fake"}, {"risk": "write"},
+])
+def test_audit_exception_cannot_admit_other_admin_operations(changed):
+    fields = dict(code="audit.list", page="/audit", description="只读审计", method="GET",
+                  path="/api/admin/audit", permission="audit:view", risk=READ)
+    with pytest.raises(ValueError):
+        UserCapabilitySpec(**{**fields, **changed})
+
+
+@pytest.mark.asyncio
+async def test_reviewer_audit_capability_reuses_real_api_auth_and_private_content_filter(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.core.database import Base, get_db
+    from app.models.audit_log import AuditLog
+    from app.services import admin_capability_service
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+    previous_override = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        reviewer = User(username="audit-reviewer", password="unused", role="reviewer", status=1)
+        ordinary = User(username="audit-user", password="unused", role="user", status=1)
+        administrator = User(username="audit-admin", password="unused", role="admin", status=1)
+        role = Role(name="审查员", code="reviewer", status="active")
+        permission = Permission(code="audit:view", name="查看操作审计", module="audit", type="api")
+        db.add_all([reviewer, ordinary, administrator, role, permission])
+        db.flush()
+        db.add_all([UserRole(user_id=reviewer.id, role_id=role.id),
+                    RolePermission(role_id=role.id, permission_id=permission.id)])
+        db.add_all([
+            AuditLog(actor_id=reviewer.id, actor_name=reviewer.username, action="agent_chat", detail="我的私密对话"),
+            AuditLog(actor_id=ordinary.id, actor_name=ordinary.username, action="agent_chat", detail="他人的私密对话"),
+        ])
+        db.commit()
+        monkeypatch.setattr(service_module, "get_request_orchestrator", lambda *_args, **_kwargs: SimpleNamespace())
+        reviewer_executor = _executor(db, reviewer, "run_reviewer_audit")
+        discovery = await reviewer_executor.execute(ToolCall("audit_discovery", "user_describe_capabilities", {"page": "/audit"}, "{}"))
+        assert discovery.status == "success"
+        assert [row["capability"] for row in discovery.output["items"]] == ["audit.list"]
+        denied = await _executor(db, ordinary, "run_user_audit").execute(
+            ToolCall("audit_denied", "user_describe_capabilities", {"page": "/audit"}, "{}")
+        )
+        assert denied.status == "error" and "无权" in denied.error
+        spec = CAPABILITY_BY_CODE["audit.list"]
+        result = await admin_capability_service.execute_api(reviewer, spec, {}, request_id="audit-reviewer-read")
+        assert result["status_code"] == 200 and result["page"] == "/audit"
+        items = {row["actor_id"]: row for row in result["data"]["items"]}
+        assert items[reviewer.id]["detail"] == "我的私密对话"
+        assert items[ordinary.id]["detail"] is None and items[ordinary.id]["content_redacted"] is True
+        with pytest.raises(AdminCapabilityError) as rejected:
+            await admin_capability_service.execute_api(ordinary, spec, {}, request_id="audit-user-denied")
+        assert rejected.value.status_code == 403
+        admin_result = await admin_capability_service.execute_api(administrator, spec, {}, request_id="audit-admin-read")
+        assert admin_result["status_code"] == 200
+        assert all(row["detail"] is None for row in admin_result["data"]["items"])
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_override
+        db.close()
+        engine.dispose()

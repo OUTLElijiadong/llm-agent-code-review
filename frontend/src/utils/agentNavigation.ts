@@ -15,6 +15,7 @@ import { renderMarkdown } from '@/utils/markdown'
 const NAVIGATE_DIRECTIVE_RE = /<!--\s*PRISM_NAVIGATE\s*([\s\S]*?)\s*-->/g
 const MAX_DIRECTIVE_JSON_LENGTH = 2048
 const MAX_LOCAL_NAVIGATION_TEXT_LENGTH = 180
+const SUPER_ADMIN_PLATFORM_SECTIONS = new Set(['embedding', 'mcp-workers', 'llm'])
 const KNOWN_ROUTE_RE = /\/[a-z0-9][a-z0-9/_-]*(?:\?[a-z0-9%&=_.~-]+)?(?:#[a-z0-9%_.~-]+)?/gi
 const NAVIGATION_CUE_RE = /路由|页面|导航|前往|进入|打开|带(?:我|你)去/
 const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|可以)?(?:只(?:执行|做)?页面导航|仅(?:执行|做)?页面导航|页面导航)?(?:打开|前往|进入|跳转到|导航到|带我去|把我带到|去)(?:一下)?$/
@@ -22,7 +23,8 @@ const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|�
 /** 常用简称只作为已有静态路由标题的别名,不新增可访问路径。 */
 const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/admin/governance': ['Agent治理', 'Agent管理'],
-  '/admin/operations': ['运行', '监控', '告警', '审计', '总览', '管理端审计', '管理后台审计'],
+  '/admin/operations': ['运行', '监控', '告警', '审计', '总览'],
+  '/admin/audit': ['管理端审计', '管理后台审计', '管理员审计'],
   '/admin/access': ['用户', '权限', '角色'],
   '/admin/platform': ['平台配置', '模型配置', '节点'],
   '/audit': ['审计', '系统操作审计', '操作审计', '系统审计', '审计日志'],
@@ -43,19 +45,26 @@ export interface LocalNavigationResult {
   directive?: AgentNavigateDirective
 }
 
-function compactNavigationText(value: string): string {
-  return value
+function compactNavigationText(value: string, preserveClauses = false): string {
+  return (preserveClauses ? value.replace(/[\r\n]+/g, ';') : value)
     .replace(/[\s\u200b\uFEFF]/g, '')
-    .replace(/[，,。.!！?？:：;；、"“”‘’`~～（）()【】[\]<>]/g, '')
+    .replace(/[，,。.!！?？:：;；、"“”‘’`~～（）()【】[\]<>]/g, punctuation => (
+      preserveClauses && /[，,。.!！?？:：;；]/.test(punctuation) ? ';' : ''
+    ))
 }
 
 function isSafeLocalNavigationTail(value: string): boolean {
   const tail = value
     .replace(/^(?:页面|页|界面|菜单)/, '')
-    .replace(/^(?:即可|就行|就好|吧)+/, '')
-  // “不要查询/修改/执行……”是对本地导航的明确边界说明,不代表要执行这些动作。
-  if (/^(?:不要|无需|不需要|不用)/.test(tail)) return true
-  return tail === '' || /^(?:一下)*(?:完成后(?:回复|告诉我|返回)?(?:已打开|打开成功|完成)?)?$/.test(tail)
+    .replace(/^(?:;|即可|就行|就好|吧)+/, '')
+    .replace(/;+$/, '')
+  // 只接受完整否定分句，不能把“不要查询，直接修改……”吞作导航边界。
+  if (/^(?:不要|无需|不需要|不用|不)/.test(tail)) {
+    return tail.split(';').filter(Boolean).every(clause => (
+      /^(?:不要|无需|不需要|不用|不)(?:查询|读取|修改|删除|执行|写入|点击|操作)(?:(?:和|与|或|以及|也|并且|并)?(?:不要|无需|不需要|不用|不)?(?:查询|读取|修改|删除|执行|写入|点击|操作))*(?:(?:任何|其他|其它)?(?:运维|业务)?(?:操作|任务))?$/.test(clause)
+    ))
+  }
+  return tail === '' || /^(?:一下)*(?:完成后(?:回复|告诉我|返回)?(?:已打开|打开成功|完成)?)?$/.test(tail.replace(/;/g, ''))
 }
 
 function localNavigationTargets(router: Pick<Router, 'options'>): Array<{ route: string; label: string; matchLabel: string }> {
@@ -82,23 +91,27 @@ export function resolveLocalNavigationRequest(
   guardSource: Parameters<typeof isRouteAllowed>[1],
 ): LocalNavigationResult | null {
   if (!content || content.length > MAX_LOCAL_NAVIGATION_TEXT_LENGTH) return null
-  const compact = compactNavigationText(content)
+  const compact = compactNavigationText(content, true).replace(/(管理端|管理后台|管理员)的/g, '$1')
   if (!compact) return null
 
-  const matches: Array<{ route: string; label: string; matchLabel: string }> = []
+  const matches: Array<{ route: string; label: string; matchLabel: string; explicitAdmin: boolean }> = []
   for (const target of localNavigationTargets(router)) {
     const matchLabel = compactNavigationText(target.matchLabel)
     const start = compact.indexOf(matchLabel)
     if (start < 0) continue
-    const prefix = compact.slice(0, start)
+    const rawPrefix = compact.slice(0, start).replace(/;/g, '')
+    const qualifier = rawPrefix.match(/(?:管理端|管理后台|管理员)$/)?.[0]
+    const prefix = qualifier ? rawPrefix.slice(0, -qualifier.length) : rawPrefix
     const tail = compact.slice(start + matchLabel.length)
     if (!LOCAL_NAVIGATION_PREFIX_RE.test(prefix) || !isSafeLocalNavigationTail(tail)) continue
-    matches.push(target)
+    // 明确管理入口时不能回退到同名用户页面，权限仍由现有路由守卫判定。
+    if (qualifier && !target.route.startsWith('/admin')) continue
+    matches.push({ ...target, explicitAdmin: !!qualifier || /管理端|管理后台|管理员/.test(matchLabel) })
   }
   if (!matches.length) return null
 
   const explicitAdminTargets = matches.filter(
-    (target) => target.route.startsWith('/admin') && /管理端|管理后台/.test(target.matchLabel),
+    (target) => target.route.startsWith('/admin') && target.explicitAdmin,
   )
   const preferredTargets = explicitAdminTargets.length
     ? explicitAdminTargets
@@ -259,6 +272,21 @@ function resolveRedirectTarget(
   }
 }
 
+/** 路由 Promise 完成后核对真实目标，包括已登记的旧入口重定向。 */
+export function hasReachedNavigationTarget(router: Pick<Router, 'resolve' | 'currentRoute'>, path: string): boolean {
+  try {
+    let target = router.resolve(path)
+    const seen = new Set<string>()
+    while (!seen.has(target.fullPath)) {
+      seen.add(target.fullPath)
+      const redirect = resolveRedirectTarget(router, target)
+      if (!redirect) return router.currentRoute.value.fullPath === target.fullPath
+      target = redirect
+    }
+  } catch { /* 无法确认目标时不能宣称成功。 */ }
+  return false
+}
+
 /**
  * 供菜单、搜索与 Agent 导航共用的站内路由可见性判定。
  * 未注册路由、外部路径或当前用户守卫不能放行时一律不展示入口。
@@ -271,7 +299,8 @@ export function isNavigationPathAllowed(
   if (!path.startsWith('/') || path.startsWith('//')) return false
   try {
     const pathname = path.split(/[?#]/, 1)[0]
-    const resolved = router.resolve({ path: pathname })
+    const query = Object.fromEntries(new URLSearchParams(path.split('?')[1]?.split('#')[0] || ''))
+    const resolved = router.resolve({ path: pathname, query })
     if (!resolved.matched.length) return false
     if (resolved.matched.some((record) => String(record.path ?? '').includes(':pathMatch'))) return false
     // 论坛详情与编辑页只接受业务 ID 的规范正整数形式；Vue Router 的 :id
@@ -283,6 +312,14 @@ export function isNavigationPathAllowed(
     // 旧入口是重定向占位：真实守卫只检查重定向后的页面，可见性必须同口径判定，
     // 否则会因占位 meta 更严而隐藏实际可打开的入口。
     const redirectTarget = resolveRedirectTarget(router, resolved)
+    // 统一平台中心的敏感分区会隐藏并回退普通页；不能把这个回退误报成成功打开目标。
+    // 旧入口的 superAdmin 约束也不能在重定向后被普通 admin 的通用放行覆盖。
+    if (!guardSource.isSuperAdmin()) {
+      if (resolved.meta?.superAdmin || redirectTarget?.meta?.superAdmin) return false
+      if (pathname === '/admin/platform' && SUPER_ADMIN_PLATFORM_SECTIONS.has(query.section || '')) return false
+      if (redirectTarget?.path === '/admin/platform'
+        && SUPER_ADMIN_PLATFORM_SECTIONS.has(String(redirectTarget.query?.section || ''))) return false
+    }
     if (redirectTarget) return isRouteAllowed(redirectTarget, guardSource)
     return isRouteAllowed(resolved, guardSource)
   } catch {

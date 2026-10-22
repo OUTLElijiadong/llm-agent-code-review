@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Check, CircleCheck, CircleCloseFilled, Close, Connection, CopyDocument, Upload, WarningFilled } from '@element-plus/icons-vue'
 
 import dayjs from 'dayjs'
@@ -19,8 +19,7 @@ import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AgentTeamLiveGraph from '@/components/ai/AgentTeamLiveGraph.vue'
 import { useLiveAgentTeamPolling } from '@/composables/useLiveAgentTeamPolling'
 import AgentActivityDisclosure from '@/components/ai/AgentActivityDisclosure.vue'
-import AiOrb from '@/components/common/AiOrb.vue'
-import FluidProgress from '@/components/common/FluidProgress.vue'
+import FloatingChatResizeHandles from '@/components/ai/FloatingChatResizeHandles.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
@@ -37,6 +36,7 @@ import {
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { mergeLocalNavigationMessages, performLocalNavigation, settleLocalNavigationSnapshot, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import type { AgentEvent, ClarifyPayload, ClarifyQuestion } from '@/types/agentEvent'
@@ -128,6 +128,7 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'error'
   content: string
   time: string
+  localAction?: LocalNavigationAction
   /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
   images?: string[]
   /** 历史图片仅保留受鉴权的资产编号，与发送到模型的images分离。 */
@@ -180,7 +181,11 @@ const activityStore = useAgentActivityStore()
 
 const MASCOT_NAME = '小菱'
 const ORCHESTRATOR_MODEL = 'deepseek-v4-pro'
-const WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
+const WELCOME_TEXT = `我是${MASCOT_NAME}，可以审查代码、解读报告、查询项目。`
+const LEGACY_WELCOME_TEXT = `你好呀,我是${MASCOT_NAME},Prism 棱镜智能代码审查平台的小助手!我可以帮你发起代码审查、解读报告、查询项目与漏洞。点击左上角「+」可以随时开新对话,多个任务我会并行帮你盯着。`
+function isWelcomeText(content: string): boolean {
+  return content.trim() === WELCOME_TEXT || content.trim() === LEGACY_WELCOME_TEXT
+}
 
 /** 空状态快捷问题:点击填入输入框并直接发送。 */
 const QUICK_QUESTIONS = ['帮我发起代码审查', '查看我的项目', '有什么安全问题']
@@ -193,8 +198,8 @@ let latestHistorySession: AgentResponseSession | null = null
 const inputText = ref('')
 const loading = ref(false)
 const showTyping = ref(false)
-/** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
-const thinkingCityOpen = ref(true)
+/** 思考城市(想法可视化)展开态:默认收起，按需查看静态详情 */
+const thinkingCityOpen = ref(false)
 // 新会话尚未收到 response.created 时展示总调度默认值；若实际回退，SSE 会覆盖为真实模型。
 const modelName = ref(ORCHESTRATOR_MODEL)
 const chatBody = ref<HTMLElement>()
@@ -216,12 +221,16 @@ let sessionPollStopped = false
 let sessionPollGeneration = 0
 let sessionSnapshotSignature = ''
 const sessionRun = ref<Awaited<ReturnType<typeof getAgentResponseSession>>['run']>(null)
-const cancelledResponseRunIds = new Set<string>()
-const stopRequestedResponseRunIds = new Set<string>()
-const cancellingResponseRunIds = new Set<string>()
+const cancelledResponseRunIds = reactive(new Set<string>())
+const stopRequestedResponseRunIds = reactive(new Set<string>())
+const cancellingResponseRunIds = reactive(new Set<string>())
 const pendingCancelledRunReceipts = new Map<string, Map<string, AgentMeshMessage>>()
 const siteBrowser = useSiteBrowserBridge({ surface: 'user', sessionId: () => sessionId.value,
-  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '', router })
+  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '',
+  isStopped: () => {
+    const runId = sessionRun.value?.run_id || ''
+    return isResponseRunResumeBlocked(runId) || cancellingResponseRunIds.has(runId)
+  }, router })
 const sessionRestoring = ref(true)
 const sessionPollError = ref('')
 const sessionLastPolledAt = ref('')
@@ -488,6 +497,7 @@ function persistSnapshot(): void {
       autoResultKey: message.autoResultKey,
       runId: message.runId,
       errorCard: message.errorCard,
+      localAction: message.localAction,
       // 图片字节不落本地快照，历史缩略图从服务器的本人资产恢复。
     })),
     teams: visibleAgentTeams.value.map(snapshotTeam),
@@ -518,7 +528,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 仅当当前会话有真实内容(非欢迎语)或运行状态时才持久化。
   const hasRealContent = messages.value.some((message) => {
     const content = message.content ?? ''
-    return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
+    return content.trim().length > 0 && !isWelcomeText(content)
   })
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   rememberCurrentDraft()
@@ -678,7 +688,7 @@ function restoredSessionMessages(
   // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
   const teamBuckets = persistedTeamBuckets(persistedMessages)
   const restored: ChatMessage[] = session.messages
-    .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
+    .filter((message) => !isWelcomeText(message.content))
     .map((message) => {
       if (message.role !== 'assistant') {
         return {
@@ -701,7 +711,7 @@ function restoredSessionMessages(
   // 建立 run 前网络中断时服务端尚无检查点；同账号同会话的本地快照
   // 是这条未送达消息及错误反馈的唯一恢复来源。
   if (!session.run && !session.messages.length) {
-    const pending = (persistedMessages ?? []).filter((message) => message.role === 'user' || message.role === 'error')
+    const pending = (persistedMessages ?? []).filter((message) => !message.localAction && (message.role === 'user' || message.role === 'error'))
     if (pending.some((message) => message.role === 'user')) {
       restored.push(...pending.map((message) => ({
         id: messageId(), role: message.role, content: message.content,
@@ -803,7 +813,9 @@ function restoredSessionMessages(
     })
     existingFallbackKeys.add(fallback.autoResultKey)
   }
-  return restored
+  return mergeLocalNavigationMessages(restored, persistedMessages ?? [], message => message, message => ({
+    ...message, id: messageId(), time: restoredTime,
+  }))
 }
 
 async function restoreSession(): Promise<void> {
@@ -813,7 +825,12 @@ async function restoreSession(): Promise<void> {
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
-    restoreCachedTeams(loadAgentChatSnapshot(requestedSessionId, chatStorageKey.value)?.teams)
+    const cached = loadAgentChatSnapshot(requestedSessionId, chatStorageKey.value)
+    restoreCachedTeams(cached?.teams)
+    // 本地导航没有服务端副本；先恢复显示，网络失败也不能用欢迎语覆盖唯一记录。
+    messages.value = mergeLocalNavigationMessages(messages.value, cached?.messages ?? [], message => message, message => ({
+      ...message, id: messageId(), time: '',
+    }))
     const session = await getAgentResponseSession('user', requestedSessionId)
     if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
@@ -1380,8 +1397,9 @@ function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: str
     // 欢迎语是本地开屏气泡,错误卡片是本地展示层,两者都不参与模型上下文
     .filter((message) => (
       message.role !== 'error'
+      && !message.localAction
       && message.content.trim().length > 0
-      && message.content.trim() !== WELCOME_TEXT.trim()
+      && !isWelcomeText(message.content)
     ))
   const lastUserIndex = (() => {
     for (let i = history.length - 1; i >= 0; i -= 1) {
@@ -1683,7 +1701,9 @@ function finishExistingTimelineToolCalls(runId: string | undefined, error: strin
 
 async function retryRun(): Promise<void> {
   const runId = sessionRun.value?.run_id
-  if (!runId || loading.value || !canRetryRun.value) return
+  if (!runId || loading.value || !canRetryRun.value || cancellingResponseRunIds.has(runId)) return
+  // 只有用户显式重试才撤销此运行的未确认停止意图，轮询/SSE 不得自动解锁。
+  stopRequestedResponseRunIds.delete(runId)
   await runResponse({
     action: 'retry',
     surface: 'user',
@@ -2137,10 +2157,18 @@ async function sendMessage(): Promise<void> {
   const images = [...pendingImages.value]
   if ((!text && !images.length) || readingImages.value || loading.value || sessionRestoring.value || sessionBusy.value) return
 
+  const localNavigation = router && !images.length ? resolveLocalNavigationRequest(text, router, userStore) : null
+  const localAction: LocalNavigationAction | undefined = localNavigation ? {
+    id: messageId(), kind: 'navigation',
+    status: localNavigation.kind === 'navigate' ? 'pending' : 'forbidden',
+    route: localNavigation.directive?.route,
+  } : undefined
+
   messages.value.push({
     id: messageId(), role: 'user', content: text || '(图片)',
     images: images.length ? images.map((item) => item.dataUrl) : undefined,
     time: dayjs().format('HH:mm'),
+    localAction,
   })
   persistSnapshot()
   pendingImages.value = []
@@ -2157,29 +2185,38 @@ async function sendMessage(): Promise<void> {
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
   // 权限仍由路由守卫裁决,实际跳转交给全局虚拟鼠标完成。
-  const localNavigation = router && !images.length
-    ? resolveLocalNavigationRequest(text, router, userStore)
-    : null
-  if (localNavigation) {
+  if (localNavigation && localAction) {
     const directive = localNavigation.directive
     messages.value.push({
       id: messageId(),
       role: 'assistant',
       content: localNavigation.kind === 'navigate' && directive
-        ? `我已按你的要求打开「${directive.label || '目标页面'}」。`
+        ? `正在打开「${directive.label || '目标页面'}」…`
         : '当前账号没有权限打开这个页面。',
       time: dayjs().format('HH:mm'),
+      localAction,
     })
     persistSnapshot()
     await nextTick()
     if (!scopeCurrent()) return
     scrollToBottom()
     if (localNavigation.kind === 'navigate' && directive) {
-      requestXiaolingNavigation(
-        directive.route,
-        directive.label || '目标页面',
-        () => router.push(directive.route),
-      )
+      const targetSessionId = sessionId.value, storageKey = chatStorageKey.value
+      const accountId = userStore.profile?.id, token = userStore.token
+      const ownsAccount = () => accountId === userStore.profile?.id && token === userStore.token
+      await performLocalNavigation(router, directive.route, directive.label || '目标页面',
+        () => scopeCurrent() && isNavigationPathAllowed(router, directive.route, userStore),
+        (status, content) => {
+          if (!ownsAccount()) return
+          settleLocalNavigationSnapshot(targetSessionId, storageKey, localAction.id, status, content)
+          if (!scopeCurrent()) return
+          for (const message of messages.value) {
+            if (message.localAction?.id !== localAction.id) continue
+            message.localAction = { ...message.localAction, status }
+            if (message.role === 'assistant') message.content = content
+          }
+          persistSnapshot()
+        }, ownsAccount)
     }
     return
   }
@@ -2718,7 +2755,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
     >
       <PrismMascot :size="44" :status="mascotStatus" />
     </button>
-    <Transition name="drawer">
+    <Transition name="drawer" :css="false">
       <div v-if="visible" class="chat-overlay">
         <div
           ref="panelRef"
@@ -2728,6 +2765,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           @pointermove="moveDrag"
           @pointerup="endDrag"
           @pointercancel="endDrag"
+          @lostpointercapture="endDrag"
           @dragenter.prevent="onDragEnter"
           @dragover.prevent="onDragOver"
           @dragleave.prevent="onDragLeave"
@@ -2744,13 +2782,13 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               </span>
               <div class="chat-title-text">
                 <div class="chat-title-line">
-                  <span :title="`当前模型:${modelName}`">{{ MASCOT_NAME }} · Agent 助手</span>
+                  <span :title="`当前模型:${modelName}`">{{ MASCOT_NAME }} · 代码助手</span>
                   <span class="run-badge" :class="`run-${mascotStatus}`">
                     <i></i>{{ runStatusLabel }}
                   </span>
                   <span v-if="sessionPollError" class="sync-status is-error" role="status">{{ sessionPollError }}</span>
                   <span v-else-if="reconnectHint" class="sync-status is-reconnect" role="status">网络已恢复,继续执行</span>
-                  <span v-else-if="sessionLastPolledAt" class="sync-status" role="status">自动监控 · 已同步 {{ sessionLastPolledAt }}</span>
+                  <span v-else-if="sessionLastPolledAt" class="sync-status" role="status">已同步 {{ sessionLastPolledAt }}</span>
                   <button
                     v-if="canRetryRun"
                     class="retry-run-btn"
@@ -2791,13 +2829,13 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           </div>
 
           <div class="chat-body-region">
-            <Transition name="mascot-float">
+            <Transition name="mascot-float" :css="false">
               <div v-if="messages.length <= 1 && !showTyping && !sessionRestoring" class="mascot-hero" aria-hidden="true">
                 <PrismMascot :size="88" :status="mascotStatus" />
               </div>
             </Transition>
 
-            <Transition name="mascot-float">
+            <Transition name="mascot-float" :css="false">
               <div v-if="messages.length <= 1 && !showTyping && !sessionRestoring" class="quick-questions" aria-label="快捷问题">
                 <button
                   v-for="question in QUICK_QUESTIONS"
@@ -2828,20 +2866,19 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 <template v-else>小菱正在推进…</template>
               </span>
               <template v-if="showToolProgress">
-                <FluidProgress
+                <progress
                   class="chat-progress-fluid"
-                  :progress="toolProgressPercent"
-                  :height="6"
+                  :value="toolProgressPercent" max="100" aria-label="任务执行进度"
                 />
                 <span class="chat-progress-count">{{ toolStepProgress.done }}/{{ toolStepProgress.total }} 步</span>
               </template>
             </div>
 
-            <Transition name="mascot-float">
+            <Transition name="mascot-float" :css="false">
               <div v-if="sessionRestoring" class="session-restoring-hint" role="status" aria-live="polite">
                 <span class="session-restoring-spinner" aria-hidden="true"></span>
                 <span class="session-restoring-text">
-                  正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span>
+                  正在同步对话与进度…
                 </span>
               </div>
             </Transition>
@@ -2860,7 +2897,6 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                   v-if="hasMessageActivity(msg)"
                   :summary="messageActivitySummary(msg)"
                   :state="messageActivityState(msg)"
-                  :initially-expanded="Boolean(msg.teamIds?.length)"
                 >
                   <section v-if="msg.steps?.length" class="step-stream">
                     <h4 class="step-summary">Agent 调度链 · 共 {{ msg.steps.length }} 步</h4>
@@ -3182,7 +3218,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 <PrismMascot :size="26" :status="'running'" />
               </div>
               <div class="msg-bubble typing" :class="{ 'is-city-open': thinkingCityOpen }" :aria-label="showTyping ? '小菱正在思考' : '子 Agent 正在协作'">
-                <AiOrb :size="28" state="thinking" :halo="false" />
+                <PrismMascot :size="28" :status="mascotStatus" />
                 <span class="typing-label">{{ showTyping ? '小菱正在想' : '子 Agent 正在协作' }}</span>
                 <span class="typing-dot" />
                 <span class="typing-dot" />
@@ -3196,9 +3232,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
                 >{{ thinkingCityOpen ? '收起' : '看看在想什么' }}</button>
               </div>
             </div>
-            <Transition name="thinking-city">
+            <Transition name="thinking-city" :css="false">
               <div v-if="thinkingCityActive && thinkingCityOpen" class="thinking-city-wrap">
-                <ThinkingCity :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
+                <ThinkingCity :animated="false" :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
               </div>
             </Transition>
             </div>
@@ -3207,14 +3243,13 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           <div class="chat-input-area">
             <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
               <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
-              <FluidProgress
+              <progress
                 class="upload-status-fluid"
-                :progress="uploadPercent"
-                :height="8"
+                :value="uploadPercent" max="100" aria-label="上传进度"
               />
               <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
             </div>
-            <p v-else class="chat-input-hint">支持直接拖入代码文件帮你建项目;图片会由视觉模型解读;Shift+Enter 换行</p>
+            <p v-else class="chat-input-hint">可拖入代码或图片 · Shift+Enter 换行</p>
             <p v-if="readingImages" role="status" class="chat-image-feedback">正在读取图片，请稍候…</p>
             <div v-if="imageErrors.length" role="alert" class="chat-image-feedback is-error">
               <p v-for="(error, index) in imageErrors" :key="index">{{ error }}</p>
@@ -3264,7 +3299,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               ref="chatInputRef"
               v-model="inputText"
               class="chat-input"
-              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题,Enter 发送'"
+              :placeholder="sessionRestoring ? '正在恢复 Agent 会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理待办，或 + 新建对话' : '任务进行中，可 + 新建对话') : '输入问题,Enter 发送'"
               rows="2"
               :disabled="loading || uploading || sessionRestoring || sessionBusy"
               @keydown="handleKeydown"
@@ -3303,15 +3338,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               </button>
             </div>
           </div>
-          <button
-            class="panel-resize-handle"
-            type="button"
-            aria-label="调整小菱对话框大小，方向键调整宽度和高度"
-            title="拖动调整大小；方向键调整宽度和高度"
-            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
-            @pointerdown="beginResize"
-            @keydown="resizeByKeyboard"
-          >◢</button>
+          <FloatingChatResizeHandles @resize-start="beginResize" @resize-keydown="resizeByKeyboard" />
         </div>
       </div>
     </Transition>
@@ -3504,28 +3531,6 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
 
 .chat-drawer.is-dragging { user-select: none; }
 .chat-drawer.is-resizing { user-select: none; }
-.panel-resize-handle {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  z-index: 22;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--color-border-light);
-  border-radius: 8px 0 14px 0;
-  background: rgba(255, 255, 255, 0.96);
-  color: var(--brand-600, #4a46d4);
-  font-size: 14px;
-  line-height: 1;
-  cursor: nwse-resize;
-  touch-action: none;
-}
-.panel-resize-handle:hover { background: var(--brand-50, #f5f6ff); }
-.panel-resize-handle:focus-visible { outline: 2px solid var(--brand-500, #5b58e8); outline-offset: -3px; }
-.chat-drawer.is-resizing .panel-resize-handle { background: var(--brand-50, #f5f6ff); }
 .chat-drawer > * { min-width: 0; }
 .panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: var(--color-text-placeholder, #8f959e); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
 .panel-drag-handle:hover { color: var(--primary-color, #5b58e8); background: rgba(91, 88, 232, .08); }
@@ -4723,3 +4728,5 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
   .upload-btn { min-height: 40px; }
 }
 </style>
+
+<style scoped src="./floatingChat.css"></style>

@@ -272,14 +272,21 @@ function waitForRoute(route: string, timeoutMs = 2500, startPath = ''): Promise<
 
 async function activateTarget(target: Candidate, sequence: number): Promise<boolean> {
   try {
+    const navigation = requestedNavigation
+    if (navigation?.canExecute && !navigation.canExecute()) return false
     // 定位后、动画到达前页面可能弹出对话框，点击前再次检查实际命中。
     if (target.el !== document.body && (!isVisibleTarget(target.el) || !isUnobscuredTarget(target.el))) return false
+    if (navigation?.onSettled && !target.activate) {
+      // 真实菜单点击与回调是同一次动作；点击后只结算，不再补一次 router.push。
+      pendingNavigationFallback = null
+    }
     const startPath = currentFullPath()
     const result = target.activate ? target.activate() : target.el.click()
     if (isPromiseLike(result)) await result
     if (sequence !== activitySequence) return false
     if (!target.route) return true
-    return await waitForRoute(target.route, 2500, startPath)
+    const reached = await waitForRoute(target.route, 2500, startPath)
+    return reached && (!navigation?.confirmResult || navigation.confirmResult())
   } catch {
     return false
   }
@@ -422,8 +429,21 @@ function settlePendingNavigation(success: boolean): void {
   if (!success && fallback) fallback()
 }
 
+function interruptRequestedNavigation(): void {
+  if (requestedNavigation?.onSettled) {
+    // 本地聊天导航被替换或取消时只结算；不能执行旧请求，也不能让回执永久等待。
+    pendingNavigationFallback = null
+    requestedNavigation.onSettled(false)
+  }
+  settlePendingNavigation(false)
+}
+
 function finishRequestedNavigation(success: boolean): void {
+  const navigation = requestedNavigation
+  const usesFallback = !success && pendingNavigationFallback !== null
   settlePendingNavigation(success)
+  // 兜底回调自行等待 router.push；真实点击则在这里回传最终结果。
+  if (!usesFallback) navigation?.onSettled?.(success)
   if (requestedActivityKey) store.complete(requestedActivityKey, 900)
   requestedNavigation = null
   requestedActivityKey = ''
@@ -435,7 +455,7 @@ function handleNavigationRequest(event: Event): void {
   if (!detail || !isSafeXiaolingRoute(detail.route) || typeof detail.execute !== 'function') return
   detail.handled = true
   if (requestedActivityKey) store.end(requestedActivityKey)
-  settlePendingNavigation(false)
+  interruptRequestedNavigation()
   let executed = false
   const original = detail.execute
   const execute = () => {
@@ -498,8 +518,7 @@ watch(
       arrived.value = false
       clicking.value = false
       targetBox.value = null
-      // 活动被清空（关闭抽屉、切换会话等）时，已接管的导航直接执行，不丢弃。
-      settlePendingNavigation(false)
+      interruptRequestedNavigation()
       requestedNavigation = null
       requestedActivityKey = ''
       browserTarget = null
@@ -530,8 +549,8 @@ onBeforeUnmount(() => {
   if (browserActivityKey) store.end(browserActivityKey)
   if (requestedActivityKey) store.end(requestedActivityKey)
   activitySequence += 1
-  window.clearTimeout(navigationWatchdog)
   pendingNavigationFallback = null
+  interruptRequestedNavigation()
   requestedNavigation = null
   requestedActivityKey = ''
   clearHalo()

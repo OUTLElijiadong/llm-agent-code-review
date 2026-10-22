@@ -10,19 +10,25 @@ def _encoded_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")).encode())
 
 
-def project_team_result(value: Any, *, team_id: int, task_id: int, result_path: str = "",
+def project_team_result(value: Any, *, team_id: int, task_id: int | None = None,
+                        result_scope: str = "task", result_path: str = "",
                         result_indices: list[int] | None = None, budget: int = 16000) -> Any:
     from app.services.agent_responses_service import redact_agent_model_context_value
 
     if budget < 1024:
         raise ValueError("结构摘要预算不能低于1024字节")
+    if (result_scope not in {"task", "team_summary", "team_error"}
+            or (result_scope == "task") != (task_id is not None)):
+        raise ValueError("结果引用必须明确指定任务或团队摘要/错误作用域")
     # 脱敏器失败直接抛错，不以未经脱敏的值替代。
     safe = redact_agent_model_context_value(value)
     raw = json.dumps(safe, ensure_ascii=False, default=str, separators=(",", ":")).encode()
     if len(raw) <= budget:
         return safe
-    reference = {"tool": "get_agent_team", "team_id": team_id,
-                 "task_id": task_id, "result_path": result_path, "offset": 0, "limit": 20}
+    reference = {"tool": "get_agent_team", "team_id": team_id, "result_scope": result_scope,
+                 "result_path": result_path, "offset": 0, "limit": 20}
+    if task_id is not None:
+        reference["task_id"] = task_id
     if result_indices is not None:
         reference.pop("result_path")
         reference["result_indices"] = result_indices

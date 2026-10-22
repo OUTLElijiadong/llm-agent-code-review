@@ -13,6 +13,8 @@ export function useSiteBrowserBridge(options: {
   sessionId: () => string
   runId: () => string
   status: () => string
+  /** 人工停止意图优先于尚未更新的服务端 running 状态。 */
+  isStopped?: () => boolean
   router: Router
 }) {
   const user = useUserStore(), activity = useAgentActivityStore()
@@ -21,14 +23,14 @@ export function useSiteBrowserBridge(options: {
   let recovering = false
   let generation = 0
   let confirmedRunId = ''
-  const canRecover = () => ['running', 'queued', 'waiting_browser'].includes(options.status())
+  const canRecover = () => !options.isStopped?.() && ['running', 'queued', 'waiting_browser'].includes(options.status())
   const bridge = createSiteBrowserBridge({
     current: () => ({ accountId: user.profile?.id, token: user.token, sessionId: options.sessionId(),
       runId: options.runId(), surface: options.surface, route: options.router.currentRoute.value.fullPath }),
     canNavigate: path => !['/login', '/register', '/403', '/404'].includes(path.split(/[?#]/)[0]!)
       && isNavigationPathAllowed(options.router, path, user),
     navigate: route => options.router.push(route),
-    isActive: () => ['running', 'approving', 'answering', 'rejecting', 'queued', 'waiting_browser'].includes(options.status()),
+    isActive: () => !options.isStopped?.() && ['running', 'approving', 'answering', 'rejecting', 'queued', 'waiting_browser'].includes(options.status()),
     settle: async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 80)); await nextTick() },
     onStatus: status => {
       const id = `browser-${status.actionId}`
@@ -38,7 +40,7 @@ export function useSiteBrowserBridge(options: {
   })
   function stop(): void { if (timer !== undefined) clearTimeout(timer); timer = undefined }
   async function recover(): Promise<void> {
-    if (disposed || recovering || !user.token || !options.runId() || !canRecover()) return
+    if (disposed || recovering || !user.profile?.id || !user.token || !options.sessionId() || !options.runId() || !canRecover()) return
     const epoch = generation
     const runId = options.runId(), sessionId = options.sessionId()
     const owned = () => !disposed && epoch === generation
@@ -82,6 +84,12 @@ export function useSiteBrowserBridge(options: {
       }
     }
   })
+  watch(() => options.isStopped?.() ?? false, stopped => {
+    if (stopped) {
+      generation += 1; recovering = false; confirmedRunId = ''
+      stop(); bridge.reset()
+    } else if (canRecover()) void recover()
+  }, { flush: 'sync' })
   onBeforeUnmount(() => { disposed = true; stop(); bridge.reset() })
   return {
     handle(event: ResponseStreamEvent): boolean {

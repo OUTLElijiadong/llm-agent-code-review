@@ -272,7 +272,14 @@ describe('AgentTeamTrace', () => {
 
     await wrapper.find('.agent-team-toggle').trigger('click')
 
-    expect(wrapper.findAll('.agent-team-record-detail')).toHaveLength(2)
+    const details = wrapper.findAll('.agent-team-record-detail')
+    expect(details).toHaveLength(2)
+    expect(details.map(detail => detail.get('summary').text())).toEqual(['查看事件详情', '查看消息详情'])
+    for (const detail of details) {
+      expect(detail.attributes('open')).toBeUndefined()
+      expect(detail.get('summary').text()).not.toContain('diagnostic')
+      expect(detail.get('code').text()).toContain(longDetail)
+    }
     expect(wrapper.text()).toContain(tail)
   })
 

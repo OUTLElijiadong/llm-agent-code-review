@@ -512,12 +512,20 @@ class GetAgentTeamArguments(FixedToolArguments):
 
     team_id: int = Field(gt=0)
     task_id: Optional[int] = Field(default=None, gt=0, description="按原任务引用分页读取完整结果")
-    result_path: str = Field(default="", max_length=1000, description="结果内JSON Pointer路径，仅task_id提供时有效")
+    result_scope: Literal["task", "team_summary", "team_error"] = Field(default="task",
+        description="task读取任务结果；team_summary/team_error读取完整团队摘要/错误，无需task_id")
+    result_path: str = Field(default="", max_length=1000, description="指定结果作用域内的JSON Pointer路径")
     result_indices: Optional[list[int]] = Field(default=None, max_length=32,
         description="按服务端引用遍历字典键序或数组下标；与result_path互斥，适配长字段名")
     result_part: Literal["value", "key"] = Field(default="value", description="索引引用读取原值或完整字段名")
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=20, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def validate_result_scope(self) -> "GetAgentTeamArguments":
+        if self.result_scope != "task" and self.task_id is not None:
+            raise ValueError("团队摘要/错误分页不得同时指定task_id")
+        return self
 
 
 class CancelAgentTeamArguments(FixedToolArguments):
@@ -627,7 +635,9 @@ _FIXED_TOOL_CONTRACTS: Tuple[FixedToolContract, ...] = (
     FixedToolContract(
         "get_agent_team",
         "读取当前账户指定团队；任务小结果完整返回，结构摘要含result_reference时"
-        "请按其中task_id/result_path或result_indices/offset/limit读取原结果；entries中key_reference可分页读长字段名。"
+        "请按其中result_scope/task_id/result_path或result_indices/offset/limit读取原结果；"
+        "team_summary/team_error无需task_id，读取完整团队摘要/错误；默认task兼容任务结果。"
+        "entries中key_reference可分页读长字段名，has_more为true时使用next_offset继续读取。"
         "不要因预览缺明细重复新建团队。",
         GetAgentTeamArguments,
         True,

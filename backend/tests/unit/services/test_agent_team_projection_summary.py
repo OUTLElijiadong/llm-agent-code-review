@@ -43,3 +43,17 @@ def test_oversized_business_summary_is_truncated_to_projection_budget() -> None:
     assert projected["summary_truncated"] is True
     assert projected["projection_summary"].startswith("结果超过单次上下文预算；")
     assert len(encoded) <= 8000
+
+
+def test_team_summary_reference_does_not_claim_a_member_result_path():
+    source = {"completed_tasks": ["task"] * 400, "final_result": {"summary": "已核实" * 500}}
+    projected = project_team_result(source, team_id=383, result_scope="team_summary", budget=1024)
+    assert projected["result_reference"] == {
+        "tool": "get_agent_team", "team_id": 383, "result_scope": "team_summary",
+        "result_path": "", "offset": 0, "limit": 20,
+    }
+
+
+def test_small_result_keeps_original_shape():
+    source = {"status": "failed", "summary": "权限不足", "errors": [{"code": "forbidden"}]}
+    assert project_team_result(source, team_id=383, task_id=879) == source

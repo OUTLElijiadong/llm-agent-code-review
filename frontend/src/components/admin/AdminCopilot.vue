@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { pageActionTargetHint, notifyCompletedPageAction, notifyVerifiedTeamPageActions, applyTeamResultToToolCalls } from '@/utils/agentPageActions'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   CircleCheck,
@@ -37,8 +37,7 @@ import PrismMascot from '@/components/ai/PrismMascot.vue'
 import ThinkingCity from '@/components/ai/ThinkingCity.vue'
 import AgentTeamLiveGraph from '@/components/ai/AgentTeamLiveGraph.vue'
 import { useLiveAgentTeamPolling } from '@/composables/useLiveAgentTeamPolling'
-import AiOrb from '@/components/common/AiOrb.vue'
-import FluidProgress from '@/components/common/FluidProgress.vue'
+import FloatingChatResizeHandles from '@/components/ai/FloatingChatResizeHandles.vue'
 import ResponseApprovalCard from '@/components/ai/responses/ResponseApprovalCard.vue'
 import ResponseInputCard from '@/components/ai/responses/ResponseInputCard.vue'
 import ResponseToolTimeline from '@/components/ai/responses/ResponseToolTimeline.vue'
@@ -54,6 +53,7 @@ import {
   renderAuthorizedAgentMarkdown,
 } from '@/utils/agentNavigation'
 import { requestXiaolingNavigation } from '@/utils/xiaolingNavigation'
+import { mergeLocalNavigationMessages, performLocalNavigation, settleLocalNavigationSnapshot, type LocalNavigationAction } from '@/utils/agentLocalNavigation'
 import { useUserStore } from '@/stores/user'
 import type { AgentNavigateDirective } from '@/types/agentGuide'
 import { streamResponses } from '@/utils/responsesStream'
@@ -110,6 +110,7 @@ interface ChatEntry {
   id: string
   role: 'user' | 'assistant'
   time: string
+  localAction?: LocalNavigationAction
   runId?: string
   /** 多模态:该条用户消息携带的图片 data URL(仅内存展示,不落本地快照) */
   images?: string[]
@@ -147,9 +148,13 @@ interface ChatEntry {
 }
 
 
-const ASSISTANT_NAME = '小菱 · 管理员工作台'
+const ASSISTANT_NAME = '小菱 · 管理助手'
 const MASCOT_NAME = '小菱'
-const WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的唯一主控 Agent。我会按当前登录账号权限处理代码审查、安全审计、Agent 团队协作、审批与管理运维;子 Agent 只负责我派发的专项任务,写操作仍走现有审批流程。点击「+」可开新对话,多个任务并行处理。`
+const WELCOME_TEXT = `我是${MASCOT_NAME}，可以查看系统、处理审批、协作审查。`
+const LEGACY_WELCOME_TEXT = `你好,我是${MASCOT_NAME},Prism 的唯一主控 Agent。我会按当前登录账号权限处理代码审查、安全审计、Agent 团队协作、审批与管理运维;子 Agent 只负责我派发的专项任务,写操作仍走现有审批流程。点击「+」可开新对话,多个任务并行处理。`
+function isWelcomeText(content: string): boolean {
+  return content.trim() === WELCOME_TEXT || content.trim() === LEGACY_WELCOME_TEXT
+}
 const LEGACY_SESSION_KEY = 'prism-admin-copilot-session'
 const legacySessionKey = computed(() => `${LEGACY_SESSION_KEY}:${userStore.profile?.id ?? 'anonymous'}`)
 const PANEL_POSITION_KEY = 'prism-floating-chat-position:admin'
@@ -172,8 +177,8 @@ const useAdminHeaderTrigger = computed(() => (
 const triggerTeleportTarget = computed(() => useAdminHeaderTrigger.value ? '#admin-copilot-trigger-slot' : 'body')
 const loading = ref(false)
 const showTyping = ref(false)
-/** 思考城市(想法可视化)展开态:默认展开,可一键收起只看紧凑气泡 */
-const thinkingCityOpen = ref(true)
+/** 思考城市(想法可视化)展开态:默认收起，按需查看静态详情 */
+const thinkingCityOpen = ref(false)
 const inputText = ref('')
 const chatInputRef = ref<HTMLTextAreaElement | null>(null)
 const uploading = ref(false)
@@ -272,9 +277,9 @@ const historyHasMore = ref(false)
 const historyLoading = ref(false)
 let latestHistorySession: AgentResponseSession | null = null
 const sessionRun = ref<AgentResponseSession['run']>(null)
-const cancelledResponseRunIds = new Set<string>()
-const stopRequestedResponseRunIds = new Set<string>()
-const cancellingResponseRunIds = new Set<string>()
+const cancelledResponseRunIds = reactive(new Set<string>())
+const stopRequestedResponseRunIds = reactive(new Set<string>())
+const cancellingResponseRunIds = reactive(new Set<string>())
 const pendingCancelledRunReceipts = new Map<string, Set<string>>()
 const sessionRestoring = ref(true)
 const sessionPollError = ref('')
@@ -324,7 +329,11 @@ const activityStore = useAgentActivityStore()
 
 const sessionId = ref('')
 const siteBrowser = useSiteBrowserBridge({ surface: 'admin', sessionId: () => sessionId.value,
-  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '', router })
+  runId: () => sessionRun.value?.run_id || '', status: () => sessionRun.value?.status || '',
+  isStopped: () => {
+    const runId = sessionRun.value?.run_id || ''
+    return isResponseRunResumeBlocked(runId) || cancellingResponseRunIds.has(runId)
+  }, router })
 const chatAccountEpoch = ref(0)
 const chatScope = useAgentChatScope(() => userStore.profile?.id, () => userStore.token, () => sessionId.value)
 const switcherRef = ref<InstanceType<typeof AgentSessionSwitcher> | null>(null)
@@ -455,6 +464,7 @@ function persistSnapshot(): void {
       teamIds: entry.teamIds?.length ? [...entry.teamIds] : undefined,
       teamFallback: entry.teamFallback,
       autoResultKey: entry.autoResultKey,
+      localAction: entry.localAction,
     })),
     runStatus: sessionRun.value?.status ?? null,
     updatedAt: Date.now(),
@@ -485,7 +495,7 @@ async function handleSessionSelect(nextSessionId: string): Promise<void> {
   // 仅当当前会话有真实内容(非欢迎语)或运行状态时才持久化。
   const hasRealContent = messages.value.some((entry) => {
     const content = entry.payload.content ?? ''
-    return content.trim().length > 0 && content.trim() !== WELCOME_TEXT.trim()
+    return content.trim().length > 0 && !isWelcomeText(content)
   })
   if (hasRealContent || sessionRun.value?.status) persistSnapshot()
   rememberCurrentDraft()
@@ -688,8 +698,8 @@ function pendingEntry(session: AgentResponseSession, restoredTime: string): Chat
 
 function restoredEntries(session: AgentResponseSession, restoredTime: string): ChatEntry[] {
   // 早期版本曾把本地欢迎语带入模型上下文并被服务端持久化,恢复时去重
-  const restored: ChatEntry[] = session.messages
-    .filter((message) => message.content.trim() !== WELCOME_TEXT.trim())
+  const serverEntries: ChatEntry[] = session.messages
+    .filter((message) => !isWelcomeText(message.content))
     .map((message) => {
       if (message.role !== 'assistant') {
         return {
@@ -710,25 +720,27 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
         navigations: directives.length ? directives : undefined,
       }
     })
+  const restored = serverEntries
   const toolCalls = [
     ...agentMeshToolCalls(session.mesh_messages, `session:admin:${session.session_id}`),
     ...responseToolCallsFromEvents(session.events),
   ]
-  if (!toolCalls.length) return restored
-  const timeline: ChatEntry = {
-    ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
-    time: restoredTime,
-    runId: session.run?.run_id,
-    toolCalls,
-  }
-  let conclusionIndex = -1
-  for (let index = restored.length - 1; index >= 0; index -= 1) {
-    if (restored[index].role === 'assistant' && restored[index].payload.content?.trim()) {
-      conclusionIndex = index
-      break
+  if (toolCalls.length) {
+    const timeline: ChatEntry = {
+      ...assistantEntry({ type: 'text', content: '', status: 'completed' }),
+      time: restoredTime,
+      runId: session.run?.run_id,
+      toolCalls,
     }
+    let conclusionIndex = -1
+    for (let index = restored.length - 1; index >= 0; index -= 1) {
+      if (restored[index].role === 'assistant' && restored[index].payload.content?.trim()) {
+        conclusionIndex = index
+        break
+      }
+    }
+    restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   }
-  restored.splice(conclusionIndex >= 0 ? conclusionIndex : restored.length, 0, timeline)
   // 非终态或已取消运行:展示模型尚未落库为完整消息的结论文本(取消原因/回滚提示)。
   const partialOutput = session.run?.output_text?.trim()
   if (
@@ -745,7 +757,17 @@ function restoredEntries(session: AgentResponseSession, restoredTime: string): C
       })
     }
   }
-  return restored
+  return mergeLocalNavigationEntries(restored, session.session_id, restoredTime)
+}
+
+function mergeLocalNavigationEntries(entries: ChatEntry[], targetSessionId: string, time = ''): ChatEntry[] {
+  return mergeLocalNavigationMessages(entries,
+    loadAgentChatSnapshot(targetSessionId, chatStorageKey.value)?.messages ?? [],
+    entry => ({ role: entry.role, content: entry.payload.content ?? '', localAction: entry.localAction }),
+    message => ({
+      id: crypto.randomUUID(), role: message.role === 'user' ? 'user' as const : 'assistant' as const,
+      time, payload: { type: 'text' as const, content: message.content }, localAction: message.localAction,
+    }))
 }
 
 function withLoadedHistory(session: AgentResponseSession): AgentResponseSession {
@@ -881,6 +903,8 @@ async function restoreSession(generation = restoreGeneration + 1): Promise<void>
   try {
     const requestedSessionId = sessionId.value
     const requestedUserId = userStore.profile?.id
+    // 即使服务端暂时不可用，也保留只存本地的导航问答，恢复不会执行导航。
+    messages.value = mergeLocalNavigationEntries(messages.value, requestedSessionId)
     const session = await getAgentResponseSession('admin', requestedSessionId)
     if (!scopeCurrent()) return
     // 恢复过程中用户已切到其他会话或发起新流:旧恢复结果作废,不覆盖当前状态。
@@ -1179,9 +1203,10 @@ function formatStreamContent(value: string): string {
 
 function conversationHistory(): Array<{ role: 'user' | 'assistant'; content: string; images?: string[] }> {
   const history = messages.value
+    .filter(entry => !entry.localAction)
     .map((entry) => ({ role: entry.role, content: entry.payload.content ?? '', images: entry.images }))
     // 欢迎语是本地开屏气泡,不参与模型上下文,避免被服务端持久化后恢复重复
-    .filter((entry) => entry.content.trim().length > 0 && entry.content.trim() !== WELCOME_TEXT.trim())
+    .filter((entry) => entry.content.trim().length > 0 && !isWelcomeText(entry.content))
   const lastUserIndex = (() => {
     for (let i = history.length - 1; i >= 0; i -= 1) {
       if (history[i].role === 'user') return i
@@ -1487,7 +1512,9 @@ async function retryRun(): Promise<void> {
     return
   }
   const runId = sessionRun.value?.run_id
-  if (!runId) return
+  if (!runId || cancellingResponseRunIds.has(runId)) return
+  // 只有用户显式重试才撤销此运行的未确认停止意图，轮询/SSE 不得自动解锁。
+  stopRequestedResponseRunIds.delete(runId)
   await runResponse({
     action: 'retry',
     surface: 'admin',
@@ -1851,7 +1878,14 @@ async function sendMessage(): Promise<void> {
   const content = inputText.value.trim()
   const images = [...pendingImages.value]
   if ((!content && !images.length) || readingImages.value || retryChecking.value || loading.value || sessionRestoring.value || sessionBusy.value) return
-  messages.value.push(userEntry(content || '(图片)', images.length ? images.map((item) => item.dataUrl) : undefined))
+  const localNavigation = router && !images.length ? resolveLocalNavigationRequest(content, router, userStore) : null
+  const localAction: LocalNavigationAction | undefined = localNavigation ? {
+    id: crypto.randomUUID(), kind: 'navigation',
+    status: localNavigation.kind === 'navigate' ? 'pending' : 'forbidden',
+    route: localNavigation.directive?.route,
+  } : undefined
+  messages.value.push({ ...userEntry(content || '(图片)', images.length ? images.map((item) => item.dataUrl) : undefined), localAction })
+  persistSnapshot()
   pendingImages.value = []
   inputText.value = ''
   // 新对话自动命名:首条用户消息提炼为会话标题
@@ -1863,24 +1897,32 @@ async function sendMessage(): Promise<void> {
 
   // 纯页面导航是确定性本地动作,不必为“打开某页”启动付费 Responses 循环。
   // 仍复用同一权限守卫,并交给全局虚拟鼠标执行真实点击和路由跳转。
-  const localNavigation = router && !images.length
-    ? resolveLocalNavigationRequest(content, router, userStore)
-    : null
-  if (localNavigation) {
+  if (localNavigation && localAction) {
     const directive = localNavigation.directive
     const message = localNavigation.kind === 'navigate' && directive
-      ? `我已按你的要求打开「${directive.label || '目标管理页'}」。`
+      ? `正在打开「${directive.label || '目标管理页'}」…`
       : '当前账号没有权限打开这个页面。'
-    messages.value.push(assistantEntry({ type: 'text', content: message, status: 'completed' }))
+    messages.value.push({ ...assistantEntry({ type: 'text', content: message }), localAction })
     persistSnapshot()
     await scrollToBottom()
     if (!scopeCurrent()) return
     if (localNavigation.kind === 'navigate' && directive) {
-      requestXiaolingNavigation(
-        directive.route,
-        directive.label || '目标管理页',
-        () => router.push(directive.route),
-      )
+      const targetSessionId = sessionId.value, storageKey = chatStorageKey.value
+      const accountId = userStore.profile?.id, token = userStore.token
+      const ownsAccount = () => accountId === userStore.profile?.id && token === userStore.token
+      await performLocalNavigation(router, directive.route, directive.label || '目标管理页',
+        () => scopeCurrent() && isNavigationPathAllowed(router, directive.route, userStore),
+        (status, content) => {
+          if (!ownsAccount()) return
+          settleLocalNavigationSnapshot(targetSessionId, storageKey, localAction.id, status, content)
+          if (!scopeCurrent()) return
+          for (const entry of messages.value) {
+            if (entry.localAction?.id !== localAction.id) continue
+            entry.localAction = { ...entry.localAction, status }
+            if (entry.role === 'assistant') entry.payload.content = content
+          }
+          persistSnapshot()
+        }, ownsAccount)
     }
     return
   }
@@ -2186,6 +2228,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       @pointermove="moveDrag"
       @pointerup="endDrag"
       @pointercancel="endDrag"
+          @lostpointercapture="endDrag"
       @dragenter.prevent="onDragEnter"
       @dragover.prevent="onDragOver"
       @dragleave.prevent="onDragLeave"
@@ -2208,7 +2251,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
               <span class="copilot-run-badge" :class="`run-${mascotStatus}`"><i></i>{{ runStatusLabel }}</span>
               <span v-if="sessionPollError" class="copilot-sync-status is-error" role="status">{{ sessionPollError }}</span>
               <span v-else-if="reconnectHint" class="copilot-sync-status is-reconnect" role="status">网络已恢复,继续执行</span>
-              <span v-else-if="sessionLastPolledAt" class="copilot-sync-status" role="status">自动监控 · 已同步 {{ sessionLastPolledAt }}</span>
+              <span v-else-if="sessionLastPolledAt" class="copilot-sync-status" role="status">已同步 {{ sessionLastPolledAt }}</span>
               <button
                 v-if="canRetryRun"
                 class="retry-run-btn"
@@ -2249,23 +2292,24 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
         <span class="progress-watch" title="小菱正在自动跟踪执行进度,无需手动刷新"> · 自动监控</span>
       </div>
 
-      <Transition name="mascot-float">
-        <div v-if="sessionRestoring" class="session-restoring-hint" role="status">
-          <span class="session-restoring-spinner" aria-hidden="true"></span>
-          <span>正在恢复这个对话<span v-if="sessionRun?.status === 'running'">，小菱还有任务在后台跑着，马上接回进度…</span><span v-else>，从服务器拉取历史消息…</span></span>
-        </div>
-      </Transition>
+
       <div ref="messageArea" class="copilot-messages" :class="{ 'is-restoring': sessionRestoring }" aria-live="polite" @click="onMessageClick">
+        <Transition name="mascot-float" :css="false">
+          <div v-if="sessionRestoring" class="session-restoring-hint" role="status">
+            <span class="session-restoring-spinner" aria-hidden="true"></span>
+            <span>正在同步对话与进度…</span>
+          </div>
+        </Transition>
         <button v-if="historyHasMore" class="history-load-button" type="button"
           :disabled="historyLoading || loading || sessionRestoring || sessionBusy"
           @click="loadOlderHistory">{{ historyLoading ? '正在读取…' : '加载更早消息' }}</button>
-        <Transition name="copilot-hero">
+        <Transition name="copilot-hero" :css="false">
           <div v-if="messages.length <= 1 && !showTyping" class="copilot-hero" aria-hidden="true">
             <div class="copilot-hero-orb">
-              <AiOrb :size="88" state="idle" :pulse="false" />
+              <PrismMascot :size="64" status="idle" />
             </div>
-            <p class="copilot-hero-title">我是小菱,你的项目与管理员工作助手</p>
-            <p class="copilot-hero-sub">直接告诉我你想做什么,或从下面挑一个试试</p>
+            <p class="copilot-hero-title">项目与管理助手</p>
+            <p class="copilot-hero-sub">输入任务，我来处理</p>
           </div>
         </Transition>
         <div v-if="messages.length <= 1 && !showTyping" class="quick-questions" aria-label="快捷问题">
@@ -2476,7 +2520,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             <PrismMascot :size="22" :status="'running'" />
           </div>
           <div class="typing-bubble" :class="{ 'is-city-open': thinkingCityOpen }">
-            <AiOrb :size="28" state="thinking" :halo="false" />
+            <PrismMascot :size="28" :status="mascotStatus" />
             <span class="typing-label">{{ showTyping ? '小菱正在想' : '子 Agent 正在协作' }}</span>
             <i></i><i></i><i></i>
             <button
@@ -2488,9 +2532,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             >{{ thinkingCityOpen ? '收起' : '看看在想什么' }}</button>
           </div>
         </div>
-        <Transition name="thinking-city">
+        <Transition name="thinking-city" :css="false">
           <div v-if="thinkingCityActive && thinkingCityOpen" class="thinking-city-wrap">
-            <ThinkingCity :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
+            <ThinkingCity :animated="false" :active="thinkingCityActive" :team-ids="activeThinkingTeamIds" />
           </div>
         </Transition>
       </div>
@@ -2498,10 +2542,9 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
       <footer class="copilot-input-area">
         <div v-if="uploadStatusVisible" class="upload-status" role="status" aria-label="上传进度">
           <span class="upload-status-text" :title="uploadProgress.phase">{{ uploadProgress.phase }}</span>
-          <FluidProgress
+          <progress
             class="upload-status-fluid"
-            :progress="uploadPercent"
-            :height="8"
+            :value="uploadPercent" max="100" aria-label="上传进度"
           />
           <span class="upload-status-count">{{ uploadProgress.completed }}/{{ uploadProgress.total }} 个文件</span>
         </div>
@@ -2526,7 +2569,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
             rows="1"
             maxlength="2000"
             @paste="onComposerPaste"
-            :placeholder="sessionRestoring ? '正在恢复小菱会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理上方待办(审批/追问),或点击 + 新建对话' : '小菱正在运行中…可点击 + 新建对话并行处理') : '输入问题或管理指令;也可直接拖入代码文件帮你建项目'"
+            :placeholder="sessionRestoring ? '正在恢复小菱会话' : sessionBusy ? (isAgentResponseSessionWaiting(sessionRun?.status) ? '请先处理待办，或 + 新建对话' : '任务进行中，可 + 新建对话') : '输入指令，或拖入代码文件'"
             aria-label="输入管理指令"
             :disabled="loading || uploading || sessionRestoring || sessionBusy"
             @keydown="handleSubmitKey"
@@ -2557,15 +2600,7 @@ watch(() => [agentTeams.value, messages.value, messages.value.length], () => {
           </button>
         </div>
       </footer>
-      <button
-        class="panel-resize-handle"
-        type="button"
-        aria-label="调整管理副驾驶大小，方向键调整宽度和高度"
-        title="拖动调整大小；方向键调整宽度和高度"
-        aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
-        @pointerdown="beginResize"
-        @keydown="resizeByKeyboard"
-      >◢</button>
+      <FloatingChatResizeHandles @resize-start="beginResize" @resize-keydown="resizeByKeyboard" />
     </section>
 
     <AgentTeamSidePanel :team-id="selectedTeamId" @close="selectedTeamId = null" @ask-member="handleAskMember" />
@@ -2672,28 +2707,6 @@ input { font: inherit; }
 
 .copilot-panel.is-dragging { user-select: none; }
 .copilot-panel.is-resizing { user-select: none; }
-.panel-resize-handle {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  z-index: 22;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--agent-border);
-  border-radius: 8px 0 14px 0;
-  background: rgba(255, 255, 255, 0.96);
-  color: var(--agent-primary-strong);
-  font-size: 14px;
-  line-height: 1;
-  cursor: nwse-resize;
-  touch-action: none;
-}
-.panel-resize-handle:hover { background: var(--agent-primary-soft); }
-.panel-resize-handle:focus-visible { outline: 2px solid var(--agent-primary); outline-offset: -3px; }
-.copilot-panel.is-resizing .panel-resize-handle { background: var(--agent-primary-soft); }
 .copilot-panel > * { min-width: 0; }
 .panel-drag-handle { display: grid; place-items: center; flex: 0 0 auto; width: 24px; height: 30px; margin-left: -10px; border: 0; border-radius: 6px; background: transparent; color: var(--agent-text-secondary); font-size: 18px; line-height: 1; cursor: grab; touch-action: none; }
 .panel-drag-handle:hover { color: var(--agent-primary); background: rgba(91, 88, 232, 0.08); }
@@ -3380,3 +3393,5 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .agent-team-count { color: #6b7280; }
 .agent-team-working { color: #9ca3af; font-style: italic; }
 </style>
+
+<style scoped src="../ai/floatingChat.css"></style>
