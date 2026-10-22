@@ -24,7 +24,7 @@ const LOCAL_NAVIGATION_PREFIX_RE = /^(?:小菱)?(?:请帮我|请|帮我|麻烦|�
 const LOCAL_NAVIGATION_ALIASES: Record<string, string[]> = {
   '/admin/governance': ['Agent治理', 'Agent管理'],
   '/admin/operations': ['运行', '监控', '告警', '审计', '总览'],
-  '/admin/audit': ['管理端审计', '管理后台审计'],
+  '/admin/audit': ['管理端审计', '管理后台审计', '管理员审计'],
   '/admin/access': ['用户', '权限', '角色'],
   '/admin/platform': ['平台配置', '模型配置', '节点'],
   '/audit': ['审计', '系统操作审计', '操作审计', '系统审计', '审计日志'],
@@ -84,23 +84,27 @@ export function resolveLocalNavigationRequest(
   guardSource: Parameters<typeof isRouteAllowed>[1],
 ): LocalNavigationResult | null {
   if (!content || content.length > MAX_LOCAL_NAVIGATION_TEXT_LENGTH) return null
-  const compact = compactNavigationText(content)
+  const compact = compactNavigationText(content).replace(/(管理端|管理后台|管理员)的/g, '$1')
   if (!compact) return null
 
-  const matches: Array<{ route: string; label: string; matchLabel: string }> = []
+  const matches: Array<{ route: string; label: string; matchLabel: string; explicitAdmin: boolean }> = []
   for (const target of localNavigationTargets(router)) {
     const matchLabel = compactNavigationText(target.matchLabel)
     const start = compact.indexOf(matchLabel)
     if (start < 0) continue
-    const prefix = compact.slice(0, start)
+    const rawPrefix = compact.slice(0, start)
+    const qualifier = rawPrefix.match(/(?:管理端|管理后台|管理员)$/)?.[0]
+    const prefix = qualifier ? rawPrefix.slice(0, -qualifier.length) : rawPrefix
     const tail = compact.slice(start + matchLabel.length)
     if (!LOCAL_NAVIGATION_PREFIX_RE.test(prefix) || !isSafeLocalNavigationTail(tail)) continue
-    matches.push(target)
+    // 明确管理入口时不能回退到同名用户页面，权限仍由现有路由守卫判定。
+    if (qualifier && !target.route.startsWith('/admin')) continue
+    matches.push({ ...target, explicitAdmin: !!qualifier || /管理端|管理后台|管理员/.test(matchLabel) })
   }
   if (!matches.length) return null
 
   const explicitAdminTargets = matches.filter(
-    (target) => target.route.startsWith('/admin') && /管理端|管理后台/.test(target.matchLabel),
+    (target) => target.route.startsWith('/admin') && target.explicitAdmin,
   )
   const preferredTargets = explicitAdminTargets.length
     ? explicitAdminTargets

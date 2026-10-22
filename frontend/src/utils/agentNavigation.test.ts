@@ -160,6 +160,7 @@ describe('local navigation cost guard', () => {
         path: '/admin',
         children: [
           { path: 'audit', meta: { title: '系统操作审计', role: 'admin' } },
+          { path: 'platform', meta: { title: '平台配置中心', role: 'admin' } },
           { path: 'operations', meta: { title: '运行监控', role: 'admin' } },
           { path: 'users', meta: { title: '用户管理', role: 'admin', permissions: ['user:view'] } },
           { path: 'embedding', meta: { title: 'RAG 嵌入配置', role: 'admin', superAdmin: true } },
@@ -239,6 +240,48 @@ describe('local navigation cost guard', () => {
       { ...guard(true), isAdmin: () => true })).toEqual({
       kind: 'navigate', directive: { action: 'navigate', route: '/admin/audit', label: '系统操作审计' },
     })
+  })
+
+  describe.each(['管理后台的', '管理端的', '管理员的'])('中文管理限定词 %s', qualifier => {
+    it.each([
+      ['平台配置', '/admin/platform', '平台配置中心'],
+      ['审计', '/admin/audit', '系统操作审计'],
+    ])('无权账号打开%s直接禁止，不降级同名用户入口', (target, _route, _label) => {
+      const actor = { ...guard(true), hasRole: (role: string) => role === 'reviewer' }
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}`, routerFor('/audit'), actor))
+        .toEqual({ kind: 'forbidden' })
+    })
+
+    it.each([
+      ['平台配置', '/admin/platform', '平台配置中心'],
+      ['审计', '/admin/audit', '系统操作审计'],
+    ])('具备管理权限打开%s准确选择管理路径', (target, route, label) => {
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}`, routerFor(route),
+        { ...guard(true), isAdmin: () => true })).toEqual({
+        kind: 'navigate', directive: { action: 'navigate', route, label },
+      })
+    })
+
+    it.each([
+      ['平台配置', '修改默认模型'],
+      ['审计', '删除审计日志'],
+    ])('打开%s同时要求%s时不得当作纯导航吞掉写入命令', (target, operation) => {
+      expect(resolveLocalNavigationRequest(`打开${qualifier}${target}并${operation}`, routerFor('/admin/platform'),
+        { ...guard(true), isAdmin: () => true })).toBeNull()
+    })
+  })
+
+  it.each([false, true])('没有管理限定词的同名审计入口保持用户路径，管理员=%s', isAdmin => {
+    expect(resolveLocalNavigationRequest('打开审计', routerFor('/audit'), {
+      ...guard(true), isAdmin: () => isAdmin, hasRole: (role: string) => role === 'reviewer',
+    })).toEqual({
+      kind: 'navigate', directive: { action: 'navigate', route: '/audit', label: '操作审计' },
+    })
+  })
+
+  it('未加管理限定词的平台配置仍按管理入口权限拒绝普通用户', () => {
+    expect(resolveLocalNavigationRequest('打开平台配置', routerFor('/admin/platform'), guard(true)))
+      .toEqual({ kind: 'forbidden' })
   })
 
   it.each(['/admin/embedding', '/admin/mcp-workers', '/admin/llm'])(
